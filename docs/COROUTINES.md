@@ -270,7 +270,10 @@ The exact call graph is syntactic: a call whose callee denotes one function
 (a function literal, a binding denoting one, a module function:
 `hir::contexts::Callee`), excluding each thunk's boundary call. A call
 through a function value is no edge, which is sound because a function that
-may yield never becomes a value (point 37).
+may yield never becomes a value (point 37). A trait operation's edge is its
+implementation's, and a call of a trait-polymorphic function with concrete
+witnesses is an edge to that specialization of it, a node of its own
+(TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md).
 
 `verify` computes the reachable yield effect breadth-first from the
 functions with a reachable direct yield: a function may yield if it has a
@@ -1235,15 +1238,22 @@ What this says about the architecture (no optimization was attempted):
 * **Protocols are inferred over every syntactic call edge**, reachable or
   not (type inference runs before reachability is known): an unreachable
   call of a function with a different protocol is still a conflict.
-* **Trait-implementation yields are invisible before monomorphization.** A
-  trait operation whose implementation yields is resolved in build 2; in
-  build 1 the call is an operation, not an edge. Monomorphized programs are
-  checked again, so nothing unsound is accepted, but the diagnostics speak
-  about the clone, and a coroutine whose only yield is reached through an
-  operation is COROUTINE-RHS-NOT-YIELDING before monomorphization. Nor is
-  the visible function of the operation's name an edge: method syntax may
-  have stood the call in with one before its receiver was typed, and the
-  analysis, which runs before typing, is told which calls are operations
+* **Trait-implementation yields are the call's, per specialization**
+  (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md). A trait operation's
+  edge goes to the implementation the program binds it to -- the selected
+  installed context's, or its receiver's witness's -- as the
+  monomorphization's plan binds it (`hir::traits::PlanCalls`), which the
+  analysis learns from the typing of a previous check (`hir::check`'s
+  feedback). A trait-polymorphic function has a node per specialization
+  besides its own: its own (the function as written, checked against its
+  traits alone) binds no operation on a view whose witness is a
+  parameter's, so a coroutine construction *inside* such a function whose
+  root yields only through that witness's implementation is still
+  COROUTINE-RHS-NOT-YIELDING (that milestone's report, "Remaining
+  limitations"). Nor is the visible function of the operation's name an
+  edge: method syntax may have stood the call in with one before its
+  receiver was typed, and the analysis, which runs before typing, is told
+  which calls are operations
   (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md).
 * **Use-site inference reads exact callees' declared parameter types only**:
   a yield value passed to an untyped or inferred parameter does not

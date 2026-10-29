@@ -61,7 +61,10 @@
 #                expressions, not those of the functions defined in it):
 #                every binding referenced (B), every function literal in it
 #                (R: its summary -- result, errors, contexts, completion
-#                facts), every exact call target (R), every candidate of a
+#                facts), every exact call target (R) and every implementation
+#                a trait operation in it calls that may yield (R: the
+#                coroutine analysis gives the operation its yield effect,
+#                hir::coroutines::ImplementationTargets), every candidate of a
 #                method-style call (B: the trial builds try each one) and
 #                what those builds judge of the contract boundary (below), the
 #                form of every site whose body is in it (F); its parameters and captures
@@ -105,7 +108,10 @@
 #                       coroutines that reach it -- `any` once a
 #                       struct-protocol one does (hir/coroutines.tcl): R ->
 #                       every construction whose root has a struct protocol
-#                       and reaches it over the exact call edges.
+#                       and reaches it over the exact call edges and the
+#                       trait operations' implementations (each operation's
+#                       for every witness: a superset of each specialization's
+#                       reach).
 #   C:erased            the erased-callable contract (hir::completions::
 #                       erasedErrorsOf): what every callable passed into an
 #                       untyped parameter can raise. Its *contributors*:
@@ -738,7 +744,8 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
         presentKeys [lmap site $present {dict get $site key}] presentSites $present \
         regionOf {} parentOf {} litRegion {} ownRefs {} ownLits {} ownTargets {} \
         ownSites {} siteHome {} siteDepth {} depth {program 0} \
-        subtree {} names {} paramOwner {} channels {}]
+        subtree {} names {} paramOwner {} channels {} \
+        implTargets [hir::coroutines::ImplementationTargets $hir]]
     # The walk: every expression's region and parent; per region the
     # bindings, literals, call targets and sites its own code mentions.
     # The lists keyed by a site, region or binding (site -> its expressions,
@@ -806,6 +813,12 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
                 lassign [dict get $node target] tk tb
                 if {$tk eq "block"} {
                     dict set state ownTargets $region $tb 1
+                }
+                # A trait operation calls its implementation, whose yield
+                # effect the coroutine analysis gives it
+                # (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md).
+                foreach impl [dict getdef [dict get $state implTargets] $e {}] {
+                    dict set state ownTargets $region $impl 1
                 }
                 dict lappend ownCalls $region $e
             }
@@ -980,6 +993,9 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
                     dict lappend callsOf $tb $e
                     dict set callEdges $region $tb 1
                 }
+                foreach impl [dict getdef [dict get $state implTargets] $e {}] {
+                    dict set callEdges $region $impl 1
+                }
                 switch -- [hir::coroutines::NativeOf $hir $e] {
                     coroutine#create { lappend creates $e }
                     coroutine#yield { dict set yielding $region 1 }
@@ -998,7 +1014,8 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
     dict set state escaping $escaping
     dict set state callsOf $callsOf
     # Yields: the coroutine constructions whose root reaches each yielding
-    # function over the exact call edges (yieldAll: the outward types a
+    # function over the exact call edges and the implementations of trait
+    # operations (callEdges; yieldAll: the outward types a
     # yield's value lands in, hir::completions::YieldFinalsOf), and among
     # them those whose root has a struct protocol, which alone decide the
     # type of an unconstrained function's yields (yieldStruct: `any` once
@@ -2696,6 +2713,9 @@ proc hir::staticdeps::AddSubtree {hir stateVar e succVar label} {
                     lassign [dict get $node target] tk tb
                     if {$tk eq "block"} {
                         dict set nodes R:$tb 1
+                    }
+                    foreach impl [dict getdef [dict get $state implTargets] $x {}] {
+                        dict set nodes R:$impl 1
                     }
                     if {[dict exists $state candidates $x]} {
                         foreach b [dict keys [dict get $state candidates $x]] {

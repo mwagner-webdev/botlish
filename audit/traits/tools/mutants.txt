@@ -191,8 +191,7 @@
 ## hir/resolve.tcl
 <<<<
     SetField hir $e callee $c
-    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e $argNodes] $ctx]
-}
+    set argNodes [hir::CheckingCall $e {hir::variadic::Arguments hir $e $argNodes}]
 ====
     SetField hir $e callee $c
     if {[lindex $action 0] eq "redirect"} {
@@ -207,8 +206,7 @@
         }
         set argNodes $wrapped
     }
-    SetField hir $e args [Sequence hir [hir::variadic::Arguments hir $e $argNodes] $ctx]
-}
+    set argNodes [hir::CheckingCall $e {hir::variadic::Arguments hir $e $argNodes}]
 >>>>
 ## hir/resolve.tcl
 <<<<
@@ -365,7 +363,7 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
 @@ check-not-repeated hir::check never checks again with the trait operations the coroutine analysis read set aside
 ## hir/hir.tcl
 <<<<
-            if {$found eq $operations} {
+            if {$found eq $feedback} {
                 break
             }
 ====
@@ -379,4 +377,180 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
         dict set consulted $c 1
     }
 ====
+>>>>
+
+# Implementation yields (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md):
+# a trait operation's yield effect is the implementation the program binds
+# it to -- per witness, a specialization's own -- and nothing else's.
+
+@@ implementation-edges-omitted the typing's trait-operation edges are never computed: a coroutine whose only yield is an implementation's is never-yielding again, and its top-level calls are left to the monomorphized program
+## hir/coroutines.tcl
+<<<<
+    if {$operations eq {} || ![MayBind $hir $operations $binds $given]} {
+        return {}
+    }
+    # The calls by their syntax (the plan's actions are per syntax node) and
+====
+    if {1} {
+        return {}
+    }
+    # The calls by their syntax (the plan's actions are per syntax node) and
+>>>>
+
+@@ implementations-never-fed-back hir::check checks again with the trait operations to set aside, but never with the implementations they call
+## hir/coroutines.tcl
+<<<<
+    set graph [UnionGraph [dict getdef $given graph {}] [Implementations $hir $given]]
+====
+    set graph [dict getdef $given graph {}]
+>>>>
+
+@@ implementation-every-witness every witness's implementation of an operation is attributed to the function as written too (a yield acquired from implementations the specialization does not invoke)
+## hir/coroutines.tcl
+<<<<
+                foreach ctx [lsort -unique $contexts] {
+                    dict set candidate impl [list $ctx $e] [list [list $target $offset]]
+====
+                foreach ctx [lsort -unique [concat $contexts [list ""]]] {
+                    dict set candidate impl [list $ctx $e] [concat [dict getdef [dict get $candidate impl] [list $ctx $e] {}] [list [list $target $offset]]]
+>>>>
+
+@@ witness-bound-generically an operation on a view whose witness is a parameter's is taken to be bound alike in every specialization: the function as written gets whichever specialization's implementation the plan walked last (resolution depends on traversal order)
+## hir/coroutines.tcl
+<<<<
+            set type [hir::typeOf $hir [dict get $record receiver]]
+            return [expr {[hir::types::IsView $type] && [hir::traits::IsConcreteWitness [hir::types::ViewWitness $type]]}]
+====
+            return 1
+>>>>
+
+@@ implementation-of-another-witness the implementation of an operation is looked up by its call alone, not by the specialization that makes it: one witness's implementation for every specialization
+## hir/coroutines.tcl
+<<<<
+        dict set impls [list $ckey $e] $impl
+====
+        dict set impls [list live $e] $impl
+>>>>
+## hir/coroutines.tcl
+<<<<
+                } elseif {[dict exists $impls [list $ckey $e]] && [dict get $impls [list $ckey $e] kind] eq "block"} {
+                    set target [dict get $impls [list $ckey $e] block]
+====
+                } elseif {[dict exists $impls [list live $e]] && [dict get $impls [list live $e] kind] eq "block"} {
+                    set target [dict get $impls [list live $e] block]
+>>>>
+
+@@ implementation-by-name an operation's implementation is taken to be the function its method syntax names (the visible function of the operation's name) instead of the one the plan binds
+## hir/coroutines.tcl
+<<<<
+                } elseif {[dict exists $impls [list $ckey $e]] && [dict get $impls [list $ckey $e] kind] eq "block"} {
+                    set target [dict get $impls [list $ckey $e] block]
+====
+                } elseif {[hir::kind $hir [dict get $hir exprs $e callee]] eq "ref"
+                        && [hir::contexts::Denotes $hir [dict get $hir exprs [dict get $hir exprs $e callee] binding]] ne ""} {
+                    set target [hir::contexts::Denotes $hir [dict get $hir exprs [dict get $hir exprs $e callee] binding]]
+>>>>
+
+@@ implementation-protocol-skipped the protocol fixed point ignores the edges of trait operations: a coroutine yielding through an implementation is not resumed with the implementation's message
+## hir/coroutines.tcl
+<<<<
+                lassign $edge c target
+                if {![dict exists $capable $target]} continue
+                set why [list call $c $target]
+====
+                lassign $edge c target
+                if {![dict exists $capable $target]} continue
+                if {[dict exists $hir coroutines graph impl [list [ContextOf $b] $c]]} continue
+                set why [list call $c $target]
+>>>>
+
+@@ specialization-root-ignored a coroutine's root is never a specialization of a trait-polymorphic function: its construction's root call passing a concrete witness is no direct call of a yielding function
+## hir/coroutines.tcl
+<<<<
+    if {$kind ni {spec exact}} {
+        return {{} 0}
+    }
+====
+    if {$kind ni {exact}} {
+        return {{} 0}
+    }
+>>>>
+
+@@ instance-typed-generically a semantic instance of a trait-polymorphic function types its yields and constructions as the function as written, never as its specialization for the instance's witnesses
+## hir/coroutines.tcl
+<<<<
+    if {![dict exists $ctx inst] || ![dict exists $hir coroutines cloneOf]} {
+        return ""
+    }
+====
+    if {1} {
+        return ""
+    }
+>>>>
+
+@@ implementation-edges-unpruned every trait-operation edge the typing finds is kept, whether its implementation may yield or not: a program none of whose implementations yields is checked twice
+## hir/coroutines.tcl
+<<<<
+                if {[dict exists $capable $n] || ($field eq "impl" && [dict exists $receives [lindex $key 1]])} {
+                    lappend live $t
+====
+                if {1} {
+                    lappend live $t
+>>>>
+
+@@ use-site-implementation-pruned an operation's edge to an implementation that does not yield is dropped also where the operation receives a yield's value: its declared parameter no longer fixes the protocol
+## hir/coroutines.tcl
+<<<<
+                if {[dict exists $capable $n] || ($field eq "impl" && [dict exists $receives [lindex $key 1]])} {
+====
+                if {[dict exists $capable $n]} {
+>>>>
+
+@@ specializations-never-pruned keep every specialization the plan makes, also one whose calls all resolve as its function's own do: its nodes repeat the function's, and finding them costs another check
+## hir/coroutines.tcl
+<<<<
+    return [CanonicalGraph [Distinct $hir $kept $excluded]]
+====
+    return [CanonicalGraph $kept]
+>>>>
+
+@@ specializations-all-pruned take every specialization for its function as written, also one whose operation its witness's implementation binds
+## hir/coroutines.tcl
+<<<<
+                if {[lsort -unique $own] eq [lsort -unique $targets]} continue
+====
+                if {1} continue
+>>>>
+
+@@ effect-plan-always run the trait plan after every check of a program with coroutines and trait operations, whether or not anything may yield through one
+## hir/coroutines.tcl
+<<<<
+    if {$operations eq {} || ![MayBind $hir $operations $binds $given]} {
+====
+    if {$operations eq {}} {
+>>>>
+
+@@ effect-plan-gate-without-implementations decide that no trait plan is needed without asking whether an implementation may yield
+## hir/coroutines.tcl
+<<<<
+                if {[dict get $info kind] eq "block" && [dict exists $capable [dict get $info block]]} {
+                    return 1
+                }
+====
+                if {0} {
+                    return 1
+                }
+>>>>
+
+@@ effect-plan-gate-without-receivers decide that no trait plan is needed without asking whether an operation receives a yield's value
+## hir/coroutines.tcl
+<<<<
+            if {[NativeOf $hir $a] eq $yieldNative
+                    || ([dict get $node kind] eq "ref" && [dict exists $yielded [dict get $node binding]])} {
+                return 1
+            }
+====
+            if {0} {
+                return 1
+            }
 >>>>

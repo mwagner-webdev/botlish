@@ -844,13 +844,18 @@ proc hir::completions::YieldFinalsOf {hir} {
         return $finals
     }
     set table [dict get $hir coroutines]
-    dict for {thunk info} [dict get $table thunks] {
-        set root [dict getdef $info root ""]
-        if {$root eq "" || ![dict exists $hir exprs $root]} {
+    set capable [hir::coroutines::CapableNodes $hir]
+    # (A root is a call-graph node: a function, or the specialization of a
+    # trait-polymorphic one the construction calls, whose trait operations
+    # reach their implementations' yields.)
+    set roots [lmap {thunk info} [dict get $table thunks] {dict getdef $info root ""}]
+    foreach root [concat $roots [dict values [dict getdef $table cloneThunks {}]]] {
+        if {$root eq "" || ![dict exists $hir exprs [hir::coroutines::BlockOf $root]]} {
             continue
         }
         set outward [hir::coroutines::Outward $hir $root]
-        foreach b [hir::coroutines::Closure $root [dict get $table edges] [dict get $table blocks]] {
+        foreach b [hir::coroutines::Closure $root [dict get $table edges] $capable] {
+            set b [hir::coroutines::BlockOf $b]
             if {![dict exists $table direct $b]} {
                 continue
             }

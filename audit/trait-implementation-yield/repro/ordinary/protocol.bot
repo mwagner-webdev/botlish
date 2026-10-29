@@ -1,0 +1,21 @@
+import shapes
+
+struct Tick:
+    n: int
+
+struct Ticker:
+    side: int
+
+fn area(t: Ticker, resume Tick) -> int:
+    m = yield t.side
+    m.n * t.side
+
+trait Shaped:
+    fn area(self: Shaped) -> int
+
+fn measure(s: Shaped) -> int:
+    s.area() + 1
+
+coroutine {step, first} = measure(Ticker {side: 3})
+done = step(Tick {n: 5})
+[first, done, measure(shapes::make(2))]

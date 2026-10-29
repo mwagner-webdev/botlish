@@ -156,13 +156,13 @@
 @@ effect-one-caller the yield effect reaches the direct callers of a yielding function and no further
 ## hir/coroutines.tcl
 <<<<
-        foreach b $added {
-            dict set mayYield $b 1
+        foreach n $added {
+            dict set mayYield $n 1
         }
         set frontier $added
 ====
-        foreach b $added {
-            dict set mayYield $b 1
+        foreach n $added {
+            dict set mayYield $n 1
         }
         set frontier {}
 >>>>
@@ -170,17 +170,17 @@
 @@ call-crosses-yield an ordinary top-level call of a yielding function is allowed
 ## hir/coroutines.tcl
 <<<<
-            if {$target eq "" || ![dict exists $mayYield $target]} continue
-            hir::Diagnose hir UNWRAPPED-YIELD \
+                if {$target eq "" || ![dict exists $mayYield $target]} continue
+                if {$kind eq "impl"} {
 ====
-            continue
-            hir::Diagnose hir UNWRAPPED-YIELD \
+                continue
+                if {$kind eq "impl"} {
 >>>>
 
 @@ protocol-widened-any every coroutine accepts any resume message: the handle's protocol is any
 ## hir/coroutines.tcl
 <<<<
-            return [hir::types::MakeCoroutine [Resolved [dict get $table blocks $root protocol]] \
+            return [hir::types::MakeCoroutine [Resolved [dict get $info protocol]] \
 ====
             return [hir::types::MakeCoroutine any \
 >>>>

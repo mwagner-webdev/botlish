@@ -269,10 +269,14 @@ namespace eval hir {
     # made (hir/methods.tcl); `methodReports` the builds of a decided
     # program's reported form, its rejected calls resolved to no candidate
     # (hir::methods::Final; METHOD-RESOLUTION-DIAGNOSTICS-MILESTONE-2.md).
-    # Measurement only: read as differences by hir/static.tcl and the
-    # benchmarks, never by an analysis.
+    # `checks` counts hir::check's checks of resolved HIR (a build checks
+    # once, again for each change of the coroutine analysis's feedback), and
+    # `effectPlans` the plans of a check's trait-operation edges
+    # (hir::coroutines::Implementations; TRAIT-IMPLEMENTATION-YIELD-
+    # INFERENCE-MILESTONE-1.md). Measurement only: read as differences by
+    # hir/static.tcl and the benchmarks, never by an analysis.
     variable buildStats [dict create builds 0 methodTrials 0 methodFinals 0 methodReused 0 \
-        methodDeviations 0 methodReports 0]
+        methodDeviations 0 methodReports 0 checks 0 effectPlans 0]
     # 0 makes the method-call decision build every build again even when a
     # build of the same configuration was already made (measurement and
     # audits only).
@@ -882,49 +886,60 @@ proc hir::ReferenceAudit {decided reference seeds} {
 #
 # The coroutine protocols (hir/coroutines.tcl) type every yield, so they are
 # inferred before the types are -- and so before the typing decides which
-# method-style calls are trait operations, whose written callee is a visible
-# function of the operation's name and never the operation's implementation.
-# When the analysis read such a callee (hir::coroutines::TraitOperations),
-# the check is made again from the same input, the analysis told to set
-# those calls aside, until the calls it set aside are exactly the trait
-# operations it would otherwise read
-# (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md). Whether a call is a
-# trait operation is decided by its receiver's static type, which only a
-# declared trait type makes a view: no protocol, which is a struct, unit or
-# any, makes one. The second check is therefore the last, and a program
-# none of whose trait operations' written callees the analysis reads is
-# checked once.
+# method-style calls are trait operations, and which implementation each
+# trait operation calls. An operation's written callee is a visible function
+# of the operation's name and never the operation's implementation
+# (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md); its implementation
+# is the program's selected context's or its witness's, whose yields are the
+# call's (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md). So the check
+# is made again from the same input, the analysis told what the typing
+# found (hir::coroutines::Feedback): the operations whose written callee it
+# read, to set aside, and the implementation (and, for a trait-polymorphic
+# function, the specialization) each operation and call binds to, where
+# that may yield. It is made until the feedback is what the check was made
+# with. The feedback only grows -- it is the union of every check's -- and
+# it is a set over the program's finitely many calls, implementations and
+# specializations, so the checks end; a program none of whose trait
+# operations' written callees the analysis reads, and none of whose
+# operations' implementations may yield, is checked once. Typically the
+# second check is the last: a third is needed only when a type the second
+# one inferred anew (a coroutine's outward type, say) gives a trait
+# operation a witness it had none for.
 proc hir::check {hirVar} {
     upvar 1 $hirVar hir
     # (Under the front end's recursion floor even when not entered through
     # hir::buildSyntax: native::prepareHir re-checks a HIR itself.)
     Deep {
         set input $hir
-        set operations {}
+        set feedback {}
         for {set pass 1} {1} {incr pass} {
             set hir $input
-            CheckWith hir $operations
-            set found [hir::coroutines::TraitOperations $hir]
-            if {$found eq $operations} {
+            dict incr ::hir::buildStats checks
+            CheckWith hir $feedback
+            set found [hir::coroutines::Feedback $hir $feedback]
+            if {$found eq $feedback} {
                 break
             }
-            if {$pass > 2} {
-                error "hir::check: the trait operations the coroutine analysis sets aside do not settle: {$operations} then {$found}"
+            if {$pass >= 64} {
+                # (The feedback grows at every repeated check and is
+                # finite: a compiler bug, never a program's.)
+                error "hir::check: the coroutine analysis's feedback does not settle: {$feedback} then {$found}"
             }
-            set operations $found
+            set feedback $found
         }
     }
     return
 }
 
-# hir::check's one check of resolved HIR, the coroutine analysis setting
-# aside the method-style calls OPERATIONS (trait operations: the header).
-proc hir::CheckWith {hirVar operations} {
+# hir::check's one check of resolved HIR, the coroutine analysis told
+# FEEDBACK (the trait operations to set aside and the trait-operation edges:
+# the header).
+proc hir::CheckWith {hirVar feedback} {
     upvar 1 $hirVar hir
     variable recheckReuse
     variable recheckAudit
     set input $hir
-    hir::coroutines::analyze hir $operations
+    hir::coroutines::analyze hir $feedback
     set pre $hir
     set rounds [dict create]
     CheckOnce hir {} rounds
@@ -935,7 +950,7 @@ proc hir::CheckWith {hirVar operations} {
         if {$recheckAudit || !$recheckReuse} {
             # The second check from the start, sharing nothing.
             set full $input
-            hir::coroutines::analyze full $operations
+            hir::coroutines::analyze full $feedback
             CheckOnce full $demote
         }
         if {$recheckReuse} {

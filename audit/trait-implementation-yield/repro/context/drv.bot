@@ -1,0 +1,8 @@
+context trait Driver:
+    fn wait(deadline: int) -> int
+
+fn run(context d: Driver) -> int:
+    d.wait(5)
+
+fn wrapper(context d: Driver) -> int:
+    run() + 1

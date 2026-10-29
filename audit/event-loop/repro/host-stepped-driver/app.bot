@@ -1,0 +1,46 @@
+# app.bot -- the scheduler (audit/event-loop/src/evloop.bot, unchanged)
+# under a host-stepped driver (stepdrv.bot): the program's main runs as a
+# coroutine the host steps, because the selected implementation of
+# evloop::Driver's block yields (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-
+# MILESTONE-1.md). It compiles beside a copy of src/evloop.bot
+# (tests/context-traits.test, ct-implementation-yield-event-loop).
+import evloop
+import stepdrv
+import std::coroutine
+
+fn sleeper(n: int, context ev: evloop::Loop) -> int errors IndexNotFound:
+    evloop::sleep(100 * n)
+    evloop::log(evloop::cat("woke ", n))
+    n
+
+fn spawn(n: int, context ev: evloop::Loop) errors IndexNotFound:
+    coroutine {step, first} = sleeper(n)
+    evloop::adopt(step, first)
+
+fn drive(context ev: evloop::Loop, d: evloop::Driver) -> int errors IndexNotFound, evloop::LoopReentered:
+    spawn(1)
+    spawn(2)
+    evloop::run()
+
+# The program as the host runs it: every time the loop has nothing to do
+# before a deadline it yields the deadline, and the host resumes it.
+fn main(context ev: evloop::Loop, d: evloop::Driver) -> int:
+    drive():
+        on IndexNotFound:
+            -2
+        on evloop::LoopReentered:
+            -3
+
+with context evloop::create(16, 1)
+with context stepdrv::create()
+coroutine {step, first} = main()
+# Each value the host receives: a deadline the loop waits for, then the
+# number of turns the loop ran.
+received = loop i from 0 to 8:
+    if std::coroutine::done?(step):
+        break
+    step()
+trace = evloop::trace():
+    on IndexNotFound:
+        ["index"]
+[[first], received, trace]

@@ -1,0 +1,9 @@
+struct YSq:
+    side: int
+
+fn make(side: int) -> YSq:
+    YSq {side: side}
+
+fn area(s: YSq) -> int:
+    yield s.side
+    s.side * s.side

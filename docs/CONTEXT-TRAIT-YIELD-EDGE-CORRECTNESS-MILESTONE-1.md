@@ -547,3 +547,14 @@ the renamed operations were exercised through the deterministic driver.
   selected implementation through this milestone's feedback loop. The edge
   would also have to appear in `hir/staticdeps.tcl`'s yield reachability.
   Ordinary traits would need per-witness analysis.
+
+  *Since TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md* both are
+  done: the feedback loop carries each operation's implementation, as the
+  monomorphization's plan binds it, and a trait-polymorphic function has a
+  node per specialization in the coroutine call graph; `hir/staticdeps.tcl`
+  reads the implementations as the operations' call targets. The tests
+  `ct-operation-identity-implementation-yield` and
+  `trait-operation-identity-implementation-yield` now pin the checked
+  program's diagnostics and running coroutines, and
+  `ct-operation-identity-implementation-yield-limitation` became
+  `ct-implementation-yield-coroutine`.

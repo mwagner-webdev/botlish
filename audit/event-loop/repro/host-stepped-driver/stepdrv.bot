@@ -1,0 +1,42 @@
+# stepdrv.bot -- a host-stepped driver for evloop: block(DEADLINE) hands the
+# deadline to whoever resumes the coroutine running the loop (it yields, one
+# call below the implementation) and goes on when resumed, the clock then
+# at the deadline. The loop's code is unchanged: it is the selected
+# implementation of evloop::Driver's block that suspends it
+# (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md).
+import std::mutable_array
+
+opaque context struct Step:
+    now: MutableArray[int]
+
+fn create() -> Step:
+    Step {now: std::mutable_array::create(1, 0)}
+
+fn clock(context s: Step) -> int:
+    s.now.at(0):
+        on IndexNotFound:
+            0
+
+fn hand_over(deadline: int) -> int:
+    yield deadline
+    0
+
+fn block(deadline: int, context s: Step) -> int:
+    hand_over(deadline)
+    if deadline > 0:
+        s.now.set(0, deadline):
+            on IndexNotFound:
+                unit
+    0
+
+fn take_record(context s: Step) -> int:
+    -1
+
+fn record_gen(context s: Step) -> int:
+    0
+
+fn record_a(context s: Step) -> int:
+    0
+
+fn record_b(context s: Step) -> int:
+    0

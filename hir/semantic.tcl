@@ -221,6 +221,18 @@ proc hir::semantic::End {} {
     return $s
 }
 
+# The record {block B args ENTRY ...} of instance ID of the run in progress,
+# or "" (no run, or no such instance): which function and entry types a walk
+# with typing context `inst ID` is analyzing (hir::coroutines::
+# SpecializedNode).
+proc hir::semantic::Instance {id} {
+    variable state
+    if {$state eq "" || ![dict exists $state instances $id]} {
+        return ""
+    }
+    return [dict get $state instances $id]
+}
+
 # 1 if a run is in progress.
 proc hir::semantic::Active {} {
     variable state

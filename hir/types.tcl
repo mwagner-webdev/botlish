@@ -3107,7 +3107,7 @@ proc hir::types::LayoutReadRefused {hir argExprs shape} {
 # The result type of a call of a native with -result-shape SHAPE on the
 # arguments ARG-EXPRS of types ARG-TYPES, given its declared result type
 # RESULT.
-proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
+proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
     switch -- [lindex $shape 0] {
         never {
             # context#unreachable (core/contexts.tcl): never completes.
@@ -3115,8 +3115,11 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
         }
         coroutine-create - coroutine-outward - coroutine-yield {
             # The coroutine operations (core/coroutines.tcl): typed from the
-            # program's coroutine analysis (hir/coroutines.tcl).
-            return [hir::coroutines::ShapeResult $hir [lindex $shape 0] $argExprs $argTypes]
+            # program's coroutine analysis (hir/coroutines.tcl), in CTX, the
+            # typing context (a semantic instance's walk types a trait-
+            # polymorphic function's yields and constructions as its
+            # specialization).
+            return [hir::coroutines::ShapeResult $hir [lindex $shape 0] $argExprs $argTypes $ctx]
         }
         context-struct {
             # context#load("ID") (core/contexts.tcl, CONTEXTS.md): the
@@ -4505,7 +4508,7 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # core/primitives.tcl) carry or recover a concrete List[T]
                 # applied type with no List-specific inference code of its
                 # own (MINIMAL-APPLIED-LIST-TYPES.md).
-                set result [ShapeResult $hir [dict get $meta resultShape] $argExprs $argTypes $result]
+                set result [ShapeResult $hir [dict get $meta resultShape] $argExprs $argTypes $result $ctx]
                 set shapeKind [lindex [dict get $meta resultShape] 0]
                 if {[MakesPoison $hir $ctx] && [dict get $ctx reachable]
                         && (($shapeKind eq "view-struct" && [hir::layouts::OfType $result] eq ""

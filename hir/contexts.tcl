@@ -472,7 +472,9 @@ proc hir::contexts::Denotes {hir b {seen {}}} {
 # (CONTEXT-TRAIT-YIELD-EDGE-CORRECTNESS-MILESTONE-1.md). Before typing has
 # decided which calls are trait operations, a caller that must not read a
 # trait operation as a call of its written callee is told which they are
-# (hir/coroutines.tcl's analyze).
+# (hir/coroutines.tcl's analyze); the coroutine analysis is also told the
+# implementation, as the monomorphization's plan binds it, whose yields are
+# the operation's (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md).
 proc hir::contexts::Callee {hir e} {
     if {[dict exists $hir exprs $e traitCall]} {
         return ""

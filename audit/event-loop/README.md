@@ -35,6 +35,13 @@ EVENT-LOOP-EXPLORATION.md. An isolated prototype -- nothing in `core/`,
   `tools/original-names.tcl` checks the deterministic scenarios with the
   driver operations under their intended names, `now` and `wait`
   (`tclsh9.0 audit/event-loop/tools/original-names.tcl ?-only GLOB?`).
+* `repro/host-stepped-driver/` -- the unchanged scheduler under a driver
+  whose `block` hands each deadline to the host, which steps the program as
+  a coroutine: compiles only since
+  TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md (an operation's yields
+  are its selected implementation's); it compiles beside a copy of
+  `src/evloop.bot` (tests/context-traits.test,
+  `ct-implementation-yield-event-loop`).
 
 The C adapters are built by the tools into `build/` (ignored). The SDL3
 parts need the headless SDL3 that `tclsh9.0 tests/cffi/sdl3.tcl` builds, and

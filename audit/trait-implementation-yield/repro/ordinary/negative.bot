@@ -1,0 +1,11 @@
+import shapes
+import ysq
+
+trait Shaped:
+    fn area(self: Shaped) -> int
+
+fn measure(s: Shaped) -> int:
+    s.area()
+
+coroutine {step, first} = measure(shapes::make(4))
+first

@@ -1,0 +1,11 @@
+type Base = Int in 0..10000
+
+opaque context struct YSim:
+    base: Base
+
+fn create() -> YSim:
+    YSim {base: 100}
+
+fn wait(deadline: int, context s: YSim) -> int:
+    yield deadline
+    deadline + s.base

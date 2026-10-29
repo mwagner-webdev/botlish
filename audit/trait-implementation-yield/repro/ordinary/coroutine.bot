@@ -1,0 +1,16 @@
+import shapes
+import ysq
+
+trait Shaped:
+    fn area(self: Shaped) -> int
+
+fn measure(s: Shaped) -> int:
+    s.area()
+
+fn twice(s: Shaped) -> int:
+    measure(s) + measure(s)
+
+coroutine {step, first} = twice(ysq::make(3))
+a = step()
+b = step()
+[first, a, b, twice(shapes::make(4))]

@@ -3538,7 +3538,7 @@ index: concepts
 alias: coroutines; yield; generator; resume a coroutine
 keywords: coroutine, yield, resume, step, first, done?, handle, generator, iterator, UNWRAPPED-YIELD, suspend, message, scheduler
 related: concept.affine concept.function-types concept.mutable-vector concept.testing stdlib.module.std::coroutine error.unwrapped-yield error.use-after-move
-docs: COROUTINES.md AFFINE-VALUES.md COROUTINE-FUSION-MILESTONE-1.md
+docs: COROUTINES.md AFFINE-VALUES.md COROUTINE-FUSION-MILESTONE-1.md TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md
 
 == WHAT IT IS
 `coroutine {step, first} = counter(3)` starts the call: `first` is what it
@@ -3556,6 +3556,10 @@ protocol.
   * A function that may yield is called only inside a coroutine (or
     started as one): UNWRAPPED-YIELD otherwise; it cannot become a
     function value.
+  * A trait operation may yield when the implementation it calls does:
+    the installed context's for a context trait, the witness's for an
+    ordinary trait -- per witness, so `drain(s)` may yield for one witness
+    and not for another (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md).
   * After completion the handle keeps returning the final result; a failed
     coroutine raises its error again. `std::coroutine::done?(step)` (`import
     coroutine`) is true once it has done either.
@@ -3608,6 +3612,27 @@ b = step(Add {amount: 7})
 [first, a, b]
 @caption Resumed with messages of a declared struct type
 @value [10, 15, 22]
+@end
+
+@example accept
+trait Source:
+    fn next(self: Source) -> int
+
+struct Counter:
+    limit: int
+
+fn next(c: Counter) -> int:
+    loop i from 0 to c.limit:
+        yield i
+    -1
+
+fn drain(s: Source) -> int:
+    s.next() + 100
+
+coroutine {step, first} = drain(Counter {limit: 2})
+[first, step(), step()]
+@caption A coroutine that suspends in its witness's implementation of a trait operation
+@value [0, 1, 99]
 @end
 
 @example reject
