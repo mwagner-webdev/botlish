@@ -358,7 +358,7 @@ foreach {name source message} {
     nested      "fn f():\n    opaque struct T:\n        a: int\n    1\n" {a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop}
     no-name     "opaque struct:\n    a: int\n"                   {expected a struct name after "struct", found ":"}
     no-fields   "opaque struct T:\n"                             {a struct declaration needs at least one "field: Type" line in an indented block (there is no empty-struct syntax), found end of file}
-    not-yet-2   "opaque resource struct T:\n    a: int\n"         {expected end of line, found name "resource"}
+    not-yet-2   "opaque linear struct T:\n    a: int\n"           {expected end of line, found name "linear"}
     after-name  "struct opaque T:\n    a: int\n"                  {expected ":" after the struct name "opaque", found name "T"}
 } {
     test opaque-syntax-$name {a malformed or unsupported opaque declaration is a located syntax error} -body {
