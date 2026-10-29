@@ -722,6 +722,12 @@ fn live_hashes(t: Table[K]) -> List[int]:
 @@ set-freeze-first-member-lost a frozen MutableSet loses its first member
 ## stdlib/mutable_set.bot
 <<<<
+import std::immutable_set
+====
+import std::immutable_set
+import std::list
+>>>>
+<<<<
     std::immutable_set::from_list(std::ordered_table::live_keys(s.table))
 ====
     keys = std::ordered_table::live_keys(s.table)
