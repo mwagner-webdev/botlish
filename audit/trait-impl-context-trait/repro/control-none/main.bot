@@ -1,0 +1,14 @@
+# Control: the implementation needs no context. Runs: 2.
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    t.v
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+twice(A {v: 1})

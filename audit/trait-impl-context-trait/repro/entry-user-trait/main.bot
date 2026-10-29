@@ -1,0 +1,31 @@
+# The same with the program's own context trait Out and its own context K
+# (no standard library): the implementation of Thing needs Out. Should be
+# 2 * (1 + 10) = 22.
+type Small = Int in 0..1000
+
+context trait Out:
+    fn emit(n: int) -> int
+
+context struct K:
+    k: Small
+
+fn emit(n: int, context c: K) -> int:
+    n + c.k
+
+fn through(n: int, context o: Out) -> int:
+    o.emit(n)
+
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    through(t.v)
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+with context K {k: 10}
+twice(A {v: 1})

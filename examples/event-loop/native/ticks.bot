@@ -1,0 +1,24 @@
+# ticks.bot -- the application's logic of examples/event-loop/native: what
+# it does with ticks, written against std::event_loop alone. It requires
+# only the Loop, never a driver or a native capability, so the same code
+# runs under the Linux driver with a native producer (main.bot) and under
+# the deterministic driver with scripted records (test.bot).
+import std::event_loop
+import std::int
+import std::mutable_array
+import std::str
+import type std::event_loop::Wake
+
+# Handle COUNT ticks from SRC (Event.a: the tick's number), then report how
+# many arrived and their sum. Ends early if SRC is revoked.
+fn handle(src: std::event_loop::Reg, count: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    seen = std::mutable_array::create(2, 0)
+    loop i from 0 to count:
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        seen.set(0, seen.at(0) + 1)
+        seen.set(1, seen.at(1) + e.a)
+        std::event_loop::log("tick ".concat(std::int::to_string(e.a)))
+    std::event_loop::log("handled ".concat(std::int::to_string(seen.at(0))).concat(" ticks, sum ").concat(std::int::to_string(seen.at(1))))
+    seen.at(1)

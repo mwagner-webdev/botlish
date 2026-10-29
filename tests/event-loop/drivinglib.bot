@@ -1,0 +1,7 @@
+# drivinglib.bot -- a library function that drives the loop: accepted by the
+# compiler (requiring a context is an ordinary, visible requirement), and
+# reported by the driver audit (tests/event-loop.test, el-static-audit).
+import std::event_loop
+
+fn settle(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::run()

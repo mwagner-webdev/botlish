@@ -1,0 +1,15 @@
+# reject-two-drivers.bot -- must be REJECTED (tests/event-loop.test, el-static-*): two installed drivers: driver choice is one explicit application decision, never a precedence (AMBIGUOUS-CONTEXT-IMPLEMENTATION)
+import std::event_loop
+import std::event_loop::deterministic
+import stepdrv
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context stepdrv::create()
+n = std::event_loop::run():
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3

@@ -1,0 +1,50 @@
+# rotation.bot -- the adapter serves its sources round-robin
+# (EVENT-LOOP-MILESTONE-1.md, "Fairness"), measured without backpressure.
+#
+# 256 records are posted to one endpoint (a burst thread, joined), then one
+# record to another, all before the loop runs. Both feed Lossy sources with
+# room for every record, so nothing is held: the order the adapter hands
+# records over is all that decides when the quiet record arrives. Served
+# round-robin, it is the second record taken (collected in the first
+# turn, after one burst record); a driver that kept serving a source while
+# it had records would hand over all 256 first (four turns of 64).
+import elog
+import event_loop_linux
+import fx
+import std::event_loop
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn quiet(q: std::event_loop::Reg, burst: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(q)
+    if e.reason == Wake::Event:
+        elog::say("quiet record in turn ", std::event_loop::turn_number())
+        elog::say("burst records delivered by then ", std::event_loop::delivered(burst))
+    e.a
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    burst = std::event_loop::source(Delivery::Lossy, 1000)
+    q = std::event_loop::source(Delivery::Lossy, 16, :keep_alive)
+    eb = event_loop_linux::endpoint(256)
+    eq = event_loop_linux::endpoint(16)
+    coroutine {step, first} = quiet(q, burst)
+    std::event_loop::adopt(step, first)
+    fx::burst(event_loop_linux::endpoint_id(eb), std::event_loop::native_slot(burst), std::event_loop::native_generation(burst), 256, 0)
+    fx::synth_join()
+    fx::post(event_loop_linux::endpoint_id(eq), std::event_loop::native_slot(q), std::event_loop::native_generation(q), 7, 0)
+    std::event_loop::run()
+    elog::say("burst records delivered ", std::event_loop::delivered(burst))
+    event_loop_linux::close_endpoint(eb)
+    event_loop_linux::close_endpoint(eq)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

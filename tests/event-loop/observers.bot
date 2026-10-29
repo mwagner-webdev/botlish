@@ -1,0 +1,134 @@
+# observers.bot -- once-per-turn registrations (EVENT-LOOP-EXPLORATION.md's
+# a-observers).
+#
+# An observer is a registration of kind turn; a task waiting on it runs once
+# in the observer phase of every turn that collected or dispatched
+# something, after the dispatch phase, in registration order:
+#
+#   * obs-a is registered before the loop runs and counts its turns;
+#   * a worker yields 6 times (6 busy turns), then sleeps 500 us (an idle
+#     gap: no turn happens while the loop sleeps), then yields twice more;
+#   * in the worker's 2nd turn (dispatch phase) it registers obs-b: it runs
+#     in that same turn's observer phase;
+#   * obs-a registers obs-c from inside the observer phase in its 3rd run
+#     (obs-c's first opportunity is the next turn's phase) and leaves its
+#     Reg on the application's board;
+#   * obs-b revokes obs-c in its own 3rd run, which comes before obs-c's
+#     place in that phase: obs-c's entry is skipped, and its task wakes with
+#     Wake::Revoked in the next dispatch and ends -- never having run;
+#   * obs-a registers obs-d from inside the observer phase in its 4th run
+#     and nobody revokes it: its first run is in the next turn's phase (the
+#     phase runs the observers live when it starts), then every busy turn;
+#   * obs-a revokes itself in its 6th run: that run completes, no 7th;
+#   * a stale record wakes the sleeping loop at t=200: an empty turn, in
+#     which no observer runs;
+#   * obs-b never ends by itself, and does not keep the loop alive: when the
+#     worker is done, run returns while obs-b still waits.
+import board
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import std::mutable_array
+import type std::event_loop::Wake
+
+fn obs_c(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Turn:
+            elog::say("obs-c woke not for a turn: revoked ", elog::bit(e.reason == Wake::Revoked))
+            break
+        runs.set(0, runs.at(0) + 1)
+        elog::say("obs-c run in turn ", e.a)
+    runs.at(0)
+
+fn obs_d(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Turn:
+            break
+        runs.set(0, runs.at(0) + 1)
+        elog::say("obs-d run in turn ", e.a)
+    runs.at(0)
+
+fn obs_b(reg: std::event_loop::Reg, context ev: std::event_loop::Loop, b: board::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Turn:
+            break
+        runs.set(0, runs.at(0) + 1)
+        elog::say("obs-b run in turn ", e.a)
+        if runs.at(0) == 3 and board::count() > 0:
+            elog::say("obs-b revokes obs-c: ", elog::bit(std::event_loop::revoke(board::get(0))))
+    runs.at(0)
+
+fn obs_a(reg: std::event_loop::Reg, context ev: std::event_loop::Loop, b: board::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Turn:
+            elog::say("obs-a woke not for a turn: revoked ", elog::bit(e.reason == Wake::Revoked))
+            break
+        runs.set(0, runs.at(0) + 1)
+        elog::say("obs-a run in turn ", e.a)
+        if runs.at(0) == 3:
+            c = std::event_loop::observer()
+            coroutine {step, first} = obs_c(c)
+            std::event_loop::adopt(step, first)
+            board::put(c)
+            elog::say("obs-a registered obs-c in turn ", e.a)
+        if runs.at(0) == 4:
+            d = std::event_loop::observer()
+            coroutine {step, first} = obs_d(d)
+            std::event_loop::adopt(step, first)
+            elog::say("obs-a registered obs-d in turn ", e.a)
+        if runs.at(0) == 6:
+            elog::say("obs-a revokes itself: ", elog::bit(std::event_loop::revoke(reg)))
+    runs.at(0)
+
+fn worker(context ev: std::event_loop::Loop, b: board::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop i from 0 to 6:
+        elog::say("worker busy turn ", std::event_loop::turn_number())
+        if i == 1:
+            r = std::event_loop::observer()
+            coroutine {step, first} = obs_b(r)
+            std::event_loop::adopt(step, first)
+            elog::say("worker registered obs-b in turn ", std::event_loop::turn_number())
+        std::event_loop::yield_now()
+    std::event_loop::sleep(500)
+    elog::say("worker woke in turn ", std::event_loop::turn_number())
+    std::event_loop::yield_now()
+    std::event_loop::yield_now()
+    elog::say("worker ends in turn ", std::event_loop::turn_number())
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic, b: board::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    a = std::event_loop::observer()
+    coroutine {step: oa, first: oaf} = obs_a(a)
+    std::event_loop::adopt(oa, oaf)
+    coroutine {step: w, first: wf} = worker()
+    std::event_loop::adopt(w, wf)
+    # A record for no live registration, while the worker sleeps: the loop
+    # wakes for nothing -- an empty turn, in which no observer runs.
+    std::event_loop::deterministic::inject_tag(200, 999, 1, 0, 0)
+    turns = std::event_loop::run()
+    elog::say("turns ", turns)
+    s = std::event_loop::stats()
+    elog::say("idle turns ", s.idle_turns)
+    elog::say("observer runs ", s.observed)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+with context board::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -1760,6 +1760,62 @@ with `CI-Tests: darwin-io.test ...`) the darwin-io tests themselves.
 `bench/darwin-io.tcl` (tier item `darwin-io-bench`) is the performance
 report.
 
+## Paths and the synchronous filesystem
+
+Paths have two layers (WINDOWS-X86-64-MILESTONE-7.md): textual paths a
+program writes (`std::linux::path::LinuxPath`, `std::windows::path::WindowsPath`,
+`std::darwin::path::DarwinPath`: refinements of str, syntax only) and native
+paths the system takes and returns (`std::PLATFORM::fs::NativePath`: Linux and
+macOS bytes through `std::io::bytepath`, Windows UTF-16 code units). The
+portable layer is `std::io::fs` (FileError, OpenMode, EntryKind, the eager
+trait FilePath); the platform layers are `std::linux::fs` (raw syscalls),
+`std::windows::fs` (kernel32's wide functions) and `std::darwin::fs`
+(libSystem). Keep it so:
+
+* Never decode a native name lossily into a path: text from a native path is
+  strict (`text`, else `std::io::path::NotText`), `display` is for people
+  and never a path, and a portable listing fails with NotText rather than
+  skip or misname an entry (the experiments: a lossy name opened another
+  file). A native path is no `std::io::path::Path`.
+* The path's type selects the filesystem: a witness's FilePath operations
+  call its platform module, whose functions require its context; never
+  select a filesystem at run time, add a dynamic dispatch, a fallback, or a
+  context trait that chooses by installation.
+* Windows paths are Win32's syntax (`PathKind`; one join for text and
+  native paths): a bare drive designator joins without a separator, a
+  verbatim path takes no `/`, `.`, `..` or empty component, any other no
+  component ending with a period or a space; nothing is normalized and no
+  filesystem observed. Every Win32 call is a wide function; never the ANSI
+  code page, the C runtime or a POSIX layer.
+* A File is opaque and affine (Windows: its HANDLE; Linux and macOS: a
+  `std::io::fs::Owner`, the affine token only the standard library makes:
+  the syscall side never names `std::ffi::c`); a failed read or write
+  closes it, and the whole-file and directory operations close on every
+  path. Ownership is not
+  cleanup: never claim RAII. Short reads and writes are ordinary; completion
+  continues after what the system reports, never restarts; no retry, no
+  durability claim.
+* Every failure is `FileError {reason, code}` with the system's code read
+  right after the failed call (errno; `__error()`; GetLastError before
+  any other call). Validation failures stay `NotAPath`.
+* The Win32 and libSystem declarations are `private`; helpers of the
+  platform modules are `private`; `of_valid_text` is an internal member.
+* No watching, asynchronous I/O, event loop, metadata, links or renaming
+  here (`fs-no-watchers`).
+
+If you change any of that, or `std::abi::bytes::join`, `slice` or
+`decode_utf8`, or the Linux path syscalls, run `tests/filesystem.test` (its
+Windows and macOS tests run on their hosts: the Windows workflow's smoke
+and GC-stress steps, the macOS acceptance tier), `tests/linux-path.test`,
+`tests/portable-io.test`, `tests/darwin-io.test`, `tests/windows-io.test`,
+`tests/abi-bytes.test`, `audit/filesystem/tools/fuzz.tcl` (several seeds,
+once with `-gc-stress 1`) and `audit/filesystem/tools/mutate.tcl` (every
+mutant in its `mutants.txt` that applies to the host must still apply and
+be killed: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule; the `%% windows-x86_64` ones on
+Windows, the tier item `filesystem-mutants`), and the warning gate.
+`bench/filesystem.tcl` regenerates the performance table.
+
 ## Affine values
 
 Affinity (AFFINE-VALUES.md) is a compositional property of a value's type:
@@ -1868,6 +1924,77 @@ coroutine, mutable-vector and mutable-array harnesses for a change to
 to the native slots, and `tclsh9.0 audit/icy-tower/context-refactor/tools/
 repro.tcl` (a reproducer whose outcome changes is a census finding that
 changed: update the census).
+
+## The event loop (std::event_loop)
+
+`std::event_loop` (stdlib/event_loop.bot; EVENT-LOOP-MILESTONE-1.md) is one
+thread-local scheduler of ordinary coroutines, written in ordinary Botlish
+over MutableVectors, MutableArrays and the existing coroutines: tasks are
+coroutines adopted by the opaque context `Loop`, and a driver is any
+context implementing the context trait `std::event_loop::Driver` --
+`std::event_loop::deterministic` (every backend) or the Linux package
+`packages/event_loop_linux` (a C adapter over epoll and an eventfd, installed
+into an application's `.bot_modules` by `tools/event-loop-linux.tcl
+install`, which builds its archive there). Keep it so:
+
+* No compiler, runtime or Tcl knowledge of the event loop: no native, NIR
+  instruction, runtime object or syntax of it, and no promise, `async`,
+  microtask queue or callback registry. The scheduler names no operating
+  system: no descriptor, handle, epoll state or clock source in
+  stdlib/event_loop.bot; native handles stay in a driver or its adapter.
+* The application chooses the driver: only an entry program installs
+  contexts. Never add a default driver, a runtime driver selection, or a way
+  for a library to install, select or wrap one. A library that requires only
+  the Loop (and an integration capability such as `event_loop_linux::Native`)
+  can register, post, wait and revoke, never wait or turn the loop or drop
+  its tasks: `run`, `turn`, `sync`, `shutdown` and `abandon` require the
+  Driver.
+* The turn is wait, collect (released holds, expired timers in (deadline,
+  registration) order, at most `budget` records, round-robin over the
+  driver's sources), dispatch (exactly the tasks ready when it begins, once
+  each, FIFO) and observe (every observer registration live at its start,
+  once, in registration order, only in a turn that collected or dispatched
+  something). Never run work made ready during dispatch in the same turn,
+  an observer twice in a turn or in an empty turn, and never let an
+  observer, a channel or a timer nobody waits on keep the loop alive or
+  awake.
+* Revocation is explicit and generation-checked: a `Reg` is an identity,
+  never an owner. Nothing revokes implicitly -- no drop action until the
+  lexical-scope cleanup milestone, and never one faked with last-use
+  release -- and shutdown revokes every registration. Never deliver a record
+  of an old generation, let a reused slot inherit events, or cancel a task as
+  a side effect of revocation.
+* Delivery is a registration's declared policy (Lossy, Coalesce, Reliable).
+  Reliable never drops: a record without room is held by the driver
+  (`hold_record`, `release_held`) and the backpressure reaches the producer
+  (a full endpoint refuses posts with -EAGAIN). Never make a policy drop
+  silently.
+* An `IndexNotFound` of the scheduler's own tables is `SchedulerFault` (a
+  scheduler bug, ending `run`), never an application error; a task's own
+  failure is a recorded outcome that ends only that task.
+* The native integration ABI (packages/event_loop_linux/native/
+  botlish_event_loop.h, version 1): a post copies four scalars and never runs
+  Botlish code; pumps run on the loop's thread inside the wait and never call
+  Botlish. Never add a C-to-Botlish callback or a pointer in a record. A
+  library that wakes the loop before its data is where its check can take it
+  (SDL calls an event watch before it queues the event) announces what it
+  woke for and keeps its prepare deadline near until check has taken it;
+  never rely on the wake alone (`el-linux-sdl-hybrid-window`).
+* The exploration's prototype (`audit/event-loop/src`) is evidence and the
+  benchmark's baseline: never extend it or load it from production code.
+
+If you change stdlib/event_loop.bot, stdlib/event_loop/deterministic.bot, the
+Linux package, its C adapter or `examples/event-loop/`, run
+`tests/event-loop.test` (on both passes, `CORE_BACKEND=interp` and
+`compile`; directly, all four backends), `tests/event-loop-linux.test` (real
+epoll, sockets and threads; its SDL3 tests need `tclsh9.0
+tests/cffi/sdl3.tcl` and are skipped without it), `tests/context-traits.test`,
+`tests/coroutines.test`, the warning gate (both modules are in its
+manifest), `tools/compilerpedia.tcl generate` and `check`, and
+`audit/event-loop/tools/mutate.tcl` (every mutant in its `mutants.txt` must
+still apply and be killed: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule). `bench/event-loop.tcl` is
+the performance report against the prototype.
 
 ## DecimalRounded and scalar refinements
 

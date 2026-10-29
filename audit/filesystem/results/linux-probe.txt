@@ -1,0 +1,16 @@
+# audit/filesystem/experiments/linux.tcl on Linux x86-64 (this repository's
+# development container, ext4), cranelift. Recorded verbatim.
+fixture: == make.bot (cranelift)
+   value: 4
+ls -b: a\nb
+dangling
+é-nfd
+link
+plain.txt
+sub
+é-nfc
+��x
+\377\376x
+columns: [A strict text, what A's text opened, A' lossy text, what A''s text opened, what the native name opened]
+== designs.bot (cranelift)
+   value: [["é-nfc", "1", "é-nfc", "1", "1"], ["dangling", "<nothing>", "dangling", "<nothing>", "<nothing>"], ["��x", "4", "��x", "4", "4"], ["é-nfd", "2", "é-nfd", "2", "2"], ["link", "0", "link", "0", "0"], ["sub", "<nothing>", "sub", "<nothing>", "<nothing>"], ["plain.txt", "0", "plain.txt", "0", "0"], ["a\nb", "5", "a\nb", "5", "5"], ["-", "<no name>", "��x", "4", "3"]]

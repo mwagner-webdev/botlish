@@ -35,4 +35,56 @@ test bench-backends-4 {the manifest names and describes every requested backend,
         [string match -nocase "*JIT compile time excluded*" $manifest]
 } -result {1 1 1}
 
+# Every benchmark, canonical (bench/*.bot) and experimental
+# (bench/experimental/*.bot), has a reference program in each of Python,
+# Rust and Go beside it (bench/bench.tcl's reference columns), so no
+# benchmark is Botlish-only.
+test bench-backends-5 {every benchmark has a Python, a Rust and a Go reference program} -body {
+    set missing {}
+    foreach {programs equivalents} {bench {bench equivalents} {bench experimental} {bench experimental equivalents}} {
+        foreach path [lsort [glob -directory [file join $::projectRoot {*}$programs] *.bot]] {
+            set base [string map {- _} [file rootname [file tail $path]]]
+            foreach {language extension} {python py rust rs go go} {
+                if {![file exists [file join $::projectRoot {*}$equivalents $language $base.$extension]]} {
+                    lappend missing "[file tail $path] $language"
+                }
+            }
+        }
+    }
+    set missing
+} -result {}
+
+# Every experimental benchmark documents its value ("# expect:"), the value
+# its reference programs are ported to produce and bench.tcl checks every
+# column against, and every module it is staged beside ("# bench-modules:")
+# exists outside bench/.
+test bench-backends-6 {every experimental benchmark has an expectation and every module it is staged beside exists} -body {
+    set problems {}
+    foreach path [lsort [glob -directory [file join $::projectRoot bench experimental] *.bot]] {
+        set header {}
+        foreach line [split [core::ReadFile $path] \n] {
+            if {![string match "#*" $line]} {
+                break
+            }
+            lappend header [string trim [string range $line 1 end]]
+        }
+        if {![llength [lsearch -all -glob $header "expect: *"]]} {
+            lappend problems "[file tail $path]: no expect"
+        }
+        set modules {}
+        foreach line [lsearch -all -inline -glob $header "bench-modules:*"] {
+            lappend modules {*}[lrange $line 1 end]
+        }
+        if {![llength $modules]} {
+            lappend problems "[file tail $path]: no bench-modules"
+        }
+        foreach module $modules {
+            if {![file isfile [file join $::projectRoot $module]] || [string match bench/* $module]} {
+                lappend problems "[file tail $path]: $module"
+            }
+        }
+    }
+    set problems
+} -result {}
+
 cleanupTests

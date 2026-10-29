@@ -1,0 +1,129 @@
+# wakeups.bot -- wakeups, sleeping and idle cost on the Linux driver
+# (EVENT-LOOP-EXPLORATION.md's b-wake, through the integration ABI).
+#
+#   latency  a producer thread posts COUNT records to an endpoint (a
+#            jittered stream, or bursts of two 150 us apart -- the second
+#            lands while the loop is going back to sleep after the first,
+#            the window a racy wakeup protocol loses); a task waiting on
+#            the source measures, at each dispatch, now - the post's time.
+#            A 50 ms heartbeat bounds how long a LOST wakeup can delay a
+#            post;
+#   idle     the loop sleeps 300 ms on a timer, with and without an observer
+#            registered: the wakeups and CPU time it uses while asleep.
+# tests/event-loop-linux.test runs it with the adapter's protocol and, as a
+# positive control, under BOTLISH_EVENT_LOOP_FAULT=lost-wakeup.
+import elog
+import event_loop_linux
+import fx
+import std::event_loop
+import std::int
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn receiver(src: std::event_loop::Reg, count: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    lat = std::mutable_array::create(4, 0)
+    loop i from 0 to count:
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        l = event_loop_linux::now_us() - e.b
+        lat.set(0, lat.at(0) + 1)
+        lat.set(1, lat.at(1) + l)
+        if l > lat.at(2):
+            lat.set(2, l)
+        if l > 5000:
+            lat.set(3, lat.at(3) + 1)
+    elog::say("received ", lat.at(0))
+    elog::say("total latency us ", lat.at(1))
+    elog::say("max latency us ", lat.at(2))
+    elog::say("posts later than 5 ms ", lat.at(3))
+    elog::bit(std::event_loop::revoke(src))
+
+fn heartbeat(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    t = std::event_loop::every(50000)
+    beats = std::mutable_array::create(1, 0)
+    loop:
+        if not std::event_loop::live?(src):
+            break
+        std::event_loop::wait(t)
+        beats.set(0, beats.at(0) + 1)
+    std::event_loop::revoke(t)
+    beats.at(0)
+
+fn watcher(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Turn:
+            break
+        runs.set(0, runs.at(0) + 1)
+    runs.at(0)
+
+fn idle_sleeper(us: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(us)
+    us
+
+fn idle(us: int, observed: bool, context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    obs = std::event_loop::observer()
+    if observed:
+        coroutine {step: w, first: wf} = watcher(obs)
+        std::event_loop::adopt(w, wf)
+    coroutine {step, first} = idle_sleeper(us)
+    std::event_loop::adopt(step, first)
+    before = event_loop_linux::stats()
+    cpu = event_loop_linux::cpu_us()
+    wall = event_loop_linux::now_us()
+    turns = std::event_loop::run()
+    used = event_loop_linux::cpu_us() - cpu
+    after = event_loop_linux::stats()
+    label = "idle observed=".concat(std::int::to_string(elog::bit(observed)))
+    elog::say(label.concat(" turns "), turns)
+    elog::say(label.concat(" wall us "), event_loop_linux::now_us() - wall)
+    elog::say(label.concat(" cpu us "), used)
+    elog::say(label.concat(" sleeps "), after.sleeps - before.sleeps)
+    std::event_loop::revoke(obs)
+    used
+
+nomethod fn latency(label: str, count: int, interval: int, burst: int, jitter: int, gap: int, context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::log(label)
+    std::event_loop::sync()
+    src = std::event_loop::source(Delivery::Reliable, 4096, :keep_alive)
+    ep = event_loop_linux::endpoint(4096)
+    coroutine {step: r, first: rf} = receiver(src, count)
+    std::event_loop::adopt(r, rf)
+    coroutine {step: h, first: hf} = heartbeat(src)
+    std::event_loop::adopt(h, hf)
+    fx::synth(event_loop_linux::endpoint_id(ep), std::event_loop::native_slot(src), std::event_loop::native_generation(src), count, interval, burst, jitter, gap)
+    turns = std::event_loop::run()
+    fx::synth_join()
+    event_loop_linux::close_endpoint(ep)
+    s = event_loop_linux::stats()
+    elog::say("latency turns ", turns)
+    elog::say("eventfd writes ", s.eventfd_writes)
+    elog::say("wakeups ", s.wakeups)
+    elog::say("sleeps ", s.sleeps)
+    turns
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    elog::say("adapter status ", event_loop_linux::status())
+    latency("stream", 300, 1000, 1, 1, 0)
+    latency("pairs", 40, 30000, 2, 0, 150)
+    idle(300000, false)
+    idle(300000, true)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

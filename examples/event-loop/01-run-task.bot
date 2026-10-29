@@ -1,0 +1,41 @@
+# 01-run-task.bot -- run ordinary coroutines from an event loop
+# (EVENT-LOOP-MILESTONE-1.md, "Public API").
+#
+#   tclsh9.0 main.tcl examples/event-loop/01-run-task.bot
+#
+# A task is an ordinary coroutine: its spawner constructs it (its first
+# segment runs at once) and hands it to the loop with adopt, which moves
+# the handle into the Loop. Each turn resumes the tasks that were ready when
+# the turn began; yield_now makes a task ready again for the next turn. What
+# a task returns is its outcome.
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+
+fn count(name: str, n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 1 to n + 1:
+        std::event_loop::log(name.concat(" step ").concat(std::int::to_string(i)))
+        std::event_loop::yield_now()
+    n
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step: a, first: fa} = count("left", 2)
+    std::event_loop::adopt(a, fa)
+    coroutine {step: b, first: fb} = count("right", 3)
+    std::event_loop::adopt(b, fb)
+    turns = std::event_loop::run()
+    std::event_loop::log("turns ".concat(std::int::to_string(turns)))
+    loop o in std::event_loop::take_outcomes():
+        std::event_loop::log("task ".concat(std::int::to_string(o.task)).concat(" returned ").concat(std::int::to_string(o.value)))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

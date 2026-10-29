@@ -1,0 +1,20 @@
+# mixed-sdl-first.bot -- mixed.bot with the sdl source initialized
+# first.
+import event_loop_linux
+import linuxnet
+import mixed
+import std::event_loop
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context linuxnet::create(false)
+mixed::run(true):
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

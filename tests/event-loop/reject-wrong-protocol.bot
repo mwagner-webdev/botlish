@@ -1,0 +1,18 @@
+# reject-wrong-protocol.bot -- must be REJECTED (tests/event-loop.test, el-static-*): a coroutine of another protocol given to the scheduler (TYPE)
+import std::event_loop
+
+struct Line:
+    v: int
+
+fn talker(context ev: std::event_loop::Loop, resume Line) -> int:
+    line = yield -1
+    line.v
+
+fn main(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    coroutine {step, first} = talker()
+    std::event_loop::adopt(step, first)
+
+with context std::event_loop::create(8)
+main():
+    on std::event_loop::SchedulerFault:
+        -1

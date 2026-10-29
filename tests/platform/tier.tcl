@@ -32,7 +32,12 @@
 # WINDOWS-X86-64-MILESTONE-2.md) or `windows-unwind-mutants`
 # (audit/windows-unwind/tools/mutate.tcl: Windows unwind information's and
 # the native-frame roots' mutants for this host, WINDOWS-X86-64-MILESTONE-3.md;
-# `windows-unwind-mutants=NAME,...` only those); the last fourteen are never
+# `windows-unwind-mutants=NAME,...` only those), `filesystem-fuzz`
+# (audit/filesystem/tools/fuzz.tcl: the path models and, on Linux, the
+# round trip of random names), `filesystem-mutants`
+# (audit/filesystem/tools/mutate.tcl: the filesystem's mutants for this host,
+# WINDOWS-X86-64-MILESTONE-7.md; `filesystem-mutants=NAME,...` only those) or
+# `filesystem-bench` (bench/filesystem.tcl); the last seventeen are never
 # part of a tier.
 #
 #   smoke       cabi, examples and a dozen front-end test files that never
@@ -76,13 +81,16 @@
 #   darwin-io-bench       tclsh9.0 bench/darwin-io.tcl
 #   c-capture-bench       tclsh9.0 bench/c-ffi-error-capture.tcl -baseline-rev e2ae884
 #   windows-io-mutants    tclsh9.0 audit/context-traits/tools/mutate.tcl -only windows-*
+#   filesystem-fuzz       tclsh9.0 audit/filesystem/tools/fuzz.tcl -seed S, seeds 1 and 2
+#   filesystem-mutants    tclsh9.0 audit/filesystem/tools/mutate.tcl ?-only NAMES?
+#   filesystem-bench      tclsh9.0 bench/filesystem.tcl
 #
 # -gc-stress 1 runs everything with BOTLISH_NATIVE_GC_STRESS=1. -shard I/N
 # (1 <= I <= N) keeps the Ith of every N test files and of every N suites,
 # for parallel CI jobs; examples, cabi, rust, native-stack-mutants,
 # native-aot-mutants, native-stack-bench, c-capture-bench, the darwin-io-*,
-# windows-io-mutants, windows-unwind-mutants and the c-ffi-* and c-borrow-*
-# checks run in shard 1 only. -list 1 prints the commands and runs nothing. Each command is printed before it
+# windows-io-mutants, windows-unwind-mutants, the filesystem-* and the
+# c-ffi-* and c-borrow-* checks run in shard 1 only. -list 1 prints the commands and runs nothing. Each command is printed before it
 # runs and streams its output; at the end a summary lists every failure with
 # the command that reruns it alone. Exits 1 on any failure. It never uses
 # the front-end cache.
@@ -118,7 +126,7 @@ set notYet [dict getdef $notYetByHost [core::cabi::hostTarget] {}]
 
 proc usage {} {
     puts stderr "usage: tclsh9.0 tests/platform/tier.tcl ?-backends LIST? ?-golden-backends LIST? ?-example-backends LIST? ?-gc-stress 0|1? ?-shard I/N? ?-list 0|1? ITEM ..."
-    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants | native-aot-mutants | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | c-capture-bench | windows-io-mutants | windows-unwind-mutants?=NAME,...?"
+    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants | native-aot-mutants | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | c-capture-bench | windows-io-mutants | windows-unwind-mutants?=NAME,...? | filesystem-fuzz | filesystem-mutants?=NAME,...? | filesystem-bench"
     exit 2
 }
 
@@ -209,15 +217,15 @@ proc addTier {name} {
 foreach item $items {
     if {$item in {smoke acceptance all}} {
         addTier $item
-    } elseif {$item in {examples cabi rust native-stack-mutants native-aot-mutants native-stack-bench c-ffi-fuzz c-ffi-bench c-borrow-fuzz c-borrow-bench darwin-io-mutants darwin-io-bench c-capture-bench windows-io-mutants}
-            || [regexp {^(c-ffi|c-borrow|windows-unwind)-mutants(=[A-Za-z0-9,_-]+)?$} $item]} {
+    } elseif {$item in {examples cabi rust native-stack-mutants native-aot-mutants native-stack-bench c-ffi-fuzz c-ffi-bench c-borrow-fuzz c-borrow-bench darwin-io-mutants darwin-io-bench c-capture-bench windows-io-mutants filesystem-fuzz filesystem-bench}
+            || [regexp {^(c-ffi|c-borrow|windows-unwind|filesystem)-mutants(=[A-Za-z0-9,_-]+)?$} $item]} {
         addCheck $item
     } elseif {[string match *.test $item]} {
         addFile $item
     } elseif {[string match *.bot $item]} {
         addSuite $item $goldenBackends
     } else {
-        puts stderr "not a tier, test file, golden suite, examples, cabi, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants, c-ffi-bench, c-borrow-fuzz, c-borrow-mutants, c-borrow-bench, darwin-io-mutants, darwin-io-bench, c-capture-bench, windows-io-mutants or windows-unwind-mutants: $item"
+        puts stderr "not a tier, test file, golden suite, examples, cabi, rust, native-stack-mutants, native-aot-mutants, native-stack-bench, c-ffi-fuzz, c-ffi-mutants, c-ffi-bench, c-borrow-fuzz, c-borrow-mutants, c-borrow-bench, darwin-io-mutants, darwin-io-bench, c-capture-bench, windows-io-mutants, windows-unwind-mutants, filesystem-fuzz, filesystem-mutants or filesystem-bench: $item"
         usage
     }
 }
@@ -331,6 +339,15 @@ foreach check $checks {
             lappend commands [list "Windows I/O mutants" {} \
                 [list $tclsh [file join $root audit context-traits tools mutate.tcl] -only windows-*] plain]
         }
+        filesystem-fuzz {
+            foreach seed {1 2} {
+                lappend commands [list "filesystem fuzzer, seed $seed" {} \
+                    [list $tclsh [file join $root audit filesystem tools fuzz.tcl] -seed $seed] plain]
+            }
+        }
+        filesystem-bench {
+            lappend commands [list "filesystem performance" {} [list $tclsh [file join $root bench filesystem.tcl]] plain]
+        }
         default {
             if {[regexp {^c-ffi-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "C FFI mutants" {} \
@@ -341,6 +358,9 @@ foreach check $checks {
             } elseif {[regexp {^windows-unwind-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "Windows unwind mutants" {} \
                     [list $tclsh [file join $root audit windows-unwind tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
+            } elseif {[regexp {^filesystem-mutants(?:=(.*))?$} $check -> only]} {
+                lappend commands [list "filesystem mutants" {} \
+                    [list $tclsh [file join $root audit filesystem tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
             }
         }
     }

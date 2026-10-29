@@ -5,6 +5,16 @@ EVENT-LOOP-EXPLORATION.md. An isolated prototype -- nothing in `core/`,
 `hir/`, `surface/`, `compiler/`, `native/` or `stdlib/` loads it, and
 `tests/local.tcl` and CI do not run it.
 
+EVENT-LOOP-MILESTONE-1.md promoted it: the production scheduler is
+`stdlib/event_loop.bot` (`std::event_loop`), its deterministic driver
+`stdlib/event_loop/deterministic.bot`, the Linux driver the package
+`packages/event_loop_linux`, and their tests `tests/event-loop.test` and
+`tests/event-loop-linux.test`. This directory stays as the evidence the
+promotion builds on, and as the baseline `bench/event-loop.tcl` measures
+against; it is not extended. `tools/mutate.tcl` and `tools/mutants.txt`
+here are the production loop's mutation harness (EVENT-LOOP-MILESTONE-1.md,
+"Testing").
+
 * `src/evloop.bot` -- the scheduler: one ordinary module over the existing
   coroutines, MutableVectors and contexts (the turn, the ready queue,
   registrations, timers, observers, revocation, shutdown), with the

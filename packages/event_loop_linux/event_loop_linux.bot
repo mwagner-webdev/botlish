@@ -1,0 +1,265 @@
+# event_loop_linux.bot -- the production Linux driver of std::event_loop
+# (EVENT-LOOP-MILESTONE-1.md, "Linux driver"), a package: installed as
+# APP/.bot_modules/event_loop_linux (tools/event-loop-linux.tcl install APP),
+# it links its C adapter, native/event_loop_linux.c, from the archive the
+# install builds beside it (native/libevent_loop_linux.a).
+#
+#   with context std::event_loop::create(64)
+#   with context event_loop_linux::create()          the driver (Linux)
+#   with context event_loop_linux::native()          the integration
+#                                                    capability (Native)
+#
+# Two contexts, two authorities:
+#
+# * Linux implements std::event_loop::Driver: the monotonic clock, the wait
+#   (epoll, an eventfd for wakeups), the records. Whoever requires it can
+#   make the loop wait and turn -- the application, which installs it.
+# * Native is what an event source needs: endpoints native producers post
+#   to, readiness watches of descriptors, wakeups. A library that requires
+#   only Native (and std::event_loop::Loop) can deliver events and consume
+#   scheduling capacity, never run the scheduler. Native is made from an
+#   installed Linux driver, so a library needing it under another driver --
+#   the deterministic one, a host's -- is MISSING-CONTEXT at compile time,
+#   never silently given a different driver.
+#
+# Native records reach the scheduler round-robin over the driver's sources
+# (endpoints and watches), one per source in turn, so a flooding source
+# cannot hold back a quiet one; at most the loop's budget per turn. A
+# source whose records a Reliable registration has no room for is held:
+# the adapter takes nothing more from it until the registration has room,
+# and its endpoint, once full, refuses its producer's posts (-EAGAIN).
+#
+# Descriptors are the program's: a watch reports readiness (one coalesced
+# record per arming: a = 1 readable, 2 writable, 4 hang-up, 8 error, ORed;
+# b = the descriptor) and readable re-arms it when the task wants more, so
+# the task reads the byte stream itself and an unread socket pushes back on
+# its peer. Readiness describes the kernel's buffer, never the program's:
+# a task that buffers input must consume what it holds before it waits for
+# readiness again (tests/event-loop-linux.test, buffered lines).
+#
+# Native programs only: the Tcl backends refuse a C call.
+import std::event_loop
+import std::ffi::c
+import std::mutable_array
+
+extern c library "event_loop_linux" static at "native/libevent_loop_linux.a"
+
+extern c fn evl_open(flags: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_close() -> std::ffi::c::Int
+extern c fn evl_now() -> std::ffi::c::LongLong
+extern c fn evl_cpu_us() -> std::ffi::c::LongLong
+extern c fn evl_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evl_block(deadline: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn evl_take() -> std::ffi::c::Int
+extern c fn evl_gen() -> std::ffi::c::Int
+extern c fn evl_a() -> std::ffi::c::LongLong
+extern c fn evl_b() -> std::ffi::c::LongLong
+extern c fn evl_hold() -> std::ffi::c::Int
+extern c fn evl_release(slot: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_endpoint_open(capacity: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_endpoint_close(id: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_endpoint_count(id: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_watch(fd: std::ffi::c::Int, interest: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_watch_rearm(id: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evl_watch_close(id: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn botlish_event_wake() -> std::ffi::c::Int
+
+# The adapter's counters (stats).
+struct Stats:
+    blocks: int
+    sleeps: int
+    poll_syscalls: int
+    polls_skipped: int
+    wakeups: int
+    spurious: int
+    timeouts: int
+    posts: int
+    refused_posts: int
+    records_taken: int
+    holds: int
+    releases: int
+    watch_events: int
+    eventfd_writes: int
+    endpoint_max: int
+    pump_checks: int
+    discarded: int
+    resets: int
+
+# What a watch waits for.
+enum Interest:
+    Readable,
+    Writable,
+    Both,
+
+# The driver: the adapter's open status (0, or -errno).
+opaque context struct Linux:
+    state: MutableArray[int]
+
+# The integration capability (made by native, from an installed driver).
+opaque context struct Native:
+    open: bool
+
+# A cross-thread endpoint: native producers post records to it by its id.
+opaque struct Endpoint:
+    id: int
+
+# A readiness watch of a descriptor, delivering to REG.
+opaque struct Watch:
+    id: int
+    reg: std::event_loop::Reg
+
+# A C int of X (clamped: a value outside a C int is never one this module
+# passes, but the clamp keeps every call in its domain).
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+# The Linux driver (one per process). The adapter opens here; a failure to
+# open is reported by the first wait (DriverFault with the negated errno).
+fn create() -> Linux:
+    opened = evl_open(0)
+    Linux {state: std::mutable_array::from_list([opened + 0])}
+
+# The adapter's open status: 0, or the negated errno opening failed with.
+fn status(context d: Linux) -> int:
+    d.state.at(0):
+        on IndexNotFound:
+            -1
+
+# --- std::event_loop::Driver
+
+fn clock(context d: Linux) -> int:
+    evl_now()
+
+fn block(deadline: int, context d: Linux) -> int errors std::event_loop::DriverFault:
+    n = evl_block(cll(deadline))
+    if n < 0:
+        fail std::event_loop::DriverFault {code: n}
+    n
+
+fn take_record(context d: Linux) -> int:
+    evl_take()
+
+fn record_gen(context d: Linux) -> int:
+    evl_gen()
+
+fn record_a(context d: Linux) -> int:
+    evl_a()
+
+fn record_b(context d: Linux) -> int:
+    evl_b()
+
+fn hold_record(context d: Linux) -> int:
+    evl_hold()
+
+fn release_held(slot: int, context d: Linux) -> int:
+    evl_release(ci(slot))
+
+# Close the adapter: every endpoint refuses later posts (-EPIPE) and every
+# watch is dropped (descriptors stay the program's). For the end of a
+# program, after the loop's shutdown.
+fn close(context d: Linux) -> int:
+    evl_close()
+
+# The integration capability of the installed driver.
+fn native(context d: Linux) -> Native:
+    Native {open: true}
+
+# --- Native: what event sources use
+
+# A new endpoint holding at most CAPACITY records. Hand endpoint_id(e) to
+# the native library that posts to it (botlish_event_loop.h).
+fn endpoint(capacity: int, context n: Native) -> Endpoint errors std::event_loop::DriverFault:
+    id = evl_endpoint_open(ci(capacity))
+    if id < 0:
+        fail std::event_loop::DriverFault {code: id}
+    Endpoint {id: id}
+
+# The int a native library posts to (botlish_event_post's ENDPOINT).
+fn endpoint_id(e: Endpoint) -> int:
+    e.id
+
+# Records waiting in E for the loop (held ones included).
+fn endpoint_count(e: Endpoint, context n: Native) -> int:
+    evl_endpoint_count(ci(e.id))
+
+# Close E: its undelivered records are discarded (how many is returned) and
+# later posts fail with -EPIPE. Tell the producer to stop first.
+fn close_endpoint(e: Endpoint, context n: Native) -> int:
+    evl_endpoint_close(ci(e.id))
+
+private fn interest_code(interest: Interest) -> int:
+    if interest == Interest::Readable:
+        1
+    elif interest == Interest::Writable:
+        2
+    else:
+        3
+
+# Watch descriptor FD for INTEREST, delivering readiness records to REG (a
+# Coalesce source suits it). Armed at once: the first readiness is
+# reported without a call to readable.
+nomethod fn watch(fd: int, interest: Interest, reg: std::event_loop::Reg, context n: Native) -> Watch errors std::event_loop::DriverFault:
+    id = ci(fd).evl_watch(ci(interest_code(interest)), ci(std::event_loop::native_slot(reg)), ci(std::event_loop::native_generation(reg)))
+    if id < 0:
+        fail std::event_loop::DriverFault {code: id}
+    Watch {id: id, reg: reg}
+
+# Arm W again: the next readiness of its descriptor is reported.
+fn rearm(w: Watch, context n: Native) errors std::event_loop::DriverFault:
+    r = ci(w.id).evl_watch_rearm(ci(std::event_loop::native_slot(w.reg)), ci(std::event_loop::native_generation(w.reg)))
+    if r < 0:
+        fail std::event_loop::DriverFault {code: r}
+
+# Wait until W's descriptor is ready: arm it, then wait on its
+# registration (Event.a: the readiness bits).
+fn readable(w: Watch, context n: Native, ev: std::event_loop::Loop) -> std::event_loop::Event errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    rearm(w)
+    std::event_loop::wait(w.reg)
+
+# The registration W delivers to.
+fn watch_reg(w: Watch) -> std::event_loop::Reg:
+    w.reg
+
+# Stop watching. The descriptor stays open: close it after this, never
+# before (a closed descriptor's number may already name another file). A
+# Watch that was already stopped does nothing (-22): its id may name a newer
+# watch, which it never reaches.
+fn unwatch(w: Watch, context n: Native) -> int:
+    ci(w.id).evl_watch_close(ci(std::event_loop::native_slot(w.reg)), ci(std::event_loop::native_generation(w.reg)))
+
+# Wake the loop without a record (its pumps run).
+fn wake(context n: Native) -> int:
+    botlish_event_wake()
+
+# The monotonic clock and the process's CPU time, microseconds (measurements).
+fn now_us(context n: Native) -> int:
+    evl_now()
+
+fn cpu_us(context n: Native) -> int:
+    evl_cpu_us()
+
+private nomethod fn st(i: int) -> int:
+    evl_stat(ci(i))
+
+# The adapter's counters.
+fn stats(context n: Native) -> Stats:
+    Stats {
+        blocks: st(0), sleeps: st(1), poll_syscalls: st(2), polls_skipped: st(3),
+        wakeups: st(4), spurious: st(5), timeouts: st(6), posts: st(7),
+        refused_posts: st(8), records_taken: st(9), holds: st(10), releases: st(11),
+        watch_events: st(12), eventfd_writes: st(13), endpoint_max: st(14),
+        pump_checks: st(15), discarded: st(16), resets: st(17)
+    }

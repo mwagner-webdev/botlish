@@ -1,0 +1,100 @@
+# gameserver-linux.bot -- the game-server workload (gameserver.bot,
+# unchanged) on real TCP sockets in one process, beside an independent
+# flooding source (EVENT-LOOP-EXPLORATION.md's b-gameserver, on the Linux
+# driver and linuxnet.bot):
+#
+#   client 1  MOVE 3000 (300 pathfinding segments), then 20 TALK lines
+#   client 2  50 TALK lines, 1 ms apart
+#   client 3  50 TALK lines, 1.5 ms apart
+#   client 4  a flood: 3000 TALK lines as fast as TCP takes them
+#   telemetry a producer thread posting 20000 records as fast as its
+#             endpoint takes them, to a source an unrelated task drains
+#   world     a 20 ms timer advancing its AI coroutine directly, 15 ticks
+#
+# Each TALK line carries its send time; each session reports the largest
+# network-to-handler latency of its lines. tests/event-loop-linux.test
+# checks that every client gets every reply, that the quiet connections stay
+# fast while the flood and the telemetry run, and that nothing of the
+# telemetry is lost.
+import elog
+import event_loop_linux
+import fx
+import gameserver
+import linuxnet
+import std::event_loop
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn telemetry(src: std::event_loop::Reg, total: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    got = std::mutable_array::create(1, 0)
+    loop:
+        if got.at(0) >= total:
+            break
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        got.set(0, got.at(0) + 1)
+        loop:
+            more = std::event_loop::try_take(src)
+            if more.reason != Wake::Event:
+                break
+            got.set(0, got.at(0) + 1)
+    elog::say("telemetry records ", got.at(0))
+    std::event_loop::revoke(src)
+    got.at(0)
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native, net: linuxnet::LinuxNet) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    elog::say("adapter status ", event_loop_linux::status())
+    std::event_loop::sync()
+    lfd = fx::listen()
+    listener = std::event_loop::source(Delivery::Reliable, 64, :keep_alive)
+    outbox = std::event_loop::channel(Delivery::Reliable, 4096)
+    coroutine {step: l, first: lf} = linuxnet::acceptor(lfd, listener, 4)
+    std::event_loop::adopt(l, lf)
+    coroutine {step: a, first: af} = gameserver::acceptor(listener, outbox, 4)
+    std::event_loop::adopt(a, af)
+    coroutine {step: f, first: ff} = gameserver::flusher(outbox)
+    std::event_loop::adopt(f, ff)
+    coroutine {step: w, first: wf} = gameserver::world(20000, 15)
+    std::event_loop::adopt(w, wf)
+    tel = std::event_loop::source(Delivery::Reliable, 256, :keep_alive)
+    tep = event_loop_linux::endpoint(256)
+    coroutine {step: t, first: tf} = telemetry(tel, 20000)
+    std::event_loop::adopt(t, tf)
+    port = fx::port(lfd)
+    fx::client(port, 1, 1, 20, 2000)
+    fx::client(port, 2, 0, 50, 1000)
+    fx::client(port, 3, 0, 50, 1500)
+    fx::client(port, 4, 0, 3000, 0)
+    fx::synth(event_loop_linux::endpoint_id(tep), std::event_loop::native_slot(tel), std::event_loop::native_generation(tel), 20000, 0, 1, 0, 0)
+    started = event_loop_linux::now_us()
+    turns = std::event_loop::run()
+    elog::say("wall us ", event_loop_linux::now_us() - started)
+    elog::say("turns ", turns)
+    fx::clients_join()
+    fx::synth_join()
+    event_loop_linux::close_endpoint(tep)
+    loop c from 1 to 5:
+        elog::say2("client ", c, " replies ", fx::client_replies(c))
+    s = event_loop_linux::stats()
+    elog::say("producer refusals ", fx::synth_refusals())
+    elog::say("endpoint max ", s.endpoint_max)
+    elog::say("watch events ", s.watch_events)
+    elog::say("max ready ", std::event_loop::stats().max_ready)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context linuxnet::create(false)
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

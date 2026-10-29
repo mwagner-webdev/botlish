@@ -1,0 +1,134 @@
+# flood.bot -- source fairness, backpressure and reliable delivery on the
+# Linux driver (EVENT-LOOP-MILESTONE-1.md, "Native delivery").
+#
+# Two producer threads each post 20,000 records as fast as they can, each to
+# its own endpoint (capacity 256), each for a Reliable source with room for
+# 64; their consumers are slow (a few microseconds of work per record). A
+# third, quiet producer posts 200 records 1 ms apart to its own endpoint;
+# its consumer measures post -> dispatch latency. tests/event-loop-linux.test
+# checks: nothing is lost or reordered (each flood consumer sees 0..19999
+# in order), the floods are paced by backpressure (their producers' posts
+# are refused while the consumers lag; no endpoint ever holds more than its
+# capacity; the scheduler holds and releases records), and the quiet
+# source stays responsive beside them -- the driver serves its sources
+# round-robin, so the floods cannot fill a turn ahead of it. A watchdog
+# ends a run in which a record went missing (its consumer would wait for
+# ever) after 60 s, instead of letting it hang.
+import elog
+import event_loop_linux
+import fx
+import std::event_loop
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+nomethod fn flood_consumer(label: str, src: std::event_loop::Reg, total: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    # received, out of order
+    st = std::mutable_array::create(2, 0)
+    loop:
+        if st.at(0) >= total:
+            break
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        if e.a != st.at(0):
+            st.set(1, st.at(1) + 1)
+        st.set(0, st.at(0) + 1)
+        fx::spin(3)
+    elog::say(label.concat(" received "), st.at(0))
+    elog::say(label.concat(" out of order "), st.at(1))
+    std::event_loop::revoke(src)
+    st.at(0)
+
+fn quiet_consumer(src: std::event_loop::Reg, total: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    st = std::mutable_array::create(3, 0)
+    loop:
+        if st.at(0) >= total:
+            break
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        lat = event_loop_linux::now_us() - e.b
+        st.set(0, st.at(0) + 1)
+        if lat > st.at(1):
+            st.set(1, lat)
+        st.set(2, st.at(2) + lat)
+    elog::say("quiet received ", st.at(0))
+    elog::say("quiet max latency us ", st.at(1))
+    elog::say("quiet total latency us ", st.at(2))
+    std::event_loop::revoke(src)
+    st.at(0)
+
+# Every 10 ms: done when every consumer has revoked its source; after LIMIT
+# ticks, stop the loop (a record went missing).
+nomethod fn watchdog(a: std::event_loop::Reg, b: std::event_loop::Reg, q: std::event_loop::Reg, limit: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    t = std::event_loop::every(10000)
+    ticks = std::mutable_array::create(1, 0)
+    loop:
+        if not (std::event_loop::live?(a) or std::event_loop::live?(b) or std::event_loop::live?(q)):
+            break
+        if ticks.at(0) >= limit:
+            elog::say("watchdog fired at turn ", std::event_loop::turn_number())
+            std::event_loop::stop()
+            break
+        std::event_loop::wait(t)
+        ticks.set(0, ticks.at(0) + 1)
+    std::event_loop::revoke(t)
+    ticks.at(0)
+
+nomethod fn producer(src: std::event_loop::Reg, count: int, interval: int, jitter: int, context n: event_loop_linux::Native) -> event_loop_linux::Endpoint errors std::event_loop::DriverFault:
+    ep = event_loop_linux::endpoint(256)
+    fx::synth(event_loop_linux::endpoint_id(ep), std::event_loop::native_slot(src), std::event_loop::native_generation(src), count, interval, 1, jitter, 0)
+    ep
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    a = std::event_loop::source(Delivery::Reliable, 64, :keep_alive)
+    b = std::event_loop::source(Delivery::Reliable, 64, :keep_alive)
+    q = std::event_loop::source(Delivery::Reliable, 64, :keep_alive)
+    coroutine {step: ca, first: caf} = flood_consumer("flood a", a, 20000)
+    std::event_loop::adopt(ca, caf)
+    coroutine {step: cb, first: cbf} = flood_consumer("flood b", b, 20000)
+    std::event_loop::adopt(cb, cbf)
+    coroutine {step: cq, first: cqf} = quiet_consumer(q, 200)
+    std::event_loop::adopt(cq, cqf)
+    coroutine {step: w, first: wf} = watchdog(a, b, q, 6000)
+    std::event_loop::adopt(w, wf)
+    ea = producer(a, 20000, 0, 0)
+    eb = producer(b, 20000, 0, 0)
+    eq = producer(q, 200, 1000, 1)
+    started = event_loop_linux::now_us()
+    turns = std::event_loop::run()
+    elog::say("wall us ", event_loop_linux::now_us() - started)
+    elog::say("turns ", turns)
+    # Closed before the producers are joined: after a watchdog stop, a
+    # producer whose endpoint never drains gets -EPIPE and ends.
+    event_loop_linux::close_endpoint(ea)
+    event_loop_linux::close_endpoint(eb)
+    event_loop_linux::close_endpoint(eq)
+    fx::synth_join()
+    s = std::event_loop::stats()
+    elog::say("held records ", s.held_records)
+    elog::say("released holds ", s.released_holds)
+    elog::say("dropped events ", s.dropped_events)
+    elog::say("stale records ", s.stale_records)
+    a2 = event_loop_linux::stats()
+    elog::say("producer refusals ", fx::synth_refusals())
+    elog::say("endpoint max ", a2.endpoint_max)
+    elog::say("posts ", a2.posts)
+    elog::say("records taken ", a2.records_taken)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

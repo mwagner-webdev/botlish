@@ -1,5 +1,24 @@
 name: bench
 
+# bench/bench.tcl on every host the native backend runs on in CI: Linux
+# x86-64, Linux AArch64 (GitHub's ubuntu-24.04-arm) and Windows x86-64
+# (MSVC; Tcl 9.0.1 built by tests/platform/setup-windows.ps1). The same
+# command runs locally: `tclsh9.0 bench/bench.tcl` (its header has the
+# options).
+#
+# Each job reports the canonical programs (bench/*.bot) and the
+# experimental ones (bench/experimental/*.bot: the JSON validator of
+# DFA-COROUTINE-MILESTONE-2.md and the game server of
+# EVENT-LOOP-EXPLORATION.md), on the three Botlish backends and against the
+# Python, Rust and Go reference programs. A cell a host cannot run is
+# marked (unsupported, n/a, error, each with a note under the table), never
+# a failed job: the job fails only when a canonical program's Botlish
+# backends produce a wrong value or its interp or compile backend fails
+# (bench.tcl's header), or when a setup step does. The three hosts run
+# independently (fail-fast off), so one host's failure never hides
+# another's numbers. Timings from shared runners are noisy: they are
+# reported, never gated on.
+
 on:
   push:
     branches: [main]
@@ -11,69 +30,103 @@ on:
       runs:
         description: Timed runs per program and backend (best is reported)
         default: "5"
+      budget:
+        description: Seconds a Botlish backend's cell may take before it stops short of the runs (0 = no budget)
+        default: "60"
 
 permissions:
   contents: read
 
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   bench:
-    runs-on: ubuntu-latest
+    name: bench (${{ matrix.host }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: linux-x86_64
+            runner: ubuntu-latest
+          - host: linux-aarch64
+            runner: ubuntu-24.04-arm
+          - host: windows-x86_64
+            runner: windows-2025
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
+    defaults:
+      run:
+        # Git for Windows' bash on Windows, -eo pipefail everywhere (a
+        # failure piped through tee fails the step).
+        shell: bash
     steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v5
 
-      # Keep the devcontainer and GitHub Actions prerequisite setup in one
-      # place so they stay in sync.
-      - name: Install project prerequisites
+      # The reference programs' toolchains, pinned so the three hosts compare
+      # the same ones: the Go game server's coroutines are Go 1.23's
+      # iter.Pull, which the distribution's golang-go may predate. Installed
+      # before the project prerequisites, which then keep them.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+
+      # Tcl 9.0.1 and stable Rust: .devcontainer/setup.sh on Linux (the
+      # devcontainer's own prerequisites), the Windows workflow's action on
+      # Windows.
+      - name: Install project prerequisites (Linux)
+        if: runner.os == 'Linux'
         run: bash .devcontainer/setup.sh
 
-      # bench.tcl shells out to python3 and go to run the reference programs
-      # under bench/equivalents/. Both ship on ubuntu-latest already, but the
-      # job log still prints their versions so the benchmark environment is
-      # explicit in CI.
-      - name: Ensure Python toolchain
-        run: python3 --version
+      - name: Install project prerequisites (Windows)
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-windows
 
-      - name: Ensure Go toolchain
-        run: go version
+      - name: Versions
+        run: |
+          echo 'puts "Tcl [info patchlevel], host target [source core/core.tcl; core::cabi::hostTarget]"' | tclsh9.0
+          python --version
+          rustc --version
+          go version
 
-      # bench.tcl's native column, and bench/equivalents/rust/*.rs's own
-      # column, both need the Cranelift backend built. bench.tcl itself
-      # degrades a program's Cranelift column, not a failure, if this step
-      # is ever skipped (n/a: never built this run) or a program can't be
-      # lowered natively (unsupported: built, but this program uses a
-      # construct native lowering has no implementation for -- see
-      # bench.tcl's header and NATIVE-AUDIT.md).
+      # bench.tcl's Cranelift column needs the native driver. If the build
+      # fails the job fails, but the benchmarks still run (every Cranelift
+      # cell n/a, with its note) so the host's other numbers are reported.
       - name: Build native (Cranelift) backend
+        id: build
         uses: ./.github/actions/build-native
 
-      # Fails if the Botlish backends -- interp, compile, and native, once
-      # native produces a value at all -- disagree on any benchmark's value
-      # (the bench/equivalents/ Python and Rust columns are informational
-      # and never gate, and neither does a benchmark native code can't run
-      # at all: see bench.tcl's header). Timings from shared runners are
-      # noisy, so they are reported but never gate either.
       - name: Run benchmarks
-        shell: bash
+        if: ${{ !cancelled() }}
         env:
           RUNS: ${{ inputs.runs || '5' }}
-        run: tclsh9.0 bench/bench.tcl -runs "$RUNS" -markdown | tee bench.md
+          BUDGET: ${{ inputs.budget || '60' }}
+        run: tclsh9.0 bench/bench.tcl -runs "$RUNS" -budget "$BUDGET" -markdown | tee bench.md
 
       - name: Publish summary
         if: always()
-        shell: bash
         run: |
           {
-            echo "## Benchmarks"
+            echo "## Benchmarks (${{ matrix.host }})"
             echo
-            if [ -s bench.md ]; then cat bench.md; else echo "No results (benchmark failed to start)."; fi
+            if [ -s bench.md ]; then cat bench.md; else echo "No results (the benchmarks did not start)."; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: bench-results
+          name: bench-results-${{ matrix.host }}
           path: bench.md
           if-no-files-found: ignore

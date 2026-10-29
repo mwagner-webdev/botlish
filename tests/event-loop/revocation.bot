@@ -1,0 +1,150 @@
+# revocation.bot -- revoking registrations, independently of the coroutines
+# they woke or started (EVENT-LOOP-EXPLORATION.md's a-revocation).
+#
+#   1. queued, not dispatched: task `revoker` is ahead of `victim` in the
+#      run queue when a record for source s1 makes victim ready; revoker
+#      revokes s1 in the same dispatch phase; victim's wake is suppressed
+#      (it sees Wake::Revoked, never the event);
+#   2. five records queue on s2 with no waiter; revoking s2 discards all
+#      five; taking from s2 then answers Wake::Revoked;
+#   3. a handler revokes its own registration s3 while handling its event:
+#      the handler's segment completes; its next wait returns Wake::Revoked;
+#   4. s4 is revoked and its slot reused by s5; a record still tagged with
+#      s4's generation (a native callback that was in flight) arrives and is
+#      dropped as stale -- s5's waiter is not woken by it;
+#   5. revoking twice, or through a copy of the Reg, does nothing;
+#   6. a listener on s6 starts one independent worker task per event; s6 is
+#      revoked after two events: the listener ends, both workers finish;
+#   7. three tasks wait on one channel; revoking it wakes all three, in the
+#      order they waited.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import std::mutable_array
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn victim(s1: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(s1)
+    elog::say("victim woke revoked ", elog::bit(e.reason == Wake::Revoked))
+    elog::say("victim event value ", e.a)
+    e.a
+
+fn revoker(s1: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    # Ready every turn, so in the turn s1's record is collected it is ahead
+    # of victim (made ready by that collection) in the run queue.
+    loop i from 0 to 30:
+        if std::event_loop::delivered(s1) == 1 and std::event_loop::live?(s1):
+            elog::say("revoker revokes s1 in turn ", std::event_loop::turn_number())
+            std::event_loop::revoke(s1)
+        std::event_loop::yield_now()
+    0
+
+fn handler(s3: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(s3)
+    elog::say("handler got ", e.a)
+    elog::say("handler revokes its own registration: ", elog::bit(std::event_loop::revoke(s3)))
+    elog::say("handler continues after revoking, event was ", e.a)
+    again = std::event_loop::wait(s3)
+    elog::say("handler's next wait revoked: ", elog::bit(again.reason == Wake::Revoked))
+    again.a
+
+fn s5_waiter(s5: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(s5)
+    elog::say("s5 waiter woke with value ", e.a)
+    elog::say("s5 waiter woke at turn ", std::event_loop::turn_number())
+    e.a
+
+fn worker(n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 3:
+        std::event_loop::yield_now()
+    elog::say("worker finished for event ", n)
+    n
+
+fn listener(s6: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    count = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(s6)
+        if e.reason != Wake::Event:
+            elog::say("listener sees revocation: ", elog::bit(e.reason == Wake::Revoked))
+            break
+        count.set(0, count.at(0) + 1)
+        coroutine {step, first} = worker(e.a)
+        std::event_loop::adopt(step, first)
+        if count.at(0) == 2:
+            elog::say("listener revokes s6: ", elog::bit(std::event_loop::revoke(s6)))
+    count.at(0)
+
+fn queuer(name: int, ch: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(ch)
+    elog::say("channel waiter woke, name ", name)
+    elog::bit(e.reason == Wake::Revoked)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    s1 = std::event_loop::source(Delivery::Lossy, 8, :keep_alive)
+    s2 = std::event_loop::source(Delivery::Lossy, 8, :keep_alive)
+    s3 = std::event_loop::source(Delivery::Lossy, 8, :keep_alive)
+    s4 = std::event_loop::source(Delivery::Lossy, 8, :keep_alive)
+    s6 = std::event_loop::source(Delivery::Lossy, 8, :keep_alive)
+    ch = std::event_loop::channel(Delivery::Lossy, 4)
+    # 1
+    coroutine {step: rv, first: rvf} = revoker(s1)
+    elog::say("revoker id ", std::event_loop::adopt(rv, rvf))
+    coroutine {step: vi, first: vif} = victim(s1)
+    elog::say("victim id ", std::event_loop::adopt(vi, vif))
+    std::event_loop::deterministic::inject(10, s1, 41, 0)
+    # 2
+    loop i from 0 to 5:
+        std::event_loop::deterministic::inject(3, s2, i, 0)
+    # 3
+    coroutine {step: h, first: hf} = handler(s3)
+    elog::say("handler id ", std::event_loop::adopt(h, hf))
+    std::event_loop::deterministic::inject(5, s3, 33, 0)
+    std::event_loop::deterministic::inject(6, s3, 34, 0)
+    # 6
+    coroutine {step: l, first: lf} = listener(s6)
+    elog::say("listener id ", std::event_loop::adopt(l, lf))
+    std::event_loop::deterministic::inject(4, s6, 61, 0)
+    std::event_loop::deterministic::inject(5, s6, 62, 0)
+    std::event_loop::deterministic::inject(6, s6, 63, 0)
+    # 7
+    loop k from 0 to 3:
+        coroutine {step: q, first: qf} = queuer(k, ch)
+        std::event_loop::adopt(q, qf)
+    elog::say("phase 1 turns ", std::event_loop::run())
+    # 2, after the records arrived
+    elog::say("s2 pending ", std::event_loop::pending(s2))
+    elog::say("revoke s2: ", elog::bit(std::event_loop::revoke(s2)))
+    elog::say("revoke s2 again: ", elog::bit(std::event_loop::revoke(s2)))
+    copy = s2
+    elog::say("revoke a copy of s2: ", elog::bit(std::event_loop::revoke(copy)))
+    later = std::event_loop::try_take(s2)
+    elog::say("taking from revoked s2 answers revoked: ", elog::bit(later.reason == Wake::Revoked))
+    # 7
+    elog::say("revoke the channel: ", elog::bit(std::event_loop::revoke(ch)))
+    # 4
+    elog::say("revoke s4: ", elog::bit(std::event_loop::revoke(s4)))
+    s5 = std::event_loop::source(Delivery::Lossy, 8, :keep_alive)
+    elog::say("s5 reuses slot ", std::event_loop::native_slot(s5))
+    elog::say("s4 slot was ", std::event_loop::native_slot(s4))
+    coroutine {step: w5, first: w5f} = s5_waiter(s5)
+    std::event_loop::adopt(w5, w5f)
+    std::event_loop::deterministic::inject(std::event_loop::now() + 5, s4, 444, 0)
+    std::event_loop::deterministic::inject(std::event_loop::now() + 9, s5, 555, 0)
+    elog::say("phase 2 turns ", std::event_loop::run())
+    s = std::event_loop::stats()
+    elog::say("stale records ", s.stale_records)
+    elog::say("suppressed wakes ", s.suppressed_wakes)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

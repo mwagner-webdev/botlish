@@ -386,7 +386,8 @@ jobs:
       # tests, linked runs among them), targets, executables, the command
       # line, applications, the 2048 workload, the C FFI (the Win64 ABI
       # against MSVC-built fixtures), byte exposure, C floats, Windows I/O,
-      # native coroutines (fused and on the general runtime, their stacks'
+      # paths and files on NTFS (WINDOWS-X86-64-MILESTONE-7.md), native
+      # coroutines (fused and on the general runtime, their stacks'
       # exhaustion, C recursion on a coroutine stack among c-ffi.test's) and
       # the coroutine golden suite on all four backends.
       - name: Smoke tier and the Windows-relevant test files
@@ -395,7 +396,20 @@ jobs:
           tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
             main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
             c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test native-link-plan.test \
+            filesystem.test abi-bytes.test \
             coroutines.test coroutine-fusion.test native-stack-overflow.test coroutines.bot 2>&1 | tee tier.log
+
+      # Paths and files on NTFS (WINDOWS-X86-64-MILESTONE-7.md) once more,
+      # every run under GC stress: CreateFileW, ReadFile, WriteFile,
+      # FindFirstFileW and the path conversions, with a collection at every
+      # allocation, in programs and in an executable.
+      - name: Filesystem under GC stress
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          mkdir -p filesystem-tmp
+          BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/filesystem.test -match 'fs-windows-*' -tmpdir "$(pwd -W)/filesystem-tmp" 2>&1 | tee filesystem-gc.log
+          grep -aq 'Failed	0' filesystem-gc.log
+          ! grep -aq 'Passed	0' filesystem-gc.log
 
       # Variadic C calls (WINDOWS-X86-64-MILESTONE-6.md) once more, every
       # one under GC stress: the machine state each arrives in against
@@ -440,6 +454,12 @@ jobs:
               awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' tier.log | head -n 400
               echo '```'
             fi
+            if grep -aq '^==== .*FAILED' filesystem-gc.log 2>/dev/null; then
+              echo '### Failed filesystem tests (GC stress)'
+              echo '```'
+              awk '/^==== [^ ]+ FAILED$/ {print; on = 0; next} /^==== .* FAILED$/ {on = 1} on {print}' filesystem-gc.log | head -n 300
+              echo '```'
+            fi
             if grep -aq '^==== .*FAILED' variadic-gc.log 2>/dev/null; then
               echo '### Failed variadic tests (GC stress)'
               echo '```'
@@ -470,6 +490,7 @@ jobs:
             [ -f gc-workloads-unwind.log ] && grep -a 'native unwind check' gc-workloads-unwind.log | head -n 30
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the smoke tier did not run"
             [ -f variadic-gc.log ] && grep -a '^c-ffi.test:' variadic-gc.log | sed 's/^/variadic C calls under GC stress: /'
+            [ -f filesystem-gc.log ] && grep -a '^filesystem.test:' filesystem-gc.log | sed 's/^/filesystem under GC stress: /'
             echo '```'
             # The Rust tests of this milestone's Windows paths, by name: the
             # evidence that they ran here (WINDOWS-X86-64-MILESTONE-3.md).
@@ -704,7 +725,7 @@ jobs:
           Remove-Item env:BOTLISH_NATIVE_LINK_LOG
           tclsh9.0 tests/all.tcl -file system-linker.test
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
-          tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test native-link-plan.test"
+          tclsh9.0 tests/all.tcl -file "c-ffi.test windows-io.test argv.test native-executable.test c-float-ffi.test workload-2048.test native-link-plan.test filesystem.test"
           if ($LASTEXITCODE -ne 0) { $failed = 1 }
           $env:BOTLISH_NATIVE_GC_STRESS = "1"
           tclsh9.0 tests/all.tcl -file "system-linker.test c-ffi.test native-link-plan.test"

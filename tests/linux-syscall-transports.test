@@ -290,7 +290,7 @@ test lst-linux-sys-selected-by-target {the compilation target's architecture pic
         set error [strictError $text $target]
         list $target [lrange $error 0 1] [string match "namespace \"std::linux\" belongs to the Linux platform *unavailable for target $target *" [lindex $error 2]]
     }]
-} -cleanup {unset -nocomplain text files error} -result {{linux-x86_64 linux/sys.x86_64.bot 5} {linux-aarch64 linux/sys.aarch64.bot 5} {macos-aarch64 {UNSUPPORTED-PLATFORM 4:8} 1} {windows-x86_64 {UNSUPPORTED-PLATFORM 4:8} 1}}
+} -cleanup {unset -nocomplain text files error} -result {{linux-x86_64 linux/sys.x86_64.bot 6} {linux-aarch64 linux/sys.aarch64.bot 6} {macos-aarch64 {UNSUPPORTED-PLATFORM 4:8} 1} {windows-x86_64 {UNSUPPORTED-PLATFORM 4:8} 1}}
 
 test lst-linux-sys-uses-the-targets-transport {std::linux::write lowers to the target's own transport: syscall_linux_x86_64 with write's x86-64 number 1 for linux-x86_64, syscall_linux_aarch64 with its AArch64 number 64 for linux-aarch64 -- one op either way, in std::linux::sys::write} -body {
     lmap target {linux-x86_64 linux-aarch64} {
@@ -324,7 +324,7 @@ test lst-linux-sys-same-surface {the two files of std::linux::sys declare the sa
         lmap import [dict get [surface::parse [core::ReadFile $path] $path] imports] {dict get $import namespace}
     }]
     list [expr {[moduleSurface $x86] eq [moduleSurface $arm]}] [lmap s [moduleSurface $x86] {lindex $s 0}] $imports
-} -cleanup {unset -nocomplain x86 arm imports} -result {1 {write read} {{std::abi std::abi::bytes std::abi::x86_64 std::linux::abi::x86_64} {std::abi std::abi::bytes std::abi::aarch64 std::linux::abi::aarch64}}}
+} -cleanup {unset -nocomplain x86 arm imports} -result {1 {write read openat close getdents64 mkdirat unlinkat o_directory o_nofollow} {{std::abi std::abi::bytes std::abi::x86_64 std::linux::abi::x86_64} {std::abi std::abi::bytes std::abi::aarch64 std::linux::abi::aarch64}}}
 
 test lst-linux-is-one-source {stdlib/linux.bot names no architecture, register or transport: everything above std::linux::sys (linux, std::linux::io, io) is the same source on both architectures, and only the two std::linux::sys files spell a transport} -body {
     set hits {}

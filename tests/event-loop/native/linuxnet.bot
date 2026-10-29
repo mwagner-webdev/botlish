@@ -1,0 +1,169 @@
+# linuxnet.bot -- gameserver::Net on real TCP sockets, over the Linux driver
+# and the fixture's line protocol: a library that requires only the driver's
+# integration capability (event_loop_linux::Native) and the Loop, never the
+# driver itself.
+#
+# Each attached connection gets a reader task: its socket is watched (a
+# Coalesce source), and on each wake the reader moves complete lines --
+# buffered ones first -- to the session's registration while the session
+# has credit (ack gives one more), then re-arms readiness only when no
+# complete line is left. Acks post to the same source, so the reader wakes
+# for either. With NAIVE, the reader re-arms readiness after every line:
+# lines already buffered wait for bytes that may never come (the
+# exploration's buffered-lines bug, kept as the regression's negative
+# control).
+import event_loop_linux
+import fx
+import std::event_loop
+import std::mutable_array
+import std::mutable_vector
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# conns: naive, then each connection's credit; regs and watches: each
+# connection's reader source and socket watch.
+opaque context struct LinuxNet:
+    conns: MutableVector[int]
+    regs: MutableVector[std::event_loop::Reg]
+    watches: MutableVector[event_loop_linux::Watch]
+
+fn create(naive: bool) -> LinuxNet:
+    flag = if naive:
+        1
+    else:
+        0
+    LinuxNet {conns: std::mutable_vector::from_list([flag]), regs: std::mutable_vector::from_list([]), watches: std::mutable_vector::from_list([])}
+
+private nomethod fn naive?(context n: LinuxNet) -> bool errors IndexNotFound:
+    n.conns.at(0) == 1
+
+private nomethod fn credit(conn: int, context n: LinuxNet) -> int errors IndexNotFound:
+    n.conns.at(1 + conn)
+
+private nomethod fn set_credit(conn: int, v: int, context n: LinuxNet) errors IndexNotFound:
+    n.conns.swap(1 + conn, v)
+
+private nomethod fn ensure(conn: int, context n: LinuxNet) errors IndexNotFound:
+    loop:
+        if n.conns.length() > 1 + conn:
+            break
+        n.conns.push(0)
+
+# Move complete lines of CONN to SESSION while it has credit; 1 when the
+# reader should wait for readiness (no complete line left), 0 when for
+# credit, -1 at end of input.
+private nomethod fn pump(conn: int, session: std::event_loop::Reg, context n: LinuxNet, ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if credit(conn) <= 0:
+            return 0
+        r = fx::next_line(conn, naive?())
+        if r < 0:
+            session.post(9, 0)
+            return -1
+        if r == 1:
+            set_credit(conn, credit(conn) - 1)
+            session.post(fx::cmd(), fx::arg())
+        if r == 0 or naive?():
+            return 1
+
+fn reader(conn: int, session: std::event_loop::Reg, w: event_loop_linux::Watch, context n: LinuxNet, ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    me = event_loop_linux::watch_reg(w)
+    ended = std::mutable_array::create(1, 0)
+    loop:
+        if ended.at(0) == 1:
+            break
+        e = std::event_loop::wait(me)
+        if e.reason != Wake::Event:
+            break
+        next = pump(conn, session)
+        if next < 0:
+            ended.set(0, 1)
+        elif next == 1:
+            event_loop_linux::rearm(w)
+    conn
+
+private nomethod fn attach_checked(conn: int, session: std::event_loop::Reg, context n: LinuxNet, ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    ensure(conn)
+    set_credit(conn, 16)
+    src = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    loop:
+        if n.regs.length() > conn:
+            break
+        n.regs.push(src)
+    n.regs.swap(conn, src)
+    w = event_loop_linux::watch(fx::conn_fd(conn), event_loop_linux::Interest::Readable, src)
+    loop:
+        if n.watches.length() > conn:
+            break
+        n.watches.push(w)
+    n.watches.swap(conn, w)
+    coroutine {step, first} = reader(conn, session, w)
+    std::event_loop::adopt(step, first)
+
+fn attach(conn: int, reg: std::event_loop::Reg, context n: LinuxNet) -> int:
+    attach_checked(conn, reg):
+        on IndexNotFound:
+            -1
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault:
+            -1
+
+fn send(conn: int, value: int, context n: LinuxNet) -> int:
+    fx::send(conn, value)
+
+# Close CONN: its watch first, then the socket (a closed descriptor's number
+# may be reused at once), then the reader's source, which wakes the reader
+# with Wake::Revoked.
+private nomethod fn hangup_checked(conn: int, context n: LinuxNet, ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    event_loop_linux::unwatch(n.watches.at(conn))
+    closed = fx::hangup(conn)
+    std::event_loop::revoke(n.regs.at(conn))
+    closed
+
+fn hangup(conn: int, context n: LinuxNet) -> int:
+    hangup_checked(conn):
+        on IndexNotFound:
+            -1
+        on std::event_loop::SchedulerFault:
+            -1
+
+private nomethod fn ack_checked(conn: int, context n: LinuxNet, ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    set_credit(conn, credit(conn) + 1)
+    n.regs.at(conn).post(0, 0)
+    conn
+
+fn ack(conn: int, context n: LinuxNet) -> int:
+    ack_checked(conn):
+        on IndexNotFound:
+            -1
+        on std::event_loop::SchedulerFault:
+            -1
+
+# Accept connections on the listening socket LFD (watched) and post each
+# to LISTENER, as the deterministic network's listener records do.
+fn acceptor(lfd: int, listener: std::event_loop::Reg, max: int, context ev: std::event_loop::Loop, nat: event_loop_linux::Native) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    ready = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    w = event_loop_linux::watch(lfd, event_loop_linux::Interest::Readable, ready)
+    accepted = std::mutable_vector::from_list([0])
+    loop:
+        n = accepted.at(0):
+            on IndexNotFound:
+                max
+        if n >= max:
+            break
+        e = std::event_loop::wait(ready)
+        if e.reason != Wake::Event:
+            break
+        loop:
+            conn = fx::accept(lfd)
+            if conn < 0:
+                break
+            listener.post(conn, 0)
+            accepted.swap(0, conn + 1):
+                on IndexNotFound:
+                    0
+        event_loop_linux::rearm(w)
+    event_loop_linux::unwatch(w)
+    std::event_loop::revoke(ready)
+    max

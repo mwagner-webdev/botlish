@@ -1,0 +1,64 @@
+# 05-revoke.bot -- explicit revocation (EVENT-LOOP-MILESTONE-1.md,
+# "Ownership").
+#
+#   tclsh9.0 main.tcl examples/event-loop/05-revoke.bot
+#
+# A registration lives until it is revoked: nothing revokes it implicitly
+# (there is no drop action yet), and shutdown revokes every one. revoke
+# discards the events queued on it, turns wakes already queued for a task
+# into Wake::Revoked, drops records still in flight as stale, and wakes its
+# waiters with Wake::Revoked; it never cancels a task. Revoking again, or
+# through a copy of the Reg, does nothing (false).
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn bit(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+fn reader(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(src)
+    std::event_loop::log("reader: event ".concat(std::int::to_string(e.a)))
+    std::event_loop::sleep(100)
+    std::event_loop::log("reader: ".concat(std::int::to_string(std::event_loop::pending(src))).concat(" events queued, waiting again"))
+    again = std::event_loop::wait(src)
+    if again.reason == Wake::Revoked:
+        std::event_loop::log("reader: woke with Wake::Revoked; the task goes on")
+    0
+
+fn closer(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(50)
+    src.post(2, 0)
+    src.post(3, 0)
+    std::event_loop::log("closer: ".concat(std::int::to_string(std::event_loop::pending(src))).concat(" events queued, revoking"))
+    first = std::event_loop::revoke(src)
+    second = std::event_loop::revoke(src)
+    std::event_loop::log("closer: revoked (".concat(std::int::to_string(std::event_loop::pending(src))).concat(" events left); revoke again does nothing: ").concat(std::int::to_string(bit(second))))
+    bit(first)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    src = std::event_loop::source(Delivery::Reliable, 8)
+    src.post(1, 0)
+    coroutine {step: r, first: rf} = reader(src)
+    std::event_loop::adopt(r, rf)
+    coroutine {step: c, first: cf} = closer(src)
+    std::event_loop::adopt(c, cf)
+    std::event_loop::run()
+    std::event_loop::log("live after run: ".concat(std::int::to_string(bit(std::event_loop::live?(src)))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

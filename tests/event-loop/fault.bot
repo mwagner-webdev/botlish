@@ -1,0 +1,62 @@
+# fault.bot -- the scheduler's own faults stay distinct from tasks' failures.
+#
+#   * a task failing with a DriverFault (a driver operation it made failed)
+#     is recorded as that task's failure; the loop goes on;
+#   * a task that receives SchedulerFault from a scheduler operation (here
+#     raised directly, standing in for a broken invariant) ends, and run
+#     fails with SchedulerFault after that turn: the loop's state is no
+#     longer trusted, so it does not keep running tasks.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import type std::event_loop::Ending
+
+fn driver_trouble(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::event_loop::yield_now()
+    fail std::event_loop::DriverFault {code: -5}
+
+fn broken(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    std::event_loop::yield_now()
+    fail std::event_loop::SchedulerFault
+
+fn bystander(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 10:
+        elog::say("bystander step ", i)
+        std::event_loop::yield_now()
+    10
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step: a, first: af} = driver_trouble()
+    elog::say("driver_trouble id ", std::event_loop::adopt(a, af))
+    coroutine {step: b, first: bf} = broken()
+    elog::say("broken id ", std::event_loop::adopt(b, bf))
+    coroutine {step: c, first: cf} = bystander()
+    elog::say("bystander id ", std::event_loop::adopt(c, cf))
+    n = std::event_loop::run():
+        on std::event_loop::SchedulerFault:
+            elog::say("run failed with SchedulerFault in turn ", std::event_loop::turn_number())
+            -1
+    elog::say("run returned ", n)
+    loop o in std::event_loop::take_outcomes():
+        code = if o.ending == Ending::DriverFault:
+            4
+        elif o.ending == Ending::SchedulerFault:
+            3
+        else:
+            0
+        elog::say2("outcome task ", o.task, " ending ", code)
+        elog::say2("outcome task ", o.task, " value ", o.value)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

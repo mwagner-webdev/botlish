@@ -1,0 +1,16 @@
+# Control: the same implementation (needing std::io::IO) called directly,
+# not through the trait. Runs: prints "A" twice, 2.
+import std::io
+import std::linux::io
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    std::io::print_line("A"):
+        on std::io::WriteFailed:
+            return 0
+    t.v
+
+with context std::linux::io::create()
+show(A {v: 1}) + show(A {v: 1})

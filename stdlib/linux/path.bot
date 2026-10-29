@@ -34,9 +34,28 @@
 # own `concat` and `text` (TRAITS.md: the owner's declarations, nothing
 # else), so a function over std::io::path::Path specializes to direct calls of
 # them.
+#
+# A LinuxPath is also a std::io::fs::FilePath (WINDOWS-X86-64-MILESTONE-7.md):
+# its native path is its UTF-8 bytes (`native`, total: a LinuxPath holds no
+# U+0000), and its filesystem operations below are std::linux::fs's on that
+# native path. They declare no context; std::linux::fs's functions require
+# std::linux::fs::LinuxFS, so every caller of these does too (the requirement
+# is derived), and a program that uses a LinuxPath's file operations without
+# installing a LinuxFS is MISSING-CONTEXT at compile time.
+#
+#   std::linux::path::native(path)            PATH's std::linux::fs::NativePath
+#   std::linux::path::read_file(path), write_file(path, data),
+#   create_file(path, data), entries(path), create_directory(path),
+#   remove_file(path), remove_directory(path)
+#                                             std::io::fs::FilePath's
+#                                             operations, on PATH's native path
+import std::abi
+import std::abi::bytes
 import std::char
 import std::str
+import std::io::fs
 import std::io::path
+import std::linux::fs
 
 refined type LinuxPath = str
 
@@ -84,3 +103,42 @@ fn concat(path: LinuxPath, component: str) -> LinuxPath errors std::io::path::No
         std::str::concat(std::str::concat(path, "/"), component)
     validate(joined)
     joined
+
+# ---------------------------------------------------------------------------
+# std::io::fs::FilePath (WINDOWS-X86-64-MILESTONE-7.md)
+
+# PATH's native path: its UTF-8 bytes, exactly (no normalization).
+fn native(path: LinuxPath) -> std::linux::fs::NativePath:
+    std::linux::fs::of_valid_text(path)
+
+# Every byte of the file PATH.
+fn read_file(path: LinuxPath) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    std::linux::fs::read_file(path.native())
+
+# The file PATH holds exactly DATA: created, or truncated and rewritten.
+fn write_file(path: LinuxPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    std::linux::fs::write_file(path.native(), data)
+
+# A new file PATH holding DATA; AlreadyExists when the name exists.
+fn create_file(path: LinuxPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    std::linux::fs::create_file(path.native(), data)
+
+# Every entry of the directory PATH but "." and "..", with its textual name;
+# std::io::path::NotText when a name is not UTF-8 (std::linux::fs::entries
+# lists every name as bytes).
+fn entries(path: LinuxPath) -> List[std::io::fs::Entry] errors std::io::fs::FileError, std::io::path::NotText:
+    listed = std::linux::fs::entries(path.native())
+    loop e in listed:
+        std::io::fs::Entry {name: std::linux::fs::text(e.name), kind: e.kind}
+
+# A new, empty directory PATH.
+fn create_directory(path: LinuxPath) -> unit errors std::io::fs::FileError:
+    std::linux::fs::create_directory(path.native())
+
+# Removes the name PATH of anything but a directory.
+fn remove_file(path: LinuxPath) -> unit errors std::io::fs::FileError:
+    std::linux::fs::remove_file(path.native())
+
+# Removes the empty directory PATH.
+fn remove_directory(path: LinuxPath) -> unit errors std::io::fs::FileError:
+    std::linux::fs::remove_directory(path.native())

@@ -1,0 +1,514 @@
+# fs.bot -- the "std::linux::fs" namespace: Linux's native paths and its
+# synchronous filesystem, through the raw syscalls of stdlib/linux.bot
+# (WINDOWS-X86-64-MILESTONE-7.md).
+#
+#   with context std::linux::fs::create()               install it (entry program)
+#
+#   std::linux::fs::open(path, mode)          an owned File (std::io::fs::OpenMode)
+#   std::linux::fs::read(file, count)         one read(2): a Read {file, data}
+#   std::linux::fs::read_all(file)            reads to the end of the file
+#   std::linux::fs::write(file, data)         one write(2): a Written {file, count}
+#   std::linux::fs::write_all(file, data)     writes all of DATA: the File
+#   std::linux::fs::close(file)               releases the File
+#   std::linux::fs::read_file(path)           every byte of a file
+#   std::linux::fs::write_file(path, data)    create or replace
+#   std::linux::fs::create_file(path, data)   create a file that did not exist
+#   std::linux::fs::entries(dir)              every entry, its native name
+#   std::linux::fs::create_directory(path), remove_file(path),
+#   remove_directory(path)
+#
+# ---------------------------------------------------------------------------
+# Native paths.
+#
+# A Linux name is bytes: any byte but 0 (and "/", which separates
+# components). NativePath holds exactly the bytes the kernel takes or returns
+# -- non-empty, without 0, nothing else assumed: they need not be UTF-8, and
+# nothing is normalized -- so every name a directory holds round-trips:
+# listed, joined to its directory and opened again, it names the same entry
+# (audit/filesystem/experiments/linux.tcl: a lossy textual name of the bytes
+# FF FE 78 opened another file). A textual std::linux::path::LinuxPath has
+# exactly one NativePath, its UTF-8 bytes (std::linux::path::native); a
+# NativePath has a String only when its bytes are UTF-8 (`text`, else
+# std::io::path::NotText), and `display` is the explicitly lossy one for
+# people, never an identity. Two NativePaths are equal exactly when their
+# bytes are: path equality is spelling, never file identity ("a", "./a" and
+# a link to it are three paths).
+#
+# ---------------------------------------------------------------------------
+# Authority and ownership.
+#
+# LinuxFS is the filesystem context: the authority to open names, create and
+# remove entries and list directories, relative to the process's working
+# directory (AT_FDCWD). `linux` is a direct module, so every function here
+# that makes a syscall requires LinuxFS (DIRECT-MODULES.md): the raw
+# authority reaches callers only as that context, and nothing above
+# std::linux::fs is direct for using it. A path is a request, never
+# authority.
+#
+# A File is an opened file: an opaque token of its descriptor, AFFINE --
+# its one owner may use it, give it away (move it into a call, a result, a
+# struct field) and close it; it cannot be copied (USE-AFTER-MOVE), and a
+# closed File no longer exists. Its affinity comes from its one other field,
+# a std::io::fs::Owner, an affine token that owns nothing and costs one word:
+# Botlish has no declaration that makes a struct affine (the report, "Affine
+# ownership").
+# Operations that use a File take it and give it back: `read` returns a
+# Read {file, data}, `write` a Written {file, count}, write_all the File.
+#
+# Ownership is not cleanup. Nothing closes a File for its owner: a File
+# dropped unclosed, by an owner that returns, fails or ends without closing
+# it, leaks its descriptor until the process ends (the language releases an
+# affine value without running code: AFFINE-VALUES.md). Close every File you
+# open; the whole-file operations below do it on every path. One rule
+# closes for you: a read or write that FAILS closes its File (close's own
+# result ignored) and fails with the operation's error, so a failed
+# operation never leaves an owner holding a broken File, and an error path
+# never leaks.
+#
+# Operations on a File require LinuxFS too: the descriptor is used by
+# syscalls of the direct module `linux`, which only a context of this module
+# mediates. (On Windows, where a HANDLE is used by ordinary C calls, an
+# opened File needs no context: std::windows::fs.)
+#
+# ---------------------------------------------------------------------------
+# Completion.
+#
+# `read` and `write` are one syscall each: a read may return fewer bytes than
+# asked (no bytes is the end of the file: a read always asks for at least
+# one), a write may write fewer than given. read_all, write_all and the
+# whole-file operations complete: they repeat until the end of the file, or
+# until every byte is written; a write that makes no progress is a failure
+# (Other), never a loop. No operation retries a failure (EINTR included: a
+# regular file's I/O is not interrupted by a handled signal on Linux) or
+# promises durability: a completed write is in the kernel, not necessarily
+# on the disk (no fsync).
+#
+# Every failure is std::io::fs::FileError: the reason (`reason_of`) and the
+# kernel's errno, never a path validation error.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::io::bytepath
+import std::io::fs
+import std::io::path
+import std::linux
+import std::list
+import std::mutable_vector
+import std::str
+import type std::byte::Byte
+
+# A Linux name or path: its bytes, non-empty, without 0.
+opaque struct NativePath:
+    bytes: List[Byte]
+
+# The filesystem context: the directory relative paths resolve against
+# (AT_FDCWD: the process's working directory).
+opaque context struct LinuxFS:
+    at: std::abi::I32
+
+# An opened file: its descriptor and its affine token.
+opaque struct File:
+    fd: std::abi::I32
+    owner: std::io::fs::Owner
+
+# What one read did: the File back, and the bytes read (none at the end of
+# the file).
+struct Read:
+    file: File
+    data: std::abi::bytes::Bytes
+
+# What one write did: the File back, and how many bytes were written.
+struct Written:
+    file: File
+    count: int
+
+# A directory entry: its native name (one component) and its kind.
+struct Entry:
+    name: NativePath
+    kind: std::io::fs::EntryKind
+
+# The standard filesystem context. An ordinary constructor; `with context
+# std::linux::fs::create()` installs it.
+fn create() -> LinuxFS:
+    LinuxFS {at: std::abi::i32(-100)}
+
+# ---------------------------------------------------------------------------
+# Native paths (std::io::bytepath's syntax, shared with std::darwin::fs)
+
+# The native path of BYTES; std::io::path::NotAPath when BYTES is empty or
+# holds a 0.
+fn from_bytes(bytes: List[Byte]) -> NativePath errors std::io::path::NotAPath:
+    if not std::io::bytepath::valid?(bytes):
+        fail std::io::path::NotAPath
+    NativePath {bytes: bytes}
+
+# The native path of TEXT: its UTF-8 bytes; std::io::path::NotAPath when TEXT
+# is empty or holds U+0000. (A std::linux::path::LinuxPath converts with
+# std::linux::path::native, which cannot fail.)
+fn from_text(text: str) -> NativePath errors std::io::path::NotAPath:
+    from_bytes(text.encode_utf8())
+
+# The native path of TEXT, already proven a valid path by the caller
+# (std::linux::path::native's LinuxPath): an internal member of the standard
+# library (core/native.tcl), never API.
+nomethod fn of_valid_text(text: str) -> NativePath:
+    NativePath {bytes: text.encode_utf8()}
+
+# PATH's bytes, exactly.
+fn bytes(path: NativePath) -> List[Byte]:
+    path.bytes
+
+# PATH's String: its bytes decoded as UTF-8; std::io::path::NotText when they
+# are not UTF-8 (never a replacement character).
+fn text(path: NativePath) -> str errors std::io::path::NotText:
+    std::io::bytepath::text(path.bytes)
+
+# PATH as text for people: its String when it has one, else every byte that
+# is not part of a UTF-8 sequence shown as U+FFFD. LOSSY: two different
+# paths can display alike, and the display of a path is no path (open the
+# NativePath, never its display).
+fn display(path: NativePath) -> str:
+    std::io::bytepath::display(path.bytes)
+
+# PATH joined with the relative native NAME: one "/" between them unless PATH
+# already ends with one -- std::linux::path::concat's rule on bytes. NAME may
+# hold several components; it must not start with "/" (an absolute NAME
+# would replace PATH, which joining never does: std::io::path::NotAPath).
+# Nothing is normalized, no byte decoded and no filesystem observed.
+fn join(path: NativePath, name: NativePath) -> NativePath errors std::io::path::NotAPath:
+    NativePath {bytes: std::io::bytepath::join(path.bytes, name.bytes)}
+
+# PATH joined with the textual relative COMPONENT (its UTF-8 bytes):
+# std::io::path::NotAPath for an empty or absolute COMPONENT or one holding
+# U+0000.
+fn concat(path: NativePath, component: str) -> NativePath errors std::io::path::NotAPath:
+    NativePath {bytes: std::io::bytepath::join(path.bytes, component.encode_utf8())}
+
+# ---------------------------------------------------------------------------
+# Failures
+
+# The portable reason of the kernel's errno ERRNO (Linux's generic table,
+# the same on x86-64 and AArch64).
+private fn reason_of(errno: int) -> std::io::fs::Reason:
+    if errno == 2:
+        return std::io::fs::Reason::NotFound
+    if errno == 17:
+        return std::io::fs::Reason::AlreadyExists
+    if errno == 13 or errno == 1 or errno == 30:
+        return std::io::fs::Reason::PermissionDenied
+    if errno == 20:
+        return std::io::fs::Reason::NotADirectory
+    if errno == 21:
+        return std::io::fs::Reason::IsADirectory
+    if errno == 39:
+        return std::io::fs::Reason::NotEmpty
+    if errno == 36 or errno == 84:
+        return std::io::fs::Reason::InvalidName
+    if errno == 16 or errno == 26:
+        return std::io::fs::Reason::Busy
+    if errno == 28 or errno == 122 or errno == 24 or errno == 23 or errno == 12 or errno == 27:
+        return std::io::fs::Reason::ResourceExhausted
+    std::io::fs::Reason::Other
+
+# The descriptor RESULT names (a non-negative raw result of openat): a kernel
+# descriptor is an int, so this never fails but by a kernel's bug, which the
+# caller reports as Other.
+private fn descriptor(result: int) -> std::abi::I32 errors std::abi::AbiIntegerAboveRange, std::abi::AbiIntegerBelowRange:
+    std::abi::i32(result)
+
+# ---------------------------------------------------------------------------
+# Files
+
+# openat(2)'s flags for MODE: always O_CLOEXEC (no child inherits a File).
+private fn flags(mode: std::io::fs::OpenMode) -> std::abi::I32Value:
+    if mode == std::io::fs::OpenMode::Read:
+        return 524288
+    if mode == std::io::fs::OpenMode::Replace:
+        return 524288 + 1 + 64 + 512
+    if mode == std::io::fs::OpenMode::CreateNew:
+        return 524288 + 1 + 64 + 128
+    524288 + 1 + 64 + 1024
+
+# Opens PATH as MODE says (std::io::fs::OpenMode), a new file with the
+# permission bits 0666 before the process's umask; the File is the caller's
+# to close. Symbolic links are followed. A directory opens for reading (its
+# first read fails, IsADirectory) and fails for writing (IsADirectory).
+fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: LinuxFS) -> File errors std::io::fs::FileError:
+    result = fs.at.openat(path.bytes, std::abi::i32(flags(mode)), std::abi::u32(438))
+    if result < 0:
+        fail std::io::fs::FileError {reason: reason_of(0 - result), code: 0 - result}
+    fd = descriptor(result):
+        on std::abi::AbiIntegerAboveRange:
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        on std::abi::AbiIntegerBelowRange:
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+    File {fd: fd, owner: std::io::fs::owner()}
+
+# Releases FD after a failed operation, close(2)'s own result ignored: the
+# operation's error is what its caller reports.
+private fn release(fd: std::abi::I32, context fs: LinuxFS) -> unit:
+    std::linux::close(fd)
+    unit
+
+# The first COUNT bytes of DATA, which a read that returned COUNT wrote.
+private fn prefix(data: std::abi::bytes::MutableBytes, count: int) -> std::abi::bytes::Bytes errors UpperOverrun, std::abi::AbiIntegerAboveRange, std::abi::AbiIntegerBelowRange:
+    data.freeze_prefix(std::abi::usize(count))
+
+# One read(2) of at most COUNT bytes from FD: the bytes read, none at the end
+# of the file. A failure releases FD and fails.
+private fn read_some(fd: std::abi::I32, count: std::io::fs::ReadSize, context fs: LinuxFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    r = std::linux::read(fd, std::abi::bytes::zeroed(std::abi::usize(count)))
+    if r.result < 0:
+        fd.release()
+        fail std::io::fs::FileError {reason: reason_of(0 - r.result), code: 0 - r.result}
+    r.data.prefix(r.result):
+        on UpperOverrun:
+            fd.release()
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        on std::abi::AbiIntegerAboveRange:
+            fd.release()
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        on std::abi::AbiIntegerBelowRange:
+            fd.release()
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+
+# One read(2) of at most COUNT bytes: the File back and the bytes read --
+# fewer than COUNT is an ordinary short read, none the end of the file. A
+# failure closes FILE and fails.
+fn read(file: File, count: std::io::fs::ReadSize, context fs: LinuxFS) -> Read errors std::io::fs::FileError:
+    {fd, owner} = file
+    data = fd.read_some(count)
+    Read {file: File {fd: fd, owner: owner}, data: data}
+
+private fn chunks() -> MutableVector[std::abi::bytes::Bytes]:
+    std::mutable_vector::from_list([])
+
+# The size of read_rest's read after COUNT reads: 4 KiB, doubling to 1 MiB.
+# Each read's buffer is a fresh storage of its full size (a write exposure is
+# a copy: C-POINTER-BORROWING.md), so a small file costs one small buffer and
+# a large one few reads (bench/filesystem.tcl: a 64-byte read_file took 14 us
+# with 64 KiB reads).
+private fn chunk_size(count: int) -> std::io::fs::ReadSize:
+    if count <= 0:
+        return 4096
+    if count == 1:
+        return 8192
+    if count == 2:
+        return 16384
+    if count == 3:
+        return 32768
+    if count == 4:
+        return 65536
+    if count == 5:
+        return 131072
+    if count == 6:
+        return 262144
+    if count == 7:
+        return 524288
+    1048576
+
+# Every byte of FD from its offset to the end of the file, read in chunks of
+# chunk_size and made one Bytes. A failure releases FD and fails.
+private fn read_rest(fd: std::abi::I32, context fs: LinuxFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    parts = chunks()
+    loop:
+        data = fd.read_some(chunk_size(std::mutable_vector::length(parts)))
+        if std::abi::bytes::length(data).value == 0:
+            break
+        parts.push(data)
+    all = loop part in parts:
+        part
+    std::abi::bytes::join(all)
+
+# Reads FILE to the end: the File back and every byte from its offset on, in
+# one Bytes (as many bytes as the file holds: the allocation is the file's
+# size). A failure closes FILE and fails.
+fn read_all(file: File, context fs: LinuxFS) -> Read errors std::io::fs::FileError:
+    {fd, owner} = file
+    data = fd.read_rest()
+    Read {file: File {fd: fd, owner: owner}, data: data}
+
+# One write(2) of DATA: the File back and how many bytes were written (fewer
+# than DATA holds is an ordinary short write). A failure closes FILE and
+# fails.
+fn write(file: File, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> Written errors std::io::fs::FileError:
+    {fd, owner} = file
+    n = std::linux::write(fd, data)
+    if n < 0:
+        fd.release()
+        fail std::io::fs::FileError {reason: reason_of(0 - n), code: 0 - n}
+    Written {file: File {fd: fd, owner: owner}, count: n}
+
+# Writes every byte of DATA to FD: one write(2) in the common case, the
+# unwritten rest of a short write written again and again; a write that
+# makes no progress is Other. A failure releases FD and fails.
+private fn write_rest(fd: std::abi::I32, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    total = std::abi::bytes::length(data).value
+    if total == 0:
+        return unit
+    n = std::linux::write(fd, data)
+    if n < 0:
+        fd.release()
+        fail std::io::fs::FileError {reason: reason_of(0 - n), code: 0 - n}
+    if n == 0:
+        fd.release()
+        fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+    if n < total:
+        rest = data.slice(n, total):
+            on LowerUnderrun:
+                fd.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+            on UpperOverrun:
+                fd.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        return fd.write_rest(rest)
+    unit
+
+# Writes all of DATA to FILE (short writes completed): the File back. A
+# failure closes FILE and fails: some of DATA may have been written.
+fn write_all(file: File, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> File errors std::io::fs::FileError:
+    {fd, owner} = file
+    fd.write_rest(data)
+    File {fd: fd, owner: owner}
+
+# Closes FILE: its descriptor is released even when close(2) reports an
+# error (Linux's rule), which is then the FileError -- never retried (the
+# descriptor number may already be another file's).
+fn close(file: File, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    {fd} = file
+    r = std::linux::close(fd)
+    if r < 0:
+        fail std::io::fs::FileError {reason: reason_of(0 - r), code: 0 - r}
+    unit
+
+# Every byte of the file PATH.
+fn read_file(path: NativePath, context fs: LinuxFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    opened = path.open(std::io::fs::OpenMode::Read)
+    {file, data} = opened.read_all()
+    file.close()
+    data
+
+# Opens PATH as MODE (a writing mode), writes all of DATA and closes it.
+private fn write_with(path: NativePath, mode: std::io::fs::OpenMode, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    opened = path.open(mode)
+    written = opened.write_all(data)
+    written.close()
+
+# The file PATH holds exactly DATA: created, or truncated and rewritten.
+fn write_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    path.write_with(std::io::fs::OpenMode::Replace, data)
+
+# A new file PATH holding DATA; AlreadyExists when the name exists.
+fn create_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    path.write_with(std::io::fs::OpenMode::CreateNew, data)
+
+# ---------------------------------------------------------------------------
+# Directories
+
+# A getdents64(2) buffer, read back as one byte array: the records are
+# walked in Botlish (`records`).
+private layout DirentBlock:
+    size 4096
+    align 8
+    field bytes: array 4096 of std::byte::Byte at 0
+
+private fn found() -> MutableVector[Entry]:
+    std::mutable_vector::from_list([])
+
+# The kind of a linux_dirent64's d_type.
+private fn kind_of(d_type: int) -> std::io::fs::EntryKind:
+    if d_type == 8:
+        return std::io::fs::EntryKind::File
+    if d_type == 4:
+        return std::io::fs::EntryKind::Directory
+    if d_type == 10:
+        return std::io::fs::EntryKind::SymbolicLink
+    if d_type == 0:
+        return std::io::fs::EntryKind::Unknown
+    std::io::fs::EntryKind::Other
+
+# The bytes of BLOCK from START up to (not including) the first 0.
+private fn name_at(block: List[Byte], start: int) -> List[Byte]:
+    if start < 0:
+        return []
+    loop i from start to block.length():
+        b = block.at(i)
+        if b == 0:
+            break
+        b
+
+# The linux_dirent64 records of BLOCK[POS, END) -- d_reclen (16-bit, at 16),
+# d_type (at 18), d_name (NUL-terminated, at 19) -- pushed onto OUT but "."
+# and "..". A malformed record ends the walk (the kernel writes none).
+private fn records(block: List[Byte], pos: int, end: int, place out: MutableVector[Entry]) -> unit errors IndexNotFound:
+    if pos < 0 or pos + 19 >= end:
+        return unit
+    length = block.at(pos + 16) + block.at(pos + 17).shift_left(8)
+    if length < 20:
+        return unit
+    name = block.name_at(pos + 19)
+    if std::io::bytepath::valid?(name) and not std::io::bytepath::dot_or_dot_dot?(name):
+        out.push(Entry {name: NativePath {bytes: name}, kind: kind_of(block.at(pos + 18))})
+    block.records(pos + length, end, out)
+
+# Every entry of the directory open on FD into OUT, a getdents64(2) at a
+# time. A failure releases FD and fails.
+private fn list_into(fd: std::abi::I32, place out: MutableVector[Entry], context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    loop:
+        r = fd.getdents64(std::abi::bytes::zeroed(std::abi::usize(4096)))
+        if r.result < 0:
+            fd.release()
+            fail std::io::fs::FileError {reason: reason_of(0 - r.result), code: 0 - r.result}
+        if r.result == 0:
+            break
+        block = std::binary::read(std::abi::bytes::freeze(r.data), DirentBlock.bytes):
+            on LayoutLengthMismatch:
+                fd.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        block.records(0, r.result, out):
+            on IndexNotFound:
+                fd.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+    unit
+
+# Every entry of the directory DIR but "." and "..", in the order the kernel
+# lists them, each with its native name and its kind (as d_type says: a
+# symbolic link is SymbolicLink, whatever it names; Unknown when the
+# filesystem does not say). The directory is opened (O_DIRECTORY) and closed
+# here, also when listing fails: no descriptor outlives the call.
+fn entries(dir: NativePath, context fs: LinuxFS) -> List[Entry] errors std::io::fs::FileError:
+    result = fs.at.openat(dir.bytes, std::abi::i32(524288 + std::linux::o_directory()), std::abi::u32(0))
+    if result < 0:
+        fail std::io::fs::FileError {reason: reason_of(0 - result), code: 0 - result}
+    fd = descriptor(result):
+        on std::abi::AbiIntegerAboveRange:
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        on std::abi::AbiIntegerBelowRange:
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+    out = found()
+    fd.list_into(out)
+    std::linux::close(fd)
+    loop e in out:
+        e
+
+# Fails with the FileError of a path syscall's raw RESULT when it is negative.
+private fn checked(result: int) -> unit errors std::io::fs::FileError:
+    if result < 0:
+        fail std::io::fs::FileError {reason: reason_of(0 - result), code: 0 - result}
+    unit
+
+# A new, empty directory PATH (permission bits 0777 before the umask);
+# AlreadyExists when the name exists.
+fn create_directory(path: NativePath, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    checked(fs.at.mkdirat(path.bytes, std::abi::u32(511)))
+
+# Removes the name PATH of anything but a directory (a link itself, never
+# what it names); IsADirectory for a directory.
+fn remove_file(path: NativePath, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    checked(fs.at.unlinkat(path.bytes, std::abi::i32(0)))
+
+# Removes the empty directory PATH; NotEmpty when it has entries,
+# NotADirectory when it is no directory.
+fn remove_directory(path: NativePath, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+    checked(fs.at.unlinkat(path.bytes, std::abi::i32(512)))

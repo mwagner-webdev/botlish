@@ -1,13 +1,14 @@
-# Binaries bench/bench.tcl compiles from bench/equivalents/rust/*.rs and
-# caches alongside the source, rebuilt automatically when the source changes.
+# bench/bench.tcl builds the Rust and Go reference programs into a private
+# temporary directory; these keep a binary built beside its source by hand
+# (or by an older bench.tcl, which cached them there) out of git.
 /bench/equivalents/rust/*
 !/bench/equivalents/rust/*.rs
-
-# Same for the Go equivalents (bench/equivalents/go/*.go): cached binaries
-# have no way to be checked stale and compile quickly, so they are not
-# committed.
 /bench/equivalents/go/*
 !/bench/equivalents/go/*.go
+/bench/experimental/equivalents/rust/*
+!/bench/experimental/equivalents/rust/*.rs
+/bench/experimental/equivalents/go/*
+!/bench/experimental/equivalents/go/*.go
 __pycache__/
 
 # The fuzzing campaign tree (FUZZING-EXAMPLES-AOT.md). Everything the
@@ -24,3 +25,13 @@ __pycache__/
 
 # single/build.sh's default output (SINGLE-EXECUTABLE.md).
 /single/out/
+
+# tools/event-loop-linux.tcl builds the Linux event-loop driver package's
+# archive where it installs the package, never here.
+/packages/event_loop_linux/native/*.a
+/packages/event_loop_linux/native/*.o
+
+# examples/event-loop/native/build.sh's products (the installed driver
+# package and the ticker's archive).
+/examples/event-loop/native/.bot_modules/
+/examples/event-loop/native/libticker.a

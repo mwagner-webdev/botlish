@@ -1,0 +1,117 @@
+# heap.bot -- the deadline heap (EVENT-LOOP-MILESTONE-1.md, "Timers").
+#
+#   1. 200 one-shot timers at pseudo-random deadlines (many equal), each
+#      waited on by its own task, every third revoked before it expires:
+#      the others fire in deadline order, registration order among equal
+#      deadlines, none before its deadline, each in the first turn at or
+#      after it; the revoked ones never fire, and their tasks wake with
+#      Wake::Revoked;
+#   2. a one-shot timer two tasks wait on wakes both (the exploration's
+#      prototype woke only the first: the second waited forever);
+#   3. a timer nobody waits on imposes no deadline: a loop whose only
+#      watched timer is 1000 us away sleeps once, through an unwatched
+#      5 us repeating timer's 200 expiries, and that timer's late waiter
+#      gets them coalesced;
+#   4. a repeating timer waited on by two tasks wakes one per expiry, in
+#      the order they waited.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import std::list
+import type std::event_loop::Wake
+
+nomethod fn lcg(x: int) -> int:
+    (x * 1103515245 + 12345).mod(2147483648)
+
+fn sleeper(n: int, t: std::event_loop::Reg, deadline: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(t)
+    if e.reason == Wake::Timer:
+        elog::say2("fired ", n, " at ", std::event_loop::now())
+        elog::say2("deadline ", n, " was ", deadline)
+        elog::say2("turn ", n, " is ", std::event_loop::turn_number())
+    else:
+        elog::say("revoked ", n)
+    n
+
+fn canceller(regs: List[std::event_loop::Reg], context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    n = std::list::length(regs)
+    loop i from 0 to n:
+        if i.mod(3) == 0:
+            std::event_loop::revoke(regs.at(i))
+    n
+
+fn both(name: int, t: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(t)
+    elog::say2("shared one-shot woke waiter ", name, " timer ", elog::bit(e.reason == Wake::Timer))
+    name
+
+fn ticker(name: int, t: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 3:
+        e = std::event_loop::wait(t)
+        elog::say2("repeating woke waiter ", name, " at ", std::event_loop::now())
+    name
+
+fn watcher(t: std::event_loop::Reg, unwatched: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::wait(t)
+    elog::say("watched timer at ", std::event_loop::now())
+    e = std::event_loop::wait(unwatched)
+    elog::say("unwatched timer's late waiter missed ", e.a)
+    std::event_loop::revoke(unwatched)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    # 1
+    seeds = loop i from 0 to 200:
+        i
+    regs = loop i in seeds:
+        deadline = 100 + lcg(i * 7 + 3).mod(40) * 25
+        t = std::event_loop::timer(deadline, 0)
+        coroutine {step, first} = sleeper(i, t, deadline)
+        std::event_loop::adopt(step, first)
+        t
+    canceller(regs)
+    elog::say("phase 1 turns ", std::event_loop::run())
+    # 2
+    shared = std::event_loop::after(10)
+    coroutine {step: b1, first: b1f} = both(1, shared)
+    std::event_loop::adopt(b1, b1f)
+    coroutine {step: b2, first: b2f} = both(2, shared)
+    std::event_loop::adopt(b2, b2f)
+    elog::say("phase 2 turns ", std::event_loop::run())
+    elog::say("phase 2 live registrations ", std::event_loop::stats().registrations)
+    # 3
+    std::event_loop::sync()
+    unwatched = std::event_loop::every(5)
+    watched = std::event_loop::after(1000)
+    blocks = std::list::length(std::event_loop::deterministic::waits())
+    coroutine {step: w, first: wf} = watcher(watched, unwatched)
+    std::event_loop::adopt(w, wf)
+    elog::say("phase 3 turns ", std::event_loop::run())
+    waits = std::event_loop::deterministic::waits()
+    elog::say("phase 3 blocks ", std::list::length(waits) - blocks)
+    loop k from blocks to std::list::length(waits):
+        elog::say("phase 3 block deadline ", waits.at(k))
+    # 4
+    rep = std::event_loop::every(50)
+    coroutine {step: r1, first: r1f} = ticker(1, rep)
+    std::event_loop::adopt(r1, r1f)
+    coroutine {step: r2, first: r2f} = ticker(2, rep)
+    std::event_loop::adopt(r2, r2f)
+    elog::say("phase 4 turns ", std::event_loop::run())
+    std::event_loop::revoke(rep)
+    s = std::event_loop::stats()
+    elog::say("timers fired ", s.timers_fired)
+    elog::say("timers waiting at the end ", s.timers_waiting)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

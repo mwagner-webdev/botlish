@@ -1,0 +1,140 @@
+# errors.bot -- failures, reentrancy, liveness and shutdown
+# (EVENT-LOOP-EXPLORATION.md's a-errors).
+#
+#   * fails_later fails with TaskFailed {code: 7} in its third segment: the
+#     loop records the outcome and every other task goes on;
+#   * fails_now fails in its first segment, which runs inside the spawner
+#     (construction is eager): the spawner's handler gets the error, and the
+#     loop never sees the task;
+#   * bad_index fails with its own IndexNotFound (an error the task
+#     protocol carries): recorded as that task's failure;
+#   * nester calls turn from inside its segment -- a nested loop -- and gets
+#     LoopReentered; it handles it and goes on;
+#   * optional waits on a source that does not keep the loop alive: the
+#     first run returns ("no live work") while it still waits;
+#   * stopper stops the second run; shutdown then revokes every
+#     registration (a timer waiter and the optional reader wake with
+#     Wake::Revoked and end), runs at most 3 more turns, and abandons the
+#     one task that never ends (stubborn) -- released without running.
+import elog
+import std::coroutine
+import std::event_loop
+import std::event_loop::deterministic
+import std::list
+import type std::event_loop::Delivery
+import type std::event_loop::Ending
+import type std::event_loop::Wake
+
+fn fails_later(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault, std::event_loop::TaskFailed:
+    std::event_loop::yield_now()
+    std::event_loop::yield_now()
+    fail std::event_loop::TaskFailed {code: 7}
+
+fn fails_now(code: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault, std::event_loop::TaskFailed:
+    if code > 0:
+        fail std::event_loop::TaskFailed {code: code}
+    std::event_loop::yield_now()
+    0
+
+fn bad_index(i: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    xs = [1, 2]
+    xs.at(i)
+
+fn nester(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    std::event_loop::yield_now()
+    n = std::event_loop::turn():
+        on std::event_loop::LoopReentered:
+            elog::say("nester: nested turn refused in turn ", std::event_loop::turn_number())
+            -1
+    n
+
+fn optional(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(src)
+    elog::say("optional woke revoked ", elog::bit(e.reason == Wake::Revoked))
+    0
+
+fn stopper(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    std::event_loop::yield_now()
+    elog::say("stopper stops the loop in turn ", std::event_loop::turn_number())
+    std::event_loop::stop()
+    0
+
+fn sleeper(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    reason = std::event_loop::sleep(1000000)
+    elog::say("sleeper woke revoked ", elog::bit(reason == Wake::Revoked))
+    0
+
+fn stubborn(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop:
+        std::event_loop::yield_now()
+    0
+
+fn if_done(step: Coroutine{args: [], return: int, errors: [std::event_loop::SchedulerFault, std::event_loop::TaskFailed]}) -> int:
+    elog::bit(std::coroutine::done?(step))
+
+fn ending_code(e: Ending) -> int:
+    if e == Ending::Returned:
+        0
+    elif e == Ending::Failed:
+        1
+    elif e == Ending::IndexNotFound:
+        2
+    elif e == Ending::SchedulerFault:
+        3
+    else:
+        4
+
+fn report(context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    loop o in std::event_loop::take_outcomes():
+        elog::say2("outcome task ", o.task, " ending ", ending_code(o.ending))
+        elog::say2("outcome task ", o.task, " value ", o.value)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    # A task's construction runs its first segment: the spawner handles what
+    # that segment may raise (here TaskFailed), once, eagerly.
+    coroutine {step: a, first: af} = fails_later():
+        on std::event_loop::TaskFailed:
+            -1
+    elog::say("fails_later id ", std::event_loop::adopt(a, af))
+    coroutine {step: b, first: bf} = fails_now(8):
+        on std::event_loop::TaskFailed {code}:
+            elog::say("spawner caught a failure at construction, code ", code)
+            -1
+    elog::say("fails_now done at construction: ", if_done(b))
+    coroutine {step: c, first: cf} = bad_index(5)
+    elog::say("bad_index id ", std::event_loop::adopt(c, cf))
+    coroutine {step: n, first: nf} = nester()
+    elog::say("nester id ", std::event_loop::adopt(n, nf))
+    src = std::event_loop::source(Delivery::Lossy, 4)
+    coroutine {step: o, first: of} = optional(src)
+    elog::say("optional id ", std::event_loop::adopt(o, of))
+    elog::say("first run turns ", std::event_loop::run())
+    s = std::event_loop::stats()
+    elog::say("failed ", s.failed)
+    elog::say("reentered ", s.reentered)
+    report()
+    coroutine {step: t, first: tf} = stopper()
+    elog::say("stopper id ", std::event_loop::adopt(t, tf))
+    coroutine {step: z, first: zf} = sleeper()
+    elog::say("sleeper id ", std::event_loop::adopt(z, zf))
+    coroutine {step: u, first: uf} = stubborn()
+    elog::say("stubborn id ", std::event_loop::adopt(u, uf))
+    elog::say("second run turns ", std::event_loop::run())
+    elog::say("abandoned ", std::event_loop::shutdown(3))
+    report()
+    elog::say("registrations after shutdown ", std::event_loop::stats().registrations)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

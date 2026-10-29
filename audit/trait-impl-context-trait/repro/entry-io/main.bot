@@ -1,0 +1,23 @@
+# The trait, its witness and the implementation in the entry program; the
+# implementation's body needs a context trait (std::io::IO, through
+# std::io::print_line). Should print "A" twice and be 2.
+import std::io
+import std::linux::io
+
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    std::io::print_line("A"):
+        on std::io::WriteFailed:
+            return 0
+    t.v
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+with context std::linux::io::create()
+twice(A {v: 1})

@@ -86,7 +86,7 @@
 # observes (std::linux::read does, with `detach`). That is the raw layer's sharp
 # edge.
 #
-# Not here, deliberately: slicing, indexing, concatenation, capacity,
+# Not here, deliberately: indexing, capacity,
 # resizing, NUL-terminated strings (CString), and any retained-pointer or
 # lifetime story.
 import std::abi
@@ -107,6 +107,32 @@ opaque struct MutableBytes:
 # the empty Bytes (length 0).
 fn from_list(values: List[Byte]) -> Bytes:
     Bytes {storage: std::byte_store::from_list(values)}
+
+# The bytes of every Bytes of PARTS, in order, as one Bytes: one copy of
+# their total length (WINDOWS-X86-64-MILESTONE-7.md: a file read in chunks
+# becomes one value). The empty List, or one of empty parts, gives the empty
+# Bytes.
+fn join(parts: List[Bytes]) -> Bytes:
+    storages = loop part in parts:
+        part.storage
+    Bytes {storage: std::byte_store::join(storages)}
+
+# DATA's bytes START..END-1, as a new Bytes (WINDOWS-X86-64-MILESTONE-7.md:
+# the bytes a short write left unwritten): the one slice rule of
+# std::str::substring -- LowerUnderrun or UpperOverrun unless 0 <= START <=
+# END <= length(DATA). An empty slice is the empty Bytes.
+fn slice(data: Bytes, start: int, end: int) -> Bytes errors LowerUnderrun, UpperOverrun:
+    Bytes {storage: std::byte_store::slice(data.storage, start, end)}
+
+# The String whose UTF-8 encoding is DATA: std::str::encode_utf8's inverse
+# (WINDOWS-X86-64-MILESTONE-7.md). Strict -- an overlong form, an encoded
+# surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
+# U+10FFFF, a truncated sequence or a stray continuation byte is the
+# declared error InvalidUtf8, never a replacement character -- so
+# decode_utf8(from_list(s.encode_utf8())) == s for every String s. A 0 byte is
+# the character U+0000. No byte-order mark is skipped, nothing normalized.
+fn decode_utf8(data: Bytes) -> str errors InvalidUtf8:
+    std::byte_store::decode_utf8(data.storage)
 
 # The exact byte count of DATA, as the ABI size domain. The runtime's
 # collection-length ceiling (below 2^62) already guarantees the count is a

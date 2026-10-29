@@ -712,7 +712,7 @@ test contexts-native-nir-hello {NIR of the Hello World: one 24-byte context area
     set hello [nirFunction $nir hello]
     list $header [regexp -all {contextstore} $nir] [regexp -all {contextload} $nir] \
         [lindex [split $write \n] 0] [nirBody $write] [nirBody $hello]
-} -result {{{nir 1 call-effects=1 statics=0 contexts=24} {context 0 "std::linux::io::LinuxIO" offset=0 words=3 fields="stdin.raw.value stdout.raw.value stderr.raw.value"}} 3 1 {func 10 "std::linux::io::write" params=1 env=0 regs=3 pnames="data.0" captures=0 instance="std::abi::bytes::Bytes" @e584} {{%1 = contextload 8} {%2 = call 8 %1 %0} {ret %2}} {{%0 = bytes "48656c6c6f2c20776f726c64210a"} {%1 = call 10 %0} {ret %1}}}
+} -result {{{nir 1 call-effects=1 statics=0 contexts=24} {context 0 "std::linux::io::LinuxIO" offset=0 words=3 fields="stdin.raw.value stdout.raw.value stderr.raw.value"}} 3 1 {func 10 "std::linux::io::write" params=1 env=0 regs=3 pnames="data.0" captures=0 instance="std::abi::bytes::Bytes" @e783} {{%1 = contextload 8} {%2 = call 8 %1 %0} {ret %2}} {{%0 = bytes "48656c6c6f2c20776f726c64210a"} {%1 = call 10 %0} {ret %1}}}
 
 test contexts-native-no-hidden-argument {the three-level chain compiles to the calling convention it would have without any context: every function has params=0 env=0, every call passes no operand, and only the consumer does anything about the context -- its own fixed-slot load} -body {
     set nir [native::nir [ctxHir "${::synthetic}fn middle():\n    read_value()\nfn top():\n    middle()\nwith context Counter {value: 3, enabled: true}\ntop()\n"]]

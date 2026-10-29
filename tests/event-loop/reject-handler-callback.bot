@@ -1,0 +1,11 @@
+# reject-handler-callback.bot -- must be REJECTED (tests/event-loop.test, el-static-*): a handler that needs the loop written as a function value (CONTEXT-FUNCTION-VALUE)
+import std::event_loop
+
+fn handler(x: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::turn_number() + x
+
+fn register(callback: Fn{args: [int], return: int, errors: [std::event_loop::SchedulerFault]}) -> int:
+    1
+
+with context std::event_loop::create(8)
+register(handler)
