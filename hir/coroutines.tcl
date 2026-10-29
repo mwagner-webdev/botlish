@@ -665,21 +665,35 @@ proc hir::coroutines::TraitOperations {hir} {
 #           implementation's parameter index of the call's first argument
 #   spec    {CTX CALL} -> {NODE ...}: CALL calls the specialization NODE
 #   clones  K -> {function H params P binding B witnesses TEXT}: the
-#           specializations (the plan's clone keys) the graph names
+#           specializations the graph names, K a specialization identity
+#           {FUNCTION PARAMS BINDING} (hir::traits::Specialization: the
+#           plan's clone key without its context selection, which the graph
+#           itself decides, so a check and the next name one node alike)
 #   via     {CTX CALL} -> {trait T operation R witness TEXT}: what a chain
 #           says of an operation's edge
-# CTX is "" (the program as written) or a specialization K. Only edges into
-# a node that may yield are kept, and an operation's edges where it receives
-# a yield's value (use-site inference reads the implementation's declared
-# parameter); any other changes no protocol, no yield effect and no
-# diagnostic. Nor is a specialization kept that equals its function as
-# written (Distinct). So a program none of whose implementations yields or
-# receives a yield's value keeps an empty graph and is checked once.
+# CTX is "" (the program as written) or a specialization K.
+#
+# The graph is the program's one *selected implementation graph*
+# (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md): hir::check
+# records it on the HIR it returns (`implementations`), and every analysis
+# of what a selected implementation requires reads it -- the coroutine
+# analysis its yields, hir::contexts::Requirements its context requirements
+# (a node per specialization), hir/staticdeps.tcl and the legacy scheduler's
+# units their targets (ImplementationTargets). An edge is kept when it
+# changes one of those: an edge into a node that may yield, an operation's
+# edges where it receives a yield's value (use-site inference reads the
+# implementation's declared parameter), and an ordinary trait operation's
+# or a specialization's edge into a node that requires a context. Any other
+# changes no protocol, no yield effect, no requirement and no diagnostic.
+# Nor is a specialization kept that equals its function as written
+# (Distinct). So a program none of whose implementations yields, receives a
+# yield's value or requires a context keeps an empty graph and is checked
+# once.
 
 # The trait-operation edges a typing found in checked HIR, given the
 # feedback GIVEN the check was made with: {} when there is nothing to bind
-# (no coroutine, no trait operation, or nothing the plan could bind would
-# be kept: MayBind), else the graph above, its edges kept as it says (the
+# (no trait operation, or nothing the plan could bind would be kept:
+# MayBind), else the graph above, its edges kept as it says (the
 # yield-capable nodes those of GIVEN's graph with these edges added).
 proc hir::coroutines::Implementations {hir given} {
     if {[dict exists $hir resolutionDiagnostics] || [dict exists $hir syntaxRecovery]} {
