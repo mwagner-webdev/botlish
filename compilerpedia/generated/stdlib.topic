@@ -6920,6 +6920,11 @@ Wait for REG's next event (or its timer, its turn, its revocation). A
 registration that is not live answers Wake::Revoked at once, without
 suspending.
 
+(wait and try_take build their Event where they return it, from the
+registers: the native backend then carries its fields to the caller without
+allocating -- an Event returned from a helper through a handler cost an
+allocation per event, bench/event-loop.tcl.)
+
 @topic stdlib.std::event_loop::try_take
 title: std::event_loop::try_take -- Function of module std::event_loop
 summary: REG's next queued event without suspending
