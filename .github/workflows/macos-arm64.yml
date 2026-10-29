@@ -31,6 +31,15 @@ name: tests (macos arm64)
 #   link-plan-sdl3 every push, after app: the downloaded application links
 #                  static SDL3 (built from its pinned release) with the
 #                  frameworks SDL3 needs (NATIVE-LINK-PLAN-MILESTONE-1.md)
+#   main-thread-startup  every push, after app: the startup policy
+#                  main-thread (MAIN-THREAD-STARTUP-MILESTONE-1.md) through
+#                  the downloaded application -- an executable built with
+#                  the checkout and Rust moved away, its LC_MAIN, its thread
+#                  -- and the graphical census's candidate A on the
+#                  production policy (audit/macos-graphical-main-thread:
+#                  SDL3's Cocoa driver, a window, Metal, the stack, the
+#                  guard, GC stress, coroutines, process semantics, both
+#                  linkers, timings), every case as predicted
 #   app-mutants    opt-in, "[ci-app-mutants]" in the pushed head commit's
 #                  message (or a manual run's app_mutants): the
 #                  application's packaging mutants
@@ -463,6 +472,155 @@ jobs:
         with:
           name: link-plan-sdl3-log
           path: link-plan-sdl3.log
+          if-no-files-found: warn
+
+  # The main-thread startup policy (MAIN-THREAD-STARTUP-MILESTONE-1.md)
+  # through the distribution: the uploaded application extracted outside the
+  # checkout into a path with a space and non-ASCII characters builds a
+  # main-thread executable with the checkout and Rust moved away (a Mach-O
+  # arm64 executable, LC_MAIN's 512 MiB, its program on the process's main
+  # thread, a coroutine too); then the graphical census's harness
+  # (audit/macos-graphical-main-thread/tools/census.py) on the production
+  # policy -- SDL3's Cocoa driver, a window captured, Metal, events and
+  # shutdown on the main thread, plain and under GC stress, through the
+  # system and the rustc linker; the worker's Cocoa failure as the positive
+  # control; the stack, the guard, every exhaustion, the 8 MiB control, GC
+  # roots, kept coroutines, process semantics, timings -- with --strict:
+  # every case as predicted, or the job fails. The census's static SDL3 is
+  # link-plan-sdl3's (the same script, cache path and key).
+  main-thread-startup:
+    name: main-thread startup (macOS arm64)
+    needs: app
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: botlish-macos-aarch64
+          path: download
+
+      - name: Place the application outside the checkout
+        run: |
+          place="$RUNNER_TEMP/Prögram Fïles"
+          mkdir -p "$place"
+          (cd download && shasum -a 256 -c botlish-macos-aarch64.zip.sha256)
+          (cd "$place" && unzip -q "$GITHUB_WORKSPACE/download/botlish-macos-aarch64.zip")
+          echo "APP=$place/Botlish.app" >>"$GITHUB_ENV"
+          codesign --verify --deep --strict --verbose=2 "$place/Botlish.app"
+
+      - name: Cache the static SDL3 build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-sdl3-static
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/link-plan-sdl3.sh') }}
+
+      - name: Static SDL3 through the application (tests/platform/link-plan-sdl3.sh)
+        run: |
+          export BOTLISH_SDL3_STATIC_PREFIX="$HOME/Library/Caches/botlish-sdl3-static"
+          bash tests/platform/link-plan-sdl3.sh "$APP" "$(command -v tclsh9.0)" 2>&1 | tee link-plan-sdl3.log | tail -n 20
+
+      # The packaged compiler alone: the checkout, Cargo and rustup moved
+      # away for the step (and put back however it ends), the program and
+      # its executables in a directory of their own.
+      - name: A main-thread executable from the application, without the checkout or Rust
+        run: |
+          kit="$RUNNER_TEMP/startup kit"
+          mkdir -p "$kit"
+          cat >"$kit/identity.bot" <<'BOT'
+          import std::ffi::c
+
+          extern c fn pthread_main_np() -> std::ffi::c::Int
+
+          fn task() -> int:
+              yield 0
+              yield pthread_main_np()
+              -1
+
+          fn resume(h: Coroutine{args: [], return: int, errors: []}) -> int:
+              h()
+
+          coroutine {step, first} = task()
+          [pthread_main_np(), first + resume(step)]
+          BOT
+          cp "$kit/identity.bot" "$kit/worker.bot"
+          workspace="$GITHUB_WORKSPACE"
+          restore() {
+            cd /
+            if [ -d "$workspace.hidden" ]; then mv "$workspace.hidden" "$workspace"; fi
+            if [ -d ~/.cargo.hidden ]; then mv ~/.cargo.hidden ~/.cargo; fi
+            if [ -d ~/.rustup.hidden ]; then mv ~/.rustup.hidden ~/.rustup; fi
+          }
+          trap restore EXIT
+          cd "$kit"
+          mv "$workspace" "$workspace.hidden"
+          mv ~/.cargo ~/.cargo.hidden
+          mv ~/.rustup ~/.rustup.hidden
+          for t in cargo rustc; do if command -v $t; then echo "::error::$t is still on PATH"; exit 1; fi; done
+          botlish="$APP/Contents/MacOS/botlish"
+          set -x
+          "$botlish" -warnings off -native-startup main-thread -emit-native-executable identity.bot
+          "$botlish" -warnings off -emit-native-executable worker.bot
+          file identity worker
+          [ "$(lipo -archs identity)" = arm64 ]
+          otool -l identity | grep -A4 'cmd LC_MAIN' | tee lc-main.txt
+          grep -q 'stacksize 536870912' lc-main.txt
+          otool -l worker | grep -A4 'cmd LC_MAIN' | grep -q 'stacksize 0'
+          [ "$(./identity)" = "[1, 1]" ]
+          [ "$(./worker)" = "[0, 0]" ]
+          BOTLISH_NATIVE_STARTUP_REPORT="$kit/report" ./identity
+          tail -n 3 "$kit/report" | tee "$kit/report.tail"
+          grep -qx 'startup main-thread' "$kit/report.tail"
+          grep -qx 'process-main-thread 1' "$kit/report.tail"
+          grep -q '^stack 536870912 [1-9]' "$kit/report.tail"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: The graphical main-thread census on the production policy (census.py --strict)
+        run: |
+          python3 -I audit/macos-graphical-main-thread/tools/census.py \
+            --work "$RUNNER_TEMP/census" --out census-results \
+            --sdl-prefix "$HOME/Library/Caches/botlish-sdl3-static" \
+            --app "$APP" --checkout "$PWD" --tclsh "$(command -v tclsh9.0)" --repeat 5 \
+            --only env,identity,stack,c-graphical,botlish-baseline,candidate-a,semantics,startup,controls,timing \
+            --strict 2>&1 | tee census.log
+
+      - name: The policy's tests (tests/main-thread-startup.test), plainly and under GC stress
+        if: always()
+        run: |
+          tclsh9.0 tests/main-thread-startup.test -tmpdir "$(mktemp -d)" 2>&1 | tee startup-test.log
+          BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/main-thread-startup.test -tmpdir "$(mktemp -d)" 2>&1 | tee startup-test-gc.log
+          ! grep -E 'Failed[[:space:]]+[1-9]' startup-test.log startup-test-gc.log
+
+      - name: The application, untouched by the runs
+        if: always()
+        run: codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Main-thread startup (macOS arm64)"
+            cat census-results/summary.md 2>/dev/null || echo "the census did not finish"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: main-thread-startup
+          path: |
+            census-results
+            census.log
+            link-plan-sdl3.log
+            startup-test.log
+            startup-test-gc.log
           if-no-files-found: warn
 
   # Mutation testing of the application's packaging (opt-in: "[ci-app-

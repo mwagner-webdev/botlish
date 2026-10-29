@@ -7,7 +7,7 @@
 //! ```text
 //!   botlish_program      LinkedProgram: magic, the runtime ABI fingerprint,
 //!                        the descriptor's address and length, the code
-//!                        table's address and length
+//!                        table's address and length, the startup policy
 //!   botlish_descriptor   the encoded ProgramDescriptor (read-only bytes)
 //!   botlish_code         one (direct, generic entry) address pair per NIR
 //!                        function, relocated by whatever links the object
@@ -41,7 +41,10 @@ const FORMAT: u32 = 1;
 
 /// The record the compiler emits as `botlish_program` (module doc). Its
 /// layout is a contract between codegen (which writes it as data) and this
-/// runtime: six machine words, in this order.
+/// runtime: seven machine words, in this order. The ABI fingerprint covers
+/// it (runtime::aotimage's `abi_fingerprint`: its size and the startup
+/// word's offset), so a runtime of another layout refuses a record before
+/// it reads past the fingerprint.
 #[repr(C)]
 pub struct LinkedProgram {
     pub magic: u64,
@@ -52,6 +55,70 @@ pub struct LinkedProgram {
     /// generic entry at `2N + 1`.
     pub code: *const usize,
     pub functions: usize,
+    /// The executable's startup policy, `Startup::word`: where `aot::run`
+    /// runs the program. Always the worker's (0) in a native library's
+    /// record, whose host calls it on its own thread.
+    pub startup: u64,
+}
+
+/// Which thread an executable runs its program on (MAIN-THREAD-STARTUP-
+/// MILESTONE-1.md): a property of the executable, fixed when it is emitted
+/// (codegen::aot's `emit_executable`) and recorded in its program record's
+/// `startup` word, never chosen by the environment it is started in, a
+/// library it links or anything the program declares. The program's
+/// meaning is the same under both; what differs is the thread and its
+/// stack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Startup {
+    /// Word 0, the default: a worker thread of its own, whose stack
+    /// `BOTLISH_NATIVE_STACK_BYTES` sizes (1 GiB by default), started and
+    /// joined by the process's main thread (`aot::run`).
+    Worker,
+    /// Word 1: the thread that entered the executable's `main` -- the
+    /// process's main thread -- on its own stack, whose size the link
+    /// reserved (macOS's LC_MAIN, 512 MiB: codegen::aot's
+    /// `MAIN_THREAD_STACK_BYTES`). macOS AArch64 executables only
+    /// (`aot::MAIN_THREAD_STARTUP`): AppKit, and so SDL3's Cocoa video
+    /// driver, works on no other thread.
+    MainThread,
+}
+
+impl Startup {
+    /// The record's word for this policy.
+    pub const fn word(self) -> u64 {
+        match self {
+            Startup::Worker => 0,
+            Startup::MainThread => 1,
+        }
+    }
+
+    /// The policy a record's word WORD names, or why it names none.
+    pub fn of_word(word: u64) -> Result<Startup, String> {
+        match word {
+            0 => Ok(Startup::Worker),
+            1 => Ok(Startup::MainThread),
+            other => Err(format!("the program record names an unknown startup policy ({other})")),
+        }
+    }
+
+    /// The policy's name, as every interface spells it: the driver's
+    /// `--startup`, native::executable's `-startup`, main.tcl's
+    /// `-native-startup` and the startup report.
+    pub const fn spelling(self) -> &'static str {
+        match self {
+            Startup::Worker => "worker",
+            Startup::MainThread => "main-thread",
+        }
+    }
+
+    /// The policy named NAME (`spelling`'s inverse).
+    pub fn parse(name: &str) -> Option<Startup> {
+        match name {
+            "worker" => Some(Startup::Worker),
+            "main-thread" => Some(Startup::MainThread),
+            _ => None,
+        }
+    }
 }
 
 // The record is immutable data the linker relocated: sharing it between
@@ -401,21 +468,40 @@ pub fn instantiate(descriptor: &ProgramDescriptor, code: &[(usize, usize)]) -> (
     (vm, entry)
 }
 
-/// The descriptor and code table a linked record LINKED points at, checked:
-/// the magic, this runtime's ABI fingerprint (a program object compiled
-/// against another runtime build addresses fields that are not there), and
-/// a code table of one pair per described function.
+/// The startup policy of the linked record LINKED, checked: the magic and
+/// this runtime's ABI fingerprint first (a record of another runtime build
+/// may have another layout, whose startup word is not where this one reads
+/// it: the fingerprint covers the record's layout), then the word itself --
+/// a policy this runtime does not know is refused, never taken for the
+/// default. Reads nothing the record points at: what an executable's
+/// startup asks before it decides which thread builds the Vm
+/// (`aot::start_linked`).
 ///
 /// # Safety
-/// LINKED must be a `LinkedProgram` the compiler emitted, relocated by its
-/// link (its pointers valid for their lengths).
-pub unsafe fn read_linked(linked: &LinkedProgram) -> Result<(ProgramDescriptor, Vec<(usize, usize)>), String> {
+/// LINKED must be readable as a `LinkedProgram`'s magic and fingerprint,
+/// and, when both are this runtime's, as the whole record.
+pub unsafe fn linked_startup(linked: &LinkedProgram) -> Result<Startup, String> {
     if linked.magic != LINKED_MAGIC {
         return Err("not a Botlish program record".to_string());
     }
     if linked.fingerprint != super::aotimage::abi_fingerprint() {
         return Err("the program was compiled for a different native runtime build".to_string());
     }
+    Startup::of_word(linked.startup)
+}
+
+/// The descriptor and code table a linked record LINKED points at, checked:
+/// the magic, this runtime's ABI fingerprint (a program object compiled
+/// against another runtime build addresses fields that are not there), its
+/// startup policy (`linked_startup`) and a code table of one pair per
+/// described function.
+///
+/// # Safety
+/// LINKED must be a `LinkedProgram` the compiler emitted, relocated by its
+/// link (its pointers valid for their lengths).
+pub unsafe fn read_linked(linked: &LinkedProgram) -> Result<(ProgramDescriptor, Vec<(usize, usize)>), String> {
+    // SAFETY: the caller's contract.
+    unsafe { linked_startup(linked) }?;
     // SAFETY: the caller's contract.
     let bytes = unsafe { std::slice::from_raw_parts(linked.descriptor, linked.descriptor_len) };
     let descriptor = ProgramDescriptor::decode(bytes)?;
@@ -528,6 +614,7 @@ mod tests {
             descriptor_len: bytes.len(),
             code: code.as_ptr(),
             functions: 2,
+            startup: Startup::Worker.word(),
         };
         assert!(unsafe { read_linked(&linked) }.is_ok());
         linked.fingerprint ^= 1;
@@ -538,5 +625,45 @@ mod tests {
         linked.magic = LINKED_MAGIC;
         linked.functions = 3;
         assert!(unsafe { read_linked(&linked) }.is_err());
+    }
+
+    /// The startup word: each policy's, read back; an unknown one refused by
+    /// the policy read and by the whole record's, never taken for the
+    /// default; a record of another magic or fingerprint refused before its
+    /// word is read.
+    #[test]
+    fn linked_program_startup_policy() {
+        let bytes = sample().encode();
+        let code = [0usize; 4];
+        let mut linked = LinkedProgram {
+            magic: LINKED_MAGIC,
+            fingerprint: super::super::aotimage::abi_fingerprint(),
+            descriptor: bytes.as_ptr(),
+            descriptor_len: bytes.len(),
+            code: code.as_ptr(),
+            functions: 2,
+            startup: Startup::Worker.word(),
+        };
+        for policy in [Startup::Worker, Startup::MainThread] {
+            linked.startup = policy.word();
+            assert_eq!(unsafe { linked_startup(&linked) }, Ok(policy));
+            assert!(unsafe { read_linked(&linked) }.is_ok());
+            assert_eq!(Startup::parse(policy.spelling()), Some(policy));
+        }
+        assert_eq!((Startup::Worker.word(), Startup::MainThread.word()), (0, 1));
+        for word in [2, 0x100, u64::MAX] {
+            linked.startup = word;
+            assert!(matches!(unsafe { linked_startup(&linked) }, Err(e) if e.contains("unknown startup policy")));
+            assert!(unsafe { read_linked(&linked) }.is_err());
+        }
+        linked.startup = Startup::MainThread.word();
+        linked.fingerprint ^= 1;
+        assert!(matches!(unsafe { linked_startup(&linked) }, Err(e) if e.contains("different native runtime build")));
+        linked.fingerprint ^= 1;
+        linked.magic = 0;
+        assert!(matches!(unsafe { linked_startup(&linked) }, Err(e) if e.contains("not a Botlish program record")));
+        assert_eq!(Startup::parse("main"), None);
+        assert_eq!(std::mem::size_of::<LinkedProgram>(), 56);
+        assert_eq!(std::mem::offset_of!(LinkedProgram, startup), 48);
     }
 }

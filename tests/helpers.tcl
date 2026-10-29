@@ -173,6 +173,14 @@ testConstraint nativeDepthChecked [expr {!([testConstraint nativeFrameRoots] && 
 # nativeCCalls.
 testConstraint executableAot [native::hostSupports executables]
 
+# Executables started on the process's main thread (native::executable
+# -startup main-thread, MAIN-THREAD-STARTUP-MILESTONE-1.md): macOS AArch64's
+# only; every other target starts an executable on a worker, and refuses the
+# policy (NATIVE UNSUPPORTED startup). A capability of the host target, never
+# an operating system: a test that runs a main-thread executable carries it
+# (tests/main-thread-startup.test; its refusal elsewhere, mainThreadRefused).
+testConstraint mainThreadStartup [expr {[testConstraint executableAot] && [native::hostSupports mainThreadStartup]}]
+
 # A Unix shell for scripts the tests write and run (`#!/bin/sh` wrappers, `sh
 # -c`): a test that needs one carries this, never an operating system.
 testConstraint unixShell [expr {$::tcl_platform(platform) eq "unix" && [auto_execok sh] ne ""}]

@@ -17,6 +17,8 @@
 //!                                        without compiling
 //!   botlish-native object OUT FILE.nir   write a relocatable program object
 //!   botlish-native executable OUT FILE.nir  link a standalone executable
+//!                                        (--startup worker|main-thread: its
+//!                                        startup policy, below)
 //!                                        (Linux ELF, macOS AArch64 Mach-O,
 //!                                        Windows x86-64 PE: OUT.exe for an
 //!                                        OUT without an extension;
@@ -96,6 +98,17 @@
 //! protocol (runtime/aot.rs): its result lines come back through a file, and
 //! its standard output and error are this driver's own. `batch` and
 //! `--alloc` do not run one.
+//!
+//! `--startup worker|main-thread` (anywhere on the line, `executable` and
+//! `object` only; once, or repeated with the same policy) is the
+//! executable's startup policy (MAIN-THREAD-STARTUP-MILESTONE-1.md;
+//! runtime::program's `Startup`), recorded in its program record:
+//! `worker`, the default, runs the program on a worker thread of its own;
+//! `main-thread` on the process's main thread, its stack reserved by the
+//! link (512 MiB, LC_MAIN) -- for a macOS AArch64 target only, refused for
+//! any other with `error {NATIVE UNSUPPORTED startup} ...` before anything
+//! is written. A linked run (`run`/`bench` of a program that calls C) is
+//! always the worker's.
 //!
 //! `--table-hash-key HEX` (anywhere on the line; 32 hexadecimal digits, the
 //! two 64-bit key words K0 then K1) fixes the key of the private table hash
@@ -236,6 +249,10 @@ fn emit_link_error(code: &str, error: &codegen::aot::LinkError) {
         Some("TOOLCHAIN") => emit_error(&["NATIVE", code, "TOOLCHAIN"], &error.message),
         Some("RUNTIME") => emit_error(&["NATIVE", code, "RUNTIME"], &error.message),
         Some("ARCHIVE") => emit_error(&["NATIVE", code, "ARCHIVE"], &error.message),
+        // The startup policy its target does not support
+        // (codegen::aot::startup_refusal): refused before the link, whatever
+        // the program calls.
+        Some("STARTUP") => emit_error(&["NATIVE", "UNSUPPORTED", "startup"], &error.message),
         _ => emit_error(&["NATIVE", code], &error.message),
     }
 }
@@ -368,12 +385,45 @@ fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, codegen::aot::Link
     Ok((out, search))
 }
 
+/// Pulls every "--startup POLICY" out of ARGS (anywhere): the remaining
+/// arguments in order, and the policy (None if absent). Err if one has no
+/// value or names no policy, or two name different ones: an explicit
+/// choice is never silently replaced.
+fn extract_startup(args: &[String]) -> Result<(Vec<String>, Option<runtime::program::Startup>), String> {
+    let mut startup = None;
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--startup" {
+            let name = args.get(i + 1).ok_or("--startup needs a policy (worker or main-thread)")?;
+            let policy = runtime::program::Startup::parse(name)
+                .ok_or_else(|| format!("unknown startup policy {name:?} (known: worker main-thread)"))?;
+            if startup.is_some_and(|given| given != policy) {
+                return Err("--startup given twice with different policies".to_string());
+            }
+            startup = Some(policy);
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    Ok((out, startup))
+}
+
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR)");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check|fusion|fused FILE.nir [--alloc off|summary|sites] [--argv ARGS|--argv-file PATH] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir [--startup worker|main-thread] | library OUT NAME FILE.nir | link-plan FILE.nir | target TRIPLE | system-linker (each also [--result PATH], --link-dir DIR, --framework-dir DIR)");
         2
     };
     let Some(args) = extract_table_hash_key(args) else { return usage() };
+    let (args, startup) = match extract_startup(&args) {
+        Ok(split) => split,
+        Err(message) => {
+            eprintln!("botlish-native: {message}");
+            return usage();
+        }
+    };
     let (args, link_dirs) = match extract_link_dirs(&args) {
         Ok(split) => split,
         Err(message) => {
@@ -388,6 +438,13 @@ fn cli(args: &[String]) -> i32 {
         Some((c, rest)) => (c.as_str(), rest),
         None => return usage(),
     };
+    if startup.is_some() && !matches!(command, "executable" | "object") {
+        // The policy is an executable's: no other command makes one, and an
+        // explicit choice is never ignored.
+        eprintln!("botlish-native: --startup is an option of executable and object (an executable's startup policy), not of {command}");
+        return usage();
+    }
+    let startup = startup.unwrap_or(runtime::program::Startup::Worker);
     if command == "system-linker" && rest.is_empty() {
         // What the system linker would link with here (codegen::aot's
         // `system_linker_facts`): inspectable discovery, and the runtime
@@ -498,7 +555,7 @@ fn cli(args: &[String]) -> i32 {
             // The file the executable is: OUT, or OUT.exe on Windows
             // (codegen::aot::executable_path), as given.
             let named = codegen::aot::executable_path(std::path::Path::new(&rest[0]));
-            match codegen::aot::emit_executable(&program, &named, &link_dirs) {
+            match codegen::aot::emit_executable(&program, &named, &link_dirs, startup) {
                 Ok(_) => emit(&tcl_list(&["executable".to_string(), named.to_string_lossy().into_owned()])),
                 Err(e) => {
                     let code = if codegen::aot::calls_c(&program) { "LINK" } else { "AOT" };
@@ -570,7 +627,11 @@ fn cli(args: &[String]) -> i32 {
         }
         "object" => {
             let out = &rest[0];
-            match codegen::emit_object(&program) {
+            if let Some(message) = codegen::aot::startup_refusal(&program, startup) {
+                emit_error(&["NATIVE", "UNSUPPORTED", "startup"], &message);
+                return 1;
+            }
+            match codegen::emit_executable_object(&program, startup) {
                 Ok(object) => {
                     let bytes = object.bytes;
                     if let Err(e) = std::fs::write(out, &bytes) {
@@ -638,7 +699,10 @@ fn run_linked(
         }
     }
     let _cleanup = Cleanup(work.clone());
-    let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs) {
+    // Always the worker's startup: a linked run is the driver's way of
+    // running a program that calls C, not an executable someone emitted
+    // with a policy (MAIN-THREAD-STARTUP-MILESTONE-1.md).
+    let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs, runtime::program::Startup::Worker) {
         Ok(executable) => executable,
         Err(e) => {
             emit_link_error("LINK", &e);

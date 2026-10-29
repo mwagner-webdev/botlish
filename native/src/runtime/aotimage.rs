@@ -112,6 +112,11 @@ pub fn abi_fingerprint() -> u64 {
         // frame walk, or the shadow stack): a `fallback-roots` build's code
         // never runs on a runtime of the other plan.
         u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
+        // The program record's layout (runtime::program's LinkedProgram):
+        // a runtime that reads the record's words elsewhere -- its startup
+        // policy among them -- refuses it here, before it reads them.
+        std::mem::size_of::<LinkedProgram>() as u64,
+        std::mem::offset_of!(LinkedProgram, startup) as u64,
     ];
     // The helpers' names and parameter counts, never their addresses: an
     // executable whose startup computes this (every executable's, through
@@ -358,6 +363,12 @@ fn map_near(anchor: usize, size: usize) -> Result<usize, String> {
 }
 
 impl Loaded {
+    /// The startup policy the program's record names (`program::linked_startup`).
+    pub fn startup(&self) -> Result<super::program::Startup, String> {
+        // SAFETY: as `instantiate`'s.
+        unsafe { super::program::linked_startup(&*((self.base + self.program) as *const LinkedProgram)) }
+    }
+
     /// The program's Vm and entry, built from its relocated record exactly as
     /// the `rustc` linker's startup builds them (`program::instantiate_linked`).
     /// Runs on the thread that runs the program.
@@ -380,7 +391,17 @@ pub fn main() -> i32 {
             return 1;
         }
     };
-    super::aot::run(argv, move || match loaded.instantiate() {
+    // The record's startup policy, as every executable's startup reads it
+    // (aot::start_linked): only the worker on this host, which `run`
+    // checks.
+    let startup = match loaded.startup() {
+        Ok(startup) => startup,
+        Err(error) => {
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 1;
+        }
+    };
+    super::aot::run(startup, argv, move || match loaded.instantiate() {
         Ok(started) => started,
         Err(error) => {
             eprintln!("{error} (NATIVE STARTUP)");

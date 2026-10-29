@@ -351,6 +351,13 @@ impl Vm {
         let _ = stack;
     }
 
+    /// The stack of the thread that made this Vm, as `NativeStack::current`
+    /// found it (None on a host without stack discovery): the startup
+    /// report's `stack` line (runtime::aot's `startup_lines`).
+    pub fn native_stack(&self) -> Option<NativeStack> {
+        self.native_stack
+    }
+
     /// Makes this Vm's code bound its recursion by the running stack's
     /// `stack_limit` (a native library's instance, made on the thread that
     /// owns it: runtime::library's `create`). From now on

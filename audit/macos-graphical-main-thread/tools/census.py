@@ -10,20 +10,34 @@ is an expected FAILED-CORRECTNESS.
 
     python3 -I census.py --work DIR --out RESULTS --sdl-prefix PREFIX
         [--app Botlish.app] [--checkout REPO] [--exp EXPERIMENTAL_CHECKOUT]
-        [--tclsh tclsh9.0] [--repeat N] [--only GROUP,...]
+        [--tclsh tclsh9.0] [--repeat N] [--only GROUP,...] [--strict]
 
   --app        the packaged compiler (macOS): production executables are
                built by Botlish.app's own `botlish` (the system linker:
                the application's `auto` for a program that calls C)
   --checkout   this repository: its main.tcl builds the production
-               executables when there is no --app, and a rustc-linked one
+               executables when there is no --app, the rustc-linked ones,
+               and the 8 MiB main-stack control's program objects
   --exp        a checkout with patches/main-thread-experiment.patch
-               applied and native/ built: candidate A (main thread) and
-               candidate B (dispatcher), selected per run by the
-               environment
+               applied and native/ built: candidate B (dispatcher) and its
+               controls, selected per run by the environment (the census's
+               history; candidate A is production since
+               MAIN-THREAD-STARTUP-MILESTONE-1.md and needs no --exp)
   --sdl-prefix an SDL3 install (lib/libSDL3.a, include/, lib/pkgconfig/
                sdl3.pc): the pinned release, static
   --repeat     timed repetitions of the timing cases (section 18)
+  --strict     exit 1 when a case is not as predicted (the milestone's
+               acceptance, macos-arm64.yml's main-thread-startup job)
+
+Candidate A is the production startup policy (MAIN-THREAD-STARTUP-
+MILESTONE-1.md): the programs built with `-native-startup main-thread` by
+the same compiler as the worker's ("main": Botlish.app's system linker),
+by the checkout's rustc linker ("main-rustc"), and, as an isolated control
+of the 8 MiB stack the main thread has without LC_MAIN's reservation, the
+same main-thread program objects linked as the system linker links them
+but without -stack_size ("main-8mib"). On Linux the policy is refused
+(NATIVE UNSUPPORTED startup): every main-thread row is a predicted
+FAILED-BUILD there.
 
 Classes (section 19 of the census): EXECUTED-COCOA, EXECUTED-HEADLESS,
 EXECUTED-THREAD, UNAVAILABLE-GUI, FAILED-CORRECTNESS, FAILED-BUILD,
@@ -316,15 +330,17 @@ class Census:
                 shutil.copy(HERE / "programs" / f"{p}.bot", d)
         return d
 
-    def compile(self, label, directory, program, compiler, env=None):
-        """Builds DIRECTORY/PROGRAM.bot with COMPILER ("app", "checkout", "exp"): the executable's path."""
+    def compile(self, label, directory, program, compiler, env=None, startup=None):
+        """Builds DIRECTORY/PROGRAM.bot with COMPILER ("app", "checkout", "exp"), with the startup policy STARTUP
+        (-native-startup; None: the default, the worker): the executable's path."""
         env = dict(env or {})
         source = directory / f"{program}.bot"
+        policy = ["-native-startup", startup] if startup else []
         if compiler == "app":
-            cmd = [Path(self.args.app) / "Contents/MacOS/botlish", "-warnings", "off", "-emit-native-executable", source]
+            cmd = [Path(self.args.app) / "Contents/MacOS/botlish", "-warnings", "off", *policy, "-emit-native-executable", source]
         else:
             root = self.args.checkout if compiler == "checkout" else self.args.exp
-            cmd = [self.args.tclsh, Path(root) / "main.tcl", "-warnings", "off", "-emit-native-executable", source]
+            cmd = [self.args.tclsh, Path(root) / "main.tcl", "-warnings", "off", *policy, "-emit-native-executable", source]
             env.setdefault("BOTLISH_NATIVE_LINKER", "system")
         env["BOTLISH_NATIVE_LINK_LOG"] = str(self.logs / f"link-{label}-{program}.log")
         ok = self.build(f"{label}/{program}", cmd, env=env, cwd=self.work)
@@ -339,25 +355,53 @@ class Census:
         compiler = "app" if self.args.app else "checkout"
         for p in common:
             self.exe[("prod", p)] = self.compile("prod", prod, p, compiler)
+        # Candidate A in production (MAIN-THREAD-STARTUP-MILESTONE-1.md): the same programs, the same compiler,
+        # -native-startup main-thread. On Linux every one is refused (NATIVE UNSUPPORTED startup).
+        main = self.stage("main", common)
+        for p in common:
+            self.exe[("main", p)] = self.compile("main", main, p, compiler, startup="main-thread")
         if self.args.checkout:
             rustc = self.stage("prod-rustc", ["identity"])
             self.exe[("prod-rustc", "identity")] = self.compile("prod-rustc", rustc, "identity", "checkout",
                                                                 {"BOTLISH_NATIVE_LINKER": "rustc"})
-        if self.args.exp:
-            exp = self.stage("exp", common + ["dispatch", "runonmain"], dispatch=True)
-            for p in common + ["dispatch", "runonmain"]:
-                self.exe[("exp", p)] = self.compile("exp", exp, p, "exp")
-            # The rustc linker's startup reaches the same aot::run: its main-thread runs.
-            rustc = self.stage("exp-rustc", ["identity", "sdl", "errors", "depth"])
-            for p in ["identity", "sdl", "errors", "depth"]:
-                self.exe[("exp-rustc", p)] = self.compile("exp-rustc", rustc, p, "exp", {"BOTLISH_NATIVE_LINKER": "rustc"})
+            # The rustc linker's startup crate reaches the same aot::start_linked: its main-thread executables.
+            rustc_main = ["identity", "sdl", "errors", "depth", "kept"]
+            mr = self.stage("main-rustc", rustc_main)
+            for p in rustc_main:
+                self.exe[("main-rustc", p)] = self.compile("main-rustc", mr, p, "checkout", {"BOTLISH_NATIVE_LINKER": "rustc"},
+                                                           startup="main-thread")
             if APPLE:
-                self.big = self.main_stack_choice()
-                if self.big:
-                    big = self.stage("exp-big", ["identity", "sdl", "depth", "kept", "co_overflow", "big", "errors"])
-                    for p in ["identity", "sdl", "depth", "kept", "co_overflow", "big", "errors"]:
-                        self.exe[("exp-big", p)] = self.compile("exp-big", big, p, "exp",
-                                                                {"BOTLISH_EXPERIMENT_MAIN_STACK": self.big})
+                for p, exe in self.main_stack_control(["depth", "kept", "co_overflow", "big"]).items():
+                    self.exe[("main-8mib", p)] = exe
+        if self.args.exp:
+            # Candidate B's dispatcher (the census's history): the experimental build.
+            exp = self.stage("exp", ["identity", "dispatch", "runonmain", "depth", "co_overflow"], dispatch=True)
+            for p in ["identity", "dispatch", "runonmain", "depth", "co_overflow"]:
+                self.exe[("exp", p)] = self.compile("exp", exp, p, "exp")
+
+    def main_stack_control(self, programs):
+        """The isolated control of the 8 MiB main stack (MAIN-THREAD-STARTUP-MILESTONE-1.md, section 16): each
+        PROGRAM's main-thread program object (native::object -startup main-thread, the checkout's driver), linked
+        as the system linker links an Apple executable (codegen/aot.rs's system_link_args: -arch arm64, the
+        deployment target, -dead_strip, the object, the runtime archive and its system libraries) but without
+        LC_MAIN's -stack_size: the process's default main stack. Not a product -- no command line makes one --
+        only the measure of what the reservation buys. {PROGRAM: executable}."""
+        d = self.stage("main-8mib", programs)
+        checkout = Path(self.args.checkout)
+        runtime = checkout / "native/target/release/libbotlish_runtime.a"
+        made = {}
+        for p in programs:
+            obj, exe = d / f"{p}.o", d / p
+            script = d / f"{p}-object.tcl"
+            script.write_text(f"source {{{checkout / 'native/native.tcl'}}}\n"
+                              f"native::object [surface::readProgramFile {{{d / (p + '.bot')}}} -warnings off] {{{obj}}} -startup main-thread\n")
+            if not self.build(f"main-8mib/{p}.o", [self.args.tclsh, script]):
+                made[p] = None
+                continue
+            ok = self.build(f"main-8mib/{p}", ["clang", "-arch", "arm64", "-mmacosx-version-min=11.0", "-Wl,-dead_strip",
+                                               "-o", exe, obj, runtime, "-liconv", "-lSystem", "-lc", "-lm"])
+            made[p] = exe if ok and exe.exists() else None
+        return made
 
     def main_stack_choice(self):
         """The LC_MAIN stack size the experiment links with (section 11): the worker's own 1 GiB when the kernel
@@ -670,6 +714,36 @@ class Census:
             return "FAILED-CORRECTNESS", dict(facts, problem=bad), False
         return ("EXECUTED-THREAD" if ok else "FAILED-CORRECTNESS"), facts, ok
 
+    def classify_lcmain(self, r, expect, name):
+        """otool -l of an executable: its LC_MAIN's stacksize, against EXPECT's."""
+        text = r["stdout"]
+        at = text.find("cmd LC_MAIN")
+        m = re.search(r"stacksize (\d+)", text[at:]) if at >= 0 else None
+        facts = {"status": r["status"], "lc_main": at >= 0, "stacksize": int(m.group(1)) if m else None,
+                 "load_commands": len(re.findall(r"^Load command \d+$", text, re.M))}
+        ok = r["status"] == 0 and facts["stacksize"] == expect.get("stacksize")
+        return ("EXECUTED-THREAD" if ok else "FAILED-CORRECTNESS"), facts, ok
+
+    def classify_deps(self, r, expect, name):
+        """otool -L of an executable: none of its dynamic libraries names EXPECT's absent word."""
+        libraries = [l.strip().split(" (")[0] for l in r["stdout"].splitlines()[1:] if l.strip()]
+        facts = {"status": r["status"], "libraries": libraries}
+        ok = r["status"] == 0 and bool(libraries) and not any(expect["absent"] in l for l in libraries)
+        return ("EXECUTED-THREAD" if ok else "FAILED-CORRECTNESS"), facts, ok
+
+    def classify_report(self, r, expect, name):
+        """The runtime's startup report (BOTLISH_NATIVE_STARTUP_REPORT; runtime::aot's startup_lines): the policy,
+        whether the thread is the process's main thread, the stack's usable and guard bytes."""
+        path = Path(expect["file"])
+        lines = path.read_text().splitlines() if path.exists() else []
+        tail = {l.split(" ", 1)[0]: l.split(" ", 1)[1] for l in lines[-3:] if " " in l}
+        usable, guard = (int(w) for w in tail.get("stack", "0 0").split()[:2])
+        facts = {"status": r["status"], "startup": tail.get("startup"), "process_main_thread": tail.get("process-main-thread"),
+                 "usable_bytes": usable, "guard_bytes": guard, "report_lines": len(lines)}
+        ok = (r["status"] == 0 and facts["startup"] == expect["startup"] and facts["process_main_thread"] == expect["main"]
+              and guard > 0 and (expect.get("usable") is None or usable == expect["usable"]))
+        return ("EXECUTED-THREAD" if ok else "FAILED-CORRECTNESS"), facts, ok
+
     def classify_refusal(self, r, expect, name):
         text = r["stdout"] + r["stderr"]
         refused = r["status"] != 0 and all(w in text for w in expect.get("words", []))
@@ -747,8 +821,14 @@ class Census:
         want = lambda g: not only or g in only
         exp = lambda p: e.get(("exp", p))
         prod = lambda p: e.get(("prod", p))
-        big = lambda p: e.get(("exp-big", p))
-        main = {"BOTLISH_EXPERIMENT_THREAD": "main", "BOTLISH_EXPERIMENT_REPORT": "1"}
+        # Candidate A in production (MAIN-THREAD-STARTUP-MILESTONE-1.md): main-thread executables, the policy fixed
+        # in them -- no environment selects it.
+        prodmain = lambda p: e.get(("main", p))
+        mainrustc = lambda p: e.get(("main-rustc", p))
+        control = lambda p: e.get(("main-8mib", p))
+        # On Linux the policy is refused when the executable is emitted: a main-thread row is a predicted
+        # FAILED-BUILD there.
+        refused = {} if APPLE else {"build_refused": "NATIVE UNSUPPORTED startup"}
         worker = {"BOTLISH_EXPERIMENT_REPORT": "1"}
         dispatch = {"BOTLISH_EXPERIMENT_THREAD": "dispatch", "BOTLISH_EXPERIMENT_REPORT": "1"}
         gc = {"BOTLISH_NATIVE_GC_STRESS": "1"}
@@ -778,11 +858,12 @@ class Census:
                           [self.args.tclsh, Path(self.args.checkout) / "main.tcl", "-warnings", "off", "-backend",
                            "cranelift", self.work / "prod/identity.bot"], "identity", expect={"main": False},
                           note="main.tcl -backend cranelift: a program that calls C runs as a linked executable (driver protocol)")
+            self.case("id-botlish-main", "identity", [prodmain("identity")], "identity", expect={"main": True, **refused},
+                      build="main/identity", note="-native-startup main-thread, the production compiler's (system linker)")
+            self.case("id-botlish-main-rustc", "identity", [mainrustc("identity")], "identity", expect={"main": True, **refused},
+                      build="main-rustc/identity", note="-native-startup main-thread, rustc-linked")
             if self.args.exp:
                 self.case("id-botlish-exp-worker", "identity", [exp("identity")], "identity", env=worker, expect={"main": False})
-                self.case("id-botlish-exp-main", "identity", [exp("identity")], "identity", env=main,
-                          expect={"main": True, "fails": not APPLE},
-                          note="Linux: the guard refuses the main thread's stack (no confirmed guard)" if not APPLE else "")
                 self.case("id-botlish-exp-dispatch", "identity", [exp("identity")], "identity", env=dispatch, expect={"main": False})
 
         if want("stack"):
@@ -833,102 +914,130 @@ class Census:
             self.case("bl-worker-headless-gc", "botlish-baseline", [prod("sdl")], "graphical", env={**dummy, **gc},
                       expect={"class": "EXECUTED-HEADLESS", "headless": True})
 
-        if want("candidate-a") and self.args.exp:
-            cocoa = {"class": "EXECUTED-COCOA", "color": (255, 0, 255)} if APPLE else {"class": "FAILED-CORRECTNESS"}
-            self.case("a-main-cocoa", "candidate-a", [exp("sdl")], "graphical", env=main, capture=True, expect=cocoa)
-            self.case("a-main-cocoa-gc", "candidate-a", [exp("sdl")], "graphical", env={**main, **gc}, expect=cocoa, timeout=180)
-            self.case("a-main-headless", "candidate-a", [exp("sdl")], "graphical", env={**main, **dummy},
-                      expect={"class": "EXECUTED-HEADLESS" if APPLE else "FAILED-CORRECTNESS", "headless": True})
-            self.case("a-worker-cocoa", "candidate-a", [exp("sdl")], "graphical", env=worker,
+        if want("candidate-a"):
+            cocoa = {"class": "EXECUTED-COCOA", "color": (255, 0, 255)} if APPLE else refused
+            self.case("a-main-cocoa", "candidate-a", [prodmain("sdl")], "graphical", capture=True, expect=cocoa, build="main/sdl")
+            self.case("a-main-cocoa-gc", "candidate-a", [prodmain("sdl")], "graphical", env=gc, expect=cocoa, timeout=180,
+                      build="main/sdl")
+            self.case("a-main-headless", "candidate-a", [prodmain("sdl")], "graphical", env=dummy,
+                      expect={"class": "EXECUTED-HEADLESS", "headless": True} if APPLE else refused, build="main/sdl")
+            self.case("a-main-headless-gc", "candidate-a", [prodmain("sdl")], "graphical", env={**dummy, **gc},
+                      expect={"class": "EXECUTED-HEADLESS", "headless": True} if APPLE else refused, build="main/sdl")
+            self.case("a-worker-cocoa", "candidate-a", [prod("sdl")], "graphical",
                       expect={"class": "FAILED-CORRECTNESS"} if APPLE else {"class": "UNAVAILABLE-GUI"},
-                      note="the experimental build in the production model")
-            if big("sdl"):
-                self.case("a-main-big-cocoa", "candidate-a", [big("sdl")], "graphical", env=main, expect=cocoa,
-                          note=f"linked with -stack_size {self.big}")
-            # Runtime safety on each thread (sections 8, 9, 11-14).
+                      note="the positive control: the same program, the default worker startup")
+            if APPLE:
+                self.case("a-main-rustc-cocoa", "candidate-a", [mainrustc("sdl")], "graphical", expect={"class": "EXECUTED-COCOA"},
+                          build="main-rustc/sdl", note="rustc-linked: Rust's own main, then aot::start_linked")
+            # Runtime safety on each thread (sections 8, 9, 11-14 of the census).
             depths = {"down": [10000, 100000, 1000000], "keep": [10000, 100000], "wide": [10000, 100000],
                       "rec": [10000, 100000]}
             expected = {"down": lambda n: n, "keep": lambda n: 2 * n, "wide": lambda n: 0, "rec": lambda n: n}
-            for label, env, exe in (("worker", worker, exp), ("main", main, exp), ("main-big", main, big)):
-                if label == "main-big" and not big("depth"):
+            for label, exe in (("worker", prod), ("main", prodmain), ("main-rustc", mainrustc), ("main-8mib", control)):
+                if label == "main-8mib" and not APPLE:
                     continue
-                # Linux: the guard refuses the main thread (glibc reports no guard): every main-thread run ends at startup.
-                refused = {"fails": True} if not APPLE and label.startswith("main") else {}
-                # The default main stack is 8 MiB: a recursion the worker's 1 GiB holds may exhaust it, which the
-                # runtime must report as NATIVE LIMIT STACK (run 40825370442 measured which).
-                small = {"or_overflow": True} if label == "main" else {}
-                for shape, ns in depths.items():
+                where = {"worker": "prod", "main": "main", "main-rustc": "main-rustc", "main-8mib": "main-8mib"}[label]
+                no = {} if label == "worker" else refused
+                # The 8 MiB control: three recursions the worker's 1 GiB and the 512 MiB main-thread stack hold
+                # exhaust it, which the runtime reports as NATIVE LIMIT STACK (the census's run 40825370442
+                # measured which: its section 11).
+                exhausts = {("down", 1000000), ("wide", 100000), ("rec", 100000)} if label == "main-8mib" else set()
+                shapes = depths if label != "main-rustc" else {"down": [1000000]}
+                for shape, ns in shapes.items():
                     for n in ns:
+                        want = {"overflow": True} if (shape, n) in exhausts else {"value": expected[shape](n)}
                         self.case(f"a-{label}-depth-{shape}-{n}", "candidate-a", [exe("depth"), shape, str(n)], "runtime",
-                                  env=env, expect={"value": expected[shape](n), **small, **refused}, timeout=120)
+                                  expect={**want, **no}, timeout=120, build=f"{where}/depth")
                     self.case(f"a-{label}-overflow-{shape}", "candidate-a", [exe("depth"), shape, "0"], "runtime",
-                              env=env, expect={"overflow": True, **refused}, timeout=180)
+                              expect={"overflow": True, **no}, timeout=180, build=f"{where}/depth")
+                if label == "main-rustc":
+                    self.case(f"a-{label}-kept-gc", "candidate-a", [exe("kept")], "runtime", env=gc,
+                              expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]], **no}, timeout=180,
+                              build=f"{where}/kept")
+                    continue
                 self.case(f"a-{label}-keep-gc", "candidate-a", [exe("depth"), "keep", "3000"], "runtime",
-                          env={**env, **gc}, expect={"value": 6000, **refused}, timeout=300)
-                self.case(f"a-{label}-kept", "candidate-a", [exe("kept")], "runtime", env=env,
-                          expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]], **refused})
-                self.case(f"a-{label}-kept-gc", "candidate-a", [exe("kept")], "runtime", env={**env, **gc},
-                          expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]], **refused}, timeout=180)
-                self.case(f"a-{label}-co-overflow", "candidate-a", [exe("co_overflow")], "runtime", env=env,
-                          expect={"overflow": True, **refused}, timeout=180)
-                if label != "main-big":
-                    self.case(f"a-{label}-fault", "candidate-a", [exe("fault")], "runtime", env=env, expect={"fault": True, **refused})
+                          env=gc, expect={"value": 6000, **no}, timeout=300, build=f"{where}/depth")
+                self.case(f"a-{label}-kept", "candidate-a", [exe("kept")], "runtime",
+                          expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]], **no}, build=f"{where}/kept")
+                self.case(f"a-{label}-kept-gc", "candidate-a", [exe("kept")], "runtime", env=gc,
+                          expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]], **no}, timeout=180,
+                          build=f"{where}/kept")
+                self.case(f"a-{label}-co-overflow", "candidate-a", [exe("co_overflow")], "runtime",
+                          expect={"overflow": True, **no}, timeout=180, build=f"{where}/co_overflow")
+                if label in ("worker", "main"):
+                    self.case(f"a-{label}-fault", "candidate-a", [exe("fault")], "runtime", expect={"fault": True, **no},
+                              build=f"{where}/fault")
                 # Large frames: finite, under GC stress, and exhausted. The worker's overflow runs on an 8 MiB worker
-                # (BOTLISH_NATIVE_STACK_BYTES) so that it is the main thread's size and ends in seconds.
-                self.case(f"a-{label}-bigframe-100", "candidate-a", [exe("big"), "100"], "runtime", env=env,
-                          expect={"value": big_value(100), **refused}, timeout=120)
-                self.case(f"a-{label}-bigframe-gc", "candidate-a", [exe("big"), "8"], "runtime", env={**env, **gc},
-                          expect={"value": big_value(8), **refused}, timeout=600)
+                # (BOTLISH_NATIVE_STACK_BYTES) so that it ends in seconds.
+                self.case(f"a-{label}-bigframe-100", "candidate-a", [exe("big"), "100"], "runtime",
+                          expect={"value": big_value(100), **no}, timeout=120, build=f"{where}/big")
+                self.case(f"a-{label}-bigframe-gc", "candidate-a", [exe("big"), "8"], "runtime", env=gc,
+                          expect={"value": big_value(8), **no}, timeout=600, build=f"{where}/big")
                 small = {"BOTLISH_NATIVE_STACK_BYTES": str(8 << 20)} if label == "worker" else {}
                 self.case(f"a-{label}-bigframe-overflow", "candidate-a", [exe("big"), "0"], "runtime",
-                          env={**env, **small}, expect={"overflow": True, **refused}, timeout=300)
+                          env=small, expect={"overflow": True, **no}, timeout=300, build=f"{where}/big")
 
-        if want("semantics") and self.args.exp:
+        if want("semantics"):
             # How a program leaves the process (section 21), on the worker and on the main thread, through both
             # linkers' startups, plainly and in the driver protocol's mode.
-            runs = [("worker", worker, exp), ("main", main, exp), ("main-rustc", main, lambda p: e.get(("exp-rustc", p)))]
-            if APPLE and big("errors"):
-                runs.append(("main-big", main, big))
-            for label, env, exe in runs:
-                no = {"fails": True} if not APPLE and label.startswith("main") else {}
+            runs = [("worker", {}, prod, "prod"), ("main", {}, prodmain, "main"), ("main-rustc", {}, mainrustc, "main-rustc")]
+            for label, env, exe, where in runs:
+                no = refused if label.startswith("main") else {}
                 self.case(f"s-{label}-declared", "semantics", [exe("errors"), "declared"], "process", env=env,
-                          expect={"status": 0, "stdout": r"^1008$", **no})
+                          expect={"status": 0, "stdout": r"^1008$", **no}, build=f"{where}/errors")
                 self.case(f"s-{label}-runtime", "semantics", [exe("errors"), "runtime"], "process", env=env,
-                          expect={"status": 1, "stdout": r"^$", "stderr": r"\+: expected int, got \[true\] \(CORE SEMANTIC TYPE\)", **no})
+                          expect={"status": 1, "stdout": r"^$", "stderr": r"\+: expected int, got \[true\] \(CORE SEMANTIC TYPE\)", **no},
+                          build=f"{where}/errors")
                 result = self.work / f"result-{label}.txt"
                 self.case(f"s-{label}-protocol", "semantics", [exe("errors"), "runtime"], "process",
                           env={**env, "BOTLISH_NATIVE_RESULT": str(result)},
                           expect={"status": 0, "stdout": r"^$", "file": str(result),
                                   "file_re": r"^error \{CORE SEMANTIC TYPE\} \{\+: expected int, got \[true\]\}$", **no},
-                          note="the driver protocol: the error is the result file's line, the status 0")
+                          build=f"{where}/errors", note="the driver protocol: the error is the result file's line, the status 0")
                 runs3 = self.work / f"runs-{label}.txt"
                 self.case(f"s-{label}-protocol-runs", "semantics", [exe("errors"), "declared"], "process",
                           env={**env, "BOTLISH_NATIVE_RESULT": str(runs3), "BOTLISH_NATIVE_RUNS": "3"},
                           expect={"status": 0, "file": str(runs3),
-                                  "file_re": r"^times \d+ \d+ \d+\ntiming \d+ \d+ 3 \d+\nvalue \{int 1008\}$", **no})
+                                  "file_re": r"^times \d+ \d+ \d+\ntiming \d+ \d+ 3 \d+\nvalue \{int 1008\}$", **no},
+                          build=f"{where}/errors")
                 self.case(f"s-{label}-startup-report-io", "semantics", [exe("errors"), "value"], "process",
                           env={**env, "BOTLISH_NATIVE_STARTUP_REPORT": "/nonexistent/startup-report"},
-                          expect={"status": 2, "stderr": r"NATIVE IO"},
+                          expect={"status": 2, "stderr": r"NATIVE IO", **no}, build=f"{where}/errors",
                           note="the startup report is written before the guard is installed: the same on every host")
                 self.case(f"s-{label}-overflow-line", "semantics", [exe("depth"), "down", "0"], "process", env=env,
                           expect={"status": 1, "stderr": r"^error \{NATIVE LIMIT STACK\} \{native stack exhausted: too many nested calls\}$", **no},
-                          timeout=180)
+                          timeout=180, build=f"{where}/depth")
             if APPLE:
                 # SIGTERM while SDL runs: SDL's own handler (SDL_INIT_EVENTS) turns it into SDL_EVENT_QUIT, on any
                 # thread; the program then ends normally.
-                self.case("s-main-sigterm-sdl", "semantics", [exp("sdl")], "graphical", env=main,
+                self.case("s-main-sigterm-sdl", "semantics", [prodmain("sdl")], "graphical",
                           signal_after=(1.0, signal.SIGTERM), expect={"class": "EXECUTED-COCOA"},
                           note="SIGTERM one second in: SDL's handler makes it a quit event")
             # No SDL: the runtime leaves SIGTERM and SIGINT (Ctrl+C) at their defaults on every thread.
-            for label, env in (("worker", worker), ("main", main)):
+            for label, exe, where in (("worker", prod, "prod"), ("main", prodmain, "main")):
                 for sig in (signal.SIGTERM, signal.SIGINT):
-                    self.case(f"s-{label}-{sig.name.lower()}-c-call", "semantics", [exp("sleep")], "signal", env=env,
-                              signal_after=(1.0, sig), expect={"signal": int(sig), **({"fails": True} if not APPLE and label == "main" else {})},
-                              timeout=30, note="a program in a 5 s C call, signalled after 1 s")
-            # The rustc linker's startup on the main thread, graphically.
-            if APPLE:
-                self.case("a-main-rustc-cocoa", "candidate-a", [e.get(("exp-rustc", "sdl"))], "graphical", env=main,
-                          expect={"class": "EXECUTED-COCOA"}, note="rustc-linked: Rust's own main, then aot::run")
+                    self.case(f"s-{label}-{sig.name.lower()}-c-call", "semantics", [exe("sleep")], "signal",
+                              signal_after=(1.0, sig), expect={"signal": int(sig), **(refused if label == "main" else {})},
+                              timeout=30, build=f"{where}/sleep", note="a program in a 5 s C call, signalled after 1 s")
+
+        if want("startup") and APPLE:
+            # What makes a main-thread executable one (MAIN-THREAD-STARTUP-MILESTONE-1.md): LC_MAIN's 512 MiB
+            # reservation, read from the Mach-O itself (otool -l), with either linker -- and none in a worker
+            # executable or in the 8 MiB control; no SDL3 dylib in the graphical executable (otool -L); the
+            # runtime's own startup report: the policy, the thread and the stack it found there.
+            for name, exe, size in (("lc-main-system", prodmain("identity"), 0x20000000),
+                                    ("lc-main-rustc", mainrustc("identity"), 0x20000000),
+                                    ("lc-worker", prod("identity"), 0), ("lc-control-8mib", control("depth"), 0)):
+                self.case(name, "startup", ["otool", "-l", exe] if exe else [None], "lcmain", expect={"stacksize": size})
+            sdl = prodmain("sdl")
+            self.case("deps-main-sdl", "startup", ["otool", "-L", sdl] if sdl else [None], "deps", expect={"absent": "SDL3"})
+            for name, exe, want_startup, want_main, usable in (
+                    ("report-main", prodmain("identity"), "main-thread", "1", 0x20000000),
+                    ("report-main-rustc", mainrustc("identity"), "main-thread", "1", 0x20000000),
+                    ("report-worker", prod("identity"), "worker", "0", None)):
+                path = self.work / f"{name}.txt"
+                self.case(name, "startup", [exe], "report", env={"BOTLISH_NATIVE_STARTUP_REPORT": str(path)},
+                          expect={"file": str(path), "startup": want_startup, "main": want_main, "usable": usable})
 
         if want("candidate-b") and self.args.exp:
             self.case("b-dispatch-cocoa", "candidate-b", [exp("dispatch")], "dispatch", env={**dispatch, **gui_env}, capture=False,
@@ -972,7 +1081,11 @@ class Census:
             self.case("pc-dummy-not-cocoa", "controls", [w / "csdl", "main"], "graphical", env=dummy,
                       expect={"class": "EXECUTED-HEADLESS", "headless": True},
                       note="a dummy-driver run must never be classified EXECUTED-COCOA")
+            self.case("pc-main-baddriver", "controls", [prodmain("sdl")], "graphical", env={"SDL_VIDEODRIVER": "nonexistent"},
+                      expect={"class": "FAILED-CORRECTNESS", "headless": True} if APPLE else refused, build="main/sdl",
+                      note="the production main-thread executable with a video driver that does not exist: never a window")
             if self.args.exp:
+                main = {"BOTLISH_EXPERIMENT_THREAD": "main", "BOTLISH_EXPERIMENT_REPORT": "1"}
                 self.case("pc-main-noguard-overflow", "controls", [exp("depth"), "down", "0"], "runtime",
                           env={**main, "BOTLISH_EXPERIMENT_NO_GUARD": "1"}, expect={"overflow": True, "fails": True},
                           timeout=120, note="no guard on the main thread: the overflow is the raw fault, not the line")
@@ -984,31 +1097,28 @@ class Census:
         if want("timing"):
             n = self.args.repeat
             self.case("t-id-prod-worker", "timing", [prod("identity")], "identity", expect={"main": False}, repeat=n)
+            self.case("t-id-main", "timing", [prodmain("identity")], "identity", expect={"main": True, **refused}, repeat=n,
+                      build="main/identity")
+            self.case("t-a-main-sdl", "timing", [prodmain("sdl")], "graphical", env={} if APPLE else dummy,
+                      expect={"class": "EXECUTED-COCOA"} if APPLE else refused, repeat=n, build="main/sdl")
+            self.case("t-a-main-sdl-headless", "timing", [prodmain("sdl")], "graphical", env=dummy,
+                      expect={"class": "EXECUTED-HEADLESS", "headless": True} if APPLE else refused, repeat=n, build="main/sdl")
+            self.case("t-a-worker-sdl-headless", "timing", [prod("sdl")], "graphical", env=dummy,
+                      expect={"class": "EXECUTED-HEADLESS", "headless": True}, repeat=n)
+            self.case("t-a-main-sdl-headless-gc", "timing", [prodmain("sdl")], "graphical", env={**dummy, **gc},
+                      expect={"class": "EXECUTED-HEADLESS", "headless": True} if APPLE else refused, repeat=n, build="main/sdl")
+            self.case("t-a-worker-sdl-headless-gc", "timing", [prod("sdl")], "graphical", env={**dummy, **gc},
+                      expect={"class": "EXECUTED-HEADLESS", "headless": True}, repeat=n)
+            self.case("t-a-main-kept-gc", "timing", [prodmain("kept")], "runtime", env=gc,
+                      expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]], **refused},
+                      repeat=n, timeout=180, build="main/kept")
+            self.case("t-a-worker-kept-gc", "timing", [prod("kept")], "runtime", env=gc,
+                      expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}, repeat=n, timeout=180)
             if self.args.exp:
-                self.case("t-id-exp-main", "timing", [exp("identity")], "identity", env=main,
-                          expect={"main": True, "fails": not APPLE}, repeat=n)
                 self.case("t-id-exp-dispatch", "timing", [exp("identity")], "identity", env=dispatch,
                           expect={"main": False}, repeat=n)
-                self.case("t-a-main-sdl", "timing", [exp("sdl")], "graphical", env=main if APPLE else {**main, **dummy},
-                          expect={"class": ("EXECUTED-COCOA" if APPLE else "FAILED-CORRECTNESS")}, repeat=n)
-                self.case("t-a-main-sdl-headless", "timing", [exp("sdl")], "graphical", env={**main, **dummy},
-                          expect={"class": "EXECUTED-HEADLESS" if APPLE else "FAILED-CORRECTNESS", "headless": True}, repeat=n)
-                self.case("t-a-worker-sdl-headless", "timing", [exp("sdl")], "graphical", env={**worker, **dummy},
-                          expect={"class": "EXECUTED-HEADLESS", "headless": True}, repeat=n)
-                self.case("t-a-main-sdl-headless-gc", "timing", [exp("sdl")], "graphical", env={**main, **dummy, **gc},
-                          expect={"class": "EXECUTED-HEADLESS" if APPLE else "FAILED-CORRECTNESS", "headless": True}, repeat=n)
-                self.case("t-a-worker-sdl-headless-gc", "timing", [exp("sdl")], "graphical", env={**worker, **dummy, **gc},
-                          expect={"class": "EXECUTED-HEADLESS", "headless": True}, repeat=n)
-                if APPLE and big("sdl"):
-                    self.case("t-a-main-big-sdl", "timing", [big("sdl")], "graphical", env=main,
-                              expect={"class": "EXECUTED-COCOA"}, repeat=n)
                 self.case("t-b-dispatch", "timing", [exp("dispatch")], "dispatch", env=dispatch if APPLE else {**dispatch, **dummy},
                           expect={"headless": not APPLE}, repeat=n, timeout=120)
-                self.case("t-a-main-kept-gc", "timing", [exp("kept")], "runtime", env={**main, **gc},
-                          expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]], "fails": not APPLE},
-                          repeat=n, timeout=180)
-                self.case("t-a-worker-kept-gc", "timing", [exp("kept")], "runtime", env={**worker, **gc},
-                          expect={"value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}, repeat=n, timeout=180)
             self.case("t-c-main", "timing", [w / "csdl", "main"], "graphical", env={} if APPLE else dummy,
                       expect={"class": "EXECUTED-COCOA" if APPLE else "EXECUTED-HEADLESS"}, repeat=n)
             self.case("t-c-callbacks", "timing", [w / "csdl_callbacks"], "callbacks", env={} if APPLE else dummy,
@@ -1068,6 +1178,11 @@ class Census:
                 cell = lambda s: "-" if not s else f"{s['median']} [{s['min']}, {s['max']}]"
                 lines.append(f"| {r['name']} | {cell(t['wall_ms'])} | {cell(t['entry_since_exec_ms'])} | {cell(t['sdl_init_ms'])} | "
                              f"{cell(t['frame_ms'])} | {cell(t.get('pump_us'))} | {cell(t['shutdown_ms'])} | {cell(t['threads_max'])} |")
+        built = [(k, b) for k, b in sorted(self.builds.items())
+                 if k.split("/")[0] in ("prod", "prod-rustc", "main", "main-rustc", "main-8mib") and b["ok"]]
+        if built:
+            lines += ["", "## Build times (one compiler process each: front end, object, link)", "", "| build | ms |", "|---|---|"]
+            lines += [f"| {k} | {b['ms']} |" for k, b in built]
         sizes = {k: v for k, v in ((f"{a}/{p}", x.stat().st_size) for (a, p), x in getattr(self, "exe", {}).items() if x)}
         lines += ["", "## Executable sizes (bytes)", "", "| executable | bytes |", "|---|---|"]
         lines += [f"| {k} | {v} |" for k, v in sorted(sizes.items())]
@@ -1091,6 +1206,7 @@ def main():
     ap.add_argument("--tclsh", default="tclsh9.0")
     ap.add_argument("--repeat", type=int, default=10)
     ap.add_argument("--only", default="")
+    ap.add_argument("--strict", action="store_true")
     args = ap.parse_args()
     c = Census(args)
     c.environment()
@@ -1098,6 +1214,10 @@ def main():
     c.botlish()
     c.cases()
     c.report()
+    unexpected = [r["name"] for r in c.records if not r.get("expected")]
+    if args.strict and unexpected:
+        log(f"FAIL: {len(unexpected)} cases not as predicted: {', '.join(unexpected)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
