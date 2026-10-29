@@ -753,6 +753,14 @@ proc hir::structs::apply {decls} {
             # declaration's entry is unchanged.
             dict set entry context 1
         }
+        if {[dict exists $decl identity]} {
+            # Present only for a struct that declares its semantic identity
+            # (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md): {form FORM
+            # fields {FIELD ...}}.
+            set identity [ValidateIdentity $decl $id $types]
+            dict set registry $id identity $identity
+            dict set entry identity $identity
+        }
         lappend entries $entry
     }
     # (Affinity read while field types were still being resolved is stale.)
@@ -802,8 +810,195 @@ proc hir::structs::applyEntries {entries} {
             opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque]}] \
             context [expr {[dict exists $entry context] && [dict get $entry context]}] names $names \
             types [dict get $entry fields] spans {} span {} slots $slotNames constraints $constraints]
+        if {[dict exists $entry identity]} {
+            dict set registry [dict get $entry id] identity [dict get $entry identity]
+        }
     }
     set affinity [dict create]
+}
+
+# ---------------------------------------------------------------------------
+# Semantic identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md)
+#
+# An opaque struct may declare what its values mean -- their *identity* --
+# apart from how they are stored, by one clause of its declaration:
+#
+#   identity members(F)            the elements of the List field F, in no
+#                                  order: two values are equal when F holds
+#                                  the same elements, as many times
+#   identity associations(K, V)    the pairs (K[i], V[i]) of the List fields
+#                                  K and V, in no order: two values are equal
+#                                  when they hold the same pairs
+#
+# Every other field is representation: no equality, hash or table hash reads
+# it. The language implementation defines the two forms -- equality is
+# multiset equality of the elements or pairs under Botlish `==`, both hashes
+# a commutative combination of the elements' or pairs' hashes (core/value.tcl,
+# core/hashing.tcl, native/src/runtime/ops.rs) -- so totality, coherence and
+# order independence hold by construction: no code of the owner runs. The
+# owner chooses the projection, and keeps its own invariants (distinct
+# members, distinct keys) that make multiset equality the set or map
+# equality it means. Only an opaque, immutable struct may declare one, and
+# only in its own declaration, so a type has exactly one identity and only
+# its owner decides it.
+
+# The identity forms: name -> the number of fields each takes.
+namespace eval hir::structs {
+    variable identityForms {members 1 associations 2}
+}
+
+# The identity of struct ID, {form FORM fields {FIELD ...}}, or "" when it
+# declares none (its equality and hashes are its fields', structurally).
+proc hir::structs::identityOf {id} {
+    variable registry
+    if {![dict exists $registry $id identity]} {
+        return ""
+    }
+    return [dict get $registry $id identity]
+}
+
+# What the runtimes read (core::value's identity test): {FORM {POSITION ...}}
+# -- the identity's form and its fields' slot positions -- or "" for a struct
+# of no declared identity, or no struct of the current registry.
+proc hir::structs::RuntimeIdentity {id} {
+    variable registry
+    if {$id eq "" || ![dict exists $registry $id identity]} {
+        return ""
+    }
+    set entry [dict get $registry $id]
+    set identity [dict get $entry identity]
+    return [list [dict get $identity form] [lmap field [dict get $identity fields] {
+        lsearch -exact [dict get $entry names] $field
+    }]]
+}
+
+# The labels Totality and diagnostics give an identity's fields, in order:
+# what a value's identity is made of, in the type's own terms -- never a
+# field's name, which is representation (an opaque struct's fields are its
+# owner's).
+proc hir::structs::IdentityLabels {form} {
+    switch -- $form {
+        members { return {members} }
+        associations { return {keys values} }
+    }
+    return {}
+}
+
+# The identity of struct declaration DECL (apply's; ID its identity, TYPES
+# its resolved field types {FIELD TYPE ...}), checked: {form FORM fields
+# {FIELD ...}}. Only an opaque struct may declare one (only its owner can
+# make its values, so the owner's invariants hold), never a context struct;
+# the form is one of identityForms with its number of fields, each a
+# distinct field of the struct whose type is a List; and every field of the
+# struct -- representation included -- is immutable (MutableComponent): an
+# identity is a value's meaning, which must not change under it.
+proc hir::structs::ValidateIdentity {decl id types} {
+    variable identityForms
+    set name [dict get $decl name]
+    set clause [dict get $decl identity]
+    set span [dict get $clause span]
+    if {!([dict exists $decl opaque] && [dict get $decl opaque])} {
+        Fail $span "struct \"$name\" declares an identity but is not opaque: only an opaque struct may define its equality by its contents (its owner alone makes its values, so the representation it projects is the owner's to keep consistent: declare it \"opaque struct $name\")"
+    }
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail $span "context struct \"$name\" cannot declare an identity: a context is installed and required by its type, never compared or hashed"
+    }
+    set form [dict get $clause form]
+    if {![dict exists $identityForms $form]} {
+        Fail [dict get $clause formSpan] "unknown identity form \"$form\" in struct \"$name\": the forms are members(FIELD) -- the elements of a List field, in no order -- and associations(KEYS, VALUES) -- the pairs of two List fields, in no order"
+    }
+    set fields [dict get $clause fields]
+    set want [dict get $identityForms $form]
+    if {[llength $fields] != $want} {
+        Fail $span "identity $form takes [expr {$want == 1 ? "one field" : "$want fields"}], got [llength $fields] in struct \"$name\""
+    }
+    set seen {}
+    foreach field $fields fieldSpan [dict get $clause fieldSpans] {
+        if {![dict exists $types $field]} {
+            Fail $fieldSpan "identity $form of struct \"$name\" names \"$field\", which is not a field of it"
+        }
+        if {$field in $seen} {
+            Fail $fieldSpan "identity $form of struct \"$name\" names field \"$field\" twice"
+        }
+        lappend seen $field
+        set type [dict get $types $field]
+        if {!([hir::types::IsList $type] && [llength $type] == 2)} {
+            Fail $fieldSpan "identity $form of struct \"$name\" names field \"$field\" of type [hir::types::show $type]: an identity field is a List (List\[T\]), whose elements are what the identity is made of"
+        }
+    }
+    foreach field [dict get $decl fields] {
+        set type [dict get $types [dict get $field name]]
+        set why [MutableComponent $type]
+        if {$why ne ""} {
+            Fail [dict get $field typeSpan] "struct \"$name\" declares an identity, so every value of it is an immutable value whose meaning never changes, but field \"[dict get $field name]\" ([hir::types::show $type]) holds $why"
+        }
+    }
+    return [dict create form $form fields $fields]
+}
+
+# The first mutable or affine component of TYPE, described ("" for none): a
+# MutableVector, a MutableArray, a coroutine handle, a C pointer or native
+# view or edit, or a struct holding one. A type slot or `any` is no
+# component of the declaration (an application decides its own values); a
+# struct that declares an identity is immutable by its own check.
+proc hir::structs::MutableComponent {type {seen {}}} {
+    if {$type eq "never" || [hir::types::IsFn $type] || [hir::types::IsImprint $type]
+            || [hir::types::IsTrait $type]} {
+        return ""
+    }
+    if {[hir::types::IsAffine $type]} {
+        return "an affine value"
+    }
+    switch -- [hir::types::kindOf $type] {
+        mutvec { return "a MutableVector" }
+        mutarray { return "a MutableArray" }
+        cptr { return "a C pointer or native view" }
+    }
+    if {[hir::types::IsList $type] && [llength $type] == 2} {
+        return [MutableComponent [lindex $type 1] $seen]
+    }
+    if {[hir::types::IsList $type]} {
+        foreach t [lindex $type 2] {
+            set why [MutableComponent $t $seen]
+            if {$why ne ""} {
+                return $why
+            }
+        }
+        return ""
+    }
+    if {[hir::types::IsSet $type]} {
+        return [MutableComponent [lindex $type 1] $seen]
+    }
+    if {[hir::types::IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            set why [MutableComponent $t $seen]
+            if {$why ne ""} {
+                return $why
+            }
+        }
+        return ""
+    }
+    if {[hir::types::IsNamedStruct $type]} {
+        set id [lindex $type 1]
+        if {$type in $seen || ![declared $id] || [identityOf $id] ne ""} {
+            return ""
+        }
+        if {[catch {AppliedFieldTypes $type} fields]} {
+            return ""
+        }
+        foreach {name t} $fields {
+            if {$t eq {}} continue
+            set why [MutableComponent $t [concat $seen [list $type]]]
+            if {$why ne ""} {
+                if {[isOpaque $id]} {
+                    # (An opaque struct's representation is its owner's.)
+                    return "[hir::types::show $type], a mutable value"
+                }
+                return "[hir::types::show $type], whose field \"$name\" holds $why"
+            }
+        }
+    }
+    return ""
 }
 
 # {SLOTS CONSTRAINTS}: the type slots of struct declaration DECL (apply's)
@@ -1367,3 +1562,6 @@ proc hir::structs::GenericLive {hir} {
 # nominal type only; whether an identity is opaque is this registry's
 # knowledge (OPAQUE-STRUCTS.md).
 core::value::setOpaqueStructTest hir::structs::isOpaque
+# Likewise, equality and both hashes read a struct's declared identity from
+# this registry (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+core::value::setIdentityTest hir::structs::RuntimeIdentity

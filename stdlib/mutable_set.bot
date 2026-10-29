@@ -27,6 +27,11 @@
 #                                           exactly s's elements
 #   loop x in s:                            every element, in insertion order
 #                                           (or the last reorder's)
+#   s.freeze()                              the ImmutableSet[T] of s's
+#                                           current elements: an immutable
+#                                           value, equal and hashed by its
+#                                           members, which no later change
+#                                           of s reaches
 #
 # A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
 # copy, and mutating one copy never changes another. The mutating operations
@@ -48,6 +53,7 @@
 # keys): a set stores no value per element.
 import std::table_hash
 import std::ordered_table
+import std::immutable_set
 
 opaque struct MutableSet[T satisfies Hashable]:
     table: std::ordered_table::Table[T]
@@ -116,6 +122,17 @@ fn validate_order(s: MutableSet[T], candidate: MutableSet[T]) -> MutableSet[T] e
 fn reorder(place s: MutableSet[T], order: MutableSet[T]) -> unit:
     perm = s.table.arrangement(order.table)
     s.table.permute(perm)
+
+# ---------------------------------------------------------------------------
+# Freezing (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md)
+
+# The ImmutableSet of S's current elements: equal to another exactly when
+# their members are, and hashed by its members, whatever the order. S is a
+# value parameter, so nothing later done to the caller's set reaches it. The
+# intrinsic set deduplicates by hash, so this is O(n) expected (its elements
+# are distinct already).
+fn freeze(s: MutableSet[T]) -> ImmutableSet[T]:
+    std::immutable_set::from_list(std::ordered_table::live_keys(s.table))
 
 # ---------------------------------------------------------------------------
 # Representation access for std::mutable_map's order operations: internal to

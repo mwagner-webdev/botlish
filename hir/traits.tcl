@@ -80,15 +80,26 @@ namespace eval hir::traits {
     # known to have total (hir::types::Totality). A source program cannot
     # declare a witness of one, or a type or trait of its name.
     #
-    #   Hashable  total equality and total hashing, so equal values hash
-    #             equally: the key contract of the standard library's hash
-    #             structures. Its one operation is the public hash.
+    #   Hashable   total equality and total hashing, so equal values hash
+    #              equally: the key contract of the standard library's hash
+    #              structures. Its one operation is the public hash.
+    #   Equatable  total equality (REPRESENTATION-INDEPENDENT-VALUE-
+    #              IDENTITY.md): `==` of two such values never refuses
+    #              them. It has no operation (`==` is every value's), and
+    #              every Hashable type is Equatable: Hashable's witnesses
+    #              are its witnesses with total hashing too, and a view of
+    #              Hashable is Equatable (its guarantees include equality).
     variable intrinsics [dict create \
         Hashable [dict create \
             requirements {{name hash nameSpan {} span {} params {{name value type {trait Hashable} self 1}} result {type int self 0} errors {}}} \
             impls {hash hash} \
             witness hir::types::HashClass \
-            guarantees {equality hash}]]
+            guarantees {equality hash}] \
+        Equatable [dict create \
+            requirements {} \
+            impls {} \
+            witness hir::types::EqualityClass \
+            guarantees {equality}]]
 }
 
 # The names of the intrinsic traits.
@@ -118,6 +129,24 @@ proc hir::traits::intrinsicGuarantees {id} {
         return {}
     }
     return [dict get $intrinsics $id guarantees]
+}
+
+# 1 if intrinsic trait A refines intrinsic trait B: every operation B
+# guarantees total, A does, so every witness of A is one of B and a view of A
+# is accepted where B is expected (Hashable refines Equatable,
+# REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md). Only intrinsic traits
+# refine: a source trait's view satisfies its own trait alone.
+proc hir::traits::Refines {a b} {
+    variable intrinsics
+    if {$a eq $b || ![dict exists $intrinsics $a] || ![dict exists $intrinsics $b]} {
+        return 0
+    }
+    foreach operation [dict get $intrinsics $b guarantees] {
+        if {$operation ni [dict get $intrinsics $a guarantees]} {
+            return 0
+        }
+    }
+    return 1
 }
 
 # The declarations (declare's) of the intrinsic traits the syntax NODES and
@@ -970,7 +999,7 @@ proc hir::traits::SpanText {span} {
 proc hir::traits::Accept {type constraint} {
     set id [lindex $constraint 1]
     if {[hir::types::IsTrait $type]} {
-        if {[lindex $type 1] ne $id} {
+        if {[lindex $type 1] ne $id && ![Refines [lindex $type 1] $id]} {
             return 0
         }
         return [expr {[hir::types::IsTraitConstraint $type]
@@ -991,6 +1020,12 @@ proc hir::traits::EntryView {type constraint} {
     set id [lindex $constraint 1]
     if {[hir::types::IsView $type] && [hir::types::ViewTrait $type] eq $id} {
         return $type
+    }
+    if {[hir::types::IsView $type] && [Refines [hir::types::ViewTrait $type] $id]} {
+        # A view of a refining intrinsic trait (a Hashable view at an
+        # Equatable parameter) is the view of this one with the same hidden
+        # witness.
+        return [hir::types::MakeView $id [hir::types::ViewWitness $type]]
     }
     if {![hir::types::IsTrait $type] && $type ne "never" && [dict get [satisfies $type $id] ok]} {
         return [hir::types::MakeView $id [hir::types::canonical [hir::types::ForgetInferred $type]]]

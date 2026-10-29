@@ -4909,6 +4909,7 @@ proc surface::parser::StructDecl {pVar} {
     }
     Advance p
     set fields {}
+    set identity ""
     while {[Kind p] ne "DEDENT" && [Kind p] ne "EOF"} {
         if {[Kind p] eq "NEWLINE"} {
             Advance p
@@ -4917,6 +4918,17 @@ proc surface::parser::StructDecl {pVar} {
         set fieldToken [Peek p]
         if {[dict get $fieldToken kind] ne "IDENT"} {
             Fail $fieldToken "expected a field declaration \"name: Type\", found [Describe $fieldToken]"
+        }
+        if {[dict get $fieldToken value] eq "identity" && [Kind p 1] eq "IDENT"} {
+            # `identity FORM(FIELD, ...)`: the struct's semantic identity
+            # (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md). A field named
+            # `identity` is still `identity: Type`. Which forms exist and
+            # what they may name is hir/structs.tcl's.
+            if {$identity ne ""} {
+                Fail $fieldToken "duplicate \"identity\" clause in struct \"[dict get $name value]\" (a struct has at most one identity)"
+            }
+            set identity [IdentityClause p [dict get $name value]]
+            continue
         }
         Advance p
         if {[Kind p] ne ":"} {
@@ -4952,7 +4964,48 @@ proc surface::parser::StructDecl {pVar} {
         # unchanged.
         dict set node slots $slots
     }
+    if {$identity ne ""} {
+        # Likewise present only for a struct that declares its identity.
+        dict set node identity $identity
+    }
     return $node
+}
+
+# "identity" FORM "(" FIELD { "," FIELD } ")" NEWLINE, a clause of struct
+# NAME's body (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md): {form FORM
+# formSpan SPAN fields {FIELD ...} fieldSpans {SPAN ...} span SPAN}.
+proc surface::parser::IdentityClause {pVar name} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set form [Expect p IDENT "an identity form after \"identity\" (members or associations)"]
+    if {[Kind p] ne "("} {
+        Fail [Peek p] "expected \"(\" and the fields of identity [dict get $form value] in struct \"$name\", found [Describe [Peek p]]"
+    }
+    Advance p
+    set fields {}
+    set fieldSpans {}
+    while 1 {
+        set field [Expect p IDENT "a field name in identity [dict get $form value](...)"]
+        lappend fields [dict get $field value]
+        lappend fieldSpans [dict get $field span]
+        if {[Kind p] eq ","} {
+            Advance p
+            continue
+        }
+        break
+    }
+    if {[Kind p] ne ")"} {
+        Fail [Peek p] "expected \",\" or \")\" in identity [dict get $form value](...), found [Describe [Peek p]]"
+    }
+    Advance p
+    set span [SpanFrom p $start]
+    set next [Peek p]
+    if {[dict get $next kind] ne "NEWLINE"} {
+        Fail $next "expected end of line after the identity clause, found [Describe $next]"
+    }
+    Advance p
+    return [dict create form [dict get $form value] formSpan [dict get $form span] \
+        fields $fields fieldSpans $fieldSpans span $span]
 }
 
 # "[" typeSlot { "," typeSlot } [ "," ] "]" after the name of struct NAME

@@ -35,6 +35,40 @@ namespace eval core::immutableset {}
 # duplicates are of comparable kinds, never triggers this: see MINIMAL-
 # IMMUTABLE-SET.md's "Deduplication semantics").
 proc core::immutableset::Dedup {items} {
+    if {[llength $items] > $::core::value::pairwiseLimit} {
+        # Many items are deduplicated by hash (REPRESENTATION-INDEPENDENT-
+        # VALUE-IDENTITY.md): an item is compared only with the kept items
+        # of its hash, which are all the items it can equal (equal values
+        # hash equally), so the result is the pairwise one's in expected
+        # O(n). An item with no hash leaves it to the pairwise scan below,
+        # whose comparison refuses it as it always did.
+        set hashes {}
+        try {
+            foreach item $items {
+                lappend hashes [core::hashing::Fold public $item]
+            }
+        } trap {CORE SEMANTIC EQUALITY} {} {
+            set hashes ""
+        }
+        if {$hashes ne ""} {
+            set result {}
+            set kept [dict create]
+            foreach item $items h $hashes {
+                set seen 0
+                foreach existing [dict getdef $kept $h {}] {
+                    if {[core::value::equal $existing $item]} {
+                        set seen 1
+                        break
+                    }
+                }
+                if {!$seen} {
+                    lappend result $item
+                    dict lappend kept $h $item
+                }
+            }
+            return $result
+        }
+    }
     set result {}
     foreach item $items {
         set seen 0

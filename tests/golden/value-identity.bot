@@ -1,0 +1,307 @@
+# value-identity.bot -- representation-independent equality and hashing of
+# opaque immutable values (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md),
+# ported from tests/value-identity.test.
+#
+# * An opaque struct may declare its identity apart from its representation:
+#   `identity members(F)` (the elements of List field F, in no order) or
+#   `identity associations(K, V)` (the pairs of List fields K and V, in no
+#   order). `==` and both hashes read those entries and nothing else.
+# * Equality is multiset equality of the entries, so the other fields, the
+#   order and the representation history take no part; two declarations are
+#   two types. Identity composes through Lists, structs, sets and other
+#   identities.
+# * Equatable (total equality) and Hashable are decided per application by
+#   the identity's elements: a conditional witness. Hashable refines
+#   Equatable; the mutable collections are neither.
+
+# What a Botlish program cannot observe stays in the Tcl suite: the struct
+# registry and HIR text of an identity, interchange and compilation
+# isolation, the declaration checks (a struct declaration cannot sit in a
+# static compile block), that an Equatable view is not Hashable (a
+# trait-typed function cannot sit in one either), the private table hash (a privileged fixture
+# module) and its oracle, the run-time EQUALITY refusals, and every native
+# fact (veqtotal and hashtotal, allocation).
+import std::compiler
+import std::immutable_map
+import std::immutable_set
+import std::int
+import std::list
+import std::mutable_map
+import std::mutable_set
+import std::mutable_vector
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only): viDecls of the Tcl file.
+
+opaque struct Bag[T]:
+    items: List[T]
+    note: str
+    identity members(items)
+
+opaque struct Dict[K, V]:
+    ks: List[K]
+    junk: int
+    vs: List[V]
+    identity associations(ks, vs)
+
+opaque struct Plain:
+    items: List[int]
+    note: str
+
+opaque struct OtherBag[T]:
+    items: List[T]
+    identity members(items)
+
+fn bag(items: List[int], note: str) -> Bag[int]:
+    Bag[int] {items: items, note: note}
+
+fn other(items: List[int]) -> OtherBag[int]:
+    OtherBag[int] {items: items}
+
+fn dict(ks: List[str], vs: List[int], junk: int) -> Dict[str, int]:
+    Dict[str, int] {ks: ks, junk: junk, vs: vs}
+
+fn plain(items: List[int], note: str) -> Plain:
+    Plain {items: items, note: note}
+
+fn bags(xs: List[Bag[int]]) -> Bag[Bag[int]]:
+    Bag[Bag[int]] {items: xs, note: ""}
+
+fn int_bag(xs: List[List[int]], note: str) -> Bag[List[int]]:
+    Bag[List[int]] {items: xs, note: note}
+
+# vi-nested: a struct holding an identity value.
+struct Doc:
+    title: str
+    data: Dict[str, int]
+
+# vi-equality-not-hash: a non-identity field with no total equality.
+opaque struct WithDecimal:
+    xs: List[int]
+    d: DecimalRounded{minDecimalsPreserved: 2}
+    identity members(xs)
+
+fn with_decimal(xs: List[int]) -> WithDecimal:
+    WithDecimal {xs: xs, d: 0.25}
+
+# vi-equatable-conditional/rejected: a Bag of MutableVectors (no total
+# equality), whose own Equatable function the rejected block calls.
+fn vector_bag() -> Bag[MutableVector[int]]:
+    Bag[MutableVector[int]] {items: [], note: ""}
+
+# vi-equatable-slot: a slot constrained by Equatable.
+struct Box[T satisfies Equatable]:
+    x: T
+
+fn box_eq(a: Box[T], b: Box[T]) -> bool:
+    a.x == b.x
+
+# The trait-typed functions (top level); every rejected block calls one of
+# its own (HASHABLE-AND-KEYED-HASH.md, "Limitations": blocks sharing one
+# trait-polymorphic function are decided one plan at a time).
+fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn fp(x: Hashable) -> int:
+    hash(x)
+
+fn via(x: Hashable) -> bool:
+    same(x, x)
+
+fn same_vectors(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn same_maps(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn fp_sets(x: Hashable) -> int:
+    hash(x)
+
+fn ints(n: int) -> List[int]:
+    loop i from 0 to n:
+        i * 7
+
+fn rev(n: int) -> List[int]:
+    loop i down from n - 1 through 0:
+        i * 7
+
+fn names(n: int) -> List[str]:
+    loop i from 0 to n:
+        std::int::to_string(i)
+
+fn rnames(n: int) -> List[str]:
+    loop i down from n - 1 through 0:
+        std::int::to_string(i)
+
+fn rvals(n: int) -> List[int]:
+    loop i down from n - 1 through 0:
+        i
+
+fn plain_ints(n: int) -> List[int]:
+    loop i from 0 to n:
+        i
+
+fn plain_rev(n: int) -> List[int]:
+    loop i down from n - 1 through 0:
+        i
+
+# ---------------------------------------------------------------------------
+# Declarations
+
+fn register_declaration_tests():
+    # an identity is part of its struct's declaration: another module's opaque value cannot be constructed to fake one
+    fn b_vi_decl_owner_only() errors std::compiler::CompilerError:
+        static compile:
+            m = std::immutable_map::ImmutableMap[int, int] {keys: [1], vals: [2], hashes: [0], index: [0]}
+            m
+    std::test::rejects("vi-decl-owner-only", std::compiler::DiagnosticCode::OpaqueConstruction, b_vi_decl_owner_only)
+
+# ---------------------------------------------------------------------------
+# Equality
+
+fn register_equality_tests():
+    # members: equal when the List holds the same elements as many times, in any order; the other fields take no part
+    fn b_vi_members_equality() errors std::compiler::CompilerError:
+        static compile:
+            [
+                bag([1, 2, 3], "a") == bag([3, 1, 2], "b"),
+                bag([1, 2, 3], "a") == bag([1, 2, 4], "a"),
+                bag([1, 1, 2], "a") == bag([2, 1, 1], "b"),
+                bag([1, 1, 2], "a") == bag([1, 2, 2], "a"),
+                bag([1, 2], "a") == bag([1, 2, 2], "a"),
+                bag([], "a") == bag([], "b"),
+                plain([1, 2], "a") == plain([2, 1], "a"),
+                plain([1, 2], "a") == plain([1, 2], "b")
+            ]
+    std::test::value("vi-members-equality", [true, false, true, false, false, true, false, false], b_vi_members_equality)
+
+    # associations: equal when the same key-value pairs are held, in any order; a pair is a unit; the other fields take no part
+    fn b_vi_associations_equality() errors std::compiler::CompilerError:
+        static compile:
+            [
+                dict(["a", "b", "c"], [1, 2, 3], 1) == dict(["c", "a", "b"], [3, 1, 2], 9),
+                dict(["a", "b"], [1, 2], 1) == dict(["a", "b"], [2, 1], 1),
+                dict(["a", "b"], [1, 2], 1) == dict(["a", "c"], [1, 2], 1),
+                dict(["a", "b"], [1, 2], 1) == dict(["a"], [1], 1),
+                dict(["a", "b", "z"], [1, 2], 1) == dict(["b", "a"], [2, 1, 7], 1)
+            ]
+    std::test::value("vi-associations-equality", [true, false, false, false, true], b_vi_associations_equality)
+
+    # more than eight unmatched entries are matched by hash buckets: a reversed order, a duplicated element in place of another (twice), keys in another order with their values, a pair whose value differs
+    fn b_vi_hash_matching() errors std::compiler::CompilerError:
+        static compile:
+            [
+                bag(ints(40), "a") == bag(rev(40), "b"),
+                bag(ints(40), "a") == bag(std::list::append(rev(39), 0), "b"),
+                bag(std::list::append(ints(39), 7), "a") == bag(rev(40), "b"),
+                dict(names(30), ints(30), 0) == dict(rnames(30), rev(30), 0),
+                dict(names(30), ints(30), 0) == dict(rnames(30), rvals(30), 0),
+                hash(bag(ints(40), "a")) == hash(bag(rev(40), "b")),
+                hash(dict(names(30), ints(30), 0)) == hash(dict(rnames(30), rev(30), 0))
+            ]
+    std::test::value("vi-hash-matching", [true, false, false, true, false, true, true], b_vi_hash_matching)
+
+    # two declarations with the same identity form and entries are two types
+    fn b_vi_declarations_distinct() errors std::compiler::CompilerError:
+        static compile:
+            [bag([1], "a") == bag([1], "a"), other([1]) == other([1]), [bag([1], "a")] == [bag([1], "a")]]
+    std::test::value("vi-declarations-distinct", [true, true, true], b_vi_declarations_distinct)
+
+    # identity composes: a List of identity values, a struct holding one, an identity whose entries are identity values
+    fn b_vi_nested() errors std::compiler::CompilerError:
+        static compile:
+            [
+                [bag([1, 2], "a"), bag([3], "")] == [bag([2, 1], "b"), bag([3], "z")],
+                Doc {title: "t", data: dict(["a", "b"], [1, 2], 0)} == Doc {title: "t", data: dict(["b", "a"], [2, 1], 5)},
+                bags([bag([1, 2], ""), bag([3], "")]) == bags([bag([3], "x"), bag([2, 1], "y")]),
+                hash(bags([bag([1, 2], ""), bag([3], "")])) == hash(bags([bag([3], "x"), bag([2, 1], "y")])),
+                hash(Doc {title: "t", data: dict(["a", "b"], [1, 2], 0)}) == hash(Doc {title: "t", data: dict(["b", "a"], [2, 1], 5)})
+            ]
+    std::test::value("vi-nested", [true, true, true, true, true], b_vi_nested)
+
+    # an ImmutableSet of identity values deduplicates and compares them by identity, and a set of more than eight members is matched by hash
+    fn b_vi_intrinsic_set_members() errors std::compiler::CompilerError:
+        static compile:
+            [
+                std::immutable_set::from_list([bag([1, 2], "a"), bag([2, 1], "b"), bag([3], "c")]) == std::immutable_set::from_list([bag([3], ""), bag([1, 2], "")]),
+                std::immutable_set::contains(std::immutable_set::from_list([bag([1, 2], "a")]), bag([2, 1], "q")),
+                std::immutable_set::from_list(plain_ints(30)) == std::immutable_set::from_list(plain_rev(30)),
+                std::immutable_set::from_list(plain_ints(30)) == std::immutable_set::from_list(std::list::append(plain_rev(29), 31)),
+                std::immutable_set::from_list(std::list::append(plain_ints(30), 5)) == std::immutable_set::from_list(plain_ints(30))
+            ]
+    std::test::value("vi-intrinsic-set-members", [true, true, true, false, true], b_vi_intrinsic_set_members)
+
+# ---------------------------------------------------------------------------
+# Hashing
+
+fn register_hash_tests():
+    # the public hash of an identity value is fixed by its entries (deterministic across processes and backends)
+    fn b_vi_public_hash_pinned() errors std::compiler::CompilerError:
+        static compile:
+            [hash(bag([1, 2, 3], "x")), hash(dict(["a", "b", "c"], [1, 2, 3], 1))]
+    std::test::value("vi-public-hash-pinned", [2303140193253857579, 26301586116918609], b_vi_public_hash_pinned)
+
+    # the public hash of a value of no declared identity is unchanged: it hashes by its fields
+    fn b_vi_unrelated_hashes_unchanged() errors std::compiler::CompilerError:
+        static compile:
+            [hash(plain([1, 2], "a")) == hash(plain([2, 1], "a")), hash(plain([1, 2], "a")) == hash(plain([1, 2], "b"))]
+    std::test::value("vi-unrelated-hashes-unchanged", [false, false], b_vi_unrelated_hashes_unchanged)
+
+# ---------------------------------------------------------------------------
+# Equatable and Hashable
+
+fn register_witness_tests():
+    # Bag[T] is Equatable exactly when T's equality is total, and Hashable exactly when T is Hashable
+    fn b_vi_equatable_conditional() errors std::compiler::CompilerError:
+        static compile:
+            [same(bag([1], ""), bag([1], "")), fp(bag([1, 2], "")) == fp(bag([2, 1], "q")), same(int_bag([[1]], ""), int_bag([[1]], "x"))]
+    std::test::value("vi-equatable-conditional", [true, true, true], b_vi_equatable_conditional)
+
+    # a Bag of MutableVectors is not Equatable: its members have no total equality
+    fn b_vi_equatable_conditional_rejected() errors std::compiler::CompilerError:
+        static compile:
+            b = vector_bag()
+            same_vectors(b, b)
+    std::test::rejects("vi-equatable-conditional/rejected", std::compiler::DiagnosticCode::TraitNotSatisfied, b_vi_equatable_conditional_rejected)
+
+    # the witness predicates read the identity's elements only: a non-identity field of a type with no total equality takes no part
+    fn b_vi_equality_not_hash() errors std::compiler::CompilerError:
+        static compile:
+            [same(with_decimal([1, 2]), with_decimal([2, 1])), fp(with_decimal([1, 2])) == fp(with_decimal([2, 1]))]
+    std::test::value("vi-equality-not-hash", [true, true], b_vi_equality_not_hash)
+
+    # Hashable refines Equatable: a Hashable view is accepted where Equatable is expected
+    fn b_vi_hashable_refines_equatable() errors std::compiler::CompilerError:
+        static compile:
+            [via(bag([1], "")), via(3)]
+    std::test::value("vi-hashable-refines-equatable", [true, true], b_vi_hashable_refines_equatable)
+
+    # a struct slot may be constrained by Equatable
+    fn b_vi_equatable_slot() errors std::compiler::CompilerError:
+        static compile:
+            [box_eq(Box[int] {x: 1}, Box[int] {x: 1}), box_eq(Box[List[str]] {x: ["a"]}, Box[List[str]] {x: ["b"]})]
+    std::test::value("vi-equatable-slot", [true, false], b_vi_equatable_slot)
+
+    # the mutable collections stay neither Equatable nor Hashable
+    fn b_vi_mutable_not_eligible_equatable() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[int, int]()
+            same_maps(m, m)
+    std::test::rejects("vi-mutable-not-eligible/equatable", std::compiler::DiagnosticCode::TraitNotSatisfied, b_vi_mutable_not_eligible_equatable)
+
+    fn b_vi_mutable_not_eligible_hashable() errors std::compiler::CompilerError:
+        static compile:
+            s = std::mutable_set::create[int]()
+            fp_sets(s)
+    std::test::rejects("vi-mutable-not-eligible/hashable", std::compiler::DiagnosticCode::TraitNotSatisfied, b_vi_mutable_not_eligible_hashable)
+
+fn register_value_identity_tests():
+    register_declaration_tests()
+    register_equality_tests()
+    register_hash_tests()
+    register_witness_tests()
+
+with context std::test::suite()
+register_value_identity_tests()
+std::test::report()

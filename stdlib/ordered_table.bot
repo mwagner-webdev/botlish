@@ -53,6 +53,7 @@
 # headers, and a write to one copy detaches only what it writes.
 import std::mutable_vector
 import std::mutable_array
+import std::list
 
 opaque struct Table[K satisfies Hashable]:
     index: MutableVector[int]
@@ -489,3 +490,115 @@ fn permute_values(t: Table[K], perm: MutableArray[int], place values: MutableVec
                 continue
         values.push(v)
     unit
+
+# ---------------------------------------------------------------------------
+# Frozen tables (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md)
+#
+# std::immutable_map's representation is this table's, frozen into Lists:
+# the live entries in order -- the keys, their stored hashes (and the map's
+# values) -- and an index of their positions with a power-of-two number of
+# slots, each -1 or a position. A frozen table never changes, so it has no
+# dead entry and no live count, and a lookup is this file's probe over
+# Lists: the index from the key's home slot, an entry's key compared only
+# where its stored hash equals the key's. The immutable map's identity is its
+# keys and values alone; the index and the stored hashes are representation,
+# which no equality or hash reads.
+
+# The number of T's index slots.
+fn slots(t: Table[K]) -> int:
+    std::mutable_vector::length(t.index)
+
+# T's live keys, in order.
+fn live_keys(t: Table[K]) -> List[K]:
+    loop p from 0 to t.positions():
+        if not t.live_at?(p):
+            continue
+        t.key_at(p)
+
+# T's live entries' stored hashes, in order.
+fn live_hashes(t: Table[K]) -> List[int]:
+    loop p from 0 to std::mutable_vector::length(t.hashes):
+        h = t.hashes.at(p):
+            on IndexNotFound:
+                continue
+        if h < 0:
+            continue
+        h
+
+# VALUES (a collection's per-entry payload, aligned with T's positions) at
+# T's live positions, in order.
+fn live_values(t: Table[K], values: MutableVector[V]) -> List[V]:
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        v = values.at(p):
+            on IndexNotFound:
+                continue
+        v
+
+# Stores position P at the first empty slot of INDEX from SLOT on (INDEX is
+# never full).
+fn place_frozen(place index: MutableArray[int], slot: int, p: int) -> unit:
+    s = bit_and(slot, index.capacity() - 1)
+    e = index.at(s):
+        on IndexNotFound:
+            return unit
+    if e >= 0:
+        return index.place_frozen(s + 1, p)
+    index.set(s, p):
+        on IndexNotFound:
+            unit
+
+# The frozen index of the entries whose stored hashes are HASHES, in order:
+# SLOTS slots (a power of two of at least min_slots(), holding the entries
+# at most 7/10 full: the table's own slot count, or slots_for's).
+fn frozen_index(hashes: List[int], slots: int) -> List[int]:
+    index = std::mutable_array::create(slots, -1)
+    loop p from 0 to std::list::length(hashes):
+        index.place_frozen(hashes.at(p), p)
+    index.freeze(index.capacity())
+
+# Whether frozen position E (one the index holds) is the entry of KEY, whose
+# keyed hash is H: the stored hash is compared first, the key only when the
+# hashes are equal.
+fn frozen_holds?(hashes: List[int], keys: List[K], e: int, h: int, key: K) -> bool:
+    stored = hashes.at(e):
+        on IndexNotFound:
+            -1
+    stored == h and keys.at(e.mod(std::list::length(keys))) == key
+
+# The probe from SLOT on (reduced into INDEX, never empty in a frozen map): the
+# position of KEY (keyed hash H) among the frozen entries, or -1 at the
+# first empty slot.
+fn frozen_probe(index: List[int], hashes: List[int], keys: List[K], h: int, key: K, slot: int) -> int:
+    n = std::list::length(index)
+    if n == 0:
+        return -1
+    s = bit_and(slot, n - 1)
+    e = index.at(s)
+    if e >= 0 and not hashes.frozen_holds?(keys, e, h, key):
+        return index.frozen_probe(hashes, keys, h, key, s + 1)
+    e
+
+# The position of KEY, whose keyed hash is H, among the frozen entries KEYS
+# (stored hashes HASHES, index INDEX), or -1 when KEY is none of them: the
+# probe from H's home slot up to the first empty slot.
+fn frozen_position(index: List[int], hashes: List[int], keys: List[K], h: int, key: K) -> int:
+    index.frozen_probe(hashes, keys, h, key, h)
+
+# A table holding the frozen entries KEYS (stored hashes HASHES, index
+# INDEX): a mutable copy, whose every entry is live.
+fn of_frozen(keys: List[K], hashes: List[int], index: List[int]) -> Table[K]:
+    Table[K] {index: std::mutable_vector::from_list(index), hashes: std::mutable_vector::from_list(hashes), keys: std::mutable_vector::from_list(keys), live: std::mutable_array::create(1, std::list::length(keys))}
+
+# XS in the order PERM gives (arrangement's, over a table of XS's positions
+# with no dead entry): the element at position PERM[I] at position I.
+fn permuted(xs: List[E], perm: MutableArray[int]) -> List[E]:
+    loop i from 0 to perm.capacity():
+        p = perm.at(i):
+            on IndexNotFound:
+                continue
+        x = xs.at(p):
+            on IndexNotFound:
+                continue
+        x

@@ -21,10 +21,15 @@
 #   {"enum": ["ENUM-ID", "CASE"]} {"list": [V, ...]}     {"set": [V, ...]}
 #   {"result": [OK, V]}
 #   {"struct": {"id": "ID", "fields": [["NAME", V], ...]}}
+#   {"identity": {"id": "ID", "members": [V, ...]}}
+#   {"identity": {"id": "ID", "associations": [[K, V], ...]}}
 #
 # a named struct's fields in declaration order (its slot order); an anonymous
 # struct's ("id": "") in any order -- the oracle sorts them by code point, the
-# one canonical layout of an anonymous struct.
+# one canonical layout of an anonymous struct. An `identity` is a value of a
+# struct that declares its identity (REPRESENTATION-INDEPENDENT-VALUE-
+# IDENTITY.md): only its entries are given, in any order, never its other
+# fields.
 
 import json
 import struct
@@ -35,7 +40,15 @@ MASK61 = (1 << 61) - 1
 FNV_OFFSET = 0xCBF29CE484222325
 FNV_PRIME = 0x100000001B3
 TAGS = {"int": 0, "str": 1, "bool": 2, "unit": 3, "list": 4, "result": 5, "char": 6,
-        "set": 7, "struct": 8, "bytes": 9, "mutbytes": 10, "enum": 11, "float": 12}
+        "set": 7, "struct": 8, "bytes": 9, "mutbytes": 10, "enum": 11, "float": 12,
+        "identity": 8}
+# An identity's canonical input, after the struct's declaration identity:
+# its form's tag, the entry count, the wrapping 64-bit sum of the entries'
+# whole hashes (a pair's from its own input: the entry tag, then the key and
+# the value as nested values).
+IDENTITY_MEMBERS = 1
+IDENTITY_ASSOCIATIONS = 2
+IDENTITY_ENTRY = 3
 
 
 def rotl(x, b):
@@ -98,8 +111,13 @@ class Mode:
         return le64(self.whole(v)) if self.key is None else encode(self, v)
 
     def whole(self, v):
-        data = encode(self, v)
+        return self.fold(encode(self, v))
+
+    def fold(self, data):
         return fnv(data) if self.key is None else siphash(self.key[0], self.key[1], data, 1, 3)
+
+    def entry(self, k, v):
+        return self.fold(bytes([IDENTITY_ENTRY]) + self.child(k) + self.child(v))
 
 
 def encode(mode, v):
@@ -132,6 +150,14 @@ def encode(mode, v):
         out += mode.text(x["id"].encode()) + le64(len(fields))
         for name, value in fields:
             out += mode.text(name.encode()) + mode.child(value)
+    elif kind == "identity":
+        out += mode.text(x["id"].encode())
+        if "members" in x:
+            total = sum(mode.whole(e) for e in x["members"])
+            out += bytes([IDENTITY_MEMBERS]) + le64(len(x["members"])) + le64(total)
+        else:
+            total = sum(mode.entry(k, e) for k, e in x["associations"])
+            out += bytes([IDENTITY_ASSOCIATIONS]) + le64(len(x["associations"])) + le64(total)
     elif kind == "set":
         combined = 0
         for e in x:
@@ -159,6 +185,16 @@ def selftest():
     assert siphash(k0, k1, bytes(range(1)), 1, 3) == 0xC9F49BF37D57CA93
     # FNV-1a's published test vector ("a").
     assert fnv(b"a") == 0xAF63DC4C8601EC8C
+    # An identity's input is the same in any order of its entries, and its
+    # pairs are units: swapping two values across keys changes it.
+    for mode in (Mode(), Mode((k0, k1))):
+        a = {"identity": {"id": "m::M", "associations": [[{"int": "1"}, {"str": "x"}], [{"int": "2"}, {"str": "y"}]]}}
+        b = {"identity": {"id": "m::M", "associations": [[{"int": "2"}, {"str": "y"}], [{"int": "1"}, {"str": "x"}]]}}
+        c = {"identity": {"id": "m::M", "associations": [[{"int": "1"}, {"str": "y"}], [{"int": "2"}, {"str": "x"}]]}}
+        assert mode.whole(a) == mode.whole(b) != mode.whole(c)
+        s1 = {"identity": {"id": "m::S", "members": [{"int": "1"}, {"int": "2"}]}}
+        s2 = {"identity": {"id": "m::S", "members": [{"int": "2"}, {"int": "1"}]}}
+        assert mode.whole(s1) == mode.whole(s2)
     print("selftest ok")
 
 

@@ -164,7 +164,10 @@
 #              NAME:`, else 0) and contextSpan likewise (CONTEXTS.md), and
 #              for a parameterized struct only, slots ({name nameSpan trait
 #              traitSpan} dicts in written order, TRAIT the spelled trait of
-#              `satisfies` or "": TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+#              `satisfies` or "": TRAIT-CONSTRAINED-IMPRINTED-TYPES.md),
+#              and for a struct with an `identity` clause only, identity
+#              ({form formSpan fields fieldSpans span}: REPRESENTATION-
+#              INDEPENDENT-VALUE-IDENTITY.md)
 #              -- a top-level nominal struct declaration ("struct NAME:"
 #              followed by its indented "field: Type" lines; STRUCTS.md).
 #              A declaration like typedecl: no runtime meaning, no binding.
@@ -1154,6 +1157,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             lappend lines "${pad}${modifier}struct [dict get $node name]$slots$at"
             foreach field [dict get $node fields] {
                 lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
+            }
+            if {[dict exists $node identity]} {
+                set identity [dict get $node identity]
+                lappend lines "${pad}    identity [dict get $identity form]([join [dict get $identity fields] {, }])"
             }
             return
         }

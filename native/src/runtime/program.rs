@@ -30,14 +30,15 @@ use super::constants::{self, Const};
 use super::framemap::{FunctionMap, ProgramMap};
 use super::metrics::AllocMode;
 use super::value::{FloatType, Kind};
-use super::vm::{EnumInfo, FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
+use super::vm::{EnumInfo, FunctionInfo, Identity, NativeInfo, ProgramInfo, ShapeInfo, Vm};
 use crate::nir::{self, Boundary, ExportDecl, OpCode};
 use std::rc::Rc;
 
 /// The first word of a `LinkedProgram`.
 pub const LINKED_MAGIC: u64 = u64::from_le_bytes(*b"BOTLPRG1");
-/// The descriptor's own format revision, its first word.
-const FORMAT: u32 = 1;
+/// The descriptor's own format revision, its first word. 2: a shape carries
+/// its identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+const FORMAT: u32 = 2;
 
 /// The record the compiler emits as `botlish_program` (module doc). Its
 /// layout is a contract between codegen (which writes it as data) and this
@@ -95,7 +96,7 @@ pub fn program_info(program: &nir::Program) -> ProgramInfo {
         shapes: program
             .shapes
             .iter()
-            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque })
+            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque, identity: s.identity })
             .collect(),
         enums: program.enums.iter().map(|e| EnumInfo { name: e.name.clone(), cases: e.cases.clone() }).collect(),
         errors: program.errors.clone(),
@@ -220,6 +221,20 @@ impl ProgramDescriptor {
                 w.str(field);
             }
             w.u32(u32::from(s.opaque));
+            // The identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md):
+            // 0 for none, 1 and a position (members), 2 and two (associations).
+            match s.identity {
+                None => w.u32(0),
+                Some(Identity::Members(f)) => {
+                    w.u32(1);
+                    w.len(f);
+                }
+                Some(Identity::Associations(k, v)) => {
+                    w.u32(2);
+                    w.len(k);
+                    w.len(v);
+                }
+            }
         }
         w.len(info.enums.len());
         for e in &info.enums {
@@ -318,7 +333,23 @@ impl ProgramDescriptor {
             let name = r.opt_str()?;
             let fields = (0..r.len()?).map(|_| r.str()).collect::<Result<Vec<_>, _>>()?;
             let opaque = r.u32()? != 0;
-            info.shapes.push(ShapeInfo { name, fields, opaque });
+            let identity = match r.u32()? {
+                0 => None,
+                1 => Some(Identity::Members(r.len()?)),
+                2 => Some(Identity::Associations(r.len()?, r.len()?)),
+                other => return Err(format!("unknown shape identity form {other}")),
+            };
+            if let Some(Identity::Members(f) | Identity::Associations(f, _)) = identity
+                && f >= fields.len()
+            {
+                return Err("a shape identity names no field of its shape".to_string());
+            }
+            if let Some(Identity::Associations(_, v)) = identity
+                && v >= fields.len()
+            {
+                return Err("a shape identity names no field of its shape".to_string());
+            }
+            info.shapes.push(ShapeInfo { name, fields, opaque, identity });
         }
         for _ in 0..r.len()? {
             let name = r.str()?;
@@ -453,8 +484,20 @@ mod tests {
                     NativeInfo { name: "list".into(), arity: None, params: vec![None], op: OpCode::ListNew },
                 ],
                 shapes: vec![
-                    ShapeInfo { name: None, fields: vec!["a".into(), "b".into()], opaque: false },
-                    ShapeInfo { name: Some("m::Point".into()), fields: vec!["x".into()], opaque: true },
+                    ShapeInfo { name: None, fields: vec!["a".into(), "b".into()], opaque: false, identity: None },
+                    ShapeInfo { name: Some("m::Point".into()), fields: vec!["x".into()], opaque: true, identity: None },
+                    ShapeInfo {
+                        name: Some("m::Bag".into()),
+                        fields: vec!["items".into(), "note".into()],
+                        opaque: true,
+                        identity: Some(Identity::Members(0)),
+                    },
+                    ShapeInfo {
+                        name: Some("m::Map".into()),
+                        fields: vec!["keys".into(), "vals".into(), "index".into()],
+                        opaque: true,
+                        identity: Some(Identity::Associations(0, 1)),
+                    },
                 ],
                 enums: vec![EnumInfo { name: "Color".into(), cases: vec!["Red".into(), "Green".into()] }],
                 errors: vec![(1, "Rejected".into()), (0x4000_0001, "IndexNotFound".into())],
@@ -488,6 +531,9 @@ mod tests {
         assert_eq!(decoded.info.natives[1].arity, None);
         assert_eq!(decoded.info.shapes[1].name.as_deref(), Some("m::Point"));
         assert!(decoded.info.shapes[1].opaque);
+        assert_eq!(decoded.info.shapes[1].identity, None);
+        assert_eq!(decoded.info.shapes[2].identity, Some(Identity::Members(0)));
+        assert_eq!(decoded.info.shapes[3].identity, Some(Identity::Associations(0, 1)));
         assert_eq!(decoded.info.errors, descriptor.info.errors);
     }
 

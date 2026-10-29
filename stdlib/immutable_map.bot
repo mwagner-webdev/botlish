@@ -1,0 +1,136 @@
+# immutable_map.bot -- the "std::immutable_map" namespace: ImmutableMap[K, V],
+# an immutable, insertion-ordered map of Hashable keys whose equality and
+# hashes are its associations' (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+#
+#   m.freeze()                       (std::mutable_map) the ImmutableMap of a
+#                                    MutableMap's current associations, in
+#                                    its current order
+#   std::immutable_map::empty[K, V]()
+#                                    the map with no association
+#   m.length()                       the number of associations
+#   m.empty?()                       whether there is none
+#   m.contains(key)                  whether KEY has an association
+#   m.at(key)                        KEY's value, or the error KeyNotFound
+#   m.order()                        the keys in their order: a
+#                                    std::mutable_set::MutableSet[K] of
+#                                    exactly m's keys, known so
+#   m.validate_order(candidate)      CANDIDATE, once checked to hold exactly
+#                                    m's keys (any order), or OrderMismatch
+#   m.reordered(order)               the map with m's associations in
+#                                    ORDER's order: ORDER must be known to
+#                                    hold exactly m's keys
+#   loop e in m:                     every association, in order, as an
+#                                    ImmutableMapEntry[K, V]
+#   a == b, hash(m)                  by the associations, in no order
+#
+# An ImmutableMap is an immutable VALUE. Its *identity* is its associations
+# -- which keys map to which values -- and nothing else: two maps holding
+# the same associations are equal (`==`) and hash equally, publicly and in
+# the standard library's keyed tables, whatever order they iterate in and
+# however they were built. Its *order* is observable and is no part of its
+# identity: a loop visits the associations in the order the map was frozen
+# with (its MutableMap's insertion order, or the last reorder's), and
+# `reordered` returns an equal map that iterates in another order.
+#
+# It is Equatable exactly when V is (K, being Hashable, always is), and
+# Hashable exactly when V is: a map of Hashable keys and values may itself
+# be a key of a map, an element of a set or a field of a Hashable value.
+#
+# Expected cost: O(1) for contains and at, O(n) for freeze, a loop, equality
+# and either hash (no sort, no key hashed again by equality's own lookup
+# structure beyond one table hash per key), O(n) for order, validate_order
+# and reordered.
+#
+# The representation is std::ordered_table's, frozen into Lists, opaque: no
+# program sees a slot, a stored hash or a capacity, and no equality or hash
+# reads them (the `identity` clause below).
+import std::list
+import std::table_hash
+import std::ordered_table
+import std::mutable_set
+
+opaque struct ImmutableMap[K satisfies Hashable, V]:
+    keys: List[K]
+    vals: List[V]
+    hashes: List[int]
+    index: List[int]
+    identity associations(keys, vals)
+
+# One association of a map, as a loop over it visits it.
+struct ImmutableMapEntry[K, V]:
+    key: K
+    value: V
+
+# A key with no association in the map.
+error KeyNotFound
+
+# A candidate order that does not hold exactly the map's keys.
+error OrderMismatch
+
+fn empty() -> ImmutableMap[K, V]:
+    ImmutableMap[K, V] {keys: [], vals: [], hashes: [], index: [].frozen_index(std::ordered_table::min_slots())}
+
+fn length(m: ImmutableMap[K, V]) -> int:
+    std::list::length(m.keys)
+
+fn empty?(m: ImmutableMap[K, V]) -> bool:
+    std::list::length(m.keys) == 0
+
+fn contains(m: ImmutableMap[K, V], key: K) -> bool:
+    m.index.frozen_position(m.hashes, m.keys, std::table_hash::of(key), key) >= 0
+
+fn at(m: ImmutableMap[K, V], key: K) -> V errors KeyNotFound:
+    p = m.index.frozen_position(m.hashes, m.keys, std::table_hash::of(key), key)
+    if p < 0 or p >= std::list::length(m.vals):
+        fail KeyNotFound
+    m.vals.at(p)
+
+# ---------------------------------------------------------------------------
+# Order (PROVEN-COLLECTION-REORDERING.md). The compiler knows, by these
+# functions' relational contracts (hir/relations.tcl), that order's result
+# and validate_order's hold exactly M's keys, and reordered requires it.
+
+# M's keys in M's iteration order: a MutableSet of exactly M's keys, which
+# the compiler knows it is (an order M.reordered admits). O(n).
+fn order(m: ImmutableMap[K, V]) -> std::mutable_set::MutableSet[K]:
+    std::mutable_set::of_table(m.keys.of_frozen(m.hashes, m.index))
+
+# CANDIDATE unchanged, once checked to hold exactly M's keys, in any order
+# (OrderMismatch otherwise): the compiler then knows it is an order of M.
+# O(n), no key hashed again.
+fn validate_order(m: ImmutableMap[K, V], candidate: std::mutable_set::MutableSet[K]) -> std::mutable_set::MutableSet[K] errors OrderMismatch:
+    t = m.keys.of_frozen(m.hashes, m.index)
+    if not t.same_members?(std::mutable_set::table_of(candidate)):
+        fail OrderMismatch
+    candidate
+
+# The map of M's associations in ORDER's order: equal to M (the same
+# associations), with the same hashes, iterating in ORDER's order. ORDER
+# must be known to hold exactly M's current keys (order, validate_order:
+# REORDER-NOT-PROVEN otherwise); nothing is checked at run time. O(n), no
+# key hashed again.
+fn reordered(m: ImmutableMap[K, V], order: std::mutable_set::MutableSet[K]) -> ImmutableMap[K, V]:
+    t = m.keys.of_frozen(m.hashes, m.index)
+    perm = t.arrangement(std::mutable_set::table_of(order))
+    hashes = m.hashes.permuted(perm)
+    ImmutableMap[K, V] {keys: m.keys.permuted(perm), vals: m.vals.permuted(perm), hashes: hashes, index: hashes.frozen_index(std::list::length(m.index))}
+
+# ---------------------------------------------------------------------------
+# Construction from a table's parts, for std::mutable_map's freeze: internal
+# to the standard library (core/native.tcl's internal members). KEYS, VALS
+# and HASHES are a table's live entries in order, INDEX their frozen index.
+
+nomethod fn of_parts(keys: List[K], vals: List[V], hashes: List[int], index: List[int]) -> ImmutableMap[K, V]:
+    ImmutableMap[K, V] {keys: keys, vals: vals, hashes: hashes, index: index}
+
+# ---------------------------------------------------------------------------
+# The loop protocol (hir/iteration.tcl): internal to the standard library.
+
+nomethod fn iteration_end(m: ImmutableMap[K, V]) -> int:
+    std::list::length(m.keys)
+
+nomethod fn iteration_live?(m: ImmutableMap[K, V], i: int) -> bool:
+    i >= 0
+
+nomethod fn iteration_at(m: ImmutableMap[K, V], i: int) -> ImmutableMapEntry[K, V]:
+    ImmutableMapEntry[K, V] {key: m.keys.at(i.mod(std::list::length(m.keys))), value: m.vals.at(i.mod(std::list::length(m.vals)))}

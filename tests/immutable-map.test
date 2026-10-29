@@ -1,0 +1,665 @@
+# immutable-map.test -- std::immutable_map::ImmutableMap[K satisfies Hashable,
+# V] and the freezes of the mutable collections (REPRESENTATION-INDEPENDENT-
+# VALUE-IDENTITY.md).
+#
+# An ImmutableMap is an immutable, insertion-ordered value whose identity is
+# its associations: two maps holding the same key-value pairs are equal and
+# hash equally (publicly and under the keyed table hash) whatever order they
+# iterate in and however they were built -- different insertion orders,
+# capacities, removal and compaction histories, hidden hash keys. Its order
+# is observable (a loop visits it) and is no part of its identity. It is
+# ordinary Botlish: an opaque struct over std::ordered_table's layout frozen
+# into Lists, which declares `identity associations(keys, vals)`.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint python3 [expr {[auto_execok python3] ne ""
+    && ![catch {exec python3 -I -c {print(6 * 7)}} answer] && $answer eq "42"}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::imKey {1311768467750121216 18364758544493064720}
+
+set ::imDecls {import std::list
+import std::int
+import std::mutable_map
+import std::mutable_set
+import std::mutable_vector
+import std::immutable_map
+import std::immutable_set
+
+fn imap(ks: List[int], vs: List[int]) -> std::immutable_map::ImmutableMap[int, int]:
+    m = std::mutable_map::create[int, int]()
+    loop i from 0 to std::list::length(ks):
+        v = vs.at(i):
+            on IndexNotFound:
+                0
+        m.set(ks.at(i), v)
+    m.freeze()
+
+fn smap(ks: List[str], vs: List[int]) -> std::immutable_map::ImmutableMap[str, int]:
+    m = std::mutable_map::create[str, int]()
+    loop i from 0 to std::list::length(ks):
+        v = vs.at(i):
+            on IndexNotFound:
+                0
+        m.set(ks.at(i), v)
+    m.freeze()
+
+fn items(m: std::immutable_map::ImmutableMap[int, int]) -> List[List[int]]:
+    loop e in m:
+        [e.key, e.value]
+
+fn names(m: std::immutable_map::ImmutableMap[str, int]) -> List[str]:
+    loop e in m:
+        e.key
+
+fn at_or(m: std::immutable_map::ImmutableMap[int, int], k: int, d: int) -> int:
+    v = m.at(k):
+        on std::immutable_map::KeyNotFound:
+            d
+    v
+
+fn ints(n: int) -> List[int]:
+    loop i from 0 to n:
+        i
+
+fn rev(n: int) -> List[int]:
+    loop i down from n - 1 through 0:
+        i
+
+}
+
+proc imRun {body {backends {interp compile cranelift-generic cranelift}}} {
+    return [sourceAgree "$::imDecls$body" $backends]
+}
+
+proc imHir {body} {
+    return [surface::compile "$::imDecls$body" t.bot -warnings off]
+}
+
+# The kind of the first diagnostic of BODY, or "accepted".
+proc imKind {body} {
+    if {[catch {surface::compile "$::imDecls$body" t.bot -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lindex [dict get [lindex [dict get $options -diagnostics] 0] errorcode] end]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return accepted
+}
+
+# The message, without its location, of the first diagnostic of BODY.
+proc imMessage {body} {
+    catch {surface::compile "$::imDecls$body" t.bot -warnings off} message options
+    set message [dict get [lindex [dict get $options -diagnostics] 0] message]
+    return [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]
+}
+
+set ::imFixture {import std::table_hash
+
+fn keyed(x: Hashable) -> int:
+    std::table_hash::of(x)
+}
+
+# imRun of BODY with the keyed-hash fixture importable as std::hashfix,
+# under table hash key KEY ("" for the drawn one).
+proc imKeyed {body {key ""} {backends {interp compile cranelift-generic cranelift}}} {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir hashfix.bot] w]
+        puts -nonewline $f $::imFixture
+        close $f
+        core::hashing::useTableHashKey $key
+        try {
+            set result [sourceAgree "import std::hashfix\n$::imDecls$body" $backends]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    }
+    return $result
+}
+
+# The NIR operations of function NAME in NIR text.
+proc imOps {nir name} {
+    set ops {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$inside && [regexp {op ([a-z0-9]+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return $ops
+}
+
+# ---------------------------------------------------------------------------
+# Freezing and the API
+
+test im-freeze-basic {freeze keeps a MutableMap's associations and its order; length, empty?, contains and at read them; a missing key is KeyNotFound} -body {
+    imRun {m = std::mutable_map::create[str, int]()
+m.set("pear", 1)
+m.set("fig", 2)
+m.set("kiwi", 3)
+x = m.freeze()
+a = x.at("fig"):
+    on std::immutable_map::KeyNotFound:
+        -1
+b = x.at("plum"):
+    on std::immutable_map::KeyNotFound:
+        -1
+e = std::immutable_map::empty[str, int]()
+[names(x), x.length(), x.empty?(), [x.contains("kiwi"), x.contains("plum")], a, b, e.length(), e.empty?(), e.contains("fig")]
+}
+} -result {value {[["pear", "fig", "kiwi"], 3, false, [true, false], 2, -1, 0, true, false]}}
+
+test im-key-not-found-declared {KeyNotFound is a declared error of at: unhandled it is UNHANDLED-ERROR, declared it propagates} -body {
+    list [imKind {x = imap([1], [2])
+x.at(5)
+}] [imRun {fn f(m: std::immutable_map::ImmutableMap[int, int]) -> int errors std::immutable_map::KeyNotFound:
+    m.at(5)
+r = f(imap([1], [2])):
+    on std::immutable_map::KeyNotFound:
+        -7
+r
+}]
+} -result {UNHANDLED-ERROR {value -7}}
+
+test im-freeze-snapshot {a frozen map is a value: nothing done to its MutableMap afterwards reaches it, and two freezes are independent} -body {
+    imRun {m = std::mutable_map::create[int, int]()
+loop i from 0 to 5:
+    m.set(i, i * 10)
+x = m.freeze()
+m.set(1, 99)
+r = m.remove(2):
+    on std::mutable_map::KeyNotFound:
+        -1
+m.set(7, 70)
+y = m.freeze()
+m.clear()
+z = m.freeze()
+[items(x), items(y), items(z), x == y, z.length()]
+}
+} -result {value {[[[0, 0], [1, 10], [2, 20], [3, 30], [4, 40]], [[0, 0], [1, 99], [3, 30], [4, 40], [7, 70]], [], false, 0]}}
+
+test im-freeze-histories {freeze keeps the order every history gives its map: replacement in place, removal and reinsertion last, clear, growth and compaction} -body {
+    imRun {m = std::mutable_map::create[int, int]()
+loop i from 0 to 40:
+    m.set(i, i)
+loop i from 0 to 40:
+    if i.mod(3) != 0:
+        r = m.remove(i):
+            on std::mutable_map::KeyNotFound:
+                -1
+m.set(3, 333)
+r2 = m.remove(0):
+    on std::mutable_map::KeyNotFound:
+        -1
+m.set(0, 1000)
+x = m.freeze()
+mutable = loop e in m:
+    [e.key, e.value]
+[items(x) == mutable, items(x), at_or(x, 3, -1), at_or(x, 0, -1), at_or(x, 1, -1)]
+}
+} -result {value {[true, [[3, 333], [6, 6], [9, 9], [12, 12], [15, 15], [18, 18], [21, 21], [24, 24], [27, 27], [30, 30], [33, 33], [36, 36], [39, 39], [0, 1000]], 333, 1000, -1]}}
+
+test im-large-lookups {lookups in a large frozen map: every key found with its value, absent keys absent (the compiled backends: the reference interpreter takes minutes over 3000 entries)} -body {
+    imRun {m = std::mutable_map::create[int, int]()
+loop i from 0 to 3000:
+    m.set(i * 7, i)
+x = m.freeze()
+found = loop i from 0 to 3000:
+    if at_or(x, i * 7, -1) != i:
+        i
+    else:
+        continue
+misses = loop i from 0 to 3000:
+    if x.contains(i * 7 + 1):
+        i
+    else:
+        continue
+[x.length(), found, misses]
+} {compile cranelift-generic cranelift}
+} -result {value {[3000, [], []]}}
+
+# ---------------------------------------------------------------------------
+# Identity: associations, not order or representation
+
+test im-equality-ignores-order {two maps of the same associations built in different orders are equal and hash equally, and iterate differently} -body {
+    imRun {a = smap(["a", "b", "c"], [1, 2, 3])
+b = smap(["c", "a", "b"], [3, 1, 2])
+[a == b, hash(a) == hash(b), names(a), names(b), names(a) == names(b)]
+}
+} -result {value {[true, true, ["a", "b", "c"], ["c", "a", "b"], false]}}
+
+test im-equality-associations {equality is the associations: another value, another key, one more or one fewer, and values swapped across keys are unequal; two empty maps are equal} -body {
+    imRun {a = smap(["a", "b"], [1, 2])
+[
+    a == smap(["a", "b"], [1, 3]),
+    a == smap(["a", "c"], [1, 2]),
+    a == smap(["a", "b", "c"], [1, 2, 3]),
+    a == smap(["a"], [1]),
+    a == smap(["a", "b"], [2, 1]),
+    hash(a) == hash(smap(["a", "b"], [2, 1])),
+    std::immutable_map::empty[str, int]() == smap([], []),
+    hash(std::immutable_map::empty[str, int]()) == hash(smap([], []))
+]
+}
+} -result {value {[false, false, false, false, false, false, true, true]}}
+
+test im-representation-perturbation {maps of the same associations with different representation histories -- a reserved capacity, growth, removal and reinsertion, a compaction, a clear, a copy mutated -- are equal and hash equally under both hashes; their orders differ as built} -body {
+    imKeyed {fn build(order: List[int]) -> std::mutable_map::MutableMap[int, int]:
+    m = std::mutable_map::create[int, int]()
+    loop k in order:
+        m.set(k, k * 2)
+    m
+a = build(ints(60)).freeze()
+r = std::mutable_map::with_capacity[int, int](5000)
+loop k in rev(60):
+    r.set(k, k * 2)
+b = r.freeze()
+c0 = build(ints(200))
+loop k from 60 to 200:
+    gone = c0.remove(k):
+        on std::mutable_map::KeyNotFound:
+            -1
+c = c0.freeze()
+d0 = build(ints(60))
+loop k from 0 to 60:
+    if k.mod(2) == 0:
+        gone = d0.remove(k):
+            on std::mutable_map::KeyNotFound:
+                -1
+loop k from 0 to 60:
+    if k.mod(2) == 0:
+        d0.set(k, k * 2)
+d = d0.freeze()
+e0 = build([999, 998])
+e0.clear()
+loop k in rev(60):
+    e0.set(k, k * 2)
+e = e0.freeze()
+f0 = build(ints(60))
+f1 = f0
+f1.set(5000, 1)
+gone = f1.remove(5000):
+    on std::mutable_map::KeyNotFound:
+        -1
+f = f1.freeze()
+maps = [a, b, c, d, e, f]
+equal = loop x in maps:
+    loop y in maps:
+        x == y
+public = loop x in maps:
+    hash(x) == hash(a)
+keyed = loop x in maps:
+    std::hashfix::keyed(x) == std::hashfix::keyed(a)
+firsts = loop x in maps:
+    std::list::at(items(x), 0):
+        on IndexNotFound:
+            []
+[equal, public, keyed, firsts]
+} $::imKey
+} -result {value {[[[true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true]], [true, true, true, true, true, true], [true, true, true, true, true, true], [[0, 0], [59, 118], [0, 0], [1, 2], [59, 118], [0, 0]]]}}
+
+test im-different-secrets {maps built under different hidden table hash keys -- different stored hashes and index placement -- are equal and hash equally: identity never reads the representation} -body {
+    set body {fn build(order: List[int]) -> std::immutable_map::ImmutableMap[int, int]:
+    m = std::mutable_map::create[int, int]()
+    loop k in order:
+        m.set(k, k + 1)
+    m.freeze()
+build(ints(40))
+}
+    core::hashing::useTableHashKey {1 2}
+    set a [core::compiler::evalHir [imHir $body]]
+    core::hashing::useTableHashKey {0x123456789abcdef0 0x0fedcba987654321}
+    set b [core::compiler::evalHir [imHir [string map {ints(40) rev(40)} $body]]]
+    set result [list [string equal $a $b] [core::value::equal $a $b] \
+        [expr {[core::hashing::hash $a] eq [core::hashing::hash $b]}] \
+        [expr {[core::hashing::tableHash $a] eq [core::hashing::tableHash $b]}]]
+    core::hashing::useTableHashKey ""
+    set result
+} -result {0 1 1 1}
+
+test im-full-hash-collisions {genuine collisions of the stored keyed hash -- injected by a private library whose collections hash keys into only 4 values -- never make two maps equal or a lookup wrong: the hash is a filter, the key and value decide} -body {
+    withPrivateLibrary {
+        set changed {}
+        foreach name {mutable_map.bot immutable_map.bot} {
+            set path [file join $::core::libraryDir $name]
+            set text [string map {{std::table_hash::of(key)} {bit_and(std::table_hash::of(key), 3)}} [core::ReadFile $path]]
+            lappend changed [regexp {bit_and\(std::table_hash::of\(key\), 3\)} $text]
+            set f [open $path w]
+            puts -nonewline $f $text
+            close $f
+        }
+        set result [sourceAgree "$::imDecls[string cat {a = imap(ints(50), ints(50))
+b = imap(rev(50), rev(50))
+c = imap(rev(50), ints(50))
+hits = loop i from 0 to 52:
+    at_or(a, i, -1)
+last = std::list::at(hits, 51):
+    on IndexNotFound:
+        0
+[a == b, a == c, hash(a) == hash(b), b.contains(17), c.contains(50), std::list::length(hits), last, at_or(c, 7, -1)]
+}]"]
+    }
+    list $changed $result
+} -result {{1 1} {value {[true, false, true, true, false, 52, -1, 42]}}}
+
+test im-hash-oracle {under a fixed test key every backend computes the independent oracle's public and table hash of maps: by their associations, in no order} -constraints python3 -body {
+    set outcome [imKeyed {a = smap(["b", "a"], [2, 1])
+n = imap([3, 1], [30, 10])
+[[hash(a), std::hashfix::keyed(a)], [hash(n), std::hashfix::keyed(n)], [hash(std::immutable_map::empty[int, int]()), std::hashfix::keyed(std::immutable_map::empty[int, int]())]]
+} $::imKey]
+    set jsons {
+        {{"identity": {"id": "std::immutable_map::ImmutableMap", "associations": [[{"str": "a"}, {"int": "1"}], [{"str": "b"}, {"int": "2"}]]}}}
+        {{"identity": {"id": "std::immutable_map::ImmutableMap", "associations": [[{"int": "1"}, {"int": "10"}], [{"int": "3"}, {"int": "30"}]]}}}
+        {{"identity": {"id": "std::immutable_map::ImmutableMap", "associations": []}}}
+    }
+    set out [exec python3 -I [file join $::projectRoot audit hashable tools oracle.py] hash {*}$::imKey << [join $jsons \n]]
+    set expected "\[[join [lmap line [split $out \n] {format {[%s, %s]} {*}$line}] {, }]\]"
+    expr {$outcome eq [list value $expected] ? "agree" : "$outcome != $expected"}
+} -result agree
+
+# ---------------------------------------------------------------------------
+# Composition: maps as keys, elements and fields
+
+test im-map-as-key {an ImmutableMap of Hashable keys and values is Hashable: a key of a MutableMap and of an ImmutableMap, found through an equal map built in another order} -body {
+    imRun {k1 = smap(["a", "b"], [1, 2])
+k2 = smap(["b", "a"], [2, 1])
+k3 = smap(["a"], [1])
+byMap = std::mutable_map::create[std::immutable_map::ImmutableMap[str, int], str]()
+byMap.set(k1, "first")
+byMap.set(k3, "small")
+hit = byMap.at(k2):
+    on std::mutable_map::KeyNotFound:
+        "missing"
+byMap.set(k2, "replaced")
+frozen = byMap.freeze()
+found = frozen.at(k2):
+    on std::immutable_map::KeyNotFound:
+        "missing"
+stored = loop e in byMap:
+    names(e.key)
+[hit, byMap.length(), found, frozen.contains(smap(["a"], [2])), stored]
+}
+} -result {value {["first", 2, "replaced", false, [["a", "b"], ["a"]]]}}
+
+test im-sets-of-maps {sets deduplicate equal maps whatever their order: a MutableSet, an ImmutableSet built from a List, and a frozen MutableSet} -body {
+    imRun {k1 = smap(["a", "b"], [1, 2])
+k2 = smap(["b", "a"], [2, 1])
+k3 = smap(["c"], [3])
+s = std::mutable_set::create[std::immutable_map::ImmutableMap[str, int]]()
+added = [s.add(k1), s.add(k2), s.add(k3)]
+i = std::immutable_set::from_list([k1, k2, k3, k2])
+[added, s.length(), i == std::immutable_set::from_list([k3, k1]), std::immutable_set::contains(i, k2), s.freeze() == i]
+}
+} -result {value {[[true, false, true], 2, true, true, true]}}
+
+test im-nested {maps compose: a map of maps, a map of Lists of maps, a List of maps, a struct holding a map -- equal and hashed by content at every level} -body {
+    imRun {struct Doc:
+    title: str
+    body: std::immutable_map::ImmutableMap[str, int]
+fn outer(order: List[str]) -> std::immutable_map::ImmutableMap[str, std::immutable_map::ImmutableMap[str, int]]:
+    m = std::mutable_map::create[str, std::immutable_map::ImmutableMap[str, int]]()
+    loop k in order:
+        if k == "x":
+            m.set(k, smap(["p", "q"], [1, 2]))
+        else:
+            m.set(k, smap(["q", "p"], [2, 1]))
+    m.freeze()
+fn lists(order: List[str]) -> std::immutable_map::ImmutableMap[str, List[std::immutable_map::ImmutableMap[str, int]]]:
+    m = std::mutable_map::create[str, List[std::immutable_map::ImmutableMap[str, int]]]()
+    loop k in order:
+        m.set(k, [smap([k], [1]), smap(["z", k], [0, 1])])
+    m.freeze()
+a = outer(["x", "y"])
+b = outer(["y", "x"])
+[
+    a == b,
+    hash(a) == hash(b),
+    lists(["s", "t"]) == lists(["t", "s"]),
+    hash(lists(["s", "t"])) == hash(lists(["t", "s"])),
+    [smap(["a", "b"], [1, 2]), smap([], [])] == [smap(["b", "a"], [2, 1]), smap([], [])],
+    Doc {title: "t", body: smap(["a", "b"], [1, 2])} == Doc {title: "t", body: smap(["b", "a"], [2, 1])},
+    hash(Doc {title: "t", body: smap(["a", "b"], [1, 2])}) == hash(Doc {title: "t", body: smap(["b", "a"], [2, 1])}),
+    outer(["x", "y"]) == outer(["x"])
+]
+}
+} -result {value {[true, true, true, true, true, true, true, false]}}
+
+test im-json {a JSON-like value: an object is an ImmutableMap of members; two objects with the same members in another source order are equal, hash equally, and keep their own orders} -body {
+    imRun {enum Kind:
+    Null, Num, Text, Arr, Obj
+struct Json:
+    kind: Kind
+    num: int
+    text: str
+    items: List[Json]
+    fields: std::immutable_map::ImmutableMap[str, Json]
+struct Member:
+    name: str
+    value: Json
+fn num(n: int) -> Json:
+    Json {kind: Kind::Num, num: n, text: "", items: [], fields: std::immutable_map::empty[str, Json]()}
+fn arr(items: List[Json]) -> Json:
+    Json {kind: Kind::Arr, num: 0, text: "", items: items, fields: std::immutable_map::empty[str, Json]()}
+fn mem(name: str, value: Json) -> Member:
+    Member {name: name, value: value}
+fn obj(members: List[Member]) -> Json:
+    m = std::mutable_map::create[str, Json]()
+    loop f in members:
+        m.set(f.name, f.value)
+    Json {kind: Kind::Obj, num: 0, text: "", items: [], fields: m.freeze()}
+fn order(j: Json) -> List[str]:
+    loop e in j.fields:
+        e.key
+a = obj([mem("id", num(1)), mem("tags", arr([num(1), num(2)])), mem("meta", obj([mem("x", num(3)), mem("y", num(4))]))])
+b = obj([mem("meta", obj([mem("y", num(4)), mem("x", num(3))])), mem("id", num(1)), mem("tags", arr([num(1), num(2)]))])
+c = obj([mem("meta", obj([mem("y", num(4)), mem("x", num(3))])), mem("id", num(1)), mem("tags", arr([num(2), num(1)]))])
+docs = std::mutable_set::create[Json]()
+added = [docs.add(a), docs.add(b), docs.add(c)]
+[a == b, hash(a) == hash(b), a == c, order(a), order(b), added]
+}
+} -result {value {[true, true, false, ["id", "tags", "meta"], ["meta", "id", "tags"], [true, false, true]]}}
+
+# ---------------------------------------------------------------------------
+# Conditional witnesses
+
+set ::imTraits {fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn fp(x: Hashable) -> int:
+    hash(x)
+
+}
+
+test im-conditional-witness {ImmutableMap[K, V] is Equatable exactly when V is, Hashable exactly when V is: a map of Lists is both, a map of MutableVectors neither, and the reason names the map's values, never its representation} -body {
+    list [imRun "$::imTraits[string cat {fn lm(order: List[str]) -> std::immutable_map::ImmutableMap[str, List[int]]:
+    m = std::mutable_map::create[str, List[int]]()
+    loop k in order:
+        m.set(k, [1, 2])
+    m.freeze()
+[same(smap(["a"], [1]), smap(["a"], [1])), fp(lm(["a", "b"])) == fp(lm(["b", "a"])), same(lm(["a", "b"]), lm(["b", "a"]))]
+}]"] [imMessage "$::imTraits[string cat {m = std::mutable_map::create[str, MutableVector[int]]().freeze()
+same(m, m)
+}]"] [imMessage "$::imTraits[string cat {m = std::mutable_map::create[str, MutableVector[int]]().freeze()
+hash(m)
+}]"]
+} -result {{value {[true, true, true]}} {argument for parameter "a" does not satisfy trait Equatable:
+std::immutable_map::ImmutableMap[str, MutableVector[int]] does not satisfy Equatable
+the values of std::immutable_map::ImmutableMap[str, MutableVector[int]] (MutableVector[int]): a MutableVector has no total equality (a mutable header's identity is never a value's)} {the argument of hash does not satisfy trait Hashable:
+std::immutable_map::ImmutableMap[str, MutableVector[int]] does not satisfy Hashable
+the values of std::immutable_map::ImmutableMap[str, MutableVector[int]] (MutableVector[int]): a MutableVector has no total equality (a mutable header's identity is never a value's)}}
+
+test im-key-hashable {the key slot is constrained by Hashable at every application} -body {
+    imKind {fn f(m: std::immutable_map::ImmutableMap[MutableVector[int], int]) -> int:
+    0
+1
+}
+} -result TRAIT-NOT-SATISFIED
+
+test im-mutable-unchanged {the mutable collections stay neither Equatable nor Hashable, and == of two MutableMaps is still refused at run time naming the opaque values} -body {
+    list [imKind "$::imTraits[string cat {m = std::mutable_map::create[int, int]()
+same(m, m)
+}]"] [imKind {m = std::mutable_map::create[int, int]()
+hash(m)
+}] [imRun {fn same(a, b) -> bool:
+    a == b
+same(std::mutable_map::create[int, int](), std::mutable_map::create[int, int]())
+}]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED {error {CORE SEMANTIC EQUALITY} {== is not defined for callables: <opaque std::mutable_map::MutableMap> == <opaque std::mutable_map::MutableMap>}}}
+
+# ---------------------------------------------------------------------------
+# Order: reordered
+
+test im-reordered {reordered returns an equal map with the same hashes that iterates in the order's order; the order comes from order() or a validated candidate} -body {
+    imKeyed {m = smap(["one", "two", "three"], [1, 2, 3])
+o = m.order()
+o.reorder(o)
+wanted = std::mutable_set::create[str]()
+wanted.add("three")
+wanted.add("one")
+wanted.add("two")
+c = m.validate_order(wanted):
+    on std::immutable_map::OrderMismatch:
+        m.order()
+r = m.reordered(c)
+same = m.reordered(m.order())
+v = r.at("two"):
+    on std::immutable_map::KeyNotFound:
+        -1
+[r == m, hash(r) == hash(m), std::hashfix::keyed(r) == std::hashfix::keyed(m), names(r), names(m), names(same), v]
+} $::imKey
+} -result {value {[true, true, true, ["three", "one", "two"], ["one", "two", "three"], ["one", "two", "three"], 2]}}
+
+test im-validate-mismatch {a candidate one key short, one extra or one replaced is OrderMismatch} -body {
+    imRun {m = smap(["a", "b"], [1, 2])
+fn cand(xs: List[str]) -> std::mutable_set::MutableSet[str]:
+    s = std::mutable_set::create[str]()
+    loop x in xs:
+        added = s.add(x)
+    s
+fn check(m: std::immutable_map::ImmutableMap[str, int], xs: List[str]) -> bool:
+    c = m.validate_order(cand(xs)):
+        on std::immutable_map::OrderMismatch:
+            return false
+    true
+[check(m, ["b", "a"]), check(m, ["a"]), check(m, ["a", "b", "c"]), check(m, ["a", "c"])]
+}
+} -result {value {[true, false, false, false]}}
+
+test im-reordered-not-proven {reordered requires the order to be known to hold exactly the map's keys: a set of the right type, another map's order, and an unbound receiver are REORDER-NOT-PROVEN} -body {
+    list [imKind {m = smap(["a"], [1])
+s = std::mutable_set::create[str]()
+added = s.add("a")
+m.reordered(s)
+}] [imKind {m = smap(["a"], [1])
+n = smap(["a"], [1])
+m.reordered(n.order())
+}] [imKind {m = smap(["a"], [1])
+smap(["a"], [1]).reordered(m.order())
+}] [imKind {m = smap(["a"], [1])
+o = m.order()
+added = o.add("b")
+m.reordered(o)
+}]
+} -result {REORDER-NOT-PROVEN REORDER-NOT-PROVEN REORDER-NOT-PROVEN REORDER-NOT-PROVEN}
+
+# ---------------------------------------------------------------------------
+# Encapsulation
+
+test im-opaque {the representation is the module's: construction, a field, the loop protocol and the internal constructor are refused to programs; a value prints as its type only} -body {
+    list [imKind {m = std::immutable_map::ImmutableMap[int, int] {keys: [1], vals: [2], hashes: [0], index: [0]}
+m
+}] [imKind {m = imap([1], [2])
+m.keys
+}] [imKind {std::immutable_map::iteration_end(imap([1], [2]))
+}] [imKind {std::immutable_map::of_parts([1], [2], [0], [0])
+}] [core::value::show [core::compiler::evalHir [imHir {imap([1], [2])
+}]]]
+} -result {OPAQUE-CONSTRUCTION OPAQUE-REPRESENTATION INTERNAL-NAMESPACE INTERNAL-NAMESPACE {<opaque std::immutable_map::ImmutableMap>}}
+
+# ---------------------------------------------------------------------------
+# Lowering and cost
+
+test im-nir {a lookup computes one table hash; == of two maps is veqtotal and hash hashtotal, neither may fail} -constraints nativeBuilt -body {
+    set nir [dict get [native::lower::program [imHir {fn look(m: std::immutable_map::ImmutableMap[str, int], k: str) -> bool:
+    m.contains(k)
+fn eq(a: std::immutable_map::ImmutableMap[str, int], b: std::immutable_map::ImmutableMap[str, int]) -> bool:
+    a == b
+fn h(a: std::immutable_map::ImmutableMap[str, int]) -> int:
+    hash(a)
+x = smap(["a"], [1])
+[look(x, "a"), eq(x, x), h(x)]
+}] -tiny-leaf-inline-opt 0] text]
+    set calls {}
+    foreach line [native::Driver calls $nir] {
+        if {[regexp {callee_name="(eq|h)" .*may_error=(\w+)} $line -> name e]} {
+            lappend calls $name $e
+        }
+    }
+    list [llength [lsearch -all [imOps $nir std::immutable_map::contains] tablehashtotal]] \
+        [lsearch -all -inline -regexp [imOps $nir eq] {veq}] [lsearch -all -inline -regexp [imOps $nir h] {hash}] [lsort -stride 2 $calls]
+} -result {1 veqtotal hashtotal {eq false h false}}
+
+test im-allocation {lookups (hits and misses), equality and both hashes of frozen maps allocate nothing per operation natively (the managed heap's object counts at two operation counts are equal); a loop over a map allocates the same at any length} -constraints nativeBuilt -body {
+    proc imAllocations {source} {
+        return [dict get [native::allocationReport [imHir $source] summary] total allocations]
+    }
+    set prelude "x = imap(ints(500), ints(500))\ny = imap(rev(500), rev(500))\n"
+    set deltas {}
+    foreach {template few many} {
+        {hits = loop i from 0 to @N@:
+    if at_or(x, i, -1) < 0:
+        i
+    else:
+        continue
+misses = loop i from 0 to @N@:
+    if x.contains(i + 1000):
+        i
+    else:
+        continue
+} 50 400
+        {e = loop i from 0 to @N@:
+    if x != y:
+        i
+    else:
+        continue
+} 5 40
+        {h = loop i from 0 to @N@:
+    if hash(x) != hash(y):
+        i
+    else:
+        continue
+} 5 40
+    } {
+        set a [imAllocations "$prelude[string map [list @N@ $few] $template]\n1\n"]
+        set b [imAllocations "$prelude[string map [list @N@ $many] $template]\n1\n"]
+        lappend deltas [expr {$b - $a}]
+    }
+    set small [expr {[imAllocations "x = imap(ints(100), ints(100))\nn = loop e in x:\n    continue\n1\n"] - [imAllocations "x = imap(ints(100), ints(100))\n1\n"]}]
+    set large [expr {[imAllocations "x = imap(ints(1000), ints(1000))\nn = loop e in x:\n    continue\n1\n"] - [imAllocations "x = imap(ints(1000), ints(1000))\n1\n"]}]
+    lappend deltas $small $large
+} -result {0 0 0 1 1}
+
+# ---------------------------------------------------------------------------
+# MutableSet freeze
+
+test im-set-freeze {a MutableSet freezes into the ImmutableSet of its elements: equal to the set of the same members built from a List, and untouched by later changes} -body {
+    imRun {s = std::mutable_set::create[int]()
+loop i from 0 to 30:
+    added = s.add(i * 3)
+f = s.freeze()
+removed = s.remove(3)
+g = s.freeze()
+fn threes(n: int) -> List[int]:
+    loop i down from n - 1 through 0:
+        i * 3
+[f == std::immutable_set::from_list(threes(30)), g == f, std::immutable_set::contains(f, 3), std::immutable_set::contains(g, 3), hash(f) == hash(std::immutable_set::from_list(threes(30)))]
+}
+} -result {value {[true, false, true, false, true]}}
+
+cleanupTests

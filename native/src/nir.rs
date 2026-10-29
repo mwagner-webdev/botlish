@@ -1655,11 +1655,15 @@ pub struct NativeDecl {
 /// shape's fields are its canonical (sorted) field set; a named shape's are
 /// its declaration's slot order. Shape numbers are dense, in order. A named
 /// shape may carry `opaque=1` (the declaration is an `opaque struct`,
-/// OPAQUE-STRUCTS.md): a rendering fact only, see `ShapeInfo::opaque`.
+/// OPAQUE-STRUCTS.md): a rendering fact only, see `ShapeInfo::opaque`; and
+/// `identity="members F"` or `identity="associations K V"` (the declaration's
+/// semantic identity, REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md, by field
+/// name): what equality and the hashes read, see `ShapeInfo::identity`.
 pub struct ShapeDecl {
     pub name: Option<String>,
     pub fields: Vec<String>,
     pub opaque: bool,
+    pub identity: Option<crate::runtime::vm::Identity>,
 }
 
 /// One statically assigned context slot (`context N "ID" offset=O words=W
@@ -2584,7 +2588,28 @@ fn parse_shape(p: &Parser, tokens: &[Token]) -> Result<(u32, ShapeDecl), NirErro
     if opaque && name.is_none() {
         return p.err("an anonymous shape cannot be opaque");
     }
-    Ok((index, ShapeDecl { name, fields, opaque }))
+    let identity = match kv.get("identity") {
+        None => None,
+        Some(text) => {
+            use crate::runtime::vm::Identity;
+            let words: Vec<&str> = text.split_whitespace().collect();
+            let position = |field: &str| fields.iter().position(|f| f == field);
+            let identity = match words.as_slice() {
+                ["members", f] => position(f).map(Identity::Members),
+                ["associations", k, v] if k != v => match (position(k), position(v)) {
+                    (Some(k), Some(v)) => Some(Identity::Associations(k, v)),
+                    _ => None,
+                },
+                _ => return p.err("shape identity= must be \"members FIELD\" or \"associations KEYS VALUES\""),
+            };
+            let Some(identity) = identity else { return p.err("shape identity= names a field the shape does not have") };
+            if !opaque {
+                return p.err("a shape with an identity must be opaque");
+            }
+            Some(identity)
+        }
+    };
+    Ok((index, ShapeDecl { name, fields, opaque, identity }))
 }
 
 fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError> {
