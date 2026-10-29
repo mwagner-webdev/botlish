@@ -2386,6 +2386,27 @@ mod tests {
         }
     }
 
+    /// An executable's program object records its startup policy in its
+    /// record's last word (runtime::program's LinkedProgram), the only
+    /// difference between the two policies' objects.
+    #[test]
+    fn executable_object_records_the_startup_policy() {
+        use botlish_native::runtime::program::LINKED_MAGIC;
+        let word = |startup| {
+            let bytes = super::super::emit_executable_object(&plain_program(), startup).unwrap_or_else(|e| panic!("{}", e.message())).bytes;
+            let magic = LINKED_MAGIC.to_le_bytes();
+            let at = (0..bytes.len() - 56)
+                .find(|&i| bytes[i..i + 8] == magic && u64::from_le_bytes(bytes[i + 40..i + 48].try_into().unwrap()) == 1)
+                .expect("the program record");
+            (u64::from_le_bytes(bytes[at + 48..at + 56].try_into().unwrap()), bytes)
+        };
+        let (worker, worker_bytes) = word(Startup::Worker);
+        let (main, main_bytes) = word(Startup::MainThread);
+        assert_eq!((worker, main), (0, 1));
+        assert_eq!(worker_bytes.len(), main_bytes.len());
+        assert_eq!(worker_bytes.iter().zip(&main_bytes).filter(|(a, b)| a != b).count(), 1);
+    }
+
     /// The main-thread policy is refused for every target but macOS AArch64,
     /// before anything is linked, with the target and the reason; the worker
     /// never is.

@@ -78,12 +78,23 @@ pub struct Image {
 }
 
 /// A digest of the runtime ABI the generated code is compiled against: the
-/// Vm and object field offsets it addresses directly and the helpers it
-/// calls. The driver records its own in the image; the stub refuses an image
-/// recorded by a driver whose runtime differs from its own (a stub and a
-/// driver from different builds), since that code would address fields that
-/// are not there.
+/// Vm and object field offsets it addresses directly, the helpers it calls
+/// and the program record's layout (`abi_words`). The driver records its own
+/// in the image and in every program record; the stub and every startup
+/// refuse one recorded by a driver whose runtime differs from its own (a stub
+/// and a driver from different builds), since that code would address fields
+/// that are not there.
 pub fn abi_fingerprint() -> u64 {
+    // FNV-1a over the words' little-endian bytes.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in abi_words().iter().flat_map(|w| w.to_le_bytes()) {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// What `abi_fingerprint` digests, word by word.
+pub fn abi_words() -> Vec<u64> {
     use super::{bytesobj, strobj, value, vm};
     let mut words: Vec<u64> = vec![
         std::mem::size_of::<Vm>() as u64,
@@ -127,12 +138,7 @@ pub fn abi_fingerprint() -> u64 {
         words.extend(name.bytes().map(u64::from));
         words.push(params as u64);
     }
-    // FNV-1a over the words' little-endian bytes.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in words.iter().flat_map(|w| w.to_le_bytes()) {
-        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
+    words
 }
 
 // ---------------------------------------------------------------- encoding
@@ -437,6 +443,18 @@ mod tests {
         assert_eq!(decoded.fixups, image.fixups);
         assert_eq!(decoded.imports, image.imports);
         assert_eq!(decoded.program, image.program);
+    }
+
+    /// The fingerprint covers the program record's layout -- its size and
+    /// where its startup word is (MAIN-THREAD-STARTUP-MILESTONE-1.md) -- so
+    /// a runtime that reads a record of another layout refuses it at the
+    /// fingerprint, before it reads the startup policy.
+    #[test]
+    fn abi_fingerprint_covers_the_program_record() {
+        let words = abi_words();
+        let record = [std::mem::size_of::<LinkedProgram>() as u64, std::mem::offset_of!(LinkedProgram, startup) as u64];
+        assert!(words.windows(2).any(|w| w == record), "{record:?} not among the fingerprint's words");
+        assert_eq!(record, [56, 48]);
     }
 
     #[test]

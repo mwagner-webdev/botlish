@@ -108,10 +108,15 @@ proc mtsLink {hir path startup {linker ""}} {
 # standard input empty. STATUS is the exit status, or "signal NAME" for a
 # process a signal ended. Line ends are Unix's.
 proc mtsRun {settings exe args} {
+    mtsRunInput "" $settings $exe {*}$args
+}
+
+# mtsRun with INPUT on the process's standard input.
+proc mtsRunInput {input settings exe args} {
     set out [file join [temporaryDirectory] mts-stdout-[pid]]
     set err [file join [temporaryDirectory] mts-stderr-[pid]]
     set code [mtsWithEnv $settings {
-        catch {exec $exe {*}$args << "" > $out 2> $err} message options
+        catch {exec $exe {*}$args << $input > $out 2> $err} message options
     }]
     set texts {}
     foreach path [list $out $err] {
@@ -351,7 +356,7 @@ test mts-api-refused {native::executable -startup main-thread is NATIVE UNSUPPOR
 # ---------------------------------------------------------------------------
 # The driver
 
-test mts-driver-option {the driver's --startup: an option of executable and object only, one policy, worker or main-thread; an object's record carries it (or the policy is refused for the object's target as for an executable)} -constraints nativeBuilt -body {
+test mts-driver-option {the driver's --startup: an option of executable and object only, one policy, worker or main-thread, the worker's by default; an object's record carries it (or the policy is refused for the object's target as for an executable)} -constraints nativeBuilt -body {
     set dir [makeDirectory mts-driver]
     set nir [file join $dir one.nir]
     set channel [open $nir w]; puts -nonewline $channel [native::nir [surface::compile "1 + 2\n" one.bot]]; close $channel
@@ -366,6 +371,9 @@ test mts-driver-option {the driver's --startup: an option of executable and obje
     }
     exec [native::binary] object [file join $dir worker.o] $nir --startup worker
     lappend results worker-object [mtsStartupWord [mtsBytes [file join $dir worker.o]]]
+    # The driver's own default, without --startup: the worker's.
+    exec [native::binary] object [file join $dir default.o] $nir
+    lappend results default-object [mtsStartupWord [mtsBytes [file join $dir default.o]]]
     set code [catch {exec [native::binary] object [file join $dir main.o] $nir --startup main-thread} line]
     if {[native::hostSupports mainThreadStartup]} {
         lappend results main-object [mtsStartupWord [mtsBytes [file join $dir main.o]]]
@@ -374,7 +382,7 @@ test mts-driver-option {the driver's --startup: an option of executable and obje
     }
     removeDirectory mts-driver
     set results
-} -result [list run 2 1 unknown 2 1 missing 2 1 conflicting 2 1 worker-object 0 \
+} -result [list run 2 1 unknown 2 1 missing 2 1 conflicting 2 1 worker-object 0 default-object 0 \
     {*}[expr {[native::hostSupports mainThreadStartup] ? {main-object 1} : {main-object {NATIVE UNSUPPORTED startup} 0}}]]
 
 # ---------------------------------------------------------------------------
@@ -387,11 +395,11 @@ test mts-record-damage {an executable whose record's startup word was altered re
     foreach linker [concat [mtsLinkers] [expr {[testConstraint stubLinked] ? "stub" : ""}]] {
         set exe [mtsLink $hir [file join $dir $linker] worker $linker]
         set bytes [mtsBytes $exe]
-        set damaged [mtsWriteExecutable [file join $dir $linker.unknown] [mtsWithStartupWord $bytes 2]]
+        set damaged [mtsWriteExecutable [native::executableFile [file join $dir $linker-unknown]] [mtsWithStartupWord $bytes 2]]
         lassign [mtsRun {} $damaged] status stdout stderr
         lappend results $linker unknown $status $stdout [string match "*the program record names an unknown startup policy (2) (NATIVE STARTUP)*" $stderr]
         if {![native::hostSupports mainThreadStartup]} {
-            set damaged [mtsWriteExecutable [file join $dir $linker.main] [mtsWithStartupWord $bytes 1]]
+            set damaged [mtsWriteExecutable [native::executableFile [file join $dir $linker-main]] [mtsWithStartupWord $bytes 1]]
             lassign [mtsRun {} $damaged] status stdout stderr
             lappend results main $status $stdout [string match "*this executable asks to run its program on the process's main thread (startup policy main-thread), which only macOS AArch64 executables do*(NATIVE STARTUP)*" $stderr]
         }
@@ -427,7 +435,7 @@ test mts-panic-native-bug {a Rust panic of the program's body (a damaged constan
         foreach policy [expr {$linker eq "stub" ? "worker" : $policies}] {
             set exe [mtsLink $hir [file join $dir $linker-$policy] $policy $linker]
             set intact [mtsRun {} $exe]
-            lassign [mtsRun {} [mtsPanicking $exe [file join $dir $linker-$policy.damaged]]] status stdout stderr
+            lassign [mtsRun {} [mtsPanicking $exe [native::executableFile [file join $dir $linker-$policy-damaged]]]] status stdout stderr
             lappend results $linker $policy $intact $status $stdout [lindex [split [string trimright $stderr \n] \n] end]
         }
     }
@@ -568,7 +576,7 @@ test mts-main-fault {a fault that is no stack's exhaustion -- C's memset through
 
 test mts-main-gc-stress {under GC stress (a collection at every allocation site) the main thread's frames and every suspended coroutine's give the worker's values: kept, resumed and abandoned coroutines with Strings live in their frames, an allocating recursion, frames of 9.5 KiB holding a String, closures holding managed values} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-gc]
-    set closures "import std::list\nimport std::str\n\nfn adder(s: str) -> Fn{args: \[int\], return: int}:\n    fn add(n: int) -> int:\n        n + std::str::length(s)\n    add\n\nfn build(n: int, acc: List\[Fn{args: \[int\], return: int}\]) -> List\[Fn{args: \[int\], return: int}\]:\n    if n == 0:\n        return acc\n    build(n - 1, std::list::append(acc, adder(std::str::concat(\"s\", \"tr\"))))\n\nfs = build(50, \[\])\nf = std::list::at(fs, 49):\n    on IndexNotFound:\n        adder(\"\")\n\[std::list::length(fs), f(1)\]\n"
+    set closures "import std::str\n\nfn adder(s: str) -> Fn{args: \[int\], return: int}:\n    fn add(n: int) -> int:\n        n + std::str::length(s)\n    add\n\nfn deep(n: int) -> int:\n    if n == 0:\n        return 0\n    f = adder(std::str::concat(\"s\", \"tr\"))\n    k = deep(n - 1)\n    k + f(1)\n\ndeep(200)\n"
     set programs [list kept [mtsCensus kept] {} \
         keep [mtsCensus depth] {keep 3000} \
         big [surface::compile [mtsBigProgram 600] big.bot -warnings off] 8 \
@@ -588,9 +596,7 @@ test mts-main-gc-stress {under GC stress (a collection at every allocation site)
 } {}} \
     keep worker [list 0 "6000\n" {}] keep main-thread [list 0 "6000\n" {}] \
     big worker [list 0 "[mtsBigValue 8 600]\n" {}] big main-thread [list 0 "[mtsBigValue 8 600]\n" {}] \
-    closures worker {0 {[50, 4]
-} {}} closures main-thread {0 {[50, 4]
-} {}}]
+    closures worker [list 0 "800\n" {}] closures main-thread [list 0 "800\n" {}]]
 
 test mts-main-kept-coroutines {kept coroutines -- a handle passed to another function, four suspended frames of a recursive yielding function, two coroutines abandoned while suspended -- give the worker's values on the main thread, with either linker} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-kept]
@@ -683,19 +689,30 @@ test mts-main-report-parity {the startup report of a main-thread executable is t
     set results
 } -result [concat {*}[lmap linker [mtsLinkers] {list $linker-worker 1 1 worker 0 $linker-main-thread 1 1 main-thread 1}]]
 
-test mts-main-darwin-io {a main-thread executable prints through Darwin I/O (libSystem's write) exactly as a worker executable does: its output, then its value} -constraints {mainThreadStartup darwinIO} -body {
+test mts-main-darwin-io {a main-thread executable prints through Darwin I/O (libSystem's write), reads its standard input and sees a failing C call's -1 and errno (read of a descriptor that is none) exactly as a worker executable does} -constraints {mainThreadStartup darwinIO} -body {
     set dir [makeDirectory mts-main-darwin-io]
     set hir [surface::compile "import std::io\nimport std::darwin::io\n\nfn hello() errors std::io::WriteFailed:\n    std::io::print_line(\"Hello from the main thread\")\n\nwith context std::darwin::io::create()\n\nhello():\n    on std::io::WriteFailed:\n        unit\n" hello.bot -warnings off]
+    set reader [surface::compile "direct module\nimport std::abi\nimport std::abi::bytes\nimport std::darwin\n\nr = std::darwin::read(0, std::abi::bytes::zeroed(std::abi::usize(64)))\nbad = std::darwin::read(9999, std::abi::bytes::zeroed(std::abi::usize(4)))\n\[r.count, bad.count, bad.errno\]\n" read.bot -warnings off]
     set results {}
     foreach policy {worker main-thread} {
-        lappend results $policy [mtsRun {} [mtsLink $hir [file join $dir $policy] $policy system]]
+        lappend results $policy [mtsRun {} [mtsLink $hir [file join $dir $policy] $policy system]] \
+            [mtsRunInput "twelve bytes" {} [mtsLink $reader [file join $dir read-$policy] $policy system]]
     }
     removeDirectory mts-main-darwin-io
     set results
-} -result {worker {0 {Hello from the main thread
-unit
-} {}} main-thread {0 {Hello from the main thread
-unit
-} {}}}
+} -result [list worker [list 0 "Hello from the main thread\nunit\n" {}] [list 0 "\[12, -1, 9\]\n" {}] \
+    main-thread [list 0 "Hello from the main thread\nunit\n" {}] [list 0 "\[12, -1, 9\]\n" {}]]
+
+test mts-main-link-failure {a main-thread link that fails (no rustc) is the link's failure, never a main-thread executable: the previous file kept, no temporary directory left} -constraints {mainThreadStartup rustcLinked} -body {
+    set dir [makeDirectory mts-main-link-failure]
+    set path [file join $dir program]
+    set channel [open $path w]; puts -nonewline $channel previous; close $channel
+    set failed [mtsWithEnv {RUSTC /no/such/rustc} {
+        catch {mtsLink [surface::compile "1 + 2\n" one.bot] $path main-thread rustc} message options
+    }]
+    set results [list $failed [dict get $options -errorcode] [mtsBytes $path] [glob -nocomplain -directory $dir .botlish-aot-*]]
+    removeDirectory mts-main-link-failure
+    set results
+} -result {1 {NATIVE AOT} previous {}}
 
 cleanupTests

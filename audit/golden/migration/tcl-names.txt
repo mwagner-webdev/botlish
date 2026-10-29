@@ -3749,6 +3749,7 @@ tests/main-thread-startup.test mts-main-gc-stress skip
 tests/main-thread-startup.test mts-main-identity skip
 tests/main-thread-startup.test mts-main-kept-coroutines skip
 tests/main-thread-startup.test mts-main-lc-main skip
+tests/main-thread-startup.test mts-main-link-failure skip
 tests/main-thread-startup.test mts-main-overflow skip
 tests/main-thread-startup.test mts-main-process-semantics skip
 tests/main-thread-startup.test mts-main-report-parity skip

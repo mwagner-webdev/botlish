@@ -23,6 +23,9 @@
 #   * tests/system-linker.test (the system linker against the rustc and
 #     stub linkers: startup reports, outputs under GC stress, C, failures;
 #     SINGLE-EXECUTABLE-FFI-MILESTONE-1.md);
+#   * tests/main-thread-startup.test (the startup policy: the command line,
+#     the driver, the record, refusals, a panic, and on macOS the main
+#     thread's executables; MAIN-THREAD-STARTUP-MILESTONE-1.md);
 #   * tests/platform/aot-facts.tcl (the host's tools on the object and the
 #     executable, the standalone runs);
 #   * tests/platform/native-status.tcl (the executable, object and C call
@@ -251,6 +254,7 @@ try {
             argv.test argv.test argv-standalone-*
             workload-2048.test workload-2048.test workload-2048-bench-executable
             system-linker.test system-linker.test *
+            main-thread-startup.test main-thread-startup.test *
         } {
             set tmp [file tempdir botlish-native-aot-mutant-run]
             lassign [run $timeout $tree tclsh9.0 [file join $tree tests $file] -tmpdir $tmp -match $match] status output
