@@ -64,6 +64,8 @@ program in source alone, with the value unchanged, measured
 | refined-checks | an ASCII email of the same length | 372 -> 327 us (-12%) | 140 us |
 | uri-steady | escaping with `std::str::char_at`, `append_char` and character literals | 1824 -> 1835 us (no change) | 169 us |
 | lex-strategy, source-checks | declared parameter types (no generic, guarded instance; lex-strategy becomes AOT-ready) | no change | |
+| refined-checks | `emailish?` reading `UnicodeChar`s, classified by a prototype `std::char::is_tcl_alnum`/`is_tcl_alpha` (stdlib/web.bot patched) | 380 -> 164 us (-57%) | 140 us |
+| lex-strategy | the same, on the index-walking form | 13 -> 8.1 us (-38%; 24.3 -> 8.1 with both changes) | 1.7 us |
 
 The AOT executables run the same Cranelift code as the JIT and measure the
 same, at parity to 10% slower (AOT, below). Two programs cannot be built as
@@ -333,9 +335,10 @@ types, ImmutableSet, counted loops. Added since and unused: `std::str::char_at`
 for the classified characters, which the classifiers cannot take: they need
 `str`; MutableSet (ORDERED-MUTABLE-MAP-SET.md), a keyed hash table, pointless
 for five one-character elements. Missing: Unicode classification of a
-`UnicodeChar` (`is_tcl_alnum(c)` on a char is a TYPE error). With it, the scan
-would allocate nothing. Also a character cursor, and a small-set membership
-that is not a type-blind scan.
+`UnicodeChar` (`is_tcl_alnum(c)` on a char is a TYPE error). With it the
+scan allocates nothing: measured with a prototype below, 380 -> 164 us and
+6,815 -> 15 allocations per run, 1.17x Go. Also a character cursor, and a
+small-set membership that is not a type-blind scan.
 
 ### test-selection: in between (2.62x Go)
 
@@ -512,10 +515,14 @@ time the same.
 *Features.* Added since and unused: `std::str::char_at` and character
 literals. The classifier interface is `str`, so they cannot be used without
 an `std::str::of_char` per character, another allocation. Also unused:
-MutableVector, as a builder of the flags. Missing: Unicode classification of a `UnicodeChar`, String
-iteration, a `filter`/`count` over a List (no `std::list::filter`; the
-program collects and counts), and a non-allocating call through a joined
-callable value.
+MutableVector, as a builder of the flags. Missing: Unicode classification of
+a `UnicodeChar` (prototyped and measured below: 24.3 -> 19 us, and 13 ->
+8.1 us on the indexed form), String iteration, and a cheap call through a
+joined callable value. Filtering and counting are not missing: a collecting
+loop with `continue` is the filter, and `std::list::length` of it the count.
+What they cost here is a plan step per kept element (489 instructions),
+which is backend work: a cheaper append, or a `length` of a collecting loop
+that counts instead of building.
 
 ### source-checks: at Python (13.7x Go)
 
@@ -531,9 +538,75 @@ is not AOT-ready. Typing the five functions changes nothing (6.8 us). 93,378
 instructions per run, 12% generated, `rt_construct` 31%. Python is as
 fast: 7.6 against 8.9 us here, 11.3 against 9.1 on CI.
 
-*Features.* As lex-strategy. Also missing: `std::list::filter`, which the
-header notes. `invalid_names` is a collecting loop with `continue`, which is
-already its linear form.
+*Features.* As lex-strategy (with chars, below: 7.1 -> 6.0 us). The
+header's "no `std::list::filter` exists" names no gap: `invalid_names`, a
+collecting loop with `continue`, is the filter.
+
+## UnicodeChar instead of one-character Strings
+
+The ONE-CHAR-STRING-LITERAL warning (WARNINGS-ONE-CHAR-STRING-LITERAL.md)
+pushes new code toward `UnicodeChar`: write `'-'`, not `"-"`. A
+`UnicodeChar` is an immediate word (`(scalar << 3) | tag`, no allocation).
+`std::str::char_at` returns one (its ASCII path inline in generated code,
+`chareq` a word compare). The library stops there. The only Unicode
+classifiers, `std::str::is_tcl_alpha` and `std::str::is_tcl_alnum`, take a
+one-scalar `str`, so code that classifies characters holds them as Strings.
+That is the one-character String per character measured above.
+
+**The prototype.** Two natives, `std::char::is_tcl_alpha(c: UnicodeChar)`
+and `std::char::is_tcl_alnum(c: UnicodeChar)`: the same classification
+(Tcl's `[:alpha:]`/`[:alnum:]`), total (no RANGE edge: there is no operand
+of the wrong length), one NIR op and one non-allocating helper each: 45
+lines over core/unicodechar.tcl, native/lower.tcl, nir.rs, clif.rs and
+ops.rs. `audit/bench-bimodality/prototype/char-classifiers.patch` holds them
+and the 8-line port of `std::web::emailish?`. All four backends agree with
+the `str` classifiers on Latin, CJK, astral and non-ASCII digits. It is a
+measurement prototype: no Compilerpedia note, test or mutant.
+
+**The ports** keep each program's structure and change only what a
+character is: `std::str::char_at` for `substring(i, i + 1)`, a `UnicodeChar`
+parameter, the `std::char` classifiers, character literals.
+
+| program | `str` characters | `UnicodeChar`s | allocations per run | Go |
+|---|---:|---:|---|---:|
+| refined-checks (`emailish?` in stdlib/web.bot) | 380 us | 164 us (-57%) | 6,815 -> 15 | 140 us |
+| lex-strategy | 24.3 us | 19 us (-21%) | | 1.7 us |
+| lex-strategy, walked by index | 13 us | 8.1 us (-38%) | | 1.7 us |
+| source-checks | 7.1 us | 6.0 us (-15%) | | 0.65 us |
+| json-parse, uri-steady | -- | -- | already `char_at`: no one-character Strings | |
+
+* **refined-checks moves into the Go cluster** (position 0.06). Its run falls
+  from 5.4M to 2.4M instructions: 0.3% allocator (was 25%), 35% generated
+  code (was 17%). What remains is
+  - the non-ASCII seek of `char_at_index` (25%);
+  - `local_extra_chars`, now an ImmutableSet of characters still scanned
+    with type-blind `equal` and `kind_of` (23%);
+  - the classifier helper call (9%).
+
+  An inline ASCII fast path for the classifiers, as `char_at` has, and a
+  membership that compares characters as words would take most of the last
+  two.
+* **lex-strategy and source-checks gain less.** A character was one of
+  several heap objects per step. After the change `rt_construct` dominates
+  both (33% and 30%): the collected `List[bool]`, `chars_of`'s List, and
+  the `callvalue` through the classifier.
+* **Placement matters more than it should.** Moved verbatim from `std::web`
+  into the entry program (`variants/refined-checks-local`), `emailish?` runs
+  at 600 us, not 377. `check`'s instance loses its `str` facts
+  (`int, int, any, any`), so the second call is no longer decided. And
+  `local_char?` becomes a closure allocated on every call, because
+  `local_extra_chars` is a captured top-level binding there, not a module
+  static. The ports were therefore measured where the code lives (the patched
+  stdlib/web.bot).
+
+**The warning and `str` characters disagree silently.** In code that holds
+characters as Strings, the warning's spelling changes the result with no
+diagnostic. For `c = s.substring(0, 1)` on `"-x"`, `c == "-"` is `true`
+(with ONE-CHAR-STRING-LITERAL), and `c == '-'` is `false`: a String never
+equals a character, and nothing reports that comparison as decided.
+Classifiers over `UnicodeChar` remove the reason to hold a character as a
+String in the first place. A diagnostic for `==` between a `str` and a
+`UnicodeChar` would be the safety net for code that still does.
 
 ## AOT
 
@@ -567,7 +640,7 @@ runs, at the same speed.
 | raw Ints from range analysis; tail calls as jumps; exact callables; lambda-lifted closures; branch-form conditions | present, used | why fib, loop-count and sum-refined are at Go, and loop-count ahead |
 | a loop is an expression that collects its bodies' values | present (design) | game-server: 41% of the run, a List nobody reads; json.bot's `scalars` ends its loop with `continue` to avoid it |
 | String = UTF-8 with Unicode-scalar indexing, no index for non-ASCII text | present (representation) | json-parse: 76%; refined-checks: 12%; uri-steady: its non-ASCII inputs |
-| Unicode classification takes a one-scalar `str`, not a `UnicodeChar` | present (API) | the 318-357-instruction String per classified character in refined-checks, lex-strategy, source-checks |
+| Unicode classification takes a one-scalar `str`, not a `UnicodeChar` | present (API) | the 318-357-instruction String per classified character; with a prototype `std::char::is_tcl_alpha`/`is_tcl_alnum`: refined-checks -57%, lex-strategy -21%/-38%, source-checks -15% |
 | iteration over a String's characters | **missing** | lex-strategy's `chars_of` List (48%), json-parse's `char_at` loop |
 | a mutable String builder (or a String from bytes or characters) | **missing** | uri-steady: plan objects per escaped byte; the `append_char` rewrite copies the text per append |
 | a precise result type for `std::str::encode_utf8` | **missing** | json-parse cannot use `validate_bytes` |
@@ -577,7 +650,7 @@ runs, at the same speed.
 | a cheap call through a joined callable value | missing (backend) | lex-strategy, source-checks: 172 instructions per call |
 | mutable local variables | missing | one-slot MutableArrays with impossible `IndexNotFound` handlers (game-server, json-parse) |
 | integer division | missing | game-server's `periods_due` by doubling and search (cheap here) |
-| `std::list::filter` / count | missing | lex-strategy, source-checks collect and then count |
+| filtering and counting: a collecting loop with `continue`, `std::list::length` of it | present, used | lex-strategy, source-checks: a plan step per kept element (489-660 instructions); `length` of a collecting loop builds the List it counts |
 | dead-call elimination / inlining of small known functions | missing (compiler) | loop-count keeps a call whose value it knows |
 | declared parameter types (no generic instance) | present, unused by lex-strategy and source-checks | AOT readiness only: no speed change |
 | `std::str::char_at`, `append_char`, character literals (10-06, 10-17) | present, unused by the 09-xx programs | usable only where nothing then needs a `str`; no gain without a builder |
@@ -592,7 +665,9 @@ this audit found in the generated code:
 * what a loop in result position means,
 * what a String's characters are to code that walks them (an index into
   UTF-8, or a cursor/iterator),
-* whether character classification needs a String.
+* whether character classification needs a String: it should not, and the
+  measured gain of answering it with `UnicodeChar` (below) is the largest of
+  any change to refined-checks.
 
 The others are runtime and backend work: inline fast paths for the helpers
 above, an allocator for short-lived objects, hashed small sets. None of it

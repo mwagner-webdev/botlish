@@ -36,6 +36,11 @@ Each directory is one benchmark with one change, the value unchanged
 | `uri-steady-append-char` | bench/uri-steady.bot | the escaping with `char_at`, `append_char`, character literals |
 | `json-parse-ascii` | bench/experimental/json-parse.bot | the document's one literal `é` made `e` |
 | `game-server-continue` | bench/experimental/game-server.bot | `continue` at the end of `simdrv::release_due`'s loop body (`simdrv.bot`) |
+| `lex-strategy-chars` | bench/lex-strategy.bot | characters as `UnicodeChar`s (needs the prototype) |
+| `lex-strategy-chars-indexed` | lex-strategy-indexed | characters as `UnicodeChar`s (needs the prototype) |
+| `source-checks-chars` | bench/source-checks.bot | the leading character as a `UnicodeChar` (needs the prototype) |
+| `refined-checks-local` | bench/refined-checks.bot | `emailish?` copied into the program: shows what the move itself costs |
+| `refined-checks-chars` | refined-checks-local | its characters as `UnicodeChar`s (needs the prototype) |
 
 ```bash
 export LANG=C.utf8 LC_ALL=C.utf8
@@ -48,6 +53,25 @@ tclsh9.0 audit/bench-bimodality/tools/measure.tcl -runs 30 \
     bench/experimental/json-parse.bot audit/bench-bimodality/variants/json-parse-ascii/json-parse.bot \
     bench/experimental/game-server.bot audit/bench-bimodality/variants/game-server-continue/game-server.bot
 ```
+
+## prototype/
+
+`char-classifiers.patch`: `std::char::is_tcl_alpha(c: UnicodeChar)` and
+`std::char::is_tcl_alnum(c: UnicodeChar)` on every backend (core/unicodechar.tcl,
+native/lower.tcl, NIR op, CLIF helper call, ops.rs), and `std::web::emailish?`
+reading `UnicodeChar`s. A measurement prototype, never applied to this tree:
+apply it in a private worktree and build the native backend there.
+
+```bash
+git worktree add --detach "$(mktemp -d)/wt" HEAD    # then cd into it
+git apply audit/bench-bimodality/prototype/char-classifiers.patch
+cargo build --release --manifest-path native/Cargo.toml
+tclsh9.0 audit/bench-bimodality/tools/measure.tcl -runs 40 bench/refined-checks.bot \
+    audit/bench-bimodality/variants/lex-strategy-chars-indexed/lex-strategy.bot
+```
+
+With the patch, bench/refined-checks.bot itself measures the ported
+`emailish?`; compare it with the same command in an unpatched tree.
 
 ## The IR dumps
 
