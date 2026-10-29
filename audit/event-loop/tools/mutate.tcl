@@ -52,13 +52,15 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
 
 set mutantsFile [file join $here mutants.txt]
 
-# A private tree: what the two test files read. native/target is linked to
+# A private tree: what the two test files read (the examples' tests run
+# examples/event-loop). native/target is linked to
 # the checkout's (following a link, AGENTS.md "Running tests concurrently"):
 # no mutant rebuilds the native backend.
 proc makeTree {} {
     set tree [file tempdir botlish-event-loop-mutant]
-    foreach dir {compiler core hir surface service lsp compilerpedia stdlib tests packages tools} {
+    foreach dir {compiler core hir surface service lsp compilerpedia stdlib tests packages tools examples/event-loop} {
         if {[file exists [file join $::root $dir]]} {
+            file mkdir [file dirname [file join $tree $dir]]
             file copy [file join $::root $dir] [file join $tree $dir]
         }
     }
