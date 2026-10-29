@@ -13,6 +13,8 @@ CI.
   (refused, unknown, disjoint-kind, disjoint-nominal, disjoint-domain,
   empty-only, compatible; the script's header defines them). The output is
   the table per corpus area, and with `-sites` one line per site.
+  `census.txt` and `sites.tsv` are its output on the report's tree (its
+  failure lines with the checkout's path removed).
 * `tools/probes.tcl ?-backends B,...? ?PROBE.bot ...?` runs the programs of
   `probes/` through main.tcl and prints each one's value or first diagnostic
   per backend (default interp and cranelift).

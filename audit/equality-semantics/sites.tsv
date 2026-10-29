@@ -1,0 +1,1994 @@
+file	line	column	area	operator	class	a	b	exactA	exactB	reachable	shape	instance	why
+bench/lex-strategy.bot	44	34	bench	==	compatible	str	str		"_"	1	-	-	
+bench/lex-strategy.bot	44	46	bench	==	compatible	str	str		"-"	1	-	-	
+bench/source-checks.bot	51	5	bench	==	unknown	any	str		"_"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+bench/source-checks.bot	54	5	bench	==	unknown	any	str		"-"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+bench/source-checks.bot	59	8	bench	==	compatible	int	int		0	1	-	-	
+bench/sum-refined.bot	27	12	bench	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/abi/numeric-domains.bot	38	13	examples	==	compatible	std::abi::x86_64::Register64	std::abi::x86_64::Register64			1	-	-	
+examples/binary/c-structs.bot	120	8	examples	!=	compatible	int	int[CULong]			1	-	-	
+examples/binary/c-structs.bot	125	15	examples	!=	compatible	int	int		0	1	-	-	
+examples/binary/c-structs.bot	126	20	examples	==	compatible	int	int			1	-	-	
+examples/binary/c-structs.bot	178	29	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/binary/c-structs.bot	179	14	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/dfa/json/composition.bot	33	8	examples	==	compatible	int	int		34	1	-	-	
+examples/dfa/json/composition.bot	48	12	examples	==	compatible	int	int		-1	1	-	-	
+examples/dfa/json/composition.bot	75	12	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/composition.bot	75	34	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/json/conformance.bot	83	8	examples	==	compatible	int	int		2	1	-	-	
+examples/dfa/json/conformance.bot	85	8	examples	==	compatible	int	int		3	1	-	-	
+examples/dfa/json/conformance.bot	87	8	examples	==	compatible	int	int		4	1	-	-	
+examples/dfa/json/conformance.bot	95	8	examples	==	compatible	int	int		1	1	-	-	
+examples/dfa/json/conformance.bot	95	45	examples	==	compatible	int	int		3	1	-	-	
+examples/dfa/json/conformance.bot	95	76	examples	==	compatible	int	int		4	1	-	-	
+examples/dfa/json/conformance.bot	111	20	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/conformance.bot	175	24	examples	==	compatible	int	int		43	1	-	-	
+examples/dfa/json/json.bot	92	5	examples	==	compatible	int	int		32	1	-	-	
+examples/dfa/json/json.bot	92	16	examples	==	compatible	int	int		10	1	-	-	
+examples/dfa/json/json.bot	92	27	examples	==	compatible	int	int		13	1	-	-	
+examples/dfa/json/json.bot	92	38	examples	==	compatible	int	int		9	1	-	-	
+examples/dfa/json/json.bot	96	8	examples	==	compatible	int	int		123	1	-	-	
+examples/dfa/json/json.bot	98	8	examples	==	compatible	int	int		125	1	-	-	
+examples/dfa/json/json.bot	100	8	examples	==	compatible	int	int		91	1	-	-	
+examples/dfa/json/json.bot	102	8	examples	==	compatible	int	int		93	1	-	-	
+examples/dfa/json/json.bot	104	8	examples	==	compatible	int	int		58	1	-	-	
+examples/dfa/json/json.bot	106	8	examples	==	compatible	int	int		44	1	-	-	
+examples/dfa/json/json.bot	108	8	examples	==	compatible	int	int		34	1	-	-	
+examples/dfa/json/json.bot	110	8	examples	==	compatible	int	int		116	1	-	-	
+examples/dfa/json/json.bot	110	20	examples	==	compatible	int	int		102	1	-	-	
+examples/dfa/json/json.bot	110	32	examples	==	compatible	int	int		110	1	-	-	
+examples/dfa/json/json.bot	115	5	examples	==	compatible	json::Kind	json::Kind		json::Kind::String	1	-	-	
+examples/dfa/json/json.bot	115	26	examples	==	compatible	json::Kind	json::Kind		json::Kind::Number	1	-	-	
+examples/dfa/json/json.bot	115	47	examples	==	compatible	json::Kind	json::Kind		json::Kind::Literal	1	-	-	
+examples/dfa/json/json.bot	115	69	examples	==	compatible	json::Kind	json::Kind		json::Kind::BeginObject	1	-	-	
+examples/dfa/json/json.bot	115	95	examples	==	compatible	json::Kind	json::Kind		json::Kind::BeginArray	1	-	-	
+examples/dfa/json/json.bot	143	8	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/json.bot	145	8	examples	==	compatible	int	int		1	1	-	-	
+examples/dfa/json/json.bot	147	8	examples	==	compatible	int	int		2	1	-	-	
+examples/dfa/json/json.bot	149	8	examples	==	compatible	int	int		3	1	-	-	
+examples/dfa/json/json.bot	151	8	examples	==	compatible	int	int		4	1	-	-	
+examples/dfa/json/json.bot	153	8	examples	==	compatible	int	int		5	1	-	-	
+examples/dfa/json/json.bot	155	8	examples	==	compatible	int	int		6	1	-	-	
+examples/dfa/json/json.bot	171	12	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/json.bot	172	16	examples	==	compatible	json::Kind	json::Kind		json::Kind::End	1	-	-	
+examples/dfa/json/json.bot	176	12	examples	==	compatible	int	int		2	1	-	-	
+examples/dfa/json/json.bot	176	23	examples	==	compatible	json::Kind	json::Kind		json::Kind::EndArray	1	-	-	
+examples/dfa/json/json.bot	178	12	examples	==	compatible	int	int		4	1	-	-	
+examples/dfa/json/json.bot	178	23	examples	==	compatible	json::Kind	json::Kind		json::Kind::EndObject	1	-	-	
+examples/dfa/json/json.bot	180	12	examples	==	compatible	int	int		3	1	-	-	
+examples/dfa/json/json.bot	180	22	examples	==	compatible	int	int		5	1	-	-	
+examples/dfa/json/json.bot	181	16	examples	==	compatible	int	int		3	1	-	-	
+examples/dfa/json/json.bot	181	27	examples	==	compatible	json::Kind	json::Kind		json::Kind::EndArray	1	-	-	
+examples/dfa/json/json.bot	183	16	examples	==	compatible	int	int		5	1	-	-	
+examples/dfa/json/json.bot	183	27	examples	==	compatible	json::Kind	json::Kind		json::Kind::EndObject	1	-	-	
+examples/dfa/json/json.bot	185	16	examples	!=	compatible	json::Kind	json::Kind		json::Kind::ValueSeparator	1	-	-	
+examples/dfa/json/json.bot	187	16	examples	==	compatible	int	int		3	1	-	-	
+examples/dfa/json/json.bot	196	12	examples	==	compatible	int	int		7	1	-	-	
+examples/dfa/json/json.bot	197	16	examples	!=	compatible	json::Kind	json::Kind		json::Kind::NameSeparator	1	-	-	
+examples/dfa/json/json.bot	200	12	examples	==	compatible	int	int		6	1	-	-	
+examples/dfa/json/json.bot	200	22	examples	==	compatible	int	int		4	1	-	-	
+examples/dfa/json/json.bot	201	16	examples	!=	compatible	json::Kind	json::Kind		json::Kind::String	1	-	-	
+examples/dfa/json/json.bot	203	16	examples	==	compatible	int	int		4	1	-	-	
+examples/dfa/json/json.bot	211	12	examples	==	compatible	int	int		2	1	-	-	
+examples/dfa/json/json.bot	213	12	examples	==	compatible	json::Kind	json::Kind		json::Kind::BeginArray	1	-	-	
+examples/dfa/json/json.bot	215	12	examples	==	compatible	json::Kind	json::Kind		json::Kind::BeginObject	1	-	-	
+examples/dfa/json/json.bot	278	12	examples	==	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	310	12	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/json.bot	310	34	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	327	12	examples	==	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	359	12	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/json.bot	359	34	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	375	12	examples	==	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	406	12	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/json.bot	406	34	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	422	12	examples	==	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	454	12	examples	==	compatible	int	int		0	1	-	-	
+examples/dfa/json/json.bot	454	34	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/json/json.bot	498	12	examples	!=	compatible	int	int		92	1	-	-	
+examples/dfa/json/json.bot	503	21	examples	==	compatible	int	int		117	1	-	-	
+examples/dfa/json/json.bot	507	37	examples	!=	compatible	int	int		92	1	-	-	
+examples/dfa/json/json.bot	507	76	examples	!=	compatible	int	int		117	1	-	-	
+examples/dfa/json/json.bot	521	16	examples	==	compatible	int	int		98	1	-	-	
+examples/dfa/json/json.bot	523	18	examples	==	compatible	int	int		102	1	-	-	
+examples/dfa/json/json.bot	525	18	examples	==	compatible	int	int		110	1	-	-	
+examples/dfa/json/json.bot	527	18	examples	==	compatible	int	int		114	1	-	-	
+examples/dfa/json/json.bot	529	18	examples	==	compatible	int	int		116	1	-	-	
+examples/dfa/json/json_lex.bot	37	5	examples	?	compatible	int	int		9	1	-	-	
+examples/dfa/json/json_lex.bot	74	5	examples	?	compatible	int	int		12	1	-	-	
+examples/dfa/json/json_lex.bot	84	5	examples	?	compatible	int	int		6	1	-	-	
+examples/dfa/json/json_lex.bot	101	5	examples	?	compatible	int	int		2	1	-	-	
+examples/dfa/json/json_lex.bot	112	5	examples	?	compatible	int	int		8	1	-	-	
+examples/dfa/json/json_lex.bot	138	5	examples	?	compatible	int	int		2	1	-	-	
+examples/dfa/json/json_lex.bot	149	5	examples	?	compatible	int	int		1	1	-	-	
+examples/dfa/json/json_lex.bot	157	5	examples	?	compatible	int	int		1	1	-	-	
+examples/dfa/json/json_lex.bot	164	5	examples	?	compatible	int	int		1	1	-	-	
+examples/dfa/json/json_lex.bot	176	5	examples	?	compatible	int	int		15	1	-	-	
+examples/dfa/json/json_lex.bot	212	5	examples	?	compatible	int	int		2	1	-	-	
+examples/dfa/yaml/yaml.bot	47	5	examples	==	compatible	int	int		32	1	-	-	
+examples/dfa/yaml/yaml.bot	47	16	examples	==	compatible	int	int		9	1	-	-	
+examples/dfa/yaml/yaml.bot	47	26	examples	==	compatible	int	int		10	1	-	-	
+examples/dfa/yaml/yaml.bot	47	37	examples	==	compatible	int	int		13	1	-	-	
+examples/dfa/yaml/yaml.bot	51	8	examples	==	compatible	int	int		91	1	-	-	
+examples/dfa/yaml/yaml.bot	53	8	examples	==	compatible	int	int		93	1	-	-	
+examples/dfa/yaml/yaml.bot	55	8	examples	==	compatible	int	int		123	1	-	-	
+examples/dfa/yaml/yaml.bot	57	8	examples	==	compatible	int	int		125	1	-	-	
+examples/dfa/yaml/yaml.bot	59	8	examples	==	compatible	int	int		44	1	-	-	
+examples/dfa/yaml/yaml.bot	61	8	examples	==	compatible	int	int		58	1	-	-	
+examples/dfa/yaml/yaml.bot	61	20	examples	==	compatible	int	int		1	1	-	-	
+examples/dfa/yaml/yaml.bot	63	8	examples	==	compatible	int	int		34	1	-	-	
+examples/dfa/yaml/yaml.bot	65	8	examples	==	compatible	int	int		39	1	-	-	
+examples/dfa/yaml/yaml.bot	67	8	examples	==	compatible	int	int		35	1	-	-	
+examples/dfa/yaml/yaml.bot	109	8	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	117	16	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	121	12	examples	==	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	126	12	examples	==	compatible	int	int		58	1	-	-	
+examples/dfa/yaml/yaml.bot	126	24	examples	==	compatible	int	int		1	1	-	-	
+examples/dfa/yaml/yaml.bot	146	20	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	150	16	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	160	21	examples	==	compatible	int	int		34	1	-	-	
+examples/dfa/yaml/yaml.bot	160	32	examples	==	compatible	int	int		39	1	-	-	
+examples/dfa/yaml/yaml.bot	177	8	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	185	16	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	189	12	examples	==	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	194	12	examples	==	compatible	int	int		58	1	-	-	
+examples/dfa/yaml/yaml.bot	194	24	examples	==	compatible	int	int		1	1	-	-	
+examples/dfa/yaml/yaml.bot	214	20	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	218	16	examples	!=	compatible	int	int		-1	1	-	-	
+examples/dfa/yaml/yaml.bot	228	19	examples	==	compatible	int	int		34	1	-	-	
+examples/dfa/yaml/yaml.bot	228	30	examples	==	compatible	int	int		39	1	-	-	
+examples/dfa/yaml/yaml_lex.bot	36	5	examples	?	compatible	int	int		12	1	-	-	
+examples/dfa/yaml/yaml_lex.bot	65	5	examples	?	compatible	int	int		2	1	-	-	
+examples/dfa/yaml/yaml_lex.bot	76	5	examples	?	compatible	int	int		3	1	-	-	
+examples/dfa/yaml/yaml_lex.bot	90	5	examples	?	compatible	int	int		2	1	-	-	
+examples/dfa/yaml/yaml_lex.bot	107	5	examples	?	compatible	int	int		4	1	-	-	
+examples/dfa/yaml/yaml_lex.bot	132	5	examples	?	compatible	int	int		4	1	-	-	
+examples/event-loop/02-wait.bot	25	8	examples	==	compatible	std::event_loop::Wake	std::event_loop::Wake		std::event_loop::Wake::Event	1	-	-	
+examples/event-loop/02-wait.bot	29	8	examples	==	compatible	std::event_loop::Wake	std::event_loop::Wake		std::event_loop::Wake::Timer	1	-	-	
+examples/event-loop/04-observer.bot	25	12	examples	!=	compatible	std::event_loop::Wake	std::event_loop::Wake		std::event_loop::Wake::Turn	1	-	-	
+examples/event-loop/05-revoke.bot	31	8	examples	==	compatible	std::event_loop::Wake	std::event_loop::Wake		std::event_loop::Wake::Revoked	1	-	-	
+examples/event-loop/native/ticks.bot	18	12	examples	!=	compatible	std::event_loop::Wake	std::event_loop::Wake		std::event_loop::Wake::Event	1	-	-	
+examples/ffi/sha256/demo.bot	37	2	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/ffi/sha256/demo.bot	38	2	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/ffi/sha256/demo.bot	39	2	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/ffi/sha256/demo.bot	40	2	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/ffi/sha256/demo.bot	41	2	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/ffi/sha256/demo.bot	42	2	examples	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+examples/ffi/tcl/demo.bot	32	11	examples	==	compatible	int	int			1	-	-	
+examples/ffi/tcl/demo.bot	32	33	examples	!=	compatible	int	int			1	-	-	
+examples/games/2048/bench.bot	20	8	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/bench.bot	22	10	examples	==	compatible	int	int		1	1	-	-	
+examples/games/2048/bench.bot	24	10	examples	==	compatible	int	int		2	1	-	-	
+examples/games/2048/bench.bot	38	8	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/bench.bot	41	15	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/bench.bot	60	8	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/demo_play.bot	66	8	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/demo_play.bot	85	8	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Left	1	-	-	
+examples/games/2048/demo_play.bot	87	10	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Right	1	-	-	
+examples/games/2048/demo_play.bot	89	10	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Up	1	-	-	
+examples/games/2048/demo_play.bot	128	8	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/demo_play.bot	131	15	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/game2048.bot	80	13	examples	==	compatible	int	int			1	-	-	
+examples/games/2048/game2048.bot	87	8	examples	==	compatible	game2048::SpawnTile	game2048::SpawnTile		game2048::SpawnTile::Two	1	-	-	
+examples/games/2048/game2048.bot	101	12	examples	==	compatible	int	int			1	-	-	
+examples/games/2048/game2048.bot	111	12	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/game2048.bot	138	8	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Left	1	-	-	
+examples/games/2048/game2048.bot	140	10	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Right	1	-	-	
+examples/games/2048/game2048.bot	142	10	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Up	1	-	-	
+examples/games/2048/game2048.bot	150	8	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Left	1	-	-	
+examples/games/2048/game2048.bot	152	10	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Right	1	-	-	
+examples/games/2048/game2048.bot	154	10	examples	==	compatible	game2048::Direction	game2048::Direction		game2048::Direction::Up	1	-	-	
+examples/games/2048/game2048.bot	162	12	examples	==	compatible	int	int			1	-	-	
+examples/games/2048/game2048.bot	185	5	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/game2048.bot	188	5	examples	==	compatible	int	int		4	1	-	-	
+examples/games/2048/game2048.bot	192	5	examples	==	compatible	int	int		4	1	-	-	
+examples/games/2048/game2048.bot	217	16	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/game2048.bot	247	105	examples	!=	compatible	List[List[int]]	List[List[int]]			1	-	-	
+examples/games/2048/game2048.bot	251	8	examples	!=	compatible	int	int		0	1	-	-	
+examples/games/2048/game2048.bot	255	12	examples	==	compatible	int	int[game2048::Coordinate]			1	-	-	
+examples/games/2048/game2048.bot	265	16	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/game2048.bot	273	16	examples	==	compatible	int	int			1	-	-	
+examples/games/2048/golden.bot	84	16	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/golden.bot	457	18	examples	==	compatible	bool	bool			1	-	-	
+examples/games/2048/golden.bot	457	37	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/golden.bot	466	20	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/golden.bot	477	17	examples	==	compatible	bool	bool			1	-	-	
+examples/games/2048/golden.bot	477	31	examples	!=	compatible	List[List[int]]	List[List[int]]			1	-	-	
+examples/games/2048/golden.bot	490	8	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/golden.bot	492	10	examples	==	compatible	int	int		1	1	-	-	
+examples/games/2048/golden.bot	494	10	examples	==	compatible	int	int		2	1	-	-	
+examples/games/2048/golden.bot	503	8	examples	==	compatible	int	int		0	1	-	-	
+examples/games/2048/golden.bot	506	15	examples	==	compatible	int	int		4	1	-	-	
+examples/games/2048/golden.bot	513	29	examples	==	compatible	int	int		400	1	-	-	
+examples/games/icy-tower/golden.bot	367	12	examples	==	compatible	int	int		0	1	-	-	
+examples/games/icy-tower/golden.bot	371	41	examples	!=	compatible	int	int			1	-	-	
+examples/games/icy-tower/golden.bot	390	9	examples	==	compatible	List[list]	List[list]			1	-	-	
+examples/games/icy-tower/golden.bot	394	9	examples	!=	compatible	List[list]	List[list]			1	-	-	
+examples/games/icy-tower/golden.bot	421	16	examples	==	compatible	int	int		0	1	-	-	
+examples/games/icy-tower/golden.bot	467	10	examples	==	compatible	int	int			1	-	-	
+examples/games/icy-tower/golden.bot	467	42	examples	==	compatible	Float64	Float64			1	-	-	
+examples/games/icy-tower/golden.bot	483	46	examples	==	compatible	Float64	Float64			1	-	-	
+examples/games/icy-tower/golden.bot	515	9	examples	!=	compatible	List[list]	List[list]			1	-	-	
+examples/games/icy-tower/hud.bot	40	12	examples	==	compatible	int	int		0	1	-	-	
+examples/games/icy-tower/hud.bot	64	29	examples	==	compatible	int	int		1	1	-	-	
+examples/games/icy-tower/options.bot	51	5	examples	==	compatible	str	str		"--headless"	1	-	-	
+examples/games/icy-tower/options.bot	51	29	examples	==	compatible	str	str		"--autopilot"	1	-	-	
+examples/games/icy-tower/options.bot	51	54	examples	==	compatible	str	str		"--fixed-step"	1	-	-	
+examples/games/icy-tower/options.bot	51	80	examples	==	compatible	str	str		"--help"	1	-	-	
+examples/games/icy-tower/options.bot	54	5	examples	==	compatible	str	str		"--seed"	1	-	-	
+examples/games/icy-tower/options.bot	54	25	examples	==	compatible	str	str		"--frames"	1	-	-	
+examples/games/icy-tower/options.bot	73	12	examples	==	compatible	str	str			1	-	-	
+examples/games/icy-tower/options.bot	81	12	examples	==	compatible	str	str			1	-	-	
+examples/games/icy-tower/tower.bot	168	5	examples	==	compatible	int	int		0	1	-	-	
+examples/linux/getpid.bot	36	9	examples	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+examples/refinement/refined-strings.bot	51	20	examples	==	compatible	str	str		"a%26b%3Dc"	1	-	-	
+examples/stdlib/ai_text_clean.bot	46	6	examples	==	unknown	any	UnicodeChar		'😀'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	46	18	examples	==	unknown	any	UnicodeChar		'😂'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	46	30	examples	==	unknown	any	UnicodeChar		'🙂'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	46	42	examples	==	unknown	any	UnicodeChar		'😍'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	47	12	examples	==	unknown	any	UnicodeChar		'🔥'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	47	24	examples	==	unknown	any	UnicodeChar		'🚀'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	47	36	examples	==	unknown	any	UnicodeChar		'✅'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	47	48	examples	==	unknown	any	UnicodeChar		'❌'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	48	12	examples	==	unknown	any	UnicodeChar		'🎉'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	48	24	examples	==	unknown	any	UnicodeChar		'🤖'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	48	36	examples	==	unknown	any	UnicodeChar		'👍'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	48	48	examples	==	unknown	any	UnicodeChar		'💡'	1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/ai_text_clean.bot	60	12	examples	==	compatible	UnicodeChar	UnicodeChar		'–'	1	-	-	
+examples/stdlib/ai_text_clean.bot	60	24	examples	==	compatible	UnicodeChar	UnicodeChar		'—'	1	-	-	
+examples/stdlib/ai_text_clean.bot	63	12	examples	==	compatible	UnicodeChar	UnicodeChar		'‘'	1	-	-	
+examples/stdlib/ai_text_clean.bot	63	24	examples	==	compatible	UnicodeChar	UnicodeChar		'’'	1	-	-	
+examples/stdlib/ai_text_clean.bot	66	12	examples	==	compatible	UnicodeChar	UnicodeChar		'“'	1	-	-	
+examples/stdlib/ai_text_clean.bot	66	24	examples	==	compatible	UnicodeChar	UnicodeChar		'”'	1	-	-	
+examples/stdlib/ai_text_clean.bot	69	12	examples	==	compatible	UnicodeChar	UnicodeChar		'…'	1	-	-	
+examples/stdlib/csv.bot	38	40	examples	==	compatible	UnicodeChar	UnicodeChar		'"'	1	-	-	
+examples/stdlib/csv.bot	45	12	examples	!=	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv.bot	45	33	examples	!=	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv.bot	78	12	examples	==	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv.bot	81	12	examples	==	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv_chunked.bot	57	8	examples	==	compatible	int	int			1	-	-	
+examples/stdlib/csv_chunked.bot	99	40	examples	==	compatible	UnicodeChar	UnicodeChar		'"'	1	-	-	
+examples/stdlib/csv_chunked.bot	104	12	examples	!=	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv_chunked.bot	104	33	examples	!=	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv_chunked.bot	131	12	examples	==	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv_chunked.bot	134	12	examples	==	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv_geometric.bot	101	40	examples	==	compatible	UnicodeChar	UnicodeChar		'"'	1	-	-	
+examples/stdlib/csv_geometric.bot	106	12	examples	!=	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv_geometric.bot	106	33	examples	!=	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv_geometric.bot	137	12	examples	==	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv_geometric.bot	142	12	examples	==	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv_geometric.bot	163	8	examples	==	compatible	int	int		0	1	-	-	
+examples/stdlib/csv_records.bot	177	40	examples	==	compatible	UnicodeChar	UnicodeChar		'"'	1	-	-	
+examples/stdlib/csv_records.bot	182	12	examples	!=	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv_records.bot	182	33	examples	!=	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv_records.bot	213	12	examples	==	compatible	UnicodeChar	UnicodeChar		','	1	-	-	
+examples/stdlib/csv_records.bot	218	12	examples	==	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+examples/stdlib/csv_records.bot	239	8	examples	==	compatible	int	int		0	1	-	-	
+examples/stdlib/csv_records.bot	320	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	323	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	323	41	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	336	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	339	10	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	339	43	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	341	10	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	369	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	393	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	440	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	448	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	548	13	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/csv_records.bot	548	71	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	152	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	155	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	155	41	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	168	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	171	10	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	171	43	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	173	10	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	201	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	225	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	272	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	280	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	317	8	examples	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	342	6	examples	==	unknown	any	str		"Grace"	1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/hashtable.bot	342	95	examples	==	unknown	any	unit		unit	1	computed	-	an operand's type fixes no runtime kind
+examples/stdlib/matmul.bot	24	8	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/matmul.bot	32	8	examples	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+examples/stdlib/matmul.bot	40	8	examples	==	unknown	any	int			1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/stdlib/matmul.bot	47	8	examples	==	compatible	int	int		0	1	-	-	
+examples/stdlib/string_replace.bot	25	5	examples	==	compatible	str	str			1	-	-	
+examples/stdlib/string_replace.bot	41	8	examples	==	compatible	int	int		0	1	-	-	
+examples/stdlib/string_reverse.bot	19	8	examples	==	unknown	any	int			1	untyped-parameter	-	an operand's type fixes no runtime kind
+examples/surface/11-boolean-operators.bot	12	38	examples	!=	compatible	int	int	3	4	1	-	-	
+examples/surface/11-boolean-operators.bot	12	55	examples	==	compatible	int	int	1	1	1	-	-	
+examples/surface/12-if-value.bot	9	12	examples	==	compatible	int	int		0	1	-	-	
+examples/surface/15-enums.bot	18	8	examples	==	compatible	Light	Light		Light::Red	1	-	-	
+examples/surface/15-enums.bot	20	10	examples	==	compatible	Light	Light		Light::Green	1	-	-	
+examples/surface/15-enums.bot	29	34	examples	==	compatible	Light	Light		Light::Red	1	-	-	
+examples/surface/15-enums.bot	29	64	examples	==	disjoint-nominal	Light	Signal			1	-	-	enum Light vs enum Signal
+examples/surface/15-enums.bot	29	103	examples	==	compatible	Light	Light	Light::Red	Light::Green	1	-	-	
+stdlib/darwin.bot	200	8	stdlib	==	compatible	std::darwin::Access	std::darwin::Access		std::darwin::Access::ReadOnly	1	-	-	
+stdlib/darwin.bot	202	8	stdlib	==	compatible	std::darwin::Access	std::darwin::Access		std::darwin::Access::WriteOnly	1	-	-	
+stdlib/darwin/fs.bot	211	8	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/darwin/fs.bot	213	8	stdlib	==	compatible	int	int		17	1	-	-	
+stdlib/darwin/fs.bot	215	8	stdlib	==	compatible	int	int		13	1	-	-	
+stdlib/darwin/fs.bot	215	23	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/darwin/fs.bot	215	37	stdlib	==	compatible	int	int		30	1	-	-	
+stdlib/darwin/fs.bot	217	8	stdlib	==	compatible	int	int		20	1	-	-	
+stdlib/darwin/fs.bot	219	8	stdlib	==	compatible	int	int		21	1	-	-	
+stdlib/darwin/fs.bot	221	8	stdlib	==	compatible	int	int		66	1	-	-	
+stdlib/darwin/fs.bot	223	8	stdlib	==	compatible	int	int		63	1	-	-	
+stdlib/darwin/fs.bot	223	23	stdlib	==	compatible	int	int		92	1	-	-	
+stdlib/darwin/fs.bot	225	8	stdlib	==	compatible	int	int		16	1	-	-	
+stdlib/darwin/fs.bot	225	23	stdlib	==	compatible	int	int		26	1	-	-	
+stdlib/darwin/fs.bot	227	8	stdlib	==	compatible	int	int		28	1	-	-	
+stdlib/darwin/fs.bot	227	23	stdlib	==	compatible	int	int		69	1	-	-	
+stdlib/darwin/fs.bot	227	38	stdlib	==	compatible	int	int		24	1	-	-	
+stdlib/darwin/fs.bot	227	53	stdlib	==	compatible	int	int		23	1	-	-	
+stdlib/darwin/fs.bot	227	68	stdlib	==	compatible	int	int		12	1	-	-	
+stdlib/darwin/fs.bot	227	83	stdlib	==	compatible	int	int		27	1	-	-	
+stdlib/darwin/fs.bot	236	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Read	1	-	-	
+stdlib/darwin/fs.bot	238	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Replace	1	-	-	
+stdlib/darwin/fs.bot	240	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::CreateNew	1	-	-	
+stdlib/darwin/fs.bot	293	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/darwin/fs.bot	295	8	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/darwin/fs.bot	297	8	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/darwin/fs.bot	299	8	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/darwin/fs.bot	301	8	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/darwin/fs.bot	303	8	stdlib	==	compatible	int	int		6	1	-	-	
+stdlib/darwin/fs.bot	305	8	stdlib	==	compatible	int	int		7	1	-	-	
+stdlib/darwin/fs.bot	315	12	stdlib	==	compatible	int[std::abi::UsizeValue]	int		0	1	-	-	
+stdlib/darwin/fs.bot	348	8	stdlib	==	compatible	int[std::abi::UsizeValue]	int		0	1	-	-	
+stdlib/darwin/fs.bot	408	8	stdlib	==	compatible	int	int		8	1	-	-	
+stdlib/darwin/fs.bot	410	8	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/darwin/fs.bot	412	8	stdlib	==	compatible	int	int		10	1	-	-	
+stdlib/darwin/fs.bot	414	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/darwin/fs.bot	452	8	stdlib	!=	compatible	int	int		0	1	-	-	
+stdlib/darwin/fs.bot	477	12	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/darwin/io.bot	114	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/darwin/path.bot	53	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/darwin/path.bot	79	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/darwin/path.bot	86	5	stdlib	==	compatible	UnicodeChar	UnicodeChar		'/'	1	-	-	
+stdlib/darwin/path.bot	97	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/darwin/path.bot	97	18	stdlib	==	compatible	UnicodeChar	UnicodeChar		'/'	1	-	-	
+stdlib/event_loop.bot	404	12	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/event_loop.bot	406	14	stdlib	==	compatible	int	int		6	1	-	-	
+stdlib/event_loop.bot	408	14	stdlib	==	compatible	int	int		37	1	-	-	
+stdlib/event_loop.bot	460	5	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	506	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	548	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	550	10	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	552	10	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	554	10	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/event_loop.bot	562	12	stdlib	!=	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	650	8	stdlib	==	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	662	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	666	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	670	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	684	8	stdlib	!=	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	694	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	733	8	stdlib	==	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	789	5	stdlib	==	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	789	42	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	807	8	stdlib	==	compatible	std::event_loop::Delivery	std::event_loop::Delivery		std::event_loop::Delivery::Lossy	1	-	-	
+stdlib/event_loop.bot	809	10	stdlib	==	compatible	std::event_loop::Delivery	std::event_loop::Delivery		std::event_loop::Delivery::Coalesce	1	-	-	
+stdlib/event_loop.bot	904	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	916	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	931	9	stdlib	!=	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	931	45	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	942	12	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	955	12	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	988	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1002	9	stdlib	!=	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	1002	37	stdlib	!=	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1009	8	stdlib	!=	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	1009	32	stdlib	!=	compatible	int	int		3	1	-	-	
+stdlib/event_loop.bot	1017	8	stdlib	!=	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1023	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1032	12	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	1044	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1044	27	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	1046	10	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/event_loop.bot	1048	10	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/event_loop.bot	1050	10	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/event_loop.bot	1059	8	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/event_loop.bot	1109	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1133	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1162	12	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1193	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1207	8	stdlib	!=	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1211	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1235	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1241	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1243	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1248	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1283	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1285	10	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	1287	10	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/event_loop.bot	1289	10	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/event_loop.bot	1291	10	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1317	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1317	22	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1325	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1342	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1369	16	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1369	37	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	1369	58	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/event_loop.bot	1370	9	stdlib	==	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	1382	18	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	1382	40	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1385	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1385	26	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1437	8	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/event_loop.bot	1443	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1443	28	stdlib	==	compatible	int	int		6	1	-	-	
+stdlib/event_loop.bot	1462	12	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/event_loop.bot	1487	12	stdlib	==	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	1487	41	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1511	12	stdlib	==	compatible	int	int			1	-	-	
+stdlib/event_loop.bot	1511	41	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1513	16	stdlib	!=	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1531	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1599	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1606	12	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1610	12	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1623	30	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1623	53	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop.bot	1637	17	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1684	12	stdlib	!=	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1688	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop.bot	1695	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop.bot	1709	17	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/event_loop/deterministic.bot	145	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	151	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop/deterministic.bot	153	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop/deterministic.bot	266	10	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	266	25	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	268	10	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	270	10	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	274	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	302	12	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	305	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop/deterministic.bot	309	16	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	358	8	stdlib	==	compatible	int	int		-1	1	-	-	
+stdlib/event_loop/deterministic.bot	361	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop/deterministic.bot	375	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/event_loop/deterministic.bot	380	22	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/io/bytepath.bot	28	12	stdlib	==	compatible	int[std::byte::Byte]	int		0	1	-	-	
+stdlib/io/bytepath.bot	74	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/io/bytepath.bot	74	18	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/io/bytepath.bot	90	5	stdlib	!=	compatible	int[std::byte::Byte]	int[std::byte::Byte]			1	-	-	
+stdlib/io/bytepath.bot	97	5	stdlib	==	compatible	int[std::byte::Byte]	int[std::byte::Byte]			1	-	-	
+stdlib/io/bytepath.bot	124	5	stdlib	==	compatible	List[int[std::byte::Byte]]	List[int[std::byte::Byte]]{length: 1}			1	-	-	
+stdlib/io/bytepath.bot	124	24	stdlib	==	compatible	List[int[std::byte::Byte]]	List[int[std::byte::Byte]]{length: 2}			1	-	-	
+stdlib/linux/fs.bot	194	8	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/linux/fs.bot	196	8	stdlib	==	compatible	int	int		17	1	-	-	
+stdlib/linux/fs.bot	198	8	stdlib	==	compatible	int	int		13	1	-	-	
+stdlib/linux/fs.bot	198	23	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/linux/fs.bot	198	37	stdlib	==	compatible	int	int		30	1	-	-	
+stdlib/linux/fs.bot	200	8	stdlib	==	compatible	int	int		20	1	-	-	
+stdlib/linux/fs.bot	202	8	stdlib	==	compatible	int	int		21	1	-	-	
+stdlib/linux/fs.bot	204	8	stdlib	==	compatible	int	int		39	1	-	-	
+stdlib/linux/fs.bot	206	8	stdlib	==	compatible	int	int		36	1	-	-	
+stdlib/linux/fs.bot	206	23	stdlib	==	compatible	int	int		84	1	-	-	
+stdlib/linux/fs.bot	208	8	stdlib	==	compatible	int	int		16	1	-	-	
+stdlib/linux/fs.bot	208	23	stdlib	==	compatible	int	int		26	1	-	-	
+stdlib/linux/fs.bot	210	8	stdlib	==	compatible	int	int		28	1	-	-	
+stdlib/linux/fs.bot	210	23	stdlib	==	compatible	int	int		122	1	-	-	
+stdlib/linux/fs.bot	210	39	stdlib	==	compatible	int	int		24	1	-	-	
+stdlib/linux/fs.bot	210	54	stdlib	==	compatible	int	int		23	1	-	-	
+stdlib/linux/fs.bot	210	69	stdlib	==	compatible	int	int		12	1	-	-	
+stdlib/linux/fs.bot	210	84	stdlib	==	compatible	int	int		27	1	-	-	
+stdlib/linux/fs.bot	225	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Read	1	-	-	
+stdlib/linux/fs.bot	227	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Replace	1	-	-	
+stdlib/linux/fs.bot	229	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::CreateNew	1	-	-	
+stdlib/linux/fs.bot	295	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/linux/fs.bot	297	8	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/linux/fs.bot	299	8	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/linux/fs.bot	301	8	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/linux/fs.bot	303	8	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/linux/fs.bot	305	8	stdlib	==	compatible	int	int		6	1	-	-	
+stdlib/linux/fs.bot	307	8	stdlib	==	compatible	int	int		7	1	-	-	
+stdlib/linux/fs.bot	317	12	stdlib	==	compatible	int[std::abi::UsizeValue]	int		0	1	-	-	
+stdlib/linux/fs.bot	348	8	stdlib	==	compatible	int[std::abi::UsizeValue]	int		0	1	-	-	
+stdlib/linux/fs.bot	354	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/linux/fs.bot	421	8	stdlib	==	compatible	int	int		8	1	-	-	
+stdlib/linux/fs.bot	423	8	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/linux/fs.bot	425	8	stdlib	==	compatible	int	int		10	1	-	-	
+stdlib/linux/fs.bot	427	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/linux/fs.bot	437	12	stdlib	==	compatible	int[std::byte::Byte]	int		0	1	-	-	
+stdlib/linux/fs.bot	463	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/linux/io.bot	127	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/linux/path.bot	65	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/linux/path.bot	97	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/linux/path.bot	97	18	stdlib	==	compatible	UnicodeChar	UnicodeChar		'/'	1	-	-	
+stdlib/linux/path.bot	100	27	stdlib	==	compatible	str	str		"/"	1	-	-	
+stdlib/mutable_map.bot	88	5	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/mutable_set.bot	68	5	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/ordered_table.bot	124	5	stdlib	==	compatible	int	int			1	-	-	
+stdlib/ordered_table.bot	124	21	stdlib	==	unknown	K	K			1	both-unknown	-	an operand's type fixes no runtime kind
+stdlib/ordered_table.bot	172	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/ordered_table.bot	213	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/ordered_table.bot	263	8	stdlib	==	compatible	int	int			1	-	-	
+stdlib/ordered_table.bot	272	12	stdlib	!=	compatible	int	int			1	-	-	
+stdlib/ordered_table.bot	302	8	stdlib	!=	compatible	int	int			1	-	-	
+stdlib/ordered_table.bot	313	16	stdlib	!=	compatible	int	int			1	-	-	
+stdlib/ordered_table.bot	383	5	stdlib	==	compatible	int	int			1	-	-	
+stdlib/ordered_table.bot	383	34	stdlib	==	compatible	int	int			1	-	-	
+stdlib/test.bot	179	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/test.bot	190	8	stdlib	==	compatible	UnicodeChar	UnicodeChar		'"'	1	-	-	
+stdlib/test.bot	192	10	stdlib	==	compatible	UnicodeChar	UnicodeChar		'\\'	1	-	-	
+stdlib/test.bot	194	10	stdlib	==	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+stdlib/test.bot	196	10	stdlib	==	compatible	UnicodeChar	UnicodeChar		'\t'	1	-	-	
+stdlib/test.bot	198	10	stdlib	==	compatible	UnicodeChar	UnicodeChar		'\r'	1	-	-	
+stdlib/test.bot	211	12	stdlib	!=	compatible	str	str		""	1	-	-	
+stdlib/test.bot	235	12	stdlib	!=	compatible	UnicodeChar	UnicodeChar		'\n'	1	-	-	
+stdlib/test.bot	240	20	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/test.bot	265	12	stdlib	==	compatible	str	str			1	-	-	
+stdlib/test.bot	288	10	stdlib	==	unknown	any	bool		true	1	computed	-	an operand's type fixes no runtime kind
+stdlib/test.bot	290	10	stdlib	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+stdlib/test.bot	534	12	stdlib	!=	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+stdlib/test.bot	561	8	stdlib	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+stdlib/test.bot	577	8	stdlib	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+stdlib/test.bot	624	20	stdlib	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+stdlib/test.bot	624	41	stdlib	==	compatible	int	int			1	-	-	
+stdlib/test.bot	624	66	stdlib	==	compatible	int	int			1	-	-	
+stdlib/test.bot	649	20	stdlib	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+stdlib/test.bot	649	41	stdlib	==	compatible	str	str			1	-	-	
+stdlib/test.bot	662	20	stdlib	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+stdlib/test.bot	718	12	stdlib	!=	compatible	str	str		""	1	-	-	
+stdlib/test.bot	724	20	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/test.bot	750	8	stdlib	==	compatible	int	int			1	-	-	
+stdlib/web.bot	125	9	stdlib	==	unknown	UnicodeChar	any			1	untyped-parameter	-	an operand's type fixes no runtime kind
+stdlib/web.bot	136	39	stdlib	==	compatible	UnicodeChar	UnicodeChar		'-'	1	-	-	
+stdlib/web.bot	169	12	stdlib	==	compatible	int	int			1	-	-	
+stdlib/web.bot	197	20	stdlib	==	unknown	int	any			1	untyped-parameter	-	an operand's type fixes no runtime kind
+stdlib/web.bot	254	12	stdlib	==	compatible	UnicodeChar	UnicodeChar		'%'	1	-	-	
+stdlib/windows.bot	107	8	stdlib	==	compatible	std::windows::StandardDevice	std::windows::StandardDevice		std::windows::StandardDevice::Input	1	-	-	
+stdlib/windows.bot	109	8	stdlib	==	compatible	std::windows::StandardDevice	std::windows::StandardDevice		std::windows::StandardDevice::Output	1	-	-	
+stdlib/windows.bot	146	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/fs.bot	305	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	316	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	369	5	stdlib	==	compatible	int	int		92	1	-	-	
+stdlib/windows/fs.bot	369	17	stdlib	==	compatible	int	int		47	1	-	-	
+stdlib/windows/fs.bot	378	9	stdlib	==	compatible	int	int		92	1	-	-	
+stdlib/windows/fs.bot	378	21	stdlib	==	compatible	int	int		92	1	-	-	
+stdlib/windows/fs.bot	378	33	stdlib	==	compatible	int	int		63	1	-	-	
+stdlib/windows/fs.bot	378	45	stdlib	==	compatible	int	int		92	1	-	-	
+stdlib/windows/fs.bot	378	58	stdlib	==	compatible	int	int		92	1	-	-	
+stdlib/windows/fs.bot	378	70	stdlib	==	compatible	int	int		63	1	-	-	
+stdlib/windows/fs.bot	378	82	stdlib	==	compatible	int	int		63	1	-	-	
+stdlib/windows/fs.bot	378	94	stdlib	==	compatible	int	int		92	1	-	-	
+stdlib/windows/fs.bot	381	13	stdlib	==	compatible	int	int		46	1	-	-	
+stdlib/windows/fs.bot	381	24	stdlib	==	compatible	int	int		63	1	-	-	
+stdlib/windows/fs.bot	381	38	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/windows/fs.bot	386	8	stdlib	==	compatible	int	int		58	1	-	-	
+stdlib/windows/fs.bot	400	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	415	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	415	18	stdlib	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+stdlib/windows/fs.bot	415	37	stdlib	==	compatible	List[int]	List[int]{length: 2}			1	-	-	
+stdlib/windows/fs.bot	418	5	stdlib	==	compatible	int	int		46	1	-	-	
+stdlib/windows/fs.bot	418	19	stdlib	==	compatible	int	int		32	1	-	-	
+stdlib/windows/fs.bot	423	12	stdlib	==	compatible	int	int		47	1	-	-	
+stdlib/windows/fs.bot	432	12	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	432	37	stdlib	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+stdlib/windows/fs.bot	432	56	stdlib	==	compatible	List[int]	List[int]{length: 2}			1	-	-	
+stdlib/windows/fs.bot	436	5	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	446	5	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	453	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	453	30	stdlib	!=	compatible	std::windows::fs::PathKind	std::windows::fs::PathKind		std::windows::fs::PathKind::Relative	1	-	-	
+stdlib/windows/fs.bot	455	8	stdlib	==	compatible	std::windows::fs::PathKind	std::windows::fs::PathKind		std::windows::fs::PathKind::Verbatim	1	-	-	
+stdlib/windows/fs.bot	476	29	stdlib	==	compatible	std::windows::fs::PathKind	std::windows::fs::PathKind		std::windows::fs::PathKind::Verbatim	1	-	-	
+stdlib/windows/fs.bot	476	58	stdlib	==	compatible	std::windows::fs::PathKind	std::windows::fs::PathKind		std::windows::fs::PathKind::DriveRelative	1	-	-	
+stdlib/windows/fs.bot	476	91	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/windows/fs.bot	503	8	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/windows/fs.bot	503	21	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/windows/fs.bot	503	34	stdlib	==	compatible	int	int		15	1	-	-	
+stdlib/windows/fs.bot	503	48	stdlib	==	compatible	int	int		53	1	-	-	
+stdlib/windows/fs.bot	503	62	stdlib	==	compatible	int	int		67	1	-	-	
+stdlib/windows/fs.bot	505	8	stdlib	==	compatible	int	int		80	1	-	-	
+stdlib/windows/fs.bot	505	22	stdlib	==	compatible	int	int		183	1	-	-	
+stdlib/windows/fs.bot	507	8	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/windows/fs.bot	507	21	stdlib	==	compatible	int	int		19	1	-	-	
+stdlib/windows/fs.bot	509	8	stdlib	==	compatible	int	int		267	1	-	-	
+stdlib/windows/fs.bot	511	8	stdlib	==	compatible	int	int		145	1	-	-	
+stdlib/windows/fs.bot	513	8	stdlib	==	compatible	int	int		123	1	-	-	
+stdlib/windows/fs.bot	513	23	stdlib	==	compatible	int	int		161	1	-	-	
+stdlib/windows/fs.bot	513	38	stdlib	==	compatible	int	int		206	1	-	-	
+stdlib/windows/fs.bot	515	8	stdlib	==	compatible	int	int		32	1	-	-	
+stdlib/windows/fs.bot	515	22	stdlib	==	compatible	int	int		33	1	-	-	
+stdlib/windows/fs.bot	517	8	stdlib	==	compatible	int	int		112	1	-	-	
+stdlib/windows/fs.bot	517	23	stdlib	==	compatible	int	int		39	1	-	-	
+stdlib/windows/fs.bot	517	37	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/windows/fs.bot	517	50	stdlib	==	compatible	int	int		8	1	-	-	
+stdlib/windows/fs.bot	517	63	stdlib	==	compatible	int	int		14	1	-	-	
+stdlib/windows/fs.bot	517	77	stdlib	==	compatible	int	int		1450	1	-	-	
+stdlib/windows/fs.bot	530	5	stdlib	!=	compatible	std::ffi::c::ULong	int		4294967295	1	-	-	
+stdlib/windows/fs.bot	530	34	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/windows/fs.bot	535	8	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/windows/fs.bot	562	5	stdlib	==	compatible	int[std::binary::U64]	int		18446744073709551615	1	-	-	
+stdlib/windows/fs.bot	586	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Read	1	-	-	
+stdlib/windows/fs.bot	588	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Append	1	-	-	
+stdlib/windows/fs.bot	595	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Read	1	-	-	
+stdlib/windows/fs.bot	597	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::Replace	1	-	-	
+stdlib/windows/fs.bot	599	8	stdlib	==	compatible	std::io::fs::OpenMode	std::io::fs::OpenMode		std::io::fs::OpenMode::CreateNew	1	-	-	
+stdlib/windows/fs.bot	627	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/fs.bot	629	12	stdlib	==	compatible	std::ffi::c::ULong	int		109	1	-	-	
+stdlib/windows/fs.bot	657	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/windows/fs.bot	659	8	stdlib	==	compatible	int	int		2	1	-	-	
+stdlib/windows/fs.bot	661	8	stdlib	==	compatible	int	int		3	1	-	-	
+stdlib/windows/fs.bot	663	8	stdlib	==	compatible	int	int		4	1	-	-	
+stdlib/windows/fs.bot	665	8	stdlib	==	compatible	int	int		5	1	-	-	
+stdlib/windows/fs.bot	667	8	stdlib	==	compatible	int	int		6	1	-	-	
+stdlib/windows/fs.bot	669	8	stdlib	==	compatible	int	int		7	1	-	-	
+stdlib/windows/fs.bot	680	12	stdlib	==	compatible	int[std::abi::UsizeValue]	int		0	1	-	-	
+stdlib/windows/fs.bot	707	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/fs.bot	726	8	stdlib	==	compatible	int[std::abi::UsizeValue]	int		0	1	-	-	
+stdlib/windows/fs.bot	753	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/fs.bot	803	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/windows/fs.bot	803	52	stdlib	==	compatible	int	int		2684354572	1	-	-	
+stdlib/windows/fs.bot	803	73	stdlib	==	compatible	int	int		2684354563	1	-	-	
+stdlib/windows/fs.bot	805	8	stdlib	==	compatible	int	int		1	1	-	-	
+stdlib/windows/fs.bot	817	12	stdlib	==	compatible	int[std::binary::U16]	int		0	1	-	-	
+stdlib/windows/fs.bot	820	35	stdlib	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+stdlib/windows/fs.bot	820	51	stdlib	==	compatible	List[int]	List[int]{length: 2}			1	-	-	
+stdlib/windows/fs.bot	834	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/fs.bot	836	12	stdlib	==	compatible	std::ffi::c::ULong	int		18	1	-	-	
+stdlib/windows/fs.bot	855	12	stdlib	==	compatible	std::ffi::c::ULong	int		2	1	-	-	
+stdlib/windows/fs.bot	862	8	stdlib	!=	compatible	int	int		0	1	-	-	
+stdlib/windows/fs.bot	871	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/fs.bot	878	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/fs.bot	886	8	stdlib	==	compatible	std::ffi::c::Int	int		0	1	-	-	
+stdlib/windows/io.bot	111	8	stdlib	==	compatible	int	int		0	1	-	-	
+stdlib/windows/path.bot	65	12	stdlib	==	compatible	int	int		0	1	-	-	
+tests/golden/abi-bytes-native.bot	91	17	golden	==	compatible	List[std::abi::bytes::Bytes]{length: 4}	List[std::abi::bytes::Bytes]{length: 4}			1	-	-	
+tests/golden/abi-bytes-native.bot	92	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	110	5	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	183	13	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	198	14	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	198	22	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	207	48	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	207	56	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	207	64	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	207	84	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	217	13	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	228	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	229	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	230	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	231	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	232	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	233	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	234	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	235	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	236	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	243	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	244	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	245	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	246	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	261	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	270	14	golden	==	disjoint-kind	std::abi::bytes::Bytes	List[int]{length: 1}			1	-	-	struct vs list
+tests/golden/abi-bytes.bot	270	25	golden	==	disjoint-kind	std::abi::bytes::Bytes	str		"A"	1	-	-	struct vs str
+tests/golden/abi-bytes.bot	270	35	golden	==	disjoint-kind	std::abi::bytes::Bytes	int		65	1	-	-	struct vs int
+tests/golden/abi-bytes.bot	270	44	golden	==	compatible	List[std::abi::bytes::Bytes]{length: 1}	List[std::abi::bytes::Bytes]{length: 1}			1	-	-	
+tests/golden/abi-bytes.bot	279	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	281	17	golden	==	compatible	List[std::abi::bytes::Bytes]{length: 3}	List[std::abi::bytes::Bytes]{length: 3}			1	-	-	
+tests/golden/abi-bytes.bot	282	17	golden	==	compatible	List[std::abi::bytes::Bytes]{length: 3}	List[std::abi::bytes::Bytes]{length: 3}			1	-	-	
+tests/golden/abi-bytes.bot	283	17	golden	==	compatible	List[std::abi::bytes::Bytes]{length: 3}	List[std::abi::bytes::Bytes]{length: 3}			1	-	-	
+tests/golden/abi-bytes.bot	295	17	golden	==	compatible	ImmutableSet[std::abi::bytes::Bytes]	ImmutableSet[std::abi::bytes::Bytes]			1	-	-	
+tests/golden/abi-bytes.bot	541	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	542	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	543	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	577	17	golden	==	compatible	bool	bool		false	1	-	-	
+tests/golden/abi-bytes.bot	718	80	golden	==	compatible	List[std::abi::bytes::MutableBytes]	List[std::abi::bytes::MutableBytes]{length: 2}			1	-	-	
+tests/golden/abi-bytes.bot	730	63	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	742	55	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	801	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	802	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	803	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	816	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	817	17	golden	==	compatible	List[std::abi::bytes::MutableBytes]{length: 4}	List[std::abi::bytes::MutableBytes]{length: 4}			1	-	-	
+tests/golden/abi-bytes.bot	818	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	836	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	837	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	838	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	839	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	840	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	851	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	852	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	853	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	854	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	855	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	856	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	857	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	865	14	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	865	37	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	865	61	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	877	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	878	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	879	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	880	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	881	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	892	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	896	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	897	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	898	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/abi-bytes.bot	910	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	911	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	912	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	913	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	914	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	915	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	916	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	917	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	918	17	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/abi-bytes.bot	927	17	golden	==	disjoint-nominal	std::abi::bytes::MutableBytes	std::abi::bytes::Bytes			1	-	-	struct identity std::abi::bytes::MutableBytes vs std::abi::bytes::Bytes
+tests/golden/abi-bytes.bot	928	17	golden	==	disjoint-kind	std::abi::bytes::MutableBytes	List[int]{length: 1}			1	-	-	struct vs list
+tests/golden/abi-bytes.bot	929	17	golden	==	disjoint-kind	std::abi::bytes::MutableBytes	str		"A"	1	-	-	struct vs str
+tests/golden/abi-bytes.bot	954	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	955	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	956	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	957	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-bytes.bot	978	17	golden	==	compatible	ImmutableSet[std::abi::bytes::MutableBytes]	ImmutableSet[std::abi::bytes::MutableBytes]			1	-	-	
+tests/golden/abi-bytes.bot	979	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/abi-numeric-native.bot	42	14	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/abi-numeric.bot	657	14	golden	==	compatible	std::abi::U8	std::abi::U8			1	-	-	
+tests/golden/abi-numeric.bot	657	50	golden	==	compatible	std::abi::U8	std::abi::U8			1	-	-	
+tests/golden/abi-numeric.bot	657	86	golden	==	disjoint-nominal	std::abi::I64	std::abi::Isize			1	-	-	struct identity std::abi::I64 vs std::abi::Isize
+tests/golden/abi-numeric.bot	657	126	golden	==	disjoint-nominal	std::abi::U64	std::abi::Usize			1	-	-	struct identity std::abi::U64 vs std::abi::Usize
+tests/golden/abi-numeric.bot	657	166	golden	==	disjoint-nominal	std::abi::I32	std::abi::U32			1	-	-	struct identity std::abi::I32 vs std::abi::U32
+tests/golden/abi-numeric.bot	657	204	golden	==	disjoint-kind	std::abi::U8	int		1	1	-	-	struct vs int
+tests/golden/abi-numeric.bot	719	14	golden	==	compatible	std::abi::x86_64::Register64	std::abi::x86_64::Register64			1	-	-	
+tests/golden/abi-numeric.bot	751	74	golden	==	compatible	std::abi::x86_64::Register64	std::abi::x86_64::Register64			1	-	-	
+tests/golden/affinity.bot	174	5	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/affinity.bot	203	8	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/affinity.bot	716	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/affinity.bot	970	54	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/binary-layout.bot	157	14	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	157	86	golden	==	compatible	LayoutStruct[Mixed]	LayoutStruct[Mixed]			1	-	-	
+tests/golden/binary-layout.bot	171	89	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	211	14	golden	==	disjoint-nominal	LayoutStruct[Single]	LayoutStruct[Twin]			1	-	-	struct identity LayoutStruct[Single] vs LayoutStruct[Twin]
+tests/golden/binary-layout.bot	211	80	golden	==	compatible	LayoutStruct[Single]	LayoutStruct[Single]			1	-	-	
+tests/golden/binary-layout.bot	293	22	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	367	41	golden	==	compatible	List[LayoutStruct[Inner]]{length: 1}	List[LayoutStruct[Inner]]{length: 1}			1	-	-	
+tests/golden/binary-layout.bot	373	13	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	421	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	422	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	423	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	424	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	425	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	426	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	434	17	golden	==	compatible	LayoutStruct[Single]	LayoutStruct[Single]			1	-	-	
+tests/golden/binary-layout.bot	436	17	golden	==	compatible	LayoutStruct[Adjacent]	LayoutStruct[Adjacent]			1	-	-	
+tests/golden/binary-layout.bot	438	17	golden	==	compatible	LayoutStruct[Padded]	LayoutStruct[Padded]			1	-	-	
+tests/golden/binary-layout.bot	440	17	golden	==	compatible	LayoutStruct[Wide]	LayoutStruct[Wide]			1	-	-	
+tests/golden/binary-layout.bot	442	17	golden	==	compatible	LayoutStruct[Outer]	LayoutStruct[Outer]			1	-	-	
+tests/golden/binary-layout.bot	444	17	golden	==	compatible	LayoutStruct[Vendor]	LayoutStruct[Vendor]			1	-	-	
+tests/golden/binary-layout.bot	466	18	golden	==	compatible	LayoutStruct[Padded]	LayoutStruct[Padded]			1	-	-	
+tests/golden/binary-layout.bot	466	26	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	466	98	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	482	14	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	482	60	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	482	106	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	482	156	golden	==	compatible	LayoutStruct[Padded]	LayoutStruct[Padded]			1	-	-	
+tests/golden/binary-layout.bot	492	36	golden	==	compatible	LayoutStruct[Inner]	LayoutStruct[Inner]			1	-	-	
+tests/golden/binary-layout.bot	492	82	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	526	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	533	17	golden	==	compatible	int[std::abi::UsizeValue]	int		12	1	-	-	
+tests/golden/binary-layout.bot	606	120	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/binary-layout.bot	606	200	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/bits-bytes-hashing.bot	229	26	golden	==	compatible	int	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	247	29	golden	==	compatible	int[std::byte::Nibble]	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	248	29	golden	==	compatible	int[std::byte::Nibble]	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	270	26	golden	==	compatible	int[std::byte::Byte]	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	288	30	golden	==	compatible	int[std::byte::Nibble]	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	289	31	golden	==	compatible	int[std::byte::Nibble]	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	338	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	349	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	360	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	368	13	golden	==	compatible	int	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	374	13	golden	==	compatible	int	int			1	-	-	
+tests/golden/bits-bytes-hashing.bot	380	13	golden	==	compatible	int	int			1	-	-	
+tests/golden/branch-form-boolean.bot	71	25	golden	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+tests/golden/branch-form-boolean.bot	71	50	golden	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+tests/golden/branch-form-boolean.bot	75	25	golden	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+tests/golden/branch-form-boolean.bot	75	49	golden	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+tests/golden/branch-form-boolean.bot	123	25	golden	!=	compatible	bool	bool			1	-	-	
+tests/golden/branch-form-boolean.bot	251	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	255	20	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/branch-form-boolean.bot	269	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	27	golden	!=	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	44	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	51	golden	!=	compatible	int	int		2	1	-	-	
+tests/golden/branch-form-boolean.bot	325	68	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	75	golden	!=	compatible	int	int		3	1	-	-	
+tests/golden/branch-form-boolean.bot	325	92	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	99	golden	!=	compatible	int	int		4	1	-	-	
+tests/golden/branch-form-boolean.bot	325	116	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	123	golden	!=	compatible	int	int		5	1	-	-	
+tests/golden/branch-form-boolean.bot	325	140	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	147	golden	!=	compatible	int	int		6	1	-	-	
+tests/golden/branch-form-boolean.bot	325	164	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	171	golden	!=	compatible	int	int		7	1	-	-	
+tests/golden/branch-form-boolean.bot	325	188	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	195	golden	!=	compatible	int	int		8	1	-	-	
+tests/golden/branch-form-boolean.bot	325	212	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	219	golden	!=	compatible	int	int		9	1	-	-	
+tests/golden/branch-form-boolean.bot	325	236	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	244	golden	!=	compatible	int	int		10	1	-	-	
+tests/golden/branch-form-boolean.bot	325	262	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	270	golden	!=	compatible	int	int		11	1	-	-	
+tests/golden/branch-form-boolean.bot	325	288	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	296	golden	!=	compatible	int	int		12	1	-	-	
+tests/golden/branch-form-boolean.bot	325	314	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	322	golden	!=	compatible	int	int		13	1	-	-	
+tests/golden/branch-form-boolean.bot	325	340	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	348	golden	!=	compatible	int	int		14	1	-	-	
+tests/golden/branch-form-boolean.bot	325	366	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	374	golden	!=	compatible	int	int		15	1	-	-	
+tests/golden/branch-form-boolean.bot	325	392	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	400	golden	!=	compatible	int	int		16	1	-	-	
+tests/golden/branch-form-boolean.bot	325	418	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	426	golden	!=	compatible	int	int		17	1	-	-	
+tests/golden/branch-form-boolean.bot	325	444	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	452	golden	!=	compatible	int	int		18	1	-	-	
+tests/golden/branch-form-boolean.bot	325	470	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	478	golden	!=	compatible	int	int		19	1	-	-	
+tests/golden/branch-form-boolean.bot	325	496	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	504	golden	!=	compatible	int	int		20	1	-	-	
+tests/golden/branch-form-boolean.bot	325	522	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	530	golden	!=	compatible	int	int		21	1	-	-	
+tests/golden/branch-form-boolean.bot	325	548	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	556	golden	!=	compatible	int	int		22	1	-	-	
+tests/golden/branch-form-boolean.bot	325	574	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	582	golden	!=	compatible	int	int		23	1	-	-	
+tests/golden/branch-form-boolean.bot	325	600	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	608	golden	!=	compatible	int	int		24	1	-	-	
+tests/golden/branch-form-boolean.bot	325	626	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	634	golden	!=	compatible	int	int		25	1	-	-	
+tests/golden/branch-form-boolean.bot	325	652	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	660	golden	!=	compatible	int	int		26	1	-	-	
+tests/golden/branch-form-boolean.bot	325	678	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	686	golden	!=	compatible	int	int		27	1	-	-	
+tests/golden/branch-form-boolean.bot	325	704	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	712	golden	!=	compatible	int	int		28	1	-	-	
+tests/golden/branch-form-boolean.bot	325	730	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	738	golden	!=	compatible	int	int		29	1	-	-	
+tests/golden/branch-form-boolean.bot	325	756	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	764	golden	!=	compatible	int	int		30	1	-	-	
+tests/golden/branch-form-boolean.bot	325	782	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	790	golden	!=	compatible	int	int		31	1	-	-	
+tests/golden/branch-form-boolean.bot	325	808	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	816	golden	!=	compatible	int	int		32	1	-	-	
+tests/golden/branch-form-boolean.bot	325	834	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	842	golden	!=	compatible	int	int		33	1	-	-	
+tests/golden/branch-form-boolean.bot	325	860	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	868	golden	!=	compatible	int	int		34	1	-	-	
+tests/golden/branch-form-boolean.bot	325	886	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	894	golden	!=	compatible	int	int		35	1	-	-	
+tests/golden/branch-form-boolean.bot	325	912	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	920	golden	!=	compatible	int	int		36	1	-	-	
+tests/golden/branch-form-boolean.bot	325	938	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	946	golden	!=	compatible	int	int		37	1	-	-	
+tests/golden/branch-form-boolean.bot	325	964	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	972	golden	!=	compatible	int	int		38	1	-	-	
+tests/golden/branch-form-boolean.bot	325	990	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	998	golden	!=	compatible	int	int		39	1	-	-	
+tests/golden/branch-form-boolean.bot	325	1016	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/branch-form-boolean.bot	325	1024	golden	!=	compatible	int	int		40	1	-	-	
+tests/golden/branch-form-boolean.bot	346	74	golden	!=	compatible	int	int		3	1	-	-	
+tests/golden/branch-form-boolean.bot	346	109	golden	!=	compatible	int	int		6	1	-	-	
+tests/golden/branch-form-boolean.bot	388	48	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/branch-form-boolean.bot	402	46	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/branch-form-boolean.bot	402	58	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/branch-form-boolean.bot	402	70	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/c-float-ffi.bot	92	8	golden	==	compatible	NonFiniteResult	NonFiniteResult		NonFiniteResult::NotANumber	1	-	-	
+tests/golden/c-float-ffi.bot	94	10	golden	==	compatible	NonFiniteResult	NonFiniteResult		NonFiniteResult::PositiveInfinity	1	-	-	
+tests/golden/c-float-ffi.bot	141	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/c-float-ffi.bot	143	22	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/c-float-ffi.bot	146	22	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/c-float-ffi.bot	149	22	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/c-float-ffi.bot	152	22	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/c-float-ffi.bot	155	22	golden	==	compatible	int	int		5	1	-	-	
+tests/golden/c-float-ffi.bot	158	22	golden	==	compatible	int	int		6	1	-	-	
+tests/golden/callable-contracts-fallback.bot	35	8	golden	==	unknown	any	int		3	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts-returned.bot	37	8	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts-returned.bot	39	8	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts-returned.bot	41	8	golden	==	unknown	any	int		3	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	130	8	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	132	8	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	134	8	golden	==	unknown	any	int		3	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	208	20	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	210	20	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	815	20	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	897	8	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/callable-contracts.bot	902	8	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/callable-contracts.bot	907	8	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/callable-contracts.bot	1307	20	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	1356	20	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	1483	20	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	1671	46	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/callable-contracts.bot	1717	50	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/callable-contracts.bot	1726	24	golden	==	compatible	int	int			1	-	-	
+tests/golden/callable-contracts.bot	1732	28	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/callable-contracts.bot	1733	32	golden	==	unknown	int	any			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callable-contracts.bot	1735	32	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/callable-contracts.bot	1744	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/callable-contracts.bot	1750	28	golden	==	compatible	str	str		"@"	1	-	-	
+tests/golden/callables.bot	178	17	golden	==	unknown	any	str		"x"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	197	21	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	213	54	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/callables.bot	223	17	golden	==	unknown	any	str		"_"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	225	17	golden	==	unknown	any	str		"-"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	239	17	golden	==	unknown	any	str		"_"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	241	17	golden	==	unknown	any	str		"-"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	251	46	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/callables.bot	268	46	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/callables.bot	319	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	332	46	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/callables.bot	502	20	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	541	20	golden	==	unknown	any	str		"a"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	573	20	golden	==	unknown	any	str			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	624	20	golden	==	unknown	any	str		"a"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	1240	28	golden	==	compatible	str	str		" "	1	-	-	
+tests/golden/callables.bot	1288	46	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/callables.bot	1307	24	golden	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	1339	24	golden	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	1401	24	golden	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	1419	24	golden	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	1436	24	golden	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	1541	24	golden	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/callables.bot	1576	24	golden	==	unknown	any	bool		false	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/closure-escape.bot	261	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/closure-escape.bot	396	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/closure-escape.bot	442	24	golden	==	compatible	str	str		"x"	1	-	-	
+tests/golden/closure-escape.bot	464	24	golden	==	compatible	str	str		":"	1	-	-	
+tests/golden/closure-escape.bot	494	21	golden	==	compatible	str	str		"z"	1	-	-	
+tests/golden/closure-escape.bot	516	28	golden	==	compatible	str	str		"x"	1	-	-	
+tests/golden/closure-escape.bot	538	24	golden	==	compatible	str	str		"z"	1	-	-	
+tests/golden/closure-escape.bot	658	28	golden	==	compatible	int	int		5	1	-	-	
+tests/golden/closure-escape.bot	846	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/collection-iteration.bot	79	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/collection-iteration.bot	85	20	golden	==	compatible	str	str		"b"	1	-	-	
+tests/golden/collection-reorder.bot	202	27	golden	==	compatible	List[List[int]]	List[List[int]]			1	-	-	
+tests/golden/collection-reorder.bot	212	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/collection-reorder.bot	226	20	golden	!=	compatible	int	int			1	-	-	
+tests/golden/collection-reorder.bot	229	18	golden	==	compatible	List[int]	List[int]			1	-	-	
+tests/golden/collection-reorder.bot	282	21	golden	==	compatible	List[List[int]]	List[List[int]]			1	-	-	
+tests/golden/collection-reorder.bot	1078	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/collections.bot	112	20	golden	==	compatible	str	str			1	-	-	
+tests/golden/collections.bot	112	38	golden	==	compatible	str	str			1	-	-	
+tests/golden/collections.bot	120	21	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/collections.bot	127	27	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/collections.bot	128	21	golden	==	compatible	str	str			1	-	-	
+tests/golden/collections.bot	131	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/collections.bot	131	41	golden	==	compatible	int	int			1	-	-	
+tests/golden/collections.bot	131	66	golden	==	compatible	int	int			1	-	-	
+tests/golden/collections.bot	161	13	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/collections.bot	388	10	golden	==	compatible	VehicleType	VehicleType	VehicleType::Car	VehicleType::Car	1	-	-	
+tests/golden/collections.bot	388	48	golden	==	compatible	VehicleType	VehicleType	VehicleType::Car	VehicleType::Truck	1	-	-	
+tests/golden/collections.bot	388	88	golden	!=	compatible	VehicleType	VehicleType	VehicleType::Car	VehicleType::Truck	1	-	-	
+tests/golden/collections.bot	388	128	golden	!=	compatible	VehicleType	VehicleType	VehicleType::Car	VehicleType::Car	1	-	-	
+tests/golden/collections.bot	388	166	golden	==	disjoint-nominal	VehicleType	Other			1	-	-	enum VehicleType vs enum Other
+tests/golden/collections.bot	388	210	golden	==	disjoint-nominal	VehicleType	Other			1	-	-	enum VehicleType vs enum Other
+tests/golden/collections.bot	388	255	golden	==	disjoint-nominal	VehicleType	Other	VehicleType::Car	Other::Car	1	-	-	enum VehicleType vs enum Other
+tests/golden/collections.bot	388	287	golden	==	disjoint-kind	VehicleType	int	VehicleType::Car	1	1	-	-	enum vs int
+tests/golden/collections.bot	388	310	golden	==	disjoint-kind	VehicleType	str	VehicleType::Car	"Car"	1	-	-	enum vs str
+tests/golden/collections.bot	433	164	golden	==	compatible	ImmutableSet[VehicleType]	ImmutableSet[VehicleType]			1	-	-	
+tests/golden/collections.bot	457	10	golden	==	compatible	ImmutableSet[int]	ImmutableSet[int]			1	-	-	
+tests/golden/collections.bot	457	90	golden	==	compatible	ImmutableSet[int]	ImmutableSet[int]			1	-	-	
+tests/golden/collections.bot	457	170	golden	==	compatible	ImmutableSet[int]	ImmutableSet[int]			1	-	-	
+tests/golden/collections.bot	457	253	golden	==	compatible	ImmutableSet[int]	ImmutableSet[int]			1	-	-	
+tests/golden/collections.bot	457	333	golden	==	compatible	ImmutableSet[never]	ImmutableSet[never]			1	-	-	
+tests/golden/compiled-values-struct-transport.bot	119	28	golden	==	unknown	struct{a: any, b: int, c: int, d: int, e: int, f: int}	struct{a: int, b: int, c: int, d: int, e: int, f: int}			1	computed	-	
+tests/golden/compiled-values-struct-transport.bot	119	36	golden	==	compatible	int	int			1	-	-	
+tests/golden/compiled-values-struct-transport.bot	258	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	114	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/compiled-values.bot	114	41	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/compiled-values.bot	200	17	golden	==	compatible	str	str		"b"	1	-	-	
+tests/golden/compiled-values.bot	229	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	234	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	246	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	251	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	264	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	269	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	319	17	golden	==	unknown	any	str		"b"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1013	53	golden	==	compatible	TransportSegment	TransportSegment			1	-	-	
+tests/golden/compiled-values.bot	1097	18	golden	==	unknown	any	str		"yes"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1106	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1131	18	golden	==	unknown	str	any			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1151	18	golden	==	unknown	any	str		"λ"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1165	20	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/compiled-values.bot	1168	31	golden	==	compatible	str	str		"a"	1	-	-	
+tests/golden/compiled-values.bot	1326	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1344	20	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1346	20	golden	==	unknown	any	int			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1348	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/compiled-values.bot	1362	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1416	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/compiled-values.bot	1563	24	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/completion-regressions.bot	125	13	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[never]			1	-	-	
+tests/golden/contexts.bot	260	8	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/contexts.bot	265	8	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/contexts.bot	591	12	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/contexts.bot	597	16	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/contexts.bot	720	12	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/contexts.bot	1268	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/core-semantics.bot	367	13	golden	==	unknown	any	any			1	both-unknown	disjoint-kind: int vs str	an operand's type fixes no runtime kind
+tests/golden/core-semantics.bot	399	13	golden	==	unknown	unit	any	unit		1	computed	-	an operand's type fixes no runtime kind
+tests/golden/core-semantics.bot	698	50	golden	!=	compatible	int	int	3	4	1	-	-	
+tests/golden/core-semantics.bot	698	67	golden	==	compatible	int	int	1	1	1	-	-	
+tests/golden/core-semantics.bot	708	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/core-semantics.bot	761	20	golden	==	compatible	bool	bool		true	1	-	-	
+tests/golden/core-semantics.bot	772	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/core-semantics.bot	849	14	golden	==	disjoint-kind	int	str	1	"1"	1	-	-	int vs str
+tests/golden/core-semantics.bot	849	24	golden	==	compatible	unit	unit	unit	unit	1	-	-	
+tests/golden/core-semantics.bot	849	38	golden	==	compatible	bool	bool	true	false	1	-	-	
+tests/golden/core-semantics.bot	849	55	golden	==	compatible	str	str	"a"	"a"	1	-	-	
+tests/golden/core-semantics.bot	856	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/core-semantics.bot	1033	18	golden	==	compatible	int	int	5	0	1	-	-	
+tests/golden/core-semantics.bot	1046	20	golden	==	compatible	int	int	5	0	1	-	-	
+tests/golden/core-semantics.bot	1453	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/core-semantics.bot	1455	26	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/core-semantics.bot	1457	26	golden	==	compatible	int	int		6	1	-	-	
+tests/golden/core-semantics.bot	1470	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/core-semantics.bot	1473	28	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/core-semantics.bot	1476	32	golden	==	compatible	int	int		6	1	-	-	
+tests/golden/core-semantics.bot	1490	24	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/core-semantics.bot	1494	26	golden	==	compatible	int	int		8	1	-	-	
+tests/golden/core-semantics.bot	1503	24	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/core-semantics.bot	1509	32	golden	==	compatible	int	int		8	1	-	-	
+tests/golden/coroutines.bot	213	8	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/coroutines.bot	450	20	golden	==	compatible	unit	unit		unit	1	-	-	
+tests/golden/coroutines.bot	713	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/coroutines.bot	730	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/coroutines.bot	1038	14	golden	==	compatible	ListV	ListV			1	-	-	
+tests/golden/coroutines.bot	1275	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/coroutines.bot	1395	24	golden	==	compatible	int	int			1	-	-	
+tests/golden/decimal-rounded.bot	340	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/declared-errors.bot	250	8	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/declared-errors.bot	358	33	golden	==	compatible	Kind	Kind		Kind::Gone	1	-	-	
+tests/golden/declared-errors.bot	410	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/declared-errors.bot	631	20	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/declared-errors.bot	666	32	golden	==	compatible	struct{uri: str}	struct{uri: str}			1	-	-	
+tests/golden/declared-errors.bot	798	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/declared-errors.bot	806	28	golden	==	compatible	ParseErrorKind	ParseErrorKind		ParseErrorKind::BadDigit	1	-	-	
+tests/golden/declared-errors.bot	880	28	golden	==	compatible	LintCode	LintCode		LintCode::Unbound	1	-	-	
+tests/golden/declared-errors.bot	1012	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/declared-errors.bot	1014	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/declared-errors.bot	1498	32	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/declared-errors.bot	1500	32	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/declared-errors.bot	1860	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring-instances.bot	279	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	282	22	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	294	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	298	22	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	316	20	golden	==	unknown	any	int		0	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	318	22	golden	==	unknown	any	int		1	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	330	20	golden	==	unknown	any	int		0	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	332	22	golden	==	unknown	any	int		1	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	531	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	533	22	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	621	24	golden	==	unknown	any	int		2	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	634	24	golden	==	unknown	any	int		2	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	645	24	golden	==	unknown	any	int		2	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring-instances.bot	656	24	golden	==	unknown	any	int		2	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	217	12	golden	!=	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/destructuring.bot	247	13	golden	==	compatible	List[int]{length: 2}	List[int]{length: 2}			1	-	-	
+tests/golden/destructuring.bot	252	17	golden	==	compatible	List[int]{length: 1}	List[int]{length: 1}			1	-	-	
+tests/golden/destructuring.bot	965	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	982	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	998	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1015	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1032	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1048	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1064	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1081	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1099	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1116	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1134	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1153	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1170	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	1746	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	1749	22	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	1752	22	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	1763	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	1767	22	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	1771	22	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	2056	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/destructuring.bot	2989	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	3157	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	3172	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	3621	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/destructuring.bot	3642	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/diagnostic-recovery.bot	33	8	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/diagnostics.bot	117	12	golden	==	compatible	str	str			1	-	-	
+tests/golden/diagnostics.bot	137	29	golden	==	compatible	int	int			1	-	-	
+tests/golden/diagnostics.bot	137	48	golden	==	compatible	int	int			1	-	-	
+tests/golden/diagnostics.bot	139	9	golden	==	compatible	str	str			1	-	-	
+tests/golden/diagnostics.bot	142	8	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/diagnostics.bot	177	8	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/diagnostics.bot	179	8	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/errors.bot	86	41	golden	==	compatible	int	int			1	-	-	
+tests/golden/errors.bot	86	66	golden	==	compatible	int	int			1	-	-	
+tests/golden/errors.bot	87	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/errors.bot	87	53	golden	==	compatible	str	str			1	-	-	
+tests/golden/errors.bot	143	16	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/errors.bot	145	16	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/errors.bot	329	20	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/errors.bot	359	20	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/errors.bot	399	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/errors.bot	401	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/errors.bot	403	20	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/errors.bot	427	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/errors.bot	429	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/flags.bot	188	24	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/flags.bot	299	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/flags.bot	301	20	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/flags.bot	303	20	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/flags.bot	313	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/flags.bot	348	16	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/flags.bot	1131	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/flags.bot	1146	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/flags.bot	1161	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/flags.bot	1208	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/flags.bot	1210	26	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/flags.bot	1212	26	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/flags.bot	1281	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/float64.bot	59	44	golden	==	compatible	Float64	Float64	1.5	-2.0	1	-	-	
+tests/golden/float64.bot	59	52	golden	!=	compatible	Float64	Float64	1.5	-2.0	1	-	-	
+tests/golden/float64.bot	65	14	golden	==	disjoint-kind	Float64	int	1.0	1	1	-	-	Float64 vs int
+tests/golden/float64.bot	65	24	golden	==	disjoint-kind	Float64	int	0.0	0	1	-	-	Float64 vs int
+tests/golden/float64.bot	65	34	golden	==	compatible	Float64	Float64	2.5	2.5	1	-	-	
+tests/golden/float64.bot	72	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/float64.bot	77	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/float64.bot	128	14	golden	==	compatible	Point	Point			1	-	-	
+tests/golden/float64.bot	128	50	golden	==	compatible	int	int			1	-	-	
+tests/golden/float64.bot	128	70	golden	==	compatible	int	int			1	-	-	
+tests/golden/float64.bot	128	94	golden	==	compatible	int	int			1	-	-	
+tests/golden/float64.bot	128	130	golden	==	compatible	List[Float64]{length: 3}	List[Float64]{length: 3}			1	-	-	
+tests/golden/float64.bot	236	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/float64.bot	347	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/float64.bot	354	58	golden	==	compatible	struct{result: NonFiniteResult}	struct{result: NonFiniteResult}			1	-	-	
+tests/golden/float64.bot	359	32	golden	==	compatible	NonFiniteResult	NonFiniteResult		NonFiniteResult::PositiveInfinity	1	-	-	
+tests/golden/float64.bot	374	17	golden	==	compatible	NonFiniteResult	NonFiniteResult	NonFiniteResult::NotANumber	NonFiniteResult::NotANumber	1	-	-	
+tests/golden/float64.bot	374	51	golden	==	compatible	NonFiniteResult	NonFiniteResult	NonFiniteResult::NotANumber	NonFiniteResult::PositiveInfinity	1	-	-	
+tests/golden/float64.bot	430	14	golden	==	compatible	List[Float64]{length: 20}	List[Float64]{length: 20}			1	-	-	
+tests/golden/float64.bot	444	50	golden	==	compatible	int	int			1	-	-	
+tests/golden/framework-semantics.bot	608	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/gc-sensitive-values.bot	80	19	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/gc-sensitive-values.bot	84	12	golden	==	compatible	UnicodeChar	UnicodeChar			1	-	-	
+tests/golden/gc-sensitive-values.bot	100	39	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/gc-sensitive-values.bot	122	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/gc-sensitive-values.bot	128	101	golden	==	compatible	str	str			1	-	-	
+tests/golden/gc-sensitive-values.bot	158	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/gc-sensitive-values.bot	184	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/gc-sensitive-values.bot	220	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/gc-sensitive-values.bot	244	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/gc-sensitive-values.bot	250	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/gc-sensitive-values.bot	419	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/harness.bot	136	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/harness.bot	157	21	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode		std::compiler::DiagnosticCode::Unbound	1	-	-	
+tests/golden/harness.bot	160	21	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode		std::compiler::DiagnosticCode::Unbound	1	-	-	
+tests/golden/harness.bot	336	27	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/harness.bot	340	20	golden	==	compatible	UnicodeChar	UnicodeChar			1	-	-	
+tests/golden/hashable-admission.bot	44	5	golden	==	compatible	Q	Q			1	-	-	
+tests/golden/hashable-admission.bot	74	87	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	86	5	golden	==	compatible	P	P			1	-	-	
+tests/golden/hashable.bot	109	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	41	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	80	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	113	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	146	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	177	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	208	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	253	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	306	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	423	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	460	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	511	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	610	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	665	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	109	694	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	114	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	114	65	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	120	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	120	52	golden	==	compatible	int	int			1	-	-	
+tests/golden/hashable.bot	130	13	golden	==	compatible	int	int			1	-	-	
+tests/golden/hir-values.bot	238	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/imports-unimported.bot	95	13	golden	==	compatible	List[int]{length: 2}	List[int]{length: 2}			1	-	-	
+tests/golden/imports-unimported.bot	95	71	golden	==	compatible	int	int			1	-	-	
+tests/golden/imports-unimported.bot	95	94	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/layout-arrays.bot	356	17	golden	==	compatible	LayoutStruct[SCALARS]	LayoutStruct[SCALARS]			1	-	-	
+tests/golden/layout-arrays.bot	425	19	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/layout-arrays.bot	457	14	golden	==	compatible	LayoutStruct[SHAPES]	LayoutStruct[SHAPES]			1	-	-	
+tests/golden/layout-arrays.bot	457	23	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/layout-arrays.bot	461	17	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/layout-arrays.bot	465	17	golden	==	compatible	LayoutStruct[SHAPES]	LayoutStruct[SHAPES]			1	-	-	
+tests/golden/layout-arrays.bot	566	239	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/layout-arrays.bot	589	26	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/layout-arrays.bot	955	20	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/linux-io-native.bot	51	21	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/linux-io-native.bot	51	29	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/linux-io-native.bot	84	14	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/linux-io-native.bot	84	85	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/linux-io-native.bot	84	103	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/linux-io-native.bot	84	140	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/linux-io-native.bot	123	14	golden	==	compatible	int[std::abi::x86_64::Register64Word]	int[std::abi::x86_64::Register64Word]			1	-	-	
+tests/golden/linux-io.bot	184	14	golden	==	compatible	std::abi::x86_64::Register64	std::abi::x86_64::Register64			1	-	-	
+tests/golden/linux-io.bot	184	53	golden	==	compatible	std::abi::x86_64::Register64	std::abi::x86_64::Register64			1	-	-	
+tests/golden/linux-io.bot	184	92	golden	==	disjoint-kind	std::abi::x86_64::Register64	int		20	1	-	-	struct vs int
+tests/golden/linux-io.bot	500	14	golden	==	compatible	List[str]	List[str]			1	-	-	
+tests/golden/lists-and-sets.bot	161	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/lists-and-sets.bot	170	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/lists-and-sets.bot	179	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/lists-and-sets.bot	189	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/lists-and-sets.bot	449	14	golden	==	compatible	ImmutableSet[int]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	454	13	golden	==	compatible	ImmutableSet[UnicodeChar]	ImmutableSet[UnicodeChar]			1	-	-	
+tests/golden/lists-and-sets.bot	472	13	golden	==	empty-only	ImmutableSet[UnicodeChar]	ImmutableSet[int]			1	-	-	elements: UnicodeChar vs int
+tests/golden/lists-and-sets.bot	478	13	golden	==	disjoint-kind	ImmutableSet[int]	List[int]{length: 2}			1	-	-	immutableSet vs list
+tests/golden/lists-and-sets.bot	484	13	golden	==	compatible	ImmutableSet[List[int]{length: 2}]	ImmutableSet[List[int]{length: 2}]			1	-	-	
+tests/golden/lists-and-sets.bot	489	13	golden	==	compatible	ImmutableSet[ImmutableSet[int]]	ImmutableSet[ImmutableSet[int]]			1	-	-	
+tests/golden/lists-and-sets.bot	513	170	golden	==	compatible	ImmutableSet[int]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	537	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/lists-and-sets.bot	544	94	golden	==	compatible	ImmutableSet[str]	ImmutableSet[str]			1	-	-	
+tests/golden/lists-and-sets.bot	583	13	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	595	17	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[never]			1	-	-	
+tests/golden/lists-and-sets.bot	601	13	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	607	14	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	607	81	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int[std::byte::Byte]]			1	-	-	
+tests/golden/lists-and-sets.bot	612	14	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int[std::byte::Byte]]			1	-	-	
+tests/golden/lists-and-sets.bot	612	77	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	617	13	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	623	13	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	636	13	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	643	14	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/lists-and-sets.bot	655	14	golden	==	disjoint-kind	UnicodeChar	int	'-'	45	1	-	-	UnicodeChar vs int
+tests/golden/lists-and-sets.bot	655	25	golden	==	compatible	int	int	45	45	1	-	-	
+tests/golden/lists-and-sets.bot	758	13	golden	==	compatible	ImmutableSet[int]	ImmutableSet[never]			1	-	-	
+tests/golden/loop-collecting.bot	101	12	golden	==	compatible	str	str			1	-	-	
+tests/golden/loop-collecting.bot	117	9	golden	==	compatible	str	str			1	-	-	
+tests/golden/loop-collecting.bot	120	8	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/loop-collecting.bot	542	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/loop-collecting.bot	544	24	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loop-collecting.bot	555	24	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/loop-collecting.bot	566	24	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/loop-collecting.bot	576	24	golden	==	compatible	int	int		7	1	-	-	
+tests/golden/loop-collecting.bot	595	24	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/loop-collecting.bot	617	28	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loop-collecting.bot	986	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/loop-collecting.bot	997	24	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loop-collecting.bot	1008	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/loop-collecting.bot	1066	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/loop-collecting.bot	1262	24	golden	==	unknown	int	any			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/loop-collecting.bot	1264	24	golden	==	compatible	int	int			1	-	-	
+tests/golden/loop-collecting.bot	1266	24	golden	==	compatible	int	int			1	-	-	
+tests/golden/loop-collecting.bot	1271	24	golden	==	unknown	int	any			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/loop-collecting.bot	1281	28	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/loop-collecting.bot	1306	28	golden	==	compatible	str	str		" "	1	-	-	
+tests/golden/loops.bot	191	65	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/loops.bot	255	24	golden	==	compatible	int	int		105	1	-	-	
+tests/golden/loops.bot	305	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loops.bot	317	28	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/loops.bot	331	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loops.bot	344	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/loops.bot	371	24	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/loops.bot	479	20	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/loops.bot	489	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/loops.bot	501	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/loops.bot	511	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loops.bot	523	24	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loops.bot	545	36	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/loops.bot	638	24	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/loops.bot	709	24	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/method-equivalence-imported.bot	60	14	golden	==	compatible	List[str]	List[str]{length: 16}			1	-	-	
+tests/golden/method-equivalence-imported.bot	60	50	golden	==	compatible	List[str]	List[str]{length: 16}			1	-	-	
+tests/golden/method-equivalence.bot	320	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/method-equivalence.bot	326	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/method-equivalence.bot	340	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/methods.bot	99	12	golden	!=	compatible	str	str		"(at "	1	-	-	
+tests/golden/methods.bot	105	16	golden	==	compatible	UnicodeChar	UnicodeChar		')'	1	-	-	
+tests/golden/methods.bot	128	20	golden	!=	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/methods.bot	130	20	golden	!=	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/methods.bot	132	20	golden	!=	compatible	str	str			1	-	-	
+tests/golden/methods.bot	258	17	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/methods.bot	261	17	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/methods.bot	796	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/methods.bot	803	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/methods.bot	1738	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/methods.bot	1745	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/modules.bot	140	12	golden	==	compatible	str	str			1	-	-	
+tests/golden/modules.bot	153	13	golden	==	compatible	str	str			1	-	-	
+tests/golden/modules.bot	156	12	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/modules.bot	234	13	golden	==	compatible	std::linux::io::LinuxIO	std::linux::io::LinuxIO			1	-	-	
+tests/golden/modules.bot	256	28	golden	==	compatible	MdCounter	MdCounter			1	-	-	
+tests/golden/modules.bot	500	12	golden	!=	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode		std::compiler::DiagnosticCode::OpaqueRepresentation	1	-	-	
+tests/golden/modules.bot	502	17	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/modules.bot	502	42	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/modules.bot	502	65	golden	==	compatible	str	str			1	-	-	
+tests/golden/modules.bot	502	96	golden	==	compatible	str	str			1	-	-	
+tests/golden/modules.bot	502	125	golden	==	compatible	int	int			1	-	-	
+tests/golden/modules.bot	502	154	golden	==	compatible	int	int			1	-	-	
+tests/golden/modules.bot	503	12	golden	!=	compatible	List[bool]{length: 6}	List[bool]{length: 6}			1	-	-	
+tests/golden/mutable-array.bot	139	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-array.bot	146	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-array.bot	151	8	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-array.bot	165	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-array.bot	172	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-array.bot	220	12	golden	!=	compatible	str	str			1	-	-	
+tests/golden/mutable-array.bot	247	8	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/mutable-array.bot	248	16	golden	==	compatible	str	str			1	-	-	
+tests/golden/mutable-array.bot	266	5	golden	==	compatible	str	str			1	-	-	
+tests/golden/mutable-array.bot	266	23	golden	==	compatible	str	str			1	-	-	
+tests/golden/mutable-array.bot	905	17	golden	==	compatible	List[int]	List[int]{length: 3}			1	-	-	
+tests/golden/mutable-array.bot	913	20	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/mutable-array.bot	969	48	golden	==	compatible	List[List[int]]	List[List[int]]			1	-	-	
+tests/golden/mutable-array.bot	2434	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-array.bot	2801	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-map.bot	194	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-map.bot	221	20	golden	!=	compatible	int	int			1	-	-	
+tests/golden/mutable-map.bot	226	49	golden	==	compatible	List[int]	List[int]{length: 300}			1	-	-	
+tests/golden/mutable-map.bot	236	20	golden	!=	compatible	int	int		3	1	-	-	
+tests/golden/mutable-map.bot	263	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-map.bot	331	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-map.bot	391	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-map.bot	407	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-map.bot	419	20	golden	!=	compatible	int	int			1	-	-	
+tests/golden/mutable-map.bot	422	24	golden	==	compatible	int	int			1	-	-	
+tests/golden/mutable-map.bot	425	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-set.bot	83	20	golden	!=	compatible	int	int		0	1	-	-	
+tests/golden/mutable-set.bot	133	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/mutable-set.bot	136	20	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/mutable-set.bot	136	38	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-set.bot	146	20	golden	!=	compatible	int	int			1	-	-	
+tests/golden/mutable-set.bot	152	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/mutable-vector.bot	139	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-vector.bot	139	29	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/mutable-vector.bot	141	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-vector.bot	141	29	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-vector.bot	143	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-vector.bot	143	29	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/mutable-vector.bot	145	12	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/mutable-vector.bot	145	29	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/mutable-vector.bot	147	12	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/mutable-vector.bot	147	29	golden	==	compatible	int	int		5	1	-	-	
+tests/golden/mutable-vector.bot	1118	24	golden	==	compatible	int	int	0	0	1	-	-	
+tests/golden/names-and-scoping.bot	95	27	golden	==	compatible	int	int			1	-	-	
+tests/golden/names-and-scoping.bot	95	52	golden	==	compatible	int	int			1	-	-	
+tests/golden/names-and-scoping.bot	96	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/names-and-scoping.bot	96	53	golden	==	compatible	str	str			1	-	-	
+tests/golden/names-and-scoping.bot	119	27	golden	==	compatible	int	int			1	-	-	
+tests/golden/names-and-scoping.bot	119	52	golden	==	compatible	int	int			1	-	-	
+tests/golden/names-and-scoping.bot	120	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/names-and-scoping.bot	120	53	golden	==	compatible	str	str			1	-	-	
+tests/golden/names-and-scoping.bot	436	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/names-and-scoping.bot	449	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/names-and-scoping.bot	658	20	golden	==	compatible	int	int	1	1	1	-	-	
+tests/golden/names-and-scoping.bot	761	42	golden	!=	unknown	bool	any			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-aggregates.bot	143	8	golden	==	unknown	any	int			1	computed	-	an operand's type fixes no runtime kind
+tests/golden/native-aggregates.bot	190	6	golden	==	compatible	list	List[list]			1	-	-	
+tests/golden/native-aggregates.bot	190	14	golden	==	compatible	list	List[list]			1	-	-	
+tests/golden/native-aggregates.bot	529	17	golden	==	compatible	list	List[list]			1	-	-	
+tests/golden/native-aggregates.bot	547	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-aggregates.bot	765	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-aggregates.bot	793	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-aggregates.bot	949	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	121	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/native-values.bot	164	24	golden	==	unknown	any	int			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	166	24	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	207	67	golden	==	compatible	int	int	3	3	1	-	-	
+tests/golden/native-values.bot	207	75	golden	==	compatible	int	int	3	4	1	-	-	
+tests/golden/native-values.bot	217	307	golden	==	compatible	int	int	4611686018427387904	4611686018427387904	1	-	-	
+tests/golden/native-values.bot	222	185	golden	==	compatible	int	int			1	-	-	
+tests/golden/native-values.bot	335	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	350	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	363	20	golden	==	unknown	any	int			1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	380	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	405	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	416	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	439	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	470	14	golden	==	compatible	str	str	"x"	"x"	1	-	-	
+tests/golden/native-values.bot	470	26	golden	==	compatible	str	str	"x"	"y"	1	-	-	
+tests/golden/native-values.bot	470	38	golden	==	compatible	str	str	""	""	1	-	-	
+tests/golden/native-values.bot	477	96	golden	==	compatible	str	str	"🙂"	"🙂"	1	-	-	
+tests/golden/native-values.bot	477	108	golden	==	compatible	str	str	"🙂"	"🙃"	1	-	-	
+tests/golden/native-values.bot	490	14	golden	==	compatible	list{length: 2}	list{length: 2}			1	-	-	
+tests/golden/native-values.bot	490	36	golden	==	compatible	List[int]{length: 1}	List[int]{length: 2}			1	-	-	
+tests/golden/native-values.bot	490	51	golden	==	empty-only	List[int]{length: 1}	List[str]{length: 1}			1	-	-	elements: int vs str
+tests/golden/native-values.bot	490	65	golden	==	compatible	List[never]	List[never]			1	-	-	
+tests/golden/native-values.bot	654	20	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	698	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	771	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	811	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	839	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	850	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	855	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	884	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	901	24	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/native-values.bot	943	20	golden	==	unknown	any	int		4	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/numeric-text.bot	144	13	golden	==	compatible	int	int			1	-	-	
+tests/golden/numeric-text.bot	149	13	golden	==	compatible	str	str			1	-	-	
+tests/golden/opaque.bot	203	12	golden	==	compatible	str	str			1	-	-	
+tests/golden/opaque.bot	270	82	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	285	54	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	285	62	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	285	104	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	296	54	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	954	13	golden	==	compatible	std::abi::bytes::MutableBytes	std::abi::bytes::MutableBytes			1	-	-	
+tests/golden/opaque.bot	1026	14	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	1026	59	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	1026	104	golden	==	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	1026	151	golden	!=	compatible	std::abi::bytes::Bytes	std::abi::bytes::Bytes			1	-	-	
+tests/golden/opaque.bot	1035	14	golden	==	compatible	PlainWrapped	PlainWrapped			1	-	-	
+tests/golden/opaque.bot	1035	52	golden	==	compatible	PlainWrapped	PlainWrapped			1	-	-	
+tests/golden/opaque.bot	1035	90	golden	==	compatible	PlainWrapped	PlainWrapped			1	-	-	
+tests/golden/opaque.bot	1035	128	golden	!=	compatible	PlainWrapped	PlainWrapped			1	-	-	
+tests/golden/opaque.bot	1043	13	golden	==	disjoint-nominal	std::abi::bytes::Bytes	PlainStorage			1	-	-	struct identity std::abi::bytes::Bytes vs PlainStorage
+tests/golden/opaque.bot	1048	13	golden	==	disjoint-nominal	std::abi::bytes::Bytes	Bytes			1	-	-	struct identity std::abi::bytes::Bytes vs Bytes
+tests/golden/opaque.bot	1055	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/opaque.bot	1055	108	golden	==	compatible	int	int			1	-	-	
+tests/golden/ownership.bot	124	12	golden	!=	compatible	str	str			1	-	-	
+tests/golden/ownership.bot	142	5	golden	==	compatible	str	str			1	-	-	
+tests/golden/ownership.bot	147	16	golden	==	compatible	str	str			1	-	-	
+tests/golden/ownership.bot	191	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/ownership.bot	191	41	golden	==	compatible	int	int			1	-	-	
+tests/golden/ownership.bot	191	66	golden	==	compatible	int	int			1	-	-	
+tests/golden/ownership.bot	191	95	golden	==	compatible	str	str			1	-	-	
+tests/golden/ownership.bot	209	21	golden	==	compatible	str	str			1	-	-	
+tests/golden/ownership.bot	212	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/ownership.bot	228	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/place-parameters.bot	464	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/place-parameters.bot	631	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/range-and-contract-values.bot	97	17	golden	==	unknown	any	str		"x"	1	untyped-parameter	disjoint-kind: int vs str	an operand's type fixes no runtime kind
+tests/golden/range-and-contract-values.bot	126	17	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/range-and-contract-values.bot	384	17	golden	==	unknown	any	str		"x"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/range-and-contract-values.bot	386	17	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/range-and-contract-values.bot	389	21	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/range-and-contract-values.bot	521	17	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/range-and-contract-values.bot	661	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/range-and-contract-values.bot	680	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/range-and-contract-values.bot	699	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/range-and-contract-values.bot	777	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/range-and-contract-values.bot	840	13	golden	==	compatible	ImmutableSet[int[std::byte::Byte]]	ImmutableSet[int]			1	-	-	
+tests/golden/range-and-contract-values.bot	1002	28	golden	==	compatible	str	str		" "	1	-	-	
+tests/golden/range-and-contract-values.bot	1006	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/range-and-contract-values.bot	1023	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	118	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	134	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	239	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	269	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	345	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	406	62	golden	!=	compatible	int	int			1	-	-	
+tests/golden/raw-int-abi.bot	588	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	779	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	847	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/raw-int-abi.bot	913	28	golden	!=	compatible	str	str		" "	1	-	-	
+tests/golden/raw-int-abi.bot	918	24	golden	==	compatible	int	int			1	-	-	
+tests/golden/refinements.bot	254	17	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/refinements.bot	360	20	golden	==	compatible	str	str		"?"	1	-	-	
+tests/golden/refinements.bot	698	22	golden	==	compatible	str[Mail]	str		"abcd"	1	-	-	
+tests/golden/refinements.bot	698	35	golden	!=	compatible	str[Mail]	str		"abce"	1	-	-	
+tests/golden/refinements.bot	698	48	golden	==	compatible	str	str		"abcdx"	1	-	-	
+tests/golden/refinements.bot	722	26	golden	==	compatible	str[Mail]	str[Mail]			1	-	-	
+tests/golden/refinements.bot	722	34	golden	==	compatible	int	int			1	-	-	
+tests/golden/refinements.bot	722	54	golden	==	compatible	int	int			1	-	-	
+tests/golden/refinements.bot	722	79	golden	==	compatible	str[Mail]	str		"abcd"	1	-	-	
+tests/golden/refinements.bot	831	5	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/representation.bot	70	5	golden	==	compatible	str	str			1	-	-	
+tests/golden/representation.bot	83	5	golden	==	compatible	str	str			1	-	-	
+tests/golden/representation.bot	95	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/representation.bot	95	41	golden	==	compatible	int	int			1	-	-	
+tests/golden/representation.bot	95	66	golden	==	compatible	int	int			1	-	-	
+tests/golden/representation.bot	113	251	golden	==	compatible	int	int	123456789012345678901234567890	123456789012345678901234567890	1	-	-	
+tests/golden/representation.bot	121	141	golden	==	compatible	int	int			1	-	-	
+tests/golden/representation.bot	198	35	golden	==	compatible	str	str		"􏿿"	1	-	-	
+tests/golden/representation.bot	198	45	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/representation.bot	210	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/representation.bot	219	65	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/representation.bot	246	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/representation.bot	246	49	golden	==	compatible	int	int			1	-	-	
+tests/golden/representation.bot	246	79	golden	==	compatible	int	int			1	-	-	
+tests/golden/representation.bot	246	102	golden	==	compatible	int	int			1	-	-	
+tests/golden/representation.bot	265	42	golden	==	disjoint-nominal	SrPerson	SrAccount			1	-	-	struct identity SrPerson vs SrAccount
+tests/golden/representation.bot	265	50	golden	==	compatible	struct{age: int, name: str}	struct{age: int, name: str}			1	-	-	
+tests/golden/representation.bot	281	18	golden	==	compatible	str	str		"café"	1	-	-	
+tests/golden/representation.bot	281	112	golden	==	compatible	str	str		"🌍!"	1	-	-	
+tests/golden/static-compile.bot	82	8	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/static-compile.bot	84	8	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/static-compile.bot	98	8	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/static-compile.bot	103	8	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/static-compile.bot	265	32	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode::Unbound	std::compiler::DiagnosticCode::Unbound	1	-	-	
+tests/golden/static-compile.bot	349	28	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/static-compile.bot	351	28	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/static-compile.bot	583	24	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode		std::compiler::DiagnosticCode::TraitUnknownOperation	1	-	-	
+tests/golden/static-compile.bot	779	24	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode		std::compiler::DiagnosticCode::UseAfterMove	1	-	-	
+tests/golden/stdlib-namespaces.bot	137	14	golden	==	compatible	str	str		"abc"	1	-	-	
+tests/golden/stdlib-namespaces.bot	137	28	golden	==	compatible	str	str			1	-	-	
+tests/golden/stdlib-namespaces.bot	137	40	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/stdlib-namespaces.bot	137	53	golden	==	disjoint-kind	str	int			1	-	-	str vs int
+tests/golden/stdlib-namespaces.bot	137	70	golden	==	compatible	str	str		"é"	1	-	-	
+tests/golden/stdlib-namespaces.bot	278	17	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/stdlib-namespaces.bot	540	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/stdlib-namespaces.bot	589	21	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/stdlib-namespaces.bot	675	20	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/stdlib-namespaces.bot	891	14	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/stdlib-namespaces.bot	897	14	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/stdlib-namespaces.bot	897	22	golden	==	unknown	any	int		7	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/stdlib-namespaces.bot	932	18	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/stdlib-namespaces.bot	932	107	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/string-natives.bot	102	8	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/string-natives.bot	207	20	golden	==	compatible	str	str		"a"	1	-	-	
+tests/golden/string-natives.bot	207	32	golden	==	compatible	str	str		"e"	1	-	-	
+tests/golden/string-natives.bot	207	44	golden	==	compatible	str	str		"i"	1	-	-	
+tests/golden/string-natives.bot	207	56	golden	==	compatible	str	str		"o"	1	-	-	
+tests/golden/string-natives.bot	207	68	golden	==	compatible	str	str		"u"	1	-	-	
+tests/golden/string-natives.bot	234	20	golden	==	compatible	str	str		"é"	1	-	-	
+tests/golden/string-natives.bot	234	32	golden	==	compatible	str	str		"è"	1	-	-	
+tests/golden/string-natives.bot	259	18	golden	==	compatible	str	str		"a"	1	-	-	
+tests/golden/string-natives.bot	259	40	golden	==	compatible	str	str		"😀"	1	-	-	
+tests/golden/string-natives.bot	259	62	golden	==	compatible	str	str		"b"	1	-	-	
+tests/golden/string-natives.bot	283	20	golden	==	compatible	str	str		","	1	-	-	
+tests/golden/string-natives.bot	283	32	golden	==	compatible	str	str		"\n"	1	-	-	
+tests/golden/string-natives.bot	305	17	golden	==	compatible	str	str		"hello"	1	-	-	
+tests/golden/string-natives.bot	320	17	golden	==	compatible	str	str		"howdy"	1	-	-	
+tests/golden/string-natives.bot	335	17	golden	==	compatible	str	str		"hi"	1	-	-	
+tests/golden/string-natives.bot	353	20	golden	==	compatible	str	str		"ok"	1	-	-	
+tests/golden/string-natives.bot	461	20	golden	==	compatible	str	str		"h"	1	-	-	
+tests/golden/string-natives.bot	481	18	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	499	18	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	499	26	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	499	34	golden	==	compatible	int	int			1	-	-	
+tests/golden/string-natives.bot	517	18	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	517	26	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	533	18	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	533	53	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	533	88	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	550	18	golden	==	compatible	str	str			1	-	-	
+tests/golden/string-natives.bot	586	17	golden	==	compatible	str	str		"z"	1	-	-	
+tests/golden/string-natives.bot	625	20	golden	==	compatible	str	str		"z"	1	-	-	
+tests/golden/string-natives.bot	732	24	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/string-natives.bot	735	28	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/string-natives.bot	738	29	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/string-natives.bot	769	24	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/string-natives.bot	772	28	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/string-natives.bot	775	29	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/string-natives.bot	807	24	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/string-natives.bot	810	28	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/string-natives.bot	813	29	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/string-natives.bot	833	24	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/string-natives.bot	836	28	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/string-natives.bot	839	29	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/string-natives.bot	867	24	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/string-natives.bot	870	28	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/string-natives.bot	873	29	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/string-natives.bot	899	24	golden	==	compatible	str	str		"."	1	-	-	
+tests/golden/string-natives.bot	902	28	golden	==	compatible	str	str		"_"	1	-	-	
+tests/golden/string-natives.bot	905	29	golden	==	compatible	str	str		"-"	1	-	-	
+tests/golden/string-natives.bot	928	17	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/string-natives.bot	950	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/string-natives.bot	1035	20	golden	==	compatible	str	str		","	1	-	-	
+tests/golden/string-representations.bot	98	89	golden	==	compatible	str	str		"😀"	1	-	-	
+tests/golden/string-representations.bot	111	14	golden	==	compatible	str	str	"ä"		1	-	-	
+tests/golden/string-representations.bot	111	34	golden	==	compatible	str	str		"€"	1	-	-	
+tests/golden/string-representations.bot	111	87	golden	==	compatible	str	str		"😀"	1	-	-	
+tests/golden/string-representations.bot	125	47	golden	==	compatible	str	str		"é"	1	-	-	
+tests/golden/string-representations.bot	125	67	golden	==	compatible	str	str		"😀"	1	-	-	
+tests/golden/string-representations.bot	154	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	165	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	176	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	190	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	206	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	229	39	golden	==	compatible	str	str		"yes"	1	-	-	
+tests/golden/string-representations.bot	229	51	golden	==	compatible	str	str		"no"	1	-	-	
+tests/golden/string-representations.bot	245	39	golden	==	compatible	str	str		"word"	1	-	-	
+tests/golden/string-representations.bot	245	52	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/string-representations.bot	281	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	284	31	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	299	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	302	31	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	408	46	golden	==	compatible	str	str	"hello"	"hello"	1	-	-	
+tests/golden/string-representations.bot	427	85	golden	==	compatible	str	str		"y"	1	-	-	
+tests/golden/string-representations.bot	442	85	golden	==	compatible	str	str		"yes"	1	-	-	
+tests/golden/string-representations.bot	483	41	golden	==	compatible	str	str		"λ"	1	-	-	
+tests/golden/string-representations.bot	520	42	golden	==	compatible	str	str		"y"	1	-	-	
+tests/golden/string-representations.bot	556	127	golden	==	compatible	int	int			1	-	-	
+tests/golden/string-representations.bot	571	111	golden	==	compatible	int	int			1	-	-	
+tests/golden/string-representations.bot	590	82	golden	==	unknown	any	str		"z"	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	609	82	golden	==	unknown	any	str		"z"	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	645	39	golden	==	compatible	str	str		"a"	1	-	-	
+tests/golden/string-representations.bot	645	49	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/string-representations.bot	662	20	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/string-representations.bot	665	31	golden	==	compatible	str	str		"a"	1	-	-	
+tests/golden/string-representations.bot	750	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/string-representations.bot	761	65	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/string-representations.bot	783	39	golden	==	compatible	str	str		"λ"	1	-	-	
+tests/golden/string-representations.bot	802	39	golden	==	compatible	str	str		"packed"	1	-	-	
+tests/golden/string-representations.bot	852	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	858	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	872	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/string-representations.bot	878	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/strings.bot	115	12	golden	==	compatible	str	str			1	-	-	
+tests/golden/strings.bot	138	27	golden	==	compatible	int	int			1	-	-	
+tests/golden/strings.bot	138	52	golden	==	compatible	int	int			1	-	-	
+tests/golden/strings.bot	139	20	golden	==	compatible	std::compiler::DiagnosticCode	std::compiler::DiagnosticCode			1	-	-	
+tests/golden/strings.bot	154	14	golden	==	compatible	UnicodeChar	UnicodeChar		'%'	1	-	-	
+tests/golden/strings.bot	154	46	golden	==	compatible	UnicodeChar	UnicodeChar		'é'	1	-	-	
+tests/golden/strings.bot	154	78	golden	==	compatible	UnicodeChar	UnicodeChar		'😀'	1	-	-	
+tests/golden/strings.bot	154	110	golden	==	compatible	UnicodeChar	UnicodeChar		'%'	1	-	-	
+tests/golden/strings.bot	164	17	golden	==	compatible	int	int			1	-	-	
+tests/golden/strings.bot	188	17	golden	==	compatible	UnicodeChar	UnicodeChar			1	-	-	
+tests/golden/strings.bot	200	30	golden	==	compatible	UnicodeChar	UnicodeChar		'%'	1	-	-	
+tests/golden/strings.bot	216	13	golden	==	compatible	UnicodeChar	UnicodeChar		'x'	1	-	-	
+tests/golden/strings.bot	303	13	golden	==	compatible	UnicodeChar	UnicodeChar	'A'	'A'	1	-	-	
+tests/golden/strings.bot	308	13	golden	==	compatible	UnicodeChar	UnicodeChar	'A'	'B'	1	-	-	
+tests/golden/strings.bot	315	13	golden	==	disjoint-kind	UnicodeChar	int	'A'	65	1	-	-	UnicodeChar vs int
+tests/golden/strings.bot	320	13	golden	==	disjoint-kind	UnicodeChar	str	'A'	"A"	1	-	-	UnicodeChar vs str
+tests/golden/strings.bot	661	17	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/strings.bot	661	54	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/strings.bot	661	91	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/strings.bot	661	128	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/strings.bot	661	181	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/strings.bot	776	93	golden	==	compatible	int	int		45	1	-	-	
+tests/golden/strings.bot	776	104	golden	==	compatible	int	int		46	1	-	-	
+tests/golden/strings.bot	776	115	golden	==	compatible	int	int		95	1	-	-	
+tests/golden/strings.bot	776	126	golden	==	compatible	int	int		126	1	-	-	
+tests/golden/strings.bot	778	20	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/strings.bot	783	20	golden	==	compatible	bool	bool			1	-	-	
+tests/golden/strings.bot	954	16	golden	!=	compatible	int	int			1	-	-	
+tests/golden/strings.bot	959	13	golden	==	compatible	UnicodeChar	UnicodeChar			1	-	-	
+tests/golden/strings.bot	967	10	golden	==	compatible	str	str		"😀"	1	-	-	
+tests/golden/strings.bot	967	77	golden	==	compatible	str	str		"\n"	1	-	-	
+tests/golden/strings.bot	976	24	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/strings.bot	976	47	golden	==	unknown	any	str		"a é\n世😀~"	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/strings.bot	1020	16	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/struct-representation.bot	247	27	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/struct-representation.bot	487	28	golden	==	compatible	int	int		5	1	-	-	
+tests/golden/struct-representation.bot	578	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/struct-representation.bot	701	24	golden	==	compatible	int	int		25	1	-	-	
+tests/golden/struct-representation.bot	733	24	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/struct-representation.bot	739	24	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/struct-representation.bot	744	28	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/struct-representation.bot	748	24	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/struct-representation.bot	750	24	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/struct-representation.bot	757	24	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/struct-representation.bot	926	17	golden	==	compatible	struct{}	struct{}			1	-	-	
+tests/golden/struct-representation.bot	940	19	golden	==	compatible	struct{x: int}	struct{x: int}			1	-	-	
+tests/golden/struct-representation.bot	940	32	golden	==	disjoint-kind	struct{x: int}	int		7	1	-	-	struct vs int
+tests/golden/struct-representation.bot	1123	17	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/struct-representation.bot	1226	13	golden	==	unknown	any	any			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/struct-representation.bot	1351	19	golden	==	compatible	int	int			1	-	-	
+tests/golden/struct-representation.bot	1360	14	golden	==	compatible	struct{a: int, b: int}	struct{a: int, b: int}			1	-	-	
+tests/golden/struct-representation.bot	1360	22	golden	==	compatible	struct{a: int, b: int}	struct{a: int, b: int}			1	-	-	
+tests/golden/structs-and-enums.bot	225	8	golden	==	compatible	VehicleType	VehicleType		VehicleType::Boat	1	-	-	
+tests/golden/structs-and-enums.bot	275	14	golden	==	compatible	struct{}	struct{}			1	-	-	
+tests/golden/structs-and-enums.bot	275	24	golden	==	disjoint-nominal	struct{}	struct{a: int}			1	-	-	anonymous structs with fields {} vs {a}
+tests/golden/structs-and-enums.bot	314	14	golden	==	compatible	struct{x: int, y: int}	struct{x: int, y: int}			1	-	-	
+tests/golden/structs-and-enums.bot	314	44	golden	==	compatible	struct{x: int, y: str}	struct{x: int, y: str}			1	-	-	
+tests/golden/structs-and-enums.bot	321	14	golden	==	compatible	struct{x: int}	struct{x: int}			1	-	-	
+tests/golden/structs-and-enums.bot	321	32	golden	==	disjoint-nominal	struct{x: int}	struct{x: int, y: int}			1	-	-	anonymous structs with fields {x} vs {x y}
+tests/golden/structs-and-enums.bot	321	56	golden	==	disjoint-nominal	struct{x: int}	struct{y: int}			1	-	-	anonymous structs with fields {x} vs {y}
+tests/golden/structs-and-enums.bot	321	74	golden	==	disjoint-kind	struct{x: int}	struct{x: str}			1	-	-	field x: int vs str
+tests/golden/structs-and-enums.bot	327	14	golden	==	compatible	struct{a: list{length: 2}}	struct{a: list{length: 2}}			1	-	-	
+tests/golden/structs-and-enums.bot	327	56	golden	==	compatible	struct{a: list{length: 2}}	struct{a: list{length: 2}}			1	-	-	
+tests/golden/structs-and-enums.bot	333	14	golden	==	disjoint-kind	struct{a: int}	List[int]{length: 1}			1	-	-	struct vs list
+tests/golden/structs-and-enums.bot	333	29	golden	==	disjoint-kind	struct{}	List[never]			1	-	-	struct vs list
+tests/golden/structs-and-enums.bot	340	14	golden	==	compatible	Person	Person			1	-	-	
+tests/golden/structs-and-enums.bot	340	72	golden	==	compatible	Person	Person			1	-	-	
+tests/golden/structs-and-enums.bot	349	13	golden	==	disjoint-nominal	Person	Account			1	-	-	struct identity Person vs Account
+tests/golden/structs-and-enums.bot	358	14	golden	==	disjoint-nominal	Person	struct{age: int, name: str}			1	-	-	struct identity Person vs anonymous
+tests/golden/structs-and-enums.bot	358	22	golden	==	disjoint-nominal	struct{age: int, name: str}	Person			1	-	-	struct identity anonymous vs Person
+tests/golden/structs-and-enums.bot	365	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/structs-and-enums.bot	365	60	golden	==	compatible	int	int			1	-	-	
+tests/golden/structs-and-enums.bot	365	90	golden	==	compatible	int	int			1	-	-	
+tests/golden/structs-and-enums.bot	469	20	golden	==	compatible	int	int	1	2	1	-	-	
+tests/golden/structs-and-enums.bot	477	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/structs-and-enums.bot	532	17	golden	==	compatible	str	str			1	-	-	
+tests/golden/structs-and-enums.bot	768	13	golden	==	compatible	ImmutableSet[struct{a: int}]	ImmutableSet[struct{a: int}]			1	-	-	
+tests/golden/structs-and-enums.bot	784	16	golden	==	compatible	int	int		40	1	-	-	
+tests/golden/structs-and-enums.bot	840	18	golden	==	compatible	VehicleType	VehicleType		VehicleType::Car	1	-	-	
+tests/golden/structs-and-enums.bot	841	21	golden	==	compatible	VehicleType	VehicleType		VehicleType::Truck	1	-	-	
+tests/golden/structs-and-enums.bot	842	21	golden	==	compatible	VehicleType	VehicleType		VehicleType::Tank	1	-	-	
+tests/golden/structs-and-enums.bot	843	21	golden	==	compatible	VehicleType	VehicleType		VehicleType::Tractor	1	-	-	
+tests/golden/structs-and-enums.bot	870	17	golden	==	compatible	VehicleType	VehicleType		VehicleType::Car	1	-	-	
+tests/golden/structs-and-enums.bot	974	51	golden	==	disjoint-nominal	VehicleType	Other	VehicleType::Car	Other::Car	1	-	-	enum VehicleType vs enum Other
+tests/golden/structs-and-enums.bot	1078	23	golden	==	compatible	VehicleType	VehicleType	VehicleType::Car	VehicleType::Car	1	-	-	
+tests/golden/structs-and-enums.bot	1085	17	golden	==	compatible	VehicleType	VehicleType		VehicleType::Car	1	-	-	
+tests/golden/structs-and-enums.bot	1102	23	golden	==	compatible	VehicleType	VehicleType	VehicleType::Car		1	-	-	
+tests/golden/structs-and-enums.bot	1102	31	golden	==	disjoint-nominal	VehicleType	Other			1	-	-	enum VehicleType vs enum Other
+tests/golden/structs-and-enums.bot	1112	14	golden	==	unknown	any	VehicleType		VehicleType::Car	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/structs-and-enums.bot	1112	59	golden	==	unknown	any	VehicleType		VehicleType::Car	1	computed	-	an operand's type fixes no runtime kind
+tests/golden/structs-and-enums.bot	1122	25	golden	==	compatible	Vehicle	Vehicle			1	-	-	
+tests/golden/structs-and-enums.bot	1122	33	golden	==	compatible	VehicleType	VehicleType		VehicleType::Tank	1	-	-	
+tests/golden/structs-and-enums.bot	1130	21	golden	==	compatible	VehicleType	VehicleType			1	-	-	
+tests/golden/structs-and-enums.bot	1144	20	golden	==	compatible	OrderAB	OrderAB	OrderAB::B	OrderAB::A	1	-	-	
+tests/golden/structs-and-enums.bot	1144	28	golden	==	compatible	OrderAB	OrderAB	OrderAB::B	OrderAB::B	1	-	-	
+tests/golden/structs-and-enums.bot	1144	45	golden	==	compatible	int	int			1	-	-	
+tests/golden/structs-and-enums.bot	1150	20	golden	==	compatible	OrderBA	OrderBA	OrderBA::B	OrderBA::A	1	-	-	
+tests/golden/structs-and-enums.bot	1150	28	golden	==	compatible	OrderBA	OrderBA	OrderBA::B	OrderBA::B	1	-	-	
+tests/golden/structs-and-enums.bot	1150	45	golden	==	compatible	int	int			1	-	-	
+tests/golden/structs-and-enums.bot	1156	20	golden	==	compatible	OrderCBDA	OrderCBDA	OrderCBDA::B	OrderCBDA::A	1	-	-	
+tests/golden/structs-and-enums.bot	1156	28	golden	==	compatible	OrderCBDA	OrderCBDA	OrderCBDA::B	OrderCBDA::B	1	-	-	
+tests/golden/structs-and-enums.bot	1156	47	golden	==	compatible	int	int			1	-	-	
+tests/golden/structs-and-enums.bot	1169	24	golden	==	compatible	VehicleType	VehicleType			1	-	-	
+tests/golden/structs-and-enums.bot	1174	20	golden	==	compatible	VehicleType	VehicleType		VehicleType::Boat	1	-	-	
+tests/golden/structs-and-enums.bot	1185	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/structs-and-enums.bot	1214	17	golden	==	compatible	list{length: 4}	list{length: 4}			1	-	-	
+tests/golden/structs-and-enums.bot	1214	37	golden	==	compatible	int	int		2	1	-	-	
+tests/golden/structs-and-enums.bot	1232	114	golden	==	compatible	List[VehicleType]{length: 1}	List[VehicleType]{length: 1}			1	-	-	
+tests/golden/structs-and-enums.bot	1242	28	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/structs-and-enums.bot	1250	37	golden	==	compatible	List[VehicleType]	List[VehicleType]			1	-	-	
+tests/golden/structs-and-enums.bot	1269	24	golden	==	compatible	VehicleType	VehicleType		VehicleType::Tank	1	-	-	
+tests/golden/structs-and-enums.bot	1297	20	golden	==	compatible	VehicleType	VehicleType		VehicleType::Car	1	-	-	
+tests/golden/structs-and-enums.bot	1306	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/structs-and-enums.bot	1309	20	golden	==	compatible	VehicleType	VehicleType		VehicleType::Truck	1	-	-	
+tests/golden/trait-constrained-types.bot	270	14	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/trait-constrained-types.bot	270	28	golden	==	compatible	str	str		"x"	1	-	-	
+tests/golden/trait-constrained-types.bot	300	14	golden	==	compatible	List[List[List[int]]]	List[List[List[int]{length: 1}]{length: 1}]{length: 1}			1	-	-	
+tests/golden/trait-constrained-types.bot	300	34	golden	==	compatible	List[List[List[list]]]	List[List[List[list{length: 1}]{length: 1}]{length: 1}]{length: 1}			1	-	-	
+tests/golden/trait-constrained-types.bot	305	13	golden	==	compatible	List[List[List[int]]]	List[List[List[int]{length: 1}]{length: 1}]{length: 1}			1	-	-	
+tests/golden/trait-constrained-types.bot	376	14	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/trait-constrained-types.bot	376	32	golden	==	compatible	str	str		"x"	1	-	-	
+tests/golden/trait-constrained-types.bot	376	58	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/trait-constrained-types.bot	445	37	golden	==	compatible	List[int]	List[int]{length: 1}			1	-	-	
+tests/golden/trait-constrained-types.bot	499	17	golden	==	unknown	K	K			1	both-unknown	-	an operand's type fixes no runtime kind
+tests/golden/trait-constrained-types.bot	500	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/trait-constrained-types.bot	500	54	golden	==	compatible	int	int			1	-	-	
+tests/golden/trait-constrained-types.bot	508	14	golden	==	compatible	int	int			1	-	-	
+tests/golden/trait-constrained-types.bot	508	58	golden	==	compatible	int	int			1	-	-	
+tests/golden/trait-constrained-types.bot	540	13	golden	==	compatible	int	int			1	-	-	
+tests/golden/trait-constrained-types.bot	559	5	golden	==	compatible	int	int			1	-	-	
+tests/golden/trait-constrained-types.bot	559	38	golden	==	compatible	str	str		"d"	1	-	-	
+tests/golden/trait-constrained-types.bot	590	14	golden	==	compatible	str	str		"Ann"	1	-	-	
+tests/golden/trait-constrained-types.bot	590	72	golden	==	compatible	int	int		3	1	-	-	
+tests/golden/trait-constrained-types.bot	590	104	golden	==	compatible	int	int		7	1	-	-	
+tests/golden/trait-constrained-types.bot	590	143	golden	==	compatible	List[int]	List[int]{length: 2}			1	-	-	
+tests/golden/traits.bot	636	5	golden	==	compatible	Person	Person			1	-	-	
+tests/golden/type-predicates.bot	62	5	golden	==	compatible	int[Small]	int		0	1	-	-	
+tests/golden/type-predicates.bot	62	15	golden	==	compatible	int[Small]	int		2	1	-	-	
+tests/golden/type-predicates.bot	62	25	golden	==	compatible	int[Small]	int		4	1	-	-	
+tests/golden/type-predicates.bot	62	35	golden	==	compatible	int[Small]	int		6	1	-	-	
+tests/golden/type-predicates.bot	62	45	golden	==	compatible	int[Small]	int		8	1	-	-	
+tests/golden/types.bot	281	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/types.bot	284	24	golden	==	compatible	int	int		78	1	-	-	
+tests/golden/types.bot	366	20	golden	==	compatible	int	int		1	1	-	-	
+tests/golden/types.bot	369	24	golden	==	compatible	int	int		4	1	-	-	
+tests/golden/types.bot	372	28	golden	==	compatible	int	int		7	1	-	-	
+tests/golden/types.bot	410	20	golden	==	compatible	int[Big]	int		0	1	-	-	
+tests/golden/types.bot	413	24	golden	==	compatible	int[Big]	int		78	1	-	-	
+tests/golden/types.bot	430	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/types.bot	433	24	golden	==	compatible	int	int		78	1	-	-	
+tests/golden/types.bot	527	20	golden	==	compatible	int[Small]	int		0	1	-	-	
+tests/golden/validators-and-proofs.bot	362	20	golden	==	compatible	unit	unit		unit	1	-	-	
+tests/golden/validators-and-proofs.bot	456	20	golden	==	compatible	unit	unit		unit	1	-	-	
+tests/golden/validators-and-proofs.bot	1018	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/validators-and-proofs.bot	1039	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/validators-and-proofs.bot	1108	21	golden	==	compatible	str	str		"a"	1	-	-	
+tests/golden/validators-and-proofs.bot	1771	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/validators-and-proofs.bot	1782	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/values.bot	83	20	golden	==	compatible	Light	Light		Light::Red	1	-	-	
+tests/golden/values.bot	85	22	golden	==	compatible	Light	Light		Light::Green	1	-	-	
+tests/golden/values.bot	94	46	golden	==	compatible	Light	Light		Light::Red	1	-	-	
+tests/golden/values.bot	94	76	golden	==	disjoint-nominal	Light	Signal			1	-	-	enum Light vs enum Signal
+tests/golden/values.bot	94	115	golden	==	compatible	Light	Light	Light::Red	Light::Green	1	-	-	
+tests/golden/values.bot	373	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	375	22	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	377	22	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	379	22	golden	==	unknown	any	int		3	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	381	22	golden	==	unknown	any	int		4	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	383	22	golden	==	unknown	any	int		5	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	385	22	golden	==	unknown	any	int		6	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	387	22	golden	==	unknown	any	int		7	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	389	22	golden	==	unknown	any	int		8	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	391	22	golden	==	unknown	any	int		9	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	393	22	golden	==	unknown	any	int		10	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	395	22	golden	==	unknown	any	int		11	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	397	22	golden	==	unknown	any	int		12	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	399	22	golden	==	unknown	any	int		13	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	401	22	golden	==	unknown	any	int		14	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	403	22	golden	==	unknown	any	int		15	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	405	22	golden	==	unknown	any	int		16	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	407	22	golden	==	unknown	any	int		17	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	409	22	golden	==	unknown	any	int		18	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	411	22	golden	==	unknown	any	int		19	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	413	22	golden	==	unknown	any	int		20	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	415	22	golden	==	unknown	any	int		21	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	417	22	golden	==	unknown	any	int		22	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	419	22	golden	==	unknown	any	int		23	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	421	22	golden	==	unknown	any	int		24	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	423	22	golden	==	unknown	any	int		25	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	425	22	golden	==	unknown	any	int		26	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	427	22	golden	==	unknown	any	int		27	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	429	22	golden	==	unknown	any	int		28	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	431	22	golden	==	unknown	any	int		29	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	433	22	golden	==	unknown	any	int		30	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	435	22	golden	==	unknown	any	int		31	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	437	22	golden	==	unknown	any	int		32	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	439	22	golden	==	unknown	any	int		33	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	441	22	golden	==	unknown	any	int		34	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	443	22	golden	==	unknown	any	int		35	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	445	22	golden	==	unknown	any	int		36	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	447	22	golden	==	unknown	any	int		37	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	449	22	golden	==	unknown	any	int		38	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	451	22	golden	==	unknown	any	int		39	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	453	22	golden	==	unknown	any	int		40	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	455	22	golden	==	unknown	any	int		41	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	457	22	golden	==	unknown	any	int		42	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	459	22	golden	==	unknown	any	int		43	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	461	22	golden	==	unknown	any	int		44	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	463	22	golden	==	unknown	any	int		45	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	465	22	golden	==	unknown	any	int		46	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	467	22	golden	==	unknown	any	int		47	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	469	22	golden	==	unknown	any	int		48	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	471	22	golden	==	unknown	any	int		49	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	473	22	golden	==	unknown	any	int		50	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	475	22	golden	==	unknown	any	int		51	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	477	22	golden	==	unknown	any	int		52	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	479	22	golden	==	unknown	any	int		53	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	481	22	golden	==	unknown	any	int		54	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	483	22	golden	==	unknown	any	int		55	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	485	22	golden	==	unknown	any	int		56	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	487	22	golden	==	unknown	any	int		57	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	489	22	golden	==	unknown	any	int		58	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	491	22	golden	==	unknown	any	int		59	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	493	22	golden	==	unknown	any	int		60	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	495	22	golden	==	unknown	any	int		61	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	497	22	golden	==	unknown	any	int		62	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	499	22	golden	==	unknown	any	int		63	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	501	22	golden	==	unknown	any	int		64	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	503	22	golden	==	unknown	any	int		65	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	505	22	golden	==	unknown	any	int		66	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	507	22	golden	==	unknown	any	int		67	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	509	22	golden	==	unknown	any	int		68	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	511	22	golden	==	unknown	any	int		69	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	513	22	golden	==	unknown	any	int		70	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	515	22	golden	==	unknown	any	int		71	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	517	22	golden	==	unknown	any	int		72	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	519	22	golden	==	unknown	any	int		73	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	521	22	golden	==	unknown	any	int		74	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	523	22	golden	==	unknown	any	int		75	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	525	22	golden	==	unknown	any	int		76	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	527	22	golden	==	unknown	any	int		77	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	529	22	golden	==	unknown	any	int		78	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	531	22	golden	==	unknown	any	int		79	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	533	22	golden	==	unknown	any	int		80	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	535	22	golden	==	unknown	any	int		81	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	537	22	golden	==	unknown	any	int		82	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	539	22	golden	==	unknown	any	int		83	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	541	22	golden	==	unknown	any	int		84	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	543	22	golden	==	unknown	any	int		85	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	545	22	golden	==	unknown	any	int		86	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	547	22	golden	==	unknown	any	int		87	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	549	22	golden	==	unknown	any	int		88	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	551	22	golden	==	unknown	any	int		89	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	553	22	golden	==	unknown	any	int		90	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	555	22	golden	==	unknown	any	int		91	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	557	22	golden	==	unknown	any	int		92	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	559	22	golden	==	unknown	any	int		93	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	561	22	golden	==	unknown	any	int		94	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	563	22	golden	==	unknown	any	int		95	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	565	22	golden	==	unknown	any	int		96	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	567	22	golden	==	unknown	any	int		97	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	569	22	golden	==	unknown	any	int		98	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	571	22	golden	==	unknown	any	int		99	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	580	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	583	24	golden	==	unknown	any	int		1	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	586	28	golden	==	unknown	any	int		2	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	589	32	golden	==	unknown	any	int		3	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	592	36	golden	==	unknown	any	int		4	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	595	40	golden	==	unknown	any	int		5	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	598	44	golden	==	unknown	any	int		6	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	601	48	golden	==	unknown	any	int		7	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	604	52	golden	==	unknown	any	int		8	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	607	56	golden	==	unknown	any	int		9	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	610	60	golden	==	unknown	any	int		10	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	613	64	golden	==	unknown	any	int		11	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	616	68	golden	==	unknown	any	int		12	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	619	72	golden	==	unknown	any	int		13	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	622	76	golden	==	unknown	any	int		14	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	625	80	golden	==	unknown	any	int		15	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	628	84	golden	==	unknown	any	int		16	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	631	88	golden	==	unknown	any	int		17	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	634	92	golden	==	unknown	any	int		18	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	637	96	golden	==	unknown	any	int		19	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	640	100	golden	==	unknown	any	int		20	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	643	104	golden	==	unknown	any	int		21	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	646	108	golden	==	unknown	any	int		22	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	649	112	golden	==	unknown	any	int		23	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	652	116	golden	==	unknown	any	int		24	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	655	120	golden	==	unknown	any	int		25	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	658	124	golden	==	unknown	any	int		26	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	661	128	golden	==	unknown	any	int		27	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	664	132	golden	==	unknown	any	int		28	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	667	136	golden	==	unknown	any	int		29	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	670	140	golden	==	unknown	any	int		30	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	673	144	golden	==	unknown	any	int		31	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	676	148	golden	==	unknown	any	int		32	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	679	152	golden	==	unknown	any	int		33	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	682	156	golden	==	unknown	any	int		34	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	685	160	golden	==	unknown	any	int		35	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	688	164	golden	==	unknown	any	int		36	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	691	168	golden	==	unknown	any	int		37	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	694	172	golden	==	unknown	any	int		38	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	697	176	golden	==	unknown	any	int		39	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	700	180	golden	==	unknown	any	int		40	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	703	184	golden	==	unknown	any	int		41	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	706	188	golden	==	unknown	any	int		42	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	709	192	golden	==	unknown	any	int		43	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	712	196	golden	==	unknown	any	int		44	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	715	200	golden	==	unknown	any	int		45	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	718	204	golden	==	unknown	any	int		46	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	721	208	golden	==	unknown	any	int		47	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	724	212	golden	==	unknown	any	int		48	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	727	216	golden	==	unknown	any	int		49	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	730	220	golden	==	unknown	any	int		50	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	733	224	golden	==	unknown	any	int		51	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	736	228	golden	==	unknown	any	int		52	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	739	232	golden	==	unknown	any	int		53	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	742	236	golden	==	unknown	any	int		54	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	745	240	golden	==	unknown	any	int		55	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	748	244	golden	==	unknown	any	int		56	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	751	248	golden	==	unknown	any	int		57	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	754	252	golden	==	unknown	any	int		58	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	757	256	golden	==	unknown	any	int		59	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	760	260	golden	==	unknown	any	int		60	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	763	264	golden	==	unknown	any	int		61	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	766	268	golden	==	unknown	any	int		62	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	769	272	golden	==	unknown	any	int		63	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	772	276	golden	==	unknown	any	int		64	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	775	280	golden	==	unknown	any	int		65	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	778	284	golden	==	unknown	any	int		66	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	781	288	golden	==	unknown	any	int		67	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	784	292	golden	==	unknown	any	int		68	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	787	296	golden	==	unknown	any	int		69	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	790	300	golden	==	unknown	any	int		70	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	793	304	golden	==	unknown	any	int		71	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	796	308	golden	==	unknown	any	int		72	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	799	312	golden	==	unknown	any	int		73	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	802	316	golden	==	unknown	any	int		74	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	805	320	golden	==	unknown	any	int		75	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	808	324	golden	==	unknown	any	int		76	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	811	328	golden	==	unknown	any	int		77	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	814	332	golden	==	unknown	any	int		78	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	817	336	golden	==	unknown	any	int		79	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	820	340	golden	==	unknown	any	int		80	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	823	344	golden	==	unknown	any	int		81	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	826	348	golden	==	unknown	any	int		82	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	829	352	golden	==	unknown	any	int		83	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	832	356	golden	==	unknown	any	int		84	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	835	360	golden	==	unknown	any	int		85	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	838	364	golden	==	unknown	any	int		86	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	841	368	golden	==	unknown	any	int		87	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	844	372	golden	==	unknown	any	int		88	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	847	376	golden	==	unknown	any	int		89	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	850	380	golden	==	unknown	any	int		90	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	853	384	golden	==	unknown	any	int		91	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	856	388	golden	==	unknown	any	int		92	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	859	392	golden	==	unknown	any	int		93	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	862	396	golden	==	unknown	any	int		94	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	865	400	golden	==	unknown	any	int		95	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	868	404	golden	==	unknown	any	int		96	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	871	408	golden	==	unknown	any	int		97	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	874	412	golden	==	unknown	any	int		98	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/values.bot	877	416	golden	==	unknown	any	int		99	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/variadics.bot	66	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	81	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	110	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	138	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	155	20	golden	==	compatible	int	int		0	1	-	-	
+tests/golden/variadics.bot	165	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	231	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	248	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	265	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	288	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/variadics.bot	320	20	golden	==	compatible	int	int			1	-	-	
+tests/golden/warning-programs.bot	203	17	golden	==	compatible	str	str		"\""	1	-	-	
+tests/golden/warning-programs.bot	210	17	golden	==	disjoint-kind	str	UnicodeChar		'"'	1	-	-	str vs UnicodeChar
+tests/golden/warning-programs.bot	219	17	golden	==	unknown	any	UnicodeChar		','	1	untyped-parameter	disjoint-kind: str vs UnicodeChar	an operand's type fixes no runtime kind
+tests/golden/warning-programs.bot	219	29	golden	==	unknown	any	str		","	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/warning-programs.bot	226	17	golden	==	unknown	any	UnicodeChar		','	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/warning-programs.bot	226	29	golden	==	unknown	any	str		","	1	untyped-parameter	disjoint-kind: UnicodeChar vs str	an operand's type fixes no runtime kind
+tests/golden/warning-programs.bot	343	20	golden	==	unknown	any	int		0	1	untyped-parameter	-	an operand's type fixes no runtime kind
+tests/golden/warning-programs.bot	409	13	golden	==	disjoint-kind	struct{p0: int, p1: int}	List[int]{length: 2}			1	-	-	struct vs list
+tests/golden/warning-programs.bot	469	17	golden	==	compatible	str	str		"a@b"	1	-	-	
+tests/golden/warning-programs.bot	471	20	golden	==	compatible	str	str		""	1	-	-	
+tests/golden/warning-programs.bot	494	17	golden	==	compatible	str	str		"a"	1	-	-	
+tests/golden/warning-programs.bot	504	17	golden	==	compatible	str	str		"a@b"	1	-	-	
+tests/golden/warning-programs.bot	506	20	golden	==	compatible	str	str		""	1	-	-	

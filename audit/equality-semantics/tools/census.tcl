@@ -367,7 +367,7 @@ foreach path [lsort [split [exec find [file join $root stdlib] -name *.bot] \n]]
         std::darwin* { set target {-target macos-aarch64} }
         std::windows* { set target {-target windows-x86_64} }
     }
-    census::CompileText "import $namespace\n0\n" [file join $root loader-[pid].bot] stdlib {*}$target
+    census::CompileText "import $namespace\n0\n" [file join $root census-loader.bot] stdlib {*}$target
 }
 
 set classes {refused unknown disjoint-kind disjoint-nominal disjoint-domain empty-only compatible}
@@ -419,7 +419,8 @@ foreach area [concat $areas all] {
 lappend out "" $row
 lappend out "" "[dict size $census::sites] sites; [llength $census::failed] compilations failed:"
 foreach f $census::failed {
-    lappend out "  [string range [lindex $f 0] [string length $root/] end]: [string range [lindex $f 1] 0 160]"
+    # (No file is written: census-loader.bot only names a loader's text.)
+    lappend out "  [string range [lindex $f 0] [string length $root/] end]: [string range [string map [list $root/ ""] [lindex $f 1]] 0 160]"
 }
 if {[dict get $options -out] eq ""} {
     puts [join $out \n]

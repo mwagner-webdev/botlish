@@ -126,6 +126,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [ASCII-SUBSTRINGS-RECOMMENDATION.md](ASCII-SUBSTRINGS-RECOMMENDATION.md) -- should `substring` results be proven ASCII?
 - [NATIVE-TCL-UNICODE.md](NATIVE-TCL-UNICODE.md) -- Tcl-compatible Unicode character classification
 - [UNICODECHAR-CLASSIFIERS.md](UNICODECHAR-CLASSIFIERS.md) -- `std::char::is_tcl_alpha`/`is_tcl_alnum`: character classes of a `UnicodeChar`
+- [EQUALITY-SEMANTICS.md](EQUALITY-SEMANTICS.md) -- type-blind `==`, the one-character-literal warning's hazard, and a checked equality
 
 ### Systems boundary: ABI, Linux and process I/O
 
