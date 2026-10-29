@@ -1078,8 +1078,23 @@ proc hir::contexts::ContextTraitReceiver {hir parent e} {
 
 # Every reference to (or literal of) a function whose requirement is not
 # empty must be a call or an alias binding in statement position.
+#
+# A function of a trait-polymorphic function's region is checked in every
+# specialization the program makes of it too (REQUIRED's nodes {K BLOCK}:
+# Requirements): a nested function performing an operation on the
+# enclosing function's view requires what that specialization's
+# implementation does, and its value is the specialization's
+# (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md) -- reported at
+# the one written use, naming the specialization when the function as
+# written requires nothing.
 proc hir::contexts::CheckValues {hirVar parent required} {
     upvar 1 $hirVar hir
+    set specialized [dict create]
+    dict for {n ids} $required {
+        if {[llength $n] == 2 && $ids ne {}} {
+            dict lappend specialized [lindex $n 1] $n
+        }
+    }
     dict for {e node} [dict get $hir exprs] {
         set kind [dict get $node kind]
         if {$kind eq "ref"} {
@@ -1089,16 +1104,23 @@ proc hir::contexts::CheckValues {hirVar parent required} {
         } else {
             continue
         }
-        if {$target eq "" || ![dict exists $required $target] || [dict get $required $target] eq {}} {
+        if {$target eq "" || ![dict exists $required $target]} {
             continue
+        }
+        set requiring $target
+        if {[dict get $required $target] eq {}} {
+            if {![dict exists $specialized $target]} {
+                continue
+            }
+            set requiring [lindex [lsort [dict get $specialized $target]] 0]
         }
         if {![dict exists $parent $e] || ![Observed $hir $parent $e]} {
             continue
         }
-        set name [BlockName $hir $target]
+        set name [NodeName $hir $requiring]
         hir::Diagnose hir CONTEXT-FUNCTION-VALUE \
             [::format {function %s requires context %s, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed} \
-                $name [join [dict get $required $target] {, }]] $e
+                $name [join [dict get $required $requiring] {, }]] $e
     }
 }
 

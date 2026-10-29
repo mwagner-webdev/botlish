@@ -1941,6 +1941,16 @@ fn describe(d: Dog) -> int:
         [lindex $rejected 0] [lindex [split [lindex $rejected 1] \n] 1]
 } -result {{value {[204, 106]}} {value 106} MISSING-CONTEXT {    show (for T = std::imp::people::Person)}}
 
+test trait-implementation-context-function-value {a nested function performing the operation on the enclosing trait-polymorphic function's view needs, in a specialization, what the implementation it binds there needs: used as a value it is CONTEXT-FUNCTION-VALUE for the specialization for A (whose show needs Log), named as such -- never an internal error -- and nothing for C's; called, it runs} -body {
+    set pre "import std::tic::traits\nimport std::tic::a\nimport std::tic::c\nimport std::tic::lp\n\n"
+    set value "fn apply(t: std::tic::traits::Thing) -> int:\n    fn inner() -> int:\n        t.show()\n    fs = \[inner\]\n    1\n\n"
+    set called "fn apply(t: std::tic::traits::Thing) -> int:\n    fn inner() -> int:\n        t.show()\n    inner() * 10\n\n"
+    set rejected [moduleRejection $::ticLib "${pre}${value}with context std::tic::lp::create()\n\[apply(std::tic::a::A {v: 1}), apply(std::tic::c::C {u: 2})\]\n"]
+    list [lindex $rejected 0] [string range [lindex $rejected 1] 0 99] \
+        [moduleAgree $::ticLib "${pre}${value}apply(std::tic::c::C {u: 2})\n"] \
+        [moduleAgree $::ticLib "${pre}${called}with context std::tic::lp::create()\n\[apply(std::tic::a::A {v: 1}), apply(std::tic::c::C {u: 2})\]\n"]
+} -result {CONTEXT-FUNCTION-VALUE {function inner (for std::tic::a::A) requires context std::tic::traits::Log, so it can only be called} {value 1} {value {[1010, 20]}}}
+
 test trait-implementation-context-monomorphized {the monomorphized program has no trait or context-trait operation left and no runtime selection: every former operation is a direct call -- an implementation the plan replaces by the clone it made (twice for A calls A's show clone under Log=LP), any other (C's show, the providers' level and now) itself -- and the dropped declarations (A's and B's show as written) are called nowhere} -body {
     set hir [moduleHir $::ticLib [ticProgram {lp cp} {[A(1), B(2), C(3)]}]]
     set operations 0

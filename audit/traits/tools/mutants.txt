@@ -705,3 +705,15 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
     if {0} {
         # The monomorphized program (monomorphize): a function the plan
 >>>>
+
+@@ function-value-judged-as-written a function value is judged by its function as written only: a nested function of a trait-polymorphic function that needs a context only in one specialization (through the implementation its operation binds there) passes as a value, and the plan meets an implementation clone with no provider
+## hir/contexts.tcl
+<<<<
+        if {[llength $n] == 2 && $ids ne {}} {
+            dict lappend specialized [lindex $n 1] $n
+        }
+====
+        if {0} {
+            dict lappend specialized [lindex $n 1] $n
+        }
+>>>>
