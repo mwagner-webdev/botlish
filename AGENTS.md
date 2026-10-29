@@ -1975,7 +1975,11 @@ install`, which builds its archive there). Keep it so:
 * The native integration ABI (packages/event_loop_linux/native/
   botlish_event_loop.h, version 1): a post copies four scalars and never runs
   Botlish code; pumps run on the loop's thread inside the wait and never call
-  Botlish. Never add a C-to-Botlish callback or a pointer in a record.
+  Botlish. Never add a C-to-Botlish callback or a pointer in a record. A
+  library that wakes the loop before its data is where its check can take it
+  (SDL calls an event watch before it queues the event) announces what it
+  woke for and keeps its prepare deadline near until check has taken it;
+  never rely on the wake alone (`el-linux-sdl-hybrid-window`).
 * The exploration's prototype (`audit/event-loop/src`) is evidence and the
   benchmark's baseline: never extend it or load it from production code.
 

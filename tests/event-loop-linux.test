@@ -210,6 +210,13 @@ test el-linux-sdl-hybrid {hybrid (a watch wakes, a pump copies on the loop's thr
     list [expr {[elNum $t {sdl later than 5 ms (\d+)}] <= 13 && [elNum $t {sdl max latency us (\d+)}] < 50000}] [expr {[elNum $t {idle blocks (\d+)}] <= 2}]
 } -result {1 1}
 
+test el-linux-sdl-hybrid-window {hybrid with the window between SDL's watch and its queueing of the event widened to 2 ms (EVSDL_STRESS=watch-window; SDL calls a watch before it queues the event): the watch announces every event and the pump keeps the loop's sleeps short until the check has taken it, so no event waits for an unrelated wake (the 100 ms heartbeat)} -constraints eventLoopSdl -body {
+    set t [elNative sdl-hybrid {EVSDL_STRESS watch-window}]
+    set late [elNum $t {sdl later than 5 ms (\d+)}]
+    set max [elNum $t {sdl max latency us (\d+)}]
+    list [elNum $t {sdl received (\d+)}] [expr {$late <= 13 && $max < 50000 ? "ok" : "late $late max $max"}] [expr {[elNum $t {idle blocks (\d+)}] <= 2}]
+} -result {260 ok 1}
+
 test el-linux-sdl-pump {pump protocol without a wakeup: latency bounded by its 10 ms cap, paid for in idle wakeups (about 20 per 200 ms)} -constraints eventLoopSdl -body {
     set t [elNative sdl-pump]
     list [expr {[elNum $t {sdl max latency us (\d+)}] < 30000}] [expr {[elNum $t {idle blocks (\d+)}] >= 15}]

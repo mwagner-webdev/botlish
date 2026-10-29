@@ -2,7 +2,9 @@
 # EVENT-LOOP-MILESTONE-1.md, "Mutation testing"): each a plausible bug in
 # the scheduler (stdlib/event_loop.bot), the Linux driver's package
 # (packages/event_loop_linux/event_loop_linux.bot) or its C adapter
-# (packages/event_loop_linux/native/event_loop_linux.c), grouped by the rule
+# (packages/event_loop_linux/native/event_loop_linux.c; and the SDL source
+# of the tests, tests/event-loop/native/sdl.c, for the hybrid protocol the
+# integration ABI documents), grouped by the rule
 # it breaks -- the milestone's list: turn boundaries, observer starvation
 # and duplication, skipped generation checks, stale queued delivery, timer
 # order, lost wakeups, unbounded collection, Reliable-policy loss,
@@ -383,6 +385,16 @@ private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound
             if (E.rot_count > 0 || __atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
 ====
             if (E.rot_count > 0) timeout = 0;
+>>>>
+
+@@ c-hybrid-unannounced SDL's hybrid watch wakes the loop without announcing the event (SDL calls a watch before it queues the event): a check that runs first finds nothing and the event waits for an unrelated wake (the race tests/event-loop/native/sdl.c's mode 3 had)
+%% el-linux-sdl-hybrid-window el-linux-sdl-hybrid
+## tests/event-loop/native/sdl.c
+<<<<
+        atomic_fetch_add(&S.announced, 1);
+        atomic_store(&S.announced_at, botlish_event_now());
+====
+        atomic_store(&S.announced_at, botlish_event_now());
 >>>>
 
 @@ c-source-drained-first a source with more records is served again before the others (FIFO over records, not round-robin over sources): a flood starves a quiet source

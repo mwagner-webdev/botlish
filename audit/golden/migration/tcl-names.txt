@@ -10014,3 +10014,4 @@ tests/event-loop-linux.test el-linux-example pass
 tests/event-loop-linux.test el-linux-static-capability pass
 tests/event-loop-linux.test el-linux-audit pass
 tests/traits.test trait-implementation-yield-stale-edge pass
+tests/event-loop-linux.test el-linux-sdl-hybrid-window pass

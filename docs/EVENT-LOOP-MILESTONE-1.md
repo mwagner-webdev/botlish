@@ -82,6 +82,14 @@ changes no compiler, runtime or backend file.
   work and fixed** (section 7.2): a `botlish_event_wake()` landing in the
   window before the eventfd's reset was swallowed. The race test that
   shows the fix widens that window on purpose.
+* **A lost-wakeup race in the hybrid SDL integration, found when the
+  merged tree's tests ran under load, and fixed** (section 8): SDL calls an
+  event watch before it queues the event, so the watch's wake could be
+  consumed by a check that found nothing, and the event waited for the
+  100 ms heartbeat. The exploration's hybrid mode, which its report
+  recommended, has the same race (its 0-7 late events). The watch now
+  announces each event and the pump keeps the loop's sleeps short until the
+  check has taken it; the integration ABI's header states the rule.
 * **Performance** (section 11): the same cost per dispatch as the
   prototype (0.35 against 0.34 us per `yield_now` dispatch, 0.76 against
   0.78 per ping-pong dispatch, in one run), no allocation per dispatch, per
@@ -560,7 +568,7 @@ refuse a C call.
 | requirement | evidence |
 |---|---|
 | sleep without losing notifications | `el-linux-wake`, `el-linux-lost-wakeup-control`, `el-linux-reset-window`, mutants `c-post-never-signals`, `c-reset-without-recheck`, `c-wake-not-owed` |
-| wake when native work arrives | `el-linux-wake`, `el-linux-sdl-wakeup`, `el-linux-sdl-hybrid` |
+| wake when native work arrives | `el-linux-wake`, `el-linux-sdl-wakeup`, `el-linux-sdl-hybrid`, `el-linux-sdl-hybrid-window` |
 | honor deadlines while it owns the wait | `el-linux-idle`, `el-linux-gameserver` (timers beside sockets) |
 | bounded batches | the scheduler's budget (`collect-unbounded` mutant), `el-linux-flood` |
 | no starvation of quiet descriptors | `el-linux-rotation`, `el-linux-quiet-source`, `el-linux-gameserver` (quiet connections beside a flooding client), mutant `c-source-drained-first` |
@@ -605,7 +613,19 @@ return a deadline that is not in the future.
 reported): the exploration's modes on the production loop -- the wakeup
 protocol (an SDL event watch posts from SDL's threads), the hybrid (a watch
 wakes, a pump copies on the loop's thread), a pure pump with a 10 ms cap,
-and the naive negative control. `el-linux-mixed` runs SDL3, the game server
+and the naive negative control. SDL calls a watch before it queues the
+event (`SDL_PushEvent`: the watchers, then `SDL_PeepEvents(SDL_ADDEVENT)`),
+so the hybrid watch announces each event, and while announced events are
+not out of SDL's queue (not queued yet, or refused by a full endpoint) the
+pump's prepare hook caps the sleep at 100 us: the integration ABI's rule
+for a library's undelivered events, which the header now states for a wake
+that precedes its data. Before, a check that ran between the watch and the
+queueing consumed the wake and the event waited for the 100 ms heartbeat:
+with the window widened to 2 ms (`EVSDL_STRESS=watch-window`,
+`el-linux-sdl-hybrid-window`) 57-63 of 260 events were later than 5 ms and
+the worst 67-74 ms, against 1-2 and 6 ms after the fix; under six CPU-bound
+processes on 4 cores, up to 7 late and worst cases of 54-90 ms before,
+none late and at most 4.8 ms after (ten runs each). `el-linux-mixed` runs SDL3, the game server
 with a flooding client, a producer's posts, timers and the base workload W
 in one process, in both initialization orders. SDL3 is the tests'
 dependency, never the event loop's. Measurements: section 11.
@@ -788,7 +808,7 @@ brief's adversarial list, covered:
 | the examples | `el-example-*` |
 | no allocation per dispatch, per event, per drained event (native) | `el-alloc-per-event` |
 
-**Native** (`tests/event-loop-linux.test`; 24 tests, on this
+**Native** (`tests/event-loop-linux.test`; 25 tests, on this
 container: Linux x86-64, real epoll, eventfd, TCP sockets, producer threads,
 SDL3 built by `tests/cffi/sdl3.tcl`): the application is built the way an
 application installs the package; each program runs once on cranelift.
@@ -812,12 +832,12 @@ deterministic scenario and example runs identically on interp, compile,
 cranelift-generic and cranelift. The Linux driver runs on cranelift (the
 native backends; the Tcl backends refuse a C call).
 
-**Mutation** (`tclsh9.0 audit/event-loop/tools/mutate.tcl`; 35 mutants in
+**Mutation** (`tclsh9.0 audit/event-loop/tools/mutate.tcl`; 36 mutants in
 `audit/event-loop/tools/mutants.txt`). Each mutant is applied to a private
 copy of the tree; its `%%` line names the tests of the rule it breaks,
 which run first; a mutant they do not kill runs both test files whole
 before it counts as surviving, and the unmutated tree must pass both files
-whole first. **All 35 are killed**, each by a test of the rule it breaks
+whole first. **All 36 are killed**, each by a test of the rule it breaks
 (no kill by a build failure or a timeout):
 
 | brief's class | mutants | killed by |
@@ -827,7 +847,7 @@ whole first. **All 35 are killed**, each by a test of the rule it breaks
 | skipped generation checks | `deliver-skips-generation`, `dispatch-skips-generation`, `revoke-keeps-generation`, `c-watch-generation-unchecked` | `el-revocation-stale`, `-suppress`, `el-delivery-revoke-held`; `el-linux-stale-watch` |
 | stale queued delivery after revocation | `revoke-keeps-queue`, `revoke-wakes-as-event` | `el-delivery-*`; `el-revocation-suppress` |
 | timer-order violations | `timer-equal-deadlines-reversed`, `heap-sift-down-later-child`, `heap-remove-no-sift-up`, `timer-fires-early`, `timer-missed-count-off-by-one`, `one-shot-wakes-one` | `el-heap-*`, `el-timers-*` |
-| lost wakeups | `c-post-never-signals`, `c-reset-without-recheck`, `c-wake-not-owed`, `pkg-readable-no-rearm` | `el-linux-wake`, `el-linux-reset-window`, `el-linux-buffered-lines` |
+| lost wakeups | `c-post-never-signals`, `c-reset-without-recheck`, `c-wake-not-owed`, `pkg-readable-no-rearm`, `c-hybrid-unannounced` (the SDL source's hybrid watch) | `el-linux-wake`, `el-linux-reset-window`, `el-linux-buffered-lines`, `el-linux-sdl-hybrid-window` |
 | unbounded native collection | `collect-unbounded`, `queue-unbounded`, `c-no-backpressure` | `el-fairness-budget`, `el-delivery-*`, `el-linux-flood` |
 | event loss under a Reliable policy | `reliable-drops`, `held-never-released`, `coalesce-loses-count`, `c-hold-forgets-record` | `el-delivery-*`, `el-linux-flood` |
 | inactive-source interference | `unwatched-timer-in-heap`, `c-source-drained-first` | `el-heap-interest`, `el-timers-*`; `el-linux-rotation` |
@@ -849,6 +869,13 @@ evidence that the mutants test the tests:
   checked).
 * **The lost-wakeup bug of section 7.2** came from asking why
   `c-reset-without-recheck` survived; `c-wake-not-owed` puts it back.
+* **The hybrid SDL race of section 8** came later, from the merged tree's
+  run, and was added as `c-hybrid-unannounced` (the 36th): the watch wakes
+  without announcing, which `el-linux-sdl-hybrid-window` kills in 31 s and
+  the unwidened `el-linux-sdl-hybrid` does not (the race needs the window).
+  Its run's baseline then failed `el-alloc-per-event`, added after the
+  full mutation run: the harness's private tree had no `bench/event-loop`,
+  whose workloads the test compiles; the tree now copies it.
 * **Three kills were not kills**: two by the harness's own missing
   `examples/` copy, one by a mutant that did not compile
   (`c-watch-generation-unchecked`, `-Werror`; rewritten to compile, it
@@ -895,6 +922,9 @@ files that read the standard library's sources then passed on both passes
 (`mutable-array-type`, `stdlib`, `stdlib-namespaces`, `std-namespace`,
 `refined`, `refinement-values`, `typed-mutarray-builder`, `bot-modules`,
 `checked-domain-proof-provenance`: 509 tests each).
+`audit/stdlib-census/after.tsv` is regenerated for the new public surface
+(85 `api` and 229 `private` rows of `std::event_loop`; the regeneration also
+picks up earlier line drift in `core/cabi.tcl` and `stdlib/ordered_table.bot`).
 
 The next macOS and Windows runs found a layout problem only a
 case-insensitive file system shows: a qualifier `Delivery::Lossy` in a
@@ -923,9 +953,16 @@ commits after `c4cbe3ba` change tests, their census and documents only;
 both event-loop test files passed locally on both passes after them. The
 GC-stress job and the static-decisions comparison run on pushes to main
 and did not run here.
-`audit/stdlib-census/after.tsv` is regenerated for the new public surface
-(85 `api` and 229 `private` rows of `std::event_loop`; the regeneration also
-picks up earlier line drift in `core/cabi.tcl` and `stdlib/ordered_table.bot`).
+
+**The merge with main.** Merging main (WINDOWS-X86-64-MILESTONE-7's
+filesystem modules, the trait-plan defect record) conflicted in one file,
+`audit/refactor/manifest.txt` (both sides' entries kept); the generated
+files regenerated to exactly what the merge made. The merged tree's local
+run of the ten test files either side touches (four jobs on 4 cores)
+failed `el-linux-sdl-hybrid` on one pass: the hybrid race of section 8,
+which the load widened. With it fixed, `tests/event-loop-linux.test` passed
+on both passes (25 tests), as did the warning gate (86 units) and
+Compilerpedia's check (1080 topics, 0 problems) on the merged tree.
 
 ## 13. Compiler consistency
 

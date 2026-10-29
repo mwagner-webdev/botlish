@@ -16,7 +16,15 @@
  *             hook caps every sleep at CAP us (polling).
  *   3 hybrid  an event WATCH only wakes the loop (botlish_event_wake); the
  *             check hook moves the events, on the loop's thread, from SDL's
- *             queue (SDL's own bounded queue is the buffer).
+ *             queue (SDL's own bounded queue is the buffer). SDL calls a
+ *             watch BEFORE it queues the event (SDL_PushEvent: the
+ *             watchers, then SDL_PeepEvents(SDL_ADDEVENT)), so the check can
+ *             run before the event is there: the watch announces every event
+ *             it wakes for, and while announced events have not reached the
+ *             queue -- or the endpoint refused some -- the prepare hook keeps
+ *             the loop's sleeps short (the integration ABI's rule for events
+ *             a library holds but has not posted). Without it an event
+ *             waited for an unrelated wake (the 100 ms heartbeat).
  *   4 naive   the check hook alone, no cap, no wakeup: the negative control
  *             -- an event pushed while the loop sleeps waits for something
  *             else to wake it.
@@ -27,6 +35,10 @@
  * program in a later turn, never inside the task's segment. The filter's
  * answer (keep or drop) comes from a policy the program set beforehand
  * (evsdl_drop_codes_from), never from Botlish.
+ *
+ * EVSDL_STRESS=watch-window (tests only) widens mode 3's window: the watch
+ * sleeps 2 ms after waking the loop, before SDL queues the event, so the
+ * check runs first for every event.
  */
 #include "botlish_event_loop.h"
 
@@ -35,6 +47,7 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum { M_WAKEUP = 1, M_PUMP = 2, M_HYBRID = 3, M_NAIVE = 4 };
 
@@ -42,7 +55,9 @@ static struct {
     int mode, endpoint, slot, gen, started, cap_us, pump;
     SDL_ThreadID loop_thread;
     atomic_int in_call;
-    int drop_from;
+    int drop_from, stress_watch_window;
+    long long taken;                      /* events the check moved out of SDL's queue (loop thread) */
+    atomic_llong announced, announced_at; /* events mode 3's watch woke the loop for; the last one's time */
     atomic_llong callbacks, foreign_thread, nested, copied, dropped_by_policy, checks, refused, timer_callbacks;
 } S = { .drop_from = 0x7fffffff, .pump = -1 };
 
@@ -100,11 +115,31 @@ static bool SDLCALL filter_policy(void *userdata, SDL_Event *e) {
     return true;
 }
 
-/* Mode 3: a watch (after queueing) that only wakes the loop. */
+/* The application-lifecycle events SDL hands to its watchers without ever
+ * queueing them (SDL_events.c): no check will take them. */
+static bool never_queued(Uint32 type) {
+    switch (type) {
+    case SDL_EVENT_TERMINATING:
+    case SDL_EVENT_LOW_MEMORY:
+    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+    case SDL_EVENT_WILL_ENTER_FOREGROUND:
+    case SDL_EVENT_DID_ENTER_FOREGROUND:
+        return true;
+    }
+    return false;
+}
+
+/* Mode 3: a watch -- which SDL calls before it queues the event -- that
+ * announces the event and wakes the loop. */
 static bool SDLCALL watch_wake(void *userdata, SDL_Event *e) {
     (void)userdata;
-    (void)e;
+    if (!never_queued(e->type)) {
+        atomic_fetch_add(&S.announced, 1);
+        atomic_store(&S.announced_at, botlish_event_now());
+    }
     botlish_event_wake();
+    if (S.stress_watch_window) SDL_DelayNS(2000000);
     return true;
 }
 
@@ -132,8 +167,30 @@ static void check_sdl(void *user) {
         /* Remove exactly what was posted (or skipped): the rest stays in
          * SDL's queue, its own bounded buffer, until the endpoint has room. */
         SDL_PeepEvents(events, moved, SDL_GETEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST);
+        S.taken += moved;
         if (moved < n) break;
     }
+    /* An event that reached the queue without the watch is no announced
+     * one's. */
+    long long announced = atomic_load(&S.announced);
+    if (S.taken > announced) S.taken = announced;
+}
+
+/* Mode 3's prepare hook: while events the watch announced are not out of
+ * SDL's queue (not queued yet, or the endpoint refused them), sleep at
+ * most 100 us. One announced a second ago and still missing never reached
+ * the queue (SDL's queue was full): it is given up. */
+static long long prepare_announced(void *user, long long deadline) {
+    (void)user;
+    long long announced = atomic_load(&S.announced);
+    if (announced <= S.taken) return deadline;
+    long long now = botlish_event_now();
+    if (now - atomic_load(&S.announced_at) > 1000000) {
+        S.taken = announced;
+        return deadline;
+    }
+    long long soon = now + 100;
+    return (deadline < 0 || deadline > soon) ? soon : deadline;
 }
 
 static long long prepare_cap(void *user, long long deadline) {
@@ -154,6 +211,8 @@ int evsdl_start(int mode, int endpoint, int slot, int gen, int cap_us) {
     S.gen = gen;
     S.cap_us = cap_us;
     S.loop_thread = SDL_GetCurrentThreadID();
+    const char *stress = getenv("EVSDL_STRESS");
+    S.stress_watch_window = stress && strcmp(stress, "watch-window") == 0;
     S.started = 1;
     switch (mode) {
     case M_WAKEUP:
@@ -166,7 +225,7 @@ int evsdl_start(int mode, int endpoint, int slot, int gen, int cap_us) {
     case M_HYBRID:
         SDL_SetEventFilter(filter_policy, NULL);
         SDL_AddEventWatch(watch_wake, NULL);
-        S.pump = botlish_event_add_pump(NULL, check_sdl, NULL);
+        S.pump = botlish_event_add_pump(prepare_announced, check_sdl, NULL);
         break;
     case M_NAIVE:
         SDL_SetEventFilter(filter_policy, NULL);

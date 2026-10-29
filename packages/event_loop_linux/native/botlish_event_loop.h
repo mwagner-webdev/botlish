@@ -43,7 +43,13 @@
  *       A library that holds complete events it has not posted yet (its own
  *       buffer: readiness of its descriptor no longer describes them) must
  *       return a deadline that is not in the future, or they wait for an
- *       unrelated wakeup.
+ *       unrelated wakeup. The same holds for events a library has announced
+ *       with botlish_event_wake() before they are where check can take them
+ *       (SDL calls an event watch before it queues the event): a check that
+ *       runs first finds nothing and consumes the wake, so the library
+ *       counts what it announced and keeps the deadline near (at most a
+ *       short poll) until check has taken it (tests/event-loop/native/sdl.c,
+ *       mode 3).
  *   check(user)    after every wake: move what the library has into its
  *       endpoint (botlish_event_post), until it is empty or the endpoint
  *       refuses.
