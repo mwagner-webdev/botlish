@@ -154,9 +154,34 @@ entries, never its source text) and the stub for any other on a host that
 has it, the system linker elsewhere. It never chooses rustc. All three link
 the same program object, whose `botlish_program` record is the program's
 startup data (`runtime::program`, NATIVE-LIBRARY-MILESTONE-1.md), and start
-it the same way (`program::instantiate_linked`, `runtime::aot::run`);
+it the same way (`runtime::aot::start_linked` -- the stub's loader its own
+equivalent --, `program::instantiate_linked`, `runtime::aot::run`);
 `tests/system-linker.test` checks that their startups install exactly the
 same program state (`BOTLISH_NATIVE_STARTUP_REPORT`).
+
+## Where an executable runs its program
+
+An executable starts its program by the startup policy it was linked with
+(MAIN-THREAD-STARTUP-MILESTONE-1.md), the `startup` word of its
+`botlish_program` record:
+
+| | `worker` (the default) | `main-thread` |
+| --- | --- | --- |
+| chosen by | no option, or `-native-startup worker` | `-native-startup main-thread` (`native::executable -startup`, the driver's `executable --startup`) |
+| targets | every one that links executables | macOS AArch64 only: elsewhere NATIVE UNSUPPORTED startup, before anything is linked |
+| the program's thread | a thread `main` creates and joins | the process's main thread, the one that entered `main` |
+| its stack | 1 GiB by default, `BOTLISH_NATIVE_STACK_BYTES` when the executable runs | 512 MiB, reserved by the link (Apple ld's `-stack_size`, LC_MAIN), fixed |
+| linkers | rustc, system, stub | rustc, system (the stub links worker executables only) |
+| needed for | anything that does not need the main thread | Cocoa, and what is built on it: SDL3's video, AppKit windows |
+
+Both run one body: the same Vm, made on the thread that runs the program,
+the same stack guard, the same output, errors, statuses, driver protocol and
+startup report (whose last lines say `startup`, `thread` and `stack`), and a
+runtime panic is `native executable panicked (NATIVE BUG)`, status 1, on
+either thread. Nothing chooses the policy for a program -- not a library it
+links, not its source -- and a run (`-backend cranelift`, which links and
+runs a program that calls C) always uses the worker. Botlish.app emits both
+(`botlish -native-startup main-thread -emit-native-executable app.bot`).
 
 ## The system linker
 

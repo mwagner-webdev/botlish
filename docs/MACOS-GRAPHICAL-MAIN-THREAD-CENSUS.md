@@ -1,5 +1,15 @@
 # MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md
 
+> **Follow-up:** the recommendation (candidate A, section 30) is
+> implemented by [MAIN-THREAD-STARTUP-MILESTONE-1.md](MAIN-THREAD-STARTUP-MILESTONE-1.md):
+> `-native-startup main-thread` builds a macOS AArch64 executable whose
+> program runs on the process's main thread, with LC_MAIN's 512 MiB stack,
+> and a runtime panic there stays NATIVE BUG, status 1 (section 21's one
+> regression). The census's candidate-A cases now run on that production
+> policy (`audit/main-thread-startup/tools/acceptance.py`, the macOS
+> workflow's `main-thread-startup` job); this report, its experimental patch
+> and its recorded runs stay as the evidence they were.
+
 Hosting a graphical application on macOS without compromising Botlish's
 native runtime: how an AOT-compiled Botlish program should take part in
 macOS's graphical main-thread model.

@@ -7,9 +7,15 @@
 > the disposition the process had before the guard, and coroutine
 > switches publish the stack they arrive on. Windows x86-64 has a guard of
 > the same contract since WINDOWS-X86-64-MILESTONE-4.md, a vectored
-> exception handler for STATUS_STACK_OVERFLOW (`platform/windows.rs`). The
-> text below is Phase B's account of the Linux x86-64 original; those
-> points supersede it.
+> exception handler for STATUS_STACK_OVERFLOW (`platform/windows.rs`). A
+> macOS AArch64 executable built with `-native-startup main-thread`
+> (MAIN-THREAD-STARTUP-MILESTONE-1.md) runs its program on the process's
+> main thread instead of a worker: the same guard, installed on that
+> thread's stack as the runtime discovers it -- 512 MiB, which the link
+> reserves (LC_MAIN), with the one-page guard the kernel confirms below
+> it -- and the same NATIVE LIMIT STACK, status 1; BOTLISH_NATIVE_STACK_BYTES
+> sizes a worker only. The text below is Phase B's account of the Linux
+> x86-64 original; those points supersede it.
 
 The x86-64/Linux JIT runs on the existing Rust worker pthread. `main.rs`
 requests a 1 GiB stack with `thread::Builder::stack_size`; the optional

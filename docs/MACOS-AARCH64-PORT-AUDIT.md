@@ -250,6 +250,18 @@ the original findings with their resolution.
 | vm.rs :242-248, :278-301 (non-Linux branches) | without the platform layer: `native_stack: None`, a 32 MiB shadow stack (4M slots) as the depth bound, `publish_active_stack` a no-op | linux | **resolved**: on macOS `native_stack` is the discovered stack, the shadow array is empty and publication is live | high | 4 (done) | M (done) |
 | main.rs :563-567, runtime/aot.rs :52-56, :101-106 | the guard is installed for JIT runs and executables on Linux only | linux | **resolved**: installed at the same three points on the three hosts (`runtime::platform::OverflowGuard`) | medium | 4 (done) | M (done) |
 
+**The process's main thread (MAIN-THREAD-STARTUP-MILESTONE-1.md).** Since
+then a macOS AArch64 executable may run its program on the process's main
+thread -- what Cocoa and SDL3's video require
+(MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md) -- when it is built with
+`-native-startup main-thread`: the startup policy is the `startup` word of
+its program record, the main thread's stack is LC_MAIN's 512 MiB (Apple
+ld's `-stack_size`, through both linkers), and the discovery and guard
+above serve it unchanged. The worker stays the default, and the only policy
+on Linux and Windows. The macOS workflow's `main-thread-startup` job runs
+its tests and the graphical acceptance (SDL3 through Cocoa and Metal from an
+executable Botlish.app builds).
+
 ## 7. GC roots and the frame walk
 
 | Where | Linux assumption | Class | macOS adaptation | Risk | M | Check |
@@ -628,6 +640,7 @@ secret or a self-hosted runner.
 | `smoke` | A | `macos-15` | host facts (fails unless `Darwin`/`arm64`, not Rosetta); `tests/platform/toolchain-smoke.sh`; `.github/actions/setup-macos` (tests/platform/setup-macos.sh: Tcl 9.0.1 from source, cached; stable Rust); `tests/platform/cabi-facts.tcl`; the native build (`.github/actions/build-native`, cached); `cargo test --lib`; `cargo test --test native_stack` (the stack facts and the guard, in child processes; since milestone 4); `tests/platform/native-status.tcl`; `tests/platform/aot-facts.tcl` (a program object and an executable as the host's tools see them, the standalone runs; since milestone 5); `tier.tcl smoke` | 1 min 18 s with warm caches (run 4); about 3 min more for the one-time Tcl build |
 | `acceptance` (2 shards) | B | `macos-15` | `tier.tcl -shard I/2 -backends interp acceptance` | 20 and 27 min (run 4), 23 and 17 (run 7) |
 | `linux-control` | A | `ubuntu-latest` | the smoke commands on Linux x86-64 at the same commit | 1-4 min |
+| `main-thread-startup` | B | `macos-15`, after `app` | `tests/main-thread-startup.test` (both linkers), the native-status and aot-facts rows, static SDL3 (`tests/platform/link-plan-sdl3.sh`), then `audit/main-thread-startup/tools/acceptance.py`: the graphical acceptance through the downloaded Botlish.app with the checkout inaccessible and no Rust on PATH, then the checkout's rustc and system linkers (MAIN-THREAD-STARTUP-MILESTONE-1.md) | see that report |
 | `full` (3 shards) | C | `macos-15` | opt-in (below) | 4-5 min for a dozen named files (runs 4 and 5); 4 s for a shard with nothing to run; the default payload was not run in milestone 1 |
 
 - **Triggers:** `push` to any branch (so a feature branch is tested before

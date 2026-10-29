@@ -708,6 +708,66 @@ test mts-policy-parity {the same program on the worker and, where the host has i
     [list {0 {} {}} "error {CORE SEMANTIC TYPE} {+: expected int, got \[true\]}\n"] \
     [list {0 {} {}} "times ...\ntiming ...\nvalue {int 1008}\n"] {2 {}}]]
 
+# {STATUS STDOUT STDERR} of running EXECUTABLE with INPUT on its standard
+# input and nothing else in its environment.
+proc mtsRunInput {executable input} {
+    set output [makeFile {} mts-stdout]
+    set errors [makeFile {} mts-stderr]
+    set status 0
+    if {[catch {exec env -i $executable << $input > $output 2> $errors} message options]} {
+        set status [lindex [dict get $options -errorcode] 2]
+    }
+    set result [list $status [string trimright [mtsReadFile $output] \n] [string trimright [mtsReadFile $errors] \n]]
+    removeFile mts-stdout
+    removeFile mts-stderr
+    return $result
+}
+
+# The platform's own echo of one chunk of standard input: Linux's
+# (examples/linux/read-stdin.bot: raw syscalls), macOS's (libSystem's read
+# and write through std::darwin).
+set ::mtsEcho [dict create linux [file join $::projectRoot examples linux read-stdin.bot] macos {direct module
+
+import std::abi
+import std::abi::bytes
+import std::darwin
+
+r = std::darwin::read(0, std::abi::bytes::zeroed(std::abi::usize(4096)))
+n = r.count
+if n > 0:
+    count = std::abi::usize(n):
+        on std::abi::AbiIntegerAboveRange:
+            std::abi::usize(0)
+    data = r.data.freeze_prefix(count):
+        on UpperOverrun:
+            std::abi::bytes::from_list([])
+    w = std::darwin::write(1, data)
+    w.count
+else:
+    n
+}]
+testConstraint mtsEcho [expr {[testConstraint mtsExecutables] && [testConstraint posixHost]
+    && [dict exists $::mtsEcho [lindex [split [core::cabi::hostTarget] -] 0]]}]
+
+test mts-policy-stdin-stdout {a program that reads its standard input and writes its standard output through the platform's own I/O (Linux's syscalls, macOS's libSystem) does so alike on the worker and on the main thread, with each linker} -constraints {mtsEcho} -body {
+    set dir [makeDirectory mts-stdio]
+    set os [lindex [split [core::cabi::hostTarget] -] 0]
+    set echo [dict get $::mtsEcho $os]
+    set hir [if {$os eq "linux"} {
+        surface::readProgramFile $echo -warnings off -cache ""
+    } else {
+        surface::compile $echo echo.bot -warnings off
+    }]
+    set results {}
+    foreach linker [concat [list ""] [mtsLinkers]] {
+        foreach policy [mtsPolicies] {
+            lappend results [mtsRunInput [mtsLink $hir [file join $dir $policy-$linker] $policy $linker] "hello from stdin\n"]
+        }
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-stdio} -result {{0 {hello from stdin
+17} {}}}
+
 test mts-policy-depth {the census's recursion probes return their values on the worker and on the main thread's 512 MiB stack (the 8 MiB default would end three of them), with each linker} -constraints {mtsExecutables} -body {
     set dir [makeDirectory mts-depth]
     set hir [mtsCompile $::mtsDepth depth]

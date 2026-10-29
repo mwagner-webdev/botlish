@@ -647,7 +647,8 @@ test system-linker-no-rust-toolchain {the system linker links with nothing but t
 # The offset in BYTES (an executable's) of its program record
 # (runtime::program::LinkedProgram: the magic, the fingerprint, the
 # descriptor's address and length, the code table's address and function
-# count, six words) -- not the runtime's own copy of the magic, which its
+# count, the startup policy: seven words) -- not the runtime's own copy of
+# the magic, which its
 # code compares with: the record's length and count words are plausible
 # (the addresses are the linker's, and may be anything in the file). -1 if
 # none.

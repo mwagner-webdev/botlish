@@ -2600,9 +2600,18 @@ Linux the build host determines the minimum glibc version.
 `BOTLISH_NATIVE_GC_STRESS` and `BOTLISH_NATIVE_STACK_BYTES` also work for
 standalone executables. Failed compilation leaves an existing output intact.
 
+Where the executable runs its program is its startup policy, fixed when it
+is linked (MAIN-THREAD-STARTUP-MILESTONE-1.md): by default on a thread the
+executable creates (1 GiB of stack, `BOTLISH_NATIVE_STACK_BYTES` when it
+runs); with `-native-startup main-thread`, on macOS AArch64 only, on the
+process's main thread, whose 512 MiB stack the link reserves (LC_MAIN) --
+what Cocoa, and SDL3's video, require. Both run the same program the same
+way: the same output, errors, statuses and stack guard.
+
 The Tcl API is `native::executable $hir $outputPath ?OPTIONS?`. It also
-accepts the native lowering options; specialization is enabled by default
-regardless of `BOTLISH_NATIVE_SPECIALIZE`. The CLI also accepts `.hir` and
+accepts the native lowering options, and `-startup worker|main-thread`;
+specialization is enabled by default regardless of
+`BOTLISH_NATIVE_SPECIALIZE`. The CLI also accepts `.hir` and
 `.ir` inputs and multiple input paths.
 
 ### Values

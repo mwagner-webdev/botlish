@@ -1565,4 +1565,22 @@ mod startup_record_tests {
         let library = emit_library_object(&program, "lib").unwrap_or_else(|e| panic!("{}", e.message())).bytes;
         assert_eq!(startup_word(&library), 0, "a library's record names the worker");
     }
+
+    /// The policy changes nothing in the program object but its record's
+    /// word: the same machine code, descriptor, stack maps, symbols and
+    /// relocations -- the program's meaning is the executable's whichever
+    /// thread runs it.
+    #[test]
+    fn startup_policy_is_the_objects_only_difference() {
+        let program = crate::nir::parse(TEXT).unwrap_or_else(|e| panic!("{}", e.message));
+        let worker = emit_executable_object(&program, Startup::Worker).unwrap_or_else(|e| panic!("{}", e.message())).bytes;
+        let main = emit_executable_object(&program, Startup::MainThread).unwrap_or_else(|e| panic!("{}", e.message())).bytes;
+        assert_eq!(worker.len(), main.len());
+        let differing: Vec<usize> = (0..worker.len()).filter(|&i| worker[i] != main[i]).collect();
+        assert_eq!(differing.len(), 1, "one byte differs: the startup word's lowest, 0 against 1");
+        let mut head = LINKED_MAGIC.to_le_bytes().to_vec();
+        head.extend_from_slice(&crate::runtime::aotimage::abi_fingerprint().to_le_bytes());
+        let record = (0..worker.len()).find(|&i| worker[i..].starts_with(&head)).expect("the record");
+        assert_eq!(differing[0], record + std::mem::offset_of!(LinkedProgram, startup));
+    }
 }

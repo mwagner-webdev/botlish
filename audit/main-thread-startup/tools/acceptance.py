@@ -114,6 +114,27 @@ class Acceptance(census.Census):
                 for p in programs:
                     self.exe[(label, p)] = self.build_exe(label, d, p, "checkout", "main-thread", env)
 
+    def case(self, name, group, cmd, kind, env=None, timeout=60, expect=None, note="", repeat=1, capture=False,
+             signal_after=None, build=None):
+        """census.py's case, with one requirement more: a captured Cocoa window (macOS) shows what the program
+        drew -- its center pixel within 48 of each channel of EXPECT's color, and at least half the sampled
+        pixels so -- or the case is not as predicted (the census recorded the pixels; the acceptance requires
+        them)."""
+        rec = super().case(name, group, cmd, kind, env=env, timeout=timeout, expect=expect, note=note, repeat=repeat,
+                           capture=capture, signal_after=signal_after, build=build)
+        color = (expect or {}).get("color")
+        if capture and APPLE and color and rec.get("class") == "EXECUTED-COCOA":
+            shot = rec.get("facts", {}).get("capture", {})
+            center = shot.get("center_rgb")
+            drawn = shot.get("fraction_drawn_color") or 0
+            ok = bool(shot.get("exists")) and center is not None and all(abs(a - b) <= 48 for a, b in zip(center, color)) \
+                and drawn >= 0.5
+            rec["facts"]["capture_matches"] = ok
+            if not ok:
+                rec["expected"] = False
+                log(f"RESULT {name}: the capture does not show the program's color {color}: {shot} (UNEXPECTED)")
+        return rec
+
     # -- classifying what census.py does not -----------------------------------------
     def classify_lcmain(self, r, expect, name):
         """LC_MAIN's stacksize, as `otool -l` reads the executable."""
@@ -200,6 +221,8 @@ class Acceptance(census.Census):
                                                     self.work / "worker/identity.bot"], "identity", expect={"main": False},
                       note="-backend cranelift: a program that calls C runs as a linked executable, on its worker")
             if APPLE:
+                self.case("macho-main", "identity", tool(main("sdl"), "file", "-b"), "process", build="main/sdl",
+                          expect={"status": 0, "stdout": r"^Mach-O 64-bit executable arm64$"})
                 for label, exe, build in mains:
                     if build != "main" and not self.args.checkout:
                         continue
