@@ -3,6 +3,7 @@
 #
 #   tclsh9.0 audit/event-loop/tools/mutate.tcl ?-only PATTERNS? ?-jobs N?
 #       ?-timeout S? ?-quick-timeout S? ?-backend B? ?-native 0|1?
+#       ?-baseline 0|1?
 #
 # For every mutant of mutants.txt beside this script (or those whose name
 # matches one of PATTERNS, glob patterns): a private copy of the checkout's
@@ -29,8 +30,9 @@
 # missed under load is a kill that proves nothing -- rerun a mutant killed
 # only by el-linux-wake, -idle, -flood or -quiet-source alone).
 #
-# Prints one line per mutant: killed (the detector and its failing tests),
-# SURVIVED or NOT APPLIED. Exit status 1 if any survived, did not apply, or
+# Prints one line per mutant as soon as it is decided: killed (the detector
+# and its failing tests), SURVIVED or NOT APPLIED. A run stopped part way
+# keeps the lines it printed; -only the rest with -baseline 0 resumes it. Exit status 1 if any survived, did not apply, or
 # the baseline failed. Scratch state lives in `file tempdir` directories
 # (AGENTS.md); the real checkout is never modified.
 
@@ -38,7 +40,7 @@ set here [file dirname [file normalize [info script]]]
 set root [file dirname [file dirname [file dirname $here]]]
 source [file join $root audit golden tools tree.tcl]
 
-set options [dict create -only {} -jobs 3 -timeout 1500 -quick-timeout 600 -backend cranelift -native 1 -worker {}]
+set options [dict create -only {} -jobs 3 -timeout 1500 -quick-timeout 600 -backend cranelift -native 1 -baseline 1 -worker {}]
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
     if {![dict exists $options $arg]} {
@@ -187,20 +189,18 @@ foreach {name description edits} [goldentools::readMutants $mutantsFile] {
     if {$only ne {} && ![llength [lmap p $only {expr {[string match $p $name] ? 1 : [continue]}}]]} continue
     lappend names $name
 }
-set commands [dict create]
 set common [list -backend [dict get $options -backend] -native [dict get $options -native] -timeout [dict get $options -timeout] \
     -quick-timeout [dict get $options -quick-timeout]]
-foreach name [linsert $names 0 baseline] {
-    dict set commands $name [list [info nameofexecutable] [info script] {*}$common -worker $name]
-}
-# The worker's own timeout covers its detectors in turn.
-set results [goldentools::runParallel [dict get $options -jobs] \
-    [expr {2 * [dict get $options -quick-timeout] + 2 * [dict get $options -timeout] + 600}] $commands]
+# The worker's own timeouts cover its detectors in turn.
+set workerTimeout [expr {2 * [dict get $options -quick-timeout] + 2 * [dict get $options -timeout] + 600}]
 
 set exit 0
 set killed 0
-foreach name [dict keys $commands] {
-    lassign [dict get $results $name] status output seconds
+
+# Prints NAME's verdict from its worker's OUTPUT (as soon as it ends, so a
+# stopped run keeps what it found: rerun the rest with -only).
+proc verdict {name status output seconds} {
+    global exit killed
     set line [lindex [regexp -all -inline -line {^RESULT .*$} $output] end]
     set verdict [lindex $line 1]
     set detail [string range $line [string length "RESULT $verdict "] end]
@@ -229,6 +229,48 @@ foreach name [dict keys $commands] {
             set exit 1
         }
     }
+    flush stdout
 }
+
+# At most -jobs workers at a time, each reported when it ends.
+set pending $names
+if {[dict get $options -baseline]} {
+    set pending [linsert $pending 0 baseline]
+}
+set running 0
+proc launch {} {
+    global pending running common workerTimeout options
+    while {$running < [dict get $options -jobs] && [llength $pending] > 0} {
+        set name [lindex $pending 0]
+        set pending [lrange $pending 1 end]
+        set channel [open |[list timeout $workerTimeout [info nameofexecutable] [info script] {*}$common -worker $name 2>@1] r]
+        fconfigure $channel -blocking 0 -encoding utf-8
+        set ::output($channel) ""
+        set ::started($channel) [clock seconds]
+        fileevent $channel readable [list collect $channel $name]
+        incr running
+    }
+    if {$running == 0} {
+        set ::done 1
+    }
+}
+
+proc collect {channel name} {
+    global running
+    append ::output($channel) [read $channel]
+    if {![eof $channel]} return
+    fconfigure $channel -blocking 1
+    set status 0
+    if {[catch {close $channel} message options]} {
+        set status [lindex [dict get $options -errorcode] end]
+    }
+    verdict $name $status $::output($channel) [expr {[clock seconds] - $::started($channel)}]
+    unset ::output($channel) ::started($channel)
+    incr running -1
+    launch
+}
+
+launch
+vwait ::done
 puts "$killed of [llength $names] mutants killed"
 exit $exit

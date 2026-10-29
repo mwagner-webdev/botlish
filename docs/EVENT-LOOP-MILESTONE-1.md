@@ -642,13 +642,13 @@ mirrors the prototype's `benchwork.bot`) on the native backend
 one machine. Allocations come from the native allocation report under the
 deterministic driver, as the difference between two sizes of the same
 program, with each driver's own allocation sites left out (the drivers
-allocate per turn for their own bookkeeping). The machine: «MACHINE».
+allocate per turn for their own bookkeeping). The machine: a 4-core container (Intel Xeon @ 2.10 GHz, Linux 6.18, 15 GB), shared: treat times as orders of magnitude.
 
 «PERF-TABLES»
 
 ## 12. Testing
 
-**Deterministic** (`tests/event-loop.test`; «DET-COUNT» tests). Each
+**Deterministic** (`tests/event-loop.test`; 87 tests). Each
 scenario program (`tests/event-loop/*.bot`, an application root with its
 helper modules) is compiled with `-warnings error` and run on the pass's
 backends, which must agree on the whole trace: interp and cranelift in the
@@ -672,7 +672,7 @@ brief's adversarial list, covered:
 | host-stepped driver, feedback union | `el-hoststep`, `el-hoststep-feedback-exact` |
 | the examples | `el-example-*` |
 
-**Native** (`tests/event-loop-linux.test`; «NAT-COUNT» tests, on this
+**Native** (`tests/event-loop-linux.test`; 21 tests, on this
 container: Linux x86-64, real epoll, eventfd, TCP sockets, producer threads,
 SDL3 built by `tests/cffi/sdl3.tcl`): the application is built the way an
 application installs the package; each program runs once on cranelift.
@@ -695,7 +695,16 @@ native backends; the Tcl backends refuse a C call).
 
 **Exploration evidence.** «AUDIT-RUNS»
 
-**Regression suites.** «REGRESSION»
+**Regression suites.** `tclsh9.0 tests/local.tcl -jobs 1 tests/event-loop.test
+tests/context-traits.test tests/coroutines.test tests/traits.test
+tests/affine.test tests/hir-interchange.test tests/hir-cache.test`: every
+Tcl file on interp and compile passed (296 and 297 tests; 104 golden
+duplicates skipped), and the seven golden suites that replace those
+duplicates passed on all four backends (359 tests each); 29 minutes. The
+warning gate passed (`audit/refactor/tools/gate.tcl`: 77 corpus programs, 32
+library loaders, the manifest's two new `fails` entries for the modules
+compiled as entry programs), and `tools/compilerpedia.tcl check` reported no
+problem (930 topics, 650 examples run).
 
 ## 13. Compiler consistency
 
