@@ -878,6 +878,32 @@ test se-equal-implementation-yield {a construction's verdict reads the yield eff
     set results
 } -result {{} {TYPE COROUTINE-RHS-NOT-YIELDING TYPE} {} {} {accepted accepted TYPE} {}}
 
+# Writes the module files FILES ({PATH TEXT ...}, PATH relative to the
+# library) into the current (private) library: each a standard namespace.
+proc seWriteModules {files} {
+    foreach {path text} $files {
+        set f [open [file join $::core::libraryDir $path] w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $text
+        close $f
+    }
+}
+
+test se-equal-implementation-context {a function's context requirement reads the requirement of the implementation the program selects for a trait operation of a specialization it calls (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md): f calls twice(A) -- twice<A>'s operation binds std::ay's show (a module the program does not import: no visible function of the operation's name stands the call in with it), whose block calls note, which needs Log -- so g's block, which makes f a value, is CONTEXT-FUNCTION-VALUE while show's block is accepted, and accepted once show's block is rejected; so g's block depends on show's (hir/staticdeps.tcl reads the implementation as the operation's call target), an independent failure beside them -- the batched decisions are the sequential ones, with no build contradicting a prediction} -body {
+    set module "import std::compiler\n\ntype Small = Int in 0..1000\n\ncontext struct Log:\n    n: Small\n\nfn note(context log: Log) -> int:\n    log.n\n\nfn want(x: int) -> int:\n    x\n\nstruct A:\n    v: int\n\nfn show(t: A) -> int errors std::compiler::CompilerError:\n    static compile:\n        n = note()\n        %s\n    t.v\n"
+    set text "import std::compiler\nimport std::mk\n\ntrait Thing:\n    fn show(t: Thing) -> int errors std::compiler::CompilerError\n\nfn want(x: int) -> int:\n    x\n\nfn twice(t: Thing) -> int errors std::compiler::CompilerError:\n    t.show() + t.show()\n\nfn f() -> int errors std::compiler::CompilerError:\n    twice(std::mk::make(1))\n\nfn g() -> int errors std::compiler::CompilerError:\n    static compile:\n        h = \[f\]\n        1\n\nfn other() -> int errors std::compiler::CompilerError:\n    static compile:\n        want(\"t\")\n\nwith context std::mk::log(3)\nr = g():\n    on std::compiler::CompilerError {code, primary, message}:\n        -1\nr + other()\n"
+    set results {}
+    foreach body {{want("s")} {n + 0}} {
+        withPrivateLibrary {
+            seWriteModules [list ay.bot [format $module $body] \
+                mk.bot "import std::ay\n\nfn make(v: int) -> std::ay::A:\n    std::ay::A {v: v}\n\nfn log(n: std::ay::Small) -> std::ay::Log:\n    std::ay::Log {n: n}\n"]
+            set hir [seHir $text]
+            lappend results [seSame $text] [seOutcomes $text] [dict get $hir staticStats mispredicted]
+        }
+    }
+    set results
+} -result {{} {TYPE accepted TYPE} {} {} {accepted CONTEXT-FUNCTION-VALUE TYPE} {}}
+
 test se-equal-plan-gate {the trait monomorphization's plan runs only on a program with no diagnostic at all, so a site whose diagnostic only the plan reports fails only once every other site's diagnostic is gone (hir/staticdeps.tcl's C:plan): judged beside two checker failures it is unknown, not predicted ok (the dependency analysis once missed the gate, and the next build contradicted its prediction); two plan diagnostics in one build are decided one per build, as the sequential order does (the plan is one computation over the whole program) -- the batched decisions are the sequential ones} -body {
     set results {}
     foreach text [list [sePlanAffine {a nested b}] [sePlanTraits]] {

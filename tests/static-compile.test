@@ -598,7 +598,7 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
 # token in that code is a new, unclassified kind: classify it (and give it a
 # case if a block can produce it).
 set scCensus {
-    internal {CONTEXT-TRAIT-INTERNAL TRAIT-INTERNAL}
+    internal {COMPILER-INTERNAL CONTEXT-TRAIT-INTERNAL TRAIT-INTERNAL}
     declaration {CYCLIC-REFINEMENT REFINEMENT-CARRIER TRAIT-DUPLICATE-REQUIREMENT TRAIT-NAME-COLLISION
         TRAIT-OTHER-TRAIT TRAIT-REQUIREMENT-RECEIVER TRAIT-SELF-POSITION ENUM-EMPTY
         LAYOUT-SIZE LAYOUT-ALIGNMENT LAYOUT-FIELD-TYPE LAYOUT-FIELD-BOUNDS LAYOUT-FIELD-OVERLAP LAYOUT-CYCLE

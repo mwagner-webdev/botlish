@@ -1163,15 +1163,17 @@ proc hir::coroutines::Feedback {hir given} {
 }
 
 # The implementation blocks each trait operation of checked HIR calls in
-# some context, as the coroutine analysis bound them (the graph's `impl`:
-# those that may yield, or receive a yield's value): call -> {BLOCK ...}. hir/staticdeps.tcl reads
-# them as the operation's call targets, whose yield effect is the call's.
+# some context, as the selected implementation graph the check was made with
+# bound them (HIR's `implementations`, the graph's `impl`: those that may
+# yield, receive a yield's value, or carry a context requirement): call ->
+# {BLOCK ...}. hir/staticdeps.tcl reads them as the operation's call
+# targets, whose yield effect and context requirement are the call's.
 proc hir::coroutines::ImplementationTargets {hir} {
     set result [dict create]
-    if {![dict exists $hir coroutines graph impl]} {
+    if {![dict exists $hir implementations impl]} {
         return $result
     }
-    dict for {key targets} [dict get $hir coroutines graph impl] {
+    dict for {key targets} [dict get $hir implementations impl] {
         set c [lindex $key 1]
         foreach t $targets {
             set b [BlockOf [lindex $t 0]]

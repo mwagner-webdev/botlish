@@ -2843,6 +2843,34 @@ specializations of one expression.
 You should never see this: it is a compiler bug. Please report the
 program (as small as you can make it) with the full message.
 
+@topic error.compiler-internal
+title: COMPILER-INTERNAL: a rejection the compiler made of its own
+summary: The compilation failed, but every diagnostic its build has is the compiler's own (none a problem of the program): a compiler bug, reported with those diagnostics instead of an empty report.
+index: errors
+alias: internal compiler error; rejected with no diagnostic
+keywords: internal, compiler bug, monomorphized program, diagnostics, recovery, report
+related: error.trait-internal error.context-trait-internal concept.traits
+docs: DIAGNOSTIC-RECOVERY.md TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md
+code: CORE SEMANTIC COMPILER-INTERNAL
+
+== MEANING
+A compilation reports the diagnostics that are true of the source and
+leaves out the ones that only restate an earlier failure, or that are
+the compiler's own -- a problem found in the monomorphized program (the
+checked program with every trait resolved) is the compiler's, never the
+program's. COMPILER-INTERNAL means a build was rejected and none of its
+diagnostics is the program's: it names each of them, with its kind, as
+the compiler's, so none is presented as a source error.
+
+    error: f.bot:2:5: internal compiler error: this program was rejected,
+    but by none of its own problems -- each of the 1 diagnostic(s) the
+    compiler made is its own (a compiler bug; please report the program):
+        f.bot:2:5: in the monomorphized program: unbound name ... (UNBOUND)
+
+== WHAT TO DO
+You should never see this: it is a compiler bug. Please report the
+program (as small as you can make it) with the full message.
+
 @topic error.ambiguous-context-implementation
 title: AMBIGUOUS-CONTEXT-IMPLEMENTATION: two providers of one context trait
 summary: A call needs a context trait (such as std::io::IO) and more than one installed context implements it; the compiler never ranks providers, so exactly one must be installed.
