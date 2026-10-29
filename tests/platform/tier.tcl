@@ -12,9 +12,10 @@
 # (tests/platform/cabi-facts.tcl), `rust` (the native crate's Rust tests),
 # `native-stack-mutants` (audit/native-stack/tools/mutate.tcl: the stack
 # guard's mutants for this host, each rebuilding a private copy of native/;
-# about two minutes a mutant), `native-aot-mutants`
-# (audit/native-aot/tools/mutate.tcl: executable emission's mutants, the
-# same way), `native-stack-bench` (bench/native-stack-guard.tcl against
+# about two minutes a mutant; `native-stack-mutants=NAME,...` only those),
+# `native-aot-mutants` (audit/native-aot/tools/mutate.tcl: executable
+# emission's mutants, the same way; `native-aot-mutants=NAME,...` only
+# those), `native-stack-bench` (bench/native-stack-guard.tcl against
 # origin's main, built here), `c-ffi-fuzz` (audit/c-ffi/tools/fuzz.tcl: a
 # few seeds of the C FFI fuzzer, one under GC stress), `c-ffi-mutants`
 # (audit/c-ffi/tools/mutate.tcl: the C FFI's mutants for this host;
@@ -64,8 +65,8 @@
 #                   every B of -example-backends (default all four)
 #   cabi            tests/platform/cabi-facts.tcl
 #   rust            cargo test --release --manifest-path native/Cargo.toml
-#   native-stack-mutants  tclsh9.0 audit/native-stack/tools/mutate.tcl
-#   native-aot-mutants    tclsh9.0 audit/native-aot/tools/mutate.tcl
+#   native-stack-mutants  tclsh9.0 audit/native-stack/tools/mutate.tcl ?-only NAMES?
+#   native-aot-mutants    tclsh9.0 audit/native-aot/tools/mutate.tcl ?-only NAMES?
 #   windows-unwind-mutants  tclsh9.0 audit/windows-unwind/tools/mutate.tcl ?-only NAMES?
 #   native-stack-bench    tclsh9.0 bench/native-stack-guard.tcl -baseline-rev main
 #   c-ffi-fuzz            tclsh9.0 audit/c-ffi/tools/fuzz.tcl -n 10 -seed S, for
@@ -126,7 +127,7 @@ set notYet [dict getdef $notYetByHost [core::cabi::hostTarget] {}]
 
 proc usage {} {
     puts stderr "usage: tclsh9.0 tests/platform/tier.tcl ?-backends LIST? ?-golden-backends LIST? ?-example-backends LIST? ?-gc-stress 0|1? ?-shard I/N? ?-list 0|1? ITEM ..."
-    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants | native-aot-mutants | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | c-capture-bench | windows-io-mutants | windows-unwind-mutants?=NAME,...? | filesystem-fuzz | filesystem-mutants?=NAME,...? | filesystem-bench"
+    puts stderr "  ITEM: smoke | acceptance | all | tests/X.test | X.test | tests/golden/X.bot | X.bot | examples | cabi | rust | native-stack-mutants?=NAME,...? | native-aot-mutants?=NAME,...? | native-stack-bench | c-ffi-fuzz | c-ffi-mutants?=NAME,...? | c-ffi-bench | c-borrow-fuzz | c-borrow-mutants?=NAME,...? | c-borrow-bench | darwin-io-mutants | darwin-io-bench | c-capture-bench | windows-io-mutants | windows-unwind-mutants?=NAME,...? | filesystem-fuzz | filesystem-mutants?=NAME,...? | filesystem-bench"
     exit 2
 }
 
@@ -218,7 +219,7 @@ foreach item $items {
     if {$item in {smoke acceptance all}} {
         addTier $item
     } elseif {$item in {examples cabi rust native-stack-mutants native-aot-mutants native-stack-bench c-ffi-fuzz c-ffi-bench c-borrow-fuzz c-borrow-bench darwin-io-mutants darwin-io-bench c-capture-bench windows-io-mutants filesystem-fuzz filesystem-bench}
-            || [regexp {^(c-ffi|c-borrow|windows-unwind|filesystem)-mutants(=[A-Za-z0-9,_-]+)?$} $item]} {
+            || [regexp {^(c-ffi|c-borrow|windows-unwind|filesystem|native-aot|native-stack)-mutants(=[A-Za-z0-9,_-]+)?$} $item]} {
         addCheck $item
     } elseif {[string match *.test $item]} {
         addFile $item
@@ -358,6 +359,9 @@ foreach check $checks {
             } elseif {[regexp {^windows-unwind-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "Windows unwind mutants" {} \
                     [list $tclsh [file join $root audit windows-unwind tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]
+            } elseif {[regexp {^(native-aot|native-stack)-mutants=(.*)$} $check -> which only]} {
+                lappend commands [list "[expr {$which eq "native-aot" ? "native executable" : "native stack guard"}] mutants" {} \
+                    [list $tclsh [file join $root audit $which tools mutate.tcl] -only $only] plain]
             } elseif {[regexp {^filesystem-mutants(?:=(.*))?$} $check -> only]} {
                 lappend commands [list "filesystem mutants" {} \
                     [list $tclsh [file join $root audit filesystem tools mutate.tcl] {*}[expr {$only ne "" ? [list -only $only] : {}}]] plain]

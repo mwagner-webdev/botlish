@@ -82,6 +82,14 @@ class Acceptance(census.Census):
         self.exe = {}
 
     # -- building ------------------------------------------------------------------
+    def build(self, name, cmd, env=None, cwd=None, timeout=900):
+        """census.py's build, without the census's Rust identity control (native/identity.rs): no case here reads
+        it, and the run through Botlish.app has no rustc on PATH (that is the point of it)."""
+        if name == "identity-rust":
+            log("   build identity-rust: not built (the acceptance needs no Rust)")
+            return False
+        return super().build(name, cmd, env=env, cwd=cwd, timeout=timeout)
+
     def build_exe(self, label, directory, program, compiler, startup, env=None):
         """DIRECTORY/PROGRAM.bot built by COMPILER ("app" or "checkout") with startup policy STARTUP (None: no
         option, the default): the executable's path, or None."""
