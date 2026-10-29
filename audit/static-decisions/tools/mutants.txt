@@ -775,3 +775,24 @@ proc hir::static::Waits {key status deps} {
 ====
         implTargets {}]
 >>>>
+
+@@ staticdeps-implementation-contexts-ignored the dependency analysis reads a trait operation's implementations only where they may yield: a function's context requirement, which reads its specializations' implementations' (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md), is predicted unchanged by a rejection inside an implementation that does not yield
+## hir/coroutines.tcl
+<<<<
+            set b [BlockOf [lindex $t 0]]
+            if {$b ni [dict getdef $result $c {}]} {
+====
+            set b [BlockOf [lindex $t 0]]
+            if {![dict exists $hir coroutines blocks $b]} continue
+            if {$b ni [dict getdef $result $c {}]} {
+>>>>
+
+@@ legacy-units-without-implementations the legacy scheduler's units reach only what their code refers to, never a trait operation's selected implementation: a site whose diagnostic reads an implementation's context requirement is taken to be independent of a site inside the implementation
+## hir/static.tcl
+<<<<
+            foreach b [dict getdef $implTargets $e {}] {
+                if {[dict exists $unitOfBlock $b]} {
+====
+            foreach b {} {
+                if {[dict exists $unitOfBlock $b]} {
+>>>>
