@@ -657,70 +657,27 @@ proc hir::contexts::Observed {hir parent e} {
 
 proc hir::contexts::verify {hirVar} {
     upvar 1 $hirVar hir
-    lassign [Walk $hir] owner parent rootOf calls blocks
-    # Direct requirements and call edges per block region.
-    set direct [dict create]
-    set edges [dict create]
+    set walk [Walk $hir]
+    lassign $walk owner parent rootOf calls blocks
+    # The selected implementation graph the check was made with (hir::check,
+    # hir::coroutines::Implementations): what each ordinary trait operation
+    # and each call of a trait-polymorphic function calls, per
+    # specialization.
+    set graph [dict getdef $hir implementations {}]
+    set analysis [Requirements $hir $walk $graph]
+    set required [dict get $analysis required]
+    set reasons [dict get $analysis reasons]
+    set regionRoot [dict get $analysis regionRoot]
     foreach b $blocks {
-        dict set direct $b {}
-        dict set edges $b {}
-    }
-    dict for {o list} $calls {
-        foreach c $list {
-            if {![hir::get $hir $c reachable]} {
-                continue
-            }
-            if {[isLoad $hir $c]} {
-                if {$o ne ""} {
-                    set id [loadId $hir $c]
-                    if {$id ne "" && $id ni [dict get $direct $o]} {
-                        dict lappend direct $o $id
-                    }
-                }
-                continue
-            }
-            if {$o eq ""} {
-                continue
-            }
-            # (A trait operation is no edge: Callee.)
-            set target [Callee $hir $c]
-            if {$target ne ""} {
-                dict lappend edges $o [list $c $target]
-            }
-        }
-    }
-    # The transitive requirement: breadth-first rounds over the previous
-    # round's sets, so each reason is a shortest chain and the result is the
-    # least fixed point (a recursive group converges).
-    set required [dict create]
-    set reasons [dict create]
-    foreach b $blocks {
-        dict set required $b [lsort [dict get $direct $b]]
-        foreach id [dict get $direct $b] {
-            dict set reasons $b $id direct
-        }
-    }
-    set changed 1
-    while {$changed} {
-        set changed 0
-        set previous $required
-        foreach b $blocks {
-            foreach edge [dict get $edges $b] {
-                lassign $edge c target
-                if {![dict exists $previous $target]} continue
-                foreach id [dict get $previous $target] {
-                    if {$id ni [dict get $required $b]} {
-                        dict set required $b [lsort [concat [dict get $required $b] [list $id]]]
-                        dict set reasons $b $id [list call $c $target]
-                        set changed 1
-                    }
-                }
-            }
-        }
-    }
-    foreach b $blocks {
-        dict set hir exprs $b directContexts [lsort [dict get $direct $b]]
+        dict set hir exprs $b directContexts [lsort [dict get $analysis direct $b]]
         dict set hir exprs $b requiredContexts [dict get $required $b]
+    }
+    # Each specialization's own requirement (its function's node in it),
+    # which the trait plan reads for the clone's selection
+    # (hir::traits::SpecializationTraits).
+    set specialized [dict create]
+    dict for {k info} [dict getdef $graph clones {}] {
+        dict set specialized $k [dict get $required [list $k [dict get $info function]]]
     }
     # No function that needs a context may become a value.
     CheckValues hir $parent $required
@@ -761,14 +718,17 @@ proc hir::contexts::verify {hirVar} {
                 continue
             }
             if {[isLoad $hir $c]} continue
-            set target [Callee $hir $c]
-            if {$target eq "" || ![dict exists $required $target]} continue
+            # (A call of a trait-polymorphic function passing concrete
+            # witnesses requires what its specialization does, and a trait
+            # operation what its implementation does: Targets.)
+            set targets [Targets $hir $graph $regionRoot "" $c]
+            if {$targets eq {}} continue
             # (The context requirements of the call's callee are a check of
             # the call: hir::CheckingCall. A missing context, and an
             # ambiguous implementation of a context trait, are obligations
             # of a valid call, never a method candidate's problem:
             # hir::methods::ObligationKinds, SFIAE.)
-            set selection [hir::CheckingCall $c {Obligations hir $c $target $installed $required $reasons}]
+            set selection [hir::CheckingCall $c {Obligations hir $c $targets $installed $required $reasons}]
             if {[dict size $selection] > 0} {
                 dict set selections $c $selection
                 dict for {trait w} $selection {
@@ -797,13 +757,161 @@ proc hir::contexts::verify {hirVar} {
     }
     dict set hir contexts [dict create blocks $blocks installs $installs reasons $reasons \
         selections $selections selected $selected]
+    if {[dict size $specialized] > 0} {
+        dict set hir contexts specialized $specialized
+    }
 }
 
-# The context obligations of top-level call C of block TARGET, against the
-# INSTALLED context structs (in installation order): every context struct
-# TARGET requires must be installed (MISSING-CONTEXT), and every context trait
-# it requires must be implemented by exactly one installed context
-# (CONTEXT-TRAITS.md, "Selection"):
+# The context requirements of HIR (WALK hir::contexts::Walk's result) with
+# the selected implementation graph GRAPH (hir::coroutines::Implementations,
+# the feedback hir::check made the check with; {} for none): {direct D
+# edges E required R reasons S nodes N regionRoot T}.
+#
+# The nodes are the program's blocks (each function as written) and, for
+# each specialization K of GRAPH (a trait-polymorphic or per-binding
+# function for concrete witnesses: TRAIT-IMPLEMENTATION-CONTEXT-
+# REQUIREMENTS-MILESTONE-1.md), {K BLOCK} for every block of its function's
+# region -- the block as the monomorphized program's clone K has it, its
+# trait operations bound to their witnesses' implementations. D is each
+# block's own loads; E each node's reachable call edges, {CALL NODE}
+# (Targets); R the transitive requirement of each node, the least fixed
+# point; S why, per node and context: `direct`, or the first call
+# (breadth-first, so the shortest chain) through which it arrived, {call
+# CALL NODE}; T each block's region root (the top-level function whose
+# region it is in, itself when it is in none).
+#
+# A specialization requires exactly what the implementations its
+# operations bind require, and nothing from an implementation it does not
+# invoke: its edges are the graph's, which come from the plan's own call
+# resolution (hir::traits::PlanCalls), never from a resolution of this
+# file's -- no union over a requirement's implementations, no visible
+# function of an operation's name.
+proc hir::contexts::Requirements {hir walk graph} {
+    lassign $walk owner parent rootOf calls blocks
+    set regionRoot [dict create]
+    foreach b $blocks {
+        set o [dict get $owner $b]
+        if {$o eq ""} {
+            dict set regionRoot $b $b
+        } else {
+            dict set regionRoot $b [dict get $regionRoot $o]
+        }
+    }
+    set nodes $blocks
+    dict for {k info} [dict getdef $graph clones {}] {
+        set h [dict get $info function]
+        foreach b $blocks {
+            if {[dict get $regionRoot $b] eq $h} {
+                lappend nodes [list $k $b]
+            }
+        }
+    }
+    # Direct requirements per block region.
+    set direct [dict create]
+    foreach b $blocks {
+        dict set direct $b {}
+    }
+    dict for {o list} $calls {
+        if {$o eq ""} continue
+        foreach c $list {
+            if {![hir::get $hir $c reachable] || ![isLoad $hir $c]} continue
+            set id [loadId $hir $c]
+            if {$id ne "" && $id ni [dict get $direct $o]} {
+                dict lappend direct $o $id
+            }
+        }
+    }
+    # Call edges per node.
+    set edges [dict create]
+    foreach n $nodes {
+        set b [lindex $n end]
+        set ctx [if {[llength $n] == 2} {lindex $n 0} else {string cat ""}]
+        set list {}
+        foreach c [dict getdef $calls $b {}] {
+            if {![hir::get $hir $c reachable] || [isLoad $hir $c]} continue
+            foreach target [Targets $hir $graph $regionRoot $ctx $c] {
+                lappend list [list $c $target]
+            }
+        }
+        dict set edges $n $list
+    }
+    # The transitive requirement: breadth-first rounds over the previous
+    # round's sets, so each reason is a shortest chain and the result is the
+    # least fixed point (a recursive group converges).
+    set required [dict create]
+    set reasons [dict create]
+    foreach n $nodes {
+        set ids [dict get $direct [lindex $n end]]
+        dict set required $n [lsort $ids]
+        foreach id $ids {
+            dict set reasons $n $id direct
+        }
+    }
+    set changed 1
+    while {$changed} {
+        set changed 0
+        set previous $required
+        foreach n $nodes {
+            foreach edge [dict get $edges $n] {
+                lassign $edge c target
+                if {![dict exists $previous $target]} continue
+                foreach id [dict get $previous $target] {
+                    if {$id ni [dict get $required $n]} {
+                        dict set required $n [lsort [concat [dict get $required $n] [list $id]]]
+                        dict set reasons $n $id [list call $c $target]
+                        set changed 1
+                    }
+                }
+            }
+        }
+    }
+    return [dict create direct $direct edges $edges required $required reasons $reasons \
+        nodes $nodes regionRoot $regionRoot]
+}
+
+# The nodes call C (reachable, no load) calls in context CTX ("" for the
+# program as written: live code and every function's own body; a
+# specialization K of GRAPH for its clone), for the requirement graph
+# (Requirements; REGIONROOT its region roots):
+#
+#   * an ordinary trait operation: the implementation GRAPH binds it to in
+#     CTX (none when the graph has no edge: an operation on a view whose
+#     witness is a parameter's binds nothing in the function as written);
+#   * a context-trait operation: none -- its implementation is the
+#     installed context's, whose requirement is the obligation of the
+#     top-level call that selects it (Obligations);
+#   * a call of a trait-polymorphic function GRAPH resolves to a
+#     specialization: that specialization's function node, {K' FUNCTION};
+#   * any other call: its exact callee (Callee), in CTX's region a node of
+#     CTX.
+proc hir::contexts::Targets {hir graph regionRoot ctx c} {
+    set key [list $ctx $c]
+    if {[dict exists $hir exprs $c traitCall]} {
+        if {[dict exists $hir exprs $c traitCall context] || ![dict exists $graph impl $key]} {
+            return {}
+        }
+        return [lsort -unique [lmap t [dict get $graph impl $key] {lindex $t 0}]]
+    }
+    if {[dict exists $graph spec $key]} {
+        return [dict get $graph spec $key]
+    }
+    set t [Callee $hir $c]
+    if {$t eq ""} {
+        return {}
+    }
+    if {$ctx ne "" && [dict get $regionRoot $t] eq [dict get $graph clones $ctx function]} {
+        return [list [list $ctx $t]]
+    }
+    return [list $t]
+}
+
+# The context obligations of top-level call C of the requirement-graph nodes
+# TARGETS (Targets: its callee, the specialization it calls, or the
+# implementation its trait operation binds), against the INSTALLED context
+# structs (in installation order): every context struct a target requires
+# must be installed (MISSING-CONTEXT), and every context trait it requires
+# must be implemented by exactly one installed context (CONTEXT-TRAITS.md,
+# "Selection"):
 #
 #   none installed implements it   MISSING-CONTEXT
 #   one does                       selected, statically
@@ -814,13 +922,16 @@ proc hir::contexts::verify {hirVar} {
 # makes too, so their own requirements are this call's obligations as well
 # (checked the same way, with the chain through the implementation). Returns
 # the selection, {TRAIT WITNESS ...}.
-proc hir::contexts::Obligations {hirVar c target installed required reasons} {
+proc hir::contexts::Obligations {hirVar c targets installed required reasons} {
     upvar 1 $hirVar hir
     set selection [dict create]
     set seen [dict create]
     set work {}
-    foreach id [dict get $required $target] {
-        lappend work [list $id $target {}]
+    foreach target $targets {
+        if {![dict exists $required $target]} continue
+        foreach id [dict get $required $target] {
+            lappend work [list $id $target {}]
+        }
     }
     while {$work ne {}} {
         lassign [lindex $work 0] id from prefix
@@ -1070,14 +1181,24 @@ proc hir::contexts::Chain {hir b id reasons} {
 }
 
 # Chain's lines; CONTINUED: the first function is a continuation of an
-# earlier chain (" -> NAME").
+# earlier chain (" -> NAME"). B is a node of the requirement graph
+# (Requirements): a block, or a block of a specialization, named "NAME (for
+# WITNESSES)"; a step through a trait operation names the operation and the
+# implementation the program binds it to, and where it is called:
+#
+#     twice (for A)
+#      -> show, the implementation of Thing's operation show for A, called
+#         at main.bot:20:5
+#      -> std::io::print_line
+#         directly requires std::io::IO
 proc hir::contexts::ChainLines {hir b id reasons {continued 0}} {
     set lines {}
     set seen {}
     set first [expr {!$continued}]
+    set via ""
     while {$b ne "" && $b ni $seen} {
         lappend seen $b
-        lappend lines [if {$first} {string cat "    [BlockName $hir $b]"} else {string cat "     -> [BlockName $hir $b]"}]
+        lappend lines [if {$first} {string cat "    [NodeName $hir $b]$via"} else {string cat "     -> [NodeName $hir $b]$via"}]
         set first 0
         if {![dict exists $reasons $b $id]} {
             break
@@ -1087,9 +1208,35 @@ proc hir::contexts::ChainLines {hir b id reasons {continued 0}} {
             lappend lines "        directly requires $id"
             break
         }
+        set via [Via $hir $b [lindex $reason 1]]
         set b [lindex $reason 2]
     }
     return $lines
+}
+
+# The display name of requirement-graph node N (Requirements): a block's
+# (BlockName), or a specialization's, "NAME (for WITNESSES)".
+proc hir::contexts::NodeName {hir n} {
+    if {[llength $n] == 2} {
+        lassign $n k b
+        set witnesses [dict getdef $hir implementations clones $k witnesses ""]
+        return "[BlockName $hir $b] (for $witnesses)"
+    }
+    return [BlockName $hir $n]
+}
+
+# ", the implementation of TRAIT's operation OP for WITNESS, called at
+# LOCATION" when call C of node FROM is an ordinary trait operation the
+# selected implementation graph binds (its `via`), else "": what a
+# requirement chain says of a call that names no function.
+proc hir::contexts::Via {hir from c} {
+    set ctx [if {[llength $from] == 2} {lindex $from 0} else {string cat ""}]
+    set key [list $ctx $c]
+    if {![dict exists $hir exprs $c traitCall] || ![dict exists $hir implementations via $key]} {
+        return ""
+    }
+    set via [dict get $hir implementations via $key]
+    return ", the implementation of [dict get $via trait]'s operation [dict get $via operation] for [dict get $via witness], called at [hir::originLocation $hir [dict get $hir exprs $c origin]]"
 }
 
 # ---------------------------------------------------------------------------

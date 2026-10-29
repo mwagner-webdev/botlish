@@ -938,6 +938,19 @@ proc hir::CheckWith {hirVar feedback} {
     upvar 1 $hirVar hir
     variable recheckReuse
     variable recheckAudit
+    # The selected implementation graph (hir::coroutines::Implementations):
+    # what the previous check's typing bound each trait operation and each
+    # call of a trait-polymorphic function to, per specialization -- the
+    # one call graph through trait operations every analysis of the check
+    # reads (the coroutine analysis's yields and protocols, the context
+    # analysis's requirements; TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-
+    # MILESTONE-1.md). Kept only when it has an edge.
+    set graph [dict getdef $feedback graph {}]
+    if {$graph ne {}} {
+        dict set hir implementations $graph
+    } else {
+        dict unset hir implementations
+    }
     set input $hir
     hir::coroutines::analyze hir $feedback
     set pre $hir

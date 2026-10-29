@@ -682,9 +682,6 @@ proc hir::coroutines::TraitOperations {hir} {
 # be kept: MayBind), else the graph above, its edges kept as it says (the
 # yield-capable nodes those of GIVEN's graph with these edges added).
 proc hir::coroutines::Implementations {hir given} {
-    if {![dict exists $hir coroutines blocks]} {
-        return {}
-    }
     if {[dict exists $hir resolutionDiagnostics] || [dict exists $hir syntaxRecovery]} {
         # (A program that did not resolve plans nothing: what its checks find
         # in code that depends on a resolution failure is not reported.)
@@ -736,7 +733,10 @@ proc hir::coroutines::Implementations {hir given} {
         dict set impls [list $ckey $e] $impl
     }
     set candidate [dict create impl {} spec {} clones {} via {}]
-    dict for {key action} [dict get $walk actions] {
+    # (Every call the plan binds, also one it makes a placeholder of because
+    # this check's selection does not reach it: what an operation calls does
+    # not depend on which providers the check knew -- PlanCalls' `bound`.)
+    dict for {key action} [dict get $walk bound] {
         lassign $key ckey sid
         set kind [lindex $action 0]
         if {$kind ni {trait context redirect}} continue
@@ -750,13 +750,18 @@ proc hir::coroutines::Implementations {hir given} {
         # code, the one clone of a function requiring a context trait, an
         # affine argument's -- binds what the function as written does.
         set specialized [expr {$h ne "" && ([dict get $polys $h trait] || [dict get $polys $h imprint])}]
+        # (A specialization is named by its identity, never by its clone key,
+        # whose selection the context analysis learns from this graph:
+        # hir::traits::Specialization.)
+        set spec [if {$specialized} {hir::traits::Specialization $ckey} else {string cat ""}]
         foreach e [dict getdef $bySid $sid {}] {
             if {![dict exists $home $e] || [dict get $home $e] ne $h} continue
-            set contexts [list [if {$specialized} {set ckey} else {string cat ""}]]
+            set contexts [list $spec]
             if {$kind eq "redirect"} {
                 set k [lindex $action 1]
                 set tb [lindex $k 0]
                 if {![dict exists $polys $tb] || (![dict get $polys $tb trait] && ![dict get $polys $tb imprint])} continue
+                set k [hir::traits::Specialization $k]
                 AddClone hir $k candidate
                 foreach ctx $contexts {
                     dict set candidate spec [list $ctx $e] [list [list $k $tb]]
@@ -789,13 +794,13 @@ proc hir::coroutines::Implementations {hir given} {
                 }
             }
             if {$specialized} {
-                AddClone hir $ckey candidate
+                AddClone hir $spec candidate
                 if {[WitnessFree $hir $e $kind $action]} {
                     # Bound alike in every specialization: the function as
                     # written makes this call too.
                     foreach field {impl spec via} {
-                        if {[dict exists $candidate $field [list $ckey $e]]} {
-                            dict set candidate $field [list "" $e] [dict get $candidate $field [list $ckey $e]]
+                        if {[dict exists $candidate $field [list $spec $e]]} {
+                            dict set candidate $field [list "" $e] [dict get $candidate $field [list $spec $e]]
                         }
                     }
                 }
@@ -811,8 +816,27 @@ proc hir::coroutines::Implementations {hir given} {
         dict set excluded $c 1
     }
     set walkResult [hir::contexts::Walk $hir]
-    set built [Build $hir $walkResult $excluded [UnionGraph $graph $candidate]]
-    set capable [dict get $built capable]
+    set union [UnionGraph $graph $candidate]
+    if {[dict exists $hir coroutines blocks]} {
+        set built [Build $hir $walkResult $excluded $union]
+        set capable [dict get $built capable]
+    } else {
+        # (A program with no coroutine: nothing yields.)
+        set capable [dict create]
+    }
+    # The nodes whose context requirement is not empty with these edges
+    # (hir::contexts::Requirements), when an implementation of an ordinary
+    # trait has one: an edge into such a node -- an ordinary trait
+    # operation's, a specialization's -- is what a context requirement
+    # reaches a specialization and its callers through (TRAIT-
+    # IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md). A context-trait
+    # operation's implementation is the program's provider, whose
+    # requirement is the selecting call's obligation instead
+    # (hir::contexts::Obligations).
+    set required [dict create]
+    if {[ImplementationsRequire $hir]} {
+        set required [dict get [hir::contexts::Requirements $hir $walkResult $union] required]
+    }
     # Keep the edges into yield-capable nodes, and an operation's edges where
     # it receives a yield's value: its implementation's declared parameter
     # may fix the protocol (use-site inference), yielding or not. (Which
@@ -826,7 +850,7 @@ proc hir::coroutines::Implementations {hir given} {
             }
         }
     }
-    if {$asks} {
+    if {$asks && [dict exists $hir coroutines yields]} {
         lassign $walkResult owner parent
         dict for {y o} [dict get $hir coroutines yields] {
             if {$o eq ""} continue
@@ -845,6 +869,12 @@ proc hir::coroutines::Implementations {hir given} {
             foreach t $targets {
                 set n [if {$field eq "impl"} {lindex $t 0} else {set t}]
                 if {[dict exists $capable $n] || ($field eq "impl" && [dict exists $receives [lindex $key 1]])} {
+                    lappend live $t
+                    lappend specs [ContextOf $n]
+                } elseif {[dict getdef $required $n {}] ne {}
+                        && ($field eq "spec" || ![dict exists $hir exprs [lindex $key 1] traitCall context])} {
+                    # (An edge a context requirement reaches the call
+                    # through.)
                     lappend live $t
                     lappend specs [ContextOf $n]
                 }
@@ -962,6 +992,12 @@ proc hir::coroutines::MayBind {hir operations binds given} {
     if {[dict getdef $given graph {}] ne {}} {
         return 1
     }
+    if {[ImplementationsRequire $hir]} {
+        return 1
+    }
+    if {![dict exists $hir coroutines blocks]} {
+        return 0
+    }
     set capable [dict get $hir coroutines blocks]
     if {[dict size $capable] == 0} {
         return 0
@@ -986,6 +1022,30 @@ proc hir::coroutines::MayBind {hir operations binds given} {
         foreach name [hir::traits::requirementNames $id] {
             foreach info [hir::traits::ImplInfos $name] {
                 if {[dict get $info kind] eq "block" && [dict exists $capable [dict get $info block]]} {
+                    return 1
+                }
+            }
+        }
+    }
+    return 0
+}
+
+# 1 if a function of the implementation index (hir::traits::ImplInfo) under
+# the name of a declared ordinary trait's requirement has a context
+# requirement in checked HIR: only then can the trait plan give HIR an edge
+# a context requirement reaches a call through (TRAIT-IMPLEMENTATION-
+# CONTEXT-REQUIREMENTS-MILESTONE-1.md). Every such requirement starts at a
+# context parameter, and after the last operation on the way it is reached
+# through ordinary calls and calls of functions as written alone, which the
+# check saw with no trait-operation edge: so the operation's implementation
+# has a requirement in it. (A context trait's implementations are left out:
+# the selecting call's obligations cover them, hir::contexts::Obligations.)
+proc hir::coroutines::ImplementationsRequire {hir} {
+    foreach id [hir::traits::declaredIds] {
+        if {[hir::traits::isContext $id]} continue
+        foreach name [hir::traits::requirementNames $id] {
+            foreach info [hir::traits::ImplInfos $name] {
+                if {[dict get $info kind] eq "block" && [hir::contexts::required $hir [dict get $info block]] ne {}} {
                     return 1
                 }
             }
@@ -1028,15 +1088,15 @@ proc hir::coroutines::WitnessFree {hir e kind action} {
     return 0
 }
 
-# Records specialization K (a clone key of the plan: {FUNCTION PARAMS
-# SELECTION ?BINDING?}) in the graph CANDIDATEVAR, with the text that names
-# its witnesses.
+# Records specialization K (the identity of a clone of the plan: {FUNCTION
+# PARAMS BINDING}, hir::traits::Specialization) in the graph CANDIDATEVAR,
+# with the text that names its witnesses.
 proc hir::coroutines::AddClone {hirVar k candidateVar} {
     upvar 1 $hirVar hir $candidateVar candidate
     if {[dict exists $candidate clones $k]} {
         return
     }
-    lassign $k h params selection binding
+    lassign $k h params binding
     set parts [lmap {i w} $params {hir::types::show $w}]
     dict for {v t} $binding {
         lappend parts "$v = [hir::types::show $t]"
