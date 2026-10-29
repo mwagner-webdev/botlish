@@ -656,34 +656,55 @@ forms (coroutine, top-level call, both specializations in one program).
 | seed 3 | 40 | 100 | 27 | 29 | 0 |
 | the starting tree (`3be0e0c5`), seed 1, interp and cranelift, 12 programs | 12 | 32 | 7 | 7 | **11** (6 CORE MALFORMED) |
 
-**Mutants.** New mutants, each killed by a test of the invariant it
-violates (results: PENDING), and two re-anchored to code this milestone
-moved, each still a mutant of the same rule (`transitive-trait-requirement-
-dropped`, context-traits; `context-reselected-per-resume`, coroutines):
+**Mutants.** 21 new mutants, each a deliberate violation of one invariant
+of the brief, and two re-anchored to code this milestone moved, each still
+a mutant of the same rule. Every one applies and is killed, on Linux
+x86-64 (each harness's `-only` run of them; the tests named are the ones
+that failed):
 
-| harness | mutant | the invariant it violates |
-|---|---|---|
-| context-traits | `implementation-context-ignored` | a selected implementation's requirement is the call's (1) |
-| traits | `context-requirement-from-function-as-written` | requirements per specialization, not from the function as written (2) |
-| traits | `context-requirement-every-witness` | no union over the witnesses' implementations (3) |
-| traits | `specialization-selection-shared` | each specialization its own selection (4) |
-| traits | `trait-redirect-dropped` | the trait operation's clone redirection (5) |
-| traits | `implementation-clone-not-queued` | the replaced implementation's clone is made (6) |
-| traits | `clone-edge-omitted` | the placement edge to the clone (7) |
-| traits | `dangling-unchecked` | no action names a dropped declaration (8) |
-| static-decisions | `staticdeps-implementation-contexts-ignored`, `legacy-units-without-implementations` | requirements in the static dependency model (9) |
-| traits | `context-requirement-lost-when-yielding` | one implementation's yield and requirement both (10) |
-| context-traits | `implementation-missing-context-suppressed` | MISSING-CONTEXT for a specialization's requirement (11) |
-| context-traits | `ambiguous-provider-chosen` | no provider chosen among several (12) |
-| diagnostic-recovery | `internal-only-empty-report`, `internal-only-presented-as-source` | the empty report (13) and recovery's policy |
-| traits | `context-edges-unkept`, `context-plan-gate-closed`, `context-plan-gate-every-trait` | the graph keeps context edges; the gate asks for them, and only when they can exist (economics) |
-| traits | `replaced-implementation-unindexed`, `function-value-judged-as-written`, `implementation-clone-reached-everywhere` | section 3.3's three cases |
+| harness | mutant | the invariant it violates | killed by |
+|---|---|---|---|
+| context-traits | `implementation-context-ignored` | a selected implementation's requirement is the call's (1) | `ct-implementation-context-provider`, `-summary`, `io-implementation-context`, `-missing`, `-executable` |
+| traits | `context-requirement-from-function-as-written` | requirements per specialization, not from the function as written (2) | 14 `trait-implementation-context-*` tests |
+| traits | `context-requirement-every-witness` | no union over the witnesses' implementations (3) | `-agreement`, `-ambiguous`, `-missing`, `-per-specialization`, `-transitive` |
+| traits | `specialization-selection-shared` | each specialization its own selection (4) | `-agreement`, `-missing`, `-monomorphized`, `-per-specialization`, `-transitive`, `-witnesses` |
+| traits | `trait-redirect-dropped` | the trait operation's clone redirection (5) | 15 `trait-implementation-context-*` tests (the plan's own TRAIT-INTERNAL) |
+| traits | `implementation-clone-not-queued` | the replaced implementation's clone is made (6) | 15 `trait-implementation-context-*` tests (the plan's own TRAIT-INTERNAL) |
+| traits | `clone-edge-omitted` | the placement edge to the clone (7) | 71 traits tests; the trait fuzzer (30 of 40 programs) |
+| traits | `dangling-unchecked` | no action names a dropped declaration (8) | `trait-implementation-context-dangling` |
+| static-decisions | `staticdeps-implementation-contexts-ignored` | requirements in the static dependency model (9) | `se-equal-implementation-context`, `-changes` (a scheduler disagreement) |
+| static-decisions | `legacy-units-without-implementations` | the same, for the legacy scheduler's units (9) | `se-equal-implementation-context` |
+| traits | `context-requirement-lost-when-yielding` | one implementation's yield and requirement both (10) | `trait-implementation-context-yield` |
+| context-traits | `implementation-missing-context-suppressed` | MISSING-CONTEXT for a specialization's requirement (11) | `ct-implementation-context-summary`, `io-implementation-context`, `-missing`, `-executable` |
+| context-traits | `ambiguous-provider-chosen` | no provider chosen among several (12) | 8 context-traits tests (`ct-ambiguous-diagnostic`, `ct-select-matrix`, ...) |
+| diagnostic-recovery | `internal-only-empty-report` | the empty report (13) | `dr-internal-only-coded`, `-only-entries`, `dr-internal-empty-raise` |
+| diagnostic-recovery | `internal-only-presented-as-source` | recovery's policy for it (13) | `dr-internal-only-coded`, `-only-entries` |
+| traits | `context-edges-unkept` | the graph keeps context edges (economics) | 14 `trait-implementation-context-*` tests |
+| traits | `context-plan-gate-closed` | the gate asks for them (economics) | `-function-value`, `-imprint`, `-layouts`, `-no-fallback`, `-reach` |
+| traits | `context-plan-gate-every-trait` | ... and only when they can exist (economics) | `trait-implementation-context-economics` |
+| traits | `replaced-implementation-unindexed` | section 3.3, the constrained slot | `trait-implementation-context-imprint` |
+| traits | `function-value-judged-as-written` | section 3.3, the function value | `trait-implementation-context-function-value` |
+| traits | `implementation-clone-reached-everywhere` | section 3.3, the never-called function | `trait-implementation-context-reach` |
+| context-traits (re-anchored) | `transitive-trait-requirement-dropped` | a context-trait requirement is transitive | 50 context-traits tests; its fuzzer (9 of 25 programs) |
+| coroutines (re-anchored) | `context-reselected-per-resume` | a coroutine's providers are its construction's | `co-context-fixed-at-construction` |
 
 Semantic mutants (1-5, 9-12) are killed by a behavior test: a program that
 runs wrongly, a diagnostic missing or added, a scheduler disagreement.
-Internal-invariant mutants (6-8) are killed by the plan's own check or by
-the unit test of `hir::traits::Dangling`; the economic one
-(`context-plan-gate-every-trait`) only by `-economics`.
+Internal-invariant mutants (6-8) are killed by the plan's own check
+(`hir::traits::Dangling`'s TRAIT-INTERNAL, which every test compiling such
+a program sees) or by its unit test; the economic one
+(`context-plan-gate-every-trait`) only by `-economics`. None of the new
+mutants is killed by the trait fuzzer alone (it generates no context
+requirement): the extended trait-implementation fuzzer of this milestone
+is the one that generates them.
+
+**A harness repair.** The diagnostic-recovery harness's private tree held
+neither `service/`, `lsp/` nor `compilerpedia/`, which main.tcl and the
+efficiency tool load: `dr-main-prints-each`, `dr-interchange-rejected` and
+`dr-corpus-efficiency` failed there with no mutant applied, so every
+mutant of that harness counted as killed whatever it changed. The tree now
+copies them (the unmutated tree passes all 57 tests), and the results
+above are the repaired harness's.
 
 **Existing harnesses and suites.** PENDING (section 12).
 
