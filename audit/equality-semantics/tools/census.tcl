@@ -8,8 +8,9 @@
 # surface::readProgramFile -cache; a hit equals the build.)
 #
 # Compiles every program of the corpus -- examples/**/*.bot, bench/**/*.bot,
-# tests/golden/*.bot -- and a one-line loader of every standard-library
-# module (`import std::NAME`), each strict with warnings off, and visits every
+# tests/golden/*.bot -- and a loader of every standard-library module
+# (`import std::NAME` and a value; a Darwin or Windows module for its
+# platform's target), each strict with warnings off, and visits every
 # call of the root native `==` in the generic HIR (a `!=` lowers to one, in a
 # branch: surface/lower.tcl). A site is counted once, by its file, line and
 # column, however many compilations reach it (a library module's sites are
@@ -334,9 +335,9 @@ proc census::Compile {path area} {
     Visit $hir $area
 }
 
-proc census::CompileText {text name area} {
+proc census::CompileText {text name area args} {
     variable failed
-    if {[catch {surface::compile $text $name -warnings off} hir]} {
+    if {[catch {surface::compile $text $name -warnings off {*}$args} hir]} {
         lappend failed [list $name [lindex [split $hir \n] 0]]
         return
     }
@@ -358,7 +359,15 @@ foreach path [lsort [split [exec find [file join $root stdlib] -name *.bot] \n]]
     set namespace std::[string map {/ ::} [file rootname [string range $path [string length $root/stdlib/] end]]]
     # An architecture-specific module (stdlib/P.ARCH.bot) is std::P.
     regsub {\.(x86_64|aarch64)$} $namespace {} namespace
-    census::CompileText "import $namespace\n" [file join $root loader-[pid].bot] stdlib
+    # A platform's modules compile for one of its targets only; the loader
+    # ends with a value of its own, so a module whose last declaration
+    # requires a context is no program value.
+    set target {}
+    switch -glob -- $namespace {
+        std::darwin* { set target {-target macos-aarch64} }
+        std::windows* { set target {-target windows-x86_64} }
+    }
+    census::CompileText "import $namespace\n0\n" [file join $root loader-[pid].bot] stdlib {*}$target
 }
 
 set classes {refused unknown disjoint-kind disjoint-nominal disjoint-domain empty-only compatible}
