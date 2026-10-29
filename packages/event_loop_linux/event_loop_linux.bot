@@ -83,6 +83,7 @@ struct Stats:
     endpoint_max: int
     pump_checks: int
     discarded: int
+    resets: int
 
 # What a watch waits for.
 enum Interest:
@@ -260,5 +261,5 @@ fn stats(context n: Native) -> Stats:
         wakeups: st(4), spurious: st(5), timeouts: st(6), posts: st(7),
         refused_posts: st(8), records_taken: st(9), holds: st(10), releases: st(11),
         watch_events: st(12), eventfd_writes: st(13), endpoint_max: st(14),
-        pump_checks: st(15), discarded: st(16)
+        pump_checks: st(15), discarded: st(16), resets: st(17)
     }

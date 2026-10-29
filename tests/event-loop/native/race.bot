@@ -1,0 +1,104 @@
+# race.bot -- the wakeup protocol's race window, widened
+# (EVENT-LOOP-MILESTONE-1.md, "Wakeup protocol").
+#
+# Run under BOTLISH_EVENT_LOOP_STRESS=reset-window: when the loop goes from
+# busy (polls that skipped the kernel) back to sleep, the adapter waits 2 ms
+# between its first look at the posted endpoints and its reset of the
+# eventfd -- the window in which neither a post nor a wake may be lost. The
+# receiver makes every record such a transition (it yields twice after each
+# one, then waits again), and the records come in pairs 0.8 ms apart, 20 ms
+# between pairs, so the second of a pair lands in the window and nothing
+# else wakes the loop soon after it. Two phases:
+#
+#   posts  a producer thread posts the records (botlish_event_post);
+#   wakes  a pumped source (fixture.c): its thread only wakes the loop
+#          (botlish_event_wake), and the pump posts on the loop's thread.
+#
+# A 50 ms heartbeat bounds how long a lost post or wake delays a record.
+# tests/event-loop-linux.test (el-linux-reset-window) requires every record
+# promptly, and the adapter's count of resets shows the window was entered.
+import elog
+import event_loop_linux
+import fx
+import std::event_loop
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+nomethod fn receiver(label: str, src: std::event_loop::Reg, count: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    # received, max latency, later than 5 ms
+    lat = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        l = event_loop_linux::now_us() - e.b
+        lat.set(0, lat.at(0) + 1)
+        if l > lat.at(1):
+            lat.set(1, l)
+        if l > 5000:
+            lat.set(2, lat.at(2) + 1)
+        # Two busy turns: the polls skip the kernel, so the next sleep
+        # resets the eventfd first.
+        std::event_loop::yield_now()
+        std::event_loop::yield_now()
+    elog::say(label.concat(" received "), lat.at(0))
+    elog::say(label.concat(" max latency us "), lat.at(1))
+    elog::say(label.concat(" later than 5 ms "), lat.at(2))
+    elog::bit(std::event_loop::revoke(src))
+
+fn heartbeat(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    t = std::event_loop::every(50000)
+    beats = std::mutable_array::create(1, 0)
+    loop:
+        if not std::event_loop::live?(src):
+            break
+        std::event_loop::wait(t)
+        beats.set(0, beats.at(0) + 1)
+    std::event_loop::revoke(t)
+    beats.at(0)
+
+nomethod fn phase(label: str, pumped: bool, count: int, context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    src = std::event_loop::source(Delivery::Reliable, 4096, :keep_alive)
+    ep = event_loop_linux::endpoint(4096)
+    coroutine {step: r, first: rf} = receiver(label, src, count)
+    std::event_loop::adopt(r, rf)
+    coroutine {step: h, first: hf} = heartbeat(src)
+    std::event_loop::adopt(h, hf)
+    before = event_loop_linux::stats().resets
+    id = event_loop_linux::endpoint_id(ep)
+    slot = std::event_loop::native_slot(src)
+    gen = std::event_loop::native_generation(src)
+    if pumped:
+        fx::pumped(id, slot, gen, count, 20000, 2, 800)
+    else:
+        fx::synth(id, slot, gen, count, 20000, 2, 0, 800)
+    turns = std::event_loop::run()
+    if pumped:
+        fx::pumped_join()
+    else:
+        fx::synth_join()
+    event_loop_linux::close_endpoint(ep)
+    elog::say(label.concat(" resets "), event_loop_linux::stats().resets - before)
+    turns
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    elog::say("adapter status ", event_loop_linux::status())
+    phase("posts", false, 80)
+    phase("wakes", true, 80)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -116,6 +116,84 @@ int fx_burst(int endpoint, int slot, int gen, int count, long long base) {
     return 0;
 }
 
+/* ---------------------------------------------------------------------
+ * A pumped source: the hybrid protocol (SDL's, in tests/event-loop/native/
+ * sdl.c) without SDL. A thread appends stamped items to this queue (a: the
+ * sequence number, b: the time it was produced) and wakes the loop
+ * (botlish_event_wake) -- it never posts. The pump's check, on the loop's
+ * thread, posts what the queue holds to the endpoint, so an item is late
+ * exactly when a wake was lost. */
+
+#define PUMPED_CAP 4096
+
+static struct {
+    pthread_mutex_t lock;
+    long long a[PUMPED_CAP], b[PUMPED_CAP];
+    int head, count;
+    int endpoint, slot, gen, total, interval_us, burst, gap_us, pump, running;
+    pthread_t thread;
+} P = { .lock = PTHREAD_MUTEX_INITIALIZER, .pump = -1 };
+
+static void pumped_check(void *user) {
+    (void)user;
+    pthread_mutex_lock(&P.lock);
+    while (P.count > 0) {
+        if (botlish_event_post(P.endpoint, P.slot, P.gen, P.a[P.head], P.b[P.head]) != 0) break;
+        P.head = (P.head + 1) % PUMPED_CAP;
+        P.count--;
+    }
+    pthread_mutex_unlock(&P.lock);
+}
+
+static void *pumped_main(void *arg) {
+    (void)arg;
+    for (int i = 0; i < P.total; i++) {
+        pause_us(P.burst <= 1 || i % P.burst == 0 ? P.interval_us : P.gap_us);
+        pthread_mutex_lock(&P.lock);
+        if (P.count < PUMPED_CAP) {
+            int tail = (P.head + P.count) % PUMPED_CAP;
+            P.a[tail] = i;
+            P.b[tail] = botlish_event_now();
+            P.count++;
+        }
+        pthread_mutex_unlock(&P.lock);
+        botlish_event_wake();
+    }
+    return NULL;
+}
+
+/* Start the pumped source: COUNT items for ENDPOINT tagged (SLOT, GEN), in
+ * bursts of BURST every INTERVAL_US, GAP_US apart within a burst. LOOP
+ * THREAD (it adds the pump). 0, or -1. */
+int fx_pumped(int endpoint, int slot, int gen, int count, int interval_us, int burst, int gap_us) {
+    if (P.running) return -1;
+    P.head = P.count = 0;
+    P.endpoint = endpoint;
+    P.slot = slot;
+    P.gen = gen;
+    P.total = count;
+    P.interval_us = interval_us;
+    P.burst = burst;
+    P.gap_us = gap_us;
+    P.pump = botlish_event_add_pump(NULL, pumped_check, NULL);
+    if (P.pump < 0) return -1;
+    if (pthread_create(&P.thread, NULL, pumped_main, NULL) != 0) {
+        botlish_event_remove_pump(P.pump);
+        return -1;
+    }
+    P.running = 1;
+    return 0;
+}
+
+/* Wait for the pumped source's thread and remove its pump. LOOP THREAD. */
+int fx_pumped_join(void) {
+    if (!P.running) return 0;
+    pthread_join(P.thread, NULL);
+    botlish_event_remove_pump(P.pump);
+    P.running = 0;
+    return 0;
+}
+
 /* Post one record from the calling thread (a task: posting never runs
  * Botlish code, so the record reaches the program in a later turn). */
 int fx_post(int endpoint, int slot, int gen, long long a, long long b) {

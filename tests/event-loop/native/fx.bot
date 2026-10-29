@@ -1,5 +1,5 @@
 # fx.bot -- the binding of the native test fixtures (fixture.c): producer
-# threads, the TCP line protocol and its test clients. Every function takes
+# threads, a pumped source, the TCP line protocol and its test clients. Every function takes
 # and returns scalars.
 import std::ffi::c
 
@@ -9,6 +9,8 @@ extern c fn fx_synth(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: st
 extern c fn fx_synth_join() -> std::ffi::c::Int
 extern c fn fx_burst(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, base: std::ffi::c::LongLong) -> std::ffi::c::Int
 extern c fn fx_synth_refusals() -> std::ffi::c::LongLong
+extern c fn fx_pumped(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, interval: std::ffi::c::Int, burst: std::ffi::c::Int, gap: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_pumped_join() -> std::ffi::c::Int
 extern c fn fx_post(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, a: std::ffi::c::LongLong, b: std::ffi::c::LongLong) -> std::ffi::c::Int
 extern c fn fx_listen() -> std::ffi::c::Int
 extern c fn fx_port(fd: std::ffi::c::Int) -> std::ffi::c::Int
@@ -51,6 +53,14 @@ fn synth_join() -> int:
 
 fn synth_refusals() -> int:
     fx_synth_refusals()
+
+# A pumped source (fixture.c): a thread that only wakes the loop, and a pump
+# that posts on the loop's thread.
+nomethod fn pumped(endpoint: int, slot: int, gen: int, count: int, interval: int, burst: int, gap: int) -> int:
+    ci(endpoint).fx_pumped(ci(slot), ci(gen), ci(count), ci(interval), ci(burst), ci(gap))
+
+fn pumped_join() -> int:
+    fx_pumped_join()
 
 nomethod fn post(endpoint: int, slot: int, gen: int, a: int, b: int) -> int:
     ci(endpoint).fx_post(ci(slot), ci(gen), cll(a), cll(b))

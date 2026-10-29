@@ -39,6 +39,9 @@ fn server(lfd: int, naive: bool, context ev: std::event_loop::Loop, n: event_loo
                 break
             continue
         if fx::cmd() == 9:
+            # BYE, sent after the 11 replies: it arrives in a later write,
+            # so only a reader whose readiness was re-armed sees it.
+            elog::say("bye received ", 1)
             break
         handled.set(0, handled.at(0) + 1)
         fx::send(conn, fx::arg())
@@ -56,9 +59,9 @@ fn server(lfd: int, naive: bool, context ev: std::event_loop::Loop, n: event_loo
     handled.at(0)
 
 fn watchdog(us: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
-    std::event_loop::sleep(us)
-    elog::say("watchdog fired at turn ", std::event_loop::turn_number())
-    std::event_loop::stop()
+    if std::event_loop::sleep(us) == Wake::Timer:
+        elog::say("watchdog fired at turn ", std::event_loop::turn_number())
+        std::event_loop::stop()
     0
 
 nomethod fn round(label: str, naive: bool, context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:

@@ -363,20 +363,30 @@ private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound
 >>>>
 
 @@ c-reset-without-recheck the eventfd is reset after polls that skipped the kernel without looking at the posted endpoints again: a post between the two is lost
-%% el-linux-wake el-linux-lost-wakeup-control el-linux-flood el-linux-quiet-source
+%% el-linux-reset-window el-linux-wake
 ## packages/event_loop_linux/native/event_loop_linux.c
 <<<<
             reset_wakefd();
             E.reset_owed = 0;
             drain_pending();
-            if (E.rot_count > 0) timeout = 0;
+            if (E.rot_count > 0 || __atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
 ====
             reset_wakefd();
             E.reset_owed = 0;
+            if (__atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
+>>>>
+
+@@ c-wake-not-owed a wake the eventfd's reset swallowed is not owed to the pumps: the loop sleeps with a pumped source's event waiting (the bug this milestone's race test found)
+%% el-linux-reset-window
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+            if (E.rot_count > 0 || __atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
+====
+            if (E.rot_count > 0) timeout = 0;
 >>>>
 
 @@ c-source-drained-first a source with more records is served again before the others (FIFO over records, not round-robin over sources): a flood starves a quiet source
-%% el-linux-flood el-linux-quiet-source
+%% el-linux-rotation el-linux-flood el-linux-quiet-source
 ## packages/event_loop_linux/native/event_loop_linux.c
 <<<<
             if (more) {

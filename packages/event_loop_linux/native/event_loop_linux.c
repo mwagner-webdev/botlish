@@ -36,6 +36,11 @@
  * One driver per process (Botlish's scheduler is thread-local and a program
  * has one main thread).
  *
+ * Stress (tests only): BOTLISH_EVENT_LOOP_STRESS=reset-window widens the
+ * window between the loop's first look at the posted endpoints and its
+ * reset of the eventfd to 2 ms, so a test's producers land in it often;
+ * the protocol is unchanged.
+ *
  * Fault injection (tests only): BOTLISH_EVENT_LOOP_FAULT=lost-wakeup selects
  * a deliberately wrong wakeup protocol -- a post signals the eventfd only if
  * the loop has announced it is about to sleep, with the classic race
@@ -99,11 +104,11 @@ typedef struct {
 enum {
     ST_BLOCKS, ST_SLEEPS, ST_POLL_SYSCALLS, ST_POLLS_SKIPPED, ST_WAKEUPS, ST_SPURIOUS,
     ST_TIMEOUTS, ST_POSTS, ST_REFUSED, ST_TAKEN, ST_HOLDS, ST_RELEASES, ST_WATCH_EVENTS,
-    ST_EVENTFD_WRITES, ST_RING_MAX, ST_PUMP_CHECKS, ST_DISCARDED, ST_COUNT
+    ST_EVENTFD_WRITES, ST_RING_MAX, ST_PUMP_CHECKS, ST_DISCARDED, ST_RESETS, ST_COUNT
 };
 
 static struct {
-    int opened, epfd, wakefd, fault_lost_wakeup;
+    int opened, epfd, wakefd, fault_lost_wakeup, stress_reset_window;
     pthread_mutex_t lock;
     evl_endpoint eps[MAX_ENDPOINTS];
     int pending[MAX_ENDPOINTS];  /* endpoints with new records (guarded) */
@@ -115,6 +120,7 @@ static struct {
     int rot[MAX_SOURCES + 1];    /* the rotation: a ring of source ids */
     int rot_head, rot_count;
     int reset_owed;              /* the eventfd may be signalled from polls we skipped */
+    int wake_owed;               /* a wake the pumps have not answered (atomic) */
     evl_rec cur;
     int cur_source;
     long long stats[ST_COUNT];
@@ -194,6 +200,8 @@ int evl_open(int flags) {
     if (E.opened) return -EBUSY;
     const char *fault = getenv("BOTLISH_EVENT_LOOP_FAULT");
     E.fault_lost_wakeup = fault && strcmp(fault, "lost-wakeup") == 0;
+    const char *stress = getenv("BOTLISH_EVENT_LOOP_STRESS");
+    E.stress_reset_window = stress && strcmp(stress, "reset-window") == 0;
     E.epfd = epoll_create1(EPOLL_CLOEXEC);
     if (E.epfd < 0) return -errno;
     E.wakefd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -339,6 +347,9 @@ int botlish_event_post(int endpoint, int slot, int gen, long long a, long long b
 
 int botlish_event_wake(void) {
     if (!E.opened) return -EPIPE;
+    /* Owed until the pumps' checks run: a reset of the eventfd (below) can
+     * swallow the signal, and a wake has no endpoint to find. */
+    __atomic_store_n(&E.wake_owed, 1, __ATOMIC_SEQ_CST);
     signal_wakefd();
     return 0;
 }
@@ -437,6 +448,8 @@ int botlish_event_remove_pump(int pump) {
 }
 
 static void run_checks(void) {
+    /* Every wake so far is answered by the checks about to run. */
+    __atomic_store_n(&E.wake_owed, 0, __ATOMIC_SEQ_CST);
     for (int i = 0; i < MAX_PUMPS; i++) {
         if (E.pumps[i].used && E.pumps[i].check) {
             count(ST_PUMP_CHECKS);
@@ -530,11 +543,21 @@ int evl_block(long long deadline) {
         } else if (E.reset_owed) {
             /* The eventfd may hold signals from polls that skipped the
              * kernel: reset it, THEN look at the posted endpoints again, so
-             * a post after the reset wakes the sleep below. */
+             * a post after the reset wakes the sleep below. A wake the
+             * reset swallowed has no endpoint to find: it is still owed to
+             * the pumps, so the loop polls instead of sleeping, and their
+             * checks run after the poll. */
+            count(ST_RESETS);
+            if (E.stress_reset_window) {
+                /* Tests only: the race window between the endpoints' first
+                 * look and the reset, widened (no protocol change). */
+                struct timespec window = { 0, 2000000 };
+                nanosleep(&window, NULL);
+            }
             reset_wakefd();
             E.reset_owed = 0;
             drain_pending();
-            if (E.rot_count > 0) timeout = 0;
+            if (E.rot_count > 0 || __atomic_load_n(&E.wake_owed, __ATOMIC_SEQ_CST)) timeout = 0;
         }
     }
     int n = 0;

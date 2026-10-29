@@ -120,24 +120,43 @@ test el-linux-idle {an idle 300 ms sleep takes one turn, one kernel sleep and we
 # --------------------------------------------------------------------------
 # Delivery, fairness, revocation
 
-test el-linux-buffered-lines {readiness describes the kernel's buffer, not a reader's: 11 lines arriving in one write are all answered by the reader that takes its buffered lines before re-arming; the reader that waits for readiness after every line stalls after the first (the exploration's adapter bug, as a negative control)} -constraints eventLoopLinux -body {
+test el-linux-buffered-lines {readiness describes the kernel's buffer, not a reader's: 11 lines arriving in one write are all answered by the reader that takes its buffered lines before re-arming, which then sees the client's BYE (a later write: readable re-arms the watch) and ends the round itself; the reader that waits for readiness after every line stalls after the first and its round ends by the watchdog (the exploration's adapter bug, as a negative control)} -constraints eventLoopLinux -body {
     set t [elNative lines]
-    list [lmap m [elMatches $t {lines handled (\d+)}] {lindex $m 1}] [lmap m [elMatches $t {replies (\d+)}] {lindex $m 1}]
-} -result {{11 1} {11 1}}
+    set correct [lrange $t 0 [lsearch $t {*naive reader*}]]
+    list [lmap m [elMatches $t {lines handled (\d+)}] {lindex $m 1}] [lmap m [elMatches $t {replies (\d+)}] {lindex $m 1}] \
+        [llength [elMatches $correct {bye received}]] [llength [elMatches $correct {watchdog fired}]] [llength [elMatches $t {watchdog fired}]]
+} -result {{11 1} {11 1} 1 0 1}
 
 test el-linux-flood {two producer threads flooding 20,000 records each to their own endpoints for slow Reliable consumers: nothing lost or reordered, the producers paced by backpressure (refused posts), no endpoint over its capacity, every hold released} -constraints eventLoopLinux -body {
     set t [elNative flood]
     list [elNum $t {flood a received (\d+)}] [elNum $t {flood a out of order (\d+)}] \
         [elNum $t {flood b received (\d+)}] [elNum $t {flood b out of order (\d+)}] \
         [elNum $t {dropped events (\d+)}] [expr {[elNum $t {producer refusals (\d+)}] > 0}] \
-        [expr {[elNum $t {endpoint max (\d+)}] <= 256}] [expr {[elNum $t {held records (\d+)}] == [elNum $t {released holds (\d+)}]}]
-} -result {20000 0 20000 0 0 1 1 1}
+        [expr {[elNum $t {endpoint max (\d+)}] <= 256}] [expr {[elNum $t {held records (\d+)}] == [elNum $t {released holds (\d+)}]}] \
+        [llength [elMatches $t {watchdog fired}]]
+} -result {20000 0 20000 0 0 1 1 1 0}
 
 test el-linux-quiet-source {beside the two floods, a quiet producer's 200 records are all delivered promptly: the driver serves its sources round-robin} -constraints eventLoopLinux -body {
     set t [elNative flood]
     set max [elNum $t {quiet max latency us (\d+)}]
     list [elNum $t {quiet received (\d+)}] [expr {$max < 20000 ? "ok" : "max $max"}]
 } -result {200 ok}
+
+test el-linux-rotation {the adapter serves its sources round-robin, measured without backpressure: a record posted to a quiet endpoint after a 256-record burst to another, both feeding Lossy sources with room for everything, is collected in the first turn (which collects 64 records: 63 of the burst); an adapter that served one source while it had records would deliver it in the fifth} -constraints eventLoopLinux -body {
+    set t [elNative rotation]
+    list [elNum $t {quiet record in turn (\d+)}] [elNum $t {burst records delivered by then (\d+)}]
+} -result {1 63}
+
+test el-linux-reset-window {the race window between the loop's first look at the posted endpoints and its reset of the eventfd, widened to 2 ms (BOTLISH_EVENT_LOOP_STRESS=reset-window) and entered after every record: neither a post nor a pumped source's wake (botlish_event_wake, which has no endpoint to find) landing in it is lost -- every record of both phases arrives promptly, none waits for the 50 ms heartbeat} -constraints eventLoopLinux -body {
+    set t [elNative race {BOTLISH_EVENT_LOOP_STRESS reset-window}]
+    lmap phase {posts wakes} {
+        set received [elNum $t "$phase received (\\d+)"]
+        set late [elNum $t "$phase later than 5 ms (\\d+)"]
+        set max [elNum $t "$phase max latency us (\\d+)"]
+        set resets [elNum $t "$phase resets (\\d+)"]
+        expr {$received == 80 && $late <= 3 && $max < 30000 && $resets >= 40 ? "ok" : "received $received late $late max $max resets $resets"}
+    }
+} -result {ok ok}
 
 test el-linux-inflight {revocation against records in flight: r1's records posted with its old generation are dropped as stale, the registration reusing its slot receives exactly its own 100, and no handler runs for r1 after its revocation} -constraints eventLoopLinux -body {
     set t [elNative inflight]

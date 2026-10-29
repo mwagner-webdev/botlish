@@ -11,7 +11,9 @@
 # are refused while the consumers lag; no endpoint ever holds more than its
 # capacity; the scheduler holds and releases records), and the quiet
 # source stays responsive beside them -- the driver serves its sources
-# round-robin, so the floods cannot fill a turn ahead of it.
+# round-robin, so the floods cannot fill a turn ahead of it. A watchdog
+# ends a run in which a record went missing (its consumer would wait for
+# ever) after 60 s, instead of letting it hang.
 import elog
 import event_loop_linux
 import fx
@@ -58,6 +60,23 @@ fn quiet_consumer(src: std::event_loop::Reg, total: int, context ev: std::event_
     std::event_loop::revoke(src)
     st.at(0)
 
+# Every 10 ms: done when every consumer has revoked its source; after LIMIT
+# ticks, stop the loop (a record went missing).
+nomethod fn watchdog(a: std::event_loop::Reg, b: std::event_loop::Reg, q: std::event_loop::Reg, limit: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    t = std::event_loop::every(10000)
+    ticks = std::mutable_array::create(1, 0)
+    loop:
+        if not (std::event_loop::live?(a) or std::event_loop::live?(b) or std::event_loop::live?(q)):
+            break
+        if ticks.at(0) >= limit:
+            elog::say("watchdog fired at turn ", std::event_loop::turn_number())
+            std::event_loop::stop()
+            break
+        std::event_loop::wait(t)
+        ticks.set(0, ticks.at(0) + 1)
+    std::event_loop::revoke(t)
+    ticks.at(0)
+
 nomethod fn producer(src: std::event_loop::Reg, count: int, interval: int, jitter: int, context n: event_loop_linux::Native) -> event_loop_linux::Endpoint errors std::event_loop::DriverFault:
     ep = event_loop_linux::endpoint(256)
     fx::synth(event_loop_linux::endpoint_id(ep), std::event_loop::native_slot(src), std::event_loop::native_generation(src), count, interval, 1, jitter, 0)
@@ -74,6 +93,8 @@ fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_
     std::event_loop::adopt(cb, cbf)
     coroutine {step: cq, first: cqf} = quiet_consumer(q, 200)
     std::event_loop::adopt(cq, cqf)
+    coroutine {step: w, first: wf} = watchdog(a, b, q, 6000)
+    std::event_loop::adopt(w, wf)
     ea = producer(a, 20000, 0, 0)
     eb = producer(b, 20000, 0, 0)
     eq = producer(q, 200, 1000, 1)
