@@ -826,6 +826,10 @@ The updated mutants, run in their own harnesses:
 | `tclsh9.0 audit/event-loop/tools/mutate.tcl` (the scheduler's 27 mutants) | 27 killed; its baseline (the unmutated tree passes every detector) timed out in that run, under the load of three parallel jobs, and passed when run alone with `-timeout 3200` (2134 s) |
 | `tclsh9.0 audit/static-decisions/tools/mutate.tcl -only scoped-if-joins-missed,unwind-consumers-missed,unwind-not-waiting,channels-not-consumed,verdict-consumers-ignored,verdict-every-diagnostic` (the three new mutants and the three of the code they share) | 6 mutants, 6 killed |
 
+`tclsh9.0 audit/static-decisions/tools/fuzz.tcl -seed S` for S = 17, 41
+and 3 (the layout claim's seeds among them): 20 programs each, 484, 564 and
+580 sites, 0 failures (its fragments hold no resource: section 15, item 4).
+
 Every one of the static-decisions harness's 77 mutants applies to the tree
 (`channels-not-consumed` updated to the line it mutates); the other 71 mutate
 code this milestone did not change and were not run again here.
