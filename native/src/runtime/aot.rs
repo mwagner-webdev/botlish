@@ -396,9 +396,12 @@ fn startup_facts(startup: Startup, vm: &Vm) -> String {
     #[cfg(target_vendor = "apple")]
     // SAFETY: no preconditions.
     let main = Some(unsafe { libc::pthread_main_np() } == 1);
+    // Both ids from the kernel: never libc's getpid, which every executable
+    // would then import (a program making raw syscalls links none of
+    // libc's: tests/linux-syscall.test).
     #[cfg(target_os = "linux")]
     // SAFETY: no preconditions.
-    let main = Some(unsafe { libc::syscall(libc::SYS_gettid) } == libc::c_long::from(unsafe { libc::getpid() }));
+    let main = Some(unsafe { libc::syscall(libc::SYS_gettid) == libc::syscall(libc::SYS_getpid) });
     #[cfg(not(any(target_vendor = "apple", target_os = "linux")))]
     let main: Option<bool> = None;
     if let Some(main) = main {
