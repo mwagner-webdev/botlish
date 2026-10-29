@@ -603,9 +603,35 @@ edges, 2 specializations, 5 clones). Nothing enumerates witness and provider
 combinations: requirements are a fixed point over the specializations the
 plan makes, and the selection is the existing program-wide one.
 
-**Time.** PENDING: the share of each compilation spent in the feedback's
-plan runs and in `hir::contexts::Requirements`, measured on an idle
-container after the full suite.
+**Time** (an idle 4-core container; each tree compiles every program in one
+process, no front-end cache, the smaller of two runs;
+`hir::coroutines::Implementations` and `hir::contexts::Requirements` timed
+inclusively -- the context analysis calls Requirements too, for the fixed
+point the starting tree ran inline in `verify`):
+
+| program (front end) | before | now | Implementations | Requirements | plans |
+|---|---:|---:|---:|---:|---:|
+| golden `traits.bot` | 39.2 s | 37.0 s | 73 ms | 169 ms | 671 ms |
+| golden `contexts.bot` | 36.1 s | 36.7 s | 65 ms | 161 ms | 160 ms |
+| golden `mutable-map.bot` | 28.8 s | 30.2 s | 54 ms | 149 ms | 105 ms |
+| golden `coroutines.bot` | 24.6 s | 25.4 s | 49 ms | 113 ms | 119 ms |
+| golden `hashable.bot` | 9.1 s | 9.8 s | 16 ms | 42 ms | 85 ms |
+| event loop `a-gameserver` | 10.9 s | 10.9 s | 35 ms | 95 ms | 110 ms |
+| all ten golden suites and both event-loop programs | 225.2 s | 227.1 s | | | |
+| `entry-io` (runs now) | 0.57 s (CORE MALFORMED) | 1.06 s | 51 ms | 16 ms | 11 ms |
+| `entry-indirect` (runs now) | 0.42 s (CORE MALFORMED) | 1.19 s | 72 ms | 20 ms | 15 ms |
+| `two-witnesses` (runs now) | 0.51 s (CORE MALFORMED) | 1.11 s | 55 ms | 17 ms | 18 ms |
+
+The twelve large programs take 0.9% longer in total, each between 11%
+faster and 7% slower -- this container's run-to-run spread, the counts
+being identical. The graph's own analysis is at most 0.3% of a
+compilation there, and Requirements at most 0.5% (0.9% for the event-loop
+programs), most of it the context analysis's fixed point, which was there
+before. The defect's programs the
+starting tree's front end gave up on (CORE MALFORMED; module-impl a Tcl
+error) now complete it -- the check that confirms the edges, the plan, the
+monomorphized build and its check -- in two to three times the time it
+spent failing; the graph is 5-6% of that.
 
 ## 11. Tests and mutants
 
@@ -706,14 +732,62 @@ mutant of that harness counted as killed whatever it changed. The tree now
 copies them (the unmutated tree passes all 57 tests), and the results
 above are the repaired harness's.
 
-**Existing harnesses and suites.** PENDING (section 12).
+**Existing harnesses and suites.** Every existing mutant of these five
+harnesses whose edit is in a file this milestone changed is still killed,
+and the fuzzers and the interchange audit find nothing (section 12).
 
 ## 12. Cross-platform regression results
 
-PENDING: `tclsh9.0 tests/local.tcl` (every Tcl test file on interp and
-compile, every golden suite on four backends), the mutation harnesses, and
-CI on the branch: tests.yml, tests-arm64.yml, macos-arm64.yml,
-windows-x86_64.yml and static-decisions.yml.
+**The local suite** (`tclsh9.0 tests/local.tcl` on a 4-core container:
+every Tcl test file on interp and compile, golden duplicates skipped, every
+golden suite on interp, compile, cranelift-generic and cranelift through
+the front-end cache), twice:
+
+| tree | Tcl tests, interp | Tcl tests, compile | golden suites | wall |
+|---|---|---|---|---|
+| `4af19c4e` (the graph, the plan's redirection, `Dangling`, the empty report) | 7685 passed, 0 failed, 129 skipped | 7680 passed, 0 failed, 134 skipped | 109 run, 0 failed (interp 5257/5257, compile 5257/5257, cranelift-generic 5165/5165, cranelift 5267/5267) | 6524 s |
+| `13724345` (the final compiler: the gate, the index, function values, the reach rule, every test) | 7707 passed, 0 failed, 129 skipped | 7702 passed, 0 failed, 134 skipped | 109 run, 0 failed (the same counts) | 6899 s |
+
+Both skipped 2276 golden duplicates, as tests/local.tcl does; CI runs them.
+After merging main (Compilerpedia's task topics, AGENT-PRIMER.md, the
+graphical main-thread census), `tools/compilerpedia.tcl check` (1084
+topics, 667 examples, 0 problems), tests/compilerpedia.test,
+tests/main-cli.test and tests/diagnostic-recovery.test pass.
+
+**Mutation harnesses.** Beside the new and re-anchored mutants (section
+11), every existing mutant of the five harnesses whose edit is in a file
+this milestone changed (`hir/contexts.tcl`, `hir/traits.tcl`,
+`hir/coroutines.tcl`, `hir/hir.tcl`, `hir/recovery.tcl`,
+`hir/resolve.tcl`, `hir/static.tcl`, `core/errors.tcl`) ran again on the
+final compiler: traits 33 of 33 killed, context-traits 19 of 19,
+coroutines 5 of 5, static-decisions 17 of 17, diagnostic-recovery 5 of 5
+(the repaired harness). Every mutant of the five harnesses applies.
+
+**Fuzzers and audits** (the final compiler):
+
+| run | result |
+|---|---|
+| `audit/trait-implementation-yield/tools/fuzz.tcl`, seeds 1-5 | 0 failures (40 programs and 94-100 forms each, 24-29 needing a context) |
+| the same, seed 6, `-gc-stress 1` | 0 failures (20 programs, 54 forms) |
+| the same, seed 1, `-contexts 0` (the yield milestone's programs) | 0 failures (40 programs, 99 forms) |
+| `audit/traits/tools/fuzz.tcl`, seeds 1-3 | 0 failures (300 programs, 234 accepted, 694 specializations) |
+| `audit/context-traits/tools/fuzz.tcl`, seeds 1-3 | 0 disagreements (75 programs) |
+| `audit/hir-interchange/tools/roundtrip.tcl -via interchange` (its suites, traits.bot, trait-constrained-types.bot, hashable.bot) | 15 suites, 135 artifacts and outcomes, 0 differ |
+| the same, `-via cache` | 15 suites, 150 artifacts and outcomes, 0 differ |
+| `audit/trait-impl-context-trait/tools/run.tcl` (the defect's runner) | 0 deviations (15 on the starting tree) |
+
+**CI on the branch** (the compiler of `5d5662e3`, which the later commits
+change in comments, documentation and the diagnostic-recovery harness
+only):
+
+| workflow | result |
+|---|---|
+| tests.yml (dispatched): the Tcl suite on compile, its cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the stub- and system-linked executables (also under GC stress), the native Rust unit tests, the method-call oracle and reference audit, the warning gate | success |
+| tests.yml: the Tcl suite on interp | running when this was written (queued four hours behind other branches' runs) |
+| tests-arm64.yml (dispatched, Linux arm64) | success |
+| static-decisions.yml (dispatched: every golden suite, batched against sequential) | success: no suite disagrees or fails to compile |
+| icy-tower-windows.yml (push) | success |
+| macos-arm64.yml, windows-x86_64.yml (push) | queued when this was written: their runners serve every branch's pushes, and each push of this branch cancelled the previous run; the final head's runs test the tree merged with main |
 
 ## 13. Remaining limitations
 
