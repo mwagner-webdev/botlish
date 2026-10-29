@@ -102,6 +102,11 @@ fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_
     turns = std::event_loop::run()
     elog::say("wall us ", event_loop_linux::now_us() - started)
     elog::say("turns ", turns)
+    # Closed before the producers are joined: after a watchdog stop, a
+    # producer whose endpoint never drains gets -EPIPE and ends.
+    event_loop_linux::close_endpoint(ea)
+    event_loop_linux::close_endpoint(eb)
+    event_loop_linux::close_endpoint(eq)
     fx::synth_join()
     s = std::event_loop::stats()
     elog::say("held records ", s.held_records)
@@ -113,9 +118,6 @@ fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_
     elog::say("endpoint max ", a2.endpoint_max)
     elog::say("posts ", a2.posts)
     elog::say("records taken ", a2.records_taken)
-    event_loop_linux::close_endpoint(ea)
-    event_loop_linux::close_endpoint(eb)
-    event_loop_linux::close_endpoint(eq)
     std::event_loop::trace()
 
 with context std::event_loop::create(64)
