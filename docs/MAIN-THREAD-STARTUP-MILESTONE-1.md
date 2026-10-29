@@ -411,7 +411,56 @@ HIR interchange field, no front-end cache key, no compiler-service fact.
 
 ## 29. Mutation testing
 
-(Section 29's table is filled in from the runs.)
+The policy's mutants extend the existing campaigns -- `audit/native-aot`
+(23 new or refreshed) and `audit/native-stack` (one) -- with
+`tests/main-thread-startup.test` among both harnesses' detectors; each
+mutant runs in a private tree, and one that does not build or no longer
+applies is never counted as killed. Three native-aot mutants had gone
+stale (two before this milestone: `startup-no-guard`'s and
+`sys-runtime-variable-ignored`'s texts; one by it,
+`sys-startup-failure-succeeds`, whose record read moved into
+`start_linked`); each was rewritten as a mutant of the same rule.
+`tests/platform/tier.tcl`'s `native-aot-mutants` and `native-stack-mutants`
+take `=NAME,...` so a Tier C push can run the ones only macOS or Windows
+compiles differently.
+
+**Linux x86-64 [executed]**: `audit/native-aot/tools/mutate.tcl -only` the
+23: 19 killed, 0 survived, 4 skipped (macOS's or Windows' code).
+
+| Mutant | Specification row | Linux x86-64: killed by |
+|---|---|---|
+| `cli-drops-main-thread` | CLI silently drops main-thread | `mts-cli-refused` |
+| `cli-default-main-thread` | worker default changed to main | `mts-cli-default-is-worker`, native-executable.test (8), workload-2048's executable |
+| `api-replaces-main-with-worker` | driver replaces main-thread with worker | `mts-api-refused`, `mts-cli-refused`, native-status's `main-thread-executable` |
+| `api-default-main-thread` | worker default changed to main | native-executable.test (10), argv.test (13), system-linker.test (13), aot-facts |
+| `driver-default-main-thread` | worker default changed to main | `mts-driver-option`, native-executable-stack-overflow, system-linker-no-rust-toolchain |
+| `driver-startup-for-run` | main option leaks into JIT | `mts-driver-option` |
+| `linked-run-main-thread` | (linked runs stay the worker's) | `mts-linked-run-worker`, system-linker-linked-run, native-status's C probes |
+| `policy-not-recorded` | startup policy not recorded | `executable_object_records_the_startup_policy` |
+| `library-record-main-thread` | main option changes native-library calls | `mts-library-record` |
+| `record-policy-ignored` | record decoding ignores policy | `linked_program_startup_policy`, `mts-record-damage` |
+| `unknown-policy-accepted` | unknown policy accepted | `linked_program_startup_policy`, `mts-record-damage` |
+| `fingerprint-ignores-record` | ABI fingerprint ignores record layout | `abi_fingerprint_covers_the_program_record` |
+| `system-link-no-stack-size` | system linker omits LC_MAIN stack size | `main_thread_startup_link_args` |
+| `linux-accepts-main-thread` | unsupported Linux target accepts main mode | `main_thread_startup_refusal`, `mts-api-refused`, `mts-cli-refused`, `mts-driver-option`, native-status |
+| `runtime-main-thread-on-linux` | (the runtime's own refusal) | `main_thread_startup_refusal`, `mts-record-damage` |
+| `stub-ignores-policy` | stub interprets main as supported | `mts-record-damage` (the stub's damaged record) |
+| `startup-no-guard` (refreshed) | -- | native-executable.test's overflows, aot-facts' standalone overflows |
+| `sys-runtime-variable-ignored` (refreshed) | -- | system-linker-runtime-failures |
+| `sys-startup-failure-succeeds` (refreshed) | -- | system-linker-damaged-description, `mts-record-damage` |
+| `rustc-link-no-stack-size` | rustc linker omits LC_MAIN stack size | macOS only (skipped here) |
+| `main-thread-on-a-worker` | main-thread mode spawns a worker; VM initialized on a worker | macOS only |
+| `main-thread-panic-escapes` | main-thread panic escapes | macOS only |
+| `windows-accepts-main-thread` | unsupported Windows target accepts main mode | Windows only |
+| `main-thread-unguarded` (native-stack) | main-thread overflow guard omitted | macOS only |
+
+The census's "coroutine switch loses guarded stack" row is the existing
+native-stack mutants of publication (`publish-before-switch`,
+`start-publishes-thread-stack`, `resume-not-published`,
+`yield-not-restored`), whose detectors now include the main-thread test;
+"compiler bundle omits updated runtime" is the existing macOS application
+mutants (`sys-runtime-bundle-*`, `audit/macos-app`), unchanged. The macOS
+and Windows verdicts are in section 31 and 34.
 
 ## 30. Executable size and performance
 
@@ -423,7 +472,25 @@ HIR interchange field, no front-end cache key, no compiler-service fact.
 
 ## 32. Linux x86-64 CI results
 
-(Pending.)
+**[executed]** in this repository's Linux x86-64 sandbox (Ubuntu, glibc
+2.39, Tcl 9.0.1, rustc 1.97), at the milestone's commits:
+
+| Check | Result |
+|---|---|
+| `cargo test --release` (lib 303 + 2 new, driver 113 + 5 new, native_stack) | all pass |
+| `cargo check --target aarch64-apple-darwin` and `--target x86_64-pc-windows-msvc`, every target and test | clean (type-checked only) |
+| `tests/main-thread-startup.test`, plain and under `BOTLISH_NATIVE_GC_STRESS=1` | 10 pass, 13 skipped (`mainThreadStartup`, `otool`) |
+| native-executable, system-linker, aot-stub-linker, native-library, argv, native-program-output, native-stack-overflow, c-ffi, c-byte-borrowing, c-ffi-error-capture, native-link-plan, coroutines, linux-syscall, main-cli | all pass |
+| the stub-linker job's 65 files (`BOTLISH_NATIVE_LINKER=stub`) | 3410 tests: 1 failure, `linux-syscall-machine-code-routes-registers` -- the startup report's thread check had made every executable import libc's `getpid`; fixed (both ids by the raw system call, 95e3648f) and the file passes with the stub, rustc and system linkers |
+| the system-linker job's files (`BOTLISH_NATIVE_LINKER=system`) | all pass |
+| `tests/platform/native-status.tcl`, `tests/platform/aot-facts.tcl` | as recorded (the refusal probes included) |
+| `tools/compilerpedia.tcl check` | 1084 topics, 666 examples, 0 problems |
+| `audit/golden/migration/merge.tcl -check 1` | the manifest is current (23 census rows) |
+| the census harness's Linux dry run (`--strict`) | every case as predicted: the main-thread rows predicted FAILED-BUILD (the refusal), the worker and C controls headless |
+| native-aot mutants | section 29 |
+
+GitHub's `tests` and `tests (linux arm64)` workflows, dispatched on the
+branch, are recorded below as they complete.
 
 ## 33. Linux AArch64 CI results
 
