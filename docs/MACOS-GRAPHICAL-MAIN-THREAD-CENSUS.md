@@ -1269,6 +1269,15 @@ created, used and destroyed on the thread Cocoa requires.
   was a projection; this census adds the missing premise: the loop's
   thread must be the process's main thread, and candidate A is how an
   executable gets there.
+* **The event loop as a standard-library facility**
+  (EVENT-LOOP-MILESTONE-1.md, which reached main after this census's base
+  and changes none of the startup code it inspected): Linux has its only
+  native driver, and the driver assumes the thread that installed it runs
+  the loop, which it says GUI hosts that require the main thread (macOS
+  AppKit, iOS) fit. For a macOS executable that holds only when the
+  installing thread is the main thread: today's worker is not (sections 7,
+  9), candidate A's is. A macOS driver therefore depends on this census's
+  recommendation, not the other way round.
 * **Candidate B is a message-passing protocol in miniature**, built below
   the language: requests from the worker, served by the main thread, with
   their own deadlock (section 17) and their own ownership split (section
