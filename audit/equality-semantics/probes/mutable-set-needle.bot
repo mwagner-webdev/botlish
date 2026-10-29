@@ -1,0 +1,7 @@
+# typed collections: a MutableSet[str] asked about a UnicodeChar
+import std::mutable_set
+fn has_hyphen?(s: std::mutable_set::MutableSet[str]) -> bool:
+    s.contains('-')
+s = std::mutable_set::create[str]()
+s.add("-")
+has_hyphen?(s)

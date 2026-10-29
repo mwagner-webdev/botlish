@@ -1,0 +1,5 @@
+# a List of mixed kinds and membership in a set built from it
+import std::immutable_set
+xs = [1, "1", '1']
+s = std::immutable_set::from_list(xs)
+[s.contains(1), s.contains("1"), s.contains('1'), s.contains(1.0)]
