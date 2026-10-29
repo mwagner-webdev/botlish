@@ -265,11 +265,12 @@ test el-heap-repeating-waiters {a repeating timer waited on by two tasks wakes o
 # --------------------------------------------------------------------------
 # Revocation
 
-test el-revocation-suppress {a wake queued before the revocation is suppressed at dispatch, carrying no event data} -body {
+test el-revocation-suppress {a wake queued before the revocation is suppressed at dispatch, carrying no event data; it is the only one: a revocation's own waiters wake with Wake::Revoked directly, never by suppression (Stats.suppressed_wakes 1)} -body {
     set t [elTrace revocation]
     set victim [elNum $t {victim id (\d+)}]
-    list [expr {[elFirst $t "suppress wake of task $victim"] ne ""}] [elNum $t {victim woke revoked (\d)}] [elNum $t {victim event value (\d+)}]
-} -result {1 1 0}
+    list [expr {[elFirst $t "suppress wake of task $victim"] ne ""}] [elNum $t {victim woke revoked (\d)}] [elNum $t {victim event value (\d+)}] \
+        [elNum $t {suppressed wakes (\d+)}]
+} -result {1 1 0 1}
 
 test el-revocation-discard {revoking discards every queued event (5); taking from it then answers Wake::Revoked} -body {
     set t [elTrace revocation]
