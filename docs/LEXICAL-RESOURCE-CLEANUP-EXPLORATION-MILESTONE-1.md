@@ -816,7 +816,19 @@ mutable-vector, event-loop and static-compile harnesses applies (a scan of
 native-aot and native-view lists do not apply on the tree before this
 milestone either).
 
-EXISTING-HARNESS-RESULTS
+The updated mutants, run in their own harnesses:
+
+| command | result |
+|---|---|
+| `tclsh9.0 audit/affine/tools/mutate.tcl -only partial-destructure-leak,last-use-raw-only,exit-raw-only,native-list-drop-no-elements,native-struct-drop-no-fields` | 5 mutants, 5 killed (the two native ones by the runtime's Rust tests) |
+| `tclsh9.0 audit/mutable-array/tools/mutate.tcl -only failed-swap-keeps-replacement-native,drop-leaks-elements-native,factory-failure-leaks-native` | 3 mutants, 3 killed |
+| `tclsh9.0 audit/mutable-vector/tools/mutate.tcl -only failed-swap-leaks-native,clear-leaks-native` | 2 mutants, 2 killed |
+| `tclsh9.0 audit/event-loop/tools/mutate.tcl` (the scheduler's 27 mutants) | 27 killed; its baseline (the unmutated tree passes every detector) timed out in that run, under the load of three parallel jobs, and passed when run alone with `-timeout 3200` (2134 s) |
+| `tclsh9.0 audit/static-decisions/tools/mutate.tcl -only scoped-if-joins-missed,unwind-consumers-missed,unwind-not-waiting,channels-not-consumed,verdict-consumers-ignored,verdict-every-diagnostic` (the three new mutants and the three of the code they share) | 6 mutants, 6 killed |
+
+Every one of the static-decisions harness's 77 mutants applies to the tree
+(`channels-not-consumed` updated to the line it mutates); the other 71 mutate
+code this milestone did not change and were not run again here.
 
 ### Backends
 
