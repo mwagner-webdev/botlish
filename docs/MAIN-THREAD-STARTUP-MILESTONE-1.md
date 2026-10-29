@@ -505,7 +505,52 @@ the new detector included): 51 mutants, 22 killed, 0 survived, 29 skipped
 
 ## 30. Executable size and performance
 
-PERFORMANCE-PENDING
+**Linux x86-64, worker executables: before and after** (**Executed**, this
+sandbox; four cores, shared). The baseline is `17d6904f` (the census
+commit, the branch's base), built in its own worktree. "After" is this
+branch with the startup report's kernel-only thread check (`d566f3a1`).
+Every executable is the same source, linked by each linker: `trivial`
+prints `42`, `bench` is the 2048 workload's benchmark program
+(`examples/games/2048/bench.bot`, checksum 2002720). Sizes come from
+`stat` and `size`; the file is mostly debug information.
+
+| Linker | Program | File bytes before | after | text before | text after | data+bss before | after |
+|---|---|---:|---:|---:|---:|---:|---:|
+| system | trivial | 9,942,656 | 9,930,104 | 639,404 | 639,080 | 26,992 | 27,040 |
+| system | bench | 10,041,280 | 10,028,752 | 721,624 | 721,752 | 28,832 | 28,880 |
+| rustc | trivial | 10,046,928 | 10,027,880 | 652,327 | 649,807 | 30,043 | 28,483 |
+| rustc | bench | 10,142,192 | 10,123,720 | 733,262 | 730,958 | 31,035 | 29,235 |
+| stub | trivial | 10,440,828 | 10,429,756 | 979,717 | 980,885 | 42,667 | 45,595 |
+| stub | bench | 10,476,944 | 10,465,872 | 979,717 | 980,885 | 42,667 | 45,595 |
+
+Text moves by -2.5 KiB to +1.2 KiB: the startup gained `start_linked`,
+`startup_facts`, `on_this_thread` and the policy check. The rustc
+linker's startup crate shrank to three lines that no longer instantiate
+`run` themselves. The stub's own text, shared by every stub executable,
+grew by 1,168 bytes. No program's code changed (section 6).
+
+Run time, interleaved (each round runs the twelve executables once, in
+turn; 300 rounds of `trivial`, 15 of `bench`). Medians, with p10 and p90:
+
+| Linker | Program | Before | After |
+|---|---|---|---|
+| system | trivial | 2.344 ms (2.088-2.816) | 2.349 ms (2.111-3.003) |
+| rustc | trivial | 2.425 ms (2.149-3.036) | 2.473 ms (2.209-3.023) |
+| stub | trivial | 2.498 ms (2.234-3.089) | 2.545 ms (2.252-3.278) |
+| system | bench | 9.512 ms (7.738-12.347) | 8.533 ms (7.851-12.972) |
+| rustc | bench | 8.909 ms (7.779-10.388) | 8.932 ms (8.282-12.709) |
+| stub | bench | 8.656 ms (8.150-9.805) | 8.963 ms (8.227-13.212) |
+
+The worker's startup costs the same: every difference is within this
+machine's spread, and the policy check reads one word.
+
+**macOS AArch64, both policies** (the acceptance's `timing` group on the
+macos-15 runner): MACOS-TIMING-PENDING
+
+A main-thread executable's program object differs from a worker one's by
+one byte (section 6), and its link by one argument. On a Mach-O that
+argument sets LC_MAIN's `stacksize` field, which is already there, so the
+two policies' executables are the same size (MACOS-SIZE-PENDING).
 
 ## 31. macOS CI results
 
