@@ -669,15 +669,39 @@ Result:
 
 ### 13.4 CI
 
+Every run below is on the branch; the final code state is commit
+0630321a (the commits after it change only this report).
+
 * `windows-x86_64.yml`: filesystem.test and abi-bytes.test in the smoke
   tier; filesystem.test's Windows tests once more under GC stress; and with
-  the system linker. TODO-WIN.
-* `macos-arm64.yml`: the acceptance tier runs filesystem.test (darwinIO).
-  TODO-MAC.
-* `tests.yml`, `tests-arm64.yml`: every test, Linux x86-64 and AArch64
-  (the raw syscalls on both architectures). TODO-LINUX.
+  the system linker. **Run 40799420515: success**, every job -- among
+  them the smoke job (the smoke tier with filesystem.test, the filesystem
+  GC-stress step) and the `[ci-full]` tier items (the benchmark, the
+  fuzzer, the Windows mutants: sections 13.2, 13.3, 14).
+* `macos-arm64.yml`: the acceptance tier and the system linker run
+  filesystem.test (darwinIO: the macOS execution tests, executables
+  included). **Run 40799420498: success**, every job -- among them the
+  `[ci-full]` tier items (sections 13.2, 13.3, 14).
+* `tests.yml`: every test on Linux x86-64 (interp, compile, the cranelift
+  and cranelift-generic coverage, the stub- and system-linked executables
+  -- the system-linked ones also under GC stress -- the golden suites, the
+  warning gate, the method-call oracle and reference audit, the Rust unit
+  tests). **Run 40799446825: success**, every job.
+* `tests-arm64.yml`: the same on Linux AArch64 (std::linux::fs's syscalls
+  through the AArch64 transport). TODO-ARM64.
 * `static-decisions.yml`, dispatched on the branch for the method-decision
-  fix. TODO-SD.
+  fix (hir/methods.tcl; commit cb771b6f, which holds it): **run
+  40787729341: success**, every golden suite's static decisions equal under
+  the batched and the sequential scheduler. The later commits change no
+  front-end decision (the standard library's filesystem modules, which no
+  golden suite imports, and tests).
+
+The first full CI round (commit cb771b6f) failed three tests on every host,
+all fixed by 0630321a: `cb-namespace-separation` (std::linux::fs named
+std::ffi::c for its File's affine token: the token became std::io::fs::Owner,
+section 8), and `nerr-stdlib-identities` and the golden suite
+declared-errors-imports, which pin std::io::path's error set (it gained
+NotText).
 
 ## 14. Performance
 
