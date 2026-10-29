@@ -180,10 +180,15 @@ first: end such a program with a plain `0`.
 
 ## 4. Indices, search and pages
 
-`-help` with no query prints the overview: one line for a newcomer
+`-help` with no query prints the overview: first the primer's table
+(BEFORE YOU WRITE A PROGRAM: the AT A GLANCE section of
+`task.first-program`, rendered as that page renders it -- a view of the
+topic, never a copy -- and the query that shows the page, `-help primer`;
+AGENT-PRIMER.md), one line for a newcomer
 (`New to Botlish?  botlish -help "best practices"`, the topic
 `principle.idiomatic-botlish`), the indices with their sizes and example
-queries. `-help NAME` with an index name (or its singular) prints
+queries. The usage summary (no arguments) names `-help primer` before the
+options. `-help NAME` with an index name (or its singular) prints
 the index: its introduction (the topic `index.NAME`) and one line per topic
 (the standard-library index lists the modules and the hand-written topics;
 each module's page lists its symbols). An index's size counts its topics,
@@ -360,6 +365,16 @@ audit") records why each rule is as precise as it is.
   in a sentence or two and links; it never copies a detailed page, and its
   statement of a rule changes when that rule's topic does. A test
   (`cp-idiomatic-shape`) keeps it short.
+* **The primer** (`task.first-program`, AGENT-PRIMER.md) is what someone
+  arriving from another language reads before writing a program: its AT A
+  GLANCE table (the overview's first block) lists the habits that fail to
+  compile or compile and mean something else, each with its Botlish form,
+  and its examples pin them (the silent one as an accepted example with its
+  surprising value). A row is a habit seen in practice, not a rule summary;
+  keep the table within 76 columns and short enough to read in the
+  overview. A habit whose diagnostic can be told apart by its message gets
+  a matcher, so its help line names the page that explains it
+  (`cp-diagnostic-habits` compiles each one).
 * **An alias**: a phrase people type (`try catch`, `exit status`) maps to
   the topic that answers it; mappings from other languages must be
   semantically accurate (`throw` is `fail` of a declared error, not an

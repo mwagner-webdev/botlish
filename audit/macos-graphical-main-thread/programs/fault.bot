@@ -1,0 +1,8 @@
+# fault.bot -- a fault that is no stack overflow (MACOS-GRAPHICAL-MAIN-THREAD-
+# CENSUS.md, section 8): the fixture stores to address 16. Under any
+# execution model the stack guard must leave it to the signal's own
+# disposition -- the process dies by SIGSEGV or SIGBUS -- and never print
+# NATIVE LIMIT STACK.
+import probe
+
+probe::fault()

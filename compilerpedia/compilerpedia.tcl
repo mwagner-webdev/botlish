@@ -85,6 +85,9 @@ namespace eval compilerpedia {
         alias phrases keywords phrases code lines match lines
     }
     variable exampleDirectives {value warn nowarn quiet backends output error at message caption target module}
+    # The primer and its section the overview shows (PrimerGlance).
+    variable primer task.first-program
+    variable primerGlance "AT A GLANCE"
 }
 
 # ---------------------------------------------------------------------------
@@ -1051,6 +1054,7 @@ proc compilerpedia::renderOverview {} {
     set me [Invocation]
     set out [list "Compilerpedia -- the Botlish compiler's built-in reference (offline)" ""]
     lappend out [Wrap "What Botlish means, what it guarantees, what this compiler can prove, and why its rules and warnings exist: every diagnostic code, warning, language rule, proof capability, standard-library symbol and backend fact is a topic with a stable ID, reachable from several indices and by search." ""] ""
+    lappend out {*}[PrimerGlance $me]
     lappend out "New to Botlish?  $me -help \"best practices\"" ""
     lappend out INDICES
     foreach {name description} $indices {
@@ -1075,6 +1079,26 @@ proc compilerpedia::renderOverview {} {
     lappend out "" [Wrap "An exact topic ID, code or symbol wins over everything else, then an alias, then the topics that contain every word of the query. Case does not matter, except that a code's last word in capitals (TYPE, STRUCT) is the code and in lower case a word. Several matches are listed best first." "    "]
     lappend out "" [Wrap "[llength [topics]] topics. $me (no arguments) shows the command-line usage." ""]
     return [join $out \n]
+}
+
+# The overview's first block: the primer's AT A GLANCE section
+# (task.first-program), shown as its page shows it -- the habits from other
+# languages that fail or mean something else here, before anyone knows what
+# to look up. A view of the topic, never a second copy of its table.
+proc compilerpedia::PrimerGlance {me} {
+    variable primer
+    variable primerGlance
+    if {![exists $primer]} {
+        return {}
+    }
+    set topic [topic $primer]
+    set section [lsearch -inline -exact -index 0 [dict get $topic body] $primerGlance]
+    if {$section eq ""} {
+        return {}
+    }
+    set lines [lrange [RenderSections [dict replace $topic body [list [list "" [lindex $section 1]]]]] 1 end]
+    return [list "BEFORE YOU WRITE A PROGRAM" {*}$lines "" \
+        "    The whole page, with a checked program: $me -help primer" ""]
 }
 
 # How this compiler is invoked, as the help names it: the single

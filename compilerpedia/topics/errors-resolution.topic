@@ -36,6 +36,10 @@ The message says which case it is:
 
 == LIKELY CAUSES
   * A typo, or a name from another language (`len`, `print`, `string`).
+  * A name bound inside an `if` branch, a loop body or a handler, used
+    after it: each of those is a scope, and its bindings end with it. Bind
+    the `if`'s value to the name instead (`word = if c:`, third example
+    below); for a value built in a loop, see task.accumulate.
   * A function called above the line that defines it. Functions are
     bindings like any other: a function may call itself and what is
     defined above it, never what is defined below it -- also when the
@@ -64,6 +68,9 @@ definition and move it above the first use, together with what it needs.
     argument: functions that reach each other through arguments are
     legal (second example below).
   * Write enum cases qualified: `Color::Red`.
+  * For a name each branch of an `if` would set, make the `if` the
+    binding's value: `word = if c:` with the value as each branch's last
+    line.
   * Instead of `T(x)` or `T?(x)`, call a function you write: a converter
     whose declared result is the type, or a predicate with a `proves`
     clause (concept.refinements, concept.integer-domains).
@@ -94,6 +101,34 @@ fn is_odd(n: int) -> bool:
 is_odd(7)
 @caption Mutual recursion through an argument
 @value true
+@end
+
+@example reject
+fn describe(n: int) -> str:
+    if n < 0:
+        word = "negative"
+    else:
+        word = "positive"
+    word
+
+0
+@caption A name bound in each branch is gone after the if
+@error CORE SEMANTIC UNBOUND
+@at 6:5
+@message unbound name "word"
+@end
+
+@example accept
+fn describe(n: int) -> str:
+    word = if n < 0:
+        "negative"
+    else:
+        "positive"
+    word
+
+describe(-2)
+@caption The if's value bound to the name
+@value "negative"
 @end
 
 @topic error.duplicate
@@ -127,6 +162,9 @@ A nested scope (a function body, an `if` arm, a loop body) may bind a
 name its enclosing scope also binds. That is a new binding, visible only
 inside the nested scope; the outer binding is unchanged after it.
 
+A duplicate binding is the rule rule.immutable-bindings states, and its
+help line names that page; this page covers the other lists.
+
 == LIKELY CAUSES
   * Updating a variable as in an imperative language: `total = total + x`
     in the same scope, or a counter "incremented" in place.
@@ -151,12 +189,15 @@ computes a new value under a new name instead of changing an old one.
   * Merge duplicate handlers into one `on E:` body; list each error once.
 
 @example reject
-x = 1
-x = 2
-x
-@caption A second binding of x in the same scope
+error Boom
+
+fn explode() errors Boom, Boom:
+    fail Boom
+
+0
+@caption The same error twice in an errors clause
 @error CORE SEMANTIC DUPLICATE
-@at 2:1
+@message duplicate error "Boom"*
 @end
 
 @example accept

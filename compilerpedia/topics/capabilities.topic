@@ -225,7 +225,7 @@ separator).
 title: Assignment and mutable variables: absent
 summary: Bindings are immutable and a name is bound once per scope: `x = x + 1` is a duplicate binding; compute a new name, recurse, collect with a loop, or grow a MutableVector.
 index: concepts
-alias: assignment; mutable variable; reassign; variable update; counter variable; x = x + 1
+alias: assignment; mutable variable; reassign; variable update; counter variable; x = x + 1; +=; x += 1; -=; compound assignment
 keywords: assign, mutate, variable, counter, accumulate, update
 related: concept.bindings rule.immutable-bindings principle.immutability concept.loops concept.mutable-vector
 

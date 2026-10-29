@@ -1,0 +1,58 @@
+direct module
+# dispatch.bot -- candidate B (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, section
+# 11): the program on its worker, every SDL operation a synchronous request
+# the process's main thread runs (mtd.bot, native/mtdispatch.c, the
+# experimental runtime's BOTLISH_EXPERIMENT_THREAD=dispatch). The same
+# lifecycle as sdl.bot -- init, window, renderer, 30 frames, a quit event
+# pushed and polled back, destroy, SDL_Quit -- and the round-trip cost of
+# 1000 empty requests. Without a serving main thread (the production model)
+# every request is refused at once and the value says so.
+#
+# The value: [requests served, init, window, renderer, frames presented,
+# quit pushed, [polls, quit seen], destroyed].
+import mtd
+import probe
+import std::ffi::c
+
+fn polls(budget: int, seen: int) -> List[int]:
+    if budget == 0:
+        return [seen, 0]
+    kind = mtd::poll()
+    if kind == 256:
+        return [seen + 1, 1]
+    if kind == 0:
+        probe::SDL_Delay(5)
+        return polls(budget - 1, seen)
+    polls(budget - 1, seen + 1)
+
+fn frames(r: std::ffi::c::Ptr[probe::Renderer], n: int, done: int) -> int:
+    if n == 0:
+        return done
+    ok = mtd::frame(r)
+    next = if ok:
+        done + 1
+    else:
+        done
+    frames(r.clone(), n - 1, next)
+
+fn lifecycle() -> list:
+    window = mtd::create_window()
+    if window.null?():
+        return [false]
+    renderer = mtd::create_renderer(window)
+    presented = frames(renderer.clone(), 30, 0)
+    pushed = mtd::push_quit()
+    events = polls(400, 0)
+    destroyed = mtd::destroy_and_quit(renderer, window)
+    [true, true, presented, pushed, events, destroyed]
+
+probe::mark(0)
+served = mtd::available()
+mtd::roundtrips(1000)
+initialized = mtd::init(32)
+outcome = if initialized:
+    lifecycle()
+else:
+    [false]
+probe::mark(9)
+[served, initialized, outcome]
