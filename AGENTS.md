@@ -850,6 +850,26 @@ to those kinds or to where they are anchored also needs
 `tests/static-economics.test` (`se-property-plan-gate`, `se-equal-plan-gate`)
 and the static-decision harnesses (Static intrinsics, below).
 
+A statically selected trait implementation contributes its actual semantic
+requirements to the specialized program -- its yields and protocols, its
+context requirements -- and an unselected one contributes nothing. Every
+analysis of the checked program reads the one *selected implementation
+graph* (the HIR's `implementations`, hir::check's feedback:
+`hir::coroutines::Implementations`, from the plan's own call resolution,
+`hir::traits::PlanCalls`): the coroutine analysis, the context analysis
+(`hir::contexts::Requirements`, a node per specialization), hir/staticdeps.tcl
+and the legacy scheduler's units (`ImplementationTargets`). Never resolve a
+trait operation's implementation anywhere else, never union a requirement's
+implementations, and never let provider availability select one (SFIAE). A
+specialization is named in it by `{FUNCTION WITNESSES BINDING}`
+(`hir::traits::Specialization`), never by its clone key, whose selection the
+graph decides. The plan calls an implementation it replaces through its
+clone, by one rule for trait and context-trait operations
+(`CallImplementationClone`), and checks that no action names a dropped
+declaration or an unmade clone (`hir::traits::Dangling`, TRAIT-INTERNAL).
+If you change any of that, run what TRAIT-IMPLEMENTATION-CONTEXT-
+REQUIREMENTS-MILESTONE-1.md's "What to run when changing this" lists.
+
 ## Hashable and the keyed table hash
 
 `Hashable` (HASHABLE-AND-KEYED-HASH.md) is an intrinsic trait: an ordinary

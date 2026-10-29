@@ -696,11 +696,29 @@ installed contexts:
     std::io::IO is required by this call, but no installed context implements
     it (install one with "with context EXPR" before the call): ...
 
+A trait operation's implementation counts like any callee: a call of a
+trait-polymorphic function with a concrete witness requires what the
+implementation its operation binds for that witness requires (another
+witness's implementation is no part of it). The chain then names the
+specialization and the step through the operation:
+
+    Clock is required by this call but is not installed here (...):
+        twice (for A)
+         -> show, the implementation of Thing's operation show for A,
+            called at f.bot:17:5
+         -> now
+            directly requires Clock
+
 The reason for the check: a context is never looked up at run time. A
 program that compiles has every context it uses installed before the code
 that uses it runs.
 
 == LIKELY CAUSES
+  * A trait implementation calls a function that needs a context, and the
+    program calls a trait-polymorphic function with that witness: the
+    implementation's requirement is the call's. Installing the context is
+    the fix; the operation never switches to another implementation because
+    a context is missing.
   * The `with context` line is missing, or it comes after the call:
     installation takes effect from its line onward, never earlier.
   * A top-level binding (`start = now()`) evaluated before the
@@ -737,6 +755,31 @@ report()
 @caption report requires Clock through now; nothing installs it
 @error CORE SEMANTIC MISSING-CONTEXT
 @at 10:1
+@end
+
+@example reject
+context struct Clock:
+    ticks: int
+
+fn now(context clock: Clock) -> int:
+    clock.ticks
+
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    t.v + now()
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+twice(A {v: 1})
+@caption twice's specialization for A requires Clock through A's show; nothing installs it
+@error CORE SEMANTIC MISSING-CONTEXT
+@at 19:1
 @end
 
 @example accept
@@ -968,7 +1011,11 @@ see what it needs. The frontier is closed at the source:
 
 This includes returning the function as a body's or the program's last
 expression, choosing it in an `if` value, and closures that call a
-context consumer (they require the context too).
+context consumer (they require the context too). A function nested in a
+trait-polymorphic function is judged in every specialization: one whose
+trait operation binds, for some witness, an implementation that needs a
+context is reported for that specialization, `function inner (for A)
+requires context ...`.
 
 == WHAT TO DO
 Pass the data instead of the function, or wrap the work so the

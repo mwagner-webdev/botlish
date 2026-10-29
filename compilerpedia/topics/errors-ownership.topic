@@ -2896,6 +2896,13 @@ program text must mean one implementation.
 A coroutine's providers are chosen where it is constructed; a new
 construction after a second installation is ambiguous too.
 
+The requirement may come through a trait operation: a call of a
+trait-polymorphic function requires what its specialization's selected
+implementations require (the chain names `twice (for A)` and the
+implementation), and is ambiguous only where that specialization needs the
+trait -- two providers of a context trait no selected implementation needs
+are no obligation of any call.
+
 == LIKELY CAUSES
   * installing a test or capture context for std::io::IO beside
     `std::linux::io::create()`;
