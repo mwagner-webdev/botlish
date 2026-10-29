@@ -184,8 +184,8 @@ census was asked for:
 observed (section 22). Run 1's nine surprises are findings of this report
 -- Apple ld's 512 MB ceiling on LC_MAIN and the 8 MiB main stack's three
 exhaustions (section 11) -- and became the harness's predictions; run 2
-(156 cases, 14 of them EXECUTED-COCOA) and run 3 (RUN3-SUMMARY) came out
-exactly as predicted. The Linux x86-64 runs are the harness's dry run and
+(156 cases, 14 of them EXECUTED-COCOA) and run 3 (159 cases, the same 14)
+came out exactly as predicted. The Linux x86-64 runs are the harness's dry run and
 Linux's own rows (section 26), never evidence about macOS.
 
 ## 2. The starting AOT execution model
@@ -1000,8 +1000,8 @@ milestone. Nothing in candidate A or B depends on it.
 
 ## 21. Process error and exit semantics
 
-**[experimental, macOS]** (run 2, 40827366250; the SIGTERM and SIGINT rows
-run 3) `programs/errors.bot`, `depth.bot`, `sleep.bot` and `sdl.bot`, on
+**[experimental, macOS]** (run 2, 40827366250; the signals during a C call
+run 3, 40828677344) `programs/errors.bot`, `depth.bot`, `sleep.bot` and `sdl.bot`, on
 the worker, on the main thread (system-linked and rustc-linked) and on the
 main thread's 512 MiB stack:
 
@@ -1016,7 +1016,7 @@ main thread's 512 MiB stack:
 | a fault that is no overflow (`fault.bot`, run 1) | death by SIGSEGV (status -11) | the same | -- | -- |
 | a failing C call (`SDL_Init` false, section 9) | the program's own value, status 0 | -- (Cocoa succeeds) | -- | -- |
 | SIGTERM while SDL runs (`sdl.bot`, signalled after 1 s) | -- | the process ends normally, status 0: SDL's handler (installed by `SDL_INIT_EVENTS`, `src/events/SDL_quit.c`) made it a quit event, which the program polled | -- | -- |
-| SIGTERM / SIGINT in a 5 s C call, no SDL (`sleep.bot`) | PENDING-RUN3 | PENDING-RUN3 | -- | -- |
+| SIGTERM / SIGINT in a 5 s C call, no SDL (`sleep.bot`, signalled after 1 s) | killed by the signal (status -15 / -2, a shell's 143 / 130) after about 1 s; no line, no result | the same | -- | -- |
 
 Every line, file and status is the same on every thread: the reporting is
 `aot::run`'s body, which candidate A runs unchanged. Clean SDL shutdown is
@@ -1027,7 +1027,9 @@ process at all -- the checker requires every one handled (UNHANDLED-ERROR),
 which `errors.bot` first ran into. Signals: the runtime installs handlers
 for SIGSEGV and SIGBUS only (the guard) and ignores SIGPIPE
 (`rust_process_setup`), so SIGTERM and SIGINT keep their dispositions on
-either thread -- until SDL's own handler replaces them.
+either thread: a process blocked in C dies by the signal on the worker and
+on the main thread alike (run 3) -- until SDL's own handler replaces them
+and makes the signal a quit event the program polls.
 
 One difference the experiment introduces **[Linux; code]**: a Rust panic.
 On the worker a panic is caught by `join` and reported "native executable
@@ -1491,7 +1493,7 @@ JSON, the summary, a log per case and per build, the window captures),
 | 40824303902, 40824764646 | 84a3c7d5, 2679fc8e | cancelled while queued (superseded by fixes pushed before they started) |
 | [40825370442](https://github.com/mwagner-webdev/botlish/actions/runs/40825370442) | a5c6ca45 | **run 1**: success; 130 cases and 5 self-tests, 9 not as predicted -- the two refused LC_MAIN sizes and three 8 MiB main-stack depths and their four dependent rows, which became the predictions of run 2; `results/macos-aarch64/run-40825370442.log` |
 | [40827366250](https://github.com/mwagner-webdev/botlish/actions/runs/40827366250) | 0ef97fd9 | **run 2**: success; 156 cases and 5 self-tests, all as predicted; process semantics, the pump's cost, GC-stress timings; `results/macos-aarch64/run-40827366250.log` |
-| [40828677344](https://github.com/mwagner-webdev/botlish/actions/runs/40828677344) | 7e5e2bdf | **run 3**: PENDING-RUN3 |
+| [40828677344](https://github.com/mwagner-webdev/botlish/actions/runs/40828677344) | 7e5e2bdf | **run 3**: success; 159 cases and 5 self-tests, all as predicted, every case of run 2 in the same class; SIGTERM and SIGINT during a C call on both threads; `results/macos-aarch64/run-40828677344.log` |
 
 `tests (macos arm64)` runs of this branch (40824303861, 40824764669,
 40825370455, 40827366242, 40828677450) were cancelled to free the
