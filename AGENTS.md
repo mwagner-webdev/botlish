@@ -1760,6 +1760,62 @@ with `CI-Tests: darwin-io.test ...`) the darwin-io tests themselves.
 `bench/darwin-io.tcl` (tier item `darwin-io-bench`) is the performance
 report.
 
+## Paths and the synchronous filesystem
+
+Paths have two layers (WINDOWS-X86-64-MILESTONE-7.md): textual paths a
+program writes (`std::linux::path::LinuxPath`, `std::windows::path::WindowsPath`,
+`std::darwin::path::DarwinPath`: refinements of str, syntax only) and native
+paths the system takes and returns (`std::PLATFORM::fs::NativePath`: Linux and
+macOS bytes through `std::io::bytepath`, Windows UTF-16 code units). The
+portable layer is `std::io::fs` (FileError, OpenMode, EntryKind, the eager
+trait FilePath); the platform layers are `std::linux::fs` (raw syscalls),
+`std::windows::fs` (kernel32's wide functions) and `std::darwin::fs`
+(libSystem). Keep it so:
+
+* Never decode a native name lossily into a path: text from a native path is
+  strict (`text`, else `std::io::path::NotText`), `display` is for people
+  and never a path, and a portable listing fails with NotText rather than
+  skip or misname an entry (the experiments: a lossy name opened another
+  file). A native path is no `std::io::path::Path`.
+* The path's type selects the filesystem: a witness's FilePath operations
+  call its platform module, whose functions require its context; never
+  select a filesystem at run time, add a dynamic dispatch, a fallback, or a
+  context trait that chooses by installation.
+* Windows paths are Win32's syntax (`PathKind`; one join for text and
+  native paths): a bare drive designator joins without a separator, a
+  verbatim path takes no `/`, `.`, `..` or empty component, any other no
+  component ending with a period or a space; nothing is normalized and no
+  filesystem observed. Every Win32 call is a wide function; never the ANSI
+  code page, the C runtime or a POSIX layer.
+* A File is opaque and affine (Windows: its HANDLE; Linux and macOS: a
+  `std::io::fs::Owner`, the affine token only the standard library makes:
+  the syscall side never names `std::ffi::c`); a failed read or write
+  closes it, and the whole-file and directory operations close on every
+  path. Ownership is not
+  cleanup: never claim RAII. Short reads and writes are ordinary; completion
+  continues after what the system reports, never restarts; no retry, no
+  durability claim.
+* Every failure is `FileError {reason, code}` with the system's code read
+  right after the failed call (errno; `__error()`; GetLastError before
+  any other call). Validation failures stay `NotAPath`.
+* The Win32 and libSystem declarations are `private`; helpers of the
+  platform modules are `private`; `of_valid_text` is an internal member.
+* No watching, asynchronous I/O, event loop, metadata, links or renaming
+  here (`fs-no-watchers`).
+
+If you change any of that, or `std::abi::bytes::join`, `slice` or
+`decode_utf8`, or the Linux path syscalls, run `tests/filesystem.test` (its
+Windows and macOS tests run on their hosts: the Windows workflow's smoke
+and GC-stress steps, the macOS acceptance tier), `tests/linux-path.test`,
+`tests/portable-io.test`, `tests/darwin-io.test`, `tests/windows-io.test`,
+`tests/abi-bytes.test`, `audit/filesystem/tools/fuzz.tcl` (several seeds,
+once with `-gc-stress 1`) and `audit/filesystem/tools/mutate.tcl` (every
+mutant in its `mutants.txt` that applies to the host must still apply and
+be killed: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule; the `%% windows-x86_64` ones on
+Windows, the tier item `filesystem-mutants`), and the warning gate.
+`bench/filesystem.tcl` regenerates the performance table.
+
 ## Affine values
 
 Affinity (AFFINE-VALUES.md) is a compositional property of a value's type:

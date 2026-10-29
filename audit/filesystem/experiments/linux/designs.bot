@@ -1,0 +1,104 @@
+# designs.bot -- the path-representation experiment on Linux
+# (WINDOWS-X86-64-MILESTONE-7.md, section 3). For every entry of the
+# directory argv()[1] -- names as the kernel returns them, dirents.bot -- it
+# tries the three designs' ways of naming the entry again and opening it:
+#
+#   A  textual only, strict: the name's String (std::abi::bytes::decode_utf8),
+#      or no name at all
+#   A' textual only, lossy: every byte that is not part of a UTF-8 sequence
+#      replaced by U+FFFD (what a "never fail" textual listing must do)
+#   B/C native: the kernel's bytes, joined to the directory's bytes
+#
+# and reports, per entry, [the native name, A's text or "-", what opening A's
+# text read, A''s text, what opening A''s text read, what opening the native
+# path read]. Each fixture file holds its own index, so a read says which
+# file a name reached.
+direct module
+
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::list
+import std::str
+import type std::byte::Byte
+import dirents
+
+fn text_of(bytes: List[Byte]) -> str errors InvalidUtf8:
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes))
+
+# How many bytes the UTF-8 sequence led by B claims (0: B leads none).
+fn claimed(b: Byte) -> int:
+    if b < 128:
+        return 1
+    if b >= 194 and b <= 223:
+        return 2
+    if b >= 224 and b <= 239:
+        return 3
+    if b >= 240 and b <= 244:
+        return 4
+    0
+
+# BYTES[START, START + N), or [] when that runs past the end.
+fn slice(bytes: List[Byte], start: int, n: int) -> List[Byte] errors IndexNotFound:
+    if start < 0 or start + n > bytes.length():
+        return []
+    loop i from start to start + n:
+        bytes.at(i)
+
+# A lossy decoding of BYTES[POS..]: valid sequences as their characters,
+# every other byte as U+FFFD.
+fn lossy_from(bytes: List[Byte], pos: int) -> str errors IndexNotFound:
+    if pos >= bytes.length() or pos < 0:
+        return ""
+    n = claimed(bytes.at(pos))
+    piece = if n == 0:
+        ""
+    else:
+        text_of(slice(bytes, pos, n)):
+            on InvalidUtf8:
+                ""
+    if piece.length() == 0:
+        return std::str::concat("�", lossy_from(bytes, pos + 1))
+    std::str::concat(piece, lossy_from(bytes, pos + n))
+
+fn join(dir: List[Byte], name: List[Byte]) -> List[Byte] errors IndexNotFound:
+    with_slash = dir.append(std::byte::from_int(47))
+    loop i from 0 to with_slash.length() + name.length():
+        if i < with_slash.length():
+            with_slash.at(i)
+        else:
+            name.at(i - with_slash.length())
+
+fn shown(data: std::abi::bytes::Bytes) -> str:
+    text_of_bytes = std::abi::bytes::decode_utf8(data):
+        on InvalidUtf8:
+            return "<bytes>"
+    if text_of_bytes.length() == 0:
+        return "<nothing>"
+    text_of_bytes
+
+fn row(dir: List[Byte], entry: dirents::Raw) -> List[str] errors IndexNotFound:
+    strict = text_of(entry.name):
+        on InvalidUtf8:
+            "-"
+    strict_read = if strict == "-":
+        "<no name>"
+    else:
+        shown(dirents::contents(join(dir, strict.encode_utf8())))
+    lossy = lossy_from(entry.name, 0)
+    [strict, strict_read, lossy, shown(dirents::contents(join(dir, lossy.encode_utf8()))), shown(dirents::contents(join(dir, entry.name)))]
+
+fn main() -> List[List[str]] errors IndexNotFound, InvalidArgumentEncoding:
+    args = argv()
+    dir = args.at(1).encode_utf8()
+    entries = dirents::list(dir)
+    loop entry in entries:
+        if entry.name == [std::byte::from_int(46)] or entry.name == [std::byte::from_int(46), std::byte::from_int(46)]:
+            continue
+        row(dir, entry)
+
+main():
+    on IndexNotFound:
+        []
+    on InvalidArgumentEncoding:
+        []

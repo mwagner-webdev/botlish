@@ -2127,6 +2127,68 @@ std::abi::bytes::from_list or, as a method, receiver.from_list(...).
 The Bytes holding exactly the given bytes, in order. The empty List gives
 the empty Bytes (length 0).
 
+@topic stdlib.std::abi::bytes::join
+title: std::abi::bytes::join -- Function of module std::abi::bytes
+summary: The bytes of every Bytes of PARTS, in order, as one Bytes
+index: stdlib
+symbol: std::abi::bytes::join
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn join(parts: List[Bytes]) -> Bytes:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::join or, as a method, receiver.join(...).
+
+== DESCRIPTION
+The bytes of every Bytes of PARTS, in order, as one Bytes: one copy of their
+total length (WINDOWS-X86-64-MILESTONE-7.md: a file read in chunks becomes
+one value). The empty List, or one of empty parts, gives the empty Bytes.
+
+@topic stdlib.std::abi::bytes::slice
+title: std::abi::bytes::slice -- Function of module std::abi::bytes
+summary: DATA's bytes START..END-1, as a new Bytes (WINDOWS-X86-64-MILESTONE-7.md
+index: stdlib
+symbol: std::abi::bytes::slice
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn slice(data: Bytes, start: int, end: int) -> Bytes errors LowerUnderrun, UpperOverrun:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::slice or, as a method, receiver.slice(...).
+
+== DESCRIPTION
+DATA's bytes START..END-1, as a new Bytes (WINDOWS-X86-64-MILESTONE-7.md:
+the bytes a short write left unwritten): the one slice rule of
+std::str::substring -- LowerUnderrun or UpperOverrun unless 0 <= START <=
+END <= length(DATA). An empty slice is the empty Bytes.
+
+@topic stdlib.std::abi::bytes::decode_utf8
+title: std::abi::bytes::decode_utf8 -- Function of module std::abi::bytes
+summary: The String whose UTF-8 encoding is DATA
+index: stdlib
+symbol: std::abi::bytes::decode_utf8
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn decode_utf8(data: Bytes) -> str errors InvalidUtf8:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::decode_utf8 or, as a method, receiver.decode_utf8(...).
+
+== DESCRIPTION
+The String whose UTF-8 encoding is DATA: std::str::encode_utf8's inverse
+(WINDOWS-X86-64-MILESTONE-7.md). Strict -- an overlong form, an encoded
+surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
+U+10FFFF, a truncated sequence or a stray continuation byte is the declared
+error InvalidUtf8, never a replacement character -- so
+decode_utf8(from_list(s.encode_utf8())) == s for every String s. A 0 byte is
+the character U+0000. No byte-order mark is skipped, nothing normalized.
+
 @topic stdlib.std::abi::bytes::length
 title: std::abi::bytes::length -- Function of module std::abi::bytes
 summary: The exact byte count of DATA, as the ABI size domain.
@@ -2368,9 +2430,8 @@ is given and does NOT copy it: a raw-layer caller must hand it a storage
 nothing else observes (std::linux::read does, with `detach`). That is the
 raw layer's sharp edge.
 
-Not here, deliberately: slicing, indexing, concatenation, capacity,
-resizing, NUL-terminated strings (CString), and any retained-pointer or
-lifetime story.
+Not here, deliberately: indexing, capacity, resizing, NUL-terminated strings
+(CString), and any retained-pointer or lifetime story.
 
 == SOURCE
 stdlib/abi/bytes.bot (import std::abi::bytes).
@@ -2378,14 +2439,17 @@ stdlib/abi/bytes.bot (import std::abi::bytes).
 == MEMBERS
     std::abi::bytes::Bytes         opaque struct
     std::abi::bytes::MutableBytes  opaque struct
+    std::abi::bytes::decode_utf8   function -- The String whose UTF-8 encod...
     std::abi::bytes::detach        function -- DATA itself, as a value (a l...
     std::abi::bytes::freeze        function -- An immutable snapshot of all...
     std::abi::bytes::freeze_prefix function -- An immutable snapshot of the...
     std::abi::bytes::from_bytes    function -- An independent writable copy...
     std::abi::bytes::from_list     function -- The Bytes holding exactly th...
+    std::abi::bytes::join          function -- The bytes of every Bytes of ...
     std::abi::bytes::length        function -- The exact byte count of DATA...
     std::abi::bytes::mutable_length function -- The exact byte count of DATA
     std::abi::bytes::replace       function -- DATA with the byte at INDEX ...
+    std::abi::bytes::slice         function -- DATA's bytes START..END-1, a...
     std::abi::bytes::zeroed        function -- A MutableBytes of LENGTH zer...
 
 Each member is a topic: -help NAME (e.g. -help std::abi::bytes::Bytes).
@@ -4450,6 +4514,50 @@ std::byte_store::from_list([]).byte_count()
 @value 0
 @end
 
+@topic stdlib.std::byte_store::decode_utf8
+title: std::byte_store::decode_utf8 -- intrinsic of namespace std::byte_store
+summary: The String whose UTF-8 encoding is a byte storage's bytes, or the declared error InvalidUtf8.
+index: stdlib
+symbol: std::byte_store::decode_utf8
+keywords: decode utf-8; bytes to string; utf8 decode; text from bytes; InvalidUtf8
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::decode_utf8 stdlib.std::str::encode_utf8
+
+== SIGNATURE
+    std::byte_store::decode_utf8(any) -> str
+
+== ERRORS
+    InvalidUtf8
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::decode_utf8. Method syntax:
+receiver.decode_utf8(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::decode_utf8, which is what programs call
+(it takes a std::abi::bytes::Bytes). Strict: an overlong form, an encoded
+surrogate (WTF-8's form of an unpaired UTF-16 surrogate), a value above
+U+10FFFF, a truncated sequence or a stray continuation byte is the declared
+error InvalidUtf8, never a replacement character. A 0 byte is U+0000.
+WINDOWS-X86-64-MILESTONE-7.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+std::byte_store::from_list("hé".encode_utf8()).decode_utf8():
+    on InvalidUtf8:
+        "not text"
+@value "hé"
+@end
+
 @topic stdlib.std::byte_store::from_list
 title: std::byte_store::from_list -- intrinsic of namespace std::byte_store
 summary: A new immutable byte storage holding exactly the given byte values, in order; every element must be an Int in 0..255.
@@ -4488,6 +4596,91 @@ s.byte_count()
 @value 3
 @end
 
+@topic stdlib.std::byte_store::join
+title: std::byte_store::join -- intrinsic of namespace std::byte_store
+summary: One new immutable byte storage holding the bytes of every storage of a List, in order.
+index: stdlib
+symbol: std::byte_store::join
+keywords: concatenate bytes; join bytes; append bytes; combine byte buffers
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::join
+
+== SIGNATURE
+    std::byte_store::join(list) -> any
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::join. Method syntax: receiver.join(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::join, which is what programs call (it
+takes a List[std::abi::bytes::Bytes]). One copy of the total length; the
+empty List, or only empty parts, gives the empty storage. An element that
+is not a byte storage is the TYPE error when the call runs. It reads no
+byte into a Botlish value. WINDOWS-X86-64-MILESTONE-7.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+a = std::byte_store::from_list("ab".encode_utf8())
+std::byte_store::join([a, a]).byte_count()
+@value 4
+@end
+
+@topic stdlib.std::byte_store::slice
+title: std::byte_store::slice -- intrinsic of namespace std::byte_store
+summary: The byte storage of a storage's bytes from index start up to but not including end; an invalid range fails with LowerUnderrun or UpperOverrun.
+index: stdlib
+symbol: std::byte_store::slice
+keywords: byte slice; part of bytes; rest of a buffer; LowerUnderrun; UpperOverrun
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::slice stdlib.std::byte_store::join proof.slices
+
+== SIGNATURE
+    std::byte_store::slice(any, int, int) -> any
+
+== ERRORS
+    LowerUnderrun, UpperOverrun
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::slice. Method syntax: receiver.slice(...) is the
+same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::slice, which is what programs call (it
+takes and returns a std::abi::bytes::Bytes). The range is half-open over
+byte indices, valid exactly when 0 <= start <= end <= the byte count, with
+std::str::substring's rule for the two errors: start below 0, or end below
+start, is LowerUnderrun; end past the count is UpperOverrun. It copies the
+range into a new storage and reads no byte into a Botlish value. The file
+writers use it to continue after a short write
+(WINDOWS-X86-64-MILESTONE-7.md).
+
+== EXAMPLES
+@example accept
+import std::byte_store
+import std::str
+
+part = std::byte_store::from_list("abcdef".encode_utf8()).slice(1, 4):
+    on LowerUnderrun:
+        std::byte_store::from_list([])
+    on UpperOverrun:
+        std::byte_store::from_list([])
+part.byte_count()
+@value 3
+@end
+
 @topic stdlib.module.std::byte_store
 title: std::byte_store -- standard namespace
 summary: The immutable byte storage behind std::abi::bytes::Bytes: build one from a List of bytes and measure it (a substrate: use std::abi::bytes).
@@ -4501,7 +4694,10 @@ Compiler intrinsics only, no module file (import std::byte_store).
 
 == MEMBERS
     std::byte_store::byte_count    intrinsic -- The exact number of bytes o...
+    std::byte_store::decode_utf8   intrinsic -- The String whose UTF-8 enco...
     std::byte_store::from_list     intrinsic -- A new immutable byte storag...
+    std::byte_store::join          intrinsic -- One new immutable byte stor...
+    std::byte_store::slice         intrinsic -- The byte storage of a stora...
 
 Each member is a topic: -help NAME (e.g. -help
 std::byte_store::byte_count).
@@ -5429,6 +5625,564 @@ stdlib/darwin.bot (import std::darwin). A direct module
 
 Each member is a topic: -help NAME (e.g. -help std::darwin::Access).
 
+@topic stdlib.std::darwin::fs::NativePath
+title: std::darwin::fs::NativePath -- Opaque struct of module std::darwin::fs
+summary: A Darwin name or path
+index: stdlib
+symbol: std::darwin::fs::NativePath
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    opaque struct NativePath:
+        bytes: List[Byte]
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::NativePath.
+
+== DESCRIPTION
+A Darwin name or path: its bytes, non-empty, without 0.
+
+@topic stdlib.std::darwin::fs::DarwinFS
+title: std::darwin::fs::DarwinFS -- Opaque context struct of module std::darwin::fs
+summary: The filesystem context
+index: stdlib
+symbol: std::darwin::fs::DarwinFS
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    opaque context struct DarwinFS:
+        file_mode: std::ffi::c::UShort
+        directory_mode: std::ffi::c::UShort
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::DarwinFS.
+
+== DESCRIPTION
+The filesystem context: the permission bits of new files and directories
+(before the umask).
+
+@topic stdlib.std::darwin::fs::File
+title: std::darwin::fs::File -- Opaque struct of module std::darwin::fs
+summary: An opened file
+index: stdlib
+symbol: std::darwin::fs::File
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    opaque struct File:
+        fd: std::ffi::c::Int
+        owner: std::io::fs::Owner
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::File.
+
+== DESCRIPTION
+An opened file: its descriptor and its affine token (std::io::fs::Owner).
+
+@topic stdlib.std::darwin::fs::Read
+title: std::darwin::fs::Read -- Struct of module std::darwin::fs
+summary: What one read did
+index: stdlib
+symbol: std::darwin::fs::Read
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    struct Read:
+        file: File
+        data: std::abi::bytes::Bytes
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::Read.
+
+== DESCRIPTION
+What one read did: the File back, and the bytes read (none at the end of the
+file).
+
+@topic stdlib.std::darwin::fs::Written
+title: std::darwin::fs::Written -- Struct of module std::darwin::fs
+summary: What one write did
+index: stdlib
+symbol: std::darwin::fs::Written
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    struct Written:
+        file: File
+        count: int
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::Written.
+
+== DESCRIPTION
+What one write did: the File back, and how many bytes were written.
+
+@topic stdlib.std::darwin::fs::Entry
+title: std::darwin::fs::Entry -- Struct of module std::darwin::fs
+summary: A directory entry
+index: stdlib
+symbol: std::darwin::fs::Entry
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    struct Entry:
+        name: NativePath
+        kind: std::io::fs::EntryKind
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::Entry.
+
+== DESCRIPTION
+A directory entry: its native name (one component) and its kind.
+
+@topic stdlib.std::darwin::fs::create
+title: std::darwin::fs::create -- Function of module std::darwin::fs
+summary: The standard filesystem context
+index: stdlib
+symbol: std::darwin::fs::create
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn create() -> DarwinFS:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::create or, as a method, receiver.create(...).
+
+== DESCRIPTION
+The standard filesystem context: new files 0666, new directories 0777
+(before the umask). `with context std::darwin::fs::create()` installs it.
+
+@topic stdlib.std::darwin::fs::from_bytes
+title: std::darwin::fs::from_bytes -- Function of module std::darwin::fs
+summary: The native path of BYTES
+index: stdlib
+symbol: std::darwin::fs::from_bytes
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn from_bytes(bytes: List[Byte]) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::from_bytes or, as a method, receiver.from_bytes(...).
+
+== DESCRIPTION
+The native path of BYTES; std::io::path::NotAPath when BYTES is empty or
+holds a 0.
+
+@topic stdlib.std::darwin::fs::from_text
+title: std::darwin::fs::from_text -- Function of module std::darwin::fs
+summary: The native path of TEXT
+index: stdlib
+symbol: std::darwin::fs::from_text
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn from_text(text: str) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::from_text or, as a method, receiver.from_text(...).
+
+== DESCRIPTION
+The native path of TEXT: its UTF-8 bytes; std::io::path::NotAPath when TEXT
+is empty or holds U+0000.
+
+@topic stdlib.std::darwin::fs::bytes
+title: std::darwin::fs::bytes -- Function of module std::darwin::fs
+summary: PATH's bytes, exactly.
+index: stdlib
+symbol: std::darwin::fs::bytes
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn bytes(path: NativePath) -> List[Byte]:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::bytes or, as a method, receiver.bytes(...).
+
+== DESCRIPTION
+PATH's bytes, exactly.
+
+@topic stdlib.std::darwin::fs::text
+title: std::darwin::fs::text -- Function of module std::darwin::fs
+summary: PATH's String
+index: stdlib
+symbol: std::darwin::fs::text
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn text(path: NativePath) -> str errors std::io::path::NotText:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::text or, as a method, receiver.text(...).
+
+== DESCRIPTION
+PATH's String; std::io::path::NotText when its bytes are not UTF-8.
+
+@topic stdlib.std::darwin::fs::display
+title: std::darwin::fs::display -- Function of module std::darwin::fs
+summary: PATH as text for people (U+FFFD for every byte of no UTF-8 sequence)
+index: stdlib
+symbol: std::darwin::fs::display
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn display(path: NativePath) -> str:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::display or, as a method, receiver.display(...).
+
+== DESCRIPTION
+PATH as text for people (U+FFFD for every byte of no UTF-8 sequence): lossy,
+never a path.
+
+@topic stdlib.std::darwin::fs::join
+title: std::darwin::fs::join -- Function of module std::darwin::fs
+summary: PATH joined with the relative native NAME
+index: stdlib
+symbol: std::darwin::fs::join
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn join(path: NativePath, name: NativePath) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::join or, as a method, receiver.join(...).
+
+== DESCRIPTION
+PATH joined with the relative native NAME: one "/" unless PATH ends with
+one; std::io::path::NotAPath for an absolute NAME.
+
+@topic stdlib.std::darwin::fs::concat
+title: std::darwin::fs::concat -- Function of module std::darwin::fs
+summary: PATH joined with the textual relative COMPONENT (its UTF-8 bytes).
+index: stdlib
+symbol: std::darwin::fs::concat
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn concat(path: NativePath, component: str) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::concat or, as a method, receiver.concat(...).
+
+== DESCRIPTION
+PATH joined with the textual relative COMPONENT (its UTF-8 bytes).
+
+@topic stdlib.std::darwin::fs::open
+title: std::darwin::fs::open -- Function of module std::darwin::fs
+summary: Opens PATH as MODE says, a new file with the context's file mode
+index: stdlib
+symbol: std::darwin::fs::open
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: DarwinFS) -> File errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::open or, as a method, receiver.open(...).
+
+== DESCRIPTION
+Opens PATH as MODE says, a new file with the context's file mode; the File
+is the caller's to close. Symbolic links are followed.
+
+@topic stdlib.std::darwin::fs::read
+title: std::darwin::fs::read -- Function of module std::darwin::fs
+summary: One read(2) of at most COUNT bytes
+index: stdlib
+symbol: std::darwin::fs::read
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn read(file: File, count: std::io::fs::ReadSize, context fs: DarwinFS) -> Read errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::read or, as a method, receiver.read(...).
+
+== DESCRIPTION
+One read(2) of at most COUNT bytes: the File back and the bytes read. A
+failure closes FILE and fails.
+
+@topic stdlib.std::darwin::fs::read_all
+title: std::darwin::fs::read_all -- Function of module std::darwin::fs
+summary: Reads FILE to the end
+index: stdlib
+symbol: std::darwin::fs::read_all
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn read_all(file: File, context fs: DarwinFS) -> Read errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::read_all or, as a method, receiver.read_all(...).
+
+== DESCRIPTION
+Reads FILE to the end: the File back and every byte from its offset on.
+
+@topic stdlib.std::darwin::fs::write
+title: std::darwin::fs::write -- Function of module std::darwin::fs
+summary: One write(2) of DATA
+index: stdlib
+symbol: std::darwin::fs::write
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn write(file: File, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> Written errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::write or, as a method, receiver.write(...).
+
+== DESCRIPTION
+One write(2) of DATA: the File back and how many bytes were written.
+
+@topic stdlib.std::darwin::fs::write_all
+title: std::darwin::fs::write_all -- Function of module std::darwin::fs
+summary: Writes all of DATA to FILE
+index: stdlib
+symbol: std::darwin::fs::write_all
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn write_all(file: File, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> File errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::write_all or, as a method, receiver.write_all(...).
+
+== DESCRIPTION
+Writes all of DATA to FILE: the File back.
+
+@topic stdlib.std::darwin::fs::close
+title: std::darwin::fs::close -- Function of module std::darwin::fs
+summary: Closes FILE
+index: stdlib
+symbol: std::darwin::fs::close
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn close(file: File, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::close or, as a method, receiver.close(...).
+
+== DESCRIPTION
+Closes FILE; a failure is the FileError, never retried.
+
+@topic stdlib.std::darwin::fs::read_file
+title: std::darwin::fs::read_file -- Function of module std::darwin::fs
+summary: Every byte of the file PATH.
+index: stdlib
+symbol: std::darwin::fs::read_file
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn read_file(path: NativePath, context fs: DarwinFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::read_file or, as a method, receiver.read_file(...).
+
+== DESCRIPTION
+Every byte of the file PATH.
+
+@topic stdlib.std::darwin::fs::write_file
+title: std::darwin::fs::write_file -- Function of module std::darwin::fs
+summary: The file PATH holds exactly DATA
+index: stdlib
+symbol: std::darwin::fs::write_file
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn write_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::write_file or, as a method, receiver.write_file(...).
+
+== DESCRIPTION
+The file PATH holds exactly DATA: created, or truncated and rewritten.
+
+@topic stdlib.std::darwin::fs::create_file
+title: std::darwin::fs::create_file -- Function of module std::darwin::fs
+summary: A new file PATH holding DATA
+index: stdlib
+symbol: std::darwin::fs::create_file
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn create_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::create_file or, as a method, receiver.create_file(...).
+
+== DESCRIPTION
+A new file PATH holding DATA; AlreadyExists when the name exists.
+
+@topic stdlib.std::darwin::fs::entries
+title: std::darwin::fs::entries -- Function of module std::darwin::fs
+summary: Every entry of the directory DIR but "." and "..", with its native name and its kind.
+index: stdlib
+symbol: std::darwin::fs::entries
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn entries(dir: NativePath, context fs: DarwinFS) -> List[Entry] errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::entries or, as a method, receiver.entries(...).
+
+== DESCRIPTION
+Every entry of the directory DIR but "." and "..", with its native name and
+its kind. The stream (opendir) is closed here, also when listing fails.
+
+@topic stdlib.std::darwin::fs::create_directory
+title: std::darwin::fs::create_directory -- Function of module std::darwin::fs
+summary: A new, empty directory PATH (the context's directory mode).
+index: stdlib
+symbol: std::darwin::fs::create_directory
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn create_directory(path: NativePath, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::create_directory or, as a method,
+receiver.create_directory(...).
+
+== DESCRIPTION
+A new, empty directory PATH (the context's directory mode).
+
+@topic stdlib.std::darwin::fs::remove_file
+title: std::darwin::fs::remove_file -- Function of module std::darwin::fs
+summary: Removes the name PATH of anything but a directory
+index: stdlib
+symbol: std::darwin::fs::remove_file
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn remove_file(path: NativePath, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::remove_file or, as a method, receiver.remove_file(...).
+
+== DESCRIPTION
+Removes the name PATH of anything but a directory; IsADirectory for a
+directory (unlink's EPERM on macOS, reinterpreted).
+
+@topic stdlib.std::darwin::fs::remove_directory
+title: std::darwin::fs::remove_directory -- Function of module std::darwin::fs
+summary: Removes the empty directory PATH.
+index: stdlib
+symbol: std::darwin::fs::remove_directory
+related: stdlib.module.std::darwin::fs
+
+== DECLARATION
+    fn remove_directory(path: NativePath, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/fs.bot: import std::darwin::fs, then write
+std::darwin::fs::remove_directory or, as a method,
+receiver.remove_directory(...).
+
+== DESCRIPTION
+Removes the empty directory PATH.
+
+@topic stdlib.module.std::darwin::fs
+title: std::darwin::fs -- standard namespace
+summary: MacOS's native paths and its synchronous filesystem, through libSystem's C functions (WINDOWS-X86-64-MILESTONE-7.md.
+index: stdlib
+symbol: std::darwin::fs
+
+== DESCRIPTION
+  with context std::darwin::fs::create()          install it (entry program)
+
+  std::darwin::fs::open(path, mode), read(file, count), read_all(file),
+  write(file, data), write_all(file, data), close(file), read_file(path),
+  write_file(path, data), create_file(path, data), entries(dir),
+  create_directory(path), remove_file(path), remove_directory(path)
+
+std::linux::fs's sibling, with Darwin's boundary: libSystem's open, read,
+write, close, mkdir, unlink, rmdir, opendir, readdir and closedir by their
+SDK prototypes (no syscall: Darwin's kernel interface is private), each
+failure -1 and errno, read through __error() right after the call (a native
+view, the module stdlib/darwin.bot reads errno with). The declarations are
+private here, and every function that makes a C call requires DarwinFS: the
+errno view is a direct edge (std::binary::native) which only a context of
+this module mediates, and the path calls are this module's design, as
+std::windows::fs's are.
+
+Native paths are bytes (std::io::bytepath's syntax, which std::linux::fs's
+share): a std::darwin::path::DarwinPath has exactly one NativePath, its
+UTF-8 bytes. Unlike Linux, APFS stores names as UTF-8 and refuses any other
+bytes (EILSEQ: InvalidName), and compares names without normalization
+differences and, by default, without case: equality here is spelling, never
+file identity.
+
+Ownership, completion and failures are std::linux::fs's: a File (its
+descriptor and its affine token, std::io::fs::Owner) is affine and must be
+closed; a failed read or write closes it; read_all, write_all and the
+whole-file operations complete; no retry (EINTR included), no durability
+claim. unlink(2) of a directory is EPERM on macOS: when the name then opens
+as a directory (opendir) the reason is IsADirectory, the code still 1.
+
+Operations on a File require DarwinFS: errno is read through the module's
+mediated view.
+
+== SOURCE
+stdlib/darwin/fs.bot (import std::darwin::fs).
+
+== MEMBERS
+    std::darwin::fs::DarwinFS      opaque context struct -- The filesystem ...
+    std::darwin::fs::Entry         struct -- A directory entry
+    std::darwin::fs::File          opaque struct -- An opened file
+    std::darwin::fs::NativePath    opaque struct -- A Darwin name or path
+    std::darwin::fs::Read          struct -- What one read did
+    std::darwin::fs::Written       struct -- What one write did
+    std::darwin::fs::bytes         function -- PATH's bytes, exactly.
+    std::darwin::fs::close         function -- Closes FILE
+    std::darwin::fs::concat        function -- PATH joined with the textual...
+    std::darwin::fs::create        function -- The standard filesystem context
+    std::darwin::fs::create_directory function -- A new, empty directory PA...
+    std::darwin::fs::create_file   function -- A new file PATH holding DATA
+    std::darwin::fs::display       function -- PATH as text for people (U+F...
+    std::darwin::fs::entries       function -- Every entry of the directory...
+    std::darwin::fs::from_bytes    function -- The native path of BYTES
+    std::darwin::fs::from_text     function -- The native path of TEXT
+    std::darwin::fs::join          function -- PATH joined with the relativ...
+    std::darwin::fs::open          function -- Opens PATH as MODE says, a n...
+    std::darwin::fs::read          function -- One read(2) of at most COUNT...
+    std::darwin::fs::read_all      function -- Reads FILE to the end
+    std::darwin::fs::read_file     function -- Every byte of the file PATH.
+    std::darwin::fs::remove_directory function -- Removes the empty directo...
+    std::darwin::fs::remove_file   function -- Removes the name PATH of any...
+    std::darwin::fs::text          function -- PATH's String
+    std::darwin::fs::write         function -- One write(2) of DATA
+    std::darwin::fs::write_all     function -- Writes all of DATA to FILE
+    std::darwin::fs::write_file    function -- The file PATH holds exactly ...
+
+Each member is a topic: -help NAME (e.g. -help std::darwin::fs::DarwinFS).
+
 @topic stdlib.std::darwin::io::FileDescriptor
 title: std::darwin::io::FileDescriptor -- Opaque struct of module std::darwin::io
 summary: A Darwin file-descriptor token minted by this module.
@@ -5806,6 +6560,145 @@ nothing is normalized and no filesystem is observed. Fails with
 std::io::path::NotAPath for any other COMPONENT. The result is a DarwinPath
 by validation, the ordinary owner proof.
 
+@topic stdlib.std::darwin::path::native
+title: std::darwin::path::native -- Function of module std::darwin::path
+summary: PATH's native path
+index: stdlib
+symbol: std::darwin::path::native
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn native(path: DarwinPath) -> std::darwin::fs::NativePath:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::native or, as a method, receiver.native(...).
+
+== DESCRIPTION
+PATH's native path: its UTF-8 bytes, exactly (no normalization).
+
+@topic stdlib.std::darwin::path::read_file
+title: std::darwin::path::read_file -- Function of module std::darwin::path
+summary: Every byte of the file PATH.
+index: stdlib
+symbol: std::darwin::path::read_file
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn read_file(path: DarwinPath) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::read_file or, as a method, receiver.read_file(...).
+
+== DESCRIPTION
+Every byte of the file PATH.
+
+@topic stdlib.std::darwin::path::write_file
+title: std::darwin::path::write_file -- Function of module std::darwin::path
+summary: The file PATH holds exactly DATA
+index: stdlib
+symbol: std::darwin::path::write_file
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn write_file(path: DarwinPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::write_file or, as a method, receiver.write_file(...).
+
+== DESCRIPTION
+The file PATH holds exactly DATA: created, or truncated and rewritten.
+
+@topic stdlib.std::darwin::path::create_file
+title: std::darwin::path::create_file -- Function of module std::darwin::path
+summary: A new file PATH holding DATA
+index: stdlib
+symbol: std::darwin::path::create_file
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn create_file(path: DarwinPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::create_file or, as a method, receiver.create_file(...).
+
+== DESCRIPTION
+A new file PATH holding DATA; AlreadyExists when the name exists.
+
+@topic stdlib.std::darwin::path::entries
+title: std::darwin::path::entries -- Function of module std::darwin::path
+summary: Every entry of the directory PATH but "." and "..", with its textual name
+index: stdlib
+symbol: std::darwin::path::entries
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn entries(path: DarwinPath) -> List[std::io::fs::Entry] errors std::io::fs::FileError, std::io::path::NotText:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::entries or, as a method, receiver.entries(...).
+
+== DESCRIPTION
+Every entry of the directory PATH but "." and "..", with its textual name;
+std::io::path::NotText for a name that is not UTF-8.
+
+@topic stdlib.std::darwin::path::create_directory
+title: std::darwin::path::create_directory -- Function of module std::darwin::path
+summary: A new, empty directory PATH.
+index: stdlib
+symbol: std::darwin::path::create_directory
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn create_directory(path: DarwinPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::create_directory or, as a method,
+receiver.create_directory(...).
+
+== DESCRIPTION
+A new, empty directory PATH.
+
+@topic stdlib.std::darwin::path::remove_file
+title: std::darwin::path::remove_file -- Function of module std::darwin::path
+summary: Removes the name PATH of anything but a directory.
+index: stdlib
+symbol: std::darwin::path::remove_file
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn remove_file(path: DarwinPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::remove_file or, as a method, receiver.remove_file(...).
+
+== DESCRIPTION
+Removes the name PATH of anything but a directory.
+
+@topic stdlib.std::darwin::path::remove_directory
+title: std::darwin::path::remove_directory -- Function of module std::darwin::path
+summary: Removes the empty directory PATH.
+index: stdlib
+symbol: std::darwin::path::remove_directory
+related: stdlib.module.std::darwin::path
+
+== DECLARATION
+    fn remove_directory(path: DarwinPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/darwin/path.bot: import std::darwin::path, then write
+std::darwin::path::remove_directory or, as a method,
+receiver.remove_directory(...).
+
+== DESCRIPTION
+Removes the empty directory PATH.
+
 @topic stdlib.module.std::darwin::path
 title: std::darwin::path -- standard namespace
 summary: Textual macOS (Darwin) paths (CONTEXT-TRAITS.md, "Paths".
@@ -5844,17 +6737,31 @@ module's own `concat` and `text` (TRAITS.md: the owner's declarations,
 nothing else), so a function over std::io::path::Path specializes to direct
 calls of them.
 
+A DarwinPath is also a std::io::fs::FilePath
+(WINDOWS-X86-64-MILESTONE-7.md): its native path is its UTF-8 bytes
+(`native`), and its filesystem operations below are std::darwin::fs's on
+that native path, which require std::darwin::fs::DarwinFS (so every caller
+does: the requirement is derived).
+
 == SOURCE
 stdlib/darwin/path.bot (import std::darwin::path).
 
 == MEMBERS
     std::darwin::path::DarwinPath  type
     std::darwin::path::concat      function -- PATH joined with COMPONENT
+    std::darwin::path::create_directory function -- A new, empty directory ...
+    std::darwin::path::create_file function -- A new file PATH holding DATA
     std::darwin::path::ends_with_slash? function -- true when TEXT's last c...
+    std::darwin::path::entries     function -- Every entry of the directory...
+    std::darwin::path::native      function -- PATH's native path
     std::darwin::path::nul_free?   function -- true when no character of VA...
+    std::darwin::path::read_file   function -- Every byte of the file PATH.
+    std::darwin::path::remove_directory function -- Removes the empty direc...
+    std::darwin::path::remove_file function -- Removes the name PATH of any...
     std::darwin::path::text        function -- The path's canonical String ...
     std::darwin::path::valid?      function -- true when VALUE is a valid t...
     std::darwin::path::validate    function -- Completes normally only when...
+    std::darwin::path::write_file  function -- The file PATH holds exactly ...
 
 Each member is a topic: -help NAME (e.g. -help
 std::darwin::path::DarwinPath).
@@ -8535,6 +9442,294 @@ first write fails with NATIVE-ONLY. On every backend the program's final
 value is still printed by main.tcl. There is no input, file or
 formatting API here.
 
+@topic stdlib.std::io::fs::Reason
+title: std::io::fs::Reason -- Enum of module std::io::fs
+summary: Why a filesystem operation failed, as far as the platforms agree
+index: stdlib
+symbol: std::io::fs::Reason
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    enum Reason:
+        NotFound,
+        AlreadyExists,
+        PermissionDenied,
+        NotADirectory,
+        IsADirectory,
+        NotEmpty,
+        InvalidName,
+        Busy,
+        ResourceExhausted,
+        Other,
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::Reason.
+
+== DESCRIPTION
+Why a filesystem operation failed, as far as the platforms agree: the native
+code (FileError's `code`) says exactly.
+
+  NotFound            no such file or directory (a component of the path
+                      missing, too)
+  AlreadyExists       the name exists (an exclusive creation)
+  PermissionDenied    the operation is not permitted (permissions, a
+                      read-only filesystem)
+  NotADirectory       a component used as a directory is not one
+  IsADirectory        a file operation named a directory
+  NotEmpty            a directory removal found entries
+  InvalidName         the operating system refuses the name (too long, a
+                      character its filesystem does not allow)
+  Busy                the object is in use in a way the operation conflicts
+                      with (a Windows sharing violation, a busy device)
+  ResourceExhausted   out of space, quota, descriptors or memory
+  Other               anything else
+
+@topic stdlib.std::io::fs::FileError
+title: std::io::fs::FileError -- Error of module std::io::fs
+summary: A filesystem operation the operating system refused or that failed.
+index: stdlib
+symbol: std::io::fs::FileError
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    error FileError:
+        reason: Reason
+        code: int
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::FileError.
+
+== DESCRIPTION
+A filesystem operation the operating system refused or that failed. A path
+that was never a path of the platform is std::io::path::NotAPath instead,
+before any operation runs. REASON is the portable classification; CODE the
+native one, read right after the failed call (Linux's and Darwin's errno,
+Windows' GetLastError), for diagnosis -- its meaning is the platform's.
+
+@topic stdlib.std::io::fs::OpenMode
+title: std::io::fs::OpenMode -- Enum of module std::io::fs
+summary: How a file is opened (the platform modules' open)
+index: stdlib
+symbol: std::io::fs::OpenMode
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    enum OpenMode:
+        Read,
+        Replace,
+        CreateNew,
+        Append,
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::OpenMode.
+
+== DESCRIPTION
+How a file is opened (the platform modules' open):
+
+  Read        reading an existing file (NotFound otherwise)
+  Replace     writing: the file is created, or truncated to nothing when it
+              exists
+  CreateNew   writing a file that did not exist: AlreadyExists when the
+              name exists (never truncating anything)
+  Append      writing at the end: the file is created when it does not
+              exist, and every write appends, whatever else writes it
+
+@topic stdlib.std::io::fs::EntryKind
+title: std::io::fs::EntryKind -- Enum of module std::io::fs
+summary: What a directory entry is, as its listing says (the entry itself, never what a symbolic link names).
+index: stdlib
+symbol: std::io::fs::EntryKind
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    enum EntryKind:
+        File,
+        Directory,
+        SymbolicLink,
+        Other,
+        Unknown,
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::EntryKind.
+
+== DESCRIPTION
+What a directory entry is, as its listing says (the entry itself, never what
+a symbolic link names). Unknown when the filesystem does not say (Linux's
+DT_UNKNOWN).
+
+@topic stdlib.std::io::fs::Entry
+title: std::io::fs::Entry -- Struct of module std::io::fs
+summary: A directory entry with a textual name.
+index: stdlib
+symbol: std::io::fs::Entry
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    struct Entry:
+        name: str
+        kind: EntryKind
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::Entry.
+
+== DESCRIPTION
+A directory entry with a textual name.
+
+@topic stdlib.std::io::fs::ReadSize
+title: std::io::fs::ReadSize -- Type of module std::io::fs
+summary: The number of bytes one read asks for
+index: stdlib
+symbol: std::io::fs::ReadSize
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    type ReadSize = Int in 1..1073741824
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::ReadSize.
+
+== DESCRIPTION
+The number of bytes one read asks for: at least one (so that no bytes is the
+end of the file, never an empty request), at most 2^30.
+
+@topic stdlib.std::io::fs::Owner
+title: std::io::fs::Owner -- Opaque struct of module std::io::fs
+summary: An affine token that owns nothing
+index: stdlib
+symbol: std::io::fs::Owner
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    opaque struct Owner:
+        marker: std::ffi::c::Ptr[std::ffi::c::Void]
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::Owner.
+
+== DESCRIPTION
+An affine token that owns nothing: one word, a null C pointer that no C call
+ever receives. Botlish has no declaration that makes a struct affine
+(AFFINE-VALUES.md: a struct is affine when it holds an affine value), so a
+platform's File that holds no affine value of its own -- Linux's and macOS's
+hold an Int descriptor -- holds an Owner: the File can then be moved but
+never copied (WINDOWS-X86-64-MILESTONE-7.md, "Affine ownership"). Dropping
+it runs nothing. Made only by the standard library (`owner`, an internal
+member).
+
+@topic stdlib.std::io::fs::FilePath
+title: std::io::fs::FilePath -- Trait of module std::io::fs
+summary: A textual path its platform's filesystem can operate on.
+index: stdlib
+symbol: std::io::fs::FilePath
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    trait FilePath:
+        fn concat(path: FilePath, component: str) -> FilePath errors std::io::path::NotAPath
+        fn text(path: FilePath) -> str
+        fn read_file(path: FilePath) -> std::abi::bytes::Bytes errors FileError
+        fn write_file(path: FilePath, data: std::abi::bytes::Bytes) -> unit errors FileError
+        fn create_file(path: FilePath, data: std::abi::bytes::Bytes) -> unit errors FileError
+        fn entries(path: FilePath) -> List[Entry] errors FileError, std::io::path::NotText
+        fn create_directory(path: FilePath) -> unit errors FileError
+        fn remove_file(path: FilePath) -> unit errors FileError
+        fn remove_directory(path: FilePath) -> unit errors FileError
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::FilePath.
+
+== DESCRIPTION
+A textual path its platform's filesystem can operate on.
+
+  concat(path, component)      PATH joined with the relative COMPONENT
+                               (std::io::path::Path's rule)
+  text(path)                   the path's canonical String form
+  read_file(path)              every byte of the file
+  write_file(path, data)       the file holds exactly DATA (created or
+                               replaced)
+  create_file(path, data)      a new file holding DATA (AlreadyExists when
+                               the name exists)
+  entries(path)                the directory's entries but "." and ".."
+  create_directory(path)       a new, empty directory (AlreadyExists when
+                               the name exists)
+  remove_file(path)            removes the name of a file (or link)
+  remove_directory(path)       removes an empty directory
+
+@topic stdlib.module.std::io::fs
+title: std::io::fs -- standard namespace
+summary: The portable synchronous filesystem (WINDOWS-X86-64-MILESTONE-7.md).
+index: stdlib
+symbol: std::io::fs
+
+== DESCRIPTION
+  fn save(dir: std::io::fs::FilePath, data: std::abi::bytes::Bytes) errors std::io::path::NotAPath, std::io::fs::FileError:
+      dir.concat("save.dat").write_file(data)
+
+FilePath is an eager trait (TRAITS.md) of the textual paths whose platform
+can operate on them: std::linux::path::LinuxPath and
+std::windows::path::WindowsPath satisfy it through their own modules'
+functions, so `save` above is specialized per witness and its `write_file`
+compiles to a direct call of the witness's own (for a LinuxPath,
+std::linux::path::write_file), with no wrapper, dispatch or conversion of
+the path to anything but its platform's own native form.
+
+The path's type decides its filesystem. Each witness's operations require
+its own platform's filesystem context -- LinuxPath's
+std::linux::fs::LinuxFS, WindowsPath's std::windows::fs::WindowsFS --
+through the functions they call (CONTEXTS.md: requirements are derived), so
+a program that hands `save` a LinuxPath and installs no LinuxFS is
+MISSING-CONTEXT at compile time, and a WindowsPath never reaches a Linux
+filesystem: compiled for Linux, std::windows is UNSUPPORTED-PLATFORM, and a
+WindowsFS is the only context its operations accept. Nothing selects a
+filesystem at run time, and no installed context changes which function a
+call means.
+
+Portable code receives its paths: the entry program, which installs the
+platform's context, validates the text it starts from as the platform's path
+(std::linux::path::validate, std::windows::path::validate) and passes it on;
+portable code joins components to it (`concat`) and operates on the results.
+
+What is here is what behaves alike on every platform, stated once:
+
+* whole files: read_file (the bytes, of any length, read until the end of
+  the file), write_file (create or replace: the file holds exactly DATA),
+  create_file (DATA in a file that did not exist: AlreadyExists when the
+  name exists), each opening, writing or reading to completion and
+  closing, with no handle visible;
+* directories: entries (every entry but "." and "..", in the order the
+  operating system lists them, with its kind), create_directory,
+  remove_directory (an empty one), remove_file.
+
+Bytes are bytes: no operation applies an encoding, a newline convention or a
+normalization to what it reads or writes. Names are text here: an entry
+whose name has no String (Linux bytes that are not UTF-8, a Windows name
+with an unpaired UTF-16 surrogate) makes `entries` fail with
+std::io::path::NotText rather than be skipped or decoded lossily; the
+platform modules (std::linux::fs::entries, std::windows::fs::entries) list
+every name losslessly as a native path.
+
+Not here (deliberately): handles. An opened file is an affine value of its
+platform's own type (std::linux::fs::File, std::windows::fs::File), and a
+trait requirement cannot return a type that differs by witness: streaming
+reads and writes are the platform modules' (WINDOWS-X86-64-MILESTONE-7.md,
+"Contexts and portable composition"). Nor: metadata, links, renaming,
+permissions, watching, asynchronous I/O.
+
+== SOURCE
+stdlib/io/fs.bot (import std::io::fs).
+
+== MEMBERS
+    std::io::fs::Entry             struct -- A directory entry with a textu...
+    std::io::fs::EntryKind         enum -- What a directory entry is, as it...
+    std::io::fs::FileError         error -- A filesystem operation the oper...
+    std::io::fs::FilePath          trait -- A textual path its platform's f...
+    std::io::fs::OpenMode          enum -- How a file is opened (the platfo...
+    std::io::fs::Owner             opaque struct -- An affine token that ow...
+    std::io::fs::ReadSize          type -- The number of bytes one read ask...
+    std::io::fs::Reason            enum -- Why a filesystem operation faile...
+
+Each member is a topic: -help NAME (e.g. -help std::io::fs::Entry).
+
 @topic stdlib.std::io::path::NotAPath
 title: std::io::path::NotAPath -- Error of module std::io::path
 summary: A String is not a valid path of the kind an operation needs (empty, containing NUL, or -- for a component appended with `concat` -- absolute).
@@ -8553,6 +9748,26 @@ std::io::path::NotAPath.
 A String is not a valid path of the kind an operation needs (empty,
 containing NUL, or -- for a component appended with `concat` -- absolute).
 The one path-validation error: no hierarchy of reasons.
+
+@topic stdlib.std::io::path::NotText
+title: std::io::path::NotText -- Error of module std::io::path
+summary: A native path or name is valid, but has no String
+index: stdlib
+symbol: std::io::path::NotText
+related: stdlib.module.std::io::path
+
+== DECLARATION
+    error NotText
+
+== MODULE
+stdlib/io/path.bot: import std::io::path, then write
+std::io::path::NotText.
+
+== DESCRIPTION
+A native path or name is valid, but has no String: Linux bytes that are not
+UTF-8, a Windows name holding an unpaired UTF-16 surrogate. Never a
+replacement character: the native path keeps the name
+(WINDOWS-X86-64-MILESTONE-7.md).
 
 @topic stdlib.std::io::path::Path
 title: std::io::path::Path -- Trait of module std::io::path
@@ -8638,14 +9853,19 @@ knows none of them.
 A Path is *textual*: `text` is its canonical String form, losslessly (for
 LinuxPath exactly the carrier string), never an escaped or display-only
 rendering; the standard formatting of a portable textual Path should equal
-its `text`. Arbitrary-byte native paths are a different, lower-level
-abstraction.
+its `text`. Native paths -- what an operating system names a location with:
+Linux's bytes, Windows' UTF-16 code units -- are a different, lower-level
+abstraction, each platform's own (std::linux::fs::NativePath,
+std::windows::fs::NativePath): every textual path has one, losslessly, but
+not every native path has a text (NotText). std::io::fs::FilePath is the
+textual paths a filesystem can operate on (WINDOWS-X86-64-MILESTONE-7.md).
 
 == SOURCE
 stdlib/io/path.bot (import std::io::path).
 
 == MEMBERS
     std::io::path::NotAPath        error -- A String is not a valid path of...
+    std::io::path::NotText         error -- A native path or name is valid,...
     std::io::path::Path            trait -- A textual path of some platform...
     std::io::path::concat          function -- PATH joined with COMPONENT (...
     std::io::path::text            function -- PATH's canonical String form...
@@ -8741,6 +9961,166 @@ architecture's transport (std::linux::sys::read).
 * The address is taken and consumed synchronously; the compiler keeps the
   storage alive until the kernel has returned (native/lower.tcl).
 
+@topic stdlib.std::linux::terminator
+title: std::linux::terminator -- Function of module std::linux
+summary: The byte that terminates a C string.
+index: stdlib
+symbol: std::linux::terminator
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn terminator() -> Byte:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::terminator or,
+as a method, receiver.terminator(...).
+
+== DESCRIPTION
+The byte that terminates a C string.
+
+@topic stdlib.std::linux::c_string
+title: std::linux::c_string -- Function of module std::linux
+summary: PATH's bytes and a terminating NUL
+index: stdlib
+symbol: std::linux::c_string
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn c_string(path: List[Byte]) -> std::abi::bytes::Bytes:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::c_string or,
+as a method, receiver.c_string(...).
+
+== DESCRIPTION
+PATH's bytes and a terminating NUL: the C string a path syscall reads.
+
+@topic stdlib.std::linux::openat
+title: std::linux::openat -- Function of module std::linux
+summary: openat(2) of PATH relative to DIRFD (AT_FDCWD, -100, for the working directory) with FLAGS and, when FLAGS create a file, the permission bits MODE ...
+index: stdlib
+symbol: std::linux::openat
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn openat(dirfd: std::abi::I32, path: List[Byte], flags: std::abi::I32, mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::openat or, as
+a method, receiver.openat(...).
+
+== DESCRIPTION
+openat(2) of PATH relative to DIRFD (AT_FDCWD, -100, for the working
+directory) with FLAGS and, when FLAGS create a file, the permission bits
+MODE (before the umask). The new descriptor, or -errno.
+
+@topic stdlib.std::linux::close
+title: std::linux::close -- Function of module std::linux
+summary: close(2) of FD
+index: stdlib
+symbol: std::linux::close
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn close(fd: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::close or, as a
+method, receiver.close(...).
+
+== DESCRIPTION
+close(2) of FD: 0, or -errno. On Linux the descriptor is released even when
+close reports an error (EINTR, EIO): it is never closed twice.
+
+@topic stdlib.std::linux::getdents64
+title: std::linux::getdents64 -- Function of module std::linux
+summary: getdents64(2)
+index: stdlib
+symbol: std::linux::getdents64
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn getdents64(fd: std::abi::I32, data: std::abi::bytes::MutableBytes) -> ReadResult:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::getdents64 or,
+as a method, receiver.getdents64(...).
+
+== DESCRIPTION
+getdents64(2): the next linux_dirent64 records of the directory open on FD,
+into a logical copy of DATA (read's rule): result.result the bytes of
+records written (0 at the end of the directory, -errno on failure),
+result.data the buffer as the kernel left it.
+
+@topic stdlib.std::linux::mkdirat
+title: std::linux::mkdirat -- Function of module std::linux
+summary: mkdirat(2)
+index: stdlib
+symbol: std::linux::mkdirat
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn mkdirat(dirfd: std::abi::I32, path: List[Byte], mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::mkdirat or, as
+a method, receiver.mkdirat(...).
+
+== DESCRIPTION
+mkdirat(2): the directory PATH (relative to DIRFD) with the permission bits
+MODE (before the umask). 0, or -errno.
+
+@topic stdlib.std::linux::unlinkat
+title: std::linux::unlinkat -- Function of module std::linux
+summary: unlinkat(2)
+index: stdlib
+symbol: std::linux::unlinkat
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn unlinkat(dirfd: std::abi::I32, path: List[Byte], flags: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::unlinkat or,
+as a method, receiver.unlinkat(...).
+
+== DESCRIPTION
+unlinkat(2): removes the name PATH (relative to DIRFD); with FLAGS
+AT_REMOVEDIR (512) an empty directory, else any other kind of entry. 0, or
+-errno.
+
+@topic stdlib.std::linux::o_directory
+title: std::linux::o_directory -- Function of module std::linux
+summary: O_DIRECTORY and O_NOFOLLOW for the compilation target's architecture (the open flags arm64 defines differently)
+index: stdlib
+symbol: std::linux::o_directory
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn o_directory() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::o_directory
+or, as a method, receiver.o_directory(...).
+
+== DESCRIPTION
+O_DIRECTORY and O_NOFOLLOW for the compilation target's architecture (the
+open flags arm64 defines differently): std::linux::sys's.
+
+@topic stdlib.std::linux::o_nofollow
+title: std::linux::o_nofollow -- Function of module std::linux
+summary: The function std::linux::o_nofollow of the standard module std::linux.
+index: stdlib
+symbol: std::linux::o_nofollow
+related: stdlib.module.std::linux
+
+== DECLARATION
+    fn o_nofollow() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux.bot: import std::linux, then write std::linux::o_nofollow or,
+as a method, receiver.o_nofollow(...).
+
 @topic stdlib.module.std::linux
 title: std::linux -- standard namespace
 summary: Thin Botlish wrappers over the raw Linux syscall transports: std::linux::write and std::linux::read, one syscall each with the kernel's raw result (a direct module, native only).
@@ -8821,7 +10201,16 @@ it exercises raw authority.
 
 == MEMBERS
     std::linux::ReadResult         struct -- What read(2) did, with both ha...
+    std::linux::c_string           function -- PATH's bytes and a terminati...
+    std::linux::close              function -- close(2) of FD
+    std::linux::getdents64         function -- getdents64(2)
+    std::linux::mkdirat            function -- mkdirat(2)
+    std::linux::o_directory        function -- O_DIRECTORY and O_NOFOLLOW f...
+    std::linux::o_nofollow         function
+    std::linux::openat             function -- openat(2) of PATH relative t...
     std::linux::read               function -- read(2) from descriptor FD i...
+    std::linux::terminator         function -- The byte that terminates a C...
+    std::linux::unlinkat           function -- unlinkat(2)
     std::linux::write              function -- write(2)
 
 Each member is a topic: -help NAME (e.g. -help std::linux::ReadResult).
@@ -8946,6 +10335,635 @@ An intrinsic namespace declared direct (DIRECT-MODULES.md): a module that
 calls into it must itself be a `direct module` or mediate the call through a
 context it declares. stdlib/linux/sys.x86_64.bot and stdlib/linux.bot wrap
 it; programs use std::linux::write, std::linux::read, std::linux::io or io.
+
+@topic stdlib.std::linux::fs::NativePath
+title: std::linux::fs::NativePath -- Opaque struct of module std::linux::fs
+summary: A Linux name or path
+index: stdlib
+symbol: std::linux::fs::NativePath
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    opaque struct NativePath:
+        bytes: List[Byte]
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::NativePath.
+
+== DESCRIPTION
+A Linux name or path: its bytes, non-empty, without 0.
+
+@topic stdlib.std::linux::fs::LinuxFS
+title: std::linux::fs::LinuxFS -- Opaque context struct of module std::linux::fs
+summary: The filesystem context
+index: stdlib
+symbol: std::linux::fs::LinuxFS
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    opaque context struct LinuxFS:
+        at: std::abi::I32
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::LinuxFS.
+
+== DESCRIPTION
+The filesystem context: the directory relative paths resolve against
+(AT_FDCWD: the process's working directory).
+
+@topic stdlib.std::linux::fs::File
+title: std::linux::fs::File -- Opaque struct of module std::linux::fs
+summary: An opened file
+index: stdlib
+symbol: std::linux::fs::File
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    opaque struct File:
+        fd: std::abi::I32
+        owner: std::io::fs::Owner
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::File.
+
+== DESCRIPTION
+An opened file: its descriptor and its affine token.
+
+@topic stdlib.std::linux::fs::Read
+title: std::linux::fs::Read -- Struct of module std::linux::fs
+summary: What one read did
+index: stdlib
+symbol: std::linux::fs::Read
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    struct Read:
+        file: File
+        data: std::abi::bytes::Bytes
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::Read.
+
+== DESCRIPTION
+What one read did: the File back, and the bytes read (none at the end of the
+file).
+
+@topic stdlib.std::linux::fs::Written
+title: std::linux::fs::Written -- Struct of module std::linux::fs
+summary: What one write did
+index: stdlib
+symbol: std::linux::fs::Written
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    struct Written:
+        file: File
+        count: int
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::Written.
+
+== DESCRIPTION
+What one write did: the File back, and how many bytes were written.
+
+@topic stdlib.std::linux::fs::Entry
+title: std::linux::fs::Entry -- Struct of module std::linux::fs
+summary: A directory entry
+index: stdlib
+symbol: std::linux::fs::Entry
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    struct Entry:
+        name: NativePath
+        kind: std::io::fs::EntryKind
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::Entry.
+
+== DESCRIPTION
+A directory entry: its native name (one component) and its kind.
+
+@topic stdlib.std::linux::fs::create
+title: std::linux::fs::create -- Function of module std::linux::fs
+summary: The standard filesystem context.
+index: stdlib
+symbol: std::linux::fs::create
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn create() -> LinuxFS:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::create or, as a method, receiver.create(...).
+
+== DESCRIPTION
+The standard filesystem context. An ordinary constructor; `with context
+std::linux::fs::create()` installs it.
+
+@topic stdlib.std::linux::fs::from_bytes
+title: std::linux::fs::from_bytes -- Function of module std::linux::fs
+summary: The native path of BYTES
+index: stdlib
+symbol: std::linux::fs::from_bytes
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn from_bytes(bytes: List[Byte]) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::from_bytes or, as a method, receiver.from_bytes(...).
+
+== DESCRIPTION
+The native path of BYTES; std::io::path::NotAPath when BYTES is empty or
+holds a 0.
+
+@topic stdlib.std::linux::fs::from_text
+title: std::linux::fs::from_text -- Function of module std::linux::fs
+summary: The native path of TEXT
+index: stdlib
+symbol: std::linux::fs::from_text
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn from_text(text: str) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::from_text or, as a method, receiver.from_text(...).
+
+== DESCRIPTION
+The native path of TEXT: its UTF-8 bytes; std::io::path::NotAPath when TEXT
+is empty or holds U+0000. (A std::linux::path::LinuxPath converts with
+std::linux::path::native, which cannot fail.)
+
+@topic stdlib.std::linux::fs::bytes
+title: std::linux::fs::bytes -- Function of module std::linux::fs
+summary: PATH's bytes, exactly.
+index: stdlib
+symbol: std::linux::fs::bytes
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn bytes(path: NativePath) -> List[Byte]:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::bytes or, as a method, receiver.bytes(...).
+
+== DESCRIPTION
+PATH's bytes, exactly.
+
+@topic stdlib.std::linux::fs::text
+title: std::linux::fs::text -- Function of module std::linux::fs
+summary: PATH's String
+index: stdlib
+symbol: std::linux::fs::text
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn text(path: NativePath) -> str errors std::io::path::NotText:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::text or, as a method, receiver.text(...).
+
+== DESCRIPTION
+PATH's String: its bytes decoded as UTF-8; std::io::path::NotText when they
+are not UTF-8 (never a replacement character).
+
+@topic stdlib.std::linux::fs::display
+title: std::linux::fs::display -- Function of module std::linux::fs
+summary: PATH as text for people
+index: stdlib
+symbol: std::linux::fs::display
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn display(path: NativePath) -> str:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::display or, as a method, receiver.display(...).
+
+== DESCRIPTION
+PATH as text for people: its String when it has one, else every byte that is
+not part of a UTF-8 sequence shown as U+FFFD. LOSSY: two different paths can
+display alike, and the display of a path is no path (open the NativePath,
+never its display).
+
+@topic stdlib.std::linux::fs::join
+title: std::linux::fs::join -- Function of module std::linux::fs
+summary: PATH joined with the relative native NAME
+index: stdlib
+symbol: std::linux::fs::join
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn join(path: NativePath, name: NativePath) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::join or, as a method, receiver.join(...).
+
+== DESCRIPTION
+PATH joined with the relative native NAME: one "/" between them unless PATH
+already ends with one -- std::linux::path::concat's rule on bytes. NAME may
+hold several components; it must not start with "/" (an absolute NAME would
+replace PATH, which joining never does: std::io::path::NotAPath). Nothing is
+normalized, no byte decoded and no filesystem observed.
+
+@topic stdlib.std::linux::fs::concat
+title: std::linux::fs::concat -- Function of module std::linux::fs
+summary: PATH joined with the textual relative COMPONENT (its UTF-8 bytes)
+index: stdlib
+symbol: std::linux::fs::concat
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn concat(path: NativePath, component: str) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::concat or, as a method, receiver.concat(...).
+
+== DESCRIPTION
+PATH joined with the textual relative COMPONENT (its UTF-8 bytes):
+std::io::path::NotAPath for an empty or absolute COMPONENT or one holding
+U+0000.
+
+@topic stdlib.std::linux::fs::open
+title: std::linux::fs::open -- Function of module std::linux::fs
+summary: Opens PATH as MODE says (std::io::fs::OpenMode), a new file with the permission bits 0666 before the process's umask
+index: stdlib
+symbol: std::linux::fs::open
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: LinuxFS) -> File errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::open or, as a method, receiver.open(...).
+
+== DESCRIPTION
+Opens PATH as MODE says (std::io::fs::OpenMode), a new file with the
+permission bits 0666 before the process's umask; the File is the caller's to
+close. Symbolic links are followed. A directory opens for reading (its first
+read fails, IsADirectory) and fails for writing (IsADirectory).
+
+@topic stdlib.std::linux::fs::read
+title: std::linux::fs::read -- Function of module std::linux::fs
+summary: One read(2) of at most COUNT bytes
+index: stdlib
+symbol: std::linux::fs::read
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn read(file: File, count: std::io::fs::ReadSize, context fs: LinuxFS) -> Read errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::read or, as a method, receiver.read(...).
+
+== DESCRIPTION
+One read(2) of at most COUNT bytes: the File back and the bytes read --
+fewer than COUNT is an ordinary short read, none the end of the file. A
+failure closes FILE and fails.
+
+@topic stdlib.std::linux::fs::read_all
+title: std::linux::fs::read_all -- Function of module std::linux::fs
+summary: Reads FILE to the end
+index: stdlib
+symbol: std::linux::fs::read_all
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn read_all(file: File, context fs: LinuxFS) -> Read errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::read_all or, as a method, receiver.read_all(...).
+
+== DESCRIPTION
+Reads FILE to the end: the File back and every byte from its offset on, in
+one Bytes (as many bytes as the file holds: the allocation is the file's
+size). A failure closes FILE and fails.
+
+@topic stdlib.std::linux::fs::write
+title: std::linux::fs::write -- Function of module std::linux::fs
+summary: One write(2) of DATA
+index: stdlib
+symbol: std::linux::fs::write
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn write(file: File, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> Written errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::write or, as a method, receiver.write(...).
+
+== DESCRIPTION
+One write(2) of DATA: the File back and how many bytes were written (fewer
+than DATA holds is an ordinary short write). A failure closes FILE and
+fails.
+
+@topic stdlib.std::linux::fs::write_all
+title: std::linux::fs::write_all -- Function of module std::linux::fs
+summary: Writes all of DATA to FILE (short writes completed)
+index: stdlib
+symbol: std::linux::fs::write_all
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn write_all(file: File, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> File errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::write_all or, as a method, receiver.write_all(...).
+
+== DESCRIPTION
+Writes all of DATA to FILE (short writes completed): the File back. A
+failure closes FILE and fails: some of DATA may have been written.
+
+@topic stdlib.std::linux::fs::close
+title: std::linux::fs::close -- Function of module std::linux::fs
+summary: Closes FILE
+index: stdlib
+symbol: std::linux::fs::close
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn close(file: File, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::close or, as a method, receiver.close(...).
+
+== DESCRIPTION
+Closes FILE: its descriptor is released even when close(2) reports an error
+(Linux's rule), which is then the FileError -- never retried (the descriptor
+number may already be another file's).
+
+@topic stdlib.std::linux::fs::read_file
+title: std::linux::fs::read_file -- Function of module std::linux::fs
+summary: Every byte of the file PATH.
+index: stdlib
+symbol: std::linux::fs::read_file
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn read_file(path: NativePath, context fs: LinuxFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::read_file or, as a method, receiver.read_file(...).
+
+== DESCRIPTION
+Every byte of the file PATH.
+
+@topic stdlib.std::linux::fs::write_file
+title: std::linux::fs::write_file -- Function of module std::linux::fs
+summary: The file PATH holds exactly DATA
+index: stdlib
+symbol: std::linux::fs::write_file
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn write_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::write_file or, as a method, receiver.write_file(...).
+
+== DESCRIPTION
+The file PATH holds exactly DATA: created, or truncated and rewritten.
+
+@topic stdlib.std::linux::fs::create_file
+title: std::linux::fs::create_file -- Function of module std::linux::fs
+summary: A new file PATH holding DATA
+index: stdlib
+symbol: std::linux::fs::create_file
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn create_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::create_file or, as a method, receiver.create_file(...).
+
+== DESCRIPTION
+A new file PATH holding DATA; AlreadyExists when the name exists.
+
+@topic stdlib.std::linux::fs::entries
+title: std::linux::fs::entries -- Function of module std::linux::fs
+summary: Every entry of the directory DIR but "." and "..", in the order the kernel lists them, each with its native name and its kind (as d_type says
+index: stdlib
+symbol: std::linux::fs::entries
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn entries(dir: NativePath, context fs: LinuxFS) -> List[Entry] errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::entries or, as a method, receiver.entries(...).
+
+== DESCRIPTION
+Every entry of the directory DIR but "." and "..", in the order the kernel
+lists them, each with its native name and its kind (as d_type says: a
+symbolic link is SymbolicLink, whatever it names; Unknown when the
+filesystem does not say). The directory is opened (O_DIRECTORY) and closed
+here, also when listing fails: no descriptor outlives the call.
+
+@topic stdlib.std::linux::fs::create_directory
+title: std::linux::fs::create_directory -- Function of module std::linux::fs
+summary: A new, empty directory PATH (permission bits 0777 before the umask)
+index: stdlib
+symbol: std::linux::fs::create_directory
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn create_directory(path: NativePath, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::create_directory or, as a method,
+receiver.create_directory(...).
+
+== DESCRIPTION
+A new, empty directory PATH (permission bits 0777 before the umask);
+AlreadyExists when the name exists.
+
+@topic stdlib.std::linux::fs::remove_file
+title: std::linux::fs::remove_file -- Function of module std::linux::fs
+summary: Removes the name PATH of anything but a directory (a link itself, never what it names)
+index: stdlib
+symbol: std::linux::fs::remove_file
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn remove_file(path: NativePath, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::remove_file or, as a method, receiver.remove_file(...).
+
+== DESCRIPTION
+Removes the name PATH of anything but a directory (a link itself, never what
+it names); IsADirectory for a directory.
+
+@topic stdlib.std::linux::fs::remove_directory
+title: std::linux::fs::remove_directory -- Function of module std::linux::fs
+summary: Removes the empty directory PATH
+index: stdlib
+symbol: std::linux::fs::remove_directory
+related: stdlib.module.std::linux::fs
+
+== DECLARATION
+    fn remove_directory(path: NativePath, context fs: LinuxFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/fs.bot: import std::linux::fs, then write
+std::linux::fs::remove_directory or, as a method,
+receiver.remove_directory(...).
+
+== DESCRIPTION
+Removes the empty directory PATH; NotEmpty when it has entries,
+NotADirectory when it is no directory.
+
+@topic stdlib.module.std::linux::fs
+title: std::linux::fs -- standard namespace
+summary: Linux's native paths and its synchronous filesystem, through the raw syscalls of stdlib/linux.bot (WINDOWS-X86-64-MILESTONE-7.md).
+index: stdlib
+symbol: std::linux::fs
+
+== DESCRIPTION
+  with context std::linux::fs::create()               install it (entry program)
+
+  std::linux::fs::open(path, mode)          an owned File (std::io::fs::OpenMode)
+  std::linux::fs::read(file, count)         one read(2): a Read {file, data}
+  std::linux::fs::read_all(file)            reads to the end of the file
+  std::linux::fs::write(file, data)         one write(2): a Written {file, count}
+  std::linux::fs::write_all(file, data)     writes all of DATA: the File
+  std::linux::fs::close(file)               releases the File
+  std::linux::fs::read_file(path)           every byte of a file
+  std::linux::fs::write_file(path, data)    create or replace
+  std::linux::fs::create_file(path, data)   create a file that did not exist
+  std::linux::fs::entries(dir)              every entry, its native name
+  std::linux::fs::create_directory(path), remove_file(path),
+  remove_directory(path)
+
+---------------------------------------------------------------------------
+Native paths.
+
+A Linux name is bytes: any byte but 0 (and "/", which separates components).
+NativePath holds exactly the bytes the kernel takes or returns -- non-empty,
+without 0, nothing else assumed: they need not be UTF-8, and nothing is
+normalized -- so every name a directory holds round-trips: listed, joined to
+its directory and opened again, it names the same entry
+(audit/filesystem/experiments/linux.tcl: a lossy textual name of the bytes
+FF FE 78 opened another file). A textual std::linux::path::LinuxPath has
+exactly one NativePath, its UTF-8 bytes (std::linux::path::native); a
+NativePath has a String only when its bytes are UTF-8 (`text`, else
+std::io::path::NotText), and `display` is the explicitly lossy one for
+people, never an identity. Two NativePaths are equal exactly when their
+bytes are: path equality is spelling, never file identity ("a", "./a" and a
+link to it are three paths).
+
+---------------------------------------------------------------------------
+Authority and ownership.
+
+LinuxFS is the filesystem context: the authority to open names, create and
+remove entries and list directories, relative to the process's working
+directory (AT_FDCWD). `linux` is a direct module, so every function here
+that makes a syscall requires LinuxFS (DIRECT-MODULES.md): the raw authority
+reaches callers only as that context, and nothing above std::linux::fs is
+direct for using it. A path is a request, never authority.
+
+A File is an opened file: an opaque token of its descriptor, AFFINE -- its
+one owner may use it, give it away (move it into a call, a result, a struct
+field) and close it; it cannot be copied (USE-AFTER-MOVE), and a closed File
+no longer exists. Its affinity comes from its one other field, a
+std::io::fs::Owner, an affine token that owns nothing and costs one word:
+Botlish has no declaration that makes a struct affine (the report, "Affine
+ownership"). Operations that use a File take it and give it back: `read`
+returns a Read {file, data}, `write` a Written {file, count}, write_all the
+File.
+
+Ownership is not cleanup. Nothing closes a File for its owner: a File
+dropped unclosed, by an owner that returns, fails or ends without closing
+it, leaks its descriptor until the process ends (the language releases an
+affine value without running code: AFFINE-VALUES.md). Close every File you
+open; the whole-file operations below do it on every path. One rule closes
+for you: a read or write that FAILS closes its File (close's own result
+ignored) and fails with the operation's error, so a failed operation never
+leaves an owner holding a broken File, and an error path never leaks.
+
+Operations on a File require LinuxFS too: the descriptor is used by syscalls
+of the direct module `linux`, which only a context of this module mediates.
+(On Windows, where a HANDLE is used by ordinary C calls, an opened File
+needs no context: std::windows::fs.)
+
+---------------------------------------------------------------------------
+Completion.
+
+`read` and `write` are one syscall each: a read may return fewer bytes than
+asked (no bytes is the end of the file: a read always asks for at least
+one), a write may write fewer than given. read_all, write_all and the
+whole-file operations complete: they repeat until the end of the file, or
+until every byte is written; a write that makes no progress is a failure
+(Other), never a loop. No operation retries a failure (EINTR included: a
+regular file's I/O is not interrupted by a handled signal on Linux) or
+promises durability: a completed write is in the kernel, not necessarily on
+the disk (no fsync).
+
+Every failure is std::io::fs::FileError: the reason (`reason_of`) and the
+kernel's errno, never a path validation error.
+
+== SOURCE
+stdlib/linux/fs.bot (import std::linux::fs).
+
+== MEMBERS
+    std::linux::fs::Entry          struct -- A directory entry
+    std::linux::fs::File           opaque struct -- An opened file
+    std::linux::fs::LinuxFS        opaque context struct -- The filesystem ...
+    std::linux::fs::NativePath     opaque struct -- A Linux name or path
+    std::linux::fs::Read           struct -- What one read did
+    std::linux::fs::Written        struct -- What one write did
+    std::linux::fs::bytes          function -- PATH's bytes, exactly.
+    std::linux::fs::close          function -- Closes FILE
+    std::linux::fs::concat         function -- PATH joined with the textual...
+    std::linux::fs::create         function -- The standard filesystem cont...
+    std::linux::fs::create_directory function -- A new, empty directory PAT...
+    std::linux::fs::create_file    function -- A new file PATH holding DATA
+    std::linux::fs::display        function -- PATH as text for people
+    std::linux::fs::entries        function -- Every entry of the directory...
+    std::linux::fs::from_bytes     function -- The native path of BYTES
+    std::linux::fs::from_text      function -- The native path of TEXT
+    std::linux::fs::join           function -- PATH joined with the relativ...
+    std::linux::fs::open           function -- Opens PATH as MODE says (std...
+    std::linux::fs::read           function -- One read(2) of at most COUNT...
+    std::linux::fs::read_all       function -- Reads FILE to the end
+    std::linux::fs::read_file      function -- Every byte of the file PATH.
+    std::linux::fs::remove_directory function -- Removes the empty director...
+    std::linux::fs::remove_file    function -- Removes the name PATH of any...
+    std::linux::fs::text           function -- PATH's String
+    std::linux::fs::write          function -- One write(2) of DATA
+    std::linux::fs::write_all      function -- Writes all of DATA to FILE (...
+    std::linux::fs::write_file     function -- The file PATH holds exactly ...
+
+Each member is a topic: -help NAME (e.g. -help std::linux::fs::Entry).
 
 @topic stdlib.std::linux::io::FileDescriptor
 title: std::linux::io::FileDescriptor -- Opaque struct of module std::linux::io
@@ -9340,6 +11358,146 @@ nothing is normalized and no filesystem is observed. Fails with
 std::io::path::NotAPath for any other COMPONENT. The result is a LinuxPath
 by validation, the ordinary owner proof.
 
+@topic stdlib.std::linux::path::native
+title: std::linux::path::native -- Function of module std::linux::path
+summary: PATH's native path
+index: stdlib
+symbol: std::linux::path::native
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn native(path: LinuxPath) -> std::linux::fs::NativePath:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::native or, as a method, receiver.native(...).
+
+== DESCRIPTION
+PATH's native path: its UTF-8 bytes, exactly (no normalization).
+
+@topic stdlib.std::linux::path::read_file
+title: std::linux::path::read_file -- Function of module std::linux::path
+summary: Every byte of the file PATH.
+index: stdlib
+symbol: std::linux::path::read_file
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn read_file(path: LinuxPath) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::read_file or, as a method, receiver.read_file(...).
+
+== DESCRIPTION
+Every byte of the file PATH.
+
+@topic stdlib.std::linux::path::write_file
+title: std::linux::path::write_file -- Function of module std::linux::path
+summary: The file PATH holds exactly DATA
+index: stdlib
+symbol: std::linux::path::write_file
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn write_file(path: LinuxPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::write_file or, as a method, receiver.write_file(...).
+
+== DESCRIPTION
+The file PATH holds exactly DATA: created, or truncated and rewritten.
+
+@topic stdlib.std::linux::path::create_file
+title: std::linux::path::create_file -- Function of module std::linux::path
+summary: A new file PATH holding DATA
+index: stdlib
+symbol: std::linux::path::create_file
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn create_file(path: LinuxPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::create_file or, as a method, receiver.create_file(...).
+
+== DESCRIPTION
+A new file PATH holding DATA; AlreadyExists when the name exists.
+
+@topic stdlib.std::linux::path::entries
+title: std::linux::path::entries -- Function of module std::linux::path
+summary: Every entry of the directory PATH but "." and "..", with its textual name
+index: stdlib
+symbol: std::linux::path::entries
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn entries(path: LinuxPath) -> List[std::io::fs::Entry] errors std::io::fs::FileError, std::io::path::NotText:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::entries or, as a method, receiver.entries(...).
+
+== DESCRIPTION
+Every entry of the directory PATH but "." and "..", with its textual name;
+std::io::path::NotText when a name is not UTF-8 (std::linux::fs::entries
+lists every name as bytes).
+
+@topic stdlib.std::linux::path::create_directory
+title: std::linux::path::create_directory -- Function of module std::linux::path
+summary: A new, empty directory PATH.
+index: stdlib
+symbol: std::linux::path::create_directory
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn create_directory(path: LinuxPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::create_directory or, as a method,
+receiver.create_directory(...).
+
+== DESCRIPTION
+A new, empty directory PATH.
+
+@topic stdlib.std::linux::path::remove_file
+title: std::linux::path::remove_file -- Function of module std::linux::path
+summary: Removes the name PATH of anything but a directory.
+index: stdlib
+symbol: std::linux::path::remove_file
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn remove_file(path: LinuxPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::remove_file or, as a method, receiver.remove_file(...).
+
+== DESCRIPTION
+Removes the name PATH of anything but a directory.
+
+@topic stdlib.std::linux::path::remove_directory
+title: std::linux::path::remove_directory -- Function of module std::linux::path
+summary: Removes the empty directory PATH.
+index: stdlib
+symbol: std::linux::path::remove_directory
+related: stdlib.module.std::linux::path
+
+== DECLARATION
+    fn remove_directory(path: LinuxPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/linux/path.bot: import std::linux::path, then write
+std::linux::path::remove_directory or, as a method,
+receiver.remove_directory(...).
+
+== DESCRIPTION
+Removes the empty directory PATH.
+
 @topic stdlib.module.std::linux::path
 title: std::linux::path -- standard namespace
 summary: Textual Linux paths: the refinement std::linux::path::LinuxPath (a non-empty String without U+0000) with its validators, concat and text.
@@ -9383,16 +11541,39 @@ module's own `concat` and `text` (TRAITS.md: the owner's declarations,
 nothing else), so a function over std::io::path::Path specializes to direct
 calls of them.
 
+A LinuxPath is also a std::io::fs::FilePath (WINDOWS-X86-64-MILESTONE-7.md):
+its native path is its UTF-8 bytes (`native`, total: a LinuxPath holds no
+U+0000), and its filesystem operations below are std::linux::fs's on that
+native path. They declare no context; std::linux::fs's functions require
+std::linux::fs::LinuxFS, so every caller of these does too (the requirement
+is derived), and a program that uses a LinuxPath's file operations without
+installing a LinuxFS is MISSING-CONTEXT at compile time.
+
+  std::linux::path::native(path)            PATH's std::linux::fs::NativePath
+  std::linux::path::read_file(path), write_file(path, data),
+  create_file(path, data), entries(path), create_directory(path),
+  remove_file(path), remove_directory(path)
+                                            std::io::fs::FilePath's
+                                            operations, on PATH's native path
+
 == SOURCE
 stdlib/linux/path.bot (import std::linux::path).
 
 == MEMBERS
     std::linux::path::LinuxPath    type
     std::linux::path::concat       function -- PATH joined with COMPONENT
+    std::linux::path::create_directory function -- A new, empty directory P...
+    std::linux::path::create_file  function -- A new file PATH holding DATA
+    std::linux::path::entries      function -- Every entry of the directory...
+    std::linux::path::native       function -- PATH's native path
     std::linux::path::nul_free?    function -- true when no character of VA...
+    std::linux::path::read_file    function -- Every byte of the file PATH.
+    std::linux::path::remove_directory function -- Removes the empty direct...
+    std::linux::path::remove_file  function -- Removes the name PATH of any...
     std::linux::path::text         function -- The path's canonical String ...
     std::linux::path::valid?       function -- true when VALUE is a valid t...
     std::linux::path::validate     function -- Completes normally only when...
+    std::linux::path::write_file   function -- The file PATH holds exactly ...
 
 Each member is a topic: -help NAME (e.g. -help
 std::linux::path::LinuxPath).
@@ -9448,6 +11629,135 @@ kernel writes into a private copy of data, never into storage another
 value can observe. Call std::linux::read instead, which returns a
 std::linux::ReadResult.
 
+@topic stdlib.std::linux::sys::openat
+title: std::linux::sys::openat -- Function of module std::linux::sys
+summary: openat(2)
+index: stdlib
+symbol: std::linux::sys::openat
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn openat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, flags: std::abi::I32, mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::openat or, as a method, receiver.openat(...).
+
+== DESCRIPTION
+openat(2): SYS_openat = 257, rdi = dirfd, rsi = the address of PATH's
+payload (a C string: stdlib/linux.bot builds it with its terminating NUL),
+rdx = flags, r10 = the creation mode. The raw signed result: the new
+descriptor, or -errno.
+
+@topic stdlib.std::linux::sys::close
+title: std::linux::sys::close -- Function of module std::linux::sys
+summary: close(2)
+index: stdlib
+symbol: std::linux::sys::close
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn close(fd: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::close or, as a method, receiver.close(...).
+
+== DESCRIPTION
+close(2): SYS_close = 3, rdi = fd. 0, or -errno.
+
+@topic stdlib.std::linux::sys::getdents64
+title: std::linux::sys::getdents64 -- Function of module std::linux::sys
+summary: getdents64(2)
+index: stdlib
+symbol: std::linux::sys::getdents64
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn getdents64(fd: std::abi::I32, data: std::abi::bytes::MutableBytes):
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::getdents64 or, as a method, receiver.getdents64(...).
+
+== DESCRIPTION
+getdents64(2): SYS_getdents64 = 217, rdi = fd, rsi = the address of a
+freshly detached copy of the buffer, rdx = its byte count. As read: {result:
+the raw signed result (bytes of linux_dirent64 records written, 0 at the end
+of the directory, or -errno), data: the copy as the kernel left it}.
+
+@topic stdlib.std::linux::sys::mkdirat
+title: std::linux::sys::mkdirat -- Function of module std::linux::sys
+summary: mkdirat(2)
+index: stdlib
+symbol: std::linux::sys::mkdirat
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn mkdirat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, mode: std::abi::U32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::mkdirat or, as a method, receiver.mkdirat(...).
+
+== DESCRIPTION
+mkdirat(2): SYS_mkdirat = 258, rdi = dirfd, rsi = PATH (a C string), rdx =
+the mode. 0, or -errno.
+
+@topic stdlib.std::linux::sys::unlinkat
+title: std::linux::sys::unlinkat -- Function of module std::linux::sys
+summary: unlinkat(2)
+index: stdlib
+symbol: std::linux::sys::unlinkat
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn unlinkat(dirfd: std::abi::I32, path: std::abi::bytes::Bytes, flags: std::abi::I32) -> int:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::unlinkat or, as a method, receiver.unlinkat(...).
+
+== DESCRIPTION
+unlinkat(2): SYS_unlinkat = 263, rdi = dirfd, rsi = PATH (a C string), rdx =
+flags (AT_REMOVEDIR to remove a directory). 0, or -errno.
+
+@topic stdlib.std::linux::sys::o_directory
+title: std::linux::sys::o_directory -- Function of module std::linux::sys
+summary: O_DIRECTORY
+index: stdlib
+symbol: std::linux::sys::o_directory
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn o_directory() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::o_directory or, as a method, receiver.o_directory(...).
+
+== DESCRIPTION
+O_DIRECTORY: 0200000 on x86_64 (open(2)'s flags are not all the same on
+every architecture: arm64 has its own O_DIRECTORY, O_NOFOLLOW, O_DIRECT and
+O_LARGEFILE, x86-64 the generic ones).
+
+@topic stdlib.std::linux::sys::o_nofollow
+title: std::linux::sys::o_nofollow -- Function of module std::linux::sys
+summary: O_NOFOLLOW
+index: stdlib
+symbol: std::linux::sys::o_nofollow
+related: stdlib.module.std::linux::sys
+
+== DECLARATION
+    fn o_nofollow() -> std::abi::I32Value:
+
+== MODULE
+stdlib/linux/sys.x86_64.bot: import std::linux::sys, then write
+std::linux::sys::o_nofollow or, as a method, receiver.o_nofollow(...).
+
+== DESCRIPTION
+O_NOFOLLOW: 0400000 on x86_64.
+
 @topic stdlib.module.std::linux::sys
 title: std::linux::sys -- standard namespace
 summary: The architecture's Linux syscall numbers and register convention under stdlib/linux.bot's wrappers: std::linux::sys::write and read (a direct module).
@@ -9490,10 +11800,17 @@ stdlib/linux/sys.x86_64.bot and stdlib/linux/sys.aarch64.bot, chosen by
 the compilation's target, have one surface.
 
 == MEMBERS
+    std::linux::sys::close         function -- close(2)
+    std::linux::sys::getdents64    function -- getdents64(2)
+    std::linux::sys::mkdirat       function -- mkdirat(2)
+    std::linux::sys::o_directory   function -- O_DIRECTORY
+    std::linux::sys::o_nofollow    function -- O_NOFOLLOW
+    std::linux::sys::openat        function -- openat(2)
     std::linux::sys::read          function -- read(2)
+    std::linux::sys::unlinkat      function -- unlinkat(2)
     std::linux::sys::write         function -- write(2)
 
-Each member is a topic: -help NAME (e.g. -help std::linux::sys::read).
+Each member is a topic: -help NAME (e.g. -help std::linux::sys::close).
 
 == NOTES
 An architecture-specific module: the compilation target selects
@@ -13815,6 +16132,698 @@ stdlib/windows.bot (import std::windows).
 Each member is a topic: -help NAME (e.g. -help
 std::windows::StandardDevice).
 
+@topic stdlib.std::windows::fs::NativePath
+title: std::windows::fs::NativePath -- Opaque struct of module std::windows::fs
+summary: A Windows name or path
+index: stdlib
+symbol: std::windows::fs::NativePath
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    opaque struct NativePath:
+        units: List[int]
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::NativePath.
+
+== DESCRIPTION
+A Windows name or path: its UTF-16 code units (each 1..65535), non-empty.
+
+@topic stdlib.std::windows::fs::WindowsFS
+title: std::windows::fs::WindowsFS -- Opaque context struct
+summary: The filesystem context
+index: stdlib
+symbol: std::windows::fs::WindowsFS
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    opaque context struct WindowsFS:
+        share: std::ffi::c::ULong
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::WindowsFS.
+
+== DESCRIPTION
+The filesystem context: the share mode every open asks for.
+
+@topic stdlib.std::windows::fs::File
+title: std::windows::fs::File -- Opaque struct of module std::windows::fs
+summary: An opened file
+index: stdlib
+symbol: std::windows::fs::File
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    opaque struct File:
+        handle: std::ffi::c::Ptr[std::ffi::c::Void]
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::File.
+
+== DESCRIPTION
+An opened file: its HANDLE.
+
+@topic stdlib.std::windows::fs::Read
+title: std::windows::fs::Read -- Struct of module std::windows::fs
+summary: What one read did
+index: stdlib
+symbol: std::windows::fs::Read
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    struct Read:
+        file: File
+        data: std::abi::bytes::Bytes
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::Read.
+
+== DESCRIPTION
+What one read did: the File back, and the bytes read (none at the end of the
+file).
+
+@topic stdlib.std::windows::fs::Written
+title: std::windows::fs::Written -- Struct of module std::windows::fs
+summary: What one write did
+index: stdlib
+symbol: std::windows::fs::Written
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    struct Written:
+        file: File
+        count: int
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::Written.
+
+== DESCRIPTION
+What one write did: the File back, and how many bytes were written.
+
+@topic stdlib.std::windows::fs::Entry
+title: std::windows::fs::Entry -- Struct of module std::windows::fs
+summary: A directory entry
+index: stdlib
+symbol: std::windows::fs::Entry
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    struct Entry:
+        name: NativePath
+        kind: std::io::fs::EntryKind
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::Entry.
+
+== DESCRIPTION
+A directory entry: its native name (one component) and its kind.
+
+@topic stdlib.std::windows::fs::PathKind
+title: std::windows::fs::PathKind -- Enum of module std::windows::fs
+summary: The syntactic kind of a Windows path (`kind`
+index: stdlib
+symbol: std::windows::fs::PathKind
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    enum PathKind:
+        Relative,
+        DriveRelative,
+        DriveAbsolute,
+        RootRelative,
+        Unc,
+        Device,
+        Verbatim,
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::PathKind.
+
+== DESCRIPTION
+The syntactic kind of a Windows path (`kind`; the module comment).
+
+@topic stdlib.std::windows::fs::create
+title: std::windows::fs::create -- Function of module std::windows::fs
+summary: The standard filesystem context
+index: stdlib
+symbol: std::windows::fs::create
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn create() -> WindowsFS:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::create or, as a method, receiver.create(...).
+
+== DESCRIPTION
+The standard filesystem context: share mode FILE_SHARE_READ |
+FILE_SHARE_WRITE | FILE_SHARE_DELETE. `with context
+std::windows::fs::create()` installs it.
+
+@topic stdlib.std::windows::fs::from_units
+title: std::windows::fs::from_units -- Function of module std::windows::fs
+summary: The native path of UNITS
+index: stdlib
+symbol: std::windows::fs::from_units
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn from_units(units: List[int]) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::from_units or, as a method, receiver.from_units(...).
+
+== DESCRIPTION
+The native path of UNITS; std::io::path::NotAPath when UNITS is empty or a
+unit is not 1..65535.
+
+@topic stdlib.std::windows::fs::from_text
+title: std::windows::fs::from_text -- Function of module std::windows::fs
+summary: The native path of TEXT
+index: stdlib
+symbol: std::windows::fs::from_text
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn from_text(text: str) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::from_text or, as a method, receiver.from_text(...).
+
+== DESCRIPTION
+The native path of TEXT: its UTF-16 code units; std::io::path::NotAPath when
+TEXT is empty or holds U+0000. (A std::windows::path::WindowsPath converts
+with std::windows::path::native, which cannot fail.)
+
+@topic stdlib.std::windows::fs::units
+title: std::windows::fs::units -- Function of module std::windows::fs
+summary: PATH's UTF-16 code units, exactly.
+index: stdlib
+symbol: std::windows::fs::units
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn units(path: NativePath) -> List[int]:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::units or, as a method, receiver.units(...).
+
+== DESCRIPTION
+PATH's UTF-16 code units, exactly.
+
+@topic stdlib.std::windows::fs::text
+title: std::windows::fs::text -- Function of module std::windows::fs
+summary: PATH's String
+index: stdlib
+symbol: std::windows::fs::text
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn text(path: NativePath) -> str errors std::io::path::NotText:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::text or, as a method, receiver.text(...).
+
+== DESCRIPTION
+PATH's String; std::io::path::NotText when PATH holds an unpaired surrogate
+(never a replacement character).
+
+@topic stdlib.std::windows::fs::display
+title: std::windows::fs::display -- Function of module std::windows::fs
+summary: PATH as text for people
+index: stdlib
+symbol: std::windows::fs::display
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn display(path: NativePath) -> str:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::display or, as a method, receiver.display(...).
+
+== DESCRIPTION
+PATH as text for people: every unpaired surrogate shown as U+FFFD. LOSSY:
+never a path (the experiment's lossy name opened another file).
+
+@topic stdlib.std::windows::fs::kind
+title: std::windows::fs::kind -- Function of module std::windows::fs
+summary: PATH's syntactic kind (the module comment).
+index: stdlib
+symbol: std::windows::fs::kind
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn kind(path: NativePath) -> PathKind:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::kind or, as a method, receiver.kind(...).
+
+== DESCRIPTION
+PATH's syntactic kind (the module comment). Syntax only: nothing is asked of
+the filesystem or the process.
+
+@topic stdlib.std::windows::fs::join
+title: std::windows::fs::join -- Function of module std::windows::fs
+summary: PATH joined with the relative native NAME, by Win32's syntax (`joined_units`)
+index: stdlib
+symbol: std::windows::fs::join
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn join(path: NativePath, name: NativePath) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::join or, as a method, receiver.join(...).
+
+== DESCRIPTION
+PATH joined with the relative native NAME, by Win32's syntax
+(`joined_units`); std::io::path::NotAPath when NAME is no relative path,
+when PATH is verbatim and NAME holds "/", "." or ".." or an empty component,
+and when PATH is not verbatim and a component of NAME ends with a period or
+a space -- which Win32 would drop, so the result would name another entry (a
+name listed under a verbatim directory, "verb.", is joined to that verbatim
+directory). Nothing is normalized, no unit decoded and no filesystem
+observed.
+
+@topic stdlib.std::windows::fs::concat
+title: std::windows::fs::concat -- Function of module std::windows::fs
+summary: PATH joined with the textual relative COMPONENT (its UTF-16 units), by `join`'s rule.
+index: stdlib
+symbol: std::windows::fs::concat
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn concat(path: NativePath, component: str) -> NativePath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::concat or, as a method, receiver.concat(...).
+
+== DESCRIPTION
+PATH joined with the textual relative COMPONENT (its UTF-16 units), by
+`join`'s rule.
+
+@topic stdlib.std::windows::fs::open
+title: std::windows::fs::open -- Function of module std::windows::fs
+summary: Opens PATH as MODE says (std::io::fs::OpenMode) with the context's share mode, FILE_ATTRIBUTE_NORMAL for a new file
+index: stdlib
+symbol: std::windows::fs::open
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: WindowsFS) -> File errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::open or, as a method, receiver.open(...).
+
+== DESCRIPTION
+Opens PATH as MODE says (std::io::fs::OpenMode) with the context's share
+mode, FILE_ATTRIBUTE_NORMAL for a new file; the File is the caller's to
+close. A directory does not open (IsADirectory).
+
+@topic stdlib.std::windows::fs::read
+title: std::windows::fs::read -- Function of module std::windows::fs
+summary: One ReadFile of at most COUNT bytes
+index: stdlib
+symbol: std::windows::fs::read
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn read(file: File, count: std::io::fs::ReadSize) -> Read errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::read or, as a method, receiver.read(...).
+
+== DESCRIPTION
+One ReadFile of at most COUNT bytes: the File back and the bytes read --
+fewer than COUNT is an ordinary short read, none the end of the file. A
+failure closes FILE and fails.
+
+@topic stdlib.std::windows::fs::read_all
+title: std::windows::fs::read_all -- Function of module std::windows::fs
+summary: Reads FILE to the end
+index: stdlib
+symbol: std::windows::fs::read_all
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn read_all(file: File) -> Read errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::read_all or, as a method, receiver.read_all(...).
+
+== DESCRIPTION
+Reads FILE to the end: the File back and every byte from its file pointer
+on, in one Bytes. A failure closes FILE and fails.
+
+@topic stdlib.std::windows::fs::write
+title: std::windows::fs::write -- Function of module std::windows::fs
+summary: One WriteFile of DATA
+index: stdlib
+symbol: std::windows::fs::write
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn write(file: File, data: std::abi::bytes::Bytes) -> Written errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::write or, as a method, receiver.write(...).
+
+== DESCRIPTION
+One WriteFile of DATA: the File back and how many bytes were written (fewer
+than DATA holds is an ordinary short write). A failure closes FILE and
+fails.
+
+@topic stdlib.std::windows::fs::write_all
+title: std::windows::fs::write_all -- Function of module std::windows::fs
+summary: Writes all of DATA to FILE (short writes completed)
+index: stdlib
+symbol: std::windows::fs::write_all
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn write_all(file: File, data: std::abi::bytes::Bytes) -> File errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::write_all or, as a method, receiver.write_all(...).
+
+== DESCRIPTION
+Writes all of DATA to FILE (short writes completed): the File back. A
+failure closes FILE and fails: some of DATA may have been written.
+
+@topic stdlib.std::windows::fs::close
+title: std::windows::fs::close -- Function of module std::windows::fs
+summary: Closes FILE (CloseHandle)
+index: stdlib
+symbol: std::windows::fs::close
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn close(file: File) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::close or, as a method, receiver.close(...).
+
+== DESCRIPTION
+Closes FILE (CloseHandle); a failure is the FileError, never retried.
+
+@topic stdlib.std::windows::fs::read_file
+title: std::windows::fs::read_file -- Function of module std::windows::fs
+summary: Every byte of the file PATH.
+index: stdlib
+symbol: std::windows::fs::read_file
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn read_file(path: NativePath, context fs: WindowsFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::read_file or, as a method, receiver.read_file(...).
+
+== DESCRIPTION
+Every byte of the file PATH.
+
+@topic stdlib.std::windows::fs::write_file
+title: std::windows::fs::write_file -- Function of module std::windows::fs
+summary: The file PATH holds exactly DATA
+index: stdlib
+symbol: std::windows::fs::write_file
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn write_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::write_file or, as a method, receiver.write_file(...).
+
+== DESCRIPTION
+The file PATH holds exactly DATA: created, or truncated and rewritten.
+
+@topic stdlib.std::windows::fs::create_file
+title: std::windows::fs::create_file -- Function of module std::windows::fs
+summary: A new file PATH holding DATA
+index: stdlib
+symbol: std::windows::fs::create_file
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn create_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::create_file or, as a method, receiver.create_file(...).
+
+== DESCRIPTION
+A new file PATH holding DATA; AlreadyExists when the name exists (NTFS
+compares names without case: "CASE.TXT" exists when "Case.txt" does).
+
+@topic stdlib.std::windows::fs::entries
+title: std::windows::fs::entries -- Function of module std::windows::fs
+summary: Every entry of the directory DIR but "." and "..", in the order the filesystem lists them (NTFS
+index: stdlib
+symbol: std::windows::fs::entries
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn entries(dir: NativePath, context fs: WindowsFS) -> List[Entry] errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::entries or, as a method, receiver.entries(...).
+
+== DESCRIPTION
+Every entry of the directory DIR but "." and "..", in the order the
+filesystem lists them (NTFS: its name order), each with its native name and
+its kind (a link is SymbolicLink, whatever it names). FindFirstFileW of
+DIR\* and FindNextFileW; the enumeration handle is closed here, also when
+listing fails. A directory that matches nothing (a drive's root without
+entries: ERROR_FILE_NOT_FOUND) is empty; a name that is no directory is
+NotADirectory (ERROR_DIRECTORY, W9).
+
+@topic stdlib.std::windows::fs::create_directory
+title: std::windows::fs::create_directory -- Function of module std::windows::fs
+summary: A new, empty directory PATH (CreateDirectoryW)
+index: stdlib
+symbol: std::windows::fs::create_directory
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn create_directory(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::create_directory or, as a method,
+receiver.create_directory(...).
+
+== DESCRIPTION
+A new, empty directory PATH (CreateDirectoryW); AlreadyExists when the name
+exists.
+
+@topic stdlib.std::windows::fs::remove_file
+title: std::windows::fs::remove_file -- Function of module std::windows::fs
+summary: Removes the file PATH (DeleteFileW)
+index: stdlib
+symbol: std::windows::fs::remove_file
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn remove_file(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::remove_file or, as a method, receiver.remove_file(...).
+
+== DESCRIPTION
+Removes the file PATH (DeleteFileW); IsADirectory for a directory.
+
+@topic stdlib.std::windows::fs::remove_directory
+title: std::windows::fs::remove_directory -- Function of module std::windows::fs
+summary: Removes the empty directory PATH (RemoveDirectoryW)
+index: stdlib
+symbol: std::windows::fs::remove_directory
+related: stdlib.module.std::windows::fs
+
+== DECLARATION
+    fn remove_directory(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/fs.bot: import std::windows::fs, then write
+std::windows::fs::remove_directory or, as a method,
+receiver.remove_directory(...).
+
+== DESCRIPTION
+Removes the empty directory PATH (RemoveDirectoryW); NotEmpty when it has
+entries, NotADirectory when it is a file.
+
+@topic stdlib.module.std::windows::fs
+title: std::windows::fs -- standard namespace
+summary: Windows' native paths and its synchronous filesystem, through the wide Win32 functions of kernel32 (WINDOWS-X86-64-MILESTONE-7.md).
+index: stdlib
+symbol: std::windows::fs
+
+== DESCRIPTION
+  with context std::windows::fs::create()          install it (entry program)
+
+  std::windows::fs::open(path, mode)          an owned File (std::io::fs::OpenMode)
+  std::windows::fs::read(file, count)         one ReadFile: a Read {file, data}
+  std::windows::fs::read_all(file)            reads to the end of the file
+  std::windows::fs::write(file, data)         one WriteFile: a Written {file, count}
+  std::windows::fs::write_all(file, data)     writes all of DATA: the File
+  std::windows::fs::close(file)               CloseHandle
+  std::windows::fs::read_file(path), write_file(path, data),
+  create_file(path, data), entries(dir), create_directory(path),
+  remove_file(path), remove_directory(path)
+
+---------------------------------------------------------------------------
+Native paths.
+
+A Windows name is UTF-16 code units, and NTFS takes any unit but a few ASCII
+ones, an unpaired surrogate included: the units CreateFileW is given are the
+units FindFirstFileW returns (audit/filesystem/experiments/ windows.tcl, W1,
+on windows-2025's NTFS). NativePath holds exactly those units -- non-empty,
+without 0, nothing else assumed -- so every name a directory lists
+round-trips. A textual std::windows::path::WindowsPath has exactly one
+NativePath, its UTF-16 encoding (std::windows::path::native); a NativePath
+has a String only when it holds no unpaired surrogate (`text`, else
+std::io::path::NotText), and `display` is the explicitly lossy one for
+people: the experiment's lossy spelling of a surrogate name opened ANOTHER
+file, whose name really is U+FFFD. The ANSI code page is never used: every
+call is a wide (W) function, given the units' little-endian bytes and a
+two-byte NUL built for that one call. Equality is spelling, never file
+identity: NTFS compares names without case ("Case.txt" and "CASE.TXT" are
+one file, W4), Win32 rewrites some (below), and nothing here asks the
+filesystem.
+
+Path syntax (`kind`, `join`) is Win32's, not Unix's with backslashes:
+
+  Relative       a\b         relative to the current directory
+  DriveRelative  C:a         relative to drive C's current directory
+                             ("C:x" resolved to C:\x on a runner whose
+                             current directory is on D:, W5): never C:\a
+  DriveAbsolute  C:\a
+  RootRelative   \a          the current drive's root (D:\x there)
+  Unc            \\server\share\a, //server/share/a
+  Device         \\.\NAME, //./NAME: the Win32 device namespace
+  Verbatim       \\?\C:\a, \\?\UNC\server\share, \??\C:\a: handed to the
+                 NT namespace unchanged
+
+A drive designator is any one unit and ":" (Win32 resolved "1:x" to "1:\x",
+W5). Win32 normalizes every non-verbatim path before the filesystem sees it:
+"/" is a separator, "." and ".." components are resolved lexically, a
+component's trailing periods and spaces are dropped ("trail." is the file
+"trail", W2), the whole path is limited to MAX_PATH (a 272-unit path failed,
+ERROR_PATH_NOT_FOUND, W6) and some names are devices ("NUL" in any directory
+was the NUL device on windows-2025, while "CON", "COM1", "nul.txt" and
+"AUX.log" made ordinary files there, W3: this depends on the Windows
+version). A verbatim path is none of that: "/" is a character NTFS refuses
+(ERROR_INVALID_NAME), ".." too, a trailing period is kept ("verb." is a name
+of its own, which no Win32 path reaches: W2) and its length is NTFS's (32767
+units).
+
+---------------------------------------------------------------------------
+Authority and ownership.
+
+WindowsFS is the filesystem context: the authority to open names, create and
+remove entries and list directories, relative to the process's current
+directories. The Win32 functions are declared here privately: a Win32 call
+whose pointer parameters are all noescape is no direct edge
+(DIRECT-MODULES.md, "Foreign is not direct"), so the context is this
+module's design, not the direct-module analysis's: every public function
+that names a path requires WindowsFS, and no public function takes a raw
+handle. (A module that declares kernel32's CreateFileW itself has the
+authority any C declaration has: the report, "Contexts".)
+
+A File is an opened file: an opaque struct of its HANDLE, a C pointer, and
+so AFFINE -- one owner, moved by use, never copied (USE-AFTER-MOVE), gone
+once closed. A HANDLE is never a C runtime file descriptor: nothing here
+calls the C runtime. Operations on a File need no context: the HANDLE is the
+capability, used by ordinary C calls. They take the File and give it back
+(Read {file, data}, Written {file, count}, write_all's File).
+
+Ownership is not cleanup: a File dropped unclosed leaks its handle until the
+process ends (the language releases an affine value without running code).
+Close every File; the whole-file operations do on every path. A read or
+write that FAILS closes its File (CloseHandle's own result ignored) and
+fails with its error.
+
+Files are opened with share mode READ | WRITE | DELETE (the context's
+`share`): another opener -- this program or another -- may read, write,
+rename or delete the file meanwhile, as on POSIX; an opener that asked for
+exclusive access first makes the open fail with Busy (ERROR_SHARING_
+VIOLATION, 32: W7), and so does an open after one that asked for it.
+
+---------------------------------------------------------------------------
+Completion and errors.
+
+`read` and `write` are one ReadFile / WriteFile each: short counts are
+ordinary, a read of no bytes is the end of the file (and so is a pipe's
+ERROR_BROKEN_PIPE). read_all, write_all and the whole-file operations
+complete; a write that makes no progress is Other. No retry, no durability
+claim (no FlushFileBuffers). Every failure is std::io::fs::FileError: its
+reason (`reason_of`) and the thread's last-error code, read right after the
+failed call before anything else is called. Win32 reports a directory opened
+as a file, and a directory DeleteFileW was given, as ERROR_ACCESS_DENIED (5,
+W8): when the path then names a directory (GetFileAttributesW, asked after
+the code was read) the reason is IsADirectory, the code still 5.
+
+== SOURCE
+stdlib/windows/fs.bot (import std::windows::fs).
+
+== MEMBERS
+    std::windows::fs::Entry        struct -- A directory entry
+    std::windows::fs::File         opaque struct -- An opened file
+    std::windows::fs::NativePath   opaque struct -- A Windows name or path
+    std::windows::fs::PathKind     enum -- The syntactic kind of a Windows ...
+    std::windows::fs::Read         struct -- What one read did
+    std::windows::fs::WindowsFS    opaque context struct -- The filesystem ...
+    std::windows::fs::Written      struct -- What one write did
+    std::windows::fs::close        function -- Closes FILE (CloseHandle)
+    std::windows::fs::concat       function -- PATH joined with the textual...
+    std::windows::fs::create       function -- The standard filesystem context
+    std::windows::fs::create_directory function -- A new, empty directory P...
+    std::windows::fs::create_file  function -- A new file PATH holding DATA
+    std::windows::fs::display      function -- PATH as text for people
+    std::windows::fs::entries      function -- Every entry of the directory...
+    std::windows::fs::from_text    function -- The native path of TEXT
+    std::windows::fs::from_units   function -- The native path of UNITS
+    std::windows::fs::join         function -- PATH joined with the relativ...
+    std::windows::fs::kind         function -- PATH's syntactic kind (the m...
+    std::windows::fs::open         function -- Opens PATH as MODE says (std...
+    std::windows::fs::read         function -- One ReadFile of at most COUN...
+    std::windows::fs::read_all     function -- Reads FILE to the end
+    std::windows::fs::read_file    function -- Every byte of the file PATH.
+    std::windows::fs::remove_directory function -- Removes the empty direct...
+    std::windows::fs::remove_file  function -- Removes the file PATH (Delet...
+    std::windows::fs::text         function -- PATH's String
+    std::windows::fs::units        function -- PATH's UTF-16 code units, ex...
+    std::windows::fs::write        function -- One WriteFile of DATA
+    std::windows::fs::write_all    function -- Writes all of DATA to FILE (...
+    std::windows::fs::write_file   function -- The file PATH holds exactly ...
+
+Each member is a topic: -help NAME (e.g. -help std::windows::fs::Entry).
+
 @topic stdlib.std::windows::io::WindowsIO
 title: std::windows::io::WindowsIO -- Opaque context struct
 summary: The process's output environment
@@ -14059,3 +17068,347 @@ stdlib/windows/io.bot (import std::windows::io).
 
 Each member is a topic: -help NAME (e.g. -help
 std::windows::io::WindowsIO).
+
+@topic stdlib.std::windows::path::WindowsPath
+title: std::windows::path::WindowsPath -- Type of module std::windows::path
+summary: The type std::windows::path::WindowsPath of the standard module std::windows::path.
+index: stdlib
+symbol: std::windows::path::WindowsPath
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    refined type WindowsPath = str
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::WindowsPath.
+
+@topic stdlib.std::windows::path::nul_free?
+title: std::windows::path::nul_free? -- Function of module std::windows::path
+summary: true when no character of VALUE is U+0000.
+index: stdlib
+symbol: std::windows::path::nul_free?
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn nul_free?(value: str) -> bool:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::nul_free? or, as a method, receiver.nul_free?(...).
+
+== DESCRIPTION
+true when no character of VALUE is U+0000.
+
+@topic stdlib.std::windows::path::valid?
+title: std::windows::path::valid? -- Function of module std::windows::path
+summary: true when VALUE is a valid textual Windows path (non-empty, no U+0000), which proves it a WindowsPath
+index: stdlib
+symbol: std::windows::path::valid?
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn valid?(value: str) -> bool proves value: WindowsPath:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::valid? or, as a method, receiver.valid?(...).
+
+== DESCRIPTION
+true when VALUE is a valid textual Windows path (non-empty, no U+0000),
+which proves it a WindowsPath; false proves nothing.
+
+@topic stdlib.std::windows::path::validate
+title: std::windows::path::validate -- Function of module std::windows::path
+summary: Completes normally only when VALUE is a valid textual Windows path, which proves it a WindowsPath for the rest of the caller's path
+index: stdlib
+symbol: std::windows::path::validate
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn validate(value: str) -> unit proves value: WindowsPath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::validate or, as a method, receiver.validate(...).
+
+== DESCRIPTION
+Completes normally only when VALUE is a valid textual Windows path, which
+proves it a WindowsPath for the rest of the caller's path; fails with
+std::io::path::NotAPath otherwise.
+
+@topic stdlib.std::windows::path::text
+title: std::windows::path::text -- Function of module std::windows::path
+summary: The path's canonical String form
+index: stdlib
+symbol: std::windows::path::text
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn text(path: WindowsPath) -> str:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::text or, as a method, receiver.text(...).
+
+== DESCRIPTION
+The path's canonical String form: exactly the carrier String (lossless; no
+escaping, quoting or display conversion).
+
+@topic stdlib.std::windows::path::native
+title: std::windows::path::native -- Function of module std::windows::path
+summary: PATH's native path
+index: stdlib
+symbol: std::windows::path::native
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn native(path: WindowsPath) -> std::windows::fs::NativePath:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::native or, as a method, receiver.native(...).
+
+== DESCRIPTION
+PATH's native path: its UTF-16 code units, exactly (no normalization).
+
+@topic stdlib.std::windows::path::kind
+title: std::windows::path::kind -- Function of module std::windows::path
+summary: PATH's syntactic kind (std::windows::fs::PathKind)
+index: stdlib
+symbol: std::windows::path::kind
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn kind(path: WindowsPath) -> std::windows::fs::PathKind:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::kind or, as a method, receiver.kind(...).
+
+== DESCRIPTION
+PATH's syntactic kind (std::windows::fs::PathKind): syntax only.
+
+@topic stdlib.std::windows::path::concat
+title: std::windows::path::concat -- Function of module std::windows::path
+summary: PATH joined with COMPONENT by std::windows::fs::join's rule (the module comment)
+index: stdlib
+symbol: std::windows::path::concat
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn concat(path: WindowsPath, component: str) -> WindowsPath errors std::io::path::NotAPath:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::concat or, as a method, receiver.concat(...).
+
+== DESCRIPTION
+PATH joined with COMPONENT by std::windows::fs::join's rule (the module
+comment); std::io::path::NotAPath for an empty COMPONENT, one holding
+U+0000, one that is not relative, or one the rule refuses. The result is a
+WindowsPath by validation, the ordinary owner proof.
+
+@topic stdlib.std::windows::path::read_file
+title: std::windows::path::read_file -- Function of module std::windows::path
+summary: Every byte of the file PATH.
+index: stdlib
+symbol: std::windows::path::read_file
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn read_file(path: WindowsPath) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::read_file or, as a method, receiver.read_file(...).
+
+== DESCRIPTION
+Every byte of the file PATH.
+
+@topic stdlib.std::windows::path::write_file
+title: std::windows::path::write_file -- Function of module std::windows::path
+summary: The file PATH holds exactly DATA
+index: stdlib
+symbol: std::windows::path::write_file
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn write_file(path: WindowsPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::write_file or, as a method, receiver.write_file(...).
+
+== DESCRIPTION
+The file PATH holds exactly DATA: created, or truncated and rewritten.
+
+@topic stdlib.std::windows::path::create_file
+title: std::windows::path::create_file -- Function of module std::windows::path
+summary: A new file PATH holding DATA
+index: stdlib
+symbol: std::windows::path::create_file
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn create_file(path: WindowsPath, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::create_file or, as a method,
+receiver.create_file(...).
+
+== DESCRIPTION
+A new file PATH holding DATA; AlreadyExists when the name exists.
+
+@topic stdlib.std::windows::path::entries
+title: std::windows::path::entries -- Function of module std::windows::path
+summary: Every entry of the directory PATH but "." and "..", with its textual name
+index: stdlib
+symbol: std::windows::path::entries
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn entries(path: WindowsPath) -> List[std::io::fs::Entry] errors std::io::fs::FileError, std::io::path::NotText:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::entries or, as a method, receiver.entries(...).
+
+== DESCRIPTION
+Every entry of the directory PATH but "." and "..", with its textual name;
+std::io::path::NotText when a name holds an unpaired surrogate
+(std::windows::fs::entries lists every name as code units).
+
+@topic stdlib.std::windows::path::create_directory
+title: std::windows::path::create_directory -- Function of module std::windows::path
+summary: A new, empty directory PATH.
+index: stdlib
+symbol: std::windows::path::create_directory
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn create_directory(path: WindowsPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::create_directory or, as a method,
+receiver.create_directory(...).
+
+== DESCRIPTION
+A new, empty directory PATH.
+
+@topic stdlib.std::windows::path::remove_file
+title: std::windows::path::remove_file -- Function of module std::windows::path
+summary: Removes the file PATH.
+index: stdlib
+symbol: std::windows::path::remove_file
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn remove_file(path: WindowsPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::remove_file or, as a method,
+receiver.remove_file(...).
+
+== DESCRIPTION
+Removes the file PATH.
+
+@topic stdlib.std::windows::path::remove_directory
+title: std::windows::path::remove_directory -- Function of module std::windows::path
+summary: Removes the empty directory PATH.
+index: stdlib
+symbol: std::windows::path::remove_directory
+related: stdlib.module.std::windows::path
+
+== DECLARATION
+    fn remove_directory(path: WindowsPath) -> unit errors std::io::fs::FileError:
+
+== MODULE
+stdlib/windows/path.bot: import std::windows::path, then write
+std::windows::path::remove_directory or, as a method,
+receiver.remove_directory(...).
+
+== DESCRIPTION
+Removes the empty directory PATH.
+
+@topic stdlib.module.std::windows::path
+title: std::windows::path -- standard namespace
+summary: Textual Windows paths (CONTEXT-TRAITS.md, "Paths".
+index: stdlib
+symbol: std::windows::path
+
+== DESCRIPTION
+  std::windows::path::validate(value)       proves VALUE a WindowsPath, or
+                                            std::io::path::NotAPath
+  std::windows::path::valid?(value)         true proves VALUE a WindowsPath
+  std::windows::path::concat(path, part)    PATH joined with PART by Win32's
+                                            syntax: a WindowsPath
+  std::windows::path::text(path)            PATH's String form (the carrier)
+  std::windows::path::kind(path)            its syntactic kind
+                                            (std::windows::fs::PathKind)
+  std::windows::path::native(path)          its std::windows::fs::NativePath
+
+WindowsPath is a refinement of str (REFINEMENT-VALUES.md): a value proven to
+be a non-empty String without U+0000 -- text that may be handed to a wide
+Win32 function once it is encoded as UTF-16 and given its terminating NUL
+(std::windows::fs does that, for the one call). It is the same String, with
+the String's representation. It is std::linux::path::LinuxPath's and
+std::darwin::path::DarwinPath's sibling, not a shared type: a Windows path
+is not a Unix path with backslashes, and nothing converts one into another.
+
+The proposition is textual eligibility and nothing more. It does NOT claim
+that the path exists; that Win32 accepts it (a name holding "<", ">", "|",
+'"', "?" or "*", or a ":" past a drive, is valid text that NTFS refuses or
+reads as a stream); that it is shorter than MAX_PATH; that it means what its
+spelling suggests -- Win32 drops a component's trailing periods and spaces,
+resolves "." and "..", reads "NUL" as a device and resolves a relative,
+drive-relative or root-relative path against the process's current
+directories -- or that two spellings name two files (NTFS compares names
+without case). Validation observes no filesystem and normalizes nothing:
+"C:a", "C:\a", "\a", "\\server\share", "\\?\C:\a\." and "a//b" are valid
+exactly as written, and different.
+
+`kind` and `concat` are std::windows::fs's syntax on the path's UTF-16 units
+(one rule for text and native paths): concat inserts one "\" unless the path
+ends with a separator or is a bare drive designator ("C:" and "a" are "C:a",
+drive C's current directory -- never "C:\a"), refuses a component that is
+not itself relative ("\a", "C:a", "\\s\x", and "1:x": Win32 reads any unit
+before ":" as a drive), and refuses what would not name the component
+written: under a verbatim path (\\?\, \??\) a "/" or a "." or ".." component
+(Win32 resolves neither there), under any other a component ending with a
+period or a space (Win32 drops them).
+
+WindowsPath satisfies std::io::path::Path through `concat` and `text`, and
+std::io::fs::FilePath through them and the file operations below, which are
+std::windows::fs's on the path's native path: they declare no context and
+std::windows::fs's require std::windows::fs::WindowsFS, so a program using a
+WindowsPath's file operations installs a WindowsFS (or is MISSING-CONTEXT at
+compile time). Like everything under std::windows, this module is the
+Windows platform's: compiled for another target its import is
+UNSUPPORTED-PLATFORM, so no WindowsPath ever meets a Linux filesystem.
+
+== SOURCE
+stdlib/windows/path.bot (import std::windows::path).
+
+== MEMBERS
+    std::windows::path::WindowsPath type
+    std::windows::path::concat     function -- PATH joined with COMPONENT b...
+    std::windows::path::create_directory function -- A new, empty directory...
+    std::windows::path::create_file function -- A new file PATH holding DATA
+    std::windows::path::entries    function -- Every entry of the directory...
+    std::windows::path::kind       function -- PATH's syntactic kind (std::...
+    std::windows::path::native     function -- PATH's native path
+    std::windows::path::nul_free?  function -- true when no character of VA...
+    std::windows::path::read_file  function -- Every byte of the file PATH.
+    std::windows::path::remove_directory function -- Removes the empty dire...
+    std::windows::path::remove_file function -- Removes the file PATH.
+    std::windows::path::text       function -- The path's canonical String ...
+    std::windows::path::valid?     function -- true when VALUE is a valid t...
+    std::windows::path::validate   function -- Completes normally only when...
+    std::windows::path::write_file function -- The file PATH holds exactly ...
+
+Each member is a topic: -help NAME (e.g. -help
+std::windows::path::WindowsPath).

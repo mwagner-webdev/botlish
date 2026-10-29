@@ -1,0 +1,10 @@
+import std::io
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    std::io::print_line("A"):
+        on std::io::WriteFailed:
+            return 0
+    t.v

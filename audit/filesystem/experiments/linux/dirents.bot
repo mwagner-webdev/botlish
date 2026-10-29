@@ -1,0 +1,102 @@
+# dirents.bot -- experiment prototype (WINDOWS-X86-64-MILESTONE-7.md, section
+# 3): the raw Linux directory listing every path design below shares --
+# openat(O_DIRECTORY), getdents64 into an 8192-byte buffer read back through
+# a layout of one byte array, the linux_dirent64 records walked (d_reclen at
+# 16, d_type at 18, the NUL-terminated d_name at 19), close. Names come back
+# as the kernel's bytes: deciding what a name *is* is the designs' business.
+direct module
+
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::linux
+import std::list
+import std::mutable_vector
+import type std::byte::Byte
+
+layout Block:
+    size 8192
+    align 8
+    field bytes: array 8192 of std::byte::Byte at 0
+
+# One directory entry as the kernel reported it.
+struct Raw:
+    name: List[Byte]
+    kind: int
+
+fn raws() -> MutableVector[Raw]:
+    std::mutable_vector::from_list([])
+
+fn descriptor(n: int) -> std::abi::I32:
+    std::abi::i32(n):
+        on std::abi::AbiIntegerAboveRange:
+            return std::abi::i32(-1)
+        on std::abi::AbiIntegerBelowRange:
+            return std::abi::i32(-1)
+
+# The bytes of BLOCK from START up to (not including) the first 0.
+fn name_at(block: List[Byte], start: int) -> List[Byte]:
+    if start < 0:
+        return []
+    loop i from start to block.length():
+        b = block.at(i)
+        if b == 0:
+            break
+        b
+
+# The records of BLOCK in POS..END, pushed onto OUT.
+fn parse(block: List[Byte], pos: int, end: int, place out: MutableVector[Raw]) -> unit errors IndexNotFound:
+    if pos + 19 >= end:
+        return unit
+    reclen = block.at(pos + 16) + 256 * block.at(pos + 17)
+    if reclen < 20:
+        return unit
+    out.push(Raw {name: name_at(block, pos + 19), kind: block.at(pos + 18)})
+    parse(block, pos + reclen, end, out)
+
+# Every entry of the directory DIR (its bytes, no terminator), "." and ".."
+# included; [] when it cannot be opened.
+fn list(dir: List[Byte]) -> List[Raw] errors IndexNotFound:
+    fd = std::linux::openat(std::abi::i32(-100), dir, std::abi::i32(std::linux::o_directory() + 524288), std::abi::u32(0))
+    if fd < 0:
+        return []
+    out = raws()
+    loop:
+        r = std::linux::getdents64(descriptor(fd), std::abi::bytes::zeroed(std::abi::usize(8192)))
+        if r.result <= 0:
+            break
+        block = std::binary::read(std::abi::bytes::freeze(r.data), Block.bytes):
+            on LayoutLengthMismatch:
+                break
+        parse(block, 0, r.result, out)
+    std::linux::close(descriptor(fd))
+    loop x in out:
+        x
+
+# The bytes of the file PATH (at most 64 bytes), or [] when it cannot be
+# opened or read.
+fn contents(path: List[Byte]) -> std::abi::bytes::Bytes:
+    fd = std::linux::openat(std::abi::i32(-100), path, std::abi::i32(524288), std::abi::u32(0))
+    if fd < 0:
+        return std::abi::bytes::from_list([])
+    r = std::linux::read(descriptor(fd), std::abi::bytes::zeroed(std::abi::usize(64)))
+    std::linux::close(descriptor(fd))
+    if r.result < 0:
+        return std::abi::bytes::from_list([])
+    n = std::abi::usize(r.result):
+        on std::abi::AbiIntegerAboveRange:
+            return std::abi::bytes::from_list([])
+        on std::abi::AbiIntegerBelowRange:
+            return std::abi::bytes::from_list([])
+    std::abi::bytes::freeze_prefix(r.data, n):
+        on UpperOverrun:
+            return std::abi::bytes::from_list([])
+
+# Creates the file PATH holding DATA (O_CREAT | O_EXCL); the open's raw result.
+fn create(path: List[Byte], data: std::abi::bytes::Bytes) -> int:
+    fd = std::linux::openat(std::abi::i32(-100), path, std::abi::i32(1 + 64 + 128 + 524288), std::abi::u32(420))
+    if fd >= 0:
+        std::linux::write(descriptor(fd), data)
+        std::linux::close(descriptor(fd))
+    fd

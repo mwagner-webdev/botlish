@@ -176,7 +176,7 @@ import std::str
 # ---------------------------------------------------------------------------
 # Registration: the privileged surface is small and knows no syscall
 
-test abi-bytes-natives-registered {three natives and no more serve the immutable Bytes: std::byte_store::from_list and std::byte_store::byte_count (the owned storage's creation and length) and std::abi::x86_64::from_bytes (the raw address bridge, the one operation that needs a machine). The bridge is not context-free (an address belongs to one run), allocates nothing, and knows no syscall} -body {
+test abi-bytes-natives-registered {six natives and no more serve the immutable Bytes: std::byte_store::from_list and std::byte_store::byte_count (the owned storage's creation and length), std::byte_store::join, std::byte_store::slice and std::byte_store::decode_utf8 (WINDOWS-X86-64-MILESTONE-7.md: a file read in chunks made one value, the part of a write a short write left, and the String of UTF-8 bytes; none reads a byte into a Botlish value) and std::abi::x86_64::from_bytes (the raw address bridge, the one operation that needs a machine). The bridge is not context-free (an address belongs to one run), allocates nothing, and knows no syscall} -body {
     set bridge [core::native::metadata std::abi::x86_64::from_bytes]
     # (The writable counterpart's own natives -- std::byte_store::mutable_*, freeze,
     # freeze_prefix, from_mutable_bytes -- are pinned by tests/abi-mutable-bytes.test.)
@@ -190,7 +190,7 @@ test abi-bytes-natives-registered {three natives and no more serve the immutable
         [dict get $bridge arity] [dict get $bridge paramTypes] [dict get $bridge resultShape] \
         [dict get $bridge contextFree] [dict get $bridge runtime] [dict get $bridge errors] \
         [lsearch -all -inline -regexp [core::native::names] {(?i)write|keepalive|pointer|ptr}]
-} -result {{std::byte_store::byte_count std::byte_store::from_list} list 1 collection-length 1 struct {named-struct std::abi::x86_64::Register64} 0 raw-address {} {std::binary::write std::binary::write_foreign}}
+} -result {{std::byte_store::byte_count std::byte_store::decode_utf8 std::byte_store::from_list std::byte_store::join std::byte_store::slice} list 1 collection-length 1 struct {named-struct std::abi::x86_64::Register64} 0 raw-address {} {std::binary::write std::binary::write_foreign}}
 
 test abi-bytes-declaration {std::abi::bytes::Bytes is declared in stdlib/abi/bytes.bot (module std::abi::bytes, which owns both byte types) as an opaque struct with one hidden field; it is a source-level opaque struct like any other (OPAQUE-STRUCTS.md)} -body {
     set text [read [open [file join $::projectRoot stdlib abi bytes.bot]]]
@@ -215,11 +215,11 @@ test abi-bytes-length-is-bytes-not-scalars {a String's UTF-8 encoding is longer 
     agree "${::pure}s = \"h\u00e9llo \u2603 \U0001f600\"\nd = std::abi::bytes::from_list(std::str::encode_utf8(s))\n\[std::str::length(s), std::abi::bytes::length(d).value\]"
 } -result {[9, 15]}
 
-test abi-bytes-utf8-reuses-the-existing-encoder {the canonical creation is std::abi::bytes::from_list(std::str::encode_utf8(s)): the existing encoder's byte List, no second Unicode encoder (stdlib/abi/bytes.bot has no encoder and no String-specific entry point)} -body {
+test abi-bytes-utf8-reuses-the-existing-encoder {the canonical creation is std::abi::bytes::from_list(std::str::encode_utf8(s)): the existing encoder's byte List, no second Unicode encoder (stdlib/abi/bytes.bot has no encoder; its one String-specific entry point is the decoder, decode_utf8, WINDOWS-X86-64-MILESTONE-7.md: exactly its declaration and its one call of the storage's native)} -body {
     set text [read [open [file join $::projectRoot stdlib abi bytes.bot]]]
-    list [regexp -all -line {^[^#\n]*(utf8|encode|decode|str::)} $text] \
+    list [lmap line [regexp -all -line -inline {^[^#\n]*(?:utf8|encode|decode|str::)[^\n]*} $text] {string trim $line}] \
         [agree "${::pure}d = std::abi::bytes::from_list(std::str::encode_utf8(\"abc\"))\nd == std::abi::bytes::from_list([byteList 97 98 99])"]
-} -result {0 true}
+} -result {{{fn decode_utf8(data: Bytes) -> str errors InvalidUtf8:} std::byte_store::decode_utf8(data.storage)} true}
 
 test abi-bytes-equality-is-by-bytes {equal iff the same bytes: [A, B] == [A, B]; a different last byte, a prefix, a longer Bytes, the empty Bytes and a NUL-padded Bytes are all unequal; equality never depends on how the Bytes were built} -body {
     agree "${::pure}fn mk(s: str):\n    std::abi::bytes::from_list(std::str::encode_utf8(s))\nab = std::abi::bytes::from_list([byteList 65 66])\n\[ab == std::abi::bytes::from_list([byteList 65 66]), ab == std::abi::bytes::from_list([byteList 65 67]), ab == std::abi::bytes::from_list([byteList 65]), ab == std::abi::bytes::from_list([byteList 65 66 0]), std::abi::bytes::from_list(\[\]) == std::abi::bytes::from_list(\[\]), std::abi::bytes::from_list(\[\]) == std::abi::bytes::from_list([byteList 0]), ab == mk(\"AB\"), mk(\"AB\") == mk(\"AB\"), std::abi::bytes::from_list([byteList 0]) == std::abi::bytes::from_list([byteList 0 0])\]"
@@ -285,14 +285,14 @@ test abi-bytes-no-construction-outside-the-owner {std::abi::bytes::Bytes {...} i
         [lindex [strictError "import std::abi\nimport std::abi::bytes\nstd::abi::bytes::Bytes {}"] 0]
 } -result {OPAQUE-CONSTRUCTION OPAQUE-CONSTRUCTION OPAQUE-CONSTRUCTION}
 
-test abi-bytes-no-accessor-surface {the module that owns the byte types has exactly the small primitive surface -- the Bytes pair (from_list, length) and the MutableBytes operations pinned by tests/abi-mutable-bytes.test -- and nothing that indexes, slices, takes an address or a pointer, or exposes a capacity: no at, slice, substring, address, pointer, capacity or is_heap} -body {
+test abi-bytes-no-accessor-surface {the module that owns the byte types has exactly the small primitive surface -- the Bytes pair (from_list, length), join, slice and decode_utf8 (WINDOWS-X86-64-MILESTONE-7.md: slice makes a Bytes of a range of a Bytes, never a byte a Botlish value) and the MutableBytes operations pinned by tests/abi-mutable-bytes.test -- and nothing that indexes, takes an address or a pointer, or exposes a capacity: no at, substring, address, pointer, capacity or is_heap} -body {
     set text [read [open [file join $::projectRoot stdlib abi bytes.bot]]]
     set fns [lmap line [split $text \n] {
         if {![regexp {^fn ([a-z0-9_]+)} $line -> name]} continue
         set name
     }]
-    list [lsearch -all -inline -regexp $fns {^(at|slice|substring|address|pointer|capacity|is_heap|storage|get)$}] $fns
-} -result {{} {from_list length zeroed from_bytes mutable_length replace detach freeze freeze_prefix}}
+    list [lsearch -all -inline -regexp $fns {^(at|substring|address|pointer|capacity|is_heap|storage|get)$}] $fns
+} -result {{} {from_list join slice decode_utf8 length zeroed from_bytes mutable_length replace detach freeze freeze_prefix}}
 
 test abi-bytes-byte-store-gives-no-address {a byte storage value alone yields no address and no bytes: the only natives that accept one are byte_count and the opaque-struct-typed bridge, so std::abi::x86_64::from_bytes of a raw storage or of any other value is a compile-time TYPE error} -body {
     list [lindex [strictError "import std::abi::x86_64\nimport std::byte_store\nstd::abi::x86_64::from_bytes(std::byte_store::from_list(\[\]))"] 0] \

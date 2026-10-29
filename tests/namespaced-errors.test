@@ -327,7 +327,7 @@ fn f(x):
 test nerr-stdlib-identities {B8: the shipped modules' errors are owned by their modules} -body {
     set hir [surface::compile "import std::abi\nimport std::abi::x86_64\nimport std::byte\nimport std::io\nimport std::io::path\nimport std::list\n1\n" -warnings off]
     lsort [hir::errorDecls $hir]
-} -result {std::abi::AbiIntegerAboveRange std::abi::AbiIntegerBelowRange std::abi::x86_64::Register64AboveRange std::abi::x86_64::Register64BelowRange std::byte::AboveRange std::byte::BelowRange std::io::WriteFailed std::io::path::NotAPath std::list::NotFound}
+} -result {std::abi::AbiIntegerAboveRange std::abi::AbiIntegerBelowRange std::abi::x86_64::Register64AboveRange std::abi::x86_64::Register64BelowRange std::byte::AboveRange std::byte::BelowRange std::io::WriteFailed std::io::path::NotAPath std::io::path::NotText std::list::NotFound}
 
 test nerr-stdlib-qualified-use {B8: outside its module a stdlib error is spelled qualified (std::list::find's NotFound is std::list::NotFound), the bare short name is unknown there} -body {
     list [lindex [sourceAgree "import std::list\nfn big(x):\n    x > 5\nr = std::list::find(\[1, 2\], big):\n    on std::list::NotFound:\n        0\nr\n"] 1] \

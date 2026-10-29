@@ -589,7 +589,8 @@ proc hir::methods::Decide {nodes options given hir seeds} {
             dict set choices $key [dict get $calls $key chosen]
         }
     }
-    lassign [Fix $record $fixed $choices [Open $keys $fixed]] fixed choices open
+    set seeded $fixed
+    lassign [Fix $record $seeded $choices $keys] fixed choices open
     if {$open eq ""} {
         dict set hir methodChoices [Ordered $calls $choices]
         dict set hir methodDecided [Ordered $calls $fixed]
@@ -610,7 +611,7 @@ proc hir::methods::Decide {nodes options given hir seeds} {
         if {!$moved} break
         set record [Build state $choices wave]
         Trace wave $wave
-        lassign [Fix $record $fixed $choices $open] fixed choices open
+        lassign [Fix $record $seeded $choices $keys] fixed choices open
     }
     # 2. Trial rounds (search). Every call with several survivors is tried at
     # each of them, all at once (Proposal), and moves to the candidate the
@@ -618,7 +619,7 @@ proc hir::methods::Decide {nodes options given hir seeds} {
     # vary every such call together, so a call's verdict in one is not
     # relative to any one configuration.
     for {set round 0} {$round < [llength $open] + 2} {incr round} {
-        lassign [Fix $record $fixed $choices $open] fixed choices open
+        lassign [Fix $record $seeded $choices $keys] fixed choices open
         set proposal [Proposal state $record $choices $open]
         if {$proposal eq $choices} break
         Trace trial round $round moved [lmap {k v} $proposal {if {$v eq [dict get $choices $k]} continue; set k}]
@@ -639,7 +640,7 @@ proc hir::methods::Decide {nodes options given hir seeds} {
     set unstable [dict create]
     while 1 {
         incr steps
-        lassign [Fix $record $fixed $choices $open] fixed choices open
+        lassign [Fix $record $seeded $choices $keys] fixed choices open
         set verdicts [Verdicts state $record $choices $open]
         set next $choices
         dict for {key verdict} $verdicts {
@@ -714,17 +715,25 @@ proc hir::methods::Open {keys fixed} {
     }
 }
 
-# FIXED, CHOICES and OPEN with the trait operations RECORD's build types
-# added to FIXED (a call that is a trait operation is the trait's, whatever
-# its candidates).
-proc hir::methods::Fix {record fixed choices open} {
+# FIXED, CHOICES and OPEN (of the calls KEYS) for the configuration whose
+# build RECORD is: the calls SEEDS fixes, and the trait operations RECORD's
+# build types (a call that is a trait operation is the trait's, whatever its
+# candidates). Recomputed from each build, never accumulated across builds:
+# whether a call is a trait operation depends on its receiver in that
+# configuration, and a stand-in that made the receiver a trait view -- the
+# trait-polymorphic candidate of the call before it in a receiver chain,
+# which returns the view -- decides nothing. A call that was the trait's in
+# an earlier build and is not in this one is open again, and certification
+# judges it like any other (WINDOWS-X86-64-MILESTONE-7.md).
+proc hir::methods::Fix {record seeds choices keys} {
+    set fixed $seeds
     dict for {key chosen} [dict get $record traits] {
         if {![dict exists $fixed $key]} {
             dict set fixed $key $chosen
             dict set choices $key $chosen
         }
     }
-    return [list $fixed $choices [Open $open $fixed]]
+    return [list $fixed $choices [Open $keys $fixed]]
 }
 
 # DECIDED (key -> candidate) in the order of CALLS.

@@ -1,0 +1,1244 @@
+# filesystem.test -- paths and synchronous filesystem I/O
+# (WINDOWS-X86-64-MILESTONE-7.md): the portable std::io::fs (stdlib/io/fs.bot),
+# Linux's std::linux::fs and std::linux::path, Windows' std::windows::fs and
+# std::windows::path, macOS's std::darwin::fs and std::darwin::path.
+#
+#   fn save(dir: std::io::fs::FilePath, data: std::abi::bytes::Bytes) errors std::io::path::NotAPath, std::io::fs::FileError:
+#       dir.concat("save.dat").write_file(data)
+#
+# Three kinds of test:
+#
+#   * the front end, on every host (programs compiled for linux and windows
+#     targets, the pure parts run on the Tcl backends): path syntax and
+#     native names, the static link between a path's type and its
+#     filesystem context, authority, and every ownership rule an opened File
+#     obeys at compile time;
+#   * Linux execution (nativeLinux): real files and directories in the
+#     test's temporary directory, through the raw syscalls, on the native
+#     backends and as standalone executables, under GC stress, and with
+#     faults injected by strace where it can;
+#   * Windows execution (windowsIO: the windows platform is the host's and C
+#     calls link): the same through kernel32's wide functions, on NTFS;
+#   * macOS execution (darwinIO): the same through libSystem, on APFS.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64 aarch64} && [testConstraint nativeBuilt]}]
+testConstraint windowsIO [expr {[testConstraint windowsIO] && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
+# Not root: root bypasses permission bits, so EACCES needs another user.
+testConstraint notRoot [expr {$::tcl_platform(platform) ne "unix" || [exec id -u] != 0}]
+testConstraint strace [expr {[auto_execok strace] ne "" && ![catch {exec strace -f -qq -o /dev/null true 2>@1}]}]
+testConstraint straceInject [expr {[testConstraint strace]
+    && ![catch {exec strace -f -qq -o /dev/null -e inject=getpid:retval=1 true 2>@1}]}]
+
+set ::fsScratch [makeDirectory filesystem-[pid]]
+set ::fsCounter 0
+
+proc fsWrite {path text} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc fsReadBinary {path} {
+    set channel [open $path rb]
+    set data [read $channel]
+    close $channel
+    return $data
+}
+
+# A fresh directory under the test's scratch directory: its absolute native
+# path.
+proc fsDir {} {
+    set dir [file join $::fsScratch d[incr ::fsCounter]]
+    file mkdir $dir
+    return [file nativename [file normalize $dir]]
+}
+
+# TEXT as a Botlish String literal.
+proc fsString {text} {
+    return "\"[string map {\\ \\\\ \" \\\"} $text]\""
+}
+
+# The HIR of program TEXT, written as main.bot in a directory of its own with
+# the application modules FILES ({NAME TEXT ...}) beside it, compiled for
+# TARGET (the host's when "").
+proc fsHir {text {target ""} {files {}}} {
+    set dir [file join $::fsScratch app[incr ::fsCounter]]
+    file mkdir $dir
+    foreach {name body} $files {
+        fsWrite [file join $dir $name] $body
+    }
+    fsWrite [file join $dir main.bot] $text
+    set options [list -warnings off -cache ""]
+    if {$target ne ""} {
+        lappend options -target $target
+    }
+    return [surface::readProgramFile [file join $dir main.bot] {*}$options]
+}
+
+# {KIND MESSAGE} of the first diagnostic compiling TEXT for TARGET (location
+# removed), or "accepted".
+proc fsRejection {text {target ""} {files {}}} {
+    if {[catch {fsHir $text $target $files} message options]} {
+        regsub {^.*?:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return [list [lindex [dict get $options -errorcode] end] $message]
+    }
+    return accepted
+}
+
+# The value (or {error CODE}) of program TEXT for TARGET on BACKEND.
+proc fsValue {text {backend cranelift} {target ""} {files {}}} {
+    set outcome [outcomeUnderHir $backend [fsHir $text $target $files]]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return [list error [lindex $outcome 1] [lindex $outcome 2]]
+}
+
+# The imports every program here starts with, for PLATFORM (linux or
+# windows).
+proc fsImports {platform} {
+    return "import std::abi
+import std::abi::bytes
+import std::byte
+import std::int
+import std::io::fs
+import std::io::path
+import std::$platform\::fs
+import std::$platform\::path
+import std::list
+import std::str
+"
+}
+
+# A program for PLATFORM: HELPERS, then main -- `root` the textual path ROOT
+# (a LinuxPath or WindowsPath, validated) and `nroot` its native path, then
+# BODY (indented four spaces), which ends with main's value, a List -- run
+# with the platform's filesystem context installed. A failure main lets
+# escape is the value ["FileError", reason, code], ["NotAPath"],
+# ["NotText"] or ["InvalidUtf8"].
+proc fsProgram {platform root body {helpers ""}} {
+    return "[fsImports $platform]
+fn bytes_of(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(text.encode_utf8())
+
+fn text_of(data: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf8(data):
+        on InvalidUtf8:
+            \"<not UTF-8>\"
+
+fn raw(xs: List\[int\]) -> std::abi::bytes::Bytes:
+    bs = loop x in xs:
+        std::byte::from_int(x):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                0
+    std::abi::bytes::from_list(bs)
+
+fn shown(reason: std::io::fs::Reason, code: int) -> List\[any\]:
+    \[reason, code\]
+
+$helpers
+
+fn main() -> List\[any\] errors std::io::fs::FileError, std::io::path::NotAPath, std::io::path::NotText, InvalidUtf8:
+    root = [fsString $root]
+    std::$platform\::path::validate(root)
+    nroot = root.native()
+$body
+
+with context std::$platform\::fs::create()
+main():
+    on std::io::fs::FileError failed:
+        \[\"FileError\", failed.reason, failed.code\]
+    on std::io::path::NotAPath:
+        \[\"NotAPath\"\]
+    on std::io::path::NotText:
+        \[\"NotText\"\]
+    on InvalidUtf8:
+        \[\"InvalidUtf8\"\]
+"
+}
+
+# Linux's shell (fixtures Tcl cannot spell: names that are not UTF-8).
+proc fsSh {script} {
+    return [exec sh -c $script]
+}
+
+# ===========================================================================
+# The portable surface
+
+test fs-portable-surface {std::io::fs is what behaves alike: FileError {reason, code}, ten reasons, four open modes, five entry kinds, a ReadSize of 1..2^30, and the trait FilePath -- Path's two operations and seven whole-file and directory operations, no handle} -body {
+    set ast [surface::parse [core::ReadFile [file join $::projectRoot stdlib io fs.bot]] fs.bot]
+    set out {}
+    foreach statement [dict get $ast body] {
+        switch -- [dict get $statement kind] {
+            enumdecl { lappend out [list enum [dict get $statement name] [lmap c [dict get $statement cases] {dict get $c name}]] }
+            traitdecl { lappend out [list trait [dict get $statement name] [lmap r [dict get $statement requirements] {dict get $r name}]] }
+            errordecl { lappend out [list error [dict get $statement name] [lmap f [dict get $statement fields] {dict get $f name}]] }
+        }
+    }
+    set out
+} -result {{enum Reason {NotFound AlreadyExists PermissionDenied NotADirectory IsADirectory NotEmpty InvalidName Busy ResourceExhausted Other}} {error FileError {reason code}} {enum OpenMode {Read Replace CreateNew Append}} {enum EntryKind {File Directory SymbolicLink Other Unknown}} {trait FilePath {concat text read_file write_file create_file entries create_directory remove_file remove_directory}}}
+
+test fs-witnesses {LinuxPath and WindowsPath are FilePaths through their own modules (each compiled for its platform's target); a str is none; a native path is no std::io::path::Path (its text is partial: NotText)} -body {
+    set generic "fn show(p: std::io::fs::FilePath) -> str:\n    p.text()\nfn main() -> str errors std::io::path::NotAPath:\n    p = \"a\"\n    VALIDATE\n    show(p)\nmain():\n    on std::io::path::NotAPath:\n        \"\"\n"
+    list [fsRejection "[fsImports linux][string map {VALIDATE std::linux::path::validate(p)} $generic]" linux-x86_64] \
+        [fsRejection "[fsImports windows][string map {VALIDATE std::windows::path::validate(p)} $generic]" windows-x86_64] \
+        [lindex [fsRejection "[fsImports linux]${generic}show(\"a\")\n" linux-x86_64] 0] \
+        [lindex [fsRejection "[fsImports linux]fn t(p: std::io::path::Path) -> str:\n    p.text()\nt(std::linux::fs::from_text(\"a\")):\n    on std::io::path::NotAPath:\n        \"\"\n" linux-x86_64] 0] \
+        [lindex [fsRejection "[fsImports windows]fn t(p: std::io::path::Path) -> str:\n    p.text()\nt(std::windows::fs::from_text(\"a\")):\n    on std::io::path::NotAPath:\n        \"\"\n" windows-x86_64] 0]
+} -result {accepted accepted TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+# ===========================================================================
+# The path's type decides its filesystem
+
+set ::fsSave {fn save(dir: std::io::fs::FilePath) errors std::io::path::NotAPath, std::io::fs::FileError:
+    dir.concat("save.dat").write_file(std::abi::bytes::from_list([]))
+}
+
+test fs-missing-context-linux {portable code given a LinuxPath needs std::linux::fs::LinuxFS: none installed is MISSING-CONTEXT at compile time, found in the monomorphized program through the witness's own operation} -body {
+    set r [fsRejection "[fsImports linux]$::fsSave\nfn main() errors std::io::path::NotAPath, std::io::fs::FileError:\n    p = \"d\"\n    std::linux::path::validate(p)\n    save(p)\nmain():\n    on std::io::path::NotAPath:\n        unit\n    on std::io::fs::FileError:\n        unit\n" linux-x86_64]
+    list [lindex $r 0] [string match "*std::linux::fs::LinuxFS is required by this call but is not installed here*" [lindex $r 1]]
+} -result {MISSING-CONTEXT 1}
+
+test fs-missing-context-windows {the same program with a WindowsPath needs std::windows::fs::WindowsFS} -body {
+    set r [fsRejection "[fsImports windows]$::fsSave\nfn main() errors std::io::path::NotAPath, std::io::fs::FileError:\n    p = \"d\"\n    std::windows::path::validate(p)\n    save(p)\nmain():\n    on std::io::path::NotAPath:\n        unit\n    on std::io::fs::FileError:\n        unit\n" windows-x86_64]
+    list [lindex $r 0] [string match "*std::windows::fs::WindowsFS is required by this call but is not installed here*" [lindex $r 1]]
+} -result {MISSING-CONTEXT 1}
+
+# A Windows-shaped path witness of the application's own, whose operations
+# need a filesystem context of its own module: installed beside LinuxFS, it
+# is the only context those operations accept.
+set ::fsWinLike {winlike.bot {import std::abi
+import std::abi::bytes
+import std::io::fs
+import std::io::path
+import std::str
+
+refined type WinLike = str
+
+context struct WinFS:
+    drive: str
+
+fn validate(value: str) -> unit proves value: WinLike errors std::io::path::NotAPath:
+    if std::str::length(value) > 0:
+        unit
+    else:
+        fail std::io::path::NotAPath
+
+fn text(path: WinLike) -> str:
+    path
+
+fn concat(path: WinLike, component: str) -> WinLike errors std::io::path::NotAPath:
+    joined = std::str::concat(path, component)
+    validate(joined)
+    joined
+
+fn drive(context fs: WinFS) -> str:
+    fs.drive
+
+fn read_file(path: WinLike) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    std::abi::bytes::from_list(drive().encode_utf8())
+
+fn write_file(path: WinLike, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    drive()
+    unit
+
+fn create_file(path: WinLike, data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    drive()
+    unit
+
+fn entries(path: WinLike) -> List[std::io::fs::Entry] errors std::io::fs::FileError, std::io::path::NotText:
+    drive()
+    []
+
+fn create_directory(path: WinLike) -> unit errors std::io::fs::FileError:
+    drive()
+    unit
+
+fn remove_file(path: WinLike) -> unit errors std::io::fs::FileError:
+    drive()
+    unit
+
+fn remove_directory(path: WinLike) -> unit errors std::io::fs::FileError:
+    drive()
+    unit
+}}
+
+test fs-wrong-platform {a path of the wrong platform never reaches a filesystem: std::windows::path compiled for Linux is UNSUPPORTED-PLATFORM (and std::linux::path for Windows); a Windows-shaped witness whose operations need their own context is MISSING-CONTEXT under LinuxFS alone, and runs once its own context is installed: no runtime selection, no fallback} -body {
+    set program "[fsImports linux]import winlike\n$::fsSave\nfn main() errors std::io::path::NotAPath, std::io::fs::FileError:\n    p = \"C:\\\\d\"\n    winlike::validate(p)\n    save(p)\nwith context std::linux::fs::create()\nCONTEXT\nmain():\n    on std::io::path::NotAPath:\n        unit\n    on std::io::fs::FileError:\n        unit\n"
+    set missing [fsRejection [string map {CONTEXT {}} $program] linux-x86_64 $::fsWinLike]
+    list [lindex [fsRejection "import std::windows::path\n1\n" linux-x86_64] 0] \
+        [lindex [fsRejection "import std::linux::path\n1\n" windows-x86_64] 0] \
+        [lindex $missing 0] [string match "*winlike::WinFS is required*" [lindex $missing 1]] \
+        [fsValue [string map {CONTEXT {with context winlike::WinFS {drive: "C:"}}} $program] interp [linuxTarget] $::fsWinLike]
+} -result {UNSUPPORTED-PLATFORM UNSUPPORTED-PLATFORM MISSING-CONTEXT 1 unit}
+
+test fs-specialized-per-witness {a FilePath function is one clone per witness and every operation a direct call of the witness's own function: no trait call, view or dispatch is left in the monomorphized program} -body {
+    set hir [fsHir "[fsImports linux]$::fsSave\nfn main() errors std::io::path::NotAPath, std::io::fs::FileError:\n    p = \"d\"\n    std::linux::path::validate(p)\n    save(p)\nwith context std::linux::fs::create()\nmain():\n    on std::io::path::NotAPath:\n        unit\n    on std::io::fs::FileError:\n        unit\n" linux-x86_64]
+    set text [hir::format $hir]
+    list [regexp {save<std::linux::path::LinuxPath>} $text] [regexp {traitcall|contexttrait} $text]
+} -result {1 0}
+
+# ===========================================================================
+# Authority
+
+test fs-authority-context {every std::linux::fs and std::windows::fs operation that names a path needs its filesystem context (MISSING-CONTEXT without), and a std::windows::fs File's operations need none: the HANDLE is the capability} -body {
+    list [lindex [fsRejection "[fsImports linux]fn f() errors std::io::fs::FileError, std::io::path::NotAPath:\n    std::linux::fs::from_text(\"a\").create_directory()\nf():\n    on std::io::fs::FileError:\n        unit\n    on std::io::path::NotAPath:\n        unit\n" linux-x86_64] 0] \
+        [lindex [fsRejection "[fsImports windows]fn f() errors std::io::fs::FileError, std::io::path::NotAPath:\n    std::windows::fs::from_text(\"a\").create_directory()\nf():\n    on std::io::fs::FileError:\n        unit\n    on std::io::path::NotAPath:\n        unit\n" windows-x86_64] 0] \
+        [fsRejection "[fsImports windows]fn f(file: std::windows::fs::File) errors std::io::fs::FileError:\n    g = file.write_all(std::abi::bytes::from_list(\[\]))\n    g.close()\n1\n" windows-x86_64]
+} -result {MISSING-CONTEXT MISSING-CONTEXT accepted}
+
+test fs-authority-airlock {the raw layers stay behind their contexts: an application module calling std::linux::openat is DIRECT unless it is direct itself; std::windows::fs's Win32 declarations are private; the unchecked native-path constructors and the affine token's maker are internal to the standard library} -body {
+    set raw "[fsImports linux]import std::linux\nfn f() -> int:\n    std::linux::openat(std::abi::i32(-100), \[std::byte::from_int(97)\], std::abi::i32(0), std::abi::u32(0))\nf()\n"
+    list [lindex [fsRejection $raw linux-x86_64] 0] \
+        [fsRejection "direct module\n$raw" linux-x86_64] \
+        [lindex [fsRejection "[fsImports windows]import std::ffi::c\nfn f() -> int:\n    std::windows::fs::c_get_last_error()\nf()\n" windows-x86_64] 0] \
+        [lindex [fsRejection "[fsImports linux]std::linux::fs::of_valid_text(\"a\")\n" linux-x86_64] 0] \
+        [lindex [fsRejection "[fsImports linux]std::io::fs::owner()\n1\n" linux-x86_64] 0]
+} -result {DIRECT accepted PRIVATE-ACCESS INTERNAL-NAMESPACE INTERNAL-NAMESPACE}
+
+# ===========================================================================
+# Ownership of an opened file (compile time)
+
+proc fsOwnership {platform body {extra ""}} {
+    set text "[fsImports $platform]$extra\nfn f(path: std::$platform\::fs::NativePath) errors std::io::fs::FileError:\n$body\n1\n"
+    return [fsRejection $text [expr {$platform eq "linux" ? "linux-x86_64" : "windows-x86_64"}]]
+}
+
+test fs-ownership-use-after-close {a closed File no longer exists: using it again is USE-AFTER-MOVE, on both platforms} -body {
+    lmap platform {linux windows} {
+        lindex [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    file.close()\n    file.close()"] 0
+    }
+} -result {USE-AFTER-MOVE USE-AFTER-MOVE}
+
+test fs-ownership-no-copy {a File has one owner: a second binding moves it, and the first is dead; a File given to a function is that function's} -body {
+    lmap platform {linux windows} {
+        list [lindex [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    other = file\n    other.close()\n    file.close()"] 0] \
+            [lindex [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    consume(file)\n    file.close()" "fn consume(file: std::$platform\::fs::File) errors std::io::fs::FileError:\n    file.close()\n"] 0]
+    }
+} -result {{USE-AFTER-MOVE USE-AFTER-MOVE} {USE-AFTER-MOVE USE-AFTER-MOVE}}
+
+test fs-ownership-transfer {ownership moves through calls, results and struct fields: a function opening a File returns it, another takes it, uses it and gives it back, a struct holds it and is destructured} -body {
+    lmap platform {linux windows} {
+        fsOwnership $platform "    file = opened(path)\n    back = file.used()\n    holder = Holder {file: back}\n    \{file: last\} = holder\n    last.close()" "fn opened(path: std::$platform\::fs::NativePath) -> std::$platform\::fs::File errors std::io::fs::FileError:\n    path.open(std::io::fs::OpenMode::Read)\nfn used(file: std::$platform\::fs::File) -> std::$platform\::fs::File errors std::io::fs::FileError:\n    \{file: f2, data\} = file.read(16)\n    f2\nstruct Holder:\n    file: std::$platform\::fs::File\n"
+    }
+} -result {accepted accepted}
+
+test fs-ownership-restrictions {what a File is not: no equality (AFFINE-EQUALITY-UNSUPPORTED), no capture by a closure (AFFINE-CAPTURE-UNSUPPORTED), no erasure into an untyped position (AFFINE-ERASURE-UNSUPPORTED), no program result (the same kind: a result is shown, never owned), no representation outside its module (OPAQUE-REPRESENTATION, OPAQUE-CONSTRUCTION)} -body {
+    lmap platform {linux windows} {
+        set target [expr {$platform eq "linux" ? "linux-x86_64" : "windows-x86_64"}]
+        list [lindex [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    same = file == file\n    file.close()"] 0] \
+            [lindex [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    fn later():\n        file.close()\n    later()"] 0] \
+            [lindex [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    keep(file)" "fn keep(x: any) -> int:\n    1\n"] 0] \
+            [lindex [fsRejection "[fsImports $platform]fn f() -> std::$platform\::fs::File errors std::io::fs::FileError, std::io::path::NotAPath:\n    std::$platform\::fs::from_text(\"a\").open(std::io::fs::OpenMode::Read)\nfn opened() -> std::$platform\::fs::File:\n    f():\n        on std::io::fs::FileError:\n            opened()\n        on std::io::path::NotAPath:\n            opened()\nwith context std::$platform\::fs::create()\nopened()\n" $target] 0] \
+            [lindex [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    x = file.[expr {$platform eq "linux" ? "fd" : "handle"}]\n    file.close()"] 0] \
+            [lindex [fsRejection "[fsImports $platform]import std::ffi::c\nf = std::$platform\::fs::File {[expr {$platform eq "linux" ? "fd: std::abi::i32(3), owner: std::ffi::c::null\[std::ffi::c::Void\]()" : "handle: std::ffi::c::null\[std::ffi::c::Void\]()"}]}\n1\n" $target] 0]
+    }
+} -result {{AFFINE-EQUALITY-UNSUPPORTED AFFINE-CAPTURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED OPAQUE-REPRESENTATION OPAQUE-CONSTRUCTION} {AFFINE-EQUALITY-UNSUPPORTED AFFINE-CAPTURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED AFFINE-ERASURE-UNSUPPORTED OPAQUE-REPRESENTATION OPAQUE-CONSTRUCTION}}
+
+test fs-ownership-context-holds-a-file {a context may own an opened File (installation moves it in), but a contextual function only observes it where it is stored: taking it out by value to read it is AFFINE-CONTEXT-COPY-OUT -- the operations take a File, never a place} -body {
+    lmap platform {linux windows} {
+        set target [expr {$platform eq "linux" ? "linux-x86_64" : "windows-x86_64"}]
+        set text "[fsImports $platform]context struct Log:\n    file: std::$platform\::fs::File\nfn note(context log: Log) errors std::io::fs::FileError:\n    log.file.write(std::abi::bytes::from_list(\[\]))\n    unit\nfn open_log() -> std::$platform\::fs::File errors std::io::fs::FileError, std::io::path::NotAPath:\n    std::$platform\::fs::from_text(\"log\").open(std::io::fs::OpenMode::Append)\nwith context std::$platform\::fs::create()\n1\n"
+        lindex [fsRejection $text $target] 0
+    }
+} -result {AFFINE-CONTEXT-COPY-OUT AFFINE-CONTEXT-COPY-OUT}
+
+test fs-ownership-gaps {what affinity does not give (the report's resource requirements): a File dropped unclosed -- an early return, a failing call while it is owned, the end of its owner -- compiles with no diagnostic and runs no cleanup} -body {
+    lmap platform {linux windows} {
+        list [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    unit"] \
+            [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    other = path.open(std::io::fs::OpenMode::Read)\n    other.close()\n    file.close()"] \
+            [fsOwnership $platform "    file = path.open(std::io::fs::OpenMode::Read)\n    if path == path:\n        return unit\n    file.close()"]
+    }
+} -result {{accepted accepted accepted} {accepted accepted accepted}}
+
+# ===========================================================================
+# Linux native paths (pure: every backend)
+
+test fs-linux-native-paths {a Linux native path is its bytes: from_bytes refuses the empty path and a 0 byte; text decodes UTF-8 strictly (NotText for FF FE 78), display shows U+FFFD and is no path; join is concat's rule on bytes, refusing an absolute name; equality is by bytes} -body {
+    set text "[fsImports linux]fn b(xs: List\[int\]) -> List\[std::byte::Byte\]:\n    loop x in xs:\n        std::byte::from_int(x):\n            on std::byte::BelowRange:\n                0\n            on std::byte::AboveRange:\n                0\nfn t(p: std::linux::fs::NativePath) -> str:\n    p.text():\n        on std::io::path::NotText:\n            return \"NotText\"\nfn n(xs: List\[int\]) -> str:\n    p = std::linux::fs::from_bytes(b(xs)):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    t(p)\nfn j(a: str, c: str) -> str:\n    x = std::linux::fs::from_text(a):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    y = x.concat(c):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    t(y)\nfn main() -> List\[any\] errors std::io::path::NotAPath:\n    weird = std::linux::fs::from_bytes(b(\[255, 254, 120\]))\n    \[n(\[\]), n(\[97, 0, 98\]), n(\[255, 254, 120\]), n(\[195, 169\]), weird.display(), weird.bytes(), j(\"/a\", \"b\"), j(\"/\", \"b\"), j(\"a/\", \"b\"), j(\"a\", \"b/c\"), j(\"a\", \"..\"), j(\"/a\", \"/b\"), j(\"/a\", \"\"), j(\"a\", \"b\\u0000\"), std::linux::fs::from_text(\"a\") == std::linux::fs::from_text(\"a\"), std::linux::fs::from_text(\"a\") == std::linux::fs::from_text(\"./a\")\]\nmain():\n    on std::io::path::NotAPath:\n        \[\]\n"
+    set text [string map [list {\u0000} \x00] $text]
+    set hir [fsHir $text [linuxTarget]]
+    lsort -unique [lmap b [backendsFor [linuxTarget]] {lindex [outcomeUnderHir $b $hir] 1}]
+} -result {{["NotAPath", "NotAPath", "NotText", "é", "��x", [255, 254, 120], "/a/b", "/b", "a/b", "a/b/c", "a/..", "NotAPath", "NotAPath", "NotAPath", true, false]}}
+
+test fs-linux-path-native {a LinuxPath's native path is its UTF-8 bytes, exactly; it round-trips to the same text} -body {
+    set text "[fsImports linux]fn r(s: str) -> List\[any\]:\n    std::linux::path::validate(s):\n        on std::io::path::NotAPath:\n            return \[\]\n    n = s.native()\n    t = n.text():\n        on std::io::path::NotText:\n            \"NotText\"\n    \[n.bytes(), t == s\]\n\[r(\"a/é\"), r(\"./x//y\"), r(\"\\\\\")\]\n"
+    set hir [fsHir $text [linuxTarget]]
+    lsort -unique [lmap b [backendsFor [linuxTarget]] {lindex [outcomeUnderHir $b $hir] 1}]
+} -result {{[[[97, 47, 195, 169], true], [[46, 47, 120, 47, 47, 121], true], [[92], true]]}}
+
+# ===========================================================================
+# Windows paths (pure: every backend, compiled for windows-x86_64)
+
+proc fsWindowsJoins {pairs} {
+    set calls [join [lmap {a c} $pairs {string cat "j([fsString $a], [fsString $c])"}] ", "]
+    set text "[fsImports windows]fn j(base: str, part: str) -> str:\n    std::windows::path::validate(base):\n        on std::io::path::NotAPath:\n            return \"invalid\"\n    r = std::windows::path::concat(base, part):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    r\n\[$calls\]\n"
+    set hir [fsHir $text windows-x86_64]
+    return [lsort -unique [lmap b {interp compile} {lindex [outcomeUnderHir $b $hir] 1}]]
+}
+
+test fs-windows-concat {concat follows Win32's syntax, never Unix's: a bare drive designator takes no separator ("C:" and "a" are "C:a", drive C's current directory), every other path one "\" unless it ends with a separator ("/" too outside \\?\); a component that is not relative ("\a", "/a", "C:a", "1:a", a UNC) is refused, as are, under \\?\ or \??\, "/" and "." or ".." components, and elsewhere a component ending with a period or a space (Win32 drops them)} -body {
+    fsWindowsJoins {
+        C: a  C:\\ a  C:\\x a  C:x a  \\ a  a b\\c  \\\\server\\share a  //server/share a  \\\\.\\COM1 x
+        \\\\?\\C:\\x a  \\??\\C:\\x a  C:\\x\\ a  C:/x/ a  \\\\?\\C:\\x/ a
+        C:\\x \\y  C:\\x /y  C:\\x D:y  C:\\x 1:y  C:\\x \\\\s\\t
+        \\\\?\\C:\\x a/b  \\\\?\\C:\\x ..  \\\\?\\C:\\x a\\.\\b  \\\\?\\C:\\x a\\\\b  \\??\\C:\\x ..
+        C:\\x trail.  C:\\x "sp "  C:\\x a.\\b  C:\\x ..\\y  C:\\x .\\y  \\\\?\\C:\\x trail.
+        C:\\x ab:c  C:\\x a//b  C:\\x ""  é 𝄞
+    }
+} -result [list {["C:a", "C:\\a", "C:\\x\\a", "C:x\\a", "\\a", "a\\b\\c", "\\\\server\\share\\a", "//server/share\\a", "\\\\.\\COM1\\x", "\\\\?\\C:\\x\\a", "\\??\\C:\\x\\a", "C:\\x\\a", "C:/x/a", "\\\\?\\C:\\x/\\a", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "NotAPath", "C:\\x\\..\\y", "C:\\x\\.\\y", "\\\\?\\C:\\x\\trail.", "C:\\x\\ab:c", "C:\\x\\a//b", "NotAPath", "é\\𝄞"]}]
+
+test fs-windows-kinds {a Windows path's syntactic kind, by Win32's rules: a drive designator is any unit and ":", "\\?\" and "\??\" are verbatim, "\\." and "//./" (and "//?/") the device namespace} -body {
+    set paths {a .\\a C:a 1:a C: C:\\a C:/a \\a /a \\\\s\\t //s/t \\\\.\\COM1 //./C: //?/C: \\\\.  \\\\?\\C:\\a \\??\\C:\\a \\\\?\\UNC\\s\\t}
+    set calls [join [lmap p $paths {string cat "k([fsString $p])"}] ", "]
+    set text "[fsImports windows]fn k(p: str) -> std::windows::fs::PathKind:\n    std::windows::path::validate(p):\n        on std::io::path::NotAPath:\n            return std::windows::fs::PathKind::Relative\n    p.kind()\n\[$calls\]\n"
+    set hir [fsHir $text windows-x86_64]
+    string map {std::windows::fs::PathKind:: {}} [lindex [outcomeUnderHir interp $hir] 1]
+} -result {[Relative, Relative, DriveRelative, DriveRelative, DriveRelative, DriveAbsolute, DriveAbsolute, RootRelative, RootRelative, Unc, Unc, Device, Device, Device, Device, Verbatim, Verbatim, Verbatim]}
+
+test fs-windows-native-paths {a Windows native path is UTF-16 code units: an unpaired surrogate is a valid unit with no text (NotText; display shows U+FFFD); a pair is one scalar; join is concat's rule on units; from_units refuses 0, an empty path and a unit above 65535} -body {
+    set text "[fsImports windows]fn n(us: List\[int\]) -> str:\n    p = std::windows::fs::from_units(us):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    p.text():\n        on std::io::path::NotText:\n            return std::str::concat(\"NotText \", p.display())\nfn main() -> List\[any\] errors std::io::path::NotAPath:\n    lone = std::windows::fs::from_units(\[117, 55296, 120\])\n    named = std::windows::fs::from_text(\"C:\\\\d\").join(lone)\n    \[n(\[\]), n(\[97, 0\]), n(\[65536\]), n(\[117, 55296, 120\]), n(\[56320\]), n(\[55348, 56606\]), n(\[233\]), named.units(), std::windows::fs::from_text(\"𝄞\").units()\]\nmain():\n    on std::io::path::NotAPath:\n        \[\]\n"
+    set hir [fsHir $text windows-x86_64]
+    lsort -unique [lmap b {interp compile} {lindex [outcomeUnderHir $b $hir] 1}]
+} -result {{["NotAPath", "NotAPath", "NotAPath", "NotText u�x", "NotText �", "𝄞", "é", [67, 58, 92, 100, 92, 117, 55296, 120], [55348, 56606]]}}
+
+test fs-windows-join-one-rule {text and native paths share one join: for every pair, concat's text is the text of join of the native paths, and a refusal is a refusal of both} -body {
+    set bases {C: C:\\ C:x \\ a \\\\s\\t \\\\?\\C:\\x \\??\\C:\\x \\\\.\\X C:\\x\\ C:/x/}
+    set parts {a b\\c a/b .. trail. "sp " \\y C:y 1:y ab:c}
+    set pairs {}
+    foreach a $bases { foreach c $parts { lappend pairs [list $a $c] } }
+    set calls [join [lmap p $pairs {string cat "same([fsString [lindex $p 0]], [fsString [lindex $p 1]])"}] ", "]
+    set text "[fsImports windows]fn joined_text(a: str, c: str) -> str:\n    std::windows::path::validate(a):\n        on std::io::path::NotAPath:\n            return \"invalid\"\n    r = std::windows::path::concat(a, c):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    r\nfn same(a: str, c: str) -> bool:\n    std::windows::path::validate(a):\n        on std::io::path::NotAPath:\n            return false\n    textual = joined_text(a, c)\n    cn = std::windows::fs::from_text(c):\n        on std::io::path::NotAPath:\n            return textual == \"NotAPath\"\n    joined = a.native().join(cn):\n        on std::io::path::NotAPath:\n            return textual == \"NotAPath\"\n    shown = joined.text():\n        on std::io::path::NotText:\n            return false\n    shown == textual\n\[$calls\]\n"
+    set hir [fsHir $text windows-x86_64]
+    lsort -unique [split [string trim [lindex [outcomeUnderHir interp $hir] 1] {[]}] ", "]
+} -result {{} true}
+
+# ===========================================================================
+# The Tcl backends
+
+test fs-tcl-backends {the Tcl backends have no filesystem: a Linux operation reaches the syscall and is NATIVE-ONLY there, a Windows one the C call (NATIVE-ONLY); path syntax runs everywhere} -body {
+    set linux [fsProgram linux /tmp "    nroot.create_directory()\n    \[\]"]
+    set windows [fsProgram windows {C:\x} "    nroot.create_directory()\n    \[\]"]
+    list [lindex [fsValue $linux interp [linuxTarget]] 1] [lindex [fsValue $windows interp windows-x86_64] 1]
+} -result {{CORE SEMANTIC NATIVE-ONLY} {CORE SEMANTIC NATIVE-ONLY}}
+
+test fs-no-watchers {no watching and no asynchronous I/O: no module of the standard library names inotify, fanotify, ReadDirectoryChangesW, FSEvents, kqueue, epoll, an I/O completion port or overlapped I/O but to say they are absent} -body {
+    set hits {}
+    foreach path [glob -directory [file join $::projectRoot stdlib] -tails {*}{*.bot */*.bot */*/*.bot}] {
+        set n 0
+        foreach line [split [core::ReadFile [file join $::projectRoot stdlib $path]] \n] {
+            incr n
+            if {[regexp {^\s*#} $line]} continue
+            if {[regexp -nocase {inotify|fanotify|ReadDirectoryChanges|FSEvent|kqueue|epoll|CompletionPort|FILE_FLAG_OVERLAPPED} $line]} {
+                lappend hits $path:$n
+            }
+        }
+    }
+    set hits
+} -result {}
+
+# ===========================================================================
+# Linux execution: real files and directories
+
+test fs-linux-roundtrip {create a file exclusively, write bytes (a NUL and a high byte among them) and close it; reopen it, read three bytes (a short read by request), then the rest, then nothing (the end of the file), and close it} -constraints nativeLinux -body {
+    set dir [fsDir]
+    fsValue [fsProgram linux $dir {    path = nroot.concat("data.bin")
+    made = path.open(std::io::fs::OpenMode::CreateNew)
+    written = made.write_all(std::abi::bytes::join([bytes_of("hé"), raw([0, 255]), bytes_of("tail")]))
+    written.close()
+    opened = path.open(std::io::fs::OpenMode::Read)
+    {file: f1, data: first} = opened.read(3)
+    {file: f2, data: rest} = f1.read(4096)
+    {file: f3, data: last} = f2.read(4096)
+    f3.close()
+    [std::abi::bytes::length(first).value, text_of(first), std::abi::bytes::length(rest).value, std::abi::bytes::length(last).value, std::abi::bytes::join([first, rest]) == std::abi::bytes::join([bytes_of("hé"), raw([0, 255]), bytes_of("tail")])]}]
+} -result {[3, "hé", 6, 0, true]}
+
+test fs-linux-modes {the four open modes mean four things: Read needs the file (NotFound, errno 2), Replace truncates, CreateNew never does (AlreadyExists, 17), Append writes at the end and creates; an empty file reads as nothing and an empty write writes nothing} -constraints nativeLinux -body {
+    set dir [fsDir]
+    fsValue [fsProgram linux $dir {    path = nroot.concat("f.txt")
+    path.write_file(bytes_of("long text"))
+    path.write_file(bytes_of("short"))
+    replaced = text_of(path.read_file())
+    exists = create_refused(path)
+    log = nroot.concat("log.txt")
+    a = log.open(std::io::fs::OpenMode::Append)
+    a2 = a.write_all(bytes_of("one,"))
+    a2.close()
+    b = log.open(std::io::fs::OpenMode::Append)
+    b2 = b.write_all(bytes_of("two"))
+    b2.close()
+    empty = nroot.concat("empty")
+    empty.write_file(std::abi::bytes::from_list([]))
+    missing = read_refused(nroot.concat("missing"))
+    [replaced, exists, text_of(log.read_file()), std::abi::bytes::length(empty.read_file()).value, missing]} {fn create_refused(p: std::linux::fs::NativePath) -> List[any]:
+    p.create_file(bytes_of("x")):
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn read_refused(p: std::linux::fs::NativePath) -> List[any]:
+    p.read_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+}]
+} -result {["short", [std::io::fs::Reason::AlreadyExists, 17], "one,two", 0, [std::io::fs::Reason::NotFound, 2]]}
+
+test fs-linux-large {a file of 3 MiB plus a few bytes is written with one write_file and read back whole (reads of 4 KiB doubling to 1 MiB, joined), and in 1000-byte reads until the end: the same bytes, and the reads' sizes add up} -constraints nativeLinux -body {
+    set dir [fsDir]
+    fsValue [fsProgram linux $dir {    cycle = loop i from 0 to 4096:
+        i.mod(256)
+    block = raw(cycle)
+    blocks = loop i from 0 to 768:
+        block
+    data = std::abi::bytes::join(blocks.append(bytes_of("tail")))
+    path = nroot.concat("big.bin")
+    path.write_file(data)
+    back = path.read_file()
+    opened = path.open(std::io::fs::OpenMode::Read)
+    counted = opened.count_in_reads(0)
+    [std::abi::bytes::length(back).value, back == data, counted]} {fn count_in_reads(file: std::linux::fs::File, total: int) -> int errors std::io::fs::FileError:
+    {file: next, data} = file.read(1000)
+    n = std::abi::bytes::length(data).value
+    if n == 0:
+        next.close()
+        return total
+    next.count_in_reads(total + n)
+}]
+} -result {[3145732, true, 3145732]}
+
+test fs-linux-short-reads {a short read is no end of the file: from a FIFO whose writer writes "abc", pauses and writes "def", one read of 100 bytes returns the three bytes there are, and read_all reads on until the writer closes -- and read_file of the FIFO gets every byte, however the writes arrive} -constraints nativeLinux -body {
+    set dir [fsDir]
+    set fifo [file join $dir fifo]
+    set fifo2 [file join $dir fifo2]
+    exec mkfifo $fifo $fifo2
+    set program [fsProgram linux $dir {    fifo = nroot.concat("fifo")
+    opened = fifo.open(std::io::fs::OpenMode::Read)
+    {file: f1, data: first} = opened.read(100)
+    {file: f2, data: rest} = f1.read_all()
+    f2.close()
+    whole = nroot.concat("fifo2").read_file()
+    [text_of(first), text_of(rest), text_of(whole)]}]
+    set hir [fsHir $program [linuxTarget]]
+    # Each writer opens its FIFO in the shell (an open for writing waits for
+    # the reader), writes, pauses and writes again, then exits: the end of
+    # the file.
+    set writers [list [exec sh -c "exec > '$fifo'; printf abc; sleep 1; printf def" &] \
+        [exec sh -c "exec > '$fifo2'; printf 12; sleep 1; printf 34" &]]
+    try {
+        lindex [outcomeUnderHir cranelift $hir] 1
+    } finally {
+        foreach writer $writers { catch {exec kill $writer} }
+    }
+} -cleanup {unset -nocomplain writers writer fifo fifo2 program hir} -result {["abc", "def", "1234"]}
+
+test fs-linux-entries {entries lists every entry but "." and ".." with its kind as the listing says: a file, a directory, a symbolic link and a dangling one (SymbolicLink both), a FIFO (Other); an empty directory lists nothing} -constraints nativeLinux -body {
+    set dir [fsDir]
+    fsWrite [file join $dir file.txt] x
+    file mkdir [file join $dir sub] [file join $dir empty]
+    exec ln -s file.txt [file join $dir link]
+    exec ln -s missing [file join $dir dangling]
+    exec mkfifo [file join $dir fifo]
+    set value [fsValue [fsProgram linux $dir {    listed = nroot.entries()
+    names = loop e in listed:
+        [e.name.display(), e.kind]
+    [names, nroot.concat("empty").entries().length()]}]]
+    set value
+} -match regexp -result {^\[\[(\["[a-z.]+", std::io::fs::EntryKind::[A-Za-z]+\](, )?){6}\], 0\]$}
+
+test fs-linux-entries-kinds {the kinds, sorted by name} -constraints nativeLinux -body {
+    set dir [fsDir]
+    fsWrite [file join $dir file.txt] x
+    file mkdir [file join $dir sub]
+    exec ln -s file.txt [file join $dir link]
+    exec ln -s missing [file join $dir dangling]
+    exec mkfifo [file join $dir fifo]
+    set value [fsValue [fsProgram linux $dir {    listed = nroot.entries()
+    loop e in listed:
+        std::str::concat(std::str::concat(e.name.display(), "="), kind_name(e.kind))} {fn kind_name(kind: std::io::fs::EntryKind) -> str:
+    if kind == std::io::fs::EntryKind::File:
+        "File"
+    elif kind == std::io::fs::EntryKind::Directory:
+        "Directory"
+    elif kind == std::io::fs::EntryKind::SymbolicLink:
+        "SymbolicLink"
+    elif kind == std::io::fs::EntryKind::Other:
+        "Other"
+    else:
+        "Unknown"
+}]]
+    lsort [regexp -all -inline {[a-z.]+=[A-Za-z]+} $value]
+} -result {dangling=SymbolicLink fifo=Other file.txt=File link=SymbolicLink sub=Directory}
+
+test fs-linux-native-roundtrip {every name a directory holds round-trips through the native layer -- the bytes FF FE 78, their lossy spelling's own file, NFC and NFD spellings, a newline -- each listed, joined to its directory and opened again reaches its own file; the portable listing refuses the directory explicitly (NotText) rather than skip or misname an entry} -constraints nativeLinux -body {
+    set dir [fsDir]
+    fsWrite [file join $dir \ufffd\ufffdx] lossy
+    fsWrite [file join $dir \u00e9] nfc
+    fsWrite [file join $dir e\u0301] nfd
+    fsWrite [file join $dir a\nb] newline
+    fsSh "printf raw > '$dir/'\"\$(printf '\\377\\376x')\""
+    set value [fsValue [fsProgram linux $dir {    listed = nroot.entries()
+    reached = loop e in listed:
+        path = nroot.join(e.name)
+        [e.name.bytes(), text_of(path.read_file())]
+    portable = root.entries():
+        on std::io::path::NotText:
+            []
+    [reached, portable.length()]}]]
+    list [lsort [regexp -all -inline {\[\[[0-9, ]+\], "[a-z]+"\]} $value]] [regexp {\], 0\]$} $value] [exec sh -c "ls -b '$dir' | wc -l"]
+} -result {{{[[101, 204, 129], "nfd"]} {[[195, 169], "nfc"]} {[[239, 191, 189, 239, 191, 189, 120], "lossy"]} {[[255, 254, 120], "raw"]} {[[97, 10, 98], "newline"]}} 1 5}
+
+test fs-linux-paths-as-written {paths are used as written, never normalized by the library: "." and ".." components and repeated separators reach what the kernel resolves; a relative path resolves against the working directory; a symbolic link is followed to read, a dangling one is NotFound} -constraints nativeLinux -body {
+    set dir [fsDir]
+    file mkdir [file join $dir sub]
+    fsWrite [file join $dir x.txt] x
+    exec ln -s x.txt [file join $dir link]
+    exec ln -s missing [file join $dir dangling]
+    set saved [pwd]
+    cd $dir
+    try {
+        fsValue [fsProgram linux $dir {    dotted = text_of(nroot.concat("sub/../x.txt").read_file())
+    doubled = text_of(nroot.concat("sub//..//./x.txt").read_file())
+    relative = std::linux::fs::from_text("x.txt")
+    linked = text_of(nroot.concat("link").read_file())
+    dangling = nroot.concat("dangling").read_file():
+        on std::io::fs::FileError failed:
+            bytes_of(failed.code.to_string())
+    std::linux::fs::from_text("rel.txt").write_file(bytes_of("rel"))
+    [dotted, doubled, text_of(relative.read_file()), linked, text_of(dangling)]}]
+    } finally {
+        cd $saved
+    }
+} -cleanup {unset -nocomplain saved} -result {["x", "x", "x", "x", "2"]}
+
+test fs-linux-directory-failures {the reasons of directory misuse, each with its errno: listing a file (NotADirectory, 20), a file used as a directory (20), opening a directory to write (IsADirectory, 21), reading one (it opens; its read fails 21 and closes it), remove_file of a directory (21), remove_directory of a non-empty one (NotEmpty, 39) and of a file (20), create_directory of an existing name (AlreadyExists, 17)} -constraints nativeLinux -body {
+    set dir [fsDir]
+    file mkdir [file join $dir full]
+    fsWrite [file join $dir full f] x
+    fsWrite [file join $dir file.txt] x
+    fsValue [fsProgram linux $dir {    fails = [
+        try_list(nroot.concat("file.txt")),
+        try_read(nroot.concat("file.txt/x")),
+        try_open(nroot.concat("full"), std::io::fs::OpenMode::Replace),
+        try_read(nroot.concat("full")),
+        try_remove_file(nroot.concat("full")),
+        try_remove_directory(nroot.concat("full")),
+        try_remove_directory(nroot.concat("file.txt")),
+        try_create_directory(nroot.concat("full")),
+    ]
+    fails} {fn try_list(p: std::linux::fs::NativePath) -> List[any]:
+    p.entries():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_read(p: std::linux::fs::NativePath) -> List[any]:
+    p.read_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_open(p: std::linux::fs::NativePath, mode: std::io::fs::OpenMode) -> List[any]:
+    f = p.open(mode):
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    f.close():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_remove_file(p: std::linux::fs::NativePath) -> List[any]:
+    p.remove_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_remove_directory(p: std::linux::fs::NativePath) -> List[any]:
+    p.remove_directory():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_create_directory(p: std::linux::fs::NativePath) -> List[any]:
+    p.create_directory():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+}]
+} -result {[[std::io::fs::Reason::NotADirectory, 20], [std::io::fs::Reason::NotADirectory, 20], [std::io::fs::Reason::IsADirectory, 21], [std::io::fs::Reason::IsADirectory, 21], [std::io::fs::Reason::IsADirectory, 21], [std::io::fs::Reason::NotEmpty, 39], [std::io::fs::Reason::NotADirectory, 20], [std::io::fs::Reason::AlreadyExists, 17]]}
+
+test fs-linux-permission {a file the process may not read is PermissionDenied (EACCES, 13)} -constraints {nativeLinux notRoot} -body {
+    set dir [fsDir]
+    fsWrite [file join $dir secret] x
+    file attributes [file join $dir secret] -permissions 0000
+    fsValue [fsProgram linux $dir {    nroot.concat("secret").read_file()
+    []}]
+} -result {["FileError", std::io::fs::Reason::PermissionDenied, 13]}
+
+test fs-linux-disappearing {an entry removed between operations: a file removed while open stays readable through its File (POSIX), a name listed and then removed is NotFound when opened} -constraints nativeLinux -body {
+    set dir [fsDir]
+    fsWrite [file join $dir a.txt] still
+    fsWrite [file join $dir b.txt] gone
+    fsValue [fsProgram linux $dir {    a = nroot.concat("a.txt")
+    opened = a.open(std::io::fs::OpenMode::Read)
+    a.remove_file()
+    {file, data} = opened.read_all()
+    file.close()
+    listed = nroot.entries()
+    nroot.concat("b.txt").remove_file()
+    after = loop e in listed:
+        nroot.join(e.name).read_file():
+            on std::io::fs::FileError failed:
+                bytes_of(failed.code.to_string())
+    first = after.at(0):
+        on IndexNotFound:
+            bytes_of("none")
+    [text_of(data), listed.length(), text_of(first)]}]
+} -result {["still", 1, "2"]}
+
+test fs-linux-portable {portable code over FilePath, given a LinuxPath: create a directory, write, create exclusively, read, list (textual names), remove -- one clone, direct calls of std::linux::path's functions} -constraints nativeLinux -body {
+    set dir [fsDir]
+    set value [fsValue [fsProgram linux $dir {    data = portable(root)
+    data} {fn create_refused(p: std::io::fs::FilePath) -> List[any]:
+    p.create_file(std::abi::bytes::from_list([])):
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn portable(dir: std::io::fs::FilePath) -> List[any] errors std::io::fs::FileError, std::io::path::NotAPath, std::io::path::NotText:
+    sub = dir.concat("saves")
+    sub.create_directory()
+    sub.concat("one.txt").write_file(std::abi::bytes::from_list("1".encode_utf8()))
+    sub.concat("two.txt").create_file(std::abi::bytes::from_list("2".encode_utf8()))
+    again = create_refused(sub.concat("two.txt"))
+    names = loop e in sub.entries():
+        e.name
+    back = sub.concat("one.txt").read_file()
+    sub.concat("one.txt").remove_file()
+    sub.concat("two.txt").remove_file()
+    sub.remove_directory()
+    [std::list::length(names), again, back == std::abi::bytes::from_list("1".encode_utf8()), sub.text()]
+}]]
+    string map [list $dir DIR] $value
+} -result {[2, [std::io::fs::Reason::AlreadyExists, 17], true, "DIR/saves"]}
+
+test fs-linux-executable {a standalone executable does the same round trip (and under GC stress): writes, lists and reads back a file through the raw syscalls, no libc call of its own} -constraints nativeLinux -body {
+    set dir [fsDir]
+    set text [fsProgram linux $dir {    path = nroot.concat("exe.txt")
+    path.write_file(bytes_of("from an executable"))
+    names = loop e in nroot.entries():
+        e.name.display()
+    [names, text_of(path.read_file())]}]
+    set exe [native::executable [fsHir $text [linuxTarget]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
+    set first [exec $exe]
+    file delete [file join $dir exe.txt]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
+    list $first $stressed
+} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]}}
+
+test fs-linux-gc-stress {the native backends under GC stress: a directory of files written, listed and read, every operation allocating, with a collection at every allocation} -constraints nativeLinux -body {
+    set dir [fsDir]
+    set text [fsProgram linux $dir {    made = loop i from 0 to 5:
+        nroot.concat(std::str::concat("f", i.to_string())).write_file(bytes_of(i.to_string()))
+    listed = nroot.entries()
+    sum = loop e in listed:
+        text_of(nroot.join(e.name).read_file())
+    [listed.length(), sum.length()]}]
+    set hir [fsHir $text [linuxTarget]]
+    withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {
+        lmap b {cranelift cranelift-generic} {lindex [outcomeUnderHir $b $hir] 1}
+    }
+} -result {{[5, 5]} {[5, 5]}}
+
+# ===========================================================================
+# Linux: faults the kernel does not give on demand (strace's injection)
+
+# EXE's output and strace's log of its file syscalls on PATH with INJECT
+# injected: only the calls that access PATH (or a descriptor opened for it)
+# are traced and counted (-P: the dynamic loader's reads are not the
+# program's), full strings (-s), one line per call, the thread ids -f
+# prefixes removed (the runtime runs Botlish code on a thread of its own).
+proc fsStraced {exe inject path} {
+    set log [file join $::fsScratch strace[incr ::fsCounter].log]
+    catch {exec strace -f -qq -s 4096 -o $log -P $path -e trace=openat,getdents64,read,write,close -e inject=$inject $exe} out
+    regsub -all -line {^[0-9]+ +} [fsReadBinary $log] {} text
+    return [list $out $text]
+}
+
+test fs-linux-fault-enumeration {a getdents64 that fails (EIO, injected) fails entries with FileError (Other, 5) and closes the directory's descriptor: no descriptor outlives the failure} -constraints {nativeLinux straceInject} -body {
+    set dir [fsDir]
+    fsWrite [file join $dir a] a
+    set exe [native::executable [fsHir [fsProgram linux $dir {    listed = nroot.entries()
+    [listed.length()]}] [linuxTarget]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
+    lassign [fsStraced $exe getdents64:error=EIO $dir] out log
+    regexp {openat\([^)]*O_DIRECTORY[^)]*\) = (\d+)} $log -> fd
+    list $out [regexp "getdents64\\($fd, .*= -1 EIO \\(Input/output error\\) \\(INJECTED\\)\nclose\\($fd\\) += 0" $log]
+} -cleanup {unset -nocomplain fd} -result {{["FileError", std::io::fs::Reason::Other, 5]} 1}
+
+test fs-linux-fault-short-write {a short write (the first write reports one byte, injected) is continued by write_all from the next byte: strace's injection skips the call, so the file holds the five bytes write_all wrote after it -- the policy is "continue after what the kernel reports", never "write it all again"} -constraints {nativeLinux straceInject} -body {
+    set dir [fsDir]
+    set exe [native::executable [fsHir [fsProgram linux $dir {    path = nroot.concat("w.txt")
+    path.write_file(bytes_of("abcdef"))
+    [text_of(path.read_file())]}] [linuxTarget]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
+    lassign [fsStraced $exe write:retval=1:when=1 [file join $dir w.txt]] out log
+    regexp {openat\([^)]*w\.txt[^)]*\) = (\d+)} $log -> fd
+    list $out [fsReadBinary [file join $dir w.txt]] \
+        [regexp "write\\($fd, \"abcdef\", 6\\) += 1 \\(INJECTED\\)\nwrite\\($fd, \"bcdef\", 5\\) += 5\n" $log]
+} -cleanup {unset -nocomplain fd} -result {{["bcdef"]} bcdef 1}
+
+test fs-linux-fault-read {a read that fails (EINTR, injected: no retry) fails read_file with FileError (Other, 4) and closes the file} -constraints {nativeLinux straceInject} -body {
+    set dir [fsDir]
+    fsWrite [file join $dir r.txt] data
+    set exe [native::executable [fsHir [fsProgram linux $dir {    [text_of(nroot.concat("r.txt").read_file())]}] [linuxTarget]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
+    lassign [fsStraced $exe read:error=EINTR:when=1 [file join $dir r.txt]] out log
+    regexp {openat\([^)]*r\.txt[^)]*\) = (\d+)} $log -> fd
+    list $out [regexp "read\\($fd, .*INJECTED\\)\nclose\\($fd\\)" $log]
+} -cleanup {unset -nocomplain fd} -result {{["FileError", std::io::fs::Reason::Other, 4]} 1}
+
+# ===========================================================================
+# Windows execution: real files and directories on NTFS
+#
+# Each program is registered here, by name, so that fs-windows-programs-compile
+# type-checks every one of them for windows-x86_64 on every host; the tests
+# that run them need Windows.
+
+set ::fsWindows [dict create]
+proc fsWindows {name body {helpers ""}} {
+    dict set ::fsWindows $name [list $body $helpers]
+}
+proc fsWindowsProgram {name dir} {
+    return [fsProgram windows $dir {*}[dict get $::fsWindows $name]]
+}
+
+fsWindows roundtrip {    path = nroot.concat("data.bin")
+    made = path.open(std::io::fs::OpenMode::CreateNew)
+    written = made.write_all(std::abi::bytes::join([bytes_of("hé"), raw([0, 255]), bytes_of("tail")]))
+    written.close()
+    opened = path.open(std::io::fs::OpenMode::Read)
+    {file: f1, data: first} = opened.read(3)
+    {file: f2, data: rest} = f1.read(4096)
+    {file: f3, data: last} = f2.read(4096)
+    f3.close()
+    [std::abi::bytes::length(first).value, text_of(first), std::abi::bytes::length(rest).value, std::abi::bytes::length(last).value]}
+
+fsWindows modes {    path = nroot.concat("Case.txt")
+    path.write_file(bytes_of("long text"))
+    path.write_file(bytes_of("short"))
+    other = nroot.concat("CASE.TXT")
+    exists = create_refused(other)
+    log = nroot.concat("log.txt")
+    a = log.open(std::io::fs::OpenMode::Append)
+    a2 = a.write_all(bytes_of("one,"))
+    a2.close()
+    b = log.open(std::io::fs::OpenMode::Append)
+    b2 = b.write_all(bytes_of("two"))
+    b2.close()
+    missing = read_refused(nroot.concat("missing"))
+    deeper = read_refused(nroot.concat("nowhere\\x"))
+    [text_of(other.read_file()), exists, text_of(log.read_file()), missing, deeper]} {fn create_refused(p: std::windows::fs::NativePath) -> List[any]:
+    p.create_file(bytes_of("x")):
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn read_refused(p: std::windows::fs::NativePath) -> List[any]:
+    p.read_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+}
+
+fsWindows native-roundtrip {    lone = std::windows::fs::from_units([117, 45, 55296])
+    nroot.join(lone).write_file(bytes_of("lone"))
+    nroot.join(std::windows::fs::from_units([117, 45, 65533])).write_file(bytes_of("lossy"))
+    listed = nroot.entries()
+    reached = loop e in listed:
+        [e.name.units(), text_of(nroot.join(e.name).read_file()), e.name.display()]
+    portable = root.entries():
+        on std::io::path::NotText:
+            []
+    [reached, portable.length()]}
+
+fsWindows verbatim {    verbatim = std::windows::fs::from_text(std::str::concat("\\\\?\\", root))
+    verbatim.concat("verb.").write_file(bytes_of("kept"))
+    nroot.concat("plain").write_file(bytes_of("plain"))
+    listed = verbatim.entries()
+    names = loop e in listed:
+        e.name.display()
+    dotted = loop e in listed:
+        if e.name.units() == [118, 101, 114, 98, 46]:
+            e.name
+        else:
+            continue
+    found = dotted.at(0):
+        on IndexNotFound:
+            return ["no verb."]
+    back = verbatim.join(found).read_file()
+    refused = nroot.join(found):
+        on std::io::path::NotAPath:
+            nroot
+    [names, text_of(back), refused == nroot]}
+
+fsWindows directory-failures {    [
+        try_list(nroot.concat("file.txt")),
+        try_read(nroot.concat("full")),
+        try_remove_file(nroot.concat("full")),
+        try_read(nroot.concat("file.txt\\x")),
+        try_remove_directory(nroot.concat("full")),
+        try_remove_directory(nroot.concat("file.txt")),
+        try_create_directory(nroot.concat("full")),
+    ]} {fn try_list(p: std::windows::fs::NativePath) -> List[any]:
+    p.entries():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_read(p: std::windows::fs::NativePath) -> List[any]:
+    p.read_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_remove_file(p: std::windows::fs::NativePath) -> List[any]:
+    p.remove_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_remove_directory(p: std::windows::fs::NativePath) -> List[any]:
+    p.remove_directory():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_create_directory(p: std::windows::fs::NativePath) -> List[any]:
+    p.create_directory():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+}
+
+fsWindows entries {    listed = nroot.entries()
+    names = loop e in listed:
+        [e.name.display(), e.kind]
+    [names, nroot.concat("empty").entries().length()]}
+
+fsWindows sharing {    path = nroot.concat("shared.txt")
+    w = path.open(std::io::fs::OpenMode::Replace)
+    r = path.open(std::io::fs::OpenMode::Read)
+    r.close()
+    w.close()
+    busy = nroot.concat("held.txt").read_file():
+        on std::io::fs::FileError failed:
+            bytes_of(std::str::concat("Busy? ", failed.code.to_string()))
+    [text_of(busy)]}
+
+fsWindows long-path {    long = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    verbatim = std::windows::fs::from_text(std::str::concat("\\\\?\\", root))
+    deep = verbatim.concat(long).concat(long).concat(long)
+    verbatim.concat(long).create_directory()
+    verbatim.concat(long).concat(long).create_directory()
+    deep.create_directory()
+    deep.concat("f.txt").write_file(bytes_of("deep"))
+    plain = nroot.concat(long).concat(long).concat(long).concat("f.txt").read_file():
+        on std::io::fs::FileError failed:
+            bytes_of(failed.code.to_string())
+    [text_of(deep.concat("f.txt").read_file()), text_of(plain)]}
+
+fsWindows executable {    path = nroot.concat("exe.txt")
+    path.write_file(bytes_of("from an executable"))
+    names = loop e in nroot.entries():
+        e.name.display()
+    [names, text_of(path.read_file())]}
+
+fsWindows portable {    data = portable(root)
+    data} {fn portable(dir: std::io::fs::FilePath) -> List[any] errors std::io::fs::FileError, std::io::path::NotAPath, std::io::path::NotText:
+    sub = dir.concat("saves")
+    sub.create_directory()
+    sub.concat("one.txt").write_file(std::abi::bytes::from_list("1".encode_utf8()))
+    names = loop e in sub.entries():
+        e.name
+    sub.concat("one.txt").remove_file()
+    sub.remove_directory()
+    [names]
+}
+
+test fs-windows-programs-compile {every Windows execution program below compiles for windows-x86_64, on every host} -body {
+    set out {}
+    dict for {name program} $::fsWindows {
+        set r [fsRejection [fsProgram windows {C:\x} {*}$program] windows-x86_64]
+        if {$r ne "accepted"} {
+            lappend out $name $r
+        }
+    }
+    set out
+} -result {}
+
+test fs-windows-roundtrip {create a file exclusively, write bytes (a NUL and a high byte among them) and close it; reopen, read three bytes, the rest, nothing (the end), close} -constraints windowsIO -body {
+    fsValue [fsWindowsProgram roundtrip [fsDir]]
+} -result {[3, "hé", 6, 0]}
+
+test fs-windows-modes {the four open modes on NTFS: Read needs the file (NotFound, ERROR_FILE_NOT_FOUND 2; ERROR_PATH_NOT_FOUND 3 for a missing directory), Replace truncates, CreateNew never does (AlreadyExists, ERROR_FILE_EXISTS 80, also for another spelling of the name: NTFS compares names without case), Append appends} -constraints windowsIO -body {
+    fsValue [fsWindowsProgram modes [fsDir]]
+} -result {["short", [std::io::fs::Reason::AlreadyExists, 80], "one,two", [std::io::fs::Reason::NotFound, 2], [std::io::fs::Reason::NotFound, 3]]}
+
+test fs-windows-native-roundtrip {NTFS keeps a name with an unpaired surrogate: made from raw code units, listed, joined and opened again, it reaches its own file -- and so does the file whose name is its lossy spelling; the portable listing refuses the directory (NotText); display shows U+FFFD} -constraints windowsIO -body {
+    fsValue [fsWindowsProgram native-roundtrip [fsDir]]
+} -result {[[[[117, 45, 55296], "lone", "u-�"], [[117, 45, 65533], "lossy", "u-�"]], 0]}
+
+test fs-windows-verbatim {Win32 drops a component's trailing period, \\?\ keeps it: a name made through a verbatim directory ("verb.") is listed as written and reached again only through that verbatim directory -- joined to the Win32 spelling of the directory it is refused (NotAPath), never opened as another file} -constraints windowsIO -body {
+    fsValue [fsWindowsProgram verbatim [fsDir]]
+} -result {[["plain", "verb."], "kept", true]}
+
+test fs-windows-directory-failures {directory misuse on Windows, each with its Win32 code: listing a file is NotADirectory (ERROR_DIRECTORY, 267); opening a directory or DeleteFileW of one is IsADirectory (Win32's ERROR_ACCESS_DENIED, 5, kept as the code); a file used as a directory is NotFound (ERROR_PATH_NOT_FOUND, 3); removing a non-empty directory is NotEmpty (145), a file NotADirectory (267); an existing directory AlreadyExists (183)} -constraints windowsIO -body {
+    set dir [fsDir]
+    file mkdir [file join $dir full]
+    fsWrite [file join $dir full f] x
+    fsWrite [file join $dir file.txt] x
+    fsValue [fsWindowsProgram directory-failures $dir]
+} -result {[[std::io::fs::Reason::NotADirectory, 267], [std::io::fs::Reason::IsADirectory, 5], [std::io::fs::Reason::IsADirectory, 5], [std::io::fs::Reason::NotFound, 3], [std::io::fs::Reason::NotEmpty, 145], [std::io::fs::Reason::NotADirectory, 267], [std::io::fs::Reason::AlreadyExists, 183]]}
+
+test fs-windows-entries {entries on NTFS: files and directories with their kinds, "." and ".." left out, an empty directory empty} -constraints windowsIO -body {
+    set dir [fsDir]
+    fsWrite [file join $dir b.txt] x
+    file mkdir [file join $dir a] [file join $dir empty]
+    fsValue [fsWindowsProgram entries $dir]
+} -result {[[["a", std::io::fs::EntryKind::Directory], ["b.txt", std::io::fs::EntryKind::File], ["empty", std::io::fs::EntryKind::Directory]], 0]}
+
+test fs-windows-sharing {files open with share mode READ|WRITE|DELETE: a second open of a file open for writing succeeds; while another process holds it exclusively (FileShare.None) opening it is Busy (ERROR_SHARING_VIOLATION, 32)} -constraints windowsIO -body {
+    set dir [fsDir]
+    fsWrite [file join $dir held.txt] held
+    set held [file join $dir held.txt]
+    set ready [file join $dir ready]
+    set pid [exec pwsh -NoProfile -Command "\$f = \[System.IO.File\]::Open('$held', 'Open', 'ReadWrite', 'None'); Set-Content -Path '$ready' -Value ok; Start-Sleep -Seconds 120" &]
+    for {set i 0} {$i < 600 && ![file exists $ready]} {incr i} { after 100 }
+    try {
+        fsValue [fsWindowsProgram sharing $dir]
+    } finally {
+        catch {exec taskkill /PID $pid /F}
+    }
+} -cleanup {unset -nocomplain held ready pid i} -result {["Busy? 32"]}
+
+test fs-windows-long-path {a path longer than MAX_PATH works through \\?\ (NTFS's limit) and not through Win32's (ERROR_PATH_NOT_FOUND, 3)} -constraints windowsIO -body {
+    fsValue [fsWindowsProgram long-path [fsDir]]
+} -result {["deep", "3"]}
+
+test fs-windows-executable {a standalone Windows executable does the round trip (and under GC stress)} -constraints windowsIO -body {
+    set dir [fsDir]
+    set exe [native::executable [fsHir [fsWindowsProgram executable $dir]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
+    set first [exec $exe]
+    file delete [file join $dir exe.txt]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
+    list $first $stressed
+} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]}}
+
+test fs-windows-portable {portable code over FilePath, given a WindowsPath: the same program as fs-linux-portable's} -constraints windowsIO -body {
+    fsValue [fsWindowsProgram portable [fsDir]]
+} -result {[["one.txt"]]}
+
+# ===========================================================================
+# macOS execution: real files and directories on APFS, through libSystem
+#
+# Registered like the Windows programs: fs-darwin-programs-compile
+# type-checks each for macos-aarch64 on every host; the tests that run them
+# need macOS (darwinIO).
+
+set ::fsDarwin [dict create]
+proc fsDarwin {name body {helpers ""}} {
+    dict set ::fsDarwin $name [list $body $helpers]
+}
+proc fsDarwinProgram {name dir} {
+    return [fsProgram darwin $dir {*}[dict get $::fsDarwin $name]]
+}
+
+fsDarwin roundtrip {    path = nroot.concat("data.bin")
+    made = path.open(std::io::fs::OpenMode::CreateNew)
+    written = made.write_all(std::abi::bytes::join([bytes_of("hé"), raw([0, 255]), bytes_of("tail")]))
+    written.close()
+    opened = path.open(std::io::fs::OpenMode::Read)
+    {file: f1, data: first} = opened.read(3)
+    {file: f2, data: rest} = f1.read(4096)
+    {file: f3, data: last} = f2.read(4096)
+    f3.close()
+    [std::abi::bytes::length(first).value, text_of(first), std::abi::bytes::length(rest).value, std::abi::bytes::length(last).value]}
+
+fsDarwin modes {    path = nroot.concat("f.txt")
+    path.write_file(bytes_of("long text"))
+    path.write_file(bytes_of("short"))
+    replaced = text_of(path.read_file())
+    exists = create_refused(path)
+    log = nroot.concat("log.txt")
+    a = log.open(std::io::fs::OpenMode::Append)
+    a2 = a.write_all(bytes_of("one,"))
+    a2.close()
+    b = log.open(std::io::fs::OpenMode::Append)
+    b2 = b.write_all(bytes_of("two"))
+    b2.close()
+    missing = read_refused(nroot.concat("missing"))
+    [replaced, exists, text_of(log.read_file()), missing]} {fn create_refused(p: std::darwin::fs::NativePath) -> List[any]:
+    p.create_file(bytes_of("x")):
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn read_refused(p: std::darwin::fs::NativePath) -> List[any]:
+    p.read_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+}
+
+fsDarwin names {    raw_name = std::darwin::fs::from_bytes(raw_bytes([255, 254, 120]))
+    invalid = create_refused(nroot.join(raw_name))
+    nroot.concat("é").write_file(bytes_of("nfc"))
+    nfd = create_refused(nroot.concat("é"))
+    nroot.concat("Case.txt").write_file(bytes_of("case"))
+    cased = create_refused(nroot.concat("CASE.TXT"))
+    listed = loop e in nroot.entries():
+        e.name.bytes()
+    [invalid, nfd, cased, listed.length()]} {fn raw_bytes(xs: List[int]) -> List[std::byte::Byte]:
+    loop x in xs:
+        std::byte::from_int(x):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                0
+
+fn create_refused(p: std::darwin::fs::NativePath) -> List[any]:
+    p.create_file(bytes_of("x")):
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+}
+
+fsDarwin entries {    listed = nroot.entries()
+    names = loop e in listed:
+        [e.name.display(), e.kind]
+    [names, nroot.concat("empty").entries().length()]}
+
+fsDarwin directory-failures {    [
+        try_list(nroot.concat("file.txt")),
+        try_open(nroot.concat("full"), std::io::fs::OpenMode::Replace),
+        try_remove_file(nroot.concat("full")),
+        try_remove_directory(nroot.concat("full")),
+        try_remove_directory(nroot.concat("file.txt")),
+        try_create_directory(nroot.concat("full")),
+    ]} {fn try_list(p: std::darwin::fs::NativePath) -> List[any]:
+    p.entries():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_open(p: std::darwin::fs::NativePath, mode: std::io::fs::OpenMode) -> List[any]:
+    f = p.open(mode):
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    f.close():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_remove_file(p: std::darwin::fs::NativePath) -> List[any]:
+    p.remove_file():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_remove_directory(p: std::darwin::fs::NativePath) -> List[any]:
+    p.remove_directory():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+
+fn try_create_directory(p: std::darwin::fs::NativePath) -> List[any]:
+    p.create_directory():
+        on std::io::fs::FileError failed:
+            return shown(failed.reason, failed.code)
+    []
+}
+
+fsDarwin portable {    data = portable(root)
+    data} {fn portable(dir: std::io::fs::FilePath) -> List[any] errors std::io::fs::FileError, std::io::path::NotAPath, std::io::path::NotText:
+    sub = dir.concat("saves")
+    sub.create_directory()
+    sub.concat("one.txt").write_file(std::abi::bytes::from_list("1".encode_utf8()))
+    names = loop e in sub.entries():
+        e.name
+    back = sub.concat("one.txt").read_file()
+    sub.concat("one.txt").remove_file()
+    sub.remove_directory()
+    [names, back == std::abi::bytes::from_list("1".encode_utf8())]
+}
+
+fsDarwin executable {    path = nroot.concat("exe.txt")
+    path.write_file(bytes_of("from an executable"))
+    names = loop e in nroot.entries():
+        e.name.display()
+    [names, text_of(path.read_file())]}
+
+test fs-darwin-programs-compile {every macOS execution program below compiles for macos-aarch64, on every host} -body {
+    set out {}
+    dict for {name program} $::fsDarwin {
+        set r [fsRejection [fsProgram darwin /tmp/x {*}$program] macos-aarch64]
+        if {$r ne "accepted"} {
+            lappend out $name $r
+        }
+    }
+    set out
+} -result {}
+
+test fs-darwin-roundtrip {create a file exclusively, write bytes (a NUL and a high byte among them) and close it; reopen, read three bytes, the rest, nothing (the end), close -- through libSystem's open, read, write and close} -constraints darwinIO -body {
+    fsValue [fsDarwinProgram roundtrip [fsDir]]
+} -result {[3, "hé", 6, 0]}
+
+test fs-darwin-modes {the four open modes on macOS: Read needs the file (NotFound, ENOENT 2), Replace truncates, CreateNew never does (AlreadyExists, EEXIST 17), Append appends} -constraints darwinIO -body {
+    fsValue [fsDarwinProgram modes [fsDir]]
+} -result {["short", [std::io::fs::Reason::AlreadyExists, 17], "one,two", [std::io::fs::Reason::NotFound, 2]]}
+
+test fs-darwin-names {APFS's names are not Linux's: a name that is not UTF-8 is refused (InvalidName, EILSEQ 92) -- so every name a macOS directory lists has text -- and names are compared without normalization or case (an NFD spelling of an existing NFC name and another case of an existing name are AlreadyExists, 17)} -constraints darwinIO -body {
+    fsValue [fsDarwinProgram names [fsDir]]
+} -result {[[std::io::fs::Reason::InvalidName, 92], [std::io::fs::Reason::AlreadyExists, 17], [std::io::fs::Reason::AlreadyExists, 17], 2]}
+
+test fs-darwin-entries {entries on APFS (readdir): files, directories and a symbolic link with their kinds, "." and ".." left out, an empty directory empty} -constraints darwinIO -body {
+    set dir [fsDir]
+    fsWrite [file join $dir b.txt] x
+    file mkdir [file join $dir a] [file join $dir empty]
+    exec ln -s b.txt [file join $dir link]
+    set value [fsValue [fsDarwinProgram entries $dir]]
+    list [lsort [regexp -all -inline {\["[a-z.]+", std::io::fs::EntryKind::[A-Za-z]+\]} $value]] [regexp {\], 0\]$} $value]
+} -result {{{["a", std::io::fs::EntryKind::Directory]} {["b.txt", std::io::fs::EntryKind::File]} {["empty", std::io::fs::EntryKind::Directory]} {["link", std::io::fs::EntryKind::SymbolicLink]}} 1}
+
+test fs-darwin-directory-failures {directory misuse on macOS, each with its errno: listing a file is NotADirectory (ENOTDIR 20), opening a directory to write IsADirectory (EISDIR 21), unlink of a directory IsADirectory (macOS's EPERM, 1, kept as the code), removing a non-empty directory NotEmpty (ENOTEMPTY, 66 on macOS), a file NotADirectory (20), an existing directory AlreadyExists (17)} -constraints darwinIO -body {
+    set dir [fsDir]
+    file mkdir [file join $dir full]
+    fsWrite [file join $dir full f] x
+    fsWrite [file join $dir file.txt] x
+    fsValue [fsDarwinProgram directory-failures $dir]
+} -result {[[std::io::fs::Reason::NotADirectory, 20], [std::io::fs::Reason::IsADirectory, 21], [std::io::fs::Reason::IsADirectory, 1], [std::io::fs::Reason::NotEmpty, 66], [std::io::fs::Reason::NotADirectory, 20], [std::io::fs::Reason::AlreadyExists, 17]]}
+
+test fs-darwin-portable {portable code over FilePath, given a DarwinPath: the same program as the other platforms'} -constraints darwinIO -body {
+    fsValue [fsDarwinProgram portable [fsDir]]
+} -result {[["one.txt"], true]}
+
+test fs-darwin-executable {a standalone macOS executable does the round trip (and under GC stress)} -constraints darwinIO -body {
+    set dir [fsDir]
+    set exe [native::executable [fsHir [fsDarwinProgram executable $dir]] [file join $::fsScratch fsexe[incr ::fsCounter]]]
+    set first [exec $exe]
+    file delete [file join $dir exe.txt]
+    set stressed [withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {exec $exe}]
+    list $first $stressed
+} -result {{[["exe.txt"], "from an executable"]} {[["exe.txt"], "from an executable"]}}
+
+cleanupTests

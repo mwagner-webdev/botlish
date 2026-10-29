@@ -1,0 +1,213 @@
+# w32.bot -- experiment prototype (WINDOWS-X86-64-MILESTONE-7.md, section
+# 3): the wide Win32 filesystem calls, declared by their SDK prototypes, and
+# the conversions every Windows path design shares. A path here is a List of
+# UTF-16 code units (no terminator), given to a wide API as its
+# little-endian bytes and a two-byte NUL, built for the one call.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::ffi::c
+import std::list
+import std::mutable_vector
+import type std::byte::Byte
+
+extern c library "kernel32"
+
+# HANDLE CreateFileW(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE)
+extern c fn c_create_file named "CreateFileW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, access: std::ffi::c::ULong, share: std::ffi::c::ULong, security: std::ffi::c::Ptr[std::ffi::c::Void] noescape, disposition: std::ffi::c::ULong, flags: std::ffi::c::ULong, template: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+# BOOL ReadFile(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED)
+extern c fn c_read_file named "ReadFile"(file: std::ffi::c::Ptr[std::ffi::c::Void] noescape, buffer: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULong, done: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, overlapped: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+# BOOL WriteFile(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED)
+extern c fn c_write_file named "WriteFile"(file: std::ffi::c::Ptr[std::ffi::c::Void] noescape, buffer: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, count: std::ffi::c::ULong, done: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, overlapped: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+# BOOL CloseHandle(HANDLE)
+extern c fn c_close_handle named "CloseHandle"(handle: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+# HANDLE FindFirstFileW(LPCWSTR, LPWIN32_FIND_DATAW)
+extern c fn c_find_first named "FindFirstFileW"(pattern: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, data: std::ffi::c::Ptr[std::ffi::c::Void] write noescape) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+# BOOL FindNextFileW(HANDLE, LPWIN32_FIND_DATAW)
+extern c fn c_find_next named "FindNextFileW"(find: std::ffi::c::Ptr[std::ffi::c::Void] noescape, data: std::ffi::c::Ptr[std::ffi::c::Void] write noescape) -> std::ffi::c::Int
+# BOOL FindClose(HANDLE)
+extern c fn c_find_close named "FindClose"(find: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+# DWORD GetLastError(void)
+extern c fn c_last_error named "GetLastError"() -> std::ffi::c::ULong
+# DWORD GetFileAttributesW(LPCWSTR)
+extern c fn c_attributes named "GetFileAttributesW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape) -> std::ffi::c::ULong
+# BOOL CreateDirectoryW(LPCWSTR, LPSECURITY_ATTRIBUTES)
+extern c fn c_create_directory named "CreateDirectoryW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, security: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+# DWORD GetFullPathNameW(LPCWSTR, DWORD, LPWSTR, LPWSTR *)
+extern c fn c_full_path named "GetFullPathNameW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, size: std::ffi::c::ULong, buffer: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, file_part: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::ULong
+
+# A DWORD out-parameter.
+layout Dword:
+    size 4
+    align 4
+    field value: std::binary::U32 at 0
+
+# WIN32_FIND_DATAW (minwinbase.h): 592 bytes; the attributes at 0, the name
+# (WCHAR cFileName[MAX_PATH]) at 44.
+layout FindData:
+    size 592
+    align 4
+    field attributes: std::binary::U32 at 0
+    field name: array 260 of std::binary::U16 at 44
+
+# A HANDLE's bits: the same eight bytes, written as a pointer field by
+# std::binary::write_foreign and read back as an integer -- the "bits twin" of
+# NATIVE-LAYOUT-WRITES.md -- which is how INVALID_HANDLE_VALUE, a pointer no
+# Botlish value compares with, is recognized.
+layout HandleWord:
+    size 8
+    align 8
+    field handle: std::ffi::c::Ptr[std::ffi::c::Void] at 0
+
+layout HandleBits:
+    size 8
+    align 8
+    field bits: std::binary::U64 at 0
+
+# A wide path buffer for GetFullPathNameW (1024 WCHARs).
+layout Wide:
+    size 2048
+    align 2
+    field units: array 1024 of std::binary::U16 at 0
+
+struct Entry:
+    units: List[std::binary::U16]
+    attributes: int
+
+struct Opened:
+    handle: std::ffi::c::Ptr[std::ffi::c::Void]
+    code: int
+
+fn entries() -> MutableVector[Entry]:
+    std::mutable_vector::from_list([])
+
+# UNITS' little-endian bytes and a two-byte NUL: an LPCWSTR for one call.
+fn wide(units: List[int]) -> std::abi::bytes::Bytes errors std::byte::BelowRange, std::byte::AboveRange:
+    bytes = loop i from 0 to 2 * units.length() + 2:
+        if i >= 2 * units.length():
+            std::byte::from_int(0)
+        else:
+            u = units.at(i.shift_right(1)):
+                on IndexNotFound:
+                    0
+            if i.mod(2) == 0:
+                std::byte::from_int(u.mod(256))
+            else:
+                std::byte::from_int(u.shift_right(8))
+    std::abi::bytes::from_list(bytes)
+
+# true when HANDLE is INVALID_HANDLE_VALUE ((HANDLE)-1).
+fn invalid?(handle: std::ffi::c::Ptr[std::ffi::c::Void]) -> bool:
+    word = std::binary::write_foreign(std::abi::bytes::zeroed(std::abi::usize(8)), HandleWord.handle, handle):
+        on LayoutLengthMismatch:
+            return true
+    bits = std::binary::read(std::abi::bytes::freeze(word), HandleBits.bits):
+        on LayoutLengthMismatch:
+            return true
+    bits == 18446744073709551615
+
+fn last_error() -> int:
+    c_last_error()
+
+# CreateFileW(NAME, ACCESS, SHARE, DISPOSITION, FLAGS): the handle and, when
+# it is INVALID_HANDLE_VALUE, the last error read right after the call.
+fn create_file(name: List[int], access: std::ffi::c::ULong, share: std::ffi::c::ULong, disposition: std::ffi::c::ULong, flags: std::ffi::c::ULong) -> Opened errors std::byte::BelowRange, std::byte::AboveRange:
+    path = wide(name)
+    security = std::ffi::c::null[std::ffi::c::Void]()
+    template = std::ffi::c::null[std::ffi::c::Void]()
+    h = c_create_file(path, access, share, security, disposition, flags, template)
+    failure = c_last_error()
+    if invalid?(h.clone()):
+        return Opened {handle: h, code: failure}
+    Opened {handle: h, code: 0}
+
+fn close(handle: std::ffi::c::Ptr[std::ffi::c::Void]) -> int:
+    c_close_handle(handle)
+
+# WriteFile of DATA; the bytes written or -error.
+fn request(data: std::abi::bytes::Bytes) -> std::ffi::c::ULong:
+    n = std::abi::bytes::length(data).value
+    if n > 4294967295:
+        return 4294967295
+    n
+
+fn write(handle: std::ffi::c::Ptr[std::ffi::c::Void], data: std::abi::bytes::Bytes) -> int errors LayoutLengthMismatch:
+    synchronous = std::ffi::c::null[std::ffi::c::Void]()
+    r = handle.c_write_file(data, request(data), std::abi::bytes::zeroed(std::abi::usize(4)), synchronous)
+    if r.result == 0:
+        return 0 - c_last_error()
+    std::binary::read(std::abi::bytes::freeze(r.done), Dword.value)
+
+# ReadFile of at most 64 bytes: what it read, or [] on failure.
+fn read(handle: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::abi::bytes::Bytes errors LayoutLengthMismatch, UpperOverrun:
+    synchronous = std::ffi::c::null[std::ffi::c::Void]()
+    r = handle.c_read_file(std::abi::bytes::zeroed(std::abi::usize(64)), 64, std::abi::bytes::zeroed(std::abi::usize(4)), synchronous)
+    if r.result == 0:
+        return std::abi::bytes::from_list([])
+    n = std::binary::read(std::abi::bytes::freeze(r.done), Dword.value)
+    std::abi::bytes::freeze_prefix(r.buffer, std::abi::usize(n))
+
+# The units of a WIN32_FIND_DATAW's cFileName, up to its NUL.
+fn found_name(data: std::abi::bytes::MutableBytes) -> List[std::binary::U16] errors LayoutLengthMismatch:
+    units = std::binary::read(std::abi::bytes::freeze(data), FindData.name)
+    loop u in units:
+        if u == 0:
+            break
+        u
+
+fn found(data: std::abi::bytes::MutableBytes) -> Entry errors LayoutLengthMismatch:
+    Entry {units: found_name(data), attributes: std::binary::read(std::abi::bytes::freeze(data), FindData.attributes)}
+
+# Every entry FindFirstFileW / FindNextFileW report for PATTERN, and the last
+# error that ended the enumeration (18, ERROR_NO_MORE_FILES, at its end).
+struct Listing:
+    entries: List[Entry]
+    code: int
+
+fn next_all(find: std::ffi::c::Ptr[std::ffi::c::Void], place out: MutableVector[Entry]) -> int errors LayoutLengthMismatch:
+    r = find.c_find_next(std::abi::bytes::zeroed(std::abi::usize(592)))
+    if r.result == 0:
+        return c_last_error()
+    out.push(found(r.data))
+    next_all(find, out)
+
+fn list(pattern: List[int]) -> Listing errors std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    r = c_find_first(wide(pattern), std::abi::bytes::zeroed(std::abi::usize(592)))
+    failure = c_last_error()
+    {result: find, data} = r
+    if invalid?(find.clone()):
+        return Listing {entries: [], code: failure}
+    out = entries()
+    out.push(found(data))
+    ended = next_all(find.clone(), out)
+    c_find_close(find)
+    all = loop e in out:
+        e
+    Listing {entries: all, code: ended}
+
+fn attributes(name: List[int]) -> int errors std::byte::BelowRange, std::byte::AboveRange:
+    a = c_attributes(wide(name))
+    if a == 4294967295:
+        return 0 - c_last_error()
+    a
+
+fn create_directory(name: List[int]) -> int errors std::byte::BelowRange, std::byte::AboveRange:
+    security = std::ffi::c::null[std::ffi::c::Void]()
+    if c_create_directory(wide(name), security) == 0:
+        return 0 - c_last_error()
+    0
+
+# GetFullPathNameW of NAME: how Win32 resolves it against the process's
+# current directories (an experiment's question only: production code never
+# resolves a path).
+fn full_path(name: List[int]) -> List[std::binary::U16] errors std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    file_part = std::ffi::c::null[std::ffi::c::Void]()
+    r = c_full_path(wide(name), 1024, std::abi::bytes::zeroed(std::abi::usize(2048)), file_part)
+    if r.result == 0:
+        return []
+    units = std::binary::read(std::abi::bytes::freeze(r.buffer), Wide.units)
+    loop u in units:
+        if u == 0:
+            break
+        u

@@ -1,0 +1,11 @@
+direct module
+import std::abi
+import std::abi::bytes
+import std::str
+import dirents
+
+xs = dirents::list(std::str::encode_utf8(".")):
+    on IndexNotFound:
+        []
+loop x in xs:
+    x.name

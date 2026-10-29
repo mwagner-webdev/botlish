@@ -177,14 +177,20 @@ program stdlib/abi/aarch64.bot
 program stdlib/abi/bytes.bot
 program stdlib/abi/x86_64.bot
 fails stdlib/darwin/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::darwin::io`)
-program stdlib/darwin/path.bot
+fails stdlib/darwin/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: fs.bot imports the standard library's internal std::io::bytepath (the byte-path syntax it shares with std::linux::fs), which only standard-library modules may import, never an entry program (verified through `import std::darwin::fs`)
+fails stdlib/darwin/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: path.bot converts a validated DarwinPath with std::darwin::fs::of_valid_text, an internal member of the standard library that no entry program may name (verified through `import std::darwin::path`)
 fails stdlib/event_loop/deterministic.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (release_held) requires a context (verified through `import std::event_loop::deterministic`)
 program stdlib/ffi/c.bot
+program stdlib/io/bytepath.bot
+program stdlib/io/fs.bot
 fails stdlib/io/path.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (text) is trait-polymorphic and cannot be a value (verified through `import std::io::path`)
 fails stdlib/linux/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (write_error_text) requires a context; only reordering create() last would compile it, an invariant nothing states (verified through `import std::linux::io`)
-program stdlib/linux/path.bot
-  ONE-CHAR-STRING-LITERAL 81:55 none -- index-proof: the natural path.char_at(n - 1) == '/' is not proven in range (the index proof relates only a guarded name to the length, not n - 1 to n; the slice proof does), and concat's errors are fixed by std::io::path::Path; the provable path.substring(n - 1, n).char_at(0) decodes a slice made only to be decoded (two allocations a call)
-  ONE-CHAR-STRING-LITERAL 84:49 none -- char->text: the "/" joining PATH and COMPONENT is a single character appended as text
+fails stdlib/linux/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/darwin/fs.bot, fs.bot imports std::io::bytepath (verified through `import std::linux::fs`)
+fails stdlib/linux/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: as for stdlib/darwin/path.bot, std::linux::fs::of_valid_text (verified through `import std::linux::path`, which also carries its two entries)
+  ONE-CHAR-STRING-LITERAL 100:55 none -- index-proof: the natural path.char_at(n - 1) == '/' is not proven in range (the index proof relates only a guarded name to the length, not n - 1 to n; the slice proof does), and concat's errors are fixed by std::io::path::Path; the provable path.substring(n - 1, n).char_at(0) decodes a slice made only to be decoded (two allocations a call)
+  ONE-CHAR-STRING-LITERAL 103:49 none -- char->text: the "/" joining PATH and COMPONENT is a single character appended as text
 program stdlib/linux/sys.aarch64.bot
 program stdlib/linux/sys.x86_64.bot
+fails stdlib/windows/fs.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (remove_directory) requires a context (verified through `import std::windows::fs`)
 fails stdlib/windows/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::windows::io`)
+fails stdlib/windows/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: as for stdlib/darwin/path.bot, std::windows::fs::of_valid_text (verified through `import std::windows::path`)

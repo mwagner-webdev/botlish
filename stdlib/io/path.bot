@@ -15,13 +15,23 @@
 # A Path is *textual*: `text` is its canonical String form, losslessly (for
 # LinuxPath exactly the carrier string), never an escaped or display-only
 # rendering; the standard formatting of a portable textual Path should equal
-# its `text`. Arbitrary-byte native paths are a different, lower-level
-# abstraction.
+# its `text`. Native paths -- what an operating system names a location with:
+# Linux's bytes, Windows' UTF-16 code units -- are a different, lower-level
+# abstraction, each platform's own (std::linux::fs::NativePath,
+# std::windows::fs::NativePath): every textual path has one, losslessly, but
+# not every native path has a text (NotText). std::io::fs::FilePath is the
+# textual paths a filesystem can operate on (WINDOWS-X86-64-MILESTONE-7.md).
 
 # A String is not a valid path of the kind an operation needs (empty,
 # containing NUL, or -- for a component appended with `concat` -- absolute).
 # The one path-validation error: no hierarchy of reasons.
 error NotAPath
+
+# A native path or name is valid, but has no String: Linux bytes that are not
+# UTF-8, a Windows name holding an unpaired UTF-16 surrogate. Never a
+# replacement character: the native path keeps the name
+# (WINDOWS-X86-64-MILESTONE-7.md).
+error NotText
 
 # A textual path of some platform's syntax.
 #

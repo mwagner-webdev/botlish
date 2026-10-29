@@ -142,7 +142,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
-            | BytesFromList
+            | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice
             // The writable storage family (MUTABLE-BYTES.md): each of these
             // but length/address makes a fresh object (a collection may run
             // first, with the operands rooted).
@@ -234,7 +234,7 @@ pub fn op_may_error(op: OpCode) -> bool {
         // not a byte storage (TYPE), an oversized storage (RANGE). A checked
         // program cannot produce any of them: lib/abi/bytes.bot's creator takes
         // a List[Byte] and its storage field only ever holds a storage.
-        | BytesFromList | BytesLen | BytesAddr
+        | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice | BytesLen | BytesAddr
         // The writable family: a length that is not 0..the ceiling (RANGE), an
         // operand of the wrong kind (TYPE: the readable and writable storages
         // are never interchanged), an index/count outside the payload (RANGE),
@@ -1256,6 +1256,72 @@ pub extern "C" fn rt_bytes_from_list(p: *mut Vm, l: Value) -> Value {
     let r = vm(p).new_bytes(&bytes);
     vm(p).metrics.record_list_copy(bytes.len());
     r
+}
+
+/// `byte_store::join` (core/bytestore.tcl, WINDOWS-X86-64-MILESTONE-7.md):
+/// the storage holding the bytes of every storage of List L, in order -- one
+/// allocation of the total length (the shared static empty storage when it
+/// is 0), every part copied straight into place. TYPE for an element that is
+/// not a byte storage (lib/abi/bytes.bot's wrapper only ever passes the
+/// storages of Bytes values), RANGE past the collection-length ceiling
+/// (`Vm::alloc_bytes`). The parts stay reachable through L, an operand of
+/// the allocating instruction, while the result is allocated.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_join(p: *mut Vm, l: Value) -> Value {
+    let items = list_of(l).items();
+    let mut total: usize = 0;
+    for &item in items.iter() {
+        if let Err(failed) = bytes_operand(p, item, "std::byte_store::join") {
+            return failed;
+        }
+        total = total.saturating_add(bytes_of(item).len());
+    }
+    let r = vm(p).new_bytes_with(total, |init| {
+        for &item in items.iter() {
+            init.push_slice(bytes_of(item));
+        }
+    });
+    vm(p).metrics.record_list_copy(total);
+    r
+}
+
+/// `byte_store::slice` (core/bytestore.tcl, WINDOWS-X86-64-MILESTONE-7.md):
+/// the storage of V's bytes START..END-1, by the one slice rule
+/// (`check_slice`: LowerUnderrun / UpperOverrun unless 0 <= START <= END <=
+/// N). One allocation (none for an empty slice); V stays reachable as the
+/// allocating instruction's operand while it is made.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_slice(p: *mut Vm, v: Value, start: Value, end: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::slice") {
+        return failed;
+    }
+    let n = bytes_of(v).len();
+    let (from, to) = match check_slice(p, bound_of(start), SliceEnd::End(bound_of(end)), n) {
+        Ok(bounds) => bounds,
+        Err(failed) => return failed,
+    };
+    let r = vm(p).new_bytes_with(to - from, |init| init.push_slice(&bytes_of(v)[from..to]));
+    vm(p).metrics.record_list_copy(to - from);
+    r
+}
+
+/// `byte_store::decode_utf8` (core/utf8text.tcl, WINDOWS-X86-64-MILESTONE-7.md):
+/// the String whose UTF-8 encoding is storage V's bytes, or the declared
+/// builtin error InvalidUtf8. Strict, by Rust's own `std::str::from_utf8`
+/// (the rule core/utf8text.tcl's strict Tcl decoding and argv() share): an
+/// overlong form, an encoded surrogate, a value above U+10FFFF, a truncated
+/// sequence or a stray continuation byte is the error, never a replacement
+/// character. One String allocation; V stays reachable as the allocating
+/// instruction's operand while it is made.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_decode_utf8(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::decode_utf8") {
+        return failed;
+    }
+    match std::str::from_utf8(bytes_of(v)) {
+        Ok(text) => vm(p).new_str(text),
+        Err(_) => fail_builtin(p, super::error::ERR_INVALID_UTF8, "InvalidUtf8"),
+    }
 }
 
 /// The storage V, or a TYPE error naming CONTEXT (the same text as
@@ -3277,6 +3343,9 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         Hash | HashTotal => rt_hash(p, a[0]),
         TableHash | TableHashTotal => rt_table_hash(p, a[0]),
         BytesFromList => rt_bytes_from_list(p, a[0]),
+        BytesJoin => rt_bytes_join(p, a[0]),
+        BytesDecodeUtf8 => rt_bytes_decode_utf8(p, a[0]),
+        BytesSlice => rt_bytes_slice(p, a[0], a[1], a[2]),
         BytesLen => rt_bytes_len(p, a[0]),
         MBytesNew => rt_mbytes_new(p, a[0]),
         MBytesFrom => rt_mbytes_from(p, a[0]),
@@ -3430,6 +3499,9 @@ runtime_helpers! {
     (rt_linux_x86_64_syscall, 8),
     (rt_linux_aarch64_syscall, 8),
     (rt_bytes_from_list, 2),
+    (rt_bytes_join, 2),
+    (rt_bytes_decode_utf8, 2),
+    (rt_bytes_slice, 4),
     (rt_bytes_len, 2),
     (rt_bytes_addr, 2),
     (rt_mbytes_new, 2),
@@ -5083,6 +5155,65 @@ mod tests {
     fn bytes_list(vm: &mut Vm, values: &[i64]) -> Value {
         let items: Vec<Value> = values.iter().map(|n| vm.new_int(*n)).collect();
         vm.new_list(items)
+    }
+
+    #[test]
+    fn bytes_join_copies_every_part_in_order() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let a = rooted!(vm, vm.new_bytes(&[1, 0, 255]));
+        let b = rooted!(vm, vm.new_bytes(&[]));
+        let c = rooted!(vm, vm.new_bytes(&[7]));
+        let parts = rooted!(vm, vm.new_list(vec![a, b, c, a]));
+        let j = rt_bytes_join(p, parts);
+        assert_eq!(heap_kind(j), KIND_BYTES);
+        assert_eq!(bytes_of(j), &[1, 0, 255, 7, 1, 0, 255]);
+        // Nothing, or nothing but empty parts: the shared empty storage.
+        let none = rooted!(vm, vm.new_list(vec![]));
+        assert_eq!(bytes_of(rt_bytes_join(p, none)), &[] as &[u8]);
+        let empties = rooted!(vm, vm.new_list(vec![b, b]));
+        assert_eq!(bytes_of(rt_bytes_join(p, empties)), &[] as &[u8]);
+        // A part that is no storage: TYPE, never a partial result.
+        let bad = rooted!(vm, vm.new_list(vec![a, make_small(3)]));
+        assert_eq!(rt_bytes_join(p, bad), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn bytes_slice_copies_the_range_and_refuses_an_invalid_one() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let v = rooted!(vm, vm.new_bytes(&[1, 0, 255, 7, 9]));
+        let s = rt_bytes_slice(p, v, make_small(1), make_small(4));
+        assert_eq!(heap_kind(s), KIND_BYTES);
+        assert_eq!(bytes_of(s), &[0, 255, 7]);
+        assert_eq!(bytes_of(rt_bytes_slice(p, v, make_small(0), make_small(5))), &[1, 0, 255, 7, 9]);
+        assert_eq!(bytes_of(rt_bytes_slice(p, v, make_small(5), make_small(5))), &[] as &[u8]);
+        // std::str::substring's rule: a start below 0 or an end below the
+        // start is LowerUnderrun, an end past the count UpperOverrun.
+        for (start, end, error) in [(-1, 2, crate::runtime::error::ERR_LOWER_UNDERRUN), (3, 2, crate::runtime::error::ERR_LOWER_UNDERRUN), (0, 6, crate::runtime::error::ERR_UPPER_OVERRUN)] {
+            assert_eq!(rt_bytes_slice(p, v, make_small(start), make_small(end)), NO_VALUE, "{start} {end}");
+            assert_eq!(vm.declared_error, error, "{start} {end}");
+            assert!(vm.error.take().is_some());
+        }
+    }
+
+    #[test]
+    fn bytes_decode_utf8_is_strict() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let good = rooted!(vm, vm.new_bytes("héllo \u{1F4A9}\0".as_bytes()));
+        let s = rt_bytes_decode_utf8(p, good);
+        assert_eq!(str_of(s).as_str(), "héllo \u{1F4A9}\0");
+        // An encoded surrogate (WTF-8), an overlong NUL, a value above
+        // U+10FFFF, a stray continuation and a truncated sequence: the
+        // declared InvalidUtf8, never a replacement character.
+        for bad in [&[0xed, 0xa0, 0x80][..], &[0xc0, 0x80], &[0xf4, 0x90, 0x80, 0x80], &[0x80], &[0xe2, 0x82]] {
+            let v = rooted!(vm, vm.new_bytes(bad));
+            assert_eq!(rt_bytes_decode_utf8(p, v), NO_VALUE, "{bad:?}");
+            assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_UTF8, "{bad:?}");
+            assert!(vm.error.take().is_some());
+        }
     }
 
     #[test]

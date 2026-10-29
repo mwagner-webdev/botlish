@@ -1,0 +1,487 @@
+# fs.bot -- the "std::darwin::fs" namespace: macOS's native paths and its
+# synchronous filesystem, through libSystem's C functions
+# (WINDOWS-X86-64-MILESTONE-7.md; MACOS-AARCH64-MILESTONE-8.md for the
+# boundary).
+#
+#   with context std::darwin::fs::create()          install it (entry program)
+#
+#   std::darwin::fs::open(path, mode), read(file, count), read_all(file),
+#   write(file, data), write_all(file, data), close(file), read_file(path),
+#   write_file(path, data), create_file(path, data), entries(dir),
+#   create_directory(path), remove_file(path), remove_directory(path)
+#
+# std::linux::fs's sibling, with Darwin's boundary: libSystem's open, read,
+# write, close, mkdir, unlink, rmdir, opendir, readdir and closedir by their
+# SDK prototypes (no syscall: Darwin's kernel interface is private), each
+# failure -1 and errno, read through __error() right after the call (a native
+# view, the module stdlib/darwin.bot reads errno with). The declarations are
+# private here, and every function that makes a C call requires DarwinFS: the
+# errno view is a direct edge (std::binary::native) which only a context of
+# this module mediates, and the path calls are this module's design, as
+# std::windows::fs's are.
+#
+# Native paths are bytes (std::io::bytepath's syntax, which std::linux::fs's
+# share): a std::darwin::path::DarwinPath has exactly one NativePath, its
+# UTF-8 bytes. Unlike Linux, APFS stores names as UTF-8 and refuses any other
+# bytes (EILSEQ: InvalidName), and compares names without normalization
+# differences and, by default, without case: equality here is spelling, never
+# file identity.
+#
+# Ownership, completion and failures are std::linux::fs's: a File (its
+# descriptor and its affine token, std::io::fs::Owner) is affine and must be
+# closed; a failed read or write closes it; read_all, write_all and the
+# whole-file operations complete; no retry (EINTR included), no durability
+# claim. unlink(2) of a directory is EPERM on macOS: when the name then opens
+# as a directory (opendir) the reason is IsADirectory, the code still 1.
+#
+# Operations on a File require DarwinFS: errno is read through the module's
+# mediated view.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::ffi::c
+import std::io::bytepath
+import std::io::fs
+import std::io::path
+import std::list
+import std::mutable_vector
+import std::str
+import type std::byte::Byte
+
+# int *__error(void): the address of the calling thread's errno.
+private extern c fn c_errno_location named "__error"() -> std::ffi::c::Ptr[std::ffi::c::Int] independent
+
+# int open(const char *path, int oflag, ...)
+private extern c fn c_open named "open"(path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, oflag: std::ffi::c::Int, variadic) -> std::ffi::c::Int
+
+# ssize_t read(int fd, void *buf, size_t nbyte)
+private extern c fn c_read named "read"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+
+# ssize_t write(int fd, const void *buf, size_t nbyte)
+private extern c fn c_write named "write"(fd: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, nbyte: std::ffi::c::ULong) -> std::ffi::c::Long
+
+# int close(int fd)
+private extern c fn c_close named "close"(fd: std::ffi::c::Int) -> std::ffi::c::Int
+
+# int mkdir(const char *path, mode_t mode)
+private extern c fn c_mkdir named "mkdir"(path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, mode: std::ffi::c::UShort) -> std::ffi::c::Int
+
+# int unlink(const char *path)
+private extern c fn c_unlink named "unlink"(path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::Int
+
+# int rmdir(const char *path)
+private extern c fn c_rmdir named "rmdir"(path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::Int
+
+# DIR *opendir(const char *dirname)
+private extern c fn c_opendir named "opendir"(path: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+
+# struct dirent *readdir(DIR *dirp)
+private extern c fn c_readdir named "readdir"(dir: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+
+# int closedir(DIR *dirp)
+private extern c fn c_closedir named "closedir"(dir: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+
+# The int errno is: what __error() points to.
+private layout ErrnoCell:
+    size 4
+    align 4
+    field value: std::ffi::c::Int at 0
+
+# struct dirent (sys/dirent.h, 64-bit inodes: arm64's only layout): d_namlen
+# at 18, d_type at 20, d_name[1024] at 21.
+private layout Dirent:
+    size 1048
+    align 8
+    field namlen: std::binary::U16 at 18
+    field kind: std::binary::U8 at 20
+    field name: array 1024 of std::byte::Byte at 21
+
+# A Darwin name or path: its bytes, non-empty, without 0.
+opaque struct NativePath:
+    bytes: List[Byte]
+
+# The filesystem context: the permission bits of new files and directories
+# (before the umask).
+opaque context struct DarwinFS:
+    file_mode: std::ffi::c::UShort
+    directory_mode: std::ffi::c::UShort
+
+# An opened file: its descriptor and its affine token (std::io::fs::Owner).
+opaque struct File:
+    fd: std::ffi::c::Int
+    owner: std::io::fs::Owner
+
+# What one read did: the File back, and the bytes read (none at the end of
+# the file).
+struct Read:
+    file: File
+    data: std::abi::bytes::Bytes
+
+# What one write did: the File back, and how many bytes were written.
+struct Written:
+    file: File
+    count: int
+
+# A directory entry: its native name (one component) and its kind.
+struct Entry:
+    name: NativePath
+    kind: std::io::fs::EntryKind
+
+# The standard filesystem context: new files 0666, new directories 0777
+# (before the umask). `with context std::darwin::fs::create()` installs it.
+fn create() -> DarwinFS:
+    DarwinFS {file_mode: 438, directory_mode: 511}
+
+# ---------------------------------------------------------------------------
+# Native paths (std::io::bytepath's syntax)
+
+# The native path of BYTES; std::io::path::NotAPath when BYTES is empty or
+# holds a 0.
+fn from_bytes(bytes: List[Byte]) -> NativePath errors std::io::path::NotAPath:
+    if not std::io::bytepath::valid?(bytes):
+        fail std::io::path::NotAPath
+    NativePath {bytes: bytes}
+
+# The native path of TEXT: its UTF-8 bytes; std::io::path::NotAPath when TEXT
+# is empty or holds U+0000.
+fn from_text(text: str) -> NativePath errors std::io::path::NotAPath:
+    from_bytes(text.encode_utf8())
+
+# The native path of TEXT, already proven a valid path by the caller
+# (std::darwin::path::native's DarwinPath): an internal member of the
+# standard library (core/native.tcl), never API.
+nomethod fn of_valid_text(text: str) -> NativePath:
+    NativePath {bytes: text.encode_utf8()}
+
+# PATH's bytes, exactly.
+fn bytes(path: NativePath) -> List[Byte]:
+    path.bytes
+
+# PATH's String; std::io::path::NotText when its bytes are not UTF-8.
+fn text(path: NativePath) -> str errors std::io::path::NotText:
+    std::io::bytepath::text(path.bytes)
+
+# PATH as text for people (U+FFFD for every byte of no UTF-8 sequence):
+# lossy, never a path.
+fn display(path: NativePath) -> str:
+    std::io::bytepath::display(path.bytes)
+
+# PATH joined with the relative native NAME: one "/" unless PATH ends with
+# one; std::io::path::NotAPath for an absolute NAME.
+fn join(path: NativePath, name: NativePath) -> NativePath errors std::io::path::NotAPath:
+    NativePath {bytes: std::io::bytepath::join(path.bytes, name.bytes)}
+
+# PATH joined with the textual relative COMPONENT (its UTF-8 bytes).
+fn concat(path: NativePath, component: str) -> NativePath errors std::io::path::NotAPath:
+    NativePath {bytes: std::io::bytepath::join(path.bytes, component.encode_utf8())}
+
+# The byte that terminates a C string.
+private fn nul() -> Byte:
+    0
+
+# PATH's bytes and a terminating NUL: the C string a call reads.
+private fn c_string(path: NativePath) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(path.bytes.append(nul()))
+
+# ---------------------------------------------------------------------------
+# Failures
+
+# The calling thread's errno, as it is now: meaningful right after a call
+# that reported a failure.
+private fn errno(context fs: DarwinFS) -> int:
+    location = c_errno_location()
+    cell = std::binary::native::view(ErrnoCell, location):
+        on NativeViewNull:
+            return 0
+    cell.value
+
+# Sets the calling thread's errno to 0 (readdir reports its end and its
+# failure alike, by NULL: only errno tells them apart).
+private fn clear_errno(context fs: DarwinFS) -> unit:
+    location = c_errno_location()
+    cell = std::binary::native::edit(ErrnoCell, location):
+        on NativeEditNull:
+            return unit
+    std::binary::store(cell, ErrnoCell.value, 0)
+
+# The portable reason of Darwin's errno ERRNO (<sys/errno.h>).
+private fn reason_of(errno: int) -> std::io::fs::Reason:
+    if errno == 2:
+        return std::io::fs::Reason::NotFound
+    if errno == 17:
+        return std::io::fs::Reason::AlreadyExists
+    if errno == 13 or errno == 1 or errno == 30:
+        return std::io::fs::Reason::PermissionDenied
+    if errno == 20:
+        return std::io::fs::Reason::NotADirectory
+    if errno == 21:
+        return std::io::fs::Reason::IsADirectory
+    if errno == 66:
+        return std::io::fs::Reason::NotEmpty
+    if errno == 63 or errno == 92:
+        return std::io::fs::Reason::InvalidName
+    if errno == 16 or errno == 26:
+        return std::io::fs::Reason::Busy
+    if errno == 28 or errno == 69 or errno == 24 or errno == 23 or errno == 12 or errno == 27:
+        return std::io::fs::Reason::ResourceExhausted
+    std::io::fs::Reason::Other
+
+# ---------------------------------------------------------------------------
+# Files
+
+# open(2)'s flags for MODE: always O_CLOEXEC.
+private fn flags(mode: std::io::fs::OpenMode) -> std::ffi::c::Int:
+    if mode == std::io::fs::OpenMode::Read:
+        return 16777216
+    if mode == std::io::fs::OpenMode::Replace:
+        return 16777216 + 1 + 512 + 1024
+    if mode == std::io::fs::OpenMode::CreateNew:
+        return 16777216 + 1 + 512 + 2048
+    16777216 + 1 + 512 + 8
+
+# Opens PATH as MODE says, a new file with the context's file mode; the File
+# is the caller's to close. Symbolic links are followed.
+fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: DarwinFS) -> File errors std::io::fs::FileError:
+    fd = c_open(c_string(path), flags(mode), fs.file_mode)
+    if fd < 0:
+        failure = errno()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    File {fd: fd, owner: std::io::fs::owner()}
+
+# Releases FD after a failed operation, close(2)'s own result ignored.
+private fn release(fd: std::ffi::c::Int, context fs: DarwinFS) -> unit:
+    c_close(fd)
+    unit
+
+# One read(2) of at most COUNT bytes from FD: the bytes read, none at the end
+# of the file. A failure releases FD and fails.
+private fn read_some(fd: std::ffi::c::Int, count: std::io::fs::ReadSize, context fs: DarwinFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    r = fd.c_read(std::abi::bytes::zeroed(std::abi::usize(count)), count)
+    if r.result < 0:
+        failure = errno()
+        fd.release()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    got = std::abi::usize(r.result):
+        on std::abi::AbiIntegerBelowRange:
+            fd.release()
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+    r.buf.freeze_prefix(got):
+        on UpperOverrun:
+            fd.release()
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+
+# One read(2) of at most COUNT bytes: the File back and the bytes read. A
+# failure closes FILE and fails.
+fn read(file: File, count: std::io::fs::ReadSize, context fs: DarwinFS) -> Read errors std::io::fs::FileError:
+    {fd, owner} = file
+    data = fd.read_some(count)
+    Read {file: File {fd: fd, owner: owner}, data: data}
+
+private fn chunks() -> MutableVector[std::abi::bytes::Bytes]:
+    std::mutable_vector::from_list([])
+
+# The size of read_rest's read after COUNT reads: 4 KiB, doubling to 1 MiB.
+# Each read's buffer is a fresh storage of its full size (a write exposure is
+# a copy: C-POINTER-BORROWING.md), so a small file costs one small buffer and
+# a large one few reads (bench/filesystem.tcl: a 64-byte read_file took 14 us
+# with 64 KiB reads).
+private fn chunk_size(count: int) -> std::io::fs::ReadSize:
+    if count <= 0:
+        return 4096
+    if count == 1:
+        return 8192
+    if count == 2:
+        return 16384
+    if count == 3:
+        return 32768
+    if count == 4:
+        return 65536
+    if count == 5:
+        return 131072
+    if count == 6:
+        return 262144
+    if count == 7:
+        return 524288
+    1048576
+
+# Every byte of FD to the end of the file, in chunks of chunk_size, as one
+# Bytes.
+private fn read_rest(fd: std::ffi::c::Int, context fs: DarwinFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    parts = chunks()
+    loop:
+        data = fd.read_some(chunk_size(std::mutable_vector::length(parts)))
+        if std::abi::bytes::length(data).value == 0:
+            break
+        parts.push(data)
+    all = loop part in parts:
+        part
+    std::abi::bytes::join(all)
+
+# Reads FILE to the end: the File back and every byte from its offset on.
+fn read_all(file: File, context fs: DarwinFS) -> Read errors std::io::fs::FileError:
+    {fd, owner} = file
+    data = fd.read_rest()
+    Read {file: File {fd: fd, owner: owner}, data: data}
+
+# One write(2) of DATA to FD: how many bytes it wrote. A failure releases FD
+# and fails.
+private fn write_some(fd: std::ffi::c::Int, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> int errors std::io::fs::FileError:
+    n = fd.c_write(data, std::abi::bytes::length(data).value)
+    if n < 0:
+        failure = errno()
+        fd.release()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    n
+
+# One write(2) of DATA: the File back and how many bytes were written.
+fn write(file: File, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> Written errors std::io::fs::FileError:
+    {fd, owner} = file
+    n = fd.write_some(data)
+    Written {file: File {fd: fd, owner: owner}, count: n}
+
+# Writes every byte of DATA to FD, short writes completed; no progress is
+# Other. A failure releases FD and fails.
+private fn write_rest(fd: std::ffi::c::Int, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    total = std::abi::bytes::length(data).value
+    if total == 0:
+        return unit
+    n = fd.write_some(data)
+    if n <= 0:
+        fd.release()
+        fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+    if n < total:
+        rest = data.slice(n, total):
+            on LowerUnderrun:
+                fd.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+            on UpperOverrun:
+                fd.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        return fd.write_rest(rest)
+    unit
+
+# Writes all of DATA to FILE: the File back.
+fn write_all(file: File, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> File errors std::io::fs::FileError:
+    {fd, owner} = file
+    fd.write_rest(data)
+    File {fd: fd, owner: owner}
+
+# Closes FILE; a failure is the FileError, never retried.
+fn close(file: File, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    {fd} = file
+    if c_close(fd) < 0:
+        failure = errno()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    unit
+
+# Every byte of the file PATH.
+fn read_file(path: NativePath, context fs: DarwinFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    opened = path.open(std::io::fs::OpenMode::Read)
+    {file, data} = opened.read_all()
+    file.close()
+    data
+
+# Opens PATH as MODE (a writing mode), writes all of DATA and closes it.
+private fn write_with(path: NativePath, mode: std::io::fs::OpenMode, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    opened = path.open(mode)
+    written = opened.write_all(data)
+    written.close()
+
+# The file PATH holds exactly DATA: created, or truncated and rewritten.
+fn write_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    path.write_with(std::io::fs::OpenMode::Replace, data)
+
+# A new file PATH holding DATA; AlreadyExists when the name exists.
+fn create_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    path.write_with(std::io::fs::OpenMode::CreateNew, data)
+
+# ---------------------------------------------------------------------------
+# Directories
+
+private fn found() -> MutableVector[Entry]:
+    std::mutable_vector::from_list([])
+
+# The kind of a dirent's d_type.
+private fn kind_of(d_type: int) -> std::io::fs::EntryKind:
+    if d_type == 8:
+        return std::io::fs::EntryKind::File
+    if d_type == 4:
+        return std::io::fs::EntryKind::Directory
+    if d_type == 10:
+        return std::io::fs::EntryKind::SymbolicLink
+    if d_type == 0:
+        return std::io::fs::EntryKind::Unknown
+    std::io::fs::EntryKind::Other
+
+# The entry the dirent at ENTRY describes, pushed onto OUT unless it is "."
+# or "..".
+private fn take(entry: std::ffi::c::Ptr[std::ffi::c::Void], place out: MutableVector[Entry], context fs: DarwinFS) -> unit errors NativeViewNull, IndexNotFound:
+    v = std::binary::native::view(Dirent, entry)
+    name = loop i from 0 to v.namlen:
+        std::binary::element(v.name, i)
+    if std::io::bytepath::valid?(name) and not std::io::bytepath::dot_or_dot_dot?(name):
+        out.push(Entry {name: NativePath {bytes: name}, kind: kind_of(v.kind)})
+    unit
+
+# Every entry of the directory stream DIR into OUT, a readdir(3) at a time:
+# 0 at the end, or the errno of the failure that ended it.
+private fn rest(dir: std::ffi::c::Ptr[std::ffi::c::Void], place out: MutableVector[Entry], context fs: DarwinFS) -> int:
+    clear_errno()
+    entry = dir.c_readdir()
+    if entry.null?():
+        return errno()
+    entry.take(out):
+        on NativeViewNull:
+            return 0
+        on IndexNotFound:
+            return 0
+    dir.clone().rest(out)
+
+# Every entry of the directory DIR but "." and "..", with its native name and
+# its kind. The stream (opendir) is closed here, also when listing fails.
+fn entries(dir: NativePath, context fs: DarwinFS) -> List[Entry] errors std::io::fs::FileError:
+    stream = c_opendir(c_string(dir))
+    if stream.null?():
+        failure = errno()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    out = found()
+    ended = stream.clone().rest(out)
+    c_closedir(stream)
+    if ended != 0:
+        fail std::io::fs::FileError {reason: reason_of(ended), code: ended}
+    loop e in out:
+        e
+
+# A new, empty directory PATH (the context's directory mode).
+fn create_directory(path: NativePath, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    if c_string(path).c_mkdir(fs.directory_mode) < 0:
+        failure = errno()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    unit
+
+# true when PATH opens as a directory stream (closed again at once).
+private fn directory?(path: NativePath, context fs: DarwinFS) -> bool:
+    stream = c_opendir(c_string(path))
+    if stream.null?():
+        return false
+    c_closedir(stream)
+    true
+
+# Removes the name PATH of anything but a directory; IsADirectory for a
+# directory (unlink's EPERM on macOS, reinterpreted).
+fn remove_file(path: NativePath, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    if c_string(path).c_unlink() < 0:
+        failure = errno()
+        if failure == 1 and path.directory?():
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::IsADirectory, code: failure}
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    unit
+
+# Removes the empty directory PATH.
+fn remove_directory(path: NativePath, context fs: DarwinFS) -> unit errors std::io::fs::FileError:
+    if c_string(path).c_rmdir() < 0:
+        failure = errno()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    unit
