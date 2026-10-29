@@ -96,7 +96,7 @@ proc elTurnOf {line} {
 
 foreach name {smoke fairness observers timers revocation errors gameserver-sim
               compose-alone compose-quiet-before compose-quiet-after compose-busy
-              delivery heap ownership fault hoststep} {
+              delivery heap heapshape ownership fault hoststep} {
     test el-agree-$name "scenario $name compiles under -warnings error and gives one outcome on every backend of the pass (its trace)" -body {
         lindex [elRun $name] 0
     } -result 1
@@ -246,6 +246,11 @@ test el-heap-revoked {timers revoked before their deadline never fire; their 67 
     set revoked [lmap m [elMatches $t {revoked (\d+)}] {lindex $m 1}]
     list [llength $revoked] [lsort -unique [lmap n $revoked {expr {$n % 3}}]] [llength [lmap n $revoked {expr {[elFirst $t "fired $n at"] eq "" ? [continue] : $n}}]]
 } -result {67 0 0}
+
+test el-heap-remove-middle {a timer revoked from the middle of the heap: the last timer, moved into its place below two later deadlines, rises -- every other timer fires in deadline order, the revoked one never, and the heap ends empty (heapshape.bot builds the shape)} -body {
+    set t [elTrace heapshape]
+    list [lmap m [elMatches $t {fired (\d+) at}] {lindex $m 1}] [elNum $t {revoked (\d+)}] [elNum $t {timers waiting at the end (\d+)}]
+} -result {{100 200 201 202 205 210 220 230 1000 1100 1200 1300 1400 1600} 1500 0}
 
 test el-heap-broadcast {a one-shot timer two tasks wait on wakes both, and its slot is freed after both wakes (the prototype woke only the first)} -body {
     set t [elTrace heap]
