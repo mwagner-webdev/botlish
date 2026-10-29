@@ -1,0 +1,20 @@
+# entry-io without the installation: should be MISSING-CONTEXT (a compile-
+# time rejection), never an internal error.
+import std::io
+
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    std::io::print_line("A"):
+        on std::io::WriteFailed:
+            return 0
+    t.v
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+twice(A {v: 1})

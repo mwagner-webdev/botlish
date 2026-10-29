@@ -1,0 +1,10 @@
+# std::io::fs's layout: the trait and its polymorphic caller in one module,
+# the witness and its implementation in the witness's own module -- with the
+# implementation needing a context trait (std::io::fs's need context
+# structs). Should print "A" twice and be 2.
+import std::linux::io
+import thing
+import witness
+
+with context std::linux::io::create()
+thing::twice(witness::A {v: 1})

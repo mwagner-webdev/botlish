@@ -15,6 +15,11 @@
 # std::darwin::path::DarwinPath) and their implementations live in their own
 # modules, and the contexts they need are structs.
 #
+# The defect's full record -- every case (this one is `entry-io`), the
+# runner, the root cause and what a fix must establish -- is
+# TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md and
+# audit/trait-impl-context-trait/.
+#
 #   tclsh9.0 main.tcl audit/filesystem/findings/trait-plan-entry-context-trait.bot
 import std::io
 import std::linux::io

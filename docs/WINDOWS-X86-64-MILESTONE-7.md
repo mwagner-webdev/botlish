@@ -534,16 +534,28 @@ and static-compile.test pass; the static-decisions comparison runs in CI.
 
 ### 12.2 A trait-plan defect (recorded, not fixed)
 
-A trait, its witness and the witness's implementation all in the entry
-program, the implementation's body needing a context **trait** (std::io::IO
-through `std::io::print_line`), is an internal error on every backend:
-`malformed IR: trait plan: entry-program binding "show" is not established
-here` (CORE MALFORMED). With a context struct, or no context, the same
-program runs. Reproducer:
-audit/filesystem/findings/trait-plan-entry-context-trait.bot. std::io::fs is
-not affected (its witnesses and their implementations live in their own
-modules, and the contexts they need are structs); it is out of this
-milestone's scope and left for the trait plan's owner.
+A trait operation whose selected implementation needs a context **trait**
+(std::io::IO through `std::io::print_line`, or a program's own) cannot be
+compiled, wherever the implementation is declared: in the entry program it
+is `malformed IR: trait plan: entry-program binding "show" is not
+established here` (CORE MALFORMED) on every backend; in the calling module
+the compiler crashes with a Tcl error; in another module it is an
+unresolved module reference; and with no installation it is the same
+internal error instead of MISSING-CONTEXT. With a context struct, or no
+context, the same program runs. The first reproducer is
+audit/filesystem/findings/trait-plan-entry-context-trait.bot.
+
+It is recorded in full, for its own milestone, in
+TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md: every case with a runner
+(audit/trait-impl-context-trait/), the root cause (build 1 never sees a
+context requirement that flows through a trait operation, so nothing is
+selected; the plan drops the implementation, makes no clone of it, and its
+ordinary-trait branch -- unlike its context-trait branch -- names the
+dropped declaration), two further defects on the same path, and what the
+fix must establish. It was re-checked after merging main at 7aec2a11
+(TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md included): unchanged.
+std::io::fs is not affected: its witnesses' implementations need context
+structs (LinuxFS, WindowsFS, DarwinFS).
 
 ### 12.3 Language friction met writing the library
 
@@ -808,7 +820,8 @@ standard library names none of those APIs.
   associated types (or another way for a requirement to return a
   per-witness type);
 * a File dropped unclosed leaks (section 8);
-* the trait-plan defect of section 12.2;
+* the trait-plan defect of section 12.2
+  (TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md);
 * native joins walk byte lists in Botlish, and Windows' conversions
   between Strings and UTF-16 units are Botlish list passes: a Windows
   textual concat costs about one open + close (section 14);

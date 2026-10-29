@@ -1,0 +1,33 @@
+# Control: a context-trait operation (out.emit) whose selected
+# implementation itself needs another context trait (Log, through note):
+# the plan's context branch redirects it to the implementation's clone.
+# Runs: emit(1) = 1 + 10 + 100 = 111.
+type Small = Int in 0..1000
+
+context trait Log:
+    fn level() -> int
+
+context trait Out:
+    fn emit(n: int) -> int
+
+context struct L:
+    l: Small
+
+fn level(context c: L) -> int:
+    c.l
+
+fn note(context g: Log) -> int:
+    g.level()
+
+context struct K:
+    k: Small
+
+fn emit(n: int, context c: K) -> int:
+    n + c.k + note()
+
+fn send(n: int, context o: Out) -> int:
+    o.emit(n)
+
+with context L {l: 100}
+with context K {k: 10}
+send(1)

@@ -1,0 +1,8 @@
+# The trait, the witness, its implementation (needing std::io::IO) and the
+# trait-polymorphic caller in one application module. Should print "A"
+# twice and be 2.
+import std::linux::io
+import shapes
+
+with context std::linux::io::create()
+shapes::twice(shapes::A {v: 1})
