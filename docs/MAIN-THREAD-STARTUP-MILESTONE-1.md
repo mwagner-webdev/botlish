@@ -463,29 +463,29 @@ macOS workflow's full tier (section 31).
 
 | Mutant | What it breaks | Linux x86-64 | macOS AArch64 |
 |---|---|---|---|
-| `cli-startup-dropped` | main.tcl's `-native-startup main-thread` builds a worker | KILLED: main-thread-startup.test (`mts-cli-startup`) | MACOS-AOT-PENDING |
+| `cli-startup-dropped` | main.tcl's `-native-startup main-thread` builds a worker | KILLED: main-thread-startup.test (`mts-cli-startup`) | -- |
 | `api-default-main` | `native::executable` defaults to the main thread | KILLED: main-thread-startup.test | -- |
 | `api-capability-linux` | the capability table gives Linux the policy | KILLED: main-thread-startup.test (`mts-refused-where-unsupported`) | SKIPPED |
 | `api-capability-windows` | the capability table gives Windows the policy | SKIPPED (Windows') | SKIPPED |
-| `api-driver-worker` | `native::executable` asks the driver for the worker whatever the policy | SKIPPED (macOS') | MACOS-AOT-PENDING |
+| `api-driver-worker` | `native::executable` asks the driver for the worker whatever the policy | SKIPPED (macOS') | KILLED: main-thread-startup.test (`mts-cli-startup`, `mts-main-identity`, `mts-main-gc-stress-report`, `mts-stub-links-worker-only`) |
 | `driver-startup-ignored` | the driver's `executable` ignores `--startup` | KILLED: main-thread-startup.test (`mts-driver-refused-where-unsupported`) | -- |
 | `driver-startup-anywhere` | the driver takes `--startup` on any command | KILLED: main-thread-startup.test (`mts-driver-option-errors`) | -- |
 | `driver-default-main` | the driver's `executable` defaults to the main thread | KILLED: native-executable.test, system-linker.test | -- |
 | `startup-anywhere` | every host takes the policy for supported | KILLED: Rust (`startup_main_thread_is_macos_aarch64s_only`), main-thread-startup.test | SKIPPED |
 | `record-startup-unwritten` | the record never carries the policy | KILLED: Rust (`startup_policy_is_recorded`, `..._the_objects_only_difference`) | -- |
-| `record-startup-ignored` | the runtime reads every word as the worker | KILLED: Rust (`linked_program_startup_policy`), main-thread-startup.test (`mts-damaged-startup-word`) | MACOS-AOT-PENDING |
+| `record-startup-ignored` | the runtime reads every word as the worker | KILLED: Rust (`linked_program_startup_policy`), main-thread-startup.test (`mts-damaged-startup-word`) | KILLED: Rust (`linked_program_startup_policy`), main-thread-startup.test (`mts-cli-startup`, `mts-main-identity`, `mts-main-gc-stress-report`) |
 | `record-startup-unchecked` | a word naming no policy reads as the worker | KILLED: Rust, main-thread-startup.test (`mts-damaged-startup-word`) | -- |
 | `fingerprint-ignores-record` | the ABI fingerprint leaves the record layout out | KILLED: Rust (`aot_fingerprint_covers_the_record_layout`) | -- |
-| `main-thread-spawns-worker` | a main-thread executable runs on a worker after all | SKIPPED (macOS') | MACOS-AOT-PENDING |
-| `main-thread-panic-escapes` | a main-thread panic unwinds out of `run` (status 101) | KILLED: Rust (`startup_on_this_thread_catches_a_panic`) | MACOS-AOT-PENDING |
-| `main-thread-no-guard` | a main-thread executable runs unguarded | SKIPPED (macOS') | MACOS-AOT-PENDING |
-| `system-lc-main-dropped` | the system linker drops LC_MAIN's stack size | KILLED: Rust (`startup_main_thread_reserves_lc_main_stack`) | MACOS-AOT-PENDING |
-| `rustc-lc-main-dropped` | the rustc linker drops LC_MAIN's stack size | SKIPPED (macOS') | MACOS-AOT-PENDING |
+| `main-thread-spawns-worker` | a main-thread executable runs on a worker after all | SKIPPED (macOS') | KILLED: main-thread-startup.test (`mts-main-identity`, `mts-panic-is-native-bug`, `mts-cli-startup`, `mts-main-gc-stress-report`) |
+| `main-thread-panic-escapes` | a main-thread panic unwinds out of `run` (status 101) | KILLED: Rust (`startup_on_this_thread_catches_a_panic`) | KILLED: Rust (`startup_on_this_thread_catches_a_panic`), main-thread-startup.test (`mts-panic-is-native-bug`) |
+| `main-thread-no-guard` | a main-thread executable runs unguarded | SKIPPED (macOS') | KILLED: main-thread-startup.test (`mts-policy-overflow`) |
+| `system-lc-main-dropped` | the system linker drops LC_MAIN's stack size | KILLED: Rust (`startup_main_thread_reserves_lc_main_stack`) | KILLED: Rust (`startup_main_thread_reserves_lc_main_stack`), main-thread-startup.test (`mts-policy-depth`) |
+| `rustc-lc-main-dropped` | the rustc linker drops LC_MAIN's stack size | SKIPPED (macOS') | KILLED: main-thread-startup.test (`mts-policy-depth`) |
 | `stub-runs-main` | the stub runs a main-thread image on a worker | KILLED: main-thread-startup.test (`mts-damaged-startup-word`) | SKIPPED |
 | `startup-no-guard` (repaired) | an executable runs without the guard | KILLED | -- |
 | `sys-runtime-variable-ignored` (repaired) | `BOTLISH_NATIVE_RUNTIME` is not read | KILLED | -- |
 | `sys-startup-failure-succeeds` (repaired) | an unreadable record (magic, build, policy) exits 0 | KILLED | -- |
-| `macos-size-from-rlimit` (native-stack) | the main thread's size read as the stack rlimit (8 MiB): LC_MAIN's 512 MiB unused | SKIPPED (macOS') | MACOS-STACK-PENDING |
+| `macos-size-from-rlimit` (native-stack) | the main thread's size read as the stack rlimit (8 MiB): LC_MAIN's 512 MiB unused | SKIPPED (macOS') | KILLED: Rust (`this_threads_stack_contains_the_stack_pointer_and_has_a_confirmed_guard`) |
 
 `--`: not run on that host. Each of those mutants is portable code that
 the same detectors kill on every host; the macOS run spends its time on
@@ -499,9 +499,21 @@ in `hir/cabi.tcl` (c-abi-types' `ptr-as-int`, native-view's
 of other campaigns (c-ffi's, native-link-plan's) were updated to the new
 signatures, and both are still KILLED on Linux x86-64: c-ffi's
 `link-failure-removes-earlier` (by `cf-link-failure-keeps-executable`) and
-native-link-plan's `system-loses-static` (by `nlp-linkers-agree`). The native-stack campaign on Linux x86-64 (all of its mutants,
-the new detector included): 51 mutants, 22 killed, 0 survived, 29 skipped
-(macOS' and Windows' code).
+native-link-plan's `system-loses-static` (by `nlp-linkers-agree`). The
+native-stack campaign on Linux x86-64 (all of its mutants, the new
+detector included): 51 mutants, 22 killed, 0 survived, 29 skipped (macOS'
+and Windows' code).
+
+macOS AArch64 (**Executed**: run 40931039959, the full tier's
+`native-aot-mutants=...` and `native-stack-mutants=...` items, macos-15):
+native-aot 7 of 7 killed, native-stack 3 of 3 killed (with
+`macos-guard-assumed` and `macos-reported-bottom-trusted`, both killed by
+`native_stack`'s checks of the main thread and of a pthread). That run's
+tree still had the three check mistakes section 31 records
+(`mts-main-lc-main`, `mts-main-linkers-agree`, `mts-main-record-and-report`,
+`aot-facts.tcl`'s and `native-status.tcl`'s `main-thread-executable` failed
+without any mutant). The table names only the detectors that pass on the
+unmutated tree: every mutant has at least one.
 
 ## 30. Executable size and performance
 
