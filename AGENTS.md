@@ -317,9 +317,11 @@ the test suite, still install the `.deb`s.
     (`system-linker-keeps-only-reached-helpers`; the helper list is one
     macro, so the two cannot disagree).
 * The three startups build the Vm identically because they share it: the
-  startup crate (`codegen/aot.rs`'s constant `STARTUP`),
-  `aotimage::Loaded::instantiate` (the stub's) and the runtime archive's
-  `main` (`runtime::aot::linked_main`, the system linker's) all read the
+  startup crate (`codegen/aot.rs`'s constant `STARTUP`) and the runtime
+  archive's `main` (`runtime::aot::linked_main`, the system linker's) both
+  start through `runtime::aot::start_linked`, which reads the record's
+  startup policy first (The executable startup policy, below), and they and
+  `aotimage::Loaded::instantiate` (the stub's) all read the
   program object's `botlish_program` record with
   `runtime::program::instantiate_linked`, the one place a Vm is built from
   a program's descriptor (native libraries use it too:
@@ -400,6 +402,70 @@ be killed; update a mutant's text when you change the code it mutates,
 keeping it a mutant of the same rule), and the Linux single executable's
 checks (single/build.sh, both smoke tests,
 `audit/single-executable/tools/mutate.tcl`): the scripts are shared.
+
+## The executable startup policy (the process's main thread)
+
+A standalone executable runs its program on a thread chosen when the
+executable is emitted (MAIN-THREAD-STARTUP-MILESTONE-1.md): `worker`, the
+default and every target's -- a thread `runtime::aot::run` creates with
+`BOTLISH_NATIVE_STACK_BYTES` (1 GiB by default) and joins -- or
+`main-thread`, macOS AArch64's only -- the process's main thread, on the
+512 MiB stack the link reserves (Apple ld's `-stack_size`, LC_MAIN;
+`codegen::aot::MAIN_STACK_BYTES`), which Cocoa and SDL3's video require
+(MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md). main.tcl's `-native-startup`,
+`native::executable -startup`, the driver's `executable --startup`. Keep it
+so:
+
+* The policy is the executable's: the `startup` word of its
+  `botlish_program` record (`runtime::program::Startup`), which
+  `aot::start_linked` reads on the thread that entered `main` before
+  anything else is decided. Never an environment variable at launch, a
+  library the program links (SDL3, AppKit), a context, an import, a
+  declaration or anything inferred from the program; no language
+  annotation, no SDL or Cocoa code in the runtime, no dispatcher or
+  callback-owned lifecycle.
+* One body: both policies run `aot::run`'s one body -- INIT (the Vm made on
+  the thread that runs the program), the startup report, the guard, the
+  lines and statuses -- and a panic on either thread is `native executable
+  panicked (NATIVE BUG)`, status 1 (`on_this_thread` catches it: never an
+  unwind into `main`). Never a second startup sequence, descriptor or
+  per-policy startup code; the rustc startup crate, the runtime archive's
+  `main` and the stub reach the same `start_linked`/`run`.
+* The record's layout is in the ABI fingerprint (`aotimage`'s
+  `RECORD_LAYOUT`), and an unknown startup word is refused (NATIVE
+  STARTUP). A native library's record names the worker, and nothing reads
+  it: a library runs on its host's thread.
+* Refused before anything is linked or written where unsupported
+  (`runtime::aot::MAIN_THREAD_STARTUP`, `codegen::aot::startup_refusal`,
+  `native::capabilities`'s `mainThreadStartup`, `native::StartupPolicy`:
+  NATIVE UNSUPPORTED startup), and `run` refuses such a record anyway. The
+  stub links worker executables only. A linked run (a native backend
+  running a program that calls C) is always the worker's; the JIT keeps its
+  own worker.
+* The main thread's stack is the link's: LC_MAIN's 512 MiB through both
+  linkers (`startup_link_args`), never `BOTLISH_NATIVE_STACK_BYTES`, never a
+  switch of the main thread onto a stack the runtime allocates, never a
+  patched Mach-O. Stack discovery and the guard are the worker's
+  (MACOS-AARCH64-MILESTONE-4.md): never a guard of the main thread's own.
+* `BOTLISH_NATIVE_RUNTIME_FAULT=panic` is the runtime's test-only fault (a
+  panic on the program's thread right before its entry): it proves the
+  panic line, nothing else reads it.
+
+If you change the record, `aot::run`, `start_linked`, `linked_main`, the
+startup crate (`codegen::aot`'s `STARTUP`), the stub's loader, the option or
+its refusal, or the link arguments, run `tests/main-thread-startup.test`
+(its macOS half in the macOS workflow's `main-thread-startup` job and the
+acceptance tier), `tests/system-linker.test`, `tests/native-executable.test`,
+`tests/aot-stub-linker.test`, `tests/native-library.test`,
+`tests/main-cli.test`, `cargo test --release --manifest-path
+native/Cargo.toml --lib -- aotimage program runtime::aot` and `--bin
+botlish-native -- aot startup`, `tests/platform/native-status.tcl`,
+`tests/platform/aot-facts.tcl` and `audit/native-aot/tools/mutate.tcl`
+(every mutant that applies to the host must still apply and be killed; the
+macOS ones through the tier item `native-aot-mutants`), and for the main
+thread's stack or guard `audit/native-stack/tools/mutate.tcl`. The graphical
+acceptance is `audit/main-thread-startup/tools/acceptance.py` (the
+`main-thread-startup` job): never weaken the census's classifier it uses.
 
 ## Running the tests locally
 

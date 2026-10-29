@@ -27,7 +27,7 @@
 //! machine code is the same Cranelift output either linker links.
 
 use super::aot::ProgramEntry;
-use super::program::{LinkedProgram, Reader, Writer};
+use super::program::{LinkedProgram, Reader, Startup, Writer};
 use super::vm::Vm;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -84,6 +84,17 @@ pub struct Image {
 /// driver from different builds), since that code would address fields that
 /// are not there.
 pub fn abi_fingerprint() -> u64 {
+    abi_fingerprint_for(RECORD_LAYOUT)
+}
+
+/// The program record's layout (runtime::program's LinkedProgram), as the
+/// fingerprint covers it: its size and its startup policy's place.
+const RECORD_LAYOUT: [u64; 2] =
+    [std::mem::size_of::<LinkedProgram>() as u64, std::mem::offset_of!(LinkedProgram, startup) as u64];
+
+/// The fingerprint of this runtime build with a program record of layout
+/// RECORD (`RECORD_LAYOUT` for this build's own).
+fn abi_fingerprint_for(record: [u64; 2]) -> u64 {
     use super::{bytesobj, strobj, value, vm};
     let mut words: Vec<u64> = vec![
         std::mem::size_of::<Vm>() as u64,
@@ -112,6 +123,13 @@ pub fn abi_fingerprint() -> u64 {
         // frame walk, or the shadow stack): a `fallback-roots` build's code
         // never runs on a runtime of the other plan.
         u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
+        // The program record's own layout (runtime::program's
+        // LinkedProgram): its size and its startup policy's place, so a
+        // record of another layout is refused by its fingerprint, the second
+        // word, before any later word is read
+        // (MAIN-THREAD-STARTUP-MILESTONE-1.md).
+        record[0],
+        record[1],
     ];
     // The helpers' names and parameter counts, never their addresses: an
     // executable whose startup computes this (every executable's, through
@@ -358,6 +376,13 @@ fn map_near(anchor: usize, size: usize) -> Result<usize, String> {
 }
 
 impl Loaded {
+    /// The startup policy of the image's record (`program::startup_of`),
+    /// read before the program is started.
+    pub fn startup(&self) -> Result<Startup, String> {
+        // SAFETY: as `instantiate`; startup_of reads only the record itself.
+        unsafe { super::program::startup_of(&*((self.base + self.program) as *const LinkedProgram)) }
+    }
+
     /// The program's Vm and entry, built from its relocated record exactly as
     /// the `rustc` linker's startup builds them (`program::instantiate_linked`).
     /// Runs on the thread that runs the program.
@@ -380,7 +405,21 @@ pub fn main() -> i32 {
             return 1;
         }
     };
-    super::aot::run(argv, move || match loaded.instantiate() {
+    // The stub links no main-thread executable (codegen::aot refuses one
+    // before linking): its record's policy is the worker's, or the image is
+    // not one this driver made.
+    match loaded.startup() {
+        Ok(Startup::Worker) => {}
+        Ok(Startup::MainThread) => {
+            eprintln!("the stub linker's executables start their program on a worker: this image's record names the main-thread startup policy (NATIVE STARTUP)");
+            return 1;
+        }
+        Err(error) => {
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 1;
+        }
+    }
+    super::aot::run(Startup::Worker, argv, move || match loaded.instantiate() {
         Ok(started) => started,
         Err(error) => {
             eprintln!("{error} (NATIVE STARTUP)");
@@ -416,6 +455,18 @@ mod tests {
         assert_eq!(decoded.fixups, image.fixups);
         assert_eq!(decoded.imports, image.imports);
         assert_eq!(decoded.program, image.program);
+    }
+
+    /// The fingerprint covers the program record's layout: a runtime whose
+    /// record were another -- the six words before the startup policy, say
+    /// -- fingerprints differently, so neither reads the other's record
+    /// (MAIN-THREAD-STARTUP-MILESTONE-1.md, "Runtime ABI compatibility").
+    #[test]
+    fn aot_fingerprint_covers_the_record_layout() {
+        assert_eq!(RECORD_LAYOUT, [56, 48]);
+        assert_eq!(abi_fingerprint(), abi_fingerprint_for(RECORD_LAYOUT));
+        assert_ne!(abi_fingerprint(), abi_fingerprint_for([48, 40]));
+        assert_ne!(abi_fingerprint(), abi_fingerprint_for([56, 0]));
     }
 
     #[test]

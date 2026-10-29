@@ -65,7 +65,14 @@
 #                                         toolchain, SINGLE-EXECUTABLE.md),
 #                                         system (the host's C driver and
 #                                         the runtime archive, no rustc) or
-#                                         auto (system for C, else stub)
+#                                         auto (system for C, else stub).
+#                                         -startup worker|main-thread is
+#                                         where it runs its program: on a
+#                                         worker (the default) or on the
+#                                         process's main thread (macOS
+#                                         aarch64 only: the capability
+#                                         mainThreadStartup;
+#                                         MAIN-THREAD-STARTUP-MILESTONE-1.md)
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
@@ -164,6 +171,16 @@ namespace eval native {
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
 #                codegen/library.rs's SUPPORTED; the archive's partial link
 #                and symbol localization are GNU binutils')
+#   mainThreadStartup
+#                standalone executables that start their program on the
+#                process's main thread (native::executable -startup
+#                main-thread; runtime/aot.rs's MAIN_THREAD_STARTUP,
+#                MAIN-THREAD-STARTUP-MILESTONE-1.md): macOS AArch64, whose
+#                main thread's stack the runtime discovers with a confirmed
+#                guard and the link sizes (LC_MAIN, 512 MiB). Not Linux,
+#                whose main thread has no confirmed guard (glibc reports
+#                none), nor Windows, whose main-thread stack would need its
+#                own reservation and validation: a worker everywhere else.
 #   frameRoots   GC roots in native frames, found by the frame walk
 #                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS: the frame-pointer
 #                chain, on Windows with Windows' unwinder across Rust frames);
@@ -193,6 +210,7 @@ namespace eval native {
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        mainThreadStartup {macos-aarch64} \
         libraries {linux-x86_64 linux-aarch64}]
 }
 
@@ -500,7 +518,50 @@ proc native::executableFile {path} {
     return $path
 }
 
+# The startup policy -startup names in ARGS (native::executable's options),
+# checked for the target HIR is compiled for (its own, else the host's):
+# worker when none is given. An unknown policy, two different ones, or
+# main-thread for a target without the capability mainThreadStartup is an
+# error, before anything is lowered, written or linked
+# (MAIN-THREAD-STARTUP-MILESTONE-1.md).
+proc native::StartupPolicy {hir arguments} {
+    variable capabilities
+    set startup ""
+    foreach {option value} $arguments {
+        if {$option ne "-startup"} continue
+        if {$value ni {worker main-thread}} {
+            throw {NATIVE STARTUP POLICY} "unknown startup policy \"$value\" (known: worker main-thread)"
+        }
+        if {$startup ne "" && $startup ne $value} {
+            throw {NATIVE STARTUP POLICY} "-startup is given twice with different policies ($startup, $value)"
+        }
+        set startup $value
+    }
+    if {$startup eq ""} {
+        return worker
+    }
+    if {$startup eq "main-thread"} {
+        set target [hir::cabi::targetOf $hir]
+        if {$target eq ""} {
+            set target [core::cabi::hostTarget]
+        }
+        if {$target ni [dict get $capabilities mainThreadStartup]} {
+            if {[string match linux-* $target]} {
+                set reason "Linux's main thread has no confirmed stack guard (glibc reports none, so the runtime's stack guard refuses it), and its startup has had no main-thread acceptance"
+            } elseif {[string match windows-* $target]} {
+                set reason "Windows' main thread would need its own stack reservation and validation (its stack is the link's reservation, 1 MiB unless it reserves more), and its startup has had no main-thread acceptance"
+            } else {
+                set reason "this target's main-thread startup has had no acceptance"
+            }
+            throw {NATIVE UNSUPPORTED startup} "the main-thread startup policy is supported for macOS aarch64 native executables only, and this program is compiled for [if {$target eq ""} {string cat "an unknown host"} else {set target}]: $reason (MAIN-THREAD-STARTUP-MILESTONE-1.md); the worker policy, the default, runs the program on a thread of its own there"
+        }
+    }
+    return $startup
+}
+
 proc native::executable {hir path args} {
+    set startup [StartupPolicy $hir $args]
+    set args [dict remove $args -startup]
     set analysisOptions [dict create -specialize 1]
     foreach {option variable} {
         -call-facts-opt BOTLISH_NATIVE_CALL_FACTS_OPT
@@ -533,7 +594,7 @@ proc native::executable {hir path args} {
         throw {NATIVE AOT NOT-READY} "program is not AOT-ready:\n[join $failures \n]"
     }
     set text [nir $hir {*}$args {*}$analysisOptions]
-    set lines [Driver executable $text [file normalize $path]]
+    set lines [Driver executable $text [file normalize $path] --startup $startup]
     foreach line $lines {
         if {[lindex $line 0] eq "error"} { Outcome $lines }
     }

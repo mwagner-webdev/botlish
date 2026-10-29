@@ -913,7 +913,10 @@ the native runtime, not in the program. Its forms:
   * "native backend failed: ..." or "native backend produced no
     result" -- the driver process ended without reporting (a crash, or
     a process killed from outside, e.g. for lack of memory);
-  * "native executable panicked" -- a standalone executable's runtime.
+  * "native executable panicked" -- a standalone executable's runtime,
+    on whichever thread runs its program (its worker, or the process's
+    main thread with -native-startup main-thread:
+    backend.main-thread-startup); its exit status is 1.
 
 == HOW TO INVESTIGATE
 Run the program on -backend cranelift-generic and on interp: if they
@@ -1335,11 +1338,12 @@ summary: NATIVE UNSUPPORTED KIND reports a valid construct the native backends c
 index: errors backends
 alias: native lowering does not support; not supported natively
 keywords: struct-shape, CONTEXT-NATIVE-LOWERING-UNSUPPORTED, value, foreign, sequence-mode, validator contract, cranelift-generic, context struct
-related: backend.cranelift backend.cranelift-generic backend.native-only concept.contexts concept.specialization error.native-bug
+related: backend.cranelift backend.cranelift-generic backend.native-only backend.main-thread-startup concept.contexts concept.specialization error.native-bug
 docs: README.md CONTEXTS.md DIRECT-HIR-NATIVE-PATH.md
 code: NATIVE UNSUPPORTED
 code: NATIVE UNSUPPORTED CONTEXT-NATIVE-LOWERING-UNSUPPORTED
 code: NATIVE UNSUPPORTED struct-shape
+code: NATIVE UNSUPPORTED startup
 
 == MEANING
 On the native backends; the program is valid and runs on interp and
@@ -1362,6 +1366,9 @@ of the code says what:
     test suite's instrumentation natives).
   * foreign: batch timing or allocation reports of a program that calls
     C, or such a program run with an empty argument vector.
+  * startup: -native-startup main-thread (native::executable -startup
+    main-thread) for a target other than macOS aarch64, refused before
+    anything is linked (backend.main-thread-startup).
   * validator contract, ambient binding, DynamicBinding,
     UnresolvedControl, sequence-mode: HIR that only unchecked programs or
     the embedding API produce.
@@ -1401,6 +1408,8 @@ CONTEXT-NATIVE-LOWERING-UNSUPPORTED)". Declaring `type Depth = Int in
     Lists as ordinary parameters (or keep them in a MutableVector field).
   * value: end the program with data (call the function), not with a
     function.
+  * startup: build without -native-startup (the worker), or on macOS
+    aarch64.
   * anything else: run on interp or compile, and report the program if
     it is ordinary Botlish source.
 

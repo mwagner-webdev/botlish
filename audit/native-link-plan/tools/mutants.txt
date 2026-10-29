@@ -213,7 +213,7 @@ proc hir::interchange::WithoutRepresentations {hir} {
 @@ system-loses-static the system linker links a static archive as an ordinary library (-lNAME)
 ## native/src/codegen/aot.rs
 <<<<
-    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &inputs, search);
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &inputs, search, startup);
 ====
     let lost: Vec<LinkInput> = inputs
         .iter()
@@ -222,7 +222,7 @@ proc hir::interchange::WithoutRepresentations {hir} {
             other => other.clone(),
         })
         .collect();
-    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &lost, search);
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &lost, search, startup);
 >>>>
 
 @@ static-only-plan-is-no-c a program whose plan holds only static libraries or frameworks counts as one that calls no C: auto links it with the stub

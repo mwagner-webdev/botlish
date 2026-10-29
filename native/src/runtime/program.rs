@@ -7,7 +7,7 @@
 //! ```text
 //!   botlish_program      LinkedProgram: magic, the runtime ABI fingerprint,
 //!                        the descriptor's address and length, the code
-//!                        table's address and length
+//!                        table's address and length, the startup policy
 //!   botlish_descriptor   the encoded ProgramDescriptor (read-only bytes)
 //!   botlish_code         one (direct, generic entry) address pair per NIR
 //!                        function, relocated by whatever links the object
@@ -41,7 +41,10 @@ const FORMAT: u32 = 1;
 
 /// The record the compiler emits as `botlish_program` (module doc). Its
 /// layout is a contract between codegen (which writes it as data) and this
-/// runtime: six machine words, in this order.
+/// runtime: seven machine words, in this order. The runtime ABI fingerprint
+/// (aotimage::abi_fingerprint) covers the layout itself -- its size and
+/// where `startup` is -- so a record of another layout is refused by its
+/// fingerprint before any word past the first two is read.
 #[repr(C)]
 pub struct LinkedProgram {
     pub magic: u64,
@@ -52,6 +55,63 @@ pub struct LinkedProgram {
     /// generic entry at `2N + 1`.
     pub code: *const usize,
     pub functions: usize,
+    /// The executable's startup policy, `Startup::word` (0, the worker, for
+    /// every record but a main-thread executable's; a native library's is
+    /// always 0).
+    pub startup: u64,
+}
+
+/// Which thread an executable's program runs on
+/// (MAIN-THREAD-STARTUP-MILESTONE-1.md): a property of the executable, chosen
+/// when it is emitted (`botlish-native executable --startup`, main.tcl's
+/// `-native-startup`) and recorded in its `botlish_program` record, never
+/// read from the environment, a library or the program's source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Startup {
+    /// A thread the executable's `main` creates and joins, with a stack of
+    /// `BOTLISH_NATIVE_STACK_BYTES` (1 GiB by default): the default, and
+    /// every target's.
+    Worker,
+    /// The thread that entered the executable's `main` -- the process's main
+    /// thread -- on the stack the link reserved for it (LC_MAIN's 512 MiB on
+    /// macOS). macOS AArch64 only (runtime::aot's `MAIN_THREAD_STARTUP`).
+    MainThread,
+}
+
+impl Startup {
+    /// The record's encoding: 0 the worker, 1 the main thread.
+    pub const fn word(self) -> u64 {
+        match self {
+            Startup::Worker => 0,
+            Startup::MainThread => 1,
+        }
+    }
+
+    /// The policy a record's word WORD encodes; any other word is refused.
+    pub fn from_word(word: u64) -> Result<Startup, String> {
+        match word {
+            0 => Ok(Startup::Worker),
+            1 => Ok(Startup::MainThread),
+            _ => Err(format!("the program record names an unknown startup policy ({word})")),
+        }
+    }
+
+    /// Its name on the command line (`--startup`, `-native-startup`) and in
+    /// the startup report.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Startup::Worker => "worker",
+            Startup::MainThread => "main-thread",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Startup> {
+        match name {
+            "worker" => Some(Startup::Worker),
+            "main-thread" => Some(Startup::MainThread),
+            _ => None,
+        }
+    }
 }
 
 // The record is immutable data the linker relocated: sharing it between
@@ -401,21 +461,38 @@ pub fn instantiate(descriptor: &ProgramDescriptor, code: &[(usize, usize)]) -> (
     (vm, entry)
 }
 
-/// The descriptor and code table a linked record LINKED points at, checked:
-/// the magic, this runtime's ABI fingerprint (a program object compiled
-/// against another runtime build addresses fields that are not there), and
-/// a code table of one pair per described function.
+/// The startup policy of the linked record LINKED, checked: the magic, this
+/// runtime's ABI fingerprint (which covers the record's layout: a record of
+/// another layout is refused before its `startup` word is read), and a word
+/// that names a policy. Reads nothing the record points at: an executable's
+/// `main` reads this before it decides which thread runs the program
+/// (runtime::aot's `start_linked`), and the thread that runs it reads the
+/// rest (`read_linked`).
 ///
 /// # Safety
-/// LINKED must be a `LinkedProgram` the compiler emitted, relocated by its
-/// link (its pointers valid for their lengths).
-pub unsafe fn read_linked(linked: &LinkedProgram) -> Result<(ProgramDescriptor, Vec<(usize, usize)>), String> {
+/// LINKED must be a `LinkedProgram` the compiler emitted.
+pub unsafe fn startup_of(linked: &LinkedProgram) -> Result<Startup, String> {
     if linked.magic != LINKED_MAGIC {
         return Err("not a Botlish program record".to_string());
     }
     if linked.fingerprint != super::aotimage::abi_fingerprint() {
         return Err("the program was compiled for a different native runtime build".to_string());
     }
+    Startup::from_word(linked.startup)
+}
+
+/// The descriptor and code table a linked record LINKED points at, checked:
+/// the magic, this runtime's ABI fingerprint (a program object compiled
+/// against another runtime build addresses fields that are not there), a
+/// startup policy it knows (`startup_of`), and a code table of one pair per
+/// described function.
+///
+/// # Safety
+/// LINKED must be a `LinkedProgram` the compiler emitted, relocated by its
+/// link (its pointers valid for their lengths).
+pub unsafe fn read_linked(linked: &LinkedProgram) -> Result<(ProgramDescriptor, Vec<(usize, usize)>), String> {
+    // SAFETY: the caller's contract.
+    unsafe { startup_of(linked) }?;
     // SAFETY: the caller's contract.
     let bytes = unsafe { std::slice::from_raw_parts(linked.descriptor, linked.descriptor_len) };
     let descriptor = ProgramDescriptor::decode(bytes)?;
@@ -528,6 +605,7 @@ mod tests {
             descriptor_len: bytes.len(),
             code: code.as_ptr(),
             functions: 2,
+            startup: Startup::Worker.word(),
         };
         assert!(unsafe { read_linked(&linked) }.is_ok());
         linked.fingerprint ^= 1;
@@ -538,5 +616,45 @@ mod tests {
         linked.magic = LINKED_MAGIC;
         linked.functions = 3;
         assert!(unsafe { read_linked(&linked) }.is_err());
+    }
+
+    /// The startup word: the two policies round-trip, and any other word is
+    /// refused by `startup_of` and by `read_linked` -- a damaged record never
+    /// starts on a guessed thread.
+    #[test]
+    fn linked_program_startup_policy() {
+        for startup in [Startup::Worker, Startup::MainThread] {
+            assert_eq!(Startup::from_word(startup.word()), Ok(startup));
+            assert_eq!(Startup::parse(startup.name()), Some(startup));
+        }
+        assert_eq!(Startup::Worker.word(), 0, "the worker is the record's default, zero");
+        assert_eq!(Startup::parse("main"), None);
+        let bytes = sample().encode();
+        let code = [0usize; 4];
+        let mut linked = LinkedProgram {
+            magic: LINKED_MAGIC,
+            fingerprint: super::super::aotimage::abi_fingerprint(),
+            descriptor: bytes.as_ptr(),
+            descriptor_len: bytes.len(),
+            code: code.as_ptr(),
+            functions: 2,
+            startup: Startup::MainThread.word(),
+        };
+        assert_eq!(unsafe { startup_of(&linked) }, Ok(Startup::MainThread));
+        assert!(unsafe { read_linked(&linked) }.is_ok());
+        linked.startup = 2;
+        assert!(matches!(unsafe { startup_of(&linked) }, Err(e) if e.contains("unknown startup policy (2)")));
+        assert!(unsafe { read_linked(&linked) }.is_err());
+        linked.startup = 0;
+        linked.fingerprint ^= 1;
+        assert!(matches!(unsafe { startup_of(&linked) }, Err(e) if e.contains("different native runtime build")));
+    }
+
+    /// The record's layout is part of the ABI fingerprint: seven words, the
+    /// startup policy last, where codegen writes it.
+    #[test]
+    fn linked_program_layout() {
+        assert_eq!(std::mem::size_of::<LinkedProgram>(), 56);
+        assert_eq!(std::mem::offset_of!(LinkedProgram, startup), 48);
     }
 }

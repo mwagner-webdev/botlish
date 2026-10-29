@@ -24,6 +24,11 @@
 #   * tests/platform/native-status.tcl (the driver's overflows: Botlish
 #     recursion, a large frame, the runtime's own recursion);
 #   * tests/platform/aot-facts.tcl (a standalone executable's overflows);
+#   * tests/main-thread-startup.test's stack tests (mts-policy-*, mts-main-*:
+#     the overflows, depths and GC stress of a standalone executable on its
+#     worker and, on macOS AArch64, on the process's main thread, whose
+#     LC_MAIN stack the startup report states: MAIN-THREAD-STARTUP-
+#     MILESTONE-1.md);
 #   * the fallback plan's Rust tests (`cargo test --lib --features
 #     fallback-roots`, a build of its own): what only the shadow stack's
 #     depth check decides.
@@ -186,6 +191,13 @@ set detectors [list \
         if {$status == 0} { return "" }
         set failing [lmap {- n} [regexp -all -inline -line {^FAIL\s+(\S+)} $output] {set n}]
         expr {$failing eq {} ? [lastLine $output] : [join $failing {, }]}
+    } \
+    main-thread-startup.test [list $tclsh tests/main-thread-startup.test -tmpdir TMPDIR -match {mts-policy-* mts-main-*}] {
+        set failed [lsort -unique [lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]]
+        if {![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
+            return "did not complete: [lastLine $output]"
+        }
+        expr {$failed eq {} ? "" : "[llength $failed] failed: [join [lrange $failed 0 5] {, }]"}
     } \
     fallback [list cargo test --release --manifest-path $manifest --features fallback-roots --target-dir native/target-fallback --lib --no-fail-fast] {
         if {$status == 0} { return "" }

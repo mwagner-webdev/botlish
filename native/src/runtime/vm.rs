@@ -351,6 +351,13 @@ impl Vm {
         let _ = stack;
     }
 
+    /// The stack of the thread this Vm was made on (`Vm::new`'s
+    /// `NativeStack::current()`): the thread its program runs on. None on a
+    /// host without stack discovery.
+    pub fn native_stack(&self) -> Option<NativeStack> {
+        self.native_stack
+    }
+
     /// Makes this Vm's code bound its recursion by the running stack's
     /// `stack_limit` (a native library's instance, made on the thread that
     /// owns it: runtime::library's `create`). From now on

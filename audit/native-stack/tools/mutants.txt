@@ -106,6 +106,19 @@
     let low_bound = reported_low;
 >>>>
 
+@@ macos-size-from-rlimit the stack size read from RLIMIT_STACK, not from libpthread: the main thread's LC_MAIN stack (512 MiB) taken for the 8 MiB the rlimit still says (macOS; MAIN-THREAD-STARTUP-MILESTONE-1.md)
+%% macos-aarch64
+## native/src/runtime/platform/macos.rs
+<<<<
+        (libc::pthread_get_stackaddr_np(thread) as usize, libc::pthread_get_stacksize_np(thread))
+====
+        (libc::pthread_get_stackaddr_np(thread) as usize, {
+            let mut limit: libc::rlimit = std::mem::zeroed();
+            libc::getrlimit(libc::RLIMIT_STACK, &mut limit);
+            limit.rlim_cur as usize
+        })
+>>>>
+
 @@ macos-guard-assumed one 16 KiB page below the stack taken for its guard, unconfirmed (macOS)
 %% macos-aarch64
 ## native/src/runtime/platform/macos.rs

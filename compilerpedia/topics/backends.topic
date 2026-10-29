@@ -171,6 +171,71 @@ executable's machine code uses
 the target's baseline instruction set, whichever native backend the
 command line names: it is always the closed, specialized program.
 
+== WHERE ITS PROGRAM RUNS
+By default on a thread the executable creates, with a 1 GiB stack
+(BOTLISH_NATIVE_STACK_BYTES resizes it when the executable runs). On macOS
+aarch64, `-native-startup main-thread` builds an executable that runs it on
+the process's main thread instead, which a Cocoa application (SDL3's
+video) needs (backend.main-thread-startup).
+
+@topic backend.main-thread-startup
+title: Running an executable's program on the process's main thread
+summary: -native-startup main-thread builds a macOS aarch64 executable that runs its program on the process's main thread, which Cocoa and SDL3's video need.
+index: backends
+alias: main thread; main-thread startup; native-startup; startup policy; Cocoa main thread; SDL video on macOS
+keywords: -native-startup, main-thread, worker, Cocoa, AppKit, SDL3, SDL_Init, No available video device, LC_MAIN, stack_size, 512 MiB, BOTLISH_NATIVE_STACK_BYTES, pthread_main_np, NATIVE UNSUPPORTED startup
+related: backend.native-executable backend.macos-application backend.platforms cli.options error.native-limit-stack error.native-unsupported concept.c-ffi concept.native-link-plan
+docs: MAIN-THREAD-STARTUP-MILESTONE-1.md MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md SINGLE-EXECUTABLE.md
+
+== WHAT IT IS
+A standalone executable starts its program one of two ways, chosen when it
+is built and fixed into it (its program record):
+    worker        the default, on every platform: the executable's main
+                  thread creates a thread with a 1 GiB stack
+                  (BOTLISH_NATIVE_STACK_BYTES when it runs, at least 1 MiB),
+                  runs the program there and waits for it
+    main-thread   macOS aarch64 only: the program runs on the thread that
+                  entered the executable's main -- the process's main
+                  thread -- on a 512 MiB stack the link reserves for it
+                  (Apple ld's -stack_size, LC_MAIN's stack size: its
+                  largest on arm64). BOTLISH_NATIVE_STACK_BYTES does not
+                  apply to it.
+`botlish -native-startup main-thread -emit-native-executable app.bot`
+builds the second kind.
+
+== WHY IT EXISTS
+Cocoa (AppKit) makes windows and runs events on the process's main thread
+only, and every library built on it inherits the rule: SDL3's video
+subsystem on a worker fails SDL_Init(SDL_INIT_VIDEO) with "No available
+video device", although SDL_IsMainThread() answers true there (SDL calls
+the thread that initialized it its main thread). A main-thread executable
+calls SDL, Cocoa and Metal from the process's main thread -- also from a
+coroutine, whose stack switches never change the thread.
+
+== WHAT STAYS THE SAME
+The program's meaning: its values, errors, output, exit status, argv(),
+the driver protocol and the startup report are the worker's; a panic of
+the runtime is "native executable panicked (NATIVE BUG)", status 1, on
+either thread. The collector, coroutines, the C FFI and the stack guard are
+the same code: exhausting the main stack (or a coroutine's) is NATIVE LIMIT
+STACK, status 1. The stack is a reservation of address space, mapped as it
+grows; it holds half of the worker's default, so a recursion that the
+worker's 1 GiB just holds can end in NATIVE LIMIT STACK on the main thread.
+
+== WHAT CHOOSES IT
+Only the option. Nothing in a program selects it -- not a library it
+links (SDL3, AppKit), a context, an import or a declaration -- and an
+executable linking Cocoa may still use the worker. A run through main.tcl
+(-backend cranelift, which links and runs a program that calls C) always
+uses the worker; the JIT and native libraries are unaffected.
+
+== WHERE IT IS REFUSED
+On every other target (Linux, Windows) -native-startup main-thread is
+NATIVE UNSUPPORTED startup, before anything is linked or written: Linux's
+main thread has no confirmed stack guard (glibc reports none), and
+Windows' main-thread stack would need its own reservation and validation.
+The stub linker (Linux x86-64) links worker executables only.
+
 @topic backend.native-library
 title: Native libraries: Botlish functions a C host calls
 summary: `exported c fn` declares a C export; -emit-native-library NAME builds libNAME.a, libNAME.so, NAME.h and a manifest that any C host can link and call.
@@ -466,6 +531,9 @@ other platforms.
                              calls on all of them (Win64's through a
                              stub copying doubles into integer
                              registers); never with the stub linker
+    main-thread startup      macOS AArch64: -native-startup main-thread
+                             (backend.main-thread-startup); a worker
+                             thread on every platform otherwise
     single executable        Linux x86-64
     Botlish.app              macOS AArch64 (backend.macos-application)
 
@@ -585,8 +653,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-library concept.argv
+keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.main-thread-startup backend.native-library concept.argv
 docs: README.md
 
 == RUNNING
@@ -622,6 +690,13 @@ own process arguments.
 == BUILDING (nothing runs)
     -emit-native-executable   a standalone executable beside each input
                               (backend.native-executable)
+    -native-startup POLICY    where that executable runs its program:
+                              worker (the default: a thread of its own,
+                              1 GiB of stack) or main-thread (the process's
+                              main thread, 512 MiB of stack, which Cocoa
+                              and SDL3's video need; macOS aarch64 only)
+                              (backend.main-thread-startup); an option of
+                              -emit-native-executable only
     -emit-hir-interchange     each input's analyzed HIR as FILE.hirx
                               (backend.hir-interchange)
     -emit-native-library NAME the native library NAME from the one input:
@@ -693,8 +768,10 @@ An unknown option, an option without its argument (`-backend` last), an
 unknown backend, mode or target, a malformed -argv-hex, -check beside an
 option it does not take or with an input that is not Botlish source, -lsp
 beside an option it does not take or with an input file, an unknown
--lsp-scheduler, or options without an input file print a message on stderr
-and exit with status 2; nothing is compiled.
+-lsp-scheduler, an unknown -native-startup policy, -native-startup given
+twice with different policies or without -emit-native-executable, or
+options without an input file print a message on stderr and exit with
+status 2; nothing is compiled.
 
 @topic cli.output
 title: What a run prints

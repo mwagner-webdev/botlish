@@ -37,12 +37,51 @@
 //! startup installed to PATH (`Vm::startup_report`) before the program
 //! runs, which then runs as ever: how the tests compare the startups of the
 //! rustc, stub and system linkers (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
+//! After the Vm's report come the startup's own facts (`startup_facts`): the
+//! policy the record names, whether the thread running the program is the
+//! process's main thread, and the stack the Vm found it on.
+//!
+//! The startup policy (MAIN-THREAD-STARTUP-MILESTONE-1.md;
+//! runtime::program's `Startup`): where the program runs is a property of
+//! the executable, the `startup` word of its `botlish_program` record, which
+//! `start_linked` reads on the thread that entered `main` before anything
+//! else is decided. `worker` (the default, every target's) runs the program
+//! on a thread `run` creates with a stack of `BOTLISH_NATIVE_STACK_BYTES`
+//! (1 GiB by default) and joins; `main-thread` (macOS AArch64 only:
+//! `MAIN_THREAD_STARTUP`) runs it on the calling thread -- the process's
+//! main thread -- on the stack the link reserved for it (LC_MAIN's 512 MiB,
+//! codegen::aot's `MAIN_STACK_BYTES`), which the environment cannot resize.
+//! Both run one body (`run`): the same Vm, made on the thread that runs the
+//! program, the same guard on that thread's stack, the same reports, lines
+//! and statuses -- a panic included, which is `native executable panicked
+//! (NATIVE BUG)`, status 1, on either thread. The driver's JIT keeps its own
+//! worker (main.rs) and a native library runs on its host's thread
+//! (runtime::library): neither reads the policy.
+//!
+//! `BOTLISH_NATIVE_RUNTIME_FAULT=panic` is a test-only fault injection: the
+//! runtime panics on the program's thread right before the program's entry,
+//! which is how the tests prove the panic line of both policies
+//! (tests/main-thread-startup.test). Any other value is ignored.
 use super::error::RtError;
 use super::metrics::AllocMode;
+use super::program::{LinkedProgram, Startup};
 use super::show::{show, tcl_list, tcl_value};
 use super::value::{NO_VALUE, Value};
 use super::vm::Vm;
 use std::io::Write;
+
+/// Whether this target's executables may start on the process's main thread
+/// (`Startup::MainThread`): macOS AArch64, where the census
+/// (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md) and MAIN-THREAD-STARTUP-
+/// MILESTONE-1.md validated it -- the main thread's stack discovered with a
+/// confirmed guard, LC_MAIN's stack size honoured, the guard, the
+/// collector and coroutines unchanged. Not Linux: glibc reports no guard for
+/// the main thread, so the stack guard refuses it; not Windows: its main
+/// thread's stack is the link's reservation (1 MiB unless it reserves more),
+/// never validated. Code generation refuses the policy elsewhere before
+/// anything is linked (codegen::aot), and `run` refuses a record that names
+/// it anyway.
+pub const MAIN_THREAD_STARTUP: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 pub type ProgramEntry = extern "C" fn(*mut Vm) -> Value;
 
@@ -178,32 +217,55 @@ pub fn rust_process_setup() {
     }
 }
 
-/// The runtime archive's `main` (native/runtime-archive): a system-linked
-/// executable's startup (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). What Rust's
-/// own startup does to the process (`rust_process_setup`), then exactly what
-/// the rustc linker's startup crate does (codegen::aot's `STARTUP`): the
-/// program object's record LINKED, read by `program::instantiate_linked` on
-/// the thread `run` starts and run with the process's own arguments, the
-/// process ended by `std::process::exit` (which flushes Rust's standard
-/// output). A record it cannot read is NATIVE STARTUP, status 1; a panic
-/// outside the program's own thread is status 101, as a Rust `main`'s.
+/// The executables' startup (codegen::aot's startup crate, the rustc
+/// linker's; `linked_main`, the system linker's): the policy of the program
+/// object's record LINKED, read and checked on the calling thread -- the
+/// process's main thread -- before anything is decided (`program::
+/// startup_of`), then the program run by that policy (`run`), the record
+/// read by `program::instantiate_linked` on the thread that runs it. A
+/// record it cannot read is NATIVE STARTUP, status 1. Returns the exit
+/// status.
 ///
 /// # Safety
 /// As `program::read_linked`: LINKED is the record the program object
 /// defines, relocated by the link.
-pub unsafe fn linked_main(linked: &'static super::program::LinkedProgram) -> i32 {
+pub unsafe fn start_linked(linked: &'static LinkedProgram) -> i32 {
+    // SAFETY: the caller's contract.
+    let startup = match unsafe { super::program::startup_of(linked) } {
+        Ok(startup) => startup,
+        Err(error) => {
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 1;
+        }
+    };
+    run(startup, process_argv(), move || {
+        // SAFETY: the caller's contract.
+        match unsafe { super::program::instantiate_linked(linked) } {
+            Ok(started) => started,
+            Err(error) => {
+                eprintln!("{error} (NATIVE STARTUP)");
+                std::process::exit(1);
+            }
+        }
+    })
+}
+
+/// The runtime archive's `main` (native/runtime-archive): a system-linked
+/// executable's startup (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). What Rust's
+/// own startup does to the process (`rust_process_setup`), then exactly what
+/// the rustc linker's startup crate does (codegen::aot's `STARTUP`):
+/// `start_linked` of the program object's record LINKED, the process ended
+/// by `std::process::exit` (which flushes Rust's standard output). A panic
+/// outside the program's own body is status 101, as a Rust `main`'s.
+///
+/// # Safety
+/// As `program::read_linked`: LINKED is the record the program object
+/// defines, relocated by the link.
+pub unsafe fn linked_main(linked: &'static LinkedProgram) -> i32 {
     let status = std::panic::catch_unwind(|| -> i32 {
         rust_process_setup();
-        run(process_argv(), move || {
-            // SAFETY: the caller's contract.
-            match unsafe { super::program::instantiate_linked(linked) } {
-                Ok(started) => started,
-                Err(error) => {
-                    eprintln!("{error} (NATIVE STARTUP)");
-                    std::process::exit(1);
-                }
-            }
-        })
+        // SAFETY: the caller's contract.
+        unsafe { start_linked(linked) }
     });
     match status {
         Ok(status) => std::process::exit(status),
@@ -214,21 +276,23 @@ pub unsafe fn linked_main(linked: &'static super::program::LinkedProgram) -> i32
     }
 }
 
-pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
-    let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")
-        .ok()
-        .and_then(|text| text.parse::<usize>().ok())
-        .filter(|&size| size >= 1 << 20)
-        .unwrap_or(1 << 30);
+/// Runs the program INIT makes, with the argument snapshot ARGV, by the
+/// startup policy STARTUP (the module doc): on a worker it creates and joins,
+/// or on the calling thread. Either way one body runs on that thread: INIT
+/// (the Vm and the entry, made there), the startup report, the snapshot, the
+/// driver protocol or the guard and the program, and its value or error.
+/// Returns the exit status.
+pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + Send + 'static) -> i32 {
     let protocol = std::env::var_os("BOTLISH_NATIVE_RESULT").filter(|p| !p.is_empty());
     let report = std::env::var_os("BOTLISH_NATIVE_STARTUP_REPORT").filter(|p| !p.is_empty());
-    let worker = std::thread::Builder::new().stack_size(stack_size).spawn(move || {
+    let body = move || -> i32 {
         let (mut vm, entry) = init();
         if let Some(path) = report {
             // What the startup installed (Vm::startup_report), before any of
             // the program runs: the evidence that every linker's startup
-            // builds the same Vm (tests/system-linker.test).
-            if let Err(error) = std::fs::write(&path, vm.startup_report()) {
+            // builds the same Vm (tests/system-linker.test), and that each
+            // policy runs it where it says (tests/main-thread-startup.test).
+            if let Err(error) = std::fs::write(&path, format!("{}{}", vm.startup_report(), startup_facts(startup, &vm))) {
                 eprintln!("{}: {error} (NATIVE IO)", std::path::Path::new(&path).display());
                 return 2;
             }
@@ -243,6 +307,7 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
             let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
             super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
         };
+        injected_fault();
         let result = entry(&mut *vm);
         if result == NO_VALUE {
             let error = vm
@@ -259,17 +324,28 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
                 1
             }
         }
-    });
-    let status = match worker {
-        Ok(worker) => match worker.join() {
-            Ok(status) => status,
-            Err(_) => {
-                eprintln!("native executable panicked (NATIVE BUG)");
-                1
+    };
+    let status = match startup {
+        Startup::Worker => {
+            let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")
+                .ok()
+                .and_then(|text| text.parse::<usize>().ok())
+                .filter(|&size| size >= 1 << 20)
+                .unwrap_or(1 << 30);
+            match std::thread::Builder::new().stack_size(stack_size).spawn(body) {
+                Ok(worker) => match worker.join() {
+                    Ok(status) => status,
+                    Err(_) => panicked(),
+                },
+                Err(error) => {
+                    eprintln!("{error} (NATIVE STARTUP)");
+                    1
+                }
             }
-        },
-        Err(error) => {
-            eprintln!("{error} (NATIVE STARTUP)");
+        }
+        Startup::MainThread if MAIN_THREAD_STARTUP => on_this_thread(body),
+        Startup::MainThread => {
+            eprintln!("this executable starts its program on the process's main thread (startup policy main-thread), which executables of this target do not support: only macOS aarch64's do (NATIVE STARTUP)");
             1
         }
     };
@@ -279,6 +355,59 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) + 
         eprintln!("{summary}");
     }
     status
+}
+
+/// BODY's status, run on the calling thread, a panic in it caught where the
+/// worker's `join` would catch it and reported the same way (`panicked`):
+/// it never unwinds into the executable's `main` (Rust's, or the runtime
+/// archive's C `main`). A stack overflow is no panic: the guard reports it
+/// and ends the process before anything unwinds.
+pub fn on_this_thread(body: impl FnOnce() -> i32) -> i32 {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(status) => status,
+        Err(_) => panicked(),
+    }
+}
+
+/// The report of a panic on the program's thread, whichever that is
+/// (Rust's panic hook has printed the panic's own message first): status 1.
+fn panicked() -> i32 {
+    eprintln!("native executable panicked (NATIVE BUG)");
+    1
+}
+
+/// `BOTLISH_NATIVE_RUNTIME_FAULT=panic` (the module doc): a panic on the
+/// program's thread, where a runtime defect would raise one.
+fn injected_fault() {
+    if std::env::var_os("BOTLISH_NATIVE_RUNTIME_FAULT").is_some_and(|v| v == "panic") {
+        panic!("BOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread");
+    }
+}
+
+/// The startup's own facts after the Vm's report (the module doc): the
+/// policy STARTUP, `thread main` or `thread worker` (whether the calling
+/// thread is the process's main thread, as the host says: libpthread's
+/// `pthread_main_np` on macOS, the thread id against the process id on
+/// Linux; no line on Windows, which has no such question), and the usable
+/// bytes and confirmed guard of the stack VM was made on (its
+/// `NativeStack`; none on a host without stack discovery).
+fn startup_facts(startup: Startup, vm: &Vm) -> String {
+    let mut facts = format!("startup {}\n", startup.name());
+    #[cfg(target_vendor = "apple")]
+    // SAFETY: no preconditions.
+    let main = Some(unsafe { libc::pthread_main_np() } == 1);
+    #[cfg(target_os = "linux")]
+    // SAFETY: no preconditions.
+    let main = Some(unsafe { libc::syscall(libc::SYS_gettid) } == libc::c_long::from(unsafe { libc::getpid() }));
+    #[cfg(not(any(target_vendor = "apple", target_os = "linux")))]
+    let main: Option<bool> = None;
+    if let Some(main) = main {
+        facts.push_str(if main { "thread main\n" } else { "thread worker\n" });
+    }
+    if let Some(stack) = vm.native_stack() {
+        facts.push_str(&format!("stack usable {} guard {}\n", stack.high_bound - stack.low_bound, stack.low_bound - stack.guard_low));
+    }
+    facts
 }
 
 /// Runs the program as `botlish-native run` (or `bench`) would and writes its
@@ -299,6 +428,7 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
         let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
         super::platform::OverflowGuard::install(&stack).expect("the stack-overflow guard")
     };
+    injected_fault();
     let runs = std::env::var("BOTLISH_NATIVE_RUNS").ok().and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0);
     let mut lines = Vec::new();
     let mut result = NO_VALUE;
@@ -344,4 +474,30 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The main-thread policy's body runs on the calling thread, and a panic
+    /// in it is the worker's report and status, never an unwind out of
+    /// `run` (MAIN-THREAD-STARTUP-MILESTONE-1.md, "Panic behavior").
+    #[test]
+    fn startup_on_this_thread_catches_a_panic() {
+        let caller = std::thread::current().id();
+        assert_eq!(on_this_thread(|| if std::thread::current().id() == caller { 7 } else { 0 }), 7);
+        assert_eq!(on_this_thread(|| panic!("an injected panic")), 1);
+    }
+
+    /// A record naming the main-thread policy on a target without it is
+    /// refused before its program is made or run: INIT never runs.
+    #[test]
+    fn startup_main_thread_refused_where_unsupported() {
+        if MAIN_THREAD_STARTUP {
+            return;
+        }
+        let status = run(Startup::MainThread, Vec::new(), || panic!("the program must not be made"));
+        assert_eq!(status, 1);
+    }
 }

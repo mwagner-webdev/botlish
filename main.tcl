@@ -19,6 +19,8 @@
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
+#   -native-startup POLICY where an executable runs its program: worker
+#                          (default) or main-thread (macOS aarch64)
 #   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
 #                          native library NAME (NATIVE-LIBRARY-MILESTONE-1.md:
 #                          libNAME.a, libNAME.so, NAME.h,
@@ -115,6 +117,17 @@
 # for any other: SINGLE-EXECUTABLE.md, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
 # It does not evaluate the program.
 # Running the executable prints its value.
+# -native-startup POLICY chooses where such an executable runs its program
+# (MAIN-THREAD-STARTUP-MILESTONE-1.md), fixed into the executable when it is
+# linked: worker (the default) on a thread the executable creates, with a
+# stack of BOTLISH_NATIVE_STACK_BYTES (1 GiB by default); main-thread on the
+# process's main thread, whose 512 MiB stack the link reserves (LC_MAIN),
+# which Cocoa and every library built on it (SDL3's video) require. It is
+# macOS aarch64's only: elsewhere it is refused before anything is linked
+# (NATIVE UNSUPPORTED startup). Nothing chooses it for a program: not a
+# library it links, not its source. It is an option of
+# -emit-native-executable only; a run, -check, a library or the language
+# server takes none.
 # -emit-hir-interchange writes each .bot or .hir input's analyzed HIR in the
 # HIR interchange format (HIR-INTERCHANGE.md) beside it, as FILE.hirx, without
 # evaluating it; a .hirx input is run like any other, on any backend, with no
@@ -203,6 +216,7 @@ set cliOptions {
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}
     -emit-native-executable {} build {build a standalone executable beside each input}
+    -native-startup POLICY build {its program's thread: worker (default) or main-thread}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -emit-native-library NAME build {build native library NAME from the one input}
     -export FUNCTION build {export a top-level function (default: exported c fns)}
@@ -792,7 +806,7 @@ proc emitLibrary {path name exports dir} {
 }
 
 proc emitExecutable {path} {
-    global warnings target hintsShown
+    global warnings target hintsShown nativeStartup
     set hintsShown {}
     if {[catch {
         switch -- [file extension $path] {
@@ -804,7 +818,7 @@ proc emitExecutable {path} {
             .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
             default { throw {NATIVE AOT INPUT} "expected a .bot, .hir or .hirx input file (native executables are built from HIR, never from core IR text): $path" }
         }
-        set executable [native::executable $hir [file rootname $path]]
+        set executable [native::executable $hir [file rootname $path] {*}$nativeStartup]
     } message options]} {
         printError stderr "$path: " $message $options
         return 1
@@ -831,6 +845,9 @@ set injectedArgvGiven 0
 set libraryName ""
 set libraryExports {}
 set libraryDir ""
+# native::executable's -startup option, from -native-startup ({} when none
+# is given: the worker, the default).
+set nativeStartup {}
 set check 0
 foreach option [dict get $commandLine options] {
     lassign $option arg value
@@ -891,6 +908,15 @@ foreach option [dict get $commandLine options] {
         -emit-nir { set showNative nir }
         -emit-clif { set showNative clif }
         -emit-native-executable { set showNative executable }
+        -native-startup {
+            if {$value ni {worker main-thread}} {
+                usageError "unknown startup policy \"$value\" (known: worker main-thread)"
+            }
+            if {$nativeStartup ne "" && [lindex $nativeStartup 1] ne $value} {
+                usageError "-native-startup is given twice with different policies ([lindex $nativeStartup 1], $value): an executable starts its program one way"
+            }
+            set nativeStartup [list -startup $value]
+        }
         -emit-hir-interchange { set showNative interchange }
         -emit-native-library {
             if {![regexp {^[A-Za-z_][A-Za-z0-9_]*$} $value]} {
@@ -929,6 +955,12 @@ foreach option [dict get $commandLine options] {
             usageError "-lsp-scheduler is an option of -lsp"
         }
     }
+}
+if {$nativeStartup ne "" && $showNative ne "executable"} {
+    # Where a program runs is a property of a standalone executable, chosen
+    # when it is linked: a run (the JIT, or a program that calls C linked
+    # and run on the worker), a library or an inspection has none.
+    usageError "-native-startup is an option of -emit-native-executable: it chooses where a standalone executable runs its program, and this invocation builds none"
 }
 if {$showNative ne "library" && ($libraryExports ne "" || $libraryDir ne "")} {
     usageError "-export and -out are options of -emit-native-library"

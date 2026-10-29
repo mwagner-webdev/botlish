@@ -521,12 +521,12 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 ## native/src/codegen/aot.rs
 <<<<
     let work = WorkDir::beside(destination)?;
-    let object = emit_object(program).map_err(|e| e.message().to_string())?;
+    let object = emit_executable_object(program, startup).map_err(|e| e.message().to_string())?;
     let object_path = work.0.join("program.o");
 ====
     let work = WorkDir::beside(destination)?;
     let _ = std::fs::remove_file(destination);
-    let object = emit_object(program).map_err(|e| e.message().to_string())?;
+    let object = emit_executable_object(program, startup).map_err(|e| e.message().to_string())?;
     let object_path = work.0.join("program.o");
 >>>>
 

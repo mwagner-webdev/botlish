@@ -176,6 +176,14 @@ foreach {name arguments message} {
     lsp-worker-scheduler  {-lsp-worker -lsp-scheduler sync}  {-lsp-scheduler is an option of -lsp}
     lsp-and-worker        {-lsp -lsp-worker}                 {-lsp and -lsp-worker cannot be combined}
     lsp-target            {-lsp -target vax}                 {unknown C ABI target "vax"*}
+    missing-startup       {-native-startup}                  {option -native-startup needs an argument (POLICY)}
+    unknown-startup       {-native-startup main -emit-native-executable x.bot}   {unknown startup policy "main" (known: worker main-thread)}
+    startup-twice         {-native-startup worker -native-startup main-thread -emit-native-executable x.bot}   {-native-startup is given twice with different policies*}
+    startup-run           {-native-startup main-thread x.bot}    {-native-startup is an option of -emit-native-executable*}
+    startup-library       {-native-startup main-thread -emit-native-library lib x.bot}   {-native-startup is an option of -emit-native-executable*}
+    startup-interchange   {-native-startup worker -emit-hir-interchange x.bot}   {-native-startup is an option of -emit-native-executable*}
+    startup-check         {-check -native-startup main-thread x.bot}   {-check cannot be combined with -native-startup*}
+    startup-lsp           {-lsp -native-startup main-thread}   {-lsp cannot be combined with -native-startup*}
 } {
     test cli-malformed-$name "a malformed invocation ($arguments) is a message on stderr and exit status 2; nothing runs" -body {
         set r [runMain {*}$arguments]

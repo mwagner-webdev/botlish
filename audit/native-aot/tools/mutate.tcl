@@ -11,10 +11,12 @@
 # that does not build is reported NOT-BUILT, never counted as killed), and
 # the detectors run against it:
 #
-#   * cargo test --bin botlish-native aot (the link plans' unit tests, the
-#     system linker's among them) and --lib aotimage program (the stub
-#     image's encoding and checks, and the program record's and
-#     descriptor's, which every startup reads);
+#   * cargo test --bin botlish-native aot startup (the link plans' unit
+#     tests, the system linker's among them, and the program object's
+#     startup policy) and --lib aotimage program runtime::aot (the stub
+#     image's encoding and checks, the program record's and descriptor's,
+#     which every startup reads, the ABI fingerprint's cover of the record,
+#     and the startup's own: the main thread's caught panic);
 #   * tests/native-executable.test (formats, parity, paths, diagnostics,
 #     stack overflows, coroutines);
 #   * tests/argv.test's standalone tests (argv-standalone-*);
@@ -23,6 +25,10 @@
 #   * tests/system-linker.test (the system linker against the rustc and
 #     stub linkers: startup reports, outputs under GC stress, C, failures;
 #     SINGLE-EXECUTABLE-FFI-MILESTONE-1.md);
+#   * tests/main-thread-startup.test (the startup policy: the worker by
+#     default, the main thread on macOS AArch64, its refusal elsewhere, the
+#     record's word, the panic line, parity of both policies;
+#     MAIN-THREAD-STARTUP-MILESTONE-1.md);
 #   * tests/platform/aot-facts.tcl (the host's tools on the object and the
 #     executable, the standalone runs);
 #   * tests/platform/native-status.tcl (the executable, object and C call
@@ -239,7 +245,7 @@ try {
             continue
         }
         set killers {}
-        foreach {label target filter} {rust {--bin botlish-native} aot rust-lib --lib {-- aotimage program}} {
+        foreach {label target filter} {rust {--bin botlish-native} {-- aot startup} rust-lib --lib {-- aotimage program runtime::aot}} {
             lassign [run $timeout $tree cargo test --release --manifest-path $manifest -p botlish-native {*}$target {*}$filter] status output
             if {$status != 0} {
                 set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
@@ -251,6 +257,7 @@ try {
             argv.test argv.test argv-standalone-*
             workload-2048.test workload-2048.test workload-2048-bench-executable
             system-linker.test system-linker.test *
+            main-thread-startup.test main-thread-startup.test *
         } {
             set tmp [file tempdir botlish-native-aot-mutant-run]
             lassign [run $timeout $tree tclsh9.0 [file join $tree tests $file] -tmpdir $tmp -match $match] status output

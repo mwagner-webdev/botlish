@@ -438,6 +438,13 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
         unsafe { *instance = 0 };
         // SAFETY: PROGRAM is the record the library object emitted.
         let (descriptor, code) = unsafe { program::read_linked(&*program) }.map_err(|e| LibError::new(STATUS_INTERNAL, "NATIVE STARTUP", e))?;
+        // A library's code runs on its host's thread: its record carries the
+        // default policy (codegen::library), which nothing here reads
+        // further (MAIN-THREAD-STARTUP-MILESTONE-1.md).
+        // SAFETY: read_linked checked the record.
+        if unsafe { program::startup_of(&*program) } != Ok(program::Startup::Worker) {
+            return Err(LibError::new(STATUS_INTERNAL, "NATIVE STARTUP", "a native library's program record names an executable's startup policy".to_string()));
+        }
         let previous = vm::swap_current_program(None);
         let (mut vm, entry): (Box<Vm>, ProgramEntry) = program::instantiate(&descriptor, &code);
         vm.set_argv(Vec::new());

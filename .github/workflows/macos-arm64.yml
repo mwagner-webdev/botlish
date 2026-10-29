@@ -31,6 +31,15 @@ name: tests (macos arm64)
 #   link-plan-sdl3 every push, after app: the downloaded application links
 #                  static SDL3 (built from its pinned release) with the
 #                  frameworks SDL3 needs (NATIVE-LINK-PLAN-MILESTONE-1.md)
+#   main-thread-startup  every push, after app: the main-thread startup
+#                  policy (MAIN-THREAD-STARTUP-MILESTONE-1.md) -- its test
+#                  file with both linkers, then the graphical acceptance
+#                  (audit/main-thread-startup/tools/acceptance.py): SDL3
+#                  through Cocoa and Metal from an executable the downloaded
+#                  application builds with the checkout inaccessible and no
+#                  Rust on PATH, the census's runtime probes, the process
+#                  semantics, the positive controls, the timings; then the
+#                  checkout's rustc and system linkers
 #   app-mutants    opt-in, "[ci-app-mutants]" in the pushed head commit's
 #                  message (or a manual run's app_mutants): the
 #                  application's packaging mutants
@@ -463,6 +472,121 @@ jobs:
         with:
           name: link-plan-sdl3-log
           path: link-plan-sdl3.log
+          if-no-files-found: warn
+
+  # The main-thread startup policy (MAIN-THREAD-STARTUP-MILESTONE-1.md): an
+  # executable emitted with -native-startup main-thread runs its program on
+  # the process's main thread, on the 512 MiB stack LC_MAIN reserves. Its
+  # test file (both linkers: identity, LC_MAIN, the startup report, depths,
+  # overflows, GC stress, the panic line, parity with the worker), then the
+  # graphical acceptance: the census's cases (audit/macos-graphical-main-
+  # thread/) on production executables, built by the downloaded application
+  # from a path with a space and a non-ASCII letter while this checkout is
+  # inaccessible (chmod 000) and nothing of Rust's is on PATH -- the
+  # harness and its fixtures copied out first -- then the checkout's own
+  # rustc and system linkers. A graphical case is EXECUTED-COCOA only on
+  # the cocoa driver, a Cocoa window, every SDL stage on the main thread,
+  # presented frames, the quit polled back and a clean shutdown; the worker
+  # is the positive control (SDL_Init fails there). The harness exits 1 on
+  # any case not as predicted. The static SDL3 is link-plan-sdl3's: the
+  # same script, cache path and key.
+  main-thread-startup:
+    name: main-thread startup (macOS arm64)
+    needs: app
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: botlish-macos-aarch64
+          path: download
+
+      - name: Place Botlish.app outside the checkout
+        run: |
+          place="$RUNNER_TEMP/Prögram Files"
+          mkdir -p "$place"
+          (cd download && shasum -a 256 -c botlish-macos-aarch64.zip.sha256)
+          (cd "$place" && unzip -q "$GITHUB_WORKSPACE/download/botlish-macos-aarch64.zip")
+          echo "APP=$place/Botlish.app" >>"$GITHUB_ENV"
+          codesign --verify --deep --strict --verbose=2 "$place/Botlish.app"
+
+      - name: The policy's tests (tests/main-thread-startup.test, both linkers)
+        run: CORE_BACKEND=interp tclsh9.0 tests/all.tcl -tmpdir "$RUNNER_TEMP/mts-tests" -file main-thread-startup.test 2>&1 | tee mts-tests.log
+
+      - name: Native status and executable facts (main-thread rows)
+        if: always()
+        run: |
+          tclsh9.0 tests/platform/native-status.tcl 2>&1 | tee native-status.log
+          tclsh9.0 tests/platform/aot-facts.tcl 2>&1 | tee aot-facts.log
+
+      - name: Cache the static SDL3 build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-sdl3-static
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/link-plan-sdl3.sh') }}
+
+      - name: Static SDL3 (tests/platform/link-plan-sdl3.sh)
+        run: |
+          export BOTLISH_SDL3_STATIC_PREFIX="$HOME/Library/Caches/botlish-sdl3-static"
+          bash tests/platform/link-plan-sdl3.sh "$APP" 2>&1 | tee link-plan-sdl3.log | tail -n 20
+
+      - name: The acceptance harness, copied out of the checkout
+        run: |
+          mkdir -p "$RUNNER_TEMP/acceptance"
+          cp -R audit/macos-graphical-main-thread audit/main-thread-startup "$RUNNER_TEMP/acceptance/"
+          echo "PY=$(command -v python3)" >>"$GITHUB_ENV"
+
+      # Botlish.app alone: this checkout inaccessible, PATH the system's (no
+      # rustc, cargo or tclsh; Apple's cc, otool, sips and screencapture).
+      - name: Graphical acceptance through Botlish.app (checkout inaccessible, no Rust)
+        working-directory: ${{ runner.temp }}
+        run: |
+          chmod 000 "$GITHUB_WORKSPACE"
+          trap 'chmod 755 "$GITHUB_WORKSPACE"' EXIT
+          ls "$GITHUB_WORKSPACE" >/dev/null 2>&1 && { echo "::error::the checkout is still readable"; exit 1; }
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin "$PY" -I "$RUNNER_TEMP/acceptance/main-thread-startup/tools/acceptance.py" \
+            --work "$RUNNER_TEMP/mts-app" --out "$RUNNER_TEMP/acceptance-app" \
+            --sdl-prefix "$HOME/Library/Caches/botlish-sdl3-static" --app "$APP" --repeat 10 2>&1 | tee "$RUNNER_TEMP/acceptance-app.log"
+
+      - name: The checkout's rustc and system linkers, main-thread
+        if: always()
+        run: |
+          "$PY" -I audit/main-thread-startup/tools/acceptance.py \
+            --work "$RUNNER_TEMP/mts-checkout" --out "$RUNNER_TEMP/acceptance-checkout" \
+            --sdl-prefix "$HOME/Library/Caches/botlish-sdl3-static" --app "$APP" --checkout "$PWD" \
+            --tclsh "$(command -v tclsh9.0)" --only identity,lc-main,report,semantics,graphical --repeat 3 2>&1 | tee acceptance-checkout.log
+
+      - name: The application, untouched by the runs
+        if: always()
+        run: codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Main-thread startup: graphical acceptance through Botlish.app"
+            cat "$RUNNER_TEMP/acceptance-app/summary.md" 2>/dev/null || echo "the acceptance did not finish"
+            echo "## The checkout's rustc and system linkers"
+            cat "$RUNNER_TEMP/acceptance-checkout/summary.md" 2>/dev/null || echo "the acceptance did not finish"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: main-thread-startup
+          path: |
+            *.log
+            ${{ runner.temp }}/acceptance-app.log
+            ${{ runner.temp }}/acceptance-app
+            ${{ runner.temp }}/acceptance-checkout
           if-no-files-found: warn
 
   # Mutation testing of the application's packaging (opt-in: "[ci-app-

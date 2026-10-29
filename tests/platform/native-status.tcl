@@ -48,7 +48,10 @@ foreach {option value} $argv {
 # (native::object) and reports the object's header {FORMAT ARCHITECTURE
 # KIND} (tests/binary-header.tcl); executable links it with
 # native::executable, runs the executable and reports its header and the
-# value it prints; target asks the driver how it
+# value it prints; main-thread-executable links it with -startup
+# main-thread (MAIN-THREAD-STARTUP-MILESTONE-1.md) and reports its header,
+# its value, and the thread and stack its startup report names (the
+# capability mainThreadStartup); target asks the driver how it
 # reads the host target's triple (botlish-native target TRIPLE: its object
 # format, C calling convention and whether code for it runs here);
 # convention compiles the program to CLIF (native::clif: no C call runs) and
@@ -321,6 +324,14 @@ fib(20)
 
 fib(20)
 } {}] \
+    main-thread-executable [list main-thread-executable {fn fib(n):
+    if n <= 1:
+        return n
+
+    fib(n - 1) + fib(n - 2)
+
+fib(20)
+} {}] \
     target [list target {} {}] \
     c-convention [list convention {import std::ffi::c
 
@@ -440,7 +451,8 @@ set linux [dict create \
     target {value {format elf c-call-conv system_v runs 1}} \
     c-convention {value {labs system_v abs system_v}} \
     c-variadic {value {printf system_v}} \
-    other-target {error {NATIVE TARGET} {this program was built for target macos-* and native code runs only on its own target's host*matching architecture is not a matching target*}}]
+    other-target {error {NATIVE TARGET} {this program was built for target macos-* and native code runs only on its own target's host*matching architecture is not a matching target*}} \
+    main-thread-executable {error {NATIVE UNSUPPORTED startup} {the main-thread startup policy is supported for macOS aarch64 native executables only, and this program is compiled for linux-*: Linux's main thread has no confirmed stack guard*}}]
 set expected [dict create \
     linux-x86_64 [dict merge $linux {
         object {value {elf x86_64 relocatable}}
@@ -478,7 +490,8 @@ unit}}} \
         target {value {format macho c-call-conv apple_aarch64 runs 1}} \
         c-convention {value {labs apple_aarch64 abs apple_aarch64}} \
         c-variadic {value {printf apple_aarch64}} \
-        other-target {error {NATIVE TARGET} {this program was built for target linux-aarch64 (aarch64-unknown-linux-gnu)*Both are aarch64, but a matching architecture is not a matching target*}}] \
+        other-target {error {NATIVE TARGET} {this program was built for target linux-aarch64 (aarch64-unknown-linux-gnu)*Both are aarch64, but a matching architecture is not a matching target*}} \
+        main-thread-executable {value {{macho arm64 execute} 6765 main 536870912}}] \
     windows-x86_64 [dict create \
         jit {value 6765} \
         gc-frame-walk [list value [list str [string repeat xy 400]]] \
@@ -509,7 +522,8 @@ unit}}} \
         c-convention {value {labs windows_fastcall abs windows_fastcall}} \
         c-variadic {value {printf windows_fastcall}} \
         other-target {error {NATIVE TARGET} {this program was built for target linux-x86_64 (x86_64-unknown-linux-gnu)*Both are x86_64, but a matching architecture is not a matching target*}} \
-        other-environment {error {NATIVE TARGET} {this program was built for target windows-x86_64-gnu (x86_64-pc-windows-gnu)*Both are x86_64 windows, but the C toolchain environment is part of the target: gnu for this program, msvc here*}}]]
+        other-environment {error {NATIVE TARGET} {this program was built for target windows-x86_64-gnu (x86_64-pc-windows-gnu)*Both are x86_64 windows, but the C toolchain environment is part of the target: gnu for this program, msvc here*}} \
+        main-thread-executable {error {NATIVE UNSUPPORTED startup} {the main-thread startup policy is supported for macOS aarch64 native executables only, and this program is compiled for windows-x86_64: Windows' main thread would need its own stack reservation*}}]]
 
 # The outcome of running SCRIPT with ENVIRONMENT ({NAME VALUE ...}) set:
 # {value TEXT} or {error CODE MESSAGE}.
@@ -592,6 +606,22 @@ proc observe {name} {
                 return [outcome $environment {
                     set path [native::executable [surface::compile $argument -warnings off] [file join $work probe]]
                     list [binaryHeader $path] [string trim [exec $path]]
+                }]
+            } finally {
+                file delete -force $work
+            }
+        }
+        main-thread-executable {
+            set work [file tempdir botlish-native-status]
+            try {
+                return [outcome $environment {
+                    set path [native::executable [surface::compile $argument -warnings off] [file join $work probe] -startup main-thread]
+                    set report [file join $work report]
+                    set value [string trim [exec env BOTLISH_NATIVE_STARTUP_REPORT=$report $path]]
+                    set text [core::ReadFile $report]
+                    regexp -line {^thread (\S+)$} $text -> thread
+                    regexp -line {^stack usable (\d+) } $text -> usable
+                    list [binaryHeader $path] $value $thread $usable
                 }]
             } finally {
                 file delete -force $work

@@ -1,0 +1,794 @@
+# The startup policy of a standalone executable
+# (MAIN-THREAD-STARTUP-MILESTONE-1.md; runtime/aot.rs, runtime/program.rs's
+# Startup, codegen/aot.rs's startup_link_args and startup_refusal): where an
+# executable runs its program is fixed into it when it is linked -- the
+# `startup` word of its botlish_program record -- and is either `worker`, the
+# default and every target's (a thread the executable creates, a stack of
+# BOTLISH_NATIVE_STACK_BYTES), or `main-thread`, macOS AArch64's (the
+# process's main thread, on the 512 MiB stack the link reserves: LC_MAIN).
+#
+#   * Every host: the default is the worker, an explicit worker is the
+#     default, the startup report says so (`startup`, `thread`, `stack`
+#     lines), a linked run (-backend cranelift of a program that calls C)
+#     runs on the worker, the option's errors, the record's startup word
+#     checked (a damaged word refuses to start, NATIVE STARTUP), a panic on
+#     the program's thread is NATIVE BUG status 1, and the C fixture
+#     (tests/cffi/mainthread-fixture.c) says the worker is no main thread.
+#   * Hosts without the policy (notMainThreadStartup: Linux, Windows): it is
+#     NATIVE UNSUPPORTED startup through every entry point, before anything
+#     is linked, and an earlier executable at the path stays as it was; a
+#     record that names it anyway refuses to start.
+#   * macOS AArch64 (mainThreadStartup): the program, its C calls and its
+#     coroutines' C calls run on the process's main thread, a coroutine on a
+#     stack of its own; LC_MAIN reserves 512 MiB (otool -l), which the
+#     runtime discovers with a confirmed guard; with both linkers, the
+#     values, output, errors, statuses, the driver protocol and the startup
+#     report are the worker's, plain and under GC stress; the census's
+#     recursion probes return their values, exhaustion of the main stack and
+#     of a coroutine's is NATIVE LIMIT STACK, a fault that is no overflow
+#     dies by its signal.
+#
+# The graphical acceptance (SDL3, Cocoa, Metal through Botlish.app) is
+# audit/main-thread-startup/tools/acceptance.py's, in the macOS workflow's
+# main-thread-startup job.
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::windowsHost [expr {$::tcl_platform(platform) eq "windows"}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint posixHost [expr {$::tcl_platform(platform) eq "unix"}]
+if {[testConstraint nativeBuilt]} {
+    set ::release [file dirname [native::binary]]
+} else {
+    set ::release [file join $native::home target release]
+}
+set ::runtimeArchive [file join $::release [expr {$::windowsHost ? "botlish_runtime.lib" : "libbotlish_runtime.a"}]]
+testConstraint mtsExecutables [expr {[testConstraint executableAot] && [testConstraint nativeBuilt]}]
+testConstraint mtsSystemLinker [expr {[testConstraint mtsExecutables] && [file isfile $::runtimeArchive]
+    && ($::windowsHost ? [ctool::available] : [auto_execok cc] ne "")}]
+testConstraint mtsRustcLinker [expr {[testConstraint mtsExecutables] && [auto_execok rustc] ne ""
+    && [file isfile [file join $::release libbotlish_native.rlib]]}]
+testConstraint mtsStub [expr {[testConstraint mtsExecutables] && [core::cabi::hostTarget] eq "linux-x86_64"
+    && [file executable [file join $::release botlish-aot-stub]]}]
+testConstraint mtsMain [expr {[testConstraint mainThreadStartup] && [testConstraint mtsExecutables]}]
+
+# The startup policies this host links: the worker, and the main thread
+# where the host has it.
+proc mtsPolicies {} {
+    return [concat worker [if {[testConstraint mainThreadStartup]} {list main-thread}]]
+}
+
+# The linkers this host links main-thread executables with: the system
+# linker's and the rustc linker's, where each is usable.
+proc mtsLinkers {} {
+    set linkers {}
+    if {[testConstraint mtsSystemLinker]} { lappend linkers system }
+    if {[testConstraint mtsRustcLinker]} { lappend linkers rustc }
+    return $linkers
+}
+
+# Evaluates BODY with the environment variables NAME VALUE ... set (VALUE {}
+# unsets NAME) -- on Windows inside ctool's Developer environment, where
+# link.exe is -- restored afterwards.
+proc mtsWithEnv {settings body} {
+    set saved {}
+    foreach {name value} $settings {
+        lappend saved $name [if {[info exists ::env($name)]} { list $::env($name) }]
+        if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) $value }
+    }
+    try {
+        if {$::windowsHost} {
+            return [uplevel 1 [list ctool::withMsvc $body]]
+        }
+        uplevel 1 $body
+    } finally {
+        foreach {name value} $saved {
+            if {$value eq ""} { unset -nocomplain ::env($name) } else { set ::env($name) [lindex $value 0] }
+        }
+    }
+}
+
+# Links HIR to PATH by startup policy STARTUP ("" for no -startup option)
+# with LINKER (rustc, system, stub; "" the one in force) and the link
+# directories DIRS: the executable's file.
+proc mtsLink {hir path startup {linker ""} {dirs {}}} {
+    set options [if {$startup eq ""} {list} else {list -startup $startup}]
+    set settings [if {$linker eq ""} {list} else {list BOTLISH_NATIVE_LINKER $linker}]
+    mtsWithEnv $settings {
+        native::withLinkDirs $dirs {
+            native::executable $hir $path {*}$options
+        }
+    }
+}
+
+proc mtsReadFile {path} {
+    set channel [open $path rb]
+    try { return [read $channel] } finally { close $channel }
+}
+
+proc mtsWriteFile {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# {STATUS STDOUT STDERR} of running EXECUTABLE (with ARGS) in an environment
+# holding only ENV (NAME VALUE ...; Windows keeps its own and adds them).
+# STATUS is the exit status, or `signal NAME` for a process a signal ended.
+proc mtsRun {executable env args} {
+    set output [makeFile {} mts-stdout]
+    set errors [makeFile {} mts-stderr]
+    set status 0
+    if {$::windowsHost} {
+        set command [list withEnvironment $env [list exec $executable {*}$args > $output 2> $errors]]
+    } else {
+        set pairs [lmap {name value} $env {string cat $name = $value}]
+        set command [list exec env -i {*}$pairs $executable {*}$args < /dev/null > $output 2> $errors]
+    }
+    if {[catch {uplevel #0 $command} message options]} {
+        set code [dict get $options -errorcode]
+        switch -- [lindex $code 0] {
+            CHILDSTATUS { set status [lindex $code 2] }
+            CHILDKILLED { set status [list signal [lindex $code 2]] }
+            default { return -options $options $message }
+        }
+    }
+    set result [list $status]
+    foreach file [list $output $errors] {
+        lappend result [string map {\r\n \n} [string trimright [mtsReadFile $file] \n]]
+    }
+    removeFile mts-stdout
+    removeFile mts-stderr
+    return $result
+}
+
+# What EXECUTABLE's startup reports (BOTLISH_NATIVE_STARTUP_REPORT): a dict
+# of its startup facts -- startup, thread (where the host can say), usable
+# and guard (the stack's bytes) -- and `vm`, the Vm's report before them.
+proc mtsReport {executable {env {}}} {
+    set path [makeFile {} mts-report]
+    mtsRun $executable [concat $env [list BOTLISH_NATIVE_STARTUP_REPORT $path]]
+    set text [mtsReadFile $path]
+    removeFile mts-report
+    set facts [dict create vm ""]
+    set vm {}
+    foreach line [split [string trimright $text \n] \n] {
+        if {[regexp {^startup (\S+)$} $line -> policy]} {
+            dict set facts startup $policy
+        } elseif {[regexp {^thread (\S+)$} $line -> thread]} {
+            dict set facts thread $thread
+        } elseif {[regexp {^stack usable (\d+) guard (\d+)$} $line -> usable guard]} {
+            dict set facts usable $usable
+            dict set facts guard $guard
+        } else {
+            lappend vm $line
+        }
+    }
+    dict set facts vm [join $vm \n]
+    return $facts
+}
+
+# The offset in BYTES (an executable's or an object's) of its program record
+# (runtime::program::LinkedProgram: the magic, the fingerprint, the
+# descriptor's address and length, the code table's address and function
+# count, the startup policy: seven words) -- not the runtime's own copy of
+# the magic, which its code compares with: the record's length and count
+# words are plausible. -1 if none.
+proc mtsRecordAt {bytes} {
+    set at -1
+    while {[set at [string first BOTLPRG1 $bytes [expr {$at + 1}]]] >= 0} {
+        if {[binary scan [string range $bytes $at+24 $at+31] w length] == 1
+                && [binary scan [string range $bytes $at+40 $at+47] w n] == 1
+                && $length > 0 && $length < 1 << 32 && $n > 0 && $n < 1 << 24} {
+            return $at
+        }
+    }
+    return -1
+}
+
+# The startup word of the record in FILE (an executable or an object).
+proc mtsStartupWord {file} {
+    set bytes [mtsReadFile $file]
+    set at [mtsRecordAt $bytes]
+    binary scan [string range $bytes $at+48 $at+55] w word
+    return $word
+}
+
+# FILE (an executable) with its record's startup word set to WORD -- on
+# macOS signed again, ad hoc, as its linker signed it: Apple Silicon runs no
+# executable whose pages its signature does not cover.
+proc mtsSetStartupWord {file word} {
+    set bytes [mtsReadFile $file]
+    set at [mtsRecordAt $bytes]
+    set channel [open $file wb]
+    puts -nonewline $channel [string replace $bytes $at+48 $at+55 [binary format w $word]]
+    close $channel
+    if {$::tcl_platform(os) eq "Darwin"} {
+        exec codesign --force --sign - $file 2>@1
+    }
+}
+
+# LC_MAIN's stack size in the Mach-O EXECUTABLE (otool -l): its stacksize
+# field, 0 when the link set none.
+proc mtsLcMainStackSize {executable} {
+    set text [exec otool -l $executable]
+    if {![regexp {cmd LC_MAIN\s.*?stacksize (\d+)} $text -> size]} {
+        error "no LC_MAIN in $executable"
+    }
+    return $size
+}
+
+# The programs: the census's (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md,
+# audit/macos-graphical-main-thread/programs/), as the tests compile them.
+set ::mtsDepth {import std::int
+import std::list
+import std::str
+
+fn down(n: int) -> int:
+    if n == 0:
+        return 0
+    1 + down(n - 1)
+
+fn keep(n: int, s: str) -> int:
+    if n == 0:
+        return 0
+    t = std::str::concat(s, "x")
+    k = keep(n - 1, s)
+    k + std::str::length(t)
+
+fn wide(n: int) -> int:
+    if n == 0:
+        return 0
+    a = n + 1
+    b = a * 2
+    c = b + 3
+    d = c * 5
+    e = d + 7
+    f = e * 11
+    k = wide(n - 1)
+    k + a + b + c + d + e + f - 135 * n - 417
+
+fn apply(f: Fn{args: [int], return: int}, n: int) -> int:
+    f(n)
+
+fn rec(n: int) -> int:
+    if n == 0:
+        return 0
+    1 + apply(rec, n - 1)
+
+fn arg(i: int) -> str:
+    args = argv():
+        on InvalidArgumentEncoding:
+            ["", "", ""]
+    std::list::at(args, i):
+        on IndexNotFound:
+            ""
+
+fn number(text: str) -> int:
+    std::int::from_string(text):
+        on InvalidIntegerText:
+            0
+
+fn run(shape: str, n: int) -> int:
+    if shape == "keep":
+        return keep(n, "s")
+    if shape == "wide":
+        return wide(n)
+    if shape == "rec":
+        return rec(n)
+    down(n)
+
+depth = number(arg(2))
+limit = if depth == 0:
+    -1
+else:
+    depth
+run(arg(1), limit)
+}
+
+set ::mtsKept {import std::str
+
+struct Ev:
+    n: int
+    label: str
+
+fn counting(limit: int) -> Ev:
+    loop i from 0 to limit:
+        yield Ev {n: i * i, label: "step"}
+    return Ev {n: -1, label: "done"}
+
+fn drain(h: Coroutine{args: [], return: Ev, errors: []}) -> List[int]:
+    a = h()
+    b = h()
+    c = h()
+    [a.n, b.n, c.n]
+
+fn passed() -> list:
+    coroutine {step, first} = counting(3)
+    [first.n, drain(step)]
+
+fn leaves(depth: int, at: int) -> unit:
+    if depth == 0:
+        yield Ev {n: at, label: "leaf"}
+        return unit
+    leaves(depth - 1, 2 * at)
+    leaves(depth - 1, 2 * at + 1)
+
+fn walk() -> Ev:
+    leaves(2, 1)
+    Ev {n: -1, label: "done"}
+
+fn tree() -> List[int]:
+    coroutine {step, first} = walk()
+    a = step()
+    b = step()
+    c = step()
+    d = step()
+    [first.n, a.n, b.n, c.n, d.n]
+
+fn holding(tag: str, depth: int) -> Ev:
+    s = std::str::concat(tag, "-held")
+    if depth > 0:
+        inner = holding(s, depth - 1)
+        return Ev {n: inner.n + 1, label: s}
+    yield Ev {n: std::str::length(s), label: s}
+    yield Ev {n: 0, label: s}
+    Ev {n: -1, label: s}
+
+fn once(h: Coroutine{args: [], return: Ev, errors: []}) -> int:
+    e = h()
+    e.n
+
+fn abandoned() -> List[int]:
+    coroutine {step: a, first: fa} = holding("alpha", 20)
+    coroutine {step: b, first: fb} = holding("beta", 5)
+    x = once(a)
+    y = once(b)
+    churn = std::str::concat(std::str::concat("x", "y"), "z")
+    [fa.n, fb.n, x, y, std::str::length(churn)]
+
+[passed(), tree(), abandoned()]
+}
+set ::mtsKeptValue {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}
+
+set ::mtsCoOverflow {fn sink(n: int) -> int:
+    1 + sink(n + 1)
+
+fn task() -> int:
+    yield 1
+    yield 2
+    sink(0)
+
+fn go(h: Coroutine{args: [], return: int, errors: []}) -> int:
+    a = h()
+    a + h()
+
+coroutine {step: h, first: first} = task()
+go(h)
+}
+
+set ::mtsErrors {import std::list
+import std::str
+
+error Rejected:
+    code: int
+
+fn reject(n: int) -> int errors Rejected:
+    if n > 0:
+        fail Rejected {code: n}
+    n
+
+fn mode() -> str:
+    args = argv():
+        on InvalidArgumentEncoding:
+            ["", ""]
+    std::list::at(args, 1):
+        on IndexNotFound:
+            ""
+
+fn erased(flag: bool) -> list:
+    if flag:
+        return [true]
+    [1]
+
+fn run(m: str) -> int:
+    if m == "declared":
+        return reject(std::str::length(m)):
+            on Rejected {code}:
+                1000 + code
+    if m == "runtime":
+        return erased(true) + erased(false)
+    if m == "args":
+        args = argv():
+            on InvalidArgumentEncoding:
+                []
+        return std::list::length(args)
+    0
+
+run(mode())
+}
+
+# Compiles the program TEXT, named NAME.bot, with warnings off: its HIR.
+proc mtsCompile {text name} {
+    return [surface::compile $text $name.bot -warnings off]
+}
+
+# The C fixture (tests/cffi/mainthread-fixture.c), built once as the static
+# archive libbotlish_mainthread_fixture.a (Linux and macOS: it asks
+# libpthread), and the binding a program imports as the application module
+# `bmt`.
+set ::mtsFixtureDir ""
+if {[testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstraint mtsExecutables]
+        && [testConstraint cLinker] && [testConstraint posixHost]} {
+    set ::mtsFixtureDir [makeDirectory mainthread-fixture-[pid]]
+    if {[catch {
+        ctool::staticLibrary $::mtsFixtureDir botlish_mainthread_fixture [file join $::projectRoot tests cffi mainthread-fixture.c]
+    } message]} {
+        puts stderr "main-thread-startup.test: the C fixture did not build: $message"
+        set ::mtsFixtureDir ""
+    }
+}
+testConstraint mtsFixture [expr {$::mtsFixtureDir ne ""}]
+set ::mtsBinding {import std::ffi::c
+
+extern c library "botlish_mainthread_fixture"
+
+extern c fn on_process_main named "bmt_on_process_main"() -> std::ffi::c::Int
+extern c fn off_thread_stack named "bmt_off_thread_stack"() -> std::ffi::c::Int
+extern c fn fault named "bmt_fault"() -> std::ffi::c::Int
+}
+# Where the program's code and its coroutine's code call C from: [the
+# program's thread is the process's main thread, its stack is the thread's
+# own, a coroutine's thread is the main thread, the coroutine's stack is
+# not the thread's], as the fixture answers.
+set ::mtsIdentity {import bmt
+import std::ffi::c
+
+fn where() -> List[std::ffi::c::Int]:
+    yield [bmt::on_process_main(), bmt::off_thread_stack()]
+    [bmt::on_process_main(), bmt::off_thread_stack()]
+
+fn resume(h: Coroutine{args: [], return: List[std::ffi::c::Int], errors: []}) -> List[std::ffi::c::Int]:
+    h()
+
+coroutine {step, first} = where()
+inside = resume(step)
+[bmt::on_process_main(), bmt::off_thread_stack(), inside]
+}
+
+# An application directory under DIR holding main.bot (TEXT) and the
+# fixture's binding: the HIR of main.bot.
+proc mtsFixtureProgram {dir text} {
+    mtsWriteFile [file join $dir bmt.bot] $::mtsBinding
+    set main [mtsWriteFile [file join $dir main.bot] $text]
+    return [surface::readProgramFile $main -warnings off]
+}
+
+# ---------------------------------------------------------------------------
+# The policy: worker by default, everywhere
+
+test mts-default-is-worker {an executable linked without a policy starts its program on a worker: its record's startup word is 0, its startup report says startup worker, and the thread is not the process's main thread} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-default]
+    set exe [mtsLink [mtsCompile "1 + 2" one] [file join $dir one] ""]
+    set report [mtsReport $exe]
+    list [mtsRun $exe {}] [mtsStartupWord $exe] [dict get $report startup] [dict getdef $report thread worker] \
+        [expr {[dict get $report usable] >= (1 << 30)}]
+} -cleanup {removeDirectory mts-default} -result {{0 3 {}} 0 worker worker 1}
+
+test mts-explicit-worker-is-the-default {-startup worker builds what no option builds: the same record word, startup report and run} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-explicit]
+    set hir [mtsCompile $::mtsErrors errors]
+    set default [mtsLink $hir [file join $dir default] ""]
+    set explicit [mtsLink $hir [file join $dir explicit] worker]
+    list [expr {[mtsReport $default] eq [mtsReport $explicit]}] [mtsStartupWord $explicit] \
+        [expr {[mtsRun $default {} declared] eq [mtsRun $explicit {} declared]}] [mtsRun $explicit {} declared]
+} -cleanup {removeDirectory mts-explicit} -result {1 0 1 {0 1008 {}}}
+
+test mts-worker-stack-is-the-runtimes {a worker's stack is the runtime's choice when the executable runs: BOTLISH_NATIVE_STACK_BYTES resizes it, the report shows it} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-worker-stack]
+    set exe [mtsLink [mtsCompile "1" one] [file join $dir one] worker]
+    set small [mtsReport $exe {BOTLISH_NATIVE_STACK_BYTES 8388608}]
+    set usable [dict get $small usable]
+    list [expr {$usable >= 8388608 && $usable < 8388608 + (1 << 20)}] [expr {[dict get [mtsReport $exe] usable] >= (1 << 30)}]
+} -cleanup {removeDirectory mts-worker-stack} -result {1 1}
+
+test mts-object-record-is-worker {a program object (botlish-native object) and a linked run's executable carry the worker: the driver's other products never name the main thread} -constraints {nativeBuilt} -body {
+    set dir [makeDirectory mts-object]
+    native::object [mtsCompile "1 + 2" one] [file join $dir one.o]
+    mtsStartupWord [file join $dir one.o]
+} -cleanup {removeDirectory mts-object} -result 0
+
+test mts-linked-run-is-worker {main.tcl's native backends run a program that calls C as a linked executable, on the worker whatever runs it: its startup report says so} -constraints {mtsExecutables nativeCCalls cLinker} -body {
+    set library [expr {$::windowsHost ? "kernel32" : "m"}]
+    set hir [mtsCompile "extern c library \"$library\"\n1 + 2" linked]
+    set path [makeFile {} mts-linked-report]
+    set value [mtsWithEnv [list BOTLISH_NATIVE_STARTUP_REPORT $path] {native::evalHir $hir}]
+    set text [mtsReadFile $path]
+    removeFile mts-linked-report
+    list $value [regexp -line {^startup worker$} $text] [expr {![regexp -line {^thread main$} $text]}]
+} -result {{int 3} 1 1}
+
+test mts-fixture-worker-identity {on the worker, the program's C calls and its coroutine's are on a thread that is not the process's main thread, and a coroutine runs on a stack of its own (the fixture's own answers)} -constraints {mtsFixture} -body {
+    set dir [makeDirectory mts-identity-worker]
+    set hir [mtsFixtureProgram [file join $dir app] $::mtsIdentity]
+    set exe [mtsLink $hir [file join $dir identity] worker "" [list $::mtsFixtureDir]]
+    mtsRun $exe {}
+} -cleanup {removeDirectory mts-identity-worker} -result {0 {[0, 0, [0, 1]]} {}}
+
+# ---------------------------------------------------------------------------
+# The policy's errors
+
+test mts-api-option-errors {native::executable refuses an unknown policy and two different ones before anything is lowered (NATIVE STARTUP POLICY); one given twice alike is that one} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-api-errors]
+    set hir [mtsCompile "1" one]
+    set results {}
+    foreach options {{-startup main} {-startup worker -startup main-thread}} {
+        catch {native::executable $hir [file join $dir one] {*}$options} message opts
+        lappend results [dict get $opts -errorcode] [string match {*startup*} $message] [file exists [file join $dir one]]
+    }
+    set exe [native::executable $hir [file join $dir one] -startup worker -startup worker]
+    lappend results [lindex [mtsRun $exe {}] 1]
+} -cleanup {removeDirectory mts-api-errors} -result {{NATIVE STARTUP POLICY} 1 0 {NATIVE STARTUP POLICY} 1 0 1}
+
+test mts-driver-option-errors {the driver's --startup: an option of executable only, one of two policies, never two different ones} -constraints {nativeBuilt} -body {
+    set dir [makeDirectory mts-driver-errors]
+    set nir [mtsWriteFile [file join $dir one.nir] [native::nir [mtsCompile "1" one]]]
+    set results {}
+    foreach arguments [list \
+            [list run $nir --startup worker] \
+            [list object [file join $dir one.o] $nir --startup worker] \
+            [list executable [file join $dir one] $nir --startup main] \
+            [list executable [file join $dir one] $nir --startup worker --startup main-thread] \
+            [list executable [file join $dir one] $nir --startup]] {
+        set status [catch {exec [native::binary] {*}$arguments 2>@1} output options]
+        lappend results [lindex [dict getdef $options -errorcode {NONE 0 0}] 2] [regexp {startup} $output]
+    }
+    lappend results [file exists [file join $dir one]] [file exists [file join $dir one.o]]
+} -cleanup {removeDirectory mts-driver-errors} -result {2 1 2 1 2 1 2 1 2 1 0 0}
+
+test mts-refused-where-unsupported {main-thread on a target without it is NATIVE UNSUPPORTED startup, refused before anything is linked or written: an executable already at the path stays as it was, and no work directory is left beside it} -constraints {mtsExecutables notMainThreadStartup} -body {
+    set dir [makeDirectory mts-refused]
+    set hir [mtsCompile "1 + 2" one]
+    set path [native::executableFile [file join $dir one]]
+    mtsWriteFile $path "an earlier executable"
+    set results {}
+    foreach linker [concat [list ""] [mtsLinkers]] {
+        catch {mtsLink $hir [file join $dir one] main-thread $linker} message options
+        # The front end's own refusal (native::StartupPolicy, by the
+        # capability table), before the driver's.
+        lappend results [dict get $options -errorcode] [string match {*supported for macOS aarch64 native executables only, and this program is compiled for*} $message]
+    }
+    lappend results [mtsReadFile $path] [glob -nocomplain -directory $dir .botlish-aot-*]
+} -cleanup {removeDirectory mts-refused} -result [concat {{NATIVE UNSUPPORTED startup} 1} \
+    [lrepeat [llength [mtsLinkers]] {NATIVE UNSUPPORTED startup} 1] [list {an earlier executable} {}]]
+
+test mts-driver-refused-where-unsupported {the driver refuses executable --startup main-thread on a host without it (NATIVE UNSUPPORTED startup, status 1) before it writes anything} -constraints {nativeBuilt executableAot notMainThreadStartup} -body {
+    set dir [makeDirectory mts-driver-refused]
+    set nir [mtsWriteFile [file join $dir one.nir] [native::nir [mtsCompile "1" one]]]
+    set status [catch {exec [native::binary] executable [file join $dir one] $nir --startup main-thread} output options]
+    list [lindex [dict getdef $options -errorcode {NONE 0 0}] 2] [lindex [lindex [split $output \n] 0] 1] \
+        [glob -nocomplain -directory $dir -tails *]
+} -cleanup {removeDirectory mts-driver-refused} -result {1 {NATIVE UNSUPPORTED startup} one.nir}
+
+test mts-stub-links-worker-only {the stub linker links worker executables only: main-thread is refused by the policy's own check where the host lacks it, by the stub's elsewhere -- never linked} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-stub]
+    catch {mtsLink [mtsCompile "1" one] [file join $dir one] main-thread stub} message options
+    list [lindex [dict get $options -errorcode] 0] [expr {[string match {*macOS aarch64 native executables only*} $message]
+        || [string match {*stub linker*worker only*} $message]}] [file exists [native::executableFile [file join $dir one]]]
+} -cleanup {removeDirectory mts-stub} -result {NATIVE 1 0}
+
+test mts-cli-startup {main.tcl -native-startup: worker builds the default executable (repeated alike, once); main-thread builds a main-thread executable where the host has it, and elsewhere is NATIVE UNSUPPORTED startup, status 1, the earlier executable left as it was} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-cli]
+    set source [mtsWriteFile [file join $dir one.bot] "1 + 2\n"]
+    set exe [native::executableFile [file join $dir one]]
+    set main [list [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off]
+    set results {}
+    lappend results [catch {exec {*}$main -native-startup worker -native-startup worker -emit-native-executable $source 2>@1} output] \
+        [mtsStartupWord $exe] [lindex [mtsRun $exe {}] 1]
+    set status [catch {exec {*}$main -native-startup main-thread -emit-native-executable $source 2>@1} output]
+    if {[testConstraint mainThreadStartup]} {
+        lappend results $status [mtsStartupWord $exe] [dict get [mtsReport $exe] thread]
+    } else {
+        lappend results $status [string match {*(NATIVE UNSUPPORTED startup)*} $output] [mtsStartupWord $exe]
+    }
+} -cleanup {removeDirectory mts-cli} -result [concat {0 0 3} [if {[testConstraint mainThreadStartup]} {list 0 1 main} {list 1 1 0}]]
+
+# ---------------------------------------------------------------------------
+# The record's startup word, checked at startup
+
+test mts-damaged-startup-word {an executable whose record's startup word names no policy refuses to start (NATIVE STARTUP, status 1) before any program code runs; one naming the main thread where the target has none refuses too, with the reason} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-damaged]
+    set results {}
+    foreach linker [concat [list ""] [mtsLinkers] [if {[testConstraint mtsStub]} {list stub}]] {
+        set exe [mtsLink [mtsCompile "1 + 2" one] [file join $dir one-$linker] "" $linker]
+        mtsSetStartupWord $exe 2
+        lassign [mtsRun $exe {}] status stdout stderr
+        lappend results $status $stdout [string match {*unknown startup policy (2) (NATIVE STARTUP)*} $stderr]
+        if {![testConstraint mainThreadStartup]} {
+            mtsSetStartupWord $exe 1
+            lassign [mtsRun $exe {}] status stdout stderr
+            lappend results $status $stdout [regexp {main-thread.*\(NATIVE STARTUP\)} $stderr]
+        }
+    }
+    lsort -unique [lmap {status stdout matched} $results {list $status $stdout $matched}]
+} -cleanup {removeDirectory mts-damaged} -result {{1 {} 1}}
+
+# ---------------------------------------------------------------------------
+# A panic on the program's thread
+
+test mts-panic-is-native-bug {a runtime panic on the program's thread (BOTLISH_NATIVE_RUNTIME_FAULT=panic) is "native executable panicked (NATIVE BUG)", status 1, nothing on standard output -- on the worker, and, where the host has it, on the main thread, with each linker, plainly and in the driver protocol} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-panic]
+    set hir [mtsCompile "1 + 2" one]
+    set results {}
+    set policies [concat worker [if {[testConstraint mainThreadStartup]} {list main-thread}]]
+    foreach linker [concat [list ""] [mtsLinkers]] {
+        foreach policy $policies {
+            set exe [mtsLink $hir [file join $dir one-$linker-$policy] $policy $linker]
+            lassign [mtsRun $exe {BOTLISH_NATIVE_RUNTIME_FAULT panic}] status stdout stderr
+            lappend results [list $status $stdout [lindex [split $stderr \n] end]]
+            set result [makeFile {} mts-panic-result]
+            lassign [mtsRun $exe [list BOTLISH_NATIVE_RUNTIME_FAULT panic BOTLISH_NATIVE_RESULT $result]] status stdout stderr
+            lappend results [list $status $stdout [lindex [split $stderr \n] end]]
+            removeFile mts-panic-result
+            # Without the fault, the program's value.
+            lappend results [mtsRun $exe {}]
+        }
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-panic} -result {{0 3 {}} {1 {} {native executable panicked (NATIVE BUG)}}}
+
+# ---------------------------------------------------------------------------
+# On the main thread (macOS AArch64)
+
+test mts-main-record-and-report {a main-thread executable's record names the main thread (word 1) and its startup report says where the program runs: the process's main thread, on LC_MAIN's 512 MiB stack with a confirmed guard below it; the Vm it reports is the worker's} -constraints {mtsMain} -body {
+    set dir [makeDirectory mts-main-report]
+    set hir [mtsCompile $::mtsKept kept]
+    set results {}
+    foreach linker [mtsLinkers] {
+        set main [mtsLink $hir [file join $dir main-$linker] main-thread $linker]
+        set worker [mtsLink $hir [file join $dir worker-$linker] worker $linker]
+        set m [mtsReport $main]
+        set w [mtsReport $worker]
+        lappend results [list $linker [mtsStartupWord $main] [dict get $m startup] [dict get $m thread] [dict get $m usable] \
+            [expr {[dict get $m guard] > 0}] [dict get $w startup] [dict get $w thread] [expr {[dict get $m vm] eq [dict get $w vm]}]]
+    }
+    lsort -unique [lmap r $results {lrange $r 1 end}]
+} -cleanup {removeDirectory mts-main-report} -result {{1 main-thread main 536870912 1 worker worker 1}}
+
+test mts-main-lc-main {a main-thread executable reserves its main thread's stack at link time: LC_MAIN's stacksize is 512 MiB with both linkers; a worker executable's is the system's default (0)} -constraints {mtsMain} -body {
+    set dir [makeDirectory mts-lc-main]
+    set hir [mtsCompile "1" one]
+    set results {}
+    foreach linker [mtsLinkers] {
+        lappend results [mtsLcMainStackSize [mtsLink $hir [file join $dir main-$linker] main-thread $linker]] \
+            [mtsLcMainStackSize [mtsLink $hir [file join $dir worker-$linker] worker $linker]]
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-lc-main} -result {0 536870912}
+
+test mts-main-identity {on the main thread, the program's C calls run on the process's main thread, and its coroutine's too, on a stack of its own (the fixture's answers); the worker of the same program says the opposite} -constraints {mtsMain mtsFixture} -body {
+    set dir [makeDirectory mts-identity-main]
+    set hir [mtsFixtureProgram [file join $dir app] $::mtsIdentity]
+    set results {}
+    foreach linker [mtsLinkers] {
+        lappend results [mtsRun [mtsLink $hir [file join $dir main-$linker] main-thread $linker [list $::mtsFixtureDir]] {}] \
+            [mtsRun [mtsLink $hir [file join $dir worker-$linker] worker $linker [list $::mtsFixtureDir]] {}]
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-identity-main} -result {{0 {[0, 0, [0, 1]]} {}} {0 {[1, 0, [1, 1]]} {}}}
+
+test mts-policy-parity {the same program on the worker and, where the host has it, on the main thread, with each linker: the same standard output, error and status for a value, a handled declared error, a runtime error, the arguments, the driver protocol (one run and three) and an unwritable startup report} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-parity]
+    set hir [mtsCompile $::mtsErrors errors]
+    set results {}
+    foreach linker [concat [list ""] [mtsLinkers]] {
+        foreach policy [mtsPolicies] {
+            set exe [mtsLink $hir [file join $dir $policy-$linker] $policy $linker]
+            set runs {}
+            foreach mode {value declared runtime args} {
+                lappend runs [mtsRun $exe {} $mode one "two words"]
+            }
+            foreach {mode extra} {runtime {} declared {BOTLISH_NATIVE_RUNS 3}} {
+                set file [makeFile {} mts-protocol]
+                set run [mtsRun $exe [concat $extra [list BOTLISH_NATIVE_RESULT $file]] $mode]
+                set lines [regsub -all {(times|timing) [^\n]*} [mtsReadFile $file] {\1 ...}]
+                lappend runs [list $run [string map {\r\n \n} $lines]]
+                removeFile mts-protocol
+            }
+            lappend runs [lrange [mtsRun $exe {BOTLISH_NATIVE_STARTUP_REPORT /nonexistent/startup-report} value] 0 1]
+            lappend results $runs
+        }
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-parity} -result [list [list \
+    {0 0 {}} {0 1008 {}} {1 {} {+: expected int, got [true] (CORE SEMANTIC TYPE)}} {0 4 {}} \
+    [list {0 {} {}} "error {CORE SEMANTIC TYPE} {+: expected int, got \[true\]}\n"] \
+    [list {0 {} {}} "times ...\ntiming ...\nvalue {int 1008}\n"] {2 {}}]]
+
+test mts-policy-depth {the census's recursion probes return their values on the worker and on the main thread's 512 MiB stack (the 8 MiB default would end three of them), with each linker} -constraints {mtsExecutables} -body {
+    set dir [makeDirectory mts-depth]
+    set hir [mtsCompile $::mtsDepth depth]
+    set results {}
+    foreach linker [concat [list ""] [mtsLinkers]] {
+        foreach policy [mtsPolicies] {
+            set exe [mtsLink $hir [file join $dir $policy-$linker] $policy $linker]
+            foreach {shape n} {down 1000000 keep 100000 wide 100000 rec 100000} {
+                lappend results [list $shape $n [mtsRun $exe {} $shape $n]]
+            }
+        }
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-depth} -result {{down 1000000 {0 1000000 {}}} {keep 100000 {0 200000 {}}} {rec 100000 {0 100000 {}}} {wide 100000 {0 0 {}}}}
+
+test mts-policy-overflow {exhausting the program's stack -- small frames, Strings held across calls, wide frames, calls through a Fn -- and a coroutine's after it yielded, is NATIVE LIMIT STACK, status 1, on the worker (a 64 MiB one, to be quick) and on the main thread, with each linker} -constraints {mtsExecutables nativeStackGuard nativeCoroutines} -body {
+    set dir [makeDirectory mts-overflow]
+    set depth [mtsCompile $::mtsDepth depth]
+    set co [mtsCompile $::mtsCoOverflow co]
+    set results {}
+    foreach linker [concat [list ""] [mtsLinkers]] {
+        foreach policy [mtsPolicies] {
+            set extra [if {$policy eq "worker"} {list BOTLISH_NATIVE_STACK_BYTES 67108864}]
+            set exe [mtsLink $depth [file join $dir depth-$policy-$linker] $policy $linker]
+            foreach shape {down keep wide rec} {
+                lappend results [mtsRun $exe $extra $shape 0]
+            }
+            lappend results [mtsRun [mtsLink $co [file join $dir co-$policy-$linker] $policy $linker] $extra]
+        }
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-overflow} -result {{1 {} {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}}}
+
+test mts-policy-fault-not-overflow {a fault that is no stack overflow dies by its signal on the worker and on the main thread: the guard never calls it NATIVE LIMIT STACK} -constraints {mtsFixture nativeStackGuard} -body {
+    set dir [makeDirectory mts-fault]
+    set hir [mtsFixtureProgram [file join $dir app] "import bmt\n\nbmt::fault()\n"]
+    set results {}
+    foreach linker [mtsLinkers] {
+        foreach policy [mtsPolicies] {
+            lassign [mtsRun [mtsLink $hir [file join $dir $policy-$linker] $policy $linker [list $::mtsFixtureDir]] {}] status stdout stderr
+            lappend results [expr {[lindex $status 0] eq "signal" && [lindex $status 1] in {SIGSEGV SIGBUS}}] [string match *LIMIT* $stderr]
+        }
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-fault} -result {0 1}
+
+test mts-policy-gc-stress {under GC stress (a collection at every allocation site) the program's frames, a coroutine's suspended frames and abandoned coroutines hold their roots: the same values on the worker and on the main thread, with each linker} -constraints {mtsExecutables nativeCoroutines} -body {
+    set dir [makeDirectory mts-gc]
+    set kept [mtsCompile $::mtsKept kept]
+    set depth [mtsCompile $::mtsDepth depth]
+    set results {}
+    foreach linker [concat [list ""] [mtsLinkers]] {
+        foreach policy [mtsPolicies] {
+            lappend results [mtsRun [mtsLink $kept [file join $dir kept-$policy-$linker] $policy $linker] {BOTLISH_NATIVE_GC_STRESS 1}] \
+                [mtsRun [mtsLink $depth [file join $dir depth-$policy-$linker] $policy $linker] {BOTLISH_NATIVE_GC_STRESS 1} keep 3000]
+        }
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-gc} -result [list {0 6000 {}} [list 0 $::mtsKeptValue {}]]
+
+test mts-main-gc-stress-report {under GC stress the main-thread executable's startup installs what the worker's does} -constraints {mtsMain} -body {
+    set dir [makeDirectory mts-main-gc-report]
+    set hir [mtsCompile $::mtsKept kept]
+    set results {}
+    foreach linker [mtsLinkers] {
+        set m [mtsReport [mtsLink $hir [file join $dir main-$linker] main-thread $linker] {BOTLISH_NATIVE_GC_STRESS 1}]
+        set w [mtsReport [mtsLink $hir [file join $dir worker-$linker] worker $linker] {BOTLISH_NATIVE_GC_STRESS 1}]
+        lappend results [expr {[dict get $m vm] eq [dict get $w vm]}] [dict get $m thread]
+    }
+    lsort -unique $results
+} -cleanup {removeDirectory mts-main-gc-report} -result {1 main}
+
+test mts-main-linkers-agree {a main-thread executable's startup is the same whichever linker links it: the system linker's and the rustc linker's report the same Vm, thread and stack, and print the same} -constraints {mtsMain mtsSystemLinker mtsRustcLinker} -body {
+    set dir [makeDirectory mts-main-linkers]
+    set hir [mtsCompile $::mtsKept kept]
+    set system [mtsLink $hir [file join $dir system] main-thread system]
+    set rustc [mtsLink $hir [file join $dir rustc] main-thread rustc]
+    list [expr {[mtsReport $system] eq [mtsReport $rustc]}] [expr {[mtsRun $system {}] eq [mtsRun $rustc {}]}]
+} -cleanup {removeDirectory mts-main-linkers} -result {1 1}
+
+if {$::mtsFixtureDir ne ""} {
+    file delete -force $::mtsFixtureDir
+}
+cleanupTests

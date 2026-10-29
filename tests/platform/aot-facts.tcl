@@ -18,6 +18,12 @@
 #               the context area and a runtime helper reached through the
 #               GOT, no relocation of another format) and, on macOS, its
 #               LC_BUILD_VERSION (`otool -l`)
+#   main thread where the host has the main-thread startup (macOS:
+#               MAIN-THREAD-STARTUP-MILESTONE-1.md), the same program linked
+#               with -startup main-thread: LC_MAIN's stacksize (`otool -l`:
+#               512 MiB, the worker executable's 0), its signature, and the
+#               thread and stack its startup report names; elsewhere the
+#               policy's refusal (NATIVE UNSUPPORTED startup), nothing written
 #   executable  its format, architecture and kind; on macOS one
 #               architecture (`lipo -archs`), a valid signature (`codesign
 #               -v`; the linker's ad-hoc one); the dynamic libraries it
@@ -576,6 +582,41 @@ proc checks {} {
     set exeSymbols [tool nm -P $executable]
     check executable-symbols [expr {[regexp -line "^${prefix}botlish_fn_0 T " $exeSymbols]}] \
         "${prefix}botlish_fn_0 [expr {[regexp -line "^${prefix}botlish_fn_0 T " $exeSymbols] ? "defined" : "missing"}] in the executable" $::toolError
+
+    # The startup policy (MAIN-THREAD-STARTUP-MILESTONE-1.md): where the host
+    # has the main-thread startup, an executable emitted with it reserves its
+    # main thread's stack at link time -- LC_MAIN's stacksize, as otool reads
+    # it, 512 MiB, where the worker executable above has none (0) -- is
+    # signed as any, and its startup report names the main thread and that
+    # stack; elsewhere the policy is refused before anything is linked.
+    set mainPath [file join $buildDir "main thread"]
+    if {[native::hostSupports mainThreadStartup]} {
+        set linked [catch {native::executable $hir $mainPath -startup main-thread} message]
+        set mainLoads [tool otool -l $mainPath]
+        set workerLoads [tool otool -l $executable]
+        set mainSize ?
+        set workerSize ?
+        regexp {cmd LC_MAIN\s.*?stacksize (\d+)} $mainLoads -> mainSize
+        regexp {cmd LC_MAIN\s.*?stacksize (\d+)} $workerLoads -> workerSize
+        tool codesign -v $mainPath
+        set signed [expr {$::toolError eq ""}]
+        set report [file join $work main-thread.report]
+        set outcome [run env -i BOTLISH_NATIVE_STARTUP_REPORT=$report $mainPath]
+        set facts [expr {[file exists $report] ? [readText $report] : ""}]
+        set thread ?
+        set usable ?
+        regexp -line {^thread (\S+)$} $facts -> thread
+        regexp -line {^stack usable (\d+) } $facts -> usable
+        check main-thread-executable [expr {!$linked && $mainSize == 536870912 && $workerSize == 0 && $signed
+            && $outcome eq [list 0 "$programValue\n" ""] && $thread eq "main" && $usable == 536870912}] \
+            "LC_MAIN stacksize $mainSize (the worker's $workerSize), signature [expr {$signed ? "valid" : "invalid"}], thread $thread, usable stack $usable, [shown $outcome]" \
+            "[expr {$linked ? $message : ""}]$mainLoads"
+    } else {
+        set refused [catch {native::executable $hir $mainPath -startup main-thread} message options]
+        set code [expr {$refused ? [lrange [dict get $options -errorcode] 0 2] : "none"}]
+        check main-thread-refused [expr {$code eq {NATIVE UNSUPPORTED startup} && ![file exists $mainPath]}] \
+            "-startup main-thread: $code, nothing written" $message
+    }
 
     # The platform linker's command line, as rustc runs it for this link
     # (`--print link-args`, through a wrapper given as RUSTC: the link

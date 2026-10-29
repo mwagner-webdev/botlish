@@ -171,12 +171,12 @@ const C_CALLS: bool = cfg!(any(
 ## native/src/runtime/aot.rs
 <<<<
         let _guard = {
-            let stack = super::native_stack::NativeStack::current().expect("pthread stack bounds");
-            super::platform::OverflowGuard::install_executable(&stack).expect("pthread stack guard")
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
         };
-        let result = entry(&mut *vm);
+        injected_fault();
 ====
-        let result = entry(&mut *vm);
+        injected_fault();
 >>>>
 
 @@ startup-no-argv a standalone executable's process arguments never reach argv()
@@ -312,9 +312,9 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 @@ sys-runtime-variable-ignored BOTLISH_NATIVE_RUNTIME is not read: the archive beside the driver is always linked
 ## native/src/codegen/aot.rs
 <<<<
-    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
+    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
 ====
-    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
+    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
 >>>>
 
 @@ sys-runtime-bundle-ignored a driver in a macOS application bundle looks for the runtime archive beside itself, in Contents/MacOS, never in the bundle's Contents/Resources (MACOS-AARCH64-MILESTONE-9.md)
@@ -383,12 +383,22 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
     0
 >>>>
 
-@@ sys-startup-failure-succeeds a system-linked executable whose record cannot be read exits with status 0
+@@ sys-startup-failure-succeeds a linked executable whose record cannot be read (its magic, its runtime build, its startup policy) exits with status 0
 ## native/src/runtime/aot.rs
 <<<<
-                    std::process::exit(1);
+        Err(error) => {
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 1;
+        }
+    };
+    run(startup, process_argv(), move || {
 ====
-                    std::process::exit(0);
+        Err(error) => {
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 0;
+        }
+    };
+    run(startup, process_argv(), move || {
 >>>>
 
 @@ sys-helper-unclassified a runtime archive without a helper the program calls is taken for an error of the program's link, not the archive's
@@ -492,4 +502,200 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
             if libc::fcntl(fd, libc::F_GETFD) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
 ====
             if false && libc::fcntl(fd, libc::F_GETFD) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The startup policy (MAIN-THREAD-STARTUP-MILESTONE-1.md): the command line,
+# the Tcl entry point and its capability table, the driver's option and
+# refusal, the program record's word, the fingerprint's cover of the record,
+# the runtime's choice of thread, its panic and guard, LC_MAIN's stack size
+# in both linkers, the stub. Their detectors are tests/main-thread-startup.test
+# (on every host: the worker, the refusals, the record's word, the panic
+# line; on macOS AArch64: the main thread's identity, LC_MAIN, the stack,
+# the overflow, GC stress, parity) and the Rust unit tests of the record, the
+# fingerprint, the link arguments and the caught panic. Not here, because no
+# mutation of this code can express it: the Vm made on a worker and run on
+# the main thread (a Vm is not Send: Rust refuses the program), and a stale
+# runtime archive in Botlish.app (the packaging's, audit/macos-app; its
+# fingerprint refuses the program object of another runtime build).
+
+@@ cli-startup-dropped main.tcl -native-startup main-thread builds the default (worker) executable
+## main.tcl
+<<<<
+            set nativeStartup [list -startup $value]
+====
+            set nativeStartup [list -startup worker]
+>>>>
+
+@@ api-default-main native::executable without -startup links a main-thread executable: the default is changed
+## native/native.tcl
+<<<<
+    if {$startup eq ""} {
+        return worker
+    }
+====
+    if {$startup eq ""} {
+        return main-thread
+    }
+>>>>
+
+@@ api-capability-linux the capability table gives Linux the main-thread startup: the front end no longer refuses it there
+%% linux-x86_64 linux-aarch64
+## native/native.tcl
+<<<<
+        mainThreadStartup {macos-aarch64} \
+====
+        mainThreadStartup {macos-aarch64 linux-x86_64 linux-aarch64} \
+>>>>
+
+@@ api-capability-windows the capability table gives Windows the main-thread startup: the front end no longer refuses it there
+%% windows-x86_64
+## native/native.tcl
+<<<<
+        mainThreadStartup {macos-aarch64} \
+====
+        mainThreadStartup {macos-aarch64 windows-x86_64} \
+>>>>
+
+@@ api-driver-worker native::executable asks the driver for the worker whatever the policy: main-thread is silently replaced
+%% macos-aarch64
+## native/native.tcl
+<<<<
+    set lines [Driver executable $text [file normalize $path] --startup $startup]
+====
+    set lines [Driver executable $text [file normalize $path] --startup worker]
+>>>>
+
+@@ driver-startup-ignored the driver's executable command links a worker executable whatever --startup names
+## native/src/main.rs
+<<<<
+            let startup = startup.unwrap_or(runtime::program::Startup::Worker);
+====
+            let startup = runtime::program::Startup::Worker;
+>>>>
+
+@@ driver-startup-anywhere the driver takes --startup on any command (a JIT run, an object, a library), where it means nothing
+## native/src/main.rs
+<<<<
+    if startup.is_some() && args.first().map(String::as_str) != Some("executable") {
+====
+    if startup.is_some() && args.first().map(String::as_str) == Some("--never") {
+>>>>
+
+@@ driver-default-main the driver's executable command without --startup links a main-thread executable
+## native/src/main.rs
+<<<<
+            let startup = startup.unwrap_or(runtime::program::Startup::Worker);
+====
+            let startup = startup.unwrap_or(runtime::program::Startup::MainThread);
+>>>>
+
+@@ startup-anywhere the main-thread startup is taken for supported on every host: Linux and Windows executables start on their main thread, whose stack has no confirmed guard
+%% linux-x86_64 linux-aarch64 windows-x86_64
+## native/src/runtime/aot.rs
+<<<<
+pub const MAIN_THREAD_STARTUP: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+====
+pub const MAIN_THREAD_STARTUP: bool = true;
+>>>>
+
+@@ record-startup-unwritten the program object's record never carries the startup policy: every executable names the worker
+## native/src/codegen/mod.rs
+<<<<
+    record[at..at + 8].copy_from_slice(&startup.word().to_le_bytes());
+====
+    let _ = (at, startup);
+>>>>
+
+@@ record-startup-ignored the runtime reads every record's startup word as the worker's
+## native/src/runtime/program.rs
+<<<<
+            1 => Ok(Startup::MainThread),
+====
+            1 => Ok(Startup::Worker),
+>>>>
+
+@@ record-startup-unchecked a startup word that names no policy is read as the worker's: a damaged record starts on a guessed thread
+## native/src/runtime/program.rs
+<<<<
+            _ => Err(format!("the program record names an unknown startup policy ({word})")),
+====
+            _ => Ok(Startup::Worker),
+>>>>
+
+@@ fingerprint-ignores-record the ABI fingerprint leaves the program record's layout out: a runtime with another record layout would read this one's words
+## native/src/runtime/aotimage.rs
+<<<<
+        record[0],
+        record[1],
+    ];
+====
+    ];
+    let _ = record;
+>>>>
+
+@@ main-thread-spawns-worker a main-thread executable runs its program on a worker after all
+%% macos-aarch64
+## native/src/runtime/aot.rs
+<<<<
+        Startup::MainThread if MAIN_THREAD_STARTUP => on_this_thread(body),
+====
+        Startup::MainThread if MAIN_THREAD_STARTUP => match std::thread::Builder::new().stack_size(1 << 29).spawn(body) {
+            Ok(worker) => worker.join().unwrap_or(1),
+            Err(_) => 1,
+        },
+>>>>
+
+@@ main-thread-panic-escapes a panic on the main thread unwinds out of run (Rust's status 101) instead of NATIVE BUG, status 1
+## native/src/runtime/aot.rs
+<<<<
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(status) => status,
+        Err(_) => panicked(),
+    }
+====
+    body()
+>>>>
+
+@@ main-thread-no-guard a main-thread executable runs without the stack-overflow guard: its exhaustion is a raw fault
+%% macos-aarch64
+## native/src/runtime/aot.rs
+<<<<
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
+        };
+        injected_fault();
+====
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            (startup == Startup::Worker).then(|| super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard"))
+        };
+        injected_fault();
+>>>>
+
+@@ system-lc-main-dropped the system linker links a main-thread executable without LC_MAIN's stack size: the 8 MiB default main stack
+## native/src/codegen/aot.rs
+<<<<
+    args.extend(startup_link_args(flavor, startup).iter().filter_map(|a| a.strip_prefix("link-arg=")).map(OsString::from));
+====
+    let _ = startup;
+>>>>
+
+@@ rustc-lc-main-dropped the rustc linker links a main-thread executable without LC_MAIN's stack size: the 8 MiB default main stack
+%% macos-aarch64
+## native/src/codegen/aot.rs
+<<<<
+        .args(startup_link_args(LINKER, startup))
+====
+        .args(Vec::<String>::new())
+>>>>
+
+@@ stub-runs-main the stub starts an image whose record names the main thread on a worker, as if it named the worker
+%% linux-x86_64
+## native/src/runtime/aotimage.rs
+<<<<
+        Ok(Startup::Worker) => {}
+        Ok(Startup::MainThread) => {
+====
+        Ok(Startup::Worker) | Ok(Startup::MainThread) => {}
+        Ok(Startup::MainThread) if false => {
 >>>>
