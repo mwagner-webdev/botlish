@@ -56,6 +56,7 @@
 
 import std::abi
 import std::abi::bytes
+import std::ffi::c
 import std::io::path
 
 # Why a filesystem operation failed, as far as the platforms agree: the
@@ -129,6 +130,22 @@ struct Entry:
 # The number of bytes one read asks for: at least one (so that no bytes is
 # the end of the file, never an empty request), at most 2^30.
 type ReadSize = Int in 1..1073741824
+
+# An affine token that owns nothing: one word, a null C pointer that no C
+# call ever receives. Botlish has no declaration that makes a struct affine
+# (AFFINE-VALUES.md: a struct is affine when it holds an affine value), so a
+# platform's File that holds no affine value of its own -- Linux's and
+# macOS's hold an Int descriptor -- holds an Owner: the File can then be
+# moved but never copied (WINDOWS-X86-64-MILESTONE-7.md, "Affine ownership").
+# Dropping it runs nothing. Made only by the standard library (`owner`, an
+# internal member).
+opaque struct Owner:
+    marker: std::ffi::c::Ptr[std::ffi::c::Void]
+
+# A fresh Owner: an internal member of the standard library
+# (core/native.tcl), never API.
+nomethod fn owner() -> Owner:
+    Owner {marker: std::ffi::c::null[std::ffi::c::Void]()}
 
 # A textual path its platform's filesystem can operate on.
 #

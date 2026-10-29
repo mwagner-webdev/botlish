@@ -5673,14 +5673,14 @@ related: stdlib.module.std::darwin::fs
 == DECLARATION
     opaque struct File:
         fd: std::ffi::c::Int
-        owner: std::ffi::c::Ptr[std::ffi::c::Void]
+        owner: std::io::fs::Owner
 
 == MODULE
 stdlib/darwin/fs.bot: import std::darwin::fs, then write
 std::darwin::fs::File.
 
 == DESCRIPTION
-An opened file: its descriptor and the affinity marker (a null pointer).
+An opened file: its descriptor and its affine token (std::io::fs::Owner).
 
 @topic stdlib.std::darwin::fs::Read
 title: std::darwin::fs::Read -- Struct of module std::darwin::fs
@@ -6140,7 +6140,7 @@ differences and, by default, without case: equality here is spelling, never
 file identity.
 
 Ownership, completion and failures are std::linux::fs's: a File (its
-descriptor and the affinity marker, a null pointer) is affine and must be
+descriptor and its affine token, std::io::fs::Owner) is affine and must be
 closed; a failed read or write closes it; read_all, write_all and the
 whole-file operations complete; no retry (EINTR included), no durability
 claim. unlink(2) of a directory is EPERM on macOS: when the name then opens
@@ -8099,6 +8099,30 @@ stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::ReadSize.
 The number of bytes one read asks for: at least one (so that no bytes is the
 end of the file, never an empty request), at most 2^30.
 
+@topic stdlib.std::io::fs::Owner
+title: std::io::fs::Owner -- Opaque struct of module std::io::fs
+summary: An affine token that owns nothing
+index: stdlib
+symbol: std::io::fs::Owner
+related: stdlib.module.std::io::fs
+
+== DECLARATION
+    opaque struct Owner:
+        marker: std::ffi::c::Ptr[std::ffi::c::Void]
+
+== MODULE
+stdlib/io/fs.bot: import std::io::fs, then write std::io::fs::Owner.
+
+== DESCRIPTION
+An affine token that owns nothing: one word, a null C pointer that no C call
+ever receives. Botlish has no declaration that makes a struct affine
+(AFFINE-VALUES.md: a struct is affine when it holds an affine value), so a
+platform's File that holds no affine value of its own -- Linux's and macOS's
+hold an Int descriptor -- holds an Owner: the File can then be moved but
+never copied (WINDOWS-X86-64-MILESTONE-7.md, "Affine ownership"). Dropping
+it runs nothing. Made only by the standard library (`owner`, an internal
+member).
+
 @topic stdlib.std::io::fs::FilePath
 title: std::io::fs::FilePath -- Trait of module std::io::fs
 summary: A textual path its platform's filesystem can operate on.
@@ -8207,6 +8231,7 @@ stdlib/io/fs.bot (import std::io::fs).
     std::io::fs::FileError         error -- A filesystem operation the oper...
     std::io::fs::FilePath          trait -- A textual path its platform's f...
     std::io::fs::OpenMode          enum -- How a file is opened (the platfo...
+    std::io::fs::Owner             opaque struct -- An affine token that ow...
     std::io::fs::ReadSize          type -- The number of bytes one read ask...
     std::io::fs::Reason            enum -- Why a filesystem operation faile...
 
@@ -8865,14 +8890,14 @@ related: stdlib.module.std::linux::fs
 == DECLARATION
     opaque struct File:
         fd: std::abi::I32
-        owner: std::ffi::c::Ptr[std::ffi::c::Void]
+        owner: std::io::fs::Owner
 
 == MODULE
 stdlib/linux/fs.bot: import std::linux::fs, then write
 std::linux::fs::File.
 
 == DESCRIPTION
-An opened file: its descriptor and the affinity marker (a null pointer).
+An opened file: its descriptor and its affine token.
 
 @topic stdlib.std::linux::fs::Read
 title: std::linux::fs::Read -- Struct of module std::linux::fs
@@ -9376,11 +9401,12 @@ direct for using it. A path is a request, never authority.
 A File is an opened file: an opaque token of its descriptor, AFFINE -- its
 one owner may use it, give it away (move it into a call, a result, a struct
 field) and close it; it cannot be copied (USE-AFTER-MOVE), and a closed File
-no longer exists. Its affinity comes from its one other field, a null C
-pointer that owns nothing and costs one word: Botlish has no declaration
-that makes a struct affine (the report, "Affine ownership"). Operations that
-use a File take it and give it back: `read` returns a Read {file, data},
-`write` a Written {file, count}, write_all the File.
+no longer exists. Its affinity comes from its one other field, a
+std::io::fs::Owner, an affine token that owns nothing and costs one word:
+Botlish has no declaration that makes a struct affine (the report, "Affine
+ownership"). Operations that use a File take it and give it back: `read`
+returns a Read {file, data}, `write` a Written {file, count}, write_all the
+File.
 
 Ownership is not cleanup. Nothing closes a File for its owner: a File
 dropped unclosed, by an owner that returns, fails or ends without closing

@@ -298,13 +298,14 @@ test fs-authority-context {every std::linux::fs and std::windows::fs operation t
         [fsRejection "[fsImports windows]fn f(file: std::windows::fs::File) errors std::io::fs::FileError:\n    g = file.write_all(std::abi::bytes::from_list(\[\]))\n    g.close()\n1\n" windows-x86_64]
 } -result {MISSING-CONTEXT MISSING-CONTEXT accepted}
 
-test fs-authority-airlock {the raw layers stay behind their contexts: an application module calling std::linux::openat is DIRECT unless it is direct itself; std::windows::fs's Win32 declarations are private; the unchecked native-path constructors are internal to the standard library} -body {
+test fs-authority-airlock {the raw layers stay behind their contexts: an application module calling std::linux::openat is DIRECT unless it is direct itself; std::windows::fs's Win32 declarations are private; the unchecked native-path constructors and the affine token's maker are internal to the standard library} -body {
     set raw "[fsImports linux]import std::linux\nfn f() -> int:\n    std::linux::openat(std::abi::i32(-100), \[std::byte::from_int(97)\], std::abi::i32(0), std::abi::u32(0))\nf()\n"
     list [lindex [fsRejection $raw linux-x86_64] 0] \
         [fsRejection "direct module\n$raw" linux-x86_64] \
         [lindex [fsRejection "[fsImports windows]import std::ffi::c\nfn f() -> int:\n    std::windows::fs::c_get_last_error()\nf()\n" windows-x86_64] 0] \
-        [lindex [fsRejection "[fsImports linux]std::linux::fs::of_valid_text(\"a\")\n" linux-x86_64] 0]
-} -result {DIRECT accepted PRIVATE-ACCESS INTERNAL-NAMESPACE}
+        [lindex [fsRejection "[fsImports linux]std::linux::fs::of_valid_text(\"a\")\n" linux-x86_64] 0] \
+        [lindex [fsRejection "[fsImports linux]std::io::fs::owner()\n1\n" linux-x86_64] 0]
+} -result {DIRECT accepted PRIVATE-ACCESS INTERNAL-NAMESPACE INTERNAL-NAMESPACE}
 
 # ===========================================================================
 # Ownership of an opened file (compile time)

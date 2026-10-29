@@ -1404,3 +1404,5 @@ core::native::declareInternalMember std::mutable_set::of_table
 core::native::declareInternalMember std::linux::fs::of_valid_text
 core::native::declareInternalMember std::windows::fs::of_valid_text
 core::native::declareInternalMember std::darwin::fs::of_valid_text
+# ... and the affine token a platform's File holds (std::io::fs::Owner).
+core::native::declareInternalMember std::io::fs::owner

@@ -398,8 +398,13 @@ create_directory(path), remove_file(path), remove_directory(path)
 A File is opaque and affine. Botlish has no declaration that makes a
 struct affine, so a File's affinity comes from a field: on Windows its
 HANDLE (a `std::ffi::c::Ptr`, affine by C-ABI-TYPES.md), on Linux and
-macOS a null C pointer beside the descriptor, which owns nothing and costs
-one word. The ten ownership experiments,
+macOS a `std::io::fs::Owner` beside the descriptor -- an affine token that
+owns nothing and costs one word (a null C pointer no C call receives,
+declared in the portable module: the Linux syscall side names no
+`std::ffi::c`, C-POINTER-BORROWING.md's separation, which the macOS CI's
+`cb-namespace-separation` caught on the first version). Only the standard
+library makes one (`std::io::fs::owner` is an internal member). The ten
+ownership experiments,
 every one a compile-time test on both platforms (`fs-ownership-*`):
 
 | # | experiment | outcome |

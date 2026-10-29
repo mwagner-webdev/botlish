@@ -28,7 +28,7 @@
 # file identity.
 #
 # Ownership, completion and failures are std::linux::fs's: a File (its
-# descriptor and the affinity marker, a null pointer) is affine and must be
+# descriptor and its affine token, std::io::fs::Owner) is affine and must be
 # closed; a failed read or write closes it; read_all, write_all and the
 # whole-file operations complete; no retry (EINTR included), no durability
 # claim. unlink(2) of a directory is EPERM on macOS: when the name then opens
@@ -108,10 +108,10 @@ opaque context struct DarwinFS:
     file_mode: std::ffi::c::UShort
     directory_mode: std::ffi::c::UShort
 
-# An opened file: its descriptor and the affinity marker (a null pointer).
+# An opened file: its descriptor and its affine token (std::io::fs::Owner).
 opaque struct File:
     fd: std::ffi::c::Int
-    owner: std::ffi::c::Ptr[std::ffi::c::Void]
+    owner: std::io::fs::Owner
 
 # What one read did: the File back, and the bytes read (none at the end of
 # the file).
@@ -248,7 +248,7 @@ fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: DarwinFS) -> 
     if fd < 0:
         failure = errno()
         fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
-    File {fd: fd, owner: std::ffi::c::null[std::ffi::c::Void]()}
+    File {fd: fd, owner: std::io::fs::owner()}
 
 # Releases FD after a failed operation, close(2)'s own result ignored.
 private fn release(fd: std::ffi::c::Int, context fs: DarwinFS) -> unit:

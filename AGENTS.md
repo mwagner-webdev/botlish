@@ -1787,8 +1787,11 @@ trait FilePath); the platform layers are `std::linux::fs` (raw syscalls),
   component ending with a period or a space; nothing is normalized and no
   filesystem observed. Every Win32 call is a wide function; never the ANSI
   code page, the C runtime or a POSIX layer.
-* A File is opaque and affine; a failed read or write closes it, and the
-  whole-file and directory operations close on every path. Ownership is not
+* A File is opaque and affine (Windows: its HANDLE; Linux and macOS: a
+  `std::io::fs::Owner`, the affine token only the standard library makes:
+  the syscall side never names `std::ffi::c`); a failed read or write
+  closes it, and the whole-file and directory operations close on every
+  path. Ownership is not
   cleanup: never claim RAII. Short reads and writes are ordinary; completion
   continues after what the system reports, never restarts; no retry, no
   durability claim.

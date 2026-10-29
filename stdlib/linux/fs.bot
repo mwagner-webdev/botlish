@@ -49,8 +49,9 @@
 # its one owner may use it, give it away (move it into a call, a result, a
 # struct field) and close it; it cannot be copied (USE-AFTER-MOVE), and a
 # closed File no longer exists. Its affinity comes from its one other field,
-# a null C pointer that owns nothing and costs one word: Botlish has no
-# declaration that makes a struct affine (the report, "Affine ownership").
+# a std::io::fs::Owner, an affine token that owns nothing and costs one word:
+# Botlish has no declaration that makes a struct affine (the report, "Affine
+# ownership").
 # Operations that use a File take it and give it back: `read` returns a
 # Read {file, data}, `write` a Written {file, count}, write_all the File.
 #
@@ -88,7 +89,6 @@ import std::abi
 import std::abi::bytes
 import std::binary
 import std::byte
-import std::ffi::c
 import std::io::bytepath
 import std::io::fs
 import std::io::path
@@ -107,10 +107,10 @@ opaque struct NativePath:
 opaque context struct LinuxFS:
     at: std::abi::I32
 
-# An opened file: its descriptor and the affinity marker (a null pointer).
+# An opened file: its descriptor and its affine token.
 opaque struct File:
     fd: std::abi::I32
-    owner: std::ffi::c::Ptr[std::ffi::c::Void]
+    owner: std::io::fs::Owner
 
 # What one read did: the File back, and the bytes read (none at the end of
 # the file).
@@ -243,7 +243,7 @@ fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: LinuxFS) -> F
             fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
         on std::abi::AbiIntegerBelowRange:
             fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
-    File {fd: fd, owner: std::ffi::c::null[std::ffi::c::Void]()}
+    File {fd: fd, owner: std::io::fs::owner()}
 
 # Releases FD after a failed operation, close(2)'s own result ignored: the
 # operation's error is what its caller reports.

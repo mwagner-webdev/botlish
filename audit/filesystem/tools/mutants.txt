@@ -248,20 +248,20 @@ extern c fn c_get_last_error
         return std::io::fs::Reason::AlreadyExists
 >>>>
 
-@@ linux-file-copyable a File holds no affine field (its marker an Int): it can be copied, used after close, closed twice
-## stdlib/linux/fs.bot
+@@ file-copyable the affine token is an Int: Linux's and macOS's Files can be copied, used after close, closed twice
+## stdlib/io/fs.bot
 <<<<
-    owner: std::ffi::c::Ptr[std::ffi::c::Void]
+    marker: std::ffi::c::Ptr[std::ffi::c::Void]
 
 ====
-    owner: int
+    marker: int
 
 >>>>
-## stdlib/linux/fs.bot
+## stdlib/io/fs.bot
 <<<<
-    File {fd: fd, owner: std::ffi::c::null[std::ffi::c::Void]()}
+    Owner {marker: std::ffi::c::null[std::ffi::c::Void]()}
 ====
-    File {fd: fd, owner: 0}
+    Owner {marker: 0}
 >>>>
 
 # ---------------------------------------------------------------------------
