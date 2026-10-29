@@ -904,6 +904,158 @@ test se-equal-implementation-context {a function's context requirement reads the
     set results
 } -result {{} {TYPE accepted TYPE} {} {} {accepted CONTEXT-FUNCTION-VALUE TYPE} {}}
 
+# The change experiments of TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-
+# MILESTONE-1.md (section 13), as static decisions: std::ay's A, whose
+# implementation needs Log only through its helper via's block, the
+# selected one; std::bee's B (its block needs Clock) and std::yy's Y (its
+# block yields and needs Log), implementations no specialization of the
+# first program selects. AY, YY take the helper's and Y's last line.
+proc seContextChanges {ay yy} {
+    seWriteModules [list ay.bot [format {import std::compiler
+
+type Small = Int in 0..1000
+
+context struct Log:
+    n: Small
+
+context struct Clock:
+    n: Small
+
+fn note(context log: Log) -> int:
+    log.n
+
+fn tick(context c: Clock) -> int:
+    c.n
+
+fn want(x: int) -> int:
+    x
+
+struct A:
+    v: int
+
+fn via(n: int) -> int errors std::compiler::CompilerError:
+    static compile:
+        m = note()
+        %1$s
+    n
+
+fn show(t: A) -> int errors std::compiler::CompilerError:
+    via(t.v)
+} $ay] bee.bot {import std::compiler
+import std::ay
+
+struct B:
+    w: int
+
+fn show(t: B) -> int errors std::compiler::CompilerError:
+    static compile:
+        k = std::ay::tick()
+        std::ay::want("b")
+    t.w
+} yy.bot [format {import std::compiler
+import std::ay
+
+struct Y:
+    v: int
+
+fn show(t: Y) -> int errors std::compiler::CompilerError:
+    static compile:
+        yield t.v
+        k = std::ay::note()
+        %1$s
+    t.v
+} $yy] mk.bot {import std::ay
+import std::bee
+import std::yy
+
+fn make(v: int) -> std::ay::A:
+    std::ay::A {v: v}
+
+fn makeb(w: int) -> std::bee::B:
+    std::bee::B {w: w}
+
+fn log(n: std::ay::Small) -> std::ay::Log:
+    std::ay::Log {n: n}
+
+fn makey(v: int) -> std::yy::Y:
+    std::yy::Y {v: v}
+}]
+}
+
+test se-equal-implementation-context-changes {the change experiments, decided by both schedulers alike with no build contradicting a prediction: (1) a helper of the selected implementation acquires the requirement (via's block accepted: f needs Log, g's block is CONTEXT-FUNCTION-VALUE) or loses it (rejected: g's accepted), g's block depending on via's; (2) an implementation no specialization selects (B's, Y's) changes its own requirement (its block rejected): g's decision does not wait for it -- every independent rejection in one round, two builds; (3) one selected implementation changes its yield and its requirement together (Y's block, through a coroutine of twice for Y): the construction is accepted while the block yields, COROUTINE-RHS-NOT-YIELDING once it is rejected -- start's block waits for Y's, on which it depends (three builds)} -body {
+    set main {import std::compiler
+import std::mk
+
+trait Thing:
+    fn show(t: Thing) -> int errors std::compiler::CompilerError
+
+fn want(x: int) -> int:
+    x
+
+fn twice(t: Thing) -> int errors std::compiler::CompilerError:
+    t.show() + t.show()
+
+fn f() -> int errors std::compiler::CompilerError:
+    twice(std::mk::make(1))
+
+fn g() -> int errors std::compiler::CompilerError:
+    static compile:
+        h = [f]
+        1
+
+fn other() -> int errors std::compiler::CompilerError:
+    static compile:
+        want("t")
+
+with context std::mk::log(3)
+r = g():
+    on std::compiler::CompilerError {code, primary, message}:
+        -1
+r + other()
+}
+    set start {import std::compiler
+import std::mk
+
+trait Thing:
+    fn show(t: Thing) -> int errors std::compiler::CompilerError
+
+fn want(x: int) -> int:
+    x
+
+fn twice(t: Thing) -> int errors std::compiler::CompilerError:
+    t.show() + t.show()
+
+fn fy() -> int errors std::compiler::CompilerError:
+    1
+
+fn start() -> int errors std::compiler::CompilerError:
+    static compile:
+        coroutine {step, first} = twice(std::mk::makey(1))
+        first
+
+fn other() -> int errors std::compiler::CompilerError:
+    static compile:
+        want("t")
+
+with context std::mk::log(3)
+r = start():
+    on std::compiler::CompilerError {code, primary, message}:
+        -1
+r + other()
+}
+    set results {}
+    foreach {helper ylast text} [list {want("h")} {std::ay::want("y")} $main {m + 0} {std::ay::want("y")} $main \
+            {m + 0} {std::ay::want("y")} $start {m + 0} {k + 0} $start] {
+        withPrivateLibrary {
+            seContextChanges $helper $ylast
+            set hir [seHir $text]
+            lappend results [list [seSame $text 0] [seOutcomes $text] [dict get $hir staticStats mispredicted] \
+                [dict get $hir staticStats rounds]]
+        }
+    }
+    set results
+} -result {{{} {TYPE TYPE TYPE accepted TYPE} {} 2} {{} {accepted TYPE TYPE CONTEXT-FUNCTION-VALUE TYPE} {} 2} {{} {accepted TYPE TYPE COROUTINE-RHS-NOT-YIELDING TYPE} {} 3} {{} {accepted TYPE accepted accepted TYPE} {} 2}}
+
 test se-equal-plan-gate {the trait monomorphization's plan runs only on a program with no diagnostic at all, so a site whose diagnostic only the plan reports fails only once every other site's diagnostic is gone (hir/staticdeps.tcl's C:plan): judged beside two checker failures it is unknown, not predicted ok (the dependency analysis once missed the gate, and the next build contradicted its prediction); two plan diagnostics in one build are decided one per build, as the sequential order does (the plan is one computation over the whole program) -- the batched decisions are the sequential ones} -body {
     set results {}
     foreach text [list [sePlanAffine {a nested b}] [sePlanTraits]] {
