@@ -747,7 +747,7 @@ Compiler:
 
 Tests, tools and evidence: the test files of section 11;
 `audit/trait-implementation-yield/tools/fuzz.tcl`; mutants in
-`audit/traits/tools/mutants.txt` (17 new), `audit/context-traits/tools/
+`audit/traits/tools/mutants.txt` (14 new), `audit/context-traits/tools/
 mutants.txt` (3 new, 1 re-anchored), `audit/coroutines/tools/mutants.txt` (1
 re-anchored), `audit/static-decisions/tools/mutants.txt` (2 new),
 `audit/diagnostic-recovery/tools/mutants.txt` (2 new);
