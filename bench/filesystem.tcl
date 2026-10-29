@@ -1,7 +1,7 @@
 # filesystem.tcl -- what paths and synchronous file I/O cost natively
 # (WINDOWS-X86-64-MILESTONE-7.md, "Performance").
 #
-#   tclsh9.0 bench/filesystem.tcl ?-runs N? ?-scale F?
+#   tclsh9.0 bench/filesystem.tcl ?-runs N? ?-scale F? ?-compile-only TARGET?
 #
 # Measured on the host's own platform -- std::linux::fs (raw syscalls) on
 # Linux, std::windows::fs (kernel32's wide functions) on Windows,
@@ -33,7 +33,9 @@
 #                        native name: per entry
 #
 # -scale F multiplies every N (smaller for a quick look). Prints a table;
-# the report quotes it.
+# the report quotes it. -compile-only TARGET (linux-x86_64, windows-x86_64,
+# macos-aarch64) only compiles every program for TARGET's platform and runs
+# none: a check, on any host, of the programs another host will run.
 
 set here [file dirname [file normalize [info script]]]
 set root [file dirname $here]
@@ -42,15 +44,17 @@ source [file join $root native native.tcl]
 
 set runs 5
 set scale 1.0
+set compileOnly ""
 foreach {option value} $argv {
     switch -- $option {
         -runs { set runs $value }
         -scale { set scale $value }
+        -compile-only { set compileOnly $value }
         default { error "unknown option $option" }
     }
 }
 
-set target [core::cabi::hostTarget]
+set target [expr {$compileOnly ne "" ? $compileOnly : [core::cabi::hostTarget]}]
 switch -glob -- $target {
     linux-* { set platform linux }
     windows-* { set platform windows }
@@ -127,7 +131,10 @@ proc best {text} {
     fconfigure $f -encoding utf-8 -translation lf
     puts -nonewline $f $text
     close $f
-    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache ""]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -target $::target]
+    if {$::compileOnly ne ""} {
+        return 1.0
+    }
     set resultPath [file join $::scratch result]
     file delete $resultPath
     if {$::platform eq "linux"} {
