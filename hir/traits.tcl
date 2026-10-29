@@ -2315,7 +2315,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                         if {[IsReplaced $polys $impl]} {
                             # The implementation itself requires a context
                             # trait: it is replaced by its own clone.
-                            CallImplementationClone context $operation $impl 1
+                            CallImplementationClone context $operation $impl 0
                         } else {
                             SetAction actions diagnostics $ckey $sid [list context $operation] $e
                         }
@@ -2360,7 +2360,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                             # clone: the operation calls that clone, by the
                             # one rule a context-trait operation's call of a
                             # replaced implementation follows.
-                            CallImplementationClone trait $operation $impl [hir::get $hir $e reachable]
+                            CallImplementationClone trait $operation $impl 1
                         } else {
                             SetAction actions diagnostics $ckey $sid [list trait $operation] $e
                         }
@@ -2640,20 +2640,24 @@ proc hir::traits::CallSpecialization {k j traits} {
 # PlanCalls' walk, at a trait operation (KIND trait) or context-trait
 # operation (KIND context) under examination that binds implementation
 # block IMPL, a function the monomorphized program replaces by its clones
-# (IsReplaced), with the operation record OPERATION; REACHES 0 when the
-# call is unreachable. The one rule for every call of a replaced
-# implementation (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md):
-# the action is {KIND OPERATION KEY}, KEY the clone the selection in force
-# makes of it, with the placement edge and the clone walked, as for a call
-# of any replaced function -- never the dropped declaration. An unreachable
-# call is the placeholder of never-executed code. A function whose
-# requirement includes a context trait has one clone, under the program's
-# providers; one replaced per witness tuple or per binding cannot be an
-# implementation today (TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md,
-# section 3), and the call names no clone of it: TRAIT-INTERNAL.
-proc hir::traits::CallImplementationClone {kind operation impl reaches} {
+# (IsReplaced), with the operation record OPERATION. The one rule for every
+# call of a replaced implementation (TRAIT-IMPLEMENTATION-CONTEXT-
+# REQUIREMENTS-MILESTONE-1.md): the action is {KIND OPERATION KEY}, KEY the
+# clone the selection in force makes of it, with the placement edge and the
+# clone walked, as for a call of any replaced function -- never the dropped
+# declaration. A function whose requirement includes a context trait has
+# one clone, under the program's providers, and its call reaches it as a
+# call of such a function does: only where the selection is (CONSULT 1: a
+# reachable top-level call, or a reachable call in a clone that provides
+# its context traits), and is never-executed code -- the placeholder --
+# anywhere else; a context-trait operation is called only where its own
+# provider is (CONSULT 0), which provides its implementation's selection.
+# One replaced per witness tuple or per binding cannot be an implementation
+# today (TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md, section 3), and the
+# call names no clone of it: TRAIT-INTERNAL.
+proc hir::traits::CallImplementationClone {kind operation impl consult} {
     upvar 1 hir hir polys polys e e sid sid ckey ckey actions actions \
-        diagnostics diagnostics bound bound
+        diagnostics diagnostics bound bound provided provided parents parents
     set implBlock [dict get $impl block]
     set fn [dict get $polys $implBlock]
     if {[dict get $fn trait] || [dict get $fn imprint]} {
@@ -2662,6 +2666,19 @@ proc hir::traits::CallImplementationClone {kind operation impl reaches} {
         return
     }
     set k [list $implBlock {} [dict get $fn selection]]
+    set reaches 1
+    if {$consult} {
+        set reaches [hir::get $hir $e reachable]
+        if {$reaches && $ckey eq "live"} {
+            set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+        } elseif {$reaches} {
+            foreach c [dict get $fn contextTraits] {
+                if {![dict exists $provided $c]} {
+                    set reaches 0
+                }
+            }
+        }
+    }
     if {!$reaches} {
         dict set bound [list $ckey $sid] [list $kind $operation $k]
         SetAction actions diagnostics $ckey $sid [list unreachable] $e

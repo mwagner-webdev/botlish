@@ -608,7 +608,7 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
 @@ trait-redirect-dropped an ordinary trait operation whose implementation the plan replaces still calls the implementation's original declaration, which the plan drops (the original defect): the plan's invariant reports it
 ## hir/traits.tcl
 <<<<
-                            CallImplementationClone trait $operation $impl [hir::get $hir $e reachable]
+                            CallImplementationClone trait $operation $impl 1
 ====
                             SetAction actions diagnostics $ckey $sid [list trait $operation] $e
 >>>>
@@ -716,4 +716,16 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
         if {0} {
             dict lappend specialized [lindex $n 1] $n
         }
+>>>>
+
+@@ implementation-clone-reached-everywhere a call of a replaced implementation is redirected to its clone wherever it is, also in code no provider of its context traits reaches (a nested function its enclosing specialization never calls): the clone has no selection, and the plan fails (TRAIT-INTERNAL) instead of the placeholder of never-executed code
+## hir/traits.tcl
+<<<<
+    set reaches 1
+    if {$consult} {
+        set reaches [hir::get $hir $e reachable]
+====
+    set reaches 1
+    if {0} {
+        set reaches [hir::get $hir $e reachable]
 >>>>
