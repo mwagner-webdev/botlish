@@ -95,17 +95,38 @@ proc writeFile {path text} {
     close $f
 }
 
+# {STATUS OUTPUT} of ARGS, its standard error merged into its output;
+# STATUS is "timeout" (the process killed) when it runs longer than TIMEOUT
+# seconds (audit/context-traits/tools/mutate.tcl's run: no `timeout`
+# command, which on Windows is another program).
 proc run {timeout args} {
-    set status 0
-    set command $args
-    if {[auto_execok timeout] ne ""} {
-        set command [list timeout $timeout {*}$args]
+    set pipe [open |[concat $args [list 2>@1]] r]
+    fconfigure $pipe -blocking 0 -translation auto -encoding utf-8
+    set ::runOutput ""
+    set ::runDone 0
+    fileevent $pipe readable [list apply {{pipe} {
+        append ::runOutput [read $pipe]
+        if {[eof $pipe]} { set ::runDone 1 }
+    }} $pipe]
+    set timer [after [expr {$timeout * 1000}] {set ::runDone timeout}]
+    vwait ::runDone
+    after cancel $timer
+    if {$::runDone eq "timeout"} {
+        if {$::tcl_platform(platform) eq "windows"} {
+            foreach p [pid $pipe] { catch {exec taskkill /F /T /PID $p} }
+        } else {
+            catch {exec kill -9 {*}[pid $pipe]}
+        }
+        catch {close $pipe}
+        return [list timeout $::runOutput]
     }
-    if {[catch {exec {*}$command 2>@1} output options]} {
+    fconfigure $pipe -blocking 1
+    set status 0
+    if {[catch {close $pipe} message options]} {
         set status [lindex [dict get $options -errorcode] end]
         if {![string is integer -strict $status]} { set status 1 }
     }
-    return [list $status $output]
+    return [list $status $::runOutput]
 }
 
 set only [split [dict get $options -only] ,]
