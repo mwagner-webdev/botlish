@@ -637,7 +637,28 @@ enumeration or read leaking its descriptor, a short read taken as the end,
 a short write as complete or restarted, a reason lost, a copyable File, the
 context bypassed, a Win32 declaration public, an internal constructor
 public, std::windows no platform's, and GetLastError read after another
-Win32 call (Windows only). Result: TODO-MUTANTS.
+Win32 call. Three are a host's own (`%% HOST`, skipped elsewhere): the
+Windows enumeration and GetLastError mutants (`windows-x86_64`) and `.`/`..`
+listed by std::darwin::fs (`macos-aarch64`). Each mutant is killed first by
+the fuzzer (`-n 60`), else by filesystem.test.
+
+Result:
+
+* **real Linux** (this container, the whole list): 23 of 23 applicable
+  mutants killed, 3 skipped as another host's -- 10 by the fuzzer (the
+  Windows syntax and lossy-decoding mutants by the path models, Linux
+  enumeration and `.`/`..` by the files part's round trip), 13 by
+  filesystem.test (`fs-windows-concat`, `fs-authority-context`,
+  `fs-authority-airlock` twice, `fs-linux-entries-kinds`,
+  `fs-linux-fault-enumeration`, `fs-linux-short-reads`,
+  `fs-linux-fault-short-write` twice, `fs-linux-fault-read`,
+  `fs-linux-directory-failures`, the four `fs-ownership-*` experiments for
+  a copyable File, `fs-wrong-platform`). None survived, none failed to
+  apply.
+* **macOS** (run 40799420498, the tier item `filesystem-mutants=...`):
+  `darwin-dot-entries-listed` killed by `fs-darwin-entries`,
+  `fs-darwin-executable`, `fs-darwin-names` and `fs-darwin-portable`.
+* **real Windows**: TODO-WIN-MUTANTS.
 
 ### 13.4 CI
 
