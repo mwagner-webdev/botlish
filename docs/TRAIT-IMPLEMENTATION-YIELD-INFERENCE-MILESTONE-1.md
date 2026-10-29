@@ -494,6 +494,20 @@ check; a program with no coroutine skips even that. A repro program pays
 the plan's call resolution and a call-graph build per check of build 1,
 and the second check -- a few milliseconds.
 
+*Wall time.* The starting tree and the final one, compiling the same
+file in alternating processes on an otherwise idle container, with each
+phase timed: `traits.bot` 23.0 s and 23.0 s, then 23.8 s and 23.6 s;
+`coroutines.bot` 21.6 s and 20.1 s. The coroutine analysis itself costs
+what it did (`traits.bot`: `hir::coroutines::analyze` 239-277 ms before,
+253-279 ms now, `verify` 250-253 ms both; `coroutines.bot`: `analyze`
+1058 ms before, 974 ms now, `verify` 625 and 618 ms), and `Feedback` adds
+its 43-44 ms. Totals measured without the phase timing, best of three
+per process, differed between processes by -2% to +7% (`coroutines.bot`
++7.2%, `traits.bot` +5.4%, `contexts.bot` +3.7%, `hashable.bot` -0.9%,
+`a-gameserver.bot` -2.3%), which the phase-timed runs above do not
+reproduce: the container's run-to-run variation, larger than the effect,
+which is why the table above is a share within one process.
+
 **What the measurements changed.** The first version asked the plan after
 every check of a program with a coroutine and a trait operation, and kept
 a specialization of every trait-polymorphic function that may yield:
