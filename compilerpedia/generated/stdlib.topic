@@ -7746,7 +7746,7 @@ revoking it through its Reg does nothing (false).
 
 @topic stdlib.std::event_loop::owned_source
 title: std::event_loop::owned_source -- Function (nomethod) of module std::event_loop
-summary: The function (nomethod) std::event_loop::owned_source of the standard module std::event_loop.
+summary: A source, as `source` makes one, owned
 index: stdlib
 symbol: std::event_loop::owned_source
 related: stdlib.module.std::event_loop
@@ -7758,9 +7758,13 @@ related: stdlib.module.std::event_loop
 stdlib/event_loop.bot: import std::event_loop, then write
 std::event_loop::owned_source.
 
+== DESCRIPTION
+A source, as `source` makes one, owned: an Owned (its Owner and its Reg),
+revoked where the Owner's scope ends (Ownership, above).
+
 @topic stdlib.std::event_loop::owned_channel
 title: std::event_loop::owned_channel -- Function (nomethod)
-summary: The function (nomethod) std::event_loop::owned_channel of the standard module std::event_loop.
+summary: A channel, as `channel` makes one, owned (as owned_source).
 index: stdlib
 symbol: std::event_loop::owned_channel
 related: stdlib.module.std::event_loop
@@ -7772,9 +7776,12 @@ related: stdlib.module.std::event_loop
 stdlib/event_loop.bot: import std::event_loop, then write
 std::event_loop::owned_channel.
 
+== DESCRIPTION
+A channel, as `channel` makes one, owned (as owned_source).
+
 @topic stdlib.std::event_loop::owned_timer
 title: std::event_loop::owned_timer -- Function (nomethod) of module std::event_loop
-summary: The function (nomethod) std::event_loop::owned_timer of the standard module std::event_loop.
+summary: A timer, as `timer` makes one, owned (as owned_source).
 index: stdlib
 symbol: std::event_loop::owned_timer
 related: stdlib.module.std::event_loop
@@ -7786,9 +7793,12 @@ related: stdlib.module.std::event_loop
 stdlib/event_loop.bot: import std::event_loop, then write
 std::event_loop::owned_timer.
 
+== DESCRIPTION
+A timer, as `timer` makes one, owned (as owned_source).
+
 @topic stdlib.std::event_loop::owned_after
 title: std::event_loop::owned_after -- Function of module std::event_loop
-summary: The function std::event_loop::owned_after of the standard module std::event_loop.
+summary: A one-shot timer, as `after` makes one, owned (as owned_source).
 index: stdlib
 symbol: std::event_loop::owned_after
 related: stdlib.module.std::event_loop
@@ -7800,9 +7810,12 @@ related: stdlib.module.std::event_loop
 stdlib/event_loop.bot: import std::event_loop, then write
 std::event_loop::owned_after or, as a method, receiver.owned_after(...).
 
+== DESCRIPTION
+A one-shot timer, as `after` makes one, owned (as owned_source).
+
 @topic stdlib.std::event_loop::owned_every
 title: std::event_loop::owned_every -- Function of module std::event_loop
-summary: The function std::event_loop::owned_every of the standard module std::event_loop.
+summary: A periodic timer, as `every` makes one, owned (as owned_source).
 index: stdlib
 symbol: std::event_loop::owned_every
 related: stdlib.module.std::event_loop
@@ -7814,9 +7827,12 @@ related: stdlib.module.std::event_loop
 stdlib/event_loop.bot: import std::event_loop, then write
 std::event_loop::owned_every or, as a method, receiver.owned_every(...).
 
+== DESCRIPTION
+A periodic timer, as `every` makes one, owned (as owned_source).
+
 @topic stdlib.std::event_loop::owned_observer
 title: std::event_loop::owned_observer -- Function of module std::event_loop
-summary: The function std::event_loop::owned_observer of the standard module std::event_loop.
+summary: An observer, as `observer` makes one, owned (as owned_source).
 index: stdlib
 symbol: std::event_loop::owned_observer
 related: stdlib.module.std::event_loop
@@ -7828,6 +7844,9 @@ related: stdlib.module.std::event_loop
 stdlib/event_loop.bot: import std::event_loop, then write
 std::event_loop::owned_observer or, as a method,
 receiver.owned_observer(...).
+
+== DESCRIPTION
+An observer, as `observer` makes one, owned (as owned_source).
 
 @topic stdlib.std::event_loop::release
 title: std::event_loop::release -- Function of module std::event_loop
@@ -8291,12 +8310,12 @@ stdlib/event_loop.bot (import std::event_loop).
     std::event_loop::native_slot   function -- The tag a native producer pu...
     std::event_loop::now           function -- The loop's time
     std::event_loop::observer      function -- A once-per-turn registration
-    std::event_loop::owned_after   function
-    std::event_loop::owned_channel function (nomethod)
-    std::event_loop::owned_every   function
-    std::event_loop::owned_observer function
-    std::event_loop::owned_source  function (nomethod)
-    std::event_loop::owned_timer   function (nomethod)
+    std::event_loop::owned_after   function -- A one-shot timer, as `after`...
+    std::event_loop::owned_channel function (nomethod) -- A channel, as `ch...
+    std::event_loop::owned_every   function -- A periodic timer, as `every`...
+    std::event_loop::owned_observer function -- An observer, as `observer` ...
+    std::event_loop::owned_source  function (nomethod) -- A source, as `sou...
+    std::event_loop::owned_timer   function (nomethod) -- A timer, as `time...
     std::event_loop::pending       function -- Events of REG queued and und...
     std::event_loop::post          function -- Post (A, B) to the source or...
     std::event_loop::release       function -- Release OWNER

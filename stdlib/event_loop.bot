@@ -1021,8 +1021,8 @@ private nomethod fn own(reg: Reg, context ev: Loop) -> Owned errors IndexNotFoun
 private nomethod fn owned_source_checked(keep: int, policy: int, cap: int, context ev: Loop) -> Owned errors IndexNotFound:
     own(source_checked(keep, policy, cap))
 
-# source's registration, owned: an Owned (its Owner and its Reg), revoked
-# where the Owner's scope ends (Ownership, above).
+# A source, as `source` makes one, owned: an Owned (its Owner and its Reg),
+# revoked where the Owner's scope ends (Ownership, above).
 nomethod fn owned_source(delivery: Delivery, capacity: int, flags :keep_alive, context ev: Loop) -> Owned errors SchedulerFault:
     keep = if keep_alive:
         1
@@ -1035,7 +1035,7 @@ nomethod fn owned_source(delivery: Delivery, capacity: int, flags :keep_alive, c
 private nomethod fn owned_channel_checked(policy: int, cap: int, context ev: Loop) -> Owned errors IndexNotFound:
     own(channel_checked(policy, cap))
 
-# channel's registration, owned (owned_source).
+# A channel, as `channel` makes one, owned (as owned_source).
 nomethod fn owned_channel(delivery: Delivery, capacity: int, context ev: Loop) -> Owned errors SchedulerFault:
     owned_channel_checked(delivery_code(delivery), least_one(capacity)):
         on IndexNotFound:
@@ -1044,24 +1044,24 @@ nomethod fn owned_channel(delivery: Delivery, capacity: int, context ev: Loop) -
 private nomethod fn owned_timer_checked(deadline: int, period: int, context ev: Loop) -> Owned errors IndexNotFound:
     own(timer_checked(deadline, period))
 
-# timer's registration, owned (owned_source).
+# A timer, as `timer` makes one, owned (as owned_source).
 nomethod fn owned_timer(deadline: int, period: int, context ev: Loop) -> Owned errors SchedulerFault:
     owned_timer_checked(deadline, period):
         on IndexNotFound:
             fail SchedulerFault
 
-# after's registration, owned (owned_source).
+# A one-shot timer, as `after` makes one, owned (as owned_source).
 fn owned_after(delay: int, context ev: Loop) -> Owned errors SchedulerFault:
     owned_timer(reg_of(s_now) + delay, 0)
 
-# every's registration, owned (owned_source).
+# A periodic timer, as `every` makes one, owned (as owned_source).
 fn owned_every(period: int, context ev: Loop) -> Owned errors SchedulerFault:
     owned_timer(reg_of(s_now) + period, least_one(period))
 
 private fn owned_observer_checked(context ev: Loop) -> Owned errors IndexNotFound:
     own(observer_checked())
 
-# observer's registration, owned (owned_source).
+# An observer, as `observer` makes one, owned (as owned_source).
 fn owned_observer(context ev: Loop) -> Owned errors SchedulerFault:
     owned_observer_checked():
         on IndexNotFound:
