@@ -324,6 +324,22 @@ proc tool {args} {
     return "$stdout$stderr"
 }
 
+# LC_MAIN's stacksize in `otool -l`'s LOADS (0 when the link set none), or
+# "?". Line by line: in one Tcl regular expression a non-greedy `.*?` first
+# makes every later quantifier non-greedy too, and `(\d+)` would match one
+# digit.
+proc lcMainStackSize {loads} {
+    set inMain 0
+    foreach line [split $loads \n] {
+        if {[regexp {^\s*cmd (\S+)$} $line -> command]} {
+            set inMain [expr {$command eq "LC_MAIN"}]
+        } elseif {$inMain && [regexp {^\s*stacksize ([0-9]+)$} $line -> size]} {
+            return $size
+        }
+    }
+    return ?
+}
+
 # The Mach-O header flags of PATH (MH_PIE is 0x200000), or "".
 proc machoFlags {path} {
     set channel [open $path rb]
@@ -594,10 +610,8 @@ proc checks {} {
         set linked [catch {native::executable $hir $mainPath -startup main-thread} message]
         set mainLoads [tool otool -l $mainPath]
         set workerLoads [tool otool -l $executable]
-        set mainSize ?
-        set workerSize ?
-        regexp {cmd LC_MAIN\s.*?stacksize (\d+)} $mainLoads -> mainSize
-        regexp {cmd LC_MAIN\s.*?stacksize (\d+)} $workerLoads -> workerSize
+        set mainSize [lcMainStackSize $mainLoads]
+        set workerSize [lcMainStackSize $workerLoads]
         tool codesign -v $mainPath
         set signed [expr {$::toolError eq ""}]
         set report [file join $work main-thread.report]
@@ -606,9 +620,13 @@ proc checks {} {
         set thread ?
         set usable ?
         regexp -line {^thread (\S+)$} $facts -> thread
-        regexp -line {^stack usable (\d+) } $facts -> usable
+        regexp -line {^stack usable ([0-9]+) } $facts -> usable
+        # LC_MAIN's 512 MiB, whole or less its lowest page (16 KiB), which
+        # the kernel leaves inaccessible in some executables and the
+        # runtime's discovery steps over (platform/macos.rs).
+        set wholeStack [expr {[string is entier -strict $usable] && $usable <= 536870912 && $usable >= 536870912 - 16384}]
         check main-thread-executable [expr {!$linked && $mainSize == 536870912 && $workerSize == 0 && $signed
-            && $outcome eq [list 0 "$programValue\n" ""] && $thread eq "main" && $usable == 536870912}] \
+            && $outcome eq [list 0 "$programValue\n" ""] && $thread eq "main" && $wholeStack}] \
             "LC_MAIN stacksize $mainSize (the worker's $workerSize), signature [expr {$signed ? "valid" : "invalid"}], thread $thread, usable stack $usable, [shown $outcome]" \
             "[expr {$linked ? $message : ""}]$mainLoads"
     } else {

@@ -491,7 +491,7 @@ unit}}} \
         c-convention {value {labs apple_aarch64 abs apple_aarch64}} \
         c-variadic {value {printf apple_aarch64}} \
         other-target {error {NATIVE TARGET} {this program was built for target linux-aarch64 (aarch64-unknown-linux-gnu)*Both are aarch64, but a matching architecture is not a matching target*}} \
-        main-thread-executable {value {{macho arm64 execute} 6765 main 536870912}}] \
+        main-thread-executable {value {{macho arm64 execute} 6765 main 512MiB}}] \
     windows-x86_64 [dict create \
         jit {value 6765} \
         gc-frame-walk [list value [list str [string repeat xy 400]]] \
@@ -620,7 +620,11 @@ proc observe {name} {
                     set value [string trim [exec env BOTLISH_NATIVE_STARTUP_REPORT=$report $path]]
                     set text [core::ReadFile $report]
                     regexp -line {^thread (\S+)$} $text -> thread
-                    regexp -line {^stack usable (\d+) } $text -> usable
+                    regexp -line {^stack usable ([0-9]+) } $text -> usable
+                    # LC_MAIN's 512 MiB, whole or less its lowest page (16
+                    # KiB), which the kernel leaves inaccessible in some
+                    # executables and the runtime's discovery steps over.
+                    if {$usable <= 536870912 && $usable >= 536870912 - 16384} { set usable 512MiB }
                     list [binaryHeader $path] $value $thread $usable
                 }]
             } finally {

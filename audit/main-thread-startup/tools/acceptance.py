@@ -65,6 +65,10 @@ KEPT = [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]
 # LC_MAIN's stack size of a main-thread executable (codegen::aot's
 # MAIN_STACK_BYTES): Apple ld's largest on arm64.
 MAIN_STACK = 512 << 20
+# What of it the runtime finds usable: all of it, or all but its lowest page
+# (16 KiB), which the kernel leaves inaccessible in some executables and the
+# discovery steps over (platform/macos.rs) -- both observed on macos-15.
+MAIN_USABLE = (MAIN_STACK - (16 << 10), MAIN_STACK)
 REFUSAL = "NATIVE UNSUPPORTED startup"
 # The production executables: (label, compiler, linker, startup policy).
 #   worker   Botlish.app (or the checkout), its default policy
@@ -165,7 +169,7 @@ class Acceptance(census.Census):
         vm = "\n".join(l for l in text.splitlines() if not re.match(r"^(startup|thread|stack) ", l))
         facts["vm_lines"] = len(vm.splitlines())
         problems = [k for k in ("startup", "thread") if k in expect and facts.get(k) != expect[k]]
-        if "usable" in expect and facts.get("usable") != expect["usable"]:
+        if "usable" in expect and not (expect["usable"][0] <= (facts.get("usable") or 0) <= expect["usable"][1]):
             problems.append("usable")
         if "min_usable" in expect and (facts.get("usable") or 0) < expect["min_usable"]:
             problems.append("usable")
@@ -258,7 +262,7 @@ class Acceptance(census.Census):
                 mr = self.work / f"report-{label}.txt"
                 self.case(f"report-{label}", "report", [exe("errors"), "value"], "report",
                           env={"BOTLISH_NATIVE_STARTUP_REPORT": str(mr)}, build=f"{build}/errors",
-                          expect={"file": str(mr), "startup": "main-thread", "thread": "main", "usable": MAIN_STACK,
+                          expect={"file": str(mr), "startup": "main-thread", "thread": "main", "usable": MAIN_USABLE,
                                   "guard": True, "same_vm_as": str(wr), **refused})
             mg = self.work / "report-main-gc.txt"
             self.case("report-main-gc", "report", [main("errors"), "value"], "report", build="main/errors",

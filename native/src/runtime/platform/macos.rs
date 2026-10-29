@@ -142,12 +142,16 @@ mod tests {
 
     #[test]
     fn region_reads_the_protection_of_a_mapping() {
-        // SAFETY: a fresh private mapping of three pages, unmapped below.
+        // SAFETY: a fresh private mapping of four pages: an accessible page,
+        // then the three under test. The accessible page ends the guard walk
+        // below `base` whatever else is mapped there (another test thread's
+        // guard directly below once made the walk go on into it).
         unsafe {
             let page = libc::sysconf(libc::_SC_PAGESIZE) as usize;
-            let base = libc::mmap(std::ptr::null_mut(), 3 * page, libc::PROT_READ | libc::PROT_WRITE,
+            let below = libc::mmap(std::ptr::null_mut(), 4 * page, libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0) as usize;
-            assert_ne!(base, libc::MAP_FAILED as usize);
+            assert_ne!(below, libc::MAP_FAILED as usize);
+            let base = below + page;
             assert_eq!(libc::mprotect(base as *mut libc::c_void, page, libc::PROT_NONE), 0);
             let (start, end, protection) = region(base + page / 2).expect("the guard is mapped");
             assert_eq!((start, end, protection), (base, base + page, libc::VM_PROT_NONE));
@@ -158,7 +162,7 @@ mod tests {
             // A reported bottom that is inaccessible is stepped over.
             assert_eq!(usable_low(base, base + 3 * page), base + page);
             assert_eq!(usable_low(base + page, base + 3 * page), base + page);
-            libc::munmap(base as *mut libc::c_void, 3 * page);
+            libc::munmap(below as *mut libc::c_void, 4 * page);
         }
     }
 

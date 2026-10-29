@@ -212,13 +212,29 @@ proc mtsSetStartupWord {file word} {
 }
 
 # LC_MAIN's stack size in the Mach-O EXECUTABLE (otool -l): its stacksize
-# field, 0 when the link set none.
+# field, 0 when the link set none. (Line by line: in one Tcl regular
+# expression a non-greedy `.*?` first makes every later quantifier
+# non-greedy too, and `(\d+)` would match one digit.)
 proc mtsLcMainStackSize {executable} {
-    set text [exec otool -l $executable]
-    if {![regexp {cmd LC_MAIN\s.*?stacksize (\d+)} $text -> size]} {
-        error "no LC_MAIN in $executable"
+    set inMain 0
+    foreach line [split [exec otool -l $executable] \n] {
+        if {[regexp {^\s*cmd (\S+)$} $line -> command]} {
+            set inMain [expr {$command eq "LC_MAIN"}]
+        } elseif {$inMain && [regexp {^\s*stacksize ([0-9]+)$} $line -> size]} {
+            return $size
+        }
     }
-    return $size
+    error "no LC_MAIN in $executable"
+}
+
+# What the startup report's usable stack of a main-thread executable is:
+# `512MiB` for LC_MAIN's reservation, whole or less its lowest page (16 KiB),
+# which the kernel leaves inaccessible in some executables and the runtime's
+# discovery steps over (platform/macos.rs: never trusting the reported
+# bottom) -- both observed on the macos-15 runners; else the bytes.
+proc mtsMainStack {usable} {
+    if {$usable <= 536870912 && $usable >= 536870912 - 16384} { return 512MiB }
+    return $usable
 }
 
 # The programs: the census's (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md,
@@ -652,11 +668,11 @@ test mts-main-record-and-report {a main-thread executable's record names the mai
         set worker [mtsLink $hir [file join $dir worker-$linker] worker $linker]
         set m [mtsReport $main]
         set w [mtsReport $worker]
-        lappend results [list $linker [mtsStartupWord $main] [dict get $m startup] [dict get $m thread] [dict get $m usable] \
+        lappend results [list $linker [mtsStartupWord $main] [dict get $m startup] [dict get $m thread] [mtsMainStack [dict get $m usable]] \
             [expr {[dict get $m guard] > 0}] [dict get $w startup] [dict get $w thread] [expr {[dict get $m vm] eq [dict get $w vm]}]]
     }
     lsort -unique [lmap r $results {lrange $r 1 end}]
-} -cleanup {removeDirectory mts-main-report} -result {{1 main-thread main 536870912 1 worker worker 1}}
+} -cleanup {removeDirectory mts-main-report} -result {{1 main-thread main 512MiB 1 worker worker 1}}
 
 test mts-main-lc-main {a main-thread executable reserves its main thread's stack at link time: LC_MAIN's stacksize is 512 MiB with both linkers; a worker executable's is the system's default (0)} -constraints {mtsMain} -body {
     set dir [makeDirectory mts-lc-main]
@@ -840,13 +856,17 @@ test mts-main-gc-stress-report {under GC stress the main-thread executable's sta
     lsort -unique $results
 } -cleanup {removeDirectory mts-main-gc-report} -result {1 main}
 
-test mts-main-linkers-agree {a main-thread executable's startup is the same whichever linker links it: the system linker's and the rustc linker's report the same Vm, thread and stack, and print the same} -constraints {mtsMain mtsSystemLinker mtsRustcLinker} -body {
+test mts-main-linkers-agree {a main-thread executable's startup is the same whichever linker links it: the system linker's and the rustc linker's report the same Vm, policy and thread and LC_MAIN's stack (whose lowest page the kernel may leave inaccessible in either), and print the same} -constraints {mtsMain mtsSystemLinker mtsRustcLinker} -body {
     set dir [makeDirectory mts-main-linkers]
     set hir [mtsCompile $::mtsKept kept]
     set system [mtsLink $hir [file join $dir system] main-thread system]
     set rustc [mtsLink $hir [file join $dir rustc] main-thread rustc]
-    list [expr {[mtsReport $system] eq [mtsReport $rustc]}] [expr {[mtsRun $system {}] eq [mtsRun $rustc {}]}]
-} -cleanup {removeDirectory mts-main-linkers} -result {1 1}
+    set s [mtsReport $system]
+    set r [mtsReport $rustc]
+    list [expr {[dict remove $s usable guard] eq [dict remove $r usable guard]}] \
+        [mtsMainStack [dict get $s usable]] [mtsMainStack [dict get $r usable]] \
+        [expr {[mtsRun $system {}] eq [mtsRun $rustc {}]}]
+} -cleanup {removeDirectory mts-main-linkers} -result {1 512MiB 512MiB 1}
 
 if {$::mtsFixtureDir ne ""} {
     file delete -force $::mtsFixtureDir

@@ -639,7 +639,11 @@ jobs:
     name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/2)
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
-    timeout-minutes: 75
+    # A shard ran 60-70 minutes on main. tier.tcl deals the test files out by
+    # their position, so a new test file moves every later one to the other
+    # shard and can leave one shard with far more of the work (MAIN-THREAD-
+    # STARTUP-MILESTONE-1.md, section 31: 43 and over 75 minutes).
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
