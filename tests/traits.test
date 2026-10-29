@@ -1628,6 +1628,350 @@ fn wait(deadline: int, context s: YSim) -> int:
     set results
 } -result {{{deep<std::ysq::YSq> helper measure<std::ysq::YSq> std::ysq::area twice<std::ysq::YSq>} {deep<std::ysq::YSq> helper measure<std::ysq::YSq> std::ysq::area twice<std::ysq::YSq>}} {{measure<std::ma::A> measure<std::mb::B> std::ma::area std::mb::area} {measure<std::ma::A> measure<std::mb::B> std::ma::area std::mb::area}} {{std::ty::drv::run<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::drv::wrapper<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::ysim::wait} {std::ty::drv::run<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::drv::wrapper<std::ty::drv::Driver=std::ty::ysim::YSim> std::ty::ysim::wait}}}
 
+# ---------------------------------------------------------------------------
+# Implementation context requirements
+# (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md): once a trait
+# operation's implementation is selected, its context requirement is the
+# call's. A specialization requires the contexts of the implementations its
+# operations bind, and acquires none from an implementation it does not
+# invoke; the plan calls a replaced implementation's clone.
+
+# Three witnesses whose implementations need the context trait Log (A,
+# through two helpers), Clock (B, through one) or nothing (C); D's needs
+# Log through another specialization (twice for A), R's through a
+# recursive helper, Y's yields and needs Log; providers of Log (LP, LQ) and
+# Clock (CP, CQ, and CR, whose implementation needs Log itself).
+set ::ticLib {tic/traits.bot {trait Thing:
+    fn show(t: Thing) -> int
+
+context trait Log:
+    fn level() -> int
+
+context trait Clock:
+    fn now() -> int
+
+fn logged(context g: Log) -> int:
+    g.level()
+
+fn clocked(context c: Clock) -> int:
+    c.now()
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+fn outer(t: Thing) -> int:
+    twice(t) * 10
+}
+tic/a.bot {import std::tic::traits
+
+struct A:
+    v: int
+
+fn via(n: int) -> int:
+    n + std::tic::traits::logged()
+
+fn show(t: A) -> int:
+    via(t.v)
+}
+tic/b.bot {import std::tic::traits
+
+struct B:
+    w: int
+
+fn show(t: B) -> int:
+    t.w + std::tic::traits::clocked()
+}
+tic/c.bot {struct C:
+    u: int
+
+fn show(t: C) -> int:
+    t.u
+}
+tic/d.bot {import std::tic::traits
+import std::tic::a
+
+struct D:
+    k: int
+
+fn show(t: D) -> int:
+    t.k + std::tic::traits::twice(std::tic::a::A {v: t.k})
+}
+tic/r.bot {import std::tic::traits
+
+struct R:
+    n: int
+
+fn count(n: int) -> int:
+    if n <= 0:
+        std::tic::traits::logged()
+    else:
+        1 + count(n - 1)
+
+fn show(t: R) -> int:
+    count(t.n)
+}
+tic/rec.bot {import std::tic::traits
+
+fn sum(t: std::tic::traits::Thing, n: int) -> int:
+    if n <= 0:
+        0
+    else:
+        t.show() + sum(t, n - 1)
+}
+tic/y.bot {import std::tic::traits
+
+struct Y:
+    v: int
+
+fn pause(n: int) -> int:
+    yield n
+    n + std::tic::traits::logged()
+
+fn show(t: Y) -> int:
+    pause(t.v)
+}
+tic/lp.bot {type Small = Int in 0..10000
+
+context struct LP:
+    l: Small
+
+fn create() -> LP:
+    LP {l: 100}
+
+fn level(context c: LP) -> int:
+    c.l
+}
+tic/lq.bot {type Small = Int in 0..10000
+
+context struct LQ:
+    l: Small
+
+fn create() -> LQ:
+    LQ {l: 200}
+
+fn level(context c: LQ) -> int:
+    c.l
+}
+tic/cp.bot {type Small = Int in 0..10000
+
+context struct CP:
+    c: Small
+
+fn create() -> CP:
+    CP {c: 1000}
+
+fn now(context k: CP) -> int:
+    k.c
+}
+tic/cq.bot {type Small = Int in 0..10000
+
+context struct CQ:
+    c: Small
+
+fn create() -> CQ:
+    CQ {c: 3000}
+
+fn now(context k: CQ) -> int:
+    k.c
+}
+tic/cr.bot {import std::tic::traits
+
+type Small = Int in 0..10000
+
+context struct CR:
+    c: Small
+
+fn create() -> CR:
+    CR {c: 5000}
+
+fn now(context k: CR) -> int:
+    k.c + std::tic::traits::logged()
+}}
+
+# A program over ::ticLib: every module imported, the providers PROVIDERS
+# (lp, cq, ...) installed in that order, then BODY, in which A(N), B(N),
+# C(N), D(N), R(N) and Y(N) are twice of that witness.
+proc ticProgram {providers body} {
+    set text ""
+    foreach m {traits a b c d r rec y lp lq cp cq cr} {
+        append text "import std::tic::$m\n"
+    }
+    append text "\n"
+    foreach p $providers {
+        append text "with context std::tic::${p}::create()\n"
+    }
+    foreach {w f} {A v B w C u D k R n Y v} {
+        set lower [string tolower $w]
+        regsub -all "\\m${w}\\((\[0-9\]+)\\)" $body "std::tic::traits::twice(std::tic::${lower}::$w {$f: \\1})" body
+    }
+    return "$text$body\n"
+}
+
+# The names of the clones of the monomorphized program HIR.
+proc ticClones {hir} {
+    set names {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "block" && [dict exists $node traitClone]} {
+            lappend names [hir::contexts::BlockName $hir $e]
+        }
+    }
+    return $names
+}
+
+# The diagnostics a strict compilation of SOURCE (::ticLib in a private
+# library) reports: {KIND LINE:COLUMN} each, or `accepted`.
+proc ticReport {source} {
+    withPrivateLibrary {
+        writeModules $::ticLib
+        set failed [catch {surface::compile $source -warnings off} result options]
+    }
+    if {!$failed} {
+        return accepted
+    }
+    return [lmap d [dict getdef $options -diagnostics {}] {
+        regexp {^[^ ]*:([0-9]+):([0-9]+): } [dict get $d message] -> line column
+        list [lindex [dict get $d errorcode] end] $line:$column
+    }]
+}
+
+# The message of the first diagnostic of SOURCE (::ticLib), its location
+# and the library's path left out.
+proc ticMessage {source} {
+    withPrivateLibrary {
+        writeModules $::ticLib
+        catch {surface::compile $source -warnings off} result options
+    }
+    set message [dict get [lindex [dict get $options -diagnostics] 0] message]
+    regsub -all {[^ ]*/tic/} [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}] {tic/}
+}
+
+test trait-implementation-context-witnesses {a specialization requires what the implementations its operations bind require: twice for A needs Log (A's show, through two helpers), for B Clock, for C nothing, and outer for A -- a specialization calling another -- Log; every operation is a direct call of its implementation's clone, one outcome on four backends} -body {
+    moduleAgree $::ticLib [ticProgram {lp cp} {[A(1), B(2), C(3), std::tic::traits::outer(std::tic::a::A {v: 1})]}]
+} -result {value {[202, 2004, 6, 2020]}}
+
+test trait-implementation-context-per-specialization {the checked program's requirement of each specialization is its own implementations' (hir::contexts::verify's `specialized`: the selected implementation graph keeps C's, which needs nothing, as its function as written), each top-level call selects exactly the providers of its specialization's context traits, and the two specializations of one function keep their own selections in their clones' keys: twice for A under Log=LP, for B under Clock=CP, for C under none} -body {
+    set hir [moduleHir $::ticLib [ticProgram {lp cp} {[A(1), B(2), C(3)]}]]
+    set source [dict get $hir traitSource]
+    set specialized [lsort [lmap {k ids} [dict get $source contexts specialized] {
+        list [dict get $source implementations clones $k witnesses] $ids
+    }]]
+    set selections [lsort [lmap {c selection} [dict get $source contexts selections] {set selection}]]
+    set clones [lsort [lmap name [ticClones $hir] {if {[string match *::twice<* $name]} {set name} else continue}]]
+    list $specialized $selections $clones
+} -result {{{std::tic::a::A std::tic::traits::Log} {std::tic::b::B std::tic::traits::Clock}} {{std::tic::traits::Clock std::tic::cp::CP} {std::tic::traits::Log std::tic::lp::LP}} {std::tic::traits::twice<std::tic::a::A,std::tic::traits::Log=std::tic::lp::LP> std::tic::traits::twice<std::tic::b::B,std::tic::traits::Clock=std::tic::cp::CP> std::tic::traits::twice<std::tic::c::C>}}
+
+test trait-implementation-context-missing {a specialization whose implementation needs a context no installed context provides is MISSING-CONTEXT at its top-level call, in source terms -- the specialization by its function and witness, the operation and its selected implementation, where it is called, the helpers -- and only there: a missing Log invalidates neither twice for B nor for C, and a program using only C needs no context at all} -body {
+    list [moduleAgree $::ticLib [ticProgram cp {[B(2), C(3)]}]] \
+        [ticReport [ticProgram cp {[A(1), B(2)]}]] \
+        [ticMessage [ticProgram cp {[A(1), B(2)]}]] \
+        [moduleAgree $::ticLib [ticProgram {} {C(3)}]]
+} -result {{value {[2004, 6]}} {{MISSING-CONTEXT 16:2}} {std::tic::traits::Log is required by this call, but no installed context implements it (install one with "with context EXPR" before the call):
+    std::tic::traits::twice (for std::tic::a::A)
+     -> std::tic::a::show, the implementation of std::tic::traits::Thing's operation show for std::tic::a::A, called at tic/traits.bot:17:5
+     -> std::tic::a::via
+     -> std::tic::traits::logged
+        directly requires std::tic::traits::Log
+installed contexts:
+    std::tic::cp::CP (does not implement std::tic::traits::Log: no function std::tic::cp::level exists: "level" is not defined by module "std::tic::cp" (only the namespace that owns std::tic::cp::CP implements its context-trait operations))} {value 6}}
+
+test trait-implementation-context-ambiguous {two installed providers of a context trait a selected implementation needs are AMBIGUOUS-CONTEXT-IMPLEMENTATION at the call that needs it, never a choice; two providers of a context trait no selected implementation needs are no obligation of any call} -body {
+    list [moduleAgree $::ticLib [ticProgram {lp cp cq} {[A(1), C(3)]}]] \
+        [ticReport [ticProgram {lp cp cq} {[A(1), B(2)]}]] \
+        [ticReport [ticProgram {lp lq cp} {[A(1), B(2), C(3)]}]]
+} -result {{value {[202, 6]}} {{AMBIGUOUS-CONTEXT-IMPLEMENTATION 18:50}} {{AMBIGUOUS-CONTEXT-IMPLEMENTATION 18:2}}}
+
+test trait-implementation-context-transitive {a requirement reaches a specialization through any number of helpers, through another specialization an implementation calls (D's show calls twice for A), through a recursive helper (R's count) and through trait-polymorphic self-recursion (sum), exactly as through a direct call; and a context-trait operation's selected provider whose own implementation needs another context trait (CR's now needs Log) makes that one the selecting call's obligation too} -body {
+    list [moduleAgree $::ticLib [ticProgram lp {[D(3), R(4), std::tic::rec::sum(std::tic::a::A {v: 1}, 3), std::tic::rec::sum(std::tic::c::C {u: 2}, 3)]}]] \
+        [moduleAgree $::ticLib [ticProgram {lp cr} {B(2)}]] \
+        [ticReport [ticProgram cr {B(2)}]] \
+        [ticReport [ticProgram {} {D(3)}]] \
+        [lrange [split [ticMessage [ticProgram {} {D(3)}]] \n] 1 6]
+} -result {{value {[418, 208, 303, 6]}} {value 10204} {{MISSING-CONTEXT 16:1}} {{MISSING-CONTEXT 15:1}} {{    std::tic::traits::twice (for std::tic::d::D)} {     -> std::tic::d::show, the implementation of std::tic::traits::Thing's operation show for std::tic::d::D, called at tic/traits.bot:17:5} {     -> std::tic::traits::twice (for std::tic::a::A)} {     -> std::tic::a::show, the implementation of std::tic::traits::Thing's operation show for std::tic::a::A, called at tic/traits.bot:17:5} {     -> std::tic::a::via} {     -> std::tic::traits::logged}}}
+
+test trait-implementation-context-yield {one selected implementation both yields and needs a context (Y's show, through its helper pause): the coroutine of twice for Y runs under the provider; without one it is MISSING-CONTEXT, never malformed IR; its top-level call is UNWRAPPED-YIELD, as before; and C's specialization acquires neither effect (a coroutine of it is COROUTINE-RHS-NOT-YIELDING, and it needs no provider)} -body {
+    list [moduleAgree $::ticLib [ticProgram lp "coroutine {step, first} = Y(5)\na = step()\nb = step()\n\[first, a, b, C(3)\]"]] \
+        [ticReport [ticProgram {} "coroutine {step, first} = Y(5)\na = step()\nb = step()\n\[first, a, b, C(3)\]"]] \
+        [ticReport [ticProgram lp {Y(5)}]] \
+        [ticReport [ticProgram {} "coroutine {step, first} = C(5)\nfirst"]]
+} -result {{value {[5, 5, 210, 6]}} {{MISSING-CONTEXT 15:1}} {{UNWRAPPED-YIELD 16:1}} {{COROUTINE-RHS-NOT-YIELDING 15:1}}}
+
+test trait-implementation-context-no-fallback {provider availability never selects an implementation (SFIAE): with no Log installed the operation still binds A's own show and the call is MISSING-CONTEXT, although a context-free function show(A) is visible to the program; installing a provider does not change which implementation the operation calls -- and the visible function is still what a direct call of it calls} -body {
+    set pre "import std::tic::traits\nimport std::tic::a\nimport std::tic::lp\n\nfn show(t: std::tic::a::A) -> int:\n    7\n\n"
+    list [ticReport "${pre}std::tic::traits::twice(std::tic::a::A {v: 1})\n"] \
+        [moduleAgree $::ticLib "${pre}with context std::tic::lp::create()\n\[std::tic::traits::twice(std::tic::a::A {v: 1}), show(std::tic::a::A {v: 1})\]\n"]
+} -result {{{MISSING-CONTEXT 8:1}} {value {[202, 7]}}}
+
+test trait-implementation-context-layouts {the implementation in the entry program, in the module of the trait-polymorphic caller, or in a module of its own, the witness's (TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md's entry-user-trait, module-impl and split-modules shapes, with the program's own context trait): one outcome on four backends, and without the installation MISSING-CONTEXT, never an internal error} -body {
+    set out "type Small = Int in 0..1000\n\ncontext trait Out:\n    fn emit(n: int) -> int\n\ncontext struct K:\n    k: Small\n\nfn emit(n: int, context c: K) -> int:\n    n + c.k\n\nfn through(n: int, context o: Out) -> int:\n    o.emit(n)\n\nfn make(k: Small) -> K:\n    K {k: k}\n"
+    set entry "${out}\ntrait Thing:\n    fn show(t: Thing) -> int\n\nstruct A:\n    v: int\n\nfn show(t: A) -> int:\n    through(t.v)\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n\n"
+    set results {}
+    lappend results [moduleAgree {} "${entry}with context K {k: 10}\ntwice(A {v: 1})\n"]
+    lappend results [lindex [moduleAgree {} "${entry}twice(A {v: 1})\n"] 1]
+    set together [list ly/out.bot $out ly/shapes.bot "import std::ly::out\n\ntrait Thing:\n    fn show(t: Thing) -> int\n\nstruct A:\n    v: int\n\nfn show(t: A) -> int:\n    std::ly::out::through(t.v)\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n"]
+    lappend results [moduleAgree $together "import std::ly::out\nimport std::ly::shapes\nwith context std::ly::out::make(10)\nstd::ly::shapes::twice(std::ly::shapes::A {v: 1})\n"]
+    set split [list ly/out.bot $out ly/thing.bot "trait Thing:\n    fn show(t: Thing) -> int\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n" \
+        ly/witness.bot "import std::ly::out\n\nstruct A:\n    v: int\n\nfn show(t: A) -> int:\n    std::ly::out::through(t.v)\n"]
+    lappend results [moduleAgree $split "import std::ly::out\nimport std::ly::thing\nimport std::ly::witness\nwith context std::ly::out::make(10)\nstd::ly::thing::twice(std::ly::witness::A {v: 1})\n"]
+    lappend results [lindex [moduleAgree $split "import std::ly::thing\nimport std::ly::witness\nstd::ly::thing::twice(std::ly::witness::A {v: 1})\n"] 1]
+} -result {{value 22} {CORE SEMANTIC MISSING-CONTEXT} {value 22} {value 22} {CORE SEMANTIC MISSING-CONTEXT}}
+
+test trait-implementation-context-monomorphized {the monomorphized program has no trait or context-trait operation left and no runtime selection: every former operation is a direct call -- an implementation the plan replaces by the clone it made (twice for A calls A's show clone under Log=LP), any other (C's show, the providers' level and now) itself -- and the dropped declarations (A's and B's show as written) are called nowhere} -body {
+    set hir [moduleHir $::ticLib [ticProgram {lp cp} {[A(1), B(2), C(3)]}]]
+    set operations 0
+    set targets {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $node traitCall]} {
+            incr operations
+        }
+        if {[dict get $node kind] eq "call" && [dict exists $node traitImpl]} {
+            set b [dict get $hir exprs [dict get $node callee] binding]
+            lappend targets [hir::contexts::BlockName $hir [hir::contexts::Denotes $hir $b]]
+        }
+    }
+    list $operations [lsort -unique $targets]
+} -result {0 {std::tic::a::show<std::tic::traits::Log=std::tic::lp::LP> std::tic::b::show<std::tic::traits::Clock=std::tic::cp::CP> std::tic::c::show std::tic::cp::now std::tic::lp::level}}
+
+test trait-implementation-context-dangling {the plan's invariant (hir::traits::Dangling): an action naming a declaration the monomorphized program drops -- an operation's replaced implementation called by its original identity, the original defect -- or a clone the plan does not make is a TRAIT-INTERNAL diagnostic at the call, never a malformed build; the plan of a valid program has none} -body {
+    withPrivateLibrary {
+        writeModules $::ticLib
+        set hir [surface::compile [ticProgram lp {A(1)}] -warnings off]
+        set checked [dict get $hir traitSource]
+        hir::activate $checked
+        set plan [hir::traits::Plan $checked {}]
+    }
+    set clean [hir::traits::Dangling $checked [dict get $plan clones] [dict get $plan actions] [dict get $plan drop] [dict get $plan methods]]
+    # The original defect: the operation's action without the clone.
+    set broken [dict map {key action} [dict get $plan actions] {
+        if {[lindex $action 0] eq "trait" && [llength $action] > 2} {lrange $action 0 1} else {set action}
+    }]
+    set missing [dict map {key action} [dict get $plan actions] {
+        if {[lindex $action 0] eq "redirect"} {list redirect [list e0 {} {}]} else {set action}
+    }]
+    list $clean \
+        [lsort -unique [lmap d [hir::traits::Dangling $checked [dict get $plan clones] $broken [dict get $plan drop] [dict get $plan methods]] {
+            list [lindex $d 0] [string match {*the implementation std::tic::a::show, a declaration the monomorphized program replaces*} [lindex $d 1]]
+        }]] \
+        [lsort -unique [lmap d [hir::traits::Dangling $checked [dict get $plan clones] $missing [dict get $plan drop] [dict get $plan methods]] {
+            list [lindex $d 0] [string match {*the specialization e0*which the plan does not make*} [lindex $d 1]]
+        }]]
+} -result {{} {{TRAIT-INTERNAL 1}} {{TRAIT-INTERNAL 1}}}
+
+test trait-implementation-context-agreement {the checked program's requirement of each specialization is what its clone requires in the monomorphized program: the same selected call graph decides both what the program does and what it needs -- the context traits of build 1's specialized requirement are exactly the clone's selection, and the contexts the clone requires are the selected providers'} -body {
+    set hir [moduleHir $::ticLib [ticProgram {lp cr} {[A(1), B(2), C(3), D(2)]}]]
+    set source [dict get $hir traitSource]
+    set first [lsort [lmap {k ids} [dict get $source contexts specialized] {
+        list [dict get $source implementations clones $k witnesses] $ids
+    }]]
+    set second {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "block" && [dict exists $node traitClone]
+                && [string match *::twice<* [hir::contexts::BlockName $hir $e]]} {
+            lappend second [list [hir::contexts::BlockName $hir $e] [hir::contexts::required $hir $e]]
+        }
+    }
+    list $first [lsort $second]
+} -result {{{std::tic::a::A std::tic::traits::Log} {std::tic::b::B std::tic::traits::Clock} {std::tic::d::D std::tic::traits::Log}} {{std::tic::traits::twice<std::tic::a::A,std::tic::traits::Log=std::tic::lp::LP> std::tic::lp::LP} {std::tic::traits::twice<std::tic::b::B,std::tic::traits::Clock=std::tic::cr::CR> {std::tic::cr::CR std::tic::lp::LP}} {std::tic::traits::twice<std::tic::c::C> {}} {std::tic::traits::twice<std::tic::d::D,std::tic::traits::Log=std::tic::lp::LP> std::tic::lp::LP}}}
+
 test trait-source-audit {no compiler or runtime source implements traits with runtime names, method maps, dictionaries, function-pointer tables or backend tags} -body {
     set hits {}
     foreach dir {core native/src compiler} {
