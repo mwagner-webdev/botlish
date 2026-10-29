@@ -696,7 +696,9 @@ mirrors the prototype's `benchwork.bot`) on the native backend
 one machine. Allocations come from the native allocation report under the
 deterministic driver, as the difference between two sizes of the same
 program, with each driver's own allocation sites left out (the drivers
-allocate per turn for their own bookkeeping). The machine: a 4-core container (Intel Xeon @ 2.10 GHz, Linux 6.18, 15 GB), shared: treat times as orders of magnitude.
+allocate per turn for their own bookkeeping). The machine: a 4-core
+container (Intel Xeon @ 2.10 GHz, Linux 6.18, 15 GB), shared: treat times
+as orders of magnitude.
 
 The run recorded here (2026-10-29), `tclsh9.0 bench/event-loop.tcl`, about
 20 minutes:
@@ -728,8 +730,10 @@ allocate the same.
 | channel ping-pong, 100,000 events | 200,000 | 100,000 | 156.3 ms: 0.78 us/dispatch, 1.56 us/turn | 152.3 ms: 0.76 us/dispatch, 1.52 us/turn |
 
 The production scheduler costs what the prototype costs per dispatch,
-within 3% either way, with round-robin collection, delivery policies,
-generation checks on every wake and the fault channels added. Neither
+within 3% either way: what the milestone added on this path -- a
+generation check per dispatch, the delivery policy per channel record (the
+ping-pong posts one per dispatch), the fault channels -- is within the
+noise of these workloads. Neither
 workload enters the kernel: every turn had ready work, so the adapter
 skipped every poll (production: kernel polls 0, skipped polls 1,000 and
 100,000). The exploration's figures (0.23 and 0.62 us) come from another
@@ -744,7 +748,7 @@ timers, production 6.8).
 |---|---|
 | a channel registration, create + revoke (100,000 in a row) | 0.43 us |
 | the observer phase, per observer run (100 observers x 10,000 turns, against none) | 0.74 us (750.2 against 8.1 ms) |
-| two 20,000-record Reliable floods beside a quiet source (flood.bot) | 40,000 records in 230 ms wall (174,000 records/s); the quiet source's worst latency 121 us; 1,246 records held by the scheduler, 2,512 posts refused to the producers (backpressure); nothing lost or reordered |
+| two 20,000-record Reliable floods beside a quiet source (flood.bot) | 40,000 records in 230 ms wall (174,000 records/s); the quiet source's worst latency 121 us; 1,246 records held by the scheduler, 2,512 posts refused to the producers (backpressure); nothing lost or reordered (`el-linux-flood` checks it) |
 | wakeup latency of producer-thread posts (wake.bot: 300 jittered, 40 in racing pairs) | worst 1.9 ms (stream), 0.49 ms (pairs); none waited for the 50 ms heartbeat |
 | an idle 300 ms sleep | one kernel sleep, 75 us of CPU |
 
@@ -754,8 +758,7 @@ sleep; its wakeup claim was "none held to the heartbeat", which
 30 ms, on a shared machine), with the lost-wakeup positive control.
 
 **What did not improve**: dispatch itself (the same cost, as intended: the
-milestone kept the prototype's dispatch path and added no per-dispatch
-work), and small timer counts (10 timers: 3.5 against 3.4 us per dispatch,
+milestone kept the prototype's dispatch path), and small timer counts (10 timers: 3.5 against 3.4 us per dispatch,
 the heap's bookkeeping against a scan of ten rows).
 
 ## 12. Testing
