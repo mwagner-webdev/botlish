@@ -1,0 +1,101 @@
+# fx.bot -- the binding of the native test fixtures (fixture.c): producer
+# threads, the TCP line protocol and its test clients. Every function takes
+# and returns scalars.
+import std::ffi::c
+
+extern c library "fixture" static at "native/libfixture.a"
+
+extern c fn fx_synth(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, interval: std::ffi::c::Int, burst: std::ffi::c::Int, jitter: std::ffi::c::Int, gap: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_synth_join() -> std::ffi::c::Int
+extern c fn fx_burst(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, base: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn fx_synth_refusals() -> std::ffi::c::LongLong
+extern c fn fx_post(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, a: std::ffi::c::LongLong, b: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn fx_listen() -> std::ffi::c::Int
+extern c fn fx_port(fd: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_accept(fd: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_conn_fd(conn: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_next_line(conn: std::ffi::c::Int, naive: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_cmd() -> std::ffi::c::LongLong
+extern c fn fx_arg() -> std::ffi::c::LongLong
+extern c fn fx_send(conn: std::ffi::c::Int, value: std::ffi::c::LongLong) -> std::ffi::c::Int
+extern c fn fx_hangup(conn: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_client(port: std::ffi::c::Int, id: std::ffi::c::Int, pattern: std::ffi::c::Int, lines: std::ffi::c::Int, interval: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn fx_clients_join() -> std::ffi::c::Int
+extern c fn fx_client_replies(id: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn fx_spin(us: std::ffi::c::Int) -> std::ffi::c::Int
+
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+nomethod fn synth(endpoint: int, slot: int, gen: int, count: int, interval: int, burst: int, jitter: int, gap: int) -> int:
+    ci(endpoint).fx_synth(ci(slot), ci(gen), ci(count), ci(interval), ci(burst), ci(jitter), ci(gap))
+
+nomethod fn burst(endpoint: int, slot: int, gen: int, count: int, base: int) -> int:
+    ci(endpoint).fx_burst(ci(slot), ci(gen), ci(count), cll(base))
+
+fn synth_join() -> int:
+    fx_synth_join()
+
+fn synth_refusals() -> int:
+    fx_synth_refusals()
+
+nomethod fn post(endpoint: int, slot: int, gen: int, a: int, b: int) -> int:
+    ci(endpoint).fx_post(ci(slot), ci(gen), cll(a), cll(b))
+
+fn listen() -> int:
+    fx_listen()
+
+fn port(fd: int) -> int:
+    fx_port(ci(fd))
+
+fn accept(fd: int) -> int:
+    fx_accept(ci(fd))
+
+fn conn_fd(conn: int) -> int:
+    fx_conn_fd(ci(conn))
+
+# 1: a line (cmd, arg); 0: none buffered and the socket has nothing now;
+# -1: end of input. NAIVE: the bug the buffered-lines test pins.
+nomethod fn next_line(conn: int, naive: bool) -> int:
+    flag = if naive:
+        1
+    else:
+        0
+    ci(conn).fx_next_line(ci(flag))
+
+fn cmd() -> int:
+    fx_cmd()
+
+fn arg() -> int:
+    fx_arg()
+
+nomethod fn send(conn: int, value: int) -> int:
+    ci(conn).fx_send(cll(value))
+
+fn hangup(conn: int) -> int:
+    fx_hangup(ci(conn))
+
+nomethod fn client(port: int, id: int, pattern: int, lines: int, interval: int) -> int:
+    ci(port).fx_client(ci(id), ci(pattern), ci(lines), ci(interval))
+
+fn clients_join() -> int:
+    fx_clients_join()
+
+fn client_replies(id: int) -> int:
+    fx_client_replies(ci(id))
+
+fn spin(us: int) -> int:
+    fx_spin(ci(us))

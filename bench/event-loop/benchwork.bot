@@ -1,0 +1,72 @@
+# benchwork.bot -- the workloads of bench/event-loop.tcl on std::event_loop,
+# the same as the exploration prototype's (audit/event-loop/src/benchwork.bot)
+# so the two schedulers are compared on identical work.
+import std::event_loop
+import std::mutable_array
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn yielder(k: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to k:
+        std::event_loop::yield_now()
+    k
+
+fn spawn_yielders(n: int, k: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    loop t from 0 to n:
+        coroutine {step, first} = yielder(k)
+        std::event_loop::adopt(step, first)
+
+fn producer(ch: std::event_loop::Reg, k: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to k:
+        ch.post(i, 0)
+        std::event_loop::yield_now()
+    k
+
+fn consumer(ch: std::event_loop::Reg, k: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    total = std::mutable_array::create(1, 0)
+    loop i from 0 to k:
+        e = std::event_loop::wait(ch)
+        total.set(0, total.at(0) + e.a)
+    total.at(0)
+
+fn spawn_pair(k: int, context ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    ch = std::event_loop::channel(Delivery::Lossy, 4)
+    coroutine {step: c, first: cf} = consumer(ch, k)
+    std::event_loop::adopt(c, cf)
+    coroutine {step: p, first: pf} = producer(ch, k)
+    std::event_loop::adopt(p, pf)
+
+fn sleeper(delay: int, k: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to k:
+        std::event_loop::sleep(delay)
+    k
+
+fn spawn_sleepers(n: int, k: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    loop t from 0 to n:
+        coroutine {step, first} = sleeper(50 + t, k)
+        std::event_loop::adopt(step, first)
+
+# K registrations made and revoked, one after another.
+fn churn(k: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to k:
+        r = std::event_loop::channel(Delivery::Lossy, 4)
+        std::event_loop::revoke(r)
+    k
+
+fn watcher(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Turn:
+            break
+        runs.set(0, runs.at(0) + 1)
+    runs.at(0)
+
+# N observers beside one task yielding K times: K busy turns, each with an
+# observer phase running N tasks.
+fn spawn_observers(n: int, k: int, context ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop t from 0 to n:
+        coroutine {step, first} = watcher(std::event_loop::observer())
+        std::event_loop::adopt(step, first)
+    coroutine {step: y, first: yf} = yielder(k)
+    std::event_loop::adopt(y, yf)

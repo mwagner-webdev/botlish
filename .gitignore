@@ -24,3 +24,13 @@ __pycache__/
 
 # single/build.sh's default output (SINGLE-EXECUTABLE.md).
 /single/out/
+
+# tools/event-loop-linux.tcl builds the Linux event-loop driver package's
+# archive where it installs the package, never here.
+/packages/event_loop_linux/native/*.a
+/packages/event_loop_linux/native/*.o
+
+# examples/event-loop/native/build.sh's products (the installed driver
+# package and the ticker's archive).
+/examples/event-loop/native/.bot_modules/
+/examples/event-loop/native/libticker.a

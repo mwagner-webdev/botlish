@@ -1,0 +1,52 @@
+# ticker.bot -- a native event source as a library (examples/event-loop/
+# native/ticker.c behind it). It needs two capabilities, both granted by
+# the application through contexts: the Loop, to register its source, and
+# the Linux driver's integration capability (event_loop_linux::Native), to
+# open the endpoint its native thread posts to. It cannot make the loop
+# wait or turn: that needs the Driver, which only the application installs.
+import event_loop_linux
+import std::event_loop
+import std::ffi::c
+import type std::event_loop::Delivery
+
+extern c library "ticker" static at "libticker.a"
+extern c fn ticker_start(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, count: std::ffi::c::Int, interval: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn ticker_join() -> std::ffi::c::Int
+
+# A running ticker: its registration and the endpoint its thread posts to.
+opaque struct Ticker:
+    reg: std::event_loop::Reg
+    endpoint: event_loop_linux::Endpoint
+
+private fn ci(x: int) -> std::ffi::c::Int:
+    if x < 0:
+        0
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+# Start a native thread posting COUNT ticks, one every INTERVAL
+# microseconds. Its records reach a Reliable source of capacity 16 that
+# keeps the loop alive while a task waits on it; a consumer that falls
+# behind holds the endpoint, and the thread waits (backpressure).
+fn start(count: int, interval: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> Ticker errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    reg = std::event_loop::source(Delivery::Reliable, 16, :keep_alive)
+    ep = event_loop_linux::endpoint(16)
+    # (Method syntax: the warning METHOD-ELIGIBLE asks for it, and an
+    # extern declaration cannot be marked nomethod.)
+    endpoint = ci(event_loop_linux::endpoint_id(ep))
+    r = endpoint.ticker_start(ci(std::event_loop::native_slot(reg)), ci(std::event_loop::native_generation(reg)), ci(count), ci(interval))
+    if r < 0:
+        fail std::event_loop::DriverFault {code: r}
+    Ticker {reg: reg, endpoint: ep}
+
+# The registration the ticks arrive on.
+fn reg(t: Ticker) -> std::event_loop::Reg:
+    t.reg
+
+# Stop: wait for the thread, close the endpoint, revoke the registration.
+fn stop(t: Ticker, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> bool errors std::event_loop::SchedulerFault:
+    ticker_join()
+    event_loop_linux::close_endpoint(t.endpoint)
+    std::event_loop::revoke(t.reg)

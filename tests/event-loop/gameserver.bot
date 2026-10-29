@@ -1,0 +1,200 @@
+# gameserver.bot -- the game-server workload of EVENT-LOOP-EXPLORATION.md
+# (Experiment A), on std::event_loop and the context trait Net, so the same
+# code runs on the deterministic driver (gameserver-sim.bot, every backend)
+# and on real sockets (tests/event-loop/native/gameserver-linux.bot).
+#
+#   network input  -> a session task per connection (scheduler-owned), which
+#                     drives its own dialogue coroutine DIRECTLY (ordinary
+#                     resumes, its own protocol: resume Line, yields Reply);
+#   dialogue work  -> asks for a path: the session adopts a pathfinding task
+#                     (yields every `chunk` steps) and waits on a result
+#                     channel while other inputs keep arriving;
+#   simulation     -> a repeating timer; each tick DIRECTLY advances an AI
+#                     coroutine one step (its own protocol, never scheduled);
+#   output         -> sessions post replies to an outbox channel; an
+#                     observer flushes it once per turn (coalesced writes).
+#
+# Commands of a line (cmd, arg): 1 MOVE arg (a path of `arg` steps), 2 TALK
+# arg (an echo), 9 BYE.
+import elog
+import std::event_loop
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# What the network gives a program: per connection, its lines become events
+# of a registration the program made (attach), and replies go back (send);
+# a connection is read only as far as the program has acknowledged its
+# lines (ack), so a slow session pushes back on its peer.
+context trait Net:
+    fn attach(conn: int, reg: std::event_loop::Reg) -> int
+    fn send(conn: int, value: int) -> int
+    fn hangup(conn: int) -> int
+    fn ack(conn: int) -> int
+
+struct Line:
+    cmd: int
+    arg: int
+
+struct Reply:
+    kind: int
+    value: int
+
+struct Tick:
+    n: int
+
+struct Move:
+    x: int
+
+# Reply kinds.
+say_kind = 1
+find_kind = 3
+bye_kind = 4
+
+# Steps of pathfinding between yields.
+chunk = 10
+
+# A dialogue: an ordinary coroutine of its own protocol, driven directly by
+# its session. It knows nothing of the scheduler: its yields go to the
+# session that resumes it.
+fn dialogue(conn: int, resume Line) -> Reply errors IndexNotFound:
+    cur = std::mutable_array::create(2, 0)
+    first = yield Reply {kind: say_kind, value: 1000 + conn}
+    cur.set(0, first.cmd)
+    cur.set(1, first.arg)
+    loop:
+        cmd = cur.at(0)
+        arg = cur.at(1)
+        if cmd == 9:
+            break
+        line = if cmd == 1:
+            found = yield Reply {kind: find_kind, value: arg}
+            yield Reply {kind: say_kind, value: 2000000 + found.arg}
+        else:
+            yield Reply {kind: say_kind, value: 3000000 + arg}
+        cur.set(0, line.cmd)
+        cur.set(1, line.arg)
+    Reply {kind: bye_kind, value: conn}
+
+# Pathfinding: a scheduler task that yields every `chunk` steps and posts
+# its result (twice the length, say) to CH.
+fn pathfinder(n: int, ch: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to n:
+        if i.mod(chunk) == 0:
+            std::event_loop::yield_now()
+    ch.post(n * 2, 0)
+    n
+
+fn pathfind(n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    ch = std::event_loop::channel(Delivery::Reliable, 1)
+    coroutine {step, first} = pathfinder(n, ch)
+    std::event_loop::adopt(step, first)
+    e = std::event_loop::wait(ch)
+    std::event_loop::revoke(ch)
+    e.a
+
+fn session(conn: int, reg: std::event_loop::Reg, outbox: std::event_loop::Reg, context ev: std::event_loop::Loop, net: Net) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    # lines handled, the largest and the total `now - arg` of TALK lines
+    # (native clients send their send time as the argument: the
+    # network-to-handler latency; meaningless on the deterministic driver)
+    lines = std::mutable_array::create(3, 0)
+    coroutine {step, first} = dialogue(conn):
+        on IndexNotFound:
+            Reply {kind: bye_kind, value: -1}
+    outbox.post(conn, first.value)
+    loop:
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Event:
+            break
+        lines.set(0, lines.at(0) + 1)
+        if e.a == 2:
+            lag = std::event_loop::now() - e.b
+            if lag > lines.at(1):
+                lines.set(1, lag)
+            lines.set(2, lines.at(2) + lag)
+        if std::event_loop::tracing?():
+            elog::say2("conn ", conn, " cmd ", e.a)
+            elog::say("in turn ", std::event_loop::turn_number())
+        reply = step(Line {cmd: e.a, arg: e.b}):
+            on IndexNotFound:
+                Reply {kind: bye_kind, value: -1}
+        final = if reply.kind == find_kind:
+            found = pathfind(reply.value)
+            elog::say2("conn ", conn, " path found in turn ", std::event_loop::turn_number())
+            step(Line {cmd: 100, arg: found}):
+                on IndexNotFound:
+                    Reply {kind: bye_kind, value: -1}
+        else:
+            reply
+        if final.kind == bye_kind:
+            break
+        outbox.post(conn, final.value)
+        # Demand-driven reading: one more line may be read for this
+        # connection (backpressure).
+        net.ack(conn)
+    net.hangup(conn)
+    std::event_loop::revoke(reg)
+    elog::say2("conn ", conn, " closed in turn ", std::event_loop::turn_number())
+    elog::say2("conn ", conn, " lines ", lines.at(0))
+    elog::say2("conn ", conn, " max lag us ", lines.at(1))
+    elog::say2("conn ", conn, " total lag us ", lines.at(2))
+    lines.at(0)
+
+fn acceptor(listener: std::event_loop::Reg, outbox: std::event_loop::Reg, max: int, context ev: std::event_loop::Loop, net: Net) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop i from 0 to max:
+        e = std::event_loop::wait(listener)
+        if e.reason != Wake::Event:
+            break
+        conn = e.a
+        reg = std::event_loop::source(Delivery::Reliable, 16, :keep_alive)
+        net.attach(conn, reg)
+        coroutine {step, first} = session(conn, reg, outbox)
+        std::event_loop::adopt(step, first)
+    std::event_loop::revoke(listener)
+    max
+
+# The once-per-turn output flush: everything the sessions posted this turn,
+# sent in one batch.
+fn flusher(outbox: std::event_loop::Reg, context ev: std::event_loop::Loop, net: Net) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    obs = std::event_loop::observer()
+    total = std::mutable_array::create(2, 0)
+    loop:
+        t = std::event_loop::wait(obs)
+        if t.reason != Wake::Turn:
+            break
+        total.set(1, 0)
+        loop:
+            m = std::event_loop::try_take(outbox)
+            if m.reason != Wake::Event:
+                break
+            net.send(m.a, m.b)
+            total.set(1, total.at(1) + 1)
+        if total.at(1) > 0:
+            elog::say2("flush ", total.at(1), " in turn ", t.a)
+            total.set(0, total.at(0) + total.at(1))
+    total.at(0)
+
+# An AI agent: its own protocol (resume Tick, yields Move), advanced
+# directly, one step per world tick.
+fn agent(resume Tick) -> Move errors IndexNotFound:
+    pos = std::mutable_array::create(1, 0)
+    loop:
+        x = pos.at(0)
+        tick = yield Move {x: x}
+        pos.set(0, x + tick.n)
+    Move {x: 0}
+
+fn world(period: int, ticks: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    clock = std::event_loop::every(period)
+    coroutine {step, first} = agent():
+        on IndexNotFound:
+            Move {x: -1}
+    pos = std::mutable_array::create(1, first.x)
+    loop k from 0 to ticks:
+        e = std::event_loop::wait(clock)
+        m = step(Tick {n: e.count})
+        pos.set(0, m.x)
+        elog::say("world tick, agent at ", m.x)
+    std::event_loop::revoke(clock)
+    pos.at(0)

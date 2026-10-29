@@ -1,0 +1,44 @@
+# hoststep.bot -- the production scheduler under a host-stepped driver
+# (stepdrv.bot): the program's main runs as a coroutine the host steps,
+# because the selected implementation of std::event_loop::Driver's block
+# yields. Each value the host receives is a deadline the loop waits for;
+# then the number of turns the loop ran.
+import elog
+import std::coroutine
+import std::event_loop
+import stepdrv
+
+fn sleeper(n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(100 * n)
+    elog::say("woke ", n)
+    n
+
+fn spawn(n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    coroutine {step, first} = sleeper(n)
+    std::event_loop::adopt(step, first)
+
+fn drive(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    spawn(1)
+    spawn(2)
+    std::event_loop::run()
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> int:
+    drive():
+        on std::event_loop::SchedulerFault:
+            -2
+        on std::event_loop::DriverFault:
+            -3
+        on std::event_loop::LoopReentered:
+            -4
+
+with context std::event_loop::create(16, :trace)
+with context stepdrv::create()
+coroutine {step, first} = main()
+received = loop i from 0 to 8:
+    if std::coroutine::done?(step):
+        break
+    step()
+trace = std::event_loop::trace():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+[[first], received, trace]

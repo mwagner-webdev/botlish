@@ -1,0 +1,125 @@
+# fairness.bot -- a saturated loop (EVENT-LOOP-EXPLORATION.md's
+# a-fairness, under the production contract).
+#
+# Pressure at once, on the deterministic driver (budget 8):
+#   * greedy: continuous activity (yield_now 40 times);
+#   * storm: every dispatch adopts the next storm task, which is ready at once
+#     -- a ready queue replenished forever (until 60 generations);
+#   * flood: 200 records for each of two sources, all released at t=10, one
+#     consumer taking an event per wake (wait), the other draining per wake
+#     (try_take); and one record of a third, quiet source at t=11;
+#   * a ticker sleeping 1000 us three times;
+# and a bystander, adopted by greedy's fifth step, whose first act is to
+# yield. tests/event-loop.test checks: each turn collects at most 8 records;
+# greedy runs at most once per turn; the bystander runs in the turn after
+# it became ready; every storm generation runs in the turn after its parent;
+# the quiet source's record is collected in the first turn after it is
+# released (the driver serves its sources round-robin -- the exploration's
+# FIFO driver kept it behind the bursts for 50 turns); the drainer keeps up
+# with its source, the one-per-wake reader does not; the ticker fires on
+# time.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import std::mutable_array
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn bystander(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    elog::say("bystander ready at ", std::event_loop::turn_number())
+    std::event_loop::yield_now()
+    elog::say("bystander ran at ", std::event_loop::turn_number())
+    7
+
+fn spawn_bystander(context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    coroutine {step, first} = bystander()
+    elog::say("bystander id ", std::event_loop::adopt(step, first))
+
+fn greedy(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 40:
+        if i == 5:
+            spawn_bystander()
+        std::event_loop::yield_now()
+    1
+
+fn storm(generation: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    elog::say("storm generation ", generation)
+    if generation < 60:
+        coroutine {step, first} = storm(generation + 1)
+        std::event_loop::adopt(step, first)
+    generation
+
+fn reader(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    total = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        total.set(0, total.at(0) + 1)
+        if total.at(0) == 200:
+            elog::say("reader got all at ", std::event_loop::turn_number())
+    total.at(0)
+
+# Takes everything queued in one dispatch (try_take), then waits.
+fn drainer(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    total = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        total.set(0, total.at(0) + 1)
+        loop:
+            more = std::event_loop::try_take(src)
+            if more.reason != Wake::Event:
+                break
+            total.set(0, total.at(0) + 1)
+        if total.at(0) == 200:
+            elog::say("drainer got all at ", std::event_loop::turn_number())
+    total.at(0)
+
+fn quiet(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(src)
+    elog::say("quiet record at ", std::event_loop::turn_number())
+    e.a
+
+fn ticker(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 3:
+        std::event_loop::sleep(1000)
+        elog::say("tick at ", std::event_loop::now())
+    3
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    src = std::event_loop::source(Delivery::Lossy, 1000, :keep_alive)
+    other = std::event_loop::source(Delivery::Lossy, 1000, :keep_alive)
+    calm = std::event_loop::source(Delivery::Lossy, 10, :keep_alive)
+    loop i from 0 to 200:
+        std::event_loop::deterministic::inject(10, src, i, 0)
+        std::event_loop::deterministic::inject(10, other, i, 0)
+    std::event_loop::deterministic::inject(11, calm, 99, 0)
+    coroutine {step: g, first: gf} = greedy()
+    elog::say("greedy id ", std::event_loop::adopt(g, gf))
+    coroutine {step: s, first: sf} = storm(0)
+    elog::say("storm id ", std::event_loop::adopt(s, sf))
+    coroutine {step: r, first: rf} = reader(src)
+    elog::say("reader id ", std::event_loop::adopt(r, rf))
+    coroutine {step: dr, first: drf} = drainer(other)
+    elog::say("drainer id ", std::event_loop::adopt(dr, drf))
+    coroutine {step: q, first: qf} = quiet(calm)
+    elog::say("quiet id ", std::event_loop::adopt(q, qf))
+    coroutine {step: t, first: tf} = ticker()
+    elog::say("ticker id ", std::event_loop::adopt(t, tf))
+    turns = std::event_loop::run()
+    elog::say("turns ", turns)
+    elog::say("max ready ", std::event_loop::stats().max_ready)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

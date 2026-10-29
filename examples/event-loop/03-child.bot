@@ -1,0 +1,62 @@
+# 03-child.bot -- a task resumes a child coroutine directly
+# (EVENT-LOOP-MILESTONE-1.md, "Public API").
+#
+#   tclsh9.0 main.tcl examples/event-loop/03-child.bot
+#
+# The loop schedules only the coroutines adopted by it. A task may own
+# other coroutines and resume them itself, as any Botlish code does: the
+# child's yields return to the task that resumed it, never to the loop, and
+# the loop never sees the child. Here a task sums a generator's values,
+# yielding to the loop between them so another task interleaves.
+import std::coroutine
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::mutable_array
+import std::str
+
+# A generator: the squares of 0 .. N-1, then -1.
+fn squares(n: int) -> int:
+    loop i from 0 to n:
+        yield i * i
+    -1
+
+fn summer(context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    coroutine {step, first} = squares(4)
+    total = std::mutable_array::create(1, first)
+    loop:
+        value = step()
+        if std::coroutine::done?(step):
+            break
+        total.set(0, total.at(0) + value)
+        std::event_loop::log("summer: running total ".concat(std::int::to_string(total.at(0))))
+        std::event_loop::yield_now()
+    total.at(0)
+
+fn ticker(n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to n:
+        std::event_loop::log("ticker")
+        std::event_loop::yield_now()
+    n
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step: s, first: sf} = summer()
+    std::event_loop::adopt(s, sf)
+    coroutine {step: t, first: tf} = ticker(2)
+    std::event_loop::adopt(t, tf)
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        std::event_loop::log("task ".concat(std::int::to_string(o.task)).concat(" returned ").concat(std::int::to_string(o.value)))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]
+    on IndexNotFound:
+        ["IndexNotFound"]

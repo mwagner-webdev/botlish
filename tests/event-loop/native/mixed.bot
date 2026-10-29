@@ -1,0 +1,65 @@
+# mixed.bot -- every native source of the Linux driver in one process:
+# SDL3 (hybrid coordination: a watch wakes the loop, a pump copies), the TCP
+# game server with a flooding client, a producer thread's posts, timers --
+# beside the base workload W, initialized in either order
+# (mixed-sdl-first.bot, mixed-net-first.bot; EVENT-LOOP-EXPLORATION.md's
+# b-mixed). tests/event-loop-linux.test requires the same results from both
+# orders: every delivery, W's own order, bounded latencies.
+import elog
+import event_loop_linux
+import evsdl
+import fx
+import gameserver
+import linuxnet
+import sdlprobe
+import std::event_loop
+import workload
+import type std::event_loop::Delivery
+
+fn start_sdl(context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> std::event_loop::Reg errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    reg = std::event_loop::source(Delivery::Reliable, 4096, :keep_alive)
+    elog::say("sdl start ", evsdl::start(evsdl::mode_hybrid, reg, 1024, 0))
+    reg
+
+fn start_net(context ev: std::event_loop::Loop, n: event_loop_linux::Native, net: linuxnet::LinuxNet) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    lfd = fx::listen()
+    listener = std::event_loop::source(Delivery::Reliable, 64, :keep_alive)
+    outbox = std::event_loop::channel(Delivery::Reliable, 4096)
+    coroutine {step: l, first: lf} = linuxnet::acceptor(lfd, listener, 3)
+    std::event_loop::adopt(l, lf)
+    coroutine {step: a, first: af} = gameserver::acceptor(listener, outbox, 3)
+    std::event_loop::adopt(a, af)
+    coroutine {step: f, first: ff} = gameserver::flusher(outbox)
+    std::event_loop::adopt(f, ff)
+    fx::port(lfd)
+
+nomethod fn run(sdl_first: bool, context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native, net: linuxnet::LinuxNet) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    first = if sdl_first:
+        start_sdl()
+    else:
+        std::event_loop::channel(Delivery::Lossy, 1)
+    port = start_net()
+    sdl = if sdl_first:
+        first
+    else:
+        start_sdl()
+    workload::start()
+    posts = std::event_loop::source(Delivery::Reliable, 4096, :keep_alive)
+    sdlprobe::spawn_all(sdl, posts)
+    sdlprobe::start_producers()
+    pep = event_loop_linux::endpoint(1024)
+    fx::synth(event_loop_linux::endpoint_id(pep), std::event_loop::native_slot(posts), std::event_loop::native_generation(posts), 200, 1000, 1, 1, 0)
+    fx::client(port, 1, 0, 40, 1500)
+    fx::client(port, 2, 0, 40, 1000)
+    fx::client(port, 3, 0, 2000, 0)
+    started = event_loop_linux::now_us()
+    elog::say("turns ", std::event_loop::run())
+    elog::say("wall us ", event_loop_linux::now_us() - started)
+    fx::clients_join()
+    fx::synth_join()
+    evsdl::producers_join()
+    loop c from 1 to 4:
+        elog::say2("client ", c, " replies ", fx::client_replies(c))
+    evsdl::quit()
+    std::event_loop::trace()

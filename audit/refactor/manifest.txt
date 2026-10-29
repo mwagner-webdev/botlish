@@ -137,6 +137,7 @@ program stdlib/byte.bot
 program stdlib/compiler.bot
 program stdlib/darwin.bot
 program stdlib/dfa.bot
+fails stdlib/event_loop.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (shutdown) requires contexts (verified through `import std::event_loop`)
 program stdlib/float64.bot
 fails stdlib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import std::io`)
 program stdlib/linux.bot
@@ -177,6 +178,7 @@ program stdlib/abi/bytes.bot
 program stdlib/abi/x86_64.bot
 fails stdlib/darwin/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::darwin::io`)
 program stdlib/darwin/path.bot
+fails stdlib/event_loop/deterministic.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (release_held) requires a context (verified through `import std::event_loop::deterministic`)
 program stdlib/ffi/c.bot
 fails stdlib/io/path.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (text) is trait-polymorphic and cannot be a value (verified through `import std::io::path`)
 fails stdlib/linux/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (write_error_text) requires a context; only reordering create() last would compile it, an invariant nothing states (verified through `import std::linux::io`)

@@ -1,0 +1,442 @@
+# Mutants of the production event loop (audit/event-loop/tools/mutate.tcl;
+# EVENT-LOOP-MILESTONE-1.md, "Mutation testing"): each a plausible bug in
+# the scheduler (stdlib/event_loop.bot), the Linux driver's package
+# (packages/event_loop_linux/event_loop_linux.bot) or its C adapter
+# (packages/event_loop_linux/native/event_loop_linux.c), grouped by the rule
+# it breaks -- the milestone's list: turn boundaries, observer starvation
+# and duplication, skipped generation checks, stale queued delivery, timer
+# order, lost wakeups, unbounded collection, Reliable-policy loss,
+# inactive-source interference, incorrect shutdown, premature ownership
+# release. Format (as audit/golden/tools/mutants.txt):
+#
+#   @@ NAME DESCRIPTION
+#   %% TEST-PATTERNS        the detectors' tests to try first (mutate.tcl)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Every mutant must still apply and be killed by tests/event-loop.test or
+# tests/event-loop-linux.test: a failed test, or a file that does not
+# complete. The %% line names the tests of the rule the mutant breaks
+# (tcltest -match patterns of either file), run first; a mutant they do not
+# kill runs both files whole before it counts as surviving. A mutant keeps
+# its program warning-free (the scenarios compile with -warnings error), so
+# a kill is a behavior's, never a warning's.
+
+# --- turn boundaries --------------------------------------------------------
+
+@@ turn-runs-new-ready a turn's dispatch runs the tasks made ready during it (no snapshot of the ready queue): continuous activity runs many times per turn
+%% el-fairness-* el-smoke-*
+## stdlib/event_loop.bot
+<<<<
+        if ev.st.at(s_tmp_i) >= n:
+            break
+        bump(s_tmp_i)
+====
+        if ready_count() == 0:
+            break
+        bump(s_tmp_i)
+>>>>
+
+@@ turn-reentered a nested turn from inside a task is not refused
+%% el-errors-reentered
+## stdlib/event_loop.bot
+<<<<
+private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound, DriverFault, LoopReentered:
+    if ev.st.at(s_dispatching) == 1:
+====
+private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound, DriverFault, LoopReentered:
+    if ev.st.at(s_dispatching) == 2:
+>>>>
+
+# --- observers --------------------------------------------------------------
+
+@@ observer-starved-while-busy the observer phase runs only once the ready queue has drained: continuous activity starves every observer
+%% el-observers-*
+## stdlib/event_loop.bot
+<<<<
+    if collected + n > 0:
+        observe()
+====
+    if ready_count() == 0 and collected + n > 0:
+        observe()
+>>>>
+
+@@ observer-runs-twice the observer phase runs twice per turn (an observer that waits again runs again in the same turn)
+%% el-observers-*
+## stdlib/event_loop.bot
+<<<<
+    if collected + n > 0:
+        observe()
+====
+    if collected + n > 0:
+        observe()
+        observe()
+>>>>
+
+@@ observer-phase-no-snapshot an observer registered during the observer phase takes part in that phase
+%% el-observers-*
+## stdlib/event_loop.bot
+<<<<
+        i = ev.st.at(s_tmp_obs)
+        if i >= n:
+            break
+====
+        i = ev.st.at(s_tmp_obs)
+        if i >= ev.observers.length():
+            break
+>>>>
+
+# --- generations ------------------------------------------------------------
+
+@@ deliver-skips-generation a record is delivered to whatever registration lives in its slot, whatever generation it was posted for
+%% el-revocation-* el-delivery-*
+## stdlib/event_loop.bot
+<<<<
+        rget(slot, r_gen) != gen or rget(slot, r_live) != 1
+====
+        rget(slot, r_gen) < 0 or rget(slot, r_live) != 1
+>>>>
+
+@@ dispatch-skips-generation a wake queued for a task is dispatched as it was queued even when its registration was revoked meanwhile
+%% el-revocation-*
+## stdlib/event_loop.bot
+<<<<
+    valid = if reason == w_event or reason == w_timer or reason == w_turn:
+        rget(slot, r_gen) == gen
+====
+    valid = if reason == w_event or reason == w_timer or reason == w_turn:
+        rget(slot, r_gen) >= 0
+>>>>
+
+@@ revoke-keeps-generation a freed slot keeps its generation: a stale Reg, and records posted for it, reach the slot's next registration
+%% el-revocation-*
+## stdlib/event_loop.bot
+<<<<
+    gen = rget(slot, r_gen) + 1
+====
+    gen = rget(slot, r_gen)
+>>>>
+
+# --- stale queued delivery and revocation ------------------------------------
+
+@@ revoke-wakes-as-event a revoked registration's waiters wake with Wake::Event instead of Wake::Revoked
+%% el-revocation-*
+## stdlib/event_loop.bot
+<<<<
+        push_ready(unpark(id), id, w_revoked, slot, reg.gen, 0, 0, 0)
+====
+        push_ready(unpark(id), id, w_event, slot, reg.gen, 0, 0, 0)
+>>>>
+
+@@ revoke-keeps-queue revocation leaves the queued events in place: the slot's next registration starts with them
+%% el-revocation-* el-delivery-*
+## stdlib/event_loop.bot
+<<<<
+    rset(slot, r_ptail, -1)
+    rset(slot, r_npend, 0)
+    heap_remove(slot)
+====
+    heap_remove(slot)
+>>>>
+## stdlib/event_loop.bot
+<<<<
+    rset(slot, r_phead, -1)
+    rset(slot, r_ptail, -1)
+    rset(slot, r_npend, 0)
+    rset(slot, r_dropped, 0)
+====
+    rset(slot, r_dropped, 0)
+>>>>
+## stdlib/event_loop.bot
+<<<<
+    # The queued events.
+    loop:
+        node = rget(slot, r_phead)
+        if node == -1:
+            break
+        rset(slot, r_phead, ev.events.at(node * es + 3))
+        ev.e_free.push(node)
+====
+>>>>
+
+# --- timers -----------------------------------------------------------------
+
+@@ timer-equal-deadlines-reversed timers with equal deadlines expire in reverse registration order
+%% el-timers-* el-heap-*
+## stdlib/event_loop.bot
+<<<<
+        rget(x, r_seq) < rget(y, r_seq)
+====
+        rget(x, r_seq) > rget(y, r_seq)
+>>>>
+
+@@ heap-sift-down-later-child sift_down moves the later of the two children up: the heap's order breaks
+%% el-heap-*
+## stdlib/event_loop.bot
+<<<<
+    child = if right < n and earlier?(ev.heap.at(right), ev.heap.at(left)):
+====
+    child = if right < n and earlier?(ev.heap.at(left), ev.heap.at(right)):
+>>>>
+
+@@ heap-remove-no-sift-up removing a timer from the middle of the heap never sifts the moved one up
+%% el-heap-*
+## stdlib/event_loop.bot
+<<<<
+    sift_down(i)
+    sift_up(rget(last, r_hpos))
+====
+    sift_down(i)
+>>>>
+
+@@ timer-fires-early a timer within 50 us of its deadline expires now
+%% el-heap-* el-timers-*
+## stdlib/event_loop.bot
+<<<<
+        if rget(slot, r_deadline) > now:
+            break
+====
+        if rget(slot, r_deadline) > now + 50:
+            break
+>>>>
+
+@@ timer-missed-count-off-by-one a repeating timer's wake reports the expiries it covers as missed, one too many
+%% el-timers-*
+## stdlib/event_loop.bot
+<<<<
+        push_ready(unpark(id), id, w_timer, slot, gen, due - 1, 0, due)
+====
+        push_ready(unpark(id), id, w_timer, slot, gen, due, 0, due)
+>>>>
+
+@@ one-shot-wakes-one a one-shot timer wakes only its first waiter (the exploration prototype's hang)
+%% el-heap-*
+## stdlib/event_loop.bot
+<<<<
+        push_ready(unpark(id), id, w_timer, slot, gen, 0, 0, 1)
+    spend_timer(slot)
+====
+        push_ready(unpark(id), id, w_timer, slot, gen, 0, 0, 1)
+        break
+    spend_timer(slot)
+>>>>
+
+# --- inactive-source interference --------------------------------------------
+
+@@ unwatched-timer-in-heap a timer enters the deadline heap when it is made: a timer nobody waits on (an idle library's) wakes the loop
+%% el-heap-* el-timers-* el-compose-*
+## stdlib/event_loop.bot
+<<<<
+    rset(reg.slot, r_period, period)
+    if tracing_on?():
+====
+    rset(reg.slot, r_period, period)
+    heap_insert(reg.slot)
+    if tracing_on?():
+>>>>
+
+# --- unbounded collection, delivery policies ---------------------------------
+
+@@ collect-unbounded a turn collects every record the driver has, whatever the budget
+%% el-fairness-* el-delivery-*
+## stdlib/event_loop.bot
+<<<<
+        if ev.st.at(s_tmp_taken) >= budget:
+====
+        if ev.st.at(s_tmp_taken) < 0:
+>>>>
+
+@@ reliable-drops a full Reliable registration drops a record instead of holding its source
+%% el-delivery-*
+## stdlib/event_loop.bot
+<<<<
+        if policy == d_reliable:
+            return dv_full
+====
+        if policy == -1:
+            return dv_full
+>>>>
+
+@@ held-never-released a held source is never released while its registration lives (the consumer's takes never schedule a release)
+%% el-delivery-*
+## stdlib/event_loop.bot
+<<<<
+    if rget(slot, r_npend) <= rget(slot, r_cap).shift_right(1):
+====
+    if rget(slot, r_npend) < 0:
+>>>>
+
+@@ queue-unbounded a full queue takes one more event anyway: Lossy never drops, Reliable never holds
+%% el-delivery-* el-timers-*
+## stdlib/event_loop.bot
+<<<<
+    if npend >= rget(slot, r_cap):
+====
+    if npend >= rget(slot, r_cap) + 1000000:
+>>>>
+
+@@ coalesce-loses-count a coalesced event replaces the queued one without counting it
+%% el-delivery-*
+## stdlib/event_loop.bot
+<<<<
+        ev.events.swap(tail * es + 2, ev.events.at(tail * es + 2) + 1)
+====
+        ev.events.swap(tail * es + 2, 1)
+>>>>
+
+# --- shutdown ---------------------------------------------------------------
+
+@@ shutdown-skips-revoke shutdown abandons the waiters without revoking their registrations (nobody wakes with Wake::Revoked)
+%% el-errors-* el-ownership-*
+## stdlib/event_loop.bot
+<<<<
+    revoke_all()
+    loop r from 0 to rounds:
+====
+    loop r from 0 to rounds:
+>>>>
+
+@@ shutdown-runs-no-rounds shutdown abandons at once: the waiters it woke never get to finish
+%% el-errors-* el-ownership-*
+## stdlib/event_loop.bot
+<<<<
+        turn_checked()
+    abandon_checked()
+====
+    abandon_checked()
+>>>>
+
+@@ abandon-keeps-waiters abandon leaves the released tasks in the registrations' waiter lists (the exploration prototype's bug)
+%% el-errors-* el-ownership-*
+## stdlib/event_loop.bot
+<<<<
+    loop slot from 0 to ev.st.at(s_nregs):
+        rset(slot, r_whead, -1)
+        rset(slot, r_wtail, -1)
+        rset(slot, r_nwait, 0)
+        rset(slot, r_hpos, -1)
+    ev.heap.clear()
+====
+>>>>
+
+# --- premature ownership release ---------------------------------------------
+
+@@ abandon-drops-registrations abandoning a task ends the registrations it waited on (an automatic drop action)
+%% el-ownership-*
+## stdlib/event_loop.bot
+<<<<
+    loop slot from 0 to ev.st.at(s_nregs):
+        rset(slot, r_whead, -1)
+====
+    loop slot from 0 to ev.st.at(s_nregs):
+        if rget(slot, r_nwait) > 0:
+            rset(slot, r_live, 0)
+        rset(slot, r_whead, -1)
+>>>>
+
+@@ task-end-drops-registration a task that ends takes the registration that last woke it with it
+%% el-ownership-*
+## stdlib/event_loop.bot
+<<<<
+    bump(s_completed)
+    record_outcome(tget(id, t_serial), 0, value)
+====
+    bump(s_completed)
+    if tget(id, t_slot) >= 0:
+        rset(tget(id, t_slot), r_live, 0)
+    record_outcome(tget(id, t_serial), 0, value)
+>>>>
+
+# --- the C adapter: lost wakeups, source fairness, backpressure ---------------
+
+@@ c-post-never-signals a post never signals the eventfd: a sleeping loop misses every record until a deadline
+%% el-linux-wake el-linux-lost-wakeup-control el-linux-idle
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+        signal = E.npending == 1;
+====
+        signal = 0;
+>>>>
+
+@@ c-reset-without-recheck the eventfd is reset after polls that skipped the kernel without looking at the posted endpoints again: a post between the two is lost
+%% el-linux-wake el-linux-lost-wakeup-control el-linux-flood el-linux-quiet-source
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+            reset_wakefd();
+            E.reset_owed = 0;
+            drain_pending();
+            if (E.rot_count > 0) timeout = 0;
+====
+            reset_wakefd();
+            E.reset_owed = 0;
+>>>>
+
+@@ c-source-drained-first a source with more records is served again before the others (FIFO over records, not round-robin over sources): a flood starves a quiet source
+%% el-linux-flood el-linux-quiet-source
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+            if (more) {
+                ep->rotating = 1;
+                rot_push(s);
+            }
+====
+            if (more) {
+                ep->rotating = 1;
+                E.rot_head = (E.rot_head + MAX_SOURCES) % (MAX_SOURCES + 1);
+                E.rot[E.rot_head] = s;
+                E.rot_count++;
+            }
+>>>>
+
+@@ c-hold-forgets-record a held record is not kept: a Reliable registration loses it
+%% el-linux-flood el-linux-quiet-source
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+            ep->held = 1;
+            ep->held_rec = E.cur;
+            ep->paused = 1;
+====
+            ep->held = 0;
+            ep->held_rec = E.cur;
+            ep->paused = 1;
+>>>>
+
+@@ c-no-backpressure a full endpoint accepts a post (overwriting its oldest record) instead of refusing it
+%% el-linux-flood
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+    if (ep->count == ep->cap) {
+        ep->refused++;
+====
+    if (ep->count == ep->cap) {
+        ep->head = (ep->head + 1) % ep->cap;
+        ep->count--;
+    }
+    if (0) {
+        ep->refused++;
+>>>>
+
+@@ c-watch-generation-unchecked a watch is found by its slot alone: a stale Watch's unwatch or rearm reaches the slot's newer watch
+%% el-linux-gameserver el-linux-buffered-lines
+## packages/event_loop_linux/native/event_loop_linux.c
+<<<<
+    if (!w->used || w->slot != slot || w->gen != gen) return NULL;
+====
+    if (!w->used || w->slot != slot) return NULL;
+>>>>
+
+# --- the Linux package --------------------------------------------------------
+
+@@ pkg-readable-no-rearm readable waits without arming its watch: after the first readiness a descriptor is never reported again
+%% el-linux-buffered-lines el-linux-gameserver
+## packages/event_loop_linux/event_loop_linux.bot
+<<<<
+    rearm(w)
+    std::event_loop::wait(w.reg)
+====
+    std::event_loop::wait(w.reg)
+>>>>

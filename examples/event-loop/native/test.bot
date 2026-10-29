@@ -1,0 +1,32 @@
+# test.bot -- the same application logic (ticks.bot) under the
+# deterministic driver: the ticks are scripted records at virtual times, so
+# the outcome is exact and the same on every backend. Nothing in ticks.bot
+# changes; only the entry program's installed driver does.
+#
+#   tclsh9.0 main.tcl examples/event-loop/native/test.bot
+import std::event_loop
+import std::event_loop::deterministic
+import ticks
+import type std::event_loop::Delivery
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    src = std::event_loop::source(Delivery::Reliable, 16, :keep_alive)
+    loop i from 1 to 6:
+        std::event_loop::deterministic::inject(i * 2000, src, i, 0)
+    coroutine {step, first} = ticks::handle(src, 5)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    std::event_loop::revoke(src)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

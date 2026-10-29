@@ -1,0 +1,568 @@
+# event-loop.test -- std::event_loop, the deterministic driver and the
+# scheduling contract (EVENT-LOOP-MILESTONE-1.md).
+#
+# The scenario programs are tests/event-loop/*.bot (an application root: the
+# helper modules beside them). Each is compiled once with -warnings error and
+# run on this pass's backends, which must agree on its whole outcome (the
+# loop's trace, "t=TURN: TEXT" lines); the claims are then checked on the
+# trace. They carry EVENT-LOOP-EXPLORATION.md's claims over to the
+# production scheduler and add the production ones: round-robin source
+# fairness, the Delivery policies and backpressure, the deadline heap, the
+# fault channels, ownership as it is today and the host-stepped driver.
+# Also here: the programs the compiler must reject (driver choice,
+# ownership, the opaque representation, privacy) and the driver audit.
+#
+# Backends, as tests/workload-2048.test's: the outer pass's own (CORE_BACKEND
+# interp or compile) plus cranelift in the interp pass and
+# cranelift-generic in the compile pass; all four when run directly.
+#
+# The Linux driver (packages/event_loop_linux) is tests/event-loop-linux.test.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+if {![info exists ::env(CORE_BACKEND)]} {
+    set elBackends {interp compile cranelift-generic cranelift}
+} elseif {$::env(CORE_BACKEND) eq "interp"} {
+    set elBackends {interp cranelift}
+} elseif {$::env(CORE_BACKEND) eq "compile"} {
+    set elBackends {compile cranelift-generic}
+} else {
+    set elBackends [list $::env(CORE_BACKEND)]
+}
+
+set elDir [file join $::projectRoot tests event-loop]
+
+# The strings of a Botlish List[str] as core::value::show prints it.
+proc elStrings {shown} {
+    set out {}
+    foreach {- s} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $shown] {
+        lappend out [subst -nocommands -novariables $s]
+    }
+    return $out
+}
+
+# Scenario NAME: compiled once (-warnings error), run on every backend of
+# the pass. Returns {agree TRACE}: whether every backend gave one outcome,
+# and the trace (empty on any failure).
+proc elRun {name} {
+    if {[info exists ::elRuns($name)]} {
+        return $::elRuns($name)
+    }
+    set hir [surface::readProgramFile [file join $::elDir $name.bot] -warnings error]
+    set outcomes [lsort -unique [lmap b $::elBackends {lrange [outcomeUnderHir $b $hir] 0 1}]]
+    set agree [expr {[llength $outcomes] == 1 && [lindex $outcomes 0 0] eq "value"}]
+    set trace [expr {$agree ? [elStrings [lindex $outcomes 0 1]] : {}}]
+    if {!$agree} {
+        puts stderr "$name: [string range $outcomes 0 2000]"
+    }
+    set ::elRuns($name) [list $agree $trace]
+    return $::elRuns($name)
+}
+
+proc elTrace {name} {
+    lindex [elRun $name] 1
+}
+
+# Lines of TRACE matching RE, each as its match list.
+proc elMatches {trace re} {
+    set out {}
+    foreach line $trace {
+        set m [regexp -inline -- $re $line]
+        if {$m ne ""} {
+            lappend out $m
+        }
+    }
+    return $out
+}
+
+proc elFirst {trace re} {
+    lindex [elMatches $trace $re] 0
+}
+
+proc elNum {trace re} {
+    lindex [elFirst $trace $re] 1
+}
+
+proc elTurnOf {line} {
+    regexp {^t=(\d+):} $line -> t
+    return $t
+}
+
+# --------------------------------------------------------------------------
+# Every scenario: one outcome on every backend.
+
+foreach name {smoke fairness observers timers revocation errors gameserver-sim
+              compose-alone compose-quiet-before compose-quiet-after compose-busy
+              delivery heap ownership fault hoststep} {
+    test el-agree-$name "scenario $name compiles under -warnings error and gives one outcome on every backend of the pass (its trace)" -body {
+        lindex [elRun $name] 0
+    } -result 1
+}
+
+# --------------------------------------------------------------------------
+# The turn
+
+test el-smoke-interleave {two workers interleave one step per turn; run returns when no live work remains} -body {
+    set t [elTrace smoke]
+    list [join [concat {*}[lmap m [elMatches $t {^t=(\d+): w=(\d) step (\d)}] {lrange $m 1 end}]] ,] [lindex $t end]
+} -result {0,1,0,0,2,0,1,1,1,1,2,1,2,1,2 {t=3: no live work}}
+
+test el-fairness-budget {no turn collects more than the budget (8) of native records} -body {
+    lmap m [elMatches [elTrace fairness] {^t=\d+: collect timers \d+ records (\d+)}] {
+        expr {[lindex $m 1] > 8 ? [lindex $m 1] : [continue]}
+    }
+} -result {}
+
+test el-fairness-continuous {continuous activity (greedy, 40 yields) runs at most once per turn, in 40 turns} -body {
+    set t [elTrace fairness]
+    set greedy [elNum $t {greedy id (\d+)}]
+    set perTurn [dict create]
+    foreach m [elMatches $t "^t=(\\d+): run task $greedy reason"] {
+        dict incr perTurn [lindex $m 1]
+    }
+    list [tcl::mathfunc::max {*}[dict values $perTurn]] [dict size $perTurn]
+} -result {1 40}
+
+test el-fairness-bystander {a task made ready runs in the next turn despite the saturation} -body {
+    set t [elTrace fairness]
+    expr {[elNum $t {bystander ran at (\d+)}] - [elNum $t {bystander ready at (\d+)}]}
+} -result 1
+
+test el-fairness-storm {a self-replenishing ready queue (61 generations) advances one generation per turn} -body {
+    set gens [lmap m [elMatches [elTrace fairness] {^t=(\d+): storm generation (\d+)}] {lindex $m 1}]
+    list [llength $gens] [lsort -unique [lmap a [lrange $gens 0 end-1] b [lrange $gens 1 end] {expr {$b - $a}}]]
+} -result {61 1}
+
+test el-fairness-quiet-source {a quiet source's record, released at t=11 behind two 200-record bursts released at t=10, is collected in the first turn after its release: the driver serves its sources round-robin (the exploration's FIFO driver delivered it 50 turns later)} -body {
+    set t [elTrace fairness]
+    set first [elTurnOf [lindex [lsearch -inline -all -regexp $t {records [1-9]}] 0]]
+    expr {[elNum $t {quiet record at (\d+)}] - $first}
+} -result 1
+
+test el-fairness-drain {a task that drains its queue per wake (try_take) keeps up with its share of the collection; one taking an event per wake does not} -body {
+    set t [elTrace fairness]
+    set first [elTurnOf [lindex [lsearch -inline -all -regexp $t {records [1-9]}] 0]]
+    set drained [elNum $t {drainer got all at (\d+)}]
+    set read [elNum $t {reader got all at (\d+)}]
+    list [expr {$drained < $read}] [expr {$drained <= $first + 400 / 8 + 1}] [expr {$read >= $first + 199}]
+} -result {1 1 1}
+
+test el-fairness-ticker {the ticker's timers fire on time after the busy phase} -body {
+    lsort -unique [lmap m [elMatches [elTrace fairness] {timer \d+ fires late (\d+)}] {lindex $m 1}]
+} -result 0
+
+# --------------------------------------------------------------------------
+# Observers
+
+test el-observers-a {obs-a runs once per turn from the first turn, and not after revoking itself in its 6th run} -body {
+    lmap m [elMatches [elTrace observers] {obs-a run in turn (\d+)}] {lindex $m 1}
+} -result {1 2 3 4 5 6}
+
+test el-observers-b-same-turn {obs-b, registered during a dispatch phase, runs in that same turn's observer phase} -body {
+    set t [elTrace observers]
+    expr {[elNum $t {obs-b run in turn (\d+)}] == [elNum $t {worker registered obs-b in turn (\d+)}]}
+} -result 1
+
+test el-observers-empty-turn {no observer runs in an empty turn (a wakeup for a stale record)} -body {
+    set t [elTrace observers]
+    set empty [lmap m [elMatches $t {^t=(\d+): collect timers 0 records 0 ready 0}] {lindex $m 1}]
+    set ran [concat [lmap m [elMatches $t {obs-[ab] run in turn (\d+)}] {lindex $m 1}]]
+    list [llength $empty] [lmap e $empty {expr {$e in $ran ? $e : [continue]}}] [elNum $t {idle turns (\d+)}]
+} -result {1 {} 1}
+
+test el-observers-every-busy-turn {obs-b runs in every non-empty turn after its registration} -body {
+    set t [elTrace observers]
+    set reg [elNum $t {worker registered obs-b in turn (\d+)}]
+    set b [lmap m [elMatches $t {obs-b run in turn (\d+)}] {lindex $m 1}]
+    set busy [lsort -unique -integer [lmap line [lsearch -all -inline -regexp $t {: run task}] {elTurnOf $line}]]
+    lmap x $busy {expr {$x >= $reg && $x ni $b ? $x : [continue]}}
+} -result {}
+
+test el-observers-revoked-before-place {obs-c, registered inside an observer phase and revoked before its first opportunity, never runs; its task wakes with Wake::Revoked} -body {
+    set t [elTrace observers]
+    list [llength [elMatches $t {obs-c run}]] [elNum $t {obs-c woke not for a turn: revoked (\d)}]
+} -result {0 1}
+
+test el-observers-registered-in-phase {obs-d, registered inside an observer phase (turn 4) and left alone, first runs in the next turn's phase -- the phase runs the observers live when it starts -- then in every busy turn (7 is the empty one)} -body {
+    set t [elTrace observers]
+    list [elNum $t {obs-a registered obs-d in turn (\d+)}] [lmap m [elMatches $t {obs-d run in turn (\d+)}] {lindex $m 1}]
+} -result {4 {5 6 8 9 10}}
+
+test el-observers-liveness {an observer does not keep the loop alive: run returns while obs-b and obs-d still wait} -body {
+    set t [elTrace observers]
+    list [expr {[elFirst $t {no live work}] ne ""}] [elNum $t {observer runs (\d+)}]
+} -result {1 20}
+
+# --------------------------------------------------------------------------
+# Timers (the deadline heap)
+
+test el-timers-missed {a slow segment makes the repeating timer report 2 missed intervals once, coalesced; it stays on its 100 us grid} -body {
+    set t [elTrace timers]
+    list [lmap m [elMatches $t {metro missed (\d+)}] {lindex $m 1}] [lmap m [elMatches $t {metro at (\d+)}] {lindex $m 1}]
+} -result {{0 0 0 2 0} {100 200 300 651 700}}
+
+test el-timers-equal-deadlines {equal deadlines fire in registration order} -body {
+    set t [elTrace timers]
+    set later [lsearch -regexp $t {later fired}]
+    set sooner [lsearch -regexp $t {sooner fired}]
+    expr {$later >= 0 && $later < $sooner}
+} -result 1
+
+test el-timers-jump {a 10 s jump of a 10 us timer: one wake, 999999 missed (by doubling, no per-interval loop)} -body {
+    elNum [elTrace timers] {jump missed (\d+)}
+} -result 999999
+
+test el-timers-coalesce-unwatched {an unwatched repeating timer coalesces: its late waiter is ready at once with the count} -body {
+    elNum [elTrace timers] {idler coalesced missed (\d+)}
+} -result 19
+
+test el-timers-frames {frame work follows elapsed time, not the turn rate; a Lossy queue of 4 with no consumer drops 96 of 100 and counts them} -body {
+    set t [elTrace timers]
+    list [elNum $t {frames (\d+)}] [expr {[elNum $t {frame turns (\d+)}] > 60}] [elNum $t {dropped (\d+)}]
+} -result {6 1 96}
+
+test el-heap-order {200 one-shot timers at pseudo-random deadlines: the 133 not revoked fire in deadline order (registration order among equal deadlines), never early, each in the first turn at or after its deadline} -body {
+    set t [elTrace heap]
+    set order {}
+    set early 0
+    foreach m [elMatches $t {fired (\d+) at (\d+)}] {
+        lassign $m - n at
+        set deadline [elNum $t "deadline $n was (\\d+)"]
+        if {$at < $deadline} {
+            incr early
+        }
+        lappend order [list $deadline $n]
+    }
+    # Tcl's lsort is stable: by deadline, registration order among equals.
+    set expected [lsort -integer -index 0 [lsort -integer -index 1 $order]]
+    list [llength $order] $early [expr {$order eq $expected}]
+} -result {133 0 1}
+
+test el-heap-revoked {timers revoked before their deadline never fire; their 67 tasks wake with Wake::Revoked} -body {
+    set t [elTrace heap]
+    set revoked [lmap m [elMatches $t {revoked (\d+)}] {lindex $m 1}]
+    list [llength $revoked] [lsort -unique [lmap n $revoked {expr {$n % 3}}]] [llength [lmap n $revoked {expr {[elFirst $t "fired $n at"] eq "" ? [continue] : $n}}]]
+} -result {67 0 0}
+
+test el-heap-broadcast {a one-shot timer two tasks wait on wakes both, and its slot is freed after both wakes (the prototype woke only the first)} -body {
+    set t [elTrace heap]
+    list [lmap m [elMatches $t {shared one-shot woke waiter (\d) timer (\d)}] {lrange $m 1 2}] [elNum $t {phase 2 live registrations (\d+)}]
+} -result {{{1 1} {2 1}} 0}
+
+test el-heap-interest {a timer nobody waits on imposes no deadline: the loop sleeps once to the watched timer through 200 expiries of an unwatched 5 us timer, whose late waiter gets them coalesced} -body {
+    set t [elTrace heap]
+    list [elNum $t {phase 3 blocks (\d+)}] [lmap m [elMatches $t {phase 3 block deadline (-?\d+)}] {expr {[lindex $m 1] > 0}}] [elNum $t {unwatched timer's late waiter missed (\d+)}]
+} -result {2 {1 0} 199}
+
+test el-heap-repeating-waiters {a repeating timer waited on by two tasks wakes one per expiry, alternating in the order they waited; no timer is left in the heap} -body {
+    set t [elTrace heap]
+    list [lmap m [elMatches $t {repeating woke waiter (\d)}] {lindex $m 1}] [elNum $t {timers waiting at the end (\d+)}]
+} -result {{1 2 1 2 1 2} 0}
+
+# --------------------------------------------------------------------------
+# Revocation
+
+test el-revocation-suppress {a wake queued before the revocation is suppressed at dispatch, carrying no event data} -body {
+    set t [elTrace revocation]
+    set victim [elNum $t {victim id (\d+)}]
+    list [expr {[elFirst $t "suppress wake of task $victim"] ne ""}] [elNum $t {victim woke revoked (\d)}] [elNum $t {victim event value (\d+)}]
+} -result {1 1 0}
+
+test el-revocation-discard {revoking discards every queued event (5); taking from it then answers Wake::Revoked} -body {
+    set t [elTrace revocation]
+    list [elNum $t {s2 pending (\d+)}] [elNum $t {revoke \d+ discarding (5)}] [elNum $t {taking from revoked s2 answers revoked: (\d)}]
+} -result {5 5 1}
+
+test el-revocation-idempotent {revoking twice, or through a copy, does nothing} -body {
+    set t [elTrace revocation]
+    list [elNum $t {revoke s2: (\d)}] [elNum $t {revoke s2 again: (\d)}] [elNum $t {revoke a copy of s2: (\d)}]
+} -result {1 0 0}
+
+test el-revocation-self {a handler revoking its own registration completes its invocation; its next wait sees the revocation} -body {
+    set t [elTrace revocation]
+    set h [lsearch -regexp $t {handler revokes its own}]
+    set c [lsearch -regexp $t {handler continues after revoking}]
+    list [expr {$h >= 0 && $c > $h}] [elNum $t {handler's next wait revoked: (\d)}]
+} -result {1 1}
+
+test el-revocation-stale {records still tagged with a revoked generation are dropped as stale (3), also after the slot is reused; the reused slot's registration gets only its own record} -body {
+    set t [elTrace revocation]
+    list [llength [elMatches $t {stale record for}]] [elNum $t {stale records (\d+)}] \
+        [expr {[elNum $t {s5 reuses slot (\d+)}] == [elNum $t {s4 slot was (\d+)}]}] [elNum $t {s5 waiter woke with value (\d+)}]
+} -result {3 3 1 555}
+
+test el-revocation-not-cancellation {revocation is not cancellation: tasks the listener started finish after it is revoked} -body {
+    set t [elTrace revocation]
+    set rev [lsearch -regexp $t {listener revokes s6}]
+    list [expr {[lsearch -regexp $t {worker finished for event 61}] > $rev}] [expr {[lsearch -regexp $t {worker finished for event 62}] > $rev}]
+} -result {1 1}
+
+test el-revocation-waiters-order {revoking wakes every waiter, in the order they waited} -body {
+    lmap m [elMatches [elTrace revocation] {channel waiter woke, name (\d)}] {lindex $m 1}
+} -result {0 1 2}
+
+# --------------------------------------------------------------------------
+# Delivery policies and backpressure
+
+test el-delivery-posts {Botlish posts: Lossy accepts 4 and drops (counts) 6; Coalesce accepts 1 and merges 9; Reliable accepts 2 and refuses the third} -body {
+    set t [elTrace delivery]
+    list [lmap m [elMatches $t {lossy \d posted (\d)}] {lindex $m 1}] [elNum $t {lossy dropped (\d+)}] \
+        [lmap m [elMatches $t {coalesce \d posted (\d)}] {lindex $m 1}] [lmap m [elMatches $t {reliable \d posted (\d)}] {lindex $m 1}]
+} -result {{1 1 1 1 3 3 3 3 3 3} 6 {1 2 2 2 2 2 2 2 2 2} {1 1 4}}
+
+test el-delivery-consumers {consumers then get the Lossy queue's first four in order, the coalesced event once (latest values, count 10), and a Reliable registration accepts again once it has room} -body {
+    set t [elTrace delivery]
+    list [lmap m [elMatches $t {taker got (\d+) count (\d+)}] {lrange $m 1 2}] [elNum $t {reliable post after a take (\d)}]
+} -result {{{0 1} {9 10} {0 1} {1 1} {2 1} {3 1}} 1}
+
+test el-delivery-reliable-records {a Reliable source with room for 2 and 12 records: nothing dropped, every record in order, the excess held by the driver and released as room appears} -body {
+    set t [elTrace delivery]
+    list [lmap m [elMatches $t {reliable source (\d+) count 1}] {lindex $m 1}] [elNum $t {reliable source dropped (\d+)}] \
+        [expr {[elNum $t {held records (\d+)}] > 0}] [expr {[elNum $t {held records (\d+)}] == [elNum $t {released holds (\d+)}]}] \
+        [elNum $t {driver undelivered (\d+)}]
+} -result {{0 1 2 3 4 5 6 7 8 9 10 11} 0 1 1 0}
+
+test el-delivery-lossy-coalesce-records {beside it, the Lossy source drops (8 of 12, counted) and the Coalesce source wakes fewer times, its counts adding up to 12} -body {
+    set t [elTrace delivery]
+    set counts [lmap m [elMatches $t {coalesce source \d+ count (\d+)}] {lindex $m 1}]
+    list [elNum $t {lossy source dropped (\d+)}] [expr {[llength $counts] < 12}] [tcl::mathop::+ {*}$counts]
+} -result {8 1 12}
+
+test el-delivery-quiet-beside-held {a quiet source's records are delivered in the turn each is released, while the Reliable source is held} -body {
+    set t [elTrace delivery]
+    set turns [lmap m [elMatches $t {quiet (\d) at turn (\d+)}] {lindex $m 2}]
+    list [llength $turns] [lmap a [lrange $turns 0 end-1] b [lrange $turns 1 end] {expr {$b - $a}}]
+} -result {3 {1 1}}
+
+test el-delivery-revoke-held {revoking a Reliable registration with a held record releases it at the driver: its 4 records left arrive stale and are dropped, nothing stays with the driver, and the registration reusing the slot gets none of them} -body {
+    set t [elTrace delivery]
+    list [elNum $t {gone pending before revoke (\d+)}] [elNum $t {gone driver undelivered before revoke (\d+)}] \
+        [elNum $t {stale after revoke (\d+)}] [elNum $t {driver undelivered after revoke (\d+)}] \
+        [expr {[elNum $t {reuse slot (\d+)}] == [elNum $t {gone slot (\d+)}]}] [elNum $t {reuse pending (\d+)}] [elNum $t {reuse waiter got (\d+) revoked 1}]
+} -result {1 4 4 0 1 0 0}
+
+# --------------------------------------------------------------------------
+# Errors, faults, liveness, shutdown
+
+test el-errors-recorded {a task's declared failure and its own IndexNotFound are recorded as that task's outcome (endings 1 and 2); the loop goes on} -body {
+    set t [elTrace errors]
+    list [elNum $t {task (\d+) failed TaskFailed 7}] [elNum $t {task (\d+) failed IndexNotFound}] \
+        [lmap m [elMatches $t {outcome task (\d+) ending (\d)}] {lindex $m 2}] [elNum $t {failed (\d+)}]
+} -result {0 1 {2 0 1 0 0 0} 2}
+
+test el-errors-construction {a failure in the first segment reaches the spawner (eager construction), never the loop} -body {
+    set t [elTrace errors]
+    list [elNum $t {spawner caught a failure at construction, code (\d+)}] [elNum $t {fails_now done at construction: (\d)}]
+} -result {8 1}
+
+test el-errors-reentered {a nested turn from inside a task is refused (LoopReentered)} -body {
+    set t [elTrace errors]
+    list [expr {[elFirst $t {nester: nested turn refused}] ne ""}] [elNum $t {reentered (\d+)}]
+} -result {1 1}
+
+test el-errors-liveness-stop-shutdown {a waiter on a source without :keep_alive does not keep the loop alive; stop ends run after the current turn; shutdown wakes waiters with Wake::Revoked (they finish), abandons what never ends, and leaves no registration} -body {
+    set t [elTrace errors]
+    list [elNum $t {first run turns (\d+)}] [expr {[elFirst $t {stopped}] ne ""}] [elNum $t {second run turns (\d+)}] \
+        [elNum $t {optional woke revoked (\d)}] [elNum $t {sleeper woke revoked (\d)}] [elNum $t {abandoned (\d+)}] \
+        [elNum $t {registrations after shutdown (\d+)}]
+} -result {2 1 2 1 1 1 0}
+
+test el-errors-serial-ids {task ids are serial numbers, never reused} -body {
+    lmap m [elMatches [elTrace errors] {(?:fails_later|bad_index|nester|optional|stopper|sleeper|stubborn) id (\d+)}] {lindex $m 1}
+} -result {0 1 2 3 4 5 6}
+
+test el-fault-channels {a DriverFault a task received ends only that task; a task that received SchedulerFault ends run with SchedulerFault after its turn, and both outcomes are recorded} -body {
+    set t [elTrace fault]
+    list [elNum $t {run failed with SchedulerFault in turn (\d+)}] [lmap m [elMatches $t {outcome task (\d+) ending (\d)}] {lrange $m 1 2}] \
+        [elNum $t {outcome task 0 value (-?\d+)}] [llength [elMatches $t {bystander step}]]
+} -result {2 {{0 4} {1 3}} -5 3}
+
+# --------------------------------------------------------------------------
+# Ownership
+
+test el-ownership-explicit {revocation is explicit: a task's own revoke ends its registration; a Reg kept but no longer read keeps its registration until the task revokes it} -body {
+    set t [elTrace ownership]
+    list [elNum $t {listener's registration live after its revoke: (\d)}] [elNum $t {keeper's registration live after its sleep: (\d)}] \
+        [elNum $t {keeper's registration live after revoke: (\d)}]
+} -result {0 1 0}
+
+test el-ownership-no-drop-action {NEGATIVE (no drop action yet): a task that ends without revoking, or is abandoned, leaves its registration registered; shutdown revokes every one} -body {
+    set t [elTrace ownership]
+    list [elNum $t {forgetful's registration live after its task ended: (\d)}] [elNum $t {parked task's registration live after abandon: (\d)}] \
+        [elNum $t {forgetful's registration live after shutdown: (\d)}] [elNum $t {parked task's registration live after shutdown: (\d)}] \
+        [elNum $t {registrations after shutdown (\d+)}]
+} -result {1 1 0 0 0}
+
+test el-ownership-direct {a coroutine resumed directly by its owner beside the loop is never scheduled by it} -body {
+    set t [elTrace ownership]
+    list [elNum $t {direct coroutine finished: (\d)}] [elNum $t {direct steps dispatched by the loop: (\d+)}]
+} -result {1 0}
+
+# --------------------------------------------------------------------------
+# Composition, the game server, the host-stepped driver
+
+test el-compose-inactive {W's trace (turns included) is identical alone and with an inactive library initialized before or after it} -body {
+    set w [lmap v {alone quiet-before quiet-after} {lsearch -all -inline [elTrace compose-$v] {*W: *}}]
+    list [llength [lindex $w 0]] [expr {[lindex $w 0] eq [lindex $w 1] && [lindex $w 0] eq [lindex $w 2]}]
+} -result {12 1}
+
+test el-compose-active {W's trace is identical beside an active library (a spinning task and a 300-record flood)} -body {
+    expr {[lsearch -all -inline [elTrace compose-alone] {*W: *}] eq [lsearch -all -inline [elTrace compose-busy] {*W: *}]}
+} -result 1
+
+test el-gameserver-lines {every TALK line of connections 2 and 3 (16) is handled in the turn it is collected, also while pathfinding runs; connection 1's TALK waits for its path} -body {
+    set t [elTrace gameserver-sim]
+    set talks [elMatches $t {^t=(\d+): conn ([23]) cmd 2}]
+    set late {}
+    foreach m $talks {
+        set x [lindex $m 1]
+        if {[lsearch -regexp $t "^t=$x: collect timers \\d+ records \[1-9\]"] < 0} {
+            lappend late $x
+        }
+    }
+    set path [elNum $t {conn 1 path found in turn (\d+)}]
+    set during [llength [lmap m $talks {expr {[lindex $m 1] < $path ? 1 : [continue]}}]]
+    set c1 [elTurnOf [lindex [lsearch -inline -regexp $t {conn 1 cmd 2}] 0]]
+    list [llength $talks] $late [expr {$during >= 6}] [expr {$c1 > $path}]
+} -result {16 {} 1 1}
+
+test el-gameserver-replies {each connection's replies are sent in order; output is flushed at most once per turn; the world's timer advances its AI coroutine directly, 5 ticks} -body {
+    set t [elTrace gameserver-sim]
+    set by [dict create]
+    foreach {c v} [lmap m [elMatches $t {sent (-?\d+)}] {lindex $m 1}] {
+        dict lappend by $c $v
+    }
+    set flushes [lmap m [elMatches $t {flush \d+ in turn (\d+)}] {lindex $m 1}]
+    list [dict get $by 1] [dict get $by 2] [dict get $by 3] [expr {[llength $flushes] == [llength [lsort -unique $flushes]]}] \
+        [llength [elMatches $t {world tick}]] [expr {[elFirst $t {agent at 5}] ne ""}]
+} -result {{1001 2000600 3000011 -1} {1002 3000020 3000021 3000022 3000023 3000024 3000025 3000026 3000027 -1} {1003 3000030 3000031 3000032 3000033 3000034 3000035 3000036 3000037 -1} 1 5 1}
+
+test el-hoststep {the production scheduler under a host-stepped driver (the selected implementation of Driver's block yields each deadline): the host receives the deadlines 100 and 200, then the loop's two turns} -body {
+    set hir [surface::readProgramFile [file join $::elDir hoststep.bot] -warnings error]
+    set outcomes [lsort -unique [lmap b $::elBackends {lrange [outcomeUnderHir $b $hir] 0 1}]]
+    list [llength $outcomes] [string range [lindex $outcomes 0 1] 0 24] [string match {*"t=1: woke 1"*"t=2: woke 2"*"t=2: no live work"*} [lindex $outcomes 0 1]]
+} -result {1 {[[100], [200, 2], ["t=0: } 1}
+
+test el-hoststep-feedback-exact {the host-stepped program's yield inference: the one trait-operation edge its settled check was told (the scheduler's d.block() bound to the installed Step's yielding block) is one that check's own typing finds -- no stale edge from the feedback union, which the driver's selection (one provider per context trait, by installation) cannot produce (EVENT-LOOP-MILESTONE-1.md, "The feedback union")} -body {
+    set hir [surface::readProgramFile [file join $::elDir hoststep.bot] -warnings error]
+    set checked [dict get $hir traitSource]
+    hir::activate $checked
+    set union [dict get $checked coroutines graph]
+    set own [hir::coroutines::Implementations $checked \
+        [dict create operations [dict getdef $checked coroutines operations {}] graph $union]]
+    list [lmap {key via} [dict get $union via] {list [dict get $via operation] [dict get $via witness]}] \
+        [expr {[dict get $own impl] eq [dict get $union impl]}]
+} -result {{{block {the installed context stepdrv::Step}}} 1}
+
+# --------------------------------------------------------------------------
+# The examples (examples/event-loop; EVENT-LOOP-MILESTONE-1.md, "Public
+# API"): each compiled with -warnings error and run on the pass's backends,
+# which agree; their traces are the ones the examples' comments describe.
+# The native example's main.bot is tests/event-loop-linux.test's.
+
+proc elExample {path} {
+    set hir [surface::readProgramFile [file join $::projectRoot examples event-loop {*}$path] -warnings error]
+    set outcomes [lsort -unique [lmap b $::elBackends {lrange [outcomeUnderHir $b $hir] 0 1}]]
+    if {[llength $outcomes] != 1 || [lindex $outcomes 0 0] ne "value"} {
+        return [list DISAGREE [string range $outcomes 0 2000]]
+    }
+    elStrings [lindex $outcomes 0 1]
+}
+
+test el-example-run-task {01-run-task.bot: two ordinary coroutines adopted by the loop, their first segments run at construction (t=0), one step per turn after} -body {
+    elExample 01-run-task.bot
+} -result {{t=0: left step 1} {t=0: right step 1} {t=1: left step 2} {t=1: right step 2} {t=2: right step 3} {t=3: turns 3} {t=3: task 0 returned 2} {t=3: task 1 returned 3}}
+
+test el-example-wait {02-wait.bot: a wait for a channel event (posted after a 250 us sleep) and then for a 1000 us timer, in virtual time (each driver visit takes 1 us)} -body {
+    elExample 02-wait.bot
+} -result {{t=1: producer posts 42 at time 250} {t=2: consumer got 42 at time 251} {t=3: consumer's timer fired, missed 0 at time 1251}}
+
+test el-example-child {03-child.bot: a task resumes a generator child directly between its own yields to the loop; the child is never the loop's} -body {
+    elExample 03-child.bot
+} -result {{t=0: summer: running total 1} {t=0: ticker} {t=1: summer: running total 5} {t=1: ticker} {t=2: summer: running total 14} {t=3: task 1 returned 2} {t=3: task 0 returned 14}}
+
+test el-example-observer {04-observer.bot: the observer runs at the end of every busy turn (1-4), not while the loop sleeps, keeps nothing alive, and finishes when shutdown revokes it} -body {
+    elExample 04-observer.bot
+} -result {{t=0: worker: step} {t=1: worker: step} {t=1: observer: end of turn 1} {t=2: worker: step} {t=2: observer: end of turn 2} {t=3: observer: end of turn 3} {t=4: worker: woke at time 503} {t=4: observer: end of turn 4} {t=4: run returned} {t=5: observer: revoked after 4 runs}}
+
+test el-example-revoke {05-revoke.bot: revocation discards the two queued events, a second revoke does nothing, and the waiting task wakes with Wake::Revoked and goes on} -body {
+    elExample 05-revoke.bot
+} -result {{t=1: reader: event 1} {t=2: closer: 2 events queued, revoking} {t=2: closer: revoked (0 events left); revoke again does nothing: 0} {t=3: reader: 0 events queued, waiting again} {t=3: reader: woke with Wake::Revoked; the task goes on} {t=3: live after run: 0}}
+
+test el-example-native-test {native/test.bot: the native example's handler (ticks.bot) under the deterministic driver, with the ticks scripted at virtual times} -body {
+    elExample {native test.bot}
+} -result {{t=1: tick 1} {t=2: tick 2} {t=3: tick 3} {t=4: tick 4} {t=5: tick 5} {t=5: handled 5 ticks, sum 15}}
+
+# --------------------------------------------------------------------------
+# What the compiler must reject
+
+proc elKinds {path} {
+    if {[catch {surface::readProgramFile $path -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+foreach {name kind} {
+    two-drivers      AMBIGUOUS-CONTEXT-IMPLEMENTATION
+    missing-driver   MISSING-CONTEXT
+    library-installs CONTEXT-INSTALLATION-UNSUPPORTED
+    adopt-twice      USE-AFTER-MOVE
+    resume-adopted   USE-AFTER-MOVE
+    wrong-protocol   TYPE
+    loop-internals   OPAQUE-REPRESENTATION
+    forge-reg        OPAQUE-CONSTRUCTION
+    private-helper   PRIVATE-ACCESS
+    handler-callback CONTEXT-FUNCTION-VALUE
+    capture-task     AFFINE-CAPTURE-UNSUPPORTED
+} {
+    test el-static-$name "tests/event-loop/reject-$name.bot is rejected with $kind (its header says why)" -body {
+        elKinds [file join $::elDir reject-$name.bot]
+    } -result $kind
+}
+
+# The driver audit: every function whose transitive context requirements
+# include std::event_loop::Driver -- the authority to make the loop wait and
+# turn -- outside the application's own modules (the entry program and
+# std::event_loop itself, whose run, turn, sync and shutdown are that
+# authority's interface). Requiring the driver is an ordinary, visible
+# requirement (hir::contexts::summary), never a compile error: the audit is
+# the check an application runs over its libraries.
+proc elDriverRequirers {path libraries} {
+    set hir [surface::readProgramFile $path -warnings off]
+    set out {}
+    foreach line [split [hir::contexts::summary $hir] \n] {
+        if {[regexp {^source-function (\S+) \S+ direct-contexts \([^)]*\) required-contexts \(([^)]*)\)} $line -> fn required]
+                && "std::event_loop::Driver" in [split [string map {", " ,} $required] ,]} {
+            set module [expr {[string first :: $fn] >= 0 ? [string range $fn 0 [expr {[string last :: $fn] - 1}]] : ""}]
+            if {$module in $libraries} {
+                lappend out $fn
+            }
+        }
+    }
+    return [lsort -unique $out]
+}
+
+test el-static-audit {the driver audit reports the library function that drives the loop (drivinglib::settle), and no library of the scenario programs requires the driver} -body {
+    set libraries {drivinglib gameserver simnet quietlib busylib workload board elog}
+    set offenders {}
+    foreach path [lsort [glob -directory $::elDir *.bot]] {
+        set tail [file tail $path]
+        if {[string match reject-* $tail] || [file rootname $tail] in [concat $libraries rogue stepdrv]} {
+            continue
+        }
+        set bad [elDriverRequirers $path $libraries]
+        if {$bad ne "" && $tail ne "library-drives.bot"} {
+            lappend offenders "$tail: $bad"
+        }
+    }
+    list [elDriverRequirers [file join $::elDir library-drives.bot] $libraries] $offenders
+} -result {drivinglib::settle {}}
+
+cleanupTests

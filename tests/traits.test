@@ -1501,6 +1501,76 @@ fn msg(side: int) -> std::gen::MsgS:
         [moduleAgree $lib $text]
 } -result {4 2 {value {[0, 1, 2, 7]}}}
 
+# Of SOURCE with the module files FILES (a lenient compilation): the checks
+# it took, the diagnostics of the program as written, the trait-operation
+# edges its settled check was told (the feedback union) and those of them
+# the settled check's own typing does not find again -- the stale ones --
+# each as {TRAIT OPERATION WITNESS}.
+proc feedbackEdges {files source} {
+    withPrivateLibrary {
+        writeModules $files
+        set before [hir::BuildStats]
+        set hir [surface::compile $source -strict 0 -warnings off]
+        set checks [expr {[dict get [hir::BuildStats] checks] - [dict get $before checks]}]
+        set checked [dict getdef $hir traitSource $hir]
+        hir::activate $checked
+        set union [dict getdef $checked coroutines graph {}]
+        set own [hir::coroutines::Implementations $checked \
+            [dict create operations [dict getdef $checked coroutines operations {}] graph $union]]
+    }
+    set told {}
+    set stale {}
+    if {$union ne {}} {
+        dict for {key targets} [dict get $union impl] {
+            set via [dict get $union via $key]
+            set edge [list [dict get $via trait] [dict get $via operation] [dict get $via witness]]
+            lappend told $edge
+            set found [expr {$own eq {} ? {} : [dict getdef [dict get $own impl] $key {}]}]
+            foreach t $targets {
+                if {$t ni $found} {
+                    lappend stale $edge
+                }
+            }
+        }
+    }
+    list $checks [lmap d [dict get $checked diagnostics] {dict get $d kind}] [lsort $told] [lsort $stale]
+}
+
+test trait-implementation-yield-stale-edge {the feedback is a union, so an edge an earlier check found stays when the settled check's typing no longer finds it -- only when that typing widened a type, which the coroutine analysis always reports: f's first is std::wa::WA in the first check (op's edge), the second check adds emit's int yield and f's outward type becomes any (COROUTINE-RESULT-MISMATCH), so op is no longer bound -- the one stale edge, in a rejected program, whose only effect is that g's dependent COROUTINE-RHS-NOT-YIELDING (reported when the same mismatch is written directly) is not; with f's result declared, or in an accepted program, the settled check finds every edge it was told (EVENT-LOOP-MILESTONE-1.md, "The feedback union")} -body {
+    set lib {wa.bot {struct WA:
+    n: int
+
+fn op(w: WA) -> int:
+    yield w.n
+    w.n + 1
+}
+src.bot {struct S:
+    k: int
+
+fn emit(s: S) -> int:
+    yield s.k
+    s.k + 1
+}
+mk.bot {import std::src
+import std::wa
+
+fn s(k: int) -> std::src::S:
+    std::src::S {k: k}
+
+fn w(n: int) -> std::wa::WA:
+    std::wa::WA {n: n}
+}}
+    # The implementations are reachable only through the traits (std::wa and
+    # std::src are not imported), so a check binds them only by the edges it
+    # was told.
+    set pre "import std::mk\n\ntrait Op:\n    fn op(self: Op) -> int\n\ntrait Em:\n    fn emit(self: Em) -> int\n\nfn as_op(o: Op) -> Op:\n    o\n\nfn as_em(e: Em) -> Em:\n    e\n\n"
+    set g "fn g() -> int:\n    coroutine {step, first} = f()\n    as_op(first).op()\n\ncoroutine {step, first} = g()\nfirst\n"
+    list [feedbackEdges $lib "${pre}fn f():\n    yield std::mk::w(1)\n    as_em(std::mk::s(2)).emit()\n    std::mk::w(0)\n\n$g"] \
+        [feedbackEdges $lib "${pre}fn f():\n    yield std::mk::w(1)\n    yield 2\n    std::mk::w(0)\n\n$g"] \
+        [feedbackEdges $lib "import std::wa\n${pre}fn f() -> std::wa::WA:\n    yield std::mk::w(1)\n    as_em(std::mk::s(2)).emit()\n    std::mk::w(0)\n\n$g"] \
+        [feedbackEdges $lib "${pre}fn f():\n    yield std::mk::w(1)\n    std::mk::w(0)\n\n$g"]
+} -result {{2 {TRAIT-NOT-SATISFIED COROUTINE-RESULT-MISMATCH} {{Em emit std::src::S} {Op op std::wa::WA}} {{Op op std::wa::WA}}} {1 {TRAIT-NOT-SATISFIED COROUTINE-RESULT-MISMATCH COROUTINE-RHS-NOT-YIELDING} {} {}} {2 COROUTINE-RESULT-MISMATCH {{Em emit std::src::S} {Op op std::wa::WA}} {}} {3 {} {{Op op std::wa::WA}} {}}}
+
 test trait-implementation-yield-economics {a program that constructs coroutines but none of whose trait operations' implementations yields is checked as before: one check of the program as written and one of the monomorphized program, no trait-operation edge kept -- and no trait plan run for it when no implementation may yield and no operation receives a yield's value (MayBind); a trait-polymorphic function that yields by itself needs no plan, and when the plan runs (a yielding implementation of a module the program only imports) no specialization of its own (Distinct): no second check; with a yielding implementation the program as written is checked twice (the second check confirms the edges)} -body {
     set results {}
     set quiet "import std::shapes\n\ntrait Shaped:\n    fn area(self: Shaped) -> int\n\nfn measure(s: Shaped) -> int:\n    s.area()\n\nfn gen() -> int:\n    yield measure(std::shapes::make(1))\n    2\n\n"

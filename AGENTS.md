@@ -1869,6 +1869,73 @@ to the native slots, and `tclsh9.0 audit/icy-tower/context-refactor/tools/
 repro.tcl` (a reproducer whose outcome changes is a census finding that
 changed: update the census).
 
+## The event loop (std::event_loop)
+
+`std::event_loop` (stdlib/event_loop.bot; EVENT-LOOP-MILESTONE-1.md) is one
+thread-local scheduler of ordinary coroutines, written in ordinary Botlish
+over MutableVectors, MutableArrays and the existing coroutines: tasks are
+coroutines adopted by the opaque context `Loop`, and a driver is any
+context implementing the context trait `std::event_loop::Driver` --
+`std::event_loop::deterministic` (every backend) or the Linux package
+`packages/event_loop_linux` (a C adapter over epoll and an eventfd, installed
+into an application's `.bot_modules` by `tools/event-loop-linux.tcl
+install`, which builds its archive there). Keep it so:
+
+* No compiler, runtime or Tcl knowledge of the event loop: no native, NIR
+  instruction, runtime object or syntax of it, and no promise, `async`,
+  microtask queue or callback registry. The scheduler names no operating
+  system: no descriptor, handle, epoll state or clock source in
+  stdlib/event_loop.bot; native handles stay in a driver or its adapter.
+* The application chooses the driver: only an entry program installs
+  contexts. Never add a default driver, a runtime driver selection, or a way
+  for a library to install, select or wrap one. A library that requires only
+  the Loop (and an integration capability such as `event_loop_linux::Native`)
+  can register, post, wait and revoke, never wait or turn the loop or drop
+  its tasks: `run`, `turn`, `sync`, `shutdown` and `abandon` require the
+  Driver.
+* The turn is wait, collect (released holds, expired timers in (deadline,
+  registration) order, at most `budget` records, round-robin over the
+  driver's sources), dispatch (exactly the tasks ready when it begins, once
+  each, FIFO) and observe (every observer registration live at its start,
+  once, in registration order, only in a turn that collected or dispatched
+  something). Never run work made ready during dispatch in the same turn,
+  an observer twice in a turn or in an empty turn, and never let an
+  observer, a channel or a timer nobody waits on keep the loop alive or
+  awake.
+* Revocation is explicit and generation-checked: a `Reg` is an identity,
+  never an owner. Nothing revokes implicitly -- no drop action until the
+  lexical-scope cleanup milestone, and never one faked with last-use
+  release -- and shutdown revokes every registration. Never deliver a record
+  of an old generation, let a reused slot inherit events, or cancel a task as
+  a side effect of revocation.
+* Delivery is a registration's declared policy (Lossy, Coalesce, Reliable).
+  Reliable never drops: a record without room is held by the driver
+  (`hold_record`, `release_held`) and the backpressure reaches the producer
+  (a full endpoint refuses posts with -EAGAIN). Never make a policy drop
+  silently.
+* An `IndexNotFound` of the scheduler's own tables is `SchedulerFault` (a
+  scheduler bug, ending `run`), never an application error; a task's own
+  failure is a recorded outcome that ends only that task.
+* The native integration ABI (packages/event_loop_linux/native/
+  botlish_event_loop.h, version 1): a post copies four scalars and never runs
+  Botlish code; pumps run on the loop's thread inside the wait and never call
+  Botlish. Never add a C-to-Botlish callback or a pointer in a record.
+* The exploration's prototype (`audit/event-loop/src`) is evidence and the
+  benchmark's baseline: never extend it or load it from production code.
+
+If you change stdlib/event_loop.bot, stdlib/event_loop/deterministic.bot, the
+Linux package, its C adapter or `examples/event-loop/`, run
+`tests/event-loop.test` (on both passes, `CORE_BACKEND=interp` and
+`compile`; directly, all four backends), `tests/event-loop-linux.test` (real
+epoll, sockets and threads; its SDL3 tests need `tclsh9.0
+tests/cffi/sdl3.tcl` and are skipped without it), `tests/context-traits.test`,
+`tests/coroutines.test`, the warning gate (both modules are in its
+manifest), `tools/compilerpedia.tcl generate` and `check`, and
+`audit/event-loop/tools/mutate.tcl` (every mutant in its `mutants.txt` must
+still apply and be killed: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule). `bench/event-loop.tcl` is
+the performance report against the prototype.
+
 ## DecimalRounded and scalar refinements
 
 `DecimalRounded{minDecimalsPreserved: N}` (optionally `maxDecimalsPreserved:

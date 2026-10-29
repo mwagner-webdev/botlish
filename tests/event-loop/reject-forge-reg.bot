@@ -1,0 +1,10 @@
+# reject-forge-reg.bot -- must be REJECTED (tests/event-loop.test, el-static-*): making a registration identity from integers (OPAQUE-CONSTRUCTION)
+import std::event_loop
+
+fn forge(context ev: std::event_loop::Loop) -> bool errors std::event_loop::SchedulerFault:
+    std::event_loop::revoke(std::event_loop::Reg {slot: 0, gen: 1})
+
+with context std::event_loop::create(8)
+forge():
+    on std::event_loop::SchedulerFault:
+        false

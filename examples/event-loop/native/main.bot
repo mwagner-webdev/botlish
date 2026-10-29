@@ -1,0 +1,35 @@
+# main.bot -- examples/event-loop/native under the Linux driver: a native
+# thread (ticker.c) posts five ticks; ticks.bot's task handles them.
+#
+#   sh examples/event-loop/native/build.sh
+#   tclsh9.0 main.tcl -backend cranelift examples/event-loop/native/main.bot
+#
+# The entry program alone installs the contexts: the scheduler, the driver
+# (the application's choice: a library cannot install or select one) and
+# the integration capability made from it.
+import event_loop_linux
+import std::event_loop
+import ticker
+import ticks
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    t = ticker::start(5, 2000)
+    coroutine {step, first} = ticks::handle(ticker::reg(t), 5)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    ticker::stop(t)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

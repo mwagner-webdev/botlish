@@ -1,0 +1,51 @@
+# stepdrv.bot -- a host-stepped driver for std::event_loop (the exploration's
+# repro/host-stepped-driver, on the production scheduler): block(DEADLINE)
+# hands the deadline to whoever resumes the coroutine running the loop (it
+# yields, one call below the implementation) and goes on when resumed, the
+# clock then at the deadline. The scheduler's code is unchanged: it is the
+# selected implementation of std::event_loop::Driver's block that suspends
+# it (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md). An externally
+# paced driver: progress happens only when the host resumes.
+import std::event_loop
+import std::mutable_array
+
+opaque context struct Step:
+    now: MutableArray[int]
+
+fn create() -> Step:
+    Step {now: std::mutable_array::create(1, 0)}
+
+fn clock(context s: Step) -> int errors std::event_loop::DriverFault:
+    s.now.at(0):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+fn hand_over(deadline: int) -> int:
+    yield deadline
+    0
+
+fn block(deadline: int, context s: Step) -> int errors std::event_loop::DriverFault:
+    hand_over(deadline)
+    if deadline > 0:
+        s.now.set(0, deadline):
+            on IndexNotFound:
+                fail std::event_loop::DriverFault {code: -1}
+    0
+
+fn take_record(context s: Step) -> int:
+    -1
+
+fn record_gen(context s: Step) -> int:
+    0
+
+fn record_a(context s: Step) -> int:
+    0
+
+fn record_b(context s: Step) -> int:
+    0
+
+fn hold_record(context s: Step) -> int:
+    0
+
+fn release_held(slot: int, context s: Step) -> int:
+    slot

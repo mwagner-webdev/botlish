@@ -1,0 +1,16 @@
+# library-drives.bot -- accepted, but the driver audit reports
+# drivinglib::settle: a library that requires std::event_loop::Driver can
+# make the loop wait and turn (tests/event-loop.test, el-static-audit).
+import drivinglib
+import std::event_loop
+import std::event_loop::deterministic
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+n = drivinglib::settle():
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2
+    on std::event_loop::LoopReentered:
+        -3

@@ -1,0 +1,56 @@
+# gameserver-sim.bot -- the game-server workload (gameserver.bot) on the
+# deterministic driver, every backend (EVENT-LOOP-EXPLORATION.md's
+# a-gameserver).
+#
+# Three connections arrive at t=5, 6 and 7. Connection 1 asks for a long
+# path (MOVE 300: 30 pathfinding segments) and then talks; connections 2
+# and 3 talk every few microseconds meanwhile. The world ticks every 40 us
+# and advances its AI coroutine directly. tests/event-loop.test checks:
+# every TALK line is handled in the turn it is collected, also while
+# pathfinding runs; connection 1's TALK sent during pathfinding waits for
+# the path (one session handles its lines in order); each connection's
+# replies arrive in order; every flush happens once per turn at most.
+import elog
+import gameserver
+import simnet
+import std::event_loop
+import std::event_loop::deterministic
+import type std::event_loop::Delivery
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic, n: simnet::SimNet) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    listener = std::event_loop::source(Delivery::Reliable, 8, :keep_alive)
+    outbox = std::event_loop::channel(Delivery::Reliable, 256)
+    std::event_loop::deterministic::inject(5, listener, 1, 0)
+    std::event_loop::deterministic::inject(6, listener, 2, 0)
+    std::event_loop::deterministic::inject(7, listener, 3, 0)
+    simnet::line(1, 1, 1, 300)
+    simnet::line(1, 3, 2, 11)
+    simnet::line(1, 400, 9, 0)
+    loop k from 0 to 8:
+        simnet::line(2, 2 + k * 9, 2, 20 + k)
+        simnet::line(3, 3 + k * 11, 2, 30 + k)
+    simnet::line(2, 300, 9, 0)
+    simnet::line(3, 310, 9, 0)
+    coroutine {step: a, first: af} = gameserver::acceptor(listener, outbox, 3)
+    std::event_loop::adopt(a, af)
+    coroutine {step: f, first: ff} = gameserver::flusher(outbox)
+    std::event_loop::adopt(f, ff)
+    coroutine {step: w, first: wf} = gameserver::world(40, 5)
+    std::event_loop::adopt(w, wf)
+    elog::say("turns ", std::event_loop::run())
+    loop v in simnet::sent():
+        elog::say("sent ", v)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+with context simnet::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

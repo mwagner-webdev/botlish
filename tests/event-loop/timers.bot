@@ -1,0 +1,114 @@
+# timers.bot -- timers, deadlines, missed intervals, frame-oriented work
+# (EVENT-LOOP-EXPLORATION.md's a-timers, on the deadline heap).
+#
+# On the deterministic driver (one virtual microsecond per driver visit;
+# advance makes a segment take time):
+#
+#   * metro: a repeating 100 us timer. Its task's 3rd segment takes 350 us:
+#     the next wake reports the missed intervals (coalesced, never queued),
+#     and the deadline stays on the 100 us grid (no drift);
+#   * twins: two one-shot timers with the same deadline, `later` registered
+#     before `sooner`: they fire in registration order;
+#   * jump: a repeating 10 us timer with a segment of 10,000,000 us: one
+#     wake, 999,999 missed, computed by doubling (no per-interval loop);
+#   * idle: a repeating 50 us timer nobody waits on for 1000 us: when its
+#     task finally waits, it is ready at once with the coalesced count;
+#   * frames: a 16,667 us frame task (60 Hz) while a busy task and a flood
+#     of records produce many more turns than frames: the frame count
+#     follows elapsed time, not the turn rate; the flood's Lossy queue of 4
+#     drops the excess and counts it.
+import elog
+import std::str
+import std::event_loop
+import std::event_loop::deterministic
+import std::mutable_array
+import type std::event_loop::Delivery
+
+fn metro(context ev: std::event_loop::Loop, s: std::event_loop::deterministic::Deterministic) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    t = std::event_loop::every(100)
+    loop i from 0 to 5:
+        e = std::event_loop::wait(t)
+        elog::say("metro at ", std::event_loop::now())
+        elog::say("metro missed ", e.a)
+        if i == 2:
+            std::event_loop::deterministic::advance(350)
+    elog::bit(std::event_loop::revoke(t))
+
+fn twin(name: str, deadline: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    t = std::event_loop::timer(deadline, 0)
+    e = std::event_loop::wait(t)
+    elog::say(name.concat(" fired at "), std::event_loop::now())
+    e.count
+
+fn jumper(context ev: std::event_loop::Loop, s: std::event_loop::deterministic::Deterministic) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    t = std::event_loop::every(10)
+    std::event_loop::wait(t)
+    std::event_loop::deterministic::advance(10000000)
+    e2 = std::event_loop::wait(t)
+    elog::say("jump missed ", e2.a)
+    elog::bit(std::event_loop::revoke(t))
+
+fn idler(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    t = std::event_loop::every(50)
+    std::event_loop::sleep(1000)
+    elog::say("idler waits at ", std::event_loop::now())
+    e = std::event_loop::wait(t)
+    elog::say("idler woke at ", std::event_loop::now())
+    elog::say("idler coalesced missed ", e.a)
+    elog::bit(std::event_loop::revoke(t))
+
+fn frames(context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    t = std::event_loop::every(16667)
+    count = std::mutable_array::create(1, 0)
+    start = std::event_loop::turn_number()
+    loop i from 0 to 6:
+        e = std::event_loop::wait(t)
+        count.set(0, count.at(0) + e.count)
+    elog::say("frames ", count.at(0))
+    elog::say("frame turns ", std::event_loop::turn_number() - start)
+    elog::bit(std::event_loop::revoke(t))
+
+fn busy(context ev: std::event_loop::Loop, s: std::event_loop::deterministic::Deterministic) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop i from 0 to 300:
+        std::event_loop::deterministic::advance(97)
+        std::event_loop::yield_now()
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step: m, first: mf} = metro()
+    elog::say("metro id ", std::event_loop::adopt(m, mf))
+    coroutine {step: l, first: lf} = twin("later", 700)
+    elog::say("later id ", std::event_loop::adopt(l, lf))
+    coroutine {step: o, first: of} = twin("sooner", 700)
+    elog::say("sooner id ", std::event_loop::adopt(o, of))
+    coroutine {step: i, first: inf} = idler()
+    elog::say("idler id ", std::event_loop::adopt(i, inf))
+    elog::say("turns ", std::event_loop::run())
+    # A segment that takes ten seconds: nothing else runs meanwhile (the
+    # scheduler is cooperative), and the repeating timer owes one wake.
+    coroutine {step: j, first: jf} = jumper()
+    elog::say("jumper id ", std::event_loop::adopt(j, jf))
+    elog::say("jump phase turns ", std::event_loop::run())
+    # The frame phase: frames against a busy task and a record flood.
+    src = std::event_loop::source(Delivery::Lossy, 4)
+    loop k from 0 to 100:
+        std::event_loop::deterministic::inject(std::event_loop::now() + k * 300, src, k, 0)
+    coroutine {step: f, first: ff} = frames()
+    std::event_loop::adopt(f, ff)
+    coroutine {step: b, first: bf} = busy()
+    std::event_loop::adopt(b, bf)
+    elog::say("frame phase turns ", std::event_loop::run())
+    elog::say("dropped ", std::event_loop::dropped(src))
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

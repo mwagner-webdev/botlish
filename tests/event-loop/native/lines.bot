@@ -1,0 +1,94 @@
+# lines.bot -- the buffered-lines regression (EVENT-LOOP-EXPLORATION.md,
+# section 11: the prototype's adapter stalled on 9 of 11 lines).
+#
+# A client sends 11 lines in ONE write and waits for 11 replies before it
+# says BYE. The server reads its socket through a readiness watch and the
+# fixture's line buffer, one line per handled event. Readiness describes
+# the kernel's buffer, never the reader's: after the first readable wake
+# the socket is drained into the buffer and never readable again until the
+# client speaks. The correct reader (NAIVE false) takes every complete
+# buffered line before it re-arms readiness, and answers all 11; the naive
+# one re-arms after every line and stalls after the first (a 1 s watchdog
+# ends that run). tests/event-loop-linux.test runs both.
+import elog
+import event_loop_linux
+import fx
+import std::event_loop
+import std::mutable_array
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn server(lfd: int, naive: bool, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    ready = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    lw = event_loop_linux::watch(lfd, event_loop_linux::Interest::Readable, ready)
+    std::event_loop::wait(ready)
+    conn = fx::accept(lfd)
+    event_loop_linux::unwatch(lw)
+    elog::say("accepted ", conn)
+    src = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    w = event_loop_linux::watch(fx::conn_fd(conn), event_loop_linux::Interest::Readable, src)
+    handled = std::mutable_array::create(1, 0)
+    std::event_loop::wait(src)
+    loop:
+        r = fx::next_line(conn, naive)
+        if r < 0:
+            break
+        if r == 0:
+            e = event_loop_linux::readable(w)
+            if e.reason != Wake::Event:
+                break
+            continue
+        if fx::cmd() == 9:
+            break
+        handled.set(0, handled.at(0) + 1)
+        fx::send(conn, fx::arg())
+        if naive:
+            # The bug: back to readiness after every line.
+            e2 = event_loop_linux::readable(w)
+            if e2.reason != Wake::Event:
+                break
+    elog::say("lines handled ", handled.at(0))
+    std::event_loop::stop()
+    event_loop_linux::unwatch(w)
+    fx::hangup(conn)
+    std::event_loop::revoke(src)
+    std::event_loop::revoke(ready)
+    handled.at(0)
+
+fn watchdog(us: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(us)
+    elog::say("watchdog fired at turn ", std::event_loop::turn_number())
+    std::event_loop::stop()
+    0
+
+nomethod fn round(label: str, naive: bool, context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::log(label)
+    std::event_loop::sync()
+    lfd = fx::listen()
+    coroutine {step, first} = server(lfd, naive)
+    std::event_loop::adopt(step, first)
+    coroutine {step: w, first: wf} = watchdog(1000000)
+    std::event_loop::adopt(w, wf)
+    fx::client(fx::port(lfd), 1, 2, 11, 0)
+    std::event_loop::run()
+    fx::clients_join()
+    elog::say("replies ", fx::client_replies(1))
+    std::event_loop::shutdown(4)
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    round("correct reader", false)
+    round("naive reader", true)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

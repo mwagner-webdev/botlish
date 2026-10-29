@@ -6100,6 +6100,1494 @@ stdlib/dfa.bot (import std::dfa).
 
 Each member is a topic: -help NAME (e.g. -help std::dfa::Symbol).
 
+@topic stdlib.std::event_loop::TaskFailed
+title: std::event_loop::TaskFailed -- Error of module std::event_loop
+summary: A task's own failure, carried out of its coroutine to the scheduler.
+index: stdlib
+symbol: std::event_loop::TaskFailed
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    error TaskFailed:
+        code: int
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::TaskFailed.
+
+== DESCRIPTION
+A task's own failure, carried out of its coroutine to the scheduler.
+
+@topic stdlib.std::event_loop::LoopReentered
+title: std::event_loop::LoopReentered -- Error of module std::event_loop
+summary: run or turn called while a task is being dispatched (a nested loop).
+index: stdlib
+symbol: std::event_loop::LoopReentered
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    error LoopReentered
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::LoopReentered.
+
+== DESCRIPTION
+run or turn called while a task is being dispatched (a nested loop).
+
+@topic stdlib.std::event_loop::SchedulerFault
+title: std::event_loop::SchedulerFault -- Error of module std::event_loop
+summary: The scheduler's own state broke an invariant (an index it derived from its own tables was out of range)
+index: stdlib
+symbol: std::event_loop::SchedulerFault
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    error SchedulerFault
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::SchedulerFault.
+
+== DESCRIPTION
+The scheduler's own state broke an invariant (an index it derived from its
+own tables was out of range): a bug in the scheduler, never an application
+error. run and turn fail with it, and a task that receives it from a
+scheduler operation should let it propagate.
+
+@topic stdlib.std::event_loop::DriverFault
+title: std::event_loop::DriverFault -- Error of module std::event_loop
+summary: The driver reports a native failure it cannot recover from (CODE
+index: stdlib
+symbol: std::event_loop::DriverFault
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    error DriverFault:
+        code: int
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::DriverFault.
+
+== DESCRIPTION
+The driver reports a native failure it cannot recover from (CODE: the
+driver's, e.g. a negated errno).
+
+@topic stdlib.std::event_loop::Wake
+title: std::event_loop::Wake -- Enum of module std::event_loop
+summary: What made a waiting task ready.
+index: stdlib
+symbol: std::event_loop::Wake
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    enum Wake:
+        Ready,
+        Event,
+        Timer,
+        Turn,
+        Revoked,
+        Empty,
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Wake.
+
+== DESCRIPTION
+What made a waiting task ready.
+
+@topic stdlib.std::event_loop::Delivery
+title: std::event_loop::Delivery -- Enum of module std::event_loop
+summary: What a source or channel does with an event it has no room for.
+index: stdlib
+symbol: std::event_loop::Delivery
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    enum Delivery:
+        Lossy,
+        Coalesce,
+        Reliable,
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Delivery.
+
+== DESCRIPTION
+What a source or channel does with an event it has no room for.
+
+@topic stdlib.std::event_loop::Posted
+title: std::event_loop::Posted -- Enum of module std::event_loop
+summary: What post did with an event.
+index: stdlib
+symbol: std::event_loop::Posted
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    enum Posted:
+        Accepted,
+        Coalesced,
+        Dropped,
+        Refused,
+        NotLive,
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Posted.
+
+== DESCRIPTION
+What post did with an event.
+
+@topic stdlib.std::event_loop::Ending
+title: std::event_loop::Ending -- Enum of module std::event_loop
+summary: How a task ended (take_outcomes).
+index: stdlib
+symbol: std::event_loop::Ending
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    enum Ending:
+        Returned,
+        Failed,
+        IndexNotFound,
+        SchedulerFault,
+        DriverFault,
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Ending.
+
+== DESCRIPTION
+How a task ended (take_outcomes).
+
+@topic stdlib.std::event_loop::Reg
+title: std::event_loop::Reg -- Opaque struct of module std::event_loop
+summary: A registration's identity
+index: stdlib
+symbol: std::event_loop::Reg
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    opaque struct Reg:
+        slot: int
+        gen: int
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Reg.
+
+== DESCRIPTION
+A registration's identity: its slot and the generation it had when made.
+Opaque: only this module makes one, so holding a Reg is the authority to
+post to, wait on and revoke that registration.
+
+@topic stdlib.std::event_loop::Event
+title: std::event_loop::Event -- Struct of module std::event_loop
+summary: What woke a task.
+index: stdlib
+symbol: std::event_loop::Event
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    struct Event:
+        reason: Wake
+        a: int
+        b: int
+        count: int
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Event.
+
+== DESCRIPTION
+What woke a task. A: the event's first value (a timer: the intervals it
+missed; an observer: the turn), B: its second, COUNT: the native events the
+wake stands for (a coalesced event's merged count; a timer's expiries, 1 +
+missed; 0 for Ready, Revoked and Empty).
+
+@topic stdlib.std::event_loop::Outcome
+title: std::event_loop::Outcome -- Struct of module std::event_loop
+summary: A finished task
+index: stdlib
+symbol: std::event_loop::Outcome
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    struct Outcome:
+        task: int
+        ending: Ending
+        value: int
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Outcome.
+
+== DESCRIPTION
+A finished task: its id (adopt's), how it ended, and its value (the return
+value; TaskFailed's or DriverFault's code; 0 otherwise).
+
+@topic stdlib.std::event_loop::Stats
+title: std::event_loop::Stats -- Struct of module std::event_loop
+summary: The loop's counters (stats).
+index: stdlib
+symbol: std::event_loop::Stats
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    struct Stats:
+        turns: int
+        idle_turns: int
+        dispatched: int
+        observed: int
+        collected: int
+        timers_fired: int
+        stale_records: int
+        invalid_records: int
+        suppressed_wakes: int
+        dropped_events: int
+        coalesced_events: int
+        refused_posts: int
+        held_records: int
+        released_holds: int
+        spawned: int
+        completed: int
+        failed: int
+        reentered: int
+        max_ready: int
+        ready: int
+        parked: int
+        timers_waiting: int
+        registrations: int
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Stats.
+
+== DESCRIPTION
+The loop's counters (stats).
+
+@topic stdlib.std::event_loop::Driver
+title: std::event_loop::Driver -- Context trait of module std::event_loop
+summary: The environment the loop waits in (a driver).
+index: stdlib
+symbol: std::event_loop::Driver
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    context trait Driver:
+        fn clock() -> int errors DriverFault
+        fn block(deadline: int) -> int errors DriverFault
+        fn take_record() -> int errors DriverFault
+        fn record_gen() -> int errors DriverFault
+        fn record_a() -> int errors DriverFault
+        fn record_b() -> int errors DriverFault
+        fn hold_record() -> int errors DriverFault
+        fn release_held(slot: int) -> int errors DriverFault
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Driver.
+
+== DESCRIPTION
+The environment the loop waits in (a driver). Times are microseconds of one
+monotonic clock.
+
+* clock() reads it.
+* block(DEADLINE) returns when a record is available, a wakeup arrives or
+  DEADLINE passes (-1: no deadline; a deadline not after now -- 0 is always
+  one -- means poll: do not wait), with the number of records available,
+  or -1 when no record can ever arrive again (a script that ran out).
+* take_record() makes the next available record current and returns its
+  registration slot (-1: none). Records come round-robin over the
+  driver's sources (one record per source in turn; one source's records in
+  order); a held source yields nothing until released. record_gen,
+  record_a and record_b read the current record.
+* hold_record() keeps the current record, unconsumed, first in its source
+  and takes nothing more from that source until release_held(SLOT) is
+  called for the record's slot (Delivery::Reliable's backpressure).
+
+A driver adds no scheduling rule: turns, ordering, revocation and ownership
+are the scheduler's under every driver.
+
+@topic stdlib.std::event_loop::Loop
+title: std::event_loop::Loop -- Opaque context struct of module std::event_loop
+summary: The opaque context struct std::event_loop::Loop of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::Loop
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    opaque context struct Loop:
+        ready_in: MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}]
+        ready_in_id: MutableVector[int]
+        ready_out: MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}]
+        ready_out_id: MutableVector[int]
+        parked: MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}]
+        parked_id: MutableVector[int]
+        tasks: MutableVector[int]
+        t_free: MutableVector[int]
+        regs: MutableVector[int]
+        r_free: MutableVector[int]
+        events: MutableVector[int]
+        e_free: MutableVector[int]
+        heap: MutableVector[int]
+        observers: MutableVector[int]
+        observer_gens: MutableVector[int]
+        releases: MutableVector[int]
+        outcomes: MutableVector[int]
+        st: MutableArray[int]
+        trace: MutableVector[str]
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Loop.
+
+@topic stdlib.std::event_loop::create
+title: std::event_loop::create -- Function of module std::event_loop
+summary: A Loop that collects at most BUDGET native records per turn (at least 1).
+index: stdlib
+symbol: std::event_loop::create
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn create(budget: int, flags :trace) -> Loop:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::create or, as a method, receiver.create(...).
+
+== DESCRIPTION
+A Loop that collects at most BUDGET native records per turn (at least 1).
+:trace records every scheduling decision in the trace (tests: trace).
+
+@topic stdlib.std::event_loop::tracing?
+title: std::event_loop::tracing? -- Function of module std::event_loop
+summary: Whether the loop records its scheduling decisions (create's :trace).
+index: stdlib
+symbol: std::event_loop::tracing?
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn tracing?(context ev: Loop) -> bool errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::tracing? or, as a method, receiver.tracing?(...).
+
+== DESCRIPTION
+Whether the loop records its scheduling decisions (create's :trace).
+
+@topic stdlib.std::event_loop::trace
+title: std::event_loop::trace -- Function of module std::event_loop
+summary: The trace so far, oldest first
+index: stdlib
+symbol: std::event_loop::trace
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn trace(context ev: Loop) -> List[str] errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::trace or, as a method, receiver.trace(...).
+
+== DESCRIPTION
+The trace so far, oldest first: the scheduler's decisions (with :trace) and
+the application's own log lines, each "t=TURN: TEXT".
+
+@topic stdlib.std::event_loop::log
+title: std::event_loop::log -- Function of module std::event_loop
+summary: An application line in the trace (recorded also without :trace).
+index: stdlib
+symbol: std::event_loop::log
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn log(text: str, context ev: Loop) errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::log or, as a method, receiver.log(...).
+
+== DESCRIPTION
+An application line in the trace (recorded also without :trace).
+
+@topic stdlib.std::event_loop::now
+title: std::event_loop::now -- Function of module std::event_loop
+summary: The loop's time
+index: stdlib
+symbol: std::event_loop::now
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn now(context ev: Loop) -> int errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::now or, as a method, receiver.now(...).
+
+== DESCRIPTION
+The loop's time: the driver's clock as read at the start of the current turn
+(or by sync). after, every and timers count from it.
+
+@topic stdlib.std::event_loop::turn_number
+title: std::event_loop::turn_number -- Function of module std::event_loop
+summary: The number of the current turn (0 before the first).
+index: stdlib
+symbol: std::event_loop::turn_number
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn turn_number(context ev: Loop) -> int errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::turn_number or, as a method, receiver.turn_number(...).
+
+== DESCRIPTION
+The number of the current turn (0 before the first).
+
+@topic stdlib.std::event_loop::current_task
+title: std::event_loop::current_task -- Function of module std::event_loop
+summary: The id of the task being dispatched (-1 outside a dispatch).
+index: stdlib
+symbol: std::event_loop::current_task
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn current_task(context ev: Loop) -> int errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::current_task or, as a method, receiver.current_task(...).
+
+== DESCRIPTION
+The id of the task being dispatched (-1 outside a dispatch).
+
+@topic stdlib.std::event_loop::stats
+title: std::event_loop::stats -- Function of module std::event_loop
+summary: A snapshot of the loop's counters.
+index: stdlib
+symbol: std::event_loop::stats
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn stats(context ev: Loop) -> Stats errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::stats or, as a method, receiver.stats(...).
+
+== DESCRIPTION
+A snapshot of the loop's counters.
+
+@topic stdlib.std::event_loop::take_outcomes
+title: std::event_loop::take_outcomes -- Function of module std::event_loop
+summary: The tasks that ended since the last call, in the order they ended (at most 4096 are kept between calls
+index: stdlib
+symbol: std::event_loop::take_outcomes
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn take_outcomes(context ev: Loop) -> List[Outcome] errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::take_outcomes or, as a method,
+receiver.take_outcomes(...).
+
+== DESCRIPTION
+The tasks that ended since the last call, in the order they ended (at most
+4096 are kept between calls; the excess is counted in
+Stats.outcomes_dropped).
+
+@topic stdlib.std::event_loop::live?
+title: std::event_loop::live? -- Function of module std::event_loop
+summary: Whether REG still names a live registration.
+index: stdlib
+symbol: std::event_loop::live?
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn live?(reg: Reg, context ev: Loop) -> bool errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::live? or, as a method, receiver.live?(...).
+
+== DESCRIPTION
+Whether REG still names a live registration.
+
+@topic stdlib.std::event_loop::native_slot
+title: std::event_loop::native_slot -- Function of module std::event_loop
+summary: The tag a native producer puts on its records for REG
+index: stdlib
+symbol: std::event_loop::native_slot
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn native_slot(reg: Reg) -> int:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::native_slot or, as a method, receiver.native_slot(...).
+
+== DESCRIPTION
+The tag a native producer puts on its records for REG: the slot and the
+generation (each fits a C int). Nothing can be done with them but delivering
+records: a Reg cannot be made from them.
+
+@topic stdlib.std::event_loop::native_generation
+title: std::event_loop::native_generation -- Function of module std::event_loop
+summary: The function std::event_loop::native_generation of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::native_generation
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn native_generation(reg: Reg) -> int:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::native_generation or, as a method,
+receiver.native_generation(...).
+
+@topic stdlib.std::event_loop::timer
+title: std::event_loop::timer -- Function (nomethod) of module std::event_loop
+summary: A one-shot timer at DEADLINE (loop time), or a repeating one (PERIOD > 0) whose first expiry is DEADLINE.
+index: stdlib
+symbol: std::event_loop::timer
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    nomethod fn timer(deadline: int, period: int, context ev: Loop) -> Reg errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::timer.
+
+== DESCRIPTION
+A one-shot timer at DEADLINE (loop time), or a repeating one (PERIOD > 0)
+whose first expiry is DEADLINE. A timer keeps the loop alive while a task
+waits on it. A repeating timer never queues missed expiries: one wake
+reports how many intervals were missed (Event.a) and its next deadline stays
+on the period's grid. A one-shot timer wakes every task waiting on it when
+it expires, and is then spent (no longer live).
+
+@topic stdlib.std::event_loop::after
+title: std::event_loop::after -- Function of module std::event_loop
+summary: A one-shot timer DELAY microseconds after the loop's time.
+index: stdlib
+symbol: std::event_loop::after
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn after(delay: int, context ev: Loop) -> Reg errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::after or, as a method, receiver.after(...).
+
+== DESCRIPTION
+A one-shot timer DELAY microseconds after the loop's time.
+
+@topic stdlib.std::event_loop::every
+title: std::event_loop::every -- Function of module std::event_loop
+summary: A repeating timer of PERIOD microseconds (> 0), first PERIOD after the loop's time.
+index: stdlib
+symbol: std::event_loop::every
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn every(period: int, context ev: Loop) -> Reg errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::every or, as a method, receiver.every(...).
+
+== DESCRIPTION
+A repeating timer of PERIOD microseconds (> 0), first PERIOD after the
+loop's time.
+
+@topic stdlib.std::event_loop::source
+title: std::event_loop::source -- Function (nomethod) of module std::event_loop
+summary: A source of native records (the driver delivers them
+index: stdlib
+symbol: std::event_loop::source
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    nomethod fn source(delivery: Delivery, capacity: int, flags :keep_alive, context ev: Loop) -> Reg errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::source.
+
+== DESCRIPTION
+A source of native records (the driver delivers them; Botlish code may post
+too). DELIVERY says what happens when CAPACITY (at least 1) undelivered
+events are already queued. :keep_alive: a task waiting on it keeps the loop
+alive (a listening socket); without it, it does not (an optional input).
+
+@topic stdlib.std::event_loop::channel
+title: std::event_loop::channel -- Function (nomethod) of module std::event_loop
+summary: A channel Botlish code posts to.
+index: stdlib
+symbol: std::event_loop::channel
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    nomethod fn channel(delivery: Delivery, capacity: int, context ev: Loop) -> Reg errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::channel.
+
+== DESCRIPTION
+A channel Botlish code posts to. It never keeps the loop alive by itself:
+only a running task can post to it.
+
+@topic stdlib.std::event_loop::observer
+title: std::event_loop::observer -- Function of module std::event_loop
+summary: A once-per-turn registration
+index: stdlib
+symbol: std::event_loop::observer
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn observer(context ev: Loop) -> Reg errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::observer or, as a method, receiver.observer(...).
+
+== DESCRIPTION
+A once-per-turn registration: a task waiting on it runs once in the observer
+phase of every turn that collected or dispatched something (Event.a: the
+turn). It takes effect at the first observer phase that starts after this
+call, never keeps the loop alive, and never makes the loop poll: an idle
+loop sleeps. It is not a timer and not a frame clock (frame work is a
+repeating timer).
+
+@topic stdlib.std::event_loop::revoke
+title: std::event_loop::revoke -- Function of module std::event_loop
+summary: Revoke REG
+index: stdlib
+symbol: std::event_loop::revoke
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn revoke(reg: Reg, context ev: Loop) -> bool errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::revoke or, as a method, receiver.revoke(...).
+
+== DESCRIPTION
+Revoke REG: no handler invocation after this one. Its queued events are
+discarded, a wake already queued for a task becomes Wake::Revoked when the
+task is dispatched, records still in flight are dropped as stale, and every
+waiter is made ready with Wake::Revoked, in the order they waited. Running
+code is not undone and no task is cancelled. True when REG was live (or a
+spent one-shot timer); revoking twice, or a stale copy, does nothing
+(false).
+
+@topic stdlib.std::event_loop::post
+title: std::event_loop::post -- Function of module std::event_loop
+summary: Post (A, B) to the source or channel REG from Botlish code (a task or the top level).
+index: stdlib
+symbol: std::event_loop::post
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn post(reg: Reg, a: int, b: int, context ev: Loop) -> Posted errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::post or, as a method, receiver.post(...).
+
+== DESCRIPTION
+Post (A, B) to the source or channel REG from Botlish code (a task or the
+top level). Accepted: a waiter was woken or the event queued; Coalesced:
+merged into the pending event; Dropped: a Lossy registration was full
+(counted); Refused: a Reliable one was full (try again after its consumer
+took an event); NotLive: REG is revoked, spent, or not a source or channel.
+
+@topic stdlib.std::event_loop::pending
+title: std::event_loop::pending -- Function of module std::event_loop
+summary: Events of REG queued and undelivered (0 when REG is not live).
+index: stdlib
+symbol: std::event_loop::pending
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn pending(reg: Reg, context ev: Loop) -> int errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::pending or, as a method, receiver.pending(...).
+
+== DESCRIPTION
+Events of REG queued and undelivered (0 when REG is not live).
+
+@topic stdlib.std::event_loop::delivered
+title: std::event_loop::delivered -- Function of module std::event_loop
+summary: Events REG accepted (woke a waiter, queued or coalesced) / dropped for want of room (Lossy), while live.
+index: stdlib
+symbol: std::event_loop::delivered
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn delivered(reg: Reg, context ev: Loop) -> int errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::delivered or, as a method, receiver.delivered(...).
+
+== DESCRIPTION
+Events REG accepted (woke a waiter, queued or coalesced) / dropped for want
+of room (Lossy), while live.
+
+@topic stdlib.std::event_loop::dropped
+title: std::event_loop::dropped -- Function of module std::event_loop
+summary: The function std::event_loop::dropped of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::dropped
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn dropped(reg: Reg, context ev: Loop) -> int errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::dropped or, as a method, receiver.dropped(...).
+
+@topic stdlib.std::event_loop::adopt
+title: std::event_loop::adopt -- Function (nomethod) of module std::event_loop
+summary: Hand a task to the scheduler
+index: stdlib
+symbol: std::event_loop::adopt
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    nomethod fn adopt(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}, first: int, context ev: Loop) -> int errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::adopt.
+
+== DESCRIPTION
+Hand a task to the scheduler: STEP was constructed by the caller (its first
+segment already ran), FIRST is what that segment yielded (or returned). The
+handle moves into the Loop; the task's id is returned: ids are serial
+numbers, never reused.
+
+@topic stdlib.std::event_loop::yield_now
+title: std::event_loop::yield_now -- Function of module std::event_loop
+summary: Run again in the next turn
+index: stdlib
+symbol: std::event_loop::yield_now
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn yield_now():
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::yield_now or, as a method, receiver.yield_now(...).
+
+== DESCRIPTION
+Run again in the next turn: continuous activity, which keeps the loop awake
+and polling.
+
+@topic stdlib.std::event_loop::wait
+title: std::event_loop::wait -- Function of module std::event_loop
+summary: Wait for REG's next event (or its timer, its turn, its revocation).
+index: stdlib
+symbol: std::event_loop::wait
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn wait(reg: Reg, context ev: Loop) -> Event errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::wait or, as a method, receiver.wait(...).
+
+== DESCRIPTION
+Wait for REG's next event (or its timer, its turn, its revocation). A
+registration that is not live answers Wake::Revoked at once, without
+suspending.
+
+@topic stdlib.std::event_loop::try_take
+title: std::event_loop::try_take -- Function of module std::event_loop
+summary: REG's next queued event without suspending
+index: stdlib
+symbol: std::event_loop::try_take
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn try_take(reg: Reg, context ev: Loop) -> Event errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::try_take or, as a method, receiver.try_take(...).
+
+== DESCRIPTION
+REG's next queued event without suspending: Wake::Event, Wake::Empty when
+nothing is queued, Wake::Revoked when REG is not live. A task that drains a
+queue this way handles a whole batch in one dispatch.
+
+@topic stdlib.std::event_loop::sleep
+title: std::event_loop::sleep -- Function of module std::event_loop
+summary: Sleep DELAY microseconds (a one-shot timer of its own)
+index: stdlib
+symbol: std::event_loop::sleep
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn sleep(delay: int, context ev: Loop) -> Wake errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::sleep or, as a method, receiver.sleep(...).
+
+== DESCRIPTION
+Sleep DELAY microseconds (a one-shot timer of its own): Wake::Timer, or
+Wake::Revoked when the loop shut down meanwhile.
+
+@topic stdlib.std::event_loop::turn
+title: std::event_loop::turn -- Function of module std::event_loop
+summary: One scheduling turn without waiting (the driver has waited, or a host advances the loop)
+index: stdlib
+symbol: std::event_loop::turn
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn turn(context ev: Loop, d: Driver) -> int errors SchedulerFault, DriverFault, LoopReentered:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::turn or, as a method, receiver.turn(...).
+
+== DESCRIPTION
+One scheduling turn without waiting (the driver has waited, or a host
+advances the loop): collect, dispatch, observe. Returns how many tasks its
+dispatch phase ran.
+
+@topic stdlib.std::event_loop::sync
+title: std::event_loop::sync -- Function of module std::event_loop
+summary: Read the driver's clock into the loop's time
+index: stdlib
+symbol: std::event_loop::sync
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn sync(context ev: Loop, d: Driver) -> int errors SchedulerFault, DriverFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::sync or, as a method, receiver.sync(...).
+
+== DESCRIPTION
+Read the driver's clock into the loop's time: the time after, every and now
+use until the next turn starts. The application calls it before registering
+timers outside the loop; tasks never need it.
+
+@topic stdlib.std::event_loop::stop
+title: std::event_loop::stop -- Function of module std::event_loop
+summary: Ask run to return after the current turn.
+index: stdlib
+symbol: std::event_loop::stop
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn stop(context ev: Loop) errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::stop or, as a method, receiver.stop(...).
+
+== DESCRIPTION
+Ask run to return after the current turn. A Loop operation, so a task can
+make it (a quit command): it ends the current run only, and the application
+decides what follows (run again, shutdown).
+
+@topic stdlib.std::event_loop::run
+title: std::event_loop::run -- Function of module std::event_loop
+summary: Drive the loop until nothing can happen any more (or stop, or a driver that can never deliver again).
+index: stdlib
+symbol: std::event_loop::run
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn run(context ev: Loop, d: Driver) -> int errors SchedulerFault, DriverFault, LoopReentered:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::run or, as a method, receiver.run(...).
+
+== DESCRIPTION
+Drive the loop until nothing can happen any more (or stop, or a driver that
+can never deliver again). Returns the number of turns.
+
+@topic stdlib.std::event_loop::abandon
+title: std::event_loop::abandon -- Function of module std::event_loop
+summary: Release every task the loop still owns, without running it (a released coroutine is unwound, never resumed)
+index: stdlib
+symbol: std::event_loop::abandon
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn abandon(context ev: Loop, d: Driver) -> int errors SchedulerFault, LoopReentered:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::abandon or, as a method, receiver.abandon(...).
+
+== DESCRIPTION
+Release every task the loop still owns, without running it (a released
+coroutine is unwound, never resumed): the end of a shutdown. Returns how
+many it released. The application's, as run and shutdown are (it requires
+the Driver: a library holding only the Loop cannot drop the program's
+tasks); from inside a dispatch it is LoopReentered.
+
+@topic stdlib.std::event_loop::shutdown
+title: std::event_loop::shutdown -- Function of module std::event_loop
+summary: Shutdown
+index: stdlib
+symbol: std::event_loop::shutdown
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn shutdown(rounds: int, context ev: Loop, d: Driver) -> int errors SchedulerFault, DriverFault, LoopReentered:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::shutdown or, as a method, receiver.shutdown(...).
+
+== DESCRIPTION
+Shutdown: revoke every registration (their waiters wake with Wake::Revoked
+and may finish), run at most ROUNDS more turns while tasks are ready, then
+abandon what is left. Returns how many tasks were abandoned.
+
+@topic stdlib.module.std::event_loop
+title: std::event_loop -- standard namespace
+summary: One thread-local scheduler of ordinary Botlish coroutines and native event sources (EVENT-LOOP-MILESTONE-1.md.
+index: stdlib
+symbol: std::event_loop
+
+== DESCRIPTION
+  with context std::event_loop::create(64)          the scheduler (Loop)
+  with context DRIVER                               any context implementing
+                                                    std::event_loop::Driver
+  coroutine {step, first} = task(...)               an ordinary coroutine
+  std::event_loop::adopt(step, first)               ... handed to the loop
+  std::event_loop::run()                            turns until nothing is live
+
+Three responsibilities, kept apart:
+
+* The SCHEDULER (this module, ordinary Botlish over MutableVectors,
+  MutableArrays and the existing coroutines) owns tasks, ready queues,
+  registrations, timers, the scheduling turn, fairness, revocation and
+  shutdown. It knows no operating system: no descriptor, handle or clock
+  source appears here.
+* The DRIVER is a context implementing the context trait Driver below: it
+  supplies time, waiting, wakeups and native records, and nothing of the
+  scheduling rules. Only the entry program installs contexts, so only the
+  application chooses the driver; two installed drivers are
+  AMBIGUOUS-CONTEXT-IMPLEMENTATION and none MISSING-CONTEXT -- importing a
+  library never changes who drives the loop. The deterministic driver is
+  std::event_loop::deterministic (every backend); the production Linux
+  driver is the package packages/event_loop_linux.
+* EVENT SOURCES register with the loop (source, channel, timer, observer)
+  and deliver records tagged with a registration's identity. A library that
+  requires only Loop can register, post, wait and revoke; it cannot make the
+  loop wait or turn, or drop its tasks -- run, turn, sync, shutdown and
+  abandon also require the Driver, which is the application's.
+
+Tasks are ordinary coroutines of one protocol,
+
+    Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}
+
+built (eagerly: the first segment runs inside the spawner) by whoever spawns
+them and handed over with adopt, which moves the handle into the Loop.
+Adopting twice, or resuming after adopting, is USE-AFTER-MOVE. A task's
+segment ends by yielding (yield_now, wait, sleep) or by returning; its
+children are ordinary coroutines it resumes directly. Nothing is allocated
+per dispatch.
+
+THE SCHEDULING TURN, in order:
+
+  1. wait     the driver blocks until a native record, a wakeup or the
+              earliest deadline a task waits on -- or polls, when ready
+              work exists. A timer nobody waits on imposes no deadline.
+  2. collect  holds the driver may release (backpressure: below), expired
+              timers (deadline order, registration order among equal
+              deadlines), then at most `budget` native records, which the
+              driver hands over round-robin among its sources. Each record
+              goes to its registration (its generation checked): the first
+              waiter becomes ready, else the event is queued under the
+              registration's Delivery policy.
+  3. dispatch exactly the tasks ready when this phase starts, each once,
+              in the order they became ready (FIFO, whatever made them
+              ready). Work made ready during the phase -- a yield, a post,
+              an adoption, a revocation's wakes -- runs in the next turn.
+  4. observe  every observer registration live when the phase starts runs
+              its waiting task once, in registration order -- only in a
+              turn whose collect or dispatch did something. An empty turn
+              (a wakeup for nothing) runs no observer.
+
+FAIRNESS is cooperative. A ready task runs within one turn of becoming ready
+however many others yield or replenish the queue; a turn collects at most
+`budget` records; a driver serves its sources round-robin, so a flooding
+source cannot hold back a quiet one. A segment that never yields holds the
+thread: there is no preemption and no wall-clock bound.
+
+DELIVERY. A source or channel queues at most CAPACITY undelivered events and
+its Delivery policy says what happens beyond: Lossy counts and drops the
+excess (a stream where the latest matters); Coalesce keeps one pending
+event, the latest, with a count of the events it stands for (readiness,
+motion); Reliable never drops: a record the registration has no room for
+stays with the driver (hold_record), which takes nothing more from that
+source until the registration's queue has drained to half its capacity
+(release_held) -- the backpressure reaches the native producer -- and a post
+from Botlish code is Refused. Timers coalesce (missed intervals are counted,
+never queued).
+
+LIVENESS. run returns when no task is ready and no task waits on a
+registration that keeps the loop alive (timers, and sources registered
+:keep_alive), on stop, or when the driver reports it can never deliver
+again. Observers and channels never keep the loop alive.
+
+REVOCATION. revoke(reg) bumps the registration's generation: no handler
+invocation after it -- its queued events are discarded, a wake already
+queued for a task is turned into Wake::Revoked when the task is dispatched,
+records still in flight with the old generation are dropped as stale (also
+after the slot is reused), and its waiters wake with Wake::Revoked in the
+order they waited. Code already running is not undone; tasks a registration
+woke or started keep their own lifetimes; revoking twice, or through a stale
+copy, does nothing. A Reg is an identity, not an owner: nothing revokes a
+registration implicitly (there is no drop action yet,
+EVENT-LOOP-MILESTONE-1.md, "Ownership"); shutdown revokes every one.
+
+ERRORS. A task's declared failure (TaskFailed, its own IndexNotFound, or a
+DriverFault from a driver operation it made) ends that task, is recorded
+(take_outcomes) and affects nothing else. A failure in a task's first
+segment reaches its spawner (construction is eager). SchedulerFault is
+raised only when the scheduler's own state breaks an invariant -- a bug,
+never an application condition -- and ends run; DriverFault is the driver's
+report of a native failure. run or turn from inside a dispatch is
+LoopReentered.
+
+== SOURCE
+stdlib/event_loop.bot (import std::event_loop).
+
+== MEMBERS
+    std::event_loop::Delivery      enum -- What a source or channel does wi...
+    std::event_loop::Driver        context trait -- The environment the loo...
+    std::event_loop::DriverFault   error -- The driver reports a native fai...
+    std::event_loop::Ending        enum -- How a task ended (take_outcomes).
+    std::event_loop::Event         struct -- What woke a task.
+    std::event_loop::Loop          opaque context struct
+    std::event_loop::LoopReentered error -- run or turn called while a task...
+    std::event_loop::Outcome       struct -- A finished task
+    std::event_loop::Posted        enum -- What post did with an event.
+    std::event_loop::Reg           opaque struct -- A registration's identity
+    std::event_loop::SchedulerFault error -- The scheduler's own state brok...
+    std::event_loop::Stats         struct -- The loop's counters (stats).
+    std::event_loop::TaskFailed    error -- A task's own failure, carried o...
+    std::event_loop::Wake          enum -- What made a waiting task ready.
+    std::event_loop::abandon       function -- Release every task the loop ...
+    std::event_loop::adopt         function (nomethod) -- Hand a task to th...
+    std::event_loop::after         function -- A one-shot timer DELAY micro...
+    std::event_loop::channel       function (nomethod) -- A channel Botlish...
+    std::event_loop::create        function -- A Loop that collects at most...
+    std::event_loop::current_task  function -- The id of the task being dis...
+    std::event_loop::delivered     function -- Events REG accepted (woke a ...
+    std::event_loop::dropped       function
+    std::event_loop::every         function -- A repeating timer of PERIOD ...
+    std::event_loop::live?         function -- Whether REG still names a li...
+    std::event_loop::log           function -- An application line in the t...
+    std::event_loop::native_generation function
+    std::event_loop::native_slot   function -- The tag a native producer pu...
+    std::event_loop::now           function -- The loop's time
+    std::event_loop::observer      function -- A once-per-turn registration
+    std::event_loop::pending       function -- Events of REG queued and und...
+    std::event_loop::post          function -- Post (A, B) to the source or...
+    std::event_loop::revoke        function -- Revoke REG
+    std::event_loop::run           function -- Drive the loop until nothing...
+    std::event_loop::shutdown      function -- Shutdown
+    std::event_loop::sleep         function -- Sleep DELAY microseconds (a ...
+    std::event_loop::source        function (nomethod) -- A source of nativ...
+    std::event_loop::stats         function -- A snapshot of the loop's cou...
+    std::event_loop::stop          function -- Ask run to return after the ...
+    std::event_loop::sync          function -- Read the driver's clock into...
+    std::event_loop::take_outcomes function -- The tasks that ended since t...
+    std::event_loop::timer         function (nomethod) -- A one-shot timer ...
+    std::event_loop::trace         function -- The trace so far, oldest first
+    std::event_loop::tracing?      function -- Whether the loop records its...
+    std::event_loop::try_take      function -- REG's next queued event with...
+    std::event_loop::turn          function -- One scheduling turn without ...
+    std::event_loop::turn_number   function -- The number of the current tu...
+    std::event_loop::wait          function -- Wait for REG's next event (o...
+    std::event_loop::yield_now     function -- Run again in the next turn
+
+Each member is a topic: -help NAME (e.g. -help std::event_loop::Delivery).
+
+@topic stdlib.std::event_loop::deterministic::Deterministic
+title: std::event_loop::deterministic::Deterministic -- Opaque context struct
+summary: The driver
+index: stdlib
+symbol: std::event_loop::deterministic::Deterministic
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    opaque context struct Deterministic:
+        clock: MutableArray[int]
+        script: MutableVector[int]
+        queues: MutableVector[int]
+        nodes: MutableVector[int]
+        free: MutableVector[int]
+        rot_in: MutableVector[int]
+        rot_out: MutableVector[int]
+        waits: MutableVector[int]
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::Deterministic.
+
+== DESCRIPTION
+The driver: its registers, the script (time, slot, gen, a, b; stride 5, kept
+sorted by time, stable), the per-slot queues of released records, the record
+nodes (gen, a, b, next; stride 4) and the round-robin rotation of slots with
+records (a two-stack queue).
+
+@topic stdlib.std::event_loop::deterministic::create
+title: std::event_loop::deterministic::create -- Function
+summary: A driver at virtual time 0 with an empty script.
+index: stdlib
+symbol: std::event_loop::deterministic::create
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn create() -> Deterministic:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::create or, as a method,
+receiver.create(...).
+
+== DESCRIPTION
+A driver at virtual time 0 with an empty script.
+
+@topic stdlib.std::event_loop::deterministic::inject
+title: std::event_loop::deterministic::inject -- Function (nomethod)
+summary: Script a record of registration REG at virtual time WHEN, carrying (A, B).
+index: stdlib
+symbol: std::event_loop::deterministic::inject
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    nomethod fn inject(when: int, reg: std::event_loop::Reg, a: int, b: int, context s: Deterministic) errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::inject.
+
+== DESCRIPTION
+Script a record of registration REG at virtual time WHEN, carrying (A, B).
+Records may be scripted in any order and at any time, also while the loop
+runs; those due at the same time are released in the order they were
+scripted.
+
+@topic stdlib.std::event_loop::deterministic::inject_tag
+title: std::event_loop::deterministic::inject_tag -- Function (nomethod)
+summary: Script a record with an explicit tag (SLOT, GEN), as a native producer would post it -- a record for a revoked registration (stale), for a slot not...
+index: stdlib
+symbol: std::event_loop::deterministic::inject_tag
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    nomethod fn inject_tag(when: int, slot: int, gen: int, a: int, b: int, context s: Deterministic) errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::inject_tag.
+
+== DESCRIPTION
+Script a record with an explicit tag (SLOT, GEN), as a native producer would
+post it -- a record for a revoked registration (stale), for a slot nothing
+uses, or for a later reuse of a slot.
+
+@topic stdlib.std::event_loop::deterministic::waits
+title: std::event_loop::deterministic::waits -- Function
+summary: The deadlines the loop blocked with, in order (-1
+index: stdlib
+symbol: std::event_loop::deterministic::waits
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn waits(context s: Deterministic) -> List[int] errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::waits or, as a method,
+receiver.waits(...).
+
+== DESCRIPTION
+The deadlines the loop blocked with, in order (-1: none; 0: a poll).
+
+@topic stdlib.std::event_loop::deterministic::advance
+title: std::event_loop::deterministic::advance -- Function
+summary: Move the virtual clock forward by DELTA (a segment that takes time).
+index: stdlib
+symbol: std::event_loop::deterministic::advance
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn advance(delta: int, context s: Deterministic) errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::advance or, as a method,
+receiver.advance(...).
+
+== DESCRIPTION
+Move the virtual clock forward by DELTA (a segment that takes time).
+
+@topic stdlib.std::event_loop::deterministic::undelivered
+title: std::event_loop::deterministic::undelivered -- Function
+summary: Records released (due) and not yet taken by the loop, held ones included.
+index: stdlib
+symbol: std::event_loop::deterministic::undelivered
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn undelivered(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::undelivered or, as a method,
+receiver.undelivered(...).
+
+== DESCRIPTION
+Records released (due) and not yet taken by the loop, held ones included.
+
+@topic stdlib.std::event_loop::deterministic::clock
+title: std::event_loop::deterministic::clock -- Function
+summary: The function std::event_loop::deterministic::clock of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::clock
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn clock(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::clock or, as a method,
+receiver.clock(...).
+
+@topic stdlib.std::event_loop::deterministic::advance_to
+title: std::event_loop::deterministic::advance_to -- Function
+summary: Move the virtual clock forward to TIME (never backward) and release every record due by then
+index: stdlib
+symbol: std::event_loop::deterministic::advance_to
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn advance_to(time: int, context s: Deterministic) errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::advance_to or, as a method,
+receiver.advance_to(...).
+
+== DESCRIPTION
+Move the virtual clock forward to TIME (never backward) and release every
+record due by then: the next turn collects them. With turn, this steps a
+loop explicitly, outside run.
+
+@topic stdlib.std::event_loop::deterministic::block
+title: std::event_loop::deterministic::block -- Function
+summary: The function std::event_loop::deterministic::block of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::block
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn block(deadline: int, context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::block or, as a method,
+receiver.block(...).
+
+@topic stdlib.std::event_loop::deterministic::take_record
+title: std::event_loop::deterministic::take_record -- Function
+summary: The function std::event_loop::deterministic::take_record of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::take_record
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn take_record(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::take_record or, as a method,
+receiver.take_record(...).
+
+@topic stdlib.std::event_loop::deterministic::record_gen
+title: std::event_loop::deterministic::record_gen -- Function
+summary: The function std::event_loop::deterministic::record_gen of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::record_gen
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn record_gen(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::record_gen or, as a method,
+receiver.record_gen(...).
+
+@topic stdlib.std::event_loop::deterministic::record_a
+title: std::event_loop::deterministic::record_a -- Function
+summary: The function std::event_loop::deterministic::record_a of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::record_a
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn record_a(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::record_a or, as a method,
+receiver.record_a(...).
+
+@topic stdlib.std::event_loop::deterministic::record_b
+title: std::event_loop::deterministic::record_b -- Function
+summary: The function std::event_loop::deterministic::record_b of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::record_b
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn record_b(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::record_b or, as a method,
+receiver.record_b(...).
+
+@topic stdlib.std::event_loop::deterministic::hold_record
+title: std::event_loop::deterministic::hold_record -- Function
+summary: The function std::event_loop::deterministic::hold_record of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::hold_record
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn hold_record(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::hold_record or, as a method,
+receiver.hold_record(...).
+
+@topic stdlib.std::event_loop::deterministic::release_held
+title: std::event_loop::deterministic::release_held -- Function
+summary: The function std::event_loop::deterministic::release_held of the standard module std::event_loop::deterministic.
+index: stdlib
+symbol: std::event_loop::deterministic::release_held
+related: stdlib.module.std::event_loop::deterministic
+
+== DECLARATION
+    fn release_held(slot: int, context s: Deterministic) -> int errors std::event_loop::DriverFault:
+
+== MODULE
+stdlib/event_loop/deterministic.bot: import
+std::event_loop::deterministic, then write
+std::event_loop::deterministic::release_held or, as a method,
+receiver.release_held(...).
+
+@topic stdlib.module.std::event_loop::deterministic
+title: std::event_loop::deterministic -- standard namespace
+summary: A deterministic driver for std::event_loop (EVENT-LOOP-MILESTONE-1.md, "Deterministic testing").
+index: stdlib
+symbol: std::event_loop::deterministic
+
+== DESCRIPTION
+  with context std::event_loop::create(8)
+  with context std::event_loop::deterministic::create()
+  std::event_loop::deterministic::inject(10, reg, 1, 2)   a record at t=10
+  std::event_loop::run()
+
+A virtual monotonic clock and a script of native records, each released once
+the clock reaches its time. block(DEADLINE) never sleeps: it advances the
+clock to the next scripted record or to DEADLINE, whichever comes first.
+Every visit to the driver takes one virtual microsecond, so a loop that
+never sleeps still sees time pass; a task can make its segment take time
+(advance). It is ordinary Botlish, with no native code, so the same
+application runs under it on every backend (interp, compile,
+cranelift-generic, cranelift) with identical results -- the scheduling rules
+are the scheduler's, whichever driver advances it.
+
+Its sources are registration slots: the records scripted for one slot are
+delivered in script order, and take_record serves the slots that have
+records round-robin, one record per slot in turn -- the same contract the
+Linux driver keeps for its endpoints and watches. hold_record and
+release_held model backpressure exactly (a held slot delivers nothing until
+released).
+
+Records are scripted by time; records due at the same time are released in
+the order they were scripted.
+
+== SOURCE
+stdlib/event_loop/deterministic.bot (import
+std::event_loop::deterministic).
+
+== MEMBERS
+    std::event_loop::deterministic::Deterministic opaque context struct -- ...
+    std::event_loop::deterministic::advance function -- Move the virtual cl...
+    std::event_loop::deterministic::advance_to function -- Move the virtual...
+    std::event_loop::deterministic::block function
+    std::event_loop::deterministic::clock function
+    std::event_loop::deterministic::create function -- A driver at virtual ...
+    std::event_loop::deterministic::hold_record function
+    std::event_loop::deterministic::inject function (nomethod) -- Script a ...
+    std::event_loop::deterministic::inject_tag function (nomethod) -- Scrip...
+    std::event_loop::deterministic::record_a function
+    std::event_loop::deterministic::record_b function
+    std::event_loop::deterministic::record_gen function
+    std::event_loop::deterministic::release_held function
+    std::event_loop::deterministic::take_record function
+    std::event_loop::deterministic::undelivered function -- Records release...
+    std::event_loop::deterministic::waits function -- The deadlines the loo...
+
+Each member is a topic: -help NAME (e.g. -help
+std::event_loop::deterministic::Deterministic).
+
 @topic stdlib.std::ffi::c::clone
 title: std::ffi::c::clone -- intrinsic of namespace std::ffi::c
 summary: A second alias of a C pointer (the same address, the same type), written p.clone(): the one way to have two pointers.

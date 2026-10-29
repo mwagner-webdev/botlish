@@ -1,0 +1,53 @@
+# sdl-naive.bot -- SDL3 beside the Linux driver, coordinated by mode 4
+# (naive; sdl.c's header), with a producer thread's posts, a repeating
+# timer and a task that pushes an SDL event from inside its segment, then an
+# idle 200 ms sleep with SDL running. tests/event-loop-linux.test compares
+# the modes.
+import elog
+import event_loop_linux
+import evsdl
+import fx
+import sdlprobe
+import std::event_loop
+import type std::event_loop::Delivery
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    sdlreg = std::event_loop::source(Delivery::Reliable, 4096, :keep_alive)
+    posts = std::event_loop::source(Delivery::Reliable, 4096, :keep_alive)
+    elog::say("sdl start ", evsdl::start(4, sdlreg, 1024, 10000))
+    sdlprobe::spawn_all(sdlreg, posts)
+    sdlprobe::start_producers()
+    pep = event_loop_linux::endpoint(1024)
+    fx::synth(event_loop_linux::endpoint_id(pep), std::event_loop::native_slot(posts), std::event_loop::native_generation(posts), 200, 1000, 1, 1, 0)
+    started = event_loop_linux::now_us()
+    elog::say("turns ", std::event_loop::run())
+    elog::say("wall us ", event_loop_linux::now_us() - started)
+    evsdl::producers_join()
+    fx::synth_join()
+    sdlprobe::report_sdl()
+    # Idle: one 200 ms sleep with SDL running.
+    std::event_loop::sync()
+    coroutine {step, first} = sdlprobe::idle_sleep(200000)
+    std::event_loop::adopt(step, first)
+    before = event_loop_linux::stats()
+    cpu = event_loop_linux::cpu_us()
+    std::event_loop::run()
+    after = event_loop_linux::stats()
+    elog::say("idle blocks ", after.blocks - before.blocks)
+    elog::say("idle cpu us ", event_loop_linux::cpu_us() - cpu)
+    evsdl::quit()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -1,0 +1,271 @@
+# event-loop-linux.test -- the production Linux driver of std::event_loop
+# (packages/event_loop_linux; EVENT-LOOP-MILESTONE-1.md, "Linux driver",
+# "Native delivery") against real epoll, eventfd, sockets and threads, and
+# SDL3 where tests/cffi/sdl3.tcl has built it.
+#
+# The scenario programs are tests/event-loop/native/*.bot. They run in a
+# private application directory (tests/event-loop/native/app.tcl): the
+# programs, the shared modules of tests/event-loop/, the fixtures' archives
+# (native/fixture.c; native/sdl.c with SDL3) and the driver package
+# installed under .bot_modules by tools/event-loop-linux.tcl -- the way an
+# application installs it. Each program is compiled with -warnings error
+# and run once on the native backend (cranelift); the claims are checked on
+# its trace.
+#
+# The timing claims are bounds on a shared machine, generous enough to hold
+# on a loaded 4-core container; each failure message carries the
+# measurement.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot tests event-loop native app.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint eventLoopLinux [expr {$::tcl_platform(os) eq "Linux"
+    && $::tcl_platform(machine) in {x86_64 amd64 aarch64}
+    && [testConstraint nativeCCalls] && [testConstraint cLinker] && [auto_execok cc] ne "" && [auto_execok ar] ne ""}]
+testConstraint eventLoopSdl [expr {[testConstraint eventLoopLinux] && [eventLoopApp::sdl] ne ""}]
+
+set elApp [file join [temporaryDirectory] event-loop-linux-app]
+
+proc elStrings {shown} {
+    set out {}
+    foreach {- s} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $shown] {
+        lappend out [subst -nocommands -novariables $s]
+    }
+    return $out
+}
+
+proc elMatches {trace re} {
+    set out {}
+    foreach line $trace {
+        set m [regexp -inline -- $re $line]
+        if {$m ne ""} {
+            lappend out $m
+        }
+    }
+    return $out
+}
+
+proc elNum {trace re} {
+    lindex [lindex [elMatches $trace $re] 0] 1
+}
+
+# The application, built once.
+proc elBuild {} {
+    if {![info exists ::elBuilt]} {
+        set ::elBuilt [expr {![catch {eventLoopApp::create $::elApp} ::elBuildError]}]
+    }
+    return $::elBuilt
+}
+
+# Native program NAME of the application: its trace (a list of lines), or
+# the failure as one line. ENVIRONMENT: variable pairs set for the run.
+proc elNative {name {environment {}}} {
+    set key [list $name $environment]
+    if {[info exists ::elRuns($key)]} {
+        return $::elRuns($key)
+    }
+    if {![elBuild]} {
+        return [list "BUILD FAILED: $::elBuildError"]
+    }
+    set hir [surface::readProgramFile [file join $::elApp $name.bot] -warnings error]
+    set dirs {}
+    set pairs $environment
+    set sdl [eventLoopApp::sdl]
+    if {$sdl ne ""} {
+        # Botlish adds no rpath: the executable finds libSDL3.so this way.
+        lappend dirs $sdl
+        lappend pairs LD_LIBRARY_PATH $sdl
+    }
+    set o [withEnvironment $pairs {native::withLinkDirs $dirs {outcomeUnderHir cranelift $hir}}]
+    set ::elRuns($key) [expr {[lindex $o 0] eq "value" ? [elStrings [lindex $o 1]] : [list "FAILED: [string range $o 0 2000]"]}]
+    return $::elRuns($key)
+}
+
+test el-linux-build {the driver package installs into an application (tools/event-loop-linux.tcl install) and builds its archive with -Werror; the fixtures build} -constraints eventLoopLinux -body {
+    list [elBuild] [file exists [file join $::elApp .bot_modules event_loop_linux native libevent_loop_linux.a]] \
+        [file exists [file join $::elApp native libfixture.a]]
+} -result {1 1 1}
+
+# --------------------------------------------------------------------------
+# Wakeups
+
+test el-linux-wake {a producer thread's posts all arrive (300 jittered, 40 in racing pairs) and wake the sleeping loop at once: none waits for the 50 ms heartbeat} -constraints eventLoopLinux -body {
+    set t [elNative wake]
+    set received [lmap m [elMatches $t {received (\d+)}] {lindex $m 1}]
+    set late [tcl::mathop::+ {*}[lmap m [elMatches $t {posts later than 5 ms (\d+)}] {lindex $m 1}]]
+    set max [tcl::mathfunc::max {*}[lmap m [elMatches $t {max latency us (\d+)}] {lindex $m 1}]]
+    list $received [expr {$late <= 3 && $max < 30000 ? "ok" : "late $late max $max"}]
+} -result {{300 40} ok}
+
+test el-linux-lost-wakeup-control {positive control: the deliberately racy wakeup protocol (BOTLISH_EVENT_LOOP_FAULT=lost-wakeup) delays posts to the heartbeat, which the claim above detects} -constraints eventLoopLinux -body {
+    set t [elNative wake {BOTLISH_EVENT_LOOP_FAULT lost-wakeup}]
+    set late [tcl::mathop::+ {*}[lmap m [elMatches $t {posts later than 5 ms (\d+)}] {lindex $m 1}]]
+    set max [tcl::mathfunc::max {*}[lmap m [elMatches $t {max latency us (\d+)}] {lindex $m 1}]]
+    expr {$late > 0 && $max > 10000 ? "detected" : "late $late max $max"}
+} -result detected
+
+test el-linux-idle {an idle 300 ms sleep takes one turn, one kernel sleep and well under 2% CPU, with or without an observer registered (an observer never makes the loop poll)} -constraints eventLoopLinux -body {
+    set t [elNative wake]
+    lmap observed {0 1} {
+        set turns [elNum $t "idle observed=$observed turns (\\d+)"]
+        set sleeps [elNum $t "idle observed=$observed sleeps (\\d+)"]
+        set cpu [elNum $t "idle observed=$observed cpu us (\\d+)"]
+        expr {$turns == 1 && $sleeps == 1 && $cpu < 6000 ? "ok" : "turns $turns sleeps $sleeps cpu $cpu"}
+    }
+} -result {ok ok}
+
+# --------------------------------------------------------------------------
+# Delivery, fairness, revocation
+
+test el-linux-buffered-lines {readiness describes the kernel's buffer, not a reader's: 11 lines arriving in one write are all answered by the reader that takes its buffered lines before re-arming; the reader that waits for readiness after every line stalls after the first (the exploration's adapter bug, as a negative control)} -constraints eventLoopLinux -body {
+    set t [elNative lines]
+    list [lmap m [elMatches $t {lines handled (\d+)}] {lindex $m 1}] [lmap m [elMatches $t {replies (\d+)}] {lindex $m 1}]
+} -result {{11 1} {11 1}}
+
+test el-linux-flood {two producer threads flooding 20,000 records each to their own endpoints for slow Reliable consumers: nothing lost or reordered, the producers paced by backpressure (refused posts), no endpoint over its capacity, every hold released} -constraints eventLoopLinux -body {
+    set t [elNative flood]
+    list [elNum $t {flood a received (\d+)}] [elNum $t {flood a out of order (\d+)}] \
+        [elNum $t {flood b received (\d+)}] [elNum $t {flood b out of order (\d+)}] \
+        [elNum $t {dropped events (\d+)}] [expr {[elNum $t {producer refusals (\d+)}] > 0}] \
+        [expr {[elNum $t {endpoint max (\d+)}] <= 256}] [expr {[elNum $t {held records (\d+)}] == [elNum $t {released holds (\d+)}]}]
+} -result {20000 0 20000 0 0 1 1 1}
+
+test el-linux-quiet-source {beside the two floods, a quiet producer's 200 records are all delivered promptly: the driver serves its sources round-robin} -constraints eventLoopLinux -body {
+    set t [elNative flood]
+    set max [elNum $t {quiet max latency us (\d+)}]
+    list [elNum $t {quiet received (\d+)}] [expr {$max < 20000 ? "ok" : "max $max"}]
+} -result {200 ok}
+
+test el-linux-inflight {revocation against records in flight: r1's records posted with its old generation are dropped as stale, the registration reusing its slot receives exactly its own 100, and no handler runs for r1 after its revocation} -constraints eventLoopLinux -body {
+    set t [elNative inflight]
+    list [expr {[elNum $t {r2 slot (\d+)}] == [lindex [lindex [elMatches $t {r1 slot (\d+)}] 0] 1]}] \
+        [elNum $t {r2 received (\d+)}] [elNum $t {r2 received of r1 (\d+)}] [expr {[elNum $t {stale records (\d+)}] > 0}] \
+        [llength [elMatches $t {r1 handler ran after revocation}]] [elNum $t {r1 consumer woke revoked (\d)}]
+} -result {1 100 0 1 0 1}
+
+# --------------------------------------------------------------------------
+# The game server on real sockets
+
+test el-linux-gameserver {the game-server workload (unchanged from the deterministic scenario) on real TCP sockets beside a flooding client and a 20,000-record telemetry producer: every client gets every reply, all telemetry arrives, the quiet connections stay fast} -constraints eventLoopLinux -body {
+    set t [elNative gameserver-linux]
+    set replies [lmap c {1 2 3 4} {elNum $t "client $c replies (\\d+)"}]
+    set quiet {}
+    foreach m [elMatches $t {conn (\d+) lines (\d+)}] {
+        lassign $m - conn lines
+        if {$lines == 51} {
+            lappend quiet [elNum $t "conn $conn max lag us (\\d+)"]
+        }
+    }
+    list $replies [elNum $t {telemetry records (\d+)}] [llength $quiet] [expr {[tcl::mathfunc::max {*}$quiet] < 50000 ? "ok" : $quiet}]
+} -result {{22 51 51 3001} 20000 2 ok}
+
+# --------------------------------------------------------------------------
+# SDL3
+
+foreach {mode} {wakeup pump hybrid naive} {
+    test el-linux-sdl-$mode-delivery "SDL3 ($mode): every SDL event (260) and post (200) arrives; an event a task pushes inside its segment reaches the program in a later turn; SDL's callbacks ran on foreign threads and once nested in a task's C call, running no Botlish code; the policy dropped 50 at once" -constraints eventLoopSdl -body {
+        set t [elNative sdl-$mode]
+        list [elNum $t {sdl received (\d+)}] [elNum $t {posts received (\d+)}] \
+            [expr {[elNum $t {pushed event received in turn (\d+)}] > [elNum $t {pusher pushes in turn (\d+)}]}] \
+            [expr {[elNum $t {sdl callbacks on a foreign thread (\d+)}] > 250}] [elNum $t {sdl callbacks nested in a task's C call (\d+)}] \
+            [elNum $t {sdl events dropped by policy (\d+)}]
+    } -result {260 200 1 1 1 50}
+}
+
+test el-linux-sdl-wakeup {wakeup protocol: SDL events from other threads wake the sleeping loop at once, one wakeup per idle sleep} -constraints eventLoopSdl -body {
+    set t [elNative sdl-wakeup]
+    list [expr {[elNum $t {sdl later than 5 ms (\d+)}] <= 13 && [elNum $t {sdl max latency us (\d+)}] < 50000}] [expr {[elNum $t {idle blocks (\d+)}] <= 2}]
+} -result {1 1}
+
+test el-linux-sdl-hybrid {hybrid (a watch wakes, a pump copies on the loop's thread): SDL events delivered promptly, one wakeup per idle sleep} -constraints eventLoopSdl -body {
+    set t [elNative sdl-hybrid]
+    list [expr {[elNum $t {sdl later than 5 ms (\d+)}] <= 13 && [elNum $t {sdl max latency us (\d+)}] < 50000}] [expr {[elNum $t {idle blocks (\d+)}] <= 2}]
+} -result {1 1}
+
+test el-linux-sdl-pump {pump protocol without a wakeup: latency bounded by its 10 ms cap, paid for in idle wakeups (about 20 per 200 ms)} -constraints eventLoopSdl -body {
+    set t [elNative sdl-pump]
+    list [expr {[elNum $t {sdl max latency us (\d+)}] < 30000}] [expr {[elNum $t {idle blocks (\d+)}] >= 15}]
+} -result {1 1}
+
+test el-linux-sdl-naive {negative control: pumping only when something else wakes the loop delays SDL events to the 100 ms heartbeat} -constraints eventLoopSdl -body {
+    expr {[elNum [elNative sdl-naive] {sdl max latency us (\d+)}] > 50000}
+} -result 1
+
+test el-linux-mixed {SDL3, the game server with a flooding client, a producer's posts, timers and the base workload W in one process, in both initialization orders: every source delivers, the quiet connections and SDL stay responsive, and W's own order is the same} -constraints eventLoopSdl -body {
+    set out {}
+    set w {}
+    foreach order {sdl net} {
+        set t [elNative mixed-$order-first]
+        set replies [lmap c {1 2 3} {elNum $t "client $c replies (\\d+)"}]
+        set quiet {}
+        foreach m [elMatches $t {conn (\d+) lines 41}] {
+            lappend quiet [elNum $t "conn [lindex $m 1] max lag us (\\d+)"]
+        }
+        lappend out [list [elNum $t {sdl received (\d+)}] [elNum $t {posts received (\d+)}] $replies \
+            [expr {[llength $quiet] == 2 && [tcl::mathfunc::max {*}$quiet] < 50000 && [elNum $t {sdl max latency us (\d+)}] < 50000}]]
+        lappend w [lmap line [lsearch -all -inline $t {*W: *}] {regsub {^t=\d+: } [regsub {slept until \d+} $line {slept}] {}}]
+    }
+    list {*}$out [expr {[lindex $w 0] eq [lindex $w 1] && [llength [lindex $w 0]] == 12}]
+} -result {{260 200 {41 41 2001} 1} {260 200 {41 41 2001} 1} 1}
+
+# --------------------------------------------------------------------------
+# The native-source example (examples/event-loop/native)
+
+test el-linux-example {examples/event-loop/native, built as its build.sh does: a C thread posts five ticks through the integration ABI and ticks.bot's driver-independent handler handles them under the Linux driver -- the same trace test.bot's scripted ticks give under the deterministic driver (el-example-native-test), turn numbers aside} -constraints eventLoopLinux -body {
+    set dir [file join [temporaryDirectory] event-loop-example]
+    file delete -force $dir
+    file mkdir $dir
+    foreach f {ticks.bot ticker.bot ticker.c main.bot} {
+        file copy [file join $::projectRoot examples event-loop native $f] $dir
+    }
+    eventLoopLinux::install $dir
+    exec [eventLoopLinux::cc] -O2 -Wall -Wextra -Werror -fPIC -pthread -I[eventLoopLinux::include] \
+        -c [file join $dir ticker.c] -o [file join $dir ticker.o]
+    exec ar rcs [file join $dir libticker.a] [file join $dir ticker.o]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings error]
+    set o [outcomeUnderHir cranelift $hir]
+    set lines [elStrings [lindex $o 1]]
+    list [lindex $o 0] [lmap m [elMatches $lines {tick (\d+)$}] {lindex $m 1}] [lindex [elMatches $lines {handled .*$}] 0]
+} -cleanup {
+    file delete -force [file join [temporaryDirectory] event-loop-example]
+} -result {value {1 2 3 4 5} {{handled 5 ticks, sum 15}}}
+
+# --------------------------------------------------------------------------
+# What the compiler must reject, and the driver audit
+
+test el-linux-static-capability {a library that needs the Linux driver's integration capability (the SDL source) under the deterministic driver is MISSING-CONTEXT: an incompatible combination is a compile-time error, never a silently different driver} -constraints eventLoopLinux -body {
+    if {![elBuild]} {
+        return "BUILD FAILED"
+    }
+    if {[catch {surface::readProgramFile [file join $::elApp reject-linux-capability.bot] -warnings off} message options]} {
+        return [lsort -unique [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]]
+    }
+    return accepted
+} -result MISSING-CONTEXT
+
+test el-linux-audit {no library of the native scenarios (the fixtures, the network and SDL sources, the probes, the game server, the workload) requires the driver -- std::event_loop::Driver or the Linux driver context itself: they deliver events and consume capacity, they never run the loop} -constraints eventLoopLinux -body {
+    if {![elBuild]} {
+        return "BUILD FAILED"
+    }
+    set libraries {fx linuxnet evsdl sdlprobe gameserver workload elog}
+    set offenders {}
+    foreach name {wake lines flood inflight gameserver-linux sdl-hybrid mixed-sdl-first} {
+        set hir [surface::readProgramFile [file join $::elApp $name.bot] -warnings off]
+        foreach line [split [hir::contexts::summary $hir] \n] {
+            if {[regexp {^source-function (\S+) \S+ direct-contexts \([^)]*\) required-contexts \(([^)]*)\)} $line -> fn required]} {
+                set required [split [string map {", " ,} $required] ,]
+                set module [expr {[string first :: $fn] >= 0 ? [string range $fn 0 [expr {[string last :: $fn] - 1}]] : ""}]
+                if {$module in $libraries && ("std::event_loop::Driver" in $required || "event_loop_linux::Linux" in $required)} {
+                    lappend offenders $fn
+                }
+            }
+        }
+    }
+    lsort -unique $offenders
+} -result {}
+
+file delete -force $elApp
+cleanupTests
