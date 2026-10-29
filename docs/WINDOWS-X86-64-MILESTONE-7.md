@@ -674,8 +674,65 @@ Result:
 
 ## 14. Performance
 
-`bench/filesystem.tcl` on the host's platform; best of N runs inside one
-process, per iteration, beside the same loop without the operation. TODO-PERF
+`bench/filesystem.tcl` on the host's platform: each row a program running
+its operation in a loop, best of 5 runs inside one process (no compilation,
+link or process start in a row), per iteration, minus the same loop without
+the operation. Linux: this container (real Linux, ext4, x86-64, the machine
+otherwise idle); macOS: a `macos-15` runner (APFS, arm64; run 40799420498,
+the tier item `filesystem-bench`); Windows: a `windows-2025` runner (NTFS;
+run 40799420515). Shared runners and a container are noisy machines: read
+the rows as orders of magnitude and ratios, not as fixed costs.
+
+| per operation | Linux (raw syscalls) | macOS (libSystem) | Windows (kernel32) |
+|---|---:|---:|---:|
+| validate + native (40 characters) | 267 ns | 239 ns | TODO-WIN-PERF |
+| concat (text) | 221 ns | 292 ns | |
+| join (native) | 2.58 us | 2.90 us | |
+| text (native) | 168 ns | 229 ns | |
+| open + close | 1.76 us | 6.74 us | |
+| write_file 64 B (replace) | 159 us | 173 us | |
+| read_file 64 B | 6.4 us | 11.8 us | |
+| portable write 64 B (FilePath) | 129 us | 153 us | |
+| write_file 1 MiB | 803 us | 758 us | |
+| read_file 1 MiB | 552 us | 598 us | |
+| entries, per entry (100) | 1.48 us | 1.29 us | |
+| reopen through the native name, per entry (100) | 11.2 us | 19.4 us | |
+
+What the rows say:
+
+* **The portable layer costs nothing.** `portable write` is `write_file`
+  called through `std::io::fs::FilePath` -- the clone per witness -- and
+  is within the run-to-run noise of the direct call on both hosts (it came
+  out lower on both; a replace is dominated by the kernel's truncation of
+  the existing file, which varies run to run: Python's
+  `open(path, "wb").write(64 bytes)` measured 121 us on the same Linux
+  container). No dispatch is left to cost anything
+  (`fs-specialized-per-witness`).
+* **System calls dominate everything that touches the filesystem.** open +
+  close is two syscalls on Linux (1.8 us) and two libSystem calls on macOS
+  (6.7 us); a 1 MiB read or write is memory bandwidth plus the kernel copy
+  (0.55 to 0.8 ms per MiB).
+* **Reading a small file costs 6.4 us on Linux,** open, one read that
+  returns 64 bytes, one that returns 0 (the end), close. The first version
+  read in fixed 1 MiB requests and took 13.7 us: allocating 1 MiB of
+  storage per chunk. Reads now ask for 4 KiB first and double per chunk up
+  to 1 MiB (`chunk_size`, every platform module), which halved it and
+  keeps large files at large requests.
+* **A native join is ten times a textual concat** (2.6 us against 0.22 us):
+  std::io::bytepath validates the name and builds the joined List[Byte]
+  element by element in Botlish (`joined`), while a textual concat is
+  string concatenation. It is still per-path microseconds, far below one
+  syscall of the operation that uses the path; a byte-storage primitive
+  (`std::abi::bytes::join` exists for Bytes; native paths are List[Byte])
+  would remove it if it ever matters.
+* **Enumeration costs 1.3 to 1.5 us per entry** (on Linux, getdents64's
+  4 KiB buffer read back as one byte list through a layout,
+  `std::binary::read`, and each record's length, type and name decoded
+  from it; on macOS readdir's records read through a native view), and
+  re-reading each entry through its native name 11 to 19 us: the cost of
+  open, read, read, close per entry, which is the price of the lossless
+  round trip being real file operations, not a property of the path
+  representation.
 
 ## 15. Not here, remaining limitations, next
 
