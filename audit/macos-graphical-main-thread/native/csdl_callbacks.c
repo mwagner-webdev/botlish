@@ -8,14 +8,17 @@
  * where it runs; SDL_AppIterate draws a frame and, at its 60th call, pushes
  * a quit, which SDL_AppEvent answers with SDL_APP_SUCCESS.
  *
- * With BOTLISH_LIBRARY set (Linux only: native libraries are Linux glibc's,
- * NATIVE-LIBRARY-MILESTONE-1.md) the callbacks also call an exported
- * Botlish function -- see tools/library-callbacks.sh.
+ * Compiled with -DMTP_BOTLISH_LIBRARY (Linux only: native libraries are
+ * Linux glibc's, NATIVE-LIBRARY-MILESTONE-1.md) the callbacks also call an
+ * exported Botlish function -- one instance, made in SDL_AppInit, called in
+ * SDL_AppInit and every SDL_AppIterate, destroyed in SDL_AppQuit: see
+ * tools/library-callbacks.sh.
  */
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 extern int mtp_mark(int stage);
@@ -29,9 +32,10 @@ extern long long mtp_now_ns(void);
 /* The Botlish native library's C API (tools/library-callbacks.sh). */
 #include "mtplib.h"
 static mtplib_instance *instance;
-static long long botlish_calls, botlish_failures, botlish_last;
-static void botlish_step(long long n) {
-    long long out = 0;
+static long long botlish_calls, botlish_failures;
+static int64_t botlish_last;
+static void botlish_step(int64_t n) {
+    int64_t out = 0;
     int status = mtplib_step(instance, n, &out, NULL);
     botlish_calls++;
     if (status != mtplib_STATUS_OK) botlish_failures++;
@@ -105,8 +109,8 @@ void SDL_AppQuit(void *state, SDL_AppResult result) {
     }
 #ifdef MTP_BOTLISH_LIBRARY
     mtplib_destroy(instance);
-    fprintf(stderr, "MTP {\"kind\":\"botlish-library\",\"calls\":%lld,\"failures\":%lld,\"last\":%lld}\n",
-            botlish_calls, botlish_failures, botlish_last);
+    fprintf(stderr, "MTP {\"kind\":\"botlish-library\",\"calls\":%lld,\"failures\":%lld,\"last\":%lld,\"pthread_main\":%d}\n",
+            botlish_calls, botlish_failures, (long long)botlish_last, mtp_is_process_main());
 #endif
     fprintf(stderr, "MTP {\"kind\":\"callbacks\",\"result\":%d,\"iterations\":%d,\"presented\":%d,\"events\":%d,"
             "\"calls\":%d,\"on_main\":%d,\"ms\":%lld}\n", (int)result, a ? a->iterations : 0, a ? a->presented : 0,
