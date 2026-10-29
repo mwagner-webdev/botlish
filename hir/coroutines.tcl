@@ -672,14 +672,15 @@ proc hir::coroutines::TraitOperations {hir} {
 # a node that may yield are kept, and an operation's edges where it receives
 # a yield's value (use-site inference reads the implementation's declared
 # parameter); any other changes no protocol, no yield effect and no
-# diagnostic, so a program none of whose implementations yields or receives
-# a yield's value keeps an empty graph and is checked once.
+# diagnostic. Nor is a specialization kept that equals its function as
+# written (Distinct). So a program none of whose implementations yields or
+# receives a yield's value keeps an empty graph and is checked once.
 
 # The trait-operation edges a typing found in checked HIR, given the
 # feedback GIVEN the check was made with: {} when there is nothing to bind
-# (no coroutine, no trait operation), else the graph above, its edges kept
-# as it says (the yield-capable nodes those of GIVEN's graph with these
-# edges added).
+# (no coroutine, no trait operation, or nothing the plan could bind would
+# be kept: MayBind), else the graph above, its edges kept as it says (the
+# yield-capable nodes those of GIVEN's graph with these edges added).
 proc hir::coroutines::Implementations {hir given} {
     if {![dict exists $hir coroutines blocks]} {
         return {}

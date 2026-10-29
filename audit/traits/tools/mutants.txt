@@ -389,12 +389,12 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
     if {$operations eq {} || ![MayBind $hir $operations $binds $given]} {
         return {}
     }
-    dict incr ::hir::buildStats effectPlans
+    # The calls by their syntax (the plan's actions are per syntax node) and
 ====
     if {1} {
         return {}
     }
-    dict incr ::hir::buildStats effectPlans
+    # The calls by their syntax (the plan's actions are per syntax node) and
 >>>>
 
 @@ implementations-never-fed-back hir::check checks again with the trait operations to set aside, but never with the implementations they call

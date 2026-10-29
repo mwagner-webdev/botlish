@@ -425,7 +425,97 @@ function's own projection of a yield's value needs its own protocol
 
 ## 9. Compiler economics
 
-TBD
+The fix adds no build. It adds a check of build 1 only where the feedback
+grows -- where something does yield through an implementation -- and, to
+every other check of a program that has a coroutine, one scan of its
+expressions.
+
+**Counts** (deterministic: `hir::BuildStats`; the starting tree `24de220d`
+against the final one, each program compiled once with no front-end
+cache). Builds, checks, trait plans (`hir::traits::Plan`) and effect plans
+(`Implementations` asking `PlanCalls`):
+
+| program | before: builds / checks / plans | now: builds / checks / plans / effect plans |
+|---|---|---|
+| golden `coroutines.bot` | 5 / 4 / 1 | 5 / 4 / 1 / 0 |
+| golden `traits.bot` | 7 / 6 / 3 | 7 / 6 / 3 / 0 |
+| golden `traits-path.bot` | 2 / 2 / 1 | 2 / 2 / 1 / 0 |
+| golden `contexts.bot` | 5 / 4 / 1 | 5 / 4 / 1 / 0 |
+| golden `trait-constrained-types.bot` | 4 / 3 / 1 | 4 / 3 / 1 / 0 |
+| golden `hashable.bot` | 3 / 3 / 1 | 3 / 3 / 1 / 0 |
+| golden `mutable-map.bot` | 5 / 5 / 1 | 5 / 5 / 1 / 0 |
+| golden `mutable-vector.bot` | 7 / 6 / 1 | 7 / 6 / 1 / 0 |
+| golden `static-compile.bot` | 12 / 8 / 1 | 12 / 8 / 1 / 0 |
+| golden `framework-semantics.bot` | 6 / 6 / 1 | 6 / 6 / 1 / 0 |
+| golden `structs-and-enums.bot` | 6 / 5 / 1 | 6 / 5 / 1 / 0 |
+| golden `callable-contracts.bot` | 6 / 6 / 1 | 6 / 6 / 1 / 0 |
+| golden `ownership.bot` | 5 / 4 / 1 | 5 / 4 / 1 / 0 |
+| golden `harness.bot` | 2 / 1 / 0 | 2 / 1 / 0 / 0 |
+| event loop `a-smoke`, `a-gameserver`, `a-timers`, `a-observers`, `b-gameserver` | 3 / 3 / 1 each | 3 / 3 / 1 / 0 each |
+| repro `context/coroutine.bot` | 1 / 1 / 0 (rejected) | 2 / 3 / 1 / 2 (runs) |
+| repro `ordinary/coroutine.bot` | 1 / 1 / 0 (rejected) | 2 / 3 / 1 / 2 (runs) |
+| repro `ordinary/protocol.bot` | 1 / 2 / 0 (rejected) | 2 / 3 / 1 / 2 (runs) |
+| repro `context/top.bot`, `ordinary/top.bot` | 2 / 2 / 1 (UNWRAPPED-YIELD in build 2) | 1 / 2 / 0 / 2 (UNWRAPPED-YIELD in build 1) |
+| repro `context/negative.bot` | 1 / 1 / 0 | 1 / 1 / 0 / 0 |
+
+Every program that does not yield through an implementation compiles with
+exactly the builds, checks and plans it did. A program that does is
+checked twice in build 1 (three times only in the adversarial
+`trait-implementation-yield-rounds`); one that misuses such a function is
+now rejected one build earlier.
+
+**Time.** The share of each compilation spent in `Implementations` (one
+process, the wall time inside it against the whole compilation, so a
+loaded machine scales both alike), on the final tree:
+
+| program | compilation | effect plans | share | `Plan` (for scale) |
+|---|---:|---:|---:|---:|
+| golden `coroutines.bot` | 16.2 s | 36 ms | 0.2% | 67 ms |
+| golden `traits.bot` | 21.6 s | 37 ms | 0.2% | 505 ms |
+| golden `contexts.bot` | 20.4 s | 40 ms | 0.2% | 114 ms |
+| golden `hashable.bot` | 7.9 s | 11 ms | 0.1% | 74 ms |
+| golden `static-compile.bot` | 45.5 s | 85 ms | 0.2% | 83 ms |
+| golden `callable-contracts.bot` | 43.4 s | 68 ms | 0.2% | 83 ms |
+| event loop `a-gameserver.bot` | 10.6 s | 34 ms | 0.3% | 131 ms |
+| repro `ordinary/coroutine.bot` | 100 ms | 5 ms | 4.7% | 1 ms |
+
+The other golden suites measured (`traits-path`, `trait-constrained-types`,
+`mutable-map`, `mutable-vector`, `framework-semantics`, `structs-and-enums`,
+`ownership`, `harness`) are at 0.1-0.2%, the other event-loop programs at
+0.3%. What remains in a program that needs no edge is the gate's scan of
+the expressions (its trait operations and bind expressions) after each
+check; a program with no coroutine skips even that. A repro program pays
+the plan's call resolution and a call-graph build per check of build 1,
+and the second check -- a few milliseconds.
+
+**What the measurements changed.** The first version asked the plan after
+every check of a program with a coroutine and a trait operation, and kept
+a specialization of every trait-polymorphic function that may yield:
+1.6-4.1% of most golden suites' compilation (`coroutines.bot` 4.1%,
+`traits.bot` 4.0%, `callable-contracts.bot` 2.5%, `framework-semantics.bot`
+1.6%; `mutable-map.bot`, with few trait operations, 0.2%) and 3.6% of the
+event loop's `a-gameserver.bot`, and `coroutines.bot`'s checks went from 4 to 7 -- its `greet` is a
+trait-polymorphic function that yields by itself, whose specializations
+were kept although they equal it, so each of its builds was checked
+twice. Three changes brought both back: the pruning of specializations
+that equal their function (`Distinct`, section 4: the checks back to 4),
+the gate (`MayBind`, section 4: no effect plan in any program measured but
+the repro programs), and indexing the bindings' references in one scan
+instead of one scan of the program per yield (`UseCalls`, which had cost
+`coroutines.bot` 345 ms). The mutants `specializations-never-pruned` and
+`effect-plan-always` keep them (`trait-implementation-yield-economics`).
+
+**Static decisions.** No outcome depends on the scheduler: the
+`static-decisions` workflow compares the batched and the sequential
+scheduler on every golden suite (section 11), and
+`se-equal-implementation-yield` shows the new staticdeps edges are what
+keeps the batched scheduler from mispredicting. Rounds and builds of the
+golden suites under the batched scheduler are unchanged (the table).
+
+**Determinism.** The feedback is canonical (`CanonicalGraph`: every field
+sorted, `{}` when empty) and only grows, so the checks it causes and the
+HIR it produces do not depend on the order of declarations or imports
+(`ct-implementation-yield-order`).
 
 ## 10. Diagnostics
 
@@ -534,8 +624,8 @@ against the final code):
 | `audit/coroutines/tools/mutate.tcl` | 52 | 52 | 0 | 0 (3 re-anchored) |
 | `audit/static-decisions/tools/mutate.tcl` | 74 | SD_KILLED | 0 | 1 |
 | `audit/trait-constrained-types/tools/mutate.tcl` (the 19 that edit a file this milestone changed) | 19 | 19 | 0 | 0 |
-| `audit/affine/tools/mutate.tcl` (the 7 that edit a file this milestone changed) | 7 | AF_KILLED | 0 | 0 |
-| `audit/hir-interchange/tools/mutate.tcl` | 28 | HI_KILLED | 0 | 0 |
+| `audit/affine/tools/mutate.tcl` (the 7 that edit a file this milestone changed) | 7 | 7 | 0 | 0 |
+| `audit/hir-interchange/tools/mutate.tcl` | 28 | 28 | 0 | 0 |
 
 Each new mutant is killed by the behavior it breaks: a missing or
 one-level edge by the coroutine and transitive tests, an implementation of
@@ -588,8 +678,8 @@ ending with no live work (`ct-implementation-yield-event-loop`); the starting tr
   with their golden suites): 429/429 Tcl tests on each backend, 11 golden
   suites 558/558 on each of the four.
 * `audit/hir-interchange/tools/roundtrip.tcl -via interchange`: 12 suites,
-  108 artifacts and outcomes compared, 0 differ; `-via cache`: RT_CACHE.
-* `tools/compilerpedia.tcl check`: COMPILERPEDIA.
+  108 artifacts and outcomes compared, 0 differ; `-via cache`: 12 suites, 120 compared, 0 differ.
+* `tools/compilerpedia.tcl check`: 864 topics, 650 examples run, 0 problems.
 
 **CI on the branch.** `static-decisions` (the batched scheduler against
 the sequential one on every golden suite, which may not run locally):
@@ -660,7 +750,8 @@ Compiler:
   (`analyze`, `YieldUses`, `Solve`'s reasons, `ExplainReason`, `Name`,
   `Via`), the trait-operation edges a typing found (`Implementations`,
   `WitnessFree`, `UseCalls`, `AddClone`, `UnionGraph`, `CanonicalGraph`), the
-  feedback (`Feedback`), the specializations' typing (`ShapeResult`'s
+  feedback (`Feedback`), what is kept and when the plan is asked
+(`Distinct`, `MayBind`), the specializations' typing (`ShapeResult`'s
   context, `SpecializedNode`, `NodeInfo`, `CapableNodes`, `Outward`,
   `YieldTypes`), verification over nodes (`verify`, `CallTargets`,
   `ResultMismatch`, `Chain`, `thunkErrors`), the selection dependency
@@ -671,7 +762,9 @@ Compiler:
   `effectPlans` counters.
 * `hir/traits.tcl` -- `hir::traits::PlanCalls`, the plan's call
   resolution, split off `hir::traits::Plan` unchanged (a clone record's
-  `node` may be empty for a caller without syntax).
+  `node` may be empty for a caller without syntax); `declaredIds` and
+  `ImplInfos` (the declared traits; a requirement name's entries in the
+  implementation index, for `MayBind`).
 * `hir/types.tcl` -- `hir::types::ShapeResult` passes the typing context to
   the coroutine shapes.
 * `hir/semantic.tcl` -- `hir::semantic::Instance`, the record of an instance
@@ -696,9 +789,10 @@ Tests and tools:
   differential fuzzer.
 * `audit/event-loop/repro/host-stepped-driver/` -- the scheduler under a
   host-stepped driver; `audit/event-loop/README.md` lists it.
-* Mutants: `audit/traits/tools/mutants.txt` (11 new), `audit/context-traits/
+* Mutants: `audit/traits/tools/mutants.txt` (16 new), `audit/context-traits/
   tools/mutants.txt` (4 new), `audit/static-decisions/tools/mutants.txt` (1
-  new); re-anchored: `check-not-repeated` (traits), `effect-one-caller`,
+  new); re-anchored: `check-not-repeated` and `runtime-wrapper` (traits; the
+  second had stopped applying before this milestone), `effect-one-caller`,
   `call-crosses-yield`, `protocol-widened-any` (coroutines) and
   `recheck-analysis-repeated`'s replacement (static decisions).
   `audit/context-traits/tools/mutate.tcl` copies `src/evloop.bot` into its
