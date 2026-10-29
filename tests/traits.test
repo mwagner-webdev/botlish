@@ -1915,6 +1915,32 @@ test trait-implementation-context-layouts {the implementation in the entry progr
     lappend results [lindex [moduleAgree $split "import std::ly::thing\nimport std::ly::witness\nstd::ly::thing::twice(std::ly::witness::A {v: 1})\n"] 1]
 } -result {{value 22} {CORE SEMANTIC MISSING-CONTEXT} {value 22} {value 22} {CORE SEMANTIC MISSING-CONTEXT}}
 
+test trait-implementation-context-imprint {an operation on a constrained imprint variable binds its imprinted type's implementation, per binding (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): show for a Person, whose describe needs Log, needs it -- MISSING-CONTEXT in source terms without a provider, the specialization named by its binding -- and show for a Dog does not; with the provider both run, the monomorphized program's application P[Person] satisfied by describe's clone (the function it replaces, hir::traits::index)} -body {
+    set lib {imp/printable.bot {trait Printable:
+    fn describe(value: Printable) -> int
+}
+imp/people.bot {import std::tic::traits
+
+struct Person:
+    n: int
+
+fn describe(p: Person) -> int:
+    p.n + std::tic::traits::logged()
+}
+imp/dogs.bot {struct Dog:
+    age: int
+
+fn describe(d: Dog) -> int:
+    d.age * 2
+}}
+    set pre "import std::imp::people\nimport std::imp::dogs\nimport std::tic::lp\nimport type std::imp::printable::Printable\n\nstruct P\[T satisfies Printable\]:\n    value: T\n\nfn show(p: P\[T\]) -> int:\n    p.value.describe() + 100\n\n"
+    set files [concat $::ticLib $lib]
+    set rejected [moduleRejection $files "${pre}\[show(P {value: std::imp::dogs::Dog {age: 3}}), show(P {value: std::imp::people::Person {n: 4}})\]\n"]
+    list [moduleAgree $files "${pre}with context std::tic::lp::create()\n\[show(P {value: std::imp::people::Person {n: 4}}), show(P {value: std::imp::dogs::Dog {age: 3}})\]\n"] \
+        [moduleAgree $files "${pre}show(P {value: std::imp::dogs::Dog {age: 3}})\n"] \
+        [lindex $rejected 0] [lindex [split [lindex $rejected 1] \n] 1]
+} -result {{value {[204, 106]}} {value 106} MISSING-CONTEXT {    show (for T = std::imp::people::Person)}}
+
 test trait-implementation-context-monomorphized {the monomorphized program has no trait or context-trait operation left and no runtime selection: every former operation is a direct call -- an implementation the plan replaces by the clone it made (twice for A calls A's show clone under Log=LP), any other (C's show, the providers' level and now) itself -- and the dropped declarations (A's and B's show as written) are called nowhere} -body {
     set hir [moduleHir $::ticLib [ticProgram {lp cp} {[A(1), B(2), C(3)]}]]
     set operations 0

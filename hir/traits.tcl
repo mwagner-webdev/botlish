@@ -545,6 +545,7 @@ proc hir::traits::index {hir} {
     variable impls
     variable cache
     variable unitNames
+    variable cloneBindings
     set impls [dict create]
     set cache [dict create]
     set unitNames [dict create]
@@ -587,6 +588,33 @@ proc hir::traits::index {hir} {
             }
             dict set impls $unit $name $info
             dict set unitNames $b [list $unit $name]
+        }
+    }
+    if {[Planning]} {
+        # The monomorphized program (monomorphize): a function the plan
+        # replaces by its one clone under the program's selection -- one
+        # whose requirement includes a context trait, an implementation
+        # among them -- is that clone there, bound under the clone's name
+        # where the plan places it. Conformance by name (a constrained
+        # slot's application, checked again in this build) finds it as the
+        # function it replaces, in its own namespace.
+        variable plan
+        dict for {key clone} [dict get $plan clones] {
+            if {[lindex $key 1] ne {} || [llength $key] > 3 || [dict get $clone node] eq {}} continue
+            set unit [dict get $clone namespace]
+            set name [dict get $clone fname]
+            if {[dict exists $impls $unit $name] || ![dict exists $cloneBindings $key]} continue
+            set b [CloneBinding $key]
+            set value [dict get $hir exprs [dict get $hir bindings $b declaredBy] value]
+            set node [dict get $hir exprs $value]
+            set flags [dict getdef $node flags {}]
+            set arity [expr {[llength [dict get $node params]] - [llength $flags]}]
+            dict set impls $unit $name [dict create kind block binding $b block $value origin [dict get $hir bindings $b origin] \
+                params [lrange [dict get $node declaredParamTypes] 0 [expr {$arity - 1}]] \
+                result [dict get $node declaredResult] errors [dict get $node declaredErrors] \
+                flags $flags contexts [dict getdef $node contextParams {}] \
+                variadic [dict exists $node variadic] places [dict getdef $node places {}] \
+                private [expr {[hir::privacy::Entry $decls $unit values $name] ne ""}]]
         }
     }
 }
@@ -2231,7 +2259,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                 }
                 dict set clones $ckey [dict create key $ckey node $node namespace [dict get $fn namespace] \
                     function [dict get $fn sid] params $params result $result source $qualified \
-                    selection $selection imprints $imprints \
+                    fname [dict get $fn name] selection $selection imprints $imprints \
                     name "$qualified<[join $parts ,]>" block $h]
                 dict incr cloneCounts $h
                 if {[dict get $cloneCounts $h] > [ImprintCloneLimit]} {

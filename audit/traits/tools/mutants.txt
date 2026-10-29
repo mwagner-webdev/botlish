@@ -695,3 +695,13 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
     foreach id [hir::traits::declaredIds] {
         if {[hir::traits::isContext $id]} continue
 >>>>
+
+@@ replaced-implementation-unindexed the monomorphized program's implementation index never lists a replaced implementation's clone under the function it replaces: a constrained slot's application, checked again there, finds no implementation (TRAIT-NOT-SATISFIED in the monomorphized program)
+## hir/traits.tcl
+<<<<
+    if {[Planning]} {
+        # The monomorphized program (monomorphize): a function the plan
+====
+    if {0} {
+        # The monomorphized program (monomorphize): a function the plan
+>>>>
