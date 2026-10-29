@@ -78,6 +78,10 @@ changes no compiler, runtime or backend file.
   so a later revocation woke a dead task (`abandon-keeps-waiters`, a
   mutant); the FIFO record queue let one source delay another by
   `burst / budget` turns (`el-fairness-quiet-source`).
+* **A lost-wakeup bug in the production adapter, found by the mutation
+  work and fixed** (section 7.2): a `botlish_event_wake()` landing in the
+  window before the eventfd's reset was swallowed. The race test that
+  shows the fix widens that window on purpose.
 * **Capabilities made explicit**: the scheduler's internal tables, row
   offsets and registers are private; a `Reg` is opaque; the Driver gates
   waiting, turning and dropping tasks; a native source needs the Linux
@@ -297,8 +301,12 @@ Cooperative and bounded, never wall-clock:
   collected 50 turns later. Round-robin is the narrowest change that bounds
   it (a quota or credit scheme adds state and tuning for no stronger
   guarantee at this budget): the same record is now collected in the first
-  turn after its release (`el-fairness-quiet-source`), natively a quiet
-  producer beside two 20,000-record floods is served promptly
+  turn after its release (`el-fairness-quiet-source`); natively, a record
+  posted to a quiet endpoint behind a 256-record burst to another is
+  collected in the first turn (`el-linux-rotation`, measured with Lossy
+  sources so that no hold masks the order; an adapter serving one source
+  while it has records delivers it in the fifth), and a quiet producer
+  beside two 20,000-record floods is served promptly
   (`el-linux-quiet-source`). The scheduling contract itself did not change:
   the round-robin is the driver's, stated in the Driver trait's
   documentation and kept by both drivers.
@@ -461,16 +469,41 @@ The Linux adapter's eventfd is readable while a wakeup is owed. A post
 appends to its endpoint ring and marks the endpoint pending under one
 mutex; the empty-to-non-empty edge of the pending list writes the eventfd
 once per batch. Before sleeping, the loop drains the pending list; when the
-eventfd may hold a signal from polls that skipped the kernel, the loop
-resets it *and then* looks at the pending list again, so a post between the
-two still wakes the sleep. `el-linux-wake` posts 300 jittered records and
-40 racing pairs from a producer thread and requires every one to wake the
-sleeping loop at once (none waits for the 50 ms heartbeat);
+eventfd may hold signals from polls that skipped the kernel (section 7.3),
+the loop resets it *and then* looks at the pending list again, so a post
+between the two still wakes the sleep.
+
+**A bug found and fixed.** That re-check covers posts, which leave a pending
+endpoint behind. A `botlish_event_wake()` -- the hybrid protocol's wake, a
+library that only signals and lets its pump post on the loop's thread --
+leaves nothing to find: a wake landing between the loop's first look and
+the reset was swallowed, and the loop slept with the pumped source's event
+waiting until something else woke it. A wake is now *owed* until the
+pumps' checks run (`wake_owed`, set by the wake, cleared when the checks
+run), and the reset path polls instead of sleeping while one is owed. The
+mutation work found it: the mutant that removes the re-check
+(`c-reset-without-recheck`) survived every test, because nothing made a
+post land in the window; reasoning about why showed the same window loses
+a wake even in the unmutated adapter.
+
+**The evidence.** `el-linux-wake` posts 300 jittered records and 40 racing
+pairs from a producer thread and requires every one to wake the sleeping
+loop at once (none waits for the 50 ms heartbeat);
 `el-linux-lost-wakeup-control` runs the deliberately racy protocol
 (`BOTLISH_EVENT_LOOP_FAULT=lost-wakeup`, the exploration's negative
-control, kept) and requires the same measurement to catch it. The mutants
-`c-post-never-signals` and `c-reset-without-recheck` (section 12) are the
-other half of the evidence.
+control, kept) and requires the same measurement to catch it.
+`el-linux-reset-window` (`tests/event-loop/native/race.bot`) attacks the
+reset window directly: `BOTLISH_EVENT_LOOP_STRESS=reset-window` (tests
+only; no protocol change) widens it to 2 ms, the receiver makes every
+record cross it (two busy turns, then a sleep), and records come in pairs
+0.8 ms apart with 20 ms between pairs, so the second of a pair lands in the
+window and nothing else wakes the loop soon after -- first as posts, then as
+wakes of a pumped source (`fixture.c`'s `fx_pumped`). Every record must
+arrive within 5 ms (measured: at most 1.6 ms), and the adapter's count of
+resets (`Stats.resets`, 80 per phase) shows the window was entered every
+time. The mutants `c-post-never-signals`, `c-reset-without-recheck` and
+`c-wake-not-owed` (the bug put back) are killed by these tests (section
+12).
 
 ### 7.3 Turns without a system call
 
@@ -505,11 +538,11 @@ refuse a C call.
 
 | requirement | evidence |
 |---|---|
-| sleep without losing notifications | `el-linux-wake`, `el-linux-lost-wakeup-control`, mutants `c-post-never-signals`, `c-reset-without-recheck` |
+| sleep without losing notifications | `el-linux-wake`, `el-linux-lost-wakeup-control`, `el-linux-reset-window`, mutants `c-post-never-signals`, `c-reset-without-recheck`, `c-wake-not-owed` |
 | wake when native work arrives | `el-linux-wake`, `el-linux-sdl-wakeup`, `el-linux-sdl-hybrid` |
 | honor deadlines while it owns the wait | `el-linux-idle`, `el-linux-gameserver` (timers beside sockets) |
 | bounded batches | the scheduler's budget (`collect-unbounded` mutant), `el-linux-flood` |
-| no starvation of quiet descriptors | `el-linux-quiet-source`, `el-linux-gameserver` (quiet connections beside a flooding client), mutant `c-source-drained-first` |
+| no starvation of quiet descriptors | `el-linux-rotation`, `el-linux-quiet-source`, `el-linux-gameserver` (quiet connections beside a flooding client), mutant `c-source-drained-first` |
 | registration and revocation without stale delivery | `el-linux-inflight` (records in flight with an old generation dropped; the slot's next registration gets exactly its own 100), mutant `c-watch-generation-unchecked` |
 | descriptor shutdown and errors | watch records carry hang-up and error bits (`a` = 4, 8); `el-linux-gameserver` closes connections mid-run; `unwatch` before `close` |
 | thread-local Botlish execution | posts from threads only queue; `el-linux-mixed` |
@@ -672,13 +705,17 @@ brief's adversarial list, covered:
 | host-stepped driver, feedback union | `el-hoststep`, `el-hoststep-feedback-exact` |
 | the examples | `el-example-*` |
 
-**Native** (`tests/event-loop-linux.test`; 21 tests, on this
+**Native** (`tests/event-loop-linux.test`; 23 tests, on this
 container: Linux x86-64, real epoll, eventfd, TCP sockets, producer threads,
 SDL3 built by `tests/cffi/sdl3.tcl`): the application is built the way an
 application installs the package; each program runs once on cranelift.
-Native buffered-data stalls (`el-linux-buffered-lines`), lost-wakeup races
-(`el-linux-wake` with its positive control), floods with backpressure
-(`el-linux-flood`, `-quiet-source`), revocation against records in flight
+Native buffered-data stalls (`el-linux-buffered-lines`: the correct reader
+answers all eleven buffered lines and then sees the client's later BYE
+through its re-armed watch), lost-wakeup races (`el-linux-wake` with its
+positive control, `el-linux-reset-window` with the race window widened),
+source rotation without backpressure (`el-linux-rotation`), floods with
+backpressure (`el-linux-flood`, `-quiet-source`; a watchdog makes a lost
+record fail the test instead of hanging it), revocation against records in flight
 (`el-linux-inflight`), the game server on sockets (`el-linux-gameserver`),
 SDL3 in four modes and the mixed workload (`el-linux-sdl-*`,
 `el-linux-mixed`), the native example (`el-linux-example`), the static
