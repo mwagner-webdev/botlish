@@ -83,7 +83,7 @@ fn at(m: ImmutableMap[K, V], key: K) -> V errors KeyNotFound:
     p = m.index.frozen_position(m.hashes, m.keys, std::table_hash::of(key), key)
     if p < 0 or p >= std::list::length(m.vals):
         fail KeyNotFound
-    m.vals.at(p)
+    std::list::at(m.vals, p)
 
 # ---------------------------------------------------------------------------
 # Order (PROVEN-COLLECTION-REORDERING.md). The compiler knows, by these
@@ -133,4 +133,4 @@ nomethod fn iteration_live?(m: ImmutableMap[K, V], i: int) -> bool:
     i >= 0
 
 nomethod fn iteration_at(m: ImmutableMap[K, V], i: int) -> ImmutableMapEntry[K, V]:
-    ImmutableMapEntry[K, V] {key: m.keys.at(i.mod(std::list::length(m.keys))), value: m.vals.at(i.mod(std::list::length(m.vals)))}
+    ImmutableMapEntry[K, V] {key: std::list::at(m.keys, i.mod(std::list::length(m.keys))), value: std::list::at(m.vals, i.mod(std::list::length(m.vals)))}

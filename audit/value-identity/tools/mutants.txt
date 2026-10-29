@@ -570,9 +570,9 @@ opaque struct ImmutableMap[K, V]:
 @@ iteration-reversed iteration visits the associations last to first
 ## stdlib/immutable_map.bot
 <<<<
-    ImmutableMapEntry[K, V] {key: m.keys.at(i.mod(std::list::length(m.keys))), value: m.vals.at(i.mod(std::list::length(m.vals)))}
+    ImmutableMapEntry[K, V] {key: std::list::at(m.keys, i.mod(std::list::length(m.keys))), value: std::list::at(m.vals, i.mod(std::list::length(m.vals)))}
 ====
-    ImmutableMapEntry[K, V] {key: m.keys.at((-1 - i).mod(std::list::length(m.keys))), value: m.vals.at((-1 - i).mod(std::list::length(m.vals)))}
+    ImmutableMapEntry[K, V] {key: std::list::at(m.keys, (-1 - i).mod(std::list::length(m.keys))), value: std::list::at(m.vals, (-1 - i).mod(std::list::length(m.vals)))}
 >>>>
 
 @@ at-off-by-one `at` returns the value after the key's
@@ -580,11 +580,11 @@ opaque struct ImmutableMap[K, V]:
 <<<<
     if p < 0 or p >= std::list::length(m.vals):
         fail KeyNotFound
-    m.vals.at(p)
+    std::list::at(m.vals, p)
 ====
     if p < 0 or p >= std::list::length(m.vals):
         fail KeyNotFound
-    m.vals.at((p + 1).mod(std::list::length(m.vals)))
+    std::list::at(m.vals, (p + 1).mod(std::list::length(m.vals)))
 >>>>
 
 @@ reordered-not-permuted `reordered` returns the map in its own order
