@@ -82,6 +82,11 @@ changes no compiler, runtime or backend file.
   work and fixed** (section 7.2): a `botlish_event_wake()` landing in the
   window before the eventfd's reset was swallowed. The race test that
   shows the fix widens that window on purpose.
+* **Performance** (section 11): the same cost per dispatch as the
+  prototype (0.35 against 0.34 us per `yield_now` dispatch, 0.76 against
+  0.78 per ping-pong dispatch, in one run), no allocation per dispatch, per
+  event or per drained event (a per-event allocation the first measurement
+  found was fixed), and timer expiry 40 times cheaper at 10,000 timers.
 * **Capabilities made explicit**: the scheduler's internal tables, row
   offsets and registers are private; a `Reg` is opaque; the Driver gates
   waiting, turning and dropping tasks; a native source needs the Linux
@@ -417,7 +422,23 @@ doubling); a one-shot timer wakes all its waiters, and its slot is freed
 only when every wake it made has been dispatched (its `inflight` count), so a
 reused slot cannot inherit a wake.
 
-**Measurements** (section 11): «TIMER-TABLE»
+**Measurements** (section 11; `bench/event-loop.tcl -parts timers`, native,
+the Linux drivers, best of 3 by CPU). N tasks each sleep K times (task t
+for 50 + t us), so every turn expires up to N timers; CPU is `run()`'s
+alone, the tasks' creation excluded:
+
+| N x K | dispatches | prototype us/dispatch | production us/dispatch | production / prototype |
+|---|---:|---:|---:|---:|
+| 10 x 200 | 2,000 | 3.36 | 3.52 | 1.05 |
+| 100 x 200 | 20,000 | 3.36 | 1.91 | 0.57 |
+| 1,000 x 20 | 20,000 | 24.09 | 2.56 | 0.11 |
+| 10,000 x 2 | 20,000 | 269.24 | 6.81 | 0.025 |
+
+The prototype's cost per expiry grows with the number of registrations (a
+scan of all of them per expired timer: tenfold from 1,000 to 10,000 timers);
+the heap's grows with its logarithm and the working set (2.6 to 6.8 us from
+1,000 to 10,000). At 10 timers the heap's bookkeeping is a few percent
+slower than the scan, within the run-to-run spread of a shared machine.
 
 ## 7. Native delivery
 
@@ -677,11 +698,69 @@ deterministic driver, as the difference between two sizes of the same
 program, with each driver's own allocation sites left out (the drivers
 allocate per turn for their own bookkeeping). The machine: a 4-core container (Intel Xeon @ 2.10 GHz, Linux 6.18, 15 GB), shared: treat times as orders of magnitude.
 
-«PERF-TABLES»
+The run recorded here (2026-10-29), `tclsh9.0 bench/event-loop.tcl`, about
+20 minutes:
+
+**Allocations per dispatch** (native allocation report, deterministic
+driver; the setup is `2 x small - large`, the program's fixed allocations):
+
+| workload | prototype | production |
+|---|---:|---:|
+| `yield_now` dispatch | 0 (setup 59) | 0 (setup 67) |
+| channel event (post + wait) | 0 (setup 42) | 0 (setup 50) |
+| event drained with `try_take` | -- | 0 (setup 50) |
+
+A regression found here and fixed: the first production run measured one
+64-byte allocation per channel event and per drained event, which the
+prototype did not have. `wait` returned the `Event` a private helper built
+behind a handler, and `try_take`'s checked body built it; the native backend
+carries a struct as fields only where it is built where it is returned, so
+it materialized one per event. Both now build the `Event` in place from the
+scheduler's registers (`try_take`'s body leaves what it took in three take
+registers). `el-alloc-per-event` pins it: two sizes of each workload
+allocate the same.
+
+**Dispatch** (native, the Linux drivers, best of 3 by CPU of `run()`):
+
+| workload | dispatches | turns | prototype | production |
+|---|---:|---:|---|---|
+| 100 tasks x 1,000 `yield_now` | 100,000 | 1,000 | 33.8 ms: 0.34 us/dispatch, 33.8 us/turn | 34.8 ms: 0.35 us/dispatch, 34.8 us/turn |
+| channel ping-pong, 100,000 events | 200,000 | 100,000 | 156.3 ms: 0.78 us/dispatch, 1.56 us/turn | 152.3 ms: 0.76 us/dispatch, 1.52 us/turn |
+
+The production scheduler costs what the prototype costs per dispatch,
+within 3% either way, with round-robin collection, delivery policies,
+generation checks on every wake and the fault channels added. Neither
+workload enters the kernel: every turn had ready work, so the adapter
+skipped every poll (production: kernel polls 0, skipped polls 1,000 and
+100,000). The exploration's figures (0.23 and 0.62 us) come from another
+run on another day; only the same-run comparison above compares the two.
+
+**Timers**: section 6's table (prototype 269 us per dispatch at 10,000
+timers, production 6.8).
+
+**Production only** (the Linux driver):
+
+| measurement | result |
+|---|---|
+| a channel registration, create + revoke (100,000 in a row) | 0.43 us |
+| the observer phase, per observer run (100 observers x 10,000 turns, against none) | 0.74 us (750.2 against 8.1 ms) |
+| two 20,000-record Reliable floods beside a quiet source (flood.bot) | 40,000 records in 230 ms wall (174,000 records/s); the quiet source's worst latency 121 us; 1,246 records held by the scheduler, 2,512 posts refused to the producers (backpressure); nothing lost or reordered |
+| wakeup latency of producer-thread posts (wake.bot: 300 jittered, 40 in racing pairs) | worst 1.9 ms (stream), 0.49 ms (pairs); none waited for the 50 ms heartbeat |
+| an idle 300 ms sleep | one kernel sleep, 75 us of CPU |
+
+The exploration's idle figure was one wakeup and 90-120 us per 300 ms
+sleep; its wakeup claim was "none held to the heartbeat", which
+`el-linux-wake` keeps (at most 3 posts later than 5 ms, the worst under
+30 ms, on a shared machine), with the lost-wakeup positive control.
+
+**What did not improve**: dispatch itself (the same cost, as intended: the
+milestone kept the prototype's dispatch path and added no per-dispatch
+work), and small timer counts (10 timers: 3.5 against 3.4 us per dispatch,
+the heap's bookkeeping against a scan of ten rows).
 
 ## 12. Testing
 
-**Deterministic** (`tests/event-loop.test`; 87 tests). Each
+**Deterministic** (`tests/event-loop.test`; 90 tests). Each
 scenario program (`tests/event-loop/*.bot`, an application root with its
 helper modules) is compiled with `-warnings error` and run on the pass's
 backends, which must agree on the whole trace: interp and cranelift in the
@@ -704,8 +783,9 @@ brief's adversarial list, covered:
 | the driver and capability boundaries | rejections `two-drivers`, `missing-driver`, `library-installs`, `loop-internals`, `forge-reg`, `private-helper`, `handler-callback`, `wrong-protocol`; `el-static-audit` |
 | host-stepped driver, feedback union | `el-hoststep`, `el-hoststep-feedback-exact` |
 | the examples | `el-example-*` |
+| no allocation per dispatch, per event, per drained event (native) | `el-alloc-per-event` |
 
-**Native** (`tests/event-loop-linux.test`; 23 tests, on this
+**Native** (`tests/event-loop-linux.test`; 24 tests, on this
 container: Linux x86-64, real epoll, eventfd, TCP sockets, producer threads,
 SDL3 built by `tests/cffi/sdl3.tcl`): the application is built the way an
 application installs the package; each program runs once on cranelift.
@@ -715,9 +795,10 @@ through its re-armed watch), lost-wakeup races (`el-linux-wake` with its
 positive control, `el-linux-reset-window` with the race window widened),
 source rotation without backpressure (`el-linux-rotation`), floods with
 backpressure (`el-linux-flood`, `-quiet-source`; a watchdog makes a lost
-record fail the test instead of hanging it), revocation against records in flight
-(`el-linux-inflight`), the game server on sockets (`el-linux-gameserver`),
-SDL3 in four modes and the mixed workload (`el-linux-sdl-*`,
+record fail the test instead of hanging it), revocation against records in
+flight (`el-linux-inflight`), a stale descriptor watch after revocation and
+slot reuse (`el-linux-stale-watch`: the adapter checks the generation), the
+game server on sockets (`el-linux-gameserver`), SDL3 in four modes and the mixed workload (`el-linux-sdl-*`,
 `el-linux-mixed`), the native example (`el-linux-example`), the static
 capability rejection and the driver audit. The timing bounds are generous
 enough for a loaded 4-core container; each failure message carries its
@@ -799,7 +880,21 @@ duplicates passed on all four backends (359 tests each); 29 minutes. The
 warning gate passed (`audit/refactor/tools/gate.tcl`: 77 corpus programs, 32
 library loaders, the manifest's two new `fails` entries for the modules
 compiled as entry programs), and `tools/compilerpedia.tcl check` reported no
-problem (930 topics, 650 examples run).
+problem (930 topics, 650 examples run); both again after the last change
+to `stdlib/event_loop.bot`.
+
+The macOS workflow's acceptance tier found one failure the narrowed local
+runs had not covered: `tests/mutable-array-type.test`'s `mat-fence-1` lists
+by name every standard module allowed to use the typed MutableArray API, and
+the scheduler's register array is one. The fence now names `event_loop.bot`
+(as ORDERED-MUTABLE-MAP-SET.md added the ordered table engine). The test
+files that read the standard library's sources then passed on both passes
+(`mutable-array-type`, `stdlib`, `stdlib-namespaces`, `std-namespace`,
+`refined`, `refinement-values`, `typed-mutarray-builder`, `bot-modules`,
+`checked-domain-proof-provenance`: 509 tests each).
+`audit/stdlib-census/after.tsv` is regenerated for the new public surface
+(85 `api` and 229 `private` rows of `std::event_loop`; the regeneration also
+picks up earlier line drift in `core/cabi.tcl` and `stdlib/ordered_table.bot`).
 
 ## 13. Compiler consistency
 
