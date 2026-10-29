@@ -728,9 +728,67 @@ deterministic scenario and example runs identically on interp, compile,
 cranelift-generic and cranelift. The Linux driver runs on cranelift (the
 native backends; the Tcl backends refuse a C call).
 
-**Mutation** (`tclsh9.0 audit/event-loop/tools/mutate.tcl`): «MUTATION»
+**Mutation** (`tclsh9.0 audit/event-loop/tools/mutate.tcl`; 35 mutants in
+`audit/event-loop/tools/mutants.txt`). Each mutant is applied to a private
+copy of the tree; its `%%` line names the tests of the rule it breaks,
+which run first; a mutant they do not kill runs both test files whole
+before it counts as surviving, and the unmutated tree must pass both files
+whole first. **All 35 are killed**, each by a test of the rule it breaks
+(no kill by a build failure or a timeout):
 
-**Exploration evidence.** «AUDIT-RUNS»
+| brief's class | mutants | killed by |
+|---|---|---|
+| incorrect turn boundaries | `turn-runs-new-ready`, `turn-reentered` | `el-fairness-*`, `el-smoke-interleave`; `el-errors-reentered` |
+| observer starvation, duplicate invocation | `observer-starved-while-busy`, `observer-runs-twice`, `observer-phase-no-snapshot` | `el-observers-*` |
+| skipped generation checks | `deliver-skips-generation`, `dispatch-skips-generation`, `revoke-keeps-generation`, `c-watch-generation-unchecked` | `el-revocation-stale`, `-suppress`, `el-delivery-revoke-held`; `el-linux-stale-watch` |
+| stale queued delivery after revocation | `revoke-keeps-queue`, `revoke-wakes-as-event` | `el-delivery-*`; `el-revocation-suppress` |
+| timer-order violations | `timer-equal-deadlines-reversed`, `heap-sift-down-later-child`, `heap-remove-no-sift-up`, `timer-fires-early`, `timer-missed-count-off-by-one`, `one-shot-wakes-one` | `el-heap-*`, `el-timers-*` |
+| lost wakeups | `c-post-never-signals`, `c-reset-without-recheck`, `c-wake-not-owed`, `pkg-readable-no-rearm` | `el-linux-wake`, `el-linux-reset-window`, `el-linux-buffered-lines` |
+| unbounded native collection | `collect-unbounded`, `queue-unbounded`, `c-no-backpressure` | `el-fairness-budget`, `el-delivery-*`, `el-linux-flood` |
+| event loss under a Reliable policy | `reliable-drops`, `held-never-released`, `coalesce-loses-count`, `c-hold-forgets-record` | `el-delivery-*`, `el-linux-flood` |
+| inactive-source interference | `unwatched-timer-in-heap`, `c-source-drained-first` | `el-heap-interest`, `el-timers-*`; `el-linux-rotation` |
+| incorrect shutdown | `shutdown-skips-revoke`, `shutdown-runs-no-rounds`, `abandon-keeps-waiters` | `el-errors-liveness-stop-shutdown`, `el-ownership-*` |
+| premature ownership release | `abandon-drops-registrations`, `task-end-drops-registration` | `el-ownership-no-drop-action` |
+
+The first run did not look like that, and the differences are the
+evidence that the mutants test the tests:
+
+* **Five survivors** led to five test changes: `revoke-wakes-as-event`
+  (the dispatch-time generation check made it invisible except in the
+  suppression counter, which `el-revocation-suppress` now pins);
+  `heap-remove-no-sift-up` (no scenario removed a timer where the moved
+  one must rise: `heapshape.bot`); `c-source-drained-first` (the flood
+  test's Reliable holds took a flooding source out of the rotation, masking
+  the order: `rotation.bot`, Lossy sources); `c-reset-without-recheck`
+  (only a rare race exposed it: `race.bot` with the window widened); and
+  `pkg-readable-no-rearm` (the correct reader's later BYE was never
+  checked).
+* **The lost-wakeup bug of section 7.2** came from asking why
+  `c-reset-without-recheck` survived; `c-wake-not-owed` puts it back.
+* **Three kills were not kills**: two by the harness's own missing
+  `examples/` copy, one by a mutant that did not compile
+  (`c-watch-generation-unchecked`, `-Werror`; rewritten to compile, it
+  needed `stalewatch.bot`), and two native mutants killed only by the 600 s
+  timeout became prompt failures once `flood.bot` got a watchdog and closed
+  its endpoints before joining its producers.
+
+The deliberately racy protocol (`BOTLISH_EVENT_LOOP_FAULT=lost-wakeup`) is
+kept as the positive control of `el-linux-wake`
+(`el-linux-lost-wakeup-control`).
+
+**Exploration evidence.** The prototype's own checks still pass on this
+tree (it is unchanged; the compiler is the current one):
+`audit/event-loop/tools/check.tcl -parts static` 13/13 claims (the
+programs that must be rejected, the driver audit), `-parts sim` 61/61
+claims (every deterministic scenario, four backends), and
+`audit/event-loop/tools/original-names.tcl` PASS (the driver operations
+under their intended names `now` and `wait`, the bug CONTEXT-TRAIT-YIELD-
+EDGE-CORRECTNESS-MILESTONE-1.md fixed). The host-stepped repro is
+`tests/context-traits.test`'s `ct-implementation-yield-event-loop`
+(passed in the regression run below) and, on the production scheduler,
+`el-hoststep`. The prototype's native scenarios are measured by
+`bench/event-loop.tcl` (section 11) rather than rerun as claims: the
+production native tests cover each of them.
 
 **Regression suites.** `tclsh9.0 tests/local.tcl -jobs 1 tests/event-loop.test
 tests/context-traits.test tests/coroutines.test tests/traits.test

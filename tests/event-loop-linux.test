@@ -160,7 +160,7 @@ test el-linux-reset-window {the race window between the loop's first look at the
 
 test el-linux-stale-watch {a stale Watch never reaches a newer watch: after A's watch is closed and its registration revoked, a new registration takes the slot and a watch of B takes the watch's id; closing the old Watch again does nothing (-22) and B's watch still reports its client} -constraints eventLoopLinux -body {
     set t [elNative stalewatch]
-    list [elNum $t {slot reused (\d)}] [elNum $t {stale close (-?\d+)}] [expr {[elFirst $t {readiness of B}] ne ""}] \
+    list [elNum $t {slot reused (\d)}] [elNum $t {stale close (-?\d+)}] [llength [elMatches $t {readiness of B}]] \
         [llength [elMatches $t {watchdog fired}]] [elNum $t {live close (-?\d+)}]
 } -result {1 -22 1 0 0}
 
