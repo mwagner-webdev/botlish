@@ -18,7 +18,7 @@ standard library, and nothing in them loads it.
 | the disposable experimental runtime: `aot::run` on the main thread (candidate A) or serving a worker's requests (candidate B), selected per run by `BOTLISH_EXPERIMENT_THREAD`; `-stack_size` at link time by `BOTLISH_EXPERIMENT_MAIN_STACK` | `patches/main-thread-experiment.patch` |
 | the harness: builds, runs every case under a timeout, classifies | `tools/census.py` |
 | the native library through SDL3's callbacks (Linux, headless) | `tools/library-callbacks.sh` |
-| recorded outcomes | `results/` |
+| recorded outcomes: each macOS run's census output (timestamps removed), the Linux run's outcomes and summary, the library-callbacks transcript | `results/macos-aarch64/run-RUN.log`, `results/linux-x86_64/` |
 
 ## Running it
 

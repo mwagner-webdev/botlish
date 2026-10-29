@@ -22,32 +22,32 @@
   "cc-mtprobe": {
    "ok": true,
    "status": 0,
-   "ms": 92,
-   "cmd": "cc -c -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -Wall /home/user/botlish/audit/macos-graphical-main-thread/native/mtprobe.c -o /tmp/claude-0/cw3/obj/mtprobe.o",
+   "ms": 86,
+   "cmd": "cc -c -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -Wall /home/user/botlish/audit/macos-graphical-main-thread/native/mtprobe.c -o /tmp/claude-0/cw6/obj/mtprobe.o",
    "env": {},
    "output": ""
   },
   "cc-mtprobe_sdl": {
    "ok": true,
    "status": 0,
-   "ms": 77,
-   "cmd": "cc -c -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -Wall /home/user/botlish/audit/macos-graphical-main-thread/native/mtprobe_sdl.c -o /tmp/claude-0/cw3/obj/mtprobe_sdl.o",
+   "ms": 80,
+   "cmd": "cc -c -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -Wall /home/user/botlish/audit/macos-graphical-main-thread/native/mtprobe_sdl.c -o /tmp/claude-0/cw6/obj/mtprobe_sdl.o",
    "env": {},
    "output": ""
   },
   "cc-mtdispatch": {
    "ok": true,
    "status": 0,
-   "ms": 149,
-   "cmd": "cc -c -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -Wall /home/user/botlish/audit/macos-graphical-main-thread/native/mtdispatch.c -o /tmp/claude-0/cw3/obj/mtdispatch.o",
+   "ms": 143,
+   "cmd": "cc -c -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -Wall /home/user/botlish/audit/macos-graphical-main-thread/native/mtdispatch.c -o /tmp/claude-0/cw6/obj/mtdispatch.o",
    "env": {},
    "output": ""
   },
   "libmtprobe.a": {
    "ok": true,
    "status": 0,
-   "ms": 22,
-   "cmd": "ar rcs /tmp/claude-0/cw3/libmtprobe.a /tmp/claude-0/cw3/obj/mtprobe.o /tmp/claude-0/cw3/obj/mtprobe_sdl.o",
+   "ms": 19,
+   "cmd": "ar rcs /tmp/claude-0/cw6/libmtprobe.a /tmp/claude-0/cw6/obj/mtprobe.o /tmp/claude-0/cw6/obj/mtprobe_sdl.o",
    "env": {},
    "output": ""
   },
@@ -55,228 +55,316 @@
    "ok": true,
    "status": 0,
    "ms": 16,
-   "cmd": "ar rcs /tmp/claude-0/cw3/libmtdispatch.a /tmp/claude-0/cw3/obj/mtdispatch.o",
+   "cmd": "ar rcs /tmp/claude-0/cw6/libmtdispatch.a /tmp/claude-0/cw6/obj/mtdispatch.o",
    "env": {},
    "output": ""
   },
   "csdl": {
    "ok": true,
    "status": 0,
-   "ms": 229,
-   "cmd": "cc -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -o /tmp/claude-0/cw3/csdl /home/user/botlish/audit/macos-graphical-main-thread/native/csdl.c /tmp/claude-0/cw3/libmtprobe.a /tmp/claude-0/sdl-src/prefix/lib/libSDL3.a -lm -lpthread",
+   "ms": 221,
+   "cmd": "cc -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -o /tmp/claude-0/cw6/csdl /home/user/botlish/audit/macos-graphical-main-thread/native/csdl.c /tmp/claude-0/cw6/libmtprobe.a /tmp/claude-0/sdl-src/prefix/lib/libSDL3.a -lm -lpthread",
    "env": {},
    "output": ""
   },
   "csdl_callbacks": {
    "ok": true,
    "status": 0,
-   "ms": 164,
-   "cmd": "cc -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -o /tmp/claude-0/cw3/csdl_callbacks /home/user/botlish/audit/macos-graphical-main-thread/native/csdl_callbacks.c /tmp/claude-0/cw3/libmtprobe.a /tmp/claude-0/sdl-src/prefix/lib/libSDL3.a -lm -lpthread",
+   "ms": 154,
+   "cmd": "cc -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -o /tmp/claude-0/cw6/csdl_callbacks /home/user/botlish/audit/macos-graphical-main-thread/native/csdl_callbacks.c /tmp/claude-0/cw6/libmtprobe.a /tmp/claude-0/sdl-src/prefix/lib/libSDL3.a -lm -lpthread",
    "env": {},
    "output": ""
   },
   "mainstack-default": {
    "ok": true,
    "status": 0,
-   "ms": 69,
-   "cmd": "cc -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -o /tmp/claude-0/cw3/mainstack-default /home/user/botlish/audit/macos-graphical-main-thread/native/mainstack.c",
+   "ms": 128,
+   "cmd": "cc -O2 -g -I /tmp/claude-0/sdl-src/prefix/include -o /tmp/claude-0/cw6/mainstack-default /home/user/botlish/audit/macos-graphical-main-thread/native/mainstack.c",
    "env": {},
    "output": ""
   },
   "identity-rust": {
    "ok": true,
    "status": 0,
-   "ms": 242,
-   "cmd": "rustc -O --edition=2024 /home/user/botlish/audit/macos-graphical-main-thread/native/identity.rs -L native=/tmp/claude-0/cw3 -l static=mtprobe -o /tmp/claude-0/cw3/identity-rust",
+   "ms": 278,
+   "cmd": "rustc -O --edition=2024 /home/user/botlish/audit/macos-graphical-main-thread/native/identity.rs -L native=/tmp/claude-0/cw6 -l static=mtprobe -o /tmp/claude-0/cw6/identity-rust",
    "env": {},
    "output": ""
   },
   "prod/identity": {
    "ok": true,
    "status": 0,
-   "ms": 407,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod/identity.bot",
+   "ms": 472,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/identity.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-identity.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-identity.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod/identity\n"
+   "output": "executable: /tmp/claude-0/cw6/prod/identity\n"
   },
   "prod/sdl": {
    "ok": true,
    "status": 0,
-   "ms": 1119,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod/sdl.bot",
+   "ms": 1251,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/sdl.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-sdl.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-sdl.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod/sdl\n"
+   "output": "executable: /tmp/claude-0/cw6/prod/sdl\n"
   },
   "prod/depth": {
    "ok": true,
    "status": 0,
-   "ms": 501,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod/depth.bot",
+   "ms": 531,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/depth.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-depth.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-depth.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod/depth\n"
+   "output": "executable: /tmp/claude-0/cw6/prod/depth\n"
   },
   "prod/kept": {
    "ok": true,
    "status": 0,
-   "ms": 523,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod/kept.bot",
+   "ms": 619,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/kept.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-kept.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-kept.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod/kept\n"
+   "output": "executable: /tmp/claude-0/cw6/prod/kept\n"
   },
   "prod/co_overflow": {
    "ok": true,
    "status": 0,
-   "ms": 373,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod/co_overflow.bot",
+   "ms": 443,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/co_overflow.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-co_overflow.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-co_overflow.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod/co_overflow\n"
+   "output": "executable: /tmp/claude-0/cw6/prod/co_overflow\n"
   },
   "prod/fault": {
    "ok": true,
    "status": 0,
-   "ms": 406,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod/fault.bot",
+   "ms": 398,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/fault.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-fault.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-fault.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod/fault\n"
+   "output": "executable: /tmp/claude-0/cw6/prod/fault\n"
   },
   "prod/big": {
    "ok": true,
    "status": 0,
-   "ms": 11812,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod/big.bot",
+   "ms": 12828,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/big.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-big.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-big.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod/big\n"
+   "output": "executable: /tmp/claude-0/cw6/prod/big\n"
+  },
+  "prod/errors": {
+   "ok": true,
+   "status": 0,
+   "ms": 440,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/errors.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "system",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-errors.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/prod/errors\n"
+  },
+  "prod/sleep": {
+   "ok": true,
+   "status": 0,
+   "ms": 426,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod/sleep.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "system",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-sleep.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/prod/sleep\n"
   },
   "prod-rustc/identity": {
    "ok": true,
    "status": 0,
-   "ms": 574,
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/prod-rustc/identity.bot",
+   "ms": 573,
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/prod-rustc/identity.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "rustc",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-prod-rustc-identity.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-prod-rustc-identity.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/prod-rustc/identity\n"
+   "output": "executable: /tmp/claude-0/cw6/prod-rustc/identity\n"
   },
   "exp/identity": {
    "ok": true,
    "status": 0,
-   "ms": 409,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/identity.bot",
+   "ms": 412,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/identity.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-identity.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-identity.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/identity\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/identity\n"
   },
   "exp/sdl": {
    "ok": true,
    "status": 0,
-   "ms": 1165,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/sdl.bot",
+   "ms": 1347,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/sdl.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-sdl.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-sdl.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/sdl\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/sdl\n"
   },
   "exp/depth": {
    "ok": true,
    "status": 0,
-   "ms": 495,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/depth.bot",
+   "ms": 606,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/depth.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-depth.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-depth.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/depth\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/depth\n"
   },
   "exp/kept": {
    "ok": true,
    "status": 0,
-   "ms": 552,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/kept.bot",
+   "ms": 571,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/kept.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-kept.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-kept.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/kept\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/kept\n"
   },
   "exp/co_overflow": {
    "ok": true,
    "status": 0,
-   "ms": 399,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/co_overflow.bot",
+   "ms": 365,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/co_overflow.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-co_overflow.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-co_overflow.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/co_overflow\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/co_overflow\n"
   },
   "exp/fault": {
    "ok": true,
    "status": 0,
-   "ms": 437,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/fault.bot",
+   "ms": 389,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/fault.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-fault.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-fault.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/fault\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/fault\n"
   },
   "exp/big": {
    "ok": true,
    "status": 0,
-   "ms": 12273,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/big.bot",
+   "ms": 12168,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/big.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-big.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-big.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/big\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/big\n"
+  },
+  "exp/errors": {
+   "ok": true,
+   "status": 0,
+   "ms": 456,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/errors.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "system",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-errors.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/exp/errors\n"
+  },
+  "exp/sleep": {
+   "ok": true,
+   "status": 0,
+   "ms": 440,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/sleep.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "system",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-sleep.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/exp/sleep\n"
   },
   "exp/dispatch": {
    "ok": true,
    "status": 0,
-   "ms": 761,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/dispatch.bot",
+   "ms": 678,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/dispatch.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-dispatch.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-dispatch.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/dispatch\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/dispatch\n"
   },
   "exp/runonmain": {
    "ok": true,
    "status": 0,
-   "ms": 527,
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw3/exp/runonmain.bot",
+   "ms": 570,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp/runonmain.bot",
    "env": {
     "BOTLISH_NATIVE_LINKER": "system",
-    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr3/logs/link-exp-runonmain.log"
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-runonmain.log"
    },
-   "output": "executable: /tmp/claude-0/cw3/exp/runonmain\n"
+   "output": "executable: /tmp/claude-0/cw6/exp/runonmain\n"
+  },
+  "exp-rustc/identity": {
+   "ok": true,
+   "status": 0,
+   "ms": 777,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp-rustc/identity.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "rustc",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-rustc-identity.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/exp-rustc/identity\n"
+  },
+  "exp-rustc/sdl": {
+   "ok": true,
+   "status": 0,
+   "ms": 1527,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp-rustc/sdl.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "rustc",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-rustc-sdl.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/exp-rustc/sdl\n"
+  },
+  "exp-rustc/errors": {
+   "ok": true,
+   "status": 0,
+   "ms": 790,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp-rustc/errors.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "rustc",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-rustc-errors.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/exp-rustc/errors\n"
+  },
+  "exp-rustc/depth": {
+   "ok": true,
+   "status": 0,
+   "ms": 827,
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-executable /tmp/claude-0/cw6/exp-rustc/depth.bot",
+   "env": {
+    "BOTLISH_NATIVE_LINKER": "rustc",
+    "BOTLISH_NATIVE_LINK_LOG": "/tmp/claude-0/cr6/logs/link-exp-rustc-depth.log"
+   },
+   "output": "executable: /tmp/claude-0/cw6/exp-rustc/depth\n"
   }
  },
  "records": [
@@ -284,12 +372,13 @@
    "name": "id-c-main",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/csdl identity",
+   "cmd": "/tmp/claude-0/cw6/csdl identity",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 1.8,
+   "wall_ms": 2.0,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -310,12 +399,13 @@
    "name": "id-c-worker",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/csdl identity-worker",
+   "cmd": "/tmp/claude-0/cw6/csdl identity-worker",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.1,
+   "wall_ms": 2.0,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -336,12 +426,13 @@
    "name": "id-rust-main",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/identity-rust",
+   "cmd": "/tmp/claude-0/cw6/identity-rust",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.2,
+   "wall_ms": 2.9,
    "stdout_tail": "[1, 0]\n",
    "stderr_tail": "",
    "note": "the first report is Rust's main thread, the second a std thread's",
@@ -352,7 +443,7 @@
     "ns_main": -1,
     "same_tid_as_main": 1,
     "threads": 1,
-    "stack_bytes": 8380416,
+    "stack_bytes": 8376320,
     "since_exec_us": -1,
     "value": [
      1,
@@ -365,12 +456,13 @@
    "name": "id-botlish-aot-prod",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/prod/identity",
+   "cmd": "/tmp/claude-0/cw6/prod/identity",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.2,
+   "wall_ms": 3.5,
    "stdout_tail": "[0, -1, 2]\n",
    "stderr_tail": "",
    "note": "the production executable (system linker)",
@@ -395,12 +487,13 @@
    "name": "id-botlish-aot-rustc",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/prod-rustc/identity",
+   "cmd": "/tmp/claude-0/cw6/prod-rustc/identity",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.7,
+   "wall_ms": 6.1,
    "stdout_tail": "[0, -1, 2]\n",
    "stderr_tail": "",
    "note": "the production runtime, rustc-linked",
@@ -425,12 +518,13 @@
    "name": "id-botlish-linked-run",
    "group": "identity",
    "kind": "identity",
-   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -backend cranelift /tmp/claude-0/cw3/prod/identity.bot",
+   "cmd": "tclsh9.0 /home/user/botlish/main.tcl -warnings off -backend cranelift /tmp/claude-0/cw6/prod/identity.bot",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 604.7,
+   "wall_ms": 600.0,
    "stdout_tail": "== identity.bot (cranelift)\n   value: [0, -1, 2]\n",
    "stderr_tail": "",
    "note": "main.tcl -backend cranelift: a program that calls C runs as a linked executable (driver protocol)",
@@ -451,14 +545,15 @@
    "name": "id-botlish-exp-worker",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/exp/identity",
+   "cmd": "/tmp/claude-0/cw6/exp/identity",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.1,
+   "wall_ms": 3.0,
    "stdout_tail": "[0, -1, 2]\n",
    "stderr_tail": "",
    "note": "",
@@ -480,9 +575,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f3742000000",
-     "stack_high": "0x7f3782000000",
-     "guard_low": "0x7f3741fff000",
+     "stack_low": "0x7f9a8e600000",
+     "stack_high": "0x7f9ace600000",
+     "guard_low": "0x7f9a8e5ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -493,15 +588,16 @@
    "name": "id-botlish-exp-main",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/exp/identity",
+   "cmd": "/tmp/claude-0/cw6/exp/identity",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 78.8,
+   "wall_ms": 78.1,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "Linux: the guard refuses the main thread's stack (no confirmed guard)",
@@ -519,10 +615,10 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffdb764e000",
-     "stack_high": "0x7ffdb7e4c000",
-     "guard_low": "0x7ffdb764e000",
-     "usable_bytes": 8380416,
+     "stack_low": "0x7ffe819bb000",
+     "stack_high": "0x7ffe821b7000",
+     "guard_low": "0x7ffe819bb000",
+     "usable_bytes": 8372224,
      "guard_bytes": 0
     },
     "problem": "no identity report"
@@ -533,15 +629,16 @@
    "name": "id-botlish-exp-dispatch",
    "group": "identity",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/exp/identity",
+   "cmd": "/tmp/claude-0/cw6/exp/identity",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "dispatch",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 4.9,
+   "wall_ms": 4.8,
    "stdout_tail": "[0, -1, 2]\n",
    "stderr_tail": "",
    "note": "",
@@ -563,9 +660,9 @@
      "kind": "runtime",
      "mode": "Dispatch",
      "pthread_main": 0,
-     "stack_low": "0x7fb4b4a00000",
-     "stack_high": "0x7fb4f4a00000",
-     "guard_low": "0x7fb4b49ff000",
+     "stack_low": "0x7f9467a00000",
+     "stack_high": "0x7f94a7a00000",
+     "guard_low": "0x7f94679ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -576,12 +673,13 @@
    "name": "stack-main-default",
    "group": "stack",
    "kind": "mainstack",
-   "cmd": "/tmp/claude-0/cw3/mainstack-default report",
+   "cmd": "/tmp/claude-0/cw6/mainstack-default report",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 1.6,
+   "wall_ms": 1.7,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -592,13 +690,13 @@
     "mainstack.pthread_main": -1,
     "mainstack.rlimit_cur": 8388608,
     "mainstack.rlimit_max": -1,
-    "mainstack.reported_bytes": 8376320,
-    "mainstack.usable_bytes": 8376320,
+    "mainstack.reported_bytes": 8372224,
+    "mainstack.usable_bytes": 8372224,
     "mainstack.reported_bottom_skipped": 0,
     "mainstack.guard_bytes": 0,
-    "mainstack.high": "0x7ffe51054000",
-    "mainstack.usable_low": "0x7ffe50857000",
-    "mainstack.guard_low": "0x7ffe50857000"
+    "mainstack.high": "0x7ffde80dc000",
+    "mainstack.usable_low": "0x7ffde78e0000",
+    "mainstack.guard_low": "0x7ffde78e0000"
    },
    "expected": true
   },
@@ -606,12 +704,13 @@
    "name": "stack-main-default-overflow",
    "group": "stack",
    "kind": "mainstack",
-   "cmd": "/tmp/claude-0/cw3/mainstack-default overflow",
+   "cmd": "/tmp/claude-0/cw6/mainstack-default overflow",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 5.8,
+   "wall_ms": 6.1,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "glibc reports no guard for the main thread: the fault is below the stack, not in a confirmed guard",
@@ -622,17 +721,17 @@
     "mainstack.pthread_main": -1,
     "mainstack.rlimit_cur": 8388608,
     "mainstack.rlimit_max": -1,
-    "mainstack.reported_bytes": 8376320,
-    "mainstack.usable_bytes": 8376320,
+    "mainstack.reported_bytes": 8372224,
+    "mainstack.usable_bytes": 8372224,
     "mainstack.reported_bottom_skipped": 0,
     "mainstack.guard_bytes": 0,
-    "mainstack.high": "0x7ffc97acf000",
-    "mainstack.usable_low": "0x7ffc972d2000",
-    "mainstack.guard_low": "0x7ffc972d2000",
+    "mainstack.high": "0x7fffe8c97000",
+    "mainstack.usable_low": "0x7fffe849b000",
+    "mainstack.guard_low": "0x7fffe849b000",
     "mainstack-fault.signal": 11,
     "mainstack-fault.in_guard": 0,
-    "mainstack-fault.below_usable": 984,
-    "mainstack-fault.deepest_above_usable": 3120
+    "mainstack-fault.below_usable": 2952,
+    "mainstack-fault.deepest_above_usable": 13440
    },
    "expected": true
   },
@@ -640,14 +739,15 @@
    "name": "c-main-cocoa",
    "group": "c-graphical",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl main",
+   "cmd": "/tmp/claude-0/cw6/csdl main",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 489.9,
+   "wall_ms": 490.8,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -679,14 +779,15 @@
    "name": "c-main-headless",
    "group": "c-graphical",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl main",
+   "cmd": "/tmp/claude-0/cw6/csdl main",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 489.8,
+   "wall_ms": 490.2,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -718,12 +819,13 @@
    "name": "c-worker-cocoa",
    "group": "c-graphical",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl worker",
+   "cmd": "/tmp/claude-0/cw6/csdl worker",
    "env": {},
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.9,
+   "wall_ms": 2.5,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "today's Botlish model in C: SDL video on a worker the main thread joins",
@@ -763,14 +865,15 @@
    "name": "c-worker-headless",
    "group": "c-graphical",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl worker",
+   "cmd": "/tmp/claude-0/cw6/csdl worker",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 490.9,
+   "wall_ms": 490.1,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -802,12 +905,13 @@
    "name": "bl-worker-cocoa",
    "group": "botlish-baseline",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/prod/sdl",
+   "cmd": "/tmp/claude-0/cw6/prod/sdl",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.0,
+   "wall_ms": 3.2,
    "stdout_tail": "[true, false, true, [false]]\n",
    "stderr_tail": "",
    "note": "the production runtime: Botlish on its worker",
@@ -851,14 +955,15 @@
    "name": "bl-worker-cocoa-hint",
    "group": "botlish-baseline",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/prod/sdl",
+   "cmd": "/tmp/claude-0/cw6/prod/sdl",
    "env": {
     "SDL_VIDEODRIVER": "cocoa"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.2,
+   "wall_ms": 3.0,
    "stdout_tail": "[true, false, true, [false]]\n",
    "stderr_tail": "",
    "note": "SDL_VIDEODRIVER=cocoa: the Cocoa driver asked for by name",
@@ -902,14 +1007,15 @@
    "name": "bl-worker-headless",
    "group": "botlish-baseline",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/prod/sdl",
+   "cmd": "/tmp/claude-0/cw6/prod/sdl",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 541.3,
+   "wall_ms": 539.5,
    "stdout_tail": "[true, true, true, [true, [true, 30, 3, true, [5, 1]]]]\n",
    "stderr_tail": "",
    "note": "",
@@ -954,6 +1060,7 @@
     "events": 5,
     "value_window": true,
     "value_renderer": true,
+    "pump_us": 0.1,
     "coroutine_on_own_stack": true,
     "coroutine_pthread_main": 0
    },
@@ -963,15 +1070,16 @@
    "name": "bl-worker-headless-gc",
    "group": "botlish-baseline",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/prod/sdl",
+   "cmd": "/tmp/claude-0/cw6/prod/sdl",
    "env": {
     "SDL_VIDEODRIVER": "dummy",
     "BOTLISH_NATIVE_GC_STRESS": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 539.7,
+   "wall_ms": 539.8,
    "stdout_tail": "[true, true, true, [true, [true, 30, 3, true, [5, 1]]]]\n",
    "stderr_tail": "",
    "note": "",
@@ -1016,6 +1124,7 @@
     "events": 5,
     "value_window": true,
     "value_renderer": true,
+    "pump_us": 0.11,
     "coroutine_on_own_stack": true,
     "coroutine_pthread_main": 0
    },
@@ -1025,15 +1134,16 @@
    "name": "a-main-cocoa",
    "group": "candidate-a",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/exp/sdl",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 78.9,
+   "wall_ms": 93.8,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -1061,16 +1171,17 @@
    "name": "a-main-cocoa-gc",
    "group": "candidate-a",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/exp/sdl",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_NATIVE_GC_STRESS": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 83.4,
+   "wall_ms": 79.0,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -1098,16 +1209,17 @@
    "name": "a-main-headless",
    "group": "candidate-a",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/exp/sdl",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 89.0,
+   "wall_ms": 85.4,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -1135,14 +1247,15 @@
    "name": "a-worker-cocoa",
    "group": "candidate-a",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/exp/sdl",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.6,
+   "wall_ms": 3.4,
    "stdout_tail": "[true, false, true, [false]]\n",
    "stderr_tail": "",
    "note": "the experimental build in the production model",
@@ -1186,14 +1299,15 @@
    "name": "a-worker-depth-down-10000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 10000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 10000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.2,
+   "wall_ms": 3.0,
    "stdout_tail": "10000\n",
    "stderr_tail": "",
    "note": "",
@@ -1208,9 +1322,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7fa593c00000",
-     "stack_high": "0x7fa5d3c00000",
-     "guard_low": "0x7fa593bff000",
+     "stack_low": "0x7fb697600000",
+     "stack_high": "0x7fb6d7600000",
+     "guard_low": "0x7fb6975ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1221,14 +1335,15 @@
    "name": "a-worker-depth-down-100000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 100000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 100000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 7.3,
+   "wall_ms": 7.8,
    "stdout_tail": "100000\n",
    "stderr_tail": "",
    "note": "",
@@ -1243,9 +1358,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f4b93400000",
-     "stack_high": "0x7f4bd3400000",
-     "guard_low": "0x7f4b933ff000",
+     "stack_low": "0x7f6209000000",
+     "stack_high": "0x7f6249000000",
+     "guard_low": "0x7f6208fff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1256,14 +1371,15 @@
    "name": "a-worker-depth-down-1000000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 1000000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 1000000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 52.0,
+   "wall_ms": 51.3,
    "stdout_tail": "1000000\n",
    "stderr_tail": "",
    "note": "",
@@ -1278,9 +1394,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f42aae00000",
-     "stack_high": "0x7f42eae00000",
-     "guard_low": "0x7f42aadff000",
+     "stack_low": "0x7f5efe600000",
+     "stack_high": "0x7f5f3e600000",
+     "guard_low": "0x7f5efe5ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1291,14 +1407,15 @@
    "name": "a-worker-overflow-down",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 0",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 547.0,
+   "wall_ms": 587.3,
    "stdout_tail": "",
    "stderr_tail": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}",
    "note": "",
@@ -1313,9 +1430,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7efdd5400000",
-     "stack_high": "0x7efe15400000",
-     "guard_low": "0x7efdd53ff000",
+     "stack_low": "0x7f27ddc00000",
+     "stack_high": "0x7f281dc00000",
+     "guard_low": "0x7f27ddbff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1326,14 +1443,15 @@
    "name": "a-worker-depth-keep-10000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 10000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 10000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 5.7,
+   "wall_ms": 4.4,
    "stdout_tail": "20000\n",
    "stderr_tail": "",
    "note": "",
@@ -1348,9 +1466,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f51ea600000",
-     "stack_high": "0x7f522a600000",
-     "guard_low": "0x7f51ea5ff000",
+     "stack_low": "0x7f09ed800000",
+     "stack_high": "0x7f0a2d800000",
+     "guard_low": "0x7f09ed7ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1361,14 +1479,15 @@
    "name": "a-worker-depth-keep-100000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 100000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 100000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 19.1,
+   "wall_ms": 16.6,
    "stdout_tail": "200000\n",
    "stderr_tail": "",
    "note": "",
@@ -1383,9 +1502,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f4a2fa00000",
-     "stack_high": "0x7f4a6fa00000",
-     "guard_low": "0x7f4a2f9ff000",
+     "stack_low": "0x7f5e24c00000",
+     "stack_high": "0x7f5e64c00000",
+     "guard_low": "0x7f5e24bff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1396,14 +1515,15 @@
    "name": "a-worker-overflow-keep",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 0",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 557.8,
+   "wall_ms": 528.7,
    "stdout_tail": "",
    "stderr_tail": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}",
    "note": "",
@@ -1418,9 +1538,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f90ef200000",
-     "stack_high": "0x7f912f200000",
-     "guard_low": "0x7f90ef1ff000",
+     "stack_low": "0x7f21a6c00000",
+     "stack_high": "0x7f21e6c00000",
+     "guard_low": "0x7f21a6bff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1431,14 +1551,15 @@
    "name": "a-worker-depth-wide-10000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth wide 10000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth wide 10000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.5,
+   "wall_ms": 4.4,
    "stdout_tail": "0\n",
    "stderr_tail": "",
    "note": "",
@@ -1453,9 +1574,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7ffb35e00000",
-     "stack_high": "0x7ffb75e00000",
-     "guard_low": "0x7ffb35dff000",
+     "stack_low": "0x7f9a6c800000",
+     "stack_high": "0x7f9aac800000",
+     "guard_low": "0x7f9a6c7ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1466,14 +1587,15 @@
    "name": "a-worker-depth-wide-100000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth wide 100000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth wide 100000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 14.1,
+   "wall_ms": 16.2,
    "stdout_tail": "0\n",
    "stderr_tail": "",
    "note": "",
@@ -1488,9 +1610,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7fa712e00000",
-     "stack_high": "0x7fa752e00000",
-     "guard_low": "0x7fa712dff000",
+     "stack_low": "0x7f0d13800000",
+     "stack_high": "0x7f0d53800000",
+     "guard_low": "0x7f0d137ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1501,14 +1623,15 @@
    "name": "a-worker-overflow-wide",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth wide 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth wide 0",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 508.2,
+   "wall_ms": 586.2,
    "stdout_tail": "",
    "stderr_tail": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}",
    "note": "",
@@ -1523,9 +1646,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7fe593800000",
-     "stack_high": "0x7fe5d3800000",
-     "guard_low": "0x7fe5937ff000",
+     "stack_low": "0x7f8b5dc00000",
+     "stack_high": "0x7f8b9dc00000",
+     "guard_low": "0x7f8b5dbff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1536,14 +1659,15 @@
    "name": "a-worker-depth-rec-10000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth rec 10000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth rec 10000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.1,
+   "wall_ms": 3.8,
    "stdout_tail": "10000\n",
    "stderr_tail": "",
    "note": "",
@@ -1558,9 +1682,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f4600200000",
-     "stack_high": "0x7f4640200000",
-     "guard_low": "0x7f46001ff000",
+     "stack_low": "0x7fc5bc800000",
+     "stack_high": "0x7fc5fc800000",
+     "guard_low": "0x7fc5bc7ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1571,14 +1695,15 @@
    "name": "a-worker-depth-rec-100000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth rec 100000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth rec 100000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 9.5,
+   "wall_ms": 10.2,
    "stdout_tail": "100000\n",
    "stderr_tail": "",
    "note": "",
@@ -1593,9 +1718,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f6898c00000",
-     "stack_high": "0x7f68d8c00000",
-     "guard_low": "0x7f6898bff000",
+     "stack_low": "0x7f9da5200000",
+     "stack_high": "0x7f9de5200000",
+     "guard_low": "0x7f9da51ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1606,14 +1731,15 @@
    "name": "a-worker-overflow-rec",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth rec 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth rec 0",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 529.0,
+   "wall_ms": 527.5,
    "stdout_tail": "",
    "stderr_tail": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}",
    "note": "",
@@ -1628,9 +1754,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f9073600000",
-     "stack_high": "0x7f90b3600000",
-     "guard_low": "0x7f90735ff000",
+     "stack_low": "0x7f9031000000",
+     "stack_high": "0x7f9071000000",
+     "guard_low": "0x7f9030fff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1641,15 +1767,16 @@
    "name": "a-worker-keep-gc",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 3000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 3000",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_NATIVE_GC_STRESS": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 123.2,
+   "wall_ms": 111.2,
    "stdout_tail": "6000\n",
    "stderr_tail": "",
    "note": "",
@@ -1664,9 +1791,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7fc16a400000",
-     "stack_high": "0x7fc1aa400000",
-     "guard_low": "0x7fc16a3ff000",
+     "stack_low": "0x7f57ae000000",
+     "stack_high": "0x7f57ee000000",
+     "guard_low": "0x7f57adfff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1677,14 +1804,15 @@
    "name": "a-worker-kept",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/kept",
+   "cmd": "/tmp/claude-0/cw6/exp/kept",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.7,
+   "wall_ms": 4.7,
    "stdout_tail": "[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]\n",
    "stderr_tail": "",
    "note": "",
@@ -1722,9 +1850,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7fe5fae00000",
-     "stack_high": "0x7fe63ae00000",
-     "guard_low": "0x7fe5fadff000",
+     "stack_low": "0x7feb19c00000",
+     "stack_high": "0x7feb59c00000",
+     "guard_low": "0x7feb19bff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1735,15 +1863,16 @@
    "name": "a-worker-kept-gc",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/kept",
+   "cmd": "/tmp/claude-0/cw6/exp/kept",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_NATIVE_GC_STRESS": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.7,
+   "wall_ms": 2.4,
    "stdout_tail": "[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]\n",
    "stderr_tail": "",
    "note": "",
@@ -1781,9 +1910,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f75f0800000",
-     "stack_high": "0x7f7630800000",
-     "guard_low": "0x7f75f07ff000",
+     "stack_low": "0x7f76fc200000",
+     "stack_high": "0x7f773c200000",
+     "guard_low": "0x7f76fc1ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1794,14 +1923,15 @@
    "name": "a-worker-co-overflow",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/co_overflow",
+   "cmd": "/tmp/claude-0/cw6/exp/co_overflow",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 7.4,
+   "wall_ms": 7.2,
    "stdout_tail": "",
    "stderr_tail": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}",
    "note": "",
@@ -1816,9 +1946,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f9869200000",
-     "stack_high": "0x7f98a9200000",
-     "guard_low": "0x7f98691ff000",
+     "stack_low": "0x7f89f5400000",
+     "stack_high": "0x7f8a35400000",
+     "guard_low": "0x7f89f53ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1829,14 +1959,15 @@
    "name": "a-worker-fault",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/fault",
+   "cmd": "/tmp/claude-0/cw6/exp/fault",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": -11,
    "signal": 11,
    "timed_out": false,
-   "wall_ms": 9.1,
+   "wall_ms": 9.2,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -1851,9 +1982,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f8c79e00000",
-     "stack_high": "0x7f8cb9e00000",
-     "guard_low": "0x7f8c79dff000",
+     "stack_low": "0x7f8e32600000",
+     "stack_high": "0x7f8e72600000",
+     "guard_low": "0x7f8e325ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1864,14 +1995,15 @@
    "name": "a-worker-bigframe-100",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/big 100",
+   "cmd": "/tmp/claude-0/cw6/exp/big 100",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 8.0,
+   "wall_ms": 9.2,
    "stdout_tail": "928487700\n",
    "stderr_tail": "",
    "note": "",
@@ -1886,9 +2018,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7fac0f600000",
-     "stack_high": "0x7fac4f600000",
-     "guard_low": "0x7fac0f5ff000",
+     "stack_low": "0x7f4ab6e00000",
+     "stack_high": "0x7f4af6e00000",
+     "guard_low": "0x7f4ab6dff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1899,15 +2031,16 @@
    "name": "a-worker-bigframe-gc",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/big 8",
+   "cmd": "/tmp/claude-0/cw6/exp/big 8",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_NATIVE_GC_STRESS": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 9.6,
+   "wall_ms": 8.1,
    "stdout_tail": "7928616\n",
    "stderr_tail": "",
    "note": "",
@@ -1922,9 +2055,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f23b1e00000",
-     "stack_high": "0x7f23f1e00000",
-     "guard_low": "0x7f23b1dff000",
+     "stack_low": "0x7f7350600000",
+     "stack_high": "0x7f7390600000",
+     "guard_low": "0x7f73505ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -1935,15 +2068,16 @@
    "name": "a-worker-bigframe-overflow",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/big 0",
+   "cmd": "/tmp/claude-0/cw6/exp/big 0",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_NATIVE_STACK_BYTES": "8388608"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 12.6,
+   "wall_ms": 15.0,
    "stdout_tail": "",
    "stderr_tail": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}",
    "note": "",
@@ -1958,9 +2092,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7fa36ba00000",
-     "stack_high": "0x7fa36c200000",
-     "guard_low": "0x7fa36b9ff000",
+     "stack_low": "0x7f0ba1400000",
+     "stack_high": "0x7f0ba1c00000",
+     "guard_low": "0x7f0ba13ff000",
      "usable_bytes": 8388608,
      "guard_bytes": 4096
     }
@@ -1971,15 +2105,16 @@
    "name": "a-main-depth-down-10000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 10000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 10000",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 100.7,
+   "wall_ms": 84.8,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -1994,9 +2129,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffeb7b05000",
-     "stack_high": "0x7ffeb8302000",
-     "guard_low": "0x7ffeb7b05000",
+     "stack_low": "0x7ffc59543000",
+     "stack_high": "0x7ffc59d40000",
+     "guard_low": "0x7ffc59543000",
      "usable_bytes": 8376320,
      "guard_bytes": 0
     },
@@ -2008,15 +2143,16 @@
    "name": "a-main-depth-down-100000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 100000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 100000",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 76.8,
+   "wall_ms": 86.2,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -2031,10 +2167,10 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7fff7ee1e000",
-     "stack_high": "0x7fff7f61a000",
-     "guard_low": "0x7fff7ee1e000",
-     "usable_bytes": 8372224,
+     "stack_low": "0x7ffd5657b000",
+     "stack_high": "0x7ffd56d78000",
+     "guard_low": "0x7ffd5657b000",
+     "usable_bytes": 8376320,
      "guard_bytes": 0
     },
     "problem": "as the control intends"
@@ -2045,15 +2181,16 @@
    "name": "a-main-depth-down-1000000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 1000000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 1000000",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 81.6,
+   "wall_ms": 86.3,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -2068,9 +2205,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffd34b91000",
-     "stack_high": "0x7ffd3538f000",
-     "guard_low": "0x7ffd34b91000",
+     "stack_low": "0x7ffe390c0000",
+     "stack_high": "0x7ffe398be000",
+     "guard_low": "0x7ffe390c0000",
      "usable_bytes": 8380416,
      "guard_bytes": 0
     },
@@ -2082,15 +2219,16 @@
    "name": "a-main-overflow-down",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 0",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 82.4,
+   "wall_ms": 79.2,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -2105,9 +2243,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffc4b109000",
-     "stack_high": "0x7ffc4b906000",
-     "guard_low": "0x7ffc4b109000",
+     "stack_low": "0x7ffef25dc000",
+     "stack_high": "0x7ffef2dd9000",
+     "guard_low": "0x7ffef25dc000",
      "usable_bytes": 8376320,
      "guard_bytes": 0
     },
@@ -2119,15 +2257,16 @@
    "name": "a-main-depth-keep-10000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 10000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 10000",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 93.2,
+   "wall_ms": 81.5,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -2142,10 +2281,10 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffd3ca2e000",
-     "stack_high": "0x7ffd3d22b000",
-     "guard_low": "0x7ffd3ca2e000",
-     "usable_bytes": 8376320,
+     "stack_low": "0x7ffcfdb51000",
+     "stack_high": "0x7ffcfe34d000",
+     "guard_low": "0x7ffcfdb51000",
+     "usable_bytes": 8372224,
      "guard_bytes": 0
     },
     "problem": "as the control intends"
@@ -2156,15 +2295,16 @@
    "name": "a-main-depth-keep-100000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 100000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 100000",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 94.9,
+   "wall_ms": 70.0,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -2179,9 +2319,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffc0f919000",
-     "stack_high": "0x7ffc10116000",
-     "guard_low": "0x7ffc0f919000",
+     "stack_low": "0x7ffd3e96d000",
+     "stack_high": "0x7ffd3f16a000",
+     "guard_low": "0x7ffd3e96d000",
      "usable_bytes": 8376320,
      "guard_bytes": 0
     },
@@ -2193,15 +2333,16 @@
    "name": "a-main-overflow-keep",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 0",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 67.8,
+   "wall_ms": 83.5,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -2216,10 +2357,10 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffd6ea1c000",
-     "stack_high": "0x7ffd6f21a000",
-     "guard_low": "0x7ffd6ea1c000",
-     "usable_bytes": 8380416,
+     "stack_low": "0x7fff477da000",
+     "stack_high": "0x7fff47fd7000",
+     "guard_low": "0x7fff477da000",
+     "usable_bytes": 8376320,
      "guard_bytes": 0
     },
     "problem": "as the control intends"
@@ -2230,458 +2371,12 @@
    "name": "a-main-depth-wide-10000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth wide 10000",
+   "cmd": "/tmp/claude-0/cw6/exp/depth wide 10000",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 93.1,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffff2936000",
-     "stack_high": "0x7ffff3133000",
-     "guard_low": "0x7ffff2936000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-depth-wide-100000",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth wide 100000",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 76.4,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffd62ddc000",
-     "stack_high": "0x7ffd635d9000",
-     "guard_low": "0x7ffd62ddc000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-overflow-wide",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth wide 0",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 77.9,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffc12340000",
-     "stack_high": "0x7ffc12b3e000",
-     "guard_low": "0x7ffc12340000",
-     "usable_bytes": 8380416,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-depth-rec-10000",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth rec 10000",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 78.4,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffdf7139000",
-     "stack_high": "0x7ffdf7935000",
-     "guard_low": "0x7ffdf7139000",
-     "usable_bytes": 8372224,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-depth-rec-100000",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth rec 100000",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 77.8,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffc0dcb8000",
-     "stack_high": "0x7ffc0e4b5000",
-     "guard_low": "0x7ffc0dcb8000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-overflow-rec",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth rec 0",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 88.3,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffc1bfc3000",
-     "stack_high": "0x7ffc1c7c0000",
-     "guard_low": "0x7ffc1bfc3000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-keep-gc",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth keep 3000",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1",
-    "BOTLISH_NATIVE_GC_STRESS": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 77.6,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffd0dd99000",
-     "stack_high": "0x7ffd0e596000",
-     "guard_low": "0x7ffd0dd99000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-kept",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/kept",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 80.3,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffd70b5d000",
-     "stack_high": "0x7ffd7135b000",
-     "guard_low": "0x7ffd70b5d000",
-     "usable_bytes": 8380416,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-kept-gc",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/kept",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1",
-    "BOTLISH_NATIVE_GC_STRESS": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 75.0,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffe85510000",
-     "stack_high": "0x7ffe85d0d000",
-     "guard_low": "0x7ffe85510000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-co-overflow",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/co_overflow",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 76.7,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffd7100f000",
-     "stack_high": "0x7ffd7180c000",
-     "guard_low": "0x7ffd7100f000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-fault",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/fault",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 78.4,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffc93afc000",
-     "stack_high": "0x7ffc942f9000",
-     "guard_low": "0x7ffc93afc000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-bigframe-100",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/big 100",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1"
-   },
-   "status": 101,
-   "signal": 0,
-   "timed_out": false,
-   "wall_ms": 82.4,
-   "stdout_tail": "",
-   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-   "note": "",
-   "class": "FAILED-CORRECTNESS",
-   "facts": {
-    "status": 101,
-    "signal": 0,
-    "value": "",
-    "native_limit_stack": false,
-    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
-    "runtime": {
-     "kind": "runtime",
-     "mode": "Main",
-     "pthread_main": 1,
-     "stack_low": "0x7ffdbee61000",
-     "stack_high": "0x7ffdbf65e000",
-     "guard_low": "0x7ffdbee61000",
-     "usable_bytes": 8376320,
-     "guard_bytes": 0
-    },
-    "problem": "as the control intends"
-   },
-   "expected": true
-  },
-  {
-   "name": "a-main-bigframe-gc",
-   "group": "candidate-a",
-   "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/big 8",
-   "env": {
-    "BOTLISH_EXPERIMENT_THREAD": "main",
-    "BOTLISH_EXPERIMENT_REPORT": "1",
-    "BOTLISH_NATIVE_GC_STRESS": "1"
-   },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
@@ -2700,9 +2395,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffde09aa000",
-     "stack_high": "0x7ffde11a7000",
-     "guard_low": "0x7ffde09aa000",
+     "stack_low": "0x7ffc0ad27000",
+     "stack_high": "0x7ffc0b524000",
+     "guard_low": "0x7ffc0ad27000",
      "usable_bytes": 8376320,
      "guard_bytes": 0
     },
@@ -2711,18 +2406,19 @@
    "expected": true
   },
   {
-   "name": "a-main-bigframe-overflow",
+   "name": "a-main-depth-wide-100000",
    "group": "candidate-a",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/big 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth wide 100000",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 94.5,
+   "wall_ms": 85.9,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -2737,9 +2433,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffe8e83f000",
-     "stack_high": "0x7ffe8f03c000",
-     "guard_low": "0x7ffe8e83f000",
+     "stack_low": "0x7ffe60907000",
+     "stack_high": "0x7ffe61104000",
+     "guard_low": "0x7ffe60907000",
      "usable_bytes": 8376320,
      "guard_bytes": 0
     },
@@ -2748,19 +2444,1085 @@
    "expected": true
   },
   {
+   "name": "a-main-overflow-wide",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/depth wide 0",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 93.5,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffe15d14000",
+     "stack_high": "0x7ffe16510000",
+     "guard_low": "0x7ffe15d14000",
+     "usable_bytes": 8372224,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-depth-rec-10000",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/depth rec 10000",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 90.8,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffe4c879000",
+     "stack_high": "0x7ffe4d076000",
+     "guard_low": "0x7ffe4c879000",
+     "usable_bytes": 8376320,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-depth-rec-100000",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/depth rec 100000",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 72.1,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffdc2e6a000",
+     "stack_high": "0x7ffdc3668000",
+     "guard_low": "0x7ffdc2e6a000",
+     "usable_bytes": 8380416,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-overflow-rec",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/depth rec 0",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 69.4,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7fff2fa45000",
+     "stack_high": "0x7fff30243000",
+     "guard_low": "0x7fff2fa45000",
+     "usable_bytes": 8380416,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-keep-gc",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/depth keep 3000",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_GC_STRESS": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 83.1,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffc4da0d000",
+     "stack_high": "0x7ffc4e20b000",
+     "guard_low": "0x7ffc4da0d000",
+     "usable_bytes": 8380416,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-kept",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/kept",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 78.1,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffe19078000",
+     "stack_high": "0x7ffe19875000",
+     "guard_low": "0x7ffe19078000",
+     "usable_bytes": 8376320,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-kept-gc",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/kept",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_GC_STRESS": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 84.2,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffd271bd000",
+     "stack_high": "0x7ffd279ba000",
+     "guard_low": "0x7ffd271bd000",
+     "usable_bytes": 8376320,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-co-overflow",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/co_overflow",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 82.3,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffe94369000",
+     "stack_high": "0x7ffe94b66000",
+     "guard_low": "0x7ffe94369000",
+     "usable_bytes": 8376320,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-fault",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/fault",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 83.3,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffd8d1ce000",
+     "stack_high": "0x7ffd8d9cc000",
+     "guard_low": "0x7ffd8d1ce000",
+     "usable_bytes": 8380416,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-bigframe-100",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/big 100",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 80.0,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7fff11b8d000",
+     "stack_high": "0x7fff12389000",
+     "guard_low": "0x7fff11b8d000",
+     "usable_bytes": 8372224,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-bigframe-gc",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/big 8",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_GC_STRESS": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 81.9,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffc880b9000",
+     "stack_high": "0x7ffc888b6000",
+     "guard_low": "0x7ffc880b9000",
+     "usable_bytes": 8376320,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "a-main-bigframe-overflow",
+   "group": "candidate-a",
+   "kind": "runtime",
+   "cmd": "/tmp/claude-0/cw6/exp/big 0",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 81.0,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "value": "",
+    "native_limit_stack": false,
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "runtime": {
+     "kind": "runtime",
+     "mode": "Main",
+     "pthread_main": 1,
+     "stack_low": "0x7ffc69250000",
+     "stack_high": "0x7ffc69a4d000",
+     "guard_low": "0x7ffc69250000",
+     "usable_bytes": 8376320,
+     "guard_bytes": 0
+    },
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-declared",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors declared",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 0,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 3.2,
+   "stdout_tail": "1008\n",
+   "stderr_tail": "",
+   "note": "",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 0,
+    "signal": 0,
+    "stdout": "1008",
+    "stderr": ""
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-runtime",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors runtime",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 1,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 2.6,
+   "stdout_tail": "",
+   "stderr_tail": "+: expected int, got [true] (CORE SEMANTIC TYPE)",
+   "note": "",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 1,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "+: expected int, got [true] (CORE SEMANTIC TYPE)"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-protocol",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors runtime",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_RESULT": "/tmp/claude-0/cw6/result-worker.txt"
+   },
+   "signal_after": null,
+   "status": 0,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 2.9,
+   "stdout_tail": "",
+   "stderr_tail": "",
+   "note": "the driver protocol: the error is the result file's line, the status 0",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 0,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "",
+    "file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-protocol-runs",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors declared",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_RESULT": "/tmp/claude-0/cw6/runs-worker.txt",
+    "BOTLISH_NATIVE_RUNS": "3"
+   },
+   "signal_after": null,
+   "status": 0,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 2.9,
+   "stdout_tail": "",
+   "stderr_tail": "",
+   "note": "",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 0,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "",
+    "file": "times 4332 1188 319\ntiming 0 0 3 2\nvalue {int 1008}\n"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-startup-report-io",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors value",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_STARTUP_REPORT": "/nonexistent/startup-report"
+   },
+   "signal_after": null,
+   "status": 2,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 2.5,
+   "stdout_tail": "",
+   "stderr_tail": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)",
+   "note": "the startup report is written before the guard is installed: the same on every host",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 2,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-overflow-line",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 0",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 1,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 519.6,
+   "stdout_tail": "",
+   "stderr_tail": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}",
+   "note": "",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 1,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-declared",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors declared",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 82.7,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "problem": "status 101; stdout does not match '^1008$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-runtime",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors runtime",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 95.7,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "problem": "status 101; stderr does not match '\\\\+: expected int, got \\\\[true\\\\] \\\\(CORE SEMANTIC TYPE\\\\)'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-protocol",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors runtime",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_RESULT": "/tmp/claude-0/cw6/result-main.txt"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 69.3,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  12: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  13: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  14: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  15: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  16: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  17: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "the driver protocol: the error is the result file's line, the status 0",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "e-archive/src/lib.rs:35:14\n  15: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  16: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  17: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "file": "",
+    "problem": "status 101; file does not match '^error \\\\{CORE SEMANTIC TYPE\\\\} \\\\{\\\\+: expected int, got \\\\[true\\\\]\\\\}$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-protocol-runs",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors declared",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_RESULT": "/tmp/claude-0/cw6/runs-main.txt",
+    "BOTLISH_NATIVE_RUNS": "3"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 75.5,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  12: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  13: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  14: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  15: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  16: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  17: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "e-archive/src/lib.rs:35:14\n  15: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  16: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  17: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "file": "",
+    "problem": "status 101; file does not match '^times \\\\d+ \\\\d+ \\\\d+\\\\ntiming \\\\d+ \\\\d+ 3 \\\\d+\\\\nvalue \\\\{int 1008\\\\}$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-startup-report-io",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/errors value",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_STARTUP_REPORT": "/nonexistent/startup-report"
+   },
+   "signal_after": null,
+   "status": 2,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 2.1,
+   "stdout_tail": "",
+   "stderr_tail": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)",
+   "note": "the startup report is written before the guard is installed: the same on every host",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 2,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-overflow-line",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 0",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 80.4,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "e-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "problem": "status 101; stderr does not match '^error \\\\{NATIVE LIMIT STACK\\\\} \\\\{native stack exhausted: too many nested calls\\\\}$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-rustc-declared",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp-rustc/errors declared",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 84.3,
+   "stdout_tail": "",
+   "stderr_tail": "tack-overflow guard: Custom { kind: Unsupported, error: \"the thread's stack has no confirmed guard\" }\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5\n   1: core::panicking::panic_fmt\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14\n   2: core::result::unwrap_failed\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/result.rs:1867:5\n   3: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   4: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   5: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "esult.rs:1867:5\n   3: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   4: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   5: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "problem": "status 101; stdout does not match '^1008$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-rustc-runtime",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp-rustc/errors runtime",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 80.8,
+   "stdout_tail": "",
+   "stderr_tail": "tack-overflow guard: Custom { kind: Unsupported, error: \"the thread's stack has no confirmed guard\" }\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5\n   1: core::panicking::panic_fmt\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14\n   2: core::result::unwrap_failed\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/result.rs:1867:5\n   3: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   4: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   5: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "esult.rs:1867:5\n   3: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   4: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   5: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "problem": "status 101; stderr does not match '\\\\+: expected int, got \\\\[true\\\\] \\\\(CORE SEMANTIC TYPE\\\\)'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-rustc-protocol",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp-rustc/errors runtime",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_RESULT": "/tmp/claude-0/cw6/result-main-rustc.txt"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 78.2,
+   "stdout_tail": "",
+   "stderr_tail": "rary/core/src/result.rs:1185:23\n   4: botlish_native::runtime::aot::driver_protocol::{closure#0}\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:317:57\n   5: <bool>::then::<botlish_native::runtime::platform::guard::OverflowGuard, botlish_native::runtime::aot::driver_protocol::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/bool.rs:66:24\n   6: botlish_native::runtime::aot::driver_protocol\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:314:46\n   7: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   8: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   9: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "the driver protocol: the error is the result file's line, the status 0",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "e/aot.rs:314:46\n   7: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   8: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   9: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "file": "",
+    "problem": "status 101; file does not match '^error \\\\{CORE SEMANTIC TYPE\\\\} \\\\{\\\\+: expected int, got \\\\[true\\\\]\\\\}$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-rustc-protocol-runs",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp-rustc/errors declared",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_RESULT": "/tmp/claude-0/cw6/runs-main-rustc.txt",
+    "BOTLISH_NATIVE_RUNS": "3"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 94.0,
+   "stdout_tail": "",
+   "stderr_tail": "rary/core/src/result.rs:1185:23\n   4: botlish_native::runtime::aot::driver_protocol::{closure#0}\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:317:57\n   5: <bool>::then::<botlish_native::runtime::platform::guard::OverflowGuard, botlish_native::runtime::aot::driver_protocol::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/bool.rs:66:24\n   6: botlish_native::runtime::aot::driver_protocol\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:314:46\n   7: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   8: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   9: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "e/aot.rs:314:46\n   7: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   8: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   9: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "file": "",
+    "problem": "status 101; file does not match '^times \\\\d+ \\\\d+ \\\\d+\\\\ntiming \\\\d+ \\\\d+ 3 \\\\d+\\\\nvalue \\\\{int 1008\\\\}$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-rustc-startup-report-io",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp-rustc/errors value",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "BOTLISH_NATIVE_STARTUP_REPORT": "/nonexistent/startup-report"
+   },
+   "signal_after": null,
+   "status": 2,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 2.2,
+   "stdout_tail": "",
+   "stderr_tail": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)",
+   "note": "the startup report is written before the guard is installed: the same on every host",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": 2,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-rustc-overflow-line",
+   "group": "semantics",
+   "kind": "process",
+   "cmd": "/tmp/claude-0/cw6/exp-rustc/depth down 0",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 79.1,
+   "stdout_tail": "",
+   "stderr_tail": "tack-overflow guard: Custom { kind: Unsupported, error: \"the thread's stack has no confirmed guard\" }\nstack backtrace:\n   0: __rustc::rust_begin_unwind\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:689:5\n   1: core::panicking::panic_fmt\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/panicking.rs:80:14\n   2: core::result::unwrap_failed\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/result.rs:1867:5\n   3: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   4: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   5: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "stdout": "",
+    "stderr": "esult.rs:1867:5\n   3: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>::{closure#4}\n   4: botlish_native::runtime::aot::run::<botlish_program::main::{closure#0}>\n   5: botlish_program::main\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+    "problem": "status 101; stderr does not match '^error \\\\{NATIVE LIMIT STACK\\\\} \\\\{native stack exhausted: too many nested calls\\\\}$'"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-sigterm-c-call",
+   "group": "semantics",
+   "kind": "signal",
+   "cmd": "/tmp/claude-0/cw6/exp/sleep",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": [
+    1.0,
+    15
+   ],
+   "status": -15,
+   "signal": 15,
+   "timed_out": false,
+   "wall_ms": 1002.2,
+   "stdout_tail": "",
+   "stderr_tail": "",
+   "note": "a program in a 5 s C call, signalled after 1 s",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": -15,
+    "signal": 15,
+    "started": true,
+    "wall_ms": 1002
+   },
+   "expected": true
+  },
+  {
+   "name": "s-worker-sigint-c-call",
+   "group": "semantics",
+   "kind": "signal",
+   "cmd": "/tmp/claude-0/cw6/exp/sleep",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": [
+    1.0,
+    2
+   ],
+   "status": -2,
+   "signal": 2,
+   "timed_out": false,
+   "wall_ms": 1002.3,
+   "stdout_tail": "",
+   "stderr_tail": "",
+   "note": "a program in a 5 s C call, signalled after 1 s",
+   "class": "EXECUTED-THREAD",
+   "facts": {
+    "status": -2,
+    "signal": 2,
+    "started": true,
+    "wall_ms": 1002
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-sigterm-c-call",
+   "group": "semantics",
+   "kind": "signal",
+   "cmd": "/tmp/claude-0/cw6/exp/sleep",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": [
+    1.0,
+    15
+   ],
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 81.4,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "a program in a 5 s C call, signalled after 1 s",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "started": false,
+    "wall_ms": 81,
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
+   "name": "s-main-sigint-c-call",
+   "group": "semantics",
+   "kind": "signal",
+   "cmd": "/tmp/claude-0/cw6/exp/sleep",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1"
+   },
+   "signal_after": [
+    1.0,
+    2
+   ],
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 79.8,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "a program in a 5 s C call, signalled after 1 s",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "signal": 0,
+    "started": false,
+    "wall_ms": 80,
+    "problem": "as the control intends"
+   },
+   "expected": true
+  },
+  {
    "name": "b-dispatch-cocoa",
    "group": "candidate-b",
    "kind": "dispatch",
-   "cmd": "/tmp/claude-0/cw3/exp/dispatch",
+   "cmd": "/tmp/claude-0/cw6/exp/dispatch",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "dispatch",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 33.3,
+   "wall_ms": 34.2,
    "stdout_tail": "[1, true, [true, true, 30, true, [5, 1], true]]\n",
    "stderr_tail": "",
    "note": "",
@@ -2786,7 +3548,7 @@
     "requests_on_main": 9,
     "callers_on_main": 0,
     "driver": "dummy",
-    "roundtrip_ns": 25716.104
+    "roundtrip_ns": 25986.314
    },
    "expected": true
   },
@@ -2794,16 +3556,17 @@
    "name": "b-dispatch-headless",
    "group": "candidate-b",
    "kind": "dispatch",
-   "cmd": "/tmp/claude-0/cw3/exp/dispatch",
+   "cmd": "/tmp/claude-0/cw6/exp/dispatch",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "dispatch",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 35.3,
+   "wall_ms": 35.7,
    "stdout_tail": "[1, true, [true, true, 30, true, [5, 1], true]]\n",
    "stderr_tail": "",
    "note": "",
@@ -2829,7 +3592,7 @@
     "requests_on_main": 9,
     "callers_on_main": 0,
     "driver": "dummy",
-    "roundtrip_ns": 27024.631
+    "roundtrip_ns": 28044.101
    },
    "expected": true
   },
@@ -2837,14 +3600,15 @@
    "name": "b-dispatch-refused",
    "group": "candidate-b",
    "kind": "dispatch",
-   "cmd": "/tmp/claude-0/cw3/exp/dispatch",
+   "cmd": "/tmp/claude-0/cw6/exp/dispatch",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.7,
+   "wall_ms": 2.5,
    "stdout_tail": "[0, false, [false]]\n",
    "stderr_tail": "",
    "note": "no main thread serves requests: the production model",
@@ -2870,16 +3634,17 @@
    "name": "b-runonmain-deadlock",
    "group": "candidate-b",
    "kind": "deadlock",
-   "cmd": "/tmp/claude-0/cw3/exp/runonmain",
+   "cmd": "/tmp/claude-0/cw6/exp/runonmain",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "dispatch",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 124,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 5003.5,
+   "wall_ms": 5003.7,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "SDL_RunOnMainThread(wait) while the main thread serves the dispatcher, not SDL's queue",
@@ -2899,7 +3664,7 @@
       "sdl_main": true,
       "error": "",
       "driver": "dummy",
-      "ns": 344876,
+      "ns": 384991,
       "threads": 3
      }
     ],
@@ -2911,10 +3676,11 @@
    "name": "b-c-join-runonmain",
    "group": "candidate-b",
    "kind": "deadlock",
-   "cmd": "/tmp/claude-0/cw3/csdl join-runonmain",
+   "cmd": "/tmp/claude-0/cw6/csdl join-runonmain",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 124,
    "signal": 0,
    "timed_out": false,
@@ -2936,14 +3702,15 @@
    "name": "b-c-pump-runonmain",
    "group": "candidate-b",
    "kind": "runonmain",
-   "cmd": "/tmp/claude-0/cw3/csdl pump-runonmain",
+   "cmd": "/tmp/claude-0/cw6/csdl pump-runonmain",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 498.3,
+   "wall_ms": 497.4,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -2955,7 +3722,7 @@
     "calls": 32,
     "on_main": 32,
     "presented": 30,
-    "empty_roundtrip_ns": 12317,
+    "empty_roundtrip_ns": 11232,
     "driver": "dummy"
    },
    "expected": true
@@ -2964,14 +3731,15 @@
    "name": "c-callbacks-cocoa",
    "group": "candidate-c",
    "kind": "callbacks",
-   "cmd": "/tmp/claude-0/cw3/csdl_callbacks",
+   "cmd": "/tmp/claude-0/cw6/csdl_callbacks",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 4.1,
+   "wall_ms": 4.3,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -2995,10 +3763,11 @@
    "name": "c-callbacks-headless",
    "group": "candidate-c",
    "kind": "callbacks",
-   "cmd": "/tmp/claude-0/cw3/csdl_callbacks",
+   "cmd": "/tmp/claude-0/cw6/csdl_callbacks",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
@@ -3026,20 +3795,21 @@
    "name": "c-library-linux",
    "group": "candidate-c",
    "kind": "runtime",
-   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-library mtplib -out /tmp/claude-0/cw3/lib/out /tmp/claude-0/cw3/lib/mtplib.bot",
+   "cmd": "tclsh9.0 /tmp/claude-0/exp/main.tcl -warnings off -emit-native-library mtplib -out /tmp/claude-0/cw6/lib/out /tmp/claude-0/cw6/lib/mtplib.bot",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 635.9,
-   "stdout_tail": "static: /tmp/claude-0/cw3/lib/out/libmtplib.a\nshared: /tmp/claude-0/cw3/lib/out/libmtplib.so\nheader: /tmp/claude-0/cw3/lib/out/mtplib.h\nmanifest: /tmp/claude-0/cw3/lib/out/mtplib.manifest.json\n",
+   "wall_ms": 688.5,
+   "stdout_tail": "static: /tmp/claude-0/cw6/lib/out/libmtplib.a\nshared: /tmp/claude-0/cw6/lib/out/libmtplib.so\nheader: /tmp/claude-0/cw6/lib/out/mtplib.h\nmanifest: /tmp/claude-0/cw6/lib/out/mtplib.manifest.json\n",
    "stderr_tail": "",
    "note": "native libraries are Linux glibc's (codegen::library::SUPPORTED)",
    "class": "EXECUTED-THREAD",
    "facts": {
     "status": 0,
     "signal": 0,
-    "value": "manifest: /tmp/claude-0/cw3/lib/out/mtplib.manifest.json",
+    "value": "manifest: /tmp/claude-0/cw6/lib/out/mtplib.manifest.json",
     "native_limit_stack": false,
     "stderr": ""
    },
@@ -3049,14 +3819,15 @@
    "name": "pc-nopump",
    "group": "controls",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl nopump",
+   "cmd": "/tmp/claude-0/cw6/csdl nopump",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 490.3,
+   "wall_ms": 492.0,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "the pushed quit is never polled: must not be reported processed",
@@ -3091,14 +3862,15 @@
    "name": "pc-nodestroy",
    "group": "controls",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl nodestroy",
+   "cmd": "/tmp/claude-0/cw6/csdl nodestroy",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 489.9,
+   "wall_ms": 491.6,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "no destroy and no SDL_Quit: the cleanup check must notice",
@@ -3133,14 +3905,15 @@
    "name": "pc-baddriver",
    "group": "controls",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl main",
+   "cmd": "/tmp/claude-0/cw6/csdl main",
    "env": {
     "SDL_VIDEODRIVER": "nonexistent"
    },
+   "signal_after": null,
    "status": 1,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.5,
+   "wall_ms": 2.7,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "SDL_Init must fail: never a window",
@@ -3180,14 +3953,15 @@
    "name": "pc-dummy-not-cocoa",
    "group": "controls",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl main",
+   "cmd": "/tmp/claude-0/cw6/csdl main",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 492.1,
+   "wall_ms": 492.0,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "a dummy-driver run must never be classified EXECUTED-COCOA",
@@ -3219,16 +3993,17 @@
    "name": "pc-main-noguard-overflow",
    "group": "controls",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/depth down 0",
+   "cmd": "/tmp/claude-0/cw6/exp/depth down 0",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_EXPERIMENT_NO_GUARD": "1"
    },
+   "signal_after": null,
    "status": -11,
    "signal": 11,
    "timed_out": false,
-   "wall_ms": 16.6,
+   "wall_ms": 18.9,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "no guard on the main thread: the overflow is the raw fault, not the line",
@@ -3243,10 +4018,10 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffea6120000",
-     "stack_high": "0x7ffea691e000",
-     "guard_low": "0x7ffea6120000",
-     "usable_bytes": 8380416,
+     "stack_low": "0x7ffd60914000",
+     "stack_high": "0x7ffd61110000",
+     "guard_low": "0x7ffd60914000",
+     "usable_bytes": 8372224,
      "guard_bytes": 0
     },
     "problem": "killed by signal 11 (SIGSEGV)"
@@ -3257,16 +4032,17 @@
    "name": "pc-main-noguard-co-overflow",
    "group": "controls",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/co_overflow",
+   "cmd": "/tmp/claude-0/cw6/exp/co_overflow",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_EXPERIMENT_NO_GUARD": "1"
    },
+   "signal_after": null,
    "status": -11,
    "signal": 11,
    "timed_out": false,
-   "wall_ms": 17.5,
+   "wall_ms": 14.6,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -3281,9 +4057,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7fff91080000",
-     "stack_high": "0x7fff9187c000",
-     "guard_low": "0x7fff91080000",
+     "stack_low": "0x7ffd49ef4000",
+     "stack_high": "0x7ffd4a6f0000",
+     "guard_low": "0x7ffd49ef4000",
      "usable_bytes": 8372224,
      "guard_bytes": 0
     },
@@ -3350,12 +4126,13 @@
    "name": "t-id-prod-worker",
    "group": "timing",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/prod/identity",
+   "cmd": "/tmp/claude-0/cw6/prod/identity",
    "env": {},
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 2.7,
+   "wall_ms": 2.6,
    "stdout_tail": "[0, -1, 2]\n",
    "stderr_tail": "",
    "note": "",
@@ -3378,10 +4155,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 2.664,
-     "min": 2.208,
-     "max": 2.836,
-     "stdev": 0.227
+     "median": 2.692,
+     "min": 2.57,
+     "max": 3.224,
+     "stdev": 0.241
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3393,22 +4170,24 @@
      "min": 2,
      "max": 2,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-id-exp-main",
    "group": "timing",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/exp/identity",
+   "cmd": "/tmp/claude-0/cw6/exp/identity",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 98.9,
+   "wall_ms": 75.6,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -3426,10 +4205,10 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffd72bf5000",
-     "stack_high": "0x7ffd733f2000",
-     "guard_low": "0x7ffd72bf5000",
-     "usable_bytes": 8376320,
+     "stack_low": "0x7ffd7aa0e000",
+     "stack_high": "0x7ffd7b20a000",
+     "guard_low": "0x7ffd7aa0e000",
+     "usable_bytes": 8372224,
      "guard_bytes": 0
     },
     "problem": "no identity report"
@@ -3438,10 +4217,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 80.157,
-     "min": 79.08,
-     "max": 98.939,
-     "stdev": 7.517
+     "median": 84.648,
+     "min": 75.599,
+     "max": 94.502,
+     "stdev": 7.586
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3453,22 +4232,24 @@
      "min": 0,
      "max": 0,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-id-exp-dispatch",
    "group": "timing",
    "kind": "identity",
-   "cmd": "/tmp/claude-0/cw3/exp/identity",
+   "cmd": "/tmp/claude-0/cw6/exp/identity",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "dispatch",
     "BOTLISH_EXPERIMENT_REPORT": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 4.8,
+   "wall_ms": 5.4,
    "stdout_tail": "[0, -1, 2]\n",
    "stderr_tail": "",
    "note": "",
@@ -3490,9 +4271,9 @@
      "kind": "runtime",
      "mode": "Dispatch",
      "pthread_main": 0,
-     "stack_low": "0x7f7c94800000",
-     "stack_high": "0x7f7cd4800000",
-     "guard_low": "0x7f7c947ff000",
+     "stack_low": "0x7fc06da00000",
+     "stack_high": "0x7fc0ada00000",
+     "guard_low": "0x7fc06d9ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -3501,10 +4282,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 4.338,
-     "min": 4.088,
-     "max": 4.82,
-     "stdev": 0.286
+     "median": 4.759,
+     "min": 4.179,
+     "max": 5.415,
+     "stdev": 0.407
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3516,23 +4297,25 @@
      "min": 2,
      "max": 2,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-a-main-sdl",
    "group": "timing",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/exp/sdl",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 86.6,
+   "wall_ms": 76.8,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -3558,10 +4341,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 75.323,
-     "min": 72.245,
-     "max": 86.643,
-     "stdev": 5.186
+     "median": 84.324,
+     "min": 75.134,
+     "max": 87.79,
+     "stdev": 4.886
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3573,23 +4356,25 @@
      "min": 0,
      "max": 0,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-a-main-sdl-headless",
    "group": "timing",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/exp/sdl",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 76.7,
+   "wall_ms": 89.6,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -3615,10 +4400,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 76.715,
-     "min": 72.006,
-     "max": 77.226,
-     "stdev": 2.16
+     "median": 89.65,
+     "min": 85.372,
+     "max": 98.272,
+     "stdev": 4.607
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3630,22 +4415,24 @@
      "min": 0,
      "max": 0,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-a-worker-sdl-headless",
    "group": "timing",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/exp/sdl",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 540.6,
+   "wall_ms": 541.5,
    "stdout_tail": "[true, true, true, [true, [true, 30, 3, true, [5, 1]]]]\n",
    "stderr_tail": "",
    "note": "",
@@ -3690,6 +4477,7 @@
     "events": 5,
     "value_window": true,
     "value_renderer": true,
+    "pump_us": 0.09,
     "coroutine_on_own_stack": true,
     "coroutine_pthread_main": 0
    },
@@ -3697,32 +4485,32 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 540.555,
-     "min": 539.776,
-     "max": 544.768,
-     "stdev": 2.05
+     "median": 541.488,
+     "min": 539.793,
+     "max": 547.611,
+     "stdev": 2.793
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": {
      "n": 5,
-     "median": 0.246,
-     "min": 0.197,
-     "max": 0.285,
-     "stdev": 0.031
+     "median": 0.264,
+     "min": 0.191,
+     "max": 0.429,
+     "stdev": 0.086
     },
     "frame_ms": {
      "n": 5,
-     "median": 16.255,
-     "min": 16.222,
-     "max": 16.382,
-     "stdev": 0.058
+     "median": 16.259,
+     "min": 16.211,
+     "max": 16.322,
+     "stdev": 0.037
     },
     "shutdown_ms": {
      "n": 5,
-     "median": 0.14,
-     "min": 0.127,
-     "max": 0.196,
-     "stdev": 0.031
+     "median": 0.142,
+     "min": 0.114,
+     "max": 0.186,
+     "stdev": 0.026
     },
     "threads_max": {
      "n": 5,
@@ -3730,6 +4518,183 @@
      "min": 2,
      "max": 2,
      "stdev": 0.0
+    },
+    "pump_us": {
+     "n": 5,
+     "median": 0.105,
+     "min": 0.09,
+     "max": 0.13,
+     "stdev": 0.014
+    }
+   }
+  },
+  {
+   "name": "t-a-main-sdl-headless-gc",
+   "group": "timing",
+   "kind": "graphical",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
+   "env": {
+    "BOTLISH_EXPERIMENT_THREAD": "main",
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "SDL_VIDEODRIVER": "dummy",
+    "BOTLISH_NATIVE_GC_STRESS": "1"
+   },
+   "signal_after": null,
+   "status": 101,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 78.8,
+   "stdout_tail": "",
+   "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
+   "note": "",
+   "class": "FAILED-CORRECTNESS",
+   "facts": {
+    "status": 101,
+    "driver": null,
+    "init": null,
+    "error": null,
+    "sdl_is_main_before_init": null,
+    "sdl_is_main_after_init": null,
+    "pthread_main_seen": [],
+    "window": false,
+    "cocoa_window": null,
+    "renderer": null,
+    "destroyed": false,
+    "quit": false,
+    "threads_max": 0,
+    "value": "",
+    "problem": "the program ended before SDL_Init (status 101)"
+   },
+   "expected": true,
+   "timing": {
+    "wall_ms": {
+     "n": 5,
+     "median": 80.242,
+     "min": 78.821,
+     "max": 95.216,
+     "stdev": 7.099
+    },
+    "entry_since_exec_ms": null,
+    "sdl_init_ms": null,
+    "frame_ms": null,
+    "shutdown_ms": null,
+    "threads_max": {
+     "n": 5,
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "stdev": 0.0
+    },
+    "pump_us": null
+   }
+  },
+  {
+   "name": "t-a-worker-sdl-headless-gc",
+   "group": "timing",
+   "kind": "graphical",
+   "cmd": "/tmp/claude-0/cw6/exp/sdl",
+   "env": {
+    "BOTLISH_EXPERIMENT_REPORT": "1",
+    "SDL_VIDEODRIVER": "dummy",
+    "BOTLISH_NATIVE_GC_STRESS": "1"
+   },
+   "signal_after": null,
+   "status": 0,
+   "signal": 0,
+   "timed_out": false,
+   "wall_ms": 540.9,
+   "stdout_tail": "[true, true, true, [true, [true, 30, 3, true, [5, 1]]]]\n",
+   "stderr_tail": "",
+   "note": "",
+   "class": "EXECUTED-HEADLESS",
+   "facts": {
+    "status": 0,
+    "driver": "dummy",
+    "init": true,
+    "error": "",
+    "sdl_is_main_before_init": true,
+    "sdl_is_main_after_init": true,
+    "pthread_main_seen": [
+     0
+    ],
+    "window": true,
+    "cocoa_window": false,
+    "renderer": "software",
+    "destroyed": true,
+    "quit": true,
+    "threads_max": 2,
+    "value": [
+     true,
+     true,
+     true,
+     [
+      true,
+      [
+       true,
+       30,
+       3,
+       true,
+       [
+        5,
+        1
+       ]
+      ]
+     ]
+    ],
+    "presented": 30,
+    "presented_in_coroutine": 3,
+    "quit_seen": true,
+    "events": 5,
+    "value_window": true,
+    "value_renderer": true,
+    "pump_us": 0.12,
+    "coroutine_on_own_stack": true,
+    "coroutine_pthread_main": 0
+   },
+   "expected": true,
+   "timing": {
+    "wall_ms": {
+     "n": 5,
+     "median": 540.871,
+     "min": 539.803,
+     "max": 541.754,
+     "stdev": 0.711
+    },
+    "entry_since_exec_ms": null,
+    "sdl_init_ms": {
+     "n": 5,
+     "median": 0.229,
+     "min": 0.178,
+     "max": 0.25,
+     "stdev": 0.028
+    },
+    "frame_ms": {
+     "n": 5,
+     "median": 16.243,
+     "min": 16.236,
+     "max": 16.287,
+     "stdev": 0.019
+    },
+    "shutdown_ms": {
+     "n": 5,
+     "median": 0.167,
+     "min": 0.142,
+     "max": 0.2,
+     "stdev": 0.019
+    },
+    "threads_max": {
+     "n": 5,
+     "median": 2,
+     "min": 2,
+     "max": 2,
+     "stdev": 0.0
+    },
+    "pump_us": {
+     "n": 5,
+     "median": 0.118,
+     "min": 0.114,
+     "max": 0.146,
+     "stdev": 0.014
     }
    }
   },
@@ -3737,16 +4702,17 @@
    "name": "t-b-dispatch",
    "group": "timing",
    "kind": "dispatch",
-   "cmd": "/tmp/claude-0/cw3/exp/dispatch",
+   "cmd": "/tmp/claude-0/cw6/exp/dispatch",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "dispatch",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 43.4,
+   "wall_ms": 39.5,
    "stdout_tail": "[1, true, [true, true, 30, true, [5, 1], true]]\n",
    "stderr_tail": "",
    "note": "",
@@ -3772,16 +4738,16 @@
     "requests_on_main": 9,
     "callers_on_main": 0,
     "driver": "dummy",
-    "roundtrip_ns": 33583.541
+    "roundtrip_ns": 28921.39
    },
    "expected": true,
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 41.645,
-     "min": 35.117,
-     "max": 43.405,
-     "stdev": 3.374
+     "median": 39.511,
+     "min": 36.776,
+     "max": 41.646,
+     "stdev": 1.914
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3793,23 +4759,25 @@
      "min": 2,
      "max": 2,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-a-main-kept-gc",
    "group": "timing",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/kept",
+   "cmd": "/tmp/claude-0/cw6/exp/kept",
    "env": {
     "BOTLISH_EXPERIMENT_THREAD": "main",
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_NATIVE_GC_STRESS": "1"
    },
+   "signal_after": null,
    "status": 101,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 79.3,
+   "wall_ms": 76.2,
    "stdout_tail": "",
    "stderr_tail": "time::aot::linked_main::{closure#0}>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panicking.rs:544:19\n  11: std::panic::catch_unwind::<botlish_native::runtime::aot::linked_main::{closure#0}, i32>\n             at /rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/panic.rs:359:14\n  12: botlish_native::runtime::aot::linked_main\n             at /tmp/claude-0/exp/native/src/runtime/aot.rs:195:18\n  13: main\n             at /tmp/claude-0/exp/native/runtime-archive/src/lib.rs:35:14\n  14: __libc_start_call_main\n             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16\n  15: __libc_start_main_impl\n             at ./csu/../csu/libc-start.c:360:3\n  16: _start\nnote: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.",
    "note": "",
@@ -3824,9 +4792,9 @@
      "kind": "runtime",
      "mode": "Main",
      "pthread_main": 1,
-     "stack_low": "0x7ffcc571d000",
-     "stack_high": "0x7ffcc5f1a000",
-     "guard_low": "0x7ffcc571d000",
+     "stack_low": "0x7fff0de7b000",
+     "stack_high": "0x7fff0e678000",
+     "guard_low": "0x7fff0de7b000",
      "usable_bytes": 8376320,
      "guard_bytes": 0
     },
@@ -3836,10 +4804,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 79.306,
-     "min": 76.781,
-     "max": 93.916,
-     "stdev": 6.347
+     "median": 79.437,
+     "min": 72.783,
+     "max": 85.739,
+     "stdev": 4.412
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3851,22 +4819,24 @@
      "min": 0,
      "max": 0,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-a-worker-kept-gc",
    "group": "timing",
    "kind": "runtime",
-   "cmd": "/tmp/claude-0/cw3/exp/kept",
+   "cmd": "/tmp/claude-0/cw6/exp/kept",
    "env": {
     "BOTLISH_EXPERIMENT_REPORT": "1",
     "BOTLISH_NATIVE_GC_STRESS": "1"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 3.2,
+   "wall_ms": 2.8,
    "stdout_tail": "[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]\n",
    "stderr_tail": "",
    "note": "",
@@ -3904,9 +4874,9 @@
      "kind": "runtime",
      "mode": "Worker",
      "pthread_main": 0,
-     "stack_low": "0x7f1ff4c00000",
-     "stack_high": "0x7f2034c00000",
-     "guard_low": "0x7f1ff4bff000",
+     "stack_low": "0x7f5a9b800000",
+     "stack_high": "0x7f5adb800000",
+     "guard_low": "0x7f5a9b7ff000",
      "usable_bytes": 1073741824,
      "guard_bytes": 4096
     }
@@ -3915,10 +4885,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 2.732,
-     "min": 2.429,
-     "max": 3.208,
-     "stdev": 0.262
+     "median": 2.746,
+     "min": 2.585,
+     "max": 2.848,
+     "stdev": 0.096
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -3930,21 +4900,23 @@
      "min": 0,
      "max": 0,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-c-main",
    "group": "timing",
    "kind": "graphical",
-   "cmd": "/tmp/claude-0/cw3/csdl main",
+   "cmd": "/tmp/claude-0/cw6/csdl main",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 490.5,
+   "wall_ms": 491.5,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -3974,32 +4946,32 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 490.487,
-     "min": 489.79,
-     "max": 493.886,
-     "stdev": 1.504
+     "median": 490.51,
+     "min": 489.694,
+     "max": 491.54,
+     "stdev": 0.634
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": {
      "n": 5,
-     "median": 0.195,
-     "min": 0.177,
-     "max": 0.275,
-     "stdev": 0.038
+     "median": 0.208,
+     "min": 0.2,
+     "max": 0.257,
+     "stdev": 0.026
     },
     "frame_ms": {
      "n": 5,
-     "median": 16.244,
-     "min": 16.225,
-     "max": 16.37,
-     "stdev": 0.053
+     "median": 16.236,
+     "min": 16.214,
+     "max": 16.27,
+     "stdev": 0.019
     },
     "shutdown_ms": {
      "n": 5,
-     "median": 0.188,
-     "min": 0.152,
-     "max": 0.278,
-     "stdev": 0.044
+     "median": 0.224,
+     "min": 0.156,
+     "max": 0.294,
+     "stdev": 0.046
     },
     "threads_max": {
      "n": 5,
@@ -4007,21 +4979,23 @@
      "min": 1,
      "max": 1,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   },
   {
    "name": "t-c-callbacks",
    "group": "timing",
    "kind": "callbacks",
-   "cmd": "/tmp/claude-0/cw3/csdl_callbacks",
+   "cmd": "/tmp/claude-0/cw6/csdl_callbacks",
    "env": {
     "SDL_VIDEODRIVER": "dummy"
    },
+   "signal_after": null,
    "status": 0,
    "signal": 0,
    "timed_out": false,
-   "wall_ms": 4.6,
+   "wall_ms": 4.2,
    "stdout_tail": "",
    "stderr_tail": "",
    "note": "",
@@ -4043,10 +5017,10 @@
    "timing": {
     "wall_ms": {
      "n": 5,
-     "median": 3.706,
-     "min": 3.437,
-     "max": 4.552,
-     "stdev": 0.385
+     "median": 4.215,
+     "min": 3.97,
+     "max": 4.426,
+     "stdev": 0.163
     },
     "entry_since_exec_ms": null,
     "sdl_init_ms": null,
@@ -4058,7 +5032,8 @@
      "min": 1,
      "max": 1,
      "stdev": 0.0
-    }
+    },
+    "pump_us": null
    }
   }
  ]
