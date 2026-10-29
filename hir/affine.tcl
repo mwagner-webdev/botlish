@@ -1756,7 +1756,7 @@ proc hir::affine::Acquisition {hir items} {
     foreach item $items {
         if {[string match b* $item]} {
             set by [dict get $hir bindings $item declaredBy]
-            set key [expr {$by eq "" ? 0 : [string range $by 1 end]}]
+            set key [if {$by eq ""} {string cat 0} else {string range $by 1 end}]
         } else {
             set key [string range $item 1 end]
         }
