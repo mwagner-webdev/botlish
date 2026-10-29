@@ -1956,6 +1956,27 @@ test trait-implementation-context-dangling {the plan's invariant (hir::traits::D
         }]]
 } -result {{} {{TRAIT-INTERNAL 1}} {{TRAIT-INTERNAL 1}}}
 
+test trait-implementation-context-economics {the trait plan is asked for the edges of a check only when an operation's implementation may need a context (hir::coroutines::ImplementationsRequire): a program whose implementations need none, one whose operations are of a trait whose implementations needing one are never called through it (FilePath, its implementations needing LinuxFS loaded with std::linux::path), and one whose only such function declares a context parameter (no implementation) are checked as before -- one check per build (std::linux::path's own build besides), no effect plan, no edge -- and a program whose specialization needs a context through its implementation checks its source build twice (the second confirms the edges)} -body {
+    set results {}
+    foreach {files text} [list \
+            {} "trait Thing:\n    fn show(t: Thing) -> int\n\nstruct A:\n    v: int\n\nfn show(t: A) -> int:\n    t.v\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n\ntwice(A {v: 1})\n" \
+            {} "import std::linux::path\nimport std::io::fs\n\ntrait Thing:\n    fn show(t: Thing) -> int\n\nstruct A:\n    v: int\n\nfn show(t: A) -> int:\n    t.v\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n\ntwice(A {v: 1})\n" \
+            {ec/b.bot "type Small = Int in 0..10\n\ncontext struct Counter:\n    value: Small\n\nstruct B:\n    v: int\n\nfn show(t: B, context c: Counter) -> int:\n    c.value\n"} "import std::ec::b\n\ntrait Thing:\n    fn show(t: Thing) -> int\n\nstruct A:\n    v: int\n\nfn show(t: A) -> int:\n    t.v\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n\ntwice(A {v: 1})\n" \
+            $::ticLib [ticProgram lp {A(1)}]] {
+        withPrivateLibrary {
+            writeModules $files
+            set before [hir::BuildStats]
+            set hir [surface::compile $text -warnings off -target [linuxTarget]]
+            set after [hir::BuildStats]
+        }
+        lappend results [list [expr {[dict get $after builds] - [dict get $before builds]}] \
+            [expr {[dict get $after checks] - [dict get $before checks]}] \
+            [expr {[dict get $after effectPlans] - [dict get $before effectPlans]}] \
+            [expr {[dict getdef [dict get $hir traitSource] implementations {}] eq {}}]]
+    }
+    set results
+} -result {{2 2 0 1} {3 3 0 1} {2 2 0 1} {2 3 2 0}}
+
 test trait-implementation-context-agreement {the checked program's requirement of each specialization is what its clone requires in the monomorphized program: the same selected call graph decides both what the program does and what it needs -- the context traits of build 1's specialized requirement are exactly the clone's selection, and the contexts the clone requires are the selected providers'} -body {
     set hir [moduleHir $::ticLib [ticProgram {lp cr} {[A(1), B(2), C(3), D(2)]}]]
     set source [dict get $hir traitSource]

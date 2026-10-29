@@ -834,7 +834,7 @@ proc hir::coroutines::Implementations {hir given} {
     # requirement is the selecting call's obligation instead
     # (hir::contexts::Obligations).
     set required [dict create]
-    if {[ImplementationsRequire $hir]} {
+    if {[ImplementationsRequire $hir $operations]} {
         set required [dict get [hir::contexts::Requirements $hir $walkResult $union] required]
     }
     # Keep the edges into yield-capable nodes, and an operation's edges where
@@ -992,7 +992,7 @@ proc hir::coroutines::MayBind {hir operations binds given} {
     if {[dict getdef $given graph {}] ne {}} {
         return 1
     }
-    if {[ImplementationsRequire $hir]} {
+    if {[ImplementationsRequire $hir $operations]} {
         return 1
     }
     if {![dict exists $hir coroutines blocks]} {
@@ -1031,21 +1031,33 @@ proc hir::coroutines::MayBind {hir operations binds given} {
 }
 
 # 1 if a function of the implementation index (hir::traits::ImplInfo) under
-# the name of a declared ordinary trait's requirement has a context
-# requirement in checked HIR: only then can the trait plan give HIR an edge
-# a context requirement reaches a call through (TRAIT-IMPLEMENTATION-
-# CONTEXT-REQUIREMENTS-MILESTONE-1.md). Every such requirement starts at a
-# context parameter, and after the last operation on the way it is reached
-# through ordinary calls and calls of functions as written alone, which the
-# check saw with no trait-operation edge: so the operation's implementation
-# has a requirement in it. (A context trait's implementations are left out:
-# the selecting call's obligations cover them, hir::contexts::Obligations.)
-proc hir::coroutines::ImplementationsRequire {hir} {
-    foreach id [hir::traits::declaredIds] {
-        if {[hir::traits::isContext $id]} continue
+# the name of a requirement of an ordinary trait one of OPERATIONS (the trait
+# operations of checked HIR) performs has a context requirement in HIR: only
+# then can the trait plan give HIR an edge a context requirement reaches a
+# call through (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md).
+# Every such requirement starts at a context parameter, and after the last
+# operation on the way it is reached through ordinary calls and calls of
+# functions as written alone, which the check saw with no trait-operation
+# edge: so that operation's implementation has a requirement in it. (A
+# function that declares a context parameter is no implementation -- a
+# context-dependent implementation is TRAIT-NOT-SATISFIED -- and a context
+# trait's implementations are left out: the selecting call's obligations
+# cover them, hir::contexts::Obligations.) Like MayBind's, the index is read
+# only to rule the plan out.
+proc hir::coroutines::ImplementationsRequire {hir operations} {
+    set traits [dict create]
+    foreach e $operations {
+        set id [dict get $hir exprs $e traitCall trait]
+        if {![dict exists $hir exprs $e traitCall context] && ![hir::traits::isContext $id]} {
+            dict set traits $id 1
+        }
+    }
+    foreach id [dict keys $traits] {
+        if {![hir::traits::declared $id]} continue
         foreach name [hir::traits::requirementNames $id] {
             foreach info [hir::traits::ImplInfos $name] {
-                if {[dict get $info kind] eq "block" && [hir::contexts::required $hir [dict get $info block]] ne {}} {
+                if {[dict get $info kind] eq "block" && [dict get $info contexts] eq {}
+                        && [hir::contexts::required $hir [dict get $info block]] ne {}} {
                     return 1
                 }
             }

@@ -205,9 +205,9 @@ set ::fsSave {fn save(dir: std::io::fs::FilePath) errors std::io::path::NotAPath
     dir.concat("save.dat").write_file(std::abi::bytes::from_list([]))
 }
 
-test fs-missing-context-linux {portable code given a LinuxPath needs std::linux::fs::LinuxFS: none installed is MISSING-CONTEXT at compile time, found in the monomorphized program through the witness's own operation} -body {
+test fs-missing-context-linux {portable code given a LinuxPath needs std::linux::fs::LinuxFS: none installed is MISSING-CONTEXT at compile time, found in the checked program through the witness's own operation, the implementation its specialization binds (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md: in source terms, never "in the monomorphized program")} -body {
     set r [fsRejection "[fsImports linux]$::fsSave\nfn main() errors std::io::path::NotAPath, std::io::fs::FileError:\n    p = \"d\"\n    std::linux::path::validate(p)\n    save(p)\nmain():\n    on std::io::path::NotAPath:\n        unit\n    on std::io::fs::FileError:\n        unit\n" linux-x86_64]
-    list [lindex $r 0] [string match "*std::linux::fs::LinuxFS is required by this call but is not installed here*" [lindex $r 1]]
+    list [lindex $r 0] [string match "std::linux::fs::LinuxFS is required by this call but is not installed here*" [lindex $r 1]]
 } -result {MISSING-CONTEXT 1}
 
 test fs-missing-context-windows {the same program with a WindowsPath needs std::windows::fs::WindowsFS} -body {

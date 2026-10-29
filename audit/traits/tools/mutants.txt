@@ -680,8 +680,18 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
 @@ context-plan-gate-closed the trait plan is never asked for the edges of an operation whose implementation needs a context: the gate (MayBind) reads only yields
 ## hir/coroutines.tcl
 <<<<
-    if {[ImplementationsRequire $hir]} {
+    if {[ImplementationsRequire $hir $operations]} {
         return 1
     }
 ====
+>>>>
+
+@@ context-plan-gate-every-trait the gate asks the plan whenever any declared trait has an implementation that needs a context, also when the program performs no operation of that trait
+## hir/coroutines.tcl
+<<<<
+    foreach id [dict keys $traits] {
+        if {![hir::traits::declared $id]} continue
+====
+    foreach id [hir::traits::declaredIds] {
+        if {[hir::traits::isContext $id]} continue
 >>>>
