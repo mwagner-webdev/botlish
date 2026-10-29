@@ -388,9 +388,13 @@ fn process_main_thread() -> Option<bool> {
     #[cfg(target_vendor = "apple")]
     // SAFETY: no preconditions.
     return Some(unsafe { libc::pthread_main_np() } == 1);
+    // Both ids by the raw system call, as the guard reads the thread's
+    // (platform/linux.rs): libc's getpid would be one more import of every
+    // executable, which a program that makes its own system calls must not
+    // need (linux-syscall.test).
     #[cfg(target_os = "linux")]
     // SAFETY: no preconditions.
-    return Some(unsafe { libc::syscall(libc::SYS_gettid) } == libc::c_long::from(unsafe { libc::getpid() }));
+    return Some(unsafe { libc::syscall(libc::SYS_gettid) == libc::syscall(libc::SYS_getpid) });
     #[allow(unreachable_code)]
     None
 }
