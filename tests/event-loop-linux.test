@@ -158,6 +158,12 @@ test el-linux-reset-window {the race window between the loop's first look at the
     }
 } -result {ok ok}
 
+test el-linux-stale-watch {a stale Watch never reaches a newer watch: after A's watch is closed and its registration revoked, a new registration takes the slot and a watch of B takes the watch's id; closing the old Watch again does nothing (-22) and B's watch still reports its client} -constraints eventLoopLinux -body {
+    set t [elNative stalewatch]
+    list [elNum $t {slot reused (\d)}] [elNum $t {stale close (-?\d+)}] [expr {[elFirst $t {readiness of B}] ne ""}] \
+        [llength [elMatches $t {watchdog fired}]] [elNum $t {live close (-?\d+)}]
+} -result {1 -22 1 0 0}
+
 test el-linux-inflight {revocation against records in flight: r1's records posted with its old generation are dropped as stale, the registration reusing its slot receives exactly its own 100, and no handler runs for r1 after its revocation} -constraints eventLoopLinux -body {
     set t [elNative inflight]
     list [expr {[elNum $t {r2 slot (\d+)}] == [lindex [lindex [elMatches $t {r1 slot (\d+)}] 0] 1]}] \

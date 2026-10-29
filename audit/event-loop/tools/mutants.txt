@@ -431,11 +431,12 @@ private fn turn_checked(context ev: Loop, d: Driver) -> int errors IndexNotFound
 >>>>
 
 @@ c-watch-generation-unchecked a watch is found by its slot alone: a stale Watch's unwatch or rearm reaches the slot's newer watch
-%% el-linux-gameserver el-linux-buffered-lines
+%% el-linux-stale-watch el-linux-gameserver
 ## packages/event_loop_linux/native/event_loop_linux.c
 <<<<
     if (!w->used || w->slot != slot || w->gen != gen) return NULL;
 ====
+    (void)gen;
     if (!w->used || w->slot != slot) return NULL;
 >>>>
 

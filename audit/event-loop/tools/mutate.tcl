@@ -248,7 +248,7 @@ proc launch {} {
         set channel [open |[list timeout $workerTimeout [info nameofexecutable] [info script] {*}$common -worker $name 2>@1] r]
         fconfigure $channel -blocking 0 -encoding utf-8
         set ::output($channel) ""
-        set ::started($channel) [clock seconds]
+        set ::started($name) [clock seconds]
         fileevent $channel readable [list collect $channel $name]
         incr running
     }
@@ -266,8 +266,8 @@ proc collect {channel name} {
     if {[catch {close $channel} message options]} {
         set status [lindex [dict get $options -errorcode] end]
     }
-    verdict $name $status $::output($channel) [expr {[clock seconds] - $::started($channel)}]
-    unset ::output($channel) ::started($channel)
+    verdict $name $status $::output($channel) [expr {[clock seconds] - $::started($name)}]
+    unset ::output($channel) ::started($name)
     incr running -1
     launch
 }
