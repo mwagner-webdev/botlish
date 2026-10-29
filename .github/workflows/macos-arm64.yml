@@ -597,6 +597,8 @@ jobs:
         run: |
           tclsh9.0 tests/main-thread-startup.test -tmpdir "$(mktemp -d)" 2>&1 | tee startup-test.log
           BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/main-thread-startup.test -tmpdir "$(mktemp -d)" 2>&1 | tee startup-test-gc.log
+          # Both runs printed their totals, and neither failed a test.
+          grep -q 'Total' startup-test.log && grep -q 'Total' startup-test-gc.log
           ! grep -E 'Failed[[:space:]]+[1-9]' startup-test.log startup-test-gc.log
 
       - name: The application, untouched by the runs

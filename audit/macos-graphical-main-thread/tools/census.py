@@ -403,22 +403,6 @@ class Census:
             made[p] = exe if ok and exe.exists() else None
         return made
 
-    def main_stack_choice(self):
-        """The LC_MAIN stack size the experiment links with (section 11): the worker's own 1 GiB when the kernel
-        gives it with a confirmed guard, else the largest smaller size that does."""
-        best = None
-        for size in ["0x40000000", "0x20000000", "0x10000000", "0x4000000"]:
-            exe = self.work / f"mainstack-{size}"
-            if not exe.exists():
-                continue
-            status, sig, timed_out, wall, out, err = run([exe, "report"], timeout=30)
-            lines = [l for l in mtp(err) if l.get("kind") == "mainstack"]
-            if status == 0 and lines and lines[0]["guard_bytes"] > 0 and lines[0]["usable_bytes"] >= int(size, 16) // 2:
-                best = size
-                break
-        log(f"   the main-thread stack size the experiment links with: {best}")
-        return best
-
     # -- running and classifying ---------------------------------------------------
     def case(self, name, group, cmd, kind, env=None, timeout=60, expect=None, note="", repeat=1, capture=False,
              signal_after=None, build=None):
