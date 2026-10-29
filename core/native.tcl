@@ -1340,7 +1340,15 @@ proc core::native::invoke {nativeValue argValues} {
             return [core::completion::propagatingError [core::value::errorId $error {*}[lrange $code 3 end]]]
         }
     } else {
-        set result [{*}[dict get $meta impl] {*}$argValues]
+        try {
+            set result [{*}[dict get $meta impl] {*}$argValues]
+        } on 5 failure {
+            # Compiled code's propagate-error (core/completion.tcl's code 5)
+            # from an implementation that delivers one: an abandoned
+            # coroutine's pending yield (core/coroutines.tcl), which compiled
+            # code calls directly and which fails there with this code.
+            return [core::completion::propagatingError $failure]
+        }
     }
     core::value::check $result
     if {$testsType ne ""} {

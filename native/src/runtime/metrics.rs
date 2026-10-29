@@ -261,6 +261,8 @@ pub struct Metrics {
     /// coroutine's stack came back -- released at its handle's last use
     /// (`corelease`), or swept with an unreachable coroutine by a collection.
     pub coroutines: CoroutineStats,
+    /// Resource releases that ran code (runtime/affine.rs, coroutine.rs).
+    pub resources: ResourceStats,
     /// MutableVector copy-on-write (MUTABLE-VECTOR.md): logical copies (a
     /// new header sharing a backing), detaches (a shared backing copied on
     /// a write) and the element words they copied, and capacity growth of a
@@ -285,6 +287,14 @@ pub struct MutVecStats {
     pub detach_elements: u64,
     pub growths: u64,
     pub growth_bytes: u64,
+}
+
+/// Resource releases (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md):
+/// cleanup calls, and coroutines abandoned (unwound) while suspended.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ResourceStats {
+    pub cleanups: u64,
+    pub abandoned: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -319,6 +329,7 @@ impl Metrics {
             str_empty_reuses: 0,
             construction: ConstructionStats::default(),
             coroutines: CoroutineStats::default(),
+            resources: ResourceStats::default(),
             mutvec: MutVecStats::default(),
             mutarray: MutArrayStats::default(),
         }
@@ -440,6 +451,20 @@ impl Metrics {
             if suspended {
                 self.coroutines.released_suspended += 1;
             }
+        }
+    }
+
+    /// A resource's cleanup call (runtime/affine.rs).
+    pub fn record_resource_cleanup(&mut self) {
+        if self.enabled() {
+            self.resources.cleanups += 1;
+        }
+    }
+
+    /// A suspended coroutine abandoned: unwound through its release pads.
+    pub fn record_coroutine_abandoned(&mut self) {
+        if self.enabled() {
+            self.resources.abandoned += 1;
         }
     }
 
@@ -635,6 +660,11 @@ impl Metrics {
                     ("sweptSuspended", n(co.swept_suspended)),
                 ]),
             ));
+        }
+        // Only a program whose releases ran code.
+        let rs = &self.resources;
+        if rs.cleanups > 0 || rs.abandoned > 0 {
+            sections.push(("resources", dict(&[("cleanups", n(rs.cleanups)), ("abandoned", n(rs.abandoned))])));
         }
         // Likewise: only a program that made a MutableVector.
         let mv = &self.mutvec;

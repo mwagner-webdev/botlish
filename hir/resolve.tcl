@@ -1082,6 +1082,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
             if {[dict exists $node nomethod]} {
                 SetField hir $e nomethod 1
             }
+            if {[dict exists $node cleanup]} {
+                # A resource's cleanup (hir/resources.tcl).
+                SetField hir $e cleanup 1
+            }
             if {[dict exists $node exported]} {
                 # A C export (hir/exports.tcl): its foreign ABI.
                 SetField hir $e exported [dict get $node exported]

@@ -314,6 +314,14 @@ proc hir::syntax::withNoMethod {block} {
     return $block
 }
 
+# BLOCK (a `block` node) declared `cleanup fn`: the cleanup of the resource
+# struct its first parameter is declared with (hir/resources.tcl;
+# LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+proc hir::syntax::withCleanup {block} {
+    dict set block cleanup 1
+    return $block
+}
+
 # BLOCK (a `block` node) declared `exported ABI fn` (ABI: c): the function
 # is a C export of a native library (NATIVE-LIBRARY-MILESTONE-1.md;
 # hir/exports.tcl).

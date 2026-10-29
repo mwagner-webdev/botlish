@@ -87,11 +87,12 @@ proc core::coroutines::resumeNative {} { return coroutine#resume }
 proc core::coroutines::yieldNative {} { return coroutine#yield }
 proc core::coroutines::doneNative {} { return std::coroutine::done? }
 proc core::coroutines::releaseNative {} { return coroutine#release }
+proc core::coroutines::abandonNative {} { return coroutine#abandon }
 
 # The coroutine natives, for the analyses that recognize them by identity.
 proc core::coroutines::natives {} {
     return [list coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? \
-        coroutine#release]
+        coroutine#release coroutine#abandon]
 }
 
 proc core::coroutines::Entry {handle} {
@@ -225,6 +226,15 @@ proc core::coroutines::yieldImpl {value} {
             "yield outside a coroutine: no coroutine is running here"
     }
     set message [yield [list yielded $value]]
+    if {$message eq [AbandonMarker]} {
+        # Abandoned while suspended here (abandonImpl): the pending yield
+        # fails with the internal abandonment, which no handler handles --
+        # every frame's own release edges for it run on the way out
+        # (hir/affine.tcl's error edges for coroutine#abandoned), and no
+        # application statement does (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+        # MILESTONE-1.md). A propagate-error completion (code 5).
+        return -code 5 [core::value::errorId [AbandonedError]]
+    }
     if {$message eq [ReleaseMarker]} {
         # Released while suspended here (releaseImpl): unwind the whole
         # suspended stack. A Tcl error passes every Botlish handler (they
@@ -239,6 +249,18 @@ proc core::coroutines::yieldImpl {value} {
 # value (every value is a kind-tagged list, and no kind is spelled so).
 proc core::coroutines::ReleaseMarker {} {
     return {coroutine#released}
+}
+
+# What an abandonment resumes a suspended Tcl coroutine with (abandonImpl).
+proc core::coroutines::AbandonMarker {} {
+    return {coroutine#abandoning}
+}
+
+# The internal failure an abandoned coroutine's pending yield fails with
+# (hir::affine::AbandonedError): no program can spell it, so nothing but the
+# compiler's release edges ever handles it.
+proc core::coroutines::AbandonedError {} {
+    return coroutine#abandoned
 }
 
 proc core::coroutines::doneImpl {handle} {
@@ -298,6 +320,51 @@ proc core::coroutines::releaseImpl {handle} {
     return [core::value::unit]
 }
 
+# Abandons coroutine HANDLE, whose handle is dead (an unwinding program's
+# release: hir/affine.tcl's Unwinds): a suspended coroutine is resumed with
+# the abandon marker, its pending yield fails with the internal abandonment
+# (yieldImpl), and its frames unwind running exactly their release edges --
+# the cleanups of the resources they own, the abandonment of the coroutines
+# they own -- and nothing else; then it is released. Any other state is a
+# release (releaseImpl). Idempotent.
+proc core::coroutines::abandonImpl {handle} {
+    variable store
+    variable running
+    variable releaseTrace
+    variable releaseCalls
+    set id [Entry $handle]
+    if {[dict get $store $id state] ne "suspended"} {
+        return [releaseImpl $handle]
+    }
+    if {$releaseTrace ne "none"} {
+        lappend releaseTrace $id
+    }
+    if {$releaseCalls ne "none"} {
+        lappend releaseCalls $id
+    }
+    set continuation [dict get $store $id continuation]
+    dict set store $id state running
+    lappend running $id
+    try {
+        set out [$continuation [AbandonMarker]]
+    } on error {message options} {
+        # A run-time fault of a release on the way out: the coroutine is
+        # gone, and the fault is the release's.
+        dict set store $id [dict create state released thunk {}]
+        if {[info commands $continuation] ne ""} {
+            rename $continuation {}
+        }
+        return -options $options $message
+    } finally {
+        set running [lrange $running 0 end-1]
+    }
+    if {[info commands $continuation] ne ""} {
+        rename $continuation {}
+    }
+    dict set store $id [dict create state released thunk {}]
+    return [core::value::unit]
+}
+
 # Runs SCRIPT (in the caller's scope) with an empty coroutine store, then
 # deletes the Tcl coroutines of every coroutine the run left suspended and
 # restores the previous store, however SCRIPT ends.
@@ -332,4 +399,6 @@ core::native::register coroutine#yield -arity 1 -impl core::coroutines::yieldImp
 core::native::register std::coroutine::done? -arity 1 -impl core::coroutines::doneImpl \
     -param-types {coroutine} -result-type bool -ownership {observe}
 core::native::register coroutine#release -arity 1 -impl core::coroutines::releaseImpl \
+    -param-types {coroutine} -result-type unit -ownership {release}
+core::native::register coroutine#abandon -arity 1 -impl core::coroutines::abandonImpl \
     -param-types {coroutine} -result-type unit -ownership {release}

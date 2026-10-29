@@ -21,10 +21,57 @@
 # affine are visited, never an unrestricted field or a List of unrestricted
 # values. Like a coroutine release, a drop is unobservable -- no Botlish code
 # runs and no value changes -- and idempotent (a coroutine release is).
+#
+# Resources (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md) add two
+# parts, each of which runs Botlish code -- exactly the program's own
+# release code, never anything else:
+#
+#   "r"K"."   a resource: its cleanup function, entry K of the program's
+#             cleanup table (hir/resources.tcl), called with the value
+#   "C"       a coroutine of an unwinding program: coroutine#abandon
+#             (core/coroutines.tcl), which runs its suspended frames'
+#             releases
+#
+# The cleanup table is the run's: affine#register_cleanup(K, F) is written
+# right after cleanup function F's declaration (hir/lower.tcl, the Tcl
+# compiler), and affine#cleanup(K, V) -- a resource's own release -- calls F
+# with V.
 
 namespace eval core::affine {
     # DESCRIPTOR -> its parsed tree ({c}, {l TREE}, {s {SLOT TREE} ...}).
     variable trees [dict create]
+    # The running program's cleanup functions: index K -> its Block value.
+    variable cleanups [dict create]
+    # Test probe: when not "none", every cleanup call appends its index and
+    # the value it releases ({K VALUE}), in order.
+    variable cleanupTrace none
+}
+
+proc core::affine::registerCleanupImpl {k f} {
+    variable cleanups
+    dict set cleanups [core::value::intOf $k] $f
+    return [core::value::unit]
+}
+
+# Releases resource VALUE by its cleanup, entry K of the cleanup table: the
+# cleanup's own completion -- normal (its result is unit), or a run-time
+# fault -- is the release's.
+proc core::affine::cleanupImpl {k value} {
+    RunCleanup [core::value::intOf $k] $value
+    return [core::value::unit]
+}
+
+proc core::affine::RunCleanup {k value} {
+    variable cleanups
+    variable cleanupTrace
+    if {![dict exists $cleanups $k]} {
+        error "affine#cleanup: no cleanup function $k is declared yet in this run (a compiler bug: hir/resources.tcl orders the declaration first)"
+    }
+    if {$cleanupTrace ne "none"} {
+        lappend cleanupTrace [list $k $value]
+    }
+    set completion [core::runtime::callValue [dict get $cleanups $k] [list $value]]
+    return
 }
 
 proc core::affine::dropNative {} { return affine#drop }
@@ -57,6 +104,8 @@ proc core::affine::Parse {text posVar} {
     incr pos
     switch -- $c {
         c { return {c} }
+        C { return {C} }
+        r { return [list r [Number $text pos]] }
         v { return [list v [Parse $text pos]] }
         a { return [list a [Parse $text pos]] }
         d {
@@ -100,6 +149,12 @@ proc core::affine::Drop {value tree} {
         c {
             core::coroutines::releaseImpl $value
         }
+        C {
+            core::coroutines::abandonImpl $value
+        }
+        r {
+            RunCleanup [lindex $tree 1] $value
+        }
         l {
             foreach element [core::value::items $value] {
                 Drop $element [lindex $tree 1]
@@ -123,3 +178,8 @@ proc core::affine::Drop {value tree} {
 
 core::native::register affine#drop -arity 2 -impl core::affine::dropImpl \
     -param-types {any str} -result-type unit -ownership {release observe}
+
+core::native::register affine#register_cleanup -arity 2 -impl core::affine::registerCleanupImpl \
+    -param-types {int any} -result-type unit -ownership {observe observe}
+core::native::register affine#cleanup -arity 2 -impl core::affine::cleanupImpl \
+    -param-types {int any} -result-type unit -ownership {observe release}

@@ -119,6 +119,15 @@ proc hir::structs::IsAffine {id {seen {}}} {
     if {$id in $seen || ![declared $id]} {
         return 0
     }
+    if {[isResource $id]} {
+        # A resource struct is affine whatever its fields: its value carries
+        # a cleanup obligation, which one owner discharges once
+        # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+        if {$seen eq {}} {
+            dict set affinity $id 1
+        }
+        return 1
+    }
     set result 0
     # (fieldTypes answers for a LayoutStruct[L] too, from the layout: a
     # layout with a pointer field makes an affine struct view,
@@ -514,6 +523,36 @@ proc hir::structs::isOpaque {id} {
     return [expr {[dict exists $registry $id opaque] && [dict get $registry $id opaque]}]
 }
 
+# 1 if struct ID was declared `resource struct` (`opaque resource struct`):
+# its values carry a cleanup obligation its module's cleanup function
+# discharges (hir/resources.tcl; LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+# MILESTONE-1.md). Affine whatever its fields (IsAffine).
+proc hir::structs::isResource {id} {
+    variable registry
+    return [expr {[dict exists $registry $id resource] && [dict get $registry $id resource]}]
+}
+
+# Checks the declaration DECL (apply's) of a resource struct with the type
+# slots SLOTS: declared in a module, opaque (only its module makes, takes
+# apart and discharges a value of it), not a context (an installed context lives for the whole run
+# and is never released), and not parameterized (one cleanup function per
+# resource, of one parameter type).
+proc hir::structs::ResourceDeclaration {decl slots} {
+    set name [dict get $decl name]
+    if {[dict get $decl namespace] eq ""} {
+        Fail [dict get $decl resourceSpan] "resource struct \"$name\" must be declared in a module, not in the entry program: a resource's authority -- making, taking apart and releasing its values -- is its module's, and its cleanup is one of the module's functions (move the declaration and its cleanup into a module the program imports)" RESOURCE-DECLARATION
+    }
+    if {![dict exists $decl opaque] || ![dict get $decl opaque]} {
+        Fail [dict get $decl resourceSpan] "resource struct \"$name\" must be opaque (\"opaque resource struct $name:\"): only its own module may make a value of it, take one apart -- which discharges its cleanup obligation without running the cleanup -- or release it" RESOURCE-DECLARATION
+    }
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail [dict get $decl resourceSpan] "struct \"$name\" cannot be both a context and a resource: an installed context lives for the whole run and is never released, so it has no lexical scope to end (a context may own resources in its members instead)" RESOURCE-DECLARATION
+    }
+    if {$slots ne {}} {
+        Fail [dict get $decl nameSpan] "resource struct \"$name\" cannot have type slots: its cleanup is one function of one parameter type (declare a resource struct of the field types you need)" RESOURCE-DECLARATION
+    }
+}
+
 # 1 if struct ID was declared `context struct` (or `opaque context struct`):
 # a value of it may be installed into the execution environment and satisfy
 # a function's context dependency (CONTEXTS.md). Independent of opacity.
@@ -684,10 +723,15 @@ proc hir::structs::apply {decls} {
         # The skeleton first: a field type may name any struct of the batch,
         # declared earlier, later, or this one itself (its slots too: an
         # application's arity is checked as its field types resolve).
+        set resource [expr {[dict exists $decl resource] && [dict get $decl resource]}]
+        if {$resource} {
+            ResourceDeclaration $decl $slotNames
+        }
         dict set registry $id [dict create id $id name $name namespace $ns \
             opaque [expr {[dict exists $decl opaque] && [dict get $decl opaque]}] \
             context [expr {[dict exists $decl context] && [dict get $decl context]}] names $names \
-            types {} spans $spans span [dict get $decl nameSpan] slots $slotNames constraints $constraints]
+            types {} spans $spans span [dict get $decl nameSpan] slots $slotNames constraints $constraints \
+            resource $resource]
     }
     foreach decl $decls {
         # A slot names no visible type (every type of the batch is
@@ -753,6 +797,11 @@ proc hir::structs::apply {decls} {
             # declaration's entry is unchanged.
             dict set entry context 1
         }
+        if {[dict get $registry $id resource]} {
+            # Likewise only for a resource struct (LEXICAL-RESOURCE-CLEANUP-
+            # EXPLORATION-MILESTONE-1.md).
+            dict set entry resource 1
+        }
         lappend entries $entry
     }
     # (Affinity read while field types were still being resolved is stale.)
@@ -801,7 +850,8 @@ proc hir::structs::applyEntries {entries} {
             name [dict get $entry name] namespace [dict get $entry namespace] \
             opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque]}] \
             context [expr {[dict exists $entry context] && [dict get $entry context]}] names $names \
-            types [dict get $entry fields] spans {} span {} slots $slotNames constraints $constraints]
+            types [dict get $entry fields] spans {} span {} slots $slotNames constraints $constraints \
+            resource [expr {[dict exists $entry resource] && [dict get $entry resource]}]]
     }
     set affinity [dict create]
 }

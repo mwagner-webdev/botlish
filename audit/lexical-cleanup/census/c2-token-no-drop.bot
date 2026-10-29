@@ -1,0 +1,56 @@
+# c2-token-no-drop.bot -- the exploration's affine registration token
+# (audit/event-loop/src/ownedreg.bot) over the production std::event_loop:
+# affinity stops a second owner, but a token's death runs nothing, so its
+# registration stays registered -- after a function returns, after its
+# last use, and after the coroutine that held it is abandoned.
+import std::event_loop
+import std::event_loop::deterministic
+import std::ffi::c
+import std::int
+import std::str
+import type std::event_loop::Delivery
+
+opaque struct Owned:
+    reg: std::event_loop::Reg
+    mark: std::ffi::c::Ptr[std::ffi::c::Void]
+
+fn own(reg: std::event_loop::Reg) -> Owned:
+    Owned {reg: reg, mark: std::ffi::c::null[std::ffi::c::Void]()}
+
+fn bit(b: bool) -> str:
+    if b:
+        "1"
+    else:
+        "0"
+
+# A function that acquires a token and returns without releasing it.
+fn forget(context ev: std::event_loop::Loop) -> std::event_loop::Reg errors std::event_loop::SchedulerFault:
+    reg = std::event_loop::channel(Delivery::Lossy, 4)
+    token = own(reg)
+    reg
+
+# A task that holds a token across a wait and is abandoned.
+fn holder(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    token = own(reg)
+    e = std::event_loop::wait(reg)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    a = forget()
+    b = std::event_loop::source(Delivery::Lossy, 4)
+    coroutine {step, first} = holder(b)
+    std::event_loop::adopt(step, first)
+    std::event_loop::run()
+    abandoned = std::event_loop::abandon()
+    ["after return: live ".concat(bit(std::event_loop::live?(a))),
+     "after abandon: live ".concat(bit(std::event_loop::live?(b))).concat(" (abandoned ").concat(std::int::to_string(abandoned)).concat(" task)")]
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

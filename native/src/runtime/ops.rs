@@ -83,12 +83,12 @@
 //! | rt_stack_overflow      |                     | records NATIVE LIMIT STACK   | no        |
 
 use super::construct::{rt_construct, rt_plan_materialize};
-use super::affine::rt_affine_drop;
+use super::affine::{rt_affine_drop, rt_affine_drop_run, rt_cleanup_call, rt_cleanup_table};
 use super::mutvec::{
     rt_mv_at, rt_mv_clear, rt_mv_clear_drop, rt_mv_empty, rt_mv_from_list, rt_mv_len, rt_mv_pop, rt_mv_push, rt_mv_share,
     rt_mv_swap, rt_mv_swap_drop, rt_mv_take, rt_mv_take_front, rt_mv_to_list,
 };
-use super::coroutine::{rt_co_create, rt_co_done, rt_co_failed, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
+use super::coroutine::{rt_co_abandon, rt_co_create, rt_co_done, rt_co_failed, rt_co_release, rt_co_resume, rt_co_resume0, rt_co_start, rt_co_yield};
 use super::error::{semantic_kind, RtError};
 use super::ffifixture::{
     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
@@ -195,6 +195,11 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // A fused coroutine's cached failure (codegen::fusion): one
             // terminal coroutine object.
             | CoFailed
+            // Releases that run Botlish code (LEXICAL-RESOURCE-CLEANUP-
+            // EXPLORATION-MILESTONE-1.md, runtime/affine.rs): a cleanup, an
+            // abandonment's release pads -- and every drop form that takes a
+            // descriptor, which may hold either.
+            | CoAbandon | AffineDropRun | CleanupCall | MvClearDrop | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop
             // MutableVector (MUTABLE-VECTOR.md): a new header (from_list, a
             // share) or a List (the snapshot); the mutations allocate no
             // Botlish object (runtime/mutvec.rs).
@@ -210,6 +215,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
 pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
     matches!(op, IMod | IShl | IShr | VEq | Hash | Substr
+        // A release that runs Botlish code fails with that code's run-time
+        // fault (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+        | CoAbandon | AffineDropRun | CleanupCall | MvClearDrop
         // The declared NonFiniteFloat (FLOAT64-MILESTONE-1.md).
         | F64Add | F64Sub | F64Mul | F64Div | F64FromInt
         // DecimalRounded's arithmetic (NonFiniteFloat) and quantization
@@ -2693,11 +2701,11 @@ fn generate(p: *mut Vm, capacity: Value, factory: Value, d: Option<Value>, name:
         let x = rt_call_value(p, factory, 1, &arg);
         if x == NO_VALUE {
             if let Some(d) = d {
-                let items = take_elements(arr, name)[..i].iter().copied();
+                let items = take_elements(arr, name)[..i].to_vec();
                 let text = str_of(d).as_str().as_bytes().to_vec();
-                for item in items {
-                    super::affine::drop_descriptor(p, item, &text);
-                }
+                // (The call's own failure is the result; a failure of the
+                // code the drop runs is recorded over it.)
+                super::affine::drop_taken(p, &items, &text, 0, &mut 0);
             }
             vm(p).temp_roots.truncate(rooted);
             return NO_VALUE;
@@ -2789,7 +2797,10 @@ pub extern "C" fn rt_mutarray_swap_drop(p: *mut Vm, arr: Value, index: Value, va
     match array_index(index, mutarray_of(arr).items().len()) {
         Some(i) => std::mem::replace(&mut array_owned(arr, "mutable_array#swap_drop")[i], value),
         None => {
-            super::affine::drop_descriptor(p, value, str_of(d).as_str().as_bytes());
+            let text = str_of(d).as_str().as_bytes().to_vec();
+            if !super::affine::drop_taken(p, &[value], &text, 0, &mut 0) {
+                return NO_VALUE;
+            }
             index_not_found(p)
         }
     }
@@ -2800,15 +2811,16 @@ pub extern "C" fn rt_mutarray_swap_drop(p: *mut Vm, arr: Value, index: Value, va
 /// slot, X is dropped by D instead before IndexNotFound.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_set_drop(p: *mut Vm, arr: Value, index: Value, value: Value, d: Value) -> Value {
-    let text = str_of(d).as_str().as_bytes();
+    let text = str_of(d).as_str().as_bytes().to_vec();
     match array_index(index, mutarray_of(arr).items().len()) {
         Some(i) => {
             let old = std::mem::replace(&mut array_owned(arr, "mutable_array#set_drop")[i], value);
-            super::affine::drop_descriptor(p, old, text);
-            UNIT
+            if super::affine::drop_taken(p, &[old], &text, 0, &mut 0) { UNIT } else { NO_VALUE }
         }
         None => {
-            super::affine::drop_descriptor(p, value, text);
+            if !super::affine::drop_taken(p, &[value], &text, 0, &mut 0) {
+                return NO_VALUE;
+            }
             index_not_found(p)
         }
     }
@@ -2927,16 +2939,10 @@ pub extern "C" fn rt_mutarray_take_front(_p: *mut Vm, arr: Value) -> Value {
 /// The `a` drop of affine.rs: every element of array ARR by the element
 /// descriptor at POS of D, first to last. The elements leave the (dying)
 /// array before any is dropped. Returns with POS past the element descriptor.
-pub fn drop_array_elements(p: *mut Vm, arr: Value, d: &[u8], pos: &mut usize) {
+pub fn drop_array_elements(p: *mut Vm, arr: Value, d: &[u8], pos: &mut usize) -> bool {
     let start = *pos;
-    let items = take_elements(arr, "affine#drop");
-    if items.is_empty() {
-        super::affine::skip(d, pos);
-    }
-    for &item in items {
-        *pos = start;
-        super::affine::drop_at(p, item, d, pos);
-    }
+    let items = take_elements(arr, "affine#drop").to_vec();
+    super::affine::drop_taken(p, &items, d, start, pos)
 }
 
 /// A logical copy of array ARR (`mvshare`'s `h` of an array header): a new
@@ -3367,6 +3373,10 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         CPtrFixtureAddress => rt_cptr_fixture_address(p, a[0]),
         CoRelease => rt_co_release(p, a[0]),
         AffineDrop => rt_affine_drop(p, a[0], a[1]),
+        // Lowering-internal releases (never a Native value).
+        CoAbandon | AffineDropRun | CleanupCall | CleanupTable => {
+            vm(p).fail(RtError::Bug(format!("{op:?} is no native value")))
+        }
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
         // A C word exists only between a C call and its uses, in one
         // function (C-FFI-ERROR-CAPTURE-MILESTONE-2.md): never a value.
@@ -3578,8 +3588,12 @@ runtime_helpers! {
     (rt_co_yield, 2),
     (rt_co_done, 2),
     (rt_co_release, 2),
+    (rt_co_abandon, 2),
     (rt_co_failed, 1),
     (rt_affine_drop, 3),
+    (rt_affine_drop_run, 3),
+    (rt_cleanup_call, 3),
+    (rt_cleanup_table, 3),
     (rt_mv_from_list, 2),
     (rt_mv_len, 2),
     (rt_mv_empty, 2),

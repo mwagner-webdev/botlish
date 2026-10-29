@@ -689,6 +689,16 @@ proc hir::contexts::verify {hirVar} {
             }
         }
     }
+    # Releases (hir/resources.tcl): a function that may release a resource
+    # calls its cleanup there -- an edge from every region holding a value
+    # (or a parameter) whose drop runs a cleanup, to that cleanup, so the
+    # cleanup's context requirement is the region's like any callee's.
+    set releases [ReleaseEdges $hir $owner $blocks]
+    dict for {o list} $releases {
+        if {$o ne ""} {
+            dict lappend edges $o {*}$list
+        }
+    }
     # The transitive requirement: breadth-first rounds over the previous
     # round's sets, so each reason is a shortest chain and the result is the
     # least fixed point (a recursive group converges).
@@ -783,6 +793,14 @@ proc hir::contexts::verify {hirVar} {
                 }
             }
         }
+        # The top level's own releases in this root (hir/resources.tcl): a
+        # value whose drop runs a cleanup needs the cleanup's contexts
+        # installed where it is held.
+        foreach edge [dict getdef $releases "" {}] {
+            lassign $edge c target
+            if {[dict get $rootOf $c] ne $r || ![dict exists $required $target]} continue
+            Obligations hir $c $target $installed $required $reasons "the release of this value"
+        }
         if {$pending ne ""} {
             # The installed value's own calls (the rest of this root) were
             # checked above against the set installed so far: a context is
@@ -797,6 +815,34 @@ proc hir::contexts::verify {hirVar} {
     }
     dict set hir contexts [dict create blocks $blocks installs $installs reasons $reasons \
         selections $selections selected $selected]
+}
+
+# The release edges of HIR (hir/resources.tcl): region (a block, "" for the
+# top level) -> {{E CLEANUP} ...}, an edge from expression E -- a value
+# whose drop runs cleanup function CLEANUP, or (E a block) a parameter of
+# that block whose drop does -- to the cleanup. OWNER and BLOCKS are Walk's.
+proc hir::contexts::ReleaseEdges {hir owner blocks} {
+    set result [dict create]
+    if {![hir::resources::Used $hir]} {
+        return $result
+    }
+    dict for {e o} $owner {
+        set node [dict get $hir exprs $e]
+        if {![dict get $node reachable] || [dict get $node kind] eq "block"} continue
+        foreach c [hir::resources::CleanupBlocks $hir [hir::typeOf $hir $e]] {
+            dict lappend result $o [list $e $c]
+        }
+    }
+    foreach b $blocks {
+        foreach p [dict get $hir exprs $b params] {
+            foreach c [hir::resources::CleanupBlocks $hir [hir::bindingType $hir $p]] {
+                if {$c ne $b} {
+                    dict lappend result $b [list $b $c]
+                }
+            }
+        }
+    }
+    return $result
 }
 
 # The context obligations of top-level call C of block TARGET, against the
@@ -814,7 +860,7 @@ proc hir::contexts::verify {hirVar} {
 # makes too, so their own requirements are this call's obligations as well
 # (checked the same way, with the chain through the implementation). Returns
 # the selection, {TRAIT WITNESS ...}.
-proc hir::contexts::Obligations {hirVar c target installed required reasons} {
+proc hir::contexts::Obligations {hirVar c target installed required reasons {what "this call"}} {
     upvar 1 $hirVar hir
     set selection [dict create]
     set seen [dict create]
@@ -831,7 +877,7 @@ proc hir::contexts::Obligations {hirVar c target installed required reasons} {
         if {![isTrait $id]} {
             if {$id ni $installed} {
                 hir::Diagnose hir MISSING-CONTEXT \
-                    "$id is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n[join $chain \n]" $c
+                    "$id is required by $what but is not installed here (install it with \"with context EXPR\" before the call):\n[join $chain \n]" $c
             }
             continue
         }

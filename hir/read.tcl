@@ -286,8 +286,8 @@ proc hir::read::EnumDeclLine {content number} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(?:slots \[([^\]]*)\] )?fields (.*)$} $content -> id name ns opaqueWord contextWord slotsText fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(resource )?(?:slots \[([^\]]*)\] )?fields (.*)$} $content -> id name ns opaqueWord contextWord resourceWord slotsText fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[resource\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] fields FIELD: TYPE, ...\""
     }
     # A parameterized struct's slots (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
     # {SLOT {TRAIT ...}} pairs, as hir::format::TypeDecl printed them.
@@ -323,6 +323,9 @@ proc hir::read::StructDeclLine {content number} {
         fields $rawFields names $names line $number]
     if {$contextWord ne ""} {
         dict set decl context 1
+    }
+    if {$resourceWord ne ""} {
+        dict set decl resource 1
     }
     if {$slots ne {}} {
         dict set decl slots $slots
@@ -1137,11 +1140,14 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported]} {
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported cleanup]} {
                 Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
+            }
+            if {$cleanup} {
+                SetField hir $e cleanup 1
             }
             if {$exported ne ""} {
                 SetField hir $e exported $exported
@@ -1607,7 +1613,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {cleanupVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1637,6 +1643,16 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         upvar 1 $exportedVar exported
         set exported ""
         if {[regexp {^ exported (c)(.*)$} $rest -> exported after]} {
+            set rest $after
+        }
+    }
+    # A resource's cleanup function (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+    # MILESTONE-1.md), as hir::format prints it.
+    if {$cleanupVar ne ""} {
+        upvar 1 $cleanupVar cleanup
+        set cleanup 0
+        if {[regexp {^ cleanup(.*)$} $rest -> after]} {
+            set cleanup 1
             set rest $after
         }
     }

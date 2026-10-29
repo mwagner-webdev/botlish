@@ -416,6 +416,15 @@ pub enum OpCode {
     CoYield,
     CoDone,
     CoRelease,
+    /// `coabandon %h` (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md):
+    /// %h's handle is dead, in an unwinding program (hir/affine.tcl's
+    /// Unwinds): a suspended coroutine is resumed with its pending yield
+    /// failing with the internal abandonment (runtime/error.rs's
+    /// ERR_COROUTINE_ABANDONED), so its frames' release pads run -- their
+    /// resources' cleanups, their coroutines' abandonments -- and nothing
+    /// else, then it is released; any other state is `corelease`. Runs
+    /// Botlish code: a safepoint, fallible on a run-time fault of that code.
+    CoAbandon,
     /// `%f = op cofailed` (COROUTINE-FUSION-MILESTONE-1.md): a terminal,
     /// failed coroutine object holding the pending error (taken from the
     /// Vm exactly as a coroutine body's unhandled failure is: the error, its
@@ -531,6 +540,21 @@ pub enum OpCode {
     /// static drop descriptor %d (a String, runtime/affine.rs). Result unit;
     /// never fails or allocates (no safepoint), like `corelease`.
     AffineDrop,
+    /// `affinedroprun %v %d`: `affinedrop` of a descriptor that runs code --
+    /// a resource's cleanup (`r` K), an unwinding coroutine's abandonment
+    /// (`C`): runtime/affine.rs. A safepoint, fallible on a run-time fault of
+    /// that code (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+    AffineDropRun,
+    /// `cleanupcall %f %v`: the release of resource %v by its cleanup
+    /// function %f (a function value): the call, with the pending error --
+    /// a release on an error edge runs while one propagates -- preserved
+    /// across it. A safepoint, fallible on a run-time fault of the cleanup
+    /// (a cleanup declares no error).
+    CleanupCall,
+    /// `cleanuptable %f...`: the run's cleanup table, entry K the K-th
+    /// function value (hir/resources.tcl), which a drop descriptor's `r` K
+    /// calls; once, at the program's start.
+    CleanupTable,
     /// MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs). A vector is a
     /// header over a copy-on-write backing; every mutation changes the
     /// header in place (its register never changes).
@@ -960,8 +984,12 @@ op_spellings! {
     "ffifixturecopy" => FfiFixtureCopy,
     "ffifixturemixed" => FfiFixtureMixed,
     "corelease" => CoRelease,
+    "coabandon" => CoAbandon,
     "cofailed" => CoFailed,
     "affinedrop" => AffineDrop,
+    "affinedroprun" => AffineDropRun,
+    "cleanupcall" => CleanupCall,
+    "cleanuptable" => CleanupTable,
     "mvfromlist" => MvFromList,
     "mvlen" => MvLen,
     "mvempty" => MvEmpty,
@@ -1079,7 +1107,7 @@ impl OpCode {
     pub fn arity(self) -> Option<usize> {
         use OpCode::*;
         match self {
-            ListNew => None,
+            ListNew | CleanupTable => None,
             Argv | CPtrNull | CoFailed => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
@@ -1089,7 +1117,7 @@ impl OpCode {
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
-            | CoRelease | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
+            | CoRelease | CoAbandon | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
             Substr | SubstrProven | BytesSlice | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort

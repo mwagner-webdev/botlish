@@ -781,7 +781,60 @@ pub extern "C" fn rt_co_yield(p: *mut Vm, value: Value) -> Value {
         if let Some(stack) = &(*co).stack {
             (*p).publish_active_stack(Some(stack.bounds()));
         }
+        // NO_VALUE: abandoned (rt_co_abandon), the abandonment pending in the
+        // Vm -- the yield fails with it, and the frames unwind through their
+        // release pads.
         (*co).value
+    }
+}
+
+/// Abandons coroutine HANDLE, whose handle is dead, in an unwinding program
+/// (`coabandon`; hir/affine.tcl's Unwinds,
+/// LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): a suspended
+/// coroutine is resumed with its pending yield failing with the internal
+/// abandonment (ERR_COROUTINE_ABANDONED), which no handler handles -- every
+/// frame's release pad for it runs (the cleanups of the resources the frames
+/// own, the abandonment of the coroutines they own) and nothing else does --
+/// and then it is released (`rt_co_release`). The releaser's own pending
+/// failure, if it releases on an error edge, is set aside meanwhile. A
+/// run-time fault of the release code is the abandonment's failure. Any
+/// other state is a plain release. Idempotent.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_co_abandon(p: *mut Vm, handle: Value) -> Value {
+    let co = handle as *mut CoroutineObj;
+    // SAFETY: as in rt_co_start: HANDLE is a live coroutine object, touched
+    // through the raw pointer around the switch; it is rooted meanwhile.
+    unsafe {
+        if (*co).state != CO_SUSPENDED || (*co).stack.is_none() {
+            return rt_co_release(p, handle);
+        }
+        vm(p).metrics.record_coroutine_abandoned();
+        let rooted = vm(p).temp_roots.len();
+        vm(p).temp_roots.push(handle);
+        let unwound = super::affine::preserving_pending(p, || {
+            vm(p).declared_error = super::error::ERR_COROUTINE_ABANDONED;
+            vm(p).declared_payload.clear();
+            vm(p).fail(RtError::Semantic { kind: "COROUTINE-ABANDONED", message: "a coroutine was abandoned".to_string() });
+            (*co).value = NO_VALUE;
+            let outcome = segment(p, co);
+            if outcome != NO_VALUE {
+                // A body that completed instead: it caught nothing (no
+                // handler can name the abandonment), so it cannot have.
+                return vm(p).fail(RtError::Bug("an abandoned coroutine completed".to_string())) != NO_VALUE;
+            }
+            if vm(p).declared_error == super::error::ERR_COROUTINE_ABANDONED {
+                // Unwound to its end: the abandonment is spent.
+                vm(p).error = None;
+                vm(p).declared_error = 0;
+                vm(p).declared_payload.clear();
+                return true;
+            }
+            // A run-time fault of a release on the way out.
+            false
+        });
+        vm(p).temp_roots.truncate(rooted);
+        rt_co_release(p, handle);
+        if unwound { UNIT } else { NO_VALUE }
     }
 }
 

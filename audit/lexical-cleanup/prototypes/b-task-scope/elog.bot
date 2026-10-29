@@ -1,0 +1,19 @@
+# elog.bot -- the scenario programs' trace helper (tests/event-loop.test):
+# an application line "TEXT N" in the loop's trace.
+import std::event_loop
+import std::int
+import std::str
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+# 1 for true, 0 for false (a trace value).
+fn bit(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+# "A N B M" in the loop's trace.
+nomethod fn say2(a: str, n: int, b: str, m: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(a.concat(std::int::to_string(n)).concat(b).concat(std::int::to_string(m)))

@@ -1,0 +1,25 @@
+# c4-context-end.bot -- an installed context owns its affine members for the
+# rest of the run, and nothing releases them when the program ends
+# (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md, reproducer c3).
+import std::mutable_vector
+
+struct Go:
+    n: int
+
+fn worker(resume Go) -> int:
+    yield 1
+    2
+
+opaque context struct Pool:
+    held: MutableVector[Coroutine{args: [Go], return: int, errors: []}]
+
+fn create() -> Pool:
+    Pool {held: std::mutable_vector::from_list([])}
+
+fn keep(context pool: Pool) -> int:
+    coroutine {step: w, first} = worker()
+    pool.held.push(w)
+    first
+
+with context create()
+keep()

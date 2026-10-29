@@ -221,6 +221,11 @@ pub struct Vm {
     /// The MutableVector/MutableArray headers installed in the context area this run
     /// (`ctxroot`, MUTABLE-VECTOR.md): roots for the rest of the run.
     pub context_roots: Vec<Value>,
+    /// The run's cleanup table (`cleanuptable`, runtime/affine.rs): the
+    /// cleanup function of each resource type, which a drop descriptor's
+    /// `r` K calls (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+    /// Roots for the rest of the run.
+    pub cleanups: Vec<Value>,
     pub info: Rc<ProgramInfo>,
     pub metrics: Metrics,
     const_table: Vec<Value>,
@@ -315,6 +320,7 @@ impl Vm {
             argv_invalid: std::cell::OnceCell::new(),
             temp_roots: Vec::new(),
             context_roots: Vec::new(),
+            cleanups: Vec::new(),
             info,
             metrics: Metrics::new(alloc_mode),
             const_table: Vec::new(),
@@ -589,6 +595,7 @@ impl Vm {
             .chain(self.declared_payload.iter().copied())
             .chain(self.temp_roots.iter().copied())
             .chain(self.context_roots.iter().copied())
+            .chain(self.cleanups.iter().copied())
             .chain(self.statics_table.iter().copied());
         let framemap = self.framemap.clone();
         self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason, &framemap);
@@ -638,6 +645,7 @@ impl Vm {
         self.declared_payload.clear();
         self.temp_roots.clear();
         self.context_roots.clear();
+        self.cleanups.clear();
         self.metrics.reset();
         self.collect_with(GcReason::Explicit);
     }

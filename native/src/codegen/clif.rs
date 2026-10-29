@@ -2870,6 +2870,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         CoRelease => ("rt_co_release", None, false, None),
                         CoFailed => ("rt_co_failed", None, false, Some(("cofailed", KIND_COROUTINE))),
                         AffineDrop => ("rt_affine_drop", None, false, None),
+                        // Releases that run Botlish code (LEXICAL-RESOURCE-
+                        // CLEANUP-EXPLORATION-MILESTONE-1.md): safepoints
+                        // (ops.rs's op_may_allocate), fallible on a run-time
+                        // fault of that code.
+                        CoAbandon => ("rt_co_abandon", None, true, None),
+                        AffineDropRun => ("rt_affine_drop_run", None, true, None),
+                        CleanupCall => ("rt_cleanup_call", None, true, None),
                         // MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs).
                         MvFromList => ("rt_mv_from_list", None, false, Some(("mvfromlist", KIND_MUTVEC))),
                         MvLen => ("rt_mv_len", None, false, None),
@@ -2883,7 +2890,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MvShare => ("rt_mv_share", None, false, Some(("mvshare", KIND_MUTVEC))),
                         MvToList => ("rt_mv_to_list", None, false, Some(("mvtolist", KIND_LIST))),
                         MvTakeFront => ("rt_mv_take_front", None, false, None),
-                        MvClearDrop => ("rt_mv_clear_drop", None, false, None),
+                        MvClearDrop => ("rt_mv_clear_drop", None, true, None),
                         MvSwapDrop => ("rt_mv_swap_drop", None, true, None),
                         CtxRoot => ("rt_context_root", None, false, None),
                         // MutableArray (MUTABLE-ARRAY.md, runtime/ops.rs).
@@ -3074,6 +3081,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                             let v = self.call_allocating("rt_list_new", &[self.vm, n, ptr], "listnew", KIND_LIST);
                             self.check(v);
                             return v;
+                        }
+                        CleanupTable => {
+                            let (n, ptr) = self.array(args);
+                            return self.call_helper("rt_cleanup_table", &[self.vm, n, ptr]);
                         }
                         _ => unreachable!(),
                     };
