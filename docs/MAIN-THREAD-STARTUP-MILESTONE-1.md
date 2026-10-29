@@ -497,7 +497,9 @@ applies to the code it mutates (a check over all of them), apart from two
 in `hir/cabi.tcl` (c-abi-types' `ptr-as-int`, native-view's
 `view-is-a-pointer`), a file this milestone does not touch. Two mutants
 of other campaigns (c-ffi's, native-link-plan's) were updated to the new
-signatures (MUTANT-NAMES-PENDING). The native-stack campaign on Linux x86-64 (all of its mutants,
+signatures, and both are still KILLED on Linux x86-64: c-ffi's
+`link-failure-removes-earlier` (by `cf-link-failure-keeps-executable`) and
+native-link-plan's `system-loses-static` (by `nlp-linkers-agree`). The native-stack campaign on Linux x86-64 (all of its mutants,
 the new detector included): STACK-LINUX-PENDING.
 
 ## 30. Executable size and performance
