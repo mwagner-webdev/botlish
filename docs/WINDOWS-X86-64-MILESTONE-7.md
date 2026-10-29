@@ -688,7 +688,10 @@ Every run below is on the branch; the final code state is commit
   warning gate, the method-call oracle and reference audit, the Rust unit
   tests). **Run 40799446825: success**, every job.
 * `tests-arm64.yml`: the same on Linux AArch64 (std::linux::fs's syscalls
-  through the AArch64 transport). TODO-ARM64.
+  through the AArch64 transport), plus the whole Tcl suite under GC stress.
+  **Run 40799449814: success**, every job (interp, compile, both coverage
+  jobs, the system-linked executables also under GC stress, the golden
+  suites, the Rust unit tests also under GC stress, the GC-stress suite).
 * `static-decisions.yml`, dispatched on the branch for the method-decision
   fix (hir/methods.tcl; commit cb771b6f, which holds it): **run
   40787729341: success**, every golden suite's static decisions equal under
