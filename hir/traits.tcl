@@ -2216,7 +2216,13 @@ proc hir::traits::PlanCalls {hir syntax} {
                 }
                 set qualified [QualifiedName [dict get $fn namespace] [dict get $fn name]]
                 set parts [lmap {i w} $params {WitnessName $w}]
-                foreach {c w} [dict get $fn selection] {
+                # (The clone's selection, its key's: its function's, or its
+                # specialization's own -- SpecializationTraits.)
+                set selection [lindex $ckey 2]
+                if {$selection eq "-"} {
+                    set selection {}
+                }
+                foreach {c w} $selection {
                     lappend parts "$c=$w"
                 }
                 set imprints [lindex $ckey 3]
@@ -2225,7 +2231,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                 }
                 dict set clones $ckey [dict create key $ckey node $node namespace [dict get $fn namespace] \
                     function [dict get $fn sid] params $params result $result source $qualified \
-                    selection [dict get $fn selection] imprints $imprints \
+                    selection $selection imprints $imprints \
                     name "$qualified<[join $parts ,]>" block $h]
                 dict incr cloneCounts $h
                 if {[dict get $cloneCounts $h] > [ImprintCloneLimit]} {

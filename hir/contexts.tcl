@@ -1262,8 +1262,9 @@ proc hir::contexts::explain {hir e id} {
 #   contextinstall eN ID
 #   contextparam eB NAME ID
 #   function NAME eB direct-contexts (IDS) required-contexts (IDS)
+#   specialization NAME (for WITNESSES) required-contexts (IDS)
 #
-# (functions with an empty requirement are omitted).
+# (functions and specializations with an empty requirement are omitted).
 proc hir::contexts::summary {hir} {
     set lines {}
     foreach entry [hir::sourceTypes $hir] {
@@ -1289,6 +1290,14 @@ proc hir::contexts::summary {hir} {
     foreach b [dict get $hir contexts blocks] {
         if {[required $hir $b] eq {}} continue
         lappend lines "function [BlockName $hir $b] $b direct-contexts ([join [direct $hir $b] {, }]) required-contexts ([join [required $hir $b] {, }])"
+    }
+    set source [dict getdef $hir traitSource $hir]
+    dict for {k ids} [dict getdef $source contexts specialized {}] {
+        # (A specialization's requirement, through the implementations its
+        # operations bind: TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-
+        # MILESTONE-1.md.)
+        if {$ids eq {}} continue
+        lappend lines "specialization [NodeName $source [list $k [lindex $k 0]]] required-contexts ([join $ids {, }])"
     }
     set traits [TraitSummary $hir]
     if {$traits ne ""} {

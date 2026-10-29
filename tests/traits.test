@@ -1329,9 +1329,15 @@ proc effectAgreement {files source} {
     set first {}
     foreach n [dict keys [dict get $checked coroutines mayYield]] {
         if {[llength $n] == 2} {
+            # (A specialization node is named by the specialization's
+            # identity, its clone by the key: hir::traits::Specialization.)
             lassign $n k b
             if {$b eq [lindex $k 0]} {
-                lappend first [dict get $clones $k name]
+                dict for {key clone} $clones {
+                    if {[hir::traits::Specialization $key] eq $k} {
+                        lappend first [dict get $clone name]
+                    }
+                }
             }
             continue
         }
