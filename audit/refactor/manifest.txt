@@ -180,7 +180,7 @@ fails stdlib/darwin/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import:
 fails stdlib/darwin/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: path.bot converts a validated DarwinPath with std::darwin::fs::of_valid_text, an internal member of the standard library that no entry program may name (verified through `import std::darwin::path`)
 program stdlib/ffi/c.bot
 program stdlib/io/bytepath.bot
-fails stdlib/io/fs.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for stdlib/io/path.bot, which fs.bot imports, a trait-polymorphic last declaration cannot be a value (verified through `import std::io::fs`)
+program stdlib/io/fs.bot
 fails stdlib/io/path.bot CORE SEMANTIC TRAIT-POLYMORPHIC-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (text) is trait-polymorphic and cannot be a value (verified through `import std::io::path`)
 fails stdlib/linux/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (write_error_text) requires a context; only reordering create() last would compile it, an invariant nothing states (verified through `import std::linux::io`)
 fails stdlib/linux/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/darwin/fs.bot, fs.bot imports std::io::bytepath (verified through `import std::linux::fs`)
