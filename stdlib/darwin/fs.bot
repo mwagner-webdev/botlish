@@ -282,11 +282,36 @@ fn read(file: File, count: std::io::fs::ReadSize, context fs: DarwinFS) -> Read 
 private fn chunks() -> MutableVector[std::abi::bytes::Bytes]:
     std::mutable_vector::from_list([])
 
-# Every byte of FD to the end of the file, 64 KiB at a time, as one Bytes.
+# The size of read_rest's read after COUNT reads: 4 KiB, doubling to 1 MiB.
+# Each read's buffer is a fresh storage of its full size (a write exposure is
+# a copy: C-POINTER-BORROWING.md), so a small file costs one small buffer and
+# a large one few reads (bench/filesystem.tcl: a 64-byte read_file took 14 us
+# with 64 KiB reads).
+private fn chunk_size(count: int) -> std::io::fs::ReadSize:
+    if count <= 0:
+        return 4096
+    if count == 1:
+        return 8192
+    if count == 2:
+        return 16384
+    if count == 3:
+        return 32768
+    if count == 4:
+        return 65536
+    if count == 5:
+        return 131072
+    if count == 6:
+        return 262144
+    if count == 7:
+        return 524288
+    1048576
+
+# Every byte of FD to the end of the file, in chunks of chunk_size, as one
+# Bytes.
 private fn read_rest(fd: std::ffi::c::Int, context fs: DarwinFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
     parts = chunks()
     loop:
-        data = fd.read_some(65536)
+        data = fd.read_some(chunk_size(std::mutable_vector::length(parts)))
         if std::abi::bytes::length(data).value == 0:
             break
         parts.push(data)

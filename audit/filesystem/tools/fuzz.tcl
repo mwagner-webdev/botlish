@@ -170,22 +170,29 @@ proc winConcat {base comp} {
     return "$base\\$comp"
 }
 
-proc randomWinBase {} {
-    set prefix [pick [list "" "C:" "C:\\" "C:/" "\\" "/" "\\\\s\\t" "//s/t" "\\\\?\\C:\\" "\\??\\C:\\" "\\\\.\\" "//./" "1:" "\\\\?\\UNC\\s\\t" "z:"]]
-    set s $prefix
-    for {set i [rand 4]} {$i > 0} {incr i -1} {
-        append s [pick [list a b . .. x. "y " \\ / é 𝄞 ab:c]]
+# Segments joined by random separators: "." and ".." whole segments, empty
+# ones (a doubled separator), trailing periods and spaces, ":" past a
+# drive, non-ASCII and astral characters.
+proc randomWinSegments {count} {
+    set out ""
+    for {set i 0} {$i < $count} {incr i} {
+        if {$i > 0} { append out [pick [list \\ \\ /]] }
+        append out [pick [list a b . .. x. "y " é 𝄞 ab:c "" a.b]]
     }
+    return $out
+}
+
+proc randomWinBase {} {
+    set prefix [pick [list "" "C:" "C:\\" "C:/" "\\" "/" "\\\\s\\t" "//s/t" "\\\\?\\C:\\" "\\??\\C:\\" \
+        "\\\\.\\" "//./" "//?/" "\\\\?\\" "1:" "\\\\?\\UNC\\s\\t" "z:"]]
+    set s $prefix[randomWinSegments [rand 4]]
     if {$s eq ""} { set s a }
     return $s
 }
 
 proc randomWinComponent {} {
-    set s [pick [list "" "" "" "" "\\" "/" "C:" "1:" "\\\\s\\t"]]
-    for {set i [expr {1 + [rand 4]}]} {$i > 0} {incr i -1} {
-        append s [pick [list a b . .. x. "y " \\ / é 𝄞 ab:c ""]]
-    }
-    return $s
+    set prefix [pick [list "" "" "" "" "" "\\" "/" "C:" "1:" "\\\\s\\t"]]
+    return $prefix[randomWinSegments [expr {1 + [rand 3]}]]
 }
 
 # UTF-16 units: mostly ASCII and BMP, some astral pairs, some lone

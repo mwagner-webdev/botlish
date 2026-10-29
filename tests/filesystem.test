@@ -495,7 +495,7 @@ fn read_refused(p: std::linux::fs::NativePath) -> List[any]:
 }]
 } -result {["short", [std::io::fs::Reason::AlreadyExists, 17], "one,two", 0, [std::io::fs::Reason::NotFound, 2]]}
 
-test fs-linux-large {a file of 3 MiB plus a few bytes is written with one write_file and read back whole (64 KiB reads joined), and in 1000-byte reads until the end: the same bytes, and the reads' sizes add up} -constraints nativeLinux -body {
+test fs-linux-large {a file of 3 MiB plus a few bytes is written with one write_file and read back whole (reads of 4 KiB doubling to 1 MiB, joined), and in 1000-byte reads until the end: the same bytes, and the reads' sizes add up} -constraints nativeLinux -body {
     set dir [fsDir]
     fsValue [fsProgram linux $dir {    cycle = loop i from 0 to 4096:
         i.mod(256)
@@ -517,6 +517,31 @@ test fs-linux-large {a file of 3 MiB plus a few bytes is written with one write_
     next.count_in_reads(total + n)
 }]
 } -result {[3145732, true, 3145732]}
+
+test fs-linux-short-reads {a short read is no end of the file: from a FIFO whose writer writes "abc", pauses and writes "def", one read of 100 bytes returns the three bytes there are, and read_all reads on until the writer closes -- and read_file of the FIFO gets every byte, however the writes arrive} -constraints nativeLinux -body {
+    set dir [fsDir]
+    set fifo [file join $dir fifo]
+    set fifo2 [file join $dir fifo2]
+    exec mkfifo $fifo $fifo2
+    set program [fsProgram linux $dir {    fifo = nroot.concat("fifo")
+    opened = fifo.open(std::io::fs::OpenMode::Read)
+    {file: f1, data: first} = opened.read(100)
+    {file: f2, data: rest} = f1.read_all()
+    f2.close()
+    whole = nroot.concat("fifo2").read_file()
+    [text_of(first), text_of(rest), text_of(whole)]}]
+    set hir [fsHir $program [linuxTarget]]
+    # Each writer opens its FIFO in the shell (an open for writing waits for
+    # the reader), writes, pauses and writes again, then exits: the end of
+    # the file.
+    set writers [list [exec sh -c "exec > '$fifo'; printf abc; sleep 1; printf def" &] \
+        [exec sh -c "exec > '$fifo2'; printf 12; sleep 1; printf 34" &]]
+    try {
+        lindex [outcomeUnderHir cranelift $hir] 1
+    } finally {
+        foreach writer $writers { catch {exec kill $writer} }
+    }
+} -cleanup {unset -nocomplain writers writer fifo fifo2 program hir} -result {["abc", "def", "1234"]}
 
 test fs-linux-entries {entries lists every entry but "." and ".." with its kind as the listing says: a file, a directory, a symbolic link and a dangling one (SymbolicLink both), a FIFO (Other); an empty directory lists nothing} -constraints nativeLinux -body {
     set dir [fsDir]

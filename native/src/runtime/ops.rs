@@ -5180,6 +5180,25 @@ mod tests {
     }
 
     #[test]
+    fn bytes_slice_copies_the_range_and_refuses_an_invalid_one() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let v = rooted!(vm, vm.new_bytes(&[1, 0, 255, 7, 9]));
+        let s = rt_bytes_slice(p, v, make_small(1), make_small(4));
+        assert_eq!(heap_kind(s), KIND_BYTES);
+        assert_eq!(bytes_of(s), &[0, 255, 7]);
+        assert_eq!(bytes_of(rt_bytes_slice(p, v, make_small(0), make_small(5))), &[1, 0, 255, 7, 9]);
+        assert_eq!(bytes_of(rt_bytes_slice(p, v, make_small(5), make_small(5))), &[] as &[u8]);
+        // std::str::substring's rule: a start below 0 or an end below the
+        // start is LowerUnderrun, an end past the count UpperOverrun.
+        for (start, end, error) in [(-1, 2, crate::runtime::error::ERR_LOWER_UNDERRUN), (3, 2, crate::runtime::error::ERR_LOWER_UNDERRUN), (0, 6, crate::runtime::error::ERR_UPPER_OVERRUN)] {
+            assert_eq!(rt_bytes_slice(p, v, make_small(start), make_small(end)), NO_VALUE, "{start} {end}");
+            assert_eq!(vm.declared_error, error, "{start} {end}");
+            assert!(vm.error.take().is_some());
+        }
+    }
+
+    #[test]
     fn bytes_decode_utf8_is_strict() {
         let mut vm = vm();
         let p: *mut Vm = &mut *vm;
