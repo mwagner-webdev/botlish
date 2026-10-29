@@ -93,7 +93,7 @@ test el-linux-build {the driver package installs into an application (tools/even
 # Wakeups
 
 test el-linux-wake {a producer thread's posts all arrive (300 jittered, 40 in racing pairs) and wake the sleeping loop at once: none waits for the 50 ms heartbeat} -constraints eventLoopLinux -body {
-    set t [elNative wake]
+    set t [elNative wakeups]
     set received [lmap m [elMatches $t {received (\d+)}] {lindex $m 1}]
     set late [tcl::mathop::+ {*}[lmap m [elMatches $t {posts later than 5 ms (\d+)}] {lindex $m 1}]]
     set max [tcl::mathfunc::max {*}[lmap m [elMatches $t {max latency us (\d+)}] {lindex $m 1}]]
@@ -101,14 +101,14 @@ test el-linux-wake {a producer thread's posts all arrive (300 jittered, 40 in ra
 } -result {{300 40} ok}
 
 test el-linux-lost-wakeup-control {positive control: the deliberately racy wakeup protocol (BOTLISH_EVENT_LOOP_FAULT=lost-wakeup) delays posts to the heartbeat, which the claim above detects} -constraints eventLoopLinux -body {
-    set t [elNative wake {BOTLISH_EVENT_LOOP_FAULT lost-wakeup}]
+    set t [elNative wakeups {BOTLISH_EVENT_LOOP_FAULT lost-wakeup}]
     set late [tcl::mathop::+ {*}[lmap m [elMatches $t {posts later than 5 ms (\d+)}] {lindex $m 1}]]
     set max [tcl::mathfunc::max {*}[lmap m [elMatches $t {max latency us (\d+)}] {lindex $m 1}]]
     expr {$late > 0 && $max > 10000 ? "detected" : "late $late max $max"}
 } -result detected
 
 test el-linux-idle {an idle 300 ms sleep takes one turn, one kernel sleep and well under 2% CPU, with or without an observer registered (an observer never makes the loop poll)} -constraints eventLoopLinux -body {
-    set t [elNative wake]
+    set t [elNative wakeups]
     lmap observed {0 1} {
         set turns [elNum $t "idle observed=$observed turns (\\d+)"]
         set sleeps [elNum $t "idle observed=$observed sleeps (\\d+)"]
@@ -277,7 +277,7 @@ test el-linux-audit {no library of the native scenarios (the fixtures, the netwo
     }
     set libraries {fx linuxnet evsdl sdlprobe gameserver workload elog}
     set offenders {}
-    foreach name {wake lines flood inflight gameserver-linux sdl-hybrid mixed-sdl-first} {
+    foreach name {wakeups lines flood inflight gameserver-linux sdl-hybrid mixed-sdl-first} {
         set hir [surface::readProgramFile [file join $::elApp $name.bot] -warnings off]
         foreach line [split [hir::contexts::summary $hir] \n] {
             if {[regexp {^source-function (\S+) \S+ direct-contexts \([^)]*\) required-contexts \(([^)]*)\)} $line -> fn required]} {

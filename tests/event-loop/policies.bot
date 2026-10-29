@@ -1,4 +1,4 @@
-# delivery.bot -- the Delivery policies and backpressure
+# policies.bot -- the Delivery policies and backpressure
 # (EVENT-LOOP-MILESTONE-1.md, "Native delivery").
 #
 # Botlish posts, no consumer yet:

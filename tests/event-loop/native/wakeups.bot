@@ -1,4 +1,4 @@
-# wake.bot -- wakeups, sleeping and idle cost on the Linux driver
+# wakeups.bot -- wakeups, sleeping and idle cost on the Linux driver
 # (EVENT-LOOP-EXPLORATION.md's b-wake, through the integration ABI).
 #
 #   latency  a producer thread posts COUNT records to an endpoint (a

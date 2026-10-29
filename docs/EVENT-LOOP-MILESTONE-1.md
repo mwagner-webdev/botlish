@@ -749,7 +749,7 @@ timers, production 6.8).
 | a channel registration, create + revoke (100,000 in a row) | 0.43 us |
 | the observer phase, per observer run (100 observers x 10,000 turns, against none) | 0.74 us (750.2 against 8.1 ms) |
 | two 20,000-record Reliable floods beside a quiet source (flood.bot) | 40,000 records in 230 ms wall (174,000 records/s); the quiet source's worst latency 121 us; 1,246 records held by the scheduler, 2,512 posts refused to the producers (backpressure); nothing lost or reordered (`el-linux-flood` checks it) |
-| wakeup latency of producer-thread posts (wake.bot: 300 jittered, 40 in racing pairs) | worst 1.9 ms (stream), 0.49 ms (pairs); none waited for the 50 ms heartbeat |
+| wakeup latency of producer-thread posts (wakeups.bot: 300 jittered, 40 in racing pairs) | worst 1.9 ms (stream), 0.49 ms (pairs); none waited for the 50 ms heartbeat |
 | an idle 300 ms sleep | one kernel sleep, 75 us of CPU |
 
 The exploration's idle figure was one wakeup and 90-120 us per 300 ms
@@ -763,7 +763,7 @@ the heap's bookkeeping against a scan of ten rows).
 
 ## 12. Testing
 
-**Deterministic** (`tests/event-loop.test`; 90 tests). Each
+**Deterministic** (`tests/event-loop.test`; 91 tests). Each
 scenario program (`tests/event-loop/*.bot`, an application root with its
 helper modules) is compiled with `-warnings error` and run on the pass's
 backends, which must agree on the whole trace: interp and cranelift in the
@@ -895,6 +895,22 @@ files that read the standard library's sources then passed on both passes
 (`mutable-array-type`, `stdlib`, `stdlib-namespaces`, `std-namespace`,
 `refined`, `refinement-values`, `typed-mutarray-builder`, `bot-modules`,
 `checked-domain-proof-provenance`: 509 tests each).
+
+The next macOS and Windows runs found a layout problem only a
+case-insensitive file system shows: a qualifier `Delivery::Lossy` in a
+scenario also found the module file `delivery.bot` of the same application
+root, and the loader rejected it as AMBIGUOUS-QUALIFIER (every scenario that
+names a delivery policy: 49 tests on macOS). The scenario is now
+`policies.bot`, the native wakeup program `wakeups.bot` (its `Wake::`
+qualifiers had the same latent clash with `wake.bot`), and
+`el-layout-case-safe` checks every application directory of the event loop
+for a module named, ignoring case, like a qualifier its programs write, so a
+Linux run catches it. The tests have census rows
+(`audit/golden/migration/census/event-loop.tsv`, `event-loop-linux.tsv`, the
+stale-edge test in `traits.tsv`; KEEP-MULTI-PROGRAM for the application-root
+scenarios and native programs, KEEP-INTERNAL for the audits, the allocation
+and feedback checks) and manifest rows (all ACTIVE-TCL-INTERNAL: nothing is
+skipped).
 `audit/stdlib-census/after.tsv` is regenerated for the new public surface
 (85 `api` and 229 `private` rows of `std::event_loop`; the regeneration also
 picks up earlier line drift in `core/cabi.tcl` and `stdlib/ordered_table.bot`).

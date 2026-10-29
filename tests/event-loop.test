@@ -96,7 +96,7 @@ proc elTurnOf {line} {
 
 foreach name {smoke fairness observers timers revocation errors gameserver-sim
               compose-alone compose-quiet-before compose-quiet-after compose-busy
-              delivery heap heapshape ownership fault hoststep} {
+              policies heap heapshape ownership fault hoststep} {
     test el-agree-$name "scenario $name compiles under -warnings error and gives one outcome on every backend of the pass (its trace)" -body {
         lindex [elRun $name] 0
     } -result 1
@@ -314,37 +314,37 @@ test el-revocation-waiters-order {revoking wakes every waiter, in the order they
 # Delivery policies and backpressure
 
 test el-delivery-posts {Botlish posts: Lossy accepts 4 and drops (counts) 6; Coalesce accepts 1 and merges 9; Reliable accepts 2 and refuses the third} -body {
-    set t [elTrace delivery]
+    set t [elTrace policies]
     list [lmap m [elMatches $t {lossy \d posted (\d)}] {lindex $m 1}] [elNum $t {lossy dropped (\d+)}] \
         [lmap m [elMatches $t {coalesce \d posted (\d)}] {lindex $m 1}] [lmap m [elMatches $t {reliable \d posted (\d)}] {lindex $m 1}]
 } -result {{1 1 1 1 3 3 3 3 3 3} 6 {1 2 2 2 2 2 2 2 2 2} {1 1 4}}
 
 test el-delivery-consumers {consumers then get the Lossy queue's first four in order, the coalesced event once (latest values, count 10), and a Reliable registration accepts again once it has room} -body {
-    set t [elTrace delivery]
+    set t [elTrace policies]
     list [lmap m [elMatches $t {taker got (\d+) count (\d+)}] {lrange $m 1 2}] [elNum $t {reliable post after a take (\d)}]
 } -result {{{0 1} {9 10} {0 1} {1 1} {2 1} {3 1}} 1}
 
 test el-delivery-reliable-records {a Reliable source with room for 2 and 12 records: nothing dropped, every record in order, the excess held by the driver and released as room appears} -body {
-    set t [elTrace delivery]
+    set t [elTrace policies]
     list [lmap m [elMatches $t {reliable source (\d+) count 1}] {lindex $m 1}] [elNum $t {reliable source dropped (\d+)}] \
         [expr {[elNum $t {held records (\d+)}] > 0}] [expr {[elNum $t {held records (\d+)}] == [elNum $t {released holds (\d+)}]}] \
         [elNum $t {driver undelivered (\d+)}]
 } -result {{0 1 2 3 4 5 6 7 8 9 10 11} 0 1 1 0}
 
 test el-delivery-lossy-coalesce-records {beside it, the Lossy source drops (8 of 12, counted) and the Coalesce source wakes fewer times, its counts adding up to 12} -body {
-    set t [elTrace delivery]
+    set t [elTrace policies]
     set counts [lmap m [elMatches $t {coalesce source \d+ count (\d+)}] {lindex $m 1}]
     list [elNum $t {lossy source dropped (\d+)}] [expr {[llength $counts] < 12}] [tcl::mathop::+ {*}$counts]
 } -result {8 1 12}
 
 test el-delivery-quiet-beside-held {a quiet source's records are delivered in the turn each is released, while the Reliable source is held} -body {
-    set t [elTrace delivery]
+    set t [elTrace policies]
     set turns [lmap m [elMatches $t {quiet (\d) at turn (\d+)}] {lindex $m 2}]
     list [llength $turns] [lmap a [lrange $turns 0 end-1] b [lrange $turns 1 end] {expr {$b - $a}}]
 } -result {3 {1 1}}
 
 test el-delivery-revoke-held {revoking a Reliable registration with a held record releases it at the driver: its 4 records left arrive stale and are dropped, nothing stays with the driver, and the registration reusing the slot gets none of them} -body {
-    set t [elTrace delivery]
+    set t [elTrace policies]
     list [elNum $t {gone pending before revoke (\d+)}] [elNum $t {gone driver undelivered before revoke (\d+)}] \
         [elNum $t {stale after revoke (\d+)}] [elNum $t {driver undelivered after revoke (\d+)}] \
         [expr {[elNum $t {reuse slot (\d+)}] == [elNum $t {gone slot (\d+)}]}] [elNum $t {reuse pending (\d+)}] [elNum $t {reuse waiter got (\d+) revoked 1}]
@@ -604,5 +604,31 @@ test el-static-audit {the driver audit reports the library function that drives 
     }
     list [elDriverRequirers [file join $::elDir library-drives.bot] $libraries] $offenders
 } -result {drivinglib::settle {}}
+
+# On a case-insensitive file system (macOS, Windows) a qualifier such as
+# `Delivery::Lossy` also finds a module file delivery.bot of the
+# application, and the loader rejects the qualifier as AMBIGUOUS-QUALIFIER:
+# no directory of the event loop's programs may hold a module whose name
+# equals, ignoring case, a qualifier its programs write.
+test el-layout-case-safe {no event-loop application directory holds a module named, ignoring case, like a type qualifier its programs write (Delivery::, Wake::, ...), which a case-insensitive file system would make ambiguous} -body {
+    set clashes {}
+    foreach dir {tests/event-loop tests/event-loop/native examples/event-loop examples/event-loop/native
+                 bench/event-loop packages/event_loop_linux} {
+        set files [glob -nocomplain -directory [file join $::projectRoot {*}[file split $dir]] *.bot]
+        set modules [lmap path $files {string tolower [file rootname [file tail $path]]}]
+        set qualifiers {}
+        foreach path $files {
+            foreach {- q} [regexp -all -inline {\m([A-Z][A-Za-z0-9_]*)::} [core::ReadFile $path]] {
+                lappend qualifiers $q
+            }
+        }
+        foreach q [lsort -unique $qualifiers] {
+            if {[string tolower $q] in $modules} {
+                lappend clashes "$dir: $q"
+            }
+        }
+    }
+    set clashes
+} -result {}
 
 cleanupTests

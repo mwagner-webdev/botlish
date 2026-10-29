@@ -21,7 +21,7 @@
 #   extra     production only: registration create + revoke, the observer
 #             phase's cost per observer, the flood scenario's throughput
 #             and quiet-source latency, wakeup latency and idle cost
-#             (tests/event-loop/native/flood.bot and wake.bot).
+#             (tests/event-loop/native/flood.bot and wakeups.bot).
 #
 # Best of N runs (default 3) for times; each run is a fresh process. Times
 # are a shared container's: treat them as orders of magnitude.
@@ -307,8 +307,8 @@ main():
     puts [format "  %-44s %s us wall for 40000 records (%.0f records/s), quiet max latency %s us, %s holds, %s refused posts" \
         "two floods + a quiet source (flood.bot)" [field $f {wall us}] [expr {40000.0 / max(1, [field $f {wall us}]) * 1e6}] \
         [field $f {quiet max latency us}] [field $f {held records}] [field $f {producer refusals}]]
-    set w [lines [file join $prod wake.bot]]
-    puts [format "  %-44s stream max %s us, pairs max %s us; idle 300 ms: %s us cpu, %s sleeps" "wakeup latency, idle (wake.bot)" \
+    set w [lines [file join $prod wakeups.bot]]
+    puts [format "  %-44s stream max %s us, pairs max %s us; idle 300 ms: %s us cpu, %s sleeps" "wakeup latency, idle (wakeups.bot)" \
         [lindex [regexp -all -inline {max latency us (\d+)} $w] 1] [lindex [regexp -all -inline {max latency us (\d+)} $w] 3] \
         [field $w {idle observed=0 cpu us}] [field $w {idle observed=0 sleeps}]]
 }
