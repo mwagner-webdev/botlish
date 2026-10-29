@@ -522,44 +522,52 @@ jobs:
         run: CORE_BACKEND=interp tclsh9.0 tests/all.tcl -tmpdir "$RUNNER_TEMP/mts-tests" -file main-thread-startup.test 2>&1 | tee mts-tests.log
 
       - name: Native status and executable facts (main-thread rows)
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
-          tclsh9.0 tests/platform/native-status.tcl 2>&1 | tee native-status.log
-          tclsh9.0 tests/platform/aot-facts.tcl 2>&1 | tee aot-facts.log
+          status=0
+          tclsh9.0 tests/platform/native-status.tcl 2>&1 | tee native-status.log || status=1
+          tclsh9.0 tests/platform/aot-facts.tcl 2>&1 | tee aot-facts.log || status=1
+          exit $status
 
+      # The acceptance runs whatever the steps above found: a failing test
+      # must not take the graphical evidence with it.
       - name: Cache the static SDL3 build
+        if: ${{ !cancelled() }}
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/botlish-sdl3-static
           key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/link-plan-sdl3.sh') }}
 
       - name: Static SDL3 (tests/platform/link-plan-sdl3.sh)
+        if: ${{ !cancelled() }}
         run: |
           export BOTLISH_SDL3_STATIC_PREFIX="$HOME/Library/Caches/botlish-sdl3-static"
           bash tests/platform/link-plan-sdl3.sh "$APP" 2>&1 | tee link-plan-sdl3.log | tail -n 20
 
       - name: The acceptance harness, copied out of the checkout
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p "$RUNNER_TEMP/acceptance"
           cp -R audit/macos-graphical-main-thread audit/main-thread-startup "$RUNNER_TEMP/acceptance/"
-          echo "PY=$(command -v python3)" >>"$GITHUB_ENV"
 
       # Botlish.app alone: this checkout inaccessible, PATH the system's (no
       # rustc, cargo or tclsh; Apple's cc, otool, sips and screencapture).
       - name: Graphical acceptance through Botlish.app (checkout inaccessible, no Rust)
+        if: ${{ !cancelled() }}
         working-directory: ${{ runner.temp }}
         run: |
+          py=$(command -v python3)
           chmod 000 "$GITHUB_WORKSPACE"
           trap 'chmod 755 "$GITHUB_WORKSPACE"' EXIT
           ls "$GITHUB_WORKSPACE" >/dev/null 2>&1 && { echo "::error::the checkout is still readable"; exit 1; }
-          env PATH=/usr/bin:/bin:/usr/sbin:/sbin "$PY" -I "$RUNNER_TEMP/acceptance/main-thread-startup/tools/acceptance.py" \
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin "$py" -I "$RUNNER_TEMP/acceptance/main-thread-startup/tools/acceptance.py" \
             --work "$RUNNER_TEMP/mts-app" --out "$RUNNER_TEMP/acceptance-app" \
             --sdl-prefix "$HOME/Library/Caches/botlish-sdl3-static" --app "$APP" --repeat 10 2>&1 | tee "$RUNNER_TEMP/acceptance-app.log"
 
       - name: The checkout's rustc and system linkers, main-thread
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
-          "$PY" -I audit/main-thread-startup/tools/acceptance.py \
+          python3 -I audit/main-thread-startup/tools/acceptance.py \
             --work "$RUNNER_TEMP/mts-checkout" --out "$RUNNER_TEMP/acceptance-checkout" \
             --sdl-prefix "$HOME/Library/Caches/botlish-sdl3-static" --app "$APP" --checkout "$PWD" \
             --tclsh "$(command -v tclsh9.0)" --only identity,lc-main,report,semantics,graphical --repeat 3 2>&1 | tee acceptance-checkout.log
