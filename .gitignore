@@ -1,13 +1,14 @@
-# Binaries bench/bench.tcl compiles from bench/equivalents/rust/*.rs and
-# caches alongside the source, rebuilt automatically when the source changes.
+# bench/bench.tcl builds the Rust and Go reference programs into a private
+# temporary directory; these keep a binary built beside its source by hand
+# (or by an older bench.tcl, which cached them there) out of git.
 /bench/equivalents/rust/*
 !/bench/equivalents/rust/*.rs
-
-# Same for the Go equivalents (bench/equivalents/go/*.go): cached binaries
-# have no way to be checked stale and compile quickly, so they are not
-# committed.
 /bench/equivalents/go/*
 !/bench/equivalents/go/*.go
+/bench/experimental/equivalents/rust/*
+!/bench/experimental/equivalents/rust/*.rs
+/bench/experimental/equivalents/go/*
+!/bench/experimental/equivalents/go/*.go
 __pycache__/
 
 # The fuzzing campaign tree (FUZZING-EXAMPLES-AOT.md). Everything the

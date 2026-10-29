@@ -375,6 +375,19 @@ authored or checked in for a new canonical benchmark; if an audit needs
 one, `native/generate-scalar-audit.tcl`-style tooling generates and
 regenerates it on demand.
 
+Every benchmark also has a hand-translated reference program in each of
+Python, Rust and Go, `bench/equivalents/{python,rust,go}/BASE.{py,rs,go}`
+(BASE: the name with `-` as `_`), printing the same value as `value: V`
+and its best time as `best_us: F` (`fib.py` documents the protocol);
+`tests/bench-backends.test` fails for a benchmark without all three. An
+*experimental* benchmark -- a workload of a recent milestone or audit that
+lives beside its own modules elsewhere in the repository -- is
+`bench/experimental/NAME.bot` with a `# bench-modules: PATH ...` header
+naming those modules, which `bench/bench.tcl` stages beside it in a private
+directory; its reference programs are under `bench/experimental/
+equivalents/`, and it is reported in a table of its own that never fails
+the run (`bench/bench.tcl`'s header has the rules).
+
 ## Fresh structural baselines
 
 Established for all four migrated benchmarks via the regenerated

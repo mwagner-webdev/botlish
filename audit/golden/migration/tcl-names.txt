@@ -445,6 +445,8 @@ tests/bench-backends.test bench-backends-1 pass
 tests/bench-backends.test bench-backends-2 pass
 tests/bench-backends.test bench-backends-3 pass
 tests/bench-backends.test bench-backends-4 pass
+tests/bench-backends.test bench-backends-5 pass
+tests/bench-backends.test bench-backends-6 pass
 tests/bench-corpus.test bench-corpus-fib.bot pass
 tests/bench-corpus.test bench-corpus-loop-count.bot pass
 tests/bench-corpus.test bench-corpus-refined-checks.bot pass
