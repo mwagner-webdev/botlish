@@ -214,3 +214,11 @@ int mtp_fault(void) {
     *(volatile int *)where = 1;
     return 0;
 }
+
+/* Sleeps MS milliseconds in a C call (nanosleep, restarted after a handled
+ * signal): a program that is busy in C, for the termination probes. */
+int mtp_sleep_ms(int ms) {
+    struct timespec left = {ms / 1000, (long)(ms % 1000) * 1000000L};
+    while (nanosleep(&left, &left) != 0) {}
+    return ms;
+}

@@ -68,3 +68,6 @@ extern c fn SDL_RunOnMainThread(callback: std::ffi::c::FnPtr[Fn{args: [std::ffi:
 
 # A store to address 16: a fault that is not a stack overflow.
 extern c fn fault named "mtp_fault"() -> std::ffi::c::Int
+
+# Sleeps in C (nanosleep): a program busy in a C call, for the termination probes.
+extern c fn sleep_ms named "mtp_sleep_ms"(ms: std::ffi::c::Int) -> std::ffi::c::Int

@@ -333,7 +333,7 @@ class Census:
 
     def botlish(self):
         log("== Botlish executables")
-        common = ["identity", "sdl", "depth", "kept", "co_overflow", "fault", "big", "errors"]
+        common = ["identity", "sdl", "depth", "kept", "co_overflow", "fault", "big", "errors", "sleep"]
         self.exe = {}
         prod = self.stage("prod", common)
         compiler = "app" if self.args.app else "checkout"
@@ -564,6 +564,15 @@ class Census:
         if problems:
             return "FAILED-CORRECTNESS", dict(facts, problem="; ".join(problems)), bool(expect.get("fails"))
         return "EXECUTED-THREAD", facts, not expect.get("fails")
+
+    def classify_signal(self, r, expect, name):
+        """A program ended by a signal it was sent: died by exactly that signal, after it started running."""
+        started = any(l.get("kind") == "mark" for l in r["mtp"])
+        facts = {"status": r["status"], "signal": r["signal"], "started": started, "wall_ms": round(r["wall_ms"])}
+        ok = started and r["signal"] == expect.get("signal") and not r["timed_out"]
+        if expect.get("fails"):
+            return "FAILED-CORRECTNESS", dict(facts, problem="as the control intends"), not ok
+        return ("EXECUTED-THREAD" if ok else "FAILED-CORRECTNESS"), facts, ok
 
     def classify_deadlock(self, r, expect, name):
         dead = next((l for l in r["mtp"] if l.get("kind") == "deadlock"), None)
@@ -910,9 +919,12 @@ class Census:
                 self.case("s-main-sigterm-sdl", "semantics", [exp("sdl")], "graphical", env=main,
                           signal_after=(1.0, signal.SIGTERM), expect={"class": "EXECUTED-COCOA"},
                           note="SIGTERM one second in: SDL's handler makes it a quit event")
-                self.case("s-main-sigterm-identity", "semantics", [exp("depth"), "keep", "100000000"], "process", env=main,
-                          signal_after=(0.5, signal.SIGTERM), expect={"signal_ok": True, "fails": False},
-                          timeout=60, note="no SDL: SIGTERM's default disposition ends the process")
+            # No SDL: the runtime leaves SIGTERM and SIGINT (Ctrl+C) at their defaults on every thread.
+            for label, env in (("worker", worker), ("main", main)):
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    self.case(f"s-{label}-{sig.name.lower()}-c-call", "semantics", [exp("sleep")], "signal", env=env,
+                              signal_after=(1.0, sig), expect={"signal": int(sig), **({"fails": True} if not APPLE and label == "main" else {})},
+                              timeout=30, note="a program in a 5 s C call, signalled after 1 s")
             # The rustc linker's startup on the main thread, graphically.
             if APPLE:
                 self.case("a-main-rustc-cocoa", "candidate-a", [e.get(("exp-rustc", "sdl"))], "graphical", env=main,
