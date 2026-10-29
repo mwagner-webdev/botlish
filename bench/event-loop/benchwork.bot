@@ -70,3 +70,36 @@ fn spawn_observers(n: int, k: int, context ev: std::event_loop::Loop) errors Ind
         std::event_loop::adopt(step, first)
     coroutine {step: y, first: yf} = yielder(k)
     std::event_loop::adopt(y, yf)
+
+# A consumer that drains: one wait, then try_take until the channel is
+# empty, K events in all.
+fn drainer(ch: std::event_loop::Reg, k: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    total = std::mutable_array::create(2, 0)
+    loop:
+        if total.at(1) >= k:
+            break
+        e = std::event_loop::wait(ch)
+        total.set(0, total.at(0) + e.a)
+        total.set(1, total.at(1) + 1)
+        loop:
+            t = std::event_loop::try_take(ch)
+            if t.reason != Wake::Event:
+                break
+            total.set(0, total.at(0) + t.a)
+            total.set(1, total.at(1) + 1)
+    total.at(0)
+
+# K posts, four per turn.
+fn burster(ch: std::event_loop::Reg, k: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to k:
+        ch.post(i, 0)
+        if i.mod(4) == 3:
+            std::event_loop::yield_now()
+    k
+
+fn spawn_drain(k: int, context ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    ch = std::event_loop::channel(Delivery::Reliable, 8)
+    coroutine {step: c, first: cf} = drainer(ch, k)
+    std::event_loop::adopt(c, cf)
+    coroutine {step: p, first: pf} = burster(ch, k)
+    std::event_loop::adopt(p, pf)

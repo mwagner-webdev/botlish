@@ -224,13 +224,19 @@ if {"alloc" in $parts} {
         set p2 [file join $proto [expr {[string match yield* $label] ? "alloc-yield-2" : "alloc-event-2"}].bot]
         lassign [allocations $p1 simdrv.bot] c1 b1
         lassign [allocations $p2 simdrv.bot] c2 b2
+        # (The larger program has twice the work: its setup is 2*c1 - c2.)
         puts [format "  %-32s %-10s %.3f allocations, %.1f bytes each (setup %d)" $label prototype \
-            [expr {double($c2 - $c1) / $n}] [expr {double($b2 - $b1) / $n}] $c1]
+            [expr {double($c2 - $c1) / $n}] [expr {double($b2 - $b1) / $n}] [expr {2 * $c1 - $c2}]]
         lassign [allocations [prodAlloc alloc-a "benchwork::$small"] deterministic.bot] c1 b1
         lassign [allocations [prodAlloc alloc-b "benchwork::$large"] deterministic.bot] c2 b2
         puts [format "  %-32s %-10s %.3f allocations, %.1f bytes each (setup %d)" $label production \
-            [expr {double($c2 - $c1) / $n}] [expr {double($b2 - $b1) / $n}] $c1]
+            [expr {double($c2 - $c1) / $n}] [expr {double($b2 - $b1) / $n}] [expr {2 * $c1 - $c2}]]
     }
+    # Draining with try_take (production only: the prototype has no such program).
+    lassign [allocations [prodAlloc alloc-a "benchwork::spawn_drain(5000)"] deterministic.bot] c1 b1
+    lassign [allocations [prodAlloc alloc-b "benchwork::spawn_drain(10000)"] deterministic.bot] c2 b2
+    puts [format "  %-32s %-10s %.3f allocations, %.1f bytes each (setup %d)" "event drained (try_take)" production \
+        [expr {double($c2 - $c1) / 5000}] [expr {double($b2 - $b1) / 5000}] [expr {2 * $c1 - $c2}]]
 }
 
 if {"dispatch" in $parts} {

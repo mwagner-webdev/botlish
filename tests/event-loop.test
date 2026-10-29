@@ -464,6 +464,40 @@ test el-hoststep-feedback-exact {the host-stepped program's yield inference: the
 } -result {{{block {the installed context stepdrv::Step}}} 1}
 
 # --------------------------------------------------------------------------
+# Allocation (natively)
+
+# Allocations natively made running SPAWN (benchwork.bot, bench/event-loop/)
+# under the deterministic driver, the driver's own sites left out.
+proc elAllocations {dir spawn} {
+    set path [file join $dir alloc.bot]
+    set f [open $path w]
+    puts $f "import benchwork\nimport std::event_loop\nimport std::event_loop::deterministic\n\nfn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:\n    benchwork::$spawn\n    std::event_loop::run()\n\nwith context std::event_loop::create(64)\nwith context std::event_loop::deterministic::create()\nmain():\n    on IndexNotFound:\n        -1\n    on std::event_loop::SchedulerFault:\n        -2\n    on std::event_loop::DriverFault:\n        -3\n    on std::event_loop::LoopReentered:\n        -4"
+    close $f
+    set report [native::allocationReport [surface::readProgramFile $path -warnings off] sites]
+    set count 0
+    foreach site [dict get $report sites] {
+        if {![string match *deterministic.bot [dict getdef [dict getdef $site location {}] file {}]]} {
+            incr count [dict getdef $site allocations 0]
+        }
+    }
+    return $count
+}
+
+test el-alloc-per-event {natively the scheduler allocates nothing per dispatch or per event -- a yield_now dispatch, a channel event (post and wait) and an event drained with try_take: the allocations of two sizes of each program are equal (wait and try_take build their Event where they return it, which the native backend carries as fields)} -constraints nativeCoroutines -body {
+    set dir [makeDirectory el-alloc]
+    file copy -force [file join $::projectRoot bench event-loop benchwork.bot] $dir
+    lmap {small large} {
+        {spawn_yielders(10, 500)} {spawn_yielders(10, 1000)}
+        {spawn_pair(500)} {spawn_pair(1000)}
+        {spawn_drain(500)} {spawn_drain(1000)}
+    } {
+        expr {[elAllocations $dir $large] - [elAllocations $dir $small]}
+    }
+} -cleanup {
+    removeDirectory el-alloc
+} -result {0 0 0}
+
+# --------------------------------------------------------------------------
 # The examples (examples/event-loop; EVENT-LOOP-MILESTONE-1.md, "Public
 # API"): each compiled with -warnings error and run on the pass's backends,
 # which agree; their traces are the ones the examples' comments describe.

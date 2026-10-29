@@ -363,7 +363,11 @@ private s_tmp_taken = 42
 private s_tmp_i = 43
 private s_tmp_obs = 44
 private s_tmp_dead = 45
-private s_count = 46
+# what try_take took (read by try_take itself)
+private s_take_a = 46
+private s_take_b = 47
+private s_take_count = 48
+private s_count = 49
 
 opaque context struct Loop:
     ready_in: MutableVector[Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}]
@@ -1289,30 +1293,29 @@ private fn wake_of(code: int) -> Wake:
     else:
         Wake::Empty
 
-private fn revoked_event() -> Event:
-    Event {reason: Wake::Revoked, a: 0, b: 0, count: 0}
-
-private fn wake_checked(context ev: Loop) -> Event errors IndexNotFound:
-    Event {reason: wake_of(ev.st.at(s_wake_reason)), a: ev.st.at(s_wake_a), b: ev.st.at(s_wake_b), count: ev.st.at(s_wake_count)}
-
 # Wait for REG's next event (or its timer, its turn, its revocation). A
 # registration that is not live answers Wake::Revoked at once, without
 # suspending.
+#
+# (wait and try_take build their Event where they return it, from the
+# registers: the native backend then carries its fields to the caller
+# without allocating -- an Event returned from a helper through a handler
+# cost an allocation per event, bench/event-loop.tcl.)
 fn wait(reg: Reg, context ev: Loop) -> Event errors SchedulerFault:
     if not live?(reg):
-        return revoked_event()
+        return Event {reason: Wake::Revoked, a: 0, b: 0, count: 0}
     yield reg.slot
-    wake_checked():
-        on IndexNotFound:
-            fail SchedulerFault
+    Event {reason: wake_of(reg_of(s_wake_reason)), a: reg_of(s_wake_a), b: reg_of(s_wake_b), count: reg_of(s_wake_count)}
 
-private fn try_take_checked(reg: Reg, context ev: Loop) -> Event errors IndexNotFound:
+# Take REG's first queued event into the take registers: what try_take
+# answers (a w_* code).
+private fn try_take_checked(reg: Reg, context ev: Loop) -> int errors IndexNotFound:
     if not live_checked?(reg):
-        return revoked_event()
+        return w_revoked
     slot = reg.slot
     npend = rget(slot, r_npend)
     if npend == 0 or rget(slot, r_kind) == kind_timer:
-        return Event {reason: Wake::Empty, a: 0, b: 0, count: 0}
+        return w_empty
     node = rget(slot, r_phead)
     a = ev.events.at(node * es)
     b = ev.events.at(node * es + 1)
@@ -1324,15 +1327,22 @@ private fn try_take_checked(reg: Reg, context ev: Loop) -> Event errors IndexNot
     rset(slot, r_npend, npend - 1)
     ev.e_free.push(node)
     release_if_room(slot)
-    Event {reason: Wake::Event, a: a, b: b, count: count}
+    set_reg(s_take_a, a)
+    set_reg(s_take_b, b)
+    set_reg(s_take_count, count)
+    w_event
 
 # REG's next queued event without suspending: Wake::Event, Wake::Empty when
 # nothing is queued, Wake::Revoked when REG is not live. A task that drains
 # a queue this way handles a whole batch in one dispatch.
 fn try_take(reg: Reg, context ev: Loop) -> Event errors SchedulerFault:
-    try_take_checked(reg):
+    code = try_take_checked(reg):
         on IndexNotFound:
             fail SchedulerFault
+    if code == w_event:
+        Event {reason: Wake::Event, a: reg_of(s_take_a), b: reg_of(s_take_b), count: reg_of(s_take_count)}
+    else:
+        Event {reason: wake_of(code), a: 0, b: 0, count: 0}
 
 # Sleep DELAY microseconds (a one-shot timer of its own): Wake::Timer, or
 # Wake::Revoked when the loop shut down meanwhile.
