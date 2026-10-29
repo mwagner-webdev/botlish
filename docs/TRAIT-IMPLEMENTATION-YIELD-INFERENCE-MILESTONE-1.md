@@ -463,7 +463,142 @@ function, and none says "in the monomorphized program".
 
 ## 11. Testing
 
-TBD
+Every accepted program of the new tests runs on all four backends --
+interp, compile, cranelift-generic, cranelift -- with one outcome
+(`moduleAgree`).
+
+**Regression tests.** tests/context-traits.test: `ct-implementation-yield-
+coroutine`, `-negative`, `-transitive`, `-chain`, `-protocol`,
+`-selection-errors`, `-order` (the implementation's module before or
+after the trait's, the yielding helper before or after its caller, the
+imports in either order: one outcome), `-event-loop`,
+`-hir` (the graph in the checked HIR: only the operations the program
+calls, only yield-capable implementations; an empty graph for a program
+none of whose implementations yields). tests/traits.test:
+`trait-implementation-yield-coroutine`, `-negative`, `-witnesses`,
+`-local-view`, `-own-yield`, `-use-site`, `-generic-body`,
+`-function-value`, `-imprint`, `-rounds`, `-economics`, `-agreement`.
+tests/static-economics.test: `se-equal-implementation-yield`.
+
+**The limitation tests, converted.**
+`ct-operation-identity-implementation-yield-limitation` is
+`ct-implementation-yield-coroutine` (`[5, 105]`, `[5, 106]`, `[5, 105]`:
+the coroutine runs, under three wrappers); `ct-operation-identity-
+implementation-yield` and `trait-operation-identity-implementation-yield`
+now expect the checked program's UNWRAPPED-YIELD naming the operation and
+the implementation (no "monomorphized program", no clone names), and the
+second runs the coroutine its old version rejected.
+
+**Adversarial programs.** `-rounds` needs a third check (an
+implementation's protocol types a yield whose value is passed to another
+trait parameter, whose implementation then yields); `-generic-body`
+pins the boundary of section 12; `-selection-errors` adds a construction
+inside a function the program never calls, with no provider installed,
+which is judged as before (section 12);
+`-use-site` an operation receiving a yield's value through an
+implementation that never yields; `-economics` the gate and the pruning
+(section 9); `-agreement` compares build 1's yielding functions per
+specialization with build 2's.
+
+**A differential fuzzer** (`audit/trait-implementation-yield/tools/
+fuzz.tcl`). Programs of one trait -- ordinary or context -- with two or
+three implementations in modules of their own (each yielding 0-2 times,
+the zero-message protocol or its own message), a chain of 1-3 functions
+over the trait and, for half of them, a yielding function of the
+operation's name visible to its method syntax. An oracle independent of
+the compiler knows from the program alone which implementation each call
+selects, so whether a coroutine is accepted, every value it sends and
+returns, and whether a top-level call is UNWRAPPED-YIELD; three forms per
+program (a coroutine; a top-level call; for ordinary traits both in one
+program with different witnesses), every backend.
+
+| run | programs | forms | accepted | failures |
+|---|---:|---:|---:|---:|
+| seed 1 | 40 | 99 | 44 | 0 |
+| seed 2 | 40 | 99 | 41 | 0 |
+| seed 3 | 40 | 100 | 46 | 0 |
+| seed 4, `-gc-stress 1` | 20 | 46 | 21 | 0 |
+| the starting tree (`24de220d`), seed 1, interp and cranelift | 20 | 51 | 6 | **24** |
+
+On the starting tree all 24 failures are false rejections: 17
+COROUTINE-RHS-NOT-YIELDING and 7 COROUTINE-RESUME-ARITY with
+COROUTINE-RHS-NOT-YIELDING.
+
+**Mutants** (each must still apply and be killed; every one was run
+against the final code):
+
+| harness | mutants | killed | skipped (host) | new |
+|---|---:|---:|---:|---|
+| `audit/traits/tools/mutate.tcl` | 40 | 40 | 0 | 16 |
+| `audit/context-traits/tools/mutate.tcl` | 63 | 48 | 15 (Darwin, Windows) | 4 |
+| `audit/coroutines/tools/mutate.tcl` | 52 | 52 | 0 | 0 (3 re-anchored) |
+| `audit/static-decisions/tools/mutate.tcl` | 74 | SD_KILLED | 0 | 1 |
+| `audit/trait-constrained-types/tools/mutate.tcl` (the 19 that edit a file this milestone changed) | 19 | 19 | 0 | 0 |
+| `audit/affine/tools/mutate.tcl` (the 7 that edit a file this milestone changed) | 7 | AF_KILLED | 0 | 0 |
+| `audit/hir-interchange/tools/mutate.tcl` | 28 | HI_KILLED | 0 | 0 |
+
+Each new mutant is killed by the behavior it breaks: a missing or
+one-level edge by the coroutine and transitive tests, an implementation of
+another witness or one found by name by the per-witness tests, the
+protocol skipped by `-witnesses`/`-own-yield`/`-rounds`, the instance
+typed generically by `-own-yield`, the restored selection cascade by
+`-selection-errors`, unpruned edges and specializations, the plan run
+after every check (`effect-plan-always`) by `-economics` alone, the gate
+without its receivers by `-use-site` alone, staticdeps without the
+implementations by `se-equal-implementation-yield` (a misprediction).
+The traits mutant `runtime-wrapper` no longer applied before this
+milestone (the planned call's arguments had moved into
+`hir::CheckingCall`); it is re-anchored and killed.
+
+**Existing fuzzers** (final code): coroutines seeds 1-3 (150 programs, 0
+disagreements), context traits seeds 1-2 (100, 0), traits seeds 1-2 (200,
+156 accepted with 464 specializations, 0 failures), static decisions seeds
+17 and 41 (1048 sites, 0 failures), affine seed 1 (30, 0),
+trait-constrained types seed 1 (20, 0).
+
+**The event loop** (section 1's fourth row, EVENT-LOOP-EXPLORATION.md's
+evidence, on the final code). `audit/event-loop/tools/check.tcl`: the
+simulation's 61 claims, the static part's 13 and the lifetime prototype's
+5 hold on all four backends. `audit/event-loop/tools/original-names.tcl`
+(the driver's operations renamed back to `now` and `wait`, a function of
+the same name visible to each): PASS, 44 checks -- one outcome on four
+backends under either name. The scheduler under a driver whose `block`
+yields to the host (`audit/event-loop/repro/host-stepped-driver/`, the
+library `src/evloop.bot` unchanged) compiles under
+`-warnings error` and runs, one outcome on four backends: the host steps
+`main`, receiving each deadline the scheduler blocks until (100, then
+200), and its trace shows the tasks waking at t=1 and t=2 and the loop
+ending with no live work (`ct-implementation-yield-event-loop`); the starting tree rejects it with COROUTINE-RHS-NOT-YIELDING.
+
+**Suites.**
+
+* `tclsh9.0 tests/local.tcl` (every Tcl test file on interp and compile,
+  every golden suite on four backends): 109 golden suites, 0 failed
+  (interp 5257/5257, compile 5257/5257, cranelift-generic 5165/5165,
+  cranelift 5267/5267); Tcl tests 7527 passed on interp and 7522 on
+  compile, two failures each, both artifacts of editing the front end
+  while the run was in progress: `se-property-plan-gate` (fixed before the
+  run reached it) and `cf-va-interchange` (its child process read the
+  interchange text with a front end whose fingerprint had changed since
+  the parent wrote it; it passes alone).
+* After the last change, the files it touches and their neighbors
+  (`tests/local.tcl` on traits, context-traits, coroutines,
+  static-economics, static-compile, hir-interchange, hir-cache,
+  compilation-isolation, trait-constrained-types, affine and golden.test,
+  with their golden suites): 429/429 Tcl tests on each backend, 11 golden
+  suites 558/558 on each of the four.
+* `audit/hir-interchange/tools/roundtrip.tcl -via interchange`: 12 suites,
+  108 artifacts and outcomes compared, 0 differ; `-via cache`: RT_CACHE.
+* `tools/compilerpedia.tcl check`: COMPILERPEDIA.
+
+**CI on the branch.** `static-decisions` (the batched scheduler against
+the sequential one on every golden suite, which may not run locally):
+agrees on every suite at the first commit and at the economics commit
+(mutable-array.bot: batched 5 rounds and 7 builds, sequential 69 and 205,
+as before), FINAL_SD. `tests` (the whole Tcl suite with the golden
+duplicates on interp and compile, the cranelift and cranelift-generic
+coverage, the golden shards, the executables, the warning gate, the Rust
+tests): success at the first commit, FINAL_TESTS.
 
 ## 12. Remaining limitations
 
