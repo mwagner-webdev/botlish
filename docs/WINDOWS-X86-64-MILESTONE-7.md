@@ -91,7 +91,7 @@ fn save(dir: std::io::fs::FilePath, text: str) errors std::io::path::NotAPath, s
 fn main() errors std::io::path::NotAPath, std::io::fs::FileError:
     home = "/tmp"
     std::linux::path::validate(home)
-    save(home, "hello")
+    home.save("hello")
 
 with context std::linux::fs::create()
 main():
@@ -115,8 +115,9 @@ native paths that every name a directory holds round-trips through, opened
 files with explicit modes, single reads and writes with their short counts,
 and listings with native names. Nothing in the compiler, the runtime or the
 backends knows a path or a file: the modules are ordinary Botlish over raw
-syscalls (Linux), C calls (Windows, macOS) and byte storage. The language
-and compiler changes are three primitives and one fix:
+syscalls (Linux), C calls (Windows, macOS) and byte storage. Below the
+library there are three byte-storage primitives, five Linux syscall
+wrappers and one compiler fix:
 
 * `std::abi::bytes::join` (one Bytes of many: a file read in chunks),
   `slice` (a range of a Bytes: the rest after a short write) and
@@ -699,7 +700,8 @@ FilePath implementations, the Linux path syscalls, or `std::abi::bytes::join`,
 * `tclsh9.0 audit/filesystem/tools/mutate.tcl` (every mutant in its
   `mutants.txt` that applies to the host must still apply and be killed:
   update a mutant's text when you change the code it mutates, keeping it a
-  mutant of the same rule; the `%% windows-x86_64` mutants on Windows);
+  mutant of the same rule; the `%% windows-x86_64` mutants on Windows, the
+  `%% macos-aarch64` one on macOS: the tier item `filesystem-mutants`);
 * the warning gate (`audit/refactor/tools/gate.tcl`) and
   `tools/compilerpedia.tcl check`;
 * `bench/filesystem.tcl` regenerates section 14;

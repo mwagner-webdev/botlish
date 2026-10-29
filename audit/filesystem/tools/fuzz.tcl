@@ -576,6 +576,11 @@ main():
             report files $backend value $value
             continue
         }
+        if {[lindex $value 0] in {FileError NotAPath}} {
+            # The program's own failure (main's handlers), not a listing.
+            report files $backend "[llength $expected] names" $value
+            continue
+        }
         set got [lsort [lmap entry $value {list [lindex $entry 0] [lindex $entry 1]}]]
         if {$got ne $expected} {
             set missing [lmap e $expected {if {$e in $got} continue; set e}]
