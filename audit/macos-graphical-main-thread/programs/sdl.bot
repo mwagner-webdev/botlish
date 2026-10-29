@@ -1,0 +1,161 @@
+direct module
+# sdl.bot -- the minimal graphical lifecycle, every SDL operation a call of
+# this Botlish program's (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, sections 6
+# and 10): SDL_IsMainThread before anything, SDL_Init(SDL_INIT_VIDEO), a
+# 320x240 window, a renderer, magenta frames presented with the events
+# pumped between them -- on the thread's stack, then inside a coroutine (a
+# C call from a coroutine stack) -- a capture of the window, a quit event
+# pushed and polled back, the renderer and window destroyed, SDL_Quit. The
+# fixture (probe::mark, probe::sdl, ...) reports each stage's thread and
+# SDL's error and driver; tools/census.py reads its lines.
+#
+# The value: [SDL_IsMainThread before init, init, SDL_IsMainThread after,
+# window, renderer, frames presented, frames presented in the coroutine,
+# quit pushed, [events polled, quit seen]].
+#
+# `direct module`: passing the window and renderer to SDL functions whose
+# contract says nothing of the pointers is a retaining call
+# (DIRECT-MODULES.md); a probe has no context to mediate it.
+import probe
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::ffi::c
+import std::list
+import std::str
+
+# The one field of an SDL_Event the probe reads and writes: its type.
+layout Event:
+    size 128
+    align 8
+    field kind: std::binary::U32 at 0
+
+# SDL_EVENT_QUIT (SDL_events.h).
+fn quit_kind() -> int:
+    256
+
+fn nul() -> std::byte::Byte:
+    0
+
+fn title() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8("Botlish main-thread census").append(nul()))
+
+fn kind_of(data: std::abi::bytes::MutableBytes) -> int:
+    e = std::binary::parse(Event, std::abi::bytes::freeze(data)):
+        on LayoutLengthMismatch:
+            LayoutStruct[Event] {kind: 0}
+    e.kind
+
+fn event_buffer() -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::zeroed(std::abi::usize(128)):
+        on std::abi::AbiIntegerBelowRange:
+            std::abi::bytes::zeroed(std::abi::Usize {value: 0})
+        on std::abi::AbiIntegerAboveRange:
+            std::abi::bytes::zeroed(std::abi::Usize {value: 0})
+
+# Polls the queue until the quit event comes back, at most BUDGET polls
+# (5 ms apart while it is empty): [events seen, 1 if the quit was seen].
+fn drain(budget: int, seen: int) -> List[int]:
+    if budget == 0:
+        return [seen, 0]
+    r = probe::SDL_PollEvent(event_buffer())
+    if r.result:
+        if kind_of(r.event) == quit_kind():
+            return [seen + 1, 1]
+        return drain(budget - 1, seen + 1)
+    probe::SDL_Delay(5)
+    drain(budget - 1, seen)
+
+# One magenta frame, presented, and the events pumped: whether all three
+# calls succeeded.
+fn frame(renderer: std::ffi::c::Ptr[probe::Renderer]) -> bool:
+    colored = probe::SDL_SetRenderDrawColor(renderer, 255, 0, 255, 255)
+    cleared = probe::SDL_RenderClear(renderer)
+    presented = probe::SDL_RenderPresent(renderer)
+    probe::SDL_PumpEvents()
+    probe::SDL_Delay(16)
+    colored and cleared and presented
+
+# N frames on this stack: how many were presented.
+fn frames(renderer: std::ffi::c::Ptr[probe::Renderer], n: int, done: int) -> int:
+    if n == 0:
+        return done
+    ok = frame(renderer.clone())
+    next = if ok:
+        done + 1
+    else:
+        done
+    frames(renderer.clone(), n - 1, next)
+
+# A coroutine that presents one frame per resume, on its own stack: the
+# number presented so far at each yield, the total at the end.
+fn frame_task(renderer: std::ffi::c::Ptr[probe::Renderer], n: int) -> int:
+    probe::mark(10)
+    loop i from 0 to n:
+        ok = frame(renderer.clone())
+        count = if ok:
+            i + 1
+        else:
+            i
+        yield count
+    n
+
+# The handle is an argument: fusion keeps the coroutine on the general
+# runtime (COROUTINE-FUSION-MILESTONE-1.md), so it runs on a stack of its
+# own and each resume is a stack switch -- on the same OS thread.
+fn resume_all(step: Coroutine{args: [], return: int, errors: []}) -> int:
+    a = step()
+    b = step()
+    probe::mark(11)
+    step()
+
+fn coroutine_frames(renderer: std::ffi::c::Ptr[probe::Renderer]) -> int:
+    coroutine {step, first} = frame_task(renderer, 3)
+    resume_all(step)
+
+fn with_window(window: std::ffi::c::Ptr[probe::Window]) -> list:
+    default_driver = std::ffi::c::null[std::ffi::c::Char]()
+    renderer = probe::SDL_CreateRenderer(window, default_driver)
+    made = probe::renderer(renderer)
+    probe::sdl(4, made == 1, probe::SDL_IsMainThread())
+    presented = if made == 1:
+        frames(renderer.clone(), 30, 0)
+    else:
+        0
+    probe::mark(5)
+    in_coroutine = if made == 1:
+        coroutine_frames(renderer.clone())
+    else:
+        0
+    probe::capture(window)
+    pushed = probe::SDL_PushEvent(std::binary::emit(LayoutStruct[Event] {kind: 256}))
+    probe::sdl(14, pushed, probe::SDL_IsMainThread())
+    events = drain(400, 0)
+    probe::mark(6)
+    probe::SDL_DestroyRenderer(renderer)
+    probe::SDL_DestroyWindow(window)
+    probe::mark(7)
+    [made == 1, presented, in_coroutine, pushed, events]
+
+fn graphics() -> list:
+    window = probe::SDL_CreateWindow(title(), 320, 240, 0)
+    probe::window(window)
+    if window.null?():
+        probe::sdl(3, false, probe::SDL_IsMainThread())
+        return [false, false, 0, 0, false, [0, 0]]
+    probe::sdl(3, true, probe::SDL_IsMainThread())
+    [true, with_window(window)]
+
+probe::mark(0)
+before = probe::SDL_IsMainThread()
+probe::sdl(1, true, before)
+initialized = probe::sdl(2, probe::SDL_Init(32), probe::SDL_IsMainThread())
+after = probe::SDL_IsMainThread()
+outcome = if initialized:
+    graphics()
+else:
+    [false]
+probe::SDL_Quit()
+probe::mark(8)
+[before, initialized, after, outcome]

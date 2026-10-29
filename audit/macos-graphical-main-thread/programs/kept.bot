@@ -1,0 +1,75 @@
+# kept.bot -- coroutines the native backend keeps on the general runtime
+# (audit/macos-app/programs/coroutine-kept.bot, MACOS-AARCH64-MILESTONE-9.md's
+# acceptance program), and two more cases (MACOS-GRAPHICAL-MAIN-THREAD-
+# CENSUS.md, section 9): a coroutine abandoned while suspended -- released
+# with Strings live in its suspended frames -- and allocation after it, so
+# that under BOTLISH_NATIVE_GC_STRESS=1 the collector walks the resumer's
+# stack and every suspended coroutine's at each allocation. Each coroutine
+# is a stack of its own, switched to and from on the thread that runs the
+# program: the worker, or the process's main thread.
+import std::str
+
+struct Ev:
+    n: int
+    label: str
+
+fn counting(limit: int) -> Ev:
+    loop i from 0 to limit:
+        yield Ev {n: i * i, label: "step"}
+    return Ev {n: -1, label: "done"}
+
+# The handle is an argument: drain owns it.
+fn drain(h: Coroutine{args: [], return: Ev, errors: []}) -> List[int]:
+    a = h()
+    b = h()
+    c = h()
+    [a.n, b.n, c.n]
+
+fn passed() -> list:
+    coroutine {step, first} = counting(3)
+    [first.n, drain(step)]
+
+# A recursive yielding function: as many suspended frames as it is deep.
+fn leaves(depth: int, at: int) -> unit:
+    if depth == 0:
+        yield Ev {n: at, label: "leaf"}
+        return unit
+    leaves(depth - 1, 2 * at)
+    leaves(depth - 1, 2 * at + 1)
+
+fn walk() -> Ev:
+    leaves(2, 1)
+    Ev {n: -1, label: "done"}
+
+fn tree() -> List[int]:
+    coroutine {step, first} = walk()
+    a = step()
+    b = step()
+    c = step()
+    d = step()
+    [first.n, a.n, b.n, c.n, d.n]
+
+# Suspended frames holding Strings made in them, abandoned after one resume.
+fn holding(tag: str, depth: int) -> Ev:
+    s = std::str::concat(tag, "-held")
+    if depth > 0:
+        inner = holding(s, depth - 1)
+        return Ev {n: inner.n + 1, label: s}
+    yield Ev {n: std::str::length(s), label: s}
+    yield Ev {n: 0, label: s}
+    Ev {n: -1, label: s}
+
+fn once(h: Coroutine{args: [], return: Ev, errors: []}) -> int:
+    e = h()
+    e.n
+
+fn abandoned() -> List[int]:
+    coroutine {step: a, first: fa} = holding("alpha", 20)
+    coroutine {step: b, first: fb} = holding("beta", 5)
+    x = once(a)
+    y = once(b)
+    # Allocation after both were released.
+    churn = std::str::concat(std::str::concat("x", "y"), "z")
+    [fa.n, fb.n, x, y, std::str::length(churn)]
+
+[passed(), tree(), abandoned()]

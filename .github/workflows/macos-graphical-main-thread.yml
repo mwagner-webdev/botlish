@@ -1,0 +1,145 @@
+name: macos graphical main-thread census
+
+# The experiments of MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md
+# (audit/macos-graphical-main-thread/), on GitHub's macos-15 Apple Silicon
+# runner: thread identity under every execution model, the runner's
+# graphical session, a C SDL3 control on the main thread and on a worker,
+# the production Botlish executable's SDL3 calls from its worker, and the
+# three candidate models -- the program on the process's main thread
+# (candidate A), its worker with every SDL call dispatched to the main
+# thread (candidate B), SDL3's main callbacks (candidate C) -- with the
+# runtime's stack, overflow, GC and coroutine probes on each thread, the
+# positive controls and the timings. Candidates A and B run on a disposable
+# experimental build: a worktree of this commit with
+# patches/main-thread-experiment.patch applied, built beside the production
+# one, which this job checks is left untouched.
+#
+# Evidence, not a test tier: nothing here gates anything, and a case's
+# outcome is recorded, never required (tools/census.py classifies each one
+# and says whether it is what the census predicted). It runs on pushes that
+# change it or audit/macos-graphical-main-thread/, and, once it is on the
+# default branch, on demand (workflow_dispatch) for any branch.
+
+on:
+  push:
+    paths:
+      - ".github/workflows/macos-graphical-main-thread.yml"
+      - "audit/macos-graphical-main-thread/**"
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "Timed repetitions of each timing case"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-graphical-main-thread-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  census:
+    name: graphical main-thread census (macOS arm64)
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Host
+        run: |
+          sw_vers
+          uname -a
+          echo "CPUs: $(sysctl -n hw.ncpu), memory: $(sysctl -n hw.memsize) bytes, page size: $(getconf PAGESIZE)"
+          echo "Xcode: $(xcode-select -p), SDK $(xcrun --show-sdk-version)"
+          echo "launchctl managername: $(launchctl managername)"
+          echo "console user: $(stat -f %Su /dev/console), this user: $(id -un)"
+          pgrep -lx WindowServer || echo "no WindowServer process"
+          if [[ $(uname -s) != Darwin || $(uname -m) != arm64 ]]; then
+            echo "::error::not a native arm64 macOS runner: $(uname -s) $(uname -m)"
+            exit 1
+          fi
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+
+      - name: Build Botlish.app (the packaged compiler)
+        run: single/macos/build.sh -o dist 2>&1 | tee app-build.log | tail -n 30
+
+      # The static SDL3 of NATIVE-LINK-PLAN-MILESTONE-1.md, by the same
+      # script, cache path and key as macos-arm64.yml's link-plan-sdl3 job:
+      # the pinned release built static, then linked into an executable by
+      # Botlish.app's compiler with the frameworks SDL3's metadata names.
+      - name: Cache the static SDL3 build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-sdl3-static
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/link-plan-sdl3.sh') }}
+
+      - name: Static SDL3 through Botlish.app (tests/platform/link-plan-sdl3.sh)
+        run: |
+          export BOTLISH_SDL3_STATIC_PREFIX="$HOME/Library/Caches/botlish-sdl3-static"
+          bash tests/platform/link-plan-sdl3.sh dist/Botlish.app 2>&1 | tee link-plan-sdl3.log | tail -n 40
+          cat "$BOTLISH_SDL3_STATIC_PREFIX/COMMIT"
+          sed -n 's/^Libs.private: *//p' "$BOTLISH_SDL3_STATIC_PREFIX/lib/pkgconfig/sdl3.pc"
+
+      # Candidates A and B: a disposable worktree of this commit with the
+      # experimental patch, its native/ built from a clone of the production
+      # build directory (so only botlish-native's own crate recompiles).
+      - name: The experimental build (patches/main-thread-experiment.patch)
+        run: |
+          exp="$RUNNER_TEMP/exp"
+          git worktree add --detach "$exp" HEAD
+          git -C "$exp" apply "$GITHUB_WORKSPACE/audit/macos-graphical-main-thread/patches/main-thread-experiment.patch"
+          git -C "$exp" diff --stat
+          cp -c -R native/target "$exp/native/target"
+          cargo build --release --manifest-path "$exp/native/Cargo.toml" 2>&1 | tail -n 5
+          echo "EXP=$exp" >>"$GITHUB_ENV"
+
+      - name: The census (tools/census.py)
+        run: |
+          python3 -I audit/macos-graphical-main-thread/tools/census.py \
+            --work "$RUNNER_TEMP/census" --out census-results \
+            --sdl-prefix "$HOME/Library/Caches/botlish-sdl3-static" \
+            --app dist/Botlish.app --checkout "$PWD" --exp "$EXP" \
+            --tclsh "$(command -v tclsh9.0)" --repeat "${{ inputs.repeat || '10' }}" 2>&1 | tee census.log
+
+      - name: The production tree is unchanged
+        if: always()
+        run: |
+          git diff --exit-code --stat
+          git -C "$GITHUB_WORKSPACE" status --short --untracked-files=no
+          codesign --verify --deep --strict --verbose=2 dist/Botlish.app
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## macOS graphical main-thread census"
+            cat census-results/summary.md 2>/dev/null || echo "the census did not finish"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-graphical-main-thread-census
+          path: |
+            census-results
+            census.log
+            app-build.log
+            link-plan-sdl3.log
+          if-no-files-found: warn

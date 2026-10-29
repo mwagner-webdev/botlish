@@ -1,0 +1,21 @@
+# co_overflow.bot -- a coroutine's stack exhausted after it has yielded and
+# been resumed (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, sections 8 and 9):
+# the coroutine is kept on the general runtime (its handle is an argument),
+# so the recursion runs on its own mapped stack, whose guard the runtime
+# publishes when it switches there. Expected: NATIVE LIMIT STACK, status 1,
+# on the worker and on the process's main thread alike.
+
+fn sink(n: int) -> int:
+    1 + sink(n + 1)
+
+fn task() -> int:
+    yield 1
+    yield 2
+    sink(0)
+
+fn go(h: Coroutine{args: [], return: int, errors: []}) -> int:
+    a = h()
+    a + h()
+
+coroutine {step: h, first: first} = task()
+go(h)

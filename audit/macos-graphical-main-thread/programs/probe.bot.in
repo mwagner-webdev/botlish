@@ -1,0 +1,70 @@
+# probe.bot -- the census's binding (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md):
+# the observation fixture (native/mtprobe.c) and the few SDL3 3.4.18
+# functions the probes call, written by hand from SDL3's headers (not the
+# generated binding: the census needs a dozen functions, and the macOS SDL3
+# binding is not generated yet). tools/census.py writes the link
+# declarations below @LINK@ for the target: the fixture's and SDL3's static
+# archives by their paths from the application root, and the frameworks
+# (macOS) or libraries (Linux) SDL3's own pkg-config metadata names.
+#
+# Every SDL *operation* is declared here and called by the Botlish
+# programs themselves; the fixture only reports what they did (its calls of
+# SDL_GetError, SDL_GetCurrentVideoDriver, SDL_GetRendererName,
+# SDL_GetWindowFlags and the window's properties are reads).
+import std::ffi::c
+
+# @LINK@
+
+opaque struct Window:
+    tag: unit
+
+opaque struct Renderer:
+    tag: unit
+
+# --- the fixture (native/mtprobe.c) ----------------------------------------
+extern c fn mark named "mtp_mark"(stage: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn is_process_main named "mtp_is_process_main"() -> std::ffi::c::Int
+extern c fn ns_is_main named "mtp_ns_is_main"() -> std::ffi::c::Int
+extern c fn threads named "mtp_threads"() -> std::ffi::c::Int
+extern c fn now_ns named "mtp_now_ns"() -> std::ffi::c::LongLong
+extern c fn elapsed_since named "mtp_elapsed_since"(start: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn value named "mtp_value"(stage: std::ffi::c::Int, v: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn sdl named "mtp_sdl"(stage: std::ffi::c::Int, ok: std::ffi::c::Bool, sdl_is_main: std::ffi::c::Bool) -> std::ffi::c::Bool
+extern c fn renderer named "mtp_renderer"(r: std::ffi::c::Ptr[Renderer] noescape) -> std::ffi::c::Int
+extern c fn window named "mtp_window"(w: std::ffi::c::Ptr[Window] noescape) -> std::ffi::c::Int
+extern c fn capture named "mtp_capture"(w: std::ffi::c::Ptr[Window] noescape) -> std::ffi::c::Int
+
+# --- SDL3 (include/SDL3/*.h of release-3.4.18) -------------------------------
+# bool SDL_IsMainThread(void)
+extern c fn SDL_IsMainThread() -> std::ffi::c::Bool
+# bool SDL_Init(SDL_InitFlags flags)
+extern c fn SDL_Init(flags: std::ffi::c::UInt) -> std::ffi::c::Bool
+# void SDL_Quit(void)
+extern c fn SDL_Quit() -> unit
+# SDL_Window *SDL_CreateWindow(const char *title, int w, int h, SDL_WindowFlags flags)
+extern c fn SDL_CreateWindow(title: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, w: std::ffi::c::Int, h: std::ffi::c::Int, flags: std::ffi::c::ULongLong) -> std::ffi::c::Ptr[Window] independent
+# SDL_Renderer *SDL_CreateRenderer(SDL_Window *window, const char *name)
+extern c fn SDL_CreateRenderer(window: std::ffi::c::Ptr[Window], name: std::ffi::c::Ptr[std::ffi::c::Char]) -> std::ffi::c::Ptr[Renderer]
+# bool SDL_SetRenderDrawColor(SDL_Renderer *renderer, Uint8 r, Uint8 g, Uint8 b, Uint8 a)
+extern c fn SDL_SetRenderDrawColor(renderer: std::ffi::c::Ptr[Renderer], r: std::ffi::c::UChar, g: std::ffi::c::UChar, b: std::ffi::c::UChar, a: std::ffi::c::UChar) -> std::ffi::c::Bool
+# bool SDL_RenderClear(SDL_Renderer *renderer)
+extern c fn SDL_RenderClear(renderer: std::ffi::c::Ptr[Renderer]) -> std::ffi::c::Bool
+# bool SDL_RenderPresent(SDL_Renderer *renderer)
+extern c fn SDL_RenderPresent(renderer: std::ffi::c::Ptr[Renderer]) -> std::ffi::c::Bool
+# void SDL_PumpEvents(void)
+extern c fn SDL_PumpEvents() -> unit
+# bool SDL_PollEvent(SDL_Event *event): SDL writes one 128-byte SDL_Event.
+extern c fn SDL_PollEvent(event: std::ffi::c::Ptr[std::ffi::c::Void] write noescape) -> std::ffi::c::Bool
+# bool SDL_PushEvent(SDL_Event *event): SDL copies the event.
+extern c fn SDL_PushEvent(event: std::ffi::c::Ptr[std::ffi::c::Void] read noescape) -> std::ffi::c::Bool
+# void SDL_Delay(Uint32 ms)
+extern c fn SDL_Delay(ms: std::ffi::c::UInt) -> unit
+# void SDL_DestroyRenderer(SDL_Renderer *renderer)
+extern c fn SDL_DestroyRenderer(renderer: std::ffi::c::Ptr[Renderer]) -> unit
+# void SDL_DestroyWindow(SDL_Window *window)
+extern c fn SDL_DestroyWindow(window: std::ffi::c::Ptr[Window]) -> unit
+# bool SDL_RunOnMainThread(SDL_MainThreadCallback callback, void *userdata, bool wait_complete)
+extern c fn SDL_RunOnMainThread(callback: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}], userdata: std::ffi::c::Ptr[std::ffi::c::Void], wait_complete: std::ffi::c::Bool) -> std::ffi::c::Bool
+
+# A store to address 16: a fault that is not a stack overflow.
+extern c fn fault named "mtp_fault"() -> std::ffi::c::Int
