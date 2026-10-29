@@ -705,10 +705,16 @@ ending with no live work (`ct-implementation-yield-event-loop`); the starting tr
 the sequential one on every golden suite, which may not run locally):
 agrees on every suite at the first commit and at the economics commit
 (mutable-array.bot: batched 5 rounds and 7 builds, sequential 69 and 205,
-as before), FINAL_SD. `tests` (the whole Tcl suite with the golden
+as before), and at the final commit `945b6b2a` (every suite agrees;
+mutable-array.bot again 5/7 batched and 69/205 sequential). `tests` (the whole Tcl suite with the golden
 duplicates on interp and compile, the cranelift and cranelift-generic
 coverage, the golden shards, the executables, the warning gate, the Rust
-tests): success at the first commit, FINAL_TESTS.
+tests): success at the first commit; at the final commit the golden
+shards, both coverage jobs, the stub- and system-linked executables (also
+under GC stress), the warning gate, the Rust tests and the method-call
+oracle succeeded, and the Tcl suite on interp and on compile was still
+running when this was written. (The GC-stress job runs only on pushes to
+main.)
 
 ## 12. Remaining limitations
 
