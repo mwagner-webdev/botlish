@@ -3366,8 +3366,8 @@ summary: Hashable is a built-in trait, used like any trait, whose witnesses the 
 index: concepts
 alias: Hashable; hashable; hashable trait; hash key; map key; set key; dictionary key
 keywords: Hashable, hash, ==, equality, total, witness, built-in trait, callable, function, key, collision, keyed hash, TRAIT-NOT-SATISFIED
-related: concept.traits stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
-docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md
+related: concept.traits concept.equatable concept.value-identity stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
+docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md
 
 == WHAT IT IS
     fn fingerprint(x: Hashable) -> int:
@@ -3384,7 +3384,10 @@ EQUALITY) and a hash, and so equal values always hash equally:
   * Int and every integer domain, String, Bool, unit, UnicodeChar,
     Float64, enum cases;
   * a List or ImmutableSet of Hashable elements;
-  * a struct (also an opaque one) whose every field is Hashable.
+  * a struct (also an opaque one) whose every field is Hashable;
+  * an opaque struct that declares its identity (concept.value-identity)
+    whose identity's elements are Hashable, whatever its other fields
+    hold: an ImmutableMap[K, V] whose V is Hashable (concept.immutable-map).
 
 Not Hashable: a function (functions have no equality), a coroutine handle,
 a MutableArray or MutableVector, a C pointer or native view, a
@@ -3407,6 +3410,8 @@ then it is.
     checked when it runs (EQUALITY), as before.
   * Hashable cannot be declared, implemented or named by a type, struct,
     enum, layout or trait of a program: the name is reserved.
+  * Every Hashable type is Equatable (concept.equatable): a Hashable value
+    is accepted where an Equatable one is expected, never the reverse.
 
 == WHY
 Hash-based collections need keys whose equality and hash agree and never
@@ -3816,9 +3821,9 @@ title: Order, membership and identity of a map or set
 summary: A MutableMap's or MutableSet's iteration order is a permutation of its members that reorder may replace, never part of its contents: reorder changes the order only.
 index: concepts
 alias: reorder; reordering; iteration order; collection order; permutation of keys
-keywords: reorder, order, validate_order, OrderMismatch, permutation, members, keys, insertion order, MutableMap, MutableSet
-related: concept.mutable-map concept.mutable-set proof.same-members error.reorder-not-proven concept.place-parameters concept.values stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder stdlib.std::mutable_map::order stdlib.std::mutable_map::validate_order
-docs: PROVEN-COLLECTION-REORDERING.md ORDERED-MUTABLE-MAP-SET.md
+keywords: reorder, reordered, order, validate_order, OrderMismatch, permutation, members, keys, insertion order, MutableMap, MutableSet, ImmutableMap, equality, ==
+related: concept.mutable-map concept.mutable-set concept.immutable-map concept.value-identity proof.same-members error.reorder-not-proven concept.place-parameters concept.values stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder stdlib.std::mutable_map::order stdlib.std::mutable_map::validate_order stdlib.std::immutable_map::reordered
+docs: PROVEN-COLLECTION-REORDERING.md ORDERED-MUTABLE-MAP-SET.md REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md
 
 == WHAT IT IS
     o = m.order()                  the keys, in m's order: a MutableSet
@@ -3833,7 +3838,16 @@ default history: reorder replaces the order and nothing else -- every
 key keeps its stored key and its value, lookups and length are
 unchanged, and the next new key still goes last. The same holds for
 `s.order()`, `s.validate_order(c)` and `s.reorder(o)` of a set (a copy
-of the set is an order of it too).
+of the set is an order of it too), and for a frozen map's
+`f.order()`, `f.validate_order(c)` and `f.reordered(o)`, which returns
+f in O's order (concept.immutable-map).
+
+Equality reads contents, never order: two ImmutableMaps (or
+ImmutableSets) are == when they hold the same associations (members),
+whatever order each iterates in, and they hash equally
+(concept.value-identity). A MutableMap or MutableSet has no ==; freeze
+it to compare it. So `f.reordered(o) == f` always, while a loop over
+each may visit the keys differently.
 
 == RULES
   * The order is a MutableSet (distinct by construction) that must hold
@@ -3899,8 +3913,8 @@ title: MutableMap[K, V]: an insertion-ordered mutable map
 summary: std::mutable_map::MutableMap[K, V] maps Hashable keys to values and iterates in insertion order: a replaced value keeps its key's place, a removed and re-set key goes last.
 index: concepts
 alias: MutableMap; hash map; dictionary; dict; associative array; ordered map; hashmap; lookup table
-keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value, reorder
-related: concept.collection-order concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
+keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value, reorder, freeze
+related: concept.collection-order concept.immutable-map concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
 docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
 
 == WHAT IT IS
@@ -3915,9 +3929,10 @@ docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
 
 After `import std::mutable_map`: create[K, V](), with_capacity[K, V](n),
 length, empty?, contains, at, set, remove (returns the value), clear,
-order, validate_order, reorder (concept.collection-order) and
-`loop e in m:`. Expected cost: O(1) for contains, at, set and remove,
-O(n) for a loop.
+order, validate_order, reorder (concept.collection-order), freeze (the
+frozen, comparable std::immutable_map::ImmutableMap of its current
+associations: concept.immutable-map) and `loop e in m:`. Expected cost:
+O(1) for contains, at, set and remove, O(n) for a loop and a freeze.
 
 == RULES
   * K must satisfy Hashable (TRAIT-NOT-SATISFIED otherwise): Ints, Strings,
@@ -3936,7 +3951,8 @@ O(n) for a loop.
   * A loop iterates the map as it was when the loop began: the body may
     mutate the map, which never changes what the loop visits.
   * A map is not Hashable, and `==` of two maps is a run-time EQUALITY
-    error: compare contents with a loop and contains/at.
+    error: freeze both and compare the frozen maps, which are == by
+    their associations (concept.immutable-map).
 
 == WHY
 The keyed hash that places a key is private and different in every
@@ -3978,14 +3994,15 @@ title: MutableSet[T]: an insertion-ordered mutable set
 summary: std::mutable_set::MutableSet[T] holds distinct Hashable values in insertion order: adding a present element changes nothing, removing and re-adding one moves it last.
 index: concepts
 alias: MutableSet; ordered set; mutable set
-keywords: reorder, mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership
+keywords: reorder, mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership, freeze
 related: concept.mutable-map concept.immutable-set concept.place-parameters concept.values concept.loops stdlib.module.std::mutable_set
 docs: ORDERED-MUTABLE-MAP-SET.md
 
 == WHAT IT IS
 After `import std::mutable_set`: create[T](), with_capacity[T](n), length,
 empty?, contains, add (true when it added), remove (true when it removed),
-clear, and `loop x in s:`. Expected cost: O(1) for contains, add and
+clear, freeze (the std::immutable_set::ImmutableSet of its members), and
+`loop x in s:`. Expected cost: O(1) for contains, add and
 remove, O(n) for a loop.
 
 == RULES
@@ -3995,7 +4012,7 @@ remove, O(n) for a loop.
   * A set is a value (copies are independent), its mutations take it as a
     place, and a loop iterates it as it was when the loop began.
   * A set is not Hashable and has no `==`; std::immutable_set is the
-    immutable, comparable set (concept.immutable-set).
+    immutable, comparable set (concept.immutable-set): `s.freeze()`.
 
 == EXAMPLES
 @example accept
@@ -4015,6 +4032,251 @@ order = loop x in s:
 
 == MORE
 ORDERED-MUTABLE-MAP-SET.md.
+
+@topic concept.value-identity
+title: Value identity: equality and hashing by contents, not representation
+summary: An opaque struct may declare `identity members(F)` or `identity associations(K, V)`: its values are then == when those List fields hold the same entries, in any order.
+index: concepts
+alias: identity; value identity; semantic equality; representation-independent equality; identity members; identity associations; custom equality; equality by contents; order-independent equality
+keywords: identity, members, associations, opaque, ==, hash, Hashable, Equatable, representation, order, multiset, table hash, ImmutableMap, TYPE, TRAIT-NOT-SATISFIED
+related: concept.equatable concept.hashable concept.immutable-map concept.collection-order concept.opaque-structs concept.structs error.type error.trait-not-satisfied
+docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md OPAQUE-STRUCTS.md HASHABLE-AND-KEYED-HASH.md
+
+== WHAT IT IS
+    opaque struct Bag[T]:
+        items: List[T]
+        note: str
+        identity members(items)            == and hash: items, in no order
+
+    opaque struct Dict[K, V]:
+        keys: List[K]
+        vals: List[V]
+        index: List[int]
+        identity associations(keys, vals)  the i-th key with the i-th
+                                           value, pairs in no order
+
+A struct's `==` and hash compare every field, slot by slot. An opaque
+struct may declare instead what its values mean: the elements of one List
+field (`members`), or the pairs of two (`associations`). Two values of the
+declaration are equal exactly when they hold the same entries, each as many
+times, in any order; the public hash and the standard library's keyed table
+hash are computed from those entries alone, combined so that their order
+does not matter. Every other field -- a note, an index, stored hashes, the
+order the entries happen to be in -- is representation: no `==`, hash or
+Hashable check reads it.
+
+== RULES
+  * Only an opaque struct may declare an identity (its module alone makes
+    and reads its values, so it alone keeps them consistent), never a
+    context struct, and with one clause (TYPE otherwise).
+  * The fields named are List fields of the struct, two distinct ones for
+    associations. Every field of the struct is immutable: no MutableVector,
+    MutableArray, C pointer, native view or affine value (TYPE).
+  * Two declarations are two types: values of different declarations are
+    never equal, whatever their entries.
+  * The Hashable and Equatable witnesses read the identity's elements only:
+    Bag[int] is Hashable, Bag[MutableVector[int]] is neither (a
+    TRAIT-NOT-SATISFIED that names "the members of Bag[...]"), and a
+    representation field of any type takes no part.
+  * Equal hashes never make two values equal: entries are compared by ==.
+  * == and a hash cost O(n) expected (entries matched in place first, the
+    rest by hash) and allocate no managed memory.
+  * Order is not identity: where a type iterates, its order is its owner's
+    representation (concept.collection-order).
+
+== WHY
+A map built in two histories, or a set stored in two orders, is the same
+value to the program that uses it; comparing the representation would make
+equality depend on the order of insertion, on removed entries or on a
+hidden hash's placement. The owner states the meaning once, and every
+operation that compares or hashes -- ==, hash, ImmutableSet, MutableMap
+keys, the Hashable check -- follows it on every backend.
+
+== EXAMPLES
+@example accept
+opaque struct Bag[T]:
+    items: List[T]
+    note: str
+    identity members(items)
+
+nomethod fn bag(items: List[int], note: str) -> Bag[int]:
+    Bag[int] {items: items, note: note}
+
+[bag([1, 2, 3], "first") == bag([3, 1, 2], "second"), bag([1, 1], "") == bag([1], ""), hash(bag([1, 2], "first")) == hash(bag([2, 1], "second"))]
+@caption Same members in another order: equal and equally hashed; the note is representation
+@value [true, false, true]
+@end
+
+@example reject
+struct Bag:
+    items: List[int]
+    identity members(items)
+
+Bag {items: [1]}
+@caption Only an opaque struct may declare its identity
+@error CORE SEMANTIC TYPE
+@at 3:5
+@end
+
+== MORE
+REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md; concept.immutable-map for
+the standard library's map with an identity.
+
+@topic concept.equatable
+title: Equatable: values whose == is total
+summary: Equatable is a built-in trait with no operation: its witnesses are exactly the types whose == never stops with EQUALITY, and every Hashable type is Equatable.
+index: concepts
+alias: Equatable; equatable; total equality; comparable values; equality trait
+keywords: Equatable, ==, equality, total, witness, built-in trait, Hashable, refines, satisfies, TRAIT-NOT-SATISFIED
+related: concept.hashable concept.value-identity concept.traits concept.parameterized-structs error.trait-not-satisfied error.equality
+docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md HASHABLE-AND-KEYED-HASH.md TRAITS.md
+
+== WHAT IT IS
+    fn same(a: Equatable, b: Equatable) -> bool:
+        a == b
+
+    struct Box[T satisfies Equatable]:
+        value: T
+
+Equatable is a trait like Hashable whose witnesses the language supplies:
+a type is Equatable exactly when == of two of its values never stops with
+EQUALITY. A parameter, a view or a struct slot can require it. It has no
+operation of its own (== is every value's); what it buys is the guarantee,
+and the compiler drops the failure path of == on such operands.
+
+== RULES
+  * Witnesses: Int, String, Bool, unit, UnicodeChar, Float64, enum cases;
+    Lists and ImmutableSets of Equatable elements; structs whose fields
+    are Equatable; an identity struct whose identity's elements are
+    (concept.value-identity). Not: functions, coroutine handles, mutable
+    collections, C pointers, DecimalRounded, `any`.
+  * Hashable refines Equatable: a Hashable value (or view) is accepted
+    where an Equatable one is expected; an Equatable one is not Hashable.
+  * Today the two traits have the same witnesses (every kind with total
+    equality has a total hash); they are separate guarantees, and a
+    program that only compares asks for Equatable.
+  * The name is reserved: no program declares or implements Equatable.
+
+== WHY
+Some code only compares values -- a membership scan, a dedup -- and needs
+the guarantee that == never fails, not a hash. Naming that guarantee keeps
+it a static obligation of the caller instead of a run-time EQUALITY.
+
+== EXAMPLES
+@example accept
+nomethod fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+nomethod fn via(x: Hashable) -> bool:
+    same(x, x)
+
+[same(1, 1), same("apple", "pear"), via([1, 2])]
+@caption A Hashable value is Equatable too
+@value [true, false, true]
+@end
+
+@example reject
+fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn twice(n: int) -> int:
+    n * 2
+
+same(twice, twice)
+@caption A function has no total equality
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 7:6
+@end
+
+== MORE
+REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md.
+
+@topic concept.immutable-map
+title: ImmutableMap[K, V]: a frozen, comparable map
+summary: std::immutable_map::ImmutableMap[K, V] is a MutableMap frozen into an immutable value: O(1) lookups, iteration in the order it was frozen in, and == and hash by its associations whatever their order.
+index: concepts
+alias: ImmutableMap; immutable map; frozen map; map as key; comparable map; hashable map; map equality; freeze a map
+keywords: immutable_map, freeze, at, contains, length, empty?, empty, order, validate_order, reordered, KeyNotFound, OrderMismatch, ImmutableMapEntry, ==, hash, Hashable, Equatable, insertion order
+related: concept.mutable-map concept.value-identity concept.collection-order concept.equatable concept.hashable concept.immutable-set stdlib.module.std::immutable_map stdlib.std::mutable_map::freeze
+docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md ORDERED-MUTABLE-MAP-SET.md PROVEN-COLLECTION-REORDERING.md
+
+== WHAT IT IS
+    m = std::mutable_map::create[str, int]()
+    m.set("pear", 3)
+    f = m.freeze()                 ImmutableMap[str, int]: m's associations,
+                                   in m's order
+    n = f.at("pear"):              KeyNotFound when absent
+        on std::immutable_map::KeyNotFound:
+            0
+    loop e in f:                   ImmutableMapEntry {key, value}
+        e.key
+
+After `import std::immutable_map` (freeze is std::mutable_map's): empty(),
+length, empty?, contains, at, order, validate_order, reordered and
+`loop e in f:`. Expected cost: O(1) for contains and at, O(n) for a freeze,
+a loop, == and a hash.
+
+== RULES
+  * K must satisfy Hashable. ImmutableMap[K, V] is Equatable exactly when
+    V is, and Hashable exactly when V is: then a map can be a MutableMap
+    key, a set member, a List element, a field of a Hashable struct or a
+    key of another map.
+  * f == g when both hold the same keys with equal values, whatever their
+    orders or histories; the hashes agree with it (concept.value-identity).
+  * Iteration is the order the map had when it was frozen;
+    `f.reordered(o)` is f in O's order (O proven to hold exactly f's keys:
+    concept.collection-order) and is == f.
+  * A frozen map never changes: freeze copies, and nothing done to the
+    MutableMap afterward reaches it. There is no update operation.
+  * at of a missing key fails with std::immutable_map::KeyNotFound.
+
+== WHY
+A MutableMap's == would have to compare what it holds now, through every
+copy; a frozen map is a value whose meaning is fixed, so it can be
+compared, hashed and used as a key. Its order is kept for iteration, and
+kept out of equality, so maps built in different orders are the same map.
+
+== EXAMPLES
+@example accept
+import std::mutable_map
+import std::immutable_map
+import std::mutable_set
+
+a = std::mutable_map::create[str, int]()
+a.set("pear", 2)
+a.set("fig", 1)
+b = std::mutable_map::create[str, int]()
+b.set("fig", 1)
+b.set("pear", 2)
+fa = a.freeze()
+fb = b.freeze()
+seen = std::mutable_set::create[std::immutable_map::ImmutableMap[str, int]]()
+first = seen.add(fa)
+again = seen.add(fb)
+keys = loop e in fb:
+    e.key
+[fa == fb, hash(fa) == hash(fb), first, again, keys]
+@caption Equal maps built in different orders: one set member, two iteration orders
+@value [true, true, true, false, ["fig", "pear"]]
+@end
+
+@example reject
+import std::mutable_map
+import std::immutable_map
+import std::mutable_vector
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+m = std::mutable_map::create[int, MutableVector[int]]()
+fingerprint(m.freeze())
+@caption A map of MutableVectors is not Hashable: its values are not
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 9:13
+@end
+
+== MORE
+REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md.
 
 @topic concept.mutable-array
 title: MutableArray[T]: a fixed-length mutable value
@@ -4094,7 +4356,9 @@ membership (false for absence; never an error for comparable values).
 
 == RULES
   * Duplicates collapse by `==`; two sets are `==` when they hold the same
-    elements, whatever the construction order.
+    elements, whatever the construction order. Construction and `==` of
+    sets of more than eight Hashable members cost O(n) expected (matched
+    by hash; equal hashes never make two members equal).
   * There is no insert, remove, size or iteration (`loop x in s:` is a
     run-time TYPE error): keep the List if you need the elements.
   * Membership of a value whose equality is undefined (a function) fails

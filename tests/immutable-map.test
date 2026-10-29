@@ -501,6 +501,20 @@ test im-key-hashable {the key slot is constrained by Hashable at every applicati
 }
 } -result TRAIT-NOT-SATISFIED
 
+test im-affine-values-refused {a map copies its values (freeze, at, a loop), so an affine V is refused where a map is made, by imprinting's existing affine admission (IMPRINT naming the affine type), for an ImmutableMap as for a MutableMap} -body {
+    set decls "import std::coroutine\nimport std::mutable_map\nimport std::immutable_map\nstruct Command:\n    value: int\nstruct Event:\n    value: int\n"
+    lmap make {{std::immutable_map::empty[int, Coroutine{args: [Command], return: Event}]()} {std::mutable_map::create[int, Coroutine{args: [Command], return: Event}]()}} {
+        catch {surface::compile "${decls}m = $make\nm.length()\n" t.bot -warnings off} message options
+        set found 0
+        foreach d [dict getdef $options -diagnostics {}] {
+            if {[lindex [dict get $d errorcode] end] eq "IMPRINT" && [string match "*V is imprinted as Coroutine*an affine type*" [dict get $d message]]} {
+                set found 1
+            }
+        }
+        set found
+    }
+} -cleanup {unset -nocomplain decls message options found d} -result {1 1}
+
 test im-mutable-unchanged {the mutable collections stay neither Equatable nor Hashable, and == of two MutableMaps is still refused at run time naming the opaque values} -body {
     list [imKind "$::imTraits[string cat {m = std::mutable_map::create[int, int]()
 same(m, m)

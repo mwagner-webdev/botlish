@@ -236,18 +236,19 @@ test vi-compilation-isolation {a HIR keeps its own identities: run after another
 # ---------------------------------------------------------------------------
 # Equality
 
-test vi-members-equality {members: equal when the List holds the same elements as many times, in any order; the other fields take no part} -body {
+test vi-members-equality {members: equal when the List holds the same elements as many times, in any order (an element matches one element: two equal ones need two); the other fields take no part} -body {
     viRun "\[
     bag(\[1, 2, 3\], \"a\") == bag(\[3, 1, 2\], \"b\"),
     bag(\[1, 2, 3\], \"a\") == bag(\[1, 2, 4\], \"a\"),
     bag(\[1, 1, 2\], \"a\") == bag(\[2, 1, 1\], \"b\"),
     bag(\[1, 1, 2\], \"a\") == bag(\[1, 2, 2\], \"a\"),
     bag(\[1, 2\], \"a\") == bag(\[1, 2, 2\], \"a\"),
+    bag(\[2, 2, 1\], \"a\") == bag(\[1, 2, 3\], \"a\"),
     bag(\[\], \"a\") == bag(\[\], \"b\"),
     plain(\[1, 2\], \"a\") == plain(\[2, 1\], \"a\"),
     plain(\[1, 2\], \"a\") == plain(\[1, 2\], \"b\")
 \]\n"
-} -result {value {[true, false, true, false, false, true, false, false]}}
+} -result {value {[true, false, true, false, false, false, true, false, false]}}
 
 test vi-associations-equality {associations: equal when the same key-value pairs are held, in any order; a pair is a unit (values swapped across keys differ); the other fields take no part} -body {
     viRun "\[
@@ -347,6 +348,48 @@ test vi-hash-oracle {under a fixed test key, every backend computes the independ
     set expected "\[[join [lmap line [split $out \n] {format {[%s, %s]} {*}$line}] {, }]\]"
     expr {$outcome eq [list value $expected] ? "agree" : "$outcome != $expected"}
 } -result agree
+
+# Two Ints whose 64-bit public (FNV-1a) hash states are identical, found
+# offline (HASHABLE-AND-KEYED-HASH.md, "Why post-mixing is insufficient").
+set ::viCollide {a = 17384044247497657079
+b = 13834495523901255922
+fill = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+fn ints_dict(ks: List[int], vs: List[int]) -> Dict[int, int]:
+    Dict[int, int] {ks: ks, junk: 0, vs: vs}
+}
+
+test vi-hash-collision-not-equal {equal public hashes never make identity values equal: entries whose public hashes collide are compared by equality, pairwise and through hash buckets (more than eight unmatched entries), as members, keys and values} -body {
+    viRun "$::viCollide\[
+    hash(a) == hash(b),
+    bag(\[a\], \"\") == bag(\[b\], \"\"),
+    hash(bag(\[a\], \"\")) == hash(bag(\[b\], \"\")),
+    bag(\[a, 1, 2, 3, 4, 5, 6, 7, 8, 9\], \"\") == bag(\[9, 8, 7, 6, 5, 4, 3, 2, 1, b\], \"\"),
+    ints_dict(\[a\], \[1\]) == ints_dict(\[b\], \[1\]),
+    ints_dict(\[1\], \[a\]) == ints_dict(\[1\], \[b\]),
+    hash(ints_dict(\[1\], \[a\])) == hash(ints_dict(\[1\], \[b\])),
+    ints_dict(\[a, 1, 2, 3, 4, 5, 6, 7, 8, 9\], \[0, 1, 2, 3, 4, 5, 6, 7, 8, 9\]) == ints_dict(\[9, 8, 7, 6, 5, 4, 3, 2, 1, b\], \[9, 8, 7, 6, 5, 4, 3, 2, 1, 0\]),
+    ints_dict(\[0, 1, 2, 3, 4, 5, 6, 7, 8, 9\], \[a, 1, 2, 3, 4, 5, 6, 7, 8, 9\]) == ints_dict(\[9, 8, 7, 6, 5, 4, 3, 2, 1, 0\], \[9, 8, 7, 6, 5, 4, 3, 2, 1, b\]),
+    bag(\[a, b, 1, 2, 3, 4, 5, 6, 7, 8\], \"\") == bag(\[8, 7, 6, 5, 4, 3, 2, 1, b, a\], \"\")
+\]\n"
+} -result {value {[true, false, true, false, false, false, true, false, false, true]}}
+
+test vi-intrinsic-set-collision {a set of more than eight members keeps two members whose public hashes collide, and tells them apart: deduplication and equality by hash buckets compare the members} -body {
+    viRun "$::viCollide\[
+    std::immutable_set::from_list(std::list::append(std::list::append(fill, a), b)) == std::immutable_set::from_list(std::list::append(fill, a)),
+    std::immutable_set::contains(std::immutable_set::from_list(std::list::append(std::list::append(fill, a), b)), b),
+    std::immutable_set::from_list(std::list::append(fill, a)) == std::immutable_set::from_list(std::list::append(fill, b))
+\]\n"
+} -result {value {[false, true, false]}}
+
+test vi-executable {a standalone executable compares and hashes by identity: the program descriptor carries each shape's identity} -constraints executableAot -setup {
+    set dir [makeDirectory {vi aot}]
+} -body {
+    set hir [viHir "$::viDecls\[bag(\[1, 2, 3\], \"a\") == bag(\[3, 1, 2\], \"b\"), dict(\[\"a\", \"b\"\], \[1, 2\], 1) == dict(\[\"b\", \"a\"\], \[2, 1\], 2), hash(bag(\[1, 2, 3\], \"x\"))\]\n"]
+    set binary [native::executable $hir [file join $dir program]]
+    list [exec $binary] [core::formatValue [native::evalHir $hir]]
+} -cleanup {
+    removeDirectory {vi aot}
+} -result {{[true, true, 2303140193253857579]} {[true, true, 2303140193253857579]}}
 
 test vi-public-hash-pinned {the public hash of an identity value is fixed by its entries (deterministic across processes and backends)} -body {
     viRun "\[hash(bag(\[1, 2, 3\], \"x\")), hash(dict(\[\"a\", \"b\", \"c\"\], \[1, 2, 3\], 1))\]\n"

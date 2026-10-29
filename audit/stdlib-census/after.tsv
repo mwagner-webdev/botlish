@@ -72,7 +72,7 @@ decimal_rounded#to_string	intrinsic		internal	intrinsic	core/decimal.tcl:830
 dfa#transition	intrinsic		internal	intrinsic	core/dfa.tcl:64			
 error?	intrinsic		primitive	intrinsic	core/predicates.tcl:55			
 foreign#refused	intrinsic		internal	intrinsic				
-hash	intrinsic		primitive	intrinsic	core/hashing.tcl:444			
+hash	intrinsic		primitive	intrinsic	core/hashing.tcl:501			
 integer?	intrinsic		primitive	intrinsic				
 list	intrinsic		primitive	intrinsic	core/primitives.tcl:102			
 list#with_length	intrinsic		internal	intrinsic	core/listlength.tcl:49			
@@ -829,9 +829,26 @@ std::float64::max	function	std::float64	api	source	stdlib/float64.bot:32
 std::float64::min	function	std::float64	api	source	stdlib/float64.bot:26			
 std::float64::round	intrinsic	std::float64	api	intrinsic				
 std::float64::truncate	intrinsic	std::float64	api	intrinsic				
+std::immutable_map	namespace		api	source	stdlib/immutable_map.bot			
+std::immutable_map::ImmutableMap	opaque-struct	std::immutable_map	api	source	stdlib/immutable_map.bot:52			
+std::immutable_map::ImmutableMapEntry	struct	std::immutable_map	api	source	stdlib/immutable_map.bot:60			
+std::immutable_map::KeyNotFound	error	std::immutable_map	api	source	stdlib/immutable_map.bot:65			
+std::immutable_map::OrderMismatch	error	std::immutable_map	api	source	stdlib/immutable_map.bot:68			
+std::immutable_map::at	function	std::immutable_map	api	source	stdlib/immutable_map.bot:82			
+std::immutable_map::contains	function	std::immutable_map	api	source	stdlib/immutable_map.bot:79			
+std::immutable_map::empty	function	std::immutable_map	api	source	stdlib/immutable_map.bot:70			
+std::immutable_map::empty?	function	std::immutable_map	api	source	stdlib/immutable_map.bot:76			
+std::immutable_map::iteration_at	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:135			
+std::immutable_map::iteration_end	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:129			
+std::immutable_map::iteration_live?	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:132			
+std::immutable_map::length	function	std::immutable_map	api	source	stdlib/immutable_map.bot:73			
+std::immutable_map::of_parts	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:123			
+std::immutable_map::order	function	std::immutable_map	api	source	stdlib/immutable_map.bot:95			
+std::immutable_map::reordered	function	std::immutable_map	api	source	stdlib/immutable_map.bot:112			
+std::immutable_map::validate_order	function	std::immutable_map	api	source	stdlib/immutable_map.bot:101			
 std::immutable_set	namespace		api	intrinsic				
-std::immutable_set::contains	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:78			
-std::immutable_set::from_list	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:75			
+std::immutable_set::contains	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:117			
+std::immutable_set::from_list	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:114			
 std::int	namespace		api	intrinsic				
 std::int::from_string	intrinsic	std::int	api	intrinsic	core/inttext.tcl:80			
 std::int::to_string	intrinsic	std::int	api	intrinsic	core/inttext.tcl:77			
@@ -1026,44 +1043,46 @@ std::mutable_byte_store::from_storage	intrinsic	std::mutable_byte_store	api	intr
 std::mutable_byte_store::replace	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:337			
 std::mutable_byte_store::zeroed	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:331			
 std::mutable_map	namespace		api	source	stdlib/mutable_map.bot			
-std::mutable_map::KeyNotFound	error	std::mutable_map	api	source	stdlib/mutable_map.bot:73			
-std::mutable_map::MutableMap	opaque-struct	std::mutable_map	api	source	stdlib/mutable_map.bot:63			
-std::mutable_map::MutableMapEntry	struct	std::mutable_map	api	source	stdlib/mutable_map.bot:68			
-std::mutable_map::OrderMismatch	error	std::mutable_map	api	source	stdlib/mutable_map.bot:76			
-std::mutable_map::at	function	std::mutable_map	api	source	stdlib/mutable_map.bot:93			
-std::mutable_map::clear	function	std::mutable_map	api	source	stdlib/mutable_map.bot:123			
-std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_map.bot:90			
-std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:78			
-std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:87			
-std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:163			
-std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:157			
-std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:160			
-std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:84			
-std::mutable_map::order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:134			
-std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:113			
-std::mutable_map::reorder	function	std::mutable_map	api	source	stdlib/mutable_map.bot:149			
-std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:100			
-std::mutable_map::validate_order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:140			
-std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:81			
+std::mutable_map::KeyNotFound	error	std::mutable_map	api	source	stdlib/mutable_map.bot:81			
+std::mutable_map::MutableMap	opaque-struct	std::mutable_map	api	source	stdlib/mutable_map.bot:71			
+std::mutable_map::MutableMapEntry	struct	std::mutable_map	api	source	stdlib/mutable_map.bot:76			
+std::mutable_map::OrderMismatch	error	std::mutable_map	api	source	stdlib/mutable_map.bot:84			
+std::mutable_map::at	function	std::mutable_map	api	source	stdlib/mutable_map.bot:101			
+std::mutable_map::clear	function	std::mutable_map	api	source	stdlib/mutable_map.bot:131			
+std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_map.bot:98			
+std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:86			
+std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:95			
+std::mutable_map::freeze	function	std::mutable_map	api	source	stdlib/mutable_map.bot:170			
+std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:184			
+std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:178			
+std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:181			
+std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:92			
+std::mutable_map::order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:142			
+std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:121			
+std::mutable_map::reorder	function	std::mutable_map	api	source	stdlib/mutable_map.bot:157			
+std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:108			
+std::mutable_map::validate_order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:148			
+std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:89			
 std::mutable_set	namespace		api	source	stdlib/mutable_set.bot			
-std::mutable_set::MutableSet	opaque-struct	std::mutable_set	api	source	stdlib/mutable_set.bot:52			
-std::mutable_set::OrderMismatch	error	std::mutable_set	api	source	stdlib/mutable_set.bot:56			
-std::mutable_set::add	function	std::mutable_set	api	source	stdlib/mutable_set.bot:73			
-std::mutable_set::clear	function	std::mutable_set	api	source	stdlib/mutable_set.bot:91			
-std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_set.bot:70			
-std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:58			
-std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:67			
-std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:139			
-std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:133			
-std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:136			
-std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:64			
-std::mutable_set::of_table	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:127			
-std::mutable_set::order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:101			
-std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:82			
-std::mutable_set::reorder	function	std::mutable_set	api	source	stdlib/mutable_set.bot:116			
-std::mutable_set::table_of	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:124			
-std::mutable_set::validate_order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:107			
-std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:61			
+std::mutable_set::MutableSet	opaque-struct	std::mutable_set	api	source	stdlib/mutable_set.bot:58			
+std::mutable_set::OrderMismatch	error	std::mutable_set	api	source	stdlib/mutable_set.bot:62			
+std::mutable_set::add	function	std::mutable_set	api	source	stdlib/mutable_set.bot:79			
+std::mutable_set::clear	function	std::mutable_set	api	source	stdlib/mutable_set.bot:97			
+std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_set.bot:76			
+std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:64			
+std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:73			
+std::mutable_set::freeze	function	std::mutable_set	api	source	stdlib/mutable_set.bot:134			
+std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:156			
+std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:150			
+std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:153			
+std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:70			
+std::mutable_set::of_table	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:144			
+std::mutable_set::order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:107			
+std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:88			
+std::mutable_set::reorder	function	std::mutable_set	api	source	stdlib/mutable_set.bot:122			
+std::mutable_set::table_of	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:141			
+std::mutable_set::validate_order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:113			
+std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:67			
 std::mutable_vector	namespace		api	intrinsic				
 std::mutable_vector::at	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:345			
 std::mutable_vector::clear	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:365			
@@ -1076,39 +1095,50 @@ std::mutable_vector::push	intrinsic	std::mutable_vector	api	intrinsic	core/mutve
 std::mutable_vector::swap	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:361			
 std::mutable_vector::take	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:358			
 std::ordered_table	namespace		std-internal	source	stdlib/ordered_table.bot			
-std::ordered_table::Table	opaque-struct	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:57			
-std::ordered_table::add_live	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:164			
-std::ordered_table::append	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:192			
-std::ordered_table::arrangement	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:422			
-std::ordered_table::between?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:204			
-std::ordered_table::clear	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:338			
-std::ordered_table::compact_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:262			
-std::ordered_table::complete	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:387			
-std::ordered_table::count_shared	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:360			
-std::ordered_table::empty_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:171			
-std::ordered_table::fresh	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:84			
-std::ordered_table::full?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:155			
-std::ordered_table::garbage?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:159			
-std::ordered_table::holds?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:120			
-std::ordered_table::key_at	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:111			
-std::ordered_table::length	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:91			
-std::ordered_table::live_at?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:102			
-std::ordered_table::min_slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:66			
-std::ordered_table::permute	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:454			
-std::ordered_table::permute_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:478			
-std::ordered_table::place_entry	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:181			
-std::ordered_table::position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:146			
-std::ordered_table::positions	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:98			
-std::ordered_table::probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:128			
-std::ordered_table::rebuild	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:301			
-std::ordered_table::rebuild_with	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:333			
-std::ordered_table::reindex	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:287			
-std::ordered_table::remove_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:238			
-std::ordered_table::same_members?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:382			
-std::ordered_table::shift	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:212			
-std::ordered_table::slot_of	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:142			
-std::ordered_table::slots_for	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:71			
-std::ordered_table::truncate	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:252			
+std::ordered_table::Table	opaque-struct	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:58			
+std::ordered_table::add_live	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:165			
+std::ordered_table::append	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:193			
+std::ordered_table::arrangement	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:423			
+std::ordered_table::between?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:205			
+std::ordered_table::clear	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:339			
+std::ordered_table::compact_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:263			
+std::ordered_table::complete	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:388			
+std::ordered_table::count_shared	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:361			
+std::ordered_table::empty_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:172			
+std::ordered_table::fresh	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:85			
+std::ordered_table::frozen_holds?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:564			
+std::ordered_table::frozen_index	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:555			
+std::ordered_table::frozen_position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:586			
+std::ordered_table::frozen_probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:573			
+std::ordered_table::full?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:156			
+std::ordered_table::garbage?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:160			
+std::ordered_table::holds?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:121			
+std::ordered_table::key_at	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:112			
+std::ordered_table::length	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:92			
+std::ordered_table::live_at?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:103			
+std::ordered_table::live_hashes	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:519			
+std::ordered_table::live_keys	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:512			
+std::ordered_table::live_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:530			
+std::ordered_table::min_slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:67			
+std::ordered_table::of_frozen	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:591			
+std::ordered_table::permute	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:455			
+std::ordered_table::permute_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:479			
+std::ordered_table::permuted	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:596			
+std::ordered_table::place_entry	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:182			
+std::ordered_table::place_frozen	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:541			
+std::ordered_table::position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:147			
+std::ordered_table::positions	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:99			
+std::ordered_table::probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:129			
+std::ordered_table::rebuild	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:302			
+std::ordered_table::rebuild_with	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:334			
+std::ordered_table::reindex	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:288			
+std::ordered_table::remove_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:239			
+std::ordered_table::same_members?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:383			
+std::ordered_table::shift	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:213			
+std::ordered_table::slot_of	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:143			
+std::ordered_table::slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:508			
+std::ordered_table::slots_for	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:72			
+std::ordered_table::truncate	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:253			
 std::str	namespace		api	intrinsic				
 std::str::append_char	intrinsic	std::str	api	intrinsic	core/strings.tcl:124			
 std::str::char_at	intrinsic	std::str	api	intrinsic	core/strings.tcl:129			
@@ -1120,7 +1150,7 @@ std::str::length	intrinsic	std::str	api	intrinsic	core/strings.tcl:114
 std::str::lowercase	intrinsic	std::str	api	intrinsic	core/strings.tcl:120			
 std::str::substring	intrinsic	std::str	api	intrinsic	core/strings.tcl:116			
 std::table_hash	namespace		std-internal	intrinsic				
-std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:452			
+std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:509			
 std::test	namespace		api	source	stdlib/test.bot			
 std::test::Erased	struct	std::test	api	source	stdlib/test.bot:270			
 std::test::Match	struct	std::test	api	source	stdlib/test.bot:95			

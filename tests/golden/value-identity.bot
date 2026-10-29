@@ -71,6 +71,20 @@ fn bags(xs: List[Bag[int]]) -> Bag[Bag[int]]:
 fn int_bag(xs: List[List[int]], note: str) -> Bag[List[int]]:
     Bag[List[int]] {items: xs, note: note}
 
+# vi-hash-collision-not-equal, vi-intrinsic-set-collision: two Ints whose
+# public hashes collide, and nine fillers to pass the pairwise limit.
+fn collide_a() -> int:
+    17384044247497657079
+
+fn collide_b() -> int:
+    13834495523901255922
+
+fn fill() -> List[int]:
+    [1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+fn ints_dict(ks: List[int], vs: List[int]) -> Dict[int, int]:
+    Dict[int, int] {ks: ks, junk: 0, vs: vs}
+
 # vi-nested: a struct holding an identity value.
 struct Doc:
     title: str
@@ -161,7 +175,7 @@ fn register_declaration_tests():
 # Equality
 
 fn register_equality_tests():
-    # members: equal when the List holds the same elements as many times, in any order; the other fields take no part
+    # members: equal when the List holds the same elements as many times, in any order (an element matches one element: two equal ones need two); the other fields take no part
     fn b_vi_members_equality() errors std::compiler::CompilerError:
         static compile:
             [
@@ -170,11 +184,12 @@ fn register_equality_tests():
                 bag([1, 1, 2], "a") == bag([2, 1, 1], "b"),
                 bag([1, 1, 2], "a") == bag([1, 2, 2], "a"),
                 bag([1, 2], "a") == bag([1, 2, 2], "a"),
+                bag([2, 2, 1], "a") == bag([1, 2, 3], "a"),
                 bag([], "a") == bag([], "b"),
                 plain([1, 2], "a") == plain([2, 1], "a"),
                 plain([1, 2], "a") == plain([1, 2], "b")
             ]
-    std::test::value("vi-members-equality", [true, false, true, false, false, true, false, false], b_vi_members_equality)
+    std::test::value("vi-members-equality", [true, false, true, false, false, false, true, false, false], b_vi_members_equality)
 
     # associations: equal when the same key-value pairs are held, in any order; a pair is a unit; the other fields take no part
     fn b_vi_associations_equality() errors std::compiler::CompilerError:
@@ -241,6 +256,37 @@ fn register_hash_tests():
         static compile:
             [hash(bag([1, 2, 3], "x")), hash(dict(["a", "b", "c"], [1, 2, 3], 1))]
     std::test::value("vi-public-hash-pinned", [2303140193253857579, 26301586116918609], b_vi_public_hash_pinned)
+
+    # equal public hashes never make identity values equal: entries whose public hashes collide are compared by equality, pairwise and through hash buckets (more than eight unmatched entries), as members, keys and values
+    fn b_vi_hash_collision_not_equal() errors std::compiler::CompilerError:
+        static compile:
+            a = collide_a()
+            b = collide_b()
+            [
+                hash(a) == hash(b),
+                bag([a], "") == bag([b], ""),
+                hash(bag([a], "")) == hash(bag([b], "")),
+                bag([a, 1, 2, 3, 4, 5, 6, 7, 8, 9], "") == bag([9, 8, 7, 6, 5, 4, 3, 2, 1, b], ""),
+                ints_dict([a], [1]) == ints_dict([b], [1]),
+                ints_dict([1], [a]) == ints_dict([1], [b]),
+                hash(ints_dict([1], [a])) == hash(ints_dict([1], [b])),
+                ints_dict([a, 1, 2, 3, 4, 5, 6, 7, 8, 9], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) == ints_dict([9, 8, 7, 6, 5, 4, 3, 2, 1, b], [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
+                ints_dict([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [a, 1, 2, 3, 4, 5, 6, 7, 8, 9]) == ints_dict([9, 8, 7, 6, 5, 4, 3, 2, 1, 0], [9, 8, 7, 6, 5, 4, 3, 2, 1, b]),
+                bag([a, b, 1, 2, 3, 4, 5, 6, 7, 8], "") == bag([8, 7, 6, 5, 4, 3, 2, 1, b, a], "")
+            ]
+    std::test::value("vi-hash-collision-not-equal", [true, false, true, false, false, false, true, false, false, true], b_vi_hash_collision_not_equal)
+
+    # a set of more than eight members keeps two members whose public hashes collide, and tells them apart
+    fn b_vi_intrinsic_set_collision() errors std::compiler::CompilerError:
+        static compile:
+            a = collide_a()
+            b = collide_b()
+            [
+                std::immutable_set::from_list(std::list::append(std::list::append(fill(), a), b)) == std::immutable_set::from_list(std::list::append(fill(), a)),
+                std::immutable_set::contains(std::immutable_set::from_list(std::list::append(std::list::append(fill(), a), b)), b),
+                std::immutable_set::from_list(std::list::append(fill(), a)) == std::immutable_set::from_list(std::list::append(fill(), b))
+            ]
+    std::test::value("vi-intrinsic-set-collision", [false, true, false], b_vi_intrinsic_set_collision)
 
     # the public hash of a value of no declared identity is unchanged: it hashes by its fields
     fn b_vi_unrelated_hashes_unchanged() errors std::compiler::CompilerError:

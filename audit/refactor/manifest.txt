@@ -139,6 +139,7 @@ program stdlib/darwin.bot
 program stdlib/dfa.bot
 fails stdlib/event_loop.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (shutdown) requires contexts (verified through `import std::event_loop`)
 program stdlib/float64.bot
+fails stdlib/immutable_map.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/mutable_map.bot, immutable_map.bot imports std::table_hash and std::ordered_table (verified through `import std::immutable_map`, which also compiles std::ordered_table)
 fails stdlib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import std::io`)
 program stdlib/linux.bot
 fails stdlib/list.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: list.bot calls its namespace's intrinsic std::list::at, which needs no import as module `list` and may not be imported there (SELF-IMPORT), while an entry program needs `import std::list`; xs.at(i) compiles both ways but is a field projection when instantiated (verified through `import std::list`)
