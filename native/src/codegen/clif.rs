@@ -2890,7 +2890,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MvShare => ("rt_mv_share", None, false, Some(("mvshare", KIND_MUTVEC))),
                         MvToList => ("rt_mv_to_list", None, false, Some(("mvtolist", KIND_LIST))),
                         MvTakeFront => ("rt_mv_take_front", None, false, None),
-                        MvClearDrop => ("rt_mv_clear_drop", None, true, None),
+                        MvClearDrop => ("rt_mv_clear_drop", None, false, None),
+                        // The variants whose descriptor runs code
+                        // (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md):
+                        // the same helpers, safepoints and fallible.
+                        MvClearDropRun => ("rt_mv_clear_drop", None, true, None),
+                        MvSwapDropRun => ("rt_mv_swap_drop", None, true, None),
+                        MutArraySwapDropRun => ("rt_mutarray_swap_drop", None, true, None),
+                        MutArraySetDropRun => ("rt_mutarray_set_drop", None, true, None),
                         MvSwapDrop => ("rt_mv_swap_drop", None, true, None),
                         CtxRoot => ("rt_context_root", None, false, None),
                         // MutableArray (MUTABLE-ARRAY.md, runtime/ops.rs).

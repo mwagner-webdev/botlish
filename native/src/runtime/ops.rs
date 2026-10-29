@@ -197,9 +197,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             | CoFailed
             // Releases that run Botlish code (LEXICAL-RESOURCE-CLEANUP-
             // EXPLORATION-MILESTONE-1.md, runtime/affine.rs): a cleanup, an
-            // abandonment's release pads -- and every drop form that takes a
-            // descriptor, which may hold either.
-            | CoAbandon | AffineDropRun | CleanupCall | MvClearDrop | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop
+            // abandonment's release pads -- and the drop forms of a
+            // collection whose element descriptor runs either.
+            | CoAbandon | AffineDropRun | CleanupCall | MvClearDropRun | MvSwapDropRun | MutArraySwapDropRun | MutArraySetDropRun
             // MutableVector (MUTABLE-VECTOR.md): a new header (from_list, a
             // share) or a List (the snapshot); the mutations allocate no
             // Botlish object (runtime/mutvec.rs).
@@ -217,7 +217,7 @@ pub fn op_may_error(op: OpCode) -> bool {
     matches!(op, IMod | IShl | IShr | VEq | Hash | Substr
         // A release that runs Botlish code fails with that code's run-time
         // fault (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
-        | CoAbandon | AffineDropRun | CleanupCall | MvClearDrop
+        | CoAbandon | AffineDropRun | CleanupCall | MvClearDropRun | MvSwapDropRun | MutArraySwapDropRun | MutArraySetDropRun
         // The declared NonFiniteFloat (FLOAT64-MILESTONE-1.md).
         | F64Add | F64Sub | F64Mul | F64Div | F64FromInt
         // DecimalRounded's arithmetic (NonFiniteFloat) and quantization
@@ -3374,7 +3374,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         CoRelease => rt_co_release(p, a[0]),
         AffineDrop => rt_affine_drop(p, a[0], a[1]),
         // Lowering-internal releases (never a Native value).
-        CoAbandon | AffineDropRun | CleanupCall | CleanupTable => {
+        CoAbandon | AffineDropRun | CleanupCall | CleanupTable | MvClearDropRun | MvSwapDropRun | MutArraySwapDropRun
+        | MutArraySetDropRun => {
             vm(p).fail(RtError::Bug(format!("{op:?} is no native value")))
         }
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq

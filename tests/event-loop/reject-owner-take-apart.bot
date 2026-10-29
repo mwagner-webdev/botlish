@@ -1,0 +1,13 @@
+# reject-owner-take-apart.bot -- must be REJECTED (tests/event-loop.test, el-static-*): taking an Owner apart outside std::event_loop (OPAQUE-REPRESENTATION), which would discharge its release without revoking the registration
+import std::event_loop
+import type std::event_loop::Delivery
+
+fn discard(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    {owner, reg} = std::event_loop::owned_channel(Delivery::Reliable, 4)
+    {slot, gen} = owner
+    slot
+
+with context std::event_loop::create(8)
+discard():
+    on std::event_loop::SchedulerFault:
+        0

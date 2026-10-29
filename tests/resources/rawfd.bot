@@ -1,0 +1,45 @@
+# rawfd.bot -- a raw Linux descriptor number as a resource
+# (tests/resources.test, LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md):
+# std::linux's openat and close, the thin syscall wrappers, behind this
+# module's own context (Closes mediates every raw call, so importers stay
+# ordinary modules). The cleanup closes the number and records close's raw
+# result, so a test can see what a release met: 0, or -9 (EBADF) when the
+# number was no longer open -- the native representation invalidated by
+# code outside Botlish's ownership (invalidate, below, stands for it).
+import std::abi
+import std::io::path
+import std::linux
+import std::linux::fs
+import std::mutable_vector
+
+opaque resource struct Fd:
+    n: std::abi::I32
+
+opaque context struct Closes:
+    results: MutableVector[int]
+
+fn create() -> Closes:
+    Closes {results: std::mutable_vector::from_list([])}
+
+cleanup fn close(fd: Fd, context closes: Closes):
+    {n} = fd
+    closes.results.push(std::linux::close(n))
+
+# PATH opened for reading (O_RDONLY | O_CLOEXEC); the open's raw result as the
+# number (a failed open's -errno is no open number: the cleanup's close then
+# reports EBADF).
+fn open(path: str, context closes: Closes) -> Fd errors std::io::path::NotAPath, std::abi::AbiIntegerAboveRange, std::abi::AbiIntegerBelowRange:
+    r = std::abi::i32(-100).openat(std::linux::fs::from_text(path).bytes(), std::abi::i32(524288), std::abi::u32(0))
+    Fd {n: std::abi::i32(r)}
+
+# FD's number closed behind its owner's back -- what another library, or C
+# code, holding the same number could do. The Fd still owns its obligation,
+# now over a number that is not open.
+fn invalidate(fd: Fd, context closes: Closes) -> Fd:
+    {n} = fd
+    std::linux::close(n)
+    Fd {n: n}
+
+fn results(context closes: Closes) -> List[int] errors IndexNotFound:
+    loop i from 0 to closes.results.length():
+        closes.results.at(i)

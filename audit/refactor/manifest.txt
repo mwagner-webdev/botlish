@@ -137,7 +137,7 @@ program stdlib/byte.bot
 program stdlib/compiler.bot
 program stdlib/darwin.bot
 program stdlib/dfa.bot
-fails stdlib/event_loop.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (shutdown) requires contexts (verified through `import std::event_loop`)
+fails stdlib/event_loop.bot CORE SEMANTIC RESOURCE-DECLARATION -- entry-program resource: compiled as an entry program, its resource struct Owner would be the entry program's, and a resource is declared in a module (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md); past that, as for stdlib/io.bot, the last declaration (shutdown) requires contexts (verified through `import std::event_loop`)
 program stdlib/float64.bot
 fails stdlib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import std::io`)
 program stdlib/linux.bot

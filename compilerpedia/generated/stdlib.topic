@@ -7187,7 +7187,50 @@ std::event_loop::Reg.
 == DESCRIPTION
 A registration's identity: its slot and the generation it had when made.
 Opaque: only this module makes one, so holding a Reg is the authority to
-post to, wait on and revoke that registration.
+post to, wait on and revoke that registration (an owned one's revocation is
+its Owner's).
+
+@topic stdlib.std::event_loop::Owner
+title: std::event_loop::Owner -- Opaque struct of module std::event_loop
+summary: The owner of an owned registration (owned_source, owned_channel, ...)
+index: stdlib
+symbol: std::event_loop::Owner
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    opaque resource struct Owner:
+        slot: int
+        gen: int
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Owner.
+
+== DESCRIPTION
+The owner of an owned registration (owned_source, owned_channel, ...): a
+resource (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). Its cleanup,
+`release`, revokes the registration where the owner's lexical scope ends, or
+where it is called explicitly; moving the owner moves that obligation.
+
+@topic stdlib.std::event_loop::Owned
+title: std::event_loop::Owned -- Struct of module std::event_loop
+summary: An owned registration
+index: stdlib
+symbol: std::event_loop::Owned
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    struct Owned:
+        owner: Owner
+        reg: Reg
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::Owned.
+
+== DESCRIPTION
+An owned registration: its owner, and its identity (a copy of which may go
+anywhere: once the owner revoked the registration, it is stale).
 
 @topic stdlib.std::event_loop::Event
 title: std::event_loop::Event -- Struct of module std::event_loop
@@ -7698,7 +7741,115 @@ task is dispatched, records still in flight are dropped as stale, and every
 waiter is made ready with Wake::Revoked, in the order they waited. Running
 code is not undone and no task is cancelled. True when REG was live (or a
 spent one-shot timer); revoking twice, or a stale copy, does nothing
-(false).
+(false). An owned registration is revoked by its Owner only (release):
+revoking it through its Reg does nothing (false).
+
+@topic stdlib.std::event_loop::owned_source
+title: std::event_loop::owned_source -- Function (nomethod) of module std::event_loop
+summary: The function (nomethod) std::event_loop::owned_source of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::owned_source
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    nomethod fn owned_source(delivery: Delivery, capacity: int, flags :keep_alive, context ev: Loop) -> Owned errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::owned_source.
+
+@topic stdlib.std::event_loop::owned_channel
+title: std::event_loop::owned_channel -- Function (nomethod)
+summary: The function (nomethod) std::event_loop::owned_channel of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::owned_channel
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    nomethod fn owned_channel(delivery: Delivery, capacity: int, context ev: Loop) -> Owned errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::owned_channel.
+
+@topic stdlib.std::event_loop::owned_timer
+title: std::event_loop::owned_timer -- Function (nomethod) of module std::event_loop
+summary: The function (nomethod) std::event_loop::owned_timer of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::owned_timer
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    nomethod fn owned_timer(deadline: int, period: int, context ev: Loop) -> Owned errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::owned_timer.
+
+@topic stdlib.std::event_loop::owned_after
+title: std::event_loop::owned_after -- Function of module std::event_loop
+summary: The function std::event_loop::owned_after of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::owned_after
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn owned_after(delay: int, context ev: Loop) -> Owned errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::owned_after or, as a method, receiver.owned_after(...).
+
+@topic stdlib.std::event_loop::owned_every
+title: std::event_loop::owned_every -- Function of module std::event_loop
+summary: The function std::event_loop::owned_every of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::owned_every
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn owned_every(period: int, context ev: Loop) -> Owned errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::owned_every or, as a method, receiver.owned_every(...).
+
+@topic stdlib.std::event_loop::owned_observer
+title: std::event_loop::owned_observer -- Function of module std::event_loop
+summary: The function std::event_loop::owned_observer of the standard module std::event_loop.
+index: stdlib
+symbol: std::event_loop::owned_observer
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    fn owned_observer(context ev: Loop) -> Owned errors SchedulerFault:
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::owned_observer or, as a method,
+receiver.owned_observer(...).
+
+@topic stdlib.std::event_loop::release
+title: std::event_loop::release -- Function of module std::event_loop
+summary: Release OWNER
+index: stdlib
+symbol: std::event_loop::release
+related: stdlib.module.std::event_loop
+
+== DECLARATION
+    cleanup fn release(owner: Owner, context ev: Loop):
+
+== MODULE
+stdlib/event_loop.bot: import std::event_loop, then write
+std::event_loop::release or, as a method, receiver.release(...).
+
+== DESCRIPTION
+Release OWNER: revoke its registration (revoke's guarantees), now -- the
+owner's cleanup, which runs where the owner's lexical scope ends; calling it
+is the explicit early release. Revoking a registration that is gone already
+(shutdown revoked it) does nothing. A cleanup fails with nothing: a
+scheduler fault on the way is recorded, and the next run, turn or shutdown
+fails with SchedulerFault.
 
 @topic stdlib.std::event_loop::post
 title: std::event_loop::post -- Function of module std::event_loop
@@ -8080,9 +8231,21 @@ records still in flight with the old generation are dropped as stale (also
 after the slot is reused), and its waiters wake with Wake::Revoked in the
 order they waited. Code already running is not undone; tasks a registration
 woke or started keep their own lifetimes; revoking twice, or through a stale
-copy, does nothing. A Reg is an identity, not an owner: nothing revokes a
-registration implicitly (there is no drop action yet,
-EVENT-LOOP-MILESTONE-1.md, "Ownership"); shutdown revokes every one.
+copy, does nothing. A Reg is an identity, not an owner; shutdown revokes
+every registration.
+
+OWNERSHIP (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). A
+registration made by owned_source, owned_channel, owned_timer, owned_after,
+owned_every or owned_observer has an Owner: a resource, affine, whose
+cleanup (`release`) revokes it. The owner holds the registration live until
+its lexical scope ends -- after its last use or not -- or until it is
+released explicitly (`release(owner)`); moving it (into a function, a
+result, a struct, a coroutine, a context's collection) moves that
+obligation, and a coroutine that holds it keeps it across suspension and
+releases it when it completes or is abandoned. Its Reg -- returned beside
+it, an ordinary identity -- waits, posts and observes as any Reg does, but
+cannot revoke: only the owner can (revoke of an owned registration does
+nothing and answers false).
 
 ERRORS. A task's declared failure (TaskFailed, its own IndexNotFound, or a
 DriverFault from a driver operation it made) ends that task, is recorded
@@ -8105,6 +8268,8 @@ stdlib/event_loop.bot (import std::event_loop).
     std::event_loop::Loop          opaque context struct
     std::event_loop::LoopReentered error -- run or turn called while a task...
     std::event_loop::Outcome       struct -- A finished task
+    std::event_loop::Owned         struct -- An owned registration
+    std::event_loop::Owner         opaque struct -- The owner of an owned r...
     std::event_loop::Posted        enum -- What post did with an event.
     std::event_loop::Reg           opaque struct -- A registration's identity
     std::event_loop::SchedulerFault error -- The scheduler's own state brok...
@@ -8126,8 +8291,15 @@ stdlib/event_loop.bot (import std::event_loop).
     std::event_loop::native_slot   function -- The tag a native producer pu...
     std::event_loop::now           function -- The loop's time
     std::event_loop::observer      function -- A once-per-turn registration
+    std::event_loop::owned_after   function
+    std::event_loop::owned_channel function (nomethod)
+    std::event_loop::owned_every   function
+    std::event_loop::owned_observer function
+    std::event_loop::owned_source  function (nomethod)
+    std::event_loop::owned_timer   function (nomethod)
     std::event_loop::pending       function -- Events of REG queued and und...
     std::event_loop::post          function -- Post (A, B) to the source or...
+    std::event_loop::release       function -- Release OWNER
     std::event_loop::revoke        function -- Revoke REG
     std::event_loop::run           function -- Drive the loop until nothing...
     std::event_loop::shutdown      function -- Shutdown

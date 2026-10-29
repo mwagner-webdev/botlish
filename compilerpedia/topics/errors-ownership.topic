@@ -3057,3 +3057,59 @@ CONTEXT-TRAIT-INTERNAL means two calls disagreed.
 == WHAT TO DO
 You should never see this: it is a compiler bug. Please report the
 program (as small as you can make it) with the full message.
+
+@topic error.resource-declaration
+title: RESOURCE-DECLARATION: a resource and its one cleanup, declared in its module
+summary: A resource struct is an `opaque resource struct` of a module, with exactly one `cleanup fn` in the same module taking it as its one ordinary parameter and failing, yielding and returning nothing.
+index: errors
+alias: resource struct in the entry program; cleanup function signature; two cleanup functions; resource without a cleanup
+keywords: resource, cleanup, cleanup fn, opaque, module, errors clause, yield, context trait, unit
+related: concept.resources concept.affine concept.opaque-structs
+docs: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md
+code: CORE SEMANTIC RESOURCE-DECLARATION
+
+== MEANING
+The compiler calls a resource's cleanup where an owner's scope ends -- on
+every exit, error edges included -- inside whatever code is running there.
+So the cleanup must be a fixed function it can name (one per resource, in
+the module that owns the representation), take the value whole, and add
+nothing an earlier analysis did not see: no error to handle, no
+suspension, no result, no context trait to select. The resource itself is
+its module's: opaque, so no other code can make one or take one apart, and
+never a context, which lives for the whole run.
+
+== WHAT TO DO
+Move the struct into a module and mark it `opaque resource struct`;
+declare one `cleanup fn NAME(r: R, context ...):` there that takes `r`
+apart on every path; handle every error inside the cleanup (record what the
+program must see in a context); require context structs, not context
+traits.
+
+@example reject
+opaque resource struct Handle:
+    id: int
+
+cleanup fn close(h: Handle):
+    {id} = h
+    unit
+
+close(Handle {id: 1})
+@caption A resource of the entry program
+@error CORE SEMANTIC RESOURCE-DECLARATION
+@at 1:8
+@end
+
+@example reject
+import res
+
+res::open(1)
+@module res
+opaque resource struct Handle:
+    id: int
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+@caption A resource with no cleanup function
+@error CORE SEMANTIC RESOURCE-DECLARATION
+@end
+

@@ -1386,13 +1386,13 @@ test co-source-no-iterator-or-exhaustion {no iterator protocol, StopIteration-li
     set hits
 } -cleanup {unset -nocomplain hits path text pattern} -result {}
 
-test co-source-operations {the coroutine operations are exactly create, start, resume (at most one message), yield, done? and release, in the Tcl runtime and in NIR, plus NIR's cofailed (a fused coroutine's cached failure, COROUTINE-FUSION-MILESTONE-1.md): no copy, fork or move operation exists at run time} -body {
+test co-source-operations {the coroutine operations are exactly create, start, resume (at most one message), yield, done?, release and abandon (a release that unwinds a suspended coroutine's own release code, LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md), in the Tcl runtime and in NIR, plus NIR's cofailed (a fused coroutine's cached failure, COROUTINE-FUSION-MILESTONE-1.md): no copy, fork or move operation exists at run time} -body {
     set runtime [coSource core/coroutines.tcl]
     set registered [lmap {- name} [regexp -all -inline {core::native::register ((?:std::)?coroutine\S+)} $runtime] {set name}]
     set nir [coSource native/src/nir.rs]
     set ops [lmap {- name} [regexp -all -inline {"(co[a-z0-9]+)" => Co} $nir] {set name}]
     list $registered [core::coroutines::natives] $ops [regexp {\[llength \$args\] > 1} $runtime]
-} -cleanup {unset -nocomplain runtime registered nir ops} -result {{coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release} {coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release} {cocreate costart coresume coresume0 coyield codone corelease cofailed} 1}
+} -cleanup {unset -nocomplain runtime registered nir ops} -result {{coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release coroutine#abandon} {coroutine#create coroutine#start coroutine#resume coroutine#yield std::coroutine::done? coroutine#release coroutine#abandon} {cocreate costart coresume coresume0 coyield codone corelease coabandon cofailed} 1}
 
 test co-source-state-machine {the runtime states are exactly fresh, running, suspended, completed, failed and released (the handle is dead): there is no moved sentinel (ownership is static), and a coroutine object is never cloned} -body {
     set runtime [coSource core/coroutines.tcl]

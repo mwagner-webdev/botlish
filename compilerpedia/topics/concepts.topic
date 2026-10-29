@@ -3459,7 +3459,7 @@ summary: A coroutine handle, and any struct, List or vector that owns one, is af
 index: concepts
 alias: affine; affine value; ownership; move semantics; use after move
 keywords: affine, move, owner, release, drop, USE-AFTER-MOVE, coroutine handle, copy, duplicate, unrestricted, AFFINE-CAPTURE-UNSUPPORTED
-related: concept.coroutines concept.mutable-vector concept.mutable-array concept.function-types proof.ownership rule.affine-use error.use-after-move
+related: concept.coroutines concept.mutable-vector concept.mutable-array concept.function-types concept.resources proof.ownership rule.affine-use error.use-after-move
 docs: AFFINE-VALUES.md COROUTINES.md
 
 == WHAT IT IS
@@ -3476,7 +3476,9 @@ by its type. `other = step` moves the handle: `step` is dead afterwards.
     destructuring the struct.
   * An affine value may be dropped unused; it is released (a suspended
     coroutine's stack freed) right after its owner's last use, or when a
-    return, fail, break, continue or error leaves its scope first.
+    return, fail, break, continue or error leaves its scope first. A
+    resource (concept.resources) is released at the end of its owner's
+    scope instead, by its cleanup function.
   * Not supported: capturing one in a closure
     (AFFINE-CAPTURE-UNSUPPORTED) and `==` on it
     (AFFINE-EQUALITY-UNSUPPORTED); a second use such as `[step, step]` is
@@ -3530,6 +3532,146 @@ b = step
 
 == MORE
 AFFINE-VALUES.md; proof.ownership.
+
+@topic concept.resources
+title: Resources: `resource struct` and `cleanup fn`
+summary: An `opaque resource struct` carries a cleanup obligation: its module's `cleanup fn` runs once where its owner's lexical scope ends (not at its last use), unless the value moved on first.
+index: concepts
+alias: resource; resource struct; cleanup function; scope-bound cleanup; deterministic cleanup; release a resource; drop action
+keywords: resource, cleanup, cleanup fn, scope, lexical, release, RESOURCE-DECLARATION, AFFINE-PATH-RELEASE-UNSUPPORTED, move, abandon, owned registration, release order
+related: concept.affine concept.coroutines concept.opaque-structs concept.contexts error.resource-declaration error.affine-path-release-unsupported stdlib.module.std::event_loop
+docs: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md AFFINE-VALUES.md
+
+== WHAT IT IS
+`opaque resource struct Handle:` declares, in a module, a struct whose
+values each carry an obligation, and `cleanup fn close(h: Handle, context
+...):` the one function of that module that discharges it. The compiler
+calls the cleanup where the owner of a value dies: at the end of the
+owning binding's sequence, or where a return, fail, break, continue or
+error leaves it. It is a lexical scope, not a last use: a value nobody reads
+after its binding still lives to its scope's end.
+
+== RULES
+  * A resource struct is declared in a module, `opaque`, with no type
+    slots, and is no context; it is affine whatever its fields.
+  * Its cleanup is a top-level function of the same module with exactly one
+    ordinary parameter of the resource type, contexts (structs, not context
+    traits) after it, no flags, no errors clause, a unit result, and no
+    yield; it takes its parameter apart. Anything else is
+    RESOURCE-DECLARATION, and so is a construction of a resource that has
+    no cleanup.
+  * One disposition per value: its scope ends (the cleanup runs), it moves
+    (a binding, an argument, a result, a field, an element, a coroutine's
+    frame, an installed context's collection: the obligation moves too), or
+    its module destructures it (discharged without the cleanup). Calling
+    the cleanup yourself is the early release: it moves the value in.
+  * A scope releases what it still owns in reverse acquisition order; a
+    struct its fields last to first, a collection its elements first to
+    last.
+  * A value moved on some paths of a statement and kept on others has no one
+    release point: AFFINE-PATH-RELEASE-UNSUPPORTED (move it on every path,
+    or release it explicitly where it is not moved). There is no run-time
+    ownership state to ask.
+  * A function that may release a resource requires its cleanup's contexts,
+    like a call (MISSING-CONTEXT where one is not installed); one that only
+    makes and returns it does not.
+  * A coroutine's frames keep what they own across suspension. Where a
+    function that may suspend owns a resource, coroutine handles are
+    released at the end of their scopes too, and releasing a suspended one
+    abandons it: its pending yield fails with an internal error no handler
+    names, so only its frames' releases run, innermost first.
+  * What an installed context holds lives as long as the run: nothing is
+    released at the program's end. There are no finalizers, destructors or
+    reference counts; the collector never runs a cleanup.
+
+== WHY
+A registration, a descriptor or a session is an obligation, not a value:
+forgetting to end it is a leak, and ending it at the last use would end it
+while code still depends on it (an event source a sleeping task means to
+keep). The lexical scope is the boundary a reader sees; the module that
+can make and take apart the value is the one that may end it.
+
+== EXAMPLES
+@example accept
+import log
+
+fn body() -> int:
+    a = log::open(1)
+    b = log::open(2)
+    log::note(9)
+    3
+
+with context log::create()
+body()
+log::lines():
+    on IndexNotFound:
+        []
+@module log
+import std::mutable_vector
+
+opaque resource struct Handle:
+    id: int
+
+opaque context struct Log:
+    lines: MutableVector[int]
+
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list([])}
+
+cleanup fn close(h: Handle, context log: Log):
+    {id} = h
+    log.lines.push(id)
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+
+fn note(n: int, context log: Log):
+    log.lines.push(n)
+
+fn lines(context log: Log) -> List[int] errors IndexNotFound:
+    loop i from 0 to log.lines.length():
+        log.lines.at(i)
+@caption Released at the scope's end, after the later note, in reverse order
+@value [9, 2, 1]
+@end
+
+@example reject
+import log
+
+fn maybe(keep: bool) -> int:
+    h = log::open(1)
+    if keep:
+        log::close(h)
+    0
+
+with context log::create()
+maybe(true)
+@module log
+import std::mutable_vector
+
+opaque resource struct Handle:
+    id: int
+
+opaque context struct Log:
+    lines: MutableVector[int]
+
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list([])}
+
+cleanup fn close(h: Handle, context log: Log):
+    {id} = h
+    log.lines.push(id)
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+@caption Released on one path, still owned on the other
+@error CORE SEMANTIC AFFINE-PATH-RELEASE-UNSUPPORTED
+@at 5:5
+@end
+
+== MORE
+LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md; std::event_loop's owned
+registrations (owned_source, ..., release) are resources.
 
 @topic concept.coroutines
 title: Coroutines: `yield`, eager start, resume

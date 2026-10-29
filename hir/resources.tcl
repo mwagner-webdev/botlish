@@ -192,32 +192,38 @@ proc hir::resources::verify {hirVar} {
         set types [dict get $node declaredParamTypes]
         set flags [dict getdef $node flags {}]
         set ordinary [expr {[llength $params] - [llength $flags]}]
+        # The resource this cleanup is for: its first parameter's declared
+        # type. Once that is a resource of this module, the cleanup is the
+        # resource's from here on, whatever else is wrong with it (its
+        # constructions are then not "without a cleanup").
+        set type [hir::types::Unrefined [lindex $types 0]]
+        set id ""
+        if {[lindex $types 0] ne {} && [hir::types::IsNamedStruct $type] && [hir::structs::isResource [lindex $type 1]]
+                && [hir::structs::owner [lindex $type 1]] eq [NamespaceOf $hir $b]} {
+            set id [lindex $type 1]
+            if {[dict exists $found $id]} {
+                set other [dict get $found $id binding]
+                hir::Diagnose hir RESOURCE-DECLARATION \
+                    "resource [hir::types::show $type] has two cleanup functions, [hir::semantic::SourceName $hir $other] and $name: a resource's obligation is discharged by exactly one" $e
+                continue
+            }
+            dict set found $id [dict create block $e binding $b]
+        }
         if {$ordinary != 1 || [lindex $types 0] eq {}} {
             hir::Diagnose hir RESOURCE-DECLARATION \
-                "cleanup function $name must have exactly one ordinary parameter, declared with its resource struct type (\"cleanup fn $name(r: R, context ...):\"): the cleanup receives the one value whose obligation it discharges" $e
+                "cleanup function $name must have exactly one ordinary parameter, declared with its resource struct type (\"cleanup fn ${name}(r: R, context ...):\"): the cleanup receives the one value whose obligation it discharges" $e
             continue
         }
-        set type [hir::types::Unrefined [lindex $types 0]]
         if {![hir::types::IsNamedStruct $type] || ![hir::structs::isResource [lindex $type 1]]} {
             hir::Diagnose hir RESOURCE-DECLARATION \
                 "cleanup function $name's parameter must have a resource struct type (an \"opaque resource struct\"), not [hir::types::show $type]" $e
             continue
         }
-        set id [lindex $type 1]
-        if {[hir::structs::owner $id] ne [NamespaceOf $hir $b]} {
+        if {$id eq ""} {
             hir::Diagnose hir RESOURCE-DECLARATION \
                 "cleanup function $name is not declared in the module of its resource [hir::types::show $type]: only the module that owns a resource's representation may discharge its obligation" $e
             continue
         }
-        if {[dict exists $found $id]} {
-            set other [dict get $found $id binding]
-            hir::Diagnose hir RESOURCE-DECLARATION \
-                "resource [hir::types::show $type] has two cleanup functions, [hir::semantic::SourceName $hir $other] and $name: a resource's obligation is discharged by exactly one" $e
-            continue
-        }
-        # The resource's cleanup from here on, whatever else is wrong with
-        # it (its constructions are not "without a cleanup").
-        dict set found $id [dict create block $e binding $b]
         if {$flags ne {} || [dict exists $node variadic] || [dict getdef $node places {}] ne {}} {
             hir::Diagnose hir RESOURCE-DECLARATION \
                 "cleanup function $name takes no flags, variadic or place parameter: the compiler calls it with the one value it releases" $e
@@ -234,7 +240,12 @@ proc hir::resources::verify {hirVar} {
                 "cleanup function $name must return unit (or declare no result): nothing receives a cleanup's value" $e
             continue
         }
-        RunsBefore hir $b $id
+        # Where it is declared in its module does not matter: no resource
+        # exists before every module's declarations are bound. A module's
+        # initializers are context-free, which no struct construction is
+        # (hir/modulebinding.tcl: MODULE-CONTEXT), so no initializer makes
+        # one, and the entry program, whose statements run after every
+        # module's, declares no resource (RESOURCE-DECLARATION).
     }
     set index 0
     foreach id [lsort [dict keys $found]] {
@@ -253,50 +264,6 @@ proc hir::resources::verify {hirVar} {
         hir::Diagnose hir RESOURCE-DECLARATION \
             "resource [hir::types::show $type] has no cleanup function: declare \"cleanup fn NAME(r: [hir::structs::display $id]):\" in its module, the one function that discharges a value's obligation when its owner's scope ends" $e
     }
-}
-
-# 1 if the cleanup binding B of resource ID may stand where it is: in its
-# sequence (its module's top level, or the entry program's), every statement
-# before it is a declaration or runs no call. A release names the cleanup
-# where it runs (Core IR resolves names when the code runs), so no code of
-# that sequence may run -- and so release a resource -- before the cleanup's
-# own declaration has run. Diagnoses the first such statement.
-proc hir::resources::RunsBefore {hirVar b id} {
-    upvar 1 $hirVar hir
-    set by [dict get $hir bindings $b declaredBy]
-    set scope [dict get $hir bindings $b scope]
-    # Every top-level statement -- a module section's and the entry
-    # program's -- is a root, in evaluation order.
-    foreach s [dict get $hir roots] {
-        if {$s eq $by} {
-            return 1
-        }
-        if {[dict get $hir exprs $s scope] ne $scope} continue
-        set node [dict get $hir exprs $s]
-        if {[dict get $node kind] eq "bind" && [dict get $hir exprs [dict get $node value] kind] eq "block"} continue
-        if {[hir::resources::Runs $hir $s]} {
-            hir::Diagnose hir RESOURCE-DECLARATION \
-                "this statement runs code before the cleanup function [hir::semantic::SourceName $hir $b] of [hir::structs::display $id] is declared: declare the cleanup before any statement of its module that runs code (a release calls the cleanup, which must exist by then)" $s
-            return 0
-        }
-    }
-    return 1
-}
-
-# 1 if expression E's subtree, nested functions excluded, makes a call.
-proc hir::resources::Runs {hir e} {
-    set work [list $e]
-    while {$work ne {}} {
-        set x [lindex $work end]
-        set work [lrange $work 0 end-1]
-        set kind [dict get $hir exprs $x kind]
-        if {$kind eq "block"} continue
-        if {$kind eq "call"} {
-            return 1
-        }
-        lappend work {*}[hir::children $hir $x]
-    }
-    return 0
 }
 
 # The checks of a cleanup function that need the yield and context analyses

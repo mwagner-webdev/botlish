@@ -1,0 +1,61 @@
+# collections.bot -- Handles in collections and contexts
+# (tests/resources.test): a collection releases its elements first to last
+# (when it dies, and when cleared), a struct its fields last to first; a
+# moved-out element is its new owner's; an installed context owns what it
+# holds for the whole run (nothing releases it at the program's end), and
+# what is moved out of it is released where its new owner's scope ends.
+import handle
+import std::mutable_vector
+
+opaque context struct Pool:
+    held: MutableVector[handle::Handle]
+
+fn vectors() -> int errors IndexNotFound:
+    v = std::mutable_vector::from_list([handle::open(90)])
+    v.push(handle::open(91))
+    v.push(handle::open(92))
+    x = v.pop()
+    v.clear()
+    handle::note(93)
+    v.push(handle::open(94))
+    # The scope's end: x (acquired after v) first -- 92 -- then v's 94.
+    0
+
+fn lists() -> int:
+    l = [handle::open(95), handle::open(96)]
+    handle::note(97)
+    0
+
+struct Three:
+    a: handle::Handle
+    b: handle::Handle
+    c: handle::Handle
+
+fn fields() -> int:
+    t = Three {a: handle::open(81), b: handle::open(82), c: handle::open(83)}
+    0
+
+fn pooled(context pool: Pool) -> int:
+    pool.held.push(handle::open(70))
+    pool.held.push(handle::open(71))
+    0
+
+fn unpooled(context pool: Pool) -> int errors IndexNotFound:
+    h = pool.held.pop()
+    handle::note(72)
+    0
+
+fn main(context log: handle::Log, pool: Pool) -> List[int] errors IndexNotFound:
+    vectors()
+    lists()
+    fields()
+    pooled()
+    unpooled()
+    handle::note(pool.held.length())
+    handle::closed()
+
+with context handle::create()
+with context Pool {held: std::mutable_vector::from_list([handle::open(69)])}
+main():
+    on IndexNotFound:
+        []

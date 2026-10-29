@@ -92,9 +92,21 @@
 # after the slot is reused), and its waiters wake with Wake::Revoked in the
 # order they waited. Code already running is not undone; tasks a
 # registration woke or started keep their own lifetimes; revoking twice, or
-# through a stale copy, does nothing. A Reg is an identity, not an owner:
-# nothing revokes a registration implicitly (there is no drop action yet,
-# EVENT-LOOP-MILESTONE-1.md, "Ownership"); shutdown revokes every one.
+# through a stale copy, does nothing. A Reg is an identity, not an owner;
+# shutdown revokes every registration.
+#
+# OWNERSHIP (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). A
+# registration made by owned_source, owned_channel, owned_timer, owned_after,
+# owned_every or owned_observer has an Owner: a resource, affine, whose
+# cleanup (`release`) revokes it. The owner holds the registration live
+# until its lexical scope ends -- after its last use or not -- or until it is
+# released explicitly (`release(owner)`); moving it (into a function, a
+# result, a struct, a coroutine, a context's collection) moves that
+# obligation, and a coroutine that holds it keeps it across suspension and
+# releases it when it completes or is abandoned. Its Reg -- returned beside
+# it, an ordinary identity -- waits, posts and observes as any Reg does, but
+# cannot revoke: only the owner can (revoke of an owned registration does
+# nothing and answers false).
 #
 # ERRORS. A task's declared failure (TaskFailed, its own IndexNotFound, or a
 # DriverFault from a driver operation it made) ends that task, is recorded
@@ -161,10 +173,25 @@ enum Ending:
 
 # A registration's identity: its slot and the generation it had when made.
 # Opaque: only this module makes one, so holding a Reg is the authority to
-# post to, wait on and revoke that registration.
+# post to, wait on and revoke that registration (an owned one's revocation is
+# its Owner's).
 opaque struct Reg:
     slot: int
     gen: int
+
+# The owner of an owned registration (owned_source, owned_channel, ...): a
+# resource (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). Its cleanup,
+# `release`, revokes the registration where the owner's lexical scope ends,
+# or where it is called explicitly; moving the owner moves that obligation.
+opaque resource struct Owner:
+    slot: int
+    gen: int
+
+# An owned registration: its owner, and its identity (a copy of which may go
+# anywhere: once the owner revoked the registration, it is stale).
+struct Owned:
+    owner: Owner
+    reg: Reg
 
 # What woke a task. A: the event's first value (a timer: the intervals it
 # missed; an observer: the turn), B: its second, COUNT: the native events the
@@ -274,7 +301,7 @@ private dv_full = 5
 private dv_invalid = 6
 
 # Registration rows (stride rs).
-private rs = 20
+private rs = 21
 private r_gen = 0
 private r_kind = 1
 private r_live = 2
@@ -295,6 +322,7 @@ private r_policy = 16
 private r_held = 17
 private r_hpos = 18
 private r_inflight = 19
+private r_owned = 20
 
 # Task rows (stride ts).
 private ts = 10
@@ -775,6 +803,7 @@ private nomethod fn new_reg(kind: int, keep: int, policy: int, cap: int, context
     rset(slot, r_held, 0)
     rset(slot, r_hpos, -1)
     rset(slot, r_inflight, 0)
+    rset(slot, r_owned, 0)
     bump(s_seq)
     bump(s_live_regs)
     Reg {slot: slot, gen: rget(slot, r_gen)}
@@ -924,7 +953,7 @@ private nomethod fn release_if_room(slot: int, context ev: Loop) errors IndexNot
     if rget(slot, r_npend) <= rget(slot, r_cap).shift_right(1):
         schedule_release(slot)
 
-private fn revoke_checked(reg: Reg, context ev: Loop) -> bool errors IndexNotFound:
+private fn revoke_slot(reg: Reg, context ev: Loop) -> bool errors IndexNotFound:
     stale = if not in_table?(reg.slot):
         true
     else:
@@ -958,17 +987,100 @@ private fn revoke_checked(reg: Reg, context ev: Loop) -> bool errors IndexNotFou
     free_reg(slot)
     true
 
+private fn revoke_checked(reg: Reg, context ev: Loop) -> bool errors IndexNotFound:
+    if in_table?(reg.slot) and rget(reg.slot, r_gen) == reg.gen and rget(reg.slot, r_owned) == 1:
+        # An owned registration: its Owner revokes it, never an identity.
+        if tracing_on?():
+            note(cat("revoke refused, owned ", reg.slot))
+        return false
+    revoke_slot(reg)
+
 # Revoke REG: no handler invocation after this one. Its queued events are
 # discarded, a wake already queued for a task becomes Wake::Revoked when the
 # task is dispatched, records still in flight are dropped as stale, and
 # every waiter is made ready with Wake::Revoked, in the order they waited.
 # Running code is not undone and no task is cancelled. True when REG was
 # live (or a spent one-shot timer); revoking twice, or a stale copy, does
-# nothing (false).
+# nothing (false). An owned registration is revoked by its Owner only
+# (release): revoking it through its Reg does nothing (false).
 fn revoke(reg: Reg, context ev: Loop) -> bool errors SchedulerFault:
     revoke_checked(reg):
         on IndexNotFound:
             fail SchedulerFault
+
+# Owned registrations (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+
+# REG, made just now, owned: its Owner and its identity.
+private nomethod fn own(reg: Reg, context ev: Loop) -> Owned errors IndexNotFound:
+    rset(reg.slot, r_owned, 1)
+    Owned {owner: Owner {slot: reg.slot, gen: reg.gen}, reg: reg}
+
+# The owned registrations: as source, channel, timer, after, every and
+# observer, each with an Owner whose scope delimits it (Ownership, above).
+
+private nomethod fn owned_source_checked(keep: int, policy: int, cap: int, context ev: Loop) -> Owned errors IndexNotFound:
+    own(source_checked(keep, policy, cap))
+
+# source's registration, owned: an Owned (its Owner and its Reg), revoked
+# where the Owner's scope ends (Ownership, above).
+nomethod fn owned_source(delivery: Delivery, capacity: int, flags :keep_alive, context ev: Loop) -> Owned errors SchedulerFault:
+    keep = if keep_alive:
+        1
+    else:
+        0
+    owned_source_checked(keep, delivery_code(delivery), least_one(capacity)):
+        on IndexNotFound:
+            fail SchedulerFault
+
+private nomethod fn owned_channel_checked(policy: int, cap: int, context ev: Loop) -> Owned errors IndexNotFound:
+    own(channel_checked(policy, cap))
+
+# channel's registration, owned (owned_source).
+nomethod fn owned_channel(delivery: Delivery, capacity: int, context ev: Loop) -> Owned errors SchedulerFault:
+    owned_channel_checked(delivery_code(delivery), least_one(capacity)):
+        on IndexNotFound:
+            fail SchedulerFault
+
+private nomethod fn owned_timer_checked(deadline: int, period: int, context ev: Loop) -> Owned errors IndexNotFound:
+    own(timer_checked(deadline, period))
+
+# timer's registration, owned (owned_source).
+nomethod fn owned_timer(deadline: int, period: int, context ev: Loop) -> Owned errors SchedulerFault:
+    owned_timer_checked(deadline, period):
+        on IndexNotFound:
+            fail SchedulerFault
+
+# after's registration, owned (owned_source).
+fn owned_after(delay: int, context ev: Loop) -> Owned errors SchedulerFault:
+    owned_timer(reg_of(s_now) + delay, 0)
+
+# every's registration, owned (owned_source).
+fn owned_every(period: int, context ev: Loop) -> Owned errors SchedulerFault:
+    owned_timer(reg_of(s_now) + period, least_one(period))
+
+private fn owned_observer_checked(context ev: Loop) -> Owned errors IndexNotFound:
+    own(observer_checked())
+
+# observer's registration, owned (owned_source).
+fn owned_observer(context ev: Loop) -> Owned errors SchedulerFault:
+    owned_observer_checked():
+        on IndexNotFound:
+            fail SchedulerFault
+
+# Release OWNER: revoke its registration (revoke's guarantees), now -- the
+# owner's cleanup, which runs where the owner's lexical scope ends; calling
+# it is the explicit early release. Revoking a registration that is gone
+# already (shutdown revoked it) does nothing. A cleanup fails with nothing: a
+# scheduler fault on the way is recorded, and the next run, turn or shutdown
+# fails with SchedulerFault.
+cleanup fn release(owner: Owner, context ev: Loop):
+    {slot, gen} = owner
+    revoke_slot(Reg {slot: slot, gen: gen}):
+        on IndexNotFound:
+            set_reg(s_faulted, 1):
+                on IndexNotFound:
+                    unit
+            false
 
 # Queue event (A, B) of COUNT native events on registration SLOT.
 private nomethod fn enqueue(slot: int, a: int, b: int, count: int, context ev: Loop) errors IndexNotFound:
@@ -1250,12 +1362,21 @@ private nomethod fn after_segment(step: Coroutine{args: [], return: int, errors:
     else:
         park(step, id, code)
 
+# Task ID's STEP, done at its start: complete it (STEP is released where
+# this function ends). A function of its own so that adopt_checked moves its
+# STEP on every path: where a coroutine handle is released at the end of its
+# lexical scope (a program whose coroutines may hold resources across a
+# suspension: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md), a handle
+# moved on some paths and kept on others has no one release point.
+private nomethod fn complete_at_start(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}, id: int, first: int, context ev: Loop) errors IndexNotFound:
+    if tracing_on?():
+        note(cat("task ", tget(id, t_serial)).concat(cat(" done at start ", first)))
+    complete(id, first)
+
 private nomethod fn adopt_checked(step: Coroutine{args: [], return: int, errors: [TaskFailed, IndexNotFound, SchedulerFault, DriverFault]}, first: int, context ev: Loop) -> int errors IndexNotFound:
     id = new_task()
     if std::coroutine::done?(step):
-        if tracing_on?():
-            note(cat("task ", tget(id, t_serial)).concat(cat(" done at start ", first)))
-        complete(id, first)
+        complete_at_start(step, id, first)
     else:
         if tracing_on?():
             note(cat("adopt task ", tget(id, t_serial)).concat(cat(" wants ", first)))
@@ -1640,22 +1761,10 @@ fn run(context ev: Loop, d: Driver) -> int errors SchedulerFault, DriverFault, L
 
 private fn abandon_checked(context ev: Loop) -> int errors IndexNotFound:
     dropped = ready_count() + ev.parked.length()
-    loop:
-        if ev.ready_in.empty?():
-            break
-        ev.ready_in.pop()
-        retire_task(ev.ready_in_id.pop())
-    loop:
-        if ev.ready_out.empty?():
-            break
-        ev.ready_out.pop()
-        retire_task(ev.ready_out_id.pop())
-    loop:
-        if ev.parked.empty?():
-            break
-        ev.parked.pop()
-        retire_task(ev.parked_id.pop())
-    # Every waiter was one of those tasks: no registration has one left.
+    # Every waiter is one of the tasks dropped below: no registration has one
+    # left -- first, so that releasing a task's registrations as it is dropped
+    # (its frames' Owners, LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md)
+    # wakes nobody and moves no task between the queues being drained.
     loop slot from 0 to ev.st.at(s_nregs):
         rset(slot, r_whead, -1)
         rset(slot, r_wtail, -1)
@@ -1663,6 +1772,21 @@ private fn abandon_checked(context ev: Loop) -> int errors IndexNotFound:
         rset(slot, r_hpos, -1)
     ev.heap.clear()
     set_reg(s_keepwait, 0)
+    loop:
+        if ev.ready_in.empty?():
+            break
+        retire_task(ev.ready_in_id.pop())
+        ev.ready_in.pop()
+    loop:
+        if ev.ready_out.empty?():
+            break
+        retire_task(ev.ready_out_id.pop())
+        ev.ready_out.pop()
+    loop:
+        if ev.parked.empty?():
+            break
+        retire_task(ev.parked_id.pop())
+        ev.parked.pop()
     if tracing_on?():
         note(cat("abandon ", dropped))
     dropped
@@ -1682,7 +1806,7 @@ fn abandon(context ev: Loop, d: Driver) -> int errors SchedulerFault, LoopReente
 private fn revoke_all(context ev: Loop) errors IndexNotFound:
     loop slot from 0 to ev.st.at(s_nregs):
         if rget(slot, r_kind) != kind_free:
-            revoke_checked(Reg {slot: slot, gen: rget(slot, r_gen)})
+            revoke_slot(Reg {slot: slot, gen: rget(slot, r_gen)})
 
 private fn shutdown_checked(rounds: int, context ev: Loop, d: Driver) -> int errors IndexNotFound, DriverFault, LoopReentered:
     if ev.st.at(s_dispatching) == 1:

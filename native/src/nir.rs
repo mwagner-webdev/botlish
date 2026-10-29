@@ -545,6 +545,15 @@ pub enum OpCode {
     /// (`C`): runtime/affine.rs. A safepoint, fallible on a run-time fault of
     /// that code (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
     AffineDropRun,
+    /// `mvcleardroprun`, `mvswapdroprun`, `mutarrayswapdroprun`,
+    /// `mutarraysetdroprun`: the drop forms of a collection whose element
+    /// descriptor runs code (a resource's cleanup, an unwinding coroutine):
+    /// the same operations, safepoints and fallible on a run-time fault of
+    /// that code (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+    MvClearDropRun,
+    MvSwapDropRun,
+    MutArraySwapDropRun,
+    MutArraySetDropRun,
     /// `cleanupcall %f %v`: the release of resource %v by its cleanup
     /// function %f (a function value): the call, with the pending error --
     /// a release on an error edge runs while one propagates -- preserved
@@ -880,6 +889,8 @@ op_spellings! {
     "mutarrayswap" => MutArraySwap,
     "mutarrayswapdrop" => MutArraySwapDrop,
     "mutarraysetdrop" => MutArraySetDrop,
+    "mutarrayswapdroprun" => MutArraySwapDropRun,
+    "mutarraysetdroprun" => MutArraySetDropRun,
     "mutarraytolist" => MutArrayToList,
     "mutarrayempty" => MutArrayEmpty,
     "mutarraytakefront" => MutArrayTakeFront,
@@ -1004,6 +1015,8 @@ op_spellings! {
     "mvtakefront" => MvTakeFront,
     "mvcleardrop" => MvClearDrop,
     "mvswapdrop" => MvSwapDrop,
+    "mvcleardroprun" => MvClearDropRun,
+    "mvswapdroprun" => MvSwapDropRun,
     "ctxroot" => CtxRoot,
     "mbytesnew" => MBytesNew,
     "mbytesfrom" => MBytesFrom,
@@ -1122,7 +1135,8 @@ impl OpCode {
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
             Substr | SubstrProven | BytesSlice | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy => Some(3),
-            RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | BinStore | FfiFixtureMixed
+            RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | MvSwapDropRun | MutArraySwapDropRun | MutArraySetDropRun
+            | BinStore | FfiFixtureMixed
             | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr
             | BinLoadArray | NativeLoadArray | BinStoreArray | NativeStoreArray | BinStorePtr => Some(4),
             MutArrayCopy | MutArrayCopyProven => Some(5),

@@ -171,6 +171,13 @@ test el-linux-inflight {revocation against records in flight: r1's records poste
         [llength [elMatches $t {r1 handler ran after revocation}]] [elNum $t {r1 consumer woke revoked (\d)}]
 } -result {1 100 0 1 0 1}
 
+test el-linux-owned {owned registrations against records in flight (owned-inflight.bot; LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): the consumer's identity cannot revoke r1; the end of the consumer's body revokes it (no Wake::Revoked: it was not waiting), records of r1 arriving after that are dropped as stale, r2's consumer receives exactly its own 100 records, and no registration is left} -constraints eventLoopLinux -body {
+    set t [elNative owned-inflight]
+    list [elNum $t {r1 identity revoke (\d)}] [elNum $t {r1 consumer ends after (\d+)}] [elNum $t {r1 live after its consumer ended (\d)}] \
+        [elNum $t {r2 received (\d+)}] [elNum $t {r2 received of r1 (\d+)}] [expr {[elNum $t {stale records (\d+)}] > 0}] \
+        [llength [elMatches $t {r1 consumer woke revoked}]] [elNum $t {registrations left (\d+)}]
+} -result {0 100 0 100 0 1 0 0}
+
 # --------------------------------------------------------------------------
 # The game server on real sockets
 

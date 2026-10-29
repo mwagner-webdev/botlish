@@ -3,10 +3,16 @@
 #
 #   tclsh9.0 audit/lexical-cleanup/tools/prototypes.tcl ?-backends LIST?
 #
-# Prototype B (prototypes/b-task-scope): the scheduler patched by patch.tcl
-# in a private copy of the standard library (never the repository's), its
-# scenario program compiled against it and run on every backend; prints the
-# trace's claim lines ("N ..."), which every backend must agree on.
+# (Prototype A is the selected implementation itself: tests/resources.test,
+# tests/event-loop.test's el-owned-*.)
+#
+# Prototype B (prototypes/b-task-scope): the scheduler as it was before this
+# milestone (prototypes/b-task-scope/event_loop.base.bot, a frozen copy:
+# the production scheduler has since gained owned registrations) patched by
+# patch.tcl in a private copy of the standard library (never the
+# repository's), its scenario program compiled against it and run on every
+# backend; prints the trace's claim lines ("N ..."), which every backend
+# must agree on.
 
 source [file join [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]] tests helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -29,7 +35,7 @@ foreach entry [glob -directory $saved *] {
 }
 try {
     set path [file join $lib event_loop.bot]
-    set f [open $path]
+    set f [open [file join $proto event_loop.base.bot]]
     set text [read $f]
     close $f
     set f [open $path w]
@@ -85,4 +91,27 @@ try {
     }
 } finally {
     file delete -force $work
+}
+
+# Prototype C (prototypes/c-scoped-construct): a scoped construct, first as
+# a library bracket (bracket.bot: must be rejected, a context-requiring body
+# is no value), then as its hand-written expansion (scoped_construct.bot,
+# every backend: its claim lines).
+set cproto [file join $::projectRoot audit lexical-cleanup prototypes c-scoped-construct]
+if {[catch {surface::readProgramFile [file join $cproto bracket.bot] -warnings off} message options]} {
+    puts "prototype C, bracket: rejected [lindex [dict get $options -errorcode] end]"
+} else {
+    puts "prototype C, bracket: COMPILES (expected a rejection)"
+}
+set hir [surface::readProgramFile [file join $cproto scoped_construct.bot] -warnings off]
+set outcomes {}
+foreach backend $backends {
+    dict set outcomes $backend [lrange [outcomeUnderHir $backend $hir] 0 1]
+}
+set distinct [lsort -unique [dict values $outcomes]]
+puts "prototype C, expansion: [llength $backends] backends, [expr {[llength $distinct] == 1 ? "one outcome" : "DISAGREE"}]"
+foreach {- s} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} [lindex $distinct 0 1]] {
+    if {[regexp {^t=\d+: (\d .*)$} $s -> claim]} {
+        puts "   $claim"
+    }
 }

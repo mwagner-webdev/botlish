@@ -1,0 +1,26 @@
+# native-collect-bind.bot -- a native lowering defect older than this
+# milestone, found by audit/lexical-cleanup/tools/fuzz.tcl
+# (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md, section 15): no
+# resource is involved. A nested collecting loop whose body ends by binding
+# a struct the escape analysis scalar-replaces: the inner loop collects the
+# binding statement's value, which native lowering has no register for
+# (Bind returns "" for a virtual struct), and the native backend rejects
+# its own program:
+#
+#   tclsh9.0 main.tcl -backend cranelift audit/lexical-cleanup/findings/native-collect-bind.bot
+#   -> NATIVE INVALID-NIR: invalid NIR at line ...: expected a register, got None
+#
+# The Tcl backends and cranelift-generic (no scalar replacement) return 0.
+struct P:
+    x: int
+
+fn mk(n: int) -> P:
+    P {x: n}
+
+fn f() -> int:
+    loop i from 0 to 2:
+        loop j from 0 to 1:
+            p = mk(i)
+    0
+
+f()

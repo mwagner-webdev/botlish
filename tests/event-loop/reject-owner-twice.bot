@@ -1,0 +1,19 @@
+# reject-owner-twice.bot -- must be REJECTED (tests/event-loop.test, el-static-*): one Owner moved into two tasks (USE-AFTER-MOVE): a registration has one owner, so it is revoked once, where that owner's scope ends
+import std::event_loop
+import type std::event_loop::Delivery
+
+fn holder(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    e.a
+
+fn main(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    {owner, reg} = std::event_loop::owned_channel(Delivery::Reliable, 4)
+    coroutine {step: a, first: af} = holder(owner, reg)
+    std::event_loop::adopt(a, af)
+    coroutine {step: b, first: bf} = holder(owner, reg)
+    std::event_loop::adopt(b, bf)
+
+with context std::event_loop::create(8)
+main():
+    on std::event_loop::SchedulerFault:
+        0

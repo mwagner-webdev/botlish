@@ -632,6 +632,13 @@ dependency, never the event loop's. Measurements: section 11.
 
 ## 9. Ownership
 
+(Since LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md, a registration
+can also be owned: `owned_source`, ..., `owned_observer` return an Owner, a
+resource whose cleanup `release` revokes the registration where the Owner's
+lexical scope ends, beside its Reg, an identity that cannot revoke it. What
+follows describes registrations made by `source`, `channel`, `timer` and
+`observer`, which are unchanged.)
+
 **Now: explicit.** A `Reg` is an identity, not an owner. `revoke(reg)`
 guarantees (`el-revocation-*`): no handler invocation after it -- queued
 events are discarded, a wake already queued for a task becomes

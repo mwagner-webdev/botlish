@@ -1,0 +1,101 @@
+# flow.bot -- every exit of a scope releases what the scope owns: an early
+# return, a propagated error, a handled one, continue and break, a nested
+# block's end, a struct's fields, a construction an argument interrupts, an
+# explicit release followed by any exit (tests/resources.test).
+import handle
+
+error Boom
+
+fn early(n: int) -> int:
+    h = handle::open(10)
+    if n > 0:
+        return 1
+    g = handle::open(11)
+    2
+
+fn may_fail(n: int) -> int errors Boom:
+    if n > 0:
+        fail Boom
+    n
+
+fn propagate(n: int) -> int errors Boom:
+    h = handle::open(20)
+    may_fail(n)
+    3
+
+fn handled(n: int) -> int:
+    h = handle::open(30)
+    x = propagate(n):
+        on Boom:
+            -1
+    x
+
+fn loops() -> int:
+    loop i from 0 to 3:
+        h = handle::open(40 + i)
+        if i == 1:
+            continue
+        unit
+    loop:
+        g = handle::open(50)
+        break
+    0
+
+fn nested() -> int:
+    a = handle::open(60)
+    if true:
+        b = handle::open(61)
+        unit
+    c = handle::open(62)
+    0
+
+struct Pair:
+    left: handle::Handle
+    right: handle::Handle
+
+fn pair() -> int:
+    p = Pair {left: handle::open(70), right: handle::open(71)}
+    0
+
+fn partial(n: int) -> int errors Boom:
+    p = Pair {left: handle::open(80), right: handle::id(handle::open(may_fail(n)))}
+    0
+
+# An explicit release, then an early return, an error or the normal end:
+# released once (85 each time), never again at the scope's end.
+fn released_early(n: int) -> int errors Boom:
+    h = handle::open(85)
+    handle::close(h)
+    if n == 1:
+        return 1
+    may_fail(n - 1)
+    0
+
+fn main(context log: handle::Log) -> List[int] errors IndexNotFound:
+    early(1)
+    early(0)
+    handled(1)
+    handled(0)
+    loops()
+    nested()
+    pair()
+    k = handle::count()
+    partial(k):
+        on Boom:
+            0
+    released_early(1):
+        on Boom:
+            0
+    released_early(2):
+        on Boom:
+            handle::note(86)
+            0
+    released_early(0):
+        on Boom:
+            0
+    handle::closed()
+
+with context handle::create()
+main():
+    on IndexNotFound:
+        []

@@ -1446,6 +1446,70 @@ mod suspended_root_tests {
     }
 }
 
+/// The elements a code-running drop took out of a collection stay roots
+/// while release code runs (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+/// MILESTONE-1.md; runtime/affine.rs's `drop_taken`): `<program>` puts six
+/// lists of eight zeros in a MutableVector and clears it with
+/// `mvcleardroprun` by the descriptor `r0.`, so each list is handed to
+/// cleanup 0 in turn. The cleanup first churns (under GC stress every
+/// allocation collects) and then reads its list's first element and uses
+/// it as an index into a one-element list. Once taken out, the lists are
+/// reachable from nothing but the drop: a drop that did not root them would
+/// let the first cleanup's collections free the later ones, which the
+/// collector poisons (`Heap::set_poison_for_test`), and a later cleanup
+/// would read poison -- an index out of range, the program's failure.
+#[cfg(test)]
+mod cleanup_root_tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::vm::{FunctionInfo, ProgramInfo};
+    use std::rc::Rc;
+
+    const PROGRAM: &str = concat!(
+        "nir 1 call-effects=1 statics=0\n\n",
+        "func 0 \"<program>\" params=0 env=0 regs=20 pnames=\"\" captures=0\n",
+        "    %0 = fnvalue 1\n    %1 = op cleanuptable %0\n    %2 = int 0\n",
+        "    %3 = op listnew %2 %2 %2 %2 %2 %2 %2 %2\n    %4 = op listnew %3\n    %5 = op mvfromlist %4\n",
+        "    %6 = op listnew %2 %2 %2 %2 %2 %2 %2 %2\n    %7 = op mvpush %5 %6\n",
+        "    %8 = op listnew %2 %2 %2 %2 %2 %2 %2 %2\n    %9 = op mvpush %5 %8\n",
+        "    %10 = op listnew %2 %2 %2 %2 %2 %2 %2 %2\n    %11 = op mvpush %5 %10\n",
+        "    %12 = op listnew %2 %2 %2 %2 %2 %2 %2 %2\n    %13 = op mvpush %5 %12\n",
+        "    %14 = op listnew %2 %2 %2 %2 %2 %2 %2 %2\n    %15 = op mvpush %5 %14\n",
+        "    %16 = str \"r0.\"\n    %17 = op mvcleardroprun %5 %16\n    %18 = op mvlen %5\n    ret %18\nend\n\n",
+        "func 1 \"cleanup\" params=1 env=0 regs=7 pnames=\"l\" captures=0\n",
+        "    %1 = int 20\n    %2 = call 2 %1\n    %3 = int 0\n    %4 = op listget %0 %3\n",
+        "    %5 = op listnew %3\n    %6 = op listget %5 %4\n    ret %6\nend\n\n",
+        "func 2 \"churn\" params=1 env=0 regs=10 pnames=\"n\" captures=0\n",
+        "    %1 = int 1\n    %2 = op ilt %0 %1\n    br %2 L0 L1\n",
+        "  label L0\n    %3 = int 0\n    ret %3\n",
+        "  label L1\n    %4 = int 999\n    %5 = op listnew %4 %4 %4 %4 %4 %4 %4 %4\n",
+        "    %6 = op isub %0 %1\n    %7 = call 2 %6\n    %8 = op listlen %5\n    %9 = op iadd %7 %8\n    ret %9\nend\n",
+    );
+
+    #[test]
+    fn taken_elements_survive_their_cleanups_collections() {
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        let compiled = CraneliftJit.compile(&program, &options).unwrap_or_else(|e| panic!("{}", e.message()));
+        for stress in [false, true] {
+            let functions = [(0, ""), (1, "l"), (1, "n")].map(|(arity, pnames)| FunctionInfo { arity, pnames: pnames.into() }).into();
+            let mut vm = Vm::new(
+                Rc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+                AllocMode::Summary,
+            );
+            compiled.install_constants(&mut vm);
+            vm.set_framemap(compiled.framemap.clone());
+            vm.heap.set_stress_for_test(stress);
+            vm.heap.set_poison_for_test(stress);
+            let result = (compiled.entry)(&mut *vm);
+            assert!(vm.error.is_none(), "stress {stress}: {:?}", vm.error.as_ref().map(|e| e.message()));
+            assert_eq!(result, make_small(0), "stress {stress}: the vector is left empty");
+            assert_eq!(vm.metrics.resources.cleanups, 6, "stress {stress}: one cleanup per element");
+            assert_eq!(vm.heap.collections > 0, stress);
+        }
+    }
+}
+
 /// A caller's live root, found while its callee collects
 /// (WINDOWS-X86-64-MILESTONE-3.md, section 4): `<program>` builds a list,
 /// holds it -- its only reference -- across three calls that reach `churn`:

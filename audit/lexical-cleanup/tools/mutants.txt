@@ -1,0 +1,305 @@
+# Mutants of lexical resource cleanup (audit/lexical-cleanup/tools/mutate.tcl;
+# LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): each a deliberate bug
+# in the resource declarations and their checks (hir/structs.tcl,
+# hir/resources.tcl), the ownership analysis's scope-bound release
+# (hir/affine.tcl), the cleanup's context requirement (hir/contexts.tcl), the
+# runtimes (core/affine.tcl, core/coroutines.tcl, native/src/runtime/) or the
+# event loop's owned registrations (stdlib/event_loop.bot).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant editing native/src/ is a native mutant: mutate.tcl rebuilds the
+# native backend for it. Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# What a resource is
+
+@@ resource-not-affine a resource struct of unrestricted fields is unrestricted: copied, never released
+## hir/structs.tcl
+<<<<
+    if {[isResource $id]} {
+        # A resource struct is affine whatever its fields: its value carries
+====
+    if {0} {
+        # A resource struct is affine whatever its fields: its value carries
+>>>>
+
+@@ no-cleanup-descriptor a resource's drop descriptor runs nothing (its cleanup is never called by a release)
+## hir/affine.tcl
+<<<<
+        return "r[dict get $record index]."
+====
+        return ""
+>>>>
+
+@@ cleanup-index-zero every resource's release calls the first cleanup of the table
+## hir/affine.tcl
+<<<<
+        return "r[dict get $record index]."
+====
+        return "r0."
+>>>>
+
+@@ destructured-runs-cleanup a destructuring temporary's drop runs the cleanup again (the discharge is ignored)
+## hir/affine.tcl
+<<<<
+    if {[hir::types::IsNamedStruct $type] && [hir::structs::isResource [lindex $type 1]]
+            && "#destructured" ni $exclude} {
+====
+    if {[hir::types::IsNamedStruct $type] && [hir::structs::isResource [lindex $type 1]]} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Where and in which order releases run
+
+@@ release-at-last-use a resource binding is released after its last use, as an unrestricted affine value is
+## hir/affine.tcl
+<<<<
+            dict set info last [expr {[llength $sequence] - 1}]
+====
+            dict set info last [dict get $info last]
+>>>>
+
+@@ moved-from-releases a binding whose value was moved still releases it (both the source and the destination clean up)
+## hir/affine.tcl
+<<<<
+        && [lindex [dict get $state $b] 0] in {live maybe}}]
+====
+        && [lindex [dict get $state $b] 0] in {live maybe moved}}]
+>>>>
+
+@@ error-bypasses-cleanup a declared error leaving a scope releases no resource binding on its way out
+## hir/affine.tcl
+<<<<
+                    set released [lmap b [concat [Leaving $hir $scopes $byKey $pairs $state $x] [PendingItems $hir $pending $x]] {
+                        if {$b in $done} {continue} else {set b}
+                    }]
+====
+                    set released [lmap b [concat [Leaving $hir $scopes $byKey $pairs $state $x] [PendingItems $hir $pending $x]] {
+                        if {$b in $done || ([string match b* $b] && [Scoped $hir $b])} {continue} else {set b}
+                    }]
+>>>>
+
+@@ release-acquisition-order a scope releases what it owns first acquired first
+## hir/affine.tcl
+<<<<
+    return [lmap pair [lsort -integer -decreasing -index 0 $keyed] {lindex $pair 1}]
+====
+    return [lmap pair [lsort -integer -increasing -index 0 $keyed] {lindex $pair 1}]
+>>>>
+
+@@ some-paths-accepted a resource moved on some paths and kept on others is accepted (released at the scope's end on every path)
+## hir/affine.tcl
+<<<<
+        if {[dict get $info lastRef] < [dict get $info last]} {
+====
+        if {0} {
+>>>>
+
+@@ shadowed-names-shared a nested binding of a resource keeps its source name (a release names the wrong value)
+## hir/affine.tcl
+<<<<
+proc hir::affine::Unshare {hirVar} {
+    upvar 1 $hirVar hir
+====
+proc hir::affine::Unshare {hirVar} {
+    upvar 1 $hirVar hir
+    return
+>>>>
+
+@@ self-release-accepted a cleanup that does not discharge its parameter is accepted (its release runs the cleanup again)
+## hir/affine.tcl
+<<<<
+proc hir::affine::CleanupDischarges {hirVar} {
+    upvar 1 $hirVar hir
+====
+proc hir::affine::CleanupDischarges {hirVar} {
+    upvar 1 $hirVar hir
+    return
+>>>>
+
+# ---------------------------------------------------------------------------
+# Coroutines
+
+@@ no-unwind a program whose suspending functions own resources discards suspended coroutines instead of unwinding them
+## hir/affine.tcl
+<<<<
+proc hir::affine::Unwinds {hir owner} {
+    set capable [dict getdef $hir coroutines blocks {}]
+====
+proc hir::affine::Unwinds {hir owner} {
+    return 0
+    set capable [dict getdef $hir coroutines blocks {}]
+>>>>
+
+@@ no-abandon-edge a suspension point has no error edge for the abandonment: a suspended frame's releases never run
+## hir/affine.tcl
+<<<<
+                    lappend names [AbandonedError]
+====
+                    set names $names
+>>>>
+
+@@ tcl-abandon-discards the Tcl runtime's abandonment releases a suspended coroutine without unwinding it
+## core/coroutines.tcl
+<<<<
+    if {[dict get $store $id state] ne "suspended"} {
+        return [releaseImpl $handle]
+====
+    if {1} {
+        return [releaseImpl $handle]
+>>>>
+
+@@ native-abandon-discards the native runtime's coabandon releases a suspended coroutine without unwinding it
+## native/src/runtime/coroutine.rs
+<<<<
+        if (*co).state != CO_SUSPENDED || (*co).stack.is_none() {
+            return rt_co_release(p, handle);
+        }
+        vm(p).metrics.record_coroutine_abandoned();
+====
+        if true {
+            return rt_co_release(p, handle);
+        }
+        vm(p).metrics.record_coroutine_abandoned();
+>>>>
+
+# ---------------------------------------------------------------------------
+# The runtimes
+
+@@ tcl-cleanup-not-called the Tcl runtime's release of a resource does not call its cleanup
+## core/affine.tcl
+<<<<
+    set completion [core::runtime::callValue [dict get $cleanups $k] [list $value]]
+====
+    set completion {}
+>>>>
+
+@@ native-cleanup-not-called the native runtime's cleanupcall does not call the cleanup
+## native/src/runtime/affine.rs
+<<<<
+    preserving_pending(p, || super::ops::rt_call_value(p, f, 1, &value) != NO_VALUE)
+====
+    preserving_pending(p, || true)
+>>>>
+
+@@ native-pending-lost release code on an error edge loses the error that is propagating
+## native/src/runtime/affine.rs
+<<<<
+    if ok {
+        vm.error = error;
+====
+    if false {
+        vm.error = error;
+>>>>
+
+@@ native-taken-unrooted items a collection's drop took out are not rooted while release code runs
+## native/src/runtime/affine.rs
+<<<<
+        vm(p).temp_roots.extend_from_slice(items);
+====
+        let _ = items;
+>>>>
+
+# ---------------------------------------------------------------------------
+# The cleanup's context requirement
+
+@@ no-release-edges a release charges its function no context: a cleanup's context is never required
+## hir/contexts.tcl
+<<<<
+    if {![hir::resources::Used $hir]} {
+        return $result
+    }
+    dict for {e o} $owner {
+====
+    if {1} {
+        return $result
+    }
+    dict for {e o} $owner {
+>>>>
+
+@@ everything-returned every value counts as its function's result: no function that releases a resource requires the cleanup's context
+## hir/contexts.tcl
+<<<<
+proc hir::contexts::Returned {hir parent e} {
+    set x $e
+====
+proc hir::contexts::Returned {hir parent e} {
+    return 1
+    set x $e
+>>>>
+
+# ---------------------------------------------------------------------------
+# The event loop's owned registrations
+
+@@ el-release-noop an Owner's release revokes nothing
+## stdlib/event_loop.bot
+<<<<
+    revoke_slot(Reg {slot: slot, gen: gen}):
+====
+    revoke_slot(Reg {slot: slot, gen: gen + 1}):
+>>>>
+
+@@ el-identity-revokes revoke through the Reg of an owned registration revokes it
+## stdlib/event_loop.bot
+<<<<
+    if in_table?(reg.slot) and rget(reg.slot, r_gen) == reg.gen and rget(reg.slot, r_owned) == 1:
+====
+    if in_table?(reg.slot) and rget(reg.slot, r_gen) == reg.gen and rget(reg.slot, r_owned) == 2:
+>>>>
+
+@@ el-abandon-waiters-late abandon clears the registrations' waiters after dropping the tasks (an abandoned task's Owner wakes a task being dropped)
+## stdlib/event_loop.bot
+<<<<
+    loop slot from 0 to ev.st.at(s_nregs):
+        rset(slot, r_whead, -1)
+        rset(slot, r_wtail, -1)
+        rset(slot, r_nwait, 0)
+        rset(slot, r_hpos, -1)
+    ev.heap.clear()
+    set_reg(s_keepwait, 0)
+    loop:
+        if ev.ready_in.empty?():
+            break
+        retire_task(ev.ready_in_id.pop())
+        ev.ready_in.pop()
+    loop:
+        if ev.ready_out.empty?():
+            break
+        retire_task(ev.ready_out_id.pop())
+        ev.ready_out.pop()
+    loop:
+        if ev.parked.empty?():
+            break
+        retire_task(ev.parked_id.pop())
+        ev.parked.pop()
+====
+    loop:
+        if ev.ready_in.empty?():
+            break
+        ev.ready_in.pop()
+        retire_task(ev.ready_in_id.pop())
+    loop:
+        if ev.ready_out.empty?():
+            break
+        ev.ready_out.pop()
+        retire_task(ev.ready_out_id.pop())
+    loop:
+        if ev.parked.empty?():
+            break
+        ev.parked.pop()
+        retire_task(ev.parked_id.pop())
+    loop slot from 0 to ev.st.at(s_nregs):
+        rset(slot, r_whead, -1)
+        rset(slot, r_wtail, -1)
+        rset(slot, r_nwait, 0)
+        rset(slot, r_hpos, -1)
+    ev.heap.clear()
+    set_reg(s_keepwait, 0)
+>>>>

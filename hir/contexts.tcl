@@ -693,7 +693,7 @@ proc hir::contexts::verify {hirVar} {
     # calls its cleanup there -- an edge from every region holding a value
     # (or a parameter) whose drop runs a cleanup, to that cleanup, so the
     # cleanup's context requirement is the region's like any callee's.
-    set releases [ReleaseEdges $hir $owner $blocks]
+    set releases [ReleaseEdges $hir $owner $parent $blocks]
     dict for {o list} $releases {
         if {$o ne ""} {
             dict lappend edges $o {*}$list
@@ -820,8 +820,15 @@ proc hir::contexts::verify {hirVar} {
 # The release edges of HIR (hir/resources.tcl): region (a block, "" for the
 # top level) -> {{E CLEANUP} ...}, an edge from expression E -- a value
 # whose drop runs cleanup function CLEANUP, or (E a block) a parameter of
-# that block whose drop does -- to the cleanup. OWNER and BLOCKS are Walk's.
-proc hir::contexts::ReleaseEdges {hir owner blocks} {
+# that block whose drop does -- to the cleanup. OWNER, PARENT and BLOCKS are
+# Walk's. The context analysis runs before the ownership analysis decides
+# where values die, so this is a sound approximation of it: every value of
+# such a type may die in its region -- at its scope's end, on an exit, on an
+# error edge that interrupts the construction holding it -- except one whose
+# whole value is its function's result on every path that completes it
+# (Returned): the caller owns that, and a function that only makes and
+# returns a resource does not require its cleanup's contexts.
+proc hir::contexts::ReleaseEdges {hir owner parent blocks} {
     set result [dict create]
     if {![hir::resources::Used $hir]} {
         return $result
@@ -829,6 +836,7 @@ proc hir::contexts::ReleaseEdges {hir owner blocks} {
     dict for {e o} $owner {
         set node [dict get $hir exprs $e]
         if {![dict get $node reachable] || [dict get $node kind] eq "block"} continue
+        if {$o ne "" && [Returned $hir $parent $e]} continue
         foreach c [hir::resources::CleanupBlocks $hir [hir::typeOf $hir $e]] {
             dict lappend result $o [list $e $c]
         }
@@ -843,6 +851,45 @@ proc hir::contexts::ReleaseEdges {hir owner blocks} {
         }
     }
     return $result
+}
+
+# 1 if expression E's whole value is its function's result whenever E
+# completes: E is a `return`'s value, or the last statement of the function's
+# body, through the last statements of `if` branches and handler bodies and
+# the call a `handle` handles. (Not a loop's body: its iteration values are
+# collected into a new List, which may die in the function. Not an operand
+# of a construction or a call: a later operand's error edge may release it
+# there.)
+proc hir::contexts::Returned {hir parent e} {
+    set x $e
+    while {1} {
+        lassign [dict get $parent $x] p role
+        if {$p eq ""} {
+            return 0
+        }
+        set kind [dict get $hir exprs $p kind]
+        if {$kind eq "return"} {
+            return 1
+        }
+        if {$kind eq "handle" && $role eq "operand"} {
+            set x $p
+            continue
+        }
+        if {$role ne "seq 1"} {
+            return 0
+        }
+        switch -- $kind {
+            block {
+                return 1
+            }
+            if - handle {
+                set x $p
+            }
+            default {
+                return 0
+            }
+        }
+    }
 }
 
 # The context obligations of top-level call C of block TARGET, against the

@@ -23,6 +23,12 @@ COROUTINES.md is the milestone this one generalizes (coroutine semantics are
 unchanged; their ownership discipline and release elaboration now live in
 `hir/affine.tcl` and apply to every affine value).
 
+Later: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md adds resources
+(`opaque resource struct` and its module's `cleanup fn`), affine values
+whose release runs their cleanup at the end of the owner's lexical scope
+instead of after its last use. Every other affine value keeps the release
+described here.
+
 ## Contents
 
 * [Terminology](#terminology)

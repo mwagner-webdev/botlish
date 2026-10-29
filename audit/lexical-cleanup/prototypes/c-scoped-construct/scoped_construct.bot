@@ -1,0 +1,57 @@
+# scoped_construct.bot -- prototype C as syntax, desugared by hand: what a
+# `scoped r = channel(...) via revoke:` block would expand to -- the release
+# written at the block's end and on every exit, by hand here (an error
+# handler that revokes and fails on). What the expansion cannot reach:
+#
+#   1. a task suspended inside the block and abandoned: its frame is
+#      discarded (no unwinding), so the block's end and its handlers never
+#      run -- the registration stays live after abandon;
+#   2. a factory: the block delimits the registration, so a function cannot
+#      make one and return it owned (only its identity escapes, revoked
+#      already when the caller gets it);
+#   3. transfer into a task: the same -- the task gets an identity whose
+#      registration ends with the creating block.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn waiter(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    # scoped r = std::event_loop::channel(...) via revoke:
+    r = std::event_loop::channel(Delivery::Reliable, 4)
+    elog::say("waiter's slot ", std::event_loop::native_slot(r))
+    e = std::event_loop::wait(r):
+        on std::event_loop::SchedulerFault:
+            std::event_loop::revoke(r)
+            fail std::event_loop::SchedulerFault
+    std::event_loop::revoke(r)
+    e.a
+
+fn factory(context ev: std::event_loop::Loop) -> std::event_loop::Reg errors std::event_loop::SchedulerFault:
+    # scoped r = ... : the block ends at the function's end, before the
+    # caller sees the result.
+    r = std::event_loop::channel(Delivery::Reliable, 4)
+    std::event_loop::revoke(r)
+    r
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    coroutine {step, first} = waiter()
+    std::event_loop::adopt(step, first)
+    elog::say("registrations before abandon ", std::event_loop::stats().registrations)
+    elog::say("abandoned ", std::event_loop::abandon())
+    elog::say("1 registrations after abandon (the block's release never ran) ", std::event_loop::stats().registrations)
+    made = factory()
+    elog::say("2 the factory's registration live for its caller ", elog::bit(std::event_loop::live?(made)))
+    std::event_loop::shutdown(1)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

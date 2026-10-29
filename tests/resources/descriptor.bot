@@ -1,0 +1,36 @@
+# descriptor.bot -- a native handle as a resource (tests/resources.test,
+# LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): an open Linux file
+# descriptor (a std::linux::fs::File) whose cleanup closes it. A close that
+# fails is recorded in the Closes context (a cleanup has no error to fail
+# with: its caller's scope is ending).
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::list
+import std::mutable_vector
+
+opaque resource struct Descriptor:
+    file: std::linux::fs::File
+
+opaque context struct Closes:
+    failures: MutableVector[int]
+
+fn create() -> Closes:
+    Closes {failures: std::mutable_vector::from_list([])}
+
+cleanup fn close(d: Descriptor, context fs: std::linux::fs::LinuxFS, closes: Closes):
+    {file} = d
+    std::linux::fs::close(file):
+        on std::io::fs::FileError {code}:
+            closes.failures.push(code)
+
+fn open(path: str, context fs: std::linux::fs::LinuxFS) -> Descriptor errors std::io::fs::FileError, std::io::path::NotAPath:
+    Descriptor {file: std::linux::fs::from_text(path).open(std::io::fs::OpenMode::Read)}
+
+# The descriptors the process has open (/proc/self/fd's entries; the one
+# entries() reads the directory through is among them, as in every count).
+fn open_count(context fs: std::linux::fs::LinuxFS) -> int errors std::io::fs::FileError, std::io::path::NotAPath:
+    std::list::length(std::linux::fs::entries(std::linux::fs::from_text("/proc/self/fd")))
+
+fn failures(context closes: Closes) -> int:
+    closes.failures.length()

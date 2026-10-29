@@ -1,0 +1,90 @@
+# owned-inflight.bot -- owned registrations on the Linux driver
+# (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md; inflight.bot's
+# revocation against records in flight, with Owners instead of revoke).
+#
+# A producer thread posts 2000 records (a: 0..1999) for registration r1
+# through endpoint E1 as fast as E1 takes them. r1's Owner is moved into its
+# consumer, which never revokes: it returns after its 100th event, and the
+# end of its body releases the Owner -- the revocation. Before that it makes
+# r2 (owned too), moves r2's Owner into a second consumer and starts a second
+# producer of 100 records (a: 100000..) for r2 through E2. r2 reuses r1's slot
+# only after r1's revocation, so here it takes another one; records of r1
+# still in E1, held, or posted after the revocation carry r1's generation
+# and are dropped as stale. tests/event-loop-linux.test checks that the
+# consumer's identity could not revoke r1, that r1 is gone once its consumer
+# ended, that r2's consumer receives exactly its own 100 records, that no
+# record reached r1 after its revocation, and that no registration is left.
+import elog
+import event_loop_linux
+import fx
+import std::event_loop
+import std::mutable_array
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn second_consumer(owner: std::event_loop::Owner, r2: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    st = std::mutable_array::create(2, 0)
+    loop:
+        if st.at(0) >= 100:
+            break
+        e = std::event_loop::wait(r2)
+        if e.reason != Wake::Event:
+            break
+        st.set(0, st.at(0) + 1)
+        if e.a < 100000:
+            st.set(1, st.at(1) + 1)
+    elog::say("r2 received ", st.at(0))
+    elog::say("r2 received of r1 ", st.at(1))
+    st.at(0)
+
+fn first_consumer(owner: std::event_loop::Owner, r1: std::event_loop::Reg, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    got = std::mutable_array::create(1, 0)
+    loop:
+        if got.at(0) >= 100:
+            break
+        e = std::event_loop::wait(r1)
+        if e.reason != Wake::Event:
+            elog::say("r1 consumer woke revoked ", elog::bit(e.reason == Wake::Revoked))
+            break
+        got.set(0, got.at(0) + 1)
+    elog::say("r1 identity revoke ", elog::bit(std::event_loop::revoke(r1)))
+    {owner: o2, reg: r2} = std::event_loop::owned_source(Delivery::Reliable, 64, :keep_alive)
+    coroutine {step, first} = second_consumer(o2, r2)
+    std::event_loop::adopt(step, first)
+    e2 = event_loop_linux::endpoint(256)
+    fx::burst(event_loop_linux::endpoint_id(e2), std::event_loop::native_slot(r2), std::event_loop::native_generation(r2), 100, 100000)
+    elog::say("r1 consumer ends after ", got.at(0))
+    got.at(0)
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    {owner: o1, reg: r1} = std::event_loop::owned_source(Delivery::Reliable, 8, :keep_alive)
+    e1 = event_loop_linux::endpoint(64)
+    coroutine {step, first} = first_consumer(o1, r1)
+    std::event_loop::adopt(step, first)
+    fx::burst(event_loop_linux::endpoint_id(e1), std::event_loop::native_slot(r1), std::event_loop::native_generation(r1), 2000, 0)
+    std::event_loop::run()
+    elog::say("r1 live after its consumer ended ", elog::bit(std::event_loop::live?(r1)))
+    # Let the loop take some more of what r1's producer posts (stale), then
+    # close E1: its producer's next post fails and it stops.
+    loop k from 0 to 64:
+        std::event_loop::turn()
+    elog::say("e1 discarded at close ", event_loop_linux::close_endpoint(e1))
+    fx::synth_join()
+    s = std::event_loop::stats()
+    elog::say("stale records ", s.stale_records)
+    elog::say("registrations left ", s.registrations)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

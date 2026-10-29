@@ -294,6 +294,7 @@ namespace eval hir::static {
         REFINEMENT-MINT-AUTHORITY                RefinementMintAuthority
         REFINEMENT-PARAMETER                     RefinementParameter
         REORDER-NOT-PROVEN                       ReorderNotProven
+        RESOURCE-DECLARATION                     ResourceDeclaration
         RETURN-OUTSIDE-CALLABLE                  ReturnOutsideCallable
         TRAIT-IMPL-ORDER                         TraitImplOrder
         TRAIT-INSTANCE-BUDGET                    TraitInstanceBudget

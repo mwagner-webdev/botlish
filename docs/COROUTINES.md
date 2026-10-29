@@ -19,6 +19,13 @@ The architectural theorem the milestone establishes:
 COROUTINE-PREREQUISITES.md is the research this builds on (what each backend
 already provided, the roadblocks); this document is what was built.
 
+Later: in a program where a function that may suspend owns a resource
+(LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md), a coroutine handle is
+released at the end of its scope, and releasing a suspended coroutine
+abandons it: its pending yield fails with an internal error no handler names,
+so its frames' releases run -- and nothing else of its code. Elsewhere the
+release described here is unchanged.
+
 AFFINE-VALUES.md generalizes the ownership half of this milestone: affinity
 is now a property of any value whose type owns a coroutine (a struct, a
 List), a coroutine handle type is spelled `Coroutine{args: [M], return: R,

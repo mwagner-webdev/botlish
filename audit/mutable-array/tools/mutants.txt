@@ -319,7 +319,10 @@ core::native::register mutable_array#set_drop
 <<<<
         Some(i) => std::mem::replace(&mut array_owned(arr, "mutable_array#swap_drop")[i], value),
         None => {
-            super::affine::drop_descriptor(p, value, str_of(d).as_str().as_bytes());
+            let text = str_of(d).as_str().as_bytes().to_vec();
+            if !super::affine::drop_taken(p, &[value], &text, 0, &mut 0) {
+                return NO_VALUE;
+            }
             index_not_found(p)
         }
 ====
@@ -344,15 +347,13 @@ core::native::register mutable_array#set_drop
 @@ drop-leaks-elements-native an affine array's death releases none of its elements (native)
 ## native/src/runtime/ops.rs
 <<<<
-    for &item in items {
-        *pos = start;
-        super::affine::drop_at(p, item, d, pos);
-    }
-}
+    let items = take_elements(arr, "affine#drop").to_vec();
+    super::affine::drop_taken(p, &items, d, start, pos)
 ====
+    let _ = take_elements(arr, "affine#drop").to_vec();
+    *pos = start;
     super::affine::skip(d, pos);
-    let _ = (start, items);
-}
+    true
 >>>>
 
 @@ drop-order-reversed an affine array's death releases its elements last to first (Tcl runtimes)
@@ -441,9 +442,7 @@ core::native::register mutable_array#set_drop
 @@ factory-failure-leaks-native a failing generate does not release the elements it already made (native)
 ## native/src/runtime/ops.rs
 <<<<
-                for item in items {
-                    super::affine::drop_descriptor(p, item, &text);
-                }
+                super::affine::drop_taken(p, &items, &text, 0, &mut 0);
 ====
                 let _ = (items, text);
 >>>>

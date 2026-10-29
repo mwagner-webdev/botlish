@@ -1,0 +1,58 @@
+# handle.bot -- the test resource of tests/resources.test
+# (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): a Handle owns a
+# number, and its cleanup records it in the Log, so the Log's lines are the
+# releases in the order they ran (with the programs' own notes between).
+import std::mutable_vector
+
+opaque resource struct Handle:
+    id: int
+
+opaque context struct Log:
+    lines: MutableVector[int]
+
+fn create() -> Log:
+    Log {lines: std::mutable_vector::from_list([])}
+
+# A second resource, so a program has two cleanups (its releases log the
+# negated number).
+opaque resource struct Tag:
+    id: int
+
+# The release: the Handle's number, logged. On the way, a failure is raised
+# and handled inside the cleanup (the index is never in the Log): a release
+# on an error edge runs while that error propagates, and must leave it as it
+# was.
+cleanup fn close(h: Handle, context log: Log):
+    {id} = h
+    log.lines.at(id + 1000000):
+        on IndexNotFound:
+            0
+    log.lines.push(id)
+
+cleanup fn untag(t: Tag, context log: Log):
+    {id} = t
+    log.lines.push(0 - id)
+
+fn tag(n: int) -> Tag:
+    Tag {id: n}
+
+fn open(n: int) -> Handle:
+    Handle {id: n}
+
+# H itself (a call that moves a Handle through a function).
+fn id(h: Handle) -> Handle:
+    h
+
+fn number(h: Handle) -> int:
+    {id} = h
+    id
+
+fn closed(context log: Log) -> List[int] errors IndexNotFound:
+    loop i from 0 to log.lines.length():
+        log.lines.at(i)
+
+fn count(context log: Log) -> int:
+    log.lines.length()
+
+fn note(n: int, context log: Log):
+    log.lines.push(n)

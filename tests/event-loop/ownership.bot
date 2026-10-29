@@ -1,5 +1,6 @@
-# ownership.bot -- registration ownership as it is today
-# (EVENT-LOOP-MILESTONE-1.md, "Ownership").
+# ownership.bot -- registration identities (EVENT-LOOP-MILESTONE-1.md,
+# "Ownership"): a Reg made by source, channel, timer or observer. Owned
+# registrations are owned.bot's.
 #
 # A Reg is an identity, not an owner: nothing revokes a registration
 # implicitly, so a task that keeps a Reg it no longer reads keeps the
@@ -9,8 +10,8 @@
 #   1. a task that revokes its registration when done: not live after;
 #   2. a task holding a Reg it stopped reading, asleep: the registration
 #      stays live until the task revokes it, after waking;
-#   3. NEGATIVE (no drop action exists yet): a task that ends without
-#      revoking leaves its registration registered;
+#   3. NEGATIVE (a Reg has no drop action; an Owner, owned.bot, has): a
+#      task that ends without revoking leaves its registration registered;
 #   4. a task parked on a registration and abandoned: the registration stays
 #      registered after abandon, and shutdown revokes every registration;
 #   5. coroutine ownership: a task adopted by the loop is the loop's; one

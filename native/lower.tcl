@@ -10001,6 +10001,17 @@ proc native::lower::NativeCallOp {e node} {
             if {[dict exists $provenOps $op] && [BoundsProven $e]} {
                 set op [dict get $provenOps $op]
             }
+            if {$op in {mvcleardrop mvswapdrop mutarrayswapdrop mutarraysetdrop}} {
+                # A collection's drop form whose descriptor (its last
+                # argument, a constant) runs code -- a resource's cleanup, an
+                # unwinding coroutine's abandonment: its safepoint variant
+                # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+                set d [lindex $argExprs end]
+                if {[hir::kind $hir $d] eq "const"
+                        && [regexp {[rC]} [core::value::strOf [hir::get $hir $d value]]]} {
+                    append op run
+                }
+            }
             return [list $name $op]
         }
     }

@@ -1,0 +1,8 @@
+# reject-forge-owner.bot -- must be REJECTED (tests/event-loop.test, el-static-*): making a registration's Owner from integers (OPAQUE-CONSTRUCTION): only std::event_loop makes an Owner, so only an owned registration's maker holds the authority its release is
+import std::event_loop
+
+fn forge(context ev: std::event_loop::Loop):
+    std::event_loop::release(std::event_loop::Owner {slot: 0, gen: 1})
+
+with context std::event_loop::create(8)
+forge()

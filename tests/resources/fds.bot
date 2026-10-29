@@ -1,0 +1,111 @@
+# fds.bot -- descriptors closed where their owners' scopes end, counted in
+# /proc/self/fd (tests/resources.test; native backends, Linux): the count
+# beside each step's acquisitions, then after them (0: every one closed).
+import descriptor
+import rawfd
+import std::io::fs
+import std::abi
+import std::io::path
+import std::linux::fs
+import std::list
+import std::mutable_vector
+
+struct Go:
+    n: int
+
+error Stop
+
+# 1. two descriptors live in a scope; none after it.
+fn two(base: int, context fs: std::linux::fs::LinuxFS) -> int errors std::io::fs::FileError, std::io::path::NotAPath:
+    a = descriptor::open("/proc/self/stat")
+    b = descriptor::open("/proc/self/status")
+    descriptor::open_count() - base
+
+# 2. a thousand iterations, one descriptor each: closed at every iteration's
+#    end (the process's limit is never approached).
+fn churn(base: int, context fs: std::linux::fs::LinuxFS) -> int errors IndexNotFound, std::io::fs::FileError, std::io::path::NotAPath:
+    peak = std::mutable_vector::from_list([0])
+    loop i from 0 to 1000:
+        d = descriptor::open("/proc/self/stat")
+        if i == 0 or i == 500 or i == 999:
+            n = descriptor::open_count() - base
+            if n > peak.at(0):
+                peak.swap(0, n)
+    peak.at(0)
+
+# 3. an error exit: the second open fails (no such file); the first
+#    descriptor is closed on the error's way out.
+fn failing(context fs: std::linux::fs::LinuxFS) -> int errors std::io::fs::FileError, std::io::path::NotAPath:
+    a = descriptor::open("/proc/self/stat")
+    b = descriptor::open("/nonexistent/botlish-resources")
+    0
+
+# 4. a coroutine holding a descriptor, abandoned where its handle's scope
+#    ends: closed then.
+fn reader(context fs: std::linux::fs::LinuxFS, resume Go) -> int errors std::io::fs::FileError, std::io::path::NotAPath:
+    d = descriptor::open("/proc/self/stat")
+    m = yield 1
+    m.n
+
+fn abandoned(base: int, context fs: std::linux::fs::LinuxFS) -> int errors std::io::fs::FileError, std::io::path::NotAPath:
+    coroutine {step, first} = reader()
+    descriptor::open_count() - base
+
+# 5. the explicit release: closed at once.
+fn explicit(base: int, context fs: std::linux::fs::LinuxFS) -> int errors std::io::fs::FileError, std::io::path::NotAPath:
+    d = descriptor::open("/proc/self/stat")
+    descriptor::close(d)
+    descriptor::open_count() - base
+
+# 6. descriptors in a vector: a cleared vector closes them all.
+fn vector(base: int, context fs: std::linux::fs::LinuxFS) -> int errors std::io::fs::FileError, std::io::path::NotAPath:
+    v = std::mutable_vector::from_list([descriptor::open("/proc/self/stat")])
+    loop i from 0 to 9:
+        v.push(descriptor::open("/proc/self/stat"))
+    during = descriptor::open_count() - base
+    v.clear()
+    during * 100 + descriptor::open_count() - base
+
+# 7. a native representation already invalid: the number closed behind the
+#    owner's back (rawfd::invalidate); the release still runs once, and its
+#    close reports EBADF (-9) -- recorded, not a failure of the scope.
+fn invalidated(base: int, context fs: std::linux::fs::LinuxFS, raw: rawfd::Closes) -> int errors std::io::fs::FileError, std::io::path::NotAPath, std::abi::AbiIntegerAboveRange, std::abi::AbiIntegerBelowRange:
+    f = rawfd::open("/proc/self/stat")
+    during = descriptor::open_count() - base
+    g = rawfd::invalidate(f)
+    during * 100 + descriptor::open_count() - base
+
+fn main(context fs: std::linux::fs::LinuxFS, closes: descriptor::Closes, raw: rawfd::Closes) -> List[int] errors IndexNotFound, std::io::fs::FileError, std::io::path::NotAPath, std::abi::AbiIntegerAboveRange, std::abi::AbiIntegerBelowRange:
+    base = descriptor::open_count()
+    t = two(base)
+    after_two = descriptor::open_count() - base
+    c = churn(base)
+    after_churn = descriptor::open_count() - base
+    f = failing():
+        on std::io::fs::FileError {code}:
+            code
+    after_failing = descriptor::open_count() - base
+    a = abandoned(base)
+    after_abandon = descriptor::open_count() - base
+    e = explicit(base)
+    v = vector(base)
+    after_vector = descriptor::open_count() - base
+    i = invalidated(base)
+    after_invalidated = descriptor::open_count() - base
+    r = rawfd::results()
+    [t, after_two, c, after_churn, f, after_failing, a, after_abandon, e, v, after_vector, descriptor::failures(), i, after_invalidated, std::list::length(r), std::list::at(r, 0)]
+
+with context std::linux::fs::create()
+with context descriptor::create()
+with context rawfd::create()
+main():
+    on IndexNotFound:
+        [-3]
+    on std::abi::AbiIntegerAboveRange:
+        [-4]
+    on std::abi::AbiIntegerBelowRange:
+        [-5]
+    on std::io::fs::FileError:
+        [-1]
+    on std::io::path::NotAPath:
+        [-2]
