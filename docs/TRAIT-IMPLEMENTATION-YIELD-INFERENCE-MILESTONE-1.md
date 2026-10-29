@@ -60,6 +60,12 @@ trait-polymorphic function whose root yields only through that function's
 own witnesses is judged by the function as written, which is checked against
 its traits alone, and is rejected.
 
+Economics (section 9): no build is added anywhere; a program that yields
+through an implementation checks build 1 twice (three times in an
+adversarial case); every other program keeps
+its builds, checks and plans exactly, and pays one scan of its expressions
+per check (0.1-0.3% of the golden suites' compilation).
+
 ## 2. Starting evidence
 
 At `24de220d` (the tree this milestone starts from), the three regression
@@ -622,7 +628,7 @@ against the final code):
 | `audit/traits/tools/mutate.tcl` | 40 | 40 | 0 | 16 |
 | `audit/context-traits/tools/mutate.tcl` | 63 | 48 | 15 (Darwin, Windows) | 4 |
 | `audit/coroutines/tools/mutate.tcl` | 52 | 52 | 0 | 0 (3 re-anchored) |
-| `audit/static-decisions/tools/mutate.tcl` | 74 | SD_KILLED | 0 | 1 |
+| `audit/static-decisions/tools/mutate.tcl` | 74 | 74 | 0 | 1 |
 | `audit/trait-constrained-types/tools/mutate.tcl` (the 19 that edit a file this milestone changed) | 19 | 19 | 0 | 0 |
 | `audit/affine/tools/mutate.tcl` (the 7 that edit a file this milestone changed) | 7 | 7 | 0 | 0 |
 | `audit/hir-interchange/tools/mutate.tcl` | 28 | 28 | 0 | 0 |
