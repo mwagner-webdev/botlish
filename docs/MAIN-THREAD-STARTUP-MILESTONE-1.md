@@ -447,7 +447,58 @@ PARITY-PENDING
 
 ## 29. Mutation testing
 
-MUTATION-PENDING
+Two campaigns cover the policy: `audit/native-aot/tools/mutate.tcl`
+(executable emission; 19 new mutants, three repaired) and
+`audit/native-stack/tools/mutate.tcl` (the stack guard; one new mutant).
+Each mutant rebuilds a private copy of `native/` and runs every detector:
+the cargo tests (`--bin botlish-native -- aot startup`, `--lib -- aotimage
+program runtime::aot`), `native-executable.test`, `argv.test`'s standalone
+tests, the 2048 executable, `system-linker.test`, `main-thread-startup.test`,
+`aot-facts.tcl` and `native-status.tcl`. The native-stack campaign runs its
+own detectors plus `main-thread-startup.test`'s `mts-policy-*` and
+`mts-main-*`. A `%%` line limits a mutant to the hosts whose code it changes.
+Elsewhere the mutant is SKIPPED: its code is another host's gate. Linux:
+**Executed** in this sandbox (Linux x86-64). macOS: **Executed** in the
+macOS workflow's full tier (section 31).
+
+| Mutant | What it breaks | Linux x86-64 | macOS AArch64 |
+|---|---|---|---|
+| `cli-startup-dropped` | main.tcl's `-native-startup main-thread` builds a worker | KILLED: main-thread-startup.test (`mts-cli-startup`) | MACOS-AOT-PENDING |
+| `api-default-main` | `native::executable` defaults to the main thread | KILLED: main-thread-startup.test | -- |
+| `api-capability-linux` | the capability table gives Linux the policy | KILLED: main-thread-startup.test (`mts-refused-where-unsupported`) | SKIPPED |
+| `api-capability-windows` | the capability table gives Windows the policy | SKIPPED (Windows') | SKIPPED |
+| `api-driver-worker` | `native::executable` asks the driver for the worker whatever the policy | SKIPPED (macOS') | MACOS-AOT-PENDING |
+| `driver-startup-ignored` | the driver's `executable` ignores `--startup` | KILLED: main-thread-startup.test (`mts-driver-refused-where-unsupported`) | -- |
+| `driver-startup-anywhere` | the driver takes `--startup` on any command | KILLED: main-thread-startup.test (`mts-driver-option-errors`) | -- |
+| `driver-default-main` | the driver's `executable` defaults to the main thread | KILLED: native-executable.test, system-linker.test | -- |
+| `startup-anywhere` | every host takes the policy for supported | KILLED: Rust (`startup_main_thread_is_macos_aarch64s_only`), main-thread-startup.test | SKIPPED |
+| `record-startup-unwritten` | the record never carries the policy | KILLED: Rust (`startup_policy_is_recorded`, `..._the_objects_only_difference`) | -- |
+| `record-startup-ignored` | the runtime reads every word as the worker | KILLED: Rust (`linked_program_startup_policy`), main-thread-startup.test (`mts-damaged-startup-word`) | MACOS-AOT-PENDING |
+| `record-startup-unchecked` | a word naming no policy reads as the worker | KILLED: Rust, main-thread-startup.test (`mts-damaged-startup-word`) | -- |
+| `fingerprint-ignores-record` | the ABI fingerprint leaves the record layout out | KILLED: Rust (`aot_fingerprint_covers_the_record_layout`) | -- |
+| `main-thread-spawns-worker` | a main-thread executable runs on a worker after all | SKIPPED (macOS') | MACOS-AOT-PENDING |
+| `main-thread-panic-escapes` | a main-thread panic unwinds out of `run` (status 101) | KILLED: Rust (`startup_on_this_thread_catches_a_panic`) | MACOS-AOT-PENDING |
+| `main-thread-no-guard` | a main-thread executable runs unguarded | SKIPPED (macOS') | MACOS-AOT-PENDING |
+| `system-lc-main-dropped` | the system linker drops LC_MAIN's stack size | KILLED: Rust (`startup_main_thread_reserves_lc_main_stack`) | MACOS-AOT-PENDING |
+| `rustc-lc-main-dropped` | the rustc linker drops LC_MAIN's stack size | SKIPPED (macOS') | MACOS-AOT-PENDING |
+| `stub-runs-main` | the stub runs a main-thread image on a worker | KILLED: main-thread-startup.test (`mts-damaged-startup-word`) | SKIPPED |
+| `startup-no-guard` (repaired) | an executable runs without the guard | KILLED | -- |
+| `sys-runtime-variable-ignored` (repaired) | `BOTLISH_NATIVE_RUNTIME` is not read | KILLED | -- |
+| `sys-startup-failure-succeeds` (repaired) | an unreadable record (magic, build, policy) exits 0 | KILLED | -- |
+| `macos-size-from-rlimit` (native-stack) | the main thread's size read as the stack rlimit (8 MiB): LC_MAIN's 512 MiB unused | SKIPPED (macOS') | MACOS-STACK-PENDING |
+
+`--`: not run on that host. Each of those mutants is portable code that
+the same detectors kill on every host; the macOS run spends its time on
+the mutants that only macOS compiles differently.
+
+Linux x86-64, native-aot: 17 killed, 0 survived, 5 skipped (another host's
+code), across the 22 above. Every mutant in every `mutants.txt` still
+applies to the code it mutates (a check over all of them), apart from two
+in `hir/cabi.tcl` (c-abi-types' `ptr-as-int`, native-view's
+`view-is-a-pointer`), a file this milestone does not touch. Two mutants
+of other campaigns (c-ffi's, native-link-plan's) were updated to the new
+signatures (MUTANT-NAMES-PENDING). The native-stack campaign on Linux x86-64 (all of its mutants,
+the new detector included): STACK-LINUX-PENDING.
 
 ## 30. Executable size and performance
 
