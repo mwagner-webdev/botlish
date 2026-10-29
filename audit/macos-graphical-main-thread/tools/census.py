@@ -115,6 +115,9 @@ def sh(cmd):
 
 class Census:
     def __init__(self, args):
+        for name in ("app", "checkout", "exp"):
+            if getattr(args, name):
+                setattr(args, name, str(Path(getattr(args, name)).resolve()))
         self.args = args
         self.work = Path(args.work).resolve()
         self.out = Path(args.out).resolve()
@@ -183,7 +186,10 @@ class Census:
             elif w.startswith("-l") and w != "-lSDL3":
                 libraries.append(w[2:])
         if APPLE:
+            # The fixture asks Foundation through the Objective-C runtime's C
+            # interface (objc_getClass, objc_msgSend): libobjc, by name.
             frameworks += ["Foundation", "AppKit"]
+            libraries += ["objc"]
         return list(dict.fromkeys(frameworks)), list(dict.fromkeys(libraries))
 
     def link_words(self):
@@ -233,7 +239,7 @@ class Census:
                                                  n / "mainstack.c", f"-Wl,-stack_size,{size}"])
             self.build("session", [self.cc, *self.cflags, "-o", self.work / "session", n / "session.c",
                                    "-framework", "ApplicationServices"])
-        rust_link = ["-l", "framework=Foundation"] if APPLE else []
+        rust_link = ["-l", "framework=Foundation", "-l", "objc"] if APPLE else []
         self.build("identity-rust", ["rustc", "-O", "--edition=2024", n / "identity.rs", "-L", f"native={self.work}",
                                      "-l", "static=mtprobe", *rust_link, "-o", self.work / "identity-rust"])
 

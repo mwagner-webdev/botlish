@@ -44,6 +44,7 @@
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <sys/sysctl.h>
+#include <sys/time.h>
 #else
 #include <dirent.h>
 #include <sys/syscall.h>
