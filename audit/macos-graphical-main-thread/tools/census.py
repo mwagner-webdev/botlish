@@ -66,20 +66,28 @@ def log(*words):
     print(*words, flush=True)
 
 
-def run(cmd, env=None, cwd=None, timeout=120, stdin=subprocess.DEVNULL):
-    """Runs CMD in a session of its own: (status, signal, timed_out, wall_ms, stdout, stderr)."""
+def run(cmd, env=None, cwd=None, timeout=120, stdin=subprocess.DEVNULL, signal_after=None):
+    """Runs CMD in a session of its own: (status, signal, timed_out, wall_ms, stdout, stderr). SIGNAL_AFTER
+    (seconds, signal) sends that signal to the process after that long, if it is still running."""
     base = {k: v for k, v in os.environ.items() if not k.startswith(ENV_STRIP)}
     base.update(env or {})
     started = time.monotonic()
     proc = subprocess.Popen([str(c) for c in cmd], env=base, cwd=cwd, stdin=stdin, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, start_new_session=True)
     timed_out = False
+    timer = None
+    if signal_after:
+        import threading
+        timer = threading.Timer(signal_after[0], lambda: proc.poll() is None and proc.send_signal(signal_after[1]))
+        timer.start()
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
         os.killpg(proc.pid, signal.SIGKILL)
         out, err = proc.communicate()
+    if timer:
+        timer.cancel()
     wall = (time.monotonic() - started) * 1000
     status = proc.returncode
     sig = -status if status is not None and status < 0 else 0
@@ -325,7 +333,7 @@ class Census:
 
     def botlish(self):
         log("== Botlish executables")
-        common = ["identity", "sdl", "depth", "kept", "co_overflow", "fault", "big"]
+        common = ["identity", "sdl", "depth", "kept", "co_overflow", "fault", "big", "errors"]
         self.exe = {}
         prod = self.stage("prod", common)
         compiler = "app" if self.args.app else "checkout"
@@ -339,11 +347,15 @@ class Census:
             exp = self.stage("exp", common + ["dispatch", "runonmain"], dispatch=True)
             for p in common + ["dispatch", "runonmain"]:
                 self.exe[("exp", p)] = self.compile("exp", exp, p, "exp")
+            # The rustc linker's startup reaches the same aot::run: its main-thread runs.
+            rustc = self.stage("exp-rustc", ["identity", "sdl", "errors", "depth"])
+            for p in ["identity", "sdl", "errors", "depth"]:
+                self.exe[("exp-rustc", p)] = self.compile("exp-rustc", rustc, p, "exp", {"BOTLISH_NATIVE_LINKER": "rustc"})
             if APPLE:
                 self.big = self.main_stack_choice()
                 if self.big:
-                    big = self.stage("exp-big", ["identity", "sdl", "depth", "kept", "co_overflow", "big"])
-                    for p in ["identity", "sdl", "depth", "kept", "co_overflow", "big"]:
+                    big = self.stage("exp-big", ["identity", "sdl", "depth", "kept", "co_overflow", "big", "errors"])
+                    for p in ["identity", "sdl", "depth", "kept", "co_overflow", "big", "errors"]:
                         self.exe[("exp-big", p)] = self.compile("exp-big", big, p, "exp",
                                                                 {"BOTLISH_EXPERIMENT_MAIN_STACK": self.big})
 
@@ -364,19 +376,22 @@ class Census:
         return best
 
     # -- running and classifying ---------------------------------------------------
-    def case(self, name, group, cmd, kind, env=None, timeout=60, expect=None, note="", repeat=1, capture=False):
+    def case(self, name, group, cmd, kind, env=None, timeout=60, expect=None, note="", repeat=1, capture=False,
+             signal_after=None, build=None):
         if cmd is None or cmd[0] is None:
-            rec = {"name": name, "group": group, "kind": kind, "class": "FAILED-BUILD", "expected": False,
-                   "facts": {}, "note": note or "the executable did not build"}
+            output = self.builds.get(build, {}).get("output", "") if build else ""
+            refused = bool((expect or {}).get("build_refused")) and (expect or {})["build_refused"] in output
+            rec = {"name": name, "group": group, "kind": kind, "class": "FAILED-BUILD", "expected": refused,
+                   "facts": {"build_output": output[-300:]} if output else {}, "note": note or "the executable did not build"}
             self.records.append(rec)
-            log(f"RESULT {name}: FAILED-BUILD")
+            log(f"RESULT {name}: FAILED-BUILD{'' if refused else ' (UNEXPECTED)'} {json.dumps(rec['facts'])[:300]}")
             return rec
         env = dict(env or {})
         if capture and APPLE:
             env["MTP_CAPTURE"] = str(self.captures / f"{name}.png")
         runs = []
         for i in range(repeat):
-            status, sig, timed_out, wall, out, err = run(cmd, env=env, timeout=timeout)
+            status, sig, timed_out, wall, out, err = run(cmd, env=env, timeout=timeout, signal_after=signal_after)
             runs.append({"status": status, "signal": sig, "timed_out": timed_out, "wall_ms": wall, "stdout": out,
                          "stderr": err, "mtp": mtp(err)})
             if i == 0:
@@ -386,6 +401,7 @@ class Census:
                     f"--- stdout\n{out}\n--- stderr\n{err}\n")
         first = runs[0]
         rec = {"name": name, "group": group, "kind": kind, "cmd": " ".join(map(str, cmd)), "env": env,
+               "signal_after": list(signal_after) if signal_after else None,
                "status": first["status"], "signal": first["signal"], "timed_out": first["timed_out"],
                "wall_ms": round(first["wall_ms"], 1), "stdout_tail": first["stdout"][-400:],
                "stderr_tail": "\n".join(l for l in first["stderr"].splitlines() if not l.startswith("MTP "))[-800:],
@@ -461,6 +477,9 @@ class Census:
                 facts["inconsistent"] = "the program's value and the fixture disagree about SDL_Init"
             if facts.get("value_window") is not None and facts["value_window"] != facts["window"]:
                 facts["inconsistent"] = "the program's value and the fixture disagree about the window"
+        pump = next((l["value"] for l in r["mtp"] if l.get("kind") == "value" and l.get("stage") == "pump-100"), None)
+        if pump is not None:
+            facts["pump_us"] = round(pump / 100 / 1000, 2)
         cor = m.get("coroutine-body")
         if cor:
             sp = int(cor["sp"], 16)
@@ -507,6 +526,11 @@ class Census:
         bad = self.ended(r)
         if "value" in expect:
             ok = not bad and r["status"] == 0 and facts["value"] == expect["value"]
+            if not ok and expect.get("or_overflow") and not bad and r["status"] == 1 and facts["native_limit_stack"]:
+                # The stack's capacity, not a defect: the recursion the worker's stack holds does not fit this
+                # one, and the runtime says so the defined way (section 11).
+                facts["capacity_exhausted"] = True
+                return "EXECUTED-THREAD", facts, True
         elif expect.get("overflow"):
             ok = not bad and r["status"] == 1 and facts["native_limit_stack"]
         elif expect.get("fault"):
@@ -519,6 +543,27 @@ class Census:
         if ok:
             return "EXECUTED-THREAD", facts, True
         return "FAILED-CORRECTNESS", dict(facts, problem=bad or "unexpected outcome"), False
+
+    def classify_process(self, r, expect, name):
+        """How the program left the process: status, standard output and error (fixture lines aside), the
+        driver protocol's result file -- each matched against EXPECT's regular expressions."""
+        err = "\n".join(l for l in r["stderr"].splitlines() if not l.startswith("MTP "))
+        facts = {"status": r["status"], "signal": r["signal"], "stdout": r["stdout"].strip()[-200:], "stderr": err.strip()[-300:]}
+        if expect.get("file"):
+            path = Path(expect["file"])
+            facts["file"] = path.read_text() if path.exists() else None
+        problems = []
+        if "status" in expect and r["status"] != expect["status"]:
+            problems.append(f"status {r['status']}")
+        for key, pattern in (("stdout", expect.get("stdout")), ("stderr", expect.get("stderr")), ("file", expect.get("file_re"))):
+            if pattern and not re.search(pattern, facts.get(key) or "", re.S | re.M):
+                problems.append(f"{key} does not match {pattern!r}")
+        bad = self.ended(r)
+        if bad and not expect.get("signal_ok"):
+            problems.append(bad)
+        if problems:
+            return "FAILED-CORRECTNESS", dict(facts, problem="; ".join(problems)), bool(expect.get("fails"))
+        return "EXECUTED-THREAD", facts, not expect.get("fails")
 
     def classify_deadlock(self, r, expect, name):
         dead = next((l for l in r["mtp"] if l.get("kind") == "deadlock"), None)
@@ -666,7 +711,7 @@ class Census:
             return {"n": len(values), "median": round(statistics.median(values), 3), "min": round(min(values), 3),
                     "max": round(max(values), 3), "stdev": round(statistics.pstdev(values), 3)}
 
-        walls, entry, init, frame, shutdown, threads = [], [], [], [], [], []
+        walls, entry, init, frame, shutdown, threads, pump = [], [], [], [], [], [], []
         for r in runs:
             walls.append(r["wall_ms"])
             m = {l["stage"]: l for l in r["mtp"] if l.get("kind") == "mark"}
@@ -681,8 +726,10 @@ class Census:
             if "after-events" in m and "after-quit" in m:
                 shutdown.append((m["after-quit"]["t_ns"] - m["after-events"]["t_ns"]) / 1e6)
             threads.append(max([l.get("threads", 0) for l in r["mtp"] if isinstance(l.get("threads"), int)] or [0]))
+            pump += [l["value"] / 100 / 1000 for l in r["mtp"] if l.get("kind") == "value" and l.get("stage") == "pump-100"]
         return {"wall_ms": series(walls), "entry_since_exec_ms": series(entry), "sdl_init_ms": series(init),
-                "frame_ms": series(frame), "shutdown_ms": series(shutdown), "threads_max": series(threads)}
+                "frame_ms": series(frame), "shutdown_ms": series(shutdown), "threads_max": series(threads),
+                "pump_us": series(pump)}
 
     # -- the cases ---------------------------------------------------------------------------
     def cases(self):
@@ -737,7 +784,13 @@ class Census:
             if APPLE:
                 for size in MAIN_STACK_SIZES:
                     exe = w / f"mainstack-{size}"
-                    self.case(f"stack-main-{size}", "stack", [exe if exe.exists() else None, "report"], "mainstack")
+                    # Apple ld (Xcode 16.4) refuses more than 512 MB on arm64: a measured limit, predicted since.
+                    over = int(size, 16) > 0x20000000
+                    refusal = {"build_refused": "-stack_size must be <= 512MB"} if over else {}
+                    self.case(f"stack-main-{size}", "stack", [exe if exe.exists() else None, "report"], "mainstack",
+                              expect=refusal, build=f"mainstack-{size}")
+                    if over:
+                        continue
                     self.case(f"stack-main-{size}-touch", "stack", [exe if exe.exists() else None, "touch"], "mainstack",
                               expect={"mode": "touch"}, timeout=120)
                     self.case(f"stack-main-{size}-overflow", "stack", [exe if exe.exists() else None, "overflow"], "mainstack",
@@ -792,10 +845,13 @@ class Census:
                     continue
                 # Linux: the guard refuses the main thread (glibc reports no guard): every main-thread run ends at startup.
                 refused = {"fails": True} if not APPLE and label.startswith("main") else {}
+                # The default main stack is 8 MiB: a recursion the worker's 1 GiB holds may exhaust it, which the
+                # runtime must report as NATIVE LIMIT STACK (run 40825370442 measured which).
+                small = {"or_overflow": True} if label == "main" else {}
                 for shape, ns in depths.items():
                     for n in ns:
                         self.case(f"a-{label}-depth-{shape}-{n}", "candidate-a", [exe("depth"), shape, str(n)], "runtime",
-                                  env=env, expect={"value": expected[shape](n), **refused}, timeout=120)
+                                  env=env, expect={"value": expected[shape](n), **small, **refused}, timeout=120)
                     self.case(f"a-{label}-overflow-{shape}", "candidate-a", [exe("depth"), shape, "0"], "runtime",
                               env=env, expect={"overflow": True, **refused}, timeout=180)
                 self.case(f"a-{label}-keep-gc", "candidate-a", [exe("depth"), "keep", "3000"], "runtime",
@@ -817,6 +873,50 @@ class Census:
                 small = {"BOTLISH_NATIVE_STACK_BYTES": str(8 << 20)} if label == "worker" else {}
                 self.case(f"a-{label}-bigframe-overflow", "candidate-a", [exe("big"), "0"], "runtime",
                           env={**env, **small}, expect={"overflow": True, **refused}, timeout=300)
+
+        if want("semantics") and self.args.exp:
+            # How a program leaves the process (section 21), on the worker and on the main thread, through both
+            # linkers' startups, plainly and in the driver protocol's mode.
+            runs = [("worker", worker, exp), ("main", main, exp), ("main-rustc", main, lambda p: e.get(("exp-rustc", p)))]
+            if APPLE and big("errors"):
+                runs.append(("main-big", main, big))
+            for label, env, exe in runs:
+                no = {"fails": True} if not APPLE and label.startswith("main") else {}
+                self.case(f"s-{label}-declared", "semantics", [exe("errors"), "declared"], "process", env=env,
+                          expect={"status": 0, "stdout": r"^1008$", **no})
+                self.case(f"s-{label}-runtime", "semantics", [exe("errors"), "runtime"], "process", env=env,
+                          expect={"status": 1, "stdout": r"^$", "stderr": r"\+: expected int, got \[true\] \(CORE SEMANTIC TYPE\)", **no})
+                result = self.work / f"result-{label}.txt"
+                self.case(f"s-{label}-protocol", "semantics", [exe("errors"), "runtime"], "process",
+                          env={**env, "BOTLISH_NATIVE_RESULT": str(result)},
+                          expect={"status": 0, "stdout": r"^$", "file": str(result),
+                                  "file_re": r"^error \{CORE SEMANTIC TYPE\} \{\+: expected int, got \[true\]\}$", **no},
+                          note="the driver protocol: the error is the result file's line, the status 0")
+                runs3 = self.work / f"runs-{label}.txt"
+                self.case(f"s-{label}-protocol-runs", "semantics", [exe("errors"), "declared"], "process",
+                          env={**env, "BOTLISH_NATIVE_RESULT": str(runs3), "BOTLISH_NATIVE_RUNS": "3"},
+                          expect={"status": 0, "file": str(runs3),
+                                  "file_re": r"^times \d+ \d+ \d+\ntiming \d+ \d+ 3 \d+\nvalue \{int 1008\}$", **no})
+                self.case(f"s-{label}-startup-report-io", "semantics", [exe("errors"), "value"], "process",
+                          env={**env, "BOTLISH_NATIVE_STARTUP_REPORT": "/nonexistent/startup-report"},
+                          expect={"status": 2, "stderr": r"NATIVE IO"},
+                          note="the startup report is written before the guard is installed: the same on every host")
+                self.case(f"s-{label}-overflow-line", "semantics", [exe("depth"), "down", "0"], "process", env=env,
+                          expect={"status": 1, "stderr": r"^error \{NATIVE LIMIT STACK\} \{native stack exhausted: too many nested calls\}$", **no},
+                          timeout=180)
+            if APPLE:
+                # SIGTERM while SDL runs: SDL's own handler (SDL_INIT_EVENTS) turns it into SDL_EVENT_QUIT, on any
+                # thread; the program then ends normally.
+                self.case("s-main-sigterm-sdl", "semantics", [exp("sdl")], "graphical", env=main,
+                          signal_after=(1.0, signal.SIGTERM), expect={"class": "EXECUTED-COCOA"},
+                          note="SIGTERM one second in: SDL's handler makes it a quit event")
+                self.case("s-main-sigterm-identity", "semantics", [exp("depth"), "keep", "100000000"], "process", env=main,
+                          signal_after=(0.5, signal.SIGTERM), expect={"signal_ok": True, "fails": False},
+                          timeout=60, note="no SDL: SIGTERM's default disposition ends the process")
+            # The rustc linker's startup on the main thread, graphically.
+            if APPLE:
+                self.case("a-main-rustc-cocoa", "candidate-a", [e.get(("exp-rustc", "sdl"))], "graphical", env=main,
+                          expect={"class": "EXECUTED-COCOA"}, note="rustc-linked: Rust's own main, then aot::run")
 
         if want("candidate-b") and self.args.exp:
             self.case("b-dispatch-cocoa", "candidate-b", [exp("dispatch")], "dispatch", env={**dispatch, **gui_env}, capture=False,
@@ -883,6 +983,13 @@ class Census:
                           expect={"class": "EXECUTED-HEADLESS" if APPLE else "FAILED-CORRECTNESS", "headless": True}, repeat=n)
                 self.case("t-a-worker-sdl-headless", "timing", [exp("sdl")], "graphical", env={**worker, **dummy},
                           expect={"class": "EXECUTED-HEADLESS", "headless": True}, repeat=n)
+                self.case("t-a-main-sdl-headless-gc", "timing", [exp("sdl")], "graphical", env={**main, **dummy, **gc},
+                          expect={"class": "EXECUTED-HEADLESS" if APPLE else "FAILED-CORRECTNESS", "headless": True}, repeat=n)
+                self.case("t-a-worker-sdl-headless-gc", "timing", [exp("sdl")], "graphical", env={**worker, **dummy, **gc},
+                          expect={"class": "EXECUTED-HEADLESS", "headless": True}, repeat=n)
+                if APPLE and big("sdl"):
+                    self.case("t-a-main-big-sdl", "timing", [big("sdl")], "graphical", env=main,
+                              expect={"class": "EXECUTED-COCOA"}, repeat=n)
                 self.case("t-b-dispatch", "timing", [exp("dispatch")], "dispatch", env=dispatch if APPLE else {**dispatch, **dummy},
                           expect={"headless": not APPLE}, repeat=n, timeout=120)
                 self.case("t-a-main-kept-gc", "timing", [exp("kept")], "runtime", env={**main, **gc},
@@ -942,13 +1049,13 @@ class Census:
         timed = [r for r in self.records if r.get("timing")]
         if timed:
             lines += ["", "## Timing (median [min, max] of the repetitions)", "",
-                      "| case | wall ms | entry since exec ms | SDL init ms | frame ms | shutdown ms | threads |",
-                      "|---|---|---|---|---|---|---|"]
+                      "| case | wall ms | entry since exec ms | SDL init ms | frame ms | SDL_PumpEvents us | shutdown ms | threads |",
+                      "|---|---|---|---|---|---|---|---|"]
             for r in timed:
                 t = r["timing"]
                 cell = lambda s: "-" if not s else f"{s['median']} [{s['min']}, {s['max']}]"
                 lines.append(f"| {r['name']} | {cell(t['wall_ms'])} | {cell(t['entry_since_exec_ms'])} | {cell(t['sdl_init_ms'])} | "
-                             f"{cell(t['frame_ms'])} | {cell(t['shutdown_ms'])} | {cell(t['threads_max'])} |")
+                             f"{cell(t['frame_ms'])} | {cell(t.get('pump_us'))} | {cell(t['shutdown_ms'])} | {cell(t['threads_max'])} |")
         sizes = {k: v for k, v in ((f"{a}/{p}", x.stat().st_size) for (a, p), x in getattr(self, "exe", {}).items() if x)}
         lines += ["", "## Executable sizes (bytes)", "", "| executable | bytes |", "|---|---|"]
         lines += [f"| {k} | {v} |" for k, v in sorted(sizes.items())]

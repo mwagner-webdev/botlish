@@ -157,6 +157,7 @@ static const char *const stage_names[] = {
     "after-present", "after-events", "after-destroy", "after-quit", "exit",
     "coroutine-body", "coroutine-resumed", "deep", "dispatch-call", "after-push",
     "callback-init", "callback-iterate", "callback-event", "callback-quit", "worker",
+    "pump-100",
 };
 
 const char *mtp_stage_name(int stage) {

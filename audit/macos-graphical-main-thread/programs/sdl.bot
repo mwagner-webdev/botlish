@@ -114,6 +114,20 @@ fn coroutine_frames(renderer: std::ffi::c::Ptr[probe::Renderer]) -> int:
     coroutine {step, first} = frame_task(renderer, 3)
     resume_all(step)
 
+# N calls of SDL_PumpEvents with no frame between them: the event pump's
+# own cost (the fixture reports the total as "pump-100").
+fn pumps(n: int) -> int:
+    if n == 0:
+        return 0
+    probe::SDL_PumpEvents()
+    pumps(n - 1)
+
+fn pump_cost() -> unit:
+    started = probe::now_ns()
+    pumps(100)
+    probe::value(20, probe::elapsed_since(started))
+    unit
+
 fn with_window(window: std::ffi::c::Ptr[probe::Window]) -> list:
     default_driver = std::ffi::c::null[std::ffi::c::Char]()
     renderer = probe::SDL_CreateRenderer(window, default_driver)
@@ -124,6 +138,7 @@ fn with_window(window: std::ffi::c::Ptr[probe::Window]) -> list:
     else:
         0
     probe::mark(5)
+    pump_cost()
     in_coroutine = if made == 1:
         coroutine_frames(renderer.clone())
     else:
