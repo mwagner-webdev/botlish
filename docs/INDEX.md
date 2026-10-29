@@ -183,6 +183,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [COMPILERPEDIA.md](COMPILERPEDIA.md) -- Compilerpedia, `-help`: the topic model, indices, search, help lines, generation, validation and maintenance
 - [COMPILERPEDIA-REPORT.md](COMPILERPEDIA-REPORT.md) -- the Compilerpedia milestone: the CLI changes, coverage, the lint audit and the 15-puzzle assessment
 - [IDIOMATIC-BOTLISH.md](IDIOMATIC-BOTLISH.md) -- the newcomer page of Compilerpedia (`principle.idiomatic-botlish`): its principles, search, the black-box audit and the questions that still need a probe
+- [AGENT-PRIMER.md](AGENT-PRIMER.md) -- the primer (`task.first-program`): the habits from other languages agents brought to their first programs, the overview's table, the help lines that now name each habit's page, and the follow-ups (a warning for the silent shadowing trap, messages for absent forms)
 
 ## Implementation
 

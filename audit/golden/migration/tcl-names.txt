@@ -1044,6 +1044,7 @@ tests/compiler-service.test cs-warnings-off-policy pass
 tests/compilerpedia.test cp-catalogue-valid pass
 tests/compilerpedia.test cp-check-structure-and-coverage pass
 tests/compilerpedia.test cp-diagnostic-code-prefix pass
+tests/compilerpedia.test cp-diagnostic-habits pass
 tests/compilerpedia.test cp-diagnostic-every-target-exists pass
 tests/compilerpedia.test cp-diagnostic-specific-rule pass
 tests/compilerpedia.test cp-diagnostic-tables-equal-load pass
@@ -9636,6 +9637,8 @@ tests/compilerpedia.test cp-idiomatic-does-not-steal pass
 tests/compilerpedia.test cp-idiomatic-names-no-language pass
 tests/compilerpedia.test cp-idiomatic-queries pass
 tests/compilerpedia.test cp-idiomatic-shape pass
+tests/compilerpedia.test cp-primer-queries pass
+tests/compilerpedia.test cp-primer-overview pass
 tests/compilerpedia.test cp-string-char-search pass
 tests/context-affine.test cao-affine-struct-vector-value pass
 tests/context-affine.test cao-array-element-place pass
@@ -9743,6 +9746,7 @@ tests/hir-interchange.test hx-text-shape pass
 tests/hir-interchange.test hx-trait-source pass
 tests/hir-interchange.test hx-unstamped pass
 tests/main-cli.test cli-help-overview-newcomer-line pass
+tests/main-cli.test cli-help-overview-primer pass
 tests/module-privacy.test mp-access-binding pass
 tests/module-privacy.test mp-access-call pass
 tests/module-privacy.test mp-access-from-module pass

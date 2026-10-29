@@ -569,7 +569,8 @@ docs: README.md SINGLE-EXECUTABLE.md
     botlish                         the usage summary (exit 0)
 In a repository checkout the compiler is `tclsh9.0 main.tcl` with the same
 arguments. Running it with no arguments only prints usage: it runs no
-program.
+program. The usage summary names the primer first (`-help primer`,
+task.first-program), and `-help` alone opens with the primer's table.
 
 == INPUT FILES
     FILE.bot    Botlish source; its imports name standard namespaces and
