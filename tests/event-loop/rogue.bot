@@ -1,0 +1,8 @@
+# rogue.bot -- a library that tries to install a driver
+# (reject-library-installs.bot): only an entry program installs contexts.
+import std::event_loop::deterministic
+
+with context std::event_loop::deterministic::create()
+
+fn nothing() -> int:
+    0

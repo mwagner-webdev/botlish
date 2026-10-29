@@ -1,0 +1,30 @@
+# compose-busy.bot -- composition (EVENT-LOOP-EXPLORATION.md, invariant 1):
+# the base workload W (busy). tests/event-loop.test compares W's lines across
+# compose-alone, compose-quiet-before, compose-quiet-after (identical, turns
+# included: an inactive library, initialized before or after W, changes
+# nothing) and compose-busy (the same order beside an active library).
+import busylib
+import quietlib
+import std::event_loop
+import std::event_loop::deterministic
+import workload
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    flood = busylib::init(40)
+    loop i from 0 to 300:
+        std::event_loop::deterministic::inject(1, flood, i, 0)
+    workload::start()
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

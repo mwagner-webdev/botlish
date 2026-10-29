@@ -1,0 +1,31 @@
+# smoke.bot -- two workers interleave one step per turn; run returns when no
+# live work remains.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+
+fn worker(name: int, n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to n:
+        elog::say2("w=", name, " step ", i)
+        std::event_loop::yield_now()
+    name
+
+fn spawn(name: int, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    coroutine {step, first} = worker(name, n)
+    std::event_loop::adopt(step, first)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    spawn(1, 3)
+    spawn(2, 2)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(16, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

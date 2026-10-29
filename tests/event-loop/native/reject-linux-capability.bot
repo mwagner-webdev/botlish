@@ -1,0 +1,21 @@
+# reject-linux-capability.bot -- must be REJECTED (tests/event-loop-linux.test,
+# el-linux-static-capability): the SDL source needs the Linux driver's
+# integration capability (event_loop_linux::Native), and this program
+# installs the deterministic driver: MISSING-CONTEXT, never a silently
+# different driver.
+import evsdl
+import std::event_loop
+import std::event_loop::deterministic
+import type std::event_loop::Delivery
+
+fn start(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    reg = std::event_loop::source(Delivery::Reliable, 64)
+    evsdl::start(evsdl::mode_hybrid, reg, 64, 0)
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+start():
+    on std::event_loop::SchedulerFault:
+        -1
+    on std::event_loop::DriverFault:
+        -2

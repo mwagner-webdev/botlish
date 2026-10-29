@@ -1,0 +1,10 @@
+# reject-private-helper.bot -- must be REJECTED (tests/event-loop.test, el-static-*): calling a scheduler-internal helper (PRIVATE-ACCESS)
+import std::event_loop
+
+fn poke(context ev: std::event_loop::Loop) -> int errors IndexNotFound:
+    std::event_loop::new_task()
+
+with context std::event_loop::create(8)
+poke():
+    on IndexNotFound:
+        -1

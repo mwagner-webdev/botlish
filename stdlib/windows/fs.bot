@@ -1,0 +1,889 @@
+# fs.bot -- the "std::windows::fs" namespace: Windows' native paths and its
+# synchronous filesystem, through the wide Win32 functions of kernel32
+# (WINDOWS-X86-64-MILESTONE-7.md).
+#
+#   with context std::windows::fs::create()          install it (entry program)
+#
+#   std::windows::fs::open(path, mode)          an owned File (std::io::fs::OpenMode)
+#   std::windows::fs::read(file, count)         one ReadFile: a Read {file, data}
+#   std::windows::fs::read_all(file)            reads to the end of the file
+#   std::windows::fs::write(file, data)         one WriteFile: a Written {file, count}
+#   std::windows::fs::write_all(file, data)     writes all of DATA: the File
+#   std::windows::fs::close(file)               CloseHandle
+#   std::windows::fs::read_file(path), write_file(path, data),
+#   create_file(path, data), entries(dir), create_directory(path),
+#   remove_file(path), remove_directory(path)
+#
+# ---------------------------------------------------------------------------
+# Native paths.
+#
+# A Windows name is UTF-16 code units, and NTFS takes any unit but a few
+# ASCII ones, an unpaired surrogate included: the units CreateFileW is given
+# are the units FindFirstFileW returns (audit/filesystem/experiments/
+# windows.tcl, W1, on windows-2025's NTFS). NativePath holds exactly those
+# units -- non-empty, without 0, nothing else assumed -- so every name a
+# directory lists round-trips. A textual std::windows::path::WindowsPath has
+# exactly one NativePath, its UTF-16 encoding (std::windows::path::native); a
+# NativePath has a String only when it holds no unpaired surrogate (`text`,
+# else std::io::path::NotText), and `display` is the explicitly lossy one for
+# people: the experiment's lossy spelling of a surrogate name opened ANOTHER
+# file, whose name really is U+FFFD. The ANSI code page is never used: every
+# call is a wide (W) function, given the units' little-endian bytes and a
+# two-byte NUL built for that one call. Equality is spelling, never file
+# identity: NTFS compares names without case ("Case.txt" and "CASE.TXT" are
+# one file, W4), Win32 rewrites some (below), and nothing here asks the
+# filesystem.
+#
+# Path syntax (`kind`, `join`) is Win32's, not Unix's with backslashes:
+#
+#   Relative       a\b         relative to the current directory
+#   DriveRelative  C:a         relative to drive C's current directory
+#                              ("C:x" resolved to C:\x on a runner whose
+#                              current directory is on D:, W5): never C:\a
+#   DriveAbsolute  C:\a
+#   RootRelative   \a          the current drive's root (D:\x there)
+#   Unc            \\server\share\a, //server/share/a
+#   Device         \\.\NAME, //./NAME: the Win32 device namespace
+#   Verbatim       \\?\C:\a, \\?\UNC\server\share, \??\C:\a: handed to the
+#                  NT namespace unchanged
+#
+# A drive designator is any one unit and ":" (Win32 resolved "1:x" to
+# "1:\x", W5). Win32 normalizes every non-verbatim path before the
+# filesystem sees it: "/" is a separator, "." and ".." components are
+# resolved lexically, a component's trailing periods and spaces are dropped
+# ("trail." is the file "trail", W2), the whole path is limited to MAX_PATH
+# (a 272-unit path failed, ERROR_PATH_NOT_FOUND, W6) and some names are
+# devices ("NUL" in any directory was the NUL device on windows-2025, while
+# "CON", "COM1", "nul.txt" and "AUX.log" made ordinary files there, W3: this
+# depends on the Windows version). A verbatim path is none of that: "/" is a
+# character NTFS refuses (ERROR_INVALID_NAME), ".." too, a trailing period
+# is kept ("verb." is a name of its own, which no Win32 path reaches: W2) and
+# its length is NTFS's (32767 units).
+#
+# ---------------------------------------------------------------------------
+# Authority and ownership.
+#
+# WindowsFS is the filesystem context: the authority to open names, create
+# and remove entries and list directories, relative to the process's current
+# directories. The Win32 functions are declared here privately: a Win32
+# call whose pointer parameters are all noescape is no direct edge
+# (DIRECT-MODULES.md, "Foreign is not direct"), so the context is this
+# module's design, not the direct-module analysis's: every public function
+# that names a path requires WindowsFS, and no public function takes a raw
+# handle. (A module that declares kernel32's CreateFileW itself has the
+# authority any C declaration has: the report, "Contexts".)
+#
+# A File is an opened file: an opaque struct of its HANDLE, a C pointer, and
+# so AFFINE -- one owner, moved by use, never copied (USE-AFTER-MOVE),
+# gone once closed. A HANDLE is never a C runtime file descriptor: nothing
+# here calls the C runtime. Operations on a File need no context: the HANDLE
+# is the capability, used by ordinary C calls. They take the File and give it
+# back (Read {file, data}, Written {file, count}, write_all's File).
+#
+# Ownership is not cleanup: a File dropped unclosed leaks its handle until
+# the process ends (the language releases an affine value without running
+# code). Close every File; the whole-file operations do on every path. A
+# read or write that FAILS closes its File (CloseHandle's own result
+# ignored) and fails with its error.
+#
+# Files are opened with share mode READ | WRITE | DELETE (the context's
+# `share`): another opener -- this program or another -- may read, write,
+# rename or delete the file meanwhile, as on POSIX; an opener that asked for
+# exclusive access first makes the open fail with Busy (ERROR_SHARING_
+# VIOLATION, 32: W7), and so does an open after one that asked for it.
+#
+# ---------------------------------------------------------------------------
+# Completion and errors.
+#
+# `read` and `write` are one ReadFile / WriteFile each: short counts are
+# ordinary, a read of no bytes is the end of the file (and so is a pipe's
+# ERROR_BROKEN_PIPE). read_all, write_all and the whole-file operations
+# complete; a write that makes no progress is Other. No retry, no durability
+# claim (no FlushFileBuffers). Every failure is std::io::fs::FileError: its
+# reason (`reason_of`) and the thread's last-error code, read right after the
+# failed call before anything else is called. Win32 reports a directory
+# opened as a file, and a directory DeleteFileW was given, as
+# ERROR_ACCESS_DENIED (5, W8): when the path then names a directory
+# (GetFileAttributesW, asked after the code was read) the reason is
+# IsADirectory, the code still 5.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::char
+import std::ffi::c
+import std::io::fs
+import std::io::path
+import std::list
+import std::mutable_vector
+import std::str
+import type std::byte::Byte
+
+extern c library "kernel32"
+
+# HANDLE CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD
+#     dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD
+#     dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
+private extern c fn c_create_file named "CreateFileW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, access: std::ffi::c::ULong, share: std::ffi::c::ULong, security: std::ffi::c::Ptr[std::ffi::c::Void] noescape, disposition: std::ffi::c::ULong, flags: std::ffi::c::ULong, template: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+
+# BOOL ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
+#     LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped)
+private extern c fn c_read_file named "ReadFile"(file: std::ffi::c::Ptr[std::ffi::c::Void] noescape, buffer: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULong, done: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, overlapped: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+
+# BOOL WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite,
+#     LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped)
+private extern c fn c_write_file named "WriteFile"(file: std::ffi::c::Ptr[std::ffi::c::Void] noescape, buffer: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, count: std::ffi::c::ULong, done: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, overlapped: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+
+# BOOL CloseHandle(HANDLE hObject)
+private extern c fn c_close_handle named "CloseHandle"(handle: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+
+# HANDLE FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData)
+private extern c fn c_find_first named "FindFirstFileW"(pattern: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, data: std::ffi::c::Ptr[std::ffi::c::Void] write noescape) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+
+# BOOL FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData)
+private extern c fn c_find_next named "FindNextFileW"(find: std::ffi::c::Ptr[std::ffi::c::Void] noescape, data: std::ffi::c::Ptr[std::ffi::c::Void] write noescape) -> std::ffi::c::Int
+
+# BOOL FindClose(HANDLE hFindFile)
+private extern c fn c_find_close named "FindClose"(find: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+
+# DWORD GetFileAttributesW(LPCWSTR lpFileName)
+private extern c fn c_get_attributes named "GetFileAttributesW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape) -> std::ffi::c::ULong
+
+# BOOL CreateDirectoryW(LPCWSTR lpPathName, LPSECURITY_ATTRIBUTES)
+private extern c fn c_create_directory named "CreateDirectoryW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, security: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> std::ffi::c::Int
+
+# BOOL DeleteFileW(LPCWSTR lpFileName)
+private extern c fn c_delete_file named "DeleteFileW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape) -> std::ffi::c::Int
+
+# BOOL RemoveDirectoryW(LPCWSTR lpPathName)
+private extern c fn c_remove_directory named "RemoveDirectoryW"(name: std::ffi::c::Ptr[std::ffi::c::Void] read noescape) -> std::ffi::c::Int
+
+# DWORD GetLastError(void)
+private extern c fn c_get_last_error named "GetLastError"() -> std::ffi::c::ULong
+
+# A Windows name or path: its UTF-16 code units (each 1..65535), non-empty.
+opaque struct NativePath:
+    units: List[int]
+
+# The filesystem context: the share mode every open asks for.
+opaque context struct WindowsFS:
+    share: std::ffi::c::ULong
+
+# An opened file: its HANDLE.
+opaque struct File:
+    handle: std::ffi::c::Ptr[std::ffi::c::Void]
+
+# What one read did: the File back, and the bytes read (none at the end of
+# the file).
+struct Read:
+    file: File
+    data: std::abi::bytes::Bytes
+
+# What one write did: the File back, and how many bytes were written.
+struct Written:
+    file: File
+    count: int
+
+# A directory entry: its native name (one component) and its kind.
+struct Entry:
+    name: NativePath
+    kind: std::io::fs::EntryKind
+
+# The syntactic kind of a Windows path (`kind`; the module comment).
+enum PathKind:
+    Relative,
+    DriveRelative,
+    DriveAbsolute,
+    RootRelative,
+    Unc,
+    Device,
+    Verbatim,
+
+# The standard filesystem context: share mode FILE_SHARE_READ |
+# FILE_SHARE_WRITE | FILE_SHARE_DELETE. `with context
+# std::windows::fs::create()` installs it.
+fn create() -> WindowsFS:
+    WindowsFS {share: 7}
+
+# ---------------------------------------------------------------------------
+# UTF-16
+
+private fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+private fn byte_vector() -> MutableVector[Byte]:
+    std::mutable_vector::from_list([])
+
+# The UTF-16 code units of TEXT (a scalar above U+FFFF as its surrogate
+# pair).
+private fn utf16(text: str) -> List[int]:
+    out = ints()
+    loop i from 0 to text.length():
+        c = text.char_at(i).scalar_value()
+        if c < 65536:
+            out.push(c)
+        else:
+            v = c - 65536
+            out.push(55296 + v.shift_right(10))
+            out.push(56320 + v.mod(1024))
+    loop u in out:
+        u
+
+# Appends the UTF-8 encoding of the scalar C (below U+110000) to OUT.
+private fn push_utf8(place out: MutableVector[Byte], c: int) -> unit:
+    if c < 128:
+        out.push(c.mod(128))
+    elif c < 2048:
+        out.push(192 + c.shift_right(6).mod(32))
+        out.push(128 + c.mod(64))
+    elif c < 65536:
+        out.push(224 + c.shift_right(12).mod(16))
+        out.push(128 + c.shift_right(6).mod(64))
+        out.push(128 + c.mod(64))
+    else:
+        out.push(240 + c.shift_right(18).mod(8))
+        out.push(128 + c.shift_right(12).mod(64))
+        out.push(128 + c.shift_right(6).mod(64))
+        out.push(128 + c.mod(64))
+
+private fn high_surrogate?(u: int) -> bool:
+    u >= 55296 and u < 56320
+
+private fn low_surrogate?(u: int) -> bool:
+    u >= 56320 and u < 57344
+
+# The unit of US at I, or 0 when I designates none.
+private fn unit_at(us: List[int], i: int) -> int:
+    us.at(i):
+        on IndexNotFound:
+            0
+
+# The scalars US's units encode, in order: a surrogate pair is its one
+# scalar, an unpaired surrogate -1.
+private fn scalars(us: List[int]) -> List[int]:
+    loop i from 0 to us.length():
+        u = us.unit_at(i)
+        if u.low_surrogate?() and us.unit_at(i - 1).high_surrogate?() and i > 0:
+            continue
+        next = us.unit_at(i + 1)
+        if u.high_surrogate?() and next.low_surrogate?():
+            65536 + (u - 55296).shift_left(10) + (next - 56320)
+        elif u.high_surrogate?() or u.low_surrogate?():
+            -1
+        else:
+            u
+
+# The UTF-8 bytes of SCALARS, each -1 (an unpaired surrogate) as U+FFFD.
+private fn utf8_of(scalars: List[int]) -> List[Byte]:
+    out = byte_vector()
+    loop c in scalars:
+        if c < 0:
+            out.push_utf8(65533)
+        else:
+            out.push_utf8(c)
+    loop b in out:
+        b
+
+# The String of UTF-8 BYTES this module encoded, or "" (never: they are
+# UTF-8 by construction).
+private fn decoded(bytes: List[Byte]) -> str:
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)):
+        on InvalidUtf8:
+            ""
+
+# The low and the high byte of the unit U.
+private fn low_byte(u: int) -> Byte:
+    u.mod(256)
+
+private fn high_byte(u: int) -> Byte:
+    u.shift_right(8).mod(256)
+
+# UNITS' little-endian bytes and a two-byte NUL: an LPCWSTR for one call.
+private fn wide(units: List[int]) -> std::abi::bytes::Bytes:
+    bytes = loop i from 0 to 2 * units.length() + 2:
+        u = units.unit_at(i.shift_right(1))
+        if i.mod(2) == 0:
+            u.low_byte()
+        else:
+            u.high_byte()
+    std::abi::bytes::from_list(bytes)
+
+# ---------------------------------------------------------------------------
+# Native paths
+
+# true when UNITS is a valid native path: non-empty, every unit 1..65535.
+private fn valid_units?(units: List[int]) -> bool:
+    if units.length() == 0:
+        return false
+    loop u in units:
+        if u < 1 or u > 65535:
+            return false
+    true
+
+# The native path of UNITS; std::io::path::NotAPath when UNITS is empty or a
+# unit is not 1..65535.
+fn from_units(units: List[int]) -> NativePath errors std::io::path::NotAPath:
+    if not units.valid_units?():
+        fail std::io::path::NotAPath
+    NativePath {units: units}
+
+# The native path of TEXT: its UTF-16 code units; std::io::path::NotAPath
+# when TEXT is empty or holds U+0000. (A std::windows::path::WindowsPath
+# converts with std::windows::path::native, which cannot fail.)
+fn from_text(text: str) -> NativePath errors std::io::path::NotAPath:
+    from_units(utf16(text))
+
+# The native path of TEXT, already proven a valid path by the caller
+# (std::windows::path::native's WindowsPath): an internal member of the
+# standard library (core/native.tcl), never API.
+nomethod fn of_valid_text(text: str) -> NativePath:
+    NativePath {units: utf16(text)}
+
+# PATH's UTF-16 code units, exactly.
+fn units(path: NativePath) -> List[int]:
+    path.units
+
+# PATH's String; std::io::path::NotText when PATH holds an unpaired
+# surrogate (never a replacement character).
+fn text(path: NativePath) -> str errors std::io::path::NotText:
+    cs = path.units.scalars()
+    unpaired = loop c in cs:
+        if c < 0:
+            c
+        else:
+            continue
+    if unpaired.length() > 0:
+        fail std::io::path::NotText
+    decoded(cs.utf8_of())
+
+# PATH as text for people: every unpaired surrogate shown as U+FFFD. LOSSY:
+# never a path (the experiment's lossy name opened another file).
+fn display(path: NativePath) -> str:
+    decoded(path.units.scalars().utf8_of())
+
+private fn backslash() -> int:
+    92
+
+# true when U separates components: "\", and "/" unless VERBATIM.
+private fn separator?(u: int, verbatim: bool) -> bool:
+    u == 92 or (u == 47 and not verbatim)
+
+# The kind of the path whose units (or Unicode scalars: every unit that
+# decides is ASCII) are US.
+private fn kind_of(us: List[int]) -> PathKind:
+    a = us.unit_at(0)
+    b = us.unit_at(1)
+    c = us.unit_at(2)
+    d = us.unit_at(3)
+    if (a == 92 and b == 92 and c == 63 and d == 92) or (a == 92 and b == 63 and c == 63 and d == 92):
+        return PathKind::Verbatim
+    if a.separator?(false) and b.separator?(false):
+        if (c == 46 or c == 63) and (us.length() == 3 or d.separator?(false)):
+            return PathKind::Device
+        return PathKind::Unc
+    if a.separator?(false):
+        return PathKind::RootRelative
+    if b == 58:
+        if c.separator?(false):
+            return PathKind::DriveAbsolute
+        return PathKind::DriveRelative
+    PathKind::Relative
+
+# PATH's syntactic kind (the module comment). Syntax only: nothing is asked
+# of the filesystem or the process.
+fn kind(path: NativePath) -> PathKind:
+    path.units.kind_of()
+
+# The components of US: the runs between separators (VERBATIM: "\" only).
+private fn segments(us: List[int], verbatim: bool) -> List[List[int]]:
+    starts = loop i from 0 to us.length() + 1:
+        if i == 0 or us.unit_at(i - 1).separator?(verbatim):
+            i
+        else:
+            continue
+    loop s in starts:
+        loop i from s to us.length():
+            u = us.unit_at(i)
+            if u.separator?(verbatim):
+                break
+            u
+
+# true when Win32 would rewrite the component SEGMENT: a trailing period
+# or space, unless it is "." or "..", which Win32 resolves.
+private fn rewritten?(segment: List[int]) -> bool:
+    n = segment.length()
+    if n == 0 or segment == [46] or segment == [46, 46]:
+        return false
+    last = segment.unit_at(n - 1)
+    last == 46 or last == 32
+
+# true when US holds "/".
+private fn holds_slash?(us: List[int]) -> bool:
+    loop u in us:
+        if u == 47:
+            return true
+    false
+
+# true when NAME can follow a verbatim path: no "/" (a character there, never
+# a separator), and no component (split on "\") empty, "." or ".." (none is
+# resolved there).
+private fn verbatim_name?(name: List[int]) -> bool:
+    bad = loop segment in name.segments(true):
+        if segment.length() == 0 or segment == [46] or segment == [46, 46] or segment.holds_slash?():
+            segment
+        else:
+            continue
+    bad.length() == 0
+
+# true when no component of NAME ends with a period or a space, which Win32
+# would drop (W2).
+private fn win32_name?(name: List[int]) -> bool:
+    bad = loop segment in name.segments(false):
+        if segment.rewritten?():
+            segment
+        else:
+            continue
+    bad.length() == 0
+
+# true when the relative NAME can be joined to a path of kind BASE and name
+# what it says: NAME is itself a relative path (no separator first, no drive
+# designator); under a verbatim BASE a verbatim_name?, under any other a
+# win32_name?.
+private fn joinable?(base: PathKind, name: List[int]) -> bool:
+    if name.length() == 0 or name.kind_of() != PathKind::Relative:
+        return false
+    if base == PathKind::Verbatim:
+        return name.verbatim_name?()
+    name.win32_name?()
+
+# true when US ends with a separator.
+private fn ends_separated?(us: List[int], verbatim: bool) -> bool:
+    us.unit_at(us.length() - 1).separator?(verbatim)
+
+# The units of A followed by those of B.
+private fn joined(a: List[int], b: List[int]) -> List[int]:
+    loop i from 0 to a.length() + b.length():
+        if i < a.length():
+            a.unit_at(i)
+        else:
+            b.unit_at(i - a.length())
+
+# The joined units of BASE and NAME by Win32's syntax: one "\" between them
+# unless BASE ends with a separator or is a bare drive designator ("C:" and
+# "a" are "C:a", drive C's current directory: never "C:\a").
+private fn joined_units(base: List[int], name: List[int]) -> List[int]:
+    k = base.kind_of()
+    if base.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and base.length() == 2):
+        return base.joined(name)
+    base.append(backslash()).joined(name)
+
+# PATH joined with the relative native NAME, by Win32's syntax
+# (`joined_units`); std::io::path::NotAPath when NAME is no relative path,
+# when PATH is verbatim and NAME holds "/", "." or ".." or an empty
+# component, and when PATH is not verbatim and a component of NAME ends with
+# a period or a space -- which Win32 would drop, so the result would name
+# another entry (a name listed under a verbatim directory, "verb.", is
+# joined to that verbatim directory). Nothing is normalized, no unit decoded
+# and no filesystem observed.
+fn join(path: NativePath, name: NativePath) -> NativePath errors std::io::path::NotAPath:
+    if not path.units.kind_of().joinable?(name.units):
+        fail std::io::path::NotAPath
+    NativePath {units: path.units.joined_units(name.units)}
+
+# PATH joined with the textual relative COMPONENT (its UTF-16 units), by
+# `join`'s rule.
+fn concat(path: NativePath, component: str) -> NativePath errors std::io::path::NotAPath:
+    path.join(from_text(component))
+
+# ---------------------------------------------------------------------------
+# Failures
+
+# The portable reason of the Win32 error CODE (winerror.h).
+private fn reason_of(code: int) -> std::io::fs::Reason:
+    if code == 2 or code == 3 or code == 15 or code == 53 or code == 67:
+        return std::io::fs::Reason::NotFound
+    if code == 80 or code == 183:
+        return std::io::fs::Reason::AlreadyExists
+    if code == 5 or code == 19:
+        return std::io::fs::Reason::PermissionDenied
+    if code == 267:
+        return std::io::fs::Reason::NotADirectory
+    if code == 145:
+        return std::io::fs::Reason::NotEmpty
+    if code == 123 or code == 161 or code == 206:
+        return std::io::fs::Reason::InvalidName
+    if code == 32 or code == 33:
+        return std::io::fs::Reason::Busy
+    if code == 112 or code == 39 or code == 4 or code == 8 or code == 14 or code == 1450:
+        return std::io::fs::Reason::ResourceExhausted
+    std::io::fs::Reason::Other
+
+# The thread's last-error code, as it is now: read right after a call that
+# reported a failure.
+private fn last_error() -> int:
+    c_get_last_error()
+
+# FILE_ATTRIBUTE_DIRECTORY of PATH's attributes, false when there are none
+# (GetFileAttributesW failed). Asked only after a failure's code was read.
+private fn directory?(path: NativePath) -> bool:
+    attributes = c_get_attributes(wide(path.units))
+    attributes != 4294967295 and attributes.shift_right(4).mod(2) == 1
+
+# The reason of CODE, a failure of an operation on PATH: ERROR_ACCESS_DENIED
+# on a path that names a directory is IsADirectory.
+private fn reason_at(path: NativePath, code: int) -> std::io::fs::Reason:
+    if code == 5 and path.directory?():
+        return std::io::fs::Reason::IsADirectory
+    reason_of(code)
+
+# A HANDLE's eight bytes, written as a pointer field (the explicit foreign
+# encoding) and read back as an integer: NATIVE-LAYOUT-WRITES.md's "bits
+# twin", the one way to recognize INVALID_HANDLE_VALUE, a pointer no
+# Botlish value compares with (a C pointer has no equality).
+private layout HandleWord:
+    size 8
+    align 8
+    field handle: std::ffi::c::Ptr[std::ffi::c::Void] at 0
+
+private layout HandleBits:
+    size 8
+    align 8
+    field bits: std::binary::U64 at 0
+
+# true when HANDLE is INVALID_HANDLE_VALUE, (HANDLE)-1 (observed, never
+# moved).
+private fn invalid?(handle: std::ffi::c::Ptr[std::ffi::c::Void]) -> bool:
+    word = std::binary::write_foreign(std::abi::bytes::zeroed(std::abi::usize(8)), HandleWord.handle, handle):
+        on LayoutLengthMismatch:
+            return true
+    bits = std::binary::read(std::abi::bytes::freeze(word), HandleBits.bits):
+        on LayoutLengthMismatch:
+            return true
+    bits == 18446744073709551615
+
+# ---------------------------------------------------------------------------
+# Files
+
+# A DWORD out-parameter (its four bytes).
+private layout Dword:
+    size 4
+    align 4
+    field value: std::binary::U32 at 0
+
+private fn dword() -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::zeroed(std::abi::usize(4))
+
+# The DWORD a call wrote into CELL.
+private fn dword_of(cell: std::abi::bytes::MutableBytes) -> std::binary::U32:
+    std::binary::read(std::abi::bytes::freeze(cell), Dword.value):
+        on LayoutLengthMismatch:
+            0
+
+# CreateFileW's dwDesiredAccess for MODE: GENERIC_READ, GENERIC_WRITE, or
+# for appending FILE_GENERIC_WRITE without FILE_WRITE_DATA (every write
+# then appends: FILE_APPEND_DATA).
+private fn access(mode: std::io::fs::OpenMode) -> std::ffi::c::ULong:
+    if mode == std::io::fs::OpenMode::Read:
+        return 2147483648
+    if mode == std::io::fs::OpenMode::Append:
+        return 1179924
+    1073741824
+
+# CreateFileW's dwCreationDisposition for MODE: OPEN_EXISTING (3),
+# CREATE_ALWAYS (2), CREATE_NEW (1), OPEN_ALWAYS (4).
+private fn disposition(mode: std::io::fs::OpenMode) -> std::ffi::c::ULong:
+    if mode == std::io::fs::OpenMode::Read:
+        return 3
+    if mode == std::io::fs::OpenMode::Replace:
+        return 2
+    if mode == std::io::fs::OpenMode::CreateNew:
+        return 1
+    4
+
+# Opens PATH as MODE says (std::io::fs::OpenMode) with the context's share
+# mode, FILE_ATTRIBUTE_NORMAL for a new file; the File is the caller's to
+# close. A directory does not open (IsADirectory).
+fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: WindowsFS) -> File errors std::io::fs::FileError:
+    security = std::ffi::c::null[std::ffi::c::Void]()
+    template = std::ffi::c::null[std::ffi::c::Void]()
+    handle = wide(path.units).c_create_file(access(mode), fs.share, security, disposition(mode), 128, template)
+    failure = c_get_last_error()
+    if handle.clone().invalid?():
+        fail std::io::fs::FileError {reason: path.reason_at(failure), code: failure}
+    File {handle: handle}
+
+# Releases HANDLE after a failed operation, CloseHandle's own result
+# ignored: the operation's error is what its caller reports.
+private fn release(handle: std::ffi::c::Ptr[std::ffi::c::Void]) -> unit:
+    c_close_handle(handle)
+    unit
+
+# One ReadFile of at most COUNT bytes from HANDLE: the bytes read, none at
+# the end of the file (ERROR_BROKEN_PIPE, a pipe's end, included). A failure
+# releases HANDLE and fails.
+private fn read_some(handle: std::ffi::c::Ptr[std::ffi::c::Void], count: std::io::fs::ReadSize) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    synchronous = std::ffi::c::null[std::ffi::c::Void]()
+    r = handle.c_read_file(std::abi::bytes::zeroed(std::abi::usize(count)), count, dword(), synchronous)
+    if r.result == 0:
+        failure = c_get_last_error()
+        if failure == 109:
+            return std::abi::bytes::from_list([])
+        handle.release()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    r.buffer.freeze_prefix(std::abi::usize(dword_of(r.done))):
+        on UpperOverrun:
+            handle.release()
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+
+# One ReadFile of at most COUNT bytes: the File back and the bytes read --
+# fewer than COUNT is an ordinary short read, none the end of the file. A
+# failure closes FILE and fails.
+fn read(file: File, count: std::io::fs::ReadSize) -> Read errors std::io::fs::FileError:
+    {handle} = file
+    data = handle.clone().read_some(count)
+    Read {file: File {handle: handle}, data: data}
+
+private fn chunks() -> MutableVector[std::abi::bytes::Bytes]:
+    std::mutable_vector::from_list([])
+
+# The size of read_rest's read after COUNT reads: 4 KiB, doubling to 1 MiB.
+# Each read's buffer is a fresh storage of its full size (a write exposure is
+# a copy: C-POINTER-BORROWING.md), so a small file costs one small buffer and
+# a large one few reads (bench/filesystem.tcl: a 64-byte read_file took 14 us
+# with 64 KiB reads).
+private fn chunk_size(count: int) -> std::io::fs::ReadSize:
+    if count <= 0:
+        return 4096
+    if count == 1:
+        return 8192
+    if count == 2:
+        return 16384
+    if count == 3:
+        return 32768
+    if count == 4:
+        return 65536
+    if count == 5:
+        return 131072
+    if count == 6:
+        return 262144
+    if count == 7:
+        return 524288
+    1048576
+
+# Every byte of HANDLE from its file pointer to the end of the file, read in
+# chunks of chunk_size and made one Bytes. A failure releases HANDLE and
+# fails.
+private fn read_rest(handle: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    parts = chunks()
+    loop:
+        data = handle.clone().read_some(chunk_size(std::mutable_vector::length(parts)))
+        if std::abi::bytes::length(data).value == 0:
+            break
+        parts.push(data)
+    all = loop part in parts:
+        part
+    std::abi::bytes::join(all)
+
+# Reads FILE to the end: the File back and every byte from its file pointer
+# on, in one Bytes. A failure closes FILE and fails.
+fn read_all(file: File) -> Read errors std::io::fs::FileError:
+    {handle} = file
+    data = handle.clone().read_rest()
+    Read {file: File {handle: handle}, data: data}
+
+# How many of DATA's bytes one WriteFile asks for: all of them, or a DWORD's
+# maximum.
+private fn request(data: std::abi::bytes::Bytes) -> std::ffi::c::ULong:
+    n = std::abi::bytes::length(data).value
+    if n > 4294967295:
+        return 4294967295
+    n
+
+# One WriteFile of DATA to HANDLE: how many bytes it wrote. A failure
+# releases HANDLE and fails.
+private fn write_some(handle: std::ffi::c::Ptr[std::ffi::c::Void], data: std::abi::bytes::Bytes) -> int errors std::io::fs::FileError:
+    synchronous = std::ffi::c::null[std::ffi::c::Void]()
+    r = handle.c_write_file(data, request(data), dword(), synchronous)
+    if r.result == 0:
+        failure = c_get_last_error()
+        handle.release()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    dword_of(r.done)
+
+# One WriteFile of DATA: the File back and how many bytes were written (fewer
+# than DATA holds is an ordinary short write). A failure closes FILE and
+# fails.
+fn write(file: File, data: std::abi::bytes::Bytes) -> Written errors std::io::fs::FileError:
+    {handle} = file
+    n = handle.clone().write_some(data)
+    Written {file: File {handle: handle}, count: n}
+
+# Writes every byte of DATA to HANDLE: one WriteFile in the common case, the
+# unwritten rest of a short write written again and again; a write that
+# makes no progress is Other. A failure releases HANDLE and fails.
+private fn write_rest(handle: std::ffi::c::Ptr[std::ffi::c::Void], data: std::abi::bytes::Bytes) -> unit errors std::io::fs::FileError:
+    total = std::abi::bytes::length(data).value
+    if total == 0:
+        return unit
+    n = handle.clone().write_some(data)
+    if n <= 0:
+        handle.release()
+        fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+    if n < total:
+        rest = data.slice(n, total):
+            on LowerUnderrun:
+                handle.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+            on UpperOverrun:
+                handle.release()
+                fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        return handle.write_rest(rest)
+    unit
+
+# Writes all of DATA to FILE (short writes completed): the File back. A
+# failure closes FILE and fails: some of DATA may have been written.
+fn write_all(file: File, data: std::abi::bytes::Bytes) -> File errors std::io::fs::FileError:
+    {handle} = file
+    handle.clone().write_rest(data)
+    File {handle: handle}
+
+# Closes FILE (CloseHandle); a failure is the FileError, never retried.
+fn close(file: File) -> unit errors std::io::fs::FileError:
+    {handle} = file
+    if c_close_handle(handle) == 0:
+        failure = c_get_last_error()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    unit
+
+# Every byte of the file PATH.
+fn read_file(path: NativePath, context fs: WindowsFS) -> std::abi::bytes::Bytes errors std::io::fs::FileError:
+    opened = path.open(std::io::fs::OpenMode::Read)
+    {file, data} = opened.read_all()
+    file.close()
+    data
+
+# Opens PATH as MODE (a writing mode), writes all of DATA and closes it.
+private fn write_with(path: NativePath, mode: std::io::fs::OpenMode, data: std::abi::bytes::Bytes, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+    opened = path.open(mode)
+    written = opened.write_all(data)
+    written.close()
+
+# The file PATH holds exactly DATA: created, or truncated and rewritten.
+fn write_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+    path.write_with(std::io::fs::OpenMode::Replace, data)
+
+# A new file PATH holding DATA; AlreadyExists when the name exists (NTFS
+# compares names without case: "CASE.TXT" exists when "Case.txt" does).
+fn create_file(path: NativePath, data: std::abi::bytes::Bytes, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+    path.write_with(std::io::fs::OpenMode::CreateNew, data)
+
+# ---------------------------------------------------------------------------
+# Directories
+
+# WIN32_FIND_DATAW (minwinbase.h, 592 bytes): the attributes at 0, the
+# reparse tag of a reparse point (dwReserved0) at 36, cFileName at 44.
+private layout FindData:
+    size 592
+    align 4
+    field attributes: std::binary::U32 at 0
+    field reparse_tag: std::binary::U32 at 36
+    field name: array 260 of std::binary::U16 at 44
+
+private fn find_data() -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::zeroed(std::abi::usize(592))
+
+private fn found() -> MutableVector[Entry]:
+    std::mutable_vector::from_list([])
+
+# The kind of an entry of ATTRIBUTES and reparse TAG: a symbolic link
+# (IO_REPARSE_TAG_SYMLINK) or a junction (IO_REPARSE_TAG_MOUNT_POINT) is
+# SymbolicLink, whatever it names; any other entry a Directory or a File by
+# FILE_ATTRIBUTE_DIRECTORY.
+private fn kind_of_entry(attributes: int, tag: int) -> std::io::fs::EntryKind:
+    if attributes.shift_right(10).mod(2) == 1 and (tag == 2684354572 or tag == 2684354563):
+        return std::io::fs::EntryKind::SymbolicLink
+    if attributes.shift_right(4).mod(2) == 1:
+        return std::io::fs::EntryKind::Directory
+    std::io::fs::EntryKind::File
+
+# The entry a FindFirstFileW / FindNextFileW wrote into DATA, pushed onto OUT
+# unless it is "." or "..".
+private fn take(data: std::abi::bytes::MutableBytes, place out: MutableVector[Entry]) -> unit:
+    record = std::abi::bytes::freeze(data)
+    name_units = std::binary::read(record, FindData.name):
+        on LayoutLengthMismatch:
+            return unit
+    name = loop u in name_units:
+        if u == 0:
+            break
+        u + 0
+    if not name.valid_units?() or name == [46] or name == [46, 46]:
+        return unit
+    attributes = std::binary::read(record, FindData.attributes):
+        on LayoutLengthMismatch:
+            return unit
+    tag = std::binary::read(record, FindData.reparse_tag):
+        on LayoutLengthMismatch:
+            return unit
+    out.push(Entry {name: NativePath {units: name}, kind: attributes.kind_of_entry(tag)})
+
+# Every further entry of the enumeration FIND into OUT, until FindNextFileW
+# reports ERROR_NO_MORE_FILES (18): 0, or another error's code.
+private fn rest(find: std::ffi::c::Ptr[std::ffi::c::Void], place out: MutableVector[Entry]) -> int:
+    r = find.c_find_next(find_data())
+    if r.result == 0:
+        failure = c_get_last_error()
+        if failure == 18:
+            return 0
+        return failure
+    take(r.data, out)
+    find.rest(out)
+
+# Every entry of the directory DIR but "." and "..", in the order the
+# filesystem lists them (NTFS: its name order), each with its native name
+# and its kind (a link is SymbolicLink, whatever it names). FindFirstFileW of
+# DIR\* and FindNextFileW; the enumeration handle is closed here, also when
+# listing fails. A directory that matches nothing (a drive's root without
+# entries: ERROR_FILE_NOT_FOUND) is empty; a name that is no directory is
+# NotADirectory (ERROR_DIRECTORY, W9).
+fn entries(dir: NativePath, context fs: WindowsFS) -> List[Entry] errors std::io::fs::FileError:
+    pattern = dir.units.joined_units([42])
+    r = wide(pattern).c_find_first(find_data())
+    failure = c_get_last_error()
+    {result: find, data} = r
+    if find.clone().invalid?():
+        if failure == 2:
+            return []
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    out = found()
+    take(data, out)
+    ended = find.clone().rest(out)
+    c_find_close(find)
+    if ended != 0:
+        fail std::io::fs::FileError {reason: reason_of(ended), code: ended}
+    loop e in out:
+        e
+
+# A new, empty directory PATH (CreateDirectoryW); AlreadyExists when the
+# name exists.
+fn create_directory(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+    security = std::ffi::c::null[std::ffi::c::Void]()
+    if wide(path.units).c_create_directory(security) == 0:
+        failure = c_get_last_error()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    unit
+
+# Removes the file PATH (DeleteFileW); IsADirectory for a directory.
+fn remove_file(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+    if c_delete_file(wide(path.units)) == 0:
+        failure = c_get_last_error()
+        fail std::io::fs::FileError {reason: path.reason_at(failure), code: failure}
+    unit
+
+# Removes the empty directory PATH (RemoveDirectoryW); NotEmpty when it has
+# entries, NotADirectory when it is a file.
+fn remove_directory(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+    if c_remove_directory(wide(path.units)) == 0:
+        failure = c_get_last_error()
+        fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
+    unit

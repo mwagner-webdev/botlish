@@ -1,0 +1,20 @@
+# board.bot -- an application context through which the scenario programs'
+# tasks share registration identities (a Reg is an ordinary value; only the
+# event loop can make one).
+import std::event_loop
+import std::mutable_vector
+
+opaque context struct Board:
+    regs: MutableVector[std::event_loop::Reg]
+
+fn create() -> Board:
+    Board {regs: std::mutable_vector::from_list([])}
+
+fn put(reg: std::event_loop::Reg, context b: Board):
+    b.regs.push(reg)
+
+fn count(context b: Board) -> int:
+    b.regs.length()
+
+fn get(i: int, context b: Board) -> std::event_loop::Reg errors IndexNotFound:
+    b.regs.at(i)

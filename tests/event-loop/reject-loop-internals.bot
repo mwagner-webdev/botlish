@@ -1,0 +1,9 @@
+# reject-loop-internals.bot -- must be REJECTED (tests/event-loop.test, el-static-*): a library reaching into the scheduler's queues (OPAQUE-REPRESENTATION)
+import std::event_loop
+import std::mutable_vector
+
+fn steal(context ev: std::event_loop::Loop) -> int:
+    ev.parked.length()
+
+with context std::event_loop::create(8)
+steal()

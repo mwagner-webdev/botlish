@@ -1,0 +1,80 @@
+name: windows filesystem probe
+
+# The path-representation experiment of WINDOWS-X86-64-MILESTONE-7.md
+# (sections 3 and 4) on a real Windows x86-64 host: what NTFS and the wide
+# Win32 APIs do with the names the designs compared there -- an unpaired
+# UTF-16 surrogate and its lossy spelling, trailing periods and spaces,
+# reserved device names, case, drive-relative and verbatim forms, long
+# paths, sharing, "/" and ".." through \\?\. It is evidence for the report,
+# not a test tier: the job records what happens (the summary lists every
+# row) and fails only when the probe itself cannot run. The production
+# filesystem tests run in windows-x86_64.yml.
+#
+# It runs on pushes that change it or audit/filesystem/experiments/, and on
+# demand (workflow_dispatch) once it is on the default branch.
+
+on:
+  push:
+    paths:
+      - ".github/workflows/windows-fs-probe.yml"
+      - "audit/filesystem/experiments/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-fs-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CC: clang
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    name: filesystem probe (Windows x86-64, MSVC)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: The volume the probe's directory is on
+        shell: pwsh
+        run: |
+          $t = [System.IO.Path]::GetTempPath()
+          "temporary directory: $t"
+          Get-Volume -DriveLetter $t.Substring(0, 1) | Format-List DriveLetter, FileSystemType, FileSystemLabel
+          "current directory: $(Get-Location)"
+
+      - name: Path-representation experiment (cranelift)
+        run: tclsh9.0 audit/filesystem/experiments/windows.tcl -backend cranelift 2>&1 | tee probe.log
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Windows filesystem probe"
+            echo '```'
+            tr -d '\r' < probe.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-fs-probe
+          path: probe.log
+          if-no-files-found: ignore

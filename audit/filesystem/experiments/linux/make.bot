@@ -1,0 +1,21 @@
+# make.bot -- the one fixture linux.tcl cannot spell in Tcl: the file whose
+# name is the bytes FF FE 78, holding "3", in the directory argv()[1].
+direct module
+
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::list
+import std::str
+import dirents
+
+fn main() -> int errors IndexNotFound, InvalidArgumentEncoding:
+    dir = argv().at(1).encode_utf8()
+    name = dir.append(std::byte::from_int(47)).append(std::byte::from_int(255)).append(std::byte::from_int(254)).append(std::byte::from_int(120))
+    dirents::create(name, std::abi::bytes::from_list("3".encode_utf8()))
+
+main():
+    on IndexNotFound:
+        -1
+    on InvalidArgumentEncoding:
+        -1

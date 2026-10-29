@@ -315,6 +315,18 @@ pub enum OpCode {
     /// copied (one allocation, or the shared static empty storage; a
     /// non-byte element is TYPE). One operand, the List.
     BytesFromList,
+    /// `byte_store::join` (WINDOWS-X86-64-MILESTONE-7.md): the storage of the
+    /// bytes of every storage of a List, in order (one allocation, or the
+    /// shared static empty storage). One operand, the List.
+    BytesJoin,
+    /// `byte_store::decode_utf8` (WINDOWS-X86-64-MILESTONE-7.md): the String
+    /// whose UTF-8 encoding is a storage's bytes, or the declared builtin
+    /// error InvalidUtf8 (routed like a `fail`). One operand, the storage.
+    BytesDecodeUtf8,
+    /// `byte_store::slice` (WINDOWS-X86-64-MILESTONE-7.md): a storage's bytes
+    /// START..END-1 in a new storage, or the declared LowerUnderrun /
+    /// UpperOverrun. Three operands: the storage, START, END.
+    BytesSlice,
     /// `byte_store::byte_count`: the exact byte count of a storage, a small Int.
     /// One operand; TYPE if it is not a byte storage.
     BytesLen,
@@ -907,6 +919,9 @@ op_spellings! {
     "syscall_linux_x86_64" => SyscallLinuxX86_64,
     "syscall_linux_aarch64" => SyscallLinuxAarch64,
     "bytesfromlist" => BytesFromList,
+    "bytesjoin" => BytesJoin,
+    "bytesdecodeutf8" => BytesDecodeUtf8,
+    "bytesslice" => BytesSlice,
     "byteslen" => BytesLen,
     "bytesaddr" => BytesAddr,
     "keepalive" => KeepAlive,
@@ -1072,12 +1087,12 @@ impl OpCode {
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
-            | AsciiToShort | BytesFromList | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
+            | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
             | CoRelease | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
-            Substr | SubstrProven | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
+            Substr | SubstrProven | BytesSlice | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy => Some(3),
             RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | BinStore | FfiFixtureMixed
             | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr

@@ -1,0 +1,59 @@
+# simnet.bot -- a scripted network implementing gameserver::Net over the
+# deterministic driver: connection CONN's lines are known in advance (line);
+# when the program attaches the connection to a registration, each line
+# becomes a record DELAY microseconds later. What is sent is logged.
+import gameserver
+import std::event_loop
+import std::event_loop::deterministic
+import std::list
+import std::mutable_vector
+
+opaque context struct SimNet:
+    lines: MutableVector[int]
+    sent: MutableVector[int]
+
+fn create() -> SimNet:
+    SimNet {lines: std::mutable_vector::from_list([]), sent: std::mutable_vector::from_list([])}
+
+nomethod fn line(conn: int, delay: int, cmd: int, arg: int, context n: SimNet):
+    n.lines.push(conn)
+    n.lines.push(delay)
+    n.lines.push(cmd)
+    n.lines.push(arg)
+
+private nomethod fn attach_checked(conn: int, reg: std::event_loop::Reg, context n: SimNet, ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    now = std::event_loop::now()
+    count = loop i from 0 to n.lines.length():
+        if i.mod(4) == 0 and n.lines.at(i) == conn:
+            std::event_loop::deterministic::inject(now + n.lines.at(i + 1), reg, n.lines.at(i + 2), n.lines.at(i + 3))
+            1
+        else:
+            continue
+    std::list::length(count)
+
+fn attach(conn: int, reg: std::event_loop::Reg, context n: SimNet) -> int:
+    attach_checked(conn, reg):
+        on IndexNotFound:
+            -1
+        on std::event_loop::SchedulerFault:
+            -1
+        on std::event_loop::DriverFault:
+            -1
+
+fn send(conn: int, value: int, context n: SimNet) -> int:
+    n.sent.push(conn)
+    n.sent.push(value)
+    1
+
+fn hangup(conn: int, context n: SimNet) -> int:
+    n.sent.push(conn)
+    n.sent.push(-1)
+    1
+
+fn ack(conn: int, context n: SimNet) -> int:
+    conn
+
+# What was sent, as conn, value pairs (-1: hung up).
+fn sent(context n: SimNet) -> List[int] errors IndexNotFound:
+    loop i from 0 to n.sent.length():
+        n.sent.at(i)

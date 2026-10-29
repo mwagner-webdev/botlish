@@ -1,0 +1,24 @@
+# Control: the implementation needs a context struct (derived through bump),
+# not a context trait. Runs: 2 * (1 + 10) = 22.
+type Small = Int in 0..1000
+
+context struct Log:
+    n: Small
+
+fn bump(context log: Log) -> int:
+    log.n
+
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    t.v + bump()
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+with context Log {n: 10}
+twice(A {v: 1})

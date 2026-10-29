@@ -1,0 +1,174 @@
+# fs.bot -- the "std::io::fs" namespace: the portable synchronous filesystem
+# (WINDOWS-X86-64-MILESTONE-7.md).
+#
+#   fn save(dir: std::io::fs::FilePath, data: std::abi::bytes::Bytes) errors std::io::path::NotAPath, std::io::fs::FileError:
+#       dir.concat("save.dat").write_file(data)
+#
+# FilePath is an eager trait (TRAITS.md) of the textual paths whose platform
+# can operate on them: std::linux::path::LinuxPath and
+# std::windows::path::WindowsPath satisfy it through their own modules'
+# functions, so `save` above is specialized per witness and its
+# `write_file` compiles to a direct call of the witness's own (for a
+# LinuxPath, std::linux::path::write_file), with no wrapper, dispatch or
+# conversion of the path to anything but its platform's own native form.
+#
+# The path's type decides its filesystem. Each witness's operations require
+# its own platform's filesystem context -- LinuxPath's std::linux::fs::LinuxFS,
+# WindowsPath's std::windows::fs::WindowsFS -- through the functions they
+# call (CONTEXTS.md: requirements are derived), so a program that hands
+# `save` a LinuxPath and installs no LinuxFS is MISSING-CONTEXT at compile
+# time, and a WindowsPath never reaches a Linux filesystem: compiled for
+# Linux, std::windows is UNSUPPORTED-PLATFORM, and a WindowsFS is the only
+# context its operations accept. Nothing selects a filesystem at run time,
+# and no installed context changes which function a call means.
+#
+# Portable code receives its paths: the entry program, which installs the
+# platform's context, validates the text it starts from as the platform's
+# path (std::linux::path::validate, std::windows::path::validate) and passes
+# it on; portable code joins components to it (`concat`) and operates on the
+# results.
+#
+# What is here is what behaves alike on every platform, stated once:
+#
+# * whole files: read_file (the bytes, of any length, read until the end of
+#   the file), write_file (create or replace: the file holds exactly DATA),
+#   create_file (DATA in a file that did not exist: AlreadyExists when the
+#   name exists), each opening, writing or reading to completion and
+#   closing, with no handle visible;
+# * directories: entries (every entry but "." and "..", in the order the
+#   operating system lists them, with its kind), create_directory,
+#   remove_directory (an empty one), remove_file.
+#
+# Bytes are bytes: no operation applies an encoding, a newline convention
+# or a normalization to what it reads or writes. Names are text here: an
+# entry whose name has no String (Linux bytes that are not UTF-8, a Windows
+# name with an unpaired UTF-16 surrogate) makes `entries` fail with
+# std::io::path::NotText rather than be skipped or decoded lossily; the
+# platform modules (std::linux::fs::entries, std::windows::fs::entries) list
+# every name losslessly as a native path.
+#
+# Not here (deliberately): handles. An opened file is an affine value of its
+# platform's own type (std::linux::fs::File, std::windows::fs::File), and a
+# trait requirement cannot return a type that differs by witness: streaming
+# reads and writes are the platform modules' (WINDOWS-X86-64-MILESTONE-7.md,
+# "Contexts and portable composition"). Nor: metadata, links, renaming,
+# permissions, watching, asynchronous I/O.
+
+import std::abi
+import std::abi::bytes
+import std::ffi::c
+import std::io::path
+
+# Why a filesystem operation failed, as far as the platforms agree: the
+# native code (FileError's `code`) says exactly.
+#
+#   NotFound            no such file or directory (a component of the path
+#                       missing, too)
+#   AlreadyExists       the name exists (an exclusive creation)
+#   PermissionDenied    the operation is not permitted (permissions, a
+#                       read-only filesystem)
+#   NotADirectory       a component used as a directory is not one
+#   IsADirectory        a file operation named a directory
+#   NotEmpty            a directory removal found entries
+#   InvalidName         the operating system refuses the name (too long, a
+#                       character its filesystem does not allow)
+#   Busy                the object is in use in a way the operation conflicts
+#                       with (a Windows sharing violation, a busy device)
+#   ResourceExhausted   out of space, quota, descriptors or memory
+#   Other               anything else
+enum Reason:
+    NotFound,
+    AlreadyExists,
+    PermissionDenied,
+    NotADirectory,
+    IsADirectory,
+    NotEmpty,
+    InvalidName,
+    Busy,
+    ResourceExhausted,
+    Other,
+
+# A filesystem operation the operating system refused or that failed. A path
+# that was never a path of the platform is std::io::path::NotAPath instead,
+# before any operation runs. REASON is the portable classification; CODE the
+# native one, read right after the failed call (Linux's and Darwin's errno,
+# Windows' GetLastError), for diagnosis -- its meaning is the platform's.
+error FileError:
+    reason: Reason
+    code: int
+
+# How a file is opened (the platform modules' open):
+#
+#   Read        reading an existing file (NotFound otherwise)
+#   Replace     writing: the file is created, or truncated to nothing when it
+#               exists
+#   CreateNew   writing a file that did not exist: AlreadyExists when the
+#               name exists (never truncating anything)
+#   Append      writing at the end: the file is created when it does not
+#               exist, and every write appends, whatever else writes it
+enum OpenMode:
+    Read,
+    Replace,
+    CreateNew,
+    Append,
+
+# What a directory entry is, as its listing says (the entry itself, never
+# what a symbolic link names). Unknown when the filesystem does not say
+# (Linux's DT_UNKNOWN).
+enum EntryKind:
+    File,
+    Directory,
+    SymbolicLink,
+    Other,
+    Unknown,
+
+# A directory entry with a textual name.
+struct Entry:
+    name: str
+    kind: EntryKind
+
+# The number of bytes one read asks for: at least one (so that no bytes is
+# the end of the file, never an empty request), at most 2^30.
+type ReadSize = Int in 1..1073741824
+
+# An affine token that owns nothing: one word, a null C pointer that no C
+# call ever receives. Botlish has no declaration that makes a struct affine
+# (AFFINE-VALUES.md: a struct is affine when it holds an affine value), so a
+# platform's File that holds no affine value of its own -- Linux's and
+# macOS's hold an Int descriptor -- holds an Owner: the File can then be
+# moved but never copied (WINDOWS-X86-64-MILESTONE-7.md, "Affine ownership").
+# Dropping it runs nothing. Made only by the standard library (`owner`, an
+# internal member).
+opaque struct Owner:
+    marker: std::ffi::c::Ptr[std::ffi::c::Void]
+
+# A fresh Owner: an internal member of the standard library
+# (core/native.tcl), never API.
+nomethod fn owner() -> Owner:
+    Owner {marker: std::ffi::c::null[std::ffi::c::Void]()}
+
+# A textual path its platform's filesystem can operate on.
+#
+#   concat(path, component)      PATH joined with the relative COMPONENT
+#                                (std::io::path::Path's rule)
+#   text(path)                   the path's canonical String form
+#   read_file(path)              every byte of the file
+#   write_file(path, data)       the file holds exactly DATA (created or
+#                                replaced)
+#   create_file(path, data)      a new file holding DATA (AlreadyExists when
+#                                the name exists)
+#   entries(path)                the directory's entries but "." and ".."
+#   create_directory(path)       a new, empty directory (AlreadyExists when
+#                                the name exists)
+#   remove_file(path)            removes the name of a file (or link)
+#   remove_directory(path)       removes an empty directory
+trait FilePath:
+    fn concat(path: FilePath, component: str) -> FilePath errors std::io::path::NotAPath
+    fn text(path: FilePath) -> str
+    fn read_file(path: FilePath) -> std::abi::bytes::Bytes errors FileError
+    fn write_file(path: FilePath, data: std::abi::bytes::Bytes) -> unit errors FileError
+    fn create_file(path: FilePath, data: std::abi::bytes::Bytes) -> unit errors FileError
+    fn entries(path: FilePath) -> List[Entry] errors FileError, std::io::path::NotText
+    fn create_directory(path: FilePath) -> unit errors FileError
+    fn remove_file(path: FilePath) -> unit errors FileError
+    fn remove_directory(path: FilePath) -> unit errors FileError

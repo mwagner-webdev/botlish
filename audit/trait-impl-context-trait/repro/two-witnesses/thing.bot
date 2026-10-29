@@ -1,0 +1,5 @@
+trait Thing:
+    fn show(t: Thing) -> int
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()

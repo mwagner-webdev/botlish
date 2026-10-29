@@ -1,0 +1,71 @@
+# evsdl.bot -- the SDL3 event source's binding (sdl.c): SDL events reach the
+# program only as records of one registration (a: the user code, b: the push
+# time), copied by C callbacks that run no Botlish code. start requires the
+# Linux driver's integration capability (event_loop_linux::Native): a
+# program whose driver is not the Linux one is rejected at compile time
+# (MISSING-CONTEXT), never silently given another driver.
+import event_loop_linux
+import std::event_loop
+import std::ffi::c
+
+extern c library "evsdl" static at "native/libevsdl.a"
+extern c library "SDL3"
+
+extern c fn evsdl_start(mode: std::ffi::c::Int, endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, cap: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_drop_codes_from(code: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_push(code: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_producer(count: std::ffi::c::Int, interval: std::ffi::c::Int, base: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_producers_join() -> std::ffi::c::Int
+extern c fn evsdl_sdl_timer(ms: std::ffi::c::Int, count: std::ffi::c::Int, base: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn evsdl_stat(i: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn evsdl_quit() -> std::ffi::c::Int
+
+# evsdl_stat
+st_callbacks = 0
+st_foreign_thread = 1
+st_nested = 2
+st_copied = 3
+st_dropped_by_policy = 4
+st_checks = 5
+st_refused = 6
+st_timer_callbacks = 7
+
+mode_wakeup = 1
+mode_pump = 2
+mode_hybrid = 3
+mode_naive = 4
+
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+# Start SDL in MODE (1-4); its events become REG's records through a new
+# endpoint of CAPACITY. CAP: mode 2's polling interval (us). 0, or < 0.
+nomethod fn start(mode: int, reg: std::event_loop::Reg, capacity: int, cap: int, context n: event_loop_linux::Native) -> int errors std::event_loop::DriverFault:
+    ep = event_loop_linux::endpoint(capacity)
+    ci(mode).evsdl_start(ci(event_loop_linux::endpoint_id(ep)), ci(std::event_loop::native_slot(reg)), ci(std::event_loop::native_generation(reg)), ci(cap))
+
+fn push(code: int) -> int:
+    evsdl_push(ci(code))
+
+nomethod fn producer(count: int, interval: int, base: int) -> int:
+    ci(count).evsdl_producer(ci(interval), ci(base))
+
+fn producers_join() -> int:
+    evsdl_producers_join()
+
+nomethod fn sdl_timer(ms: int, count: int, base: int) -> int:
+    ci(ms).evsdl_sdl_timer(ci(count), ci(base))
+
+fn drop_codes_from(code: int) -> int:
+    evsdl_drop_codes_from(ci(code))
+
+fn stat(i: int) -> int:
+    evsdl_stat(ci(i))
+
+fn quit() -> int:
+    evsdl_quit()

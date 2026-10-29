@@ -1,0 +1,283 @@
+# Mutants of paths and the synchronous filesystem (audit/filesystem/tools/
+# mutate.tcl; WINDOWS-X86-64-MILESTONE-7.md, "Mutation testing"): deliberate
+# breaks of path syntax, lossless names, ownership, completion, failure
+# paths, authority and the platform rule. Each must be killed by
+# audit/filesystem/tools/fuzz.tcl or tests/filesystem.test. A mutant of code
+# only one host runs (a `%% TARGET ...` line after its header) is SKIPPED on
+# every other host, never counted as killed.
+#
+#   @@ NAME DESCRIPTION
+#   %% TARGET ...                      (optional)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# Windows path syntax
+
+@@ win-drive-relative-as-absolute a bare drive designator is joined with a separator: "C:" and "a" become "C:\a" (the drive's root) instead of "C:a" (the drive's current directory)
+## stdlib/windows/fs.bot
+<<<<
+    if base.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and base.length() == 2):
+====
+    if base.ends_separated?(k == PathKind::Verbatim):
+>>>>
+
+@@ win-always-separator a separator is inserted even after one: "C:\x\" and "a" become "C:\x\\a"
+## stdlib/windows/fs.bot
+<<<<
+        return base.joined(name)
+    base.append(backslash()).joined(name)
+====
+        return base.append(backslash()).joined(name)
+    base.append(backslash()).joined(name)
+>>>>
+
+@@ win-verbatim-dot-dot ".." is accepted under a verbatim path, where Win32 does not resolve it (NTFS refuses it: a name that opens nothing, or another entry)
+## stdlib/windows/fs.bot
+<<<<
+        if segment.length() == 0 or segment == [46] or segment == [46, 46] or segment.holds_slash?():
+====
+        if segment.length() == 0 or segment == [46] or segment.holds_slash?():
+>>>>
+
+@@ win-trailing-period-accepted a component ending with a period is joined to a Win32 path, which drops the period: "verb." names the entry "verb"
+## stdlib/windows/fs.bot
+<<<<
+    last == 46 or last == 32
+====
+    last == 32
+>>>>
+
+@@ win-device-is-unc "//?/C:" is read as a UNC path instead of the device namespace
+## stdlib/windows/fs.bot
+<<<<
+        if (c == 46 or c == 63) and (us.length() == 3 or d.separator?(false)):
+====
+        if c == 46 and (us.length() == 3 or d.separator?(false)):
+>>>>
+
+@@ win-lossy-surrogate-text a native name holding an unpaired surrogate gets a text (U+FFFD in its place) instead of NotText: the text names another file
+## stdlib/windows/fs.bot
+<<<<
+    if unpaired.length() > 0:
+        fail std::io::path::NotText
+    decoded(cs.utf8_of())
+====
+    decoded(cs.utf8_of())
+>>>>
+
+@@ win-enumeration-loses-native-name a listed name is kept as the units of its lossy display, not its own units: an unpaired surrogate becomes U+FFFD, and the name reopens another file or none
+%% windows-x86_64
+## stdlib/windows/fs.bot
+<<<<
+    out.push(Entry {name: NativePath {units: name}, kind: attributes.kind_of_entry(tag)})
+====
+    out.push(Entry {name: NativePath {units: decoded(name.scalars().utf8_of()).utf16()}, kind: attributes.kind_of_entry(tag)})
+>>>>
+
+@@ win-last-error-read-late another Win32 call (GetFileAttributesW of an invalid name, ERROR_INVALID_NAME) runs between a failed CreateFileW and the read of its last-error code
+%% windows-x86_64
+## stdlib/windows/fs.bot
+<<<<
+    failure = c_get_last_error()
+    if handle.clone().invalid?():
+====
+    stray = c_get_attributes(wide([60]))
+    failure = c_get_last_error()
+    if handle.clone().invalid?():
+>>>>
+
+@@ win-context-bypassed create_directory needs no filesystem context: a path is authority
+## stdlib/windows/fs.bot
+<<<<
+fn create_directory(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
+====
+fn create_directory(path: NativePath) -> unit errors std::io::fs::FileError:
+>>>>
+
+@@ win-extern-public a Win32 declaration of the filesystem is public: any importer can call GetLastError, CreateFileW, ... directly, around the context
+## stdlib/windows/fs.bot
+<<<<
+private extern c fn c_get_last_error
+====
+extern c fn c_get_last_error
+>>>>
+
+# ---------------------------------------------------------------------------
+# Byte paths (Linux, Darwin)
+
+@@ bytes-lossy-text a native name that is not UTF-8 gets a text (U+FFFD for its bytes) instead of NotText
+## stdlib/io/bytepath.bot
+<<<<
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)):
+        on InvalidUtf8:
+            fail std::io::path::NotText
+====
+    bytes.display()
+>>>>
+
+@@ bytes-absolute-joined a native name starting with "/" is joined to its directory (it would replace the directory)
+## stdlib/io/bytepath.bot
+<<<<
+    if not name.valid?() or not name.relative?():
+====
+    if not name.valid?():
+>>>>
+
+@@ decode-utf8-lenient the Tcl backends' UTF-8 decoding replaces what is not UTF-8 instead of refusing it
+## core/utf8text.tcl
+<<<<
+    if {[catch {encoding convertfrom -profile strict utf-8 $raw} text]} {
+====
+    if {[catch {encoding convertfrom -profile replace utf-8 $raw} text]} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Linux enumeration
+
+@@ linux-enumeration-loses-native-name a listed name is kept as the UTF-8 of its lossy display, not its bytes: a name that is not UTF-8 reopens another file or none
+## stdlib/linux/fs.bot
+<<<<
+        out.push(Entry {name: NativePath {bytes: name}, kind: kind_of(block.at(pos + 18))})
+====
+        out.push(Entry {name: NativePath {bytes: std::io::bytepath::display(name).encode_utf8()}, kind: kind_of(block.at(pos + 18))})
+>>>>
+
+@@ linux-dot-entries-listed "." and ".." are listed as entries
+## stdlib/linux/fs.bot
+<<<<
+    if std::io::bytepath::valid?(name) and not std::io::bytepath::dot_or_dot_dot?(name):
+====
+    if std::io::bytepath::valid?(name):
+>>>>
+
+@@ linux-dtype-swapped d_type's regular file and directory are swapped
+## stdlib/linux/fs.bot
+<<<<
+    if d_type == 8:
+        return std::io::fs::EntryKind::File
+    if d_type == 4:
+        return std::io::fs::EntryKind::Directory
+====
+    if d_type == 4:
+        return std::io::fs::EntryKind::File
+    if d_type == 8:
+        return std::io::fs::EntryKind::Directory
+>>>>
+
+@@ linux-enumeration-leaks a failed getdents64 fails entries without closing the directory's descriptor
+## stdlib/linux/fs.bot
+<<<<
+        r = fd.getdents64(std::abi::bytes::zeroed(std::abi::usize(4096)))
+        if r.result < 0:
+            fd.release()
+====
+        r = fd.getdents64(std::abi::bytes::zeroed(std::abi::usize(4096)))
+        if r.result < 0:
+>>>>
+
+@@ darwin-dot-entries-listed readdir's "." and ".." are listed as entries on macOS
+%% macos-aarch64
+## stdlib/darwin/fs.bot
+<<<<
+    if std::io::bytepath::valid?(name) and not std::io::bytepath::dot_or_dot_dot?(name):
+====
+    if std::io::bytepath::valid?(name):
+>>>>
+
+# ---------------------------------------------------------------------------
+# Linux files: completion, failure paths, reasons, ownership
+
+@@ linux-short-read-is-eof a read shorter than asked ends read_all and read_file: a pipe's or a FIFO's data after a pause is lost
+## stdlib/linux/fs.bot
+<<<<
+        data = fd.read_some(chunk_size(std::mutable_vector::length(parts)))
+        if std::abi::bytes::length(data).value == 0:
+            break
+        parts.push(data)
+====
+        data = fd.read_some(chunk_size(std::mutable_vector::length(parts)))
+        if std::abi::bytes::length(data).value < 4096:
+            parts.push(data)
+            break
+        parts.push(data)
+>>>>
+
+@@ linux-short-write-is-complete a short write is taken as complete: write_all returns with the rest unwritten
+## stdlib/linux/fs.bot
+<<<<
+    if n < total:
+        rest = data.slice(n, total):
+====
+    if n < 0 - 1:
+        rest = data.slice(n, total):
+>>>>
+
+@@ linux-short-write-rewrites-all after a short write the whole buffer is written again, not its rest: the bytes the kernel took are written twice
+## stdlib/linux/fs.bot
+<<<<
+        return fd.write_rest(rest)
+====
+        return fd.write_rest(data)
+>>>>
+
+@@ linux-failed-read-leaks a failed read fails without closing the File's descriptor
+## stdlib/linux/fs.bot
+<<<<
+    if r.result < 0:
+        fd.release()
+        fail std::io::fs::FileError {reason: reason_of(0 - r.result), code: 0 - r.result}
+    r.data.prefix(r.result):
+====
+    if r.result < 0:
+        fail std::io::fs::FileError {reason: reason_of(0 - r.result), code: 0 - r.result}
+    r.data.prefix(r.result):
+>>>>
+
+@@ linux-reason-exists-lost EEXIST is reported as Other, not AlreadyExists
+## stdlib/linux/fs.bot
+<<<<
+    if errno == 17:
+        return std::io::fs::Reason::AlreadyExists
+====
+    if errno == 1700:
+        return std::io::fs::Reason::AlreadyExists
+>>>>
+
+@@ file-copyable the affine token is an Int: Linux's and macOS's Files can be copied, used after close, closed twice
+## stdlib/io/fs.bot
+<<<<
+    marker: std::ffi::c::Ptr[std::ffi::c::Void]
+
+====
+    marker: int
+
+>>>>
+## stdlib/io/fs.bot
+<<<<
+    Owner {marker: std::ffi::c::null[std::ffi::c::Void]()}
+====
+    Owner {marker: 0}
+>>>>
+
+# ---------------------------------------------------------------------------
+# Authority and the platform rule
+
+@@ internal-native-constructor-public std::linux::fs::of_valid_text (a native path made without validation) is no internal member: programs can name it
+## core/native.tcl
+<<<<
+core::native::declareInternalMember std::linux::fs::of_valid_text
+====
+>>>>
+
+@@ windows-no-platform std::windows is no platform's: std::windows::path compiles for Linux, and a Windows path reaches a program built for another system
+## core/cabi.tcl
+<<<<
+    variable platforms [dict create std::linux linux std::darwin macos std::windows windows]
+====
+    variable platforms [dict create std::linux linux std::darwin macos]
+>>>>

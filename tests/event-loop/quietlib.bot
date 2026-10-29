@@ -1,0 +1,20 @@
+# quietlib.bot -- an independently developed, INACTIVE library: it registers
+# an optional source and a task waiting on it. It never becomes ready
+# unless its source delivers, does not keep the loop alive, installs nothing
+# (a module cannot install a context) and drives nothing (it has no access
+# to a driver).
+import elog
+import std::event_loop
+import type std::event_loop::Delivery
+
+fn listen(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(src)
+    std::event_loop::log("quietlib: woke")
+    e.a
+
+# Initialize the library: one registration, one waiting task.
+fn init(context ev: std::event_loop::Loop) -> std::event_loop::Reg errors std::event_loop::SchedulerFault:
+    src = std::event_loop::source(Delivery::Lossy, 4)
+    coroutine {step, first} = listen(src)
+    std::event_loop::adopt(step, first)
+    src

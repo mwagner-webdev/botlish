@@ -1,0 +1,107 @@
+# ownership.bot -- registration ownership as it is today
+# (EVENT-LOOP-MILESTONE-1.md, "Ownership").
+#
+# A Reg is an identity, not an owner: nothing revokes a registration
+# implicitly, so a task that keeps a Reg it no longer reads keeps the
+# registration exactly as long as it decides -- never "after its last
+# use". Revocation is explicit, and shutdown revokes everything:
+#
+#   1. a task that revokes its registration when done: not live after;
+#   2. a task holding a Reg it stopped reading, asleep: the registration
+#      stays live until the task revokes it, after waking;
+#   3. NEGATIVE (no drop action exists yet): a task that ends without
+#      revoking leaves its registration registered;
+#   4. a task parked on a registration and abandoned: the registration stays
+#      registered after abandon, and shutdown revokes every registration;
+#   5. coroutine ownership: a task adopted by the loop is the loop's; one
+#      resumed directly by its owner is never scheduled (the loop's
+#      dispatched count does not include its steps).
+import elog
+import std::coroutine
+import std::event_loop
+import std::event_loop::deterministic
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn listener(reg: std::event_loop::Reg, events: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to events:
+        e = std::event_loop::wait(reg)
+        elog::say("listener got ", e.a)
+    elog::say("listener revokes: ", elog::bit(std::event_loop::revoke(reg)))
+    events
+
+fn keeper(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("keeper got ", e.a)
+    # REG is not read again until the revocation below: it stays registered.
+    std::event_loop::sleep(500)
+    elog::say("keeper's registration live after its sleep: ", elog::bit(std::event_loop::live?(reg)))
+    std::event_loop::revoke(reg)
+    elog::say("keeper's registration live after revoke: ", elog::bit(std::event_loop::live?(reg)))
+    e.a
+
+fn forgetful(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("forgetful got ", e.a)
+    e.a
+
+fn parked(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("parked woke revoked ", elog::bit(e.reason == Wake::Revoked))
+    e.a
+
+fn counter(resume Step) -> int:
+    loop i from 0 to 3:
+        yield i
+    3
+
+struct Step:
+    n: int
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    a = std::event_loop::source(Delivery::Reliable, 8, :keep_alive)
+    std::event_loop::deterministic::inject(3, a, 10, 0)
+    std::event_loop::deterministic::inject(4, a, 11, 0)
+    coroutine {step: l, first: lf} = listener(a, 2)
+    std::event_loop::adopt(l, lf)
+    k = std::event_loop::source(Delivery::Reliable, 8, :keep_alive)
+    std::event_loop::deterministic::inject(5, k, 20, 0)
+    coroutine {step: kp, first: kpf} = keeper(k)
+    std::event_loop::adopt(kp, kpf)
+    c = std::event_loop::source(Delivery::Reliable, 8, :keep_alive)
+    std::event_loop::deterministic::inject(5, c, 30, 0)
+    coroutine {step: f, first: ff} = forgetful(c)
+    std::event_loop::adopt(f, ff)
+    p = std::event_loop::source(Delivery::Reliable, 8)
+    coroutine {step: q, first: qf} = parked(p)
+    std::event_loop::adopt(q, qf)
+    std::event_loop::run()
+    elog::say("listener's registration live after its revoke: ", elog::bit(std::event_loop::live?(a)))
+    elog::say("forgetful's registration live after its task ended: ", elog::bit(std::event_loop::live?(c)))
+    elog::say("abandoned: ", std::event_loop::abandon())
+    elog::say("parked task's registration live after abandon: ", elog::bit(std::event_loop::live?(p)))
+    # 5: a coroutine its owner resumes directly, beside the loop.
+    before = std::event_loop::stats().dispatched
+    coroutine {step: own, first: of} = counter()
+    seen = loop i from 0 to 3:
+        own(Step {n: i})
+    elog::say("direct coroutine finished: ", elog::bit(std::coroutine::done?(own)))
+    elog::say("direct steps dispatched by the loop: ", std::event_loop::stats().dispatched - before)
+    elog::say("direct first value ", of)
+    elog::say("shutdown abandoned ", std::event_loop::shutdown(2))
+    elog::say("forgetful's registration live after shutdown: ", elog::bit(std::event_loop::live?(c)))
+    elog::say("parked task's registration live after shutdown: ", elog::bit(std::event_loop::live?(p)))
+    elog::say("registrations after shutdown ", std::event_loop::stats().registrations)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

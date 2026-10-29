@@ -1,0 +1,5 @@
+# reject-library-installs.bot -- must be REJECTED (tests/event-loop.test, el-static-*): a library cannot install a context, so importing one cannot choose a driver (CONTEXT-INSTALLATION-UNSUPPORTED)
+import rogue
+import std::event_loop
+
+rogue::nothing()

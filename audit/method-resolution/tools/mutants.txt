@@ -88,6 +88,16 @@
 # ---------------------------------------------------------------------------
 # The decision
 
+@@ trait-stand-in-latched the trait operations of the first build stay fixed (the old Fix, which accumulated): a call that only a stand-in made a trait operation -- its receiver the view a trait-polymorphic candidate of the call before it returned -- is never judged again once that call moves (WINDOWS-X86-64-MILESTONE-7.md)
+## hir/methods.tcl
+<<<<
+    set seeded $fixed
+    lassign [Fix $record $seeded $choices $keys] fixed choices open
+====
+    lassign [Fix $record $fixed $choices $keys] fixed choices open
+    set seeded $fixed
+>>>>
+
 @@ standing-only-judged no single deviation is built: a call's candidates other than the one it stands at are taken to be not applicable, so a call is decided to whatever stand-in the search left it at
 ## hir/methods.tcl
 <<<<

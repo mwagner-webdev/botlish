@@ -1,0 +1,30 @@
+# busylib.bot -- an ACTIVE library: a task that is always ready (continuous
+# activity) and a task that drains a flooding source. It costs turns and
+# time; the claim is only that it cannot starve another library's ready
+# work or reorder it.
+import std::event_loop
+import std::mutable_array
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn spin(n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to n:
+        std::event_loop::yield_now()
+    n
+
+fn drain(src: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    total = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        total.set(0, total.at(0) + 1)
+    total.at(0)
+
+fn init(spins: int, context ev: std::event_loop::Loop) -> std::event_loop::Reg errors IndexNotFound, std::event_loop::SchedulerFault:
+    src = std::event_loop::source(Delivery::Lossy, 1000)
+    coroutine {step: s, first: sf} = spin(spins)
+    std::event_loop::adopt(s, sf)
+    coroutine {step: d, first: df} = drain(src)
+    std::event_loop::adopt(d, df)
+    src

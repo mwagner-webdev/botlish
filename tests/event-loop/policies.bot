@@ -1,0 +1,163 @@
+# policies.bot -- the Delivery policies and backpressure
+# (EVENT-LOOP-MILESTONE-1.md, "Native delivery").
+#
+# Botlish posts, no consumer yet:
+#   1. Lossy, capacity 4: ten posts -> 4 Accepted, 6 Dropped (counted); the
+#      consumer then takes the first four, in order;
+#   2. Coalesce: ten posts -> 1 Accepted, 9 Coalesced; the consumer wakes
+#      once, with the latest values and a count of 10;
+#   3. Reliable, capacity 2: the third post is Refused; after the consumer
+#      took one, a post is Accepted again.
+# Driver records (12 for each source at t=2, a slow consumer taking one
+# event every third turn), beside a quiet source with a record at t=2, 3, 4:
+#   4. Reliable, capacity 2: nothing is dropped -- the scheduler holds the
+#      record it has no room for and the driver delivers nothing more of
+#      that source until room appears; the consumer gets 0..11 in order;
+#   5. Lossy, capacity 2: the excess is dropped and counted;
+#   6. Coalesce: fewer wakes, whose counts add up to 12;
+#   7. the quiet source's records are delivered in the turn each is
+#      released, whatever the held sources hold;
+#   8. revoking a Reliable registration that has a held record: the driver
+#      releases it, its records arrive as stale and are dropped, nothing of
+#      it stays with the driver, and a registration reusing its slot gets
+#      none of them.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import std::mutable_array
+import type std::event_loop::Delivery
+import type std::event_loop::Posted
+import type std::event_loop::Wake
+
+fn posted_code(p: Posted) -> int:
+    if p == Posted::Accepted:
+        1
+    elif p == Posted::Coalesced:
+        2
+    elif p == Posted::Dropped:
+        3
+    elif p == Posted::Refused:
+        4
+    else:
+        0
+
+nomethod fn post_all(label: str, reg: std::event_loop::Reg, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    loop i from 0 to n:
+        elog::say2(label, i, " posted ", posted_code(reg.post(i, 100 + i)))
+
+nomethod fn slow_consumer(label: str, reg: std::event_loop::Reg, want: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    got = std::mutable_array::create(2, 0)
+    loop:
+        if got.at(1) >= want:
+            break
+        e = std::event_loop::wait(reg)
+        if e.reason != Wake::Event:
+            break
+        got.set(0, got.at(0) + 1)
+        got.set(1, got.at(1) + e.count)
+        elog::say2(label, e.a, " count ", e.count)
+        std::event_loop::yield_now()
+        std::event_loop::yield_now()
+    elog::say2(label, got.at(0), " wakes for events ", got.at(1))
+    got.at(1)
+
+fn quiet(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 3:
+        e = std::event_loop::wait(reg)
+        elog::say2("quiet ", e.a, " at turn ", std::event_loop::turn_number())
+    3
+
+fn taker(reg: std::event_loop::Reg, n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to n:
+        e = std::event_loop::wait(reg)
+        elog::say2("taker got ", e.a, " count ", e.count)
+    n
+
+fn waiter(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say2("reuse waiter got ", e.a, " revoked ", elog::bit(e.reason == Wake::Revoked))
+    e.a
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    # 1-3: Botlish posts
+    lossy = std::event_loop::channel(Delivery::Lossy, 4)
+    post_all("lossy ", lossy, 10)
+    elog::say("lossy dropped ", std::event_loop::dropped(lossy))
+    coal = std::event_loop::channel(Delivery::Coalesce, 4)
+    post_all("coalesce ", coal, 10)
+    rel = std::event_loop::channel(Delivery::Reliable, 2)
+    post_all("reliable ", rel, 3)
+    coroutine {step: t1, first: t1f} = taker(lossy, 4)
+    std::event_loop::adopt(t1, t1f)
+    coroutine {step: t2, first: t2f} = taker(coal, 1)
+    std::event_loop::adopt(t2, t2f)
+    coroutine {step: t3, first: t3f} = taker(rel, 1)
+    std::event_loop::adopt(t3, t3f)
+    elog::say("reliable post after a take ", posted_code(rel.post(7, 7)))
+    elog::say("posts phase turns ", std::event_loop::run())
+    # 4-7: driver records
+    std::event_loop::sync()
+    srel = std::event_loop::source(Delivery::Reliable, 2, :keep_alive)
+    slossy = std::event_loop::source(Delivery::Lossy, 2, :keep_alive)
+    scoal = std::event_loop::source(Delivery::Coalesce, 2, :keep_alive)
+    calm = std::event_loop::source(Delivery::Reliable, 4, :keep_alive)
+    base = std::event_loop::now()
+    loop i from 0 to 12:
+        std::event_loop::deterministic::inject(base + 2, srel, i, 0)
+        std::event_loop::deterministic::inject(base + 2, slossy, i, 0)
+        std::event_loop::deterministic::inject(base + 2, scoal, i, 0)
+    loop k from 0 to 3:
+        std::event_loop::deterministic::inject(base + 2 + k, calm, k, 0)
+    coroutine {step: a, first: af} = slow_consumer("reliable source ", srel, 12)
+    std::event_loop::adopt(a, af)
+    coroutine {step: b, first: bf} = slow_consumer("lossy source ", slossy, 12)
+    std::event_loop::adopt(b, bf)
+    coroutine {step: c, first: cf} = slow_consumer("coalesce source ", scoal, 12)
+    std::event_loop::adopt(c, cf)
+    coroutine {step: q, first: qf} = quiet(calm)
+    std::event_loop::adopt(q, qf)
+    std::event_loop::stop()
+    std::event_loop::run()
+    loop r from 0 to 60:
+        std::event_loop::turn()
+    s = std::event_loop::stats()
+    elog::say("held records ", s.held_records)
+    elog::say("released holds ", s.released_holds)
+    elog::say("lossy source dropped ", std::event_loop::dropped(slossy))
+    elog::say("reliable source dropped ", std::event_loop::dropped(srel))
+    elog::say("driver undelivered ", std::event_loop::deterministic::undelivered())
+    # 8: revoking a registration with a held record
+    gone = std::event_loop::source(Delivery::Reliable, 1, :keep_alive)
+    loop i from 0 to 5:
+        std::event_loop::deterministic::inject(std::event_loop::now() + 1, gone, 50 + i, 0)
+    stale_before = std::event_loop::stats().stale_records
+    std::event_loop::deterministic::advance_to(std::event_loop::now() + 1)
+    loop r from 0 to 3:
+        std::event_loop::turn()
+    elog::say("gone pending before revoke ", std::event_loop::pending(gone))
+    elog::say("gone driver undelivered before revoke ", std::event_loop::deterministic::undelivered())
+    elog::say("revoke gone ", elog::bit(std::event_loop::revoke(gone)))
+    reuse = std::event_loop::source(Delivery::Reliable, 4, :keep_alive)
+    elog::say2("reuse slot ", std::event_loop::native_slot(reuse), " gone slot ", std::event_loop::native_slot(gone))
+    coroutine {step: w, first: wf} = waiter(reuse)
+    std::event_loop::adopt(w, wf)
+    loop r from 0 to 4:
+        std::event_loop::turn()
+    elog::say("stale after revoke ", std::event_loop::stats().stale_records - stale_before)
+    elog::say("driver undelivered after revoke ", std::event_loop::deterministic::undelivered())
+    elog::say("reuse pending ", std::event_loop::pending(reuse))
+    std::event_loop::revoke(reuse)
+    std::event_loop::turn()
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

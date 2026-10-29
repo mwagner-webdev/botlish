@@ -1,0 +1,15 @@
+# reject-capture-task.bot -- must be REJECTED (tests/event-loop.test, el-static-*): a closure capturing a task's handle (AFFINE-CAPTURE-UNSUPPORTED)
+import std::event_loop
+
+fn task(context ev: std::event_loop::Loop) -> int:
+    std::event_loop::yield_now()
+    0
+
+fn main(context ev: std::event_loop::Loop) -> int:
+    coroutine {step, first} = task()
+    fn later() -> int:
+        step()
+    first
+
+with context std::event_loop::create(8)
+main()

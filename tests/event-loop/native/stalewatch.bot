@@ -1,0 +1,64 @@
+# stalewatch.bot -- a stale Watch never reaches a newer watch
+# (EVENT-LOOP-MILESTONE-1.md, "Linux driver").
+#
+# Listening socket A is watched for registration r1, then unwatched; r1 is
+# revoked. A new registration takes r1's slot (a later generation) and a
+# watch of listening socket B takes the old watch's id: the old Watch value
+# now names an id and a slot that both exist again. Closing it again must
+# do nothing (-22, EINVAL) -- the adapter checks the generation -- and B's
+# watch must still report the client that connects to it. A 1 s watchdog
+# ends the run if it does not.
+import elog
+import event_loop_linux
+import fx
+import std::event_loop
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn acceptor(r: std::event_loop::Reg, lfd: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(r)
+    if e.reason == Wake::Event:
+        elog::say("readiness of B in turn ", std::event_loop::turn_number())
+        fx::hangup(fx::accept(lfd))
+        std::event_loop::stop()
+    0
+
+fn watchdog(us: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    if std::event_loop::sleep(us) == Wake::Timer:
+        elog::say("watchdog fired at turn ", std::event_loop::turn_number())
+        std::event_loop::stop()
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_loop_linux::Native) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    a = fx::listen()
+    b = fx::listen()
+    r1 = std::event_loop::source(Delivery::Coalesce, 1)
+    w1 = event_loop_linux::watch(a, event_loop_linux::Interest::Readable, r1)
+    elog::say("first close ", event_loop_linux::unwatch(w1))
+    std::event_loop::revoke(r1)
+    r2 = std::event_loop::source(Delivery::Coalesce, 1, :keep_alive)
+    elog::say("slot reused ", elog::bit(std::event_loop::native_slot(r2) == std::event_loop::native_slot(r1)))
+    w2 = event_loop_linux::watch(b, event_loop_linux::Interest::Readable, r2)
+    elog::say("stale close ", event_loop_linux::unwatch(w1))
+    coroutine {step, first} = acceptor(r2, b)
+    std::event_loop::adopt(step, first)
+    coroutine {step: wd, first: wdf} = watchdog(1000000)
+    std::event_loop::adopt(wd, wdf)
+    fx::client(fx::port(b), 1, 2, 1, 0)
+    std::event_loop::run()
+    fx::clients_join()
+    elog::say("live close ", event_loop_linux::unwatch(w2))
+    std::event_loop::shutdown(2)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -1,0 +1,52 @@
+# heapshape.bot -- a timer removed from the middle of the deadline heap
+# (EVENT-LOOP-MILESTONE-1.md, "Timer implementation").
+#
+# Fifteen one-shot timers, each waited on by its own task, enter the heap in
+# this order; each deadline is no earlier than its parent's, so the heap's
+# array is exactly the insertion order:
+#
+#   index  0    1     2    3     4     5    6    7     8     9     10    11   12   13   14
+#          100  1000  200  1100  1200  210  201  1300  1400  1500  1600  220  230  202  205
+#
+# Revoking the timer at index 9 (1500) moves the last one (205) into its
+# place, under 1200 and 1000: it must rise to index 1. A removal that does
+# not sift up leaves it there, and 1000 fires before 205. The others fire in
+# deadline order, 1500 never.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import std::list
+import type std::event_loop::Wake
+
+fn sleeper(deadline: int, t: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(t)
+    if e.reason == Wake::Timer:
+        elog::say2("fired ", deadline, " at ", std::event_loop::now())
+    else:
+        elog::say("revoked ", deadline)
+    deadline
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    deadlines = [100, 1000, 200, 1100, 1200, 210, 201, 1300, 1400, 1500, 1600, 220, 230, 202, 205]
+    timers = loop deadline in deadlines:
+        t = std::event_loop::timer(deadline, 0)
+        coroutine {step, first} = sleeper(deadline, t)
+        std::event_loop::adopt(step, first)
+        t
+    elog::say("timers waiting ", std::event_loop::stats().timers_waiting)
+    std::event_loop::revoke(timers.at(9))
+    std::event_loop::run()
+    elog::say("timers waiting at the end ", std::event_loop::stats().timers_waiting)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

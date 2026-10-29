@@ -1,0 +1,400 @@
+# designs.bot -- the path-representation experiment on Windows
+# (WINDOWS-X86-64-MILESTONE-7.md, sections 3 and 4), on a real NTFS
+# directory, argv()[1]. Every result is a row [label, observation].
+#
+#   W1  round trip: entries made from raw UTF-16 -- an unpaired surrogate
+#       among them, and the U+FFFD spelling a lossy decoding of it produces --
+#       listed by FindFirstFileW/FindNextFileW and named again three ways:
+#       A strict text (or none), A' lossy text, B/C the native code units
+#   W2  trailing periods and spaces, through Win32 and through \\?\
+#   W3  reserved device names
+#   W4  case: one name, two spellings
+#   W5  how Win32 resolves drive-relative, root-relative, UNC, device and
+#       verbatim forms (GetFullPathNameW: an experiment's question only)
+#   W6  a path longer than MAX_PATH, without and with \\?\
+#   W7  sharing under share mode READ|WRITE|DELETE, and against an exclusive
+#       opener
+#   W8  a directory opened as a file
+#   W9  what a missing directory, a file used as a directory and an empty
+#       directory pattern report
+#   W10 "/" through Win32 and through \\?\
+#   W11 ".." through \\?\
+
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::char
+import std::ffi::c
+import std::int
+import std::io
+import std::windows::io
+import std::list
+import std::mutable_vector
+import std::str
+import type std::byte::Byte
+import w32
+
+# CreateFileW constants (fileapi.h, winnt.h).
+generic_read = 2147483648
+generic_write = 1073741824
+share_all = 7
+create_new = 1
+create_always = 2
+open_existing = 3
+normal = 128
+backup_semantics = 33554432
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+# The UTF-16 code units of TEXT.
+fn units(text: str) -> List[int] errors IndexNotFound:
+    out = ints()
+    loop i from 0 to text.length():
+        c = text.char_at(i).scalar_value()
+        if c < 65536:
+            out.push(c)
+        else:
+            v = c - 65536
+            out.push(55296 + v.shift_right(10))
+            out.push(56320 + v.mod(1024))
+    loop u in out:
+        u
+
+fn cat(a: List[int], b: List[int]) -> List[int] errors IndexNotFound:
+    loop i from 0 to a.length() + b.length():
+        if i < a.length():
+            a.at(i)
+        else:
+            b.at(i - a.length())
+
+fn child(dir: List[int], name: List[int]) -> List[int] errors IndexNotFound:
+    cat(dir.append(92), name)
+
+fn wide_ints(us: List[std::binary::U16]) -> List[int]:
+    loop u in us:
+        u + 0
+
+fn bytes() -> MutableVector[Byte]:
+    std::mutable_vector::from_list([])
+
+fn push_utf8(place out: MutableVector[Byte], c: int) -> unit errors std::byte::BelowRange, std::byte::AboveRange:
+    if c < 128:
+        out.push(std::byte::from_int(c))
+    elif c < 2048:
+        out.push(std::byte::from_int(192 + c.shift_right(6)))
+        out.push(std::byte::from_int(128 + c.mod(64)))
+    elif c < 65536:
+        out.push(std::byte::from_int(224 + c.shift_right(12)))
+        out.push(std::byte::from_int(128 + c.shift_right(6).mod(64)))
+        out.push(std::byte::from_int(128 + c.mod(64)))
+    else:
+        out.push(std::byte::from_int(240 + c.shift_right(18)))
+        out.push(std::byte::from_int(128 + c.shift_right(12).mod(64)))
+        out.push(std::byte::from_int(128 + c.shift_right(6).mod(64)))
+        out.push(std::byte::from_int(128 + c.mod(64)))
+
+# UNITS decoded from UTF-16: an unpaired surrogate is U+FFFD when LOSSY,
+# else ends the decoding with "-" (no text).
+fn decode(us: List[int], lossy: bool) -> str errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:
+    out = bytes()
+    n = us.length()
+    loop i from 0 to n:
+        u = us.at(i)
+        if u >= 56320 and u < 57344:
+            if i > 0 and us.at(i - 1) >= 55296 and us.at(i - 1) < 56320:
+                continue
+            if not lossy:
+                return "-"
+            out.push_utf8(65533)
+            continue
+        if u >= 55296 and u < 56320:
+            if i + 1 < n and us.at(i + 1) >= 56320 and us.at(i + 1) < 57344:
+                out.push_utf8(65536 + (u - 55296).shift_left(10) + (us.at(i + 1) - 56320))
+                continue
+            if not lossy:
+                return "-"
+            out.push_utf8(65533)
+            continue
+        out.push_utf8(u)
+    all = loop b in out:
+        b
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(all)):
+        on InvalidUtf8:
+            return "?"
+
+fn shown(data: std::abi::bytes::Bytes) -> str:
+    text = std::abi::bytes::decode_utf8(data):
+        on InvalidUtf8:
+            return "<bytes>"
+    if text.length() == 0:
+        return "<nothing>"
+    text
+
+# What opening PATH for reading and reading it gives: its text, or the error.
+fn contents(path: List[int]) -> str errors std::byte::BelowRange, std::byte::AboveRange:
+    o = w32::create_file(path, generic_read, share_all, open_existing, normal)
+    {handle, code} = o
+    if code != 0:
+        return std::str::concat("error ", code.to_string())
+    data = w32::read(handle.clone()):
+        on LayoutLengthMismatch:
+            std::abi::bytes::from_list([])
+        on UpperOverrun:
+            std::abi::bytes::from_list([])
+    w32::close(handle)
+    shown(data)
+
+# Creates PATH (CREATE_NEW) holding TEXT: "ok" or the error.
+fn make(path: List[int], text: str, disposition: std::ffi::c::ULong) -> str errors std::byte::BelowRange, std::byte::AboveRange:
+    o = w32::create_file(path, generic_write, share_all, disposition, normal)
+    {handle, code} = o
+    if code != 0:
+        return std::str::concat("error ", code.to_string())
+    w32::write(handle.clone(), std::abi::bytes::from_list(text.encode_utf8())):
+        on LayoutLengthMismatch:
+            0
+    w32::close(handle)
+    "ok"
+
+fn names(dir: List[int]) -> List[str] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    l = w32::list(child(dir, [42]))
+    loop e in l.entries:
+        decode(wide_ints(e.units), true)
+
+fn row(label: str, value: str) -> List[str]:
+    [label, value]
+
+fn units_join(xs: List[str]) -> str errors IndexNotFound:
+    if xs.length() == 0:
+        return ""
+    if xs.length() == 1:
+        return xs.at(0)
+    rest = loop i from 1 to xs.length():
+        xs.at(i)
+    std::str::concat(std::str::concat(xs.at(0), " "), units_join(rest))
+
+fn joined(a: List[List[str]], b: List[List[str]]) -> List[List[str]] errors IndexNotFound:
+    loop i from 0 to a.length() + b.length():
+        if i < a.length():
+            a.at(i)
+        else:
+            b.at(i - a.length())
+
+fn w1(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    made = [
+        make(child(dir, units("plain.txt")), "0", create_new),
+        make(child(dir, units("é-nfc")), "1", create_new),
+        make(child(dir, units("é-nfd")), "2", create_new),
+        make(child(dir, [117, 45, 55296, 45, 120]), "3", create_new),
+        make(child(dir, [117, 45, 65533, 45, 120]), "4", create_new),
+        make(child(dir, [118, 45, 56320]), "5", create_new),
+    ]
+    l = w32::list(child(dir, [42]))
+    table = loop e in l.entries:
+        us = wide_ints(e.units)
+        strict = decode(us, false)
+        lossy = decode(us, true)
+        strict_read = if strict == "-":
+            "<no name>"
+        else:
+            contents(child(dir, units(strict)))
+        units_text = loop u in us:
+            u.to_string()
+        [std::str::concat("W1 entry units ", std::str::concat("[", std::str::concat(units_join(units_text), "]"))), strict, strict_read, lossy, contents(child(dir, units(lossy))), contents(child(dir, us))]
+    first = [row("W1 made", units_join(made)), row("W1 enumeration ended with", l.code.to_string())]
+    joined(first, table)
+
+fn verbatim(dir: List[int]) -> List[int] errors IndexNotFound:
+    cat([92, 92, 63, 92], dir)
+
+fn w2(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    sub = child(dir, units("w2"))
+    w32::create_directory(sub)
+    [
+        row("W2 make w2\\trail. (Win32)", make(child(sub, units("trail.")), "t", create_new)),
+        row("W2 make w2\\sp  (Win32, two trailing spaces)", make(child(sub, units("sp  ")), "s", create_new)),
+        row("W2 make \\\\?\\...\\w2\\verb. (verbatim)", make(child(verbatim(sub), units("verb.")), "v", create_new)),
+        row("W2 make \\\\?\\...\\w2\\vsp  (verbatim)", make(child(verbatim(sub), units("vsp  ")), "w", create_new)),
+        row("W2 listing", units_join(names(sub))),
+        row("W2 read w2\\trail (Win32)", contents(child(sub, units("trail")))),
+        row("W2 read w2\\verb. (Win32)", contents(child(sub, units("verb.")))),
+        row("W2 read \\\\?\\...\\w2\\verb. (verbatim)", contents(child(verbatim(sub), units("verb.")))),
+        row("W2 read w2\\trail... (Win32)", contents(child(sub, units("trail...")))),
+    ]
+
+fn w3(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    sub = child(dir, units("w3"))
+    w32::create_directory(sub)
+    [
+        row("W3 write w3\\NUL (Win32, CREATE_ALWAYS)", make(child(sub, units("NUL")), "n", create_always)),
+        row("W3 write w3\\nul.txt (Win32)", make(child(sub, units("nul.txt")), "n", create_always)),
+        row("W3 write w3\\COM1 (Win32)", make(child(sub, units("COM1")), "c", create_always)),
+        row("W3 write w3\\CON (Win32)", make(child(sub, units("CON")), "c", create_always)),
+        row("W3 write w3\\AUX.log (Win32)", make(child(sub, units("AUX.log")), "a", create_always)),
+        row("W3 write \\\\?\\...\\w3\\NUL (verbatim)", make(child(verbatim(sub), units("NUL")), "v", create_always)),
+        row("W3 listing", units_join(names(sub))),
+        row("W3 read \\\\?\\...\\w3\\NUL (verbatim)", contents(child(verbatim(sub), units("NUL")))),
+        row("W3 read w3\\NUL (Win32)", contents(child(sub, units("NUL")))),
+    ]
+
+fn w4(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:
+    [
+        row("W4 make Case.txt", make(child(dir, units("Case.txt")), "C", create_new)),
+        row("W4 read CASE.TXT", contents(child(dir, units("CASE.TXT")))),
+        row("W4 make CASE.TXT (CREATE_NEW)", make(child(dir, units("CASE.TXT")), "D", create_new)),
+    ]
+
+fn resolved(text: str) -> List[str] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    row(std::str::concat("W5 GetFullPathNameW ", text), decode(wide_ints(w32::full_path(units(text))), true))
+
+fn w5() -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    [
+        resolved("x"),
+        resolved("\\x"),
+        resolved("C:x"),
+        resolved("C:\\x"),
+        resolved("D:x"),
+        resolved("C:\\a\\..\\b"),
+        resolved("C:\\a\\.\\b\\"),
+        resolved("C:\\a\\b. "),
+        resolved("C:/a//b"),
+        resolved("\\\\server\\share\\x\\..\\..\\y"),
+        resolved("//server/share/x"),
+        resolved("\\\\?\\C:\\a\\..\\b"),
+        resolved("\\\\?\\C:/a"),
+        resolved("\\\\.\\C:\\a\\..\\b"),
+        resolved("//./C:/a"),
+        resolved("\\??\\C:\\a"),
+        resolved("C:\\dir\\NUL"),
+        resolved("C:\\dir\\nul.txt"),
+        resolved("C:\\dir\\COM1.txt"),
+        resolved("1:x"),
+    ]
+
+fn deep(base: List[int], depth: int) -> List[int] errors IndexNotFound:
+    if depth <= 0:
+        return base
+    deep(child(base, units("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")), depth - 1)
+
+# Creates BASE\a..a (depth levels) one level at a time: the deepest length
+# reached and the error that stopped it ("0" when every level was made).
+fn climb(base: List[int], depth: int) -> str errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:
+    if depth <= 0:
+        return std::str::concat("all made, length ", base.length().to_string())
+    next = child(base, units("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+    r = w32::create_directory(next)
+    if r != 0:
+        return std::str::concat(std::str::concat("error ", (0 - r).to_string()), std::str::concat(" at length ", next.length().to_string()))
+    climb(next, depth - 1)
+
+fn w6(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:
+    a = child(dir, units("w6a"))
+    b = child(dir, units("w6b"))
+    w32::create_directory(a)
+    w32::create_directory(b)
+    [
+        row("W6 nested 50-unit directories (Win32)", climb(a, 8)),
+        row("W6 nested 50-unit directories (verbatim)", climb(verbatim(b), 8)),
+        row("W6 write a file below the deepest (verbatim)", make(child(deep(verbatim(b), 8), units("f.txt")), "deep", create_new)),
+    ]
+
+fn w7(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:
+    path = child(dir, units("shared.txt"))
+    made = make(path, "s", create_new)
+    first = w32::create_file(path, generic_write, share_all, open_existing, normal)
+    {handle: h1, code: c1} = first
+    second = w32::create_file(path, generic_read, share_all, open_existing, normal)
+    {handle: h2, code: c2} = second
+    exclusive = w32::create_file(path, generic_read, 0, open_existing, normal)
+    {handle: h3, code: c3} = exclusive
+    w32::close(h1)
+    w32::close(h2)
+    if c3 == 0:
+        w32::close(h3)
+    [
+        row("W7 make shared.txt", made),
+        row("W7 open for writing, share all", c1.to_string()),
+        row("W7 open again for reading, share all", c2.to_string()),
+        row("W7 open again, share none", c3.to_string()),
+    ]
+
+fn opened(path: List[int], access: std::ffi::c::ULong, flags: std::ffi::c::ULong) -> str errors std::byte::BelowRange, std::byte::AboveRange:
+    o = w32::create_file(path, access, share_all, open_existing, flags)
+    {handle, code} = o
+    if code == 0:
+        w32::close(handle)
+        return "ok"
+    std::str::concat("error ", code.to_string())
+
+fn listed(pattern: List[int]) -> str errors std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    l = w32::list(pattern)
+    std::str::concat(std::str::concat(l.entries.length().to_string(), " entries, ended with "), l.code.to_string())
+
+fn w8_9(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    empty = child(dir, units("empty"))
+    w32::create_directory(empty)
+    [
+        row("W8 open a directory for reading", opened(dir, generic_read, normal)),
+        row("W8 open a directory for writing", opened(dir, generic_write, normal)),
+        row("W8 open a directory with FILE_FLAG_BACKUP_SEMANTICS", opened(dir, generic_read, backup_semantics)),
+        row("W9 list missing\\*", listed(child(child(dir, units("missing")), [42]))),
+        row("W9 list plain.txt\\*", listed(child(child(dir, units("plain.txt")), [42]))),
+        row("W9 list empty\\*", listed(child(empty, [42]))),
+        row("W9 open plain.txt\\child", opened(child(child(dir, units("plain.txt")), units("child")), generic_read, normal)),
+        row("W9 open missing\\child", opened(child(child(dir, units("missing")), units("child")), generic_read, normal)),
+        row("W9 attributes of missing", w32::attributes(child(dir, units("missing"))).to_string()),
+        row("W9 attributes of the directory", w32::attributes(dir).to_string()),
+        row("W9 open a name with <", opened(child(dir, units("a<b")), generic_read, normal)),
+        row("W9 open an empty path", opened([], generic_read, normal)),
+    ]
+
+fn w10_11(dir: List[int]) -> List[List[str]] errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:
+    sub = child(dir, units("sub"))
+    w32::create_directory(sub)
+    [
+        row("W10 read dir/plain.txt (Win32)", contents(cat(dir.append(47), units("plain.txt")))),
+        row("W10 read \\\\?\\dir/plain.txt (verbatim)", contents(cat(verbatim(dir).append(47), units("plain.txt")))),
+        row("W11 read sub\\..\\plain.txt (Win32)", contents(child(child(sub, units("..")), units("plain.txt")))),
+        row("W11 read \\\\?\\...\\sub\\..\\plain.txt (verbatim)", contents(child(child(verbatim(sub), units("..")), units("plain.txt")))),
+        row("W11 read \\\\?\\...\\.\\plain.txt (verbatim)", contents(child(child(verbatim(dir), units(".")), units("plain.txt")))),
+    ]
+
+fn main() -> List[List[str]] errors IndexNotFound, InvalidArgumentEncoding, std::byte::BelowRange, std::byte::AboveRange, LayoutLengthMismatch:
+    dir = units(argv().at(1))
+    parts = [w1(dir), w2(dir), w3(dir), w4(dir), w5(), w6(dir), w7(dir), w8_9(dir), w10_11(dir)]
+    all = joined(joined(joined(parts.at(0), parts.at(1)), joined(parts.at(2), parts.at(3))), joined(joined(parts.at(4), parts.at(5)), joined(parts.at(6), joined(parts.at(7), parts.at(8)))))
+    all
+
+fn line(r: List[str]) -> str errors IndexNotFound:
+    if r.length() == 0:
+        return ""
+    rest = loop i from 1 to r.length():
+        r.at(i)
+    if rest.length() == 0:
+        return r.at(0)
+    std::str::concat(std::str::concat(r.at(0), " | "), line(rest))
+
+fn report() -> unit errors std::io::WriteFailed, IndexNotFound:
+    rows = main():
+        on IndexNotFound:
+            [["failed", "IndexNotFound"]]
+        on InvalidArgumentEncoding:
+            [["failed", "InvalidArgumentEncoding"]]
+        on std::byte::BelowRange:
+            [["failed", "BelowRange"]]
+        on std::byte::AboveRange:
+            [["failed", "AboveRange"]]
+        on LayoutLengthMismatch:
+            [["failed", "LayoutLengthMismatch"]]
+    loop r in rows:
+        std::io::print_line(line(r))
+    unit
+
+with context std::windows::io::create()
+report():
+    on std::io::WriteFailed:
+        unit
+    on IndexNotFound:
+        unit

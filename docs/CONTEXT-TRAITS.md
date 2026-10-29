@@ -611,7 +611,12 @@ hand-written concrete function's and allocates the same
 (`winpath::WinPath`, joining with `\`) proves the specialization is per
 witness: `child<std::linux::path::LinuxPath>` gives `/home/child`,
 `child<winpath::WinPath>` gives `C:\Users\child`
-(`path-windows-shaped-witness`). There is no production Windows path.
+(`path-windows-shaped-witness`). The production Windows path is
+`std::windows::path::WindowsPath` (WINDOWS-X86-64-MILESTONE-7.md), with
+Win32's syntax rather than Unix's with backslashes; the three textual paths
+also satisfy `std::io::fs::FilePath`, whose file operations require their
+platform's filesystem context, and each has a lossless native form
+(`std::PLATFORM::fs::NativePath`) for the names a system returns.
 
 **Path + I/O** (examples/io/show-path.bot, `path-io-vertical`): a valid path is
 validated in place and printed (still a `str`); an invalid one is reported on

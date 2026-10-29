@@ -15,7 +15,7 @@
 # (audit/golden/migration/fragments/declared-errors-imports.tsv maps every
 # test). The Tcl tests write modules a (errors Failed and Plain) and a::sub;
 # here they are the stock io (error WriteFailed) and its child std::io::path
-# (error NotAPath), and the Tcl tests' unimported module is abi.
+# (errors NotAPath and NotText), and the Tcl tests' unimported module is abi.
 #
 # Imports: compiler and test (the framework) and std::io::path -- exactly the
 # import set the theorems need: std::io::path imported and its parent io not, and
@@ -114,7 +114,7 @@ fn register_diagnostic_message_tests():
             f(1):
                 on std::io::path::DoesNotExist:
                     0
-    std::test::rejects_message("nerr-diagnostic-messages/unknown-error", std::compiler::DiagnosticCode::UnknownSymbol, "namespace \"std::io::path\" has no error \"DoesNotExist\" (it declares: NotAPath)", b_unknown_error_message)
+    std::test::rejects_message("nerr-diagnostic-messages/unknown-error", std::compiler::DiagnosticCode::UnknownSymbol, "namespace \"std::io::path\" has no error \"DoesNotExist\" (it declares: NotAPath, NotText)", b_unknown_error_message)
 
     # ... and a module's error written bare outside its module is an unknown
     # error whose message names its qualified spelling.

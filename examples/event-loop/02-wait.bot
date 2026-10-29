@@ -1,0 +1,58 @@
+# 02-wait.bot -- wait for an event or a timer (EVENT-LOOP-MILESTONE-1.md,
+# "Public API").
+#
+#   tclsh9.0 main.tcl examples/event-loop/02-wait.bot
+#
+# A task suspends by waiting on a registration: a channel (events Botlish
+# code posts), a source (records a native producer delivers), a timer, or
+# an observer. wait returns an Event saying what woke it. sleep is a wait on
+# a one-shot timer of the task's own. Times are microseconds of the
+# driver's clock; under the deterministic driver they are virtual, so this
+# program's output is the same on every backend and every run.
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)).concat(" at time ").concat(std::int::to_string(std::event_loop::now())))
+
+# Waits for one event on CH, then for a timer 1000 us later.
+fn consumer(ch: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(ch)
+    if e.reason == Wake::Event:
+        say("consumer got ", e.a)
+    t = std::event_loop::after(1000)
+    w = std::event_loop::wait(t)
+    if w.reason == Wake::Timer:
+        say("consumer's timer fired, missed ", w.a)
+    e.a
+
+# Sleeps 250 us, then posts 42 to CH.
+fn producer(ch: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(250)
+    say("producer posts ", 42)
+    ch.post(42, 0)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    ch = std::event_loop::channel(Delivery::Reliable, 8)
+    coroutine {step: c, first: cf} = consumer(ch)
+    std::event_loop::adopt(c, cf)
+    coroutine {step: p, first: pf} = producer(ch)
+    std::event_loop::adopt(p, pf)
+    std::event_loop::run()
+    std::event_loop::revoke(ch)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

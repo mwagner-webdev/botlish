@@ -1,0 +1,10 @@
+# Two witnesses whose implementations both need std::io::IO, each in its own
+# module (one namespace has one `show`), the trait and its caller in a
+# third. Should print A, A, B, B and be 2 + 20 = 22.
+import std::linux::io
+import thing
+import ay
+import bee
+
+with context std::linux::io::create()
+thing::twice(ay::A {v: 1}) + thing::twice(bee::B {w: 10})

@@ -1,0 +1,16 @@
+# reject-resume-adopted.bot -- must be REJECTED (tests/event-loop.test, el-static-*): a task resumed directly after the scheduler took it (USE-AFTER-MOVE)
+import std::event_loop
+
+fn task(context ev: std::event_loop::Loop) -> int:
+    std::event_loop::yield_now()
+    0
+
+fn main(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    coroutine {step, first} = task()
+    std::event_loop::adopt(step, first)
+    step()
+
+with context std::event_loop::create(8)
+main():
+    on std::event_loop::SchedulerFault:
+        -1

@@ -1,0 +1,61 @@
+# 04-observer.bot -- a once-per-turn observer (EVENT-LOOP-MILESTONE-1.md,
+# "Public API").
+#
+#   tclsh9.0 main.tcl examples/event-loop/04-observer.bot
+#
+# A task waiting on an observer registration runs once in the observe phase
+# of every turn that collected or dispatched something (Event.a: the turn),
+# after that turn's ready tasks. It is not an idle callback, a zero-delay
+# timer or a frame clock: it never keeps the loop alive or awake, and a
+# sleeping loop runs no observer. Here a worker takes three steps, sleeps,
+# and takes one more; the observer runs after each busy turn and not while
+# the loop sleeps. The observer is still waiting when run returns (it keeps
+# nothing alive): shutdown revokes its registration, and it finishes.
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::mutable_array
+import std::str
+import type std::event_loop::Wake
+
+fn watcher(obs: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    runs = std::mutable_array::create(1, 0)
+    loop:
+        e = std::event_loop::wait(obs)
+        if e.reason != Wake::Turn:
+            std::event_loop::log("observer: revoked after ".concat(std::int::to_string(runs.at(0))).concat(" runs"))
+            break
+        runs.set(0, runs.at(0) + 1)
+        std::event_loop::log("observer: end of turn ".concat(std::int::to_string(e.a)))
+    runs.at(0)
+
+fn worker(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 3:
+        std::event_loop::log("worker: step")
+        std::event_loop::yield_now()
+    std::event_loop::sleep(500)
+    std::event_loop::log("worker: woke at time ".concat(std::int::to_string(std::event_loop::now())))
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    obs = std::event_loop::observer()
+    coroutine {step: w, first: wf} = watcher(obs)
+    std::event_loop::adopt(w, wf)
+    coroutine {step: k, first: kf} = worker()
+    std::event_loop::adopt(k, kf)
+    std::event_loop::run()
+    std::event_loop::log("run returned")
+    std::event_loop::shutdown(2)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]
