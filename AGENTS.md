@@ -1914,6 +1914,11 @@ carries, so only the frames' release pads run. Keep it so:
   descriptor (NativeCallOp).
 * Ordinary affine values keep last-use release: a program without resources
   is lowered as before (its HIR has no `resources` table).
+* Scoping is a fact the static decisions read (Static intrinsics, below):
+  a scoped binding's joins -- an `if` too -- are consumers of the ownership
+  verdict (`hir::staticdeps::ScopedBy`, `PathJoins`), and whether the
+  program unwinds is the waiting channel `C:unwind`. A new way for code to
+  make a binding scoped, or for the program to unwind, goes into them.
 
 If you change any of that (hir/resources.tcl, the resource cases of
 hir/affine.tcl, hir/structs.tcl and hir/contexts.tcl, the cleanup and
@@ -1927,7 +1932,9 @@ lowering, or std::event_loop's Owner), run `tests/resources.test`,
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule; run it in batches with
 `-only` when the whole list would exceed a background task's limit), plus
-the affine and coroutine harnesses for a change to `hir/affine.tcl`, and a
+the affine and coroutine harnesses for a change to `hir/affine.tcl`,
+`tests/static-economics.test` and `audit/static-decisions/tools/mutate.tcl`
+for a change to scoping or unwinding, and a
 `BOTLISH_NATIVE_GC_STRESS=1` run of `tests/resources.test` for a change to
 the native release paths. `bench/lexical-cleanup.tcl` regenerates the
 performance report.
@@ -3501,7 +3508,8 @@ difference from `BOTLISH_STATIC_SCHEDULER=sequential`: add its edge to
 `hir/staticdeps.tcl`, not a special case to the scheduler. The sequential
 order's waiting rule (STATIC-COMPILE.md, "The waiting rule";
 `hir::staticdeps::Waiting`) reads that analysis's waiting channels
-(`C:erased`, `C:budget:B`; never the gates `C:verdict` and `C:plan`): a
+(`C:erased`, `C:budget:B`, `C:unwind`; never the gates `C:verdict` and
+`C:plan`): a
 failing block consuming one waits while a failing block contributes to it,
 so a consumer's verdict does not depend on where its contributors are
 written. An edge into a waiting channel's part of the graph, or a new link

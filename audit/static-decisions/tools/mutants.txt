@@ -465,7 +465,7 @@ proc hir::static::Waits {key status deps} {
 @@ channels-not-consumed the dependency analysis records no site as a channel's consumer: nothing waits, in either scheduler
 ## hir/staticdeps.tcl
 <<<<
-                        if {$w eq "C:erased" || [string match C:budget:* $w]} {
+                        if {$w in {C:erased C:unwind} || [string match C:budget:* $w]} {
 ====
                         if {0} {
 >>>>
@@ -545,6 +545,36 @@ proc hir::static::Waits {key status deps} {
         set hirRecheckRounds [dict create]
     }
     upvar #0 hirRecheckRounds rounds
+>>>>
+
+@@ scoped-if-joins-missed a binding owned to its scope's end (a resource; a coroutine handle while the program unwinds) moved on one path of an `if` is no consumer of the ownership verdict: its path release is committed or skipped in a build whose verdict withheld it
+## hir/staticdeps.tcl
+<<<<
+                if {
+                    if {$scoped ne "" && $child ne [dict get $node condition]} {
+                        lappend joins $x
+                    }
+                }
+====
+                if {
+                }
+>>>>
+
+@@ unwind-consumers-missed no site reads whether the program unwinds suspended coroutines (C:unwind): a coroutine handle's path release, which a suspending function's resource elsewhere causes, is committed beside the rejection that takes the unwinding away, and judged before it in the sequential order
+## hir/staticdeps.tcl
+<<<<
+            if {[dict exists $state unwinding $key]} {
+                dict set succ C:unwind unwind-consumer
+            }
+====
+>>>>
+
+@@ unwind-not-waiting whether the program unwinds is read as an ordinary dependency, not a waiting channel: a failing consumer written before the failing site that makes the program unwind is judged first, while it stands
+## hir/staticdeps.tcl
+<<<<
+                        if {$w in {C:erased C:unwind} || [string match C:budget:* $w]} {
+====
+                        if {$w in {C:erased} || [string match C:budget:* $w]} {
 >>>>
 
 # ---------------------------------------------------------------------------

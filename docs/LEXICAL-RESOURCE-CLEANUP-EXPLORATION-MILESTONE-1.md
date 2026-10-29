@@ -642,6 +642,44 @@ return code 5 into the propagating error.
 * Metrics: `native::allocationReport`'s `resources {cleanups N abandoned M}`
   section, present only when nonzero.
 
+**Static decisions** (`hir/staticdeps.tcl`; STATIC-COMPILE.md, "Decision
+economics"): a `static compile:` block's outcome must not depend on the
+scheduler, and scoping added two facts the dependency analysis did not
+model. Both were found by reproducers written for this report, and each is
+a difference the batched scheduler and the sequential order had:
+
+* *Scoped joins under the ownership verdict.* Release scopes are computed
+  only while no code anywhere has an ownership diagnostic (`C:verdict`), and
+  a scoped binding moved on one path of an `if` is AFFINE-PATH-RELEASE-
+  UNSUPPORTED -- a join the verdict's consumers (loops and handled calls,
+  whose paths no statement ends) did not include. A block with a Handle
+  moved in an `if` and a KNOWN-ERROR after it, beside a block with a
+  USE-AFTER-MOVE in another function: batched, KNOWN-ERROR; sequential,
+  AFFINE-PATH-RELEASE-UNSUPPORTED (`se-equal-resource-if-join`). Now
+  `ScopedBy` tells a binding owned to its scope's end (its type holds a
+  resource, or mentions `any`, which a rejection may narrow to one; or it
+  is affine while the program unwinds) and `PathJoins` takes every join
+  moving it on some paths, `if` and `loop:` included, and the statement of
+  its sequence that holds them.
+* *Unwinding is a waiting channel* (`C:unwind`). Whether the program
+  unwinds is on while a yield-capable function owns a cleanup-bearing value;
+  rejecting the block that holds that value, or the yield, turns it off,
+  and every coroutine handle's scoped joins with it -- a diagnostic the
+  *presence* of code elsewhere causes, the shape of the erased-callable
+  contract's channel. A block moving a plain coroutine handle in an `if`
+  beside a rejected block in a coroutine owning a Handle: batched,
+  AFFINE-PATH-RELEASE-UNSUPPORTED; sequential, KNOWN-ERROR; and with the
+  consumer written first, the sequential order itself judged it while the
+  contributor stood. Now the consumers (`Z:site -> C:unwind`) wait for the
+  failing contributors (`UnwindWitnesses`: the region of every capable
+  function owning such a value and the sites its literal is in), and both
+  schedulers give KNOWN-ERROR in either layout (`se-equal-unwind-channel`).
+
+Programs without resources are untouched: `ScopedBy` is "" there and no
+`C:unwind` node exists. Mutants `scoped-if-joins-missed`,
+`unwind-consumers-missed` and `unwind-not-waiting`
+(`audit/static-decisions/tools/mutants.txt`) are killed by those tests.
+
 **Programs without resources** compile exactly as before: no `resources`
 table, no new HIR facts, identical NIR (section 13).
 
@@ -653,7 +691,7 @@ declaration contract:
 | situation | diagnostic | test |
 |---|---|---|
 | use after a move, after an explicit release, a second owner | USE-AFTER-MOVE | `rs-reject-use-after-release`, `el-static-owner-twice` |
-| moved on some paths, kept on others | AFFINE-PATH-RELEASE-UNSUPPORTED ("releases a cleanup at the end of its scope, and is moved on some paths...") | `rs-reject-some-paths`, `el-static-owner-some-paths` |
+| moved on some paths, kept on others | AFFINE-PATH-RELEASE-UNSUPPORTED ("runs a cleanup at the end of its scope, and is moved on some paths..."; a coroutine handle scoped because the program unwinds: "is released at the end of its scope (a suspending function of this program owns a value with a cleanup, ...)") | `rs-reject-some-paths`, `el-static-owner-some-paths` |
 | captured by a nested function | AFFINE-CAPTURE-UNSUPPORTED | `rs-reject-capture` |
 | made or taken apart outside its module | OPAQUE-CONSTRUCTION, OPAQUE-REPRESENTATION | `el-static-forge-owner`, `rs-reject-take-apart` |
 | a cleanup's context not installed where a release runs | MISSING-CONTEXT "required by the release of this value" | `rs-reject-missing-context` |
@@ -817,16 +855,17 @@ Each with a reproducer.
    only by explicit operations (`collections.bot`: 69 and 70 are never
    released; the event loop's `shutdown` revokes everything). A lexically
    scoped installation would need a `with context` form that ends.
-4. **A static-decision channel not registered.** Unwinding is a whole-
-   program fact, and it moves AFFINE-PATH-RELEASE-UNSUPPORTED onto ordinary
-   `if` joins of coroutine handles, which `hir/staticdeps.tcl`'s C:verdict
-   consumers (loops and handled calls) do not include. A `static compile:`
-   block in a program with resources and coroutines could therefore be
-   decided differently by the batched and the sequential scheduler. No
-   golden suite combines them, and the static-decisions comparison runs in
-   CI only (AGENTS.md): it was not run for this branch. Release edges
-   themselves (a cleanup's context requirement) are inside a function's own
-   region, whose summary the call graph already carries.
+4. **Static decisions: two channels, registered late.** Scoping adds
+   AFFINE-PATH-RELEASE-UNSUPPORTED at ordinary `if` joins, and the
+   ownership verdict withholds it; and unwinding is a fact of the whole
+   program that a rejection elsewhere can switch off. Both made the batched
+   `static compile:` scheduler decide another program than the sequential
+   order until `hir/staticdeps.tcl` modelled them (section 11, "Static
+   decisions"); the reproducers are `se-equal-resource-if-join` and
+   `se-equal-unwind-channel`. What stays open: the static-decisions fuzzer's
+   fragment pool has no resource (a resource needs a module, and its
+   programs are module-free text), so only those two tests and their three
+   mutants pin the channels.
 5. **A raw number is no safe identity.** `rawfd.bot`'s `invalidate`: a
    descriptor number closed elsewhere and reused by another open before the
    owner's cleanup runs makes the cleanup close the wrong file. Botlish
@@ -870,9 +909,10 @@ current program-wide switch, sound but non-local). The milestone should
 1. measure the uniform rule over the corpus (golden suites, examples,
    benchmarks: which programs become AFFINE-PATH-RELEASE-UNSUPPORTED, and
    what releasing suspended coroutines later costs);
-2. decide, and register the resulting joins as consumers of the
-   ownership verdict in `hir/staticdeps.tcl`, with a static-decisions run on
-   the branch;
+2. decide, and adjust `hir/staticdeps.tcl` to it: the uniform rule makes
+   every coroutine handle's joins consumers of the ownership verdict and
+   retires the `C:unwind` channel (section 11); give the static-decisions
+   fuzzer resource fragments either way;
 3. run the macOS, Windows and Linux arm64 workflows over the resource
    suites.
 
@@ -890,6 +930,13 @@ whose need this milestone records (section 15) without establishing.
 * `hir/affine.tcl`: scoped bindings, release order, unwinding, the
   descriptors `rK.` and `C`, discharge, unsharing.
 * `hir/contexts.tcl`: `ReleaseEdges`, `Returned`, release obligations.
+* `hir/staticdeps.tcl`: `ScopedBy`, the scoped joins of `PathJoins`, the
+  `C:unwind` channel (`UnwindWitnesses`, `Waiting`); its documentation in
+  STATIC-COMPILE.md and STATIC-DECISION-ECONOMICS.md; the tests
+  `se-equal-resource-if-join`, `se-equal-unwind-channel` in
+  `tests/static-economics.test`; three mutants in
+  `audit/static-decisions/tools/mutants.txt` (and `channels-not-consumed`
+  updated to the code it mutates).
 * `hir/format.tcl`, `hir/read.tcl`, `hir/resolve.tcl`, `hir/hir.tcl`,
   `hir/static.tcl`, `stdlib/compiler.bot`: HIR text, the pass order, the
   `ResourceDeclaration` code.
@@ -957,7 +1004,8 @@ tclsh9.0 bench/lexical-cleanup.tcl -baseline DIR
 ```
 
 plus `tests/affine.test`, `tests/coroutines.test`, `tests/contexts.test`,
-`tests/static-compile.test` and their harnesses for a change to code they
-share, `tools/compilerpedia.tcl check`, the warning gate, and a
+`tests/static-compile.test`, `tests/static-economics.test` and their
+harnesses (`audit/static-decisions/tools/mutate.tcl` for the scoping's
+channels) for a change to code they share, `tools/compilerpedia.tcl check`, the warning gate, and a
 `BOTLISH_NATIVE_GC_STRESS=1` run of `tests/resources.test` for the native
 release paths (AGENTS.md, "Resources (scope-bound cleanup)").

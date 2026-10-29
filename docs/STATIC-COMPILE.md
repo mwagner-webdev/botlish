@@ -129,7 +129,8 @@ would sit below it; the two stay distinct.
    first block in post-order with a diagnostic of its own that does not
    *wait* is rejected, and the blocks before it without one are accepted. A
    block waits while it may read a program-wide channel -- the
-   erased-callable contract, a semantic-instance budget under pressure --
+   erased-callable contract, a semantic-instance budget under pressure,
+   whether the program unwinds suspended coroutines --
    that another block with a diagnostic of its own may change: the
    contributors to a channel are judged before its consumers, so a
    consumer's verdict does not depend on where its contributors are written
@@ -257,7 +258,10 @@ Part of the definition, not of the economics. A *program-wide channel* is a
 fact every site reading it shares and every site feeding it may change, from
 anywhere in the program: the erased-callable contract (what every callable
 passed into an untyped parameter can raise, charged to every call through an
-uncontracted value) and a semantic-instance budget under pressure. Without
+uncontracted value), a semantic-instance budget under pressure, and whether
+the program unwinds suspended coroutines (while a suspending function owns a
+resource, every coroutine handle is owned to its scope's end:
+LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). Without
 the rule, the sequential order judged a consumer of such a channel against
 whatever the program fed it at that point, so a consumer written before a
 contributor that was rejected later kept a rejection the final program no

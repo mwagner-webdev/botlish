@@ -1820,8 +1820,14 @@ proc hir::affine::Releases {hirVar parent scopes accepted} {
             if {[dict exists $afterStates $lastRef] && [dict get $afterStates $lastRef] ne "dead"
                     && [dict exists $afterStates $lastRef $b] && [lindex [dict get $afterStates $lastRef $b] 0] eq "maybe"} {
                 set name [hir::semantic::SourceName $hir $b]
+                if {[hir::resources::HasCleanup [BindingType $hir $b]]} {
+                    set owned "runs a cleanup at the end of its scope"
+                } else {
+                    # A coroutine handle while the program unwinds (Unwinds).
+                    set owned "is released at the end of its scope (a suspending function of this program owns a value with a cleanup, so releasing a suspended coroutine unwinds it)"
+                }
                 hir::Diagnose hir AFFINE-PATH-RELEASE-UNSUPPORTED \
-                    "`$name` releases a cleanup at the end of its scope, and is moved on some paths through this statement but still owned on others: the release at the scope's end could not tell the paths apart (move it on every path, or on none -- e.g. release it explicitly where it is not moved)" $lastRef
+                    "`$name` $owned, and is moved on some paths through this statement but still owned on others: the release at the scope's end could not tell the paths apart (move it on every path, or on none -- e.g. release it explicitly where it is not moved)" $lastRef
                 continue
             }
         }

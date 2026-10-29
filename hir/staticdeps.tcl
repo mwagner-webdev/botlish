@@ -7,8 +7,8 @@
 #                 DECISIONS) whose form the site's own diagnostics may
 #                 depend on, never the site itself
 #       channels  the program-wide channels of the build, for the trace
-#       consumes  key -> the waiting channels (C:erased, C:budget:B) the
-#                 site's diagnostics read (Waiting)
+#       consumes  key -> the waiting channels (C:erased, C:budget:B,
+#                 C:unwind) the site's diagnostics read (Waiting)
 #       contributors  channel -> the keys of the sites (present as bodies)
 #                 whose decision may change the channel's value (Waiting;
 #                 hir/static.tcl's waiting rule reads both)
@@ -197,7 +197,15 @@
 #                       it (while the analysis reports an erasure, any
 #                       reference to a binding whose type is affine or may
 #                       become affine once a rejection narrows an erased
-#                       `any`). Its successors, while the analysis reports
+#                       `any`); for a binding owned to its scope's end
+#                       (hir::affine::Scoped: a resource, or any affine value
+#                       while the program unwinds, C:unwind; ScopedBy) every
+#                       join on some of whose paths it is moved -- an `if`
+#                       and an infinite `loop` too, since no release can
+#                       stand before the scope's end -- and the statement of
+#                       its sequence holding them, where the diagnostic is
+#                       reported (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+#                       MILESTONE-1.md). Its successors, while the analysis reports
 #                       something: one *witness* -- the region of the
 #                       diagnostic whose site is last in post-order, or of
 #                       every one in no site's body -- because the verdict
@@ -219,6 +227,23 @@
 #                       inferred contract, its instance's budget) or of a
 #                       callable value (its type's contract); C:verdict ->
 #                       R of each region making one.
+#   C:unwind            whether the program unwinds suspended coroutines
+#                       (HIR's `resources unwind`, hir::affine::Unwinds): it
+#                       does while a yield-capable function owns a value
+#                       whose drop runs a cleanup, and then every coroutine
+#                       handle is owned to its scope's end like a resource,
+#                       so one moved on some paths of a join only is
+#                       AFFINE-PATH-RELEASE-UNSUPPORTED -- a diagnostic the
+#                       presence of code anywhere causes: a waiting channel.
+#                       Its *consumers* (Ownership): Z:site -> C:verdict and
+#                       -> C:unwind for each site holding such a join of a
+#                       binding scoped only because the program unwinds.
+#                       Its successors (UnwindWitnesses): the region of each
+#                       yield-capable function owning such a value (its
+#                       code holds the value, and its call targets make it
+#                       yield-capable) and the forms of the sites its
+#                       literal is in. A rejection only removes code, so it
+#                       can turn the unwinding off, never on.
 #   C:plan              the gate of the trait monomorphization's plan
 #                       (hir::traits::Plan), which hir::BuildFull runs only on
 #                       a checked program with no diagnostic at all -- and
@@ -271,7 +296,7 @@
 #
 # The waiting rule (hir/static.tcl, Waits; STATIC-COMPILE.md) reads the
 # channels whose contributors' *presence* can cause a consumer's diagnostic --
-# C:erased and C:budget:B -- for the definition as well as for the
+# C:erased, C:budget:B and C:unwind -- for the definition as well as for the
 # economics: a failing site that reads one (`consumes`: its node reaches the
 # channel over every edge but a contributor's link and a gate's, and not the
 # erased contract when its first diagnostic precedes the completion walk,
@@ -522,8 +547,9 @@ proc hir::staticdeps::Deps {hir sites decisions {methods 0}} {
 # forms each reaches) and SITES (Deps' result, whose keys are the sites
 # present as bodies).
 #
-#   CONSUMES      key -> the waiting channels (C:erased, C:budget:B) the
-#                 site's diagnostics read: those its node reaches over every
+#   CONSUMES      key -> the waiting channels (C:erased, C:budget:B,
+#                 C:unwind) the site's diagnostics read: those its node
+#                 reaches over every
 #                 edge but a link (a contributor's edge to what it
 #                 contributes to, which orders but reads nothing) or a
 #                 gate's (C:verdict, C:plan: their contributors' presence
@@ -609,7 +635,7 @@ proc hir::staticdeps::Waiting {state G labels sccOf sccSites sites} {
                     }
                     set found [dict create]
                     foreach w $members {
-                        if {$w eq "C:erased" || [string match C:budget:* $w]} {
+                        if {$w in {C:erased C:unwind} || [string match C:budget:* $w]} {
                             dict set found $w 1
                         }
                         foreach x [dict get $fsucc $w] {
@@ -643,7 +669,7 @@ proc hir::staticdeps::Waiting {state G labels sccOf sccSites sites} {
     }
     set contributors [dict create]
     dict for {v _} $G {
-        if {$v ne "C:erased" && ![string match C:budget:* $v]} continue
+        if {$v ni {C:erased C:unwind} && ![string match C:budget:* $v]} continue
         set base [lsearch -all -inline -not -glob [dict get $sccSites [dict get $sccOf $v]] M:*]
         if {$v eq "C:erased"} {
             lappend base {*}[dict keys [dict get $state erasureSites]]
@@ -1246,10 +1272,13 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
     dict set state pressured $pressured
     dict set state budgetOf $budgetOf
     # The ownership analysis's verdict (C:verdict).
-    lassign [Ownership $hir $state] pathRelease verdict linked diagnosed
+    lassign [Ownership $hir $state] pathRelease verdict linked diagnosed unwinding
     dict set state pathRelease $pathRelease
     dict set state verdict $verdict
     dict set state verdictLinked $linked
+    # Whether the program unwinds suspended coroutines (C:unwind).
+    dict set state unwinding $unwinding
+    dict set state unwind [if {[dict size $unwinding] > 0} {UnwindWitnesses $hir $state} else {dict create}]
     # The sites passing a value with a fixed part to an uncontracted input
     # (PossibleSuccessors): linked to what that input may hold.
     set possibleLinks [dict create]
@@ -1279,6 +1308,7 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
         erasedConsumers [dict size $consumers] budgetPressure [dict size $pressured] \
         yieldingFunctions [dict size $yielding] constructions [llength $creates] \
         ownershipDiagnostics $diagnosed pathReleaseSites [dict size $pathRelease] \
+        unwindingSites [dict size $unwinding] \
         planSites [dict size $planConsumers] planGate [expr {$planOpen ? "open" : "closed"}]]
     return $state
 }
@@ -1644,14 +1674,24 @@ proc hir::staticdeps::Ownership {hir state} {
         }
     }
     set pathRelease [dict create]
+    set unwinding [dict create]
     set sees [dict create]
+    set unwind [dict getdef $hir resources unwind 0]
+    set scopedBy [dict create]
     foreach r [dict keys $refs] {
         if {![dict exists $regionOf $r] || ![dict exists $exprs $r binding]} continue
         set b [dict get $exprs $r binding]
         if {$b eq "" || ![dict exists $hir bindings $b]} continue
-        foreach x [PathJoins $hir $state $r $b sees] {
+        if {![dict exists $scopedBy $b]} {
+            dict set scopedBy $b [ScopedBy $hir $b $unwind]
+        }
+        set scoped [dict get $scopedBy $b]
+        foreach x [PathJoins $hir $state $r $b sees $scoped] {
             if {[dict exists $siteOf $x]} {
                 dict set pathRelease [dict get $siteOf $x] 1
+                if {$scoped eq "unwind"} {
+                    dict set unwinding [dict get $siteOf $x] 1
+                }
             }
         }
     }
@@ -1659,7 +1699,7 @@ proc hir::staticdeps::Ownership {hir state} {
     set linked [dict create]
     if {[dict size $pathRelease] == 0} {
         # No site's diagnostics read the verdict.
-        return [list $pathRelease $verdict $linked [llength $diagnosed]]
+        return [list $pathRelease $verdict $linked [llength $diagnosed] $unwinding]
     }
     set position [dict create]
     set i 0
@@ -1715,7 +1755,66 @@ proc hir::staticdeps::Ownership {hir state} {
             }
         }
     }
-    return [list $pathRelease $verdict $linked [llength $diagnosed]]
+    return [list $pathRelease $verdict $linked [llength $diagnosed] $unwinding]
+}
+
+# How binding B's value may be owned to the end of its scope
+# (hir::affine::Scoped), and so be AFFINE-PATH-RELEASE-UNSUPPORTED at any
+# join on some of whose paths it is moved: "cleanup" when its type holds a
+# resource -- or mentions `any`, which a rejection may narrow to one --
+# "unwind" when the program unwinds suspended coroutines (UNWIND: HIR's
+# `resources unwind`, C:unwind) and the type is affine or mentions `any`,
+# else "" (only the joins no statement ends hold a path release).
+proc hir::staticdeps::ScopedBy {hir b unwind} {
+    if {![hir::resources::Used $hir]} {
+        return ""
+    }
+    set type [hir::bindingType $hir $b]
+    if {[hir::resources::HasCleanup $type]} {
+        return cleanup
+    }
+    if {$unwind && ([hir::types::IsAffine $type] || [MentionsAny $type])} {
+        return unwind
+    }
+    if {[MentionsAny $type]} {
+        return cleanup
+    }
+    return ""
+}
+
+# What can turn the unwinding off (C:unwind's successors, node -> label): it
+# is on while a yield-capable function owns a value whose drop runs a
+# cleanup (hir::affine::Unwinds) -- a rejection only removes code, so it
+# never turns it on. Every such function's region (R: its code, which holds
+# the witness, and through its call targets what makes it yield-capable)
+# and the sites its literal is in (rejecting one removes the function).
+proc hir::staticdeps::UnwindWitnesses {hir state} {
+    set capable [dict getdef $hir coroutines blocks {}]
+    set owners [dict create]
+    dict for {e region} [dict get $state regionOf] {
+        if {$region eq "program" || ![dict exists $capable $region] || [dict exists $owners $region]} continue
+        if {![dict get $hir exprs $e reachable]} continue
+        if {[hir::resources::HasCleanup [hir::typeOf $hir $e]]} {
+            dict set owners $region 1
+        }
+    }
+    dict for {o _} $capable {
+        if {[dict exists $owners $o] || ![dict exists $hir exprs $o] || [dict get $hir exprs $o kind] ne "block"} continue
+        foreach b [dict get $hir exprs $o params] {
+            if {[hir::resources::HasCleanup [hir::bindingType $hir $b]]} {
+                dict set owners $o 1
+                break
+            }
+        }
+    }
+    set succ [dict create]
+    foreach o [dict keys $owners] {
+        dict set succ R:$o unwind
+        foreach s [SiteChain $state $o] {
+            dict set succ F:$s unwind
+        }
+    }
+    return $succ
 }
 
 # The joins above reference R to binding B (Ownership) on one of whose paths
@@ -1724,7 +1823,11 @@ proc hir::staticdeps::Ownership {hir state} {
 # (an infinite `loop`'s normal path never completes; an `if`'s branches each
 # end in a statement that can hold a release). Walks out of function
 # literals; stops where B is no longer visible. SEESVAR caches ScopeSees.
-proc hir::staticdeps::PathJoins {hir state r b seesVar} {
+# For a binding SCOPED to its scope's end (ScopedBy), every join is one --
+# an `if` whose branch R is in and an infinite `loop` too, since no path's
+# release can stand before the scope's end -- and so is the statement of
+# B's own sequence that holds them, where the diagnostic is reported.
+proc hir::staticdeps::PathJoins {hir state r b seesVar {scoped ""}} {
     upvar 1 $seesVar sees
     set parentOf [dict get $state parentOf]
     set regionOf [dict get $state regionOf]
@@ -1758,9 +1861,22 @@ proc hir::staticdeps::PathJoins {hir state r b seesVar} {
                         lappend joins $x
                     }
                 }
+                if {
+                    if {$scoped ne "" && $child ne [dict get $node condition]} {
+                        lappend joins $x
+                    }
+                }
+                loop {
+                    if {$scoped ne "" && $child in [dict get $node body]} {
+                        lappend joins $x
+                    }
+                }
             }
         }
         set child $x
+    }
+    if {$scoped ne "" && $joins ne {}} {
+        lappend joins $child
     }
     return $joins
 }
@@ -1930,6 +2046,9 @@ proc hir::staticdeps::Successors {hir stateVar v} {
             } elseif {[dict exists $state verdictLinked $key]} {
                 dict set succ C:verdict verdict-contributor
             }
+            if {[dict exists $state unwinding $key]} {
+                dict set succ C:unwind unwind-consumer
+            }
             if {[dict exists $state possibleLinks $key]} {
                 foreach node [dict keys [dict get $state possibleLinks $key]] {
                     dict set succ $node possible-contributor
@@ -1948,6 +2067,12 @@ proc hir::staticdeps::Successors {hir stateVar v} {
         C:verdict {
             dict set state names $v "the ownership analysis's verdict on the whole program"
             dict for {node label} [dict get $state verdict] {
+                dict set succ $node $label
+            }
+        }
+        C:unwind {
+            dict set state names $v "whether the program unwinds suspended coroutines (a suspending function owns a resource)"
+            dict for {node label} [dict get $state unwind] {
                 dict set succ $node $label
             }
         }

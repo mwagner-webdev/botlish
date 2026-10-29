@@ -169,6 +169,7 @@ missed a channel. None occurs in any suite, fuzz program or test.
 | `B:binding` | its definition, every narrowing mention in its own region ([every mention](#every-mention)); an untyped parameter also every reachable use in its function and the functions nested in it (its inferred contract); an affine or mutable binding -- never one holding a callable -- every region mentioning it |
 | `C:erased` (the erased-callable contract, a set of errors) | per error, one *witness* contribution -- the one the sequential order removes last -- among the instance requests erasing it (the chain of requests keeping the instance, its function, its arguments but a function's body), the contravariant erasures erasing it; every request the budget declined. A request erasing nothing contributes nothing ([below](#forms-the-plans-gate-and-the-witnesses)) |
 | `C:budget:B` | B's body, the place of every call requesting one of B's instances and the facts of its arguments (of an argument naming a function, its place only), only under pressure |
+| `C:unwind` (whether the program unwinds suspended coroutines: a suspending function owns a resource; LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md) | the region of every yield-capable function owning a value whose drop runs a cleanup, and the forms of the sites its literal is in |
 | `P:input` (what an uncontracted input may hold at the contract boundary: a set of errors and whether every value is quiet) | per error and for not being quiet one witness value among what the calls of its function pass in its position, every value whose part is not fixed, its value, or `C:erased` |
 | `C:plan` (the gate of the trait monomorphization's plan; [below](#forms-the-plans-gate-and-the-witnesses)) | while a diagnostic the plan does not report stays, one witness: the site of the last in post-order (else the region of each); while every diagnostic may be the plan's, the form of every site holding one |
 | `C:verdict` (the ownership analysis's verdict on the whole program; [below](#the-ownership-verdict)) | while the analysis reports something, one witness: the region of its diagnostic whose site is last in post-order, or of every one outside a site; while it accepts the program, every region passing an affine argument whose contract can widen |
@@ -212,7 +213,13 @@ where the sequential order rejects the site with
   iterating or lockstep loop, or a handled call, whose body or handlers move
   an affine binding visible at it (the analysis's moving references) -- an
   infinite `loop:`'s normal path never completes and an `if`'s branches each
-  end in a statement that can hold a release, so neither is one. While the
+  end in a statement that can hold a release, so neither is one -- except
+  for a binding owned to its scope's end (a resource, or any affine value
+  while the program unwinds suspended coroutines,
+  LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md), whose release cannot
+  stand before the scope's end: every join moving it on some paths is one,
+  `if` and `loop:` included, and so is the statement of its sequence holding
+  them (`se-equal-resource-if-join`). While the
   analysis reports an erasure, also every reference there to a binding
   whose type is affine or mentions `any`: a rejection that narrows the
   erased type can make it a move;
@@ -1298,6 +1305,7 @@ Three points follow:
 |---|---|---|
 | `C:erased` | a contribution adds errors every consumer is charged | consumers wait for failing contributors |
 | `C:budget:B` | every request takes from one budget | the same; every call of B is both, so its members form cycles (post-order, as before) |
+| `C:unwind` | while a suspending function owns a resource, every coroutine handle is owned to its scope's end, so one moved on some paths of a join is AFFINE-PATH-RELEASE-UNSUPPORTED | consumers wait for failing contributors: a site whose rejection can take the unwinding away (`se-equal-unwind-channel`) |
 | `C:verdict`, `C:plan` | a gate: the consumer's diagnostic exists only while no contributor has one (the ownership analysis's whole-program verdict; the trait plan, run only on a program with no diagnostic) | no block waits on them: a consumer cannot fail by the gate while a contributor fails, so the layout dependence cannot arise. Read as waiting channels, every failing block holding a trait call would wait for the plan's witness, the last failing block of the program -- one rejection per build |
 
 **Economics.** The rule changes no build count where nothing waits. Where

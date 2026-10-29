@@ -842,6 +842,139 @@ test se-equal-ownership-verdict {a site whose handle is moved on a break path is
     list {*}$after [seSame $text 0] [seOutcomes $text]
 } -result {{} {USE-AFTER-MOVE AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-PATH-RELEASE-UNSUPPORTED} {} {TYPE KNOWN-ERROR AFFINE-LIST-OPERATION-UNSUPPORTED accepted}}
 
+# Resources (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md): a binding
+# owned to its scope's end -- a resource, or every coroutine handle while a
+# suspending function owns one (the program unwinds) -- is
+# AFFINE-PATH-RELEASE-UNSUPPORTED at any join moving it on some paths only,
+# an `if` too, and only under the ownership verdict. The batched and the
+# sequential decisions of application MAIN beside tests/resources/handle.bot:
+# {DIFF OUTCOMES}, the first difference ("" for none) and the batched
+# outcomes in post-order (accepted or the rejection's kind).
+proc seResourceDecisions {main} {
+    set dir [file join [tcltest::temporaryDirectory] se-resources-[incr ::seResourceRuns]]
+    file delete -force $dir
+    file mkdir $dir
+    file copy [file join $::sdRoot tests resources handle.bot] $dir
+    set f [open [file join $dir main.bot] w]
+    puts -nonewline $f $main
+    close $f
+    try {
+        set b [sdCompileFile batched [file join $dir main.bot]]
+        set s [sdCompileFile sequential [file join $dir main.bot]]
+    } finally {
+        file delete -force $dir
+    }
+    if {[dict get $b error] ne ""} {
+        return [list "does not compile: [string range [dict get $b error] 0 300]" {}]
+    }
+    set outcomes [lmap {key outcome} [dict get $b sites] {
+        if {[lindex $outcome 0] eq "rejected"} {
+            lindex $outcome 1
+        } else {
+            lindex $outcome 0
+        }
+    }]
+    return [list [sdDiff $b $s] $outcomes]
+}
+
+set ::seResourcePrelude {import std::compiler
+import handle
+
+error Boom
+
+struct Command:
+    value: int
+
+struct Event:
+    value: int
+
+fn boom() -> int errors Boom:
+    fail Boom
+
+fn want_int(x: int) -> int:
+    x
+
+fn take(h: handle::Handle) -> int:
+    handle::number(h)
+
+fn plain(seed: int, resume Command) -> Event:
+    command = yield Event {value: seed}
+    return Event {value: command.value + seed}
+
+fn make_plain(seed: int) -> Coroutine{args: [Command], return: Event}:
+    coroutine {step} = plain(seed)
+    step
+
+fn take_plain(s: Coroutine{args: [Command], return: Event}) -> int:
+    1
+
+}
+
+# A site with an ownership diagnostic of the whole program.
+set ::seResourceMoved {
+fn moved() -> int errors std::compiler::CompilerError:
+    static compile:
+        h = handle::open(1)
+        g = h
+        handle::number(h)
+}
+
+# A site whose Handle is moved on one path of an `if`, then a known error.
+set ::seResourceIf {
+fn if_moved(c: bool) -> int errors std::compiler::CompilerError:
+    static compile:
+        h = handle::open(2)
+        if c:
+            take(h)
+        boom()
+}
+
+# A site whose coroutine handle (of a coroutine owning nothing) is moved on
+# one path of an `if`, then a known error.
+set ::seResourceHandle {
+fn handle_moved(c: bool) -> int errors std::compiler::CompilerError:
+    static compile:
+        s = make_plain(1)
+        if c:
+            take_plain(s)
+        boom()
+}
+
+# A site whose rejection leaves the only coroutine owning a Handle without a
+# reachable yield: it makes the program unwind while it stands.
+set ::seResourceUnwinding {
+fn holder(seed: int, resume Command) -> Event errors std::compiler::CompilerError:
+    static compile:
+        h = handle::open(seed)
+        want_int("s")
+    command = yield Event {value: seed}
+    return Event {value: command.value + seed}
+
+fn make_holder(seed: int) -> Coroutine{args: [Command], return: Event, errors: [std::compiler::CompilerError]} errors std::compiler::CompilerError:
+    coroutine {step} = holder(seed)
+    step
+}
+
+# The entry: SITES' functions called (each NAME ARGS), under handlers.
+proc seResourceMain {calls} {
+    set text "\nfn main(context log: handle::Log) -> int errors std::compiler::CompilerError:\n"
+    foreach {name args} $calls {
+        append text "    r_$name = ${name}($args):\n        on std::compiler::CompilerError:\n            -1\n"
+    }
+    append text "    0\n\nwith context handle::create()\nmain()\n"
+    return $text
+}
+
+test se-equal-resource-if-join {a resource moved on one path of an `if` is AFFINE-PATH-RELEASE-UNSUPPORTED only under the ownership verdict: judged after a site with an ownership diagnostic in another function, its first diagnostic is that one, not the KNOWN-ERROR after it -- the dependency analysis once took only loops and handled calls for the verdict's consumers and committed KNOWN-ERROR in the first build} -body {
+    seResourceDecisions "$::seResourcePrelude$::seResourceMoved$::seResourceIf[seResourceMain {moved {} if_moved true}]"
+} -result {{} {USE-AFTER-MOVE AFFINE-PATH-RELEASE-UNSUPPORTED}}
+
+test se-equal-unwind-channel {whether the program unwinds suspended coroutines is a waiting channel (C:unwind): a coroutine handle moved on one path of an `if` is AFFINE-PATH-RELEASE-UNSUPPORTED while a suspending function owns a Handle, and that site's rejection takes the yield away -- so the consumer waits for it and is judged once it is rejected, the KNOWN-ERROR, whichever is written first; the batched decisions are the sequential ones (the analysis once had no such channel: the batched scheduler committed the path release beside the contributor's rejection, and the sequential order judged a consumer written first while the contributor stood)} -body {
+    set calls {handle_moved true}
+    list [seResourceDecisions "$::seResourcePrelude$::seResourceUnwinding$::seResourceHandle[seResourceMain $calls]"] \
+        [seResourceDecisions "$::seResourcePrelude$::seResourceHandle$::seResourceUnwinding[seResourceMain $calls]"]
+} -result {{{} {TYPE KNOWN-ERROR}} {{} {KNOWN-ERROR TYPE}}}
+
 test se-equal-every-mention {every mention of a binding is an edge of the analysis, not only its last: a nested function's capture of a vector is MUTABLE-PLACE-CAPTURE while a block before it mutates the vector, and is accepted once that block is rejected (the mutation is gone with its body) -- the analysis once kept only the last mention of each binding (a flat `dict lappend`), so the capture did not depend on the mutating block: it was rejected beside it, another program than the sequential order's, or, with a site between them, predicted and contradicted by the next build} -body {
     set prelude "import std::compiler\nimport std::mutable_vector\n\nfn want_int(x: int) -> int:\n    x\n\nfn f() -> int errors std::compiler::CompilerError:\n    v = std::mutable_vector::from_list(\[1\])\n    static compile:\n        v.push(2)\n        want_int(\"s\")\n"
     set capture "    fn g() -> int errors std::compiler::CompilerError:\n        static compile:\n            v.length()\n    r = g():\n        on std::compiler::CompilerError:\n            -1\n"
