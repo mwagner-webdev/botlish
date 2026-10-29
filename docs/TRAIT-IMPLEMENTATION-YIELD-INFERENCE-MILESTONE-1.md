@@ -712,8 +712,8 @@ coverage, the golden shards, the executables, the warning gate, the Rust
 tests): success at the first commit; at the final commit the golden
 shards, both coverage jobs, the stub- and system-linked executables (also
 under GC stress), the warning gate, the Rust tests and the method-call
-oracle succeeded, and the Tcl suite on interp and on compile was still
-running when this was written. (The GC-stress job runs only on pushes to
+oracle succeeded, and the Tcl suite on interp and on compile (golden
+duplicates included): the whole run is green. (The GC-stress job runs only on pushes to
 main.)
 
 ## 12. Remaining limitations
