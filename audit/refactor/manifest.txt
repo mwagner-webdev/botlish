@@ -43,6 +43,12 @@
 #                (Fn{args: [str]}), so it is a one-character String there;
 #                comparing it as a character means decoding that String
 #                again (std::str::length(c) == 1 and c.char_at(0) == '_').
+#                Since UNICODECHAR-CLASSIFIERS.md the classes of a
+#                UnicodeChar exist (std::char::is_tcl_alnum / is_tcl_alpha),
+#                which closed stdlib/web.bot's six entries; the ones left are
+#                the canonical benchmarks lex-strategy and source-checks,
+#                whose String classifiers are part of the measured workload
+#                (BENCHMARK-BIMODALITY.md measured their UnicodeChar ports).
 #   index-proof  the natural character spelling's std::str::char_at index is not
 #                proven in range by today's completion proof.
 #   test-datum   a test datum whose length 1 is the case's subject.
@@ -149,12 +155,6 @@ fails stdlib/mutable_set.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal impor
 program stdlib/ordered_table.bot
 fails stdlib/test.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (report) requires a context (the test suite), so it cannot be a value (verified through `import std::test`)
 program stdlib/web.bot
-  ONE-CHAR-STRING-LITERAL 105:72 none -- classifier: local_extra_chars is queried by local_char?(c: str), which also classifies c with std::str::is_tcl_alnum and is passed to scan_while beside std::str::is_tcl_alpha (Fn{args: [str]}): a set of characters would need c decoded again
-  ONE-CHAR-STRING-LITERAL 105:52 none -- classifier: the set's "_", as above
-  ONE-CHAR-STRING-LITERAL 105:57 none -- classifier: the set's "%", as above
-  ONE-CHAR-STRING-LITERAL 105:62 none -- classifier: the set's "+", as above
-  ONE-CHAR-STRING-LITERAL 105:67 none -- classifier: the set's "-", as above
-  ONE-CHAR-STRING-LITERAL 136:43 none -- classifier: label_char?(c) is std::str::is_tcl_alnum(c) or c == "-", over the one-character String the String classifier needs
   ONE-CHAR-STRING-LITERAL 219:15 none -- char->text: hex_digits is the table of hexadecimal digits as text, concatenated into %XX escapes (hex_pair); a "0123456789ABCDEF" slice would keep each digit a one-character String
   ONE-CHAR-STRING-LITERAL 219:20 none -- char->text: the digit "1", as above
   ONE-CHAR-STRING-LITERAL 219:25 none -- char->text: the digit "2", as above

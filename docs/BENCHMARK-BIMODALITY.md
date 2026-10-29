@@ -64,7 +64,7 @@ program in source alone, with the value unchanged, measured
 | refined-checks | an ASCII email of the same length | 372 -> 327 us (-12%) | 140 us |
 | uri-steady | escaping with `std::str::char_at`, `append_char` and character literals | 1824 -> 1835 us (no change) | 169 us |
 | lex-strategy, source-checks | declared parameter types (no generic, guarded instance; lex-strategy becomes AOT-ready) | no change | |
-| refined-checks | `emailish?` reading `UnicodeChar`s, classified by a prototype `std::char::is_tcl_alnum`/`is_tcl_alpha` (stdlib/web.bot patched) | 380 -> 164 us (-57%) | 140 us |
+| refined-checks | `emailish?` reading `UnicodeChar`s, classified by a prototype `std::char::is_tcl_alnum`/`is_tcl_alpha` (stdlib/web.bot patched; landed since, UNICODECHAR-CLASSIFIERS.md: 156 us) | 380 -> 164 us (-57%) | 140 us |
 | lex-strategy | the same, on the index-walking form | 13 -> 8.1 us (-38%; 24.3 -> 8.1 with both changes) | 1.7 us |
 
 The AOT executables run the same Cranelift code as the JIT and measure the
@@ -560,8 +560,10 @@ of the wrong length), one NIR op and one non-allocating helper each: 45
 lines over core/unicodechar.tcl, native/lower.tcl, nir.rs, clif.rs and
 ops.rs. `audit/bench-bimodality/prototype/char-classifiers.patch` holds them
 and the 8-line port of `std::web::emailish?`. All four backends agree with
-the `str` classifiers on Latin, CJK, astral and non-ASCII digits. It is a
-measurement prototype: no Compilerpedia note, test or mutant.
+the `str` classifiers on Latin, CJK, astral and non-ASCII digits. It was a
+measurement prototype. **Both have since landed** (UNICODECHAR-CLASSIFIERS.md):
+the same natives with their tests, notes and mutants, an inline ASCII path in
+generated code, and the port in stdlib/web.bot (refined-checks 156 us).
 
 **The ports** keep each program's structure and change only what a
 character is: `std::str::char_at` for `substring(i, i + 1)`, a `UnicodeChar`
@@ -606,7 +608,8 @@ diagnostic. For `c = s.substring(0, 1)` on `"-x"`, `c == "-"` is `true`
 equals a character, and nothing reports that comparison as decided.
 Classifiers over `UnicodeChar` remove the reason to hold a character as a
 String in the first place. A diagnostic for `==` between a `str` and a
-`UnicodeChar` would be the safety net for code that still does.
+`UnicodeChar` would be the safety net for code that still does
+(EQUALITY-SEMANTICS.md takes the question up for equality as a whole).
 
 ## AOT
 
@@ -640,7 +643,7 @@ runs, at the same speed.
 | raw Ints from range analysis; tail calls as jumps; exact callables; lambda-lifted closures; branch-form conditions | present, used | why fib, loop-count and sum-refined are at Go, and loop-count ahead |
 | a loop is an expression that collects its bodies' values | present (design) | game-server: 41% of the run, a List nobody reads; json.bot's `scalars` ends its loop with `continue` to avoid it |
 | String = UTF-8 with Unicode-scalar indexing, no index for non-ASCII text | present (representation) | json-parse: 76%; refined-checks: 12%; uri-steady: its non-ASCII inputs |
-| Unicode classification takes a one-scalar `str`, not a `UnicodeChar` | present (API) | the 318-357-instruction String per classified character; with a prototype `std::char::is_tcl_alpha`/`is_tcl_alnum`: refined-checks -57%, lex-strategy -21%/-38%, source-checks -15% |
+| Unicode classification takes a one-scalar `str`, not a `UnicodeChar` | present (API) when measured; the `UnicodeChar` forms landed since (UNICODECHAR-CLASSIFIERS.md) | the 318-357-instruction String per classified character; with a prototype `std::char::is_tcl_alpha`/`is_tcl_alnum`: refined-checks -57%, lex-strategy -21%/-38%, source-checks -15% |
 | iteration over a String's characters | **missing** | lex-strategy's `chars_of` List (48%), json-parse's `char_at` loop |
 | a mutable String builder (or a String from bytes or characters) | **missing** | uri-steady: plan objects per escaped byte; the `append_char` rewrite copies the text per append |
 | a precise result type for `std::str::encode_utf8` | **missing** | json-parse cannot use `validate_bytes` |

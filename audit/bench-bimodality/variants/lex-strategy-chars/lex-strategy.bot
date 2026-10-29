@@ -1,8 +1,8 @@
 # VARIANT (BENCHMARK-BIMODALITY.md): bench/lex-strategy.bot with its
 # characters as UnicodeChars: chars_of collects std::str::char_at's
 # characters (a List[UnicodeChar], no one-character Strings), the strict
-# classifier is the prototype std::char::is_tcl_alnum (it needs the
-# prototype natives), lenient_ident_char? takes a UnicodeChar and compares
+# classifier is std::char::is_tcl_alnum (UNICODECHAR-CLASSIFIERS.md; a
+# prototype when measured), lenient_ident_char? takes a UnicodeChar and compares
 # with character literals. Otherwise unchanged, chars_of's List included.
 #
 # lex-strategy.bot -- a strict-vs-relaxed identifier-character classifier,

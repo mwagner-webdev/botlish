@@ -726,10 +726,10 @@ test ic-local-char {local_char?(c): std::str::is_tcl_alnum requires str (checked
         [hir::types::show [dict get [hir::signatures::of $h [icBlock $h local_char?]] result]]
 } -result {{{c: str (inferred checked)}} {{checked argument 1 of native std::str::is_tcl_alnum -> str}} bool}
 
-test ic-label-char {label_char?(c): std::str::is_tcl_alnum requires str, == requires nothing: str} -body {
+test ic-label-char {label_char?(c): std::char::is_tcl_alnum requires UnicodeChar, == requires nothing: UnicodeChar (stdlib/web.bot's label_char? classifies characters since UNICODECHAR-CLASSIFIERS.md)} -body {
     set h [icWebHir]
     list [icSig $h label_char?] [icWhy $h label_char? c]
-} -result {{{c: str (inferred checked)}} {{checked argument 1 of native std::str::is_tcl_alnum -> str}}}
+} -result {{{c: UnicodeChar (inferred checked)}} {{checked argument 1 of native std::char::is_tcl_alnum -> UnicodeChar}}}
 
 test ic-emailish-callers-valid {every existing caller of the web helpers proves (or cannot contradict) the inferred contracts: no diagnostic} -body {
     llength [hir::diagnostics [icCompile "import std::web\nstd::web::emailish?(\"a@b.cd\")" 0 ""]]

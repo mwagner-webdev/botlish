@@ -2,8 +2,9 @@
 # the placement costs it adds are kept here) with emailish?'s characters as
 # UnicodeChars: char_at is std::str::char_at (no one-character
 # String; ' ' outside the text, where the original returns "": neither is
-# ever classified), the classifiers are the prototype std::char::is_tcl_alnum
-# and std::char::is_tcl_alpha (they need the prototype natives), the local
+# ever classified), the classifiers are std::char::is_tcl_alnum and
+# std::char::is_tcl_alpha (UNICODECHAR-CLASSIFIERS.md; a prototype when
+# measured), the local
 # punctuation set and the label's "-" are character literals.
 #
 # expect: [400, 0]

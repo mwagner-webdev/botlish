@@ -461,7 +461,7 @@ test ev-contract-alias-index {an aliased exact index changes nothing about the r
     evSig "fn f(xs) errors IndexNotFound:\n    i = 1\n    j = i\n    std::list::at(xs, j)\nf(\[1, 2\])" f
 } -result {{xs: list (inferred)}}
 
-test ev-contract-scan-while-unchanged {scan_while's predicate contract and local_char? str requirement are unchanged by value facts} -body {
+test ev-contract-scan-while-unchanged {scan_while's predicate contract (over UnicodeChars since UNICODECHAR-CLASSIFIERS.md) is unchanged by value facts} -body {
     set path [makeFile "import std::web\nstd::web::emailish?(\"a@b.cd\")" ev-web.bot]
     try {
         set hir [surface::readProgramFile $path -strict 1]
@@ -470,7 +470,7 @@ test ev-contract-scan-while-unchanged {scan_while's predicate contract and local
     }
     set sig [hir::signatures::of $hir [evBlock $hir scan_while]]
     lmap p [dict get $sig params] { hir::types::show [hir::signatures::paramType $p] }
-} -result {int {Fn{args: [str], return: bool, errors: []}}}
+} -result {int {Fn{args: [UnicodeChar], return: bool, errors: []}}}
 
 # ---------------------------------------------------------------------------
 # Determinism and canonical form

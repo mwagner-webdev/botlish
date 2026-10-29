@@ -1,7 +1,8 @@
 # VARIANT (BENCHMARK-BIMODALITY.md): bench/source-checks.bot with the
-# leading character as a UnicodeChar (std::str::char_at), the prototype
-# std::char::is_tcl_alpha/is_tcl_alnum in the checks List (they need the
-# prototype natives) and is_underscore?/is_hyphen? taking a UnicodeChar.
+# leading character as a UnicodeChar (std::str::char_at),
+# std::char::is_tcl_alpha/is_tcl_alnum in the checks List
+# (UNICODECHAR-CLASSIFIERS.md; a prototype when measured) and
+# is_underscore?/is_hyphen? taking a UnicodeChar.
 #
 # source-checks.bot -- a small compiler-front-end lint pass: several
 # independent lexical classifiers of an identifier candidate's own leading

@@ -4713,6 +4713,87 @@ std::abi::bytes::length; these intrinsics are what that module is written
 in. There is deliberately no operation that reads, slices or iterates the
 bytes.
 
+@topic stdlib.std::char::is_tcl_alnum
+title: std::char::is_tcl_alnum -- intrinsic of namespace std::char
+summary: Whether a character (UnicodeChar) is a letter or a decimal digit (categories L* and Nd), exactly as Tcl 9's [:alnum:] decides: std::str::is_tcl_alnum's class, for a character.
+index: stdlib
+symbol: std::char::is_tcl_alnum
+keywords: is alphanumeric; letter or digit; character class; classify character
+related: stdlib.module.std::char stdlib.std::char::is_tcl_alpha stdlib.std::str::is_tcl_alnum stdlib.std::ascii::is_alphanumeric
+
+== SIGNATURE
+    std::char::is_tcl_alnum(UnicodeChar) -> bool
+
+== USE
+An intrinsic of namespace std::char: import std::char, then write
+std::char::is_tcl_alnum. Method syntax: receiver.is_tcl_alnum(...) is the
+same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+std::char::is_tcl_alpha plus general category Nd (decimal numbers, in any
+script: ARABIC-INDIC DIGIT ZERO is alnum and not alpha); other numerals
+(Roman numerals, circled digits, fractions, superscripts) are not included.
+Total and allocation-free, like std::char::is_tcl_alpha; it decides what
+std::str::is_tcl_alnum decides for the one-character String of the same
+character.
+
+== EXAMPLES
+@example accept
+import std::char
+
+['7'.is_tcl_alnum(), '٠'.is_tcl_alnum(), 'Ⅻ'.is_tcl_alnum(), '_'.is_tcl_alnum()]
+@value [true, true, false, false]
+@end
+
+@topic stdlib.std::char::is_tcl_alpha
+title: std::char::is_tcl_alpha -- intrinsic of namespace std::char
+summary: Whether a character (UnicodeChar) is a letter (Unicode general category L*), exactly as Tcl 9's [:alpha:] decides: std::str::is_tcl_alpha's class, for a character instead of a one-character String.
+index: stdlib
+symbol: std::char::is_tcl_alpha
+keywords: is letter; alphabetic; character class; unicode letter; classify character
+related: stdlib.module.std::char stdlib.std::char::is_tcl_alnum stdlib.std::str::is_tcl_alpha stdlib.std::str::char_at stdlib.std::web::emailish?
+
+== SIGNATURE
+    std::char::is_tcl_alpha(UnicodeChar) -> bool
+
+== USE
+An intrinsic of namespace std::char: import std::char, then write
+std::char::is_tcl_alpha. Method syntax: receiver.is_tcl_alpha(...) is the
+same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+True for general categories Lu, Ll, Lt, Lm and Lo -- Unicode-aware, not
+ASCII-only -- and for no other character: not a decimal digit, a Roman
+numeral (Nl), a combining mark or punctuation. It decides what
+std::str::is_tcl_alpha decides for the one-character String of the same
+character, but it is total -- every UnicodeChar is one character, so there
+is no RANGE case -- and it never makes a String: read the characters of a
+text with std::str::char_at and classify them as they are
+(UNICODECHAR-CLASSIFIERS.md). Like the std::str form, it reproduces Tcl's
+class rather than being Botlish's eventual character-classification API.
+Its parameter is a UnicodeChar: a one-character String is the TYPE error,
+and a method-style call x.is_tcl_alpha() with both std::char and std::str
+imported needs x's type to choose (with an untyped x it is
+AMBIGUOUS-METHOD-CALL: call the one you mean).
+
+== EXAMPLES
+@example accept
+import std::char
+import std::str
+
+text = "é7例"
+loop i from 0 to text.length():
+    std::char::is_tcl_alpha(text.char_at(i))
+@caption A character read from a String, classified without a slice
+@value [true, false, true]
+@end
+
 @topic stdlib.std::char::scalar_value
 title: std::char::scalar_value -- intrinsic of namespace std::char
 summary: The Unicode scalar value of a character as an Int (0..0x10FFFF, never a surrogate), written c.scalar_value() after `import std::char`.
@@ -4750,27 +4831,32 @@ import std::char
 
 @topic stdlib.module.std::char
 title: std::char -- standard namespace
-summary: The UnicodeChar operation: std::char::scalar_value, a character's Unicode scalar value as an Int.
+summary: The UnicodeChar operations: std::char::scalar_value, a character's Unicode scalar value as an Int, and the character classes std::char::is_tcl_alpha and std::char::is_tcl_alnum.
 index: stdlib
 symbol: std::char
-keywords: character functions; char functions; unicode character
-related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char
+keywords: character functions; char functions; unicode character; character class
+related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char stdlib.std::char::is_tcl_alpha stdlib.std::char::is_tcl_alnum
 
 == SOURCE
 Compiler intrinsics only, no module file (import std::char).
 
 == MEMBERS
+    std::char::is_tcl_alnum        intrinsic -- Whether a character (Unicod...
+    std::char::is_tcl_alpha        intrinsic -- Whether a character (Unicod...
     std::char::scalar_value        intrinsic -- The Unicode scalar value of...
 
-Each member is a topic: -help NAME (e.g. -help std::char::scalar_value).
+Each member is a topic: -help NAME (e.g. -help std::char::is_tcl_alnum).
 
 == NOTES
-`char` has no module file: its one member is an intrinsic. A UnicodeChar is
+`char` has no module file: its members are intrinsics. A UnicodeChar is
 written as a character literal ('a', '\n', '😀') and read from a String with
 std::str::char_at; it becomes text with std::str::append_char. There is no
-conversion from an Int to a UnicodeChar and no character classification
-beyond comparing scalar values (plus the byte-level ascii:: predicates and
-the temporary std::str::is_tcl_alpha/alnum).
+conversion from an Int to a UnicodeChar. A character is classified with
+std::char::is_tcl_alpha and std::char::is_tcl_alnum (Tcl 9's [:alpha:] and
+[:alnum:], the classes the temporary std::str forms decide for a
+one-character String), compared with character literals (c == '_'), or
+measured with std::char::scalar_value (with the byte-level ascii::
+predicates for an ASCII scalar).
 
 @topic stdlib.std::compiler::DiagnosticCode
 title: std::compiler::DiagnosticCode -- Enum of module std::compiler
@@ -14446,7 +14532,7 @@ summary: Whether a one-character String is a letter or a decimal digit (categori
 index: stdlib
 symbol: std::str::is_tcl_alnum
 keywords: is alphanumeric; letter or digit; character class
-related: stdlib.module.std::str stdlib.std::str::is_tcl_alpha stdlib.std::ascii::is_alphanumeric
+related: stdlib.module.std::str stdlib.std::str::is_tcl_alpha stdlib.std::char::is_tcl_alnum stdlib.std::ascii::is_alphanumeric
 
 == SIGNATURE
     std::str::is_tcl_alnum(str) -> bool
@@ -14464,7 +14550,8 @@ std::str::is_tcl_alpha plus general category Nd (decimal numbers, in any
 script); other numerals (Roman numerals, superscripts) are not included.
 Same contract as std::str::is_tcl_alpha: exactly one character or the
 run-time RANGE error, and a temporary compatibility primitive rather than a
-general API.
+general API. For a character, std::char::is_tcl_alnum decides the same
+class.
 
 == EXAMPLES
 @example accept
@@ -14484,7 +14571,7 @@ summary: Whether a one-character String is a letter (Unicode general category L*
 index: stdlib
 symbol: std::str::is_tcl_alpha
 keywords: is letter; alphabetic; character class; unicode letter
-related: stdlib.module.std::str stdlib.std::str::is_tcl_alnum stdlib.module.std::ascii stdlib.std::web::emailish?
+related: stdlib.module.std::str stdlib.std::str::is_tcl_alnum stdlib.std::char::is_tcl_alpha stdlib.module.std::ascii stdlib.std::web::emailish?
 
 == SIGNATURE
     std::str::is_tcl_alpha(str) -> bool
@@ -14504,8 +14591,10 @@ character-classification API, so new code should not build on it. True
 for general categories Lu, Ll, Lt, Lm and Lo -- Unicode-aware, not
 ASCII-only. The argument must be a String of exactly one character;
 anything else (the empty String included) is the run-time RANGE error.
-It takes a String, not a UnicodeChar, so pass a one-character slice. For
-byte values, std::ascii::is_alphabetic is the structural ASCII test.
+It takes a String, not a UnicodeChar, so pass a one-character slice; for a
+character (std::str::char_at's result) std::char::is_tcl_alpha decides the
+same class without a slice. For byte values, std::ascii::is_alphabetic is
+the structural ASCII test.
 
 == EXAMPLES
 @example accept
@@ -15581,27 +15670,27 @@ stdlib/web.bot: import std::web, then write std::web::Emailish.
 
 @topic stdlib.std::web::local_extra_chars
 title: std::web::local_extra_chars -- Value of module std::web
-summary: The punctuation emailish? accepts in an address's local part (. _ % + -), as an ImmutableSet of one-character Strings: an internal table.
+summary: The punctuation emailish? accepts in an address's local part ('.' '_' '%' '+' '-'), as an ImmutableSet of UnicodeChars: an internal table.
 index: stdlib
 symbol: std::web::local_extra_chars
 keywords: email punctuation
 related: stdlib.module.std::web stdlib.std::web::emailish?
 
 == DECLARATION
-    local_extra_chars = std::immutable_set::from_list([".", "_", "%", "+", "-"])
+    local_extra_chars = std::immutable_set::from_list(['.', '_', '%', '+', '-'])
 
 == MODULE
 stdlib/web.bot: import std::web, then write std::web::local_extra_chars.
 
 == DESCRIPTION
 local_extra_chars is the established immutable-set membership idiom
-(MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class (". _ % +"
-plus "-"), over ordinary one-scalar str values (char_at's own result type)
--- never UTF-8 bytes, unlike additional_unreserved_chars's std::byte::set
-below. Retained once at module scope, exactly like
-additional_unreserved_chars: constructed once at module initialization,
-never per emailish? call (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed the
-bridge-reachability defect that once forced building this per call).
+(MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class ('.' '_'
+'%' '+' plus '-'), over UnicodeChars (char_at's own result type,
+UNICODECHAR-CLASSIFIERS.md) -- never UTF-8 bytes, unlike
+additional_unreserved_chars's std::byte::set below. Retained once at module
+scope, exactly like additional_unreserved_chars: constructed once at module
+initialization, never per emailish? call (R2A1-MODULE-FN-BRIDGE-
+REACHABILITY.md fixed the defect that once forced building this per call).
 
 @topic stdlib.std::web::emailish?
 title: std::web::emailish? -- Function of module std::web

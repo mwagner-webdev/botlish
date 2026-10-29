@@ -1,7 +1,8 @@
 # VARIANT (BENCHMARK-BIMODALITY.md): lex-strategy-indexed (the tokens
 # walked by index, no chars_of List) with its characters as UnicodeChars, as
-# lex-strategy-chars: std::str::char_at, the prototype
-# std::char::is_tcl_alnum, character literals.
+# lex-strategy-chars: std::str::char_at, std::char::is_tcl_alnum
+# (UNICODECHAR-CLASSIFIERS.md; a prototype when measured), character
+# literals.
 #
 # lex-strategy.bot -- a strict-vs-relaxed identifier-character classifier,
 # selected by ordinary control flow and then invoked: the callable-selected-

@@ -86,7 +86,7 @@ proc fourWay {exprs} {
 # std::str::is_tcl_alpha / std::str::is_tcl_alnum: direct, four-way parity, edge-case corpus.
 #
 # label                          char        General_Category   alpha alnum
-foreach {label char alpha alnum} {
+set classCorpus {
     ascii-letter                    A           true  true
     ascii-digit                     9           false true
     latin-e-acute-Ll                é      true  true
@@ -100,7 +100,11 @@ foreach {label char alpha alnum} {
     combining-acute-accent-Mn       ́      false false
     underscore-Pc                   _           false false
     full-stop-Po                    .           false false
-} {
+    deseret-long-i-astral-Lu        𐐀      true  true
+    math-bold-digit-zero-astral-Nd  𝟎      false true
+    grinning-face-astral-So         😀      false false
+}
+foreach {label char alpha alnum} $classCorpus {
     test native-tcl-unicode-alpha-$label "std::str::is_tcl_alpha($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
         fourWay [classifyProgram std::str::is_tcl_alpha $char]
     } -result $alpha
@@ -144,6 +148,153 @@ foreach native {std::str::is_tcl_alpha std::str::is_tcl_alnum} {
 }
 
 # ---------------------------------------------------------------------------
+# std::char::is_tcl_alpha / std::char::is_tcl_alnum (UNICODECHAR-CLASSIFIERS.md):
+# the same classes of a UnicodeChar, total and allocation-free. The corpus
+# above, each character a Core IR UnicodeChar constant (not folded: the NIR
+# keeps the native op), four-way: the same answer as the str form's.
+
+proc classifyCharProgram {native c} {
+    scan $c %c cp
+    return [list [list call [list ref $native] [list const UnicodeChar $cp]]]
+}
+
+foreach {label char alpha alnum} $classCorpus {
+    test native-tcl-unicode-char-alpha-$label "std::char::is_tcl_alpha($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [classifyCharProgram std::char::is_tcl_alpha $char]
+    } -result $alpha
+    test native-tcl-unicode-char-alnum-$label "std::char::is_tcl_alnum($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [classifyCharProgram std::char::is_tcl_alnum $char]
+    } -result $alnum
+}
+
+# The corpus's characters read from a String at run time
+# (std::str::char_at): on the native backends a non-ASCII character goes to
+# the runtime helper, the ASCII ones (A, 9, _, .) are classified inline.
+set classText [join [lmap {label char alpha alnum} $classCorpus {set char}] ""]
+test native-tcl-unicode-char-corpus-read-at-run-time {the corpus as one String, each character read with std::str::char_at and classified, on interp/compile/cranelift-generic/cranelift} -body {
+    sourceAgree "import std::char\nimport std::str\n\ntext = \"$classText\"\nalpha = loop i from 0 to std::str::length(text):\n    std::char::is_tcl_alpha(text.char_at(i))\nalnum = loop i from 0 to std::str::length(text):\n    std::char::is_tcl_alnum(text.char_at(i))\n\[alpha, alnum\]\n"
+} -result [list value "\[\[[join [lmap {l c a n} $classCorpus {set a}] {, }]\], \[[join [lmap {l c a n} $classCorpus {set n}] {, }]\]\]"]
+
+# Every ASCII scalar, the control characters included (built at run time
+# from its bytes: no source escape writes them), against Tcl's own classes:
+# the native backends' inline ASCII rule (codegen::clif's CharIsTclAlpha)
+# on every one of them.
+set asciiAlpha {}
+set asciiAlnum {}
+for {set cp 0} {$cp < 128} {incr cp} {
+    if {[string is alpha -strict [format %c $cp]]} { lappend asciiAlpha $cp }
+    if {[string is alnum -strict [format %c $cp]]} { lappend asciiAlnum $cp }
+}
+test native-tcl-unicode-char-every-ascii-scalar {every ASCII scalar's std::char::is_tcl_alpha and is_tcl_alnum agree with Tcl's [:alpha:] and [:alnum:] on interp/compile/cranelift-generic/cranelift} -body {
+    sourceAgree {import std::abi::bytes
+import std::byte
+import std::char
+import std::str
+
+fn ascii() -> str errors InvalidUtf8:
+    codes = loop b from 0 to 128:
+        std::byte::from_int(b)
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(codes))
+
+text = ascii():
+    on InvalidUtf8:
+        ""
+alpha = loop i from 0 to std::str::length(text):
+    c = text.char_at(i)
+    if not std::char::is_tcl_alpha(c):
+        continue
+    std::char::scalar_value(c)
+alnum = loop i from 0 to std::str::length(text):
+    c = text.char_at(i)
+    if not std::char::is_tcl_alnum(c):
+        continue
+    std::char::scalar_value(c)
+[std::str::length(text), alpha, alnum]
+}
+} -result [list value "\[128, \[[join $asciiAlpha {, }]\], \[[join $asciiAlnum {, }]\]\]"]
+
+# Every scalar: the char forms decide exactly the str forms' class (the
+# implementation interp and compile run; native/src/runtime/ops.rs's
+# helpers are checked the same way by its Rust test
+# char_classifiers_agree_with_string_classifiers_on_every_scalar, and its
+# inline ASCII rule by inline_ascii_rule_is_the_general_category_rule).
+test native-tcl-unicode-char-forms-agree-every-scalar {core/tclcompat.tcl's std::char forms agree with its std::str forms on every Unicode scalar} -body {
+    set bad {}
+    for {set cp 0} {$cp <= 0x10FFFF} {incr cp} {
+        if {$cp == 0xD800} { set cp [expr {0xE000}] }
+        set c [core::value::char $cp]
+        set s [core::value::str [format %c $cp]]
+        if {[core::tclcompat::charIsTclAlpha $c] ne [core::tclcompat::isTclAlpha $s]
+                || [core::tclcompat::charIsTclAlnum $c] ne [core::tclcompat::isTclAlnum $s]} {
+            lappend bad [format U+%04X $cp]
+            if {[llength $bad] >= 10} break
+        }
+    }
+    set bad
+} -result {}
+
+# Contract: a UnicodeChar parameter. A String is the TYPE error, at run
+# time for a direct call of the native (like every native's parameter:
+# core/native.tcl), statically for an untyped parameter that forwards it
+# (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
+foreach native {std::char::is_tcl_alpha std::char::is_tcl_alnum} {
+    test native-tcl-unicode-$native-rejects-string "${native}(\"a\") is the TYPE error on every backend, with the same message" -body {
+        set program [list [list call [list ref $native] [list const str a]]]
+        set outcomes [lmap b $::parityBackends {lrange [outcomeUnder $b $program] 0 2}]
+        if {[llength [lsort -unique $outcomes]] != 1} {
+            error "outcome mismatch across $::parityBackends: $outcomes"
+        }
+        lindex $outcomes 0
+    } -result [list error {CORE SEMANTIC TYPE} "$native: expected UnicodeChar, got \"a\""]
+
+    test native-tcl-unicode-$native-forwarded-string-static "a String forwarded to $native through an untyped parameter is rejected statically" -body {
+        catch {surface::compile "import std::char\n\nfn f(c):\n    ${native}(c)\n\nf(\"a\")\n" -warnings off} message options
+        list [dict get $options -errorcode] [regexp {statically incompatible with UnicodeChar} $message]
+    } -result {{CORE SEMANTIC TYPE} 1}
+}
+
+# Native metadata: total, pure and allocation-free -- no -runtime tag at all
+# (no string indexing, no RANGE check, no allocation), a UnicodeChar
+# parameter, a bool result, context-free (a function calling it can be
+# repeatable: emailish?'s decided re-check).
+foreach native {std::char::is_tcl_alpha std::char::is_tcl_alnum} {
+    test native-tcl-unicode-$native-metadata "$native: UnicodeChar -> bool, context-free, no -runtime tag" -body {
+        set m [core::native::metadata $native]
+        list [dict get $m paramTypes] [dict get $m resultType] [dict get $m runtime] [dict get $m contextFree]
+    } -result {UnicodeChar bool {} 1}
+}
+
+# Method syntax: with both std::char and std::str imported, the receiver's
+# type chooses between the two forms; an untyped receiver accepts both, so
+# its method-style call is AMBIGUOUS-METHOD-CALL (METHOD-SUGAR.md: no
+# precedence), as xs.length() is with std::list and std::str.
+test native-tcl-unicode-char-method-typed-receivers {c.is_tcl_alnum() and t.is_tcl_alnum() resolve by the receiver's type with both std::char and std::str imported} -body {
+    sourceAgree "import std::char\nimport std::str\n\nfn of_text(t: str) -> bool:\n    t.is_tcl_alnum()\n\nfn of_char(c: UnicodeChar) -> bool:\n    c.is_tcl_alnum()\n\n\[of_text(\"é\"), of_char('é'), of_char('-')\]\n"
+} -result {value {[true, true, false]}}
+
+test native-tcl-unicode-char-method-untyped-receiver-ambiguous {x.is_tcl_alpha() with an untyped x and both std::char and std::str imported is AMBIGUOUS-METHOD-CALL naming both} -body {
+    catch {surface::compile "import std::char\nimport std::str\n\nfn f(x):\n    x.is_tcl_alpha()\n\nf(\"x\")\n" -warnings off} message options
+    list [dict get $options -errorcode] [regexp {std::char::is_tcl_alpha, std::str::is_tcl_alpha} $message]
+} -result {{CORE SEMANTIC AMBIGUOUS-METHOD-CALL} 1}
+
+# The native lowering: one op per call, no allocation. std::web::emailish?
+# classifies UnicodeChars since UNICODECHAR-CLASSIFIERS.md: on the Unicode
+# address its run makes no String at all (it made one per character read
+# before), and its NIR has no substring left.
+test native-tcl-unicode-char-nir-ops {std::char::is_tcl_alpha/alnum lower to one chartclalpha/chartclalnum op each} -body {
+    set text [native::nir [surface::compile "import std::char\n\nfn f(c: UnicodeChar) -> List\[bool\]:\n    \[std::char::is_tcl_alpha(c), std::char::is_tcl_alnum(c)\]\n\nf('é')\n" -warnings off]]
+    list [regexp -all {op chartclalpha } $text] [regexp -all {op chartclalnum } $text]
+} -result {1 1}
+
+test native-tcl-unicode-emailish-makes-no-string {std::web::emailish? on a Unicode address allocates no String natively, and its NIR slices nothing} -body {
+    set hir [surface::compile [emailishSource {café@例え.テスト}] -warnings off]
+    set report [native::allocationReport $hir summary 1]
+    set strings [expr {[dict exists $report byKind String] ? [dict get $report byKind String allocations] : 0}]
+    set text [native::nir $hir]
+    list $strings [regexp -all {op substr} $text] [expr {[regexp -all {op chartclal(?:pha|num) } $text] > 0}]
+} -result {0 0 1}
+
+# ---------------------------------------------------------------------------
 # std::web::emailish?: four-way parity and the reference regex, the corpus
 # NATIVE-TCL-UNICODE.md's report cross-checks against Python/Rust too. Each
 # case documents which grammar position it forces Unicode classification
@@ -155,6 +306,8 @@ foreach {label s expect} {
     short-tld-ok                      a@b.co                           true
     tld-too-short                     a@b.c                            false
     local-part-symbols                a.b_c%d+e-f@sub.example.com      true
+    digit-in-local-part               user7@example.com                true
+    hyphen-in-domain-label            a@my-host.example.com            true
     missing-local-part                @example.com                     false
     missing-domain                    a@                               false
     empty-first-label                 a@.com                           false
@@ -187,9 +340,9 @@ test native-tcl-unicode-emailish-numeric-non-Nd-rejected "std::web::emailish?(a 
 } -result false
 
 # ---------------------------------------------------------------------------
-# GC stress: the validator's own String traversal (substring/length calls)
-# and the classification primitives themselves must survive a collection
-# forced before every allocation.
+# GC stress: the validator's own String traversal (length and char_at
+# calls) and the classification primitives themselves must survive a
+# collection forced before every allocation.
 
 test native-tcl-unicode-emailish-gc-stress {std::web::emailish? survives a collection forced before every allocation} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1

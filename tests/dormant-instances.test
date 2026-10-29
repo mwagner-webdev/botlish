@@ -212,7 +212,7 @@ set escapeShape {
 test dormant-refined-checks-set {refined-checks: the dormant instances are the generic Block-value entries of the de-closured closures whose calls are Int-keyed (emailish?'s char_at, char_is?, scan_while, tld?, domain?; uri_query_value?'s upper_hex?, valid_from?) and the scan_while instance only tld?<generic> calls} -body {
     lassign [refinedChecks] hir spec analysis
     dormantLabels $spec
-} -result {char_at<generic> char_is?<generic> domain?<generic> {scan_while<any, native(std::str::is_tcl_alpha)>} scan_while<generic> tld?<generic> upper_hex?<generic> valid_from?<generic>}
+} -result {char_at<generic> char_is?<generic> domain?<generic> {scan_while<any, native(std::char::is_tcl_alpha)>} scan_while<generic> tld?<generic> upper_hex?<generic> valid_from?<generic>}
 
 test dormant-transitive {an instance reachable only through a dormant entry is dormant too (apply<any, str, int>); the live, exact apply instance is not; get's generic entry is dormant (its calls are Int-keyed)} -body {
     lassign [dormantOf $transitiveShape] hir spec analysis
@@ -271,22 +271,19 @@ test dormant-refined-checks-char-at-entry {refined-checks: char_at.i loses the -
     list $off [entryOf $analysis $spec char_at<int>]
 } -result {{{[-∞, 4611686018427387902]}} {{[0, 4611686018427387902]}}}
 
-# char_at (stdlib/web.bot) guards its slice (`if i < 0 or i >= n: return ""`,
-# which proves the substring's bounds): with dormant instances on, i's entry
+# char_at (stdlib/web.bot) guards its read (`if i < 0 or i >= n: return ' '`,
+# which proves std::str::char_at's index): with dormant instances on, i's entry
 # Range [0, ...] also decides the `i < 0` test statically (no ilt). With them
-# off, the guard's own false edge narrows i to [0, n - 1] (an `or` narrows
-# by every operand, hir/range.tcl's Paths and OutcomeFacts), so i + 1 is a raw
-# riadd there too; only the ilt remains.
-# The guard also makes the slice's bounds a completion proof, so its checks are
-# gone from the NIR: no `regioncheck` before the region, `substrproven` (no
-# check, no error exit) where the String is materialized (PROOF-FACT-REPAIRS.md).
-# Since the warning-driven refactor (REFACTOR-WARNINGS-CLEAN.md) the
-# materializing variant is emitted first.
-test dormant-refined-checks-char-at-nir {refined-checks: char_at's i + 1 is a raw riadd (no tag test, no overflow check) in both of its emitted variants, with dormant instances on or off; on, the i < 0 test is decided (no ilt)} -body {
+# off, only the ilt remains. The guard makes the index a completion proof
+# (PROOF-FACT-REPAIRS.md), so the read is `strcharatproven`: no check, no
+# error exit. Since UNICODECHAR-CLASSIFIERS.md the character is a
+# UnicodeChar, so there is no slice: no i + 1, and no region companion (the
+# String-producing char_at had two variants, materializing and region).
+test dormant-refined-checks-char-at-nir {refined-checks: char_at's read is one strcharatproven (no slice: no i + 1, no region companion), with dormant instances on or off; on, the i < 0 test is decided (no ilt)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
     set off [withDormant 0 {nirOpsOf [native::nir $hir] char_at}]
     list $off [nirOpsOf [native::nir $hir] char_at]
-} -result {{{ilt runbox runbox rige runbox riadd rbox substrproven} {ilt runbox runbox rige runbox riadd rbox}} {{runbox runbox rige runbox riadd rbox substrproven} {runbox runbox rige runbox riadd rbox}}}
+} -result {{{ilt runbox runbox rige strcharatproven}} {{runbox runbox rige strcharatproven}}}
 
 test dormant-scan-shape-entry {the emailish? scanner shape: get.i is [0, …] once scan<generic>'s unbounded loop counter no longer reaches it} -body {
     set off [withDormant 0 {

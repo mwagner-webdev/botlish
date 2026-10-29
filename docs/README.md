@@ -236,8 +236,10 @@ never has to be a one-character String first. What still uses a
 one-character String -- a join or an escape that `std::str::concat` builds as one
 virtual construction, where a flat append would cost an allocation; a table
 of characters as text; a character handed to a String-taking classifier such
-as `std::str::is_tcl_alnum` -- is listed, with its reason, in the warning manifest
-(§23).
+as `std::str::is_tcl_alnum` in the canonical benchmarks that measure it (a
+character's own classes are `std::char::is_tcl_alpha` and `is_tcl_alnum`,
+UNICODECHAR-CLASSIFIERS.md) -- is listed, with its reason, in the warning
+manifest (§23).
 
 **Equality (`==`)** compares structure. Values of different kinds are never
 equal (`1.0 == 1` is false). Integers and Float64s compare numerically
@@ -595,6 +597,7 @@ Standard intrinsics (qualified root natives):
 | `std::str::char_at` | str, int → UnicodeChar, errors `IndexNotFound`: the scalar at character index `0 <= i < length` (the index space of `length`/`substring`); any other Int index fails with `IndexNotFound`; never allocates. With char literals (`c == '%'`) and `std::char::scalar_value` it classifies a String's characters without a one-character String or an `encode_utf8` List (ENCODE-UTF8-ALLOCATION-RESEARCH.md) |
 | `std::str::is_tcl_alpha` `std::str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
 | `std::char::scalar_value` | UnicodeChar → int (the Unicode scalar value: `0..0x10FFFF` without the surrogates, never a byte or a code unit of an encoding) |
+| `std::char::is_tcl_alpha` `std::char::is_tcl_alnum` | UnicodeChar → bool: the String forms' classes of a character, total and allocation-free (UNICODECHAR-CLASSIFIERS.md) |
 | `std::float64::from_int` | int → Float64, errors `NonFiniteFloat`: the nearest Float64 (ties to even), from the exact Int at any size; an Int beyond the largest finite Float64 fails (FLOAT64-MILESTONE-1.md) |
 | `std::float64::truncate` | Float64 → int: the integer part, rounding toward zero, exact at any magnitude; never fails |
 | `std::float64::from_decimal_rounded` | DecimalRounded → Float64: the Float64 nearest round(x, N), N the precision x's static type guarantees (elaborated to `decimal_rounded#to_float64`); never fails (DECIMAL-ROUNDED-MILESTONE-1.md) |
@@ -633,11 +636,12 @@ Ordinary Botlish members of the same namespaces (library modules, not
 natives): `std::list::get`, `std::list::any?`, `std::list::all?`, `std::list::none?`,
 `std::list::find` (`stdlib/list.bot`); `std::mutable_array::from_list`,
 `std::mutable_array::create`, `std::mutable_array::get` (`stdlib/mutable_array.bot`).
-`char` has no library module: `std::char::scalar_value` is its one member
+`char` has no library module: its members are the intrinsics
+`std::char::scalar_value`, `std::char::is_tcl_alpha` and `std::char::is_tcl_alnum`
 (`std::str::char_at` produces a UnicodeChar from a String position; a
 "code point" also names surrogates and, colloquially, Latin-1 or other
 encodings' numbers; a scalar value is exactly what a UnicodeChar holds).
-Like every native's parameter types, its `UnicodeChar` requirement is
+Like every native's parameter types, their `UnicodeChar` requirement is
 checked at run time (`std::char::scalar_value(65)` is the `TYPE` error).
 
 **Indexed access: `at` and `get`.** `at(container, index)` is required
@@ -3470,8 +3474,9 @@ that no longer fires, or a drifted location fails it -- and compiles every
 program and loader without a manifest entry under `-warnings error`. A
 library's findings print for every program that loads it (there is no "system
 header" notion); since the refactor only two modules carry any, all
-`ONE-CHAR-STRING-LITERAL`: `stdlib/web.bot` (23: its hexadecimal digit table,
-`"%"`, and the local-part and label classes beside `std::str::is_tcl_alnum`) and
+`ONE-CHAR-STRING-LITERAL`: `stdlib/web.bot` (17: its hexadecimal digit table
+and `"%"`; its local-part and label classes read UnicodeChars since
+UNICODECHAR-CLASSIFIERS.md) and
 `stdlib/linux/path.bot` (2: the joining `"/"`, and an index the completion proof
 does not cover). `stdlib/io.bot`'s line operations append their newline as a
 character (`std::str::append_char`), so every program that prints through `io`

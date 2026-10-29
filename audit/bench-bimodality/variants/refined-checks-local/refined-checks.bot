@@ -1,11 +1,12 @@
 # VARIANT (BENCHMARK-BIMODALITY.md): bench/refined-checks.bot with
-# std::web::emailish? (and Emailish, local_extra_chars) copied verbatim into
+# std::web::emailish? (and Emailish, local_extra_chars) as it was before
+# UNICODECHAR-CLASSIFIERS.md (one-character Strings) copied verbatim into
 # the program. It is no control for the module's own emailish?: in the entry
 # program `check`'s instance loses its str facts (int, int, any, any), the
 # second emailish? call is no longer decided, and local_char? becomes a
 # closure allocated per call (local_extra_chars is a captured top-level
-# binding there, not a module static). The UnicodeChar comparison is made in
-# stdlib/web.bot itself (prototype/char-classifiers.patch); this and
+# binding there, not a module static). The UnicodeChar comparison was made in
+# stdlib/web.bot itself (prototype/char-classifiers.patch, since landed); this and
 # refined-checks-chars only show the same change under the same placement.
 #
 # expect: [400, 0]

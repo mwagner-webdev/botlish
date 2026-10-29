@@ -2469,6 +2469,38 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let eq = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
                 self.bool_of(eq)
             }
+            // char::is_tcl_alpha / char::is_tcl_alnum (UNICODECHAR-
+            // CLASSIFIERS.md): an ASCII scalar inline -- its only letters are
+            // A-Z and a-z (Lu, Ll: (cp | 0x20) - 'a' < 26 unsigned) and its
+            // only Nd digits 0-9 -- any other scalar through the helper,
+            // which reads General_Category (ops.rs's tcl_alpha_char). Never
+            // fails, never allocates.
+            CharIsTclAlpha | CharIsTclAlnum => {
+                let ascii_path = self.b.create_block();
+                let wide = self.b.create_block();
+                let done = self.b.create_block();
+                let result = self.b.append_block_param(done, I64);
+                let cp = self.b.ins().ushr_imm_s(a[0], 3);
+                let ascii = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, cp, 0x80);
+                self.b.ins().brif(ascii, ascii_path, &[], wide, &[]);
+                self.b.switch_to_block(ascii_path);
+                let folded = self.b.ins().bor_imm_s(cp, 0x20);
+                let offset = self.b.ins().iadd_imm_s(folded, -(b'a' as i64));
+                let mut flag = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, offset, 26);
+                if op == CharIsTclAlnum {
+                    let digit_offset = self.b.ins().iadd_imm_s(cp, -(b'0' as i64));
+                    let digit = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, digit_offset, 10);
+                    flag = self.b.ins().bor(flag, digit);
+                }
+                let v = self.bool_of(flag);
+                self.b.ins().jump(done, &[BlockArg::Value(v)]);
+                self.b.switch_to_block(wide);
+                let helper = if op == CharIsTclAlpha { "rt_char_is_tcl_alpha" } else { "rt_char_is_tcl_alnum" };
+                let v = self.call_helper(helper, &[self.vm, a[0]]);
+                self.b.ins().jump(done, &[BlockArg::Value(v)]);
+                self.b.switch_to_block(done);
+                result
+            }
             // Floating-point arithmetic and comparisons (FLOAT64-MILESTONE-1.md):
             // the target's own floating-point instructions on the unboxed
             // numbers (float_op); the conversions are runtime helpers.
