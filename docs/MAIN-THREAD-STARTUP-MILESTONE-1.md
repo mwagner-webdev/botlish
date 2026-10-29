@@ -500,7 +500,8 @@ of other campaigns (c-ffi's, native-link-plan's) were updated to the new
 signatures, and both are still KILLED on Linux x86-64: c-ffi's
 `link-failure-removes-earlier` (by `cf-link-failure-keeps-executable`) and
 native-link-plan's `system-loses-static` (by `nlp-linkers-agree`). The native-stack campaign on Linux x86-64 (all of its mutants,
-the new detector included): STACK-LINUX-PENDING.
+the new detector included): 51 mutants, 22 killed, 0 survived, 29 skipped
+(macOS' and Windows' code).
 
 ## 30. Executable size and performance
 
