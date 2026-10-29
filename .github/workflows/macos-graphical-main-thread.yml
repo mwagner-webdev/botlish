@@ -71,6 +71,14 @@ jobs:
       - name: Build native (Cranelift) backend
         uses: ./.github/actions/build-native
 
+      # The runtime's own stack facts and guard checks on the process's main
+      # thread and on created threads (native/tests/native_stack.rs, whose
+      # `main` runs on the main thread: MACOS-AARCH64-MILESTONE-4.md), for
+      # the census's section 11-12 -- recorded, not required.
+      - name: The runtime's stack checks (native_stack, main thread included)
+        run: |
+          cargo test --release --manifest-path native/Cargo.toml --test native_stack 2>&1 | tee native-stack.log | grep -E -i "main|frames|passed|failed" | head -n 80 || true
+
       - name: Cache the Tcl.framework build
         uses: actions/cache@v4
         with:
@@ -142,4 +150,5 @@ jobs:
             census.log
             app-build.log
             link-plan-sdl3.log
+            native-stack.log
           if-no-files-found: warn
