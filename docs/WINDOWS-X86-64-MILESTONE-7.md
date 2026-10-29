@@ -658,7 +658,14 @@ Result:
 * **macOS** (run 40799420498, the tier item `filesystem-mutants=...`):
   `darwin-dot-entries-listed` killed by `fs-darwin-entries`,
   `fs-darwin-executable`, `fs-darwin-names` and `fs-darwin-portable`.
-* **real Windows**: TODO-WIN-MUTANTS.
+* **real Windows** (run 40799420515, the same tier item):
+  `win-enumeration-loses-native-name` killed by
+  `fs-windows-native-roundtrip` (the name with an unpaired surrogate no
+  longer reopened its file), `win-last-error-read-late` killed by
+  `fs-windows-directory-failures`, `fs-windows-long-path`,
+  `fs-windows-modes` and `fs-windows-sharing` (each pins a failure's
+  native code, which a GetLastError read after another Win32 call no longer
+  reports).
 
 ### 13.4 CI
 
@@ -678,35 +685,35 @@ Result:
 its operation in a loop, best of 5 runs inside one process (no compilation,
 link or process start in a row), per iteration, minus the same loop without
 the operation. Linux: this container (real Linux, ext4, x86-64, the machine
-otherwise idle); macOS: a `macos-15` runner (APFS, arm64; run 40799420498,
-the tier item `filesystem-bench`); Windows: a `windows-2025` runner (NTFS;
-run 40799420515). Shared runners and a container are noisy machines: read
+otherwise idle); macOS: a `macos-15` runner (APFS, arm64; run 40799420498);
+Windows: a `windows-2025` runner (NTFS; run 40799420515) -- both the tier
+item `filesystem-bench`. Shared runners and a container are noisy machines: read
 the rows as orders of magnitude and ratios, not as fixed costs.
 
 | per operation | Linux (raw syscalls) | macOS (libSystem) | Windows (kernel32) |
 |---|---:|---:|---:|
-| validate + native (40 characters) | 267 ns | 239 ns | TODO-WIN-PERF |
-| concat (text) | 221 ns | 292 ns | |
-| join (native) | 2.58 us | 2.90 us | |
-| text (native) | 168 ns | 229 ns | |
-| open + close | 1.76 us | 6.74 us | |
-| write_file 64 B (replace) | 159 us | 173 us | |
-| read_file 64 B | 6.4 us | 11.8 us | |
-| portable write 64 B (FilePath) | 129 us | 153 us | |
-| write_file 1 MiB | 803 us | 758 us | |
-| read_file 1 MiB | 552 us | 598 us | |
-| entries, per entry (100) | 1.48 us | 1.29 us | |
-| reopen through the native name, per entry (100) | 11.2 us | 19.4 us | |
+| validate + native (40 characters) | 267 ns | 239 ns | 3.56 us |
+| concat (text) | 221 ns | 292 ns | 22.3 us |
+| join (native) | 2.58 us | 2.90 us | 6.99 us |
+| text (native) | 168 ns | 229 ns | 11.7 us |
+| open + close | 1.76 us | 6.74 us | 26.4 us |
+| write_file 64 B (replace) | 159 us | 173 us | 195 us |
+| read_file 64 B | 6.4 us | 11.8 us | 54.1 us |
+| portable write 64 B (FilePath) | 129 us | 153 us | 204 us |
+| write_file 1 MiB | 803 us | 758 us | 448 us |
+| read_file 1 MiB | 552 us | 598 us | 2.42 ms |
+| entries, per entry (100) | 1.48 us | 1.29 us | 7.50 us |
+| reopen through the native name, per entry (100) | 11.2 us | 19.4 us | 68.0 us |
 
 What the rows say:
 
 * **The portable layer costs nothing.** `portable write` is `write_file`
   called through `std::io::fs::FilePath` -- the clone per witness -- and
-  is within the run-to-run noise of the direct call on both hosts (it came
-  out lower on both; a replace is dominated by the kernel's truncation of
-  the existing file, which varies run to run: Python's
-  `open(path, "wb").write(64 bytes)` measured 121 us on the same Linux
-  container). No dispatch is left to cost anything
+  is within the run-to-run noise of the direct call on every host (lower on
+  Linux and macOS, 5% higher on Windows; a replace is dominated by the
+  kernel's truncation of the existing file, which varies run to run:
+  Python's `open(path, "wb").write(64 bytes)` measured 121 us on the same
+  Linux container). No dispatch is left to cost anything
   (`fs-specialized-per-witness`).
 * **System calls dominate everything that touches the filesystem.** open +
   close is two syscalls on Linux (1.8 us) and two libSystem calls on macOS
@@ -725,11 +732,34 @@ What the rows say:
   syscall of the operation that uses the path; a byte-storage primitive
   (`std::abi::bytes::join` exists for Bytes; native paths are List[Byte])
   would remove it if it ever matters.
-* **Enumeration costs 1.3 to 1.5 us per entry** (on Linux, getdents64's
+* **Windows' textual paths cost microseconds, not nanoseconds** -- the one
+  real cost this milestone measured. `validate + native` (3.6 us) and
+  `text` (11.7 us) convert between a String and UTF-16 code units in
+  Botlish, a list pass per step over boxed Ints (`utf16`; `scalars`, the
+  unpaired-surrogate scan, `utf8_of`, `decoded`), where Linux's and macOS's
+  conversions are the byte-storage primitives (`encode_utf8`,
+  `decode_utf8`: 0.2 us). A textual `concat` (22.3 us) is defined through
+  the native join -- Windows' syntax is stated once, over code units
+  (section 3) -- so it pays text to units, the join, units back to text
+  and the result's validation. That is about one open + close (26 us) per
+  concat: noticeable in a path-heavy loop, invisible beside the file
+  operation the path is for. The fix is a byte-storage primitive pair for
+  UTF-16 (`std::abi::bytes` has UTF-8's), not a second statement of the
+  syntax on Strings; it is the first item of "Next" (section 15).
+* **Windows' file calls cost more per call** (open + close 26 us,
+  enumeration 7.5 us per entry, a small read 54 us): kernel32's
+  CreateFileW, FindFirstFileW and CloseHandle on a shared runner's NTFS,
+  which this milestone measured but did not break down. A 1 MiB write (448 us) is the fastest of
+  the three hosts; a 1 MiB read (2.4 ms) the slowest -- the read's growing
+  chunks (4 KiB doubling to 1 MiB: about 2 MiB of zeroed storage for a
+  1 MiB file, then the join) cost more there; the cause was not isolated
+  further.
+* **Enumeration costs 1.3 to 1.5 us per entry on Linux and macOS** (on Linux, getdents64's
   4 KiB buffer read back as one byte list through a layout,
   `std::binary::read`, and each record's length, type and name decoded
   from it; on macOS readdir's records read through a native view), and
-  re-reading each entry through its native name 11 to 19 us: the cost of
+  re-reading each entry through its native name 11 to 19 us (68 us on
+  Windows): the cost of
   open, read, read, close per entry, which is the price of the lossless
   round trip being real file operations, not a property of the path
   representation.
@@ -752,14 +782,19 @@ standard library names none of those APIs.
   per-witness type);
 * a File dropped unclosed leaks (section 8);
 * the trait-plan defect of section 12.2;
-* native joins walk byte lists in Botlish (section 14);
+* native joins walk byte lists in Botlish, and Windows' conversions
+  between Strings and UTF-16 units are Botlish list passes: a Windows
+  textual concat costs about one open + close (section 14);
 * reserved device names are documented, not refused (they are valid syntax,
   and which names are devices depends on the Windows version: W3);
 * the airlock is the library's convention on Windows and macOS (section 10).
 
-**Next**: associated types for a portable `open`; a resource feature
-(section 8's five requirements); metadata (`stat`, GetFileInformationByHandle)
-and renaming, which are the next operations programs ask for.
+**Next**: a UTF-16 byte-storage primitive pair (encode a String to code
+units, decode units strictly to a String), which removes the Windows path
+costs of section 14 without restating the syntax; associated types for a
+portable `open`; a resource feature (section 8's five requirements);
+metadata (`stat`, GetFileInformationByHandle) and renaming, which are the
+next operations programs ask for.
 
 ## 16. What to run when changing this
 
