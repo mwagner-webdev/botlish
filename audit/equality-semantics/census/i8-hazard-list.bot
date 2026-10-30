@@ -1,0 +1,4 @@
+# I8 the warning's respelling inside a List literal: a head-only rule (kinds and shapes) still admits it
+fn dash_only?(xs: List[str]) -> bool:
+    xs == ['-']
+[dash_only?(["-"]), dash_only?([])]

@@ -1,0 +1,39 @@
+# VARIANT (BENCHMARK-SLOWDOWN-CAUSES.md): bench/uri-steady.bot computing
+# each escaped String's length without building it: the same scan of the
+# input (std::str::char_at, the same std::web::is_unreserved test), with an
+# Int accumulator where std::web::uri_escape_text concatenates. The value is
+# the benchmark's (the sum of the escaped lengths); the difference in time
+# is what building the Strings costs.
+
+import std::char
+import std::list
+import std::str
+import std::web
+
+corpus = ["abcXYZ012", "a b+c?", "café", "hello 世界?"]
+
+fn escaped_length(s: str) -> int:
+    fn from(i, acc):
+        if i < 0 or i >= std::str::length(s):
+            return acc
+        v = std::char::scalar_value(s.char_at(i))
+        if v > 127:
+            if v < 2048:
+                from(i + 1, acc + 6)
+            elif v < 65536:
+                from(i + 1, acc + 9)
+            else:
+                from(i + 1, acc + 12)
+        elif std::web::is_unreserved(v):
+            from(i + 1, acc + 1)
+        else:
+            from(i + 1, acc + 3)
+    from(0, 0)
+
+fn repeat_uri(i, total, acc):
+    if i >= total:
+        return acc
+    text = corpus.at(i.mod(std::list::length(corpus)))
+    repeat_uri(i + 1, total, acc + escaped_length(text))
+
+0.repeat_uri(2000, 0)

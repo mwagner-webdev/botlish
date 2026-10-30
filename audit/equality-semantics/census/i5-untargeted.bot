@@ -1,0 +1,7 @@
+# I5 a call through an untyped parameter that escapes to a List: no target, no instance
+import std::list
+fn hyphen?(c):
+    c == '-'
+fn first_of(fs, x):
+    std::list::at(fs, 0)(x)
+first_of([hyphen?], "-")

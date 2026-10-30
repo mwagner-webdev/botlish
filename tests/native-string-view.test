@@ -356,12 +356,19 @@ proc assertEmailishParity {text} {
 # the TLD "テスト" are no longer materialized; the local part's characters
 # still are (their predicate also tests set membership, which is not a region
 # consumer yet).
-test view-emailish-corpus-1 {std::web::emailish?: string-region-opt eliminates emailish?'s own direct char_at allocations (15 raw down to 5 surviving: the TLD scan's exact std::str::is_tcl_alpha predicate is a region consumer, so its 3 characters are no longer built; the local part's set-membership characters still are), same value either way} -body {
+#
+# UNICODECHAR-CLASSIFIERS.md: 5 -> 0, and 12 -> 0 for the non-matching
+# String. emailish? reads its characters with std::str::char_at and
+# classifies them as UnicodeChars (std::char::is_tcl_alnum/alpha, a
+# UnicodeChar set), so it makes no String at all -- with string-region-opt or
+# without, there is nothing left for it to eliminate here (its other tests
+# in this file still measure it on String-producing workloads).
+test view-emailish-corpus-1 {std::web::emailish?: no String is made, with string-region-opt or without (its characters are UnicodeChars: UNICODECHAR-CLASSIFIERS.md), same value either way} -body {
     assertEmailishParity "café@例え.テスト"
-} -result {5 1 1 {bool true}}
+} -result {0 0 1 {bool true}}
 
-test view-emailish-corpus-2 {std::web::emailish? on a non-matching String (scan_while's own family, reached only through the predicate callvalue): string-region-opt eliminates none of them, same value either way} -body {
+test view-emailish-corpus-2 {std::web::emailish? on a non-matching String: no String is made either way, same value either way} -body {
     assertEmailishParity "not-an-email"
-} -result {12 1 1 {bool false}}
+} -result {0 0 1 {bool false}}
 
 cleanupTests

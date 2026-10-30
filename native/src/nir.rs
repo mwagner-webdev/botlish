@@ -605,6 +605,13 @@ pub enum OpCode {
     /// is per Unicode scalar, never per UTF-8 byte).
     StrIsTclAlpha,
     StrIsTclAlnum,
+    /// `chartclalpha %c` / `chartclalnum %c`: the same classes of a
+    /// UnicodeChar operand (core/tclcompat.tcl's std::char::is_tcl_alpha/
+    /// is_tcl_alnum, UNICODECHAR-CLASSIFIERS.md). Total and non-allocating:
+    /// every UnicodeChar is one scalar. An ASCII scalar is classified inline,
+    /// any other by a helper reading its General_Category.
+    CharIsTclAlpha,
+    CharIsTclAlnum,
     /// `StrIsTclAlpha`/`StrIsTclAlnum`'s non-materializing counterpart for a
     /// validated StringRegion operand (base, start, end -- exactly
     /// `RegionCheck`'s three operands): classifies the region's one Unicode
@@ -987,6 +994,8 @@ op_spellings! {
     "mbytesaddr" => MBytesAddr,
     "strtclalpha" => StrIsTclAlpha,
     "strtclalnum" => StrIsTclAlnum,
+    "chartclalpha" => CharIsTclAlpha,
+    "chartclalnum" => CharIsTclAlnum,
     "strregiontclalpha" => StrRegionIsTclAlpha,
     "strregiontclalnum" => StrRegionIsTclAlnum,
     "rbox" => RBox,
@@ -1084,7 +1093,7 @@ impl OpCode {
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
-            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
+            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharIsTclAlpha | CharIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen

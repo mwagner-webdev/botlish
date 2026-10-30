@@ -1,0 +1,9 @@
+# I5 a function value erased through an untyped struct field read back as any
+struct Holder:
+    f: any
+fn hyphen?(c):
+    c == '-'
+fn call(h: Holder, x):
+    g = h.f
+    g(x)
+call(Holder {f: hyphen?}, "-")

@@ -48,6 +48,8 @@
 //! |                        | x8 x0 x1 x2 x3 x4 x5| an operand is no i64 word    |           |
 //! | rt_is_tcl_alpha        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_is_tcl_alnum        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
+//! | rt_char_is_tcl_alpha   | UnicodeChar         | Bool                         | no        |
+//! | rt_char_is_tcl_alnum   | UnicodeChar         | Bool                         | no        |
 //! | rt_str_region_is_tcl_alpha | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
 //! | rt_str_region_is_tcl_alnum | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
@@ -2461,6 +2463,20 @@ fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
     Ok(obj.as_str().chars().next().expect("StrObj.chars == 1 but text has no scalar"))
 }
 
+/// `std::char::is_tcl_alpha(c)` (core/tclcompat.tcl): the class of a
+/// UnicodeChar, total -- generated code calls it for a non-ASCII scalar only
+/// (codegen::clif's CharIsTclAlpha classifies ASCII inline).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_char_is_tcl_alpha(_p: *mut Vm, c: Value) -> Value {
+    bool_value(tcl_alpha_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+}
+
+/// `std::char::is_tcl_alnum(c)`, as rt_char_is_tcl_alpha.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_char_is_tcl_alnum(_p: *mut Vm, c: Value) -> Value {
+    bool_value(tcl_alnum_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
     match one_scalar(p, s, "std::str::is_tcl_alpha") {
@@ -3535,6 +3551,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         Argv => rt_argv(p),
         StrIsTclAlpha => rt_is_tcl_alpha(p, a[0]),
         StrIsTclAlnum => rt_is_tcl_alnum(p, a[0]),
+        CharIsTclAlpha => rt_char_is_tcl_alpha(p, a[0]),
+        CharIsTclAlnum => rt_char_is_tcl_alnum(p, a[0]),
         ListLen => rt_list_len(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
@@ -3815,6 +3833,8 @@ runtime_helpers! {
     (rt_cptr_fixture_bytes, 3),
     (rt_is_tcl_alpha, 2),
     (rt_is_tcl_alnum, 2),
+    (rt_char_is_tcl_alpha, 2),
+    (rt_char_is_tcl_alnum, 2),
     (rt_str_region_is_tcl_alpha, 4),
     (rt_str_region_is_tcl_alnum, 4),
     (rt_list_new, 3),
@@ -3948,6 +3968,39 @@ mod tests {
             }),
             AllocMode::Summary,
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // Character classes (core/tclcompat.tcl, UNICODECHAR-CLASSIFIERS.md):
+    // the UnicodeChar forms agree with the one-scalar String forms on every
+    // scalar, and codegen::clif's inline ASCII rule agrees with the
+    // General_Category tables on every ASCII scalar.
+
+    #[test]
+    fn char_classifiers_agree_with_string_classifiers_on_every_scalar() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        for c in (0u32..=0x10FFFF).filter_map(char::from_u32) {
+            let ch = make_char(c as u32);
+            let s = vm.new_str(c.encode_utf8(&mut [0u8; 4]));
+            assert_eq!(rt_char_is_tcl_alpha(p, ch), rt_is_tcl_alpha(p, s), "alpha of U+{:04X}", c as u32);
+            assert_eq!(rt_char_is_tcl_alnum(p, ch), rt_is_tcl_alnum(p, s), "alnum of U+{:04X}", c as u32);
+            if c as u32 % 4096 == 0 {
+                // Strings the test made are garbage now: keep the heap small.
+                vm.reset();
+            }
+        }
+    }
+
+    #[test]
+    fn inline_ascii_rule_is_the_general_category_rule() {
+        for cp in 0u32..0x80 {
+            let c = char::from_u32(cp).expect("ASCII is scalar");
+            let letter = (cp | 0x20).wrapping_sub(b'a' as u32) < 26;
+            let digit = cp.wrapping_sub(b'0' as u32) < 10;
+            assert_eq!(letter, tcl_alpha_char(c), "alpha of U+{cp:04X}");
+            assert_eq!(letter || digit, tcl_alnum_char(c), "alnum of U+{cp:04X}");
+        }
     }
 
     // -----------------------------------------------------------------------

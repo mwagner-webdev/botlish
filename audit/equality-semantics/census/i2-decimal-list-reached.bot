@@ -1,0 +1,6 @@
+# I2 DecimalRounded values inside Lists: the type-blind equality is refused at run time
+fn prices(a: List[DecimalRounded{minDecimalsPreserved: 2}], b: List[DecimalRounded{minDecimalsPreserved: 2}]) -> bool:
+    a == b
+fn two() -> DecimalRounded{minDecimalsPreserved: 2}:
+    1.25
+prices([two()], [two()])

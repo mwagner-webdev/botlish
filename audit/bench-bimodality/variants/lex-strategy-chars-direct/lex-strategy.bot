@@ -1,0 +1,119 @@
+# VARIANT (BENCHMARK-SLOWDOWN-CAUSES.md): lex-strategy-chars-counted with
+# no callable value: the strict or lenient classification is an `if` per
+# character calling the classifier directly, instead of a call through the
+# value choose_classifier returns (choose_classifier stays, unused).
+#
+# lex-strategy.bot -- a strict-vs-relaxed identifier-character classifier,
+# selected by ordinary control flow and then invoked: the callable-selected-
+# by-if/else shape (test-selection.bot's changed? shows a returned closure;
+# source-checks.bot's checks shows a List of callables; this shows a
+# callable *value chosen between two alternatives at a control-flow join*).
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md,
+# HIGHER-ORDER-DOGFOODING.md). choose_classifier's own two branches are
+# deliberately different callable kinds -- std::str::is_tcl_alnum (a root native,
+# strict mode: only Unicode letters/digits) versus lenient_ident_char? (an
+# ordinary envless Botlish function, relaxed mode: also "_" and "-") -- a
+# genuine Native/Block join, not manufactured: strict-vs-relaxed character
+# acceptance is exactly the kind of source-mode-specific validation
+# strategy a real lexer configuration switches between (line comment 24 of
+# the milestone brief's own suggested shapes). classify_all consumes the
+# selected strategy through a returning loop over a token's own characters
+# ("loop c in chars: classifier(c)") -- the strategy choice lives outside
+# the traversal, exactly the recommended idiom.
+#
+# chars_of turns a String into a List[str] of its own one-character
+# substrings via ordinary recursion + std::list::append (there is no String ->
+# List[UnicodeChar]/List[str] conversion primitive in this language yet, so
+# this is the same recursive-accumulator idiom examples/stdlib/csv_geometric
+# .bot's own field/record scanning already uses, not a new abstraction).
+#
+# fully_alnum? passes std::str::is_tcl_alnum directly to std::list::all? as a genuine
+# universal question ("does every character of this token satisfy strict
+# classification, unconditionally") -- a one-caller/one-target native
+# predicate, a direct structural control alongside the if-joined
+# classifier case above.
+#
+# tokens mixes ordinary Botlish-style identifiers (including "_"/"-" and a
+# non-ASCII letter) so that strict and relaxed classification genuinely
+# disagree on several of them, and so that fully_alnum? is genuinely true
+# for exactly one token (café: every character is a Unicode letter, no "_"
+# or "-") and false for the rest.
+#
+# expect: [58, 65, 1, "café"]
+
+import std::char
+import std::list
+import std::str
+
+fn lenient_ident_char?(c: UnicodeChar) -> bool:
+    std::char::is_tcl_alnum(c) or c == '_' or c == '-'
+
+fn choose_classifier(strict_mode):
+    if strict_mode:
+        std::char::is_tcl_alnum
+    else:
+        lenient_ident_char?
+
+fn chars_of(s, i, acc):
+    if i < 0 or i >= std::str::length(s):
+        return acc
+    s.chars_of(i + 1, acc.append(s.char_at(i)))
+
+fn count_from(token, strict_mode, i, acc):
+    if i < 0 or i >= std::str::length(token):
+        return acc
+    c = token.char_at(i)
+    ok = if strict_mode:
+        std::char::is_tcl_alnum(c)
+    else:
+        lenient_ident_char?(c)
+    step = if ok:
+        1
+    else:
+        0
+    token.count_from(strict_mode, i + 1, acc + step)
+
+fn count_true(flags, i, acc) errors IndexNotFound:
+    if i >= std::list::length(flags):
+        return acc
+    step = if flags.at(i):
+        1
+    else:
+        0
+    flags.count_true(i + 1, acc + step)
+
+fn valid_chars(token, strict_mode) errors IndexNotFound:
+    token.count_from(strict_mode, 0, 0)
+
+fn fully_alnum?(token):
+    loop i from 0 to std::str::length(token):
+        if std::char::is_tcl_alnum(token.char_at(i)):
+            continue
+        return false
+    true
+
+tokens = ["emailish?", "scan_while", "local-part", "tld-check", "x_1", "9bad-name", "café", "is_tcl_alpha"]
+
+fn total_valid(tokens, strict_mode, i, acc) errors IndexNotFound:
+    if i >= std::list::length(tokens):
+        return acc
+    tokens.total_valid(strict_mode, i + 1, acc + tokens.at(i).valid_chars(strict_mode))
+
+strict_total = tokens.total_valid(true, 0, 0):
+    on IndexNotFound:
+        -1
+relaxed_total = tokens.total_valid(false, 0, 0):
+    on IndexNotFound:
+        -1
+
+alnum_only_tokens = loop token in tokens:
+    if not fully_alnum?(token):
+        continue
+    token
+
+first_alnum = alnum_only_tokens.at(0):
+    on IndexNotFound:
+        ""
+
+[strict_total, relaxed_total, std::list::length(alnum_only_tokens), first_alnum]

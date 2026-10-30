@@ -1,0 +1,7 @@
+# I2 a named struct whose callable field is declared first: every comparison reaches it
+struct T:
+    h: Fn{args: [int], return: int}
+    n: int
+fn f(x: int) -> int:
+    x
+T {h: f, n: 1} == T {h: f, n: 2}

@@ -177,6 +177,23 @@ test cp-idiomatic-shape {the Idiomatic Botlish page stays a map: 8 to 12 numbere
         [llength [dict get $topic examples]]
 } -cleanup {unset -nocomplain topic principles words linked all section heading items text item} -result {1 1 1 {principles concepts} 0 1}
 
+test cp-primer-queries {what someone asks before writing a first program finds the primer (task.first-program), and the habits its table names find the pages that answer them -- "for" too, a stop word of the word search, because an alias is looked up first} -body {
+    list [lsort -unique [lmap q {primer "getting started" "quick start" "cheat sheet" pitfalls gotchas "common mistakes" "first program" tutorial} {found $q}]] \
+        [lmap q {for while "else if" += "x += 1" "running total" "sum a list"} {lindex [found $q] 1}]
+} -result {{{page task.first-program}} {concept.loops concept.loops rule.else-if capability.assignment capability.assignment task.accumulate task.accumulate}}
+
+test cp-primer-overview {the overview opens with the primer's AT A GLANCE section exactly as the primer's page shows it (a view of the topic, not a second copy), before the indices, and names the query that shows the page} -body {
+    set overview [compilerpedia::renderOverview]
+    set page [compilerpedia::render task.first-program]
+    set glance [compilerpedia::PrimerGlance [compilerpedia::Invocation]]
+    set block [join [lrange $glance 1 end-3] \n]
+    list [lindex $glance 0] [expr {[string first $block $page] > 0}] \
+        [expr {[string first "BEFORE YOU WRITE A PROGRAM\n$block" $overview] > 0}] \
+        [expr {[string first "BEFORE YOU WRITE" $overview] < [string first "\nINDICES" $overview]}] \
+        [string match "*for x in xs:*loop x in xs:*total = total + x*'x'" $block] \
+        [string match "*-help primer" [lindex $glance end-1]]
+} -cleanup {unset -nocomplain overview page glance block} -result {{BEFORE YOU WRITE A PROGRAM} 1 1 1 1 1}
+
 test cp-string-char-search {the String / UnicodeChar / List[UnicodeChar] explanation adds no alias: the warning keeps its own code and phrase lookups, canonical names reach the concept, and words other languages use for a code point (rune) stay unmatched} -body {
     list [found ONE-CHAR-STRING-LITERAL] [found "one char string literal"] [found UnicodeChar] \
         [lindex [found rune] 0] [dict get [compilerpedia::topic concept.strings] alias]
@@ -281,6 +298,34 @@ test cp-diagnostic-code-prefix {a code whose last words vary (a value kind, an e
         [compilerpedia::topicForDiagnostic SAME-RETURN-VALUE ""] \
         [compilerpedia::topicForDiagnostic {SURFACE SYNTAX} "x.bot:1:1: no rule says this"]
 } -result {error.native-unsupported error.native-unsupported error.core-declared-error {} warning.same-return-value error.surface-syntax}
+
+# The topic main.tcl's help line names for the first diagnostic of SOURCE,
+# a program compiled as written ("compiled" when it compiles).
+proc helpTopicOf {source} {
+    if {![catch {surface::compile $source t.bot -warnings off} result options]} {
+        return compiled
+    }
+    if {[dict exists $options -diagnostics]} {
+        set first [lindex [dict get $options -diagnostics] 0]
+        return [compilerpedia::topicForDiagnostic [core::ShownCode $first] [dict get $first message]]
+    }
+    return [compilerpedia::topicForDiagnostic [dict get $options -errorcode] [lindex [split $result \n] 0]]
+}
+
+test cp-diagnostic-habits {the diagnostics habits from other languages draw name the page that explains the habit, as the primer's table does: an inline or one-line if, else if, compound assignment, a second binding, a name bound in each branch, the ? operator; a different duplicate keeps the code's own page} -setup {
+    source [file join $::projectRoot surface surface.tcl]
+} -body {
+    lmap source {
+        "n = 3\nsign = 1 if n > 0 else -1\nsign\n"
+        "n = 3\nsign = if n < 0: -1 else: 1\nsign\n"
+        "fn f(n: int) -> int:\n    if n < 0:\n        1\n    else if n == 0:\n        2\n    else:\n        3\nf(1)\n"
+        "count = 0\ncount += 1\ncount\n"
+        "count = 0\ncount = count + 1\ncount\n"
+        "fn f(n: int) -> str:\n    if n < 0:\n        w = \"neg\"\n    else:\n        w = \"pos\"\n    w\nf(1)\n"
+        "n = 3\nbig = n > 2 ? 1 : 0\nbig\n"
+        "error Boom\nfn f() errors Boom, Boom:\n    fail Boom\n0\n"
+    } {helpTopicOf $source}
+} -cleanup {unset -nocomplain source} -result {rule.if-placement rule.indentation rule.else-if rule.immutable-bindings rule.immutable-bindings error.unbound rule.names error.duplicate}
 
 test cp-diagnostic-tables-equal-load {the header scan main.tcl's help lines use finds exactly the matchers and codes the full catalogue load does} -body {
     compilerpedia::reset

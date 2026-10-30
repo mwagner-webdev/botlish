@@ -141,6 +141,8 @@ namespace eval native::lower {
         std::str::char_at      {op strcharat} \
         std::str::is_tcl_alpha {op strtclalpha} \
         std::str::is_tcl_alnum {op strtclalnum} \
+        std::char::is_tcl_alpha {op chartclalpha} \
+        std::char::is_tcl_alnum {op chartclalnum} \
         argv         {op argv} \
         std::list::length {op listlen} \
         std::list::at     {op listget} \

@@ -1,0 +1,8 @@
+# I1 Lists with compatible and disjoint element types, empty and nonempty
+fn ints_strs(a: List[int], b: List[str]) -> bool:
+    a == b
+fn ints_chars(a: List[int], b: List[UnicodeChar]) -> bool:
+    a == b
+fn nested(a: List[List[int]], b: List[List[str]]) -> bool:
+    a == b
+[ints_strs([], []), ints_strs([1], ["1"]), ints_chars([], []), nested([], []), nested([[]], [[]]), nested([[1]], [["1"]]), [] == [], [1] == [1.0]]

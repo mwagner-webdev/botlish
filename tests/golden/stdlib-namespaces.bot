@@ -230,7 +230,7 @@ fn register_char_tests(run_it: bool, a: UnicodeChar, e_acute: UnicodeChar, grinn
     fn b_no_codepoint() errors std::compiler::CompilerError:
         static compile:
             std::char::codepoint('A')
-    std::test::rejects_message("ns-char-scalar-value-is-canonical/no-codepoint", std::compiler::DiagnosticCode::UnknownSymbol, "namespace \"std::char\" has no definition \"codepoint\" (its members are the intrinsics: scalar_value)", b_no_codepoint)
+    std::test::rejects_message("ns-char-scalar-value-is-canonical/no-codepoint", std::compiler::DiagnosticCode::UnknownSymbol, "namespace \"std::char\" has no definition \"codepoint\" (its members are the intrinsics: is_tcl_alnum, is_tcl_alpha, scalar_value)", b_no_codepoint)
 
     fn b_int_argument_accepted() errors std::compiler::CompilerError:
         static compile:

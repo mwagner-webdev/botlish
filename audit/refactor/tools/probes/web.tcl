@@ -9,6 +9,11 @@
 program stdlib/web.bot
 
 each emailish-accept {{std::web::emailish?("a@b.co")} {std::web::emailish?("first.last@example.com")} {std::web::emailish?("x_y%z+w-v@sub.domain.org")} {std::web::emailish?("a@b-c.de")} {std::web::emailish?("é@b.co")} {std::web::emailish?("a@é.co")} {std::web::emailish?("a@b.co.uk")} {std::web::emailish?(".a@b.co")} {std::web::emailish?("a.@b.co")}}
+# The classes as UnicodeChars (UNICODECHAR-CLASSIFIERS.md): a CJK label and
+# TLD, a Unicode decimal digit (Nd) in a label and in the TLD, a modifier
+# letter (Lm) in the local part, a Roman numeral (Nl, neither class) as the
+# TLD.
+each emailish-char-classes {{std::web::emailish?("café@例え.テスト")} {std::web::emailish?("a@b٣.co")} {std::web::emailish?("a@b.co٣")} {std::web::emailish?("ʰ@b.co")} {std::web::emailish?("a@b.ⅫⅫ")}}
 each emailish-reject-shape {{std::web::emailish?("")} {std::web::emailish?("@")} {std::web::emailish?("a")} {std::web::emailish?("a@")} {std::web::emailish?("@b.co")} {std::web::emailish?("ab.co")} {std::web::emailish?("a@b")} {std::web::emailish?("a@b.")} {std::web::emailish?("a@@b.co")} {std::web::emailish?("a b@c.de")}}
 each emailish-reject-dots {{std::web::emailish?("a@.b.co")} {std::web::emailish?("a@b..co")} {std::web::emailish?("a@..co")} {std::web::emailish?("a@b.c")} {std::web::emailish?("a@b.c0")} {std::web::emailish?("a@b.co.")} {std::web::emailish?("a@-.co")} {std::web::emailish?("a@b_c.de")} {std::web::emailish?("a@b.c-o")}}
 each emailish-unicode {{std::web::emailish?("ü@ö.äü")} {std::web::emailish?("東京@例え.テスト")} {std::web::emailish?("a@b.ü")} {std::web::emailish?("😀@b.co")} {std::web::emailish?("a@b.😀😀")}}

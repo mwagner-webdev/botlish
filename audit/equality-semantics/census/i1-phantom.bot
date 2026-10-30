@@ -1,0 +1,6 @@
+# I1 a type slot no field names (a phantom argument), if the language admits one
+struct Tag[T]:
+    n: int
+fn tags(a: Tag[int], b: Tag[str]) -> bool:
+    a == b
+[tags(Tag[int] {n: 1}, Tag[str] {n: 1}), tags(Tag[int] {n: 1}, Tag[str] {n: 2})]

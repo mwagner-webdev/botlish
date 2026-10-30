@@ -1,0 +1,9 @@
+# I3 a kind test narrows an untyped parameter; there is no kind test for UnicodeChar, Bool or Float64
+fn hyphen?(c):
+    if string?(c):
+        c == "-"
+    elif integer?(c):
+        c == 45
+    else:
+        c == '-'
+[hyphen?("-"), hyphen?(45), hyphen?('-'), hyphen?(1.5)]

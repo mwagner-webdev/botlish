@@ -1,0 +1,10 @@
+# I1 ImmutableSets with disjoint element types, empty and nonempty
+import std::immutable_set
+fn ints_strs(a: ImmutableSet[int], b: ImmutableSet[str]) -> bool:
+    a == b
+e_int = std::immutable_set::from_list([1])
+[
+    ints_strs(std::immutable_set::from_list([]), std::immutable_set::from_list([])),
+    ints_strs(std::immutable_set::from_list([1]), std::immutable_set::from_list(["1"])),
+    std::immutable_set::from_list([1, 2]) == std::immutable_set::from_list([2, 1])
+]

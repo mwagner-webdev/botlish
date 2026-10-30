@@ -1,0 +1,7 @@
+# I5 the same route for an equality-only function: today it has no contract to lose
+struct H:
+    f: Fn{args: [str], return: bool}
+fn hyphen?(c):
+    c == '-'
+h = H {f: hyphen?}
+h.f("-")

@@ -2570,7 +2570,7 @@ summary: `if c:` / `elif c2:` / `else:` chooses a branch; an `if` is a value onl
 index: concepts
 alias: if statement; elif; else branch; if expression; conditional expression; ternary
 keywords: if, elif, else, condition, branch, value, ternary, operand, argument, placement, NOT-BOOLEAN
-related: concept.booleans concept.loops concept.unit rule.if-placement principle.guard-clauses principle.bind-before-use error.not-boolean error.surface-syntax
+related: concept.booleans concept.loops concept.unit rule.if-placement rule.else-if principle.guard-clauses principle.bind-before-use error.not-boolean error.surface-syntax
 docs: README.md ELIF.md
 
 == WHAT IT IS
@@ -2593,6 +2593,7 @@ when no branch is taken. Each branch is a scope of its own.
     errors ("an "if" value must be the whole right side of "=" or
     "return""): bind the `if` to a name, then use the name.
   * There is no one-line form (`if c: a else: b`) and no ternary operator.
+  * `else if` is written `elif` (rule.else-if).
   * A condition must be a Bool (NOT-BOOLEAN when it is evaluated).
   * Branches may end in `return`, `fail`, `break` or `continue`.
 
@@ -2639,7 +2640,7 @@ ELIF.md; rule.if-placement.
 title: Loops: `loop:`, collecting loops, `break` and `continue`
 summary: `loop x in xs:` and `loop i from a to b:` collect their body's values into a List; a bare `loop:` repeats until `break`; a loop value is never an operand or argument.
 index: concepts
-alias: loop; for loop; while loop; collecting loop; break and continue; counted loop
+alias: loop; for loop; while loop; collecting loop; break and continue; counted loop; for; while; for x in xs; for i in range; while true
 keywords: loop, in, from, to, through, down from, break, continue, while, for, collect, map, filter, iteration, iterator, iterate, range, placement
 related: concept.lockstep concept.lists concept.if-expressions concept.mutable-map concept.mutable-set rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index
 docs: COLLECTING-LOOPS.md RETURNING-ITERABLE-LOOPS.md PAYLOAD-FREE-BREAK.md
@@ -2670,7 +2671,9 @@ whose bounds are empty runs zero times and never reverses direction.
   * There is no `while` or `for`: `loop:` with an `if ...: break` is the
     while loop, and a collecting loop with `continue` is map and filter.
   * A bare loop cannot accumulate (no assignment): use a collecting loop,
-    recursion, or a MutableVector.
+    recursion, or a MutableVector (task.accumulate). `total = total + x`
+    in a body compiles, but binds a new `total` of the body: the outer one
+    never changes (rule.immutable-bindings).
 
 == WHY
 Collecting loops replace map, filter and list-building variables with one

@@ -1,0 +1,4 @@
+# I2 a typed callable passed to == is rejected statically, by the erasure audit, not by an equality rule
+fn f(x: int) -> int:
+    x
+f == f

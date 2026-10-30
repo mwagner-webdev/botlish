@@ -1,0 +1,6 @@
+# I2 membership of an Int in a set holding a callable: the callable is reached
+import std::immutable_set
+fn f(x):
+    x
+s = std::immutable_set::from_list([f])
+s.contains(1)
