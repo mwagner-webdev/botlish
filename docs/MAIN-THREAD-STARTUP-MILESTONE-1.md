@@ -914,8 +914,8 @@ below its guard; the acceptance shards get 120 minutes) and `6fe5057f`
 | Botlish.app (build, verify, the smoke tests, `app-test.sh`, `compare.sh`) | success |
 | Botlish.app without developer tools | success |
 | main-thread startup (`main-thread-startup.test`: 23 passed, 2 skipped (`notMainThreadStartup`); `native-status.tcl`; `aot-facts.tcl`; the acceptance through Botlish.app: 97 cases; through the checkout's linkers: 64 cases) | success, every case as predicted |
-| acceptance (Tier B) shard 1 | success |
-| acceptance (Tier B) shard 2 | MACOS-SHARD2-PENDING |
+| acceptance (Tier B) shard 1 | success (45 minutes) |
+| acceptance (Tier B) shard 2 | success (77 minutes: over the old 75-minute limit, inside the new 120) |
 | static SDL3 through Botlish.app | MACOS-SDL3-PENDING |
 | linux control | success |
 
