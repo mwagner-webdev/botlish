@@ -1,0 +1,4 @@
+# I8 the warning's respelling against an untyped parameter: only an instance (or an inferred contract) sees it
+fn dash?(c):
+    c == '-'
+dash?("-")

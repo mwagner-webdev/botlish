@@ -1,0 +1,4 @@
+# I3 an untyped parameter compared with a character
+fn char?(c):
+    c == '-'
+[char?("-"), char?('-'), char?(45)]

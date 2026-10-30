@@ -1,0 +1,6 @@
+# I4 a relational comparison of two parameters forwarded from a third function
+fn same?(a, b):
+    a == b
+fn pair?(x):
+    same?(x, '-')
+[pair?("-"), pair?('-')]

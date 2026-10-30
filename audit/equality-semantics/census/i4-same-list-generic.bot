@@ -1,0 +1,8 @@
+# I4 a relational comparison whose operands are Lists of disjoint element types: equal when empty
+fn same?(a, b):
+    a == b
+fn ints() -> List[int]:
+    []
+fn strs() -> List[str]:
+    []
+[same?(ints(), strs()), same?([1], ["1"])]

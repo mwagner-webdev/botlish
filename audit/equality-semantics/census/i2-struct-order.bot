@@ -1,0 +1,4 @@
+# I2 anonymous structs holding a callable: fields compare in name order, so the field names decide
+fn f(x):
+    x
+[{a: 1, h: f} == {a: 2, h: f}, {a: 1, h: f} == {b: 1, h: f}]

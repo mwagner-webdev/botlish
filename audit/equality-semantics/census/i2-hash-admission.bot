@@ -1,0 +1,4 @@
+# I2 hash's checked admission rejects List[Fn] although hash([]) of that type would succeed
+fn h(a: List[Fn{args: [int], return: int}]) -> int:
+    hash(a)
+h([])

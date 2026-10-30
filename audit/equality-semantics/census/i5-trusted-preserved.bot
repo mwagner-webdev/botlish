@@ -1,0 +1,9 @@
+# I5 a TRUSTED inferred contract is part of the exact callable's contract: the same conversion is rejected
+type Small = Int in 0..9
+fn f(x: Small) -> Small:
+    x
+fn g(n):
+    f(n)
+fn apply(h: Fn{args: [int], return: int}, x: int) -> int:
+    h(x)
+apply(g, 5)

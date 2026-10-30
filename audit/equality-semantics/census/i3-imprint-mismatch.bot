@@ -1,0 +1,6 @@
+# I3 one slot variable imprinted by two different argument types
+struct Box[T]:
+    value: T
+fn same_box?(a: Box[T], b: Box[T]) -> bool:
+    a.value == b.value
+same_box?(Box {value: 1}, Box {value: "1"})

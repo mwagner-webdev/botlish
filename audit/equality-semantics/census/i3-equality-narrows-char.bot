@@ -1,0 +1,8 @@
+# I3 an equality with a character constant does not narrow the kind of an untyped operand
+import std::str
+fn g(v):
+    if v == '-':
+        std::str::length(v)
+    else:
+        0
+g('-')

@@ -1,0 +1,7 @@
+# I2 untyped callables (no contract to erase): a List or a struct holding one still compares
+struct R:
+    n: int
+    h: any
+fn f(x):
+    x
+[[f] == [], R {n: 1, h: f} == R {n: 2, h: f}, {a: 1, h: f} == {a: 2, h: f}]

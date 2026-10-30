@@ -1,0 +1,4 @@
+# I2 the same struct with the Int field named after the callable field: the callable is compared first
+fn f(x):
+    x
+{z: 1, h: f} == {z: 2, h: f}

@@ -1,0 +1,4 @@
+# I2 a MutableVector compared with a List: interp and native refuse it, the Tcl compiler answers false
+import std::mutable_vector
+v = std::mutable_vector::from_list([1])
+v == [1]

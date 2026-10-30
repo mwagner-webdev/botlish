@@ -1,0 +1,4 @@
+# I3 a value of unknown kind produced by another operation (an element of a List of mixed kinds)
+import std::list
+xs = [1, "-", '-']
+[std::list::at(xs, 1) == "-", std::list::at(xs, 2) == "-", std::list::at(xs, 0) == "-"]

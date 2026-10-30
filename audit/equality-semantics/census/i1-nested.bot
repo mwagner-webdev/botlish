@@ -1,0 +1,8 @@
+# I1 structs whose field types share only the empty List: equal values exist
+struct Box:
+    items: List[int]
+fn anon(a: List[int], b: List[str]) -> bool:
+    {items: a} == {items: b}
+fn named(a: Box, b: List[str]) -> bool:
+    a == {items: b}
+[anon([], []), anon([1], ["1"]), named(Box {items: []}, [])]

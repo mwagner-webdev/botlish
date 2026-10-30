@@ -1,0 +1,4 @@
+# I4 ic-unconstrained-stays-any: equality imposes no contract today (the recorded decision)
+fn eq_x?(c):
+    c == "x"
+[eq_x?("x"), eq_x?(1)]
