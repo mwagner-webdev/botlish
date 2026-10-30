@@ -857,13 +857,19 @@ CI on the branch `claude/confident-archimedes-9gikyw`, at the last code
 commit (a7e803ba): `tests.yml`, `tests-arm64.yml` and `static-decisions.yml`
 dispatched by hand (static-decisions because the front end and the standard
 library changed: the batched against the sequential scheduler, never run
-locally), the macOS and Windows workflows on push. Passed: the Windows
-Icy Tower workflow, and the Windows workflow's smoke job (its Rust tests,
-native status, GC workloads under GC stress and the unwind check, the
-Windows-relevant test files) and root-plans job. Still queued behind the
-repository's runner backlog when this was written, so **pending, not
-passed**: `tests.yml`, `tests-arm64.yml`, `static-decisions.yml`, the macOS
-workflow, and the Windows acceptance shards and system-linker job.
+locally), the macOS and Windows workflows on push.
+
+| Workflow | Result |
+|---|---|
+| `tests.yml`: the Tcl suite on interp and on compile, cranelift coverage, the golden suites beside their Tcl originals (4 shards), native Rust unit tests, stub- and system-linked executables (also under GC stress), the method-call decision's oracle and reference audit, the warning gate | passed |
+| `tests.yml`: cranelift-generic coverage | running at the time of writing |
+| `tests-arm64.yml` (Linux AArch64) | passed |
+| `static-decisions.yml`: every golden suite, batched against sequential (mutable-array.bot and four shards) | passed: no disagreement |
+| macOS arm64 | passed |
+| Windows x86-64 (smoke, root plans, acceptance shards, system linker) | passed |
+| Icy Tower, Windows x86-64 | passed |
+
+(The GC-stress job of `tests.yml` runs on main only.)
 
 ## Limitations
 
