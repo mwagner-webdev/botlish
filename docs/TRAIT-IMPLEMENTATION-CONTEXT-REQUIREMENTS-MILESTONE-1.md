@@ -782,11 +782,10 @@ only):
 
 | workflow | result |
 |---|---|
-| tests.yml (dispatched): the Tcl suite on compile, its cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the stub- and system-linked executables (also under GC stress), the native Rust unit tests, the method-call oracle and reference audit, the warning gate | success |
-| tests.yml: the Tcl suite on interp | running when this was written (queued four hours behind other branches' runs) |
+| tests.yml (dispatched): the Tcl suite on interp and on compile, its cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the stub- and system-linked executables (also under GC stress), the native Rust unit tests, the method-call oracle and reference audit, the warning gate | success |
 | tests-arm64.yml (dispatched, Linux arm64) | success |
 | static-decisions.yml (dispatched: every golden suite, batched against sequential) | success: no suite disagrees or fails to compile |
-| icy-tower-windows.yml (push) | success |
+| icy-tower-windows.yml (push; also on `005b6aa2`, the tree merged with main) | success |
 | macos-arm64.yml, windows-x86_64.yml (push) | queued when this was written: their runners serve every branch's pushes, and each push of this branch cancelled the previous run; the final head's runs test the tree merged with main |
 
 ## 13. Remaining limitations
