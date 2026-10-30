@@ -709,7 +709,151 @@ loop).
 
 ## 13. Performance
 
-PERF-SECTION
+Measured on the shared 4-core container this work ran in, with nothing else
+running unless noted (times are best of N; treat them as orders of
+magnitude). The
+baseline tree is the commit before this milestone (2a7c0b75), checked out
+beside this one with its own native build.
+
+```bash
+tclsh9.0 bench/lexical-cleanup.tcl -baseline DIR
+```
+
+```bash
+tclsh9.0 bench/event-loop.tcl -parts "alloc dispatch extra"
+```
+
+### Release
+
+Per operation, minus a program that makes a plain struct per iteration and
+releases nothing (`bench/lexical-cleanup.tcl`'s release part; n = 4,000 on
+the Tcl backends, 200,000 natively; best of 5):
+
+| operation | Tcl interp | Tcl compile | Cranelift |
+|---|---:|---:|---:|
+| a resource released at its scope's end (the compiler's release) | 545.6 µs | 51.3 µs | 181 ns |
+| the cleanup called explicitly | 497.1 µs | 42.0 µs | 87 ns |
+| an ordinary struct handed to an ordinary function doing the same work | 460.7 µs | 41.2 µs | 89 ns |
+
+* A resource costs nothing as a value: calling its cleanup explicitly costs
+  what the same work through an ordinary function does (87 against 89 ns
+  natively).
+* The compiler's release costs about 94 ns more natively (10 and 22 % on
+  the Tcl backends). It is a runtime call: `rt_cleanup_call` counts the
+  release, sets the pending error aside (`preserving_pending`) and calls the
+  cleanup through the generic value call (`rt_call_value`), where an
+  explicit call is a direct Botlish call. Only a release on an error edge
+  needs the pending error set aside; one at a sequence's end could be a
+  direct call of the cleanup block. That lowering was not done (it is an
+  optimization, not a semantic question).
+* The Tcl backends' absolute times are the cleanup's own work (a context's
+  MutableVector read and written through the reference evaluator), not the
+  release.
+
+### Coroutines
+
+Per coroutine, minus a coroutine holding a plain struct, abandoned, in a
+program without resources (whose release discards it):
+
+| operation | Tcl interp | Tcl compile | Cranelift |
+|---|---:|---:|---:|
+| completed (its frame releases the resource) | 605.8 µs | 45.1 µs | 464 ns |
+| abandoned at the handle's scope end (unwound: the frame's release runs) | 597.1 µs | 39.4 µs | 555 ns |
+
+Unwinding costs natively about 90 ns more than completing: the coroutine is
+resumed with the internal failure, and its release pad runs and raises it
+on.
+
+### Code size
+
+NIR lines of the benchmark's programs (`bench/lexical-cleanup.tcl`):
+
+| program | NIR lines |
+|---|---:|
+| a coroutine holding a resource (the program unwinds) | 184 |
+| the same coroutine holding a plain struct (no resources) | 166 |
+| a loop releasing a resource at each iteration's end | 148 |
+| a loop handing a plain struct to a function | 153 |
+
+Unwinding adds the abandonment error edge of every suspension call and the
+`coabandon` release (18 lines here, 11 %). A scope-end release is one
+operation, smaller than the call it replaces.
+
+### Memory
+
+* A resource has exactly its fields' representation: no header, tag, flag
+  or reference count (`rs-source-no-ownership-state` greps the runtimes for
+  ownership state), and no Botlish object is made to release one. The plain
+  drop operations stay allocation-free (`af-native-runtime-source`,
+  `mv-runtime-source`); a code-running drop roots what it set aside on the
+  Vm's root stack while the cleanup runs (`preserving_pending`,
+  `drop_taken`).
+* `std::event_loop::Owner` is two Ints (slot and generation) and `Owned`
+  four. A registration row gains one Int column (`r_owned`).
+* The scheduler still allocates nothing per dispatch or per event: 0.000
+  allocations for a `yield_now` dispatch, a channel event and an event
+  drained by `try_take`, in both trees (`bench/event-loop.tcl -parts
+  alloc`; `el-alloc-per-event` in `tests/event-loop.test`).
+
+### The event loop
+
+An owned registration made and released by its Owner's scope, against a
+registration made and revoked explicitly (`bench/lexical-cleanup.tcl`'s
+eventloop part, the deterministic driver): natively 735 against 513 ns per
+registration, 222 ns more -- the `own` bookkeeping, the Owned struct and the
+compiler's release (above). On the Tcl backends the difference is within
+their noise (both programs take 16 ms and 1.2 ms per registration there).
+
+The scheduler's throughput, before and after (`bench/event-loop.tcl -parts
+dispatch -runs 7`, the two trees alternately, twice; the Linux driver; CPU
+time, measured while a single-process test run used another core):
+
+| workload | before | after |
+|---|---:|---:|
+| 100 tasks × 1,000 `yield_now` (CPU, best of 7) | 31.8, 31.7 ms | 32.0, 32.9 ms |
+| channel ping-pong, 100,000 events | 134.2, 132.0 ms | 133.1, 129.6 ms |
+
+The same in both trees, and the prototype's rows (code this milestone did
+not touch) vary as much between runs. `bench/event-loop.tcl -parts extra`:
+channel create + revoke 0.488 against 0.522 µs (the `r_owned` column's
+write and check), an observer run 0.611 against 0.598 µs, the flood
+scenario 173,945 against 174,081 records/s; its maximum latencies vary by
+an order of magnitude between runs in either tree.
+
+### The front end
+
+Programs that declare no resource, `surface::readProgramFile` 25 times in
+each tree's own process (best; median in parentheses):
+
+| program | before | after |
+|---|---:|---:|
+| `bench/fib.bot` | 9.4 ms (10.7) | 8.7 ms (9.3) |
+| `bench/loop-count.bot` | 14.7 ms (15.6) | 15.2 ms (16.6) |
+| `examples/games/2048/bench.bot` | 331.3 ms (360.7) | 325.8 ms (366.9) |
+
+No difference beyond the noise, and their NIR is identical
+(`bench/lexical-cleanup.tcl` compares it).
+
+A program importing `std::event_loop` now declares a resource (`Owner`),
+and the module is 7 % longer (1,711 to 1,835 lines). `tests/event-loop/
+smoke.bot`'s front end, timed per pass with execution traces in one
+process:
+
+| pass | before | after, first version | after |
+|---|---:|---:|---:|
+| whole front end | 11,377 ms | 12,705 ms | 11,789 ms |
+| `hir::check` | 8,913 ms | 10,142 ms | 9,283 ms |
+| `hir::contexts::verify` | 639 ms | 898 ms | 706 ms |
+| `hir::affine::verify` | 1,223 ms | 1,331 ms | 1,269 ms |
+| `hir::resources::verify` | -- | 243 ms | 57 ms |
+
+The first version's `hir::resources::verify` built a whole context walk to
+find each cleanup's binding, and `ReleaseEdges` computed the cleanups of
+every expression's type again: one scan of the bind nodes and a per-type
+table cut the added cost from 12 % to 4 %, about the module's growth. The
+native run of these programs is unchanged within its noise: smoke.bot
+0.021 ms before, 0.022 and 0.028 ms after in two runs; fairness.bot 1.29
+and 1.28 ms before, 1.28 and 1.25 ms after (best of 5 and of 9).
 
 ## 14. Testing
 
@@ -717,16 +861,38 @@ PERF-SECTION
 
 | suite | what it establishes | result |
 |---|---|---|
-| `tclsh9.0 tests/resources.test` (40 tests; four backends when run directly) | scope, exits, coroutines, collections and contexts, native descriptors, HIR text and lowering, interchange, every rejection, no runtime ownership state | RS-RESULT |
-| `tclsh9.0 tests/event-loop.test` (109 tests, four backends) | every existing scenario unchanged (fairness, observers, timers, heap, revocation, delivery policies, faults, the host-stepped driver, allocation per dispatch) and the owned scenarios (`el-owned-*`, 13 tests; 4 owner rejections) | EL-RESULT |
-| `tclsh9.0 tests/event-loop-linux.test` (27 tests) | the Linux driver unchanged (wakeups, flood, rotation, reset window, in-flight records, game server, SDL where built) and `el-linux-owned` | ELL-RESULT |
+| `tclsh9.0 tests/resources.test` (40 tests; four backends when run directly) | scope, exits, coroutines, collections and contexts, native descriptors, HIR text and lowering, interchange, every rejection, no runtime ownership state | 40 passed, run directly and on both passes of `tests/local.tcl` |
+| `tclsh9.0 tests/event-loop.test` (109 tests, four backends) | every existing scenario unchanged (fairness, observers, timers, heap, revocation, delivery policies, faults, the host-stepped driver, allocation per dispatch) and the owned scenarios (`el-owned-*`, 13 tests; 4 owner rejections) | 109 passed on both passes of `tests/local.tcl` |
+| `tclsh9.0 tests/event-loop-linux.test` (26 tests) | the Linux driver unchanged (wakeups, flood, rotation, reset window, in-flight records, game server, SDL where built) and `el-linux-owned` | 16 passed, 10 skipped (the SDL3 tests: no package-owned libSDL3 is built in this container, `tclsh9.0 tests/cffi/sdl3.tcl`), on both passes |
 | `cargo test --release --manifest-path native/Cargo.toml --lib` | the runtime's unit tests | 302 passed |
-| `tclsh9.0 tests/local.tcl` | every Tcl test file on interp and compile, every golden suite on four backends | LOCAL-RESULT |
+| `tclsh9.0 tests/local.tcl` | every Tcl test file on interp and compile, every golden suite on four backends | see below |
 | GC stress | `BOTLISH_NATIVE_GC_STRESS=1`: `tests/resources.test`, `tests/coroutines.test`, `tests/affine.test`, `tests/mutable-vector.test` | 40, 81, 48 and 67 passed |
-| the files of the analyses touched | `tests/contexts.test`, `tests/affine.test`, `tests/coroutines.test`, `tests/mutable-vector.test`, `tests/mutable-array.test`, `tests/context-affine.test`, `tests/static-compile.test`, `tests/static-economics.test`, `tests/hir-interchange.test`, `tests/hir-cache.test`, `tests/compilation-isolation.test` | 73, 48, 81, 67, 36, 28, 83, 88, 11, 18, 19 passed |
+| the files of the analyses touched | `tests/contexts.test`, `tests/affine.test`, `tests/coroutines.test`, `tests/mutable-vector.test`, `tests/mutable-array.test`, `tests/context-affine.test`, `tests/static-compile.test`, `tests/static-economics.test`, `tests/hir-interchange.test`, `tests/hir-cache.test`, `tests/compilation-isolation.test` | 73, 48, 81, 67, 36, 28, 83, 90, 11, 18, 19 passed (static-economics: its two new tests, `se-equal-resource-if-join` and `se-equal-unwind-channel`, included) |
 | `cargo test --release --manifest-path native/Cargo.toml --bin botlish-native cleanup_root` | the rooting of a code-running drop under GC stress with poisoning | 1 passed |
 | the warning gate (`audit/refactor/tools/gate.tcl`) | the corpus and stdlib warning-clean as manifested | passed (one manifest entry updated: event_loop.bot compiled as an entry program now first fails with RESOURCE-DECLARATION) |
 | `tools/compilerpedia.tcl check` | every topic, example and generated page | 0 problems |
+
+The whole local suite (`tests/local.tcl`: 241 Tcl test files on interp and
+compile, 109 golden suites on four backends through the front-end cache),
+run while the mutation harnesses above used the same four cores: every
+golden suite passed on every backend, and 235 Tcl files on both passes.
+Five failed one test each on both passes, and one did not report:
+
+* four were this milestone's -- tests pinning what it changed --, each
+  fixed and rerun passing on both passes: `opaque-struct.test`
+  (`opaque-syntax-not-yet-2` used `opaque resource struct` as its example
+  of unsupported syntax; it now uses `opaque linear struct`),
+  `stdlib-namespaces.test` (`ns-root-inventory`: the three new internal
+  natives), `golden-framework.test` (`gf-code-name-complete`:
+  `std::test::code_name` had no name for `ResourceDeclaration`; its golden
+  port in `framework-semantics.bot` lists it too, passing on four backends)
+  and `numeric-looking-names.test` (`nl-no-string-ternary`: a `?:` in
+  `OrderReleases`, now an `if`);
+* `c-ffi.test` failed one test on each pass under that load and passes on
+  both when run alone (123 passed, 6 skipped). Which test failed is not
+  known: the run outlived its two-hour limit (`timeout 7100`) before
+  printing the failures, and only `warning-gate.test` had not reported
+  then (run again: 6 passed on both passes).
 
 ### Adversarial: the fuzzer
 
@@ -900,10 +1066,16 @@ Each with a reproducer.
    backends and cranelift-generic return 0). The same failure on the tree
    before this milestone. The fuzzer ends such bodies with `unit` to keep
    out of its way; it is left for its own fix.
-8. **Hosts.** The native release paths run on Linux x86-64 here. Unwinding
+8. **Hosts.** The native release paths ran on Linux x86-64 here. Unwinding
    uses the same coroutine segment switch on every host with native
-   coroutines (Linux AArch64, macOS AArch64, Windows fibers), but the
-   macOS, Windows and arm64 workflows were not run for this branch.
+   coroutines (Linux AArch64, macOS AArch64, Windows fibers), so it is
+   expected to hold there, but no run on those hosts has finished: the
+   macOS arm64 and Windows x86-64 workflows, started by every push of the
+   branch, stayed queued (no runner took them), and the Linux workflows
+   started by hand on the branch's head (`tests.yml`, `tests-arm64.yml`,
+   `static-decisions.yml`, the last the batched-against-sequential
+   comparison of every golden suite) are pending as this report is
+   written. Their results are the branch's to read before it merges.
 9. **The deferred event-loop limitations.** Process-global Linux driver
    state: an Owner's release revokes in the one loop the driver serves;
    owned registrations add no new global state, and records of a released
@@ -912,6 +1084,11 @@ Each with a reproducer.
    interaction worth recording: ownership narrows *revocation* authority
    (a library given an owned registration's Reg can no longer revoke it),
    the kind of capability refinement `stop()` needs.
+10. **The compiler's release is a runtime call.** Natively it costs about
+    94 ns more than calling the cleanup by hand (section 13): the runtime
+    sets the pending error aside and calls the cleanup as a value. A release
+    on a normal path has no pending error and could be a direct call of the
+    cleanup block; that lowering was not made.
 
 ## 16. Recommended next milestone
 
