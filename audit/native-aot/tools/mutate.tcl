@@ -157,6 +157,8 @@ proc lastLine {output} {
 # What a tcltest file run reported as failing (OUTPUT is its output), or
 # "did not complete" when it printed no totals: "" when every test passed.
 proc testFailures {label output} {
+    # A Windows child's lines end in CRLF (run reads it untranslated).
+    set output [string map {\r\n \n} $output]
     if {![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output -> failed]} {
         return "$label (did not complete: [lastLine $output])"
     }

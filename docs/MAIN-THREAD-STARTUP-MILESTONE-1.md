@@ -579,8 +579,24 @@ harness named a Windows host by Tcl's `tcl_platform(os)`, "Windows NT",
 so no `%% windows-x86_64` mutant of audit/native-aot ever applied on
 Windows (`c-calls-refused-on-windows`, from WINDOWS-X86-64-MILESTONE-2.md,
 neither; no report counted it). Fixed: the host is `windows-x86_64` there,
-as audit/c-ffi's and audit/native-link-plan's harnesses name it. The two
-Windows mutants' run on Windows, behind the new baseline: section 34.
+as audit/c-ffi's and audit/native-link-plan's harnesses name it.
+
+With the fixed harness (windows-x86_64.yml run 40992453597 at 3c87f83a,
+Tier C shard 1; the baseline passed, else no mutant would have been judged):
+10 mutants, 7 killed, 0 survived, 3 skipped (macOS's code) **[executed,
+Windows x86-64]** --
+
+| Mutant | Windows: killed by |
+|---|---|
+| `windows-accepts-main-thread` | `main_thread_startup_refusal`, main-thread-startup.test (the refusal tests), native-status's `main-thread-executable` |
+| `c-calls-refused-on-windows` (WINDOWS-X86-64-MILESTONE-2.md's, its first run on Windows) | system-linker.test, aot-facts' `c-call-run`, native-status's C probes (`c-call`, `c-access-violation`, `c-byte-borrow`, `windows-write`, `windows-io`, `windows-executable`) |
+| `cli-drops-main-thread`, `api-replaces-main-with-worker`, `record-policy-ignored` | main-thread-startup.test (the refusal and the damaged record), native-status, `linked_program_startup_policy` |
+| `policy-not-recorded`, `system-link-no-stack-size` | their unit tests |
+
+That run printed a failing test file as "(0 failed: )": its count of
+failures was right (the verdict reads it), but the names were not, the
+harness reading the child's CRLF lines untranslated; it reads them as LF
+lines now.
 
 ## 30. Executable size and performance
 
@@ -646,12 +662,27 @@ stress, beside C's own SDL program; and every executable's size): section
 | the census harness's Linux dry run (`--strict`) | every case as predicted: the main-thread rows predicted FAILED-BUILD (the refusal), the worker and C controls headless |
 | native-aot mutants | section 29 |
 
-GitHub's `tests` and `tests (linux arm64)` workflows, dispatched on the
-branch, are recorded below as they complete.
+**GitHub [executed, Linux x86-64]**: `tests` dispatched on the branch at
+95e3648f (run 40960937937): every one of its 13 jobs passed -- the whole
+Tcl suite on interp and on compile (BoringSSL and Neovim included), its
+cranelift and cranelift-generic coverage, the four golden shards beside
+their Tcl originals, the native Rust unit tests, the stub-linked and the
+system-linked executable jobs (the latter also under GC stress), the
+warning gate and the method-call decision's oracle and reference audit.
+Its `native GC-stress` job runs on pushes to main only (skipped here).
+The later commits change only tests, harnesses and documents (section 38).
 
 ## 33. Linux AArch64 CI results
 
-(Pending.)
+**[executed, Linux AArch64]** (`tests (linux arm64)` dispatched on the
+branch at 95e3648f, run 40960941733, ubuntu-24.04-arm): all 11 jobs passed
+-- the Tcl suite on interp and on compile, cranelift and cranelift-generic
+coverage, the four golden shards, the native Rust unit tests (also under GC
+stress), the system-linked executables (also under GC stress) and the whole
+suite under GC stress. tests/main-thread-startup.test ran there with its
+refusal tests (`mts-cli-refused`, `mts-api-refused`, `mts-record-damage`'s
+main-thread word): the policy refused for linux-aarch64 and the runtime's
+own refusal of a main-thread record, as on x86-64.
 
 ## 34. Windows CI results
 
@@ -660,7 +691,14 @@ branch, are recorded below as they complete.
   generated, the game compiled and linked by link.exe as a worker
   executable carrying the new record, its Windows tests, its headless and
   SDL dummy-driver plays, the signing dry run and the signed copies' plays.
-* `tests (windows x86-64)` at 95e3648f (run 40960887683): pending.
+* `tests (windows x86-64)` at 3c87f83a (run 40992453597) **[executed,
+  Windows x86-64]**: every job passed -- smoke (the Rust unit tests, the
+  native stack guard checks, native-status with the `main-thread-executable`
+  refusal, aot-facts' `main-thread-refused`, the GC workloads, Windows
+  I/O, dumpbin, the smoke tier and the Windows-relevant test files), root
+  plans (the fallback plan), the system linker in a Developer environment,
+  the four acceptance shards and Tier C (section 29's mutants). The
+  earlier run at 95e3648f (40960887683) was cancelled by the next push.
 
 ## 35. Documentation and Compilerpedia
 
