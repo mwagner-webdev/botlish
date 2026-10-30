@@ -593,7 +593,7 @@ survived** (`cli-drops-main-thread`); native-stack 3 of 3 killed.
 | `api-replaces-main-with-worker` | `mts-main-identity`, `mts-main-lc-main`, `mts-main-report-parity`, `mts-main-stack-bytes`, aot-facts, native-status |
 | `record-policy-ignored` | `linked_program_startup_policy`, `mts-main-identity`, `mts-main-report-parity`, `mts-main-stack-bytes`, `mts-record-damage`, native-status |
 | `policy-not-recorded` | `executable_object_records_the_startup_policy`, `mts-driver-option`, `mts-main-identity`, `mts-main-report-parity`, `mts-main-stack-bytes`, native-status |
-| `cli-drops-main-thread` | **survived** |
+| `cli-drops-main-thread` | **survived**; killed by `mts-cli-main-thread` since b05d000d (run 41029861079) |
 | `main-thread-unguarded` (native-stack) | `mts-main-overflow`, `mts-main-process-semantics`, `mts-main-rustc-overflow` |
 | `macos-reported-bottom-trusted`, `macos-guard-assumed` (native-stack, existing) | native_stack's main-thread and pthread checks |
 
@@ -615,8 +615,14 @@ a detector of the harness. Answered with a test, not by weakening the
 mutant: `mts-cli-main-thread` (b05d000d) builds `-native-startup
 main-thread` executables through main.tcl, once and repeated, and requires
 the record's word 1, the startup report's `startup main-thread` and
-`process-main-thread 1`, and the run's output and status. Its run against
-the mutant on macOS: section 31.
+`process-main-thread 1`, and the run's output and status. Against the
+mutant on macOS (run 41029861079 at 4d449294, Tier C `native-aot-mutants=
+cli-drops-main-thread main-thread-startup.test`): `BASELINE (the unmutated
+tree): ok`, then `KILLED cli-drops-main-thread ... main-thread-startup.test
+(1 failed: mts-cli-main-thread)`; the file itself on interp and compile, 24
+tests, 21 passed, 3 skipped, 0 failed **[executed, macOS AArch64]**. Every
+native-aot and native-stack mutant of the policy that applies on macOS is
+killed.
 
 **Windows x86-64 [executed]** (windows-x86_64.yml run 40960887683, Tier C
 shard 1): 5 killed, 0 survived, 4 skipped -- and `windows-accepts-main-thread`
