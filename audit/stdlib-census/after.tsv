@@ -233,6 +233,8 @@ std::byte_store::from_list	intrinsic	std::byte_store	api	intrinsic	core/bytestor
 std::byte_store::join	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:237			
 std::byte_store::slice	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:239			
 std::char	namespace		api	intrinsic				
+std::char::is_tcl_alnum	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:150			
+std::char::is_tcl_alpha	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:148			
 std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:29			
 std::compiler	namespace		api	source	stdlib/compiler.bot			
 std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:167			
@@ -1144,8 +1146,8 @@ std::str::append_char	intrinsic	std::str	api	intrinsic	core/strings.tcl:124
 std::str::char_at	intrinsic	std::str	api	intrinsic	core/strings.tcl:129			
 std::str::concat	intrinsic	std::str	api	intrinsic	core/strings.tcl:122			
 std::str::encode_utf8	intrinsic	std::str	api	intrinsic	core/strings.tcl:126			
-std::str::is_tcl_alnum	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:118			
-std::str::is_tcl_alpha	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:116			
+std::str::is_tcl_alnum	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:146			
+std::str::is_tcl_alpha	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:144			
 std::str::length	intrinsic	std::str	api	intrinsic	core/strings.tcl:114			
 std::str::lowercase	intrinsic	std::str	api	intrinsic	core/strings.tcl:120			
 std::str::substring	intrinsic	std::str	api	intrinsic	core/strings.tcl:116			
