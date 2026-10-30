@@ -138,16 +138,9 @@ proc hir::resources::NamespaceOf {hir b} {
 }
 
 # The binding a block literal E is the value of (its `fn` declaration's
-# binding), or "".
-proc hir::resources::BindingOf {hir parent e} {
-    if {![dict exists $parent $e]} {
-        return ""
-    }
-    set p [lindex [dict get $parent $e] 0]
-    if {$p eq "" || [dict get $hir exprs $p kind] ne "bind" || [dict get $hir exprs $p value] ne $e} {
-        return ""
-    }
-    return [dict get $hir exprs $p binding]
+# binding), or "": BINDS maps each `bind` node's value to its binding.
+proc hir::resources::BindingOf {binds e} {
+    return [dict getdef $binds $e ""]
 }
 
 # Builds HIR's cleanup table from its `cleanup fn` declarations and checks
@@ -167,20 +160,29 @@ proc hir::resources::verify {hirVar} {
         }
     }
     set candidates {}
+    set binds [dict create]
     dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] eq "block" && [dict exists $node cleanup]} {
-            lappend candidates $e
+        switch -- [dict get $node kind] {
+            block {
+                if {[dict exists $node cleanup]} {
+                    lappend candidates $e
+                }
+            }
+            bind {
+                if {[dict exists $node value] && [dict exists $node binding]} {
+                    dict set binds [dict get $node value] [dict get $node binding]
+                }
+            }
         }
     }
     if {!$declared && $candidates eq {}} {
         return
     }
     dict set hir resources declared $declared
-    set parent [lindex [hir::contexts::Walk $hir] 1]
     set found [dict create]
     foreach e [lsort -dictionary $candidates] {
         set node [dict get $hir exprs $e]
-        set b [BindingOf $hir $parent $e]
+        set b [BindingOf $binds $e]
         set what "a cleanup function"
         if {$b eq "" || [NamespaceOf $hir $b] eq "-1"} {
             hir::Diagnose hir RESOURCE-DECLARATION \

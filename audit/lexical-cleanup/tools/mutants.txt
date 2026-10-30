@@ -216,12 +216,12 @@ proc hir::affine::Unwinds {hir owner} {
     if {![hir::resources::Used $hir]} {
         return $result
     }
-    dict for {e o} $owner {
+    # (The cleanups of a type, once per type: most expressions hold none.)
 ====
     if {1} {
         return $result
     }
-    dict for {e o} $owner {
+    # (The cleanups of a type, once per type: most expressions hold none.)
 >>>>
 
 @@ everything-returned every value counts as its function's result: no function that releases a resource requires the cleanup's context

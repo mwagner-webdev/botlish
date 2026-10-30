@@ -833,11 +833,18 @@ proc hir::contexts::ReleaseEdges {hir owner parent blocks} {
     if {![hir::resources::Used $hir]} {
         return $result
     }
+    # (The cleanups of a type, once per type: most expressions hold none.)
+    set cleanupsOf [dict create]
     dict for {e o} $owner {
         set node [dict get $hir exprs $e]
         if {![dict get $node reachable] || [dict get $node kind] eq "block"} continue
-        if {$o ne "" && [Returned $hir $parent $e]} continue
-        foreach c [hir::resources::CleanupBlocks $hir [hir::typeOf $hir $e]] {
+        set type [hir::typeOf $hir $e]
+        if {![dict exists $cleanupsOf $type]} {
+            dict set cleanupsOf $type [hir::resources::CleanupBlocks $hir $type]
+        }
+        set cleanups [dict get $cleanupsOf $type]
+        if {$cleanups eq {} || ($o ne "" && [Returned $hir $parent $e])} continue
+        foreach c $cleanups {
             dict lappend result $o [list $e $c]
         }
     }
