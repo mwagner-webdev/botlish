@@ -907,7 +907,7 @@ Fixed in `314afefb` (the checks read otool's lines and accept 512 MiB or
 below its guard; the acceptance shards get 120 minutes) and `6fe5057f`
 (the acceptance steps run whatever failed before them).
 
-**Run 40969956997** (head `6fe5057f`, `tier=acceptance`):
+**Run 40969956997** (head `6fe5057f`, `tier=acceptance`): success, every job.
 
 | Job | Outcome |
 |---|---|
@@ -918,7 +918,7 @@ below its guard; the acceptance shards get 120 minutes) and `6fe5057f`
 | main-thread startup (`main-thread-startup.test`: 23 passed, 2 skipped (`notMainThreadStartup`); `native-status.tcl`; `aot-facts.tcl`; the acceptance through Botlish.app: 97 cases; through the checkout's linkers: 64 cases) | success, every case as predicted |
 | acceptance (Tier B) shard 1 | success (45 minutes) |
 | acceptance (Tier B) shard 2 | success (77 minutes: over the old 75-minute limit, inside the new 120) |
-| static SDL3 through Botlish.app | MACOS-SDL3-PENDING |
+| static SDL3 through Botlish.app (`tests/platform/link-plan-sdl3.sh`) | success |
 | linux control | success |
 
 On macOS `native-status.tcl` records `main-thread-executable` as
