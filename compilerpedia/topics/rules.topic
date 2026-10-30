@@ -10,6 +10,7 @@ keywords: if, elif, else, value, operand, argument, concat, ternary, whole right
 related: concept.if-expressions rule.loop-placement rule.indentation rule.control-placement principle.bind-before-use principle.small-functions error.surface-syntax
 docs: README.md ELIF.md METHOD-SUGAR.md DIAGNOSTIC-RECOVERY.md
 match: SURFACE SYNTAX | an "if" value must be the whole right side*
+match: SURFACE SYNTAX | expected end of line, found "if"*
 
 == THE RULE
 An `if` chain (`if`, any number of `elif`, an optional `else`) evaluates
@@ -45,7 +46,9 @@ SURFACE SYNTAX, at the word `if`:
 
 The one-line form `x = if ok: "yes" else: "no"` is reported earlier, at
 the first branch: `expected a new line and an indented block after ":"`
-(rule.indentation).
+(rule.indentation). Python's conditional expression, `x = a if c else b`,
+is `expected end of line, found "if"`, at the `if`; C's `c ? a : b` is
+`unexpected character "?"` (rule.names).
 
 @example reject
 import std::str
@@ -58,6 +61,16 @@ fn answer(ok: bool) -> str:
 @error SURFACE SYNTAX
 @at 4:23
 @message an "if" value must be the whole right side of "=" or "return"
+@end
+
+@example reject
+n = 3
+sign = 1 if n > 0 else -1
+sign
+@caption Python's conditional expression
+@error SURFACE SYNTAX
+@at 2:10
+@message expected end of line, found "if"
 @end
 
 == WHAT TO DO
@@ -94,6 +107,74 @@ fn answer(ok: bool) -> str:
 answer(false)
 @caption Or move the choice into a helper
 @value "answer: no"
+@end
+
+@topic rule.else-if
+title: `else if` is written `elif`
+summary: An if chain continues with `elif c:`; `else if c:` is a syntax error, since an `else` takes a block of its own on the next lines.
+index: rules errors
+alias: else if; elseif; elsif
+keywords: else, if, elif, chain, branch
+related: concept.if-expressions rule.if-placement rule.indentation task.first-program
+docs: ELIF.md
+match: SURFACE SYNTAX | expected ":" after "else", found "if"*
+
+== THE RULE
+A chain of conditions is one `if`, any number of `elif` clauses and an
+optional `else`:
+
+    if n < 0:
+        "negative"
+    elif n == 0:
+        "zero"
+    else:
+        "positive"
+
+`else` is followed by `:` and a block on its own lines, never by another
+`if` on its line. `elif` is a reserved word.
+
+== WHY
+One spelling of each clause keeps the chain flat: every condition sits at
+the same indentation, and `elif` is exactly an `else` holding one nested
+`if` (ELIF.md), with no dangling-else question about which `if` an `else`
+belongs to.
+
+== WHAT IS REPORTED
+SURFACE SYNTAX, at the `if` after `else`:
+
+    expected ":" after "else", found "if"
+
+@example reject
+fn sign(n: int) -> str:
+    if n < 0:
+        "negative"
+    else if n == 0:
+        "zero"
+    else:
+        "positive"
+
+0
+@caption else if, as in C, Java or JavaScript
+@error SURFACE SYNTAX
+@at 4:10
+@message expected ":" after "else", found "if"
+@end
+
+== WHAT TO DO
+Write `elif` for `else if`.
+
+@example accept
+fn sign(n: int) -> str:
+    if n < 0:
+        "negative"
+    elif n == 0:
+        "zero"
+    else:
+        "positive"
+
+sign(0)
+@caption The same chain with elif
+@value "zero"
 @end
 
 @topic rule.loop-placement
@@ -871,9 +952,11 @@ summary: "x = e" binds a new immutable name, at most once per scope; a nested sc
 index: rules errors
 alias: rebind a variable; reassign a name; duplicate binding; field assignment; only a name can be bound
 keywords: binding, immutable, assignment, shadowing, duplicate, scope, accumulate, +=
-related: concept.bindings concept.values rule.forward-references capability.assignment principle.immutability concept.mutable-vector error.duplicate
+related: concept.bindings concept.values rule.forward-references capability.assignment principle.immutability concept.mutable-vector error.duplicate task.accumulate task.first-program
 docs: README.md STRUCT-DESTRUCTURING.md
 match: SURFACE SYNTAX | only a name can be bound with "="*
+match: SURFACE SYNTAX | expected an expression, found "="*
+match: CORE SEMANTIC DUPLICATE | duplicate binding "*" in the same lexical scope*
 
 == THE RULE
 `name = expression` creates a new binding whose value never changes. It
@@ -892,7 +975,11 @@ new value. MutableVector and MutableArray change through their own
 operations on a place, never through `=`.
 
 A common surprise: `total = total + i` in a loop body binds a new `total`
-in the body on every iteration. The outer `total` keeps its value.
+in the body on every iteration. The outer `total` keeps its value. The
+same holds for a name "updated" in an `if` branch: after the `if` the
+outer name is unchanged, and a name bound only inside the branches is
+UNBOUND after it (error.unbound). Neither is reported where it is
+written: the program compiles.
 
 == WHY
 A binding's value is fixed where it is established, so a fact the
@@ -912,7 +999,7 @@ target that is not a name:
 
     only a name can be bound with "="
 
-`x += 1` is `expected an expression, found "="`.
+`x += 1` (and `-=`, `*=`) is `expected an expression, found "="`.
 
 @example reject
 price = 100
@@ -937,12 +1024,23 @@ p
 @message only a name can be bound with "="
 @end
 
+@example reject
+count = 0
+count += 1
+count
+@caption Compound assignment
+@error SURFACE SYNTAX
+@at 2:8
+@message expected an expression, found "="
+@end
+
 == WHAT TO DO
 Give each new value its own name (`discounted = price - 15`). Build a
-"changed" struct as a new construction. Accumulate with a collecting loop
-or with recursion that passes the running value as a parameter. Use
-MutableVector when a growing sequence really is the model
-(concept.mutable-vector).
+"changed" struct as a new construction. Choose between values with an
+`if` bound to one name (`r = if c:`), not a binding in each branch.
+Accumulate with a collecting loop or with recursion that passes the
+running value as a parameter (task.accumulate). Use MutableVector when a
+growing sequence really is the model (concept.mutable-vector).
 
 @example accept
 fn sum_to(n: int, acc: int) -> int:
@@ -1436,6 +1534,11 @@ SURFACE SYNTAX, at the offending line:
     expected an indented block, found ...
     expected a new line and an indented block after ":", found ...
 
+The last one is most often a one-line `if` or loop written as a value,
+`x = if c: a else: b` or `ys = loop x in xs: f(x)`: there is no one-line
+form of either. Give each block its own lines and bind the whole `if` or
+loop to the name (rule.if-placement, rule.loop-placement).
+
 @example reject
 fn f(x):
 	x
@@ -1491,6 +1594,16 @@ f(1)
 @caption A block on its colon's line
 @error SURFACE SYNTAX
 @at 2:15
+@message expected a new line and an indented block after ":"*
+@end
+
+@example reject
+n = 3
+sign = if n < 0: -1 else: 1
+sign
+@caption A one-line if as a value
+@error SURFACE SYNTAX
+@at 2:18
 @message expected a new line and an indented block after ":"*
 @end
 
@@ -1560,7 +1673,9 @@ SURFACE SYNTAX:
 
 A hyphenated name elsewhere is read as a subtraction: in a binding it is
 `only a name can be bound with "="`, in an expression an `unbound name`
-for one of its halves.
+for one of its halves. The commonest stray `?` is C's conditional
+operator, `c ? a : b`: Botlish has none; bind an `if` to a name instead
+(rule.if-placement).
 
 @example reject
 fn ok??(x):

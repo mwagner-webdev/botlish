@@ -251,7 +251,8 @@ proc usage {} {
         "       $me -version" "" \
         "Compiles and runs Botlish programs: FILE.bot (source), FILE.hir (HIR text)," \
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
-        "Each program's output is printed, then its value." ""]
+        "Each program's output is printed, then its value." "" \
+        "Before writing a program, read: $me -help primer" ""]
     foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} lsp {Language server (with -warnings, -target; no FILE)} inspect {Inspecting (printed before the program runs)} help Reference} {
         lappend lines "$heading:"
         foreach {name argument optionGroup description} $cliOptions {

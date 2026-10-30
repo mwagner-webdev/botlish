@@ -1,0 +1,24 @@
+static: /tmp/claude-0/libcb2/lib/out/libmtplib.a
+shared: /tmp/claude-0/libcb2/lib/out/libmtplib.so
+header: /tmp/claude-0/libcb2/lib/out/mtplib.h
+manifest: /tmp/claude-0/libcb2/lib/out/mtplib.manifest.json
+== SDL3 main callbacks calling mtplib_step (GC stress 0)
+MTP {"kind":"mark","stage":"callback-init","tid":13190,"main_tid":13190,"same_tid":1,"pthread_main":1,"ns_main":-1,"sp":"0x7ffef348aa40","stack_low":"0x7ffef2c8e000","stack_high":"0x7ffef348b000","stack_bytes":8376320,"t_ns":2684923453346,"since_load_ns":173261,"since_exec_us":-1,"threads":1}
+MTP {"kind":"sdl","stage":"after-init","ok":true,"sdl_is_main":true,"pthread_main":1,"error":"","driver":"dummy","t_ns":2684923674957,"threads":1}
+MTP {"kind":"window","id":2,"flags":1536,"cocoa_window":false,"window_number":-1,"pthread_main":1}
+MTP {"kind":"renderer","name":"software","pthread_main":1}
+MTP {"kind":"mark","stage":"callback-event","tid":13190,"main_tid":13190,"same_tid":1,"pthread_main":1,"ns_main":-1,"sp":"0x7ffef348a210","stack_low":"0x7ffef2c8e000","stack_high":"0x7ffef348b000","stack_bytes":8376320,"t_ns":2684924202601,"since_load_ns":922352,"since_exec_us":-1,"threads":1}
+MTP {"kind":"mark","stage":"callback-quit","tid":13190,"main_tid":13190,"same_tid":1,"pthread_main":1,"ns_main":-1,"sp":"0x7ffef348aa50","stack_low":"0x7ffef2c8e000","stack_high":"0x7ffef348b000","stack_bytes":8376320,"t_ns":2684925608490,"since_load_ns":2328411,"since_exec_us":-1,"threads":1}
+MTP {"kind":"botlish-library","calls":61,"failures":0,"last":81,"pthread_main":1}
+MTP {"kind":"callbacks","result":1,"iterations":60,"presented":60,"events":5,"calls":67,"on_main":67,"ms":2}
+status 0
+== SDL3 main callbacks calling mtplib_step (GC stress 1)
+MTP {"kind":"mark","stage":"callback-init","tid":13194,"main_tid":13194,"same_tid":1,"pthread_main":1,"ns_main":-1,"sp":"0x7ffe80eb54f0","stack_low":"0x7ffe806ba000","stack_high":"0x7ffe80eb6000","stack_bytes":8372224,"t_ns":2684928621541,"since_load_ns":172183,"since_exec_us":-1,"threads":1}
+MTP {"kind":"sdl","stage":"after-init","ok":true,"sdl_is_main":true,"pthread_main":1,"error":"","driver":"dummy","t_ns":2684928815098,"threads":1}
+MTP {"kind":"window","id":2,"flags":1536,"cocoa_window":false,"window_number":-1,"pthread_main":1}
+MTP {"kind":"renderer","name":"software","pthread_main":1}
+MTP {"kind":"mark","stage":"callback-event","tid":13194,"main_tid":13194,"same_tid":1,"pthread_main":1,"ns_main":-1,"sp":"0x7ffe80eb4cc0","stack_low":"0x7ffe806ba000","stack_high":"0x7ffe80eb6000","stack_bytes":8372224,"t_ns":2684929233165,"since_load_ns":783815,"since_exec_us":-1,"threads":1}
+MTP {"kind":"mark","stage":"callback-quit","tid":13194,"main_tid":13194,"same_tid":1,"pthread_main":1,"ns_main":-1,"sp":"0x7ffe80eb5500","stack_low":"0x7ffe806ba000","stack_high":"0x7ffe80eb6000","stack_bytes":8372224,"t_ns":2684930747172,"since_load_ns":2297829,"since_exec_us":-1,"threads":1}
+MTP {"kind":"botlish-library","calls":61,"failures":0,"last":81,"pthread_main":1}
+MTP {"kind":"callbacks","result":1,"iterations":60,"presented":60,"events":5,"calls":67,"on_main":67,"ms":2}
+status 0

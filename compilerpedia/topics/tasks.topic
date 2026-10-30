@@ -2,6 +2,191 @@
 # thing, found by the words people search with ("print output", "handle
 # several errors"). Each answers the task and points at the topics behind it.
 
+@topic task.first-program
+title: Before writing a program: habits that work differently in Botlish
+summary: Habits from other languages that fail to compile in Botlish, and the one that compiles and silently means something else: the list, with fixes and a checked program.
+index: concepts principles
+alias: primer; getting started; quick start; cheat sheet; first program; before you start; common mistakes; pitfalls; gotchas
+keywords: newcomer, habit, mistake, tutorial, primer
+related: principle.idiomatic-botlish rule.immutable-bindings rule.if-placement rule.loop-placement concept.loops concept.if-expressions concept.method-sugar concept.nomethod task.accumulate error.unbound warning.method-eligible warning.one-char-string-literal cli.output
+docs: AGENT-PRIMER.md
+
+== AT A GLANCE
+Botlish looks like Python. These habits fail to compile, or compile and
+mean something else:
+
+    You might write                Botlish
+    for x in xs:                   loop x in xs:
+    for i in range(n):             loop i from 0 to n:
+    while c:                       loop:  (its body ends it with break)
+    v = a if c else b, c ? a : b   v = if c:  (each branch on its own line)
+    if c: x  (on one line)         x on the next line, indented
+    else if                        elif
+    x = x + 1, x += 1              a new name; or recurse, passing x + 1
+    total = total + x  in a loop   compiles; binds a new total in the loop
+                                   body, and the outer total never changes
+    r = ... in each if branch,     UNBOUND after the if (a branch's names
+    then r after the if            end with it): write r = if c:
+    f(x, y)  your own function     x.f(y), or declare it nomethod fn
+    "x"  one character             'x'
+
+== THE ONE THAT COMPILES
+An `if` branch and a loop body are scopes of their own, and `x = e` always
+binds a new name (rule.immutable-bindings). So the usual way of keeping a
+running total, or of updating a result in one branch, compiles and leaves
+the outer name as it was:
+
+@example accept
+total = 0
+loop x in [1, 2, 3]:
+    total = total + x
+total
+@caption Not a running total: the loop body binds a total of its own
+@value 0
+@end
+
+Pass the running value on instead (or count with a collecting loop, or
+keep it in a mutable collection: task.accumulate), and bind an `if`'s
+value instead of binding a name in each branch:
+
+@example accept
+import std::list
+
+fn sum_from(xs: List[int], i: int, total: int) -> int:
+    if i < 0 or i >= xs.length():
+        return total
+    xs.sum_from(i + 1, total + xs.at(i))
+
+[1, 2, 3].sum_from(0, 0)
+@caption The running total passed on to the next call
+@value 6
+@end
+
+== A PROGRAM IN THE HOUSE STYLE
+Callees come before their callers; an `if` or a loop is bound to a name,
+returned or a body's last expression; a function about its first argument
+is called with method syntax, and one whose first parameter is no subject
+says so with `nomethod`. It compiles with no warning:
+
+@example accept
+import std::list
+import std::str
+
+fn grade(score: int) -> str:
+    if score >= 90:
+        "top"
+    elif score >= 75:
+        "good"
+    else:
+        "pass"
+
+fn total(xs: List[int], i: int, acc: int) -> int:
+    if i < 0 or i >= xs.length():
+        return acc
+    xs.total(i + 1, acc + xs.at(i))
+
+nomethod fn label(prefix: str, body: str) -> str:
+    prefix.concat(": ").concat(body)
+
+scores = [95, 80, 60]
+grades = loop s in scores:
+    s.grade()
+sum = scores.total(0, 0)
+first = if grades.length() > 0:
+    grades.at(0)
+else:
+    "none"
+label("first", first)
+@caption Names before use, bound values, receivers first
+@value "first: top"
+@quiet
+@end
+
+== WHEN THE COMPILER OBJECTS
+  * Every diagnostic and warning is followed by a `help:` line naming the
+    page that explains it (cli.output): read that page before rewriting.
+  * A warning is reported for every call it applies to: fix them in one
+    pass, and prefer deciding at the declaration (`nomethod fn`, a
+    `-> List[T]` result) to rewriting call sites until the message stops
+    (principle.investigate-warnings).
+  * `-check FILE.bot` reports a program's diagnostics and warnings without
+    running it.
+  * principle.idiomatic-botlish lists the defaults that keep code
+    unsurprising once it compiles.
+
+@topic task.accumulate
+title: Running totals: summing, counting, keeping a maximum
+summary: Botlish has no assignment, so a running total is no name updated in a loop: pass it on as a parameter, count with a collecting loop, or keep it in a MutableArray.
+index: concepts
+alias: running total; accumulator; accumulate; sum a list; sum of a list; count matches; maximum of a list; loop accumulator
+keywords: sum, total, count, maximum, minimum, accumulate, accumulator, running, aggregate
+related: rule.immutable-bindings capability.assignment capability.map-filter concept.loops concept.mutable-array task.first-program task.iterate-with-index
+
+== THE TRAP
+    total = 0
+    loop x in xs:
+        total = total + x
+    total
+The loop body is a scope of its own, so its `total` is a new binding that
+lasts for one iteration (rule.immutable-bindings). The program compiles,
+and the outer `total` is still 0 after the loop.
+
+== HOW
+  * Pass the running value on: a function takes it as a parameter and
+    calls itself with the next one. This is the general form (a sum, a
+    maximum, a value built step by step), and the compiler proves the
+    index in range.
+  * Count with a collecting loop: `continue` leaves out the elements that
+    do not count, and the length of the List it builds is the count.
+  * When the total is state a loop updates, keep it in a mutable
+    collection: a one-element MutableArray changes in place through its
+    own operations (concept.mutable-array).
+There is no fold or reduce function (capability.map-filter).
+
+@example accept
+import std::list
+
+fn largest_from(xs: List[int], i: int, best: int) -> int:
+    if i < 0 or i >= xs.length():
+        return best
+    x = xs.at(i)
+    next = if x > best:
+        x
+    else:
+        best
+    xs.largest_from(i + 1, next)
+
+[4, 9, 2].largest_from(0, 0)
+@caption A maximum: the best so far passed to the next call
+@value 9
+@end
+
+@example accept
+import std::list
+
+evens = loop x in [1, 2, 3, 4, 5, 6]:
+    if x.mod(2) == 1:
+        continue
+    x
+evens.length()
+@caption A count: collect what counts, then take the length
+@value 3
+@end
+
+@example accept
+import std::mutable_array
+
+fn sum(xs: List[int]) -> int:
+    total = std::mutable_array::create(1, 0)
+    loop x in xs:
+        total.set(0, total.at(0) + x)
+    total.at(0)
+
+sum([1, 2, 3])
+@caption A total kept in a one-element MutableArray
+@value 6
+@end
+
 @topic task.print-output
 title: Printing output
 summary: std::io::print_line(text) prints a line on the native backends and in executables, with std::linux::io's context installed; on every backend the program's value is printed for you.
