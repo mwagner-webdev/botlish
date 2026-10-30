@@ -564,7 +564,14 @@ jobs:
           mv "$workspace" "$workspace.hidden"
           mv ~/.cargo ~/.cargo.hidden
           mv ~/.rustup ~/.rustup.hidden
-          for t in cargo rustc; do if command -v $t; then echo "::error::$t is still on PATH"; exit 1; fi; done
+          # The runner's rustup is Homebrew's: its cargo and rustc proxies
+          # (/opt/homebrew/opt/rustup/bin) stay on PATH without ~/.rustup.
+          # Leave out every PATH directory that holds one, for this step.
+          PATH=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
+            if [ -n "$d" ] && [ ! -e "$d/cargo" ] && [ ! -e "$d/rustc" ] && [ ! -e "$d/rustup" ]; then printf '%s:' "$d"; fi
+          done)
+          export PATH="${PATH%:}"
+          for t in cargo rustc rustup; do if command -v $t; then echo "::error::$t is still on PATH"; exit 1; fi; done
           botlish="$APP/Contents/MacOS/botlish"
           set -x
           "$botlish" -warnings off -native-startup main-thread -emit-native-executable identity.bot
