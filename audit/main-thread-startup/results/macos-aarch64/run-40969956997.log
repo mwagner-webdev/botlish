@@ -1,0 +1,572 @@
+# run 40969956997 (commit 6fe5057f), job 123819167704 (main-thread startup (macOS arm64)): tools/acceptance.py's output,
+# first through Botlish.app (the checkout inaccessible, PATH the system's: --app, --repeat 10), then through the checkout's
+# rustc and system linkers (--checkout, --only identity,lc-main,report,semantics,graphical, --repeat 3). Timestamps removed.
+
+######## through Botlish.app
+
+== environment
+   platform: macOS-15.8.2-arm64-arm-64bit-Mach-O
+   uname: Darwin sjc22-bm210-40ce6606-1df8-4a98-977d-c71c0ce39434-561C51C16B41.local 24.6.0 Darwin Kernel Version 24.6.0: Sun Oct 11 23:44:11 PDT 2026; root:xnu-11417.140.69.713.47~2/RELEASE_ARM64_VMAPPLE arm64
+   page_size: 16384
+   ulimit_s: 8176
+   ulimit_Hs: 65520
+   cc: Apple clang version 17.0.0 (clang-1700.0.13.5)
+   rustc: 
+   sdl3: {'commit': '829a65d769d935c4852f8159e964312c0957260a', 'version': '3.4.18', 'archive_bytes': 4651024, 'frameworks': ['CoreMedia', 'CoreVideo', 'Cocoa', 'UniformTypeIdentifiers', 'IOKit', 'ForceFeedback', 'Carbon', 'CoreAudio', 'AudioToolbox', 'AVFoundation', 'Foundation', 'GameController', 'Metal', 'QuartzCore', 'CoreHaptics', 'AppKit'], 'libraries': ['pthread', 'm', 'objc']}
+   sw_vers: ProductName:		macOS
+ProductVersion:		15.8.2
+BuildVersion:		24H232
+   sdk: 15.5
+   xcode: /Applications/Xcode_16.4.app/Contents/Developer
+   launchctl_managername: Aqua
+   window_server: 147 WindowServer
+   loginwindow: 150 loginwindow
+   console_user: runner
+   user: runner
+   virtual_machine: 1
+   displays: 
+   sdl_video_hint: 
+== native fixtures and C controls
+   build cc-mtprobe: ok (388 ms)
+   build cc-mtprobe_sdl: ok (88 ms)
+   build cc-mtdispatch: ok (95 ms)
+   build libmtprobe.a: ok (23 ms)
+   build libmtdispatch.a: ok (26 ms)
+   build cc-appkit: ok (1369 ms)
+   build csdl: ok (495 ms)
+   build csdl_callbacks: ok (257 ms)
+   build mainstack-default: ok (120 ms)
+   build mainstack-0x4000000: ok (112 ms)
+   build mainstack-0x10000000: ok (107 ms)
+   build mainstack-0x20000000: ok (112 ms)
+   build mainstack-0x40000000: FAILED (78 ms)
+ld: -stack_size must be <= 512MB on arm64 platforms
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+
+   build mainstack-0x80000000: FAILED (78 ms)
+ld: -stack_size must be <= 512MB on arm64 platforms
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+
+   build session: ok (319 ms)
+   build identity-rust: not built (the acceptance needs no Rust)
+== Botlish executables (production: the startup policy of each)
+   build worker/identity: ok (447 ms)
+   build worker/sdl: ok (1212 ms)
+   build worker/depth: ok (307 ms)
+   build worker/kept: ok (428 ms)
+   build worker/co_overflow: ok (275 ms)
+   build worker/fault: ok (417 ms)
+   build worker/big: ok (8204 ms)
+   build worker/errors: ok (299 ms)
+   build worker/sleep: ok (416 ms)
+   build main/identity: ok (489 ms)
+   build main/sdl: ok (1006 ms)
+   build main/depth: ok (436 ms)
+   build main/kept: ok (458 ms)
+   build main/co_overflow: ok (284 ms)
+   build main/fault: ok (381 ms)
+   build main/big: ok (8247 ms)
+   build main/errors: ok (452 ms)
+   build main/sleep: ok (508 ms)
+RESULT env-session: EXECUTED-THREAD {"active_displays": 1, "kind": "session", "login_done": 1, "main_display_height": 768, "main_display_width": 1024, "on_console": 1, "screen_capture_access": 1, "session": 1, "status": 0, "user": "runner"}
+RESULT id-c-main: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 35152, "stack_bytes": 8372224, "status": 0, "threads": 1, "value": ""}
+RESULT id-c-worker: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 24163, "stack_bytes": 1073754112, "status": 0, "threads": 2, "value": ""}
+RESULT id-worker: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 20269, "stack_bytes": 1073754112, "status": 0, "threads": 2, "value": [0, 0, 2]}
+RESULT id-main: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 42483, "stack_bytes": 536870912, "status": 0, "threads": 1, "value": [1, 1, 1]}
+RESULT id-linked-run: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 5733, "stack_bytes": 1073754112, "status": 0, "threads": 2, "value": "   value: [0, 0, 2]"}
+RESULT macho-main: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "Mach-O 64-bit executable arm64"}
+RESULT deps-main-sdl: EXECUTED-THREAD {"libraries": ["/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa", "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers", "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit", "/System/Library/Frameworks/ForceFeedback.framework/Versions/A/ForceFeedback", "/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon", "/System/Library/F
+RESULT lc-main-worker: EXECUTED-THREAD {"stacksize": 0, "status": 0}
+RESULT lc-main-main: EXECUTED-THREAD {"stacksize": 536870912, "status": 0}
+RESULT report-worker: EXECUTED-THREAD {"guard": 16384, "startup": "worker", "status": 0, "thread": "worker", "usable": 1073754112, "vm_lines": 25}
+RESULT report-main: EXECUTED-THREAD {"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}
+RESULT report-main-gc: EXECUTED-THREAD {"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}
+RESULT rt-worker-depth-down-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 10000}
+RESULT rt-worker-depth-down-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 100000}
+RESULT rt-worker-depth-down-1000000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 1000000}
+RESULT rt-worker-overflow-down: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-worker-depth-keep-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 20000}
+RESULT rt-worker-depth-keep-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 200000}
+RESULT rt-worker-overflow-keep: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-worker-depth-wide-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 0}
+RESULT rt-worker-depth-wide-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 0}
+RESULT rt-worker-overflow-wide: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-worker-depth-rec-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 10000}
+RESULT rt-worker-depth-rec-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 100000}
+RESULT rt-worker-overflow-rec: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-worker-keep-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 6000}
+RESULT rt-worker-kept: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}
+RESULT rt-worker-kept-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}
+RESULT rt-worker-co-overflow: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-worker-fault: EXECUTED-THREAD {"native_limit_stack": false, "signal": 11, "status": -11, "stderr": "", "value": ""}
+RESULT rt-worker-bigframe-100: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 928487700}
+RESULT rt-worker-bigframe-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 7928616}
+RESULT rt-worker-bigframe-overflow: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-main-depth-down-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 10000}
+RESULT rt-main-depth-down-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 100000}
+RESULT rt-main-depth-down-1000000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 1000000}
+RESULT rt-main-overflow-down: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-main-depth-keep-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 20000}
+RESULT rt-main-depth-keep-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 200000}
+RESULT rt-main-overflow-keep: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-main-depth-wide-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 0}
+RESULT rt-main-depth-wide-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 0}
+RESULT rt-main-overflow-wide: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-main-depth-rec-10000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 10000}
+RESULT rt-main-depth-rec-100000: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 100000}
+RESULT rt-main-overflow-rec: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-main-keep-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 6000}
+RESULT rt-main-kept: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}
+RESULT rt-main-kept-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}
+RESULT rt-main-co-overflow: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT rt-main-fault: EXECUTED-THREAD {"native_limit_stack": false, "signal": 11, "status": -11, "stderr": "", "value": ""}
+RESULT rt-main-bigframe-100: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 928487700}
+RESULT rt-main-bigframe-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": 7928616}
+RESULT rt-main-bigframe-overflow: EXECUTED-THREAD {"native_limit_stack": true, "signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "value": ""}
+RESULT s-worker-declared: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "1008"}
+RESULT s-worker-runtime: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "+: expected int, got [true] (CORE SEMANTIC TYPE)", "stdout": ""}
+RESULT s-worker-protocol: EXECUTED-THREAD {"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-worker-protocol-runs: EXECUTED-THREAD {"file": "times 3458 458 292\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-worker-startup-report-io: EXECUTED-THREAD {"signal": 0, "status": 2, "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)", "stdout": ""}
+RESULT s-worker-panic: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (22562) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-worker-panic-protocol: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (22565) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-main-declared: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "1008"}
+RESULT s-main-runtime: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "+: expected int, got [true] (CORE SEMANTIC TYPE)", "stdout": ""}
+RESULT s-main-protocol: EXECUTED-THREAD {"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-main-protocol-runs: EXECUTED-THREAD {"file": "times 4459 500 250\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-main-startup-report-io: EXECUTED-THREAD {"signal": 0, "status": 2, "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)", "stdout": ""}
+RESULT s-main-panic: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (22580) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-main-panic-protocol: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (22582) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-worker-overflow-line: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "stdout": ""}
+RESULT s-worker-sigterm-c-call: EXECUTED-THREAD {"signal": 15, "started": true, "status": -15, "wall_ms": 1071}
+RESULT s-worker-sigint-c-call: EXECUTED-THREAD {"signal": 2, "started": true, "status": -2, "wall_ms": 1020}
+RESULT s-main-overflow-line: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "stdout": ""}
+RESULT s-main-sigterm-c-call: EXECUTED-THREAD {"signal": 15, "started": true, "status": -15, "wall_ms": 1034}
+RESULT s-main-sigint-c-call: EXECUTED-THREAD {"signal": 2, "started": true, "status": -2, "wall_ms": 1036}
+RESULT s-main-sigterm-sdl: EXECUTED-COCOA {"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 5, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 4.72, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": [true, true, true, [true, [true, 30, 3, true, [5, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT c-main-cocoa: EXECUTED-COCOA {"capture": {"center_rgb": [255, 128, 0], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 7014, "width": 320}, "cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": "", "window": true}
+RESULT g-main-cocoa: EXECUTED-COCOA {"capture": {"center_rgb": [255, 0, 255], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 8184, "width": 320}, "cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 10.36, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": [true, true, true, [true, [true, 30, 3, true, [6, 1]
+RESULT g-main-cocoa-gc: EXECUTED-COCOA {"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 5.2, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": [true, true, true, [true, [true, 30, 3, true, [6, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-main-headless: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.13, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 3, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-worker-cocoa: FAILED-CORRECTNESS {"cocoa_window": null, "destroyed": false, "driver": null, "error": "No available video device", "init": false, "missing": ["init", "window", "renderer", "presented", "quit_seen", "destroyed"], "pthread_main_seen": [0], "quit": true, "renderer": null, "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 2, "value": [true, false, true, [false]], "window": false}
+RESULT g-worker-headless: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.15, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 4, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-worker-headless-gc: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 4, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT pc-baddriver: FAILED-CORRECTNESS {"cocoa_window": null, "destroyed": false, "driver": null, "error": "nonexistent not available", "events": 0, "init": false, "missing": ["init", "window", "renderer", "presented", "quit_seen", "destroyed"], "presented": 0, "pthread_main_seen": [1], "quit": true, "quit_seen": false, "renderer": null, "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 1, "threads_max": 1, "value": "", "window": false}
+RESULT pc-dummy-not-cocoa: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 3, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT pc-nopump: FAILED-CORRECTNESS {"cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 0, "init": true, "missing": ["quit_seen"], "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": false, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 1, "threads_max": 5, "value": "", "window": true}
+RESULT pc-nodestroy: FAILED-CORRECTNESS {"cocoa_window": true, "destroyed": false, "driver": "cocoa", "error": "", "events": 6, "init": true, "missing": ["destroyed"], "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": "", "window": true}
+RESULT oracle: complete Cocoa record: EXECUTED-COCOA
+RESULT oracle: dummy driver claimed as Cocoa: EXECUTED-HEADLESS
+RESULT oracle: Cocoa driver off the main thread: FAILED-CORRECTNESS
+RESULT oracle: a value claiming a window the fixture did not see: FAILED-CORRECTNESS
+RESULT oracle: the quit never polled: FAILED-CORRECTNESS
+RESULT t-id-worker: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 13606, "stack_bytes": 1073754112, "status": 0, "threads": 2, "value": [0, 0, 2]}
+RESULT t-id-main: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 7755, "stack_bytes": 536870912, "status": 0, "threads": 1, "value": [1, 1, 1]}
+RESULT t-main-sdl: EXECUTED-COCOA {"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 12.11, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": [true, true, true, [true, [true, 30, 3, true, [6, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT t-main-sdl-headless: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 3, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT t-worker-sdl-headless: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.09, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 4, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT t-main-sdl-headless-gc: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 3, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT t-worker-sdl-headless-gc: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.09, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 4, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT t-main-kept-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}
+RESULT t-worker-kept-gc: EXECUTED-THREAD {"native_limit_stack": false, "signal": 0, "status": 0, "stderr": "", "value": [[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}
+RESULT t-c-main: EXECUTED-COCOA {"cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 7, "init": true, "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 5, "value": "", "window": true}
+# MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md: outcomes
+
+Host: macOS-15.8.2-arm64-arm-64bit-Mach-O; GUI available to the C control: True
+
+| case | group | class | as predicted | facts |
+|---|---|---|---|---|
+| env-session | env | EXECUTED-THREAD | yes | `{"active_displays": 1, "kind": "session", "login_done": 1, "main_display_height": 768, "main_display_width": 1024, "on_console": 1, "screen_capture_access": 1, "session": 1, "status": 0, "user": "runner"}` |
+| id-c-main | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 35152, "stack_bytes": 8372224, "status": 0, "threads": 1}` |
+| id-c-worker | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 24163, "stack_bytes": 1073754112, "status": 0, "threads": 2}` |
+| id-worker | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 20269, "stack_bytes": 1073754112, "status": 0, "threads": 2}` |
+| id-main | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 42483, "stack_bytes": 536870912, "status": 0, "threads": 1}` |
+| id-linked-run | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 5733, "stack_bytes": 1073754112, "status": 0, "threads": 2}` |
+| macho-main | identity | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "Mach-O 64-bit executable arm64"}` |
+| deps-main-sdl | identity | EXECUTED-THREAD | yes | `{"libraries": ["/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa", "/System/Library/Frame` |
+| lc-main-worker | lc-main | EXECUTED-THREAD | yes | `{"stacksize": 0, "status": 0}` |
+| lc-main-main | lc-main | EXECUTED-THREAD | yes | `{"stacksize": 536870912, "status": 0}` |
+| report-worker | report | EXECUTED-THREAD | yes | `{"guard": 16384, "startup": "worker", "status": 0, "thread": "worker", "usable": 1073754112, "vm_lines": 25}` |
+| report-main | report | EXECUTED-THREAD | yes | `{"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}` |
+| report-main-gc | report | EXECUTED-THREAD | yes | `{"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}` |
+| rt-worker-depth-down-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-depth-down-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-depth-down-1000000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-overflow-down | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-worker-depth-keep-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-depth-keep-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-overflow-keep | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-worker-depth-wide-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-depth-wide-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-overflow-wide | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-worker-depth-rec-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-depth-rec-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-overflow-rec | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-worker-keep-gc | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-kept | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-kept-gc | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-co-overflow | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-worker-fault | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 11, "status": -11}` |
+| rt-worker-bigframe-100 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-bigframe-gc | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-worker-bigframe-overflow | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-main-depth-down-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-depth-down-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-depth-down-1000000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-overflow-down | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-main-depth-keep-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-depth-keep-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-overflow-keep | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-main-depth-wide-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-depth-wide-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-overflow-wide | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-main-depth-rec-10000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-depth-rec-100000 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-overflow-rec | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-main-keep-gc | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-kept | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-kept-gc | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-co-overflow | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| rt-main-fault | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 11, "status": -11}` |
+| rt-main-bigframe-100 | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-bigframe-gc | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| rt-main-bigframe-overflow | runtime | EXECUTED-THREAD | yes | `{"native_limit_stack": true, "signal": 0, "status": 1}` |
+| s-worker-declared | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "1008"}` |
+| s-worker-runtime | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-protocol | semantics | EXECUTED-THREAD | yes | `{"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-worker-protocol-runs | semantics | EXECUTED-THREAD | yes | `{"file": "times 3458 458 292\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-worker-startup-report-io | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 2, "stdout": ""}` |
+| s-worker-panic | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-panic-protocol | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-declared | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "1008"}` |
+| s-main-runtime | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-protocol | semantics | EXECUTED-THREAD | yes | `{"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-main-protocol-runs | semantics | EXECUTED-THREAD | yes | `{"file": "times 4459 500 250\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-main-startup-report-io | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 2, "stdout": ""}` |
+| s-main-panic | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-panic-protocol | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-overflow-line | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-sigterm-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 15, "started": true, "status": -15, "wall_ms": 1071}` |
+| s-worker-sigint-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 2, "started": true, "status": -2, "wall_ms": 1020}` |
+| s-main-overflow-line | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-sigterm-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 15, "started": true, "status": -15, "wall_ms": 1034}` |
+| s-main-sigint-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 2, "started": true, "status": -2, "wall_ms": 1036}` |
+| s-main-sigterm-sdl | semantics | EXECUTED-COCOA | yes | `{"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 5, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 4.72, "quit": true, "quit_seen": true, "renderer": "met` |
+| c-main-cocoa | graphical | EXECUTED-COCOA | yes | `{"capture": {"center_rgb": [255, 128, 0], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 7014, "width": 320}, "capture_matches": true, "cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "pthread_main_seen":` |
+| g-main-cocoa | graphical | EXECUTED-COCOA | yes | `{"capture": {"center_rgb": [255, 0, 255], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 8184, "width": 320}, "capture_matches": true, "cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "ev` |
+| g-main-cocoa-gc | graphical | EXECUTED-COCOA | yes | `{"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 5.2, "quit": true, "quit_seen": true, "renderer": "meta` |
+| g-main-headless | graphical | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.13, "quit": true, "quit_seen": true, "renderer": "s` |
+| g-worker-cocoa | graphical | FAILED-CORRECTNESS | yes | `{"cocoa_window": null, "destroyed": false, "driver": null, "error": "No available video device", "init": false, "missing": ["init", "window", "renderer", "presented", "quit_seen", "destroyed"], "pthread_main_seen": [0], "quit": true, "renderer": null, "sdl_is_main_after_init": true, "sdl_is_main_bef` |
+| g-worker-headless | graphical | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.15, "quit": true, "quit_seen": true, "renderer": "s` |
+| g-worker-headless-gc | graphical | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "s` |
+| pc-baddriver | controls | FAILED-CORRECTNESS | yes | `{"cocoa_window": null, "destroyed": false, "driver": null, "error": "nonexistent not available", "events": 0, "init": false, "missing": ["init", "window", "renderer", "presented", "quit_seen", "destroyed"], "presented": 0, "pthread_main_seen": [1], "quit": true, "quit_seen": false, "renderer": null,` |
+| pc-dummy-not-cocoa | controls | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "s` |
+| pc-nopump | controls | FAILED-CORRECTNESS | yes | `{"cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 0, "init": true, "missing": ["quit_seen"], "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": false, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": ` |
+| pc-nodestroy | controls | FAILED-CORRECTNESS | yes | `{"cocoa_window": true, "destroyed": false, "driver": "cocoa", "error": "", "events": 6, "init": true, "missing": ["destroyed"], "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": ` |
+| oracle: complete Cocoa record | controls | EXECUTED-COCOA | yes | `{"want": "EXECUTED-COCOA"}` |
+| oracle: dummy driver claimed as Cocoa | controls | EXECUTED-HEADLESS | yes | `{"want": "EXECUTED-HEADLESS"}` |
+| oracle: Cocoa driver off the main thread | controls | FAILED-CORRECTNESS | yes | `{"want": "FAILED-CORRECTNESS"}` |
+| oracle: a value claiming a window the fixture did not see | controls | FAILED-CORRECTNESS | yes | `{"want": "FAILED-CORRECTNESS"}` |
+| oracle: the quit never polled | controls | FAILED-CORRECTNESS | yes | `{"want": "FAILED-CORRECTNESS"}` |
+| t-id-worker | timing | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 13606, "stack_bytes": 1073754112, "status": 0, "threads": 2}` |
+| t-id-main | timing | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 7755, "stack_bytes": 536870912, "status": 0, "threads": 1}` |
+| t-main-sdl | timing | EXECUTED-COCOA | yes | `{"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 12.11, "quit": true, "quit_seen": true, "renderer": "me` |
+| t-main-sdl-headless | timing | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "s` |
+| t-worker-sdl-headless | timing | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.09, "quit": true, "quit_seen": true, "renderer": "s` |
+| t-main-sdl-headless-gc | timing | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "s` |
+| t-worker-sdl-headless-gc | timing | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.09, "quit": true, "quit_seen": true, "renderer": "s` |
+| t-main-kept-gc | timing | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| t-worker-kept-gc | timing | EXECUTED-THREAD | yes | `{"native_limit_stack": false, "signal": 0, "status": 0}` |
+| t-c-main | timing | EXECUTED-COCOA | yes | `{"cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 7, "init": true, "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 5, "windo` |
+
+## Timing (median [min, max] of the repetitions)
+
+| case | wall ms | entry since exec ms | SDL init ms | frame ms | SDL_PumpEvents us | shutdown ms | threads |
+|---|---|---|---|---|---|---|---|
+| t-id-worker | 8.547 [7.417, 15.164] | 7.684 [6.786, 13.606] | - | - | - | - | 2.0 [2, 2] |
+| t-id-main | 9.443 [7.174, 11.105] | 8.316 [6.598, 10.347] | - | - | - | - | 1.0 [1, 1] |
+| t-main-sdl | 1924.326 [1660.677, 2124.592] | 14.571 [7.701, 20.714] | 69.622 [49.986, 116.743] | 52.216 [44.82, 60.276] | 6.0 [4.17, 14.34] | 27.184 [25.332, 32.054] | 6.0 [6, 6] |
+| t-main-sdl-headless | 1684.882 [1524.271, 1841.124] | 12.846 [9.119, 23.22] | 0.143 [0.101, 0.256] | 49.072 [42.956, 53.193] | 0.16 [0.09, 0.17] | 0.222 [0.088, 0.648] | 3.0 [3, 3] |
+| t-worker-sdl-headless | 1666.736 [1566.744, 1828.39] | 12.113 [8.27, 33.539] | 0.11 [0.097, 0.267] | 49.771 [46.125, 56.682] | 0.095 [0.08, 0.16] | 0.197 [0.1, 0.257] | 4.0 [4, 4] |
+| t-main-sdl-headless-gc | 1506.148 [1315.954, 1770.142] | 14.654 [9.359, 63.15] | 0.116 [0.092, 0.339] | 43.842 [38.616, 53.662] | 0.125 [0.08, 0.16] | 0.19 [0.12, 0.253] | 3.0 [3, 3] |
+| t-worker-sdl-headless-gc | 2577.631 [1452.501, 3105.081] | 13.805 [10.509, 19.524] | 0.179 [0.097, 0.605] | 74.868 [42.475, 97.63] | 0.15 [0.09, 0.71] | 0.19 [0.104, 0.506] | 4.0 [4, 4] |
+| t-main-kept-gc | 4.811 [3.608, 12.955] | - | - | - | - | - | 0.0 [0, 0] |
+| t-worker-kept-gc | 5.198 [4.111, 5.926] | - | - | - | - | - | 0.0 [0, 0] |
+| t-c-main | 2724.331 [2096.226, 3181.348] | 14.471 [10.682, 34.167] | 78.084 [55.067, 195.854] | 82.59 [64.553, 100.905] | - | 25.98 [24.253, 29.21] | 6.0 [5, 6] |
+
+## Executable sizes (bytes)
+
+| executable | bytes |
+|---|---|
+| main/big | 3230488 |
+| main/co_overflow | 853336 |
+| main/depth | 870136 |
+| main/errors | 854664 |
+| main/fault | 832296 |
+| main/identity | 850456 |
+| main/kept | 889720 |
+| main/sdl | 3677704 |
+| main/sleep | 832360 |
+| worker/big | 3230488 |
+| worker/co_overflow | 853336 |
+| worker/depth | 870136 |
+| worker/errors | 854664 |
+| worker/fault | 832312 |
+| worker/identity | 850472 |
+| worker/kept | 889720 |
+| worker/sdl | 3677704 |
+| worker/sleep | 832360 |
+
+## Counts (cases; the oracle self-tests are rows above)
+
+EXECUTED-COCOA: 6 EXECUTED-HEADLESS: 8 EXECUTED-THREAD: 79 UNAVAILABLE-GUI: 0 FAILED-CORRECTNESS: 4 FAILED-BUILD: 0 NOT-TESTED: 0
+
+Not as predicted (0): none
+every case as predicted
+
+######## through the checkout's linkers
+
+== environment
+   platform: macOS-15.8.2-arm64-arm-64bit-Mach-O
+   uname: Darwin sjc22-bm210-40ce6606-1df8-4a98-977d-c71c0ce39434-561C51C16B41.local 24.6.0 Darwin Kernel Version 24.6.0: Sun Oct 11 23:44:11 PDT 2026; root:xnu-11417.140.69.713.47~2/RELEASE_ARM64_VMAPPLE arm64
+   page_size: 16384
+   ulimit_s: 8176
+   ulimit_Hs: 65520
+   cc: Apple clang version 17.0.0 (clang-1700.0.13.5)
+   rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+   sdl3: {'commit': '829a65d769d935c4852f8159e964312c0957260a', 'version': '3.4.18', 'archive_bytes': 4651024, 'frameworks': ['CoreMedia', 'CoreVideo', 'Cocoa', 'UniformTypeIdentifiers', 'IOKit', 'ForceFeedback', 'Carbon', 'CoreAudio', 'AudioToolbox', 'AVFoundation', 'Foundation', 'GameController', 'Metal', 'QuartzCore', 'CoreHaptics', 'AppKit'], 'libraries': ['pthread', 'm', 'objc']}
+   sw_vers: ProductName:		macOS
+ProductVersion:		15.8.2
+BuildVersion:		24H232
+   sdk: 15.5
+   xcode: /Applications/Xcode_16.4.app/Contents/Developer
+   launchctl_managername: Aqua
+   window_server: 147 WindowServer
+   loginwindow: 150 loginwindow
+   console_user: runner
+   user: runner
+   virtual_machine: 1
+   displays: 
+   sdl_video_hint: 
+== native fixtures and C controls
+   build cc-mtprobe: ok (332 ms)
+   build cc-mtprobe_sdl: ok (153 ms)
+   build cc-mtdispatch: ok (91 ms)
+   build libmtprobe.a: ok (53 ms)
+   build libmtdispatch.a: ok (35 ms)
+   build cc-appkit: ok (1299 ms)
+   build csdl: ok (383 ms)
+   build csdl_callbacks: ok (321 ms)
+   build mainstack-default: ok (130 ms)
+   build mainstack-0x4000000: ok (143 ms)
+   build mainstack-0x10000000: ok (137 ms)
+   build mainstack-0x20000000: ok (147 ms)
+   build mainstack-0x40000000: FAILED (93 ms)
+ld: -stack_size must be <= 512MB on arm64 platforms
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+
+   build mainstack-0x80000000: FAILED (87 ms)
+ld: -stack_size must be <= 512MB on arm64 platforms
+clang: error: linker command failed with exit code 1 (use -v to see invocation)
+
+   build session: ok (367 ms)
+   build identity-rust: not built (the acceptance needs no Rust)
+== Botlish executables (production: the startup policy of each)
+   build worker/identity: ok (494 ms)
+   build worker/sdl: ok (1611 ms)
+   build worker/depth: ok (471 ms)
+   build worker/kept: ok (566 ms)
+   build worker/co_overflow: ok (388 ms)
+   build worker/fault: ok (512 ms)
+   build worker/big: ok (15935 ms)
+   build worker/errors: ok (494 ms)
+   build worker/sleep: ok (591 ms)
+   build main/identity: ok (462 ms)
+   build main/sdl: ok (1454 ms)
+   build main/depth: ok (463 ms)
+   build main/kept: ok (480 ms)
+   build main/co_overflow: ok (286 ms)
+   build main/fault: ok (506 ms)
+   build main/big: ok (12459 ms)
+   build main/errors: ok (289 ms)
+   build main/sleep: ok (379 ms)
+   build rustc/identity: ok (1331 ms)
+   build rustc/sdl: ok (1227 ms)
+   build rustc/errors: ok (374 ms)
+   build rustc/depth: ok (395 ms)
+   build rustc/kept: ok (461 ms)
+   build checkout/identity: ok (491 ms)
+   build checkout/sdl: ok (1435 ms)
+   build checkout/errors: ok (355 ms)
+RESULT id-c-main: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 27541, "stack_bytes": 8372224, "status": 0, "threads": 1, "value": ""}
+RESULT id-c-worker: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 11763, "stack_bytes": 1073754112, "status": 0, "threads": 2, "value": ""}
+RESULT id-worker: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 13295, "stack_bytes": 1073754112, "status": 0, "threads": 2, "value": [0, 0, 2]}
+RESULT id-main: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 13477, "stack_bytes": 536870912, "status": 0, "threads": 1, "value": [1, 1, 1]}
+RESULT id-rustc: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 7175, "stack_bytes": 536870912, "status": 0, "threads": 1, "value": [1, 1, 1]}
+RESULT id-checkout: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 6703, "stack_bytes": 536870912, "status": 0, "threads": 1, "value": [1, 1, 1]}
+RESULT id-linked-run: EXECUTED-THREAD {"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 9822, "stack_bytes": 1073754112, "status": 0, "threads": 2, "value": "   value: [0, 0, 2]"}
+RESULT macho-main: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "Mach-O 64-bit executable arm64"}
+RESULT deps-main-sdl: EXECUTED-THREAD {"libraries": ["/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa", "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers", "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit", "/System/Library/Frameworks/ForceFeedback.framework/Versions/A/ForceFeedback", "/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon", "/System/Library/F
+RESULT deps-rustc-sdl: EXECUTED-THREAD {"libraries": ["/usr/lib/libiconv.2.dylib", "/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa", "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers", "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit", "/System/Library/Frameworks/ForceFeedback.framework/Versions/A/ForceFeedback", "/System/Library/Frameworks/Carbon.framework/Versions/
+RESULT deps-checkout-sdl: EXECUTED-THREAD {"libraries": ["/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa", "/System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers", "/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit", "/System/Library/Frameworks/ForceFeedback.framework/Versions/A/ForceFeedback", "/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon", "/System/Library/F
+RESULT lc-main-worker: EXECUTED-THREAD {"stacksize": 0, "status": 0}
+RESULT lc-main-main: EXECUTED-THREAD {"stacksize": 536870912, "status": 0}
+RESULT lc-main-rustc: EXECUTED-THREAD {"stacksize": 536870912, "status": 0}
+RESULT lc-main-checkout: EXECUTED-THREAD {"stacksize": 536870912, "status": 0}
+RESULT report-worker: EXECUTED-THREAD {"guard": 16384, "startup": "worker", "status": 0, "thread": "worker", "usable": 1073754112, "vm_lines": 25}
+RESULT report-main: EXECUTED-THREAD {"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}
+RESULT report-rustc: EXECUTED-THREAD {"guard": 32768, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536854528, "vm_lines": 25}
+RESULT report-checkout: EXECUTED-THREAD {"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}
+RESULT report-main-gc: EXECUTED-THREAD {"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}
+RESULT s-worker-declared: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "1008"}
+RESULT s-worker-runtime: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "+: expected int, got [true] (CORE SEMANTIC TYPE)", "stdout": ""}
+RESULT s-worker-protocol: EXECUTED-THREAD {"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-worker-protocol-runs: EXECUTED-THREAD {"file": "times 4083 417 208\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-worker-startup-report-io: EXECUTED-THREAD {"signal": 0, "status": 2, "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)", "stdout": ""}
+RESULT s-worker-panic: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (34952) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-worker-panic-protocol: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (34955) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-main-declared: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "1008"}
+RESULT s-main-runtime: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "+: expected int, got [true] (CORE SEMANTIC TYPE)", "stdout": ""}
+RESULT s-main-protocol: EXECUTED-THREAD {"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-main-protocol-runs: EXECUTED-THREAD {"file": "times 4750 417 250\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-main-startup-report-io: EXECUTED-THREAD {"signal": 0, "status": 2, "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)", "stdout": ""}
+RESULT s-main-panic: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (34967) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-main-panic-protocol: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (34969) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-rustc-declared: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "1008"}
+RESULT s-rustc-runtime: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "+: expected int, got [true] (CORE SEMANTIC TYPE)", "stdout": ""}
+RESULT s-rustc-protocol: EXECUTED-THREAD {"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-rustc-protocol-runs: EXECUTED-THREAD {"file": "times 5250 417 291\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-rustc-startup-report-io: EXECUTED-THREAD {"signal": 0, "status": 2, "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)", "stdout": ""}
+RESULT s-rustc-panic: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread 'main' (34982) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-rustc-panic-protocol: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread 'main' (34985) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-checkout-declared: EXECUTED-THREAD {"signal": 0, "status": 0, "stderr": "", "stdout": "1008"}
+RESULT s-checkout-runtime: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "+: expected int, got [true] (CORE SEMANTIC TYPE)", "stdout": ""}
+RESULT s-checkout-protocol: EXECUTED-THREAD {"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-checkout-protocol-runs: EXECUTED-THREAD {"file": "times 3750 417 292\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stderr": "", "stdout": ""}
+RESULT s-checkout-startup-report-io: EXECUTED-THREAD {"signal": 0, "status": 2, "stderr": "/nonexistent/startup-report: No such file or directory (os error 2) (NATIVE IO)", "stdout": ""}
+RESULT s-checkout-panic: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (34999) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-checkout-panic-protocol: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "thread '<unnamed>' (35002) panicked at src/runtime/aot.rs:383:9:\nBOTLISH_NATIVE_RUNTIME_FAULT=panic: a panic injected on the program's thread\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nnative executable panicked (NATIVE BUG)", "stdout": ""}
+RESULT s-worker-overflow-line: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "stdout": ""}
+RESULT s-worker-sigterm-c-call: EXECUTED-THREAD {"signal": 15, "started": true, "status": -15, "wall_ms": 1094}
+RESULT s-worker-sigint-c-call: EXECUTED-THREAD {"signal": 2, "started": true, "status": -2, "wall_ms": 1152}
+RESULT s-main-overflow-line: EXECUTED-THREAD {"signal": 0, "status": 1, "stderr": "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}", "stdout": ""}
+RESULT s-main-sigterm-c-call: EXECUTED-THREAD {"signal": 15, "started": true, "status": -15, "wall_ms": 1035}
+RESULT s-main-sigint-c-call: EXECUTED-THREAD {"signal": 2, "started": true, "status": -2, "wall_ms": 1153}
+RESULT s-main-sigterm-sdl: EXECUTED-COCOA {"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 7, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 5.11, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": [true, true, true, [true, [true, 30, 3, true, [7, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT c-main-cocoa: EXECUTED-COCOA {"capture": {"center_rgb": [255, 128, 0], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 7019, "width": 320}, "cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "pthread_main_seen": [1], "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": "", "window": true}
+RESULT g-main-cocoa: EXECUTED-COCOA {"capture": {"center_rgb": [255, 0, 255], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 8184, "width": 320}, "cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 12.95, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": [true, true, true, [true, [true, 30, 3, true, [6, 1]
+RESULT g-main-cocoa-gc: EXECUTED-COCOA {"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 6.43, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 5, "value": [true, true, true, [true, [true, 30, 3, true, [6, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-main-headless: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.09, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 3, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-worker-cocoa: FAILED-CORRECTNESS {"cocoa_window": null, "destroyed": false, "driver": null, "error": "No available video device", "init": false, "missing": ["init", "window", "renderer", "presented", "quit_seen", "destroyed"], "pthread_main_seen": [0], "quit": true, "renderer": null, "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 2, "value": [true, false, true, [false]], "window": false}
+RESULT g-worker-headless: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 4, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-worker-headless-gc: EXECUTED-HEADLESS {"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.08, "quit": true, "quit_seen": true, "renderer": "software", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 4, "value": [true, true, true, [true, [true, 30, 3, true, [18, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-rustc-cocoa: EXECUTED-COCOA {"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 7, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 33.46, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 6, "value": [true, true, true, [true, [true, 30, 3, true, [7, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+RESULT g-checkout-cocoa: EXECUTED-COCOA {"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 3.91, "quit": true, "quit_seen": true, "renderer": "metal", "sdl_is_main_after_init": true, "sdl_is_main_before_init": true, "status": 0, "threads_max": 5, "value": [true, true, true, [true, [true, 30, 3, true, [6, 1]]]], "value_renderer": true, "value_window": true, "window": true}
+# MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md: outcomes
+
+Host: macOS-15.8.2-arm64-arm-64bit-Mach-O; GUI available to the C control: True
+
+| case | group | class | as predicted | facts |
+|---|---|---|---|---|
+| id-c-main | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 27541, "stack_bytes": 8372224, "status": 0, "threads": 1}` |
+| id-c-worker | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 11763, "stack_bytes": 1073754112, "status": 0, "threads": 2}` |
+| id-worker | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 13295, "stack_bytes": 1073754112, "status": 0, "threads": 2}` |
+| id-main | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 13477, "stack_bytes": 536870912, "status": 0, "threads": 1}` |
+| id-rustc | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 7175, "stack_bytes": 536870912, "status": 0, "threads": 1}` |
+| id-checkout | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 1, "pthread_main": 1, "same_tid_as_main": 1, "since_exec_us": 6703, "stack_bytes": 536870912, "status": 0, "threads": 1}` |
+| id-linked-run | identity | EXECUTED-THREAD | yes | `{"foundation_agrees": true, "ns_main": 0, "pthread_main": 0, "same_tid_as_main": 0, "since_exec_us": 9822, "stack_bytes": 1073754112, "status": 0, "threads": 2}` |
+| macho-main | identity | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "Mach-O 64-bit executable arm64"}` |
+| deps-main-sdl | identity | EXECUTED-THREAD | yes | `{"libraries": ["/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa", "/System/Library/Frame` |
+| deps-rustc-sdl | identity | EXECUTED-THREAD | yes | `{"libraries": ["/usr/lib/libiconv.2.dylib", "/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/C` |
+| deps-checkout-sdl | identity | EXECUTED-THREAD | yes | `{"libraries": ["/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib", "/System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia", "/System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo", "/System/Library/Frameworks/Cocoa.framework/Versions/A/Cocoa", "/System/Library/Frame` |
+| lc-main-worker | lc-main | EXECUTED-THREAD | yes | `{"stacksize": 0, "status": 0}` |
+| lc-main-main | lc-main | EXECUTED-THREAD | yes | `{"stacksize": 536870912, "status": 0}` |
+| lc-main-rustc | lc-main | EXECUTED-THREAD | yes | `{"stacksize": 536870912, "status": 0}` |
+| lc-main-checkout | lc-main | EXECUTED-THREAD | yes | `{"stacksize": 536870912, "status": 0}` |
+| report-worker | report | EXECUTED-THREAD | yes | `{"guard": 16384, "startup": "worker", "status": 0, "thread": "worker", "usable": 1073754112, "vm_lines": 25}` |
+| report-main | report | EXECUTED-THREAD | yes | `{"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}` |
+| report-rustc | report | EXECUTED-THREAD | yes | `{"guard": 32768, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536854528, "vm_lines": 25}` |
+| report-checkout | report | EXECUTED-THREAD | yes | `{"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}` |
+| report-main-gc | report | EXECUTED-THREAD | yes | `{"guard": 16384, "same_vm": true, "startup": "main-thread", "status": 0, "thread": "main", "usable": 536870912, "vm_lines": 25}` |
+| s-worker-declared | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "1008"}` |
+| s-worker-runtime | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-protocol | semantics | EXECUTED-THREAD | yes | `{"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-worker-protocol-runs | semantics | EXECUTED-THREAD | yes | `{"file": "times 4083 417 208\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-worker-startup-report-io | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 2, "stdout": ""}` |
+| s-worker-panic | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-panic-protocol | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-declared | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "1008"}` |
+| s-main-runtime | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-protocol | semantics | EXECUTED-THREAD | yes | `{"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-main-protocol-runs | semantics | EXECUTED-THREAD | yes | `{"file": "times 4750 417 250\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-main-startup-report-io | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 2, "stdout": ""}` |
+| s-main-panic | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-panic-protocol | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-rustc-declared | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "1008"}` |
+| s-rustc-runtime | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-rustc-protocol | semantics | EXECUTED-THREAD | yes | `{"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-rustc-protocol-runs | semantics | EXECUTED-THREAD | yes | `{"file": "times 5250 417 291\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-rustc-startup-report-io | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 2, "stdout": ""}` |
+| s-rustc-panic | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-rustc-panic-protocol | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-checkout-declared | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 0, "stdout": "1008"}` |
+| s-checkout-runtime | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-checkout-protocol | semantics | EXECUTED-THREAD | yes | `{"file": "error {CORE SEMANTIC TYPE} {+: expected int, got [true]}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-checkout-protocol-runs | semantics | EXECUTED-THREAD | yes | `{"file": "times 3750 417 292\ntiming 0 0 3 2\nvalue {int 1008}\n", "signal": 0, "status": 0, "stdout": ""}` |
+| s-checkout-startup-report-io | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 2, "stdout": ""}` |
+| s-checkout-panic | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-checkout-panic-protocol | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-overflow-line | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-worker-sigterm-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 15, "started": true, "status": -15, "wall_ms": 1094}` |
+| s-worker-sigint-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 2, "started": true, "status": -2, "wall_ms": 1152}` |
+| s-main-overflow-line | semantics | EXECUTED-THREAD | yes | `{"signal": 0, "status": 1, "stdout": ""}` |
+| s-main-sigterm-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 15, "started": true, "status": -15, "wall_ms": 1035}` |
+| s-main-sigint-c-call | semantics | EXECUTED-THREAD | yes | `{"signal": 2, "started": true, "status": -2, "wall_ms": 1153}` |
+| s-main-sigterm-sdl | semantics | EXECUTED-COCOA | yes | `{"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 7, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 5.11, "quit": true, "quit_seen": true, "renderer": "met` |
+| c-main-cocoa | graphical | EXECUTED-COCOA | yes | `{"capture": {"center_rgb": [255, 128, 0], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 7019, "width": 320}, "capture_matches": true, "cocoa_window": true, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "pthread_main_seen":` |
+| g-main-cocoa | graphical | EXECUTED-COCOA | yes | `{"capture": {"center_rgb": [255, 0, 255], "exists": true, "fraction_drawn_color": 0.895, "height": 268, "png_bytes": 8184, "width": 320}, "capture_matches": true, "cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "ev` |
+| g-main-cocoa-gc | graphical | EXECUTED-COCOA | yes | `{"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 6.43, "quit": true, "quit_seen": true, "renderer": "met` |
+| g-main-headless | graphical | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 0.09, "quit": true, "quit_seen": true, "renderer": "s` |
+| g-worker-cocoa | graphical | FAILED-CORRECTNESS | yes | `{"cocoa_window": null, "destroyed": false, "driver": null, "error": "No available video device", "init": false, "missing": ["init", "window", "renderer", "presented", "quit_seen", "destroyed"], "pthread_main_seen": [0], "quit": true, "renderer": null, "sdl_is_main_after_init": true, "sdl_is_main_bef` |
+| g-worker-headless | graphical | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.16, "quit": true, "quit_seen": true, "renderer": "s` |
+| g-worker-headless-gc | graphical | EXECUTED-HEADLESS | yes | `{"cocoa_window": false, "coroutine_on_own_stack": true, "coroutine_pthread_main": 0, "destroyed": true, "driver": "dummy", "error": "", "events": 18, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [0], "pump_us": 0.08, "quit": true, "quit_seen": true, "renderer": "s` |
+| g-rustc-cocoa | graphical | EXECUTED-COCOA | yes | `{"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 7, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 33.46, "quit": true, "quit_seen": true, "renderer": "me` |
+| g-checkout-cocoa | graphical | EXECUTED-COCOA | yes | `{"cocoa_window": true, "coroutine_on_own_stack": true, "coroutine_pthread_main": 1, "destroyed": true, "driver": "cocoa", "error": "", "events": 6, "init": true, "presented": 30, "presented_in_coroutine": 3, "pthread_main_seen": [1], "pump_us": 3.91, "quit": true, "quit_seen": true, "renderer": "met` |
+
+## Executable sizes (bytes)
+
+| executable | bytes |
+|---|---|
+| checkout/errors | 933320 |
+| checkout/identity | 925976 |
+| checkout/sdl | 3759464 |
+| main/big | 3230488 |
+| main/co_overflow | 853336 |
+| main/depth | 870136 |
+| main/errors | 854664 |
+| main/fault | 832312 |
+| main/identity | 850472 |
+| main/kept | 889720 |
+| main/sdl | 3677720 |
+| main/sleep | 832376 |
+| rustc/depth | 948680 |
+| rustc/errors | 933480 |
+| rustc/identity | 927224 |
+| rustc/kept | 969272 |
+| rustc/sdl | 3760568 |
+| worker/big | 3230488 |
+| worker/co_overflow | 853336 |
+| worker/depth | 870136 |
+| worker/errors | 854664 |
+| worker/fault | 832312 |
+| worker/identity | 850472 |
+| worker/kept | 889720 |
+| worker/sdl | 3677720 |
+| worker/sleep | 832376 |
+
+## Counts (cases; the oracle self-tests are rows above)
+
+EXECUTED-COCOA: 6 EXECUTED-HEADLESS: 3 EXECUTED-THREAD: 54 UNAVAILABLE-GUI: 0 FAILED-CORRECTNESS: 1 FAILED-BUILD: 0 NOT-TESTED: 0
+
+Not as predicted (0): none
+every case as predicted

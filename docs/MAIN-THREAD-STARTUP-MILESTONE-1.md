@@ -655,7 +655,9 @@ loginwindow running, the console user `runner`, one 1024x768 display,
 screen-capture access), Xcode 16.4 (SDK 15.5), Apple clang 17.0.0, 16 KiB
 pages. The app's own jobs (`app`: build, `verify.sh`, the smoke tests,
 `app-test.sh`, `compare.sh`; `app-clean`: without developer tools) passed in
-the same run.
+the same run. The harness's output of both phases, every case with its
+facts, is committed as
+[`audit/main-thread-startup/results/macos-aarch64/run-40969956997.log`](../audit/main-thread-startup/results/macos-aarch64/run-40969956997.log).
 
 ## 26. Cocoa/Metal graphical acceptance
 
@@ -1088,8 +1090,9 @@ Production code:
 |---|---|
 | `native/src/runtime/program.rs` | `LinkedProgram.startup` (the seventh word); `Startup` (word, name, parse); `startup_of`; `read_linked` checks the word; tests of the policy and the layout |
 | `native/src/runtime/aotimage.rs` | the fingerprint covers the record's layout (`RECORD_LAYOUT`, `abi_fingerprint_for`); the stub's loader reads the policy (`Loaded::startup`) and refuses the main thread; a test of the fingerprint's cover |
-| `native/src/runtime/aot.rs` | `MAIN_THREAD_STARTUP`; `start_linked`; `linked_main` through it; `run(startup, ...)` with one body on a worker or on the calling thread; `on_this_thread`, `panicked`, `injected_fault`, `startup_facts`; tests of the caught panic and the refusal |
+| `native/src/runtime/aot.rs` | `MAIN_THREAD_STARTUP`; `start_linked`; `linked_main` through it; `run(startup, ...)` with one body on a worker or on the calling thread; `on_this_thread`, `panicked`, `injected_fault`, `startup_facts` (Linux's thread check from the kernel's two ids, never libc's `getpid`); tests of the caught panic and the refusal |
 | `native/src/runtime/vm.rs` | `Vm::native_stack` (an accessor, for the report) |
+| `native/src/runtime/platform/macos.rs` | its test `region_reads_the_protection_of_a_mapping` keeps an accessible page below its guard (the discovery itself is unchanged) |
 | `native/src/runtime/library.rs` | a library's record must name the worker |
 | `native/src/codegen/mod.rs` | `emit_executable_object(program, startup)`; the record's seventh word; a library's object names the worker; tests of the recorded policy and of the one-byte difference |
 | `native/src/codegen/aot.rs` | the startup crate calls `start_linked`; `MAIN_STACK_BYTES`; `startup_refusal`; `emit_executable(..., startup)`; `startup_link_args` in both linkers' links; the stub refuses a main-thread executable; tests of the link arguments and the refusal |
@@ -1106,14 +1109,15 @@ Tests, tools, CI and documentation:
 | `tests/helpers.tcl` | the constraints `mainThreadStartup`, `notMainThreadStartup` |
 | `tests/main-cli.test` | eight malformed invocations of `-native-startup` |
 | `tests/system-linker.test` | the record's comment (seven words) |
-| `tests/platform/native-status.tcl` | the probe `main-thread-executable`, per host |
-| `tests/platform/aot-facts.tcl` | `main-thread-executable` (macOS: LC_MAIN, signature, report) or `main-thread-refused` |
+| `tests/platform/native-status.tcl` | the probe `main-thread-executable`, per host (macOS: LC_MAIN's 512 MiB, whole or less its lowest page) |
+| `tests/platform/aot-facts.tcl` | `main-thread-executable` (macOS: LC_MAIN read line by line (`lcMainStackSize`), signature, report) or `main-thread-refused` |
 | `tests/platform/tier.tcl` | `native-aot-mutants=NAMES`, `native-stack-mutants=NAMES` |
 | `audit/native-aot/tools/mutants.txt`, `mutate.tcl` | 19 mutants of the policy; two stale mutants repaired, one retargeted; the detectors (main-thread-startup.test, the new unit tests) |
 | `audit/native-stack/tools/mutants.txt`, `mutate.tcl` | `macos-size-from-rlimit`; the detector main-thread-startup.test |
 | `audit/c-ffi/tools/mutants.txt`, `audit/native-link-plan/tools/mutants.txt` | two mutant texts updated to the new signatures |
-| `audit/main-thread-startup/` | new: the graphical acceptance (`tools/acceptance.py`), its README |
-| `.github/workflows/macos-arm64.yml` | the `main-thread-startup` job |
+| `audit/main-thread-startup/` | new: the graphical acceptance (`tools/acceptance.py`), its README, the macOS run's output (`results/`) |
+| `docs/MAIN-THREAD-STARTUP-MILESTONE-1.md` | new: this report |
+| `.github/workflows/macos-arm64.yml` | the `main-thread-startup` job (its acceptance steps run whatever failed before them); the acceptance (Tier B) shards' timeout 75 to 120 minutes (section 31) |
 | `compilerpedia/topics/backends.topic`, `errors-runtime.topic` | section 35 |
 | `AGENTS.md`, `docs/*.md` | section 35 |
 

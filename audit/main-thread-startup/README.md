@@ -11,7 +11,7 @@ compiler, the runtime or the standard library, and nothing in them loads it.
 |---|---|
 | the harness: builds the census's fixtures and Botlish programs, links each program with each policy (Botlish.app's system linker; the checkout's rustc and system linkers), runs every case under a timeout, classifies it with the census's classifier, exits 1 on a case not as predicted | `tools/acceptance.py` |
 | the fixtures, the programs and the classifier it reuses, unchanged | `../macos-graphical-main-thread/native/`, `programs/`, `tools/census.py` |
-| recorded outcomes of CI runs | `results/` |
+| recorded outcomes of CI runs (`macos-aarch64/run-RUN.log`: the harness's output, both phases) | `results/` |
 
 Groups (`--only`): `env` (the graphical session), `identity` (which thread
 runs the program and its C calls, by the fixture's pthread_main_np and
