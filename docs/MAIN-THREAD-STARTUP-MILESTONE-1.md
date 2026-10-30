@@ -500,7 +500,7 @@ compiles differently.
 
 | Mutant | Specification row | Linux x86-64: killed by |
 |---|---|---|
-| `cli-drops-main-thread` | CLI silently drops main-thread | `mts-cli-refused` |
+| `cli-drops-main-thread` | CLI silently drops main-thread | `mts-cli-refused` (on macOS `mts-cli-main-thread`: below) |
 | `cli-default-main-thread` | worker default changed to main | `mts-cli-default-is-worker`, native-executable.test (8), workload-2048's executable |
 | `api-replaces-main-with-worker` | driver replaces main-thread with worker | `mts-api-refused`, `mts-cli-refused`, native-status's `main-thread-executable` |
 | `api-default-main-thread` | worker default changed to main | native-executable.test (10), argv.test (13), system-linker.test (13), aot-facts |
@@ -556,10 +556,13 @@ harness's private tree left out `audit/`, so every main-thread test that
 runs a census program (`mts-main-capacity`, `-gc-stress`,
 `-kept-coroutines`, `-overflow`, `-process-semantics`, ...) failed in it
 for every mutant -- and would have on the unmutated tree, which the harness
-never ran. Its kills of `rustc-link-no-stack-size`, `main-thread-on-a-worker`
-and `main-thread-panic-escapes` (the three only macOS compiles) may be
-those failures alone; the others are also killed by a unit test or by
-aot-facts or native-status, which read no census program. Fixed: the tree
+never ran; aot-facts' `main-thread-lc-main` failed for every mutant too,
+by its own `LC_MAIN` parse (section 13). A kill counted only from those
+failures is none: `rustc-link-no-stack-size`, `main-thread-on-a-worker`
+and `main-thread-panic-escapes` (the three only macOS compiles) and
+`cli-drops-main-thread` had no other detector in that run, and the re-run
+below shows the last of them surviving; the others were also killed by a
+unit test or by native-status, which read no census program. Fixed: the tree
 holds what the detectors read (`audit/`, `bench/`, `service/` and `lsp/`,
 as audit/native-stack's does), and the harness now runs every detector on
 the unmutated tree first and judges no mutant unless that baseline passes.
@@ -569,8 +572,46 @@ earlier run's (`-only linux-accepts-main-thread,policy-not-recorded`: 2 of
 reads a census program (they are macOS's), so the 19 Linux verdicts above
 stand. The native-stack harness's tree was complete (it copies `audit/`):
 `main-thread-unguarded`'s five failures, with every capacity, GC and
-coroutine test passing beside them, are a kill. The re-run on macOS:
-section 31.
+coroutine test passing beside them, are a kill.
+
+**The re-run on macOS with the fixed harness [executed, macOS AArch64]**
+(macos-arm64.yml run 41004334314 at 9d86232e, Tier C, `macos-15`):
+`BASELINE (the unmutated tree): ok`; native-aot 8 mutants, 7 killed, **1
+survived** (`cli-drops-main-thread`); native-stack 3 of 3 killed.
+
+| Mutant | macOS, run 41004334314: killed by |
+|---|---|
+| `rustc-link-no-stack-size` | `mts-main-lc-main`, `mts-main-identity`, `mts-main-rustc-overflow`, aot-facts' `main-thread-lc-main` |
+| `system-link-no-stack-size` | `main_thread_startup_link_args`, `mts-main-capacity`, `mts-main-identity`, `mts-main-lc-main` |
+| `main-thread-on-a-worker` | `mts-main-capacity`, `mts-main-identity`, `mts-main-report-parity`, `mts-main-rustc-overflow`, `mts-main-stack-bytes`, native-status's `main-thread-executable` |
+| `main-thread-panic-escapes` | `mts-panic-native-bug` |
+| `api-replaces-main-with-worker` | `mts-main-identity`, `mts-main-lc-main`, `mts-main-report-parity`, `mts-main-stack-bytes`, aot-facts, native-status |
+| `record-policy-ignored` | `linked_program_startup_policy`, `mts-main-identity`, `mts-main-report-parity`, `mts-main-stack-bytes`, `mts-record-damage`, native-status |
+| `policy-not-recorded` | `executable_object_records_the_startup_policy`, `mts-driver-option`, `mts-main-identity`, `mts-main-report-parity`, `mts-main-stack-bytes`, native-status |
+| `cli-drops-main-thread` | **survived** |
+| `main-thread-unguarded` (native-stack) | `mts-main-overflow`, `mts-main-process-semantics`, `mts-main-rustc-overflow` |
+| `macos-reported-bottom-trusted`, `macos-guard-assumed` (native-stack, existing) | native_stack's main-thread and pthread checks |
+
+Each kill now names the tests the mutant breaks and nothing else: the
+capacity, GC-stress and coroutine tests that failed for every mutant of
+the incomplete tree pass beside them. The three only macOS compiles are
+killed by tests of what they break -- the rustc link's stack by its
+`LC_MAIN` and its overflow at depth, the worker by the thread's identity
+and the stack it was given, the escaping panic by Rust's status 101 where
+NATIVE BUG is expected.
+
+`cli-drops-main-thread` survived, and the earlier run's "kill" of it was
+the incomplete tree's alone. On Linux and Windows `mts-cli-refused` kills
+it (the mutant builds the worker's executable where the refusal is
+expected); on macOS no test built a main-thread executable through
+main.tcl -- `mts-main-*` build theirs through `native::executable`, and the
+census harness, which runs `botlish -native-startup main-thread`, is not
+a detector of the harness. Answered with a test, not by weakening the
+mutant: `mts-cli-main-thread` (b05d000d) builds `-native-startup
+main-thread` executables through main.tcl, once and repeated, and requires
+the record's word 1, the startup report's `startup main-thread` and
+`process-main-thread 1`, and the run's output and status. Its run against
+the mutant on macOS: section 31.
 
 **Windows x86-64 [executed]** (windows-x86_64.yml run 40960887683, Tier C
 shard 1): 5 killed, 0 survived, 4 skipped -- and `windows-accepts-main-thread`
@@ -639,7 +680,18 @@ stress, beside C's own SDL program; and every executable's size): section
 
 ## 31. macOS CI results
 
-(Pending.)
+**Run 41004334314** (macos-arm64.yml, `workflow_dispatch` at 9d86232e,
+`tier full`, Tier C `native-aot-mutants=...` and `native-stack-mutants=...`;
+every job on `macos-15` but the Linux control) **[executed]**:
+
+| Job | Result |
+|---|---|
+| Botlish.app (the distribution: build, verify, smoke, FFI smoke, app-test, compare, bench) | passed |
+| linux control (Tier A, ubuntu x86-64) | passed |
+| acceptance (Tier B), shard 2/2 | passed: 120 Tcl test files on interp, 54 golden suites on four backends, 0 failed |
+| full (Tier C), shard 1/3: the mutants | failed: 1 native-aot mutant survived (section 29); the baseline passed |
+| full (Tier C), shards 2/3 and 3/3 | nothing to run (every item in shard 1) |
+| smoke, acceptance 1/2, system linker, Botlish.app without developer tools, static SDL3, main-thread startup | (queued at this writing) |
 
 ## 32. Linux x86-64 CI results
 
