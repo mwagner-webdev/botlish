@@ -1,0 +1,165 @@
+# h3.bot -- Probe D: HTTP/3 over core quiche (no tokio-quiche) under the
+# Botlish loop: Botlish-watched UDP sockets, quiche's deadlines as Botlish
+# timer registrations, packets sent no earlier than quiche's pacing time,
+# bounded work per poll. Two streams of one connection: /fast read at once,
+# /slow by a consumer that sleeps 2 ms per chunk; both servers produce 64
+# chunks of 1 KiB as fast as quiche takes them. Then an idle period with the
+# connection open, a client that fails TLS verification over QUIC, and a
+# release of a busy endpoint.
+import event_loop_linux
+import hs
+import hsnet
+import hsq
+import hstls
+import probe
+import std::event_loop
+import std::mutable_array
+import std::str
+
+nomethod fn handler(s: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    path = hsq::path(s)
+    probe::log("h3 producer ".concat(path).concat(" start"))
+    hsq::respond(s, 200, true)
+    data = probe::payload(6)
+    blocked = std::mutable_array::create(1, 0)
+    loop i from 0 to chunks:
+        loop:
+            r = hsq::send(s, data)
+            if r > 0:
+                break
+            if r < 0:
+                return -1
+            blocked.set(0, blocked.at(0) + 1)
+            hs::await(s)
+    hsq::finish(s)
+    probe::log("h3 producer ".concat(path).concat(" done at us ").concat(probe::n(std::event_loop::now())).concat(" waited for room ").concat(probe::n(blocked.at(0))))
+    chunks
+
+nomethod fn server_loop(server: int, count: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    served = std::mutable_array::create(1, 0)
+    loop:
+        if served.at(0) == count:
+            break
+        s = hsq::next_request(server)
+        if s == 0:
+            e = hs::await(server)
+            if e.reason != std::event_loop::Wake::Event:
+                break
+            continue
+        served.set(0, served.at(0) + 1)
+        coroutine {step: st, first: f} = handler(s, chunks)
+        std::event_loop::adopt(st, f)
+    count
+
+nomethod fn consumer(ep: int, path: str, pause: int, context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if hsq::state(ep) != 0:
+            break
+        hs::await(ep)
+    s = hsq::request(ep, "GET", path, false)
+    probe::log("h3 consumer ".concat(path).concat(" requested ").concat(probe::n(s)))
+    loop:
+        if hsq::status(s) != 0:
+            break
+        hs::await(s)
+    got = std::mutable_array::create(3, 0)
+    loop:
+        if hsq::stat(s, 4) > got.at(2):
+            got.set(2, hsq::stat(s, 4))
+        c = hsq::recv(s)
+        if c.n > 0:
+            got.set(0, got.at(0) + c.n)
+            got.set(1, got.at(1) + 1)
+            if pause > 0:
+                std::event_loop::sleep(pause)
+        elif c.n == 0:
+            hs::await(s)
+        else:
+            break
+    probe::log("h3 consumer ".concat(path).concat(" status ").concat(probe::n(hsq::status(s))).concat(" bytes ").concat(probe::n(got.at(0))).concat(" done at us ").concat(probe::n(std::event_loop::now())).concat(" max bytes held by rust ").concat(probe::n(got.at(2))))
+    hs::release(s)
+    probe::bump_flag(0)
+    0
+
+nomethod fn report(name: str, ep: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    probe::log("h3 endpoint ".concat(name).concat(": datagrams in ").concat(probe::n(hsq::stat(ep, 10))).concat(" out ").concat(probe::n(hsq::stat(ep, 11))).concat(" paced ").concat(probe::n(hsq::stat(ep, 12))).concat(" pacing wait us ").concat(probe::n(hsq::stat(ep, 13))).concat(" timeouts ").concat(probe::n(hsq::stat(ep, 14))).concat(" early ").concat(probe::n(hsq::stat(ep, 15))).concat(" budget yields ").concat(probe::n(hsq::stat(ep, 16))).concat(" polls ").concat(probe::n(hsq::stat(ep, 17))).concat(" send blocked ").concat(probe::n(hsq::stat(ep, 18))))
+
+nomethod fn scenario(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    sfd = hsq::udp_socket()
+    server = hsq::server(sfd, hstls::good(), 16384)
+    coroutine {step: s1, first: f1} = server_loop(server, 2, 64)
+    std::event_loop::adopt(s1, f1)
+    client = hsq::client(hsq::udp_socket(), hs::port_of(sfd), "localhost", 16384)
+    started = std::event_loop::now()
+    loop:
+        if hsq::state(client) != 0:
+            break
+        hs::await(client)
+    probe::log("h3 handshake: state ".concat(probe::n(hsq::state(client))).concat(" after us ").concat(probe::n(std::event_loop::now() - started)))
+    coroutine {step: s2, first: f2} = consumer(client, "/slow", 2000)
+    std::event_loop::adopt(s2, f2)
+    coroutine {step: s3, first: f3} = consumer(client, "/fast", 0)
+    std::event_loop::adopt(s3, f3)
+    waited = std::mutable_array::create(1, 0)
+    loop:
+        if probe::flag(0) == 2 or waited.at(0) > 300:
+            break
+        waited.set(0, waited.at(0) + 1)
+        std::event_loop::sleep(10000)
+    report("client", client)
+    report("server", server)
+    # Idle with the connection open: quiche's own timers (acknowledgement,
+    # loss detection, idle) run as Botlish timers; the loop sleeps between.
+    t0 = hsq::stat(client, 14) + hsq::stat(server, 14)
+    std::event_loop::sleep(300000)
+    t1 = hsq::stat(client, 14) + hsq::stat(server, 14)
+    probe::log("h3 idle 300 ms: quiche timeouts fired ".concat(probe::n(t1 - t0)))
+    # TLS over QUIC refuses a certificate for another host.
+    wfd = hsq::udp_socket()
+    wrong = hsq::server(wfd, hstls::wrong_host(), 16384)
+    bad = hsq::client(hsq::udp_socket(), hs::port_of(wfd), "localhost", 16384)
+    loop:
+        if hsq::state(bad) != 0:
+            break
+        hs::await(bad)
+    probe::log("h3 wrong-host: state ".concat(probe::n(hsq::state(bad))))
+    # Release a busy endpoint: a request in flight on it fails, its socket
+    # is unwatched and closed, its timers are dropped.
+    busy = hsq::request(client, "GET", "/never-answered", false)
+    hs::release(client)
+    probe::log("h3 released endpoint: stream state ".concat(probe::n(hsq::status(busy))).concat(" endpoint state ").concat(probe::n(hsq::state(client))))
+    hs::release(bad)
+    hs::release(wrong)
+    hs::release(server)
+    probe::log("rust: calls ".concat(probe::n(hs::rstat(0))).concat(" polls ").concat(probe::n(hs::rstat(2))).concat(" max polls per run ").concat(probe::n(hs::rstat(18))).concat(" timers fired ").concat(probe::n(hs::rstat(12))).concat(" early ").concat(probe::n(hs::rstat(13))).concat(" readiness ").concat(probe::n(hs::rstat(15))))
+    probe::log("botlish: executor runs ".concat(probe::n(hs::counter("runs"))).concat(" waits ").concat(probe::n(hs::counter("waits"))).concat(" timer expiries ").concat(probe::n(hs::counter("expiries"))).concat(" interrupts ").concat(probe::n(hs::counter("interrupts"))))
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    coroutine {step: s, first: f} = scenario()
+    std::event_loop::adopt(s, f)
+    probe::spawn_bystander(200, 1000)
+    probe::spawn_watchdog(1, 10000000)
+    std::event_loop::run()
+    probe::log("watched after stop ".concat(probe::n(hsnet::watched())).concat(" retired ").concat(probe::n(hsnet::count(3))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

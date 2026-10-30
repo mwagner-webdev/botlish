@@ -1,0 +1,401 @@
+# hs.bot -- the Botlish half of the census's Rust bridge
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Scheduling", "Rust/C FFI").
+#
+# Botlish decides when Rust work runs. Two ordinary tasks of
+# std::event_loop do it:
+#
+# * the executor runs the bridge (hs_run: at most BUDGET of the Rust
+#   futures ready when it starts, each once), then settles what the run
+#   asked for -- readiness interest (through the installed Readiness),
+#   notices (posted to the registrations Botlish coroutines wait on), the
+#   earliest Rust deadline (handed to the timekeeper). While Rust work is
+#   ready it yields (the next turn runs it again, after every other ready
+#   task); when none is, it waits on its one source, RX: readiness records,
+#   the timekeeper's expiries, foreign-thread wakes.
+# * the timekeeper waits on a Botlish timer registration at the earliest
+#   Rust deadline and posts the expiry to RX. A deadline that moves earlier
+#   interrupts it (the executor revokes its timer).
+#
+# Application coroutines never call the executor: they call the protocol
+# operations (hs_h_*, hs_q_*) for their handles and wait on the handle's
+# registration (`watch`, `await`). A notice is a hint, never data: a
+# coroutine reads the state through its handle after every wake, and before
+# its first wait.
+#
+# Descriptors: Rust parks wakers on them and asks for interest; the
+# executor of hsnet arms Botlish watches (event_loop_linux), the executor of
+# hsmem has none (the deterministic driver, in-memory transports). A
+# descriptor Rust is done with is unwatched by Botlish and then closed.
+#
+# (The executor was first written once, here, over a context trait
+# Readiness with an implementation per driver. A context-trait
+# implementation takes exactly one context -- its own -- and the Linux
+# one needs the Loop and event_loop_linux::Native to make watches, so the
+# loop is written per driver: hsnet::executor, hsmem::executor, both over
+# hs::step. The census records it.)
+import bssl
+import std::event_loop
+import std::ffi::c
+import std::mutable_array
+import std::mutable_vector
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+extern c library "hs_native" static at "native/libhs_native.a"
+
+extern c fn hs_open(flags: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn hs_close() -> std::ffi::c::LongLong
+extern c fn hs_set_notify(endpoint: std::ffi::c::LongLong, slot: std::ffi::c::LongLong, generation: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_set_fault(bits: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_run(budget: std::ffi::c::LongLong, now: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_ready() -> std::ffi::c::LongLong
+extern c fn hs_kick() -> std::ffi::c::LongLong
+extern c fn hs_fault() -> std::ffi::c::LongLong
+extern c fn hs_has_fault(bit: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_next_deadline() -> std::ffi::c::LongLong
+extern c fn hs_fire(now: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_tasks() -> std::ffi::c::LongLong
+extern c fn hs_io_ready(fd: std::ffi::c::LongLong, bits: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_next_interest() -> std::ffi::c::LongLong
+extern c fn hs_interest() -> std::ffi::c::LongLong
+extern c fn hs_close_fd(fd: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_take_notice() -> std::ffi::c::LongLong
+extern c fn hs_notice_a() -> std::ffi::c::LongLong
+extern c fn hs_notice_b() -> std::ffi::c::LongLong
+extern c fn hs_stat(i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_stats_reset() -> std::ffi::c::LongLong
+extern c fn hs_release(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_local_port(fd: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+# regs: 0 RX, 1 the timekeeper's current timer, 2 the timekeeper's kick
+# channel. handles/waiters: the notice table (a Rust handle and the
+# registration its waiter waits on). state: the registers below.
+opaque context struct Hs:
+    regs: MutableVector[std::event_loop::Reg]
+    handles: MutableVector[int]
+    waiters: MutableVector[std::event_loop::Reg]
+    state: MutableArray[int]
+
+private s_budget = 0
+private s_armed = 1
+private s_stop = 2
+private s_runs = 3
+private s_yields = 4
+private s_waits = 5
+private s_stale = 6
+private s_posted = 7
+private s_io = 8
+private s_wakes = 9
+private s_max_ready = 10
+private s_expiries = 11
+private s_open = 12
+private s_interrupts = 13
+private s_interests = 14
+private s_retired = 15
+private s_nudges = 16
+private s_size = 17
+
+# The record RX receives from the timekeeper (readiness records carry the
+# bits, 1..15; a foreign wake carries 0).
+private timer_record = 16
+
+fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+# The bridge's state; the bridge opens here (hs_open, on the thread that
+# runs the loop). BUDGET: Rust polls per executor turn.
+fn create(budget: int) -> Hs:
+    opened = hs_open(ci(0))
+    # s_budget, s_armed, then zeros up to s_open (12), then zeros.
+    state = std::mutable_array::from_list([budget, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, opened + 0, 0, 0, 0, 0])
+    Hs {regs: std::mutable_vector::from_list([]), handles: std::mutable_vector::from_list([]), waiters: std::mutable_vector::from_list([]), state: state}
+
+private nomethod fn get(i: int, context h: Hs) -> int errors IndexNotFound:
+    h.state.at(i)
+
+private nomethod fn put(i: int, v: int, context h: Hs) errors IndexNotFound:
+    h.state.set(i, v)
+
+private nomethod fn bump(i: int, context h: Hs) errors IndexNotFound:
+    h.state.set(i, h.state.at(i) + 1)
+
+# A register of the bridge's Botlish half (names below), for reports.
+nomethod fn counter(name: str, context h: Hs) -> int errors IndexNotFound:
+    if name == "runs":
+        get(s_runs)
+    elif name == "yields":
+        get(s_yields)
+    elif name == "waits":
+        get(s_waits)
+    elif name == "stale":
+        get(s_stale)
+    elif name == "posted":
+        get(s_posted)
+    elif name == "io":
+        get(s_io)
+    elif name == "wakes":
+        get(s_wakes)
+    elif name == "max_ready":
+        get(s_max_ready)
+    elif name == "expiries":
+        get(s_expiries)
+    elif name == "open":
+        get(s_open)
+    elif name == "interrupts":
+        get(s_interrupts)
+    elif name == "interests":
+        get(s_interests)
+    elif name == "retired":
+        get(s_retired)
+    elif name == "nudges":
+        get(s_nudges)
+    else:
+        -1
+
+# The bridge's own counters (hs_bridge::stats: Calls, Runs, Polls, ...).
+fn rstat(i: int) -> int:
+    hs_stat(cll(i))
+
+fn rstats_reset() -> int:
+    hs_stats_reset()
+
+fn set_fault(bits: int) -> int:
+    hs_set_fault(cll(bits))
+
+fn tasks() -> int:
+    hs_tasks()
+
+# The fault bits in force (HS_CENSUS_FAULT, read when the bridge opened).
+# 64: no timekeeper (the missing-timer control, Botlish side).
+fn fault() -> int:
+    hs_fault()
+
+fn has_fault?(bit: int) -> bool:
+    hs_has_fault(cll(bit)) == 1
+
+# RX: the executor's source.
+nomethod fn rx(context h: Hs) -> std::event_loop::Reg errors IndexNotFound:
+    h.regs.at(0)
+
+# After an application coroutine's call into the bridge: when the call left
+# the executor something to settle -- it spawned or woke a Rust task,
+# queued a notice, changed readiness interest -- wake the executor, which
+# may be parked on RX with nothing else coming. (Without this, the first
+# probe stalled: the server's accept task, spawned by main's call while the
+# executor waited, was never polled. FAULT_NO_KICK puts that back.)
+nomethod fn nudge(context ev: std::event_loop::Loop, h: Hs) errors IndexNotFound, std::event_loop::SchedulerFault:
+    if hs_kick() == 1:
+        bump(s_nudges)
+        h.regs.at(0).post(0, 0)
+
+# Release a Rust handle (its tasks cancelled now).
+nomethod fn release(handle: int, context ev: std::event_loop::Loop, h: Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = hs_release(cll(handle))
+    nudge()
+    r
+
+private nomethod fn find(handle: int, context h: Hs) -> int errors IndexNotFound:
+    n = h.handles.length()
+    loop i from 0 to n:
+        if h.handles.at(i) == handle:
+            return i
+    -1
+
+
+# --- notices
+
+# Wait until HANDLE's state may have changed (a notice for it). Each
+# waiting coroutine has its own registration, made here and revoked when
+# it wakes: a registration wakes one waiter per event, and a handle -- an
+# HTTP/2 connection several request coroutines wait to be ready, a server
+# several handlers share -- may have several waiters. (The first version
+# kept one registration per handle; the second of two coroutines waiting
+# for one HTTP/2 connection never woke. h2.bot.)
+nomethod fn await(handle: int, context ev: std::event_loop::Loop, h: Hs) -> std::event_loop::Event errors IndexNotFound, std::event_loop::SchedulerFault:
+    reg = std::event_loop::channel(Delivery::Coalesce, 1)
+    free = find(-1)
+    slot = if free >= 0:
+        h.handles.swap(free, handle)
+        h.waiters.swap(free, reg)
+        free
+    else:
+        h.handles.push(handle)
+        h.waiters.push(reg)
+        h.handles.length() - 1
+    e = std::event_loop::wait(reg)
+    h.handles.swap(slot, -1)
+    std::event_loop::revoke(reg)
+    e
+
+# Wake every coroutine waiting on HANDLE with Wake::Revoked (it is gone).
+nomethod fn forget(handle: int, context ev: std::event_loop::Loop, h: Hs) errors IndexNotFound, std::event_loop::SchedulerFault:
+    n = h.handles.length()
+    loop i from 0 to n:
+        if h.handles.at(i) == handle:
+            std::event_loop::revoke(h.waiters.at(i))
+
+private nomethod fn deliver_notices(context ev: std::event_loop::Loop, h: Hs) errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        handle = hs_take_notice()
+        if handle < 0:
+            break
+        a = hs_notice_a()
+        b = hs_notice_b()
+        woke = std::mutable_array::create(1, 0)
+        n = h.handles.length()
+        loop i from 0 to n:
+            if h.handles.at(i) == handle:
+                h.waiters.at(i).post(a, b)
+                woke.set(0, 1)
+        if woke.at(0) == 1:
+            bump(s_posted)
+        else:
+            bump(s_stale)
+
+# --- the executor
+
+private nomethod fn dispatch(e: std::event_loop::Event, context ev: std::event_loop::Loop, h: Hs) errors IndexNotFound, std::event_loop::SchedulerFault:
+    if e.a == timer_record:
+        bump(s_expiries)
+        hs_fire(cll(std::event_loop::now()))
+    elif e.a == 0:
+        bump(s_wakes)
+    else:
+        bump(s_io)
+        cll(e.b).hs_io_ready(cll(e.a))
+
+private nomethod fn drain(rx: std::event_loop::Reg, context ev: std::event_loop::Loop, h: Hs) errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        e = std::event_loop::try_take(rx)
+        if e.reason != Wake::Event:
+            break
+        dispatch(e)
+
+# The descriptor of the next readiness change the executor must make, or
+# -1; interest() then says which (1 read, 2 write, 3 both, 4 unwatch and
+# close). Also after stop: what the closed objects held.
+nomethod fn next_interest(context h: Hs) -> int errors IndexNotFound:
+    fd = hs_next_interest()
+    if fd >= 0:
+        bump(s_interests)
+        if hs_interest() == 4:
+            bump(s_retired)
+    fd
+
+fn interest() -> int:
+    hs_interest()
+
+private nomethod fn settle_deadline(context ev: std::event_loop::Loop, h: Hs) errors IndexNotFound, std::event_loop::SchedulerFault:
+    d = hs_next_deadline()
+    armed = get(s_armed)
+    if d >= 0 and (armed < 0 or d < armed):
+        if armed < 0:
+            h.regs.at(2).post(1, d)
+        else:
+            bump(s_interrupts)
+            std::event_loop::revoke(h.regs.at(1))
+
+# One executor step: records already delivered, a bounded Rust run, its
+# notices and its earliest deadline. How many Rust tasks are ready
+# afterwards. The driver's executor then settles readiness interest
+# (next_interest) before it yields or waits.
+nomethod fn step(context ev: std::event_loop::Loop, h: Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    drain(h.regs.at(0))
+    left = cll(get(s_budget)).hs_run(cll(std::event_loop::now()))
+    bump(s_runs)
+    if left > get(s_max_ready):
+        put(s_max_ready, left)
+    deliver_notices()
+    settle_deadline()
+    left
+
+# Whether stop was asked for.
+nomethod fn stopped?(context h: Hs) -> bool errors IndexNotFound:
+    get(s_stop) == 1
+
+# The executor's wait, after a step that left no Rust work ready: false
+# when the bridge stopped (RX revoked).
+nomethod fn idle(context ev: std::event_loop::Loop, h: Hs) -> bool errors IndexNotFound, std::event_loop::SchedulerFault:
+    bump(s_waits)
+    e = std::event_loop::wait(h.regs.at(0))
+    if e.reason != Wake::Event:
+        return false
+    dispatch(e)
+    true
+
+# The executor's yield, after a step that left Rust work ready.
+nomethod fn busy(context ev: std::event_loop::Loop, h: Hs) errors IndexNotFound:
+    bump(s_yields)
+    std::event_loop::yield_now()
+
+# The local port of socket FD.
+fn port_of(fd: int) -> int:
+    hs_local_port(cll(fd))
+
+# Close FD (the Readiness implementation unwatched it).
+fn close_fd(fd: int) -> int:
+    hs_close_fd(cll(fd))
+
+private fn timekeeper(context ev: std::event_loop::Loop, h: Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if get(s_stop) == 1:
+            break
+        d = hs_next_deadline()
+        if d < 0:
+            put(s_armed, -1)
+            e = std::event_loop::wait(h.regs.at(2))
+            if e.reason == Wake::Revoked:
+                break
+        else:
+            t = std::event_loop::timer(d, 0)
+            h.regs.swap(1, t)
+            put(s_armed, d)
+            e = std::event_loop::wait(t)
+            put(s_armed, -1)
+            if get(s_stop) == 1:
+                break
+            if e.reason == Wake::Timer:
+                h.regs.at(0).post(timer_record, d)
+    0
+
+
+# Make the executor's registrations and start the timekeeper (the driver
+# module's start adopts its executor after this). FOREIGN_ENDPOINT: the
+# Linux driver endpoint a foreign thread's wake posts to
+# (event_loop_linux::endpoint_id), or -1 for none.
+nomethod fn start(foreign_endpoint: int, context ev: std::event_loop::Loop, h: Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    rx = std::event_loop::source(Delivery::Reliable, 1024, :keep_alive)
+    kick = std::event_loop::channel(Delivery::Coalesce, 1)
+    h.regs.push(rx)
+    h.regs.push(kick)
+    h.regs.push(kick)
+    cll(foreign_endpoint).hs_set_notify(cll(std::event_loop::native_slot(rx)), cll(std::event_loop::native_generation(rx)))
+    if hs_has_fault(64) == 0:
+        coroutine {step: tstep, first: tfirst} = timekeeper()
+        std::event_loop::adopt(tstep, tfirst)
+    0
+
+# Stop the executor and the timekeeper (they end in the next turn) and
+# close the bridge: every Rust object is released and every task dropped,
+# on this thread. The descriptors those objects held then come back from
+# next_interest (interest 4) for the driver module to unwatch and close
+# (hsnet::stop does). How many Rust tasks were still live.
+nomethod fn stop(context ev: std::event_loop::Loop, h: Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    put(s_stop, 1)
+    std::event_loop::revoke(h.regs.at(0))
+    std::event_loop::revoke(h.regs.at(1))
+    std::event_loop::revoke(h.regs.at(2))
+    hs_close()

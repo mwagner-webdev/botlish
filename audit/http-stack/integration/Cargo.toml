@@ -1,0 +1,33 @@
+[package]
+name = "hs_native"
+description = "The census's one Rust linking unit: the hs_* C ABI over hs_bridge, hs_hyper, hs_tls and hs_quiche"
+edition.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[features]
+default = ["hyper", "tls", "quiche", "count-alloc"]
+hyper = ["dep:hs_hyper"]
+tls = ["hyper", "dep:hs_tls", "dep:boring", "dep:boring-sys"]
+quiche = ["tls", "dep:hs_quiche"]
+# The accidental-Tokio control: a fixture that calls tokio::spawn from a
+# bridge task (tokio with its runtime feature, never in the probes' unit).
+tokio-control = ["dep:tokio"]
+# A counting #[global_allocator] (measure.bot's Rust allocations). Never in
+# the unlocalized controls: an unlocalized unit's allocator shim
+# (__rustc::__rust_alloc ...) collides with the Botlish runtime's.
+count-alloc = []
+
+[dependencies]
+hs_bridge = { path = "../bridge" }
+hs_hyper = { path = "../hyper", optional = true }
+hs_tls = { path = "../tls", optional = true }
+hs_quiche = { path = "../quiche", optional = true }
+boring = { workspace = true, optional = true }
+boring-sys = { workspace = true, optional = true }
+bytes.workspace = true
+libc.workspace = true
+tokio = { version = "1", optional = true, default-features = false, features = ["rt"] }

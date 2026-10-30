@@ -1,0 +1,117 @@
+# h2.bot -- Probe A, HTTP/2: Hyper's HTTP/2 client and server over one
+# loopback TCP connection under the Botlish loop. Two streams share the
+# connection: /fast is read as fast as it arrives, /slow by a consumer that
+# sleeps 2 ms per chunk. Both server handlers produce 64 chunks of 1 KiB as
+# fast as Hyper takes them. Hyper's HTTP/2 background tasks (the connection
+# task, every server stream, the client's request pipes) run on the
+# bridge's executor; its timer is the Botlish clock.
+import event_loop_linux
+import hs
+import hsh
+import hsnet
+import probe
+import std::event_loop
+import std::mutable_array
+import std::str
+
+nomethod fn handler(x: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    path = hsh::path(x)
+    probe::log("producer ".concat(path).concat(" start"))
+    hsh::respond(x, 200, true)
+    data = probe::payload(6)
+    blocked = std::mutable_array::create(1, 0)
+    loop i from 0 to chunks:
+        loop:
+            if hsh::send(x, data) > 0:
+                break
+            blocked.set(0, blocked.at(0) + 1)
+            hs::await(x)
+    hsh::finish(x)
+    probe::log("producer ".concat(path).concat(" done at us ").concat(probe::n(std::event_loop::now())).concat(" waited for room ").concat(probe::n(blocked.at(0))))
+    chunks
+
+nomethod fn server_loop(server: int, count: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    served = std::mutable_array::create(1, 0)
+    loop:
+        if served.at(0) == count:
+            break
+        x = hsh::next_request(server)
+        if x == 0:
+            hs::await(server)
+            continue
+        served.set(0, served.at(0) + 1)
+        coroutine {step: s, first: f} = handler(x, chunks)
+        std::event_loop::adopt(s, f)
+    count
+
+nomethod fn consumer(client: int, path: str, pause: int, context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    x = hsh::request(client, "GET", path, false)
+    probe::log("consumer ".concat(path).concat(" requested ").concat(probe::n(x)))
+    loop:
+        if hsh::status(x) != 0:
+            break
+        hs::await(x)
+    probe::log("consumer ".concat(path).concat(" head ").concat(probe::n(hsh::status(x))))
+    got = std::mutable_array::create(3, 0)
+    loop:
+        # Rust holds at most one chunk per exchange (sampled before taking).
+        if hsh::stat(x, 5) > got.at(2):
+            got.set(2, hsh::stat(x, 5))
+        c = hsh::recv(x)
+        if c.n > 0:
+            got.set(0, got.at(0) + c.n)
+            got.set(1, got.at(1) + 1)
+            if pause > 0:
+                std::event_loop::sleep(pause)
+        elif c.n == 0:
+            hs::await(x)
+        else:
+            break
+    probe::log("consumer ".concat(path).concat(" status ").concat(probe::n(hsh::status(x))).concat(" bytes ").concat(probe::n(got.at(0))).concat(" done at us ").concat(probe::n(std::event_loop::now())).concat(" max chunks held by rust ").concat(probe::n(got.at(2))))
+    hs::release(x)
+    if probe::bump_flag(0) == 2:
+        probe::log("rust: polls ".concat(probe::n(hs::rstat(2))).concat(" runs ").concat(probe::n(hs::rstat(1))).concat(" max polls per run ").concat(probe::n(hs::rstat(18))).concat(" budget exhausted ").concat(probe::n(hs::rstat(11))).concat(" spawns ").concat(probe::n(hs::rstat(3))).concat(" timers fired ").concat(probe::n(hs::rstat(12))))
+        probe::log("botlish: executor runs ".concat(probe::n(hs::counter("runs"))).concat(" yields ").concat(probe::n(hs::counter("yields"))).concat(" waits ").concat(probe::n(hs::counter("waits"))).concat(" readiness ").concat(probe::n(hs::counter("io"))).concat(" notices ").concat(probe::n(hs::counter("posted"))).concat(" nudges ").concat(probe::n(hs::counter("nudges"))).concat(" calls ").concat(probe::n(hs::rstat(0))))
+        hsnet::stop()
+        probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    hsh::configure(16384, 0)
+    lfd = hsh::listen_socket(0)
+    server = hsh::server(2, 0)
+    hsh::serve(server, lfd)
+    client = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), 2, 0)
+    coroutine {step: s1, first: f1} = server_loop(server, 2, 64)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = consumer(client, "/slow", 2000)
+    std::event_loop::adopt(s2, f2)
+    coroutine {step: s3, first: f3} = consumer(client, "/fast", 0)
+    std::event_loop::adopt(s3, f3)
+    probe::spawn_bystander(100, 1000)
+    probe::spawn_watchdog(1, 5000000)
+    std::event_loop::run()
+    probe::log("watched after stop ".concat(probe::n(hsnet::watched())).concat(" retired ").concat(probe::n(hsnet::count(3))).concat(" watches made ").concat(probe::n(hsnet::count(0))).concat(" interest changes ").concat(probe::n(hsnet::count(2))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

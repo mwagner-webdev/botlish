@@ -1,0 +1,122 @@
+# hsq.bot -- QUIC and HTTP/3 (quiche, hs_quiche) for Botlish coroutines,
+# the same shape as hsh: endpoints and streams are handles, every call is
+# non-blocking, a coroutine waits with hs::await and reads the state again,
+# body bytes cross one chunk at a time.
+import hs
+import std::abi
+import std::abi::bytes
+import std::event_loop
+import std::ffi::c
+import std::str
+
+extern c fn hs_udp_bind(port: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_configure(idle_ms: std::ffi::c::LongLong, pacing_rate: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_server(fd: std::ffi::c::LongLong, cert: std::ffi::c::LongLong, window: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_client(fd: std::ffi::c::LongLong, port: std::ffi::c::LongLong, host: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, host_len: std::ffi::c::ULong, window: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_state(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_request(h: std::ffi::c::LongLong, method: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, method_len: std::ffi::c::ULong, path: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, path_len: std::ffi::c::ULong, streaming: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_next_request(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_respond(s: std::ffi::c::LongLong, status: std::ffi::c::LongLong, streaming: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_offer(s: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hs_q_finish(s: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_status(s: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_q_recv(s: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hs_q_path(s: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hs_q_stat(h: std::ffi::c::LongLong, i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+struct Chunk:
+    n: int
+    text: str
+
+private fn ll(x: int) -> std::ffi::c::LongLong:
+    hs::cll(x)
+
+private fn bytes_of(s: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(s))
+
+fn udp_socket() -> int:
+    hs_udp_bind(0)
+
+# Endpoints made after this: IDLE_MS idle timeout, at most PACING_RATE
+# bytes per second (0: unlimited).
+nomethod fn configure(idle_ms: int, pacing_rate: int) -> int:
+    ll(idle_ms).hs_q_configure(ll(pacing_rate))
+
+nomethod fn server(fd: int, cert: int, window: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = ll(fd).hs_q_server(ll(cert), ll(window))
+    hs::nudge()
+    r
+
+nomethod fn client(fd: int, port: int, host: str, window: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    b = bytes_of(host)
+    r = ll(fd).hs_q_client(ll(port), b, std::abi::bytes::length(b).value, ll(window))
+    hs::nudge()
+    r
+
+# 0 handshaking, 1 established (a server: listening), or an error.
+fn state(ep: int) -> int:
+    hs_q_state(ll(ep))
+
+nomethod fn request(ep: int, method: str, path: str, streaming: bool, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    m = bytes_of(method)
+    p = bytes_of(path)
+    flag = if streaming:
+        1
+    else:
+        0
+    r = ll(ep).hs_q_request(m, std::abi::bytes::length(m).value, p, std::abi::bytes::length(p).value, ll(flag))
+    hs::nudge()
+    r
+
+fn next_request(ep: int) -> int:
+    hs_q_next_request(ll(ep))
+
+nomethod fn respond(s: int, status: int, streaming: bool, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    flag = if streaming:
+        1
+    else:
+        0
+    r = ll(s).hs_q_respond(ll(status), ll(flag))
+    hs::nudge()
+    r
+
+nomethod fn send(s: int, text: str, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    b = bytes_of(text)
+    r = ll(s).hs_q_offer(b, std::abi::bytes::length(b).value)
+    hs::nudge()
+    r
+
+nomethod fn finish(s: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = hs_q_finish(ll(s))
+    hs::nudge()
+    r
+
+fn status(s: int) -> int:
+    hs_q_status(ll(s))
+
+nomethod fn stat(h: int, i: int) -> int:
+    ll(h).hs_q_stat(ll(i))
+
+private nomethod fn text_of(data: std::abi::bytes::MutableBytes, n: int) -> str:
+    if n <= 0:
+        return ""
+    count = std::abi::usize(n):
+        on std::abi::AbiIntegerAboveRange:
+            return "<too long>"
+        on std::abi::AbiIntegerBelowRange:
+            return "<negative>"
+    prefix = data.freeze_prefix(count):
+        on UpperOverrun:
+            return "<overrun>"
+    std::abi::bytes::decode_utf8(prefix):
+        on InvalidUtf8:
+            "<not utf-8>"
+
+nomethod fn recv(s: int, context ev: std::event_loop::Loop, h: hs::Hs) -> Chunk errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = ll(s).hs_q_recv(std::abi::bytes::zeroed(std::abi::usize(4096)), 4096)
+    hs::nudge()
+    Chunk {n: r.result, text: text_of(r.buf, r.result)}
+
+fn path(s: int) -> str:
+    r = ll(s).hs_q_path(std::abi::bytes::zeroed(std::abi::usize(512)), 512)
+    text_of(r.buf, r.result)
