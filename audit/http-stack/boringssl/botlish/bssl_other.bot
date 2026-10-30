@@ -1,0 +1,8 @@
+# bssl_other.bot -- a module that brings its own BoringSSL: "crypto" at an
+# archive of its own. Imported beside bssl, it is the conflicting-provider
+# control (reject_provider.bot): the link plan cannot hold two archives
+# for one library, and the compiler says so before anything links.
+extern c library "crypto" static at "native/other/libcrypto.a"
+
+fn marker() -> int:
+    1

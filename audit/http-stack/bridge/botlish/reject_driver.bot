@@ -1,0 +1,13 @@
+# reject_driver.bot -- negative control: a library that would change driver
+# ownership (rogue.bot). Expected: rejected at compile time.
+import rogue
+import std::event_loop
+
+with context std::event_loop::create(16)
+rogue::serve_forever():
+    on std::event_loop::SchedulerFault:
+        0
+    on std::event_loop::DriverFault:
+        0
+    on std::event_loop::LoopReentered:
+        0

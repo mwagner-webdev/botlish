@@ -1,0 +1,18 @@
+# bssl.bot -- the one BoringSSL provider in a program's link plan
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Single-link proof"). Every consumer
+# imports this module and declares no BoringSSL library of its own: the
+# crypto airlock (crypto.bot), the Rust unit (hs.bot: Hyper's TLS through
+# boring, quiche). The archives are the provider's, copied into the
+# application by tools/build.tcl app; libssl.a is C++ (its exception
+# runtime: __cxa_*, __gxx_personality_v0), hence libstdc++.
+#
+# A second module declaring "crypto" at another archive is LINK-CONFLICT
+# at compile time (NATIVE-LINK-PLAN-MILESTONE-1.md: no archive satisfies
+# both): tools/linkcheck.tcl's conflicting-provider control.
+extern c library "crypto" static at "native/libcrypto.a"
+extern c library "ssl" static at "native/libssl.a"
+extern c library "stdc++"
+
+# The provider's identity as the program sees it (the pin's tag).
+fn pin() -> str:
+    "boringssl 0.20261020.0 d3bf4795ad5b79d646cddf2fec687da5b9b502db"

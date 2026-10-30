@@ -1,0 +1,177 @@
+# hsh.bot -- HTTP/1.1 and HTTP/2 (Hyper, hs_hyper) for Botlish coroutines:
+# the application-facing sketch of the census
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Streaming", "Botlish airlocks"). Not
+# an API proposal: the
+# smallest surface the probes need, in useful units -- connections,
+# requests, responses, body chunks.
+#
+# Every call is non-blocking and returns state; a coroutine waits for a
+# handle with hs::await(handle) and reads the state again. Body bytes cross
+# the boundary as copies into Botlish-owned storage (`recv`: a write
+# exposure the Rust side fills) or out of it (`send`: a read exposure Rust
+# copies), one chunk at a time; Rust buffers at most one chunk per
+# direction per exchange.
+import hs
+import std::abi
+import std::abi::bytes
+import std::event_loop
+import std::ffi::c
+import std::int
+import std::str
+
+extern c fn hs_h_configure(window: std::ffi::c::LongLong, keepalive_us: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_server(proto: std::ffi::c::LongLong, tls: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_listen(server: std::ffi::c::LongLong, fd: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_client(fd: std::ffi::c::LongLong, proto: std::ffi::c::LongLong, tls: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_mem_pair(server: std::ffi::c::LongLong, proto: std::ffi::c::LongLong, capacity: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_client_state(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_request(client: std::ffi::c::LongLong, method: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, method_len: std::ffi::c::ULong, path: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, path_len: std::ffi::c::ULong, streaming: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_next_request(server: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_respond(h: std::ffi::c::LongLong, status: std::ffi::c::LongLong, streaming: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_offer(h: std::ffi::c::LongLong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hs_h_finish(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_status(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_recv(h: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hs_h_path(h: std::ffi::c::LongLong, buf: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hs_h_stat(h: std::ffi::c::LongLong, i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_server_conns(server: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_h_objects() -> std::ffi::c::LongLong
+extern c fn hs_tcp_listen(port: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_tcp_connect(port: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_sock_buffers(fd: std::ffi::c::LongLong, bytes: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_rss_kb() -> std::ffi::c::LongLong
+
+# A chunk received: N bytes (> 0), 0 nothing yet, -1 the end, or an error;
+# TEXT the bytes as a String when N > 0 and they are UTF-8.
+struct Chunk:
+    n: int
+    text: str
+
+private fn ll(x: int) -> std::ffi::c::LongLong:
+    hs::cll(x)
+
+fn configure(window: int, keepalive_us: int) -> int:
+    ll(window).hs_h_configure(ll(keepalive_us))
+
+# Loopback sockets (the transport airlock's operations in the census).
+fn listen_socket(port: int) -> int:
+    hs_tcp_listen(ll(port))
+
+fn connect_socket(port: int) -> int:
+    hs_tcp_connect(ll(port))
+
+fn port_of(fd: int) -> int:
+    hs::port_of(fd)
+
+nomethod fn small_buffers(fd: int, bytes: int) -> int:
+    ll(fd).hs_sock_buffers(ll(bytes))
+
+fn rss_kb() -> int:
+    hs_rss_kb()
+
+fn objects() -> int:
+    hs_h_objects()
+
+# PROTO: 1 HTTP/1.1, 2 HTTP/2. TLS: a TLS config handle (hstls), or 0.
+nomethod fn server(proto: int, tls: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = ll(proto).hs_h_server(ll(tls))
+    hs::nudge()
+    r
+
+# Accept connections for SERVER on the listening socket FD: the listener's
+# handle (release it to stop accepting; accepted connections live on).
+nomethod fn serve(server: int, fd: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = ll(server).hs_h_listen(ll(fd))
+    hs::nudge()
+    r
+
+nomethod fn client(fd: int, proto: int, tls: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = ll(fd).hs_h_client(ll(proto), ll(tls))
+    hs::nudge()
+    r
+
+nomethod fn mem_client(server: int, proto: int, capacity: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = ll(server).hs_h_mem_pair(ll(proto), ll(capacity))
+    hs::nudge()
+    r
+
+# 0 connecting, 1 HTTP/1.1, 2 HTTP/2, or an error (< 0).
+fn state(h: int) -> int:
+    hs_h_client_state(ll(h))
+
+private fn bytes_of(s: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(s))
+
+nomethod fn request(client: int, method: str, path: str, streaming: bool, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    m = bytes_of(method)
+    p = bytes_of(path)
+    flag = if streaming:
+        1
+    else:
+        0
+    r = ll(client).hs_h_request(m, std::abi::bytes::length(m).value, p, std::abi::bytes::length(p).value, ll(flag))
+    hs::nudge()
+    r
+
+# The next request the server received (an exchange handle), or 0.
+fn next_request(server: int) -> int:
+    hs_h_next_request(ll(server))
+
+nomethod fn respond(x: int, status: int, streaming: bool, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    flag = if streaming:
+        1
+    else:
+        0
+    r = ll(x).hs_h_respond(ll(status), ll(flag))
+    hs::nudge()
+    r
+
+# Offer TEXT as the next body chunk of H: its byte count when accepted, 0
+# when the one-chunk slot is still full (wait for H's SEND notice).
+nomethod fn send(x: int, text: str, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    b = bytes_of(text)
+    r = ll(x).hs_h_offer(b, std::abi::bytes::length(b).value)
+    hs::nudge()
+    r
+
+nomethod fn finish(x: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = hs_h_finish(ll(x))
+    hs::nudge()
+    r
+
+# 0 pending, the HTTP status once the head arrived (a server exchange: 1),
+# or an error.
+fn status(h: int) -> int:
+    hs_h_status(ll(h))
+
+nomethod fn stat(h: int, i: int) -> int:
+    ll(h).hs_h_stat(ll(i))
+
+fn server_conns(server: int) -> int:
+    hs_h_server_conns(ll(server))
+
+private nomethod fn text_of(data: std::abi::bytes::MutableBytes, n: int) -> str:
+    if n <= 0:
+        return ""
+    count = std::abi::usize(n):
+        on std::abi::AbiIntegerAboveRange:
+            return "<too long>"
+        on std::abi::AbiIntegerBelowRange:
+            return "<negative>"
+    prefix = data.freeze_prefix(count):
+        on UpperOverrun:
+            return "<overrun>"
+    std::abi::bytes::decode_utf8(prefix):
+        on InvalidUtf8:
+            "<not utf-8>"
+
+# The next chunk of H's incoming body (at most 4096 bytes).
+nomethod fn recv(x: int, context ev: std::event_loop::Loop, h: hs::Hs) -> Chunk errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = ll(x).hs_h_recv(std::abi::bytes::zeroed(std::abi::usize(4096)), 4096)
+    hs::nudge()
+    Chunk {n: r.result, text: text_of(r.buf, r.result)}
+
+# "METHOD PATH" of a server exchange.
+fn path(x: int) -> str:
+    r = ll(x).hs_h_path(std::abi::bytes::zeroed(std::abi::usize(512)), 512)
+    text_of(r.buf, r.result)

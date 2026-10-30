@@ -1,0 +1,56 @@
+# hsfx.bot -- the bridge's executor fixtures (integration/src/fixtures.rs)
+# for the scheduling probe: futures with known behavior.
+import hs
+import std::event_loop
+import std::ffi::c
+
+extern c fn hs_fx_spinner(n: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_fx_foreign(delay_us: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_fx_sleep(delay_us: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_fx_panic_task() -> std::ffi::c::LongLong
+extern c fn hs_fx_panic_call() -> std::ffi::c::LongLong
+extern c fn hs_fx_wrong_thread() -> std::ffi::c::LongLong
+extern c fn hs_fixture_result(h: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+# A future that wakes itself N times: much ready Rust work.
+nomethod fn spinner(n: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = hs_fx_spinner(hs::cll(n))
+    hs::nudge()
+    r
+
+# A future another OS thread completes after DELAY_US of real time.
+nomethod fn foreign(delay_us: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = hs_fx_foreign(hs::cll(delay_us))
+    hs::nudge()
+    r
+
+# A future that sleeps DELAY_US of the Botlish clock.
+nomethod fn sleep(delay_us: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = hs_fx_sleep(hs::cll(delay_us))
+    hs::nudge()
+    r
+
+nomethod fn panic_task(context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    r = hs_fx_panic_task()
+    hs::nudge()
+    r
+
+fn panic_call() -> int:
+    hs_fx_panic_call()
+
+fn wrong_thread() -> int:
+    hs_fx_wrong_thread()
+
+# 0 while the fixture runs, then its result.
+fn result(fx: int) -> int:
+    hs_fixture_result(hs::cll(fx))
+
+# Wait for fixture FX to finish; its result.
+nomethod fn finish(fx: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if result(fx) != 0:
+            break
+        e = hs::await(fx)
+        if e.reason != std::event_loop::Wake::Event:
+            break
+    result(fx)

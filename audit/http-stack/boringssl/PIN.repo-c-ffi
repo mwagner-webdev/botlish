@@ -1,0 +1,14 @@
+# A second BoringSSL pin, for the census's negative controls only: the
+# revision the repository's C FFI acceptance and binding generator already
+# pin (audit/c-header/profiles/boringssl.tcl, tests/cffi/boringssl.tcl:
+# tag 0.20260929.0), built here unprefixed for boring-sys. Never the
+# provider: tools/build.tcl unit -bssl pin:boringssl/PIN.repo-c-ffi bundles
+# it into a Rust unit to show what a second provider does to a link.
+library boringssl
+url https://boringssl.googlesource.com/boringssl
+tag 0.20260929.0
+tagObject 866a4b0f1f88fa1d9f3e5b1ebeb59efdcb726ce2
+commit 427ec40cc8edc545253289232e885708c409e5ea
+bindings {}
+cmake {-DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON}
+targets {crypto ssl}

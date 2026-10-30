@@ -1,0 +1,45 @@
+# hsmem.bot -- the bridge's executor without descriptors: the deterministic
+# driver (std::event_loop::deterministic) with in-memory transports
+# (hs_h_mem_pair). Rust never parks on a descriptor there: an interest
+# request is a bridge bug, counted (`stray`).
+import hs
+import std::event_loop
+import std::mutable_array
+
+opaque context struct Mem:
+    counts: MutableArray[int]
+
+fn create() -> Mem:
+    Mem {counts: std::mutable_array::create(1, 0)}
+
+nomethod fn stray(context m: Mem) -> int errors IndexNotFound:
+    m.counts.at(0)
+
+private nomethod fn settle(context m: Mem, h: hs::Hs) errors IndexNotFound:
+    loop:
+        fd = hs::next_interest()
+        if fd < 0:
+            break
+        m.counts.set(0, m.counts.at(0) + 1)
+
+private fn executor(context m: Mem, ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if hs::stopped?():
+            break
+        left = hs::step()
+        settle()
+        if hs::stopped?():
+            break
+        if left > 0:
+            hs::busy()
+        elif not hs::idle():
+            break
+    0
+
+fn start(context m: Mem, ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    hs::start(-1)
+    coroutine {step: s, first: f} = executor()
+    std::event_loop::adopt(s, f)
+
+fn stop(context m: Mem, ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    hs::stop()
