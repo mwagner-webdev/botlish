@@ -197,14 +197,14 @@ namespace eval native::lower {
         coroutine#yield  {op coyield} \
         std::coroutine::done? {op codone} \
         coroutine#release {op corelease} \
-        std::ffi::rawfloat::from_bits32 {op rawfrombits32} \
-        std::ffi::rawfloat::from_bits64 {op rawfrombits64} \
-        std::ffi::rawfloat::bits32      {op rawbits32} \
-        std::ffi::rawfloat::bits64      {op rawbits64} \
-        std::ffi::rawfloat::admit32     {op rawadmit32} \
-        std::ffi::rawfloat::admit64     {op rawadmit64} \
-        std::ffi::rawfloat::narrow32    {op rawnarrow32} \
-        std::ffi::rawfloat::narrow64    {op rawnarrow64} \
+        std::rawfloat::from_bits32 {op rawfrombits32} \
+        std::rawfloat::from_bits64 {op rawfrombits64} \
+        std::rawfloat::bits32      {op rawbits32} \
+        std::rawfloat::bits64      {op rawbits64} \
+        std::rawfloat::admit32     {op rawadmit32} \
+        std::rawfloat::admit64     {op rawadmit64} \
+        std::rawfloat::narrow32    {op rawnarrow32} \
+        std::rawfloat::narrow64    {op rawnarrow64} \
         std::ffi::c::null      {op cptrnull} \
         std::ffi::c::null?     {op cptrisnull} \
         std::ffi::c::clone     {op cptrsame} \

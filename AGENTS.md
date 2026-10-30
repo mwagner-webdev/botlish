@@ -3377,7 +3377,7 @@ negative zero, subnormals -- with their finite counterparts' C facts
 Their canonical type is the runtime kind `rawfloat32`/`rawfloat64` in every
 position (a C type and a type of values at once); the explicit operations
 are `std::ffi::c::raw`'s (stdlib/ffi/c/raw.bot, over the internal
-intrinsics `std::ffi::rawfloat::*`). Keep it so:
+intrinsics `std::rawfloat::*`). Keep it so:
 
 * Carrying is not admitting: a raw argument, result, field, element or
   alternative crosses as its bits (`bitcast`, integer loads and stores; NIR

@@ -242,10 +242,12 @@ collector treats it as a leaf.
   a raw value of the bytes, `bin_encode` writes a raw value's bits; every
   load and store path -- bytes, native views and edits, array rows --
   already funnels through these two.
-* **Operations**: the internal intrinsics `std::ffi::rawfloat::from_bits32`
-  ... `narrow64` (`core::native::declareInternalNamespace`: only the
-  standard library imports them; `std::ffi::c::raw`'s functions are their
-  declared spelling) lower to the NIR ops `rawfrombits32` ... `rawnarrow64`,
+* **Operations**: the internal intrinsics `std::rawfloat::from_bits32`
+  ... `narrow64` (one family below std, as every qualified intrinsic but
+  the platforms' and the C ABI's is: STD-NAMESPACE.md;
+  `core::native::declareInternalNamespace`: only the standard library
+  imports them or names their members, `rcf-intrinsics-internal`;
+  `std::ffi::c::raw`'s functions are their declared spelling) lower to the NIR ops `rawfrombits32` ... `rawnarrow64`,
   runtime helpers `rt_raw_from_bits`, `rt_raw_bits`, `rt_raw_admit`,
   `rt_raw_narrow` (runtime/ffi.rs) on both native backends.
 * **Calls**: NIR's foreign table names `rf32` / `rf64` (`CAbi::RawF32`,
@@ -489,7 +491,7 @@ and was skipped here (CI's `c-bindgen` workflow runs it).
 
 | test | what |
 |---|---|
-| `tests/raw-c-float-ffi.test` (new, 30 tests) | the type model and its facts per target; positions; no implicit conversion; no arithmetic, ordering, equality or hash (statically and through erased values on all four backends); ABI classes and error charging; no authority; invalid positions; bit round trips, classification, display, admission and narrowing on all four backends; byte layouts with raw fields, arrays and unions on all four backends; C calls against `tests/cffi/rawfloat-fixture.c` -- arguments, results, pass-through, register exhaustion with integers interleaved and a stack-passed result, the finite bindings' unchanged behavior; the record layout against C; native views, edits, arrays, unions and pointers over C's memory; function pointers of raw signatures; the Tcl backends' refusal; HIR text, interchange and isolation; NIR and CLIF; a standalone executable; GC stress |
+| `tests/raw-c-float-ffi.test` (new, 31 tests) | the type model and its facts per target; positions; no implicit conversion; the intrinsics internal to the standard library; no arithmetic, ordering, equality or hash (statically and through erased values on all four backends); ABI classes and error charging; no authority; invalid positions; bit round trips, classification, display, admission and narrowing on all four backends; byte layouts with raw fields, arrays and unions on all four backends; C calls against `tests/cffi/rawfloat-fixture.c` -- arguments, results, pass-through, register exhaustion with integers interleaved and a stack-passed result, the finite bindings' unchanged behavior; the record layout against C; native views, edits, arrays, unions and pointers over C's memory; function pointers of raw signatures; the Tcl backends' refusal; HIR text, interchange and isolation; NIR and CLIF; a standalone executable; GC stress |
 | `tests/golden/raw-c-float-ffi.bot` (new, 13 tests, all four backends) | bit round trips, classification, admission, narrowing, byte layouts and emission, and seven compile-time rejections (arithmetic, ordering, equality, implicit admission, implicit raw, a format change, an unproven bit pattern); `audit/golden/tools/perturb.tcl`: 13 inverted and 13 altered, all failed as required |
 | `tests/raven.test` `raven-raw` (new) | section 6 |
 | `tests/c-bindgen.test` `cb-representations` (new) | section 5's generator rules |
@@ -521,7 +523,7 @@ Linux x86-64 (this container):
 
 | check | result |
 |---|---|
-| `tests/raw-c-float-ffi.test` | 30 tests, all passed (the fixture built and linked) |
+| `tests/raw-c-float-ffi.test` | 31 tests, all passed (the fixture built and linked) |
 | `tests/golden/raw-c-float-ffi.bot` | 13/13 on interp, compile, cranelift-generic and cranelift; perturbation 13/13 and 13/13 |
 | `tests/raven.test` | 11 tests: 10 passed, 1 skipped (`raven-desktop`: no desktop build here) |
 | `tests/c-bindgen.test` | in the pinned Ubuntu 26.04 chroot: see the end of this section; on this Ubuntu 24.04 host every test but `cb-tcl-current` passes, and that one fails identically on the untouched tree (the host's Tcl headers differ from 26.04's) |

@@ -53,34 +53,34 @@
 # sign 9223372036854775808 = 0x8000000000000000.
 
 import std::ffi::c
-import std::ffi::rawfloat
+import std::rawfloat
 
 type FloatBits = Int in 0..4294967295
 type DoubleBits = Int in 0..18446744073709551615
 
 nomethod fn float_from_bits(bits: std::ffi::c::raw::FloatBits) -> std::ffi::c::RawFloat:
-    std::ffi::rawfloat::from_bits32(bits)
+    std::rawfloat::from_bits32(bits)
 
 fn float_to_bits(x: std::ffi::c::RawFloat) -> std::ffi::c::raw::FloatBits:
-    std::ffi::rawfloat::bits32(x)
+    std::rawfloat::bits32(x)
 
 fn float_to_float64(x: std::ffi::c::RawFloat) -> Float64 errors NonFiniteFloat:
-    std::ffi::rawfloat::admit32(x)
+    std::rawfloat::admit32(x)
 
 nomethod fn float_from_float64(x: Float64) -> std::ffi::c::RawFloat errors NonFiniteFloat:
-    std::ffi::rawfloat::narrow32(x)
+    std::rawfloat::narrow32(x)
 
 nomethod fn double_from_bits(bits: std::ffi::c::raw::DoubleBits) -> std::ffi::c::RawDouble:
-    std::ffi::rawfloat::from_bits64(bits)
+    std::rawfloat::from_bits64(bits)
 
 fn double_to_bits(x: std::ffi::c::RawDouble) -> std::ffi::c::raw::DoubleBits:
-    std::ffi::rawfloat::bits64(x)
+    std::rawfloat::bits64(x)
 
 fn double_to_float64(x: std::ffi::c::RawDouble) -> Float64 errors NonFiniteFloat:
-    std::ffi::rawfloat::admit64(x)
+    std::rawfloat::admit64(x)
 
 nomethod fn double_from_float64(x: Float64) -> std::ffi::c::RawDouble:
-    std::ffi::rawfloat::narrow64(x)
+    std::rawfloat::narrow64(x)
 
 fn float_finite?(x: std::ffi::c::RawFloat) -> bool:
     bit_and(float_to_bits(x), 2139095040) != 2139095040

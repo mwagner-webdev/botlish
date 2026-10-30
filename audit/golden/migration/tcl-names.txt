@@ -10188,6 +10188,7 @@ tests/raw-c-float-ffi.test rcf-no-number pass
 tests/raw-c-float-ffi.test rcf-erased-no-number pass
 tests/raw-c-float-ffi.test rcf-abi-classes pass
 tests/raw-c-float-ffi.test rcf-no-authority pass
+tests/raw-c-float-ffi.test rcf-intrinsics-internal pass
 tests/raw-c-float-ffi.test rcf-invalid-positions pass
 tests/raw-c-float-ffi.test rcf-bits-round-trip pass
 tests/raw-c-float-ffi.test rcf-classify pass

@@ -845,15 +845,15 @@ std::ffi::c::raw::float_to_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/
 std::ffi::c::raw::float_to_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:67			
 std::ffi::c::raw::float_zero?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:95			
 std::ffi::c::retype	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:799			
-std::ffi::rawfloat	namespace		std-internal	intrinsic				
-std::ffi::rawfloat::admit32	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
-std::ffi::rawfloat::admit64	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
-std::ffi::rawfloat::bits32	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
-std::ffi::rawfloat::bits64	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
-std::ffi::rawfloat::from_bits32	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
-std::ffi::rawfloat::from_bits64	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
-std::ffi::rawfloat::narrow32	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
-std::ffi::rawfloat::narrow64	intrinsic	std::ffi::rawfloat	std-internal	intrinsic				
+std::rawfloat	namespace		std-internal	intrinsic				
+std::rawfloat::admit32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::admit64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::bits32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::bits64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::from_bits32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::from_bits64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::narrow32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::narrow64	intrinsic	std::rawfloat	std-internal	intrinsic				
 std::float64	namespace		api	source+intrinsic	stdlib/float64.bot			
 std::float64::abs	function	std::float64	api	source	stdlib/float64.bot:38			
 std::float64::clamp	function	std::float64	api	source	stdlib/float64.bot:44			

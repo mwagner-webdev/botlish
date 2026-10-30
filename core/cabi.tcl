@@ -710,14 +710,14 @@ proc core::cabi::rawFromFloat64Impl {format what v} {
 # pattern in its domain, a raw value of its own type -- and nothing else
 # imports them. NAME32 is the binary32 operation, NAME64 the binary64 one.
 #
-#   std::ffi::rawfloat::from_bits32(n)     rawfloat32  bits N, as they are
-#   std::ffi::rawfloat::bits32(x)          Int         X's bits
-#   std::ffi::rawfloat::admit32(x)         Float64     Admit (NonFiniteFloat)
-#   std::ffi::rawfloat::narrow32(x)        rawfloat32  Narrow (NonFiniteFloat)
+#   std::rawfloat::from_bits32(n)     rawfloat32  bits N, as they are
+#   std::rawfloat::bits32(x)          Int         X's bits
+#   std::rawfloat::admit32(x)         Float64     Admit (NonFiniteFloat)
+#   std::rawfloat::narrow32(x)        rawfloat32  Narrow (NonFiniteFloat)
 #   ... and from_bits64, bits64, admit64, narrow64 (exact)
 namespace eval core::cabi {
     # The internal namespace of the raw values' intrinsics.
-    variable rawNamespace std::ffi::rawfloat
+    variable rawNamespace std::rawfloat
 }
 foreach {format kind width stem} {binary32 rawfloat32 32 float binary64 rawfloat64 64 double} {
     set ns $core::cabi::rawNamespace

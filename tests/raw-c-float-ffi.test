@@ -210,6 +210,16 @@ test rcf-no-authority {a raw value needs no authority: a module that makes, insp
     list [rcfReject $body] [rcfReject "direct module\n$body"]
 } -result {accepted {STALE-DIRECT-MODULE: `direct module` is unnecessary: the entry program makes no call into a direct module, so it exposes no direct authority; remove the declaration (it must state exactly what the compiler infers)}}
 
+test rcf-intrinsics-internal {the raw values' intrinsics are internal to the standard library: a program can neither import std::rawfloat nor name one of its natives, and reaches them only through std::ffi::c::raw's functions} -body {
+    lmap body {
+        "import std::rawfloat\n0\n"
+        "import std::ffi::c::raw\nstd::rawfloat::bits32(std::ffi::c::raw::float_from_bits(1))\n"
+        "import std::ffi::c::raw\nstd::ffi::c::raw::float_to_bits(std::ffi::c::raw::float_from_bits(1))\n"
+    } {
+        rcfReject $body
+    }
+} -result {{INTERNAL-NAMESPACE: namespace "std::rawfloat" is internal to the standard library: only its modules may import it or name its members (the entry program is not one)} {INTERNAL-NAMESPACE: namespace "std::rawfloat" is internal to the standard library: only its modules may import it or name its members (the entry program is not one)} accepted}
+
 test rcf-invalid-positions {a C ABI position that admits no raw value still says so: a raw value is no trailing argument of a variadic C function (C promotes it), a C signature declares no errors, a List of raw values is no C type, and Float64 is still no C type} -body {
     set head "import std::ffi::c\nimport std::ffi::c::raw\n"
     lmap body {

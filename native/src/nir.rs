@@ -210,7 +210,7 @@ pub enum OpCode {
     /// runtime::decimal's rt_decimal_to_str; never fails).
     D64ToStr,
     /// Raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md; core/cabi.tcl's
-    /// std::ffi::rawfloat intrinsics): `rawfrombits32`/`64` the raw value of
+    /// std::rawfloat intrinsics): `rawfrombits32`/`64` the raw value of
     /// an Int bit pattern (proven in range; RANGE otherwise), `rawbits32`/
     /// `64` a raw value's bit pattern as an Int, `rawadmit32`/`64` the
     /// Float64 it admits to (NonFiniteFloat for NaN or an infinity, -0 as
