@@ -5,9 +5,12 @@ name: c-bindgen
 # from the pinned headers, for every target of its profile (the check mode,
 # byte for byte, the layouts and their C verification included), and the
 # generator's tests, its fuzzer and the layout fuzzer pass with the Tcl,
-# BoringSSL, SDL3 and Win32 acceptance enabled. The Win32 binding is
-# generated on Linux with the MinGW-w64 cross toolchain (windows-x86_64-gnu):
-# nothing here runs Windows, Wine, a Windows binary or any MSVC tool.
+# BoringSSL, SDL3, Raven and Win32 acceptance enabled; and the Raven
+# package (packages/raven, RAVEN-BINDINGS.md) over its generated binding,
+# headless and on a real X11 window drawn by Raven's Vulkan renderer. The
+# Win32 binding is generated on Linux with the MinGW-w64 cross toolchain
+# (windows-x86_64-gnu): nothing here runs Windows, Wine, a Windows binary or
+# any MSVC tool.
 # The ordinary test jobs (tests.yml) run tests/c-bindgen.test too, but
 # without the pinned sources or libraries: there only the synthetic
 # fixture's tests run.
@@ -63,7 +66,7 @@ jobs:
 
       - name: Fetch the pinned C header sources
         run: |
-          for profile in tcl boringssl sdl3; do
+          for profile in tcl boringssl sdl3 raven; do
             tclsh9.0 tools/c-bindgen.tcl fetch $profile
           done
 
@@ -73,28 +76,47 @@ jobs:
       - name: Check every committed binding
         run: |
           status=0
-          for profile in fixture tcl tclstubs boringssl sdl3 win32; do
+          for profile in fixture tcl tclstubs boringssl sdl3 raven win32; do
             tclsh9.0 tools/c-bindgen.tcl check $profile -target committed || status=1
           done
           exit $status
 
-      - name: Cache the package-owned BoringSSL and SDL3
+      - name: Cache the package-owned BoringSSL, SDL3 and Raven
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/botlish/boringssl
             ~/.cache/botlish/sdl3
-          key: cffi-libs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('audit/c-header/profiles/boringssl.tcl', 'tests/cffi/boringssl.tcl', 'tools/c-bindgen/profiles/sdl3.tcl', 'tests/cffi/sdl3.tcl') }}
+            ~/.cache/botlish/raven
+          key: cffi-libs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('audit/c-header/profiles/boringssl.tcl', 'tests/cffi/boringssl.tcl', 'tools/c-bindgen/profiles/sdl3.tcl', 'tests/cffi/sdl3.tcl', 'tools/c-bindgen/profiles/raven.tcl', 'tests/cffi/raven.tcl') }}
 
-      - name: Build the package-owned BoringSSL and SDL3
+      # Raven twice: headless (its null platform and renderer: what the
+      # binding's acceptance and the package's tests link) and for the
+      # desktop (X11 and the Vulkan renderer, which loads libvulkan.so.1 when
+      # a program runs: raven-desktop, under Xvfb with Mesa's software
+      # Vulkan driver).
+      - name: Install Raven's desktop prerequisites
+        run: |
+          sudo apt-get install -y --no-install-recommends libx11-dev libvulkan1 mesa-vulkan-drivers xvfb
+
+      - name: Build the package-owned BoringSSL, SDL3 and Raven
         run: |
           tclsh9.0 tests/cffi/boringssl.tcl
           tclsh9.0 tests/cffi/sdl3.tcl
+          tclsh9.0 tests/cffi/raven.tcl
+          BOTLISH_RAVEN_CMAKE_FLAGS="" tclsh9.0 tests/cffi/raven.tcl
 
       - name: Run the generator's tests
         run: |
           tmp=$(mktemp -d)
           tclsh9.0 tests/c-bindgen.test -tmpdir "$tmp" | tee "$tmp/log"
+          grep -qP 'Failed\t0$' "$tmp/log"
+          ! grep -qP 'Skipped\t[1-9]' "$tmp/log"
+
+      - name: Run the Raven package's tests
+        run: |
+          tmp=$(mktemp -d)
+          tclsh9.0 tests/raven.test -tmpdir "$tmp" | tee "$tmp/log"
           grep -qP 'Failed\t0$' "$tmp/log"
           ! grep -qP 'Skipped\t[1-9]' "$tmp/log"
 

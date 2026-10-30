@@ -1,0 +1,308 @@
+c-bindgen manifest (C-BINDGEN.md, "Manifest")
+generator_version 2
+profile raven
+profile_file tools/c-bindgen/profiles/raven.tcl 83a848e7
+target linux-x86_64
+library raven
+source {url https://github.com/oscar-soirey/Raven tag v0.1.3 commit cd228d8ec05e1b8f1e85ae2520600835ad2c3585}
+revision cd228d8ec05e1b8f1e85ae2520600835ad2c3585
+entry Raven.h
+include include
+defines {}
+undefines {}
+flags {}
+command {clang -E -x c --target=x86_64-linux-gnu -I$SRC/include $TU/entry.c}
+toolchain_family clang
+toolchain_version {Ubuntu clang version 21.1.8 (6ubuntu1)}
+toolchain_target x86_64-linux-gnu
+toolchain_sysroot none
+user_label_prefix {}
+evidence llvm
+preprocessed_tokens 14802
+header include/raven/raven_accessibility.h 6f488c02
+header include/raven/raven_backend.h 578b9d4b
+header include/raven/raven_controls.h 912176a2
+header include/raven/raven_core.h 9a37b282
+header include/raven/raven_dialogs.h 40b3aedd
+header include/raven/raven_draw.h 358afcf2
+header include/raven/raven_host.h efe5ddc2
+header include/raven/raven_layout.h 1ba5dc40
+header include/raven/raven_locale.h 252d8b88
+header include/raven/raven_resources.h 31c559b0
+header include/raven/raven_shader.h dcd21f56
+header include/raven/raven_shell.h 4dad0d3f
+header include/raven/raven_style.h 68b96b70
+header include/raven/raven_text_editor.h 91b850e9
+header include/raven/raven_tools.h 2300ae07
+header include/raven/raven_viewport.h d321e84e
+header include/raven/raven_vulkan.h b0157043
+header include/raven/raven_widget.h 7eb6ac4e
+header include/raven/raven_window.h 3d02714b
+header include/raven/raven_xml.h 1a0cf1fe
+shim_library none
+file layouts-check.c 326 80b83e3a
+file layouts.tsv 232 c2522582
+file raven/accessibility.bot 142 c48c66b3
+file raven/backend.bot 38 b2f5cbe9
+file raven/controls.bot 822 b4367bfa
+file raven/core.bot 248 e9a35f4d
+file raven/ctypes.bot 127 77fef7ab
+file raven/dialogs.bot 213 5d3fd021
+file raven/draw.bot 189 5785cbbe
+file raven/host.bot 76 6bb3fa17
+file raven/layout.bot 365 5e8f9e3b
+file raven/layouts.bot 346 7f0887a7
+file raven/locale.bot 96 380ff8ee
+file raven/resources.bot 141 1692a3b6
+file raven/shader.bot 90 9b8b1346
+file raven/shell.bot 263 08c231e7
+file raven/style.bot 204 c2ea00bd
+file raven/text_editor.bot 329 5d2a79c0
+file raven/tools.bot 1122 dd6c3228
+file raven/viewport.bot 64 859e1ede
+file raven/vulkan.bot 80 302d8fae
+file raven/widget.bot 511 81a5a7bf
+file raven/window.bot 565 cfdbb373
+file raven/xml.bot 317 0ee9b2a2
+file report.tsv 1655 82c08323
+file report.txt 138 b42757e9
+libraries raven/accessibility.bot raven
+libraries raven/backend.bot raven
+libraries raven/controls.bot raven
+libraries raven/core.bot raven
+libraries raven/dialogs.bot raven
+libraries raven/draw.bot raven
+libraries raven/host.bot raven
+libraries raven/layout.bot raven
+libraries raven/locale.bot raven
+libraries raven/resources.bot raven
+libraries raven/shader.bot raven
+libraries raven/shell.bot raven
+libraries raven/style.bot raven
+libraries raven/text_editor.bot raven
+libraries raven/tools.bot raven
+libraries raven/viewport.bot raven
+libraries raven/vulkan.bot raven
+libraries raven/widget.bot raven
+libraries raven/window.bot raven
+libraries raven/xml.bot raven
+count alias 0
+count aliases 0
+count bool 0
+count boolOnly 0
+count callbacks 74
+count complete 27
+count constants 513
+count constantsSeen 21
+count declared 921
+count direct 921
+count enumerators 493
+count excluded 0
+count fnmacros 2
+count fnptrTypedefs 57
+count inline 0
+count manual 172
+count opaque 1
+count proven 0
+count ptrParams 480
+count ptrResults 85
+count resultAlias 0
+count resultIndependent 0
+count resultUnknown 85
+count tablestubs 0
+count thunk 0
+count unknownParams 308
+count unknownRetention 168
+count unsupported 2
+count views 29
+blocked macro-needs-signature 2
+layout_abi linux-x86_64 clang x86_64-linux-gnu {Ubuntu clang version 21.1.8 (6ubuntu1)}
+layout_count anonymous 0
+layout_count blocked 0
+layout_count blockedDirect 0
+layout_count blockedStructs 0
+layout_count blockedTransitive 0
+layout_count blockedUnions 0
+layout_count emitted 27
+layout_count emittedSynthetic 0
+layout_count emittedUnions 0
+layout_count incomplete 1
+layout_count promoted 0
+layout_count public 27
+layout_count structs 27
+layout_count synthetic 0
+layout_count system 0
+layout_count unheld 0
+layout_count unions 0
+contract Raction_bind name {access read escape declared-noescape} manual {group 17}
+contract Raction_unbind name {access read escape declared-noescape} manual {group 17}
+contract Raction_fire name {access read escape declared-noescape} manual {group 17}
+contract Ropen_url url {access read escape declared-noescape} manual {group 27}
+contract Rclipboard_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rwindow_create title {access read escape declared-noescape} manual {group 25}
+contract Rwindow_set_title title {access read escape declared-noescape} manual {group 25}
+contract Rwindow_inject_text text {access read escape declared-noescape} manual {group 24}
+contract Rwindow_inject_drop text {access read escape declared-noescape} manual {group 24}
+contract Rdrag_begin type {access read escape declared-noescape} manual {group 26}
+contract Rdrag_begin data {access read escape declared-noescape} manual {group 7}
+contract Rdrag_begin label {access read escape declared-noescape} manual {group 13}
+contract Rwindow_register_shortcut action {access read escape declared-noescape} manual {group 1}
+contract Rtheme_set_style_color widget {access read escape declared-noescape} manual {group 29}
+contract Rtheme_set_style_color style_class {access read escape declared-noescape} manual {group 22}
+contract Rtheme_set_style_metric widget {access read escape declared-noescape} manual {group 29}
+contract Rtheme_set_style_metric style_class {access read escape declared-noescape} manual {group 22}
+contract Rtheme_set_style_material widget {access read escape declared-noescape} manual {group 29}
+contract Rtheme_set_style_material style_class {access read escape declared-noescape} manual {group 22}
+contract Rtheme_load path {access read escape declared-noescape} manual {group 19}
+contract Rtheme_load_from_memory xml {access read escape declared-noescape} manual {group 30}
+contract Rtheme_use name {access read escape declared-noescape} manual {group 17}
+contract Rtheme_save path {access read escape declared-noescape} manual {group 19}
+contract Rtheme_save name {access read escape declared-noescape} manual {group 17}
+contract Rfont_create data {access read escape declared-noescape} manual {group 7}
+contract Rfont_create_from_file path {access read escape declared-noescape} manual {group 19}
+contract Rfont_measure_text text {access read escape declared-noescape} manual {group 24}
+contract Rtexture_create data {access read escape declared-noescape} manual {group 7}
+contract Rtexture_create_async data {access read escape declared-noescape} manual {group 7}
+contract Rtexture_create_from_file path {access read escape declared-noescape} manual {group 19}
+contract Rtexture_create_from_file_async path {access read escape declared-noescape} manual {group 19}
+contract Rwidget_set_name name {access read escape declared-noescape} manual {group 17}
+contract Rwidget_find name {access read escape declared-noescape} manual {group 17}
+contract Rslot_set_title title {access read escape declared-noescape} manual {group 25}
+contract Rwidget_set_tooltip text {access read escape declared-noescape} manual {group 24}
+contract Rwidget_set_action action {access read escape declared-noescape} manual {group 1}
+contract Rwidget_set_class classes {access read escape declared-noescape} manual {group 4}
+contract Rwidget_add_class style_class {access read escape declared-noescape} manual {group 22}
+contract Rwidget_remove_class style_class {access read escape declared-noescape} manual {group 22}
+contract Rwidget_has_class style_class {access read escape declared-noescape} manual {group 22}
+contract Rwidget_set_theme name {access read escape declared-noescape} manual {group 17}
+contract Rtab_view_add_tab title {access read escape declared-noescape} manual {group 25}
+contract Rtab_view_set_tab_title title {access read escape declared-noescape} manual {group 25}
+contract Rexpander_set_title title {access read escape declared-noescape} manual {group 25}
+contract Rlabel_create text {access read escape declared-noescape} manual {group 24}
+contract Rlabel_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rbutton_create text {access read escape declared-noescape} manual {group 24}
+contract Rbutton_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rcheckbox_create text {access read escape declared-noescape} manual {group 24}
+contract Rcheckbox_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rtext_input_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rtext_input_set_placeholder text {access read escape declared-noescape} manual {group 24}
+contract Rcombo_box_add_item text {access read escape declared-noescape} manual {group 24}
+contract Rlist_view_add_item text {access read escape declared-noescape} manual {group 24}
+contract Rlist_view_set_item_text text {access read escape declared-noescape} manual {group 24}
+contract Rtree_view_add_item text {access read escape declared-noescape} manual {group 24}
+contract Rtree_item_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rtree_view_set_drag_type type {access read escape declared-noescape} manual {group 26}
+contract Rmenu_add_menu title {access read escape declared-noescape} manual {group 25}
+contract Rmenu_set_title title {access read escape declared-noescape} manual {group 25}
+contract Rmenu_add_item text {access read escape declared-noescape} manual {group 24}
+contract Rmenu_item_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rtile_view_set_empty_text text {access read escape declared-noescape} manual {group 24}
+contract Rtile_view_set_drag_type type {access read escape declared-noescape} manual {group 26}
+contract Rtext_editor_create text {access read escape declared-noescape} manual {group 24}
+contract Rtext_editor_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rtext_editor_insert_text text {access read escape declared-noescape} manual {group 24}
+contract Rtext_editor_set_placeholder text {access read escape declared-noescape} manual {group 24}
+contract Rlanguage_get name {access read escape declared-noescape} manual {group 17}
+contract Rlanguage_for_file path {access read escape declared-noescape} manual {group 19}
+contract Rtext_editor_set_language name {access read escape declared-noescape} manual {group 17}
+contract Rtext_editor_add_completion text {access read escape declared-noescape} manual {group 24}
+contract Rtext_editor_add_completion detail {access read escape declared-noescape} manual {group 9}
+contract Rtext_editor_add_marker message {access read escape declared-noescape} manual {group 16}
+contract Rheader_bar_create title {access read escape declared-noescape} manual {group 25}
+contract Rheader_bar_set_title title {access read escape declared-noescape} manual {group 25}
+contract Rdock_area_add_panel title {access read escape declared-noescape} manual {group 25}
+contract Rdock_area_set_panel_title title {access read escape declared-noescape} manual {group 25}
+contract Rdock_area_load_layout layout {access read escape declared-noescape} manual {group 15}
+contract Rcolor_picker_set_hex text {access read escape declared-noescape} manual {group 24}
+contract Rtimeline_add_track name {access read escape declared-noescape} manual {group 17}
+contract Rtimeline_set_track_name name {access read escape declared-noescape} manual {group 17}
+contract Rtimeline_add_clip label {access read escape declared-noescape} manual {group 13}
+contract Rtimeline_add_marker label {access read escape declared-noescape} manual {group 13}
+contract Rtimeline_set_item_label label {access read escape declared-noescape} manual {group 13}
+contract Rnode_graph_add_node title {access read escape declared-noescape} manual {group 25}
+contract Rnode_graph_set_node_title title {access read escape declared-noescape} manual {group 25}
+contract Rnode_graph_set_node_name name {access read escape declared-noescape} manual {group 17}
+contract Rnode_graph_find_node name {access read escape declared-noescape} manual {group 17}
+contract Rnode_graph_add_input label {access read escape declared-noescape} manual {group 13}
+contract Rnode_graph_add_input type {access read escape declared-noescape} manual {group 26}
+contract Rnode_graph_add_output label {access read escape declared-noescape} manual {group 13}
+contract Rnode_graph_add_output type {access read escape declared-noescape} manual {group 26}
+contract Rnode_graph_set_pin_name name {access read escape declared-noescape} manual {group 17}
+contract Rnode_graph_find_pin name {access read escape declared-noescape} manual {group 17}
+contract Rnode_graph_set_type_color type {access read escape declared-noescape} manual {group 26}
+contract Rnode_graph_set_node_badge text {access read escape declared-noescape} manual {group 24}
+contract Rblock_editor_add_kind name {access read escape declared-noescape} manual {group 17}
+contract Rblock_editor_add_kind label {access read escape declared-noescape} manual {group 13}
+contract Rblock_editor_add_kind category {access read escape declared-noescape} manual {group 3}
+contract Rblock_editor_set_category_color category {access read escape declared-noescape} manual {group 3}
+contract Rblock_editor_add_block kind {access read escape declared-noescape} manual {group 12}
+contract Rblock_editor_set_value value {access read escape declared-noescape} manual {group 28}
+contract Rblock_editor_load text {access read escape declared-noescape} manual {group 24}
+contract Rblock_editor_set_slot_options kind {access read escape declared-noescape} manual {group 12}
+contract Rblock_editor_set_slot_options options {access read escape declared-noescape} manual {group 18}
+contract Rblock_editor_set_kind_visible kind {access read escape declared-noescape} manual {group 12}
+contract Rblock_editor_set_kind_label kind {access read escape declared-noescape} manual {group 12}
+contract Rblock_editor_set_kind_label label {access read escape declared-noescape} manual {group 13}
+contract Rmessage_box title {access read escape declared-noescape} manual {group 25}
+contract Rmessage_box text {access read escape declared-noescape} manual {group 24}
+contract Rfile_register_memory path {access read escape declared-noescape} manual {group 19}
+contract Rfile_unregister_memory path {access read escape declared-noescape} manual {group 19}
+contract Rfile_is_memory path {access read escape declared-noescape} manual {group 19}
+contract Rfile_read path {access read escape declared-noescape} manual {group 19}
+contract Rfile_write path {access read escape declared-noescape} manual {group 19}
+contract Rfile_browser_set_directory path {access read escape declared-noescape} manual {group 19}
+contract Rfile_browser_set_file_name name {access read escape declared-noescape} manual {group 17}
+contract Rfile_browser_set_default_extension extension {access read escape declared-noescape} manual {group 10}
+contract Rfile_browser_select name {access read escape declared-noescape} manual {group 17}
+contract Rdraw_text text {access read escape declared-noescape} manual {group 24}
+contract Rshader_create_from_file path {access read escape declared-noescape} manual {group 19}
+contract Reffect_find name {access read escape declared-noescape} manual {group 17}
+contract Rwindow_create_from_xml xml {access read escape declared-noescape} manual {group 30}
+contract Rwindow_create_from_xml_file path {access read escape declared-noescape} manual {group 19}
+contract Rwidget_create_from_xml xml {access read escape declared-noescape} manual {group 30}
+contract Rwidget_create_from_xml_file path {access read escape declared-noescape} manual {group 19}
+contract Rwindow_create_from_compiled source {access read escape declared-noescape} manual {group 21}
+contract Rwidget_create_from_compiled source {access read escape declared-noescape} manual {group 21}
+contract Rxml_set_base_path path {access read escape declared-noescape} manual {group 19}
+contract Rxml_register_widgets xml {access read escape declared-noescape} manual {group 30}
+contract Rxml_register_widgets_from_file path {access read escape declared-noescape} manual {group 19}
+contract Rxml_unregister_widget name {access read escape declared-noescape} manual {group 17}
+contract Rxml_is_widget_registered name {access read escape declared-noescape} manual {group 17}
+contract Rxml_register_tag tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_unregister_tag tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_is_tag_registered tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_resolve_path path {access read escape declared-noescape} manual {group 19}
+contract Rwidget_set_attribute name {access read escape declared-noescape} manual {group 17}
+contract Rwidget_set_attribute value {access read escape declared-noescape} manual {group 28}
+contract Rxml_document_create root_tag {access read escape declared-noescape} manual {group 20}
+contract Rxml_document_parse xml {access read escape declared-noescape} manual {group 30}
+contract Rxml_document_load path {access read escape declared-noescape} manual {group 19}
+contract Rxml_document_save path {access read escape declared-noescape} manual {group 19}
+contract Rxml_node_set_tag tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_node_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rxml_node_add_child tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_node_add_comment text {access read escape declared-noescape} manual {group 24}
+contract Rxml_node_add_xml xml {access read escape declared-noescape} manual {group 30}
+contract Rxml_node_get_attribute name {access read escape declared-noescape} manual {group 17}
+contract Rxml_node_set_attribute name {access read escape declared-noescape} manual {group 17}
+contract Rxml_node_set_attribute value {access read escape declared-noescape} manual {group 28}
+contract Rxml_get_tag_description tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_get_tag_children tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_get_attribute_count tag {access read escape declared-noescape} manual {group 23}
+contract Rxml_get_attribute_info tag {access read escape declared-noescape} manual {group 23}
+contract Rlocale_load_csv path {access read escape declared-noescape} manual {group 19}
+contract Rlocale_load_csv_from_memory csv {access read escape declared-noescape} manual {group 6}
+contract Rlocale_set_text language {access read escape declared-noescape} manual {group 14}
+contract Rlocale_set_text key {access read escape declared-noescape} manual {group 11}
+contract Rlocale_set_text text {access read escape declared-noescape} manual {group 24}
+contract Rlocale_set_language code {access read escape declared-noescape} manual {group 5}
+contract Rlocale_set_fallback_language code {access read escape declared-noescape} manual {group 5}
+contract Rtr key {access read escape declared-noescape} manual {group 11}
+contract Rtr_exists key {access read escape declared-noescape} manual {group 11}
+contract Rtr_format key {access read escape declared-noescape} manual {group 11}
+contract Rtr_plural key {access read escape declared-noescape} manual {group 11}
+contract Rwidget_set_text_key attribute {access read escape declared-noescape} manual {group 2}
+contract Rwidget_set_text_key key {access read escape declared-noescape} manual {group 11}
+contract Rwidget_set_accessible_name name {access read escape declared-noescape} manual {group 17}
+contract Rwidget_set_accessible_description description {access read escape declared-noescape} manual {group 8}
+contract Raccessibility_announce text {access read escape declared-noescape} manual {group 24}

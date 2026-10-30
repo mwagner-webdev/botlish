@@ -1,0 +1,44 @@
+# show.bot -- the Raven scenarios' shared module (tests/raven.test): events
+# and flags as text, so a scenario's value is a List of Strings the test
+# compares.
+import raven
+import std::float64
+import std::int
+import std::list
+import std::str
+
+fn kind_name(kind: raven::EventKind) -> str:
+    if kind == raven::EventKind::Clicked:
+        return "Clicked"
+    if kind == raven::EventKind::Toggled:
+        return "Toggled"
+    if kind == raven::EventKind::ValueChanged:
+        return "ValueChanged"
+    if kind == raven::EventKind::TextChanged:
+        return "TextChanged"
+    if kind == raven::EventKind::TextCommitted:
+        return "TextCommitted"
+    if kind == raven::EventKind::Selected:
+        return "Selected"
+    if kind == raven::EventKind::Action:
+        return "Action"
+    if kind == raven::EventKind::CloseRequested:
+        return "CloseRequested"
+    if kind == raven::EventKind::Resized:
+        return "Resized"
+    if kind == raven::EventKind::TimerElapsed:
+        return "TimerElapsed"
+    "Error"
+
+fn flag(value: bool) -> str:
+    if value:
+        return "true"
+    "false"
+
+fn int(value: int) -> str:
+    std::int::to_string(value)
+
+# EVENT as "KIND value extra number [text]" (number rounded); WHO names its
+# source among the handles the scenario made.
+fn event(e: raven::Event, who: str) -> str:
+    kind_name(e.kind).append_char(' ').concat(who).append_char(' ').concat(int(e.value)).append_char(' ').concat(int(e.extra)).append_char(' ').concat(int(std::float64::round(e.number))).concat(" [").concat(e.text).append_char(']')

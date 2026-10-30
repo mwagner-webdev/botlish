@@ -1,0 +1,66 @@
+# timer.bot -- timers and resizes (tests/raven.test, raven-timer): a
+# one-shot timer of 0.2 s is reported once, after at least 0.2 s of frames
+# that sleep (wait_frame), a repeating one of 0.05 s several times until it
+# is cancelled, and a watched window's resize as Resized with its new size.
+import raven
+import raven::core
+import raven::window
+import show
+import std::float64
+import std::list
+
+with context raven::create()
+
+# The events of frames waited for, at most 50 ms each, until one has events
+# or N frames passed.
+fn wait(n: int) -> List[raven::Event] errors NonFiniteFloat:
+    if n == 0:
+        return []
+    more = raven::wait_frame(0.05)
+    events = raven::events()
+    if std::list::length(events) > 0:
+        return events
+    wait(n - 1)
+
+# How many TimerElapsed events of TIMER N frames of at most 50 ms report.
+fn ticks(timer: raven::Timer, n: int, count: int) -> int errors NonFiniteFloat:
+    if n == 0:
+        return count
+    more = raven::wait_frame(0.05)
+    events = raven::events()
+    ticked = std::list::length(events)
+    timer.ticks(n - 1, count + ticked)
+
+fn first(events: List[raven::Event]) -> str:
+    e = events.at(0):
+        on IndexNotFound:
+            return "none"
+    e.event("")
+
+fn main(context ui: raven::Ui) -> List[str] errors raven::RavenFailed, NonFiniteFloat, IndexNotFound:
+    raven::start(raven::headless())
+    w = raven::window("Timers", 100, 100)
+    drawn = raven::draw_frame()
+    w.id.Rwindow_set_size(200, 150)
+    resized = raven::draw_frame()
+    resizes = raven::events()
+    start = raven::core::Rget_time()
+    once = raven::timer(0.2, false)
+    fired = wait(40)
+    elapsed = raven::core::Rget_time() - start
+    later = wait(8)
+    every = raven::timer(0.05, true)
+    count = every.ticks(12, 0)
+    raven::cancel(every)
+    after = every.ticks(4, 0)
+    raven::stop()
+    [first(resizes), first(fired), show::flag(fired.at(0).from_timer?(once)), show::flag(elapsed >= 0.2), show::int(std::list::length(later)), show::flag(count >= 3), show::int(after)]
+
+result = main():
+    on raven::RavenFailed failure:
+        ["RavenFailed", failure.call, failure.detail]
+    on NonFiniteFloat:
+        ["NonFiniteFloat"]
+    on IndexNotFound:
+        ["IndexNotFound"]
+result

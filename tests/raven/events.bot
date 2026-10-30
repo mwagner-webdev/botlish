@@ -1,0 +1,66 @@
+# events.bot -- every kind of event the raven package's controls report, in
+# one headless run (tests/raven.test, raven-events): an XML interface's
+# action, a checkbox, a text input typed into and committed, a combo box and
+# a slider changed by the program (which Raven does not report), a window's
+# close request kept open, an error. Each event shown with its source.
+import raven
+import raven::window
+import show
+import raven::core
+import std::float64
+import std::list
+
+with context raven::create()
+
+fn who(e: raven::Event, w: raven::Window, c: raven::Widget, t: raven::Widget, go: raven::Widget) -> str:
+    if e.from_window?(w):
+        return "window"
+    if e.from?(c):
+        return "checkbox"
+    if e.from?(t):
+        return "input"
+    if e.from?(go):
+        return "go"
+    if e.source == raven::core::R_INVALID_ID:
+        return "none"
+    "other"
+
+fn shown_from(events: List[raven::Event], i: int, w: raven::Window, c: raven::Widget, t: raven::Widget, go: raven::Widget, out: List[str]) -> List[str]:
+    e = events.at(i):
+        on IndexNotFound:
+            return out
+    events.shown_from(i + 1, w, c, t, go, out.append(e.event(e.who(w, c, t, go))))
+
+fn main(context ui: raven::Ui) -> List[List[str]] errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::headless())
+    xml = raven::window_from_xml("<Window Title=\"Hello\" Width=\"400\" Height=\"200\"><VBox Spacing=\"12\"><Label Name=\"status\">Not clicked yet</Label><Button Name=\"go\" Text=\"Click me\" OnClicked=\"hello.clicked\"/></VBox></Window>")
+    go = xml.find("go")
+    t = raven::text_input("")
+    c = raven::checkbox("Check")
+    combo = raven::combo_box(["one", "two", "three"])
+    s = raven::slider(0.0, 10.0)
+    w = raven::window("Second", 300, 300)
+    w.set_content(raven::vbox().add(t).add(c).add(combo).add(s))
+    laid_out = [raven::draw_frame(), raven::draw_frame()]
+    xml.click(go)
+    w.click(c)
+    w.click(t)
+    w.inject_text("hey")
+    w.inject_key(raven::window::R_KEY_ENTER, 0)
+    combo.select(2)
+    s.set_slider_value(7.0)
+    w.keep_open(true)
+    w.request_close()
+    raven::destroy(raven::Widget {id: 12345})
+    drawn = raven::draw_frame()
+    events = raven::events()
+    after = [show::flag(w.open?()), show::flag(xml.open?()), show::flag(c.checked?()), t.input_text(), show::int(combo.selected()), show::int(std::float64::round(s.slider_value()))]
+    raven::stop()
+    [events.shown_from(0, w, c, t, go, []), after]
+
+result = main():
+    on raven::RavenFailed failure:
+        [["RavenFailed", failure.call, failure.detail]]
+    on NonFiniteFloat:
+        [["NonFiniteFloat"]]
+result
