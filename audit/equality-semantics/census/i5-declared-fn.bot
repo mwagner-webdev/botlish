@@ -1,0 +1,6 @@
+# I5 a function value passed where a structural Fn type is declared
+fn hyphen?(c):
+    c == '-'
+fn apply(g: Fn{args: [str], return: bool}, x: str) -> bool:
+    g(x)
+apply(hyphen?, "-")

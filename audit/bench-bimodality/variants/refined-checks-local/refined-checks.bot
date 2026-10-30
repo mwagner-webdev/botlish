@@ -1,0 +1,96 @@
+# VARIANT (BENCHMARK-BIMODALITY.md): bench/refined-checks.bot with
+# std::web::emailish? (and Emailish, local_extra_chars) as it was before
+# UNICODECHAR-CLASSIFIERS.md (one-character Strings) copied verbatim into
+# the program. It is no control for the module's own emailish?: in the entry
+# program `check`'s instance loses its str facts (int, int, any, any), the
+# second emailish? call is no longer decided, and local_char? becomes a
+# closure allocated per call (local_extra_chars is a captured top-level
+# binding there, not a module static). The UnicodeChar comparison was made in
+# stdlib/web.bot itself (prototype/char-classifiers.patch, since landed); this and
+# refined-checks-chars only show the same change under the same placement.
+#
+# expect: [400, 0]
+
+import std::char
+import std::immutable_set
+import std::str
+import std::web
+
+refined type Emailish = str
+
+local_extra_chars = std::immutable_set::from_list([".", "_", "%", "+", "-"])
+
+fn emailish?(v: str) -> bool proves v: Emailish:
+
+    n = std::str::length(v)
+
+    fn char_at(i):
+        if i < 0 or i >= n:
+            return ""
+        v.substring(i, i + 1)
+
+    fn char_is?(i, c):
+        if i < 0 or i >= n:
+            return false
+        v.char_at(i) == c
+
+    fn local_char?(c: str) -> bool:
+        std::str::is_tcl_alnum(c) or local_extra_chars.contains(c)
+
+    fn label_char?(c):
+        std::str::is_tcl_alnum(c) or c == "-"
+
+    fn scan_while(start, predicate: Fn{args: [str], return: bool}):
+        loop i from start to n:
+            if predicate(char_at(i)):
+                continue
+            return i
+        n
+
+    fn tld?(i):
+        e = i.scan_while(std::str::is_tcl_alpha)
+        if e == n:
+            e - i >= 2
+        else:
+            false
+
+    fn domain?(start):
+        loop j from start to n:
+            if j.char_is?('.'):
+                if j == start:
+                    break
+                if (j - 1).char_is?('.'):
+                    break
+                if tld?(j + 1):
+                    return true
+            else:
+                if not label_char?(char_at(j)):
+                    break
+        false
+
+    local_end = 0.scan_while(local_char?)
+    if local_end > 0:
+        if local_end < n:
+            if local_end.char_is?('@'):
+                return domain?(local_end + 1)
+
+    false
+
+q = std::web::uri_escape_text("a b")
+
+fn check(n, acc, s, q):
+    if n <= 0:
+        return acc
+    hit = if emailish?(s):
+        if emailish?(s):
+            if std::web::uri_query_value?(q):
+                1
+            else:
+                0
+        else:
+            0
+    else:
+        0
+    check(n - 1, acc + hit, s, q)
+
+[400.check(0, "café@例え.テスト", q), 400.check(0, "not-an-email", q)]

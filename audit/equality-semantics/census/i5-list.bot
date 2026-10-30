@@ -1,0 +1,6 @@
+# I5 a function value stored in a List and called after it is read back
+import std::list
+fn hyphen?(c):
+    c == '-'
+fs = [hyphen?]
+std::list::at(fs, 0)("-")

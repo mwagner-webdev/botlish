@@ -1,0 +1,7 @@
+# an integer domain compared with a constant outside it
+type Small = Int in 0..9
+fn f(x: Small) -> bool:
+    x == 12
+fn g(x: Small) -> bool:
+    x < 12
+[f(3), g(3)]

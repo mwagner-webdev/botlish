@@ -652,8 +652,9 @@ modules' own findings print for every program that loads them, so tests that
 import `stdlib/*.bot` and assert on a complete warning set filter by code or file.
 Since the warning-driven refactor (next section) only two modules carry any,
 all `ONE-CHAR-STRING-LITERAL` and all listed in `audit/refactor/manifest.txt`:
-`stdlib/web.bot` 23 (its hex-digit table, `"%"`, and the local-part and label
-classes) and `stdlib/linux/path.bot` 2 (`"/"`). Every other module is
+`stdlib/web.bot` 17 (its hex-digit table and `"%"`; its local-part and label
+classes read `UnicodeChar`s since UNICODECHAR-CLASSIFIERS.md) and
+`stdlib/linux/path.bot` 2 (`"/"`). Every other module is
 warning-clean, `stdlib/io.bot` included (its line operations append the newline
 as a character, `std::str::append_char`).
 
@@ -2091,6 +2092,33 @@ oracle's selftest, `audit/numeric-text/tools/mutate.tcl` (every mutant in
 its `mutants.txt` must still apply and be killed: update a mutant's text
 when you change the code it mutates, keeping it a mutant of the same rule)
 and the Rust tests it names.
+
+## Character classes of a UnicodeChar
+
+`std::char::is_tcl_alpha` and `std::char::is_tcl_alnum`
+(UNICODECHAR-CLASSIFIERS.md) are the classes of `std::str::is_tcl_alpha` and
+`std::str::is_tcl_alnum` (NATIVE-TCL-UNICODE.md), for a UnicodeChar. Keep it
+so:
+
+* One classification per class in each implementation, shared by both
+  forms: core/tclcompat.tcl's `Classify`, ops.rs's `tcl_alpha_char` and
+  `tcl_alnum_char`. Never a second table, and never a class that differs
+  between the String and the character form.
+* Total and allocation-free: no RANGE case, no `-runtime` tag,
+  `-context-free 1`. Generated code classifies an ASCII scalar inline
+  (A-Z and a-z, and 0-9 for alnum: codegen::clif's `CharIsTclAlpha`) and
+  calls the helper for every other scalar. Never widen the inline rule past
+  ASCII without the tables' proof.
+
+If you change them or `std::web::emailish?`, run what
+UNICODECHAR-CLASSIFIERS.md's "What to run when changing this" lists:
+`tests/native-tcl-unicode.test`, the golden suite unicode-strings.bot, the
+Rust tests `char_classifiers` and `inline_ascii_rule`, and
+`audit/char-classifiers/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule). A
+change to stdlib/web.bot also runs the warning gate, its probes and
+`expect.tcl`.
 
 ## List length refinements
 

@@ -89,14 +89,14 @@ proc refinedChecksNir {args} {
     native::nir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]] {*}$args
 }
 
-test raw-internal-abi-refined-checks-signatures {the de-closured scanners take the plan's raw positions (knob on): both scan_while variants a raw start, the std::str::is_tcl_alpha one also a raw result, tld? a raw i, domain? a raw start; char_at's i stays tagged (substring is a tagged consumer); knob off: none} -body {
+test raw-internal-abi-refined-checks-signatures {the de-closured scanners take the plan's raw positions (knob on): both scan_while variants a raw start, the std::char::is_tcl_alpha one also a raw result, tld? a raw i, domain? a raw start; char_at's i stays tagged (std::str::char_at's index is a tagged consumer); knob off: none} -body {
     lmap knob {1 0} {
         withRawInternal $knob {
             set nir [refinedChecksNir]
             lmap name {scan_while tld? domain? char_at} {signatures $nir $name}
         }
     }
-} -result {{{rawparams=0 rawparams=0,rawresult} rawparams=0 rawparams=0 {- -}} {{- -} - - {- -}}}
+} -result {{{rawparams=0 rawparams=0,rawresult} rawparams=0 rawparams=0 -} {{- -} - - -}}
 
 test raw-internal-abi-refined-checks-callers {the calls agree: domain? hands tld? its raw j + 1 (no rbox), tld? reads scan_while's raw result (no runbox), std::web::emailish? passes a raw constant start} -body {
     set nir [refinedChecksNir]
@@ -108,17 +108,74 @@ test raw-internal-abi-refined-checks-callers {the calls agree: domain? hands tld
         [regexp {rawint 0 @e\d+\n\s+%\d+ = fnvalue \d+ @e\d+\n\s+%\d+ = call} [functionsNamed $nir std::web::emailish?]]
 } -result {1 0 1 1}
 
-# Since the warning-driven refactor (REFACTOR-WARNINGS-CLEAN.md) char_at's
-# region companion is emitted second (dormant-refined-checks-char-at-nir).
-test raw-internal-abi-refined-checks-demand-off {with the demand filter off (-raw-demand-opt 0) the internal variants take every eligible raw position (char_at's i; its region companion, listed second, stays tagged), and refined-checks still returns [400, 0]} -body {
+# Since UNICODECHAR-CLASSIFIERS.md emailish? reads UnicodeChars: its char_at
+# returns no String, so it has no region companion (the next test keeps one
+# from the String-reading copy of the algorithm).
+test raw-internal-abi-refined-checks-demand-off {with the demand filter off (-raw-demand-opt 0) the internal variants take every eligible raw position (char_at's i), and refined-checks still returns [400, 0]} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
     set nir [native::nir $hir -raw-demand-opt 0]
     list [signatures $nir char_at] [core::value::show [native::evalHir $hir -raw-demand-opt 0] 1] \
         [core::value::show [native::evalHir $hir] 1] [core::value::show [native::evalHir $hir -block-escape-opt 0] 1]
-} -result {{rawparams=0 -} {[400, 0]} {[400, 0]} {[400, 0]}}
+} -result {rawparams=0 {[400, 0]} {[400, 0]} {[400, 0]}}
 
-test raw-internal-abi-refined-checks-region-companion-tagged {char_at's internal region companion keeps the tagged ABI even when its i is planned raw (demand filter off): its callers box the argument} -body {
-    set nir [refinedChecksNir -raw-demand-opt 0]
+# emailish? as it read one-character Strings before UNICODECHAR-CLASSIFIERS.md
+# (audit/machine-code-proof-loss/probes/emailish-local-copy.bot): its
+# char_at returns a substring, which has a region companion.
+set ::stringEmailish {
+    import std::immutable_set
+    import std::str
+    local_extra_chars = std::immutable_set::from_list([".", "_", "%", "+", "-"])
+    fn my_emailish?(v):
+        n = std::str::length(v)
+        fn char_at(i):
+            if i < 0 or i >= n:
+                return ""
+            std::str::substring(v, i, i + 1)
+        fn local_char?(c):
+            std::str::is_tcl_alnum(c) or std::immutable_set::contains(local_extra_chars, c)
+        fn label_char?(c):
+            std::str::is_tcl_alnum(c) or c == "-"
+        fn scan_while(start, predicate):
+            loop i from start to n:
+                if predicate(char_at(i)):
+                    continue
+                return i
+            n
+        fn tld?(i):
+            e = scan_while(i, std::str::is_tcl_alpha)
+            if e == n:
+                e - i >= 2
+            else:
+                false
+        fn domain?(start):
+            loop j from start to n:
+                if char_at(j) == ".":
+                    if j == start:
+                        return false
+                    if char_at(j - 1) == ".":
+                        return false
+                    if tld?(j + 1):
+                        return true
+                else:
+                    if not label_char?(char_at(j)):
+                        return false
+            false
+        local_end = scan_while(0, local_char?)
+        if local_end == 0:
+            false
+        else:
+            if local_end >= n:
+                false
+            else:
+                if char_at(local_end) == "@":
+                    domain?(local_end + 1)
+                else:
+                    false
+    [my_emailish?("café@例え.テスト"), my_emailish?("not-an-email")]
+}
+
+test raw-internal-abi-string-emailish-region-companion-tagged {a String-returning char_at's internal region companion keeps the tagged ABI even when its i is planned raw (demand filter off): its callers box the argument} -body {
+    set nir [native::nir [hirOfText $::stringEmailish] -raw-demand-opt 0]
     set lines [lmap l [split $nir \n] {expr {[string match {func * "char_at" *results=3*} $l] ? $l : [continue]}}]
     list [llength $lines] [regexp {rawparams} [lindex $lines 0]]
 } -result {1 0}

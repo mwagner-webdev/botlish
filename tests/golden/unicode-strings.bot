@@ -16,6 +16,14 @@
 #     combining mark (Mn) or punctuation (Pc, Po): the classes are Tcl 9's
 #     [:alpha:] and [:alnum:], narrower than Rust's is_alphabetic /
 #     is_alphanumeric and Python's isalnum.
+# std::char::is_tcl_alpha and std::char::is_tcl_alnum
+#   (UNICODECHAR-CLASSIFIERS.md) are the same classes of a UnicodeChar: the
+#   same answer for every corpus character written as a character literal
+#   and for every character std::str::char_at reads from a String, every
+#   ASCII scalar's class the letters A-Z, a-z (and, alnum, the digits 0-9).
+#   A String given to them through an untyped parameter is a static TYPE
+#   error; with std::char and std::str both imported a typed receiver's
+#   method call chooses its form, an untyped one is ambiguous.
 # std::web::emailish? (stdlib/web.bot) uses them, so its grammar -- a local part of
 #   alnum characters and . _ % + -, "@", one or more labels of alnum
 #   characters and "-" each followed by ".", and a top-level domain of at
@@ -62,8 +70,11 @@
 # ASCII K, and the row silently tests ASCII instead).
 #
 # Imports: compiler and test are the framework's (bodies declare
-# std::compiler::CompilerError); str for the primitives under test; web for
-# std::web::emailish?.
+# std::compiler::CompilerError); char and str for the primitives under test;
+# abi::bytes and byte to build the ASCII text; web for std::web::emailish?.
+import std::abi::bytes
+import std::byte
+import std::char
 import std::compiler
 import std::str
 import std::test
@@ -73,8 +84,10 @@ import std::web
 # Character classes: std::str::is_tcl_alpha and std::str::is_tcl_alnum
 
 # native-tcl-unicode-alpha-LABEL / native-tcl-unicode-alnum-LABEL: the one
-# character C is (ALPHA) a letter and (ALNUM) a letter or decimal digit.
-fn register_character_class(label: str, c: str, alpha: bool, alnum: bool):
+# character C is (ALPHA) a letter and (ALNUM) a letter or decimal digit;
+# native-tcl-unicode-char-alpha-LABEL / -char-alnum-LABEL: so is CH, the same
+# character as a UnicodeChar.
+fn register_character_class(label: str, c: str, ch: UnicodeChar, alpha: bool, alnum: bool):
     fn b_alpha() errors std::compiler::CompilerError:
         static compile:
             std::str::is_tcl_alpha(c)
@@ -85,21 +98,127 @@ fn register_character_class(label: str, c: str, alpha: bool, alnum: bool):
             std::str::is_tcl_alnum(c)
     std::test::value("native-tcl-unicode-alnum-".concat(label), alnum, b_alnum)
 
+    fn b_char_alpha() errors std::compiler::CompilerError:
+        static compile:
+            std::char::is_tcl_alpha(ch)
+    std::test::value("native-tcl-unicode-char-alpha-".concat(label), alpha, b_char_alpha)
+
+    fn b_char_alnum() errors std::compiler::CompilerError:
+        static compile:
+            std::char::is_tcl_alnum(ch)
+    std::test::value("native-tcl-unicode-char-alnum-".concat(label), alnum, b_char_alnum)
+
 fn register_character_class_tests():
-    #                        label                          char       alpha  alnum
-    register_character_class("ascii-letter",               "A", true, true)      # U+0041 Lu
-    register_character_class("ascii-digit",                "9", false, true)     # U+0039 Nd
-    register_character_class("latin-e-acute-Ll",           "é", true, true)      # U+00E9 Ll
-    register_character_class("cjk-ri-Lo",                  "日", true, true)     # U+65E5 Lo
-    register_character_class("titlecase-Dz-Lt",            "ǅ", true, true)      # U+01C5 Lt
-    register_character_class("modifier-letter-Lm",         "ʰ", true, true)      # U+02B0 Lm
-    register_character_class("arabic-indic-digit-Nd",      "٠", false, true)     # U+0660 Nd
-    register_character_class("vulgar-fraction-3-4-No",     "¾", false, false)    # U+00BE No
-    register_character_class("circled-digit-one-No",       "①", false, false)    # U+2460 No
-    register_character_class("roman-numeral-one-Nl",       "Ⅰ", false, false)    # U+2160 Nl
-    register_character_class("combining-acute-accent-Mn",  "́", false, false)     # U+0301 Mn, alone
-    register_character_class("underscore-Pc",              "_", false, false)    # U+005F Pc
-    register_character_class("full-stop-Po",               ".", false, false)    # U+002E Po
+    #                        label                          str   char  alpha  alnum
+    register_character_class("ascii-letter",               "A", 'A', true, true)      # U+0041 Lu
+    register_character_class("ascii-digit",                "9", '9', false, true)     # U+0039 Nd
+    register_character_class("latin-e-acute-Ll",           "é", 'é', true, true)      # U+00E9 Ll
+    register_character_class("cjk-ri-Lo",                  "日", '日', true, true)     # U+65E5 Lo
+    register_character_class("titlecase-Dz-Lt",            "ǅ", 'ǅ', true, true)      # U+01C5 Lt
+    register_character_class("modifier-letter-Lm",         "ʰ", 'ʰ', true, true)      # U+02B0 Lm
+    register_character_class("arabic-indic-digit-Nd",      "٠", '٠', false, true)     # U+0660 Nd
+    register_character_class("vulgar-fraction-3-4-No",     "¾", '¾', false, false)    # U+00BE No
+    register_character_class("circled-digit-one-No",       "①", '①', false, false)    # U+2460 No
+    register_character_class("roman-numeral-one-Nl",       "Ⅰ", 'Ⅰ', false, false)    # U+2160 Nl
+    register_character_class("combining-acute-accent-Mn",  "́", '́', false, false)     # U+0301 Mn, alone
+    register_character_class("underscore-Pc",              "_", '_', false, false)    # U+005F Pc
+    register_character_class("full-stop-Po",               ".", '.', false, false)    # U+002E Po
+    register_character_class("deseret-long-i-astral-Lu",   "𐐀", '𐐀', true, true)      # U+10400 Lu
+    register_character_class("math-bold-digit-zero-astral-Nd", "𝟎", '𝟎', false, true) # U+1D7CE Nd
+    register_character_class("grinning-face-astral-So",    "😀", '😀', false, false)  # U+1F600 So
+
+# ---------------------------------------------------------------------------
+# std::char::is_tcl_alpha and std::char::is_tcl_alnum of characters read at
+# run time, their parameter, method syntax
+
+fn register_char_class_tests():
+    # native-tcl-unicode-char-corpus-read-at-run-time: the corpus above as
+    # one String (U+0041 U+0039 U+00E9 U+65E5 U+01C5 U+02B0 U+0660 U+00BE
+    # U+2460 U+2160 U+0301 U+005F U+002E U+10400 U+1D7CE U+1F600), each
+    # character read with std::str::char_at and classified.
+    fn b_corpus_read_at_run_time() errors std::compiler::CompilerError:
+        static compile:
+            text = "A9é日ǅʰ٠¾①Ⅰ́_.𐐀𝟎😀"
+            alpha = loop i from 0 to std::str::length(text):
+                std::char::is_tcl_alpha(text.char_at(i))
+            alnum = loop i from 0 to std::str::length(text):
+                std::char::is_tcl_alnum(text.char_at(i))
+            [alpha, alnum]
+    std::test::value("native-tcl-unicode-char-corpus-read-at-run-time",
+        [[true, false, true, true, true, true, false, false, false, false, false, false, false, true, false, false],
+         [true, true, true, true, true, true, true, false, false, false, false, false, false, true, true, false]],
+        b_corpus_read_at_run_time)
+
+    # native-tcl-unicode-char-every-ascii-scalar: every ASCII scalar, the
+    # control characters included (built from its bytes: no source escape
+    # writes them); the letters' and digits' scalar values.
+    fn b_every_ascii_scalar() errors std::compiler::CompilerError:
+        static compile:
+            fn ascii() -> str errors InvalidUtf8:
+                codes = loop b from 0 to 128:
+                    std::byte::from_int(b)
+                std::abi::bytes::decode_utf8(std::abi::bytes::from_list(codes))
+            text = ascii():
+                on InvalidUtf8:
+                    ""
+            alpha = loop i from 0 to std::str::length(text):
+                c = text.char_at(i)
+                if not std::char::is_tcl_alpha(c):
+                    continue
+                std::char::scalar_value(c)
+            alnum = loop i from 0 to std::str::length(text):
+                c = text.char_at(i)
+                if not std::char::is_tcl_alnum(c):
+                    continue
+                std::char::scalar_value(c)
+            [std::str::length(text), alpha, alnum]
+    std::test::value("native-tcl-unicode-char-every-ascii-scalar",
+        [128,
+         [65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+          97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122],
+         [48, 49, 50, 51, 52, 53, 54, 55, 56, 57,
+          65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+          97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122]],
+        b_every_ascii_scalar)
+
+    # native-tcl-unicode-std::char::is_tcl_alpha-forwarded-string-static and
+    # the alnum one: a String forwarded through an untyped parameter.
+    fn b_alpha_forwarded_string() errors std::compiler::CompilerError:
+        static compile:
+            fn f(c):
+                std::char::is_tcl_alpha(c)
+            f("a")
+    std::test::rejects_containing("native-tcl-unicode-std::char::is_tcl_alpha-forwarded-string-static",
+        std::compiler::DiagnosticCode::Type, "statically incompatible with UnicodeChar", b_alpha_forwarded_string)
+
+    fn b_alnum_forwarded_string() errors std::compiler::CompilerError:
+        static compile:
+            fn f(c):
+                std::char::is_tcl_alnum(c)
+            f("a")
+    std::test::rejects_containing("native-tcl-unicode-std::char::is_tcl_alnum-forwarded-string-static",
+        std::compiler::DiagnosticCode::Type, "statically incompatible with UnicodeChar", b_alnum_forwarded_string)
+
+    # native-tcl-unicode-char-method-typed-receivers: with std::char and
+    # std::str both imported, the receiver's type chooses the form.
+    fn b_method_typed_receivers() errors std::compiler::CompilerError:
+        static compile:
+            fn of_text(t: str) -> bool:
+                t.is_tcl_alnum()
+            fn of_char(c: UnicodeChar) -> bool:
+                c.is_tcl_alnum()
+            [of_text("é"), of_char('é'), of_char('-')]
+    std::test::value("native-tcl-unicode-char-method-typed-receivers", [true, true, false], b_method_typed_receivers)
+
+    # native-tcl-unicode-char-method-untyped-receiver-ambiguous: an untyped
+    # receiver admits both forms: no precedence (METHOD-SUGAR.md).
+    fn b_method_untyped_receiver() errors std::compiler::CompilerError:
+        static compile:
+            fn f(x):
+                x.is_tcl_alpha()
+            f("x")
+    std::test::rejects_containing("native-tcl-unicode-char-method-untyped-receiver-ambiguous",
+        std::compiler::DiagnosticCode::AmbiguousMethodCall, "std::char::is_tcl_alpha, std::str::is_tcl_alpha", b_method_untyped_receiver)
 
 # ---------------------------------------------------------------------------
 # std::web::emailish? on the Unicode corpus
@@ -118,6 +237,8 @@ fn register_emailish_tests():
     register_emailish("short-tld-ok", "a@b.co", true)
     register_emailish("tld-too-short", "a@b.c", false)
     register_emailish("local-part-symbols", "a.b_c%d+e-f@sub.example.com", true)
+    register_emailish("digit-in-local-part", "user7@example.com", true)
+    register_emailish("hyphen-in-domain-label", "a@my-host.example.com", true)
     register_emailish("missing-domain", "a@", false)
     register_emailish("empty-first-label", "a@.com", false)
     register_emailish("empty-middle-label", "a@b..com", false)
@@ -182,6 +303,7 @@ fn register_lowercase_tests():
 
 fn register_native_tcl_unicode_tests():
     register_character_class_tests()
+    register_char_class_tests()
     register_emailish_tests()
     register_lowercase_tests()
 

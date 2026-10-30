@@ -1,0 +1,131 @@
+file	line	function	parameter	area	first	trusted	checked	types	sites
+bench/source-checks.bot	50	is_underscore?	c	bench	1	-	-	str	51:5
+bench/source-checks.bot	53	is_hyphen?	c	bench	1	-	-	str	54:5
+bench/sum-refined.bot	25	refined_sum	n	bench	1	-	int	int	27:12
+examples/stdlib/ai_text_clean.bot	45	cleaner_emoji	c	examples	1	-	-	UnicodeChar	46:6 46:18 46:30 46:42 47:12 47:24 47:36 47:48 48:12 48:24 48:36 48:48
+examples/stdlib/matmul.bot	39	product_rows	i	examples	0	-	int	int	40:8
+examples/stdlib/string_reverse.bot	18	reverse_from	index	examples	0	-	int	int	19:8
+stdlib/web.bot	122	char_is?	c	stdlib	0	-	-	UnicodeChar	125:9
+stdlib/web.bot	194	domain?	start	stdlib	1	-	int	int	197:20
+tests/golden/callable-contracts-fallback.bot	34	raise3	x	golden	1	-	-	int	35:8
+tests/golden/callable-contracts-returned.bot	36	raise	x	golden	1	-	-	int	37:8 39:8 41:8
+tests/golden/callable-contracts.bot	129	raise	x	golden	1	-	-	int	130:8 132:8 134:8
+tests/golden/callable-contracts.bot	207	raise	x	golden	1	-	-	int	208:20 210:20
+tests/golden/callable-contracts.bot	814	raise	x	golden	1	-	-	int	815:20
+tests/golden/callable-contracts.bot	1306	raise2	x	golden	1	-	-	int	1307:20
+tests/golden/callable-contracts.bot	1355	r2	x	golden	1	-	-	int	1356:20
+tests/golden/callable-contracts.bot	1482	r2	x	golden	1	-	-	int	1483:20
+tests/golden/callable-contracts.bot	1730	domain?	start	golden	1	-	int	int	1733:32
+tests/golden/callables.bot	177	is_x?	c	golden	1	-	-	str	178:17
+tests/golden/callables.bot	222	under?	c	golden	1	-	-	str	223:17
+tests/golden/callables.bot	224	dash?	c	golden	1	-	-	str	225:17
+tests/golden/callables.bot	238	under?	c	golden	1	-	-	str	239:17
+tests/golden/callables.bot	240	dash?	c	golden	1	-	-	str	241:17
+tests/golden/callables.bot	318	count	n	golden	1	-	int	int	319:20
+tests/golden/callables.bot	501	f	x	golden	1	-	-	int	502:20
+tests/golden/callables.bot	540	find	x	golden	1	-	-	str	541:20
+tests/golden/callables.bot	572	find	x	golden	1	-	-	str	573:20
+tests/golden/callables.bot	623	find	x	golden	1	-	-	str	624:20
+tests/golden/closure-escape.bot	260	step	x	golden	1	-	int	int	261:24
+tests/golden/closure-escape.bot	393	f	n	golden	1	-	int	int	396:20
+tests/golden/closure-escape.bot	845	f	n	golden	1	-	int	int	846:20
+tests/golden/compiled-values-struct-transport.bot	257	depth	n	golden	0	-	int	int	258:20
+tests/golden/compiled-values.bot	228	ping	n	golden	0	-	int	int	229:20
+tests/golden/compiled-values.bot	233	pong	n	golden	0	-	int	int	234:20
+tests/golden/compiled-values.bot	245	pong	n	golden	0	-	int	int	246:20
+tests/golden/compiled-values.bot	250	ping	n	golden	0	-	int	int	251:20
+tests/golden/compiled-values.bot	263	even?	n	golden	1	-	int	int	264:20
+tests/golden/compiled-values.bot	268	odd?	n	golden	1	-	int	int	269:20
+tests/golden/compiled-values.bot	318	is_b	s	golden	1	-	-	str	319:17
+tests/golden/compiled-values.bot	1096	tag	s	golden	1	-	-	str	1097:18
+tests/golden/compiled-values.bot	1129	probe	t	golden	0	-	-	str	1131:18
+tests/golden/compiled-values.bot	1150	probe	c	golden	1	-	str	str	1151:18
+tests/golden/compiled-values.bot	1324	f	n	golden	1	-	int	int	1326:24
+tests/golden/compiled-values.bot	1343	collatz	n	golden	1	-	int	int	1344:20 1346:20
+tests/golden/compiled-values.bot	1361	walk	n	golden	1	-	int	int	1362:24
+tests/golden/compiled-values.bot	1415	count	n	golden	1	-	int	int	1416:24
+tests/golden/contexts.bot	590	countdown_counter	n	golden	1	-	int	int	591:12
+tests/golden/contexts.bot	596	b	m	golden	1	-	int	int	597:16
+tests/golden/core-semantics.bot	771	f	n	golden	1	-	int	int	772:20
+tests/golden/core-semantics.bot	855	pow	e	golden	0	-	int	int	856:20
+tests/golden/destructuring-instances.bot	278	pick	k	golden	1	-	-	int	279:20 282:22
+tests/golden/destructuring-instances.bot	293	pick	k	golden	1	-	-	int	294:20 298:22
+tests/golden/destructuring-instances.bot	530	run	k	golden	1	-	-	int	531:20 533:22
+tests/golden/destructuring.bot	1745	run	k	golden	1	-	-	int	1746:20 1749:22 1752:22
+tests/golden/destructuring.bot	1762	run	k	golden	1	-	-	int	1763:20 1767:22 1771:22
+tests/golden/destructuring.bot	2055	divide	b	golden	0	-	int	int	2056:20
+tests/golden/diagnostics.bot	176	dg_raise	x	golden	1	-	-	int	177:8 179:8
+tests/golden/errors.bot	142	raise	x	golden	1	-	-	int	143:16 145:16
+tests/golden/flags.bot	298	walk	n	golden	1	-	int	int	299:20 301:20 303:20
+tests/golden/flags.bot	312	count	n	golden	1	-	int	int	313:20
+tests/golden/flags.bot	1130	body	x	golden	1	-	int	int	1131:20
+tests/golden/flags.bot	1145	body	x	golden	1	-	int	int	1146:20
+tests/golden/flags.bot	1160	body	x	golden	1	-	int	int	1161:20
+tests/golden/flags.bot	1280	walk	n	golden	1	-	int	int	1281:20
+tests/golden/gc-sensitive-values.bot	121	build	n	golden	1	-	int	int	122:20
+tests/golden/gc-sensitive-values.bot	157	dbl	n	golden	1	-	int	int	158:20
+tests/golden/gc-sensitive-values.bot	183	churn	n	golden	1	-	int	int	184:20
+tests/golden/gc-sensitive-values.bot	219	rec	n	golden	1	-	int	int	220:20
+tests/golden/gc-sensitive-values.bot	243	dbl	n	golden	1	-	int	int	244:20
+tests/golden/gc-sensitive-values.bot	249	churn	n	golden	1	-	int	int	250:20
+tests/golden/hir-values.bot	237	sum	n	golden	1	-	int	int	238:20
+tests/golden/lists-and-sets.bot	536	build	n	golden	1	-	int	int	537:20
+tests/golden/loop-collecting.bot	1260	find	t	golden	0	-	int	int	1262:24
+tests/golden/loop-collecting.bot	1269	down	t	golden	0	-	int	int	1271:24
+tests/golden/method-equivalence.bot	319	rec	b	golden	0	-	int	int	320:24
+tests/golden/method-equivalence.bot	325	rec	b	golden	0	-	int	int	326:24
+tests/golden/method-equivalence.bot	339	h	a	golden	1	-	-	int	340:20
+tests/golden/methods.bot	795	sum_to	n	golden	1	-	int	int	796:20
+tests/golden/methods.bot	802	sum_to	n	golden	1	-	int	int	803:20
+tests/golden/methods.bot	1737	step	n	golden	1	-	int	int	1738:20
+tests/golden/methods.bot	1744	step	n	golden	1	-	int	int	1745:20
+tests/golden/names-and-scoping.bot	435	factorial	n	golden	1	-	int	int	436:20
+tests/golden/names-and-scoping.bot	448	count	k	golden	1	-	int	int	449:24
+tests/golden/names-and-scoping.bot	760	t	b	golden	0	-	bool	bool	761:42
+tests/golden/native-aggregates.bot	546	label	i	golden	1	-	int	int	547:20
+tests/golden/native-aggregates.bot	764	loopState	n	golden	0	-	int	int	765:20
+tests/golden/native-aggregates.bot	792	fillFrom	n	golden	0	-	int	int	793:20
+tests/golden/native-aggregates.bot	945	build	n	golden	0	-	int	int	949:20
+tests/golden/native-values.bot	162	find	i	golden	0	-	int	int	164:24
+tests/golden/native-values.bot	334	count	n	golden	1	-	int	int	335:20
+tests/golden/native-values.bot	349	go	n	golden	1	-	int	int	350:20
+tests/golden/native-values.bot	362	reverse_from	index	golden	0	-	int	int	363:20
+tests/golden/native-values.bot	379	count2	n	golden	1	-	int	int	380:20
+tests/golden/native-values.bot	404	f	n	golden	1	-	int	int	405:20
+tests/golden/native-values.bot	415	f	n	golden	1	-	int	int	416:20
+tests/golden/native-values.bot	438	f	n	golden	1	-	int	int	439:20
+tests/golden/native-values.bot	697	count	n	golden	1	-	int	int	698:20
+tests/golden/native-values.bot	770	even	n	golden	1	-	int	int	771:20
+tests/golden/native-values.bot	838	swap	n	golden	0	-	int	int	839:20
+tests/golden/native-values.bot	849	odd	n	golden	1	-	-	int	850:20
+tests/golden/native-values.bot	854	even	n	golden	1	-	int	int	855:20
+tests/golden/native-values.bot	883	walk	n	golden	1	-	int	int	884:24
+tests/golden/native-values.bot	900	count	n	golden	1	-	int	int	901:24
+tests/golden/native-values.bot	942	collect	i	golden	1	-	int	int	943:20
+tests/golden/range-and-contract-values.bot	96	eq_x?	c	golden	1	-	-	str	97:17
+tests/golden/range-and-contract-values.bot	383	eq_x?	c	golden	1	-	-	str	384:17
+tests/golden/range-and-contract-values.bot	1022	count_up	n	golden	1	-	int	int	1023:20
+tests/golden/raw-int-abi.bot	117	count	n	golden	1	-	int	int	118:20
+tests/golden/raw-int-abi.bot	133	count	n	golden	1	-	int	int	134:20
+tests/golden/raw-int-abi.bot	238	sum	n	golden	1	-	int	int	239:20
+tests/golden/raw-int-abi.bot	268	down	n	golden	1	-	int	int	269:20
+tests/golden/raw-int-abi.bot	344	count	n	golden	1	-	int	int	345:20
+tests/golden/raw-int-abi.bot	587	f	c	golden	0	-	int	int	588:20
+tests/golden/raw-int-abi.bot	778	depth	n	golden	1	-	int	int	779:20
+tests/golden/raw-int-abi.bot	846	f	c	golden	0	-	int	int	847:20
+tests/golden/static-compile.bot	81	raise_e1_e2	x	golden	1	-	-	int	82:8 84:8
+tests/golden/static-compile.bot	97	raise_e1	x	golden	1	-	-	int	98:8
+tests/golden/static-compile.bot	102	raise_e2	x	golden	1	-	-	int	103:8
+tests/golden/string-representations.bot	280	spin	n	golden	0	-	int	int	281:20 284:31
+tests/golden/string-representations.bot	298	spin	n	golden	0	-	int	int	299:20 302:31
+tests/golden/string-representations.bot	851	step	n	golden	1	-	-	int	852:20
+tests/golden/string-representations.bot	857	depth	n	golden	1	-	int	int	858:20
+tests/golden/string-representations.bot	871	step	n	golden	1	-	-	int	872:20
+tests/golden/string-representations.bot	877	depth	n	golden	1	-	int	int	878:20
+tests/golden/strings.bot	974	same_from	by_char	golden	0	-	str	str	976:47
+tests/golden/struct-representation.bot	577	build	n	golden	1	-	int	int	578:20
+tests/golden/values.bot	372	f	x	golden	1	-	-	int	373:20 375:22 377:22 379:22 381:22 383:22 385:22 387:22 389:22 391:22 393:22 395:22 397:22 399:22 401:22 403:22 405:22 407:22 409:22 411:22 413:22 415:22 417:22 419:22 421:22 423:22 425:22 427:22 429:22 431:22 433:22 435:22 437:22 439:22 441:22 443:22 445:22 447:22 449:22 451:22 453:22 455:22 457:22 459:22 461:22 463:22 465:22 467:22 469:22 471:22 473:22 475:22 477:22 479:22 481:22 483:22 485:22 487:22 489:22 491:22 493:22 495:22 497:22 499:22 501:22 503:22 505:22 507:22 509:22 511:22 513:22 515:22 517:22 519:22 521:22 523:22 525:22 527:22 529:22 531:22 533:22 535:22 537:22 539:22 541:22 543:22 545:22 547:22 549:22 551:22 553:22 555:22 557:22 559:22 561:22 563:22 565:22 567:22 569:22 571:22
+tests/golden/values.bot	579	f	x	golden	1	-	-	int	580:20 583:24 586:28 589:32 592:36 595:40 598:44 601:48 604:52 607:56 610:60 613:64 616:68 619:72 622:76 625:80 628:84 631:88 634:92 637:96 640:100 643:104 646:108 649:112 652:116 655:120 658:124 661:128 664:132 667:136 670:140 673:144 676:148 679:152 682:156 685:160 688:164 691:168 694:172 697:176 700:180 703:184 706:188 709:192 712:196 715:200 718:204 721:208 724:212 727:216 730:220 733:224 736:228 739:232 742:236 745:240 748:244 751:248 754:252 757:256 760:260 763:264 766:268 769:272 772:276 775:280 778:284 781:288 784:292 787:296 790:300 793:304 796:308 799:312 802:316 805:320 808:324 811:328 814:332 817:336 820:340 823:344 826:348 829:352 832:356 835:360 838:364 841:368 844:372 847:376 850:380 853:384 856:388 859:392 862:396 865:400 868:404 871:408 874:412 877:416
+tests/golden/warning-programs.bot	218	is_comma	c	golden	1	-	-	UnicodeChar, str	219:17 219:29
+tests/golden/warning-programs.bot	225	is_comma	c	golden	1	-	-	UnicodeChar, str	226:17 226:29
+tests/golden/warning-programs.bot	342	pair	a	golden	1	-	-	int	343:20

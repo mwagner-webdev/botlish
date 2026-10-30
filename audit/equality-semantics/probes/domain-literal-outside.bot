@@ -1,0 +1,5 @@
+# a literal outside a domain
+type Small = Int in 0..9
+fn f(x: Small) -> Small:
+    x
+f(12)

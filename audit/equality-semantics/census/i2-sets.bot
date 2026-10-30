@@ -1,0 +1,6 @@
+# I2 a set holding a callable: building it, its size against another set, membership
+import std::immutable_set
+fn f(x):
+    x
+s = std::immutable_set::from_list([f])
+[s == std::immutable_set::from_list([]), s == std::immutable_set::from_list([1, 2])]

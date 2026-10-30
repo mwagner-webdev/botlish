@@ -1,0 +1,7 @@
+# an untyped forwarder into a domain, one call out of range
+type Small = Int in 0..9
+fn f(x: Small) -> Small:
+    x
+fn g(n):
+    f(n)
+[g(3), g(12)]

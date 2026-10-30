@@ -1,0 +1,4 @@
+# I2 a null C pointer compared with itself
+import std::ffi::c
+p = std::ffi::c::null[std::ffi::c::Int]()
+p == p

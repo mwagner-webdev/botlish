@@ -1,0 +1,104 @@
+# VARIANT (BENCHMARK-BIMODALITY.md): bench/source-checks.bot with declared parameter types on is_underscore?,
+# is_hyphen?, classify_leading, valid_start? and invalid_name? (str, and
+# bool results), so no function runs as a generic instance.
+#
+# source-checks.bot -- a small compiler-front-end lint pass: several
+# independent lexical classifiers of an identifier candidate's own leading
+# character, held as a genuine List of callables and invoked from that List
+# (`loop check in checks: check(value)`) -- a qualitatively different
+# callable-provenance shape from a higher-order function parameter
+# (test-selection.bot's affected?) or a returned closure.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md,
+# HIGHER-ORDER-DOGFOODING.md). checks mixes callable kinds because a real
+# lint pass's own classifiers naturally do: std::str::is_tcl_alpha/std::str::is_tcl_alnum
+# are ordinary intrinsics (core/tclcompat.tcl), used directly, not wrapped;
+# is_underscore?/is_hyphen? are ordinary envless Botlish functions. This is
+# not a List built merely to provoke "callvalue" -- a batch of independent
+# per-character classifiers applied uniformly to one subject is exactly how
+# a real lexer/linter would organize this check (contrast: a pipeline where
+# check N needs check N-1's own result, which "loop check in checks:
+# check(value)" is deliberately not asked to express here).
+#
+# classify_leading(name) returns [is_alpha, is_alnum, is_underscore,
+# is_hyphen] for name's own first character (an empty name short-circuits
+# before the checks List is ever consulted, its own edge case, not folded
+# into the loop). valid_start?(name) is real compiler-adjacent policy over
+# that vector: an identifier may start with a letter or an underscore --
+# never a bare digit (alnum but not alpha) or a hyphen. is_hyphen?/
+# is_alnum's own flags are still computed for every non-empty candidate
+# even though this file's own valid_start? consults only two of the four --
+# an honest diagnostic vector, the same shape a real lint report would
+# produce for a caller that wants more than one downstream policy's answer.
+# The vector is read with std::list::get and a `false` default: its length is the
+# checks List's own, which a function boundary hides from the compiler, so a
+# required std::list::at would oblige every caller (including std::list::find's
+# predicate) to handle an IndexNotFound that cannot happen.
+#
+# invalid_names is the returning-loop + continue selection idiom (no
+# std::list::filter exists or is introduced); first_invalid genuinely needs "the
+# first invalid candidate in declared order" and uses std::list::find for it.
+#
+# candidates deliberately covers ordinary valid identifiers (including this
+# codebase's own trailing-"?" convention and non-ASCII letters, both
+# already structurally alpha under std::str::is_tcl_alpha's Unicode categories),
+# leading-underscore names (valid under this policy), and every invalid
+# leading-character kind (digit, hyphen, and the empty string) -- both
+# branches of valid_start? are genuinely exercised, not just one.
+#
+# expect: [16, 5, "2fast", 11]
+
+import std::list
+import std::str
+
+fn is_underscore?(c: str) -> bool:
+    c == "_"
+
+fn is_hyphen?(c: str) -> bool:
+    c == "-"
+
+checks = [std::str::is_tcl_alpha, std::str::is_tcl_alnum, is_underscore?, is_hyphen?]
+
+fn classify_leading(name: str):
+    if std::str::length(name) == 0:
+        return [false, false, false, false]
+    c = name.substring(0, 1)
+    loop check in checks:
+        check(c)
+
+fn valid_start?(name: str) -> bool:
+    flags = classify_leading(name)
+    flags.get(0, false) or flags.get(2, false)
+
+fn invalid_name?(name: str) -> bool:
+    not valid_start?(name)
+
+candidates = [
+    "emailish?",
+    "scan_while",
+    "list_get",
+    "_internal",
+    "über_count",
+    "2fast",
+    "make_changed?",
+    "_private_state",
+    "9bad_name",
+    "-flag",
+    "is_tcl_alpha",
+    "évalue",
+    "-verbose",
+    "",
+    "x_1",
+    "café_name",
+]
+
+invalid_names = loop name in candidates:
+    if valid_start?(name):
+        continue
+    name
+
+first_invalid = candidates.find(invalid_name?):
+    on std::list::NotFound:
+        "<none>"
+
+[std::list::length(candidates), std::list::length(invalid_names), first_invalid, std::list::length(candidates) - std::list::length(invalid_names)]

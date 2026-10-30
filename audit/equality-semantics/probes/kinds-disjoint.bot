@@ -1,0 +1,5 @@
+# a str compared with a UnicodeChar
+import std::str
+fn hyphen?(c: str) -> bool:
+    c == '-'
+[hyphen?("-"), hyphen?("x"), "-" == '-', 1 == "1", 1 == 1.0, [1] == ["1"]]

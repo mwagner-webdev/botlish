@@ -2,7 +2,7 @@ source:  bench/refined-checks.bot
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 9545 (per function: 1415 84 745 74 74 74 128 128 336 129 88 192 176 176 295 344 183 504 140 60 389 629 127 50 269 227 173 947 1021 368)
+machine-code bytes: 9385 (per function: 1382 84 745 74 74 74 128 128 272 119 192 249 249 193 232 322 151 360 140 60 389 629 127 50 269 230 173 947 1021 322)
 
 functions:
   0 <program entry>: nir-regs=43
@@ -14,15 +14,15 @@ functions:
   6 std::ascii::is_alphabetic<int>: nir-regs=8
   7 std::ascii::is_alphanumeric<int>: nir-regs=8
   8 std::web::emailish?<str>: nir-regs=24
-  9 char_at<int>: nir-regs=15
-  10 char_at<int>: nir-regs=18
-  11 char_is?<int, any>: nir-regs=12
-  12 local_char?<str>: nir-regs=9
-  13 local_char?<generic>: nir-regs=9
-  14 scan_while<int, block(e276)>: nir-regs=16
-  15 scan_while<int, native(std::str::is_tcl_alpha)>: nir-regs=18
+  9 char_at<int>: nir-regs=10
+  10 char_is?<int, any>: nir-regs=12
+  11 local_char?<UnicodeChar>: nir-regs=9
+  12 local_char?<generic>: nir-regs=9
+  13 label_char?<UnicodeChar>: nir-regs=9
+  14 scan_while<int, block(e272)>: nir-regs=16
+  15 scan_while<int, native(std::char::is_tcl_alpha)>: nir-regs=16
   16 tld?<int>: nir-regs=14
-  17 domain?<int>: nir-regs=44
+  17 domain?<int>: nir-regs=40
   18 std::web::is_unreserved<int>: nir-regs=10
   19 std::web::uri_query_value?<str>: nir-regs=4
   20 upper_hex?<int>: nir-regs=24
@@ -145,32 +145,6 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 24
     raw regs: 6
     managed-capable regs: 18
-    effects: may_error=true may_gc=true
-    safepoints: 1
-    root candidates: 3
-    max live roots: 3
-    shadow slots: 3
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 9 "char_at"
-    NIR regs: 15
-    raw regs: 5
-    managed-capable regs: 10
-    effects: may_error=false may_gc=true
-    safepoints: 1
-    root candidates: 3
-    max live roots: 3
-    shadow slots: 3
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 10 "char_at"
-    NIR regs: 18
-    raw regs: 7
-    managed-capable regs: 11
     effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
@@ -180,10 +154,36 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 11 "char_is?"
+  function 9 "char_at"
+    NIR regs: 10
+    raw regs: 2
+    managed-capable regs: 8
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 10 "char_is?"
     NIR regs: 12
     raw regs: 2
     managed-capable regs: 10
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 11 "local_char?"
+    NIR regs: 9
+    raw regs: 0
+    managed-capable regs: 9
     effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
@@ -197,7 +197,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 9
     raw regs: 0
     managed-capable regs: 9
-    effects: may_error=true may_gc=false
+    effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
     max live roots: 0
@@ -206,11 +206,11 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 13 "local_char?"
+  function 13 "label_char?"
     NIR regs: 9
     raw regs: 0
     managed-capable regs: 9
-    effects: may_error=true may_gc=false
+    effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
     max live roots: 0
@@ -223,20 +223,20 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 16
     raw regs: 5
     managed-capable regs: 11
-    effects: may_error=true may_gc=true
-    safepoints: 1
-    root candidates: 3
-    max live roots: 3
-    shadow slots: 3
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
     entry zero slots: 0
     depth reservation: no
     storage: native frame
   
   function 15 "scan_while"
-    NIR regs: 18
+    NIR regs: 16
     raw regs: 5
-    managed-capable regs: 13
-    effects: may_error=true may_gc=false
+    managed-capable regs: 11
+    effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
     max live roots: 0
@@ -249,7 +249,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 14
     raw regs: 5
     managed-capable regs: 9
-    effects: may_error=true may_gc=false
+    effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
     max live roots: 0
@@ -259,10 +259,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 17 "domain?"
-    NIR regs: 44
+    NIR regs: 40
     raw regs: 9
-    managed-capable regs: 35
-    effects: may_error=true may_gc=false
+    managed-capable regs: 31
+    effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
     max live roots: 0
@@ -418,8 +418,8 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 24
     raw regs: 7
     managed-capable regs: 17
-    effects: may_error=true may_gc=true
-    safepoints: 3
+    effects: may_error=false may_gc=true
+    safepoints: 2
     root candidates: 4
     max live roots: 4
     shadow slots: 4
@@ -430,4 +430,4 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   4 x calls to rt_int_add
   3 x calls to rt_int_cmp
-  42 x calls to other rt_* helpers
+  41 x calls to other rt_* helpers

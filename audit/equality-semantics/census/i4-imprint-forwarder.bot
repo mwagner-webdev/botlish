@@ -1,0 +1,6 @@
+# I4 an untyped forwarder of a function whose parameter mentions an imprint variable: inference copies MutableSet[T]
+import std::mutable_set
+fn size(s):
+    s.length()
+s = std::mutable_set::create[str]()
+size(s)

@@ -1,0 +1,49 @@
+| class | stdlib | examples | bench | golden | all |
+|---|---:|---:|---:|---:|---:|
+| refused | 0 | 0 | 0 | 0 | 0 |
+| unknown | 6 | 43 | 3 | 389 | 441 |
+| disjoint-kind | 0 | 0 | 0 | 23 | 23 |
+| disjoint-nominal | 0 | 1 | 0 | 20 | 21 |
+| disjoint-domain | 0 | 0 | 0 | 0 | 0 |
+| empty-only | 0 | 0 | 0 | 2 | 2 |
+| compatible | 328 | 256 | 3 | 919 | 1506 |
+| total | 334 | 300 | 6 | 1353 | 1993 |
+
+Unknown sites, by what Level 2 would do with them:
+
+| unknown operand | stdlib | examples | bench | golden | all |
+|---|---:|---:|---:|---:|---:|
+| untyped-parameter | 2 | 14 | 3 | 342 | 361 |
+| both-unknown | 2 | 8 | 0 | 24 | 34 |
+| computed | 2 | 21 | 0 | 23 | 46 |
+
+| instance-disjoint (not disjoint in the generic HIR) | 0 | 0 | 0 | 4 | 4 |
+
+1993 sites; 27 compilations failed:
+  bench/event-loop/benchwork.bot: bench/event-loop/benchwork.bot:100:15: function spawn_drain requires context std::event_loop::Loop, so it can only be called (or bound to anot
+  bench/experimental/game-server.bot: bench/experimental/game-server.bot:31:8: unknown namespace "evloop": no such module file bench/experimental/evloop.bot (an 
+  bench/experimental/json-parse.bot: bench/experimental/json-parse.bot:25:8: unknown namespace "json": no such module file bench/experimental/json.bot (an appli
+  examples/dfa/json/by_hand.bot: examples/dfa/json/by_hand.bot:75:18: number_by_hand may suspend, so it cannot become a function value: a call through an unknown function valu
+  examples/dfa/json/json_lex.bot: examples/dfa/json/json_lex.bot:212:5: json_string_strict may suspend, so it cannot become a function value: a call through an unknown function
+  examples/dfa/yaml/yaml_lex.bot: examples/dfa/yaml/yaml_lex.bot:132:5: yaml_token may suspend, so it cannot become a function value: a call through an unknown function value c
+  examples/event-loop/native/main.bot: examples/event-loop/native/main.bot:10:8: unknown namespace "event_loop_linux": no such module file examples/event-loop/nat
+  examples/event-loop/native/ticker.bot: examples/event-loop/native/ticker.bot:7:8: unknown namespace "event_loop_linux": no such module file examples/event-loop/na
+  examples/event-loop/native/ticks.bot: examples/event-loop/native/ticks.bot:14:10: function handle requires context std::event_loop::Loop, so it can only be called (or bound to anot
+  examples/ffi/bindgen/sdl3/demo.bot: examples/ffi/bindgen/sdl3/demo.bot:31:8: unknown namespace "sdl3::init": no such module file examples/ffi/bindgen/sdl3/sdl3
+  examples/ffi/bindgen/sha256/demo.bot: examples/ffi/bindgen/sha256/demo.bot:15:8: unknown namespace "boringssl::sha2": no such module file examples/ffi/bindgen/sh
+  examples/ffi/bindgen/sha256/sha256.bot: examples/ffi/bindgen/sha256/sha256.bot:11:8: unknown namespace "boringssl::sha2": no such module file examples/ffi/bindgen/
+  examples/ffi/bindgen/tcl/demo.bot: examples/ffi/bindgen/tcl/demo.bot:21:8: unknown namespace "tcl::decls": no such module file examples/ffi/bindgen/tcl/tcl/de
+  examples/games/2048/demo-darwin.bot: examples/games/2048/demo-darwin.bot:9:8: namespace "std::darwin::io" belongs to the macOS platform (the standard namespace std::darwin and eve
+  examples/games/2048/demo-windows.bot: examples/games/2048/demo-windows.bot:9:8: namespace "std::windows::io" belongs to the Windows platform (the standard namespace std::windows an
+  examples/games/2048/demo_play.bot: examples/games/2048/demo_play.bot:167:8: function main requires context std::io::IO, so it can only be called (or bound to another name as a s
+  examples/games/icy-tower/game.bot: examples/games/icy-tower/sdl.bot:79:8: unknown namespace "sdl3::ctypes": no such module file examples/games/icy-tower/sdl3/
+  examples/games/icy-tower/main-windows.bot: examples/games/icy-tower/sdl.bot:79:8: unknown namespace "sdl3::ctypes": no such module file examples/games/icy-tower/sdl3/
+  examples/games/icy-tower/main.bot: examples/games/icy-tower/sdl.bot:79:8: unknown namespace "sdl3::ctypes": no such module file examples/games/icy-tower/sdl3/
+  examples/games/icy-tower/render.bot: examples/games/icy-tower/sdl.bot:79:8: unknown namespace "sdl3::ctypes": no such module file examples/games/icy-tower/sdl3/
+  examples/games/icy-tower/sdl.bot: examples/games/icy-tower/sdl.bot:79:8: unknown namespace "sdl3::ctypes": no such module file examples/games/icy-tower/sdl3/
+  examples/io/hello-darwin.bot: examples/io/hello-darwin.bot:9:8: namespace "std::darwin::io" belongs to the macOS platform (the standard namespace std::darwin and every name
+  examples/io/hello-windows.bot: examples/io/hello-windows.bot:10:8: namespace "std::windows::io" belongs to the Windows platform (the standard namespace std::windows and ever
+  examples/surface/09-mutual-recursion.bot: examples/surface/09-mutual-recursion.bot:13:5: unbound name "is_odd": "is_odd" is declared later; forward references are not allowed (a bindin
+  examples/surface/10-duplicate-binding.bot: examples/surface/10-duplicate-binding.bot:7:1: duplicate binding "x" in the same lexical scope
+  census-loader.bot: census-loader.bot:1:8: namespace "std::io::bytepath" is internal to the standard library: only its modules may import it or name its members (th
+  census-loader.bot: census-loader.bot:1:8: namespace "std::ordered_table" is internal to the standard library: only its modules may import it or name its members (t

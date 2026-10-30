@@ -1,0 +1,28 @@
+== ok(1) == ok(1)
+  interp     value true
+  compile    value true
+  cranelift  value true
+== ok(1) == ok("1")  (payloads of disjoint kinds)
+  interp     value false
+  compile    value false
+  cranelift  value false
+== ok(1) == error(1)  (tags differ, payloads equal)
+  interp     value false
+  compile    value false
+  cranelift  value false
+== error("x") == error("x")  (the shared variant of two Result shapes)
+  interp     value true
+  compile    value true
+  cranelift  value true
+== ok(f) == error(1)  (a callable payload, tags differ)
+  interp     value false
+  compile    value false
+  cranelift  value false
+== ok(f) == ok(f)  (a callable payload reached)
+  interp     error CORE SEMANTIC EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  compile    error CORE SEMANTIC EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  cranelift  error CORE SEMANTIC EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+== ok([]) == ok([])  (empty Lists in the payload)
+  interp     value true
+  compile    value true
+  cranelift  value true

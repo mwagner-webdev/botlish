@@ -133,14 +133,14 @@ test raw-count-loops-refined-checks-plan {the RawInt demand rule: a raw loop's b
             foreach id [dict get $spec used] {
                 # the block's expression id depends on the imported library code
                 set label [regsub {block\(e\d+\)} [hir::specialize::label $spec $id] {block(eN)}]
-                if {$label ni {tld?<int> domain?<int> {scan_while<int, native(std::str::is_tcl_alpha)>} {scan_while<int, block(eN)>}}} continue
+                if {$label ni {tld?<int> domain?<int> {scan_while<int, native(std::char::is_tcl_alpha)>} {scan_while<int, block(eN)>}}} continue
                 lappend rows [list $label [lindex [dict get $plan $id params] 0] \
                     [lindex [dict get $plan $id paramReasons] 0]]
             }
             lsort $rows
         }
     }
-} -result {{{domain?<int> rawint {}} {tld?<int> rawint {}} {{scan_while<int, block(eN)>} rawint {}} {{scan_while<int, native(std::str::is_tcl_alpha)>} rawint {}}} {{domain?<int> value suppressed-mixed-tagged-use} {tld?<int> value suppressed-mixed-tagged-use} {{scan_while<int, block(eN)>} value suppressed-no-raw-demand} {{scan_while<int, native(std::str::is_tcl_alpha)>} value suppressed-no-raw-demand}}}
+} -result {{{domain?<int> rawint {}} {tld?<int> rawint {}} {{scan_while<int, block(eN)>} rawint {}} {{scan_while<int, native(std::char::is_tcl_alpha)>} rawint {}}} {{domain?<int> value suppressed-mixed-tagged-use} {tld?<int> value suppressed-mixed-tagged-use} {{scan_while<int, block(eN)>} value suppressed-no-raw-demand} {{scan_while<int, native(std::char::is_tcl_alpha)>} value suppressed-no-raw-demand}}}
 
 test raw-count-loops-refined-checks-parity {refined-checks still returns [400, 0] natively, with block escape on and off} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]

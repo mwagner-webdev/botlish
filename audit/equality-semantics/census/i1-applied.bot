@@ -1,0 +1,10 @@
+# I1 applications of one parameterized struct with different type arguments
+struct Box[T]:
+    value: T
+struct Bag[T]:
+    items: List[T]
+fn boxes(a: Box[int], b: Box[str]) -> bool:
+    a == b
+fn bags(a: Bag[int], b: Bag[str]) -> bool:
+    a == b
+[boxes(Box[int] {value: 1}, Box[str] {value: "1"}), bags(Bag[int] {items: []}, Bag[str] {items: []}), bags(Bag[int] {items: [1]}, Bag[str] {items: ["1"]})]

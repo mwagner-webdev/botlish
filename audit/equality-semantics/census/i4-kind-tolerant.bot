@@ -1,0 +1,4 @@
+# I4 one parameter compared with two kinds: no single concrete contract exists
+fn comma?(c):
+    c == ',' or c == ","
+[comma?(","), comma?(','), comma?(1)]

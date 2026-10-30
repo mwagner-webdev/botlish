@@ -1,0 +1,5 @@
+# I5 a function value stored in a struct field and called through the projection
+fn hyphen?(c):
+    c == '-'
+s = {f: hyphen?}
+s.f("-")

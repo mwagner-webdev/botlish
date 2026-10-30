@@ -1682,7 +1682,10 @@ proc core::compiler::IntrinsicValueEqual {ctxVar name argOps} {
     set ka [hir::types::kindOf [OpType $a]]
     set kb [hir::types::kindOf [OpType $b]]
     set t [NewTemp]
-    if {$ka eq "" || $kb eq "" || $ka in {block native mutarray} || $kb in {block native mutarray}} {
+    # A kind the runtime refuses (core::value's `incomparable`) is refused
+    # before kinds are compared, by core::value::equal and natively alike:
+    # the call stays the runtime's, never a constant `false`.
+    if {$ka eq "" || $kb eq "" || $ka in $::core::value::incomparable || $kb in $::core::value::incomparable} {
         return ""
     }
     if {$ka ne $kb} {
