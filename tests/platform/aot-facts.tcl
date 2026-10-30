@@ -598,7 +598,11 @@ proc checks {} {
         set lcMain {}
         foreach {which path} [list worker $executable main-thread $mainExecutable] {
             set loads [tool otool -l $path]
-            regexp {cmd LC_MAIN.*?stacksize (\d+)} $loads -> size
+            # From LC_MAIN on, its stacksize: never `.*?` before the digits,
+            # which makes the whole expression non-greedy in Tcl and matches
+            # one digit.
+            set at [string first "cmd LC_MAIN" $loads]
+            if {$at >= 0} { regexp {stacksize (\d+)} [string range $loads $at end] -> size }
             lappend lcMain $which [expr {[info exists size] ? $size : "none"}]
             unset -nocomplain size
         }

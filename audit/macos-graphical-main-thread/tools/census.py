@@ -1015,9 +1015,13 @@ class Census:
                 self.case(name, "startup", ["otool", "-l", exe] if exe else [None], "lcmain", expect={"stacksize": size})
             sdl = prodmain("sdl")
             self.case("deps-main-sdl", "startup", ["otool", "-L", sdl] if sdl else [None], "deps", expect={"absent": "SDL3"})
+            # The usable main stack: LC_MAIN's 512 MiB, less the page Rust's runtime start (the rustc linker's
+            # main, lang_start) makes its main-thread guard (std's install_main_guard maps the lowest
+            # reported page PROT_NONE on macOS); the system linker's C main runs no such start.
+            page = os.sysconf("SC_PAGE_SIZE")
             for name, exe, want_startup, want_main, usable in (
                     ("report-main", prodmain("identity"), "main-thread", "1", 0x20000000),
-                    ("report-main-rustc", mainrustc("identity"), "main-thread", "1", 0x20000000),
+                    ("report-main-rustc", mainrustc("identity"), "main-thread", "1", 0x20000000 - page),
                     ("report-worker", prod("identity"), "worker", "0", None)):
                 path = self.work / f"{name}.txt"
                 self.case(name, "startup", [exe], "report", env={"BOTLISH_NATIVE_STARTUP_REPORT": str(path)},

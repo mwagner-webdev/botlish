@@ -320,33 +320,91 @@ No general stack-size option exists.
 
 ## 13. LC_MAIN inspection
 
-(From the macOS runs: `otool -l` of each executable; section 31.)
+**[executed, macOS AArch64]** (macos-arm64.yml run 40992453520 at
+3c87f83a, the `system linker` job: every executable test file with
+`BOTLISH_NATIVE_LINKER=system`, tests/main-thread-startup.test's own links
+naming each linker): `mts-main-lc-main` passed -- `otool -l` of a
+main-thread executable shows `LC_MAIN ... stacksize 536870912` with the
+system and the rustc linker alike, of a worker executable `stacksize 0`
+(the default). The same run's smoke job linked one of each in
+tests/platform/aot-facts.tcl, whose main-thread executable ran
+(`main-thread-run`: exit 0, its value), kept a valid signature
+(`main-thread-signature`: `codesign -v`) and exhausted its main stack with
+the guard's line (`standalone-main-thread-overflow`). Its
+`main-thread-lc-main` check failed on its own parsing: `cmd
+LC_MAIN.*?stacksize (\d+)`, a non-greedy expression throughout in Tcl,
+read one digit ("5"); it reads from LC_MAIN on now, as the test file does.
 
 ## 14. Main-thread native stack discovery
 
-(From the macOS runs: the startup report's `stack` line inside the actual
-main-thread executables, `mts-main-identity`; section 31.)
+**[executed, macOS AArch64]** (the same job): inside the actual main-thread
+executables the startup report's lines are `startup main-thread`,
+`process-main-thread 1` (libpthread's `pthread_main_np`) and a `stack`
+line with a confirmed guard below the usable stack:
+
+| Linker | usable bytes | why |
+|---|---:|---|
+| system | 536,870,912 | LC_MAIN's 512 MiB, all of it: the runtime archive's C `main` |
+| rustc | 536,854,528 | 512 MiB less one 16 KiB page: Rust's runtime start (`lang_start`) makes the main stack's lowest reported page its own guard (std's `install_main_guard`, the default path on macOS: the page mapped and `mprotect`ed `PROT_NONE`) |
+
+The runtime's discovery (`NativeStack::current`, platform/macos.rs) never
+trusts the reported end: it takes the first accessible address at or above
+it and confirms the inaccessible run below, so it finds both, and the guard
+reports either stack's exhaustion (section 15). This is the census's
+observation explained: its C probe saw the reported bottom usable, the
+runtime's Rust test binary (Rust's start) one page above it.
+`mts-main-identity` and `mts-main-report-parity` first expected the
+system linker's value from both linkers and failed on the rustc one; each
+linker's value is pinned now (`mtsMainUsable`), the reports compared but
+for the `stack` line, and the census harness's `report-main-rustc` expects
+the page less. The worker's stack is the same under both linkers.
 
 ## 15. Overflow-guard acceptance
 
-(From the macOS runs: `mts-main-overflow`, `mts-main-fault`, the census's
-candidate-A rows; section 31.)
+**[executed, macOS AArch64]** (the same job): `mts-main-overflow` -- the
+small frame, a String held, six Ints held, a call through a `Fn`, a
+9.5 KiB probed frame and a coroutine's stack after it yielded, each `error
+{NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}`,
+status 1, on the main thread -- `mts-main-rustc-overflow` (the rustc
+link's main stack) and `mts-main-fault` (C's write through a null pointer
+ends by its signal on both policies, never `NATIVE LIMIT STACK`) passed;
+aot-facts' `standalone-main-thread-overflow` likewise. The census's
+candidate-A rows on the production policy: section 31.
 
 ## 16. Stack-capacity acceptance
 
-(From the macOS runs: `mts-main-capacity`, `mts-main-stack-bytes`, the
-census's depth rows on the worker, the 8 MiB control and the main thread;
-section 31.)
+**[executed, macOS AArch64]** (the same job): `mts-main-capacity` passed --
+`down(10^6)` 1000000, `keep(10^5)` 200000, `wide(10^5)` 0, `rec(10^5)`
+100000 and 100 frames of 9.5 KiB return the worker's values on the 512 MiB
+main stack, the recursions the census showed the default 8 MiB main stack
+exhausting -- and `mts-main-stack-bytes`: with
+`BOTLISH_NATIVE_STACK_BYTES=1048576` a worker's `down(10^5)` is NATIVE
+LIMIT STACK while the main thread's, sized by the link, returns 100000.
+The 8 MiB control (a main-thread executable linked without the stack
+size) is the census harness's: section 31.
 
 ## 17. GC root correctness
 
-(From the macOS runs: `mts-main-gc-stress`, `mts-main-report-parity`, the
-census's GC-stress rows; section 31.)
+**[executed, macOS AArch64]** (the same job, plain): `mts-main-gc-stress`
+passed -- under `BOTLISH_NATIVE_GC_STRESS=1` kept, resumed and abandoned
+coroutines with Strings in their frames, `keep(3000)`, frames of 9.5 KiB
+holding a String and closures holding managed values give the worker's
+values on the main thread -- and `mts-main-report-parity`'s Vm report
+(constants, shapes, statics, stack maps) is the worker's under both
+policies and both linkers. The whole file under GC stress is the
+`main-thread-startup` job's (section 31).
 
 ## 18. Coroutine and suspended-stack correctness
 
-(From the macOS runs: `mts-main-kept-coroutines`, `mts-main-identity`'s
-coroutine, the census's kept and SDL coroutine rows; section 31.)
+**[executed, macOS AArch64]** (the same job): `mts-main-kept-coroutines`
+passed with both linkers and both policies (`[[0, [1, 4, -1]], [4, 5, 6,
+7, -1], [110, 34, 0, 0, 3]]`: a handle passed to another function, four
+suspended frames of a recursive yielding function, two coroutines abandoned
+while suspended), and `mts-main-identity`'s coroutine, kept on the general
+runtime, answered `pthread_main_np() == 1` after it was resumed: a
+coroutine's stack is switched to on the process's main thread, so its C
+calls are the main thread's. The coroutine's stack exhaustion is
+`mts-main-overflow`'s last case (section 15).
 
 ## 19. System linker integration
 
@@ -407,7 +465,20 @@ HIR interchange field, no front-end cache key, no compiler-service fact.
 
 ## 28. Process and linked-run parity
 
-(Section 31; Linux evidence in section 32.)
+**[executed, macOS AArch64]** (run 40992453520's `system linker` job):
+`mts-main-process-semantics` passed -- a declared error handled, a runtime
+error (status 1, its line), the driver protocol (`BOTLISH_NATIVE_RESULT`,
+and `BOTLISH_NATIVE_RUNS=3`'s timing lines), an unwritable startup report
+(NATIVE IO, status 2), the overflow line and the program's arguments are
+the same under both policies with both linkers -- as did
+`mts-main-darwin-io` (Darwin I/O's `write`, standard input through `read`,
+and a failing `read`'s -1 with errno 9 on both threads),
+`mts-panic-native-bug` (a Rust panic of the body: "native executable
+panicked (NATIVE BUG)", status 1, never Rust's 101, both linkers, both
+policies), `mts-main-link-failure` (a failed main-thread link keeps the
+previous file), `mts-worker-identity` and `mts-linked-run-worker` (a
+program that calls C, run by main.tcl's native backend, runs on its
+worker: `[0, 0]`). **[executed, Linux x86-64]**: section 32.
 
 ## 29. Mutation testing
 

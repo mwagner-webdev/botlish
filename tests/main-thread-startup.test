@@ -161,6 +161,24 @@ proc mtsVmReport {report} {
     join [lrange [split [string trimright $report \n] \n] 0 end-3] \n
 }
 
+# REPORT without its stack line (startup_lines' last): what a startup
+# installed, whichever stack its thread was given.
+proc mtsWithoutStack {report} {
+    join [lsearch -all -inline -not [split [string trimright $report \n] \n] {stack *}] \n
+}
+
+# The usable bytes of a main-thread executable's main stack that LINKER's
+# startup leaves: LC_MAIN's 512 MiB, less the one page Rust's runtime start
+# -- the rustc linker's main, lang_start -- makes its own main-thread guard
+# (std's install_main_guard: on macOS the lowest reported page, mapped
+# PROT_NONE). The system linker's C main runs no such start.
+# (An expected result is built on every host: nothing to ask elsewhere.)
+proc mtsMainUsable {linker} {
+    if {![testConstraint mainThreadStartup]} { return none }
+    set page [exec getconf PAGESIZE]
+    expr {$linker eq "rustc" ? (512 << 20) - $page : 512 << 20}
+}
+
 proc mtsBytes {path} {
     set channel [open $path rb]
     try { return [read $channel] } finally { close $channel }
@@ -483,7 +501,7 @@ test mts-worker-identity {a worker executable's program runs off the process's m
 # ---------------------------------------------------------------------------
 # The main thread (macOS AArch64)
 
-test mts-main-identity {a main-thread executable's program runs on the process's main thread by libpthread's own answer -- in a coroutine kept on the general runtime too, which switches stacks on the same thread -- with the system and the rustc linker; its startup report says the policy, the main thread and the 512 MiB stack the runtime found there with a confirmed guard below it} -constraints {mainThreadStartup threadIdentity} -body {
+test mts-main-identity {a main-thread executable's program runs on the process's main thread by libpthread's own answer -- in a coroutine kept on the general runtime too, which switches stacks on the same thread -- with the system and the rustc linker; its startup report says the policy, the main thread and the stack the runtime found there with a confirmed guard below it: LC_MAIN's 512 MiB, less the page Rust's start makes its guard under the rustc linker} -constraints {mainThreadStartup threadIdentity} -body {
     set dir [makeDirectory mts-main-identity]
     set hir [surface::compile [mtsIdentitySource] identity.bot -warnings off]
     set results {}
@@ -497,7 +515,7 @@ test mts-main-identity {a main-thread executable's program runs on the process's
     removeDirectory mts-main-identity
     set results
 } -result [concat {*}[lmap linker [mtsLinkers] {list $linker {0 {[1, 1]
-} {}} main-thread 1 536870912 1}]]
+} {}} main-thread 1 [mtsMainUsable $linker] 1}]]
 
 test mts-main-lc-main {a main-thread executable's LC_MAIN reserves 512 MiB for the main thread's stack (Apple ld's -stack_size, otool -l), with either linker; a worker executable's reserves nothing of its own (stacksize 0)} -constraints otool -body {
     set dir [makeDirectory mts-lc-main]
@@ -668,7 +686,7 @@ test mts-main-stack-bytes {BOTLISH_NATIVE_STACK_BYTES sizes a worker's stack onl
     set results
 } -result [list worker $::mtsOverflow main-thread [list 0 "100000\n" {}]]
 
-test mts-main-report-parity {the startup report of a main-thread executable is the worker's -- the same program metadata, constants, natives, shapes, statics and stack maps -- but for its startup lines, and the system and rustc linkers' reports of one policy are equal} -constraints mainThreadStartup -body {
+test mts-main-report-parity {the startup report of a main-thread executable is the worker's -- the same program metadata, constants, natives, shapes, statics and stack maps -- but for its startup lines, and the system and rustc linkers' reports of one policy are equal but for the stack the host gave the thread (mts-main-identity pins each linker's)} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-report]
     set hir [surface::compile "import std::str\n\nstruct P:\n    x: int\n    s: str\n\nfn f(n: int) -> P:\n    P {x: n, s: std::str::concat(\"a\", \"b\")}\n\nbig = 99999999999999999999999\n\[f(2), big, 1.5\]\n" report.bot -warnings off]
     set reports {}
@@ -682,7 +700,7 @@ test mts-main-report-parity {the startup report of a main-thread executable is t
     dict for {name report} $reports {
         lassign [split $name -] linker
         lappend results $name [expr {[mtsVmReport $report] eq [mtsVmReport $worker]}] \
-            [expr {$report eq [dict get $reports system-[string range $name [string length $linker-] end]]}] \
+            [expr {[mtsWithoutStack $report] eq [mtsWithoutStack [dict get $reports system-[string range $name [string length $linker-] end]]]}] \
             [dict get [mtsStartup $report] startup] [dict get [mtsStartup $report] process-main-thread]
     }
     removeDirectory mts-main-report

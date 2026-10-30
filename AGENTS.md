@@ -1250,7 +1250,10 @@ guarantee). Keep it so:
 * A guard is confirmed, never assumed from a reported stack end: a host
   that cannot confirm one reports none (`guard_low == low_bound`) and
   install refuses it. The macOS main thread's lowest reported page is
-  itself inaccessible: its usable bound is above the reported one. On
+  inaccessible where Rust's runtime started the process (std's main-thread
+  guard: the rustc linker's executables, Rust test binaries) and usable
+  under a C main (the system linker's): the walk takes either, its usable
+  bound then one page above the reported one. On
   Windows an exhausted stack is an exception, not an address range: install
   confirms the system's guard page above the uncommitted reservation and a
   stack guarantee of at least `GUARANTEE` (measured: never lower it without
