@@ -62,7 +62,35 @@ kept apart from this milestone's own results.
 
 ## 1. Result
 
-RESULT-PENDING
+**Done.** A standalone executable has a startup policy, fixed when it is
+linked and recorded in its `botlish_program` record: `worker`, the
+default and every target's, exactly the startup before this milestone, or
+`main-thread`, macOS AArch64's, which runs the unchanged program on the
+process's main thread with a 512 MiB stack reserved by the link (LC_MAIN).
+
+```sh
+botlish -native-startup main-thread -emit-native-executable app.bot
+```
+
+On GitHub's macos-15 runners (**Executed**, run 40969956997), through the
+packaged Botlish.app with the checkout inaccessible and no Rust on PATH, a
+Botlish SDL3 program built with the policy opened a Cocoa window, rendered
+with Metal, presented 30 frames and 3 from a kept coroutine, polled its own
+quit event back and shut down; the screen capture shows what it drew. The
+same program built with the default policy fails as before ("No available
+video device"). The rustc and system linkers produce the same result; GC
+stress, kept coroutines, deep recursion (10^6 frames), stack exhaustion
+(`NATIVE LIMIT STACK`), faults, errors, the driver protocol, signals and
+panics (`native executable panicked (NATIVE BUG)`, status 1) behave as on
+the worker. Linux and Windows refuse the policy before anything is linked
+(`NATIVE UNSUPPORTED startup`), and every worker executable starts as
+before, at the same speed and size (section 30).
+
+What remains different on the main thread, by design: its stack is 512
+MiB (the worker's is 1 GiB by default) and cannot be resized when the
+program runs. What remains undone: a macOS event-loop driver, a graphical
+macOS Icy Tower (section 37), main-thread startup on Linux or Windows, and
+notarized distribution (section 36).
 
 ## 2. Starting census findings
 
@@ -345,35 +373,201 @@ not raised (census section 11). The worker's stack stays a run-time choice
 
 ## 13. LC_MAIN inspection
 
-LCMAIN-PENDING
+`otool -l`'s LC_MAIN `stacksize`, read line by line (**Executed**, macOS
+run 40969956997, the `main-thread-startup` job's acceptance, `lc-main-*`;
+`mts-main-lc-main`; `aot-facts.tcl`'s `main-thread-executable`):
+
+| Executable | Linker | LC_MAIN stacksize |
+|---|---|---:|
+| worker (no option) | Botlish.app's (system) | 0 (the system's default) |
+| `-native-startup main-thread` | Botlish.app's (system) | 536,870,912 |
+| `-native-startup main-thread` | the checkout's system linker | 536,870,912 |
+| `-native-startup main-thread` | the checkout's rustc linker | 536,870,912 |
+
+Apple ld refuses more on arm64, and the census's C probes, built again by
+this acceptance, still say so: `-stack_size 0x40000000` and `0x80000000` fail
+to link with `ld: -stack_size must be <= 512MB on arm64 platforms`
+(**Executed**, the same job). The first macOS run read the field as `5`.
+The executables were right (the startup report said 512 MiB); the check was
+wrong: in one Tcl regular expression a non-greedy `.*?` first makes every
+later quantifier non-greedy, and `(\d+)` matched one digit. The tests and
+`aot-facts.tcl` now read otool's lines (section 31).
 
 ## 14. Main-thread native stack discovery
 
-DISCOVERY-PENDING
+The runtime finds the main thread's stack the way it finds any other on
+macOS (`platform/macos.rs`): libpthread's top and size, the first
+accessible address at or above the reported bottom, and the run of
+inaccessible mappings directly below it, confirmed with `mach_vm_region`.
+The startup report's `stack usable BYTES guard BYTES` line shows what it
+found (**Executed**, macOS):
+
+| Executable | usable | confirmed guard |
+|---|---:|---:|
+| worker (1 GiB by default) | 1,073,754,112 | 16,384 |
+| main thread, system-linked (Botlish.app's, the checkout's) | 536,870,912 | 16,384 |
+| main thread, rustc-linked | 536,854,528 | 32,768 |
+| (census, C probe) main thread, default link | 8,372,224 | 58,736,640 |
+
+The fixture's own answer, from C, agrees: `pthread_get_stacksize_np` reports
+536,870,912 on the main thread of every main-thread executable (`id-main`,
+`id-rustc`, `id-checkout`: `stack_bytes`), against the 8,176 KiB that
+`ulimit -s` (RLIMIT_STACK) still reports. libpthread reports LC_MAIN's size,
+not the rlimit. The mutant that takes the rlimit for the size
+(`macos-size-from-rlimit`) is killed (section 29).
+
+The rustc-linked executable's lowest reported page (16 KiB) is
+inaccessible, every time it was run (the smoke job's `aot-facts.tcl`, the
+system-linker job's `mts-main-record-and-report`, `report-rustc`, in both
+macOS runs). The walk steps over it (`usable_low`) and counts it with the
+kernel's page as the confirmed guard: usable 512 MiB less one page, guard
+two pages. The system-linked executables' bottom page is accessible. Only
+the rustc-linked startup runs Rust's own `main` (its panic names the thread
+`'main'`, section 11); the system-linked one starts in the runtime
+archive's C `main`. That this is the cause is **not established**. It does
+not matter to the runtime, which never trusts the reported bottom, and the
+tests accept exactly these two outcomes: 512 MiB, or 512 MiB less its
+lowest page. The first macOS run expected exactly 512 MiB everywhere and
+failed on the rustc-linked executables (section 31).
 
 ## 15. Overflow-guard acceptance
 
-GUARD-PENDING
+The worker's guard is installed on the main thread: `aot::run`'s one body
+calls `OverflowGuard::install_executable` on the thread that runs the
+program. Exhausting the main thread's 512 MiB is `NATIVE LIMIT STACK`,
+status 1, nothing on standard output and the error line exactly as the
+worker's (**Executed**, macOS, run 40969956997):
+
+* the acceptance (Botlish.app): `rt-main-overflow-down`, `-keep`
+  (Strings held across calls), `-wide` (wide frames), `-rec` (calls
+  through a `Fn`), `rt-main-bigframe-overflow` (9,680-byte frames, probed
+  page by page) and `s-main-overflow-line`, each the line, status 1, no
+  signal;
+* a coroutine's stack exhausted from a program on the main thread
+  (`rt-main-co-overflow`): the same line;
+* a fault that is no overflow, a store to address 16 from C on the main
+  thread (`rt-main-fault`, `mts-policy-fault-not-overflow`): the process
+  dies by SIGSEGV (status -11), never relabeled `NATIVE LIMIT STACK`;
+* `tests/main-thread-startup.test`'s `mts-policy-overflow` and
+  `mts-policy-fault-not-overflow`, with the system and the rustc linker.
+
+The mutant that skips the guard on the main thread (`main-thread-no-guard`)
+is killed by `mts-policy-overflow` (section 29). The guard itself, its
+signal handler and its classification are unchanged (`platform/guard.rs`);
+the census had already run them on the main thread (its section 12).
 
 ## 16. Stack-capacity acceptance
 
-CAPACITY-PENDING
+The census's recursion probes, built by Botlish.app with each policy,
+run 10 times each in the acceptance's timing group and once each in its
+runtime group (**Executed**, macOS, run 40969956997):
+
+| Shape, depth | worker (1 GiB) | main thread (512 MiB) | main thread, default 8 MiB (census, experimental) |
+|---|---|---|---|
+| `down` 10^4, 10^5, 10^6 | 10000, 100000, 1000000 | 10000, 100000, 1000000 | 10^6: NATIVE LIMIT STACK |
+| `keep` 10^4, 10^5 | 20000, 200000 | 20000, 200000 | values |
+| `wide` 10^4, 10^5 | 0, 0 | 0, 0 | 10^5: NATIVE LIMIT STACK |
+| `rec` 10^4, 10^5 | 10000, 100000 | 10000, 100000 | 10^5: NATIVE LIMIT STACK |
+| `big` 100 (9,680-byte frames) | 928487700 | 928487700 | value |
+| each shape without end | NATIVE LIMIT STACK | NATIVE LIMIT STACK | NATIVE LIMIT STACK |
+
+`mts-policy-depth` runs `down` 10^6 and `keep`, `wide`, `rec` 10^5 with
+both linkers on both policies, on every host (the main thread on macOS
+only), and kills the mutants that drop LC_MAIN's size from either link
+(section 29): with the 8 MiB default, three of them end in `NATIVE LIMIT
+STACK`.
+
+512 MiB is half the worker's default. No probe here needs more; a program
+that needs between 512 MiB and 1 GiB of stack returns its value on the
+worker and ends in `NATIVE LIMIT STACK` on the main thread (section 36).
 
 ## 17. GC root correctness
 
-GC-PENDING
+`BOTLISH_NATIVE_GC_STRESS=1` (a collection at every allocation site) on
+the main thread (**Executed**, macOS, run 40969956997):
+
+* the startup report under GC stress names the same Vm as the worker's
+  (`report-main-gc`, `mts-main-gc-stress-report` with both linkers);
+* Strings held across 3,000 frames of the main stack (`rt-main-keep-gc`:
+  6000), large frames (`rt-main-bigframe-gc`: 7928616), the kept and
+  abandoned coroutines (`rt-main-kept-gc`; `t-main-kept-gc`, ten runs):
+  the worker's values;
+* SDL3 through Cocoa and Metal under GC stress on the main thread
+  (`g-main-cocoa-gc`): EXECUTED-COCOA; the dummy driver
+  (`t-main-sdl-headless-gc`, ten runs): EXECUTED-HEADLESS;
+* `mts-policy-gc-stress`: the kept coroutines and `keep 3000` with both
+  linkers and both policies.
+
+Nothing of the collector, the stack maps or the frame walk changed: the
+walk starts at the program's frames on whichever stack runs them. The
+whole test suite under GC stress on macOS (the full tier with
+`CI-GC-Stress: 1`) was not run for this milestone.
 
 ## 18. Coroutine and suspended-stack correctness
 
-COROUTINE-PENDING
+Coroutines keep their own stacks; only the thread that runs the program
+changed (**Executed**, macOS, run 40969956997):
+
+* `mts-main-identity` (both linkers): the program's C calls run on the
+  process's main thread, on the thread's own stack; a coroutine's C calls
+  run on the same main thread, on a stack that is not the thread's
+  (`[1, 0, [1, 1]]`; the worker's `[0, 0, [0, 1]]`);
+* the census's kept-coroutine program (`kept`: coroutines passed,
+  resumed, walked as a tree, abandoned while suspended):
+  `[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]` on both
+  policies, also under GC stress;
+* a coroutine's stack exhausted: `NATIVE LIMIT STACK` (`rt-main-co-overflow`);
+* SDL3 presenting 3 frames from inside a kept coroutine on the main thread
+  (`presented_in_coroutine: 3`, `coroutine_on_own_stack: true`,
+  `coroutine_pthread_main: 1` in `g-main-cocoa`): Cocoa and Metal work from
+  a coroutine's stack on the main thread, as the census found.
+
+Each coroutine switch publishes the stack it arrives on (unchanged), so the
+guard knows the main stack while the program runs there and a coroutine's
+while it runs on its own.
 
 ## 19. System linker integration
 
-SYSTEM-PENDING
+The system linker (`system_link_args`) puts
+`-Wl,-stack_size,0x20000000` among its arguments for a main-thread
+executable on Apple's flavor only (`startup_main_thread_reserves_lc_main_stack`:
+the Apple main-thread link differs from the worker's by that one argument;
+GNU and MSVC links are identical for both policies; **Executed** on every
+host's Rust tests).
+
+Botlish.app's compiler links a program that calls C with the system linker
+(its `auto`). Every main-thread executable of the acceptance's first phase
+was linked that way, and the checkout's system linker
+(`BOTLISH_NATIVE_LINKER=system`) in its second (**Executed**, macOS, run
+40969956997): LC_MAIN 536,870,912, the main thread, the stack, Cocoa. The
+static SDL3 3.4.18 archive was linked into them with the frameworks its
+`sdl3.pc` names: `otool -L` lists libSystem, libobjc and Apple's frameworks
+only, no SDL3 dylib (`deps-main-sdl`, `deps-checkout-sdl`). The macOS
+system-linker job (`BOTLISH_NATIVE_LINKER=system` for every test file that
+links an executable, `main-thread-startup.test` among them) passed.
 
 ## 20. Rustc linker integration
 
-RUSTC-PENDING
+The rustc linker passes the same reservation as `-C
+link-arg=-Wl,-stack_size,0x20000000` (`startup_link_args`, rustc's
+spelling). Its startup crate is three lines: it names the record and calls
+`aot::start_linked` from Rust's `main`. **Executed**, macOS (run
+40969956997, the acceptance's checkout phase and `main-thread-startup.test`):
+
+* LC_MAIN 536,870,912 (`lc-main-rustc`, `mts-main-lc-main`);
+* the program and its C calls on the main thread (`id-rustc`), the startup
+  report's `thread main`, usable 536,854,528 with a 32 KiB guard (section
+  14), the same Vm as the worker (`report-rustc`);
+* SDL3 through Cocoa and Metal (`g-rustc-cocoa`: EXECUTED-COCOA);
+* errors and the driver protocol as the worker's; the injected panic is
+  `native executable panicked (NATIVE BUG)`, status 1, after Rust's own
+  message naming the thread `'main'` (`s-rustc-panic`,
+  `s-rustc-panic-protocol`);
+* `mts-main-linkers-agree`: the system- and rustc-linked main-thread
+  executables report the same Vm, policy and thread, and print the same.
+
+The mutant that drops the argument from the rustc link
+(`rustc-lc-main-dropped`) is killed by `mts-policy-depth` (section 29).
 
 ## 21. Stub linker behavior
 
@@ -403,8 +597,10 @@ main.tcl refuses `-native-startup` beside a run. A program that calls C,
 which the native backends run as a linked executable (the driver protocol),
 is linked as a worker executable always (`run_linked` passes
 `Startup::Worker`): **Executed** on Linux x86-64 (`mts-linked-run-is-worker`:
-its startup report says `startup worker`) and on macOS (the acceptance's
-`id-linked-run`: the fixture says the program is not on the main thread).
+its startup report says `startup worker`) and on macOS (run 40969956997,
+the acceptance's `id-linked-run` through Botlish.app and through the
+checkout: the fixture says the program runs on a thread that is not the
+main thread, one of two).
 
 ## 23. Native-library noninterference
 
@@ -431,19 +627,119 @@ ordinary link-plan entries, and nothing in them selects the policy.
 
 ## 25. Packaged Botlish.app acceptance
 
-APP-PENDING
+The acceptance's first phase runs the packaged compiler the way a user
+gets it, and nothing of the checkout (**Executed**, macOS, run
+40969956997, job `main-thread startup (macOS arm64)`):
+
+* Botlish.app is the `app` job's artifact (`botlish-macos-aarch64.zip`, its
+  SHA-256 checked), unpacked to `$RUNNER_TEMP/Prögram Files/` (a space and
+  a non-ASCII letter in the path), `codesign --verify --deep --strict`
+  before and after both phases (valid on disk, satisfies its designated
+  requirement): the runs left it untouched;
+* the checkout is `chmod 000` for the phase (checked unreadable), the
+  harness copied out of it first, and `PATH` is the system's
+  (`/usr/bin:/bin:/usr/sbin:/sbin`): no rustc (the harness's environment
+  line reports none), cargo or tclsh. Apple's `cc`, `otool`, `sips` and
+  `screencapture` are the system's;
+* Botlish.app's `botlish` builds all 18 executables (9 programs, each
+  policy) from a work directory outside any checkout: `-native-startup
+  main-thread -emit-native-executable`, the system linker (`auto`), the
+  static SDL3 archive and its frameworks;
+* 97 cases, every one as predicted: 6 EXECUTED-COCOA, 8
+  EXECUTED-HEADLESS, 79 EXECUTED-THREAD, and the 4 FAILED-CORRECTNESS the
+  controls predict.
+
+The runner: macOS 15.8.2 (24H232) on GitHub's `macos-15` arm64 image
+(20260907.0337.1), a virtual machine with an Aqua session (WindowServer and
+loginwindow running, the console user `runner`, one 1024x768 display,
+screen-capture access), Xcode 16.4 (SDK 15.5), Apple clang 17.0.0, 16 KiB
+pages. The app's own jobs (`app`: build, `verify.sh`, the smoke tests,
+`app-test.sh`, `compare.sh`; `app-clean`: without developer tools) passed in
+the same run.
 
 ## 26. Cocoa/Metal graphical acceptance
 
-GRAPHICAL-PENDING
+The census's SDL3 program (`programs/sdl.bot` over the static SDL3 3.4.18:
+`SDL_Init(VIDEO | EVENTS)`, a 320x240 window, a renderer, 30 magenta frames
+presented with the events pumped, 3 more from inside a kept coroutine, an
+`SDL_EVENT_QUIT` pushed and polled back, everything destroyed and
+`SDL_Quit`), compiled by Botlish.app with `-native-startup main-thread`
+and run with nothing that selects the thread (**Executed**, macOS, run
+40969956997, `g-main-cocoa`): EXECUTED-COCOA, every fact the census's
+classifier requires:
+
+| Fact | Value |
+|---|---|
+| SDL video driver | `cocoa` (a Cocoa `NSWindow` behind the SDL window) |
+| renderer | `metal` |
+| `SDL_IsMainThread()` before and after `SDL_Init` | true, true |
+| `pthread_main_np()` at every SDL stage | 1 |
+| frames presented | 30, and 3 from the coroutine (`coroutine_pthread_main: 1`, on its own stack) |
+| the pushed quit | polled back |
+| shutdown | window and renderer destroyed, `SDL_Quit` |
+| screen capture of the window (320x268) | center pixel (255, 0, 255), 89.5% of the sampled pixels the program's magenta |
+| process threads at most | 6 (SDL's and the system's own) |
+
+The acceptance requires the capture: a Cocoa case whose window does not
+show the program's color is not as predicted. The same holds for the same
+program linked by the checkout's rustc linker (`g-rustc-cocoa`) and system
+linker (`g-checkout-cocoa`), under GC stress (`g-main-cocoa-gc`), ten times
+in a row (`t-main-sdl`), and with SIGTERM delivered one second in
+(`s-main-sigterm-sdl`: SDL's own handler turns it into `SDL_EVENT_QUIT` and
+the program ends normally, EXECUTED-COCOA). With `SDL_VIDEODRIVER=dummy` it
+runs headless on the main thread (`g-main-headless`): EXECUTED-HEADLESS,
+never classified Cocoa.
+
+Timing (median of ten runs, `t-main-sdl`): 1.92 s for the whole process,
+the program's entry 14.6 ms after exec, `SDL_Init` 69.6 ms, a frame 52.2
+ms (the program's own pacing), `SDL_PumpEvents` 6.0 µs, shutdown 27.2 ms.
+The C control (`t-c-main`, the same SDL calls from C's `main`) measured
+2.72 s, `SDL_Init` 78.1 ms, a frame 82.6 ms in the same job.
 
 ## 27. Graphical positive controls
 
-CONTROLS-PENDING
+Each positive control fails as predicted, and each self-test of the
+classifier gives its expected class (**Executed**, macOS, run 40969956997):
+
+| Case | What it shows | Outcome |
+|---|---|---|
+| `c-main-cocoa` | the session can make a Cocoa window at all: C's `main`, the same SDL calls | EXECUTED-COCOA, its capture (255, 128, 0) |
+| `g-worker-cocoa` | the worker executable of the same program, the default: SDL refuses Cocoa off the main thread (the census's finding) | FAILED-CORRECTNESS: `No available video device`, `pthread_main_np` 0, while `SDL_IsMainThread()` says true |
+| `g-worker-headless`, `-gc` | the worker with the dummy driver | EXECUTED-HEADLESS |
+| `pc-dummy-not-cocoa` | a dummy-driver run on the main thread is never Cocoa | EXECUTED-HEADLESS |
+| `pc-baddriver` | `SDL_VIDEODRIVER=nonexistent`: no window may be claimed | FAILED-CORRECTNESS |
+| `pc-nopump` | the pushed quit never polled | FAILED-CORRECTNESS (`quit_seen` missing) |
+| `pc-nodestroy` | nothing destroyed, no `SDL_Quit` | FAILED-CORRECTNESS (`destroyed` missing) |
+| oracle self-tests (5) | a complete Cocoa record; a dummy driver claimed as Cocoa; Cocoa off the main thread; a value claiming a window the fixture did not see; the quit never polled | Cocoa, headless, and three FAILED-CORRECTNESS, as expected |
+
+The worker's failure is the reason for this milestone; it is unchanged,
+and stays the default.
 
 ## 28. Process and linked-run parity
 
-PARITY-PENDING
+How a program leaves the process is the worker's on the main thread
+(**Executed**: macOS run 40969956997 for both policies and both linkers;
+Linux x86-64, Linux AArch64 and Windows CI for the worker):
+
+| Case | worker | main thread (Botlish.app, rustc, checkout system) |
+|---|---|---|
+| a handled declared error (`declared`) | `1008`, status 0 | the same |
+| a runtime error (`runtime`) | `+: expected int, got [true] (CORE SEMANTIC TYPE)`, status 1 | the same |
+| the driver protocol (`BOTLISH_NATIVE_RESULT`) | the error line in the file, status 0 | the same |
+| the protocol, three runs (`BOTLISH_NATIVE_RUNS=3`) | `times`, `timing`, `value {int 1008}` | the same |
+| an unwritable startup report | `... (NATIVE IO)`, status 2 | the same |
+| a runtime panic (`BOTLISH_NATIVE_RUNTIME_FAULT=panic`) | `native executable panicked (NATIVE BUG)`, status 1 | the same, plainly and in the protocol |
+| stack exhausted | the `NATIVE LIMIT STACK` line, status 1 | the same |
+| SIGTERM, SIGINT during a 5 s C call | killed by the signal (15, 2) after about 1 s | the same: the runtime installs no handler on either thread |
+| standard input to standard output (`mts-policy-stdin-stdout`; Darwin's `read`/`write`, Linux's syscalls) | `hello from stdin`, 17 | the same |
+| arguments, values, errors, protocol (`mts-policy-parity`) | | identical outputs, errors and statuses |
+
+A linked run (`-backend cranelift` of a program that calls C) is a worker
+executable whatever runs it: Botlish.app's `botlish -backend cranelift`
+ran the identity program on a thread that is not the main thread
+(`id-linked-run`: `pthread_main_np` 0, two threads), and
+`mts-linked-run-is-worker`'s startup report says `startup worker`
+(**Executed**, macOS and Linux).
 
 ## 29. Mutation testing
 
@@ -556,29 +852,134 @@ turn; 300 rounds of `trivial`, 15 of `bench`). Medians, with p10 and p90:
 The worker's startup costs the same: every difference is within this
 machine's spread, and the policy check reads one word.
 
-**macOS AArch64, both policies** (the acceptance's `timing` group on the
-macos-15 runner): MACOS-TIMING-PENDING
+**macOS AArch64, both policies** (**Executed**: run 40969956997, the
+acceptance's `timing` group, Botlish.app's executables, ten runs each,
+median [min, max]):
+
+| Case | worker | main thread |
+|---|---|---|
+| the identity program, whole process | 8.547 ms [7.417, 15.164] | 9.443 ms [7.174, 11.105] |
+| its entry, since exec | 7.684 ms [6.786, 13.606] | 8.316 ms [6.598, 10.347] |
+| the kept coroutines under GC stress, whole process | 5.198 ms [4.111, 5.926] | 4.811 ms [3.608, 12.955] |
+| SDL3 headless (dummy driver), whole process | 1667 ms [1567, 1828] | 1685 ms [1524, 1841] |
+| SDL3 headless, a frame | 49.8 ms | 49.1 ms |
+| SDL3 headless under GC stress, whole process | 2578 ms [1453, 3105] | 1506 ms [1316, 1770] |
+| SDL3 through Cocoa and Metal, whole process | (fails: section 27) | 1924 ms [1661, 2125] |
+
+Every difference is within the spread of a shared runner; the main
+thread's startup creates no thread and joins none, the worker's creates a
+1 GiB one. `aot-facts.tcl`'s whole-process startup of a trivial worker
+executable on the same runners: a median of 3.9 to 4.4 ms.
 
 A main-thread executable's program object differs from a worker one's by
-one byte (section 6), and its link by one argument. On a Mach-O that
-argument sets LC_MAIN's `stacksize` field, which is already there, so the
-two policies' executables are the same size (MACOS-SIZE-PENDING).
+one byte (section 6), and its link by one argument, which sets LC_MAIN's
+`stacksize` field (already there in every executable). The two policies'
+executables are the same size (**Executed**, the same run, Botlish.app's
+system linker): `sdl` 3,677,704 bytes, `big` 3,230,488, `kept` 889,720,
+`depth` 870,136, `errors` 854,664, `co_overflow` 853,336, `sleep` 832,360
+for each policy; `identity` and `fault` differ by 16 bytes (850,456
+against 850,472; 832,296 against 832,312), within the ad hoc signature.
 
 ## 31. macOS CI results
 
-MACOS-PENDING
+Two runs of `.github/workflows/macos-arm64.yml` on the branch, both
+started by hand (`workflow_dispatch`) so that a later push would not
+cancel them:
+
+**Run 40931039959** (head `0f52016f`, `tier=full` with the mutants of
+section 29). The program ran on the main thread wherever it was asked to;
+four mistakes of the checks, not of the startup, made jobs red:
+
+| Job | Outcome | Why |
+|---|---|---|
+| smoke | failure | `runtime::platform::macos`'s `region_reads_the_protection_of_a_mapping` (a test older than this milestone): its fresh mapping had another test thread's guard directly below, and the guard walk rightly went on into it; `aot-facts.tcl` read LC_MAIN's size as `5` (section 13) and expected exactly 512 MiB usable (section 14) |
+| system linker | failure | `main-thread-startup.test`: the same two checks (`mts-main-lc-main`, `mts-main-record-and-report`, `mts-main-linkers-agree`); its other 3,444 tests passed |
+| acceptance shard 1 | failure | the same three tests; 120 other Tcl files and 55 golden suites passed |
+| acceptance shard 2 | cancelled | 75 minutes: `tier.tcl` deals the test files to shards by position, and the new file moved about 60 files each way (shard 1 took 43 minutes); on main the shards take 47 to 70 |
+| full shard 1 | success | the macOS mutants (section 29) |
+| main-thread startup | failure | its policy test step failed (above), and the steps after it had no `if`: the graphical acceptance never ran |
+| app, app-clean, static SDL3, linux control | success | |
+
+Fixed in `314afefb` (the checks read otool's lines and accept 512 MiB or
+512 MiB less its lowest page; the region test keeps an accessible page
+below its guard; the acceptance shards get 120 minutes) and `6fe5057f`
+(the acceptance steps run whatever failed before them).
+
+**Run 40969956997** (head `6fe5057f`, `tier=acceptance`):
+
+| Job | Outcome |
+|---|---|
+| smoke (Tier A: the Rust tests, `native-status.tcl`, `aot-facts.tcl`, the smoke tier) | success |
+| system linker (`main-thread-startup.test` and every executable test file with the system linker) | success |
+| Botlish.app (build, verify, the smoke tests, `app-test.sh`, `compare.sh`) | success |
+| Botlish.app without developer tools | success |
+| main-thread startup (`main-thread-startup.test`: 23 passed, 2 skipped (`notMainThreadStartup`); `native-status.tcl`; `aot-facts.tcl`; the acceptance through Botlish.app: 97 cases; through the checkout's linkers: 64 cases) | success, every case as predicted |
+| acceptance (Tier B) shard 1 | success |
+| acceptance (Tier B) shard 2 | MACOS-SHARD2-PENDING |
+| static SDL3 through Botlish.app | MACOS-SDL3-PENDING |
+| linux control | success |
+
+On macOS `native-status.tcl` records `main-thread-executable` as
+`{macho arm64 execute} 6765 main 512MiB`, and every other row unchanged.
 
 ## 32. Linux x86-64 CI results
 
-LINUX-PENDING
+`tests.yml`, run 40945618194 on `d566f3a1` (started by hand; the commit
+carries `[skip ci]` so that it would not cancel the macOS run queued for
+the branch; it differs from the later heads only in tests, the acceptance,
+the macOS workflow and macOS-only code): the Tcl suite on interp and on
+compile, the golden suites (four shards), the system- and stub-linked
+executables, the native Rust unit tests, the warning gate, the
+cranelift-generic coverage and the method-call oracle all passed. The
+cranelift coverage job lost its runner after two hours ("The hosted runner
+lost communication with the server"; on main the job takes 66 minutes):
+its one re-run: LINUX-RERUN-PENDING. `main-thread-startup.test` under
+`CORE_BACKEND=cranelift` takes 16 seconds here.
+
+Before CI, this sandbox (Linux x86-64, four cores) ran the whole local
+suite (`tests/local.tcl`): every golden suite on all four backends, every
+Tcl test file on interp and compile. It found one regression of this
+milestone: the startup report's Linux thread check called libc's `getpid`,
+so every Linux executable imported it, and `linux-syscall.test` requires
+that a program making raw syscalls link none of libc's. `d566f3a1` asks the
+kernel for both ids; the file passes (23 of 23), and so does every other
+file: 109 golden suites, 241 Tcl files.
+
+The single-executable workflow (run 40928954017, `11a5f183`: the Linux
+x86-64 and AArch64 builds, the smoke and C FFI smoke tests in stock Ubuntu
+24.04 and latest) passed.
 
 ## 33. Linux AArch64 CI results
 
-ARM64-PENDING
+`tests-arm64.yml`, run 40945624818 on `d566f3a1` (started by hand):
+success. The Tcl suite on interp and on compile, its cranelift and
+cranelift-generic coverage, the golden suites (four shards), the
+system-linked executables, the native Rust unit tests and the GC-stress
+run all passed. `main-thread-startup.test` runs there with the worker
+policy and the refusal of `main-thread` (`linux-aarch64`: NATIVE
+UNSUPPORTED startup).
 
 ## 34. Windows CI results
 
-WINDOWS-PENDING
+`windows-x86_64.yml`, run 40931026140 on `0f52016f` (the code is the
+final one for Windows: later commits change tests, the acceptance, the
+macOS workflow and Linux- or macOS-only code): success.
+
+* smoke: the Rust tests (`startup_main_thread_refused_where_unsupported`,
+  `startup_on_this_thread_catches_a_panic`, `linked_program_startup_policy`,
+  `startup_main_thread_is_macos_aarch64s_only`,
+  `startup_main_thread_reserves_lc_main_stack`, the record tests among
+  them); `native-status.tcl`'s `main-thread-executable`: `NATIVE
+  UNSUPPORTED startup`, with Windows' reason; `aot-facts.tcl`; the
+  executable and C runtime checks;
+* root plans, system linker: success;
+* acceptance, four shards: success. `main-thread-startup.test` ran in
+  shard 3: 17 tests passed, 8 skipped (`mtsMain` 5: the main thread's own;
+  `mtsFixture` 2 and `mtsEcho` 1: the C fixture and the echo program are
+  POSIX's).
+
+`icy-tower-windows.yml` (runs 40928923072 and 40931026249) passed: the
+Windows game builds and runs as before.
 
 ## 35. Documentation and Compilerpedia
 
