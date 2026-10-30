@@ -597,7 +597,7 @@ test workload-icy-tower-macos-failed-build-keeps-old {a build that fails (here t
     set work [file join [tcltest::temporaryDirectory] icy-tower-empty]
     file mkdir $work
     exec clang -c -x c /dev/null -o [file join $work empty.o]
-    exec ar rcs [file join $work libempty.a] [file join $work empty.o]
+    exec ar rcs [file join $work libempty.a] [file join $work empty.o] 2>@1
     withEnv [dict create ICY_TOWER_SDL3_ARCHIVE [file join $work libempty.a]] {
         set status [catch {exec bash [file join $::gameDir build-macos.sh] $::macosGame 2>@1} output]
     }

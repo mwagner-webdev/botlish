@@ -15,12 +15,14 @@
 #       per-function counts of both
 #
 # Normalization removes only what the platform genuinely decides and the
-# game does not: how many events the window system queued. The game takes
-# every waiting event (sdl.bot's quit_requested?: SDL_PollEvent until it
-# returns false), so a run of "poll ptr -> 1" lines -- a window shown, a
-# display added, focus gained, keys -- becomes one "poll events" line; the
-# final "poll ptr -> 0" of each frame stays. A quit is no difference to
-# normalize away: it ends the run, and the frame counts then differ.
+# game does not: which events the window system queues, and when. The game
+# takes every waiting event (sdl.bot's quit_requested?: SDL_PollEvent until
+# it returns false) and acts on none but a quit, so every "poll ptr -> 1"
+# line -- a window shown, a display added, focus gained, a resize the window
+# manager made -- is dropped, in whichever frame it came; the final
+# "poll ptr -> 0" of each frame stays, so every frame still shows its poll.
+# A quit is no difference to normalize away: it ends the run, and the frame
+# counts then differ.
 # Pointers are already "ptr" or "null" in the trace, and the trace has no
 # time stamps ("ticks" is a call, not its value). Nothing else is
 # normalized: a missing call, a wrong rectangle or a wrong color differs.
@@ -41,8 +43,6 @@ def normalize(lines):
         if not line:
             continue
         if line == "poll ptr -> 1":
-            if not out or out[-1] != "poll events":
-                out.append("poll events")
             continue
         out.append(line)
     return out

@@ -50,6 +50,11 @@ on:
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
+    inputs:
+      mutants:
+        description: "Also run the macOS integration's mutants (audit/icy-tower/macos-mutants.txt)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -152,6 +157,8 @@ jobs:
         if: always() && steps.build.outcome == 'success'
         run: |
           python3 -I audit/icy-tower/tools/abi-check.py out/sdl3-binding/macos-aarch64 "$SDLSRC/include" "$RUNNER_TEMP/abi" 2>&1 | tee out/logs/abi-check.log
+          echo "== the package the game was compiled against ($STAGE/.bot_modules/sdl3)"
+          python3 -I audit/icy-tower/tools/abi-check.py "$STAGE/.bot_modules/sdl3" "$SDLSRC/include" "$RUNNER_TEMP/abi-staged" | tail -n 1
           clang -fsyntax-only --target=arm64-apple-macos11 -I "$SDLSRC/include" out/sdl3-binding/macos-aarch64/layouts-check.c
           echo "layouts-check.c: every generated layout compiles against Apple clang ($(grep -c _Static_assert out/sdl3-binding/macos-aarch64/layouts-check.c) static assertions)"
 
@@ -240,9 +247,10 @@ jobs:
         id: probes
         if: always() && steps.build.outcome == 'success'
         run: |
-          rustup component add llvm-tools >/dev/null 2>&1 || true
-          bash audit/icy-tower/tools/traced-archive.sh "$PREFIX/lib/libSDL3.a" "$RUNNER_TEMP/traced/libSDL3.a" 2>&1 | tee out/logs/traced-archive.log || {
-            mkdir -p "$RUNNER_TEMP/traced"; bash audit/icy-tower/tools/traced-archive.sh "$PREFIX/lib/libSDL3.a" "$RUNNER_TEMP/traced/libSDL3.a"; }
+          # llvm-objcopy renames the archive's symbols: Homebrew's LLVM when the
+          # image has it, else the Rust toolchain's llvm-tools.
+          rustup component add llvm-tools 2>&1 | tail -n 1 || true
+          bash audit/icy-tower/tools/traced-archive.sh "$PREFIX/lib/libSDL3.a" "$RUNNER_TEMP/traced/libSDL3.a" 2>&1 | tee out/logs/traced-archive.log
           ICY_TOWER_BOTLISH="$APP" ICY_TOWER_BINDING_FROM="$PWD/out/sdl3-binding" ICY_TOWER_SDL3_ARCHIVE="$RUNNER_TEMP/traced/libSDL3.a" \
             examples/games/icy-tower/build-macos.sh out/probe 2>&1 | tee out/logs/probe-build.log
           echo "PROBE=$PWD/out/probe/icy-tower" >>"$GITHUB_ENV"
@@ -286,6 +294,20 @@ jobs:
           if grep -i 'sdl' "$RUNNER_TEMP/dyld.txt"; then echo "::error::an SDL image was loaded"; exit 1; fi
           grep -o '/[^ ]*' "$RUNNER_TEMP/dyld.txt" | sed 's#^#   #' | sort -u | head -n 40
 
+      # The macOS integration's mutants (opt-in: "[ci-icy-tower-mutants]"
+      # in the pushed head commit's message, or a manual run's mutants):
+      # each built in a private tree and met by its detector (the build's
+      # checks, the ABI check, the output, a graphical case, the relocation,
+      # the failed build). About a minute each.
+      - name: The macOS integration's mutants (audit/icy-tower/mutate.tcl -macos 1)
+        id: mutants
+        if: >-
+          always() && steps.probes.outcome == 'success'
+          && (contains(github.event.head_commit.message, '[ci-icy-tower-mutants]') || inputs.mutants)
+        run: |
+          tclsh9.0 audit/icy-tower/mutate.tcl -macos 1 -app "$APP" -binding out/sdl3-binding -prefix "$PREFIX" \
+            -helper "$RUNNER_TEMP/macos-input" 2>&1 | tee out/logs/mutants.log
+
       - name: Measurements
         if: always() && steps.build.outcome == 'success'
         run: |
@@ -322,6 +344,7 @@ jobs:
           PROBES: ${{ steps.probes.outcome }}
           SESSION: ${{ steps.session.outcome }}
           ALONE: ${{ steps.alone.outcome }}
+          MUTANTS: ${{ steps.mutants.outcome }}
         run: |
           classify_build() {
             local log=out/logs/build.log stage
@@ -347,6 +370,7 @@ jobs:
             echo "| probe and worker builds | $PROBES | $([ "$PROBES" = failure ] && echo 'test-harness failure') |"
             echo "| graphical acceptance | $SESSION | (the cases below) |"
             echo "| without its build | $ALONE | $([ "$ALONE" = failure ] && echo 'native-link failure (a dependency)') |"
+            echo "| macOS mutants | ${MUTANTS:-not run} | $(tail -n 1 out/logs/mutants.log 2>/dev/null) |"
             echo
             cat out/session/summary.md 2>/dev/null || echo "the graphical session did not run"
           } | tee -a "$GITHUB_STEP_SUMMARY"

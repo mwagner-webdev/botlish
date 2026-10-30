@@ -2,7 +2,7 @@
 # made on Linux x86-64 by the LD_PRELOAD interposer (context-refactor/tools/sdltrace.c) on SDL's
 # dummy video driver: audit/icy-tower/tools/trace-reference.sh EXECUTABLE write regenerates it.
 args --autopilot --fixed-step --frames 600 --seed 7
-lines 52314 28ec7548eabc516b6994e0fdae36a4c043fa2ff9d16197a0a4006cab0712f7f3
+lines 52313 1ee6acc11f7ee3fdadced247df59c9b34b139b1fa6aa75cea66e5a840acd14c2
 count clear 600
 count color 13579
 count createrenderer 1
@@ -16,13 +16,13 @@ count keyboardstate 1
 count line 20400
 count logical 1
 count malloc 3
-count poll 601
+count poll 600
 count present 600
 count quit 1
 count scale 360
 count text 2853
 count ticks 601
-frame 1 104 7a520a1dc01a6845a06d07deb1baf0a8597396a64a5da65d199f18edc942fde3
+frame 1 103 baef33584b45ec83ee3a5f43d89804f7b9e059ca1594c5ed3cb06b9eef78b138
 frame 2 94 9a639d8efeb9e8af131bfd65efd0490221651948b00f67d85d42a53b075bed12
 frame 3 94 ffa14f91cf88692b931c331b4b1ae303d8812aa37f9fa1601510485d7b478dcf
 frame 4 94 d8ec982c04e48bb3a8b8df7703c3d6c973ce969bdf1a9b1f0f4f49b2a882d34f

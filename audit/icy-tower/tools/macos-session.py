@@ -548,6 +548,7 @@ class Game:
             big = [w for w in d.get("windows", []) if w.get("onscreen") and w.get("w", 0) >= 200 and w.get("h", 0) >= 200]
             if big:
                 self.win = big[0]
+                self.window_at = time.time()
                 return self.win
             time.sleep(0.2)
         return None
@@ -556,6 +557,15 @@ class Game:
         _, d = self.s.tool("frontmost")
         return d.get("pid") == self.p.pid
 
+    def refresh(self):
+        """The window's bounds now (the window manager may have moved or resized it since it opened)."""
+        if self.win:
+            _, d = self.s.tool("windows", self.p.pid)
+            for w in d.get("windows", []):
+                if w.get("id") == self.win["id"]:
+                    self.win = w
+        return self.win
+
     def focus(self):
         """Gives the game's window the keyboard focus the way a person would; the method that did, or None."""
         if self.frontmost():
@@ -563,7 +573,7 @@ class Game:
         self.s.tool("activate", self.p.pid)
         if self.frontmost():
             return "NSRunningApplication activate"
-        if self.win:
+        if self.refresh():
             # A click on the window's content: the WindowServer activates the application and makes the window key.
             self.s.tool("click", self.win["x"] + self.win["w"] / 2, self.win["y"] + self.win["h"] * 0.75)
             time.sleep(0.3)
@@ -685,7 +695,8 @@ def case_cocoa(s):
         c, f = check_static(start, tower.platforms, 0.0, "start", player_x=227)
         checks += [(ok, "start frame: " + t) for ok, t in c]
         facts["start"] = f
-    time.sleep(max(0.0, 4.2 - (time.time() - g.started)))
+    # The banner shows for the first 3 s of the game, whose clock starts as the window opens.
+    time.sleep(max(0.0, 3.6 - (time.time() - g.window_at)))
     after, problem = g.frame("after-banner")
     if after is None:
         checks.append((False, "a capture after the banner: " + problem))
@@ -748,7 +759,9 @@ def case_keyboard(s):
     step("left", 0.9, "left")
     step("d", 0.45, "d")
     step("a", 0.9, "a")
-    # Both held: run_velocity's neither-or-both rule, friction only.
+    # Both held: run_velocity's neither-or-both rule, friction only (from
+    # rest: friction stops a full run in 0.23 s).
+    time.sleep(0.6)
     rest_before, _ = g.frame("rest")
     positions["rest"] = rest_before.player() if rest_before else None
     g.key("left", "down")
@@ -786,8 +799,8 @@ def round_two(seed, final_rng, final_platforms):
     """The k for which the oracle's game after a restart of SEED's game -- new_world(rng after k platforms, 2) --
     ends with FINAL_RNG and FINAL_PLATFORMS: the next tower of the same generator, or None."""
     state = seed % 4294967296
-    first = oracle.World(seed, 1)
-    n0 = len(first.platforms)
+    # The first game places every platform but the ground (three draws each).
+    n0 = len(oracle.World(seed, 1).platforms) - 1
     for _ in range(3 * n0):
         state = oracle.lcg(state)
     for k in range(n0, n0 + 4000):
@@ -846,8 +859,9 @@ def case_restart(s):
         else:
             p = fresh.player()
             checks.append((fresh.banner() is None, "R: the banner is gone (round 2 has no start banner)"))
-            checks.append((p is not None and abs(p["x"] - 227) <= 4 and p["bottom"] > 600,
-                           "R: the player back at the ground, centred (%s)" % p))
+            # A new game's player bounces on the ground platform (y 40 to 216: rows 504 to 680).
+            checks.append((p is not None and abs(p["x"] - 227) <= 4 and 498 <= p["bottom"] <= 684,
+                           "R: the player back on the ground platform, centred (%s)" % p))
             facts["restarted"] = fresh.facts()
     code, how, out, err = g.escape()
     fields = summary_fields(out)
@@ -885,10 +899,17 @@ def case_close(s):
     if rc == 0:
         method = "Accessibility: the close button pressed"
     else:
-        # A click on the close button: the leftmost of the title bar's three, 20 points in, 14 down.
-        g.focus()
-        s.tool("click", g.win["x"] + 20, g.win["y"] + 14)
-        method = "a click on the close button"
+        # The window menu's Close (Command-W, which SDL's menu binds to performClose:), else a
+        # click on the close button: the leftmost of the title bar's three, 14 points in and down.
+        method = "Command-W (the window's performClose:)"
+        if g.focus():
+            g.key("cmd+w", "tap")
+        try:
+            g.p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            g.refresh()
+            s.tool("click", g.win["x"] + 14, g.win["y"] + 14)
+            method = "a click on the close button"
     code, how, out, err = g.finish(6.0)
     facts.update({"method": method, "status": code, "ended": how, "summary": out, "stderr": err[-300:]})
     checks = [(before is not None, "the game was drawn before the close"),
@@ -920,8 +941,6 @@ def case_focus(s):
     thief = subprocess.Popen([s.helper, "steal-focus", "3"], stdout=subprocess.PIPE, text=True)
     ready = json.loads(thief.stdout.readline() or "{}")
     time.sleep(0.4)
-    if not g.frontmost() is False:
-        pass
     if g.frontmost() and ready.get("w"):
         s.tool("click", ready["x"] + ready["w"] / 2, ready["y"] + ready["h"] / 2)
         time.sleep(0.3)
@@ -1068,19 +1087,20 @@ def case_controls(s):
 
 def run(args):
     s = Session(args)
-    cases = [case_env, case_cocoa, case_keyboard, case_restart, case_close, case_focus, case_autopilot,
-             lambda s: case_trace(s, "trace-dummy", "dummy"), lambda s: case_trace(s, "trace-cocoa", "cocoa"),
-             case_gc, case_worker, case_controls]
+    cases = [("env", case_env), ("cocoa", case_cocoa), ("keyboard", case_keyboard), ("restart", case_restart),
+             ("close", case_close), ("focus", case_focus), ("autopilot", case_autopilot),
+             ("trace-dummy", lambda s: case_trace(s, "trace-dummy", "dummy")),
+             ("trace-cocoa", lambda s: case_trace(s, "trace-cocoa", "cocoa")),
+             ("gc-stress", case_gc), ("worker", case_worker), ("controls", case_controls)]
     only = set(args.only.split(",")) if args.only else None
-    for case in cases:
+    for name, case in cases:
+        # env always runs: the other cases read its permissions.
+        if only and name not in only and name != "env":
+            continue
         try:
-            if only:
-                probe_name = getattr(case, "__name__", "")
-                if probe_name.startswith("case_") and probe_name[5:] not in only and probe_name != "case_env":
-                    continue
             case(s)
         except Exception as e:  # a harness failure is a result of its own, never a pass
-            s.record(getattr(case, "__name__", "case"), "FAILED", "test-harness", [(False, "the harness failed: %r" % e)], {})
+            s.record(name, "FAILED", "test-harness", [(False, "the harness failed: %r" % e)], {})
     lines = ["| case | class | category | checks |", "|---|---|---|---|"]
     for c in s.cases:
         lines.append("| %s | %s | %s | %d of %d |" % (c["name"], c["class"], c["category"] or "",

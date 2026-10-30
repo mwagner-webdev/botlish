@@ -67,7 +67,10 @@ while read -r name; do
     args+=(--redefine-sym "$label$name=${label}real_$name")
 done <<<"$names"
 "$objcopy" "${args[@]}" "$in" "$work/renamed.a"
-cc -c -O1 -DSDLTRACE_LINKED -o "$work/sdltrace.o" "$source"
+target=()
+[[ $(uname -s) == Darwin ]] && target=(-arch arm64 -mmacosx-version-min=11.0)  # the archive's: SDL3's deployment target
+cc ${target[@]+"${target[@]}"} -c -O1 -DSDLTRACE_LINKED -o "$work/sdltrace.o" "$source"
+mkdir -p "$(dirname "$outfile")"
 rm -f "$outfile"
 if [[ $(uname -s) == Darwin ]]; then
     libtool -static -o "$outfile" "$work/renamed.a" "$work/sdltrace.o" 2>"$work/libtool.log" \

@@ -3,11 +3,13 @@
 # checked against the target's C compiler and SDL3's own headers
 # (ICY-TOWER-MACOS-MILESTONE-1.md, "Generated ABI and layout checks").
 #
-#   python3 -I audit/icy-tower/tools/abi-check.py BINDING SDL_INCLUDE WORK
+#   python3 -I audit/icy-tower/tools/abi-check.py BINDING SDL_INCLUDE WORK [GAME]
 #
 # BINDING is a generated SDL3 binding (DIR/sdl3/*.bot: generated/c/sdl3/
-# TARGET/, or build-macos.sh's), SDL_INCLUDE the pinned SDL3's include
-# directory, WORK a scratch directory. The tool reads, from the game's own
+# TARGET/, or build-macos.sh's, or a staged application's package
+# APP/.bot_modules/sdl3), SDL_INCLUDE the pinned SDL3's include directory,
+# WORK a scratch directory, GAME the game's directory (default
+# examples/games/icy-tower). The tool reads, from the game's own
 # sources (sdl.bot, game.bot, render.bot), every SDL function, constant and
 # layout it uses, and from the binding the Botlish declaration of each, and
 # writes a C++ translation unit that includes SDL3/SDL.h and compares the two
@@ -62,7 +64,7 @@ def read(path):
 
 
 def game_names():
-    text = "".join(read(os.path.join(GAME, f)) for f in ("sdl.bot", "game.bot", "render.bot"))
+    text = "".join(read(os.path.join(GAME, f)) + "\n" for f in ("sdl.bot", "game.bot", "render.bot"))
     # Code only: a comment may name an SDL function the game does not call
     # (sdl.bot's SDL_Log).
     code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
@@ -188,10 +190,13 @@ def pointee(botlish):
 
 
 def main(argv):
-    if len(argv) != 3:
-        print("usage: abi-check.py BINDING SDL_INCLUDE WORK", file=sys.stderr)
+    global GAME
+    if len(argv) not in (3, 4):
+        print("usage: abi-check.py BINDING SDL_INCLUDE WORK [GAME]", file=sys.stderr)
         return 2
-    binding, include, work = argv
+    binding, include, work = argv[:3]
+    if len(argv) == 4:
+        GAME = argv[3]
     os.makedirs(work, exist_ok=True)
     decls = binding_decls(binding)
     names = game_names()

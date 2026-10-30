@@ -132,7 +132,13 @@ app=$(cd "$app" && pwd)
 : >"$app/.icy-tower-stage"
 mkdir -p "$app/native/macos"
 cp "$archive" "$app/native/macos/libSDL3.a"
-echo "== Application root: $app"
+# The package the game compiles against is the generated binding, file for
+# file, generated from the pinned commit: never a hand-written stand-in.
+diff -r "$binding/macos-aarch64/sdl3" "$app/.bot_modules/sdl3/sdl3" >/dev/null \
+    || fail "the staged package sdl3 is not the generated binding of $binding/macos-aarch64"
+pinned=$(sed -n 's/.*source {url [^ ]* tag [^ ]* commit \([0-9a-f]\{40\}\)}.*/\1/p' "$root/tools/c-bindgen/profiles/sdl3.tcl" | head -n 1)
+grep -qx "revision $pinned" "$binding/macos-aarch64/manifest.txt" || fail "the binding was not generated from the pinned SDL3 commit $pinned"
+echo "== Application root: $app (package sdl3: the generated macos-aarch64 binding of SDL3 $pinned)"
 
 # --- 5. the executable ------------------------------------------------------------------
 echo "== Compile and link: ${botlish[*]} -warnings error -native-startup main-thread -emit-native-executable main-macos.bot"
