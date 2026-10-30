@@ -31,10 +31,13 @@
 #   * tests/platform/native-status.tcl (the executable, object and C call
 #     probes, the target boundary).
 #
-# Each test file runs with a private -tmpdir. A mutant every detector
-# misses SURVIVES; one whose code this host does not compile differently
-# (another host's gate) is SKIPPED. The report lists each mutant and what
-# killed it; it exits 1 on a survivor or a mutant that no longer applies.
+# Each test file runs with a private -tmpdir. The unmutated tree runs the
+# detectors first, and must pass all of them: otherwise no mutant is judged
+# (a failure there is the tree's or the host's, and would pass for every
+# mutant's kill). A mutant every detector misses SURVIVES; one whose code
+# this host does not compile differently (another host's gate) is SKIPPED.
+# The report lists each mutant and what killed it; it exits 1 on a failed
+# baseline, a survivor or a mutant that no longer applies.
 # Portable to macOS (no GNU timeout, no /proc). The real checkout, its
 # native/target included, is never modified.
 
@@ -46,8 +49,8 @@ foreach {option value} $argv {
     dict set options $option $value
 }
 # This host's target, named as core::cabi names it (linux-x86_64,
-# linux-aarch64, macos-aarch64).
-set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : [string tolower $::tcl_platform(os)]}] - \
+# linux-aarch64, macos-aarch64, windows-x86_64: never Tcl's "windows nt").
+set host [string cat [expr {$::tcl_platform(os) eq "Darwin" ? "macos" : ($::tcl_platform(platform) eq "windows" ? "windows" : [string tolower $::tcl_platform(os)])}] - \
     [expr {$::tcl_platform(machine) in {arm64 aarch64} ? "aarch64" : ($::tcl_platform(machine) in {amd64 x86_64} ? "x86_64" : $::tcl_platform(machine))}]]
 
 # The mutants of mutants.txt, as {NAME DESCRIPTION HOSTS {FILE OLD NEW ...}}
@@ -164,6 +167,40 @@ proc testFailures {label output} {
     return "$label ([llength $names] failed: [join [lrange $names 0 5] {, }][expr {[llength $names] > 6 ? ", ..." : ""}])"
 }
 
+# What the detectors report against TREE (its native backend built): a
+# list of "LABEL (WHAT FAILED)", empty when every detector passed.
+proc detect {tree manifest timeout} {
+    set killers {}
+    foreach {label target filter} {rust {--bin botlish-native} aot rust-lib --lib {-- aotimage program}} {
+        lassign [run $timeout $tree cargo test --release --manifest-path $manifest -p botlish-native {*}$target {*}$filter] status output
+        if {$status != 0} {
+            set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
+            lappend killers "$label ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
+        }
+    }
+    foreach {label file match} {
+        native-executable.test native-executable.test *
+        argv.test argv.test argv-standalone-*
+        workload-2048.test workload-2048.test workload-2048-bench-executable
+        system-linker.test system-linker.test *
+        main-thread-startup.test main-thread-startup.test *
+    } {
+        set tmp [file tempdir botlish-native-aot-mutant-run]
+        lassign [run $timeout $tree tclsh9.0 [file join $tree tests $file] -tmpdir $tmp -match $match] status output
+        file delete -force $tmp
+        set failure [testFailures $label $output]
+        if {$failure ne ""} { lappend killers $failure }
+    }
+    foreach script {aot-facts.tcl native-status.tcl} {
+        lassign [run $timeout $tree tclsh9.0 [file join $tree tests platform $script]] status output
+        if {$status != 0} {
+            set failing [lmap {- n} [regexp -all -inline -line {^FAIL (\S+)} $output] {set n}]
+            lappend killers "$script ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
+        }
+    }
+    return $killers
+}
+
 set only [split [dict get $options -only] ,]
 set selected {}
 foreach {name description hosts edits} [readMutants [file join [file dirname [file normalize [info script]]] mutants.txt]] {
@@ -171,12 +208,13 @@ foreach {name description hosts edits} [readMutants [file join [file dirname [fi
     lappend selected $name $description $hosts $edits
 }
 
-# A private copy of the front end, the tests, the examples (the 2048
-# application) and the native backend, its native/target a real copy (each
-# mutant rebuilds it), following a linked target: a copied link would build
-# every mutant into another checkout.
+# A private copy of the front end, the tests, everything they read (the
+# examples' 2048 application, the census programs under audit/, the
+# service main.tcl loads) and the native backend, its native/target a real
+# copy (each mutant rebuilds it), following a linked target: a copied link
+# would build every mutant into another checkout.
 set tree [file tempdir botlish-native-aot-mutants]
-foreach dir {compiler compilerpedia core hir surface stdlib tests examples .cargo} {
+foreach dir {compiler compilerpedia core hir surface stdlib tests examples bench audit service lsp .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file copy [file join $root $dir] [file join $tree $dir]
 }
@@ -198,8 +236,26 @@ foreach entry [glob -directory $root -types f *.tcl] {
 set results {}
 set manifest [file join $tree native Cargo.toml]
 set timeout [dict get $options -timeout]
+# The unmutated tree first, when a selected mutant applies here: every
+# detector must pass on it, or a mutant's "kill" may be the tree's own
+# failure (a file the copy left out, a broken host), never the mutant's.
+set applicable [llength [lmap {name description hosts edits} $selected {
+    if {$hosts ne {} && $host ni $hosts} continue
+    set name
+}]]
+set baseline ok
 try {
-    foreach {name description hosts edits} $selected {
+    if {$applicable > 0} {
+        lassign [run $timeout $tree cargo build --release --manifest-path $manifest] status output
+        if {$status != 0} {
+            set baseline "not built: [lastLine $output]"
+        } elseif {[set failures [detect $tree $manifest $timeout]] ne {}} {
+            set baseline "failed:\n    [join $failures "\n    "]"
+        }
+        puts "BASELINE (the unmutated tree): $baseline"
+        flush stdout
+    }
+    foreach {name description hosts edits} [if {$baseline eq "ok"} {set selected} else {list}] {
         if {$hosts ne {} && $host ni $hosts} {
             lappend results [list $name $description SKIPPED ""]
             puts "SKIPPED $name: not compiled differently for $host"
@@ -241,34 +297,7 @@ try {
             eval $restore
             continue
         }
-        set killers {}
-        foreach {label target filter} {rust {--bin botlish-native} aot rust-lib --lib {-- aotimage program}} {
-            lassign [run $timeout $tree cargo test --release --manifest-path $manifest -p botlish-native {*}$target {*}$filter] status output
-            if {$status != 0} {
-                set failing [lmap {- n} [regexp -all -inline -line {^test (\S+) \.\.\. FAILED$} $output] {set n}]
-                lappend killers "$label ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
-            }
-        }
-        foreach {label file match} {
-            native-executable.test native-executable.test *
-            argv.test argv.test argv-standalone-*
-            workload-2048.test workload-2048.test workload-2048-bench-executable
-            system-linker.test system-linker.test *
-            main-thread-startup.test main-thread-startup.test *
-        } {
-            set tmp [file tempdir botlish-native-aot-mutant-run]
-            lassign [run $timeout $tree tclsh9.0 [file join $tree tests $file] -tmpdir $tmp -match $match] status output
-            file delete -force $tmp
-            set failure [testFailures $label $output]
-            if {$failure ne ""} { lappend killers $failure }
-        }
-        foreach script {aot-facts.tcl native-status.tcl} {
-            lassign [run $timeout $tree tclsh9.0 [file join $tree tests platform $script]] status output
-            if {$status != 0} {
-                set failing [lmap {- n} [regexp -all -inline -line {^FAIL (\S+)} $output] {set n}]
-                lappend killers "$script ([expr {$failing eq {} ? [lastLine $output] : [join [lrange $failing 0 5] {, }]}])"
-            }
-        }
+        set killers [detect $tree $manifest $timeout]
         set verdict [expr {$killers eq {} ? "SURVIVED" : "KILLED"}]
         lappend results [list $name $description $verdict $killers]
         puts "$verdict $name -- $description"
@@ -280,6 +309,10 @@ try {
     }
 } finally {
     file delete -force $tree
+}
+if {$baseline ne "ok"} {
+    puts "no mutant judged: the unmutated tree must pass every detector first"
+    exit 1
 }
 
 set survivors [lmap r $results {if {[lindex $r 2] ne "SURVIVED"} continue; lindex $r 0}]
