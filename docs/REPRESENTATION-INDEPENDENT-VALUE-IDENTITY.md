@@ -479,8 +479,9 @@ three ways the brief forbids without an existing defect:
    differently-elemented sets join to (`hir::types` lub), and is a type
    test's kind. A parameterized struct is `std::immutable_set::ImmutableSet[T]`
    (one canonical identity, no flat alias: STD-NAMESPACE.md), has no bare
-   form and no join of two applications. Every program naming the type --
-   20 test files, the byte module -- would change.
+   form and no join of two applications. Every program naming the type
+   would change: before this milestone, 23 Tcl test files, 8 golden
+   suites, 5 benchmark programs and `std::byte`.
 
 None of these is a defect of the set; each is a property of a *runtime*
 kind that the ordinary map deliberately does not have (its K is Hashable).
@@ -725,7 +726,93 @@ Notes on the families the brief names:
 
 ## Performance
 
-(Filled in below with the final run.)
+`bench/value-identity.tcl` (its header defines every row), on this
+container's x86-64 cores, the native backend (cranelift), best of five runs,
+each row a difference of two runs so the setup cancels; keys Int, String
+(`id_` and hex digits) and a struct `Point {x, y}`, each key id i holding
+the value i. Results: `audit/value-identity/results/time.tsv` and
+`instructions.tsv`.
+
+| operation (ns) | int 16 | int 1024 | int 65536 | str 16 | str 1024 | str 65536 | struct 16 | struct 1024 | struct 65536 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| freeze, per entry | 154.75 | 113.02 | 129.71 | 183.93 | 111.92 | 149.33 | 176.32 | 110.56 | 145.76 |
+| MutableMap build, per entry | 291.41 | 188.93 | 219.16 | 331.64 | 368.23 | 677.12 | 424.13 | 342.45 | 416.04 |
+| `at` hit | 44.49 | 51.67 | 115.95 | 50.11 | 63.57 | 292.19 | 153.71 | 150.11 | 323.63 |
+| `contains` miss | 59.88 | 68.21 | 84.78 | 44.73 | 64.89 | 102.41 | 131.32 | 134.18 | 158.97 |
+| MutableMap `at` hit | 63.66 | 71.26 | 140.82 | 71.77 | 83.06 | 366.83 | 157.70 | 172.93 | 376.43 |
+| MutableMap `contains` miss | 71.94 | 83.11 | 86.93 | 56.94 | 73.02 | 125.34 | 123.01 | 143.91 | 164.91 |
+| loop, per entry | 13.15 | 7.35 | 7.73 | 13.40 | 7.50 | 8.13 | 13.11 | 7.50 | 7.71 |
+| `==` equal, same order, per entry | 13.23 | 10.50 | 11.87 | 15.38 | 14.44 | 29.40 | 30.40 | 28.61 | 27.10 |
+| `==` equal, reversed, per entry | 66.04 | 70.31 | 87.48 | 71.26 | 72.28 | 158.88 | 209.95 | 221.65 | 251.56 |
+| `==` first association differs, per entry | 30.33 | 27.51 | 33.98 | 32.58 | 29.40 | 46.11 | 101.46 | 86.67 | 100.59 |
+| `==` last association differs, per entry | 64.48 | 66.91 | 94.51 | 69.74 | 73.46 | 150.86 | 219.10 | 215.19 | 250.36 |
+| `==` lengths differ, per comparison | 16.85 | 17.08 | 19.73 | 18.21 | 17.85 | 29.74 | 17.53 | 17.57 | 15.98 |
+| public hash, per entry | 24.56 | 17.79 | 20.93 | 20.84 | 18.84 | 22.22 | 54.98 | 56.10 | 58.42 |
+| table hash, per entry | 45.54 | 42.33 | 42.52 | 44.21 | 42.27 | 50.54 | 105.27 | 104.45 | 112.98 |
+| List `==`, per element | 5.40 | 4.57 | 4.60 | 9.60 | 8.34 | 20.03 | 24.03 | 22.02 | 23.07 |
+| ImmutableSet `==`, reversed, per member | 55.76 | 60.63 | 77.94 | 62.55 | 65.99 | 171.14 | 222.59 | 211.35 | 240.04 |
+| ImmutableSet hash, per member | 7.78 | 7.56 | 8.12 | 8.30 | 8.12 | 11.40 | 36.29 | 37.81 | 38.68 |
+
+Instructions per operation (callgrind, one run each: no machine noise),
+for the Int and String keys at 16 and 1024 entries:
+
+| operation (instructions) | int 16 | int 1024 | str 16 | str 1024 |
+|---|---:|---:|---:|---:|
+| freeze, per entry | 2253 | 1527 | 2206 | 1529 |
+| `at` hit | 779 | 838 | 835 | 898 |
+| `contains` miss | 1150 | 1039 | 831 | 853 |
+| MutableMap `at` hit | 973 | 1073 | 1090 | 1112 |
+| loop, per entry | 207 | 134 | 207 | 135 |
+| `==` equal, same order, per entry | 224 | 202 | 325 | 301 |
+| `==` equal, reversed, per entry | 1149 | 1147 | 1326 | 1291 |
+| `==` first association differs, per entry | 549 | 472 | 604 | 497 |
+| `==` last association differs, per entry | 1145 | 1141 | 1321 | 1292 |
+| public hash, per entry | 365 | 390 | 374 | 384 |
+| table hash, per entry | 748 | 772 | 806 | 812 |
+| List `==`, per element | 93 | 79 | 192 | 178 |
+| ImmutableSet `==`, reversed, per member | 1047 | 1063 | 1221 | 1211 |
+| ImmutableSet hash, per member | 136 | 150 | 145 | 143 |
+
+What the numbers say:
+
+* **Complexity is as designed.** Per-entry costs are flat from 16 to
+  65,536 entries for freeze, iteration, every kind of `==` and both hashes
+  (the rise at 65,536 entries, largest for String keys, is the memory
+  hierarchy's: the MutableMap's own build and lookups rise the same way);
+  lookups are flat per lookup. `==` of
+  maps of different lengths is O(1), about 17 ns at every size. Nothing
+  sorts, nothing is O(n log n), nothing is quadratic.
+* **Equality.** Two maps built alike match positionally: 200-300
+  instructions per entry, about 2.5 times a List `==` of the keys alone (a
+  map compares a key and a value per entry, through the identity's
+  dispatch). Reordered maps go through the hash buckets: about 1,150-1,300
+  instructions per entry, most of it two keyed SipHash folds per key (the
+  table hash alone is about 750-810 per entry). An inequality found at the
+  first association costs half of one found at the last: B's buckets are
+  built either way, A's probes stop at the first miss. ImmutableSet `==`
+  (now matched by the same buckets) costs the same as a map's per member.
+* **Hashing.** The public hash is about 370-390 instructions per entry
+  (an entry is hashed as a unit, its key and value as nested values), the
+  table hash about twice that (SipHash rounds); neither allocates or
+  depends on order. A set's hash (an XOR of member hashes, unchanged) is
+  cheaper per member: it hashes one value, not a pair.
+* **Lookups** in a frozen map are expected O(1) through the stored keyed
+  hashes and the frozen index -- about 780-900 instructions per hit, a
+  little cheaper than a MutableMap's (970-1,110). A miss costs about the
+  same.
+* **Freeze** is O(n): about 1,500 instructions per entry at 1,024 entries
+  (110-180 ns), cheaper than building the MutableMap it copies (190-680 ns
+  per entry). It hashes nothing (the stored hashes are copied) and makes 11
+  managed allocations per freeze whatever the size (22 for two at 16,
+  1,024 and 65,536 entries alike: a List is one block).
+* **Allocations.** None per lookup, per entry of a loop, per `==` (either
+  path) or per hash, in either fold: the native buckets are two Rust
+  vectors per comparison of more than eight unmatched entries, off the
+  managed heap.
+* **No hash caching.** A map's hash is recomputed per call, O(n); at about
+  20 ns per Int entry a 65,536-entry map hashes in about 1.4 ms. Caching it
+  would put a field in the value that equality must ignore and
+  serialization must recompute; nothing measured here needs it.
 
 ## Regression and CI
 
