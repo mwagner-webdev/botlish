@@ -413,9 +413,18 @@ try {
         foreach n [dict get $options -sizes] {
             foreach mode [dict get $options -modes] {
                 lassign [dict get $modes $mode] number unit
-                # Enough passes that the difference is well above a run's
-                # noise: about OPS entries (or lookups) in all.
-                set p [expr {$unit eq "lookup" ? $passes : max($passes, $m / $n)}]
+                # Enough passes that the measured work is well above the
+                # noise of the setup it is the difference from (building the
+                # maps compared costs a few hundred ns per entry): PASSES
+                # passes of OPS lookups; at least 10 PASSES passes of a
+                # per-entry operation, and 20 OPS entries in all; OPS of an
+                # O(1) comparison (at a large N its setup still dominates:
+                # the small sizes are its measurement).
+                switch -- $unit {
+                    lookup { set p $passes }
+                    entry { set p [expr {max(10 * $passes, (20 * $m) / $n)}] }
+                    default { set p $m }
+                }
                 lassign [timed $text $number $n $m 1] t1 sum
                 if {$unit eq "-"} {
                     row [list $kind $n $mode $m 1 [format %.1f $t1] - $sum]
