@@ -122,19 +122,28 @@ proc icymacos::detect {ctx name detector tree binding} {
             run [list python3 -I [file join [dict get $ctx root] audit icy-tower tools macos-session.py] run --exe $exe \
                 --probe $probe --worker [dict get $ctx worker] --helper [dict get $ctx helper] \
                 --reference [file join [dict get $ctx root] audit icy-tower trace-reference.txt] --out $results --only [join $cases ,]]
-            set recorded [goldentools::readFile [file join $results results.json]]
+            # Each case's class and its failing checks' texts, read as JSON.
+            lassign [run [list python3 -I -c {
+import json, sys
+cases = {c["name"]: c for c in json.load(open(sys.argv[1]))}
+for name in sys.argv[2:]:
+    c = cases.get(name)
+    if c is None:
+        print("case %s NONE" % name)
+        continue
+    print("case %s %s" % (name, c["class"]))
+    for check in c["checks"]:
+        if not check["ok"]:
+            print("  " + check["text"].replace("\n", " "))
+} [file join $results results.json] {*}$cases]] status summary
             set failed {}
             set blocked {}
-            foreach c $cases {
-                # The case's record (results.json is a list of {"name": ..., "class": ..., "checks": [...]}).
-                if {![regexp "\"name\": \"$c\", \"class\": \"(\[A-Z-\]+)\"" $recorded -> class]} {
-                    lappend failed "$c: no result"
-                    continue
-                }
+            foreach line [split $summary \n] {
+                if {![regexp {^case (\S+) (\S+)$} $line -> c class]} continue
                 if {$class eq "ENVIRONMENT-BLOCKED"} { lappend blocked $c }
-                if {$class eq "FAILED"} { lappend failed $c }
+                if {$class in {FAILED NONE}} { lappend failed $c }
             }
-            set texts [join [regexp -all -inline {"ok": false, "text": "[^"]*"} $recorded] \n]
+            set texts [join [lsearch -all -inline [split $summary \n] "  *"] \n]
             if {[llength $failed]} { return [list fail "FAILED: [join $failed {, }]\n$texts"] }
             if {[llength $blocked]} { return [list blocked "ENVIRONMENT-BLOCKED: [join $blocked {, }]"] }
             return [list pass ""]

@@ -180,6 +180,13 @@ jobs:
           "$RUNNER_TEMP/stripped" --headless --frames 60 --seed 7
           echo "size: $(wc -c <"$EXE" | tr -d ' ') bytes as linked, $(wc -c <"$RUNNER_TEMP/stripped" | tr -d ' ') stripped" | tee out/logs/size.txt
           nm "$EXE" | grep -c ' T _SDL_' | sed 's/^/SDL functions defined in the executable: /'
+          # The runtime's own account of the startup: the policy word the
+          # program record holds, the thread, the stack and its guard.
+          BOTLISH_NATIVE_STARTUP_REPORT="$RUNNER_TEMP/startup-report" "$EXE" --headless --frames 1 --seed 7
+          tail -n 3 "$RUNNER_TEMP/startup-report" | tee out/logs/startup-report.txt
+          grep -qx 'startup main-thread' out/logs/startup-report.txt
+          grep -qx 'process-main-thread 1' out/logs/startup-report.txt
+          grep -q '^stack 536870912 [1-9]' out/logs/startup-report.txt
 
       # The application compilation with nothing but Botlish.app: the
       # checkout, Cargo and rustup moved away (and put back however it

@@ -34,6 +34,13 @@ wrote; the SDL call trace of a played run is identical). Scancodes are
 Ints, since an SDL enumeration constant's C type is the target's. The text
 below describes the slice as it was built.
 
+**Since ICY-TOWER-MACOS-MILESTONE-1.md**, the game also builds for macOS
+AArch64 as a Cocoa application: `main-macos.bot` installs `std::darwin::io`
+and imports `macos_link.bot` (the pinned SDL3 as a static archive inside
+the application and the frameworks its sdl3.pc names), and
+`examples/games/icy-tower/build-macos.sh` builds it with Botlish.app and
+`-native-startup main-thread`; every other module is the same file.
+
 ![Three frames of the X11 window under Xvfb: the start, floor 26, a restarted game](../audit/icy-tower/screenshots/xvfb-x11.png)
 
 *Three frames of the executable in a real X11 window (Xvfb, SDL's x11

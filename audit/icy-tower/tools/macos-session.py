@@ -747,6 +747,27 @@ def case_keyboard(s):
     if start is not None:
         c, f = check_static(start, oracle.World(7, 1).platforms, 0.0, None, player_x=227)
         checks += [(ok, "the start: " + t) for ok, t in c]
+    # Which of Quartz's paths delivers the keys: the HID event tap (as a
+    # keyboard's events enter), else the session's, else posting to the
+    # game's process. The first that moves the player is kept for every case.
+    tried = []
+    for mode in ("hid", "session", "pid"):
+        before, _ = g.frame("calibrate-%s-before" % mode)
+        g.key("right", "down", mode)
+        time.sleep(0.3)
+        g.key("right", "up", mode)
+        after, _ = g.frame("calibrate-%s-after" % mode)
+        ok, t = moved_check(before.player() if before else None, after.player() if after else None, 15, 1)
+        tried.append({"mode": mode, "moved": ok, "how": t})
+        if ok:
+            s.key_mode = mode
+            break
+    facts["key_paths"] = tried
+    facts["key_mode"] = s.key_mode if any(t["moved"] for t in tried) else None
+    if facts["key_mode"]:
+        g.hold("left", 0.3)
+        time.sleep(0.6)
+        start, _ = g.frame("start-again")
     positions = {"start": start.player() if start else None}
 
     def step(key, seconds, label):

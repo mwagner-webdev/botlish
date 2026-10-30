@@ -3898,8 +3898,9 @@ empty vector, List length facts, ...): they are its evidence
 ## Workloads (examples/games/icy-tower)
 
 `examples/games/icy-tower/` is the real-time workload (ICY-TOWER-VERTICAL-
-SLICE-1.md): a playable Icy Tower-style game on Linux x86-64 and Windows
-x86-64 (ICY-TOWER-WINDOWS.md) over the generated SDL3 binding. Keep its
+SLICE-1.md): a playable Icy Tower-style game on Linux x86-64, Windows
+x86-64 (ICY-TOWER-WINDOWS.md) and macOS AArch64
+(ICY-TOWER-MACOS-MILESTONE-1.md) over the generated SDL3 binding. Keep its
 layering:
 
 * `tower.bot` (the rules: a frame is `step(world, input, dt)`), `hud.bot`
@@ -3909,9 +3910,10 @@ layering:
 * `game.bot` is the program (the frame loop, play, failure reports,
   `main`), one source for every platform; an entry program only installs
   the contexts -- `main.bot` std::linux::io's, `main-windows.bot`
-  std::windows::io's, both `sdl::create()` -- and runs `game::main`. Keep
-  everything else out of the entries, and every platform name out of the
-  other modules.
+  std::windows::io's, `main-macos.bot` std::darwin::io's (and imports
+  `macos_link`, the macOS executable's link plan), each `sdl::create()` --
+  and runs `game::main`. Keep everything else out of the entries, and every
+  platform name out of the other modules.
 * `sdl.bot` is the one module with raw authority: every function of it
   that makes a retaining C call or a native view or edit requires its own
   `Sdl` context, so `render.bot`, `game.bot` and the entries stay ordinary modules
@@ -3998,6 +4000,48 @@ in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
 release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
 build's signing dry run must keep passing: the executable must run with a
 signature appended.
+
+The macOS executable (`build-macos.sh`, ICY-TOWER-MACOS-MILESTONE-1.md: a
+Cocoa application on macOS AArch64, the pinned SDL3 linked into it as a
+static archive) is built and played only by the `icy-tower (macos arm64)`
+workflow (`.github/workflows/icy-tower-macos.yml`, every push to any
+branch): Botlish.app from the commit, the archive from
+`tests/platform/sdl3-static-macos.sh` (the recipe
+`tests/platform/link-plan-sdl3.sh` shares), the macos-aarch64 binding
+generated on the runner (none is committed), the tests' macOS section, the
+oracle and the graphical acceptance. Keep it so:
+
+* `main-macos.bot` installs `std::darwin::io`'s context and `sdl::Sdl` and
+  imports `macos_link` -- nothing else; the startup policy is the build's
+  (`-native-startup main-thread` in build-macos.sh), never the source's.
+* `macos_link.bot` declares the staged archive (`static at
+  "native/macos/libSDL3.a"`, relative to the application root) and exactly
+  the frameworks and libraries SDL3's sdl3.pc names, in its order:
+  build-macos.sh refuses any other list. When SDL3's metadata changes, take
+  its list (`sdl3-static-macos.sh link-interface PREFIX`); never add, drop or
+  weaken an entry by hand, and never edit the generated binding to make it
+  static.
+* The graphical acceptance (`audit/icy-tower/tools/macos-session.py` with
+  `macos-input.m`) reads the game from outside: the window system's
+  windows, captures checked against the oracle's geometry, keys through
+  Quartz's event taps, the close button through Accessibility (else
+  Command-W). Never push SDL events, hook the game or add an option to it
+  for a test, and never count an ENVIRONMENT-BLOCKED case as passed.
+* The SDL call trace of a static SDL3 is a link-time wrapper
+  (`audit/icy-tower/tools/traced-archive.sh`, sdltrace.c's
+  `SDLTRACE_LINKED`), compared with the Linux executable's reference,
+  `audit/icy-tower/trace-reference.txt`: rewrite it
+  (`audit/icy-tower/tools/trace-reference.sh EXE write`, on Linux) in the
+  same change as anything that changes what the game draws or calls
+  (`workload-icy-tower-trace-reference` fails otherwise).
+
+If you change the game, an entry, `macos_link.bot`, `build-macos.sh`, the
+SDL3 profile, `sdl3-static-macos.sh` or the macOS harness, push and read
+the workflow; for the port's mutants push with `[ci-icy-tower-mutants]` in
+the head commit's message (`audit/icy-tower/mutate.tcl -macos 1`: every
+mutant in `audit/icy-tower/macos-mutants.txt` must still apply and be killed
+by the detector its `??` line names; update a mutant's text when you change
+the code it mutates, keeping it a mutant of the same rule).
 
 ## Application modules, native program output, the recursion limit
 
