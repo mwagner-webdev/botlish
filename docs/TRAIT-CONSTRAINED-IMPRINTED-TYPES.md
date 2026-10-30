@@ -603,21 +603,21 @@ of a struct, never as generic function parameters.
 
 ## Tests
 
-* `tests/trait-constrained-types.test`, 74 tests: syntax, declarations,
+* `tests/trait-constrained-types.test`, 77 tests: syntax, declarations,
   applications, fields and construction, imprinting (nested functions'
   enclosing variables included), constraint propagation,
   ordinary traits, runtime representation, specialization and the probe,
   HIR text, interchange, the cache, isolation, static compile, vocabulary.
   Every behavioral case runs on interp, compile, cranelift-generic and
   cranelift.
-* `tests/golden/trait-constrained-types.bot`, 79 golden tests porting the
+* `tests/golden/trait-constrained-types.bot`, 80 golden tests porting the
   source-observable ones (manifest fragment
   `audit/golden/migration/fragments/trait-constrained-types.tsv`; census
   `audit/golden/migration/census/trait-constrained-types.tsv`). Its three
   rounds of static decisions show no misprediction; a reproducer of its
   diagnostics gives the same outcomes under the batched and the sequential
-  scheduler. `audit/golden/tools/perturb.tcl` fails every test (79 inverted,
-  78 altered, one not alterable and covered by inversion).
+  scheduler. `audit/golden/tools/perturb.tcl` fails every test (80 inverted,
+  79 altered, one not alterable and covered by inversion).
 * Tests that pinned the unary grammar were updated: `List[A, A]`,
   `MutableArray[int, str]` and `MutableVector[int, str]` are now arity errors
   (`applied-type-malformed-comma-arity`, ported to types.bot; `mat-syn-4`;

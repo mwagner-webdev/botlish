@@ -586,6 +586,14 @@ fn register_imprint_tests():
                 g(Pair {first: "s", second: 1})
             pair(Box {value: 4})
     std::test::rejects_containing("tc-imprint-nested-enclosing-uses/pair-rejected", std::compiler::DiagnosticCode::Type, "argument for parameter \"p\" cannot be proven to satisfy Pair[T, int] (argument type: Pair[str, int])", nested_pair_bad)
+    fn nested_pair_conflict() errors std::compiler::CompilerError:
+        static compile:
+            fn pair(b: Box[T]) -> int:
+                fn g(p: Pair[T, U], q: Pair[T, U]) -> U:
+                    p.second
+                g(Pair {first: "s", second: 1}, Pair {first: 2, second: 3})
+            pair(Box {value: 4})
+    std::test::rejects_containing("tc-imprint-nested-enclosing-uses/pair-conflict", std::compiler::DiagnosticCode::Type, "argument for parameter \"p\" cannot be proven to satisfy Pair[T, int] (argument type: Pair[str, int])", nested_pair_conflict)
 
 fn register_constraint_tests():
     # tc-constraint-not-a-view: K stays K.
