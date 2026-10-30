@@ -539,3 +539,61 @@
 ====
     return $binding
 >>>>
+
+# --- nested functions: an enclosing function's variable is that function's
+
+@@ nested-enclosing-variable-own a nested function's declared variable named like an enclosing function's is its own again, bound at each of its calls (the conflation: g(Box {value: "s"}) accepted beside the enclosing b)
+## hir/imprint.tcl
+<<<<
+    set inherited {}
+    foreach name [dict keys [Inherited $hir $e]] {
+====
+    set inherited {}
+    foreach name {} {
+>>>>
+
+@@ nested-enclosing-bound-in-mixed-parameter an enclosing variable is bound at a nested function's call where a parameter holds it beside the nested function's own (Pair[T, U] binds T to the argument's)
+## hir/imprint.tcl
+<<<<
+        if {$name in $inherited} {
+            # An enclosing function's variable (BlockSignature): rigid
+====
+        if {0 && $name in $inherited} {
+            # An enclosing function's variable (BlockSignature): rigid
+>>>>
+
+@@ nested-enclosing-unestablished an enclosing variable used bare in a nested signature is "not established" (fn g(x: T) rejected inside a function that has T)
+## hir/resolve.tcl
+<<<<
+                [lmap param [dict get $node params] {lindex $param 0}] $inherited]
+====
+                [lmap param [dict get $node params] {lindex $param 0}]]
+>>>>
+
+@@ nested-enclosing-constraint-own an enclosing variable in a nested signature is constrained by the nested signature's own applications, not the enclosing one's (g(h: H[K]) inside outer(b: Box[K]) adds Hashable)
+## hir/resolve.tcl
+<<<<
+                lassign [hir::imprint::Inherit $constrainedParams $declared $enclosing] constrainedParams declared
+====
+>>>>
+
+@@ nested-enclosing-clone-binding-ignored in a specialization of the enclosing function, a nested signature keeps the enclosing variable instead of the binding's type
+## hir/resolve.tcl
+<<<<
+                set constrainedParams [lmap t $constrainedParams {
+                    if {$t eq {}} { set t } else { hir::imprint::BodyType $ctx $t }
+                }]
+                if {$declared ne {}} {
+                    set declared [hir::imprint::BodyType $ctx $declared]
+                }
+====
+>>>>
+
+@@ read-nested-constraints-own HIR text reading constrains a nested function's enclosing variable by the nested signature's own applications (the enclosing constraint lost)
+## hir/read.tcl
+<<<<
+    InheritSignatures hir
+    CanonicalBlockTypes hir
+====
+    CanonicalBlockTypes hir
+>>>>

@@ -1795,31 +1795,64 @@ proc hir::read::CanonicalBlockTypes {hirVar} {
     dict set hir typeIds $typeIds
 }
 
+# Gives the enclosing functions' variables a nested function's signature
+# names their constraints (hir::imprint::Inherit), as resolution does:
+# Constrain derived the signature's own, which are not theirs. Enclosing
+# blocks are visited first, so each one's signature is final when the
+# blocks inside it read it (hir::imprint::Inherited).
+proc hir::read::InheritSignatures {hirVar} {
+    upvar 1 $hirVar hir
+    if {[string first imprint [dict get $hir types]] < 0} {
+        return
+    }
+    foreach e [hir::walk $hir] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] ne "block" || ![dict exists $node declaredParamTypes]} {
+            continue
+        }
+        set params [dict get $node declaredParamTypes]
+        set declared [dict getdef $node declaredResult {}]
+        if {[string first imprint $params$declared] < 0} {
+            continue
+        }
+        lassign [hir::imprint::Inherit $params $declared [hir::imprint::Inherited $hir $e]] params declared
+        SetField hir $e declaredParamTypes $params
+        SetField hir $e declaredResult $declared
+    }
+}
+
 # Gives every type in the body of each block whose signature constrains an
 # imprint variable that variable's constraints (TRAIT-CONSTRAINED-IMPRINTED-
 # TYPES.md): HIR text prints a variable by its name, as a source message
 # does, and the constraints are the signature's (read back by Constrain), so
-# a read HIR's types are the built one's. An enclosing block is visited
-# before the blocks inside it, so a nested function's own variable of the
-# same name is its own again.
+# a read HIR's types are the built one's. A block's own variables are no
+# enclosing function's (hir::imprint::BlockSignature), so an enclosing
+# block's variable is constrained in the blocks inside it too.
 proc hir::read::ConstrainBodies {hirVar} {
     upvar 1 $hirVar hir
     if {[string first imprint [dict get $hir types]] < 0} {
         return
     }
     # An exact block type's result is its own block's, constrained as that
-    # block's signature constrains it, wherever the type is.
+    # block's signature constrains it (an enclosing function's variable as
+    # that function's), wherever the type is.
     dict for {x node} [dict get $hir exprs] {
         set t [hir::typeOf $hir $x]
         if {![hir::types::IsExactBlock $t] || [string first imprint [lindex $t 3]] < 0
                 || ![dict exists $hir exprs [lindex $t 1]]} {
             continue
         }
+        set constraints [hir::imprint::Inherited $hir [lindex $t 1]]
         set sig [hir::imprint::BlockSignature $hir [lindex $t 1]]
-        if {$sig eq ""} {
+        if {$sig ne ""} {
+            dict for {name traits} [hir::imprint::ConstraintsOf $sig] {
+                dict set constraints $name $traits
+            }
+        }
+        if {$constraints eq {}} {
             continue
         }
-        set constrained [lreplace $t 3 3 [hir::imprint::ConstrainVariables [lindex $t 3] [hir::imprint::ConstraintsOf $sig]]]
+        set constrained [lreplace $t 3 3 [hir::imprint::ConstrainVariables [lindex $t 3] $constraints]]
         if {$constrained ne $t} {
             dict set hir exprs $x type [hir::types::intern hir $constrained]
         }
@@ -1857,6 +1890,7 @@ proc hir::read::ConstrainBodies {hirVar} {
 
 proc hir::read::Finish {hirVar} {
     upvar 1 $hirVar hir
+    InheritSignatures hir
     CanonicalBlockTypes hir
     ConstrainBodies hir
     foreach e [hir::walk $hir] {

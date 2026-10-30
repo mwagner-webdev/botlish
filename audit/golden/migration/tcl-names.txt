@@ -8120,6 +8120,8 @@ tests/trait-constrained-types.test tc-imprint-rigid pass
 tests/trait-constrained-types.test tc-imprint-not-manufactured pass
 tests/trait-constrained-types.test tc-result-constraint pass
 tests/trait-constrained-types.test tc-diagnostic-order pass
+tests/trait-constrained-types.test tc-imprint-nested-enclosing-variable pass
+tests/trait-constrained-types.test tc-imprint-nested-enclosing-uses pass
 tests/trait-constrained-types.test tc-constraint-derived pass
 tests/trait-constrained-types.test tc-constraint-not-a-view pass
 tests/trait-constrained-types.test tc-constraint-hash-total pass
@@ -8128,6 +8130,7 @@ tests/trait-constrained-types.test tc-constraint-table-hash pass
 tests/trait-constrained-types.test tc-constraint-values pass
 tests/trait-constrained-types.test tc-constraint-method-operation pass
 tests/trait-constrained-types.test tc-constraint-composite pass
+tests/trait-constrained-types.test tc-constraint-nested-enclosing pass
 tests/trait-constrained-types.test tc-constraint-forgetting pass
 tests/trait-constrained-types.test tc-constraint-any pass
 tests/trait-constrained-types.test tc-constraint-strengthening pass
@@ -8142,11 +8145,13 @@ tests/trait-constrained-types.test tc-ordinary-trait-view-into-slot pass
 tests/trait-constrained-types.test tc-ordinary-applied-witness pass
 tests/trait-constrained-types.test tc-ordinary-polymorphic-recursion pass
 tests/trait-constrained-types.test tc-ordinary-nested-function pass
+tests/trait-constrained-types.test tc-ordinary-nested-enclosing-operation pass
 tests/trait-constrained-types.test tc-runtime-shared pass
 tests/trait-constrained-types.test tc-runtime-no-checks pass
 tests/trait-constrained-types.test tc-specialize-instances pass
 tests/trait-constrained-types.test tc-typed-storage-probe pass
 tests/trait-constrained-types.test tc-hir-text pass
+tests/trait-constrained-types.test tc-hir-text-nested pass
 tests/trait-constrained-types.test tc-interchange pass
 tests/trait-constrained-types.test tc-interchange-fresh-process pass
 tests/trait-constrained-types.test tc-cache pass

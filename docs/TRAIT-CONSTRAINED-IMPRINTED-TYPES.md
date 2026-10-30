@@ -253,6 +253,17 @@ called as `empty()` is IMPRINT, as before; `empty[str]()` is accepted and
 `empty[Fn{...}]()` is TRAIT-NOT-SATISFIED -- a trait failure of the explicit
 imprint, not an imprint failure (`tc-imprint-not-manufactured`).
 
+**A nested function's enclosing variable is the enclosing function's.** A
+nested signature is written in the enclosing body, so a name of the
+enclosing function's variable there is that variable (C-ABI-TYPES.md,
+"Imprinting"): rigid, never bound at the nested function's calls, every
+argument held to it. In `fn outer(b: Box[T])`, a nested `fn g(c: Box[T])`
+takes `b` and rejects `g(Box {value: "s"})` (TYPE), where it once bound
+its own T to str while `b` kept outer's -- an accepted program that failed
+at run time (`tc-imprint-nested-enclosing-variable`). A variable the
+enclosing functions do not have is the nested function's own, bound at
+each call as before (`tc-imprint-nested-enclosing-uses`).
+
 ## Constraint propagation
 
 At resolution, every function's declared parameter and result types are
@@ -281,6 +292,14 @@ in `fn get(m: Map[K, V], key: K) -> V`, every occurrence of K becomes
   `List[K]` returns a K that is still Hashable (`tc-constraint-strengthening`).
 * **Forgetting:** an implementation's assumptions never become part of its
   contract (`tc-constraint-forgetting`, above).
+* **Nested signatures:** an enclosing function's variable in a nested
+  signature carries exactly the enclosing signature's constraints
+  (`hir::imprint::Inherit`): K of `outer(h: H[K])` is Hashable in a nested
+  `g(x: K)`, and a nested signature adds none -- `g(h: H[K])` inside
+  `outer(b: Box[K])` is TRAIT-NOT-SATISFIED, as a construction in the body
+  would be (`tc-constraint-nested-enclosing`). HIR text prints the variable
+  by name and reading derives the constraints the same way
+  (`tc-hir-text-nested`).
 * `any` never satisfies a constraint because some of its values might:
   `H {key: x}` of an untyped `x` is TRAIT-NOT-SATISFIED
   (`tc-constraint-any`).
@@ -415,7 +434,11 @@ Specializations per function are bounded all the same (64,
 trait-polymorphic function, such a function is top-level only: a nested one
 is TRAIT-NESTED-POLYMORPHIC (`tc-ordinary-nested-function`; its
 specializations would have to be made per activation of the enclosing
-function).
+function). A nested function that applies the operation to a value of an
+*enclosing* function's constrained variable applies it to that function's
+variable: the enclosing function is the one specialized per binding, each
+specialization with its own nested function, the nested signature
+imprinted with the binding (`tc-ordinary-nested-enclosing-operation`).
 
 ## Hashable integration
 
@@ -574,20 +597,21 @@ of a struct, never as generic function parameters.
 
 ## Tests
 
-* `tests/trait-constrained-types.test`, 69 tests: syntax, declarations,
-  applications, fields and construction, imprinting, constraint propagation,
+* `tests/trait-constrained-types.test`, 74 tests: syntax, declarations,
+  applications, fields and construction, imprinting (nested functions'
+  enclosing variables included), constraint propagation,
   ordinary traits, runtime representation, specialization and the probe,
   HIR text, interchange, the cache, isolation, static compile, vocabulary.
   Every behavioral case runs on interp, compile, cranelift-generic and
   cranelift.
-* `tests/golden/trait-constrained-types.bot`, 67 golden tests porting the
+* `tests/golden/trait-constrained-types.bot`, 79 golden tests porting the
   source-observable ones (manifest fragment
   `audit/golden/migration/fragments/trait-constrained-types.tsv`; census
   `audit/golden/migration/census/trait-constrained-types.tsv`). Its three
   rounds of static decisions show no misprediction; a reproducer of its
   diagnostics gives the same outcomes under the batched and the sequential
-  scheduler. `audit/golden/tools/perturb.tcl` fails every test (65 inverted,
-  64 altered, one not alterable and covered by inversion).
+  scheduler. `audit/golden/tools/perturb.tcl` fails every test (79 inverted,
+  78 altered, one not alterable and covered by inversion).
 * Tests that pinned the unary grammar were updated: `List[A, A]`,
   `MutableArray[int, str]` and `MutableVector[int, str]` are now arity errors
   (`applied-type-malformed-comma-arity`, ported to types.bot; `mat-syn-4`;

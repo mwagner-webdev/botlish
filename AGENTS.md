@@ -2824,7 +2824,13 @@ constraints are a struct slot's, which a signature's applications carry:
 Parameterized structs and constrained slots, above), or specialization
 keyed by a variable (the trait monomorphization's specializations per
 binding of a source-trait-constrained variable are a trait operation's
-witness selection, not imprinting's).
+witness selection, not imprinting's). A nested function's signature names
+an enclosing function's variable as that variable: rigid there, never bound
+at the nested function's calls, constrained as the enclosing signature
+constrains it (`hir::imprint::BlockSignature`'s own variables exclude
+`Inherited`; `Inherit` at resolution and in hir/read.tcl). Variables are
+identified by name only, so never let a nested function bind a variable of
+an enclosing one's name.
 
 If you change core/cabi.tcl, hir/cabi.tcl, hir/imprint.tcl, the `cptr`,
 `cfnptr` or `imprint` cases of hir/types.tcl, how the scalars are declared,

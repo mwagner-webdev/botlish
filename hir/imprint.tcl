@@ -46,6 +46,20 @@
 # binding that is affine in a value position is rejected; in a pointee
 # position (std::ffi::c::Ptr[T]) no value of T exists and any pointee is fine.
 #
+# A nested function's signature is written in the bodies of the functions
+# it is declared in, and a type written there that names one of their
+# variables is theirs (EnclosingVariables): so is a name in the nested
+# signature. Only the variables no enclosing function has are its own,
+# bound at its calls; an enclosing one is rigid there as in the enclosing
+# body (constrained as the enclosing signature constrains it, Inherit),
+# never bound at a call of the nested function, and the arguments are held
+# to it (BlockSignature, Bind):
+#
+#   fn outer(b: Box[T]) -> T:
+#       fn g(c: Box[T]) -> T:      outer's T: g has no variable of its own
+#           c.value
+#       g(b)                       accepted; g(Box {value: "s"}) is not
+#
 # An imprinted callable is not a value: a reference to one is only the callee
 # of a call (a function value has no call site to imprint at).
 
@@ -136,9 +150,11 @@ proc hir::imprint::VariablesOf {params result} {
 
 # The problems of a declared signature: a list of {INDEX NAME} for each
 # parameter INDEX whose type uses imprint variable NAME that no earlier
-# parameter (nor it itself, inside an applied type) establishes.
-proc hir::imprint::Unestablished {params} {
-    set established {}
+# parameter (nor it itself, inside an applied type) establishes. INHERITED
+# are the variables of the functions it is declared in (Inherited): each is
+# known there, as their own signatures establish it.
+proc hir::imprint::Unestablished {params {inherited {}}} {
+    set established $inherited
     set problems {}
     set index 0
     foreach type $params {
@@ -168,10 +184,10 @@ proc hir::imprint::Unestablished {params} {
 # was (the message says both readings). Returns the
 # parameter types with each such parameter's declaration dropped ({}), so no
 # analysis sees a variable no call can bind. NAMES are the parameters' source
-# names.
-proc hir::imprint::CheckSignature {hirVar e params names} {
+# names; INHERITED as Unestablished's.
+proc hir::imprint::CheckSignature {hirVar e params names {inherited {}}} {
     upvar 1 $hirVar hir
-    foreach problem [Unestablished $params] {
+    foreach problem [Unestablished $params $inherited] {
         lassign $problem index name
         hir::Diagnose hir TYPE [format \
             {unknown or invalid type for parameter "%s": no type named %s is visible here, and as an imprint variable %s is not established -- a parameter whose type is %s itself (or holds it in a Fn type) cannot say what %s is; an earlier parameter must hold it in an applied type (List[%s], MutableArray[%s], std::ffi::c::Ptr[%s], ...), or it may occur in the result only, to be imprinted at each call (f[TYPE](...))} \
@@ -198,7 +214,12 @@ proc hir::imprint::Signature {hir calleeType} {
     return ""
 }
 
-# The imprint signature of block E (its declared types), or "".
+# The imprint signature of block E (its declared types), or "": its own
+# variables, the ones no function it is declared in has (Inherited). The
+# enclosing functions' variables it names are listed as `inherited`: rigid
+# in it, never bound at its calls (Bind). A nested function whose every
+# variable is an enclosing one has no imprint signature: it is an ordinary
+# function of rigid types.
 proc hir::imprint::BlockSignature {hir e} {
     set node [dict get $hir exprs $e]
     if {![dict exists $node declaredParamTypes]} {
@@ -214,13 +235,95 @@ proc hir::imprint::BlockSignature {hir e} {
     if {$vars eq ""} {
         return ""
     }
-    return [dict create vars $vars params $params result $result]
+    set inherited {}
+    foreach name [dict keys [Inherited $hir $e]] {
+        if {$name in $vars} {
+            lappend inherited $name
+        }
+    }
+    if {$inherited eq {}} {
+        return [dict create vars $vars params $params result $result]
+    }
+    set vars [lmap name $vars {if {$name in $inherited} continue; set name}]
+    if {$vars eq ""} {
+        return ""
+    }
+    return [dict create vars $vars params $params result $result inherited $inherited]
+}
+
+# The function blocks whose bodies block E is declared in, innermost first:
+# the invocation of the scope E is written in (hir/resolve.tcl's scopes),
+# then that function's, and so on.
+proc hir::imprint::EnclosingFunctions {hir e} {
+    set result {}
+    set s [dict getdef $hir exprs $e bodyScope ""]
+    while {$s ne "" && [dict exists $hir scopes $s]} {
+        set parent [dict get $hir scopes $s parent]
+        if {$parent eq ""} {
+            break
+        }
+        set f [dict get $hir scopes $parent invocation]
+        if {$f eq "" || ![dict exists $hir exprs $f]} {
+            break
+        }
+        lappend result $f
+        set s [dict getdef $hir exprs $f bodyScope ""]
+    }
+    return $result
+}
+
+# {NAME {TRAIT ...} ...}: every imprint variable of the functions block E is
+# declared in (EnclosingFunctions: the variables of their declared types),
+# constrained as their signatures constrain it ({} for none). A name of one
+# written in E's own signature is that variable (Inherit): the variables a
+# body's types name are its function's (EnclosingVariables), and E's
+# signature is written in those bodies.
+proc hir::imprint::Inherited {hir e} {
+    set result [dict create]
+    foreach f [EnclosingFunctions $hir $e] {
+        set node [dict get $hir exprs $f]
+        set params [dict getdef $node declaredParamTypes {}]
+        set declared [dict getdef $node declaredResult {}]
+        if {[string first imprint $params$declared] < 0} {
+            continue
+        }
+        set constraints [ConstraintsOf [dict create params $params result $declared]]
+        foreach name [VariablesOf $params $declared] {
+            if {![dict exists $result $name]} {
+                dict set result $name [dict getdef $constraints $name {}]
+            }
+        }
+    }
+    return $result
+}
+
+# {PARAMS RESULT}: a nested function's declared types PARAMS ("" for an
+# untyped parameter) and RESULT ("" for none) with each variable of the
+# functions it is declared in -- ENCLOSING, variable -> {TRAIT ...}, every
+# one ({} for an unconstrained one) -- exactly the enclosing function's,
+# constrained as that function's signature constrains it, whatever this
+# signature's own applications would give it (Constrain): a body never adds
+# a constraint to its function's contract, so an application here that
+# needs one is invalid (TRAIT-NOT-SATISFIED, hir::structs::
+# verifyApplications).
+proc hir::imprint::Inherit {params result enclosing} {
+    if {$enclosing eq {} || [string first imprint $params$result] < 0} {
+        return [list $params $result]
+    }
+    set params [lmap t $params {
+        if {$t eq ""} { set t } else { ConstrainVariables $t $enclosing }
+    }]
+    if {$result ne ""} {
+        set result [ConstrainVariables $result $enclosing]
+    }
+    return [list $params $result]
 }
 
 # The imprint variables of the functions whose bodies resolution context CTX
 # is in (hir/resolve.tcl's `blocks`, outermost first): the names a call's
 # explicit imprint there may forward (`fn mynull() -> Ptr[T]:
-# std::ffi::c::null[T]()`), each the rigid variable of its function.
+# std::ffi::c::null[T]()`), each the rigid variable of its function -- in
+# a nested function's signature too (Inherited).
 proc hir::imprint::EnclosingVariables {hir ctx} {
     set vars {}
     if {![dict exists $ctx blocks]} {
@@ -285,9 +388,12 @@ proc hir::imprint::Positions {sig name} {
 # Binds signature SIG's variables for a call with argument types ARGTYPES
 # and explicit imprints EXPLICIT (resolved types; "" for none, a list
 # otherwise). CALLEE names the callee for messages. Returns {ok 1 binding
-# {T TYPE ...}} or {ok 0 message TEXT}.
+# {T TYPE ...}} or {ok 0 message TEXT}. An enclosing function's variable
+# the signature names (its `inherited`, BlockSignature) is no variable of
+# the call: it binds to nothing, and the arguments are held to it.
 proc hir::imprint::Bind {sig argTypes explicit callee} {
     set vars [dict get $sig vars]
+    set inherited [dict getdef $sig inherited {}]
     set binding [dict create]
     set mismatches {}
     if {$explicit ne ""} {
@@ -309,7 +415,13 @@ proc hir::imprint::Bind {sig argTypes explicit callee} {
                 # exposed to a foreign pointer parameter, hir/borrow.tcl.)
                 continue
             }
-            set problem [Match $param $argType binding $index]
+            if {$inherited ne {} && [lmap o [Occurrences $param] {
+                    if {[lindex $o 0] in $inherited} continue; set o}] eq {}} {
+                # (Every variable it names is an enclosing function's: it
+                # establishes nothing.)
+                continue
+            }
+            set problem [Match $param $argType binding $index $inherited]
             if {$problem ne ""} {
                 return [dict create ok 0 message "$callee: $problem"]
             }
@@ -420,8 +532,9 @@ proc hir::imprint::BindingProblem {sig name type} {
 
 # Establishes the variables of declared type PARAM from argument type ARG
 # into the binding in BINDINGVAR; returns "" or why argument INDEX does not
-# have PARAM's form.
-proc hir::imprint::Match {param arg bindingVar index} {
+# have PARAM's form. INHERITED are enclosing functions' variables PARAM may
+# name (Bind): rigid, established by nothing.
+proc hir::imprint::Match {param arg bindingVar index {inherited {}}} {
     upvar 1 $bindingVar binding
     # A List length is no part of a form a variable is established from: a
     # refined List[T]{length: N} parameter has List[T]'s form, and a refined
@@ -449,7 +562,7 @@ proc hir::imprint::Match {param arg bindingVar index} {
             } else {
                 return [FormMismatch $param $arg $index]
             }
-            return [MatchInner [lindex $param 1] $elem binding $index]
+            return [MatchInner [lindex $param 1] $elem binding $index $inherited]
         }
         nstruct {
             if {![hir::types::IsAppliedStruct $param]} {
@@ -469,7 +582,7 @@ proc hir::imprint::Match {param arg bindingVar index} {
                 return [FormMismatch $param $arg $index]
             }
             foreach p [lindex $param 2] a $args {
-                set problem [MatchInner $p $a binding $index]
+                set problem [MatchInner $p $a binding $index $inherited]
                 if {$problem ne ""} {
                     return $problem
                 }
@@ -478,12 +591,12 @@ proc hir::imprint::Match {param arg bindingVar index} {
         }
         cptr {
             if {$arg eq "never"} {
-                return [MatchInner [lindex $param 1] never binding $index]
+                return [MatchInner [lindex $param 1] never binding $index $inherited]
             }
             if {![hir::types::IsCPtr $arg]} {
                 return [FormMismatch $param $arg $index]
             }
-            return [MatchInner [lindex $param 1] [lindex $arg 1] binding $index]
+            return [MatchInner [lindex $param 1] [lindex $arg 1] binding $index $inherited]
         }
         cfnptr {
             if {$arg eq "never"} {
@@ -495,32 +608,37 @@ proc hir::imprint::Match {param arg bindingVar index} {
             set pf [lindex $param 1]
             set af [lindex $arg 1]
             if {[hir::types::IsImprint $pf]} {
-                return [MatchInner $pf $af binding $index]
+                return [MatchInner $pf $af binding $index $inherited]
             }
             if {[llength [hir::types::FnArgs $pf]] != [llength [hir::types::FnArgs $af]]} {
                 return [FormMismatch $param $arg $index]
             }
             foreach p [hir::types::FnArgs $pf] a [hir::types::FnArgs $af] {
-                set problem [MatchInner $p $a binding $index]
+                set problem [MatchInner $p $a binding $index $inherited]
                 if {$problem ne ""} {
                     return $problem
                 }
             }
-            return [MatchInner [hir::types::FnReturn $pf] [hir::types::FnReturn $af] binding $index]
+            return [MatchInner [hir::types::FnReturn $pf] [hir::types::FnReturn $af] binding $index $inherited]
         }
     }
     return ""
 }
 
 # Match at an establishing position: PARAM inside an applied type.
-proc hir::imprint::MatchInner {param arg bindingVar index} {
+proc hir::imprint::MatchInner {param arg bindingVar index {inherited {}}} {
     upvar 1 $bindingVar binding
     if {[hir::types::IsImprint $param]} {
+        set name [lindex $param 1]
+        if {$name in $inherited} {
+            # An enclosing function's variable (BlockSignature): rigid
+            # here, so the argument is held to it, never establishes it.
+            return ""
+        }
         # (A variable an argument establishes is the type a declaration
         # could state of its elements: the lengths inference minted for
         # them are forgotten, so Lists of two lengths establish one T.)
         set arg [hir::types::ForgetInferred $arg]
-        set name [lindex $param 1]
         if {![dict exists $binding $name] || [dict get $binding $name] eq "never"} {
             # (`never` -- an empty List's element -- says nothing a later
             # argument cannot say better.)
@@ -531,7 +649,7 @@ proc hir::imprint::MatchInner {param arg bindingVar index} {
         }
         return ""
     }
-    return [Match $param $arg binding $index]
+    return [Match $param $arg binding $index $inherited]
 }
 
 proc hir::imprint::FormMismatch {param arg index} {

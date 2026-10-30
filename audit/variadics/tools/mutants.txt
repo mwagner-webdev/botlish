@@ -96,8 +96,7 @@
 ## hir/resolve.tcl
 <<<<
                     lappend declaredParamTypes [hir::types::MakeList [list imprint \
-                        [hir::variadic::ElementVariable $node [CtxNamespace $ctx] \
-                            [hir::imprint::EnclosingVariables $hir $ctx]]] {} 0 0]
+                        [hir::variadic::ElementVariable $node [CtxNamespace $ctx] $inherited]] {} 0 0]
 ====
                     lappend declaredParamTypes [hir::types::MakeList any {} 0 0]
 >>>>

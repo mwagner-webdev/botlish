@@ -10,7 +10,8 @@
 #     generic body's own applications, joins;
 #   * imprinting: matching an application establishes its variables, rigidly;
 #     a constraint never establishes one; a result-only application
-#     constrains; IMPRINT before TRAIT-NOT-SATISFIED;
+#     constrains; IMPRINT before TRAIT-NOT-SATISFIED; a nested function's
+#     variable named like an enclosing function's is that function's;
 #   * constraint propagation: K stays K, its hash and equality are the
 #     concrete values', a constraint is never added by an implementation nor
 #     met by any;
@@ -476,6 +477,116 @@ fn register_imprint_tests():
             get(make([], [1]), 1)
     std::test::rejects("tc-diagnostic-order/poisoned", std::compiler::DiagnosticCode::Imprint, order_poisoned)
 
+    # tc-imprint-nested-enclosing-variable: a nested function's T named like
+    # its enclosing function's is the enclosing one's, rigid and never bound
+    # at the nested function's calls (the program the conflation was found
+    # with: g(Box {value: "s"}) bound g's T to str while b's T was outer's).
+    fn nested_rejected() errors std::compiler::CompilerError:
+        static compile:
+            fn pair_boxes(a: Box[T], b: Box[T]) -> List[T]:
+                [a.value, b.value]
+            fn take_str(s: str) -> bool:
+                s == "x"
+            fn outer(b: Box[T]) -> bool:
+                fn g(c: Box[T]) -> List[T]:
+                    pair_boxes(b, c)
+                ys = g(Box {value: "s"})
+                v = std::list::at(ys, 0):
+                    on IndexNotFound:
+                        "none"
+                take_str(v)
+            outer(Box {value: 4})
+    std::test::rejects_containing("tc-imprint-nested-enclosing-variable/rejected", std::compiler::DiagnosticCode::Type, "argument for parameter \"c\" cannot be proven to satisfy Box[T] (argument type: Box[str])", nested_rejected)
+    fn nested_passed() errors std::compiler::CompilerError:
+        static compile:
+            fn outer(b: Box[T]) -> List[T]:
+                fn g(c: Box[T]) -> List[T]:
+                    [b.value, c.value]
+                g(b)
+            outer(Box {value: 4})
+    std::test::value("tc-imprint-nested-enclosing-variable/value", [4, 4], nested_passed)
+
+    # tc-imprint-nested-enclosing-uses: the enclosing variable used bare, in
+    # the result only, beside the nested function's own, two deep, and with
+    # the nested function taken as a value.
+    fn nested_uses() errors std::compiler::CompilerError:
+        static compile:
+            fn bare(b: Box[T]) -> T:
+                fn g(x: T) -> T:
+                    x
+                g(b.value)
+            fn result_only(b: Box[T]) -> List[T]:
+                fn g() -> List[T]:
+                    [b.value]
+                g()
+            fn mixed(b: Box[T]) -> List[any]:
+                fn g(c: Box[T], xs: List[U]) -> List[U]:
+                    xs
+                [g(b, [1]), g(b, ["a"])]
+            fn deep(b: Box[T]) -> List[T]:
+                fn mid(c: Box[T], xs: List[U]) -> List[T]:
+                    fn inner(d: Box[T]) -> List[T]:
+                        [b.value, d.value]
+                    inner(c)
+                mid(b, ["x"])
+            fn as_value(b: Box[T]) -> List[T]:
+                fn g(c: Box[T]) -> List[T]:
+                    [c.value]
+                f = g
+                f(b)
+            [bare(Box {value: 4}), bare(Box {value: "s"}), result_only(Box {value: 4}), mixed(Box {value: 4}), deep(Box {value: 7}), as_value(Box {value: 4})]
+    std::test::value("tc-imprint-nested-enclosing-uses/value", [4, "s", [4], [[1], ["a"]], [7, 7], [4]], nested_uses)
+    fn nested_bare_bad() errors std::compiler::CompilerError:
+        static compile:
+            fn bare(b: Box[T]) -> T:
+                fn g(x: T) -> T:
+                    x
+                g(3)
+            bare(Box {value: 4})
+    std::test::rejects("tc-imprint-nested-enclosing-uses/bare", std::compiler::DiagnosticCode::Type, nested_bare_bad)
+    fn nested_explicit() errors std::compiler::CompilerError:
+        static compile:
+            fn result_only(b: Box[T]) -> List[T]:
+                fn g() -> List[T]:
+                    [b.value]
+                g[int]()
+            result_only(Box {value: 4})
+    std::test::rejects_containing("tc-imprint-nested-enclosing-uses/explicit", std::compiler::DiagnosticCode::Imprint, "g has no imprint variables, so it takes no imprint g[...]", nested_explicit)
+    fn nested_mixed_bad() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(b: Box[T]) -> List[any]:
+                fn g(c: Box[T], xs: List[U]) -> List[U]:
+                    xs
+                g(Box {value: "s"}, [1])
+            mixed(Box {value: 4})
+    std::test::rejects("tc-imprint-nested-enclosing-uses/mixed", std::compiler::DiagnosticCode::Type, nested_mixed_bad)
+    fn nested_deep_bad() errors std::compiler::CompilerError:
+        static compile:
+            fn deep(b: Box[T]) -> List[T]:
+                fn mid(c: Box[T], xs: List[U]) -> List[T]:
+                    fn inner(d: Box[U]) -> List[T]:
+                        [b.value]
+                    inner(c)
+                mid(b, ["x"])
+            deep(Box {value: 7})
+    std::test::rejects_containing("tc-imprint-nested-enclosing-uses/deep", std::compiler::DiagnosticCode::Type, "argument for parameter \"d\" cannot be proven to satisfy Box[U] (argument type: Box[T])", nested_deep_bad)
+    fn nested_pair() errors std::compiler::CompilerError:
+        static compile:
+            fn pair(b: Box[T]) -> List[any]:
+                fn g(p: Pair[T, U]) -> U:
+                    p.second
+                [g(Pair {first: b.value, second: 1}), g(Pair {first: b.value, second: "z"})]
+            pair(Box {value: 4})
+    std::test::value("tc-imprint-nested-enclosing-uses/pair", [1, "z"], nested_pair)
+    fn nested_pair_bad() errors std::compiler::CompilerError:
+        static compile:
+            fn pair(b: Box[T]) -> int:
+                fn g(p: Pair[T, U]) -> U:
+                    p.second
+                g(Pair {first: "s", second: 1})
+            pair(Box {value: 4})
+    std::test::rejects_containing("tc-imprint-nested-enclosing-uses/pair-rejected", std::compiler::DiagnosticCode::Type, "argument for parameter \"p\" cannot be proven to satisfy Pair[T, int] (argument type: Pair[str, int])", nested_pair_bad)
+
 fn register_constraint_tests():
     # tc-constraint-not-a-view: K stays K.
     fn not_a_view() errors std::compiler::CompilerError:
@@ -507,6 +618,25 @@ fn register_constraint_tests():
                 h.key.hash()
             [H {key: "xy"}.fingerprint() == "xy".hash(), H {key: 3}.fingerprint() == hash(3)]
     std::test::value("tc-constraint-method-operation", [true, true], method)
+
+    # tc-constraint-nested-enclosing: the enclosing K keeps its constraint in
+    # a nested signature, and a nested signature adds none to it.
+    fn nested_constrained() errors std::compiler::CompilerError:
+        static compile:
+            fn outer(h: H[K]) -> List[bool]:
+                fn g(x: K) -> int:
+                    hash(x)
+                [g(h.key) == hash(h.key), g(h.key) == hash("a")]
+            outer(H {key: "a"})
+    std::test::value("tc-constraint-nested-enclosing/value", [true, true], nested_constrained)
+    fn nested_obligation() errors std::compiler::CompilerError:
+        static compile:
+            fn outer(b: Box[K]) -> int:
+                fn g(h: H[K]) -> int:
+                    0
+                1
+            outer(Box {value: 1})
+    std::test::rejects_containing("tc-constraint-nested-enclosing/obligation", std::compiler::DiagnosticCode::TraitNotSatisfied, "type argument for \"K\" in H[K] does not satisfy Hashable: its type is the imprint variable K, which no constraint holds to total equality and hashing", nested_obligation)
 
     # tc-constraint-forgetting.
     fn forgetting() errors std::compiler::CompilerError:
@@ -551,6 +681,16 @@ fn size_of(m: M[T]) -> int:
 
 fn sizes_of(m: M[T]) -> List[int]:
     [size_of(m), size_of(m)]
+
+# tc-ordinary-nested-enclosing-operation: nested functions applying the
+# operation to a value of this function's T make this function specialized
+# per binding.
+fn sizes_nested(m: M[T]) -> List[int]:
+    fn size(n: M[T]) -> int:
+        n.value.length()
+    fn bare(v: T) -> int:
+        v.length()
+    [size(m), bare(m.value)]
 
 fn normalize_twice(n: N[T]) -> N[T]:
     N[T] {value: n.value.normalize().normalize()}
@@ -629,6 +769,12 @@ fn register_ordinary_tests():
                 m.value.length()
             size(M {value: "abc"})
     std::test::rejects("tc-ordinary-nested-function", std::compiler::DiagnosticCode::TraitNestedPolymorphic, nested)
+
+    # tc-ordinary-nested-enclosing-operation.
+    fn nested_enclosing() errors std::compiler::CompilerError:
+        static compile:
+            [sizes_nested(M {value: "abc"}), sizes_nested(M {value: Ruler {n: 7}})]
+    std::test::value("tc-ordinary-nested-enclosing-operation", [[3, 3], [7, 7]], nested_enclosing)
 
 fn register_static_tests():
     # tc-static-compile: a bad application is a recoverable diagnostic.

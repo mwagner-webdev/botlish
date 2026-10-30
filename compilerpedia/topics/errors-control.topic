@@ -1559,6 +1559,12 @@ binding that makes an application of the signature invalid (K bound to a
 function where a slot requires Hashable) is TRAIT-NOT-SATISFIED, not
 IMPRINT: the variables were established.
 
+A nested function's signature names its enclosing function's variable as
+that variable: rigid there, never bound at a call of the nested function,
+every argument held to it (a TYPE error otherwise). Only the variables the
+enclosing functions do not have are the nested function's own; one with no
+variable of its own takes no imprint (`g[int]()` is IMPRINT).
+
 == WHAT TO DO
 Give explicit imprints, all of them, in first-occurrence order:
 `empty[int]()`, `std::ffi::c::null[std::ffi::c::Void]()`. Make the arguments

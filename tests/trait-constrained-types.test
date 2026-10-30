@@ -528,6 +528,78 @@ test tc-diagnostic-order {imprinting comes first: a variable that cannot be esta
 } -result {IMPRINT TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED IMPRINT}
 
 # ---------------------------------------------------------------------------
+# Nested functions: an enclosing function's variable is that function's
+#
+# A nested function's signature is written in the enclosing function's body,
+# where a type that names the enclosing function's variable is that variable
+# (hir::imprint::EnclosingVariables): so is a name in the signature. Only the
+# variables no enclosing function has are the nested function's own, bound
+# at its calls; an enclosing one is rigid there and never bound at a call
+# (hir::imprint::BlockSignature, Bind, Inherit).
+
+# The program the bug was found with: g's T is outer's, so g(Box {value:
+# "s"}) cannot pass a Box[str] for outer's T (once accepted, `ys` was a
+# List[str] holding outer's 4, and take_str failed at run time on interp and
+# compile -- CORE SEMANTIC TYPE -- and as NATIVE BUG on cranelift).
+set ::tcNestedProgram {import std::list
+import std::str
+fn pair_boxes(a: Box[T], b: Box[T]) -> List[T]:
+    [a.value, b.value]
+fn take_str(s: str) -> str:
+    std::str::concat(s, "!")
+fn outer(b: Box[T]) -> str:
+    fn g(c: Box[T]) -> List[T]:
+        pair_boxes(b, c)
+    ys = g(@ARG@)
+    v = std::list::at(ys, 0):
+        on IndexNotFound:
+            "none"
+    take_str(v)
+outer(Box {value: 4})
+}
+
+test tc-imprint-nested-enclosing-variable {a nested function's declared variable named like an enclosing function's is the enclosing function's variable, rigid in the nested signature and never bound at the nested function's calls: the program that conflated the two (g's T bound to str at its call while b's T is outer's) is a compile-time TYPE error of the call, and outer's own value of its T is still passed through} -body {
+    set rejected [tcProgram [string map {@ARG@ {Box {value: "s"}}} $::tcNestedProgram]]
+    list [tcRejection $rejected] [tcKinds $rejected] \
+        [sourceAgree [tcProgram "fn outer(b: Box\[T\]) -> List\[T\]:\n    fn g(c: Box\[T\]) -> List\[T\]:\n        \[b.value, c.value\]\n    g(b)\nouter(Box {value: 4})\n"]]
+} -result {{TYPE {argument for parameter "c" cannot be proven to satisfy Box[T] (argument type: Box[str]); Box[str] and Box[T] are distinct applications of Box (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed}} {TYPE TYPE} {value {[4, 4]}}}
+
+test tc-imprint-nested-enclosing-uses {an enclosing variable in a nested signature is known there: used bare (x: T, established by the enclosing signature, never "not established"), in the result only (no imprint at the call: g[int]() is IMPRINT, g has no variable of its own), beside the nested function's own variable (bound at each call, in its own parameter type or in one with the enclosing variable: Pair[T, U] binds U and holds the argument to T), two functions deep, and with the nested function taken as a value -- every argument held to the rigid variable} -body {
+    set src [tcProgram {fn bare(b: Box[T]) -> T:
+    fn g(x: T) -> T:
+        x
+    g(b.value)
+fn result_only(b: Box[T]) -> List[T]:
+    fn g() -> List[T]:
+        [b.value]
+    g()
+fn mixed(b: Box[T]) -> List[any]:
+    fn g(c: Box[T], xs: List[U]) -> List[U]:
+        xs
+    [g(b, [1]), g(b, ["a"])]
+fn deep(b: Box[T]) -> List[T]:
+    fn mid(c: Box[T], xs: List[U]) -> List[T]:
+        fn inner(d: Box[T]) -> List[T]:
+            [b.value, d.value]
+        inner(c)
+    mid(b, ["x"])
+fn as_value(b: Box[T]) -> List[T]:
+    fn g(c: Box[T]) -> List[T]:
+        [c.value]
+    f = g
+    f(b)
+[bare(Box {value: 4}), bare(Box {value: "s"}), result_only(Box {value: 4}), mixed(Box {value: 4}), deep(Box {value: 7}), as_value(Box {value: 4})]
+}]
+    list [sourceAgree $src] \
+        [tcKind [tcProgram "fn bare(b: Box\[T\]) -> T:\n    fn g(x: T) -> T:\n        x\n    g(3)\nbare(Box {value: 4})\n"]] \
+        [tcRejection [tcProgram "fn result_only(b: Box\[T\]) -> List\[T\]:\n    fn g() -> List\[T\]:\n        \[b.value\]\n    g\[int\]()\nresult_only(Box {value: 4})\n"]] \
+        [tcKind [tcProgram "fn mixed(b: Box\[T\]) -> List\[any\]:\n    fn g(c: Box\[T\], xs: List\[U\]) -> List\[U\]:\n        xs\n    g(Box {value: \"s\"}, \[1\])\nmixed(Box {value: 4})\n"]] \
+        [tcRejection [tcProgram "fn deep(b: Box\[T\]) -> List\[T\]:\n    fn mid(c: Box\[T\], xs: List\[U\]) -> List\[T\]:\n        fn inner(d: Box\[U\]) -> List\[T\]:\n            \[b.value\]\n        inner(c)\n    mid(b, \[\"x\"\])\ndeep(Box {value: 7})\n"]] \
+        [sourceAgree [tcProgram "fn pair(b: Box\[T\]) -> List\[any\]:\n    fn g(p: Pair\[T, U\]) -> U:\n        p.second\n    \[g(Pair {first: b.value, second: 1}), g(Pair {first: b.value, second: \"z\"})\]\npair(Box {value: 4})\n"]] \
+        [tcRejection [tcProgram "fn pair(b: Box\[T\]) -> int:\n    fn g(p: Pair\[T, U\]) -> U:\n        p.second\n    g(Pair {first: \"s\", second: 1})\npair(Box {value: 4})\n"]]
+} -result {{value {[4, "s", [4], [[1], ["a"]], [7, 7], [4]]}} TYPE {IMPRINT {g has no imprint variables, so it takes no imprint g[...]: only a callable whose signature has an imprint variable (a statically known function or intrinsic) is imprinted at a call}} TYPE {TYPE {argument for parameter "d" cannot be proven to satisfy Box[U] (argument type: Box[T]); Box[T] and Box[U] are distinct applications of Box (T is T, not U): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed}} {value {[1, "z"]}} {TYPE {argument for parameter "p" cannot be proven to satisfy Pair[T, int] (argument type: Pair[str, int]); Pair[str, int] and Pair[T, int] are distinct applications of Pair (A is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed}}}
+
+# ---------------------------------------------------------------------------
 # Constraint propagation: the body knows K satisfies Hashable, and K stays K
 
 test tc-constraint-derived {a function's variables are constrained by the applications of its own signature, at every occurrence: Map[K, V] gives K Hashable, V nothing; an unconstrained variable is unchanged} -body {
@@ -610,6 +682,13 @@ test tc-constraint-composite {a composite argument in an imprinted signature, Ma
     set hir [tcHir [tcProgram "fn f(m: Map\[List\[K\], V\], k: K) -> int:\n    hash(k)\nf(Map {keys: \[\[1\]\], vals: \[2\]}, 5)\n"]]
     list [hir::get $hir [tcBlock $hir f] declaredParamTypes] [tcOps [tcNir $hir -specialize 0] f]
 } -result {{{nstruct Map {{list {imprint K Hashable}} {imprint V}}} {imprint K Hashable}} hashtotal}
+
+test tc-constraint-nested-enclosing {an enclosing variable in a nested signature is constrained as the enclosing signature constrains it: K of outer(h: H[K]) is Hashable in a nested g(x: K) -- its declared type, the total hash -- and a nested signature never adds a constraint to an enclosing variable (a body adds none to its function's contract): g(h: H[K]) inside outer(b: Box[K]) is TRAIT-NOT-SATISFIED} -constraints nativeBuilt -body {
+    set src [tcProgram "fn outer(h: H\[K\]) -> List\[bool\]:\n    fn g(x: K) -> int:\n        hash(x)\n    \[g(h.key) == hash(h.key), g(h.key) == hash(\"a\")\]\nouter(H {key: \"a\"})\n"]
+    set hir [tcHir $src]
+    list [hir::get $hir [tcBlock $hir g] declaredParamTypes] [tcOps [tcNir $hir -specialize 0] g] [sourceAgree $src] \
+        [tcRejection [tcProgram "fn outer(b: Box\[K\]) -> int:\n    fn g(h: H\[K\]) -> int:\n        0\n    1\nouter(Box {value: 1})\n"]]
+} -result {{{imprint K Hashable}} {hashtotal runbox} {value {[true, true]}} {TRAIT-NOT-SATISFIED {the type of parameter "h" is invalid: type argument for "K" in H[K] does not satisfy Hashable: its type is the imprint variable K, which no constraint holds to total equality and hashing}}}
 
 test tc-constraint-forgetting {an implementation never adds a constraint to its contract: a function whose signature does not hold K in a constrained slot may not construct a Map[K, ...] of it (TRAIT-NOT-SATISFIED in its body), whatever its callers pass} -body {
     tcRejection [tcProgram "fn wrap(ks: List\[K\]) -> int:\n    m = Map {keys: ks, vals: \[1\]}\n    1\nwrap(\[\"a\"\])\n"]
@@ -706,6 +785,13 @@ test tc-ordinary-nested-function {a function that applies an ordinary trait's op
         [tcModuleRejection $::tcTraitModules "$::tcTraitHeader\nfn show(p: P\[T\]) -> str:\n    p.value.describe()\nfn outer() -> str:\n    fn relay(p: P\[T\]) -> str:\n        show(p)\n    relay(P {value: std::dogs::Dog {age: 1}})\nouter()\n"] \
         [tcModuleAgree $::tcTraitModules "$::tcTraitHeader\nstruct H\[K satisfies Hashable\]:\n    key: K\nfn show(p: P\[T\]) -> str:\n    p.value.describe()\nfn outer() -> List\[any\]:\n    fn fingerprint(h: H\[K\]) -> int:\n        hash(h.key)\n    fn dog(p: P\[std::dogs::Dog\]) -> str:\n        show(p)\n    \[fingerprint(H {key: 3}) == hash(3), dog(P {value: std::dogs::Dog {age: 1}})\]\nouter()\n"]
 } -result {{TRAIT-NESTED-POLYMORPHIC {a function that applies a trait's operation to a value of one of its own constrained imprint variables must be declared at the top level of a module or the entry program: a nested one is not supported yet (its specializations, one per binding of the variables, would have to be made per activation of the enclosing function)}} {TRAIT-NESTED-POLYMORPHIC {a function that applies a trait's operation to a value of one of its own constrained imprint variables must be declared at the top level of a module or the entry program: a nested one is not supported yet (its specializations, one per binding of the variables, would have to be made per activation of the enclosing function)}} {value {[true, "dog"]}}}
+
+test tc-ordinary-nested-enclosing-operation {a nested function that applies a trait's operation to a value of an enclosing function's constrained variable applies it to the enclosing function's variable: the enclosing function is specialized per binding (each specialization with its own nested function), never TRAIT-NESTED-POLYMORPHIC, on every backend} -constraints nativeBuilt -body {
+    set src "$::tcTraitHeader\nfn outer(p: P\[T\]) -> List\[str\]:\n    fn show(q: P\[T\]) -> str:\n        q.value.describe()\n    fn bare(v: T) -> str:\n        v.describe()\n    \[show(p), bare(p.value)\]\n\[outer(P {value: std::people::Person {name: \"Ann\"}}), outer(P {value: std::dogs::Dog {age: 3}})\]\n"
+    set hir [tcModuleHir $::tcTraitModules $src]
+    list [tcModuleAgree $::tcTraitModules $src] [lsort [lsearch -all -inline [tcFunctionNames $hir] outer*]] \
+        [llength [lsearch -all -inline [tcFunctionNames $hir] show]]
+} -result {{value {[["Ann", "Ann"], ["dog", "dog"]]}} {outer<T=std::dogs::Dog> outer<T=std::people::Person>} 2}
 
 # ---------------------------------------------------------------------------
 # Runtime representation: one struct per constructor
@@ -829,6 +915,21 @@ test tc-hir-text {HIR text prints a parameterized struct's slots with their trai
     list [lsearch -all -inline [split $text \n] {struct *}] [expr {[hir::format $back] eq $text}] $diff \
         [expr {[tcOutcomes $back] eq [tcOutcomes $hir]}] [lindex [tcOutcomes $back] 0]
 } -result {{{struct Pair name Pair ns - slots [A, B] fields first: A, second: B} {struct H name H ns - slots [K satisfies Hashable, V] fields key: K, value: V}} 1 0 1 {ok {[true, 1, "x"]}}}
+
+test tc-hir-text-nested {HIR text of nested functions naming an enclosing function's (constrained) variable reads back the built HIR: their declared types carry the enclosing constraint again (not their own applications'), every expression's type is the same, and so is the outcome} -constraints nativeBuilt -body {
+    set hir [tcHir [tcProgram "fn outer(h: H\[K\], xs: List\[V\]) -> List\[any\]:\n    fn g(x: K, ys: List\[U\]) -> List\[any\]:\n        fn inner(b: Box\[K\]) -> int:\n            hash(b.value)\n        \[inner(Box {value: x}), ys\]\n    \[g(h.key, xs), g(h.key, \[1\])\]\nouter(H {key: \"a\"}, \[\"b\"\])\n"]]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    set diff 0
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict exists $back exprs $e] && ([hir::typeOf $hir $e] ne [hir::typeOf $back $e]
+                || [dict getdef $node declaredParamTypes {}] ne [dict getdef [dict get $back exprs $e] declaredParamTypes {}])} {
+            incr diff
+        }
+    }
+    list [expr {[hir::format $back] eq $text}] $diff [expr {[tcOutcomes $back] eq [tcOutcomes $hir]}] \
+        [lindex [tcOutcomes $back] 0]
+} -result {1 0 1 {ok {[[589763776587810007, ["b"]], [589763776587810007, [1]]]}}}
 
 test tc-interchange {a HIR written as interchange text and read back after a compilation that declares the same names differently (other slots, no constraint) is the HIR written, lowers to the same artifacts and runs the same} -constraints nativeBuilt -body {
     set hir [tcHir $::tcRoundTripProgram]

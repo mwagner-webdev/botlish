@@ -446,6 +446,23 @@ The rules (hir/imprint.tcl):
   related only to itself, `never` and `any` -- so `fn bad(xs: List[T]) -> T:
   5` is rejected. It is compiled once, its T values handled as values of any
   type.
+* **Nested functions.** A nested function's signature is written in the
+  enclosing function's body, where a type naming the enclosing function's
+  variable is that variable (an explicit imprint, an applied construction):
+  so is a name in the nested signature. Only the variables no enclosing
+  function has are the nested function's own, bound at its calls; an
+  enclosing one is rigid there, as in the enclosing body (constrained as
+  the enclosing signature constrains it), established without an argument
+  (`fn g(x: T)` is fine inside a function that has T), never bound at a call
+  of the nested function, and every argument is held to it: in
+  `fn outer(b: Box[T])`, a nested `fn g(c: Box[T]) -> List[T]` takes `b`
+  but not `Box {value: "s"}` (TYPE). A nested function whose every variable
+  is an enclosing one has no imprint signature: it takes no explicit
+  imprint and may be used as a value (`hir::imprint::BlockSignature`,
+  `Inherited`, `Inherit`). Before, the nested function bound such a T anew
+  at each call while its body's captured values kept the enclosing T --
+  one term `{imprint T}` for two variables -- and an ill-typed program
+  was accepted.
 * **Affinity.** A variable bound where values of it exist must not be an
   affine type (the body may copy its values); one that occurs only as a
   pointee (`Ptr[T]`) may be any valid pointee, a pointer included.
