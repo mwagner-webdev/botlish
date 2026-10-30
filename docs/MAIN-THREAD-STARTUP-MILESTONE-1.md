@@ -334,6 +334,11 @@ the guard's line (`standalone-main-thread-overflow`). Its
 `main-thread-lc-main` check failed on its own parsing: `cmd
 LC_MAIN.*?stacksize (\d+)`, a non-greedy expression throughout in Tcl,
 read one digit ("5"); it reads from LC_MAIN on now, as the test file does.
+With the fix (run 41004334314's smoke job, 9d86232e): `ok main-thread-lc-main
+LC_MAIN stacksize: worker 0 main-thread 536870912`, beside
+`main-thread-signature`, `main-thread-run` and
+`standalone-main-thread-overflow` ("512 MiB main stack: exit 1 ...
+NATIVE LIMIT STACK") **[executed, macOS AArch64]**.
 
 ## 14. Main-thread native stack discovery
 
@@ -687,11 +692,28 @@ every job on `macos-15` but the Linux control) **[executed]**:
 | Job | Result |
 |---|---|
 | Botlish.app (the distribution: build, verify, smoke, FFI smoke, app-test, compare, bench) | passed |
-| linux control (Tier A, ubuntu x86-64) | passed |
+| smoke (Tier A: the Rust unit tests, native_stack, native-status, aot-facts with the fixed `LC_MAIN` parse, the smoke tier) | passed |
+| acceptance (Tier B), shard 1/2 | passed |
 | acceptance (Tier B), shard 2/2 | passed: 120 Tcl test files on interp, 54 golden suites on four backends, 0 failed |
+| system linker (its tests, the executable and C test files system-linked, both under GC stress) | passed |
+| Botlish.app without developer tools | passed |
+| static SDL3 through Botlish.app | passed |
+| linux control (Tier A, ubuntu x86-64) | passed |
 | full (Tier C), shard 1/3: the mutants | failed: 1 native-aot mutant survived (section 29); the baseline passed |
 | full (Tier C), shards 2/3 and 3/3 | nothing to run (every item in shard 1) |
-| smoke, acceptance 1/2, system linker, Botlish.app without developer tools, static SDL3, main-thread startup | (queued at this writing) |
+| main-thread startup | failed in its packaged step's own setup, before the compiler ran: Homebrew's rustup proxies stayed on PATH (below); the census step was skipped; `tests/main-thread-startup.test` passed, plainly and under GC stress |
+
+`tests/main-thread-startup.test` on macOS AArch64 at 9d86232e (the job's
+test step): 23 tests, 20 passed, 3 skipped (two of `mainThreadRefused`,
+one of `nativeLibraries`: a native library is Linux's), 0 failed --
+the same under `BOTLISH_NATIVE_GC_STRESS=1` **[executed]**.
+
+The packaged step moved `~/.cargo` and `~/.rustup` away and then required
+`cargo` and `rustc` to be gone from PATH; the runner's rustup is Homebrew's,
+whose proxies (`/opt/homebrew/opt/rustup/bin/cargo`) stay on PATH without
+`~/.rustup`, so the check stopped the step. The step now leaves out every
+PATH directory holding `cargo`, `rustc` or `rustup` for its duration and
+requires all three gone (4d449294). The re-run: below.
 
 ## 32. Linux x86-64 CI results
 
