@@ -3737,6 +3737,7 @@ tests/main-recursion.test main-recursion-managed-values pass
 tests/main-recursion.test main-recursion-still-bounded pass
 tests/main-thread-startup.test mts-api-refused pass
 tests/main-thread-startup.test mts-cli-default-is-worker pass
+tests/main-thread-startup.test mts-cli-main-thread skip
 tests/main-thread-startup.test mts-cli-refused pass
 tests/main-thread-startup.test mts-cli-usage pass
 tests/main-thread-startup.test mts-driver-option pass

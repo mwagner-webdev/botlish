@@ -341,6 +341,23 @@ test mts-cli-default-is-worker {an executable is the worker's when -native-start
 } {}} twice 0 0 worker 1 {0 {42
 } {}}}
 
+test mts-cli-main-thread {where main-thread startup is supported, -native-startup main-thread (once or repeated) makes the executable the main thread's: its record's startup word is 1, its startup report says the program ran on the process's main thread, and it runs as the worker's does} -constraints mainThreadStartup -body {
+    set dir [makeDirectory mts-cli-main]
+    set results {}
+    foreach {case options} {once {-native-startup main-thread} twice {-native-startup main-thread -native-startup main-thread}} {
+        set path [makeFile "fn twice(n: int) -> int:\n    n * 2\n\ntwice(21)\n" mts-cli-main/$case.bot]
+        set r [mtsMain -warnings off {*}$options -emit-native-executable $path]
+        set exe [native::executableFile [file rootname $path]]
+        set startup [mtsStartup [mtsReport $exe]]
+        lappend results $case [dict get $r status] [mtsStartupWord [mtsBytes $exe]] [dict get $startup startup] \
+            [dict get $startup process-main-thread] [mtsRun {} $exe]
+    }
+    removeDirectory mts-cli-main
+    set results
+} -result {once 0 1 main-thread 1 {0 {42
+} {}} twice 0 1 main-thread 1 {0 {42
+} {}}}
+
 test mts-cli-refused {where main-thread startup is unsupported, -native-startup main-thread is NATIVE UNSUPPORTED startup, status 1, naming the target and the reason: before any linker runs, an executable already there kept, no temporary directory left} -constraints mainThreadRefused -body {
     set dir [makeDirectory mts-refused]
     set path [makeFile "40 + 2\n" mts-refused/program.bot]
