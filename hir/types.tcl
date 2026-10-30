@@ -2592,6 +2592,55 @@ proc hir::types::IsHashable {type} {
     return [expr {[lindex [HashClass $type] 0] eq "total"}]
 }
 
+# {KIND WANTED} when an argument of static type TYPE at position INDEX of a
+# call of native NAME is of a statically known kind KIND other than the kind
+# WANTED the native's parameter requires (core/native.tcl's -param-types),
+# else {}: the call can only raise TYPE when it runs, whatever the value is.
+# The one statement of the rule: the call's own check reports it
+# (hir::range::VerifyNativeKinds), the call is poison in the generic walk and
+# dead in region inference (Call), and the method-call decision's kind proofs
+# rule a candidate out by it (hir::methods::Excluded)
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md). A type of no fixed kind
+# (`any`, a structural function type, `never`; an imprint variable, which
+# NativeArgumentMismatch judges) is no mismatch: the call checks it when it
+# runs.
+proc hir::types::NativeKindMismatch {name index type} {
+    set paramType [lindex [dict get [core::native::metadata $name] paramTypes] $index]
+    if {$paramType in {"" any} || $type eq "never"} {
+        return {}
+    }
+    set kind [kindOf $type]
+    set wanted [core::type::base $paramType]
+    if {$kind eq "" || $wanted in {"" any} || $kind eq $wanted} {
+        return {}
+    }
+    return [list $kind $wanted]
+}
+
+# NativeKindMismatch, or {imprint WANTED} when TYPE is a rigid imprint
+# variable (hir/imprint.tcl) and the native's parameter INDEX requires the
+# kind WANTED: a body is checked once, for every T, and no kind admits every
+# T -- the call is valid only for the arguments some caller happens to give
+# it, which no check of the body may count on (its constraints are traits,
+# which name no kind). The call's own check reports both
+# (hir::range::VerifyNativeKinds); only the first is a call that can only
+# fail (region inference, whose types are concrete, never sees the second).
+proc hir::types::NativeArgumentMismatch {name index type} {
+    set mismatch [NativeKindMismatch $name $index $type]
+    if {$mismatch ne {} || ![IsImprint $type]} {
+        return $mismatch
+    }
+    set paramType [lindex [dict get [core::native::metadata $name] paramTypes] $index]
+    if {$paramType in {"" any}} {
+        return {}
+    }
+    set wanted [core::type::base $paramType]
+    if {$wanted in {"" any}} {
+        return {}
+    }
+    return [list imprint $wanted]
+}
+
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc hir::types::kindOf {type} {
     if {[hir::cabi::IsFloating $type]} {
@@ -4507,14 +4556,26 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # (DECIMAL-GUARANTEE-LOST, hir/decimal.tcl): no value.
                 set dead 1
             }
-            if {$spec && !$dead} {
-                foreach argType $argTypes paramType [dict get $meta paramTypes] {
-                    set kind [kindOf $argType]
-                    if {$paramType ni {"" any} && $kind ne "" && $kind ne [core::type::base $paramType]} {
+            if {!$dead && ($spec || ([MakesPoison $hir $ctx] && ![dict exists $ctx inst] && [dict get $ctx reachable]))} {
+                set index 0
+                foreach argType $argTypes {
+                    if {[if {$spec} {NativeKindMismatch $name $index $argType} else {NativeArgumentMismatch $name $index $argType}] ne {}} {
                         # The argument is statically of another kind: the call
-                        # always raises TYPE.
+                        # always raises TYPE (or, a rigid imprint variable in
+                        # the generic walk, is valid for no T). In the generic
+                        # walk it is the call's own TYPE diagnostic
+                        # (hir::range::VerifyNativeKinds; of a call the front
+                        # end synthesizes, its construct's: NOT-A-CONTEXT),
+                        # so it has no value: poison. (A semantic instance,
+                        # typed under one call's argument types, neither
+                        # reports nor poisons it: an argument of no fixed
+                        # kind in the program as written -- `any`, an untyped
+                        # parameter's value -- is checked when the call runs,
+                        # and a caller is held to the checked contract the use
+                        # imposes, hir/signatures.tcl.)
                         set dead 1
                     }
+                    incr index
                 }
             }
             if {!$dead && [dict get $meta resultShape] ne ""} {

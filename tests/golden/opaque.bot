@@ -1014,6 +1014,15 @@ fn register_printing_tests():
             f(x)
     std::test::rejects_containing("opaque-print-diagnostics-name-the-type", std::compiler::DiagnosticCode::Type, "argument for parameter \"n\" cannot be proven to satisfy int (argument type: std::abi::bytes::Bytes", names_the_type)
 
+    # opaque-print-static-operand-names-the-type: an opaque operand of
+    # another kind than a native requires is the compile-time Type, which
+    # names its type (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md).
+    fn operand_names_the_type() errors std::compiler::CompilerError:
+        static compile:
+            x = std::abi::bytes::from_list([])
+            x + 1
+    std::test::rejects_containing("opaque-print-static-operand-names-the-type", std::compiler::DiagnosticCode::Type, "argument 1 of native + requires int, but this operand has type std::abi::bytes::Bytes", operand_names_the_type)
+
 # ---------------------------------------------------------------------------
 # Equality and hashing: whole-value and nominal
 

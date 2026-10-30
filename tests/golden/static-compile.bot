@@ -322,21 +322,14 @@ fn register_accepted_block_tests():
             [x, y, t(4), u(10)]
     std::test::value("sc-success-value", [42, 42, 8, 21], b_success_value)
 
-    # sc-native-type-error-is-runtime: a native's argument kinds are checked
-    # at run time, never by the compiler: the block `1 + "xy"` is accepted
-    # (f has no `errors` clause, so a rejected block would reject the body's
-    # block with UnhandledError). It stands on a path no call takes: its
-    # run-time TYPE failure would abort the run.
-    fn b_native_type_error_is_runtime() errors std::compiler::CompilerError:
+    # sc-native-type-error-is-static: an argument statically of another kind
+    # than a native's parameter requires is the call's own compile-time TYPE
+    # (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it used to be the
+    # run-time TYPE error): the block `1 + "xy"` is rejected with Type.
+    fn b_native_type_error_is_static() errors std::compiler::CompilerError:
         static compile:
-            fn f(n: int) -> int:
-                if n > 100:
-                    static compile:
-                        1 + "xy"
-                n
-
-            f(1)
-    std::test::value("sc-native-type-error-is-runtime/accepted", 1, b_native_type_error_is_runtime)
+            1 + "xy"
+    std::test::rejects("sc-native-type-error-is-static/rejected", std::compiler::DiagnosticCode::Type, b_native_type_error_is_static)
 
     # sc-control-flow: an accepted block is the ordinary block where it
     # stands: `continue` and `break` reach the enclosing loop, `return`

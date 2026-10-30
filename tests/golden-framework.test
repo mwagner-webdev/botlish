@@ -291,11 +291,11 @@ test gf-run-executes-once {one run calls each check exactly once} -body {
     lmap backend {interp compile} {gfProbed [gfCounted {std::test::report()}] $backend}
 } -result {{{["PASS counted", "1 passed, 0 failed"]} 7} {{["PASS counted", "1 passed, 0 failed"]} 7}}
 
-test gf-registration-would-abort {a body whose run would abort the whole program (a run-time TYPE no handler catches) is registered without running: the registering program completes; the running one aborts} -body {
+test gf-registration-would-abort {a body whose run would abort the whole program (a run-time TYPE no handler catches: an Int added to an `any` that is a String -- statically a String it would be the block's compile-time TYPE) is registered without running: the registering program completes; the running one aborts} -body {
     set source {import std::compiler
 import std::test
 
-fn register_poisoned(text: str):
+fn register_poisoned(text: any):
     fn body() errors std::compiler::CompilerError:
         static compile:
             1 + text
@@ -771,11 +771,11 @@ std::test::report()
 }
 } -result {{FAIL escapes} {  expected: 1} {  actual: compiler diagnostic UnhandledError at line 14, column 13} {  detail: this call may produce the declared error "Boom", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} {PASS handled} {1 passed, 1 failed}}
 
-test gf-runtime-only-failure-aborts {a run-time-only failure in a body (an Int added to a String: no declared error, no handler) is not a test result: it aborts the whole run, on every backend, and no report is produced} -body {
+test gf-runtime-only-failure-aborts {a run-time-only failure in a body (an Int added to an `any` that is a String: no declared error, no handler; statically a String it would be the block's compile-time TYPE) is not a test result: it aborts the whole run, on every backend, and no report is produced} -body {
     gfReport {import std::compiler
 import std::test
 
-fn register_aborting(text: str):
+fn register_aborting(text: any):
     fn fine() errors std::compiler::CompilerError:
         static compile:
             1

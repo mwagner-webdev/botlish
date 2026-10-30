@@ -299,12 +299,12 @@ width("a")}
     list [where $original] [behavior $original] [lindex [behavior $rewritten] 0] [lindex [behavior $rewritten] 1]
 } -result {3:7 {value 7} rejected {CORE SEMANTIC TYPE}}
 
-test oc-str-native-argument-warns {a one-character literal passed to a native's str parameter warns; its character spelling compiles there and fails at run time (native parameter types are checked at run time)} -body {
+test oc-str-native-argument-warns {a one-character literal passed to a native's str parameter warns; its character spelling is a compile-time TYPE there (an argument statically of another kind than a native requires, METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it compiled and failed at run time before)} -body {
     set original {import std::str
 std::str::length("a")}
     set rewritten [string map {{"a"} {'a'}} $original]
     list [where $original] [behavior $original] [behavior $rewritten]
-} -result {2:18 {value 1} {runtime {CORE SEMANTIC TYPE}}}
+} -result {2:18 {value 1} {rejected {CORE SEMANTIC TYPE}}}
 
 test oc-comparison-with-a-string-warns {a one-character literal compared with a String warns; its character spelling compiles there and silently changes the value (== of two kinds is false): the hazard an autofix would hide} -body {
     set original {fn is_quote(text: str) -> bool:

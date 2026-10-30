@@ -391,10 +391,12 @@ twice(std::str::is_tcl_alpha)} {*cannot infer a sound type for parameter "p" of 
 
 set ::icWrapper "fn wrapper(x):\n    std::str::length(x)\n"
 
-test ic-native-direct-unchanged {a direct native call with a statically wrong argument keeps its run-time TYPE error (direct native-call semantics unchanged): the native's own message, on every backend} -body {
-    set exprs [hir::lower [icCompile "std::str::length(123)"]]
-    lsort -unique [lmap backend {interp compile cranelift-generic cranelift} {lrange [outcomeUnder $backend $exprs] 1 2}]
-} -result {{{CORE SEMANTIC TYPE} {std::str::length: expected str, got 123}}}
+test ic-native-direct-static {a direct native call with a statically wrong argument is a compile-time TYPE too, like its wrapper's call (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it kept its run-time TYPE error until then); core IR, past the source boundary, still raises the native's own message on every backend} -body {
+    set exprs [hir::lower [icCompile "std::str::length(\"abc\")"]]
+    set exprs [lreplace $exprs end end {call {ref std::str::length} {const 123}}]
+    list [icRejects "std::str::length(123)" {*:7:18: argument 1 of native std::str::length requires str, but this argument has type int: the call could only fail when it runs*}] \
+        [lsort -unique [lmap backend {interp compile cranelift-generic cranelift} {lrange [outcomeUnder $backend $exprs] 1 2}]]
+} -result {{{CORE SEMANTIC TYPE} 1} {{{CORE SEMANTIC TYPE} {std::str::length: expected str, got 123}}}}
 
 test ic-native-wrapper-static {wrapper(123) was a run-time TYPE error inside the native; it is now a compile-time error at the call, naming the inferred contract and where it came from} -body {
     icRejects "${::icWrapper}wrapper(123)" \

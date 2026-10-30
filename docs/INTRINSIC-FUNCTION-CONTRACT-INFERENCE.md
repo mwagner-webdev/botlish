@@ -228,7 +228,8 @@ compile time; see the next sections for why an argument of static type
 
 **Q14. Is this semantic change tested? Yes**: `ic-native-wrapper-static`,
 `ic-native-wrapper-known-kind`, `ic-native-wrapper-before`,
-`ic-native-wrapper-any-argument`, `ic-native-direct-unchanged`, and the
+`ic-native-wrapper-any-argument`, `ic-native-direct-unchanged` (now
+`ic-native-direct-static`), and the
 updated `stdlib-string_reverse-not-a-string` / new
 `stdlib-string_reverse-not-a-string-static`.
 
@@ -798,7 +799,10 @@ wrapper(123)
   body proves it can only ever succeed on a `str`.
 
 Direct native calls are unchanged (`length(123)` is still the run-time
-error, `ic-native-direct-unchanged`), and so is a wrapper call whose
+error, `ic-native-direct-unchanged`; since
+METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md a direct call is held to
+its native's kinds at compile time too, `ic-native-direct-static`), and so
+is a wrapper call whose
 argument's static type is `any` (it reaches `length`'s own check,
 `ic-native-wrapper-any-argument`). Where no strict HIR build runs (core IR
 on interp; the compile backend's `-strict 0`), the old run-time behavior is

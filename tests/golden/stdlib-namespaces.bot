@@ -221,24 +221,21 @@ fn register_historical_name_tests():
     std::test::rejects("ns-historical-names-are-unknown/immutable_set_contains", std::compiler::DiagnosticCode::Unbound, b_immutable_set_contains)
 
 # ns-char-scalar-value-is-canonical: std::char::scalar_value is the one spelling.
-# RUN_IT is false: the call with an Int is statically accepted (it is
-# reachable and checked) but never runs -- running it is the run-time TYPE
-# error every intrinsic raises for the wrong kind of value, which no handler
-# catches. A, E_ACUTE and GRINNING are the characters U+0041, U+00E9 and
-# U+1F600.
-fn register_char_tests(run_it: bool, a: UnicodeChar, e_acute: UnicodeChar, grinning: UnicodeChar):
+# The call with an Int is a compile-time TYPE: an argument statically of
+# another kind than an intrinsic requires
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it was the run-time TYPE
+# error, which no handler catches, until then). A, E_ACUTE and GRINNING are
+# the characters U+0041, U+00E9 and U+1F600.
+fn register_char_tests(a: UnicodeChar, e_acute: UnicodeChar, grinning: UnicodeChar):
     fn b_no_codepoint() errors std::compiler::CompilerError:
         static compile:
             std::char::codepoint('A')
     std::test::rejects_message("ns-char-scalar-value-is-canonical/no-codepoint", std::compiler::DiagnosticCode::UnknownSymbol, "namespace \"std::char\" has no definition \"codepoint\" (its members are the intrinsics: is_tcl_alnum, is_tcl_alpha, scalar_value)", b_no_codepoint)
 
-    fn b_int_argument_accepted() errors std::compiler::CompilerError:
+    fn b_int_argument_rejected() errors std::compiler::CompilerError:
         static compile:
-            if run_it:
-                std::char::scalar_value(65)
-            else:
-                "accepted"
-    std::test::value("ns-char-scalar-value-is-canonical/int-argument-accepted", "accepted", b_int_argument_accepted)
+            std::char::scalar_value(65)
+    std::test::rejects("ns-char-scalar-value-is-canonical/int-argument-rejected", std::compiler::DiagnosticCode::Type, b_int_argument_rejected)
 
     fn b_scalar_values() errors std::compiler::CompilerError:
         static compile:
@@ -1037,7 +1034,7 @@ fn register_method_tests():
 fn register_stdlib_namespaces_tests():
     register_equality_tests("abc", "abd", "", "10", 10, "é")
     register_historical_name_tests()
-    register_char_tests(false, 'A', 'é', '😀')
+    register_char_tests('A', 'é', '😀')
     register_qualified_intrinsic_tests()
     register_indexed_access_tests(0, 1, 2, 3, -1, 100000000000000000000)
     register_slice_tests(-1, 0, 1, 2, 3, 9)

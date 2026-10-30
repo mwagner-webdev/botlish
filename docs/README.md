@@ -641,8 +641,11 @@ natives): `std::list::get`, `std::list::any?`, `std::list::all?`, `std::list::no
 (`std::str::char_at` produces a UnicodeChar from a String position; a
 "code point" also names surrogates and, colloquially, Latin-1 or other
 encodings' numbers; a scalar value is exactly what a UnicodeChar holds).
-Like every native's parameter types, their `UnicodeChar` requirement is
-checked at run time (`std::char::scalar_value(65)` is the `TYPE` error).
+Like every native's parameter types, their `UnicodeChar` requirement holds
+an argument of a statically known kind at compile time
+(`std::char::scalar_value(65)` is a compile-time `TYPE` error,
+METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md) and an `any` argument when
+the call runs.
 
 **Indexed access: `at` and `get`.** `at(container, index)` is required
 indexed lookup: it returns the element or fails with the builtin declared

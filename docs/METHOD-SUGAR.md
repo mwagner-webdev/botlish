@@ -136,7 +136,11 @@ Consequences, all by construction rather than by separate rules:
   accepts the receiver under exactly the ordinary call's rules (declared
   parameter types, source-defined refinement types such as
   `type Small = Int in 0..10`, inferred parameter contracts, call-site
-  specialization). The sugar neither broadens nor narrows them.
+  specialization). The sugar neither broadens nor narrows them. An
+  intrinsic's parameter kinds are the ordinary call's too: a receiver whose
+  type is statically of another kind is the call's TYPE at compile time
+  (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md), and one of type `any`
+  is checked when the call runs.
 * **The whole call.** Arity, every later argument, declared errors and
   handlers are the ordinary call's. A wrong later argument is reported as the
   ordinary argument error, not as "method unavailable".

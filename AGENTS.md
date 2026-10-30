@@ -3800,6 +3800,45 @@ change (`-root` of each tree, then `-compare`: no semantic difference --
 decisions, choices, static outcomes, accepted programs' HIR -- over the
 golden suites).
 
+## Native argument kinds
+
+A native's `-param-types` are the kinds its arguments must have, and the
+ordinary call's check holds them statically
+(METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md): an argument whose type is
+of a known other kind -- in an ordinary call, a method-style call (the
+receiver is argument 1) or an operator -- is a compile-time TYPE of the call
+(`hir::range::VerifyNativeKinds`, inside `hir::CheckingCall`), and the call is
+poison. The rule is stated once (`hir::types::NativeKindMismatch`; with a
+rigid imprint variable, `NativeArgumentMismatch`): region inference, the
+check and the method decision's kind proof (`hir::methods::NativeMismatch`)
+ask it. Keep it so:
+
+* No special case by callable, collection or spelling, no method-specific
+  check, and no run-time check added to make up for a static one. The method
+  decision reads the call's own diagnostic like any other problem; never give
+  it a native rule of its own again, and never let a failure add, rank or
+  retry a candidate (SFIAE, METHOD-SUGAR.md).
+* `any` stays dynamic: never reject an argument whose kind is not known, and
+  never apply the rule in a semantic instance's view (an instance types a
+  body under one caller's argument types; the caller is held to the checked
+  contract instead). It applies to calls the program wrote (`written`), never
+  to one a construct lowers to (that construct checks its operands) or to
+  core IR text.
+* A check that says more about an argument keeps it: foreign calls, imprinted
+  intrinsics, layout operations, floating-point operators and `/`, a
+  mutation receiver the place check rejects, byte owners, C addresses and
+  native views or edits, DecimalRounded parameters (the report, section 7).
+  A new such check takes its argument over the same way, never by reporting
+  beside it.
+
+If you change any of that, or a native's `-param-types`, run
+`tests/method-receiver-types.test`, `tests/method-resolution.test`,
+`tests/method-filter.test`, `tests/diagnostic-recovery.test` and
+`audit/method-receiver-types/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), plus the method-call decision's harnesses (above).
+
 ## Declared recognizers (dfa and class)
 
 `class NAME = ITEMS` and `dfa NAME over bytes|ascii|unicode:`

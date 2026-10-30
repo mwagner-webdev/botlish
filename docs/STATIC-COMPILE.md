@@ -756,8 +756,11 @@ body, `return static compile:`, a destructuring).
 
 An accepted body's run-time errors are its own: IndexNotFound
 (`sc-success-runtime-error`), a declared application error with its
-payload (`sc-success-declared-error`), a native's run-time TYPE
-(`sc-native-type-error-is-runtime`).
+payload (`sc-success-declared-error`). (A native's argument statically of
+another kind was a run-time TYPE here, `sc-native-type-error-is-runtime`,
+until METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md made it the call's
+compile-time TYPE: such a block is now rejected,
+`sc-native-type-error-is-static`.)
 
 ### 17. CompilerError contract
 

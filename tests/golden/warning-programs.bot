@@ -120,7 +120,7 @@ error Invalid
 
 # SAMPLES are the Strings of oc-length-is-str-length, passed in so that
 # their lengths are computed at run time; RUN_CHARACTER_SPELLING is false.
-fn register_one_char_string_literal_tests(samples: List[str], run_character_spelling: bool):
+fn register_one_char_string_literal_tests(samples: List[str]):
     # oc-length-is-str-length: the length the warning measures is the
     # language's own std::str::length -- 0, 1 and 2 characters; a letter plus a
     # combining mark is two, the precomposed letter one, a supplementary-
@@ -177,10 +177,10 @@ fn register_one_char_string_literal_tests(samples: List[str], run_character_spel
     std::test::rejects("oc-str-parameter-is-the-api-deficiency-shape/char", std::compiler::DiagnosticCode::Type, b_str_parameter_char)
 
     # oc-str-native-argument-warns: a native's str parameter takes the
-    # one-character String; its character spelling is accepted statically
-    # (native parameter types are checked at run time, where it fails: the
-    # Tcl test keeps that half, a failure no handler catches). The call is
-    # reachable, under a condition that is false at run time.
+    # one-character String; its character spelling is a compile-time Type
+    # there (an argument statically of another kind than a native requires,
+    # METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it compiled and failed
+    # at run time before).
     fn b_native_argument_string() errors std::compiler::CompilerError:
         static compile:
             std::str::length("a")
@@ -188,11 +188,8 @@ fn register_one_char_string_literal_tests(samples: List[str], run_character_spel
 
     fn b_native_argument_char() errors std::compiler::CompilerError:
         static compile:
-            if run_character_spelling:
-                std::str::length('a')
-            else:
-                0
-    std::test::value("oc-str-native-argument-warns/char-compiles", 0, b_native_argument_char)
+            std::str::length('a')
+    std::test::rejects("oc-str-native-argument-warns/char-rejected", std::compiler::DiagnosticCode::Type, b_native_argument_char)
 
     # oc-comparison-with-a-string-warns: == with a one-character String; the
     # character spelling silently changes the value (== of two kinds is
@@ -297,7 +294,7 @@ fn register_context_key_tests():
 # fixed-arity-list-return.test
 
 # RUN_LEFTOVER is false.
-fn register_fixed_arity_list_return_tests(run_leftover: bool):
+fn register_fixed_arity_list_return_tests():
     # fa-rebinding-same-scope-is-an-error: a same-scope rebinding is
     # DUPLICATE (so the program is never warned about).
     fn b_rebinding() errors std::compiler::CompilerError:
@@ -382,23 +379,20 @@ fn register_fixed_arity_list_return_tests(run_leftover: bool):
             std::list::get(pair(1, 2), 0, 7)
     std::test::rejects("fa-conversion-leftover-through-source-function", std::compiler::DiagnosticCode::Type, b_leftover_source_function)
 
-    # fa-conversion-leftover-native-read-is-a-run-time-error: a leftover
-    # direct native read (std::list::at) is accepted statically (the gap; it
-    # fails at run time, where no handler catches it: the Tcl test keeps
-    # that half). The read is reachable, under a condition that is false at
-    # run time.
+    # fa-conversion-leftover-native-read-is-a-type-error: a leftover direct
+    # native read (std::list::at) of the converted struct is a compile-time
+    # Type, as the read through a source function is (the gap that it
+    # compiled and failed at run time was closed by
+    # METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md).
     fn b_leftover_native_read() errors std::compiler::CompilerError:
         static compile:
             fn pair(a, b):
                 {p0: a, p1: b}
-            if run_leftover:
-                v = std::list::at(pair(1, 2), 0):
-                    on IndexNotFound:
-                        0
-                v
-            else:
-                0
-    std::test::value("fa-conversion-leftover-native-read-is-a-run-time-error/compiles", 0, b_leftover_native_read)
+            v = std::list::at(pair(1, 2), 0):
+                on IndexNotFound:
+                    0
+            v
+    std::test::rejects("fa-conversion-leftover-native-read-is-a-type-error", std::compiler::DiagnosticCode::Type, b_leftover_native_read)
 
     # fa-conversion-leftover-equality-is-silent: a leftover == against a
     # list literal is silently false (no EQUALITY error).
@@ -609,9 +603,9 @@ fn register_many_boolean_arguments_tests():
 # The suite
 
 fn register_warning_programs_tests():
-    register_one_char_string_literal_tests(["", "a", "ab", "é", "é", "😀", "😀a", "\\", "\n"], false)
+    register_one_char_string_literal_tests(["", "a", "ab", "é", "é", "😀", "😀a", "\\", "\n"])
     register_context_key_tests()
-    register_fixed_arity_list_return_tests(false)
+    register_fixed_arity_list_return_tests()
     register_proves_naming_tests()
     register_same_failure_tests()
     register_many_boolean_arguments_tests()

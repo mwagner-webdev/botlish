@@ -1,0 +1,423 @@
+# method-receiver-types.test -- a method-style call enforces its selected
+# callable's parameter contract, the receiver included
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md, METHOD-SUGAR.md).
+#
+# `receiver.f(args)` is the ordinary call `f(receiver, args)`. The census
+# defect (HTTP-STACK-INTEGRATION-CENSUS.md, B11) was the ordinary call's: a
+# native called with an argument statically of another kind than its
+# parameter requires compiled and failed when it ran, on every backend, so
+# the method spelling did too. The call's own check now rejects it
+# (hir::range::VerifyNativeKinds, one rule: hir::types::NativeKindMismatch),
+# and these tests pin
+#
+#   * the reproducer, rejected before it runs, on every backend and through
+#     the compiler service;
+#   * the equivalence of the method and the ordinary spelling, receiver and
+#     later arguments;
+#   * valid receivers, every other concrete receiver kind;
+#   * generic receivers: an untyped parameter's checked contract, an
+#     unconstrained imprint variable, a trait view; `any` stays dynamic;
+#   * no diagnostic-driven fallback: one visible candidate is the call
+#     whatever it reports, several are decided by METHOD-SUGAR.md's rule
+#     only, obligations (contexts, errors) never select;
+#   * affine receivers, C calls (and METHOD-ELIGIBLE), operators, recovery
+#     (one diagnostic, no cascade), and the rule's one statement.
+#
+# audit/method-receiver-types/tools/mutate.tcl's mutants must be killed here.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot service service.tcl]
+interp recursionlimit {} 100000
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# Compiles the application FILES (a dict: file name -> text, `main.bot` the
+# entry) in a fresh directory, -strict 0 (a rejection stays a diagnostic),
+# with the method decision's reference audit on (every decision checked
+# against the reference rule): the HIR.
+proc mrtCompile {files args} {
+    set dir [makeDirectory mrt-app-[pid]-[incr ::mrtCounter]]
+    try {
+        dict for {name text} $files {
+            set f [open [file join $dir $name] w]
+            fconfigure $f -encoding utf-8 -translation lf
+            puts -nonewline $f $text
+            close $f
+        }
+        set saved $hir::methodReferenceAudit
+        set hir::methodReferenceAudit 1
+        try {
+            return [surface::readProgramFile [file join $dir main.bot] -strict 0 -warnings off -cache "" {*}$args]
+        } finally {
+            set hir::methodReferenceAudit $saved
+        }
+    } finally {
+        removeDirectory mrt-app-[pid]-$::mrtCounter
+    }
+}
+set ::mrtCounter 0
+
+# What the compilation of the entry program TEXT (beside the modules MODULES)
+# reports, as a strict compilation raises it: {KIND LINE:COLUMN MESSAGE}
+# each, in order.
+proc mrtReported {text {modules {}}} {
+    set hir [mrtCompile [dict merge $modules [dict create main.bot $text]]]
+    mrtShown $hir
+}
+
+proc mrtShown {hir} {
+    lmap d [hir::recovery::reported $hir] {
+        list [dict get $d kind] \
+            [regsub {^.*:(\d+:\d+)$} [hir::originLocation $hir [hir::methods::DiagnosticOrigin $hir $d]] {\1}] \
+            [dict get $d message]
+    }
+}
+
+# The kinds mrtReported reports.
+proc mrtKinds {text {modules {}}} {
+    lmap d [mrtReported $text $modules] {lindex $d 0}
+}
+
+# The outcome of the program TEXT, compiled strictly, on every backend: the
+# one outcome they agree on (sourceAgree), without the effect log.
+proc mrtRuns {text} {
+    lrange [sourceAgree $text $::allBackends] 0 1
+}
+
+# The callee name of call node E of HIR (a reference's name), "" if none.
+proc mrtCalleeName {hir e} {
+    set callee [dict get $hir exprs [dict get $hir exprs $e callee]]
+    if {[dict get $callee kind] ne "ref"} {
+        return ""
+    }
+    return [dict get $callee name]
+}
+
+# The functions HIR's calls written in method syntax in main.bot are, in
+# source order (a trait program's specialization by the function it
+# specializes).
+proc mrtMethodCallees {hir} {
+    set calls {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict getdef [dict getdef $node written {}] form ""] eq "method"} {
+            set where [hir::originLocation $hir [dict get $node origin]]
+            if {[regexp {/main\.bot:(\d+):(\d+)$} $where -> line column]} {
+                lappend calls [list [format %06d:%06d $line $column] [regsub {<.*>$} [mrtCalleeName $hir $e] {}]]
+            }
+        }
+    }
+    lmap c [lsort -index 0 $calls] {lindex $c 1}
+}
+
+# The reproducer of the census (B11).
+set ::mrtRepro [file join $::projectRoot audit http-stack repro method-at-list.bot]
+
+set ::mrtArrayProgram "import std::mutable_array\n\nfn f(a: List\[int\]) -> int errors IndexNotFound:\n    a.at(0)\n\nr = f(\[1, 2\]):\n    on IndexNotFound:\n        0\nr\n"
+set ::mrtArrayOrdinary "import std::mutable_array\n\nfn f(a: List\[int\]) -> int errors IndexNotFound:\n    std::mutable_array::at(a, 0)\n\nr = f(\[1, 2\]):\n    on IndexNotFound:\n        0\nr\n"
+
+# ---------------------------------------------------------------------------
+# The reproducer
+
+test mrt-reproducer-rejected {the census reproducer (a List[int] receiver of std::mutable_array::at, the one visible `at`) is rejected at compile time with one TYPE diagnostic at the receiver, naming the callable, the kind it requires and the receiver's type; its subject is the call, and the call is std::mutable_array::at's} -body {
+    set hir [surface::readProgramFile $::mrtRepro -strict 0 -warnings off -cache ""]
+    set reported [hir::recovery::reported $hir]
+    set d [lindex $reported 0]
+    list [llength $reported] [lindex [mrtShown $hir] 0] \
+        [mrtCalleeName $hir [dict get $d subject]] \
+        [expr {[lindex [dict get $hir exprs [dict get $d subject] args] 0] eq [dict get $d expr]}]
+} -result {1 {TYPE 15:14 {argument 1 of native std::mutable_array::at requires mutarray, but the receiver has type List[int]: the call could only fail when it runs}} std::mutable_array::at 1}
+
+test mrt-reproducer-strict {a strict compilation raises the diagnostic as {CORE SEMANTIC TYPE}, the program's only one} -body {
+    catch {surface::readProgramFile $::mrtRepro -warnings off -cache ""} message options
+    list [dict get $options -errorcode] [llength [dict get $options -diagnostics]]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test mrt-reproducer-every-backend {main.tcl rejects the reproducer before it runs on every backend: the compile-time diagnostic at 15:14, never the native's run-time TYPE error} -body {
+    set results {}
+    foreach backend $::allBackends {
+        set status [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -backend $backend $::mrtRepro 2>@1} output]
+        lappend results [list $backend $status [regexp {method-at-list\.bot:15:14: argument 1 of native std::mutable_array::at requires mutarray} $output] \
+            [regexp {expected mutarray, got} $output]]
+    }
+    set results
+} -result {{interp 1 1 0} {compile 1 1 0} {cranelift-generic 1 1 0} {cranelift 1 1 0}}
+
+test mrt-reproducer-compiler-service {the compiler service reports the same diagnostic, at the receiver's range, through its ordinary checking path} -body {
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $::mrtRepro]
+        list [dict get [service::revision $rev] outcome] [lmap d [service::diagnostics $rev] {
+            list [dict get $d severity] [dict get $d code] [dict get $d line] [dict get $d column] [dict get $d endColumn] [dict get $d message]
+        }]
+    } finally {
+        service::closeWorkspace $ws
+    }
+} -result {semantic {{error {CORE SEMANTIC TYPE} 15 14 15 {argument 1 of native std::mutable_array::at requires mutarray, but the receiver has type List[int]: the call could only fail when it runs}}}}
+
+# ---------------------------------------------------------------------------
+# Ordinary-call equivalence
+
+test mrt-ordinary-call-equivalent {the method spelling and the ordinary call std::mutable_array::at(a, 0) report the same diagnostic: one TYPE, at the first argument, the call its subject, the same callee; only the receiver is named as such} -body {
+    set results {}
+    foreach text [list $::mrtArrayProgram $::mrtArrayOrdinary] {
+        set hir [mrtCompile [dict create main.bot $text]]
+        set d [lindex [hir::recovery::reported $hir] 0]
+        set call [dict get $d subject]
+        lappend results [list [llength [hir::recovery::reported $hir]] [dict get $d kind] [mrtCalleeName $hir $call] \
+            [expr {[lindex [dict get $hir exprs $call args] 0] eq [dict get $d expr]}] \
+            [string map {"the receiver" "this argument"} [dict get $d message]]]
+    }
+    list [expr {[lindex $results 0] eq [lindex $results 1]}] [lindex $results 0]
+} -result {1 {1 TYPE std::mutable_array::at 1 {argument 1 of native std::mutable_array::at requires mutarray, but this argument has type List[int]: the call could only fail when it runs}}}
+
+test mrt-later-arguments {a later argument of another kind is the same ordinary argument error in both spellings, at the argument: a native's (m.at("x")) and a Botlish function's declared parameter (m.pick("x"))} -body {
+    set head "import std::mutable_array\n\nfn pick(m: MutableArray\[int\], i: int) -> int errors IndexNotFound:\n    std::mutable_array::at(m, i)\n\nm = std::mutable_array::create(2, 7)\n"
+    set results {}
+    foreach call {{m.at("x")} {std::mutable_array::at(m, "x")} {m.pick("x")} {pick(m, "x")}} {
+        lappend results [mrtReported "${head}r = $call:\n    on IndexNotFound:\n        0\nr\n"]
+    }
+    set results
+} -result {{{TYPE 7:10 {argument 2 of native std::mutable_array::at requires int, but this argument has type str: the call could only fail when it runs}}} {{TYPE 7:31 {argument 2 of native std::mutable_array::at requires int, but this argument has type str: the call could only fail when it runs}}} {{TYPE 7:12 {argument for parameter "i" cannot be proven to satisfy int (argument type: str)}}} {{TYPE 7:13 {argument for parameter "i" cannot be proven to satisfy int (argument type: str)}}}}
+
+# ---------------------------------------------------------------------------
+# Valid and invalid concrete receivers
+
+test mrt-valid-receiver {a MutableArray receiver is accepted in both spellings and runs to the same value on every backend} -body {
+    set program "import std::mutable_array\n\nfn f(a: MutableArray\[int\]) -> int errors IndexNotFound:\n    a.at(1) + std::mutable_array::at(a, 0)\n\nm = std::mutable_array::create(2, 7)\nm.set(1, 30):\n    on IndexNotFound:\n        unit\nr = f(m):\n    on IndexNotFound:\n        0\nr\n"
+    list [mrtKinds $program] [mrtRuns $program]
+} -result {{} {value 37}}
+
+test mrt-other-concrete-receivers {every other concrete receiver kind is rejected the same way, in the function's body as written (no call of it needed): a String, an Int, a Bool, a Float64, a UnicodeChar, a named struct, an enum, a MutableVector, a List of Strings, an anonymous struct} -body {
+    set results {}
+    foreach {decl type} {
+        {} str
+        {} int
+        {} bool
+        {} Float64
+        {} UnicodeChar
+        {struct P:\n    x: int\n} P
+        {enum Color:\n    Red, Green\n} Color
+        {} MutableVector[int]
+        {} List[str]
+    } {
+        set text "import std::mutable_array\n[subst -nocommands -novariables $decl]\nfn f(v: $type) errors IndexNotFound:\n    v.at(0)\n\n1\n"
+        set reported [mrtReported $text]
+        lappend results [list [llength $reported] [lindex $reported 0 0] \
+            [regsub {^argument 1 of native std::mutable_array::at requires mutarray, but the receiver has type (.*): the call could only fail when it runs$} [lindex $reported 0 2] {\1}]]
+    }
+    set reported [mrtReported "import std::mutable_array\n\nfn f() errors IndexNotFound:\n    v = {x: 1}\n    v.at(0)\n\n1\n"]
+    lappend results [list [llength $reported] [lindex $reported 0 0] \
+        [regsub {^argument 1 of native std::mutable_array::at requires mutarray, but the receiver has type (.*): the call could only fail when it runs$} [lindex $reported 0 2] {\1}]]
+} -result {{1 TYPE str} {1 TYPE int} {1 TYPE bool} {1 TYPE Float64} {1 TYPE UnicodeChar} {1 TYPE P} {1 TYPE Color} {1 TYPE {MutableVector[int]}} {1 TYPE {List[str]}} {1 TYPE {struct{x: int}}}}
+
+# ---------------------------------------------------------------------------
+# Generic receivers
+
+set ::mrtFirst "import std::mutable_array\n\nfn first(a) errors IndexNotFound:\n    a.at(0)\n\n"
+
+test mrt-generic-untyped-definition {an untyped parameter's body is checked against no instantiation: `a.at(0)` on an untyped `a` is the contract the body imposes (a checked mutarray requirement), and the definition alone compiles} -body {
+    set hir [mrtCompile [dict create main.bot "${::mrtFirst}1\n"]]
+    set block [hir::get $hir [lindex [hirFind $hir bind first] 0] value]
+    list [mrtShown $hir] [hir::signatures::checkedTypes $hir $block]
+} -result {{} mutarray}
+
+test mrt-generic-untyped-satisfied {a call giving the untyped parameter a MutableArray satisfies the contract and runs on every backend} -body {
+    set program "${::mrtFirst}m = std::mutable_array::create(2, 7)\nr = first(m):\n    on IndexNotFound:\n        0\nr\n"
+    list [mrtKinds $program] [mrtRuns $program]
+} -result {{} {value 7}}
+
+test mrt-generic-untyped-violated {a call giving it a List is rejected at the call by the contract, once: the semantic instance typed under the List does not report the body's native again} -body {
+    mrtReported "${::mrtFirst}r = first(\[1, 2\]):\n    on IndexNotFound:\n        0\nr\n"
+} -result {{TYPE 6:11 {argument for parameter "a" is statically incompatible with mutarray, the parameter type inferred from the function body (argument type: List[int]); inferred from the function body: argument 1 of native std::mutable_array::at requires mutarray (at 4:5)}}}
+
+set ::mrtBox "import std::mutable_array\n\nstruct Box\[T\]:\n    v: T\n\nfn first(b: Box\[T\]) -> int errors IndexNotFound:\n    b.v.at(0)\n\n"
+
+test mrt-generic-imprint-unconstrained {an unconstrained imprint variable is rigid in the body, which is checked once, for every T: `b.v.at(0)` is rejected at the definition -- with no call, with a call whose T happens to be a MutableArray, with one whose T is a List -- never deferred to the instantiation} -body {
+    set results {}
+    foreach tail {"1\n" "r = first(Box {v: std::mutable_array::create(1, 9)}):\n    on IndexNotFound:\n        0\nr\n" "r = first(Box {v: \[1, 2\]}):\n    on IndexNotFound:\n        0\nr\n"} {
+        lappend results [mrtReported "${::mrtBox}$tail"]
+    }
+    list [llength [lsort -unique $results]] [lindex $results 0]
+} -result {1 {{TYPE 7:5 {argument 1 of native std::mutable_array::at requires mutarray, but the receiver has type T: the function is checked once, for every T, and not every T is a mutarray}}}}
+
+test mrt-generic-imprint-trait-constrained {a trait constraint names no kind: T satisfies Hashable is still not a MutableArray, in either spelling} -body {
+    list [mrtKinds "import std::mutable_array\n\nstruct Box\[T satisfies Hashable\]:\n    v: T\n\nfn first(b: Box\[T\]) -> int errors IndexNotFound:\n    b.v.at(0)\n\n1\n"] \
+        [mrtKinds "import std::mutable_array\n\nstruct Box\[T satisfies Hashable\]:\n    v: T\n\nfn first(b: Box\[T\]) -> int errors IndexNotFound:\n    std::mutable_array::at(b.v, 0)\n\n1\n"]
+} -result {TYPE TYPE}
+
+test mrt-generic-imprint-kind-free-use {a native that requires no kind takes every T: == of two values of T compiles and runs} -body {
+    set program "struct Box\[T\]:\n    v: T\n\nfn same(b: Box\[T\]) -> bool:\n    b.v == b.v\n\nsame(Box {v: \[1, 2\]})\n"
+    list [mrtKinds $program] [mrtRuns $program]
+} -result {{} {value true}}
+
+set ::mrtNamed "trait Named:\n    fn name(value: Named) -> str\n\nstruct Person:\n    value: str\n\nfn name(value: Person) -> str:\n    value.value\n\n"
+
+test mrt-generic-trait-view {a trait view's method call is typed from its trait alone: `value.at(0)` with std::mutable_array::at visible is TRAIT-UNKNOWN-OPERATION, never that function, and the ordinary call of it is TRAIT-VIEW-MISUSE} -body {
+    list [mrtKinds "import std::mutable_array\n\n${::mrtNamed}fn f(value: Named) errors IndexNotFound:\n    value.at(0)\n\nr = f(Person {value: \"a\"}):\n    on IndexNotFound:\n        0\nr\n"] \
+        [mrtKinds "import std::mutable_array\n\n${::mrtNamed}fn f(value: Named) errors IndexNotFound:\n    std::mutable_array::at(value, 0)\n\nr = f(Person {value: \"a\"}):\n    on IndexNotFound:\n        0\nr\n"]
+} -result {TRAIT-UNKNOWN-OPERATION TRAIT-VIEW-MISUSE}
+
+test mrt-any-receiver-dynamic {an `any` receiver stays dynamic in both spellings: a declared `a: any` given a MutableArray runs, given a List compiles and fails with the native's own run-time TYPE error on every backend} -body {
+    set results {}
+    foreach body {a.at(0) {std::mutable_array::at(a, 0)}} {
+        set head "import std::mutable_array\n\nfn first(a: any) errors IndexNotFound:\n    $body\n\n"
+        set good "${head}m = std::mutable_array::create(2, 7)\nr = first(m):\n    on IndexNotFound:\n        0\nr\n"
+        set bad "${head}r = first(\[1, 2\]):\n    on IndexNotFound:\n        0\nr\n"
+        lappend results [mrtKinds $good] [mrtRuns $good] [mrtKinds $bad] [mrtRuns $bad]
+    }
+    set results
+} -result {{} {value 7} {} {error {CORE SEMANTIC TYPE}} {} {value 7} {} {error {CORE SEMANTIC TYPE}}}
+
+# ---------------------------------------------------------------------------
+# No diagnostic-driven fallback
+
+test mrt-no-fallback-single-candidate {with one visible `at`, the call is that function's whatever its check reports: std::list::at exists but is not imported, and the List receiver's call is rejected as std::mutable_array::at's, never resolved to std::list::at; no decision is recorded} -body {
+    set hir [mrtCompile [dict create main.bot $::mrtArrayProgram]]
+    set d [lindex [hir::recovery::reported $hir] 0]
+    list [mrtCalleeName $hir [dict get $d subject]] [dict size [dict getdef $hir methodCalls {}]] [dict getdef $hir methodDecided {}]
+} -result {std::mutable_array::at 0 {}}
+
+set ::mrtLocalAt "import std::list\n\nfn at(s: str, i: int) -> int:\n    i\n\n"
+
+test mrt-no-fallback-ordinary-call {an ordinary call resolves its callee by its one lexical binding: `at(xs, 0)` is the file's `at`, rejected for a List, never std::list::at} -body {
+    mrtKinds "${::mrtLocalAt}r = at(\[1, 2\], 0):\n    on IndexNotFound:\n        0\nr\n"
+} -result TYPE
+
+test mrt-several-candidates-decided-by-the-rule {with several visible candidates the call is the one whose ordinary call is valid (METHOD-SUGAR.md), judged by the calls' own checks: a List receiver is std::list::at, a String receiver the file's `at`; both run on every backend} -body {
+    set results {}
+    foreach {receiver} {{[1, 2]} {"ab"}} {
+        set program "${::mrtLocalAt}xs = $receiver\nr = xs.at(1):\n    on IndexNotFound:\n        0\nr\n"
+        set hir [mrtCompile [dict create main.bot $program]]
+        lappend results [mrtMethodCallees $hir] [mrtRuns $program]
+    }
+    set results
+} -result {std::list::at {value 2} at {value 1}}
+
+test mrt-several-candidates-ambiguous {two candidates whose ordinary calls are both valid are AMBIGUOUS-METHOD-CALL: no precedence, whatever is lexical} -body {
+    mrtKinds "import std::list\n\nfn at(xs: List\[int\], i: int) -> int:\n    0\n\nr = \[1, 2\].at(0):\n    on IndexNotFound:\n        0\nr\n"
+} -result AMBIGUOUS-METHOD-CALL
+
+test mrt-several-candidates-none-applicable {no candidate valid is NO-APPLICABLE-METHOD, each candidate explained by its own call's TYPE diagnostic, and nothing else reported} -body {
+    mrtReported "import std::list\nimport std::mutable_array\n\nr = \"ab\".at(0):\n    on IndexNotFound:\n        0\nr\n"
+} -result {{NO-APPLICABLE-METHOD 4:10 {method-style call "at": none of the visible functions of that name accepts the call (std::list::at rejects the receiver: argument 1 of native std::list::at requires list, but the receiver has type str: the call could only fail when it runs; std::mutable_array::at rejects the receiver: argument 1 of native std::mutable_array::at requires mutarray, but the receiver has type str: the call could only fail when it runs)}}}
+
+set ::mrtEnvModules [dict create \
+    env.bot "context trait Env:\n    fn tick(n: int) -> int\n" \
+    ca.bot "context struct CA:\n    k: int\n\nfn tick(n: int, context c: CA) -> int:\n    n + c.k\n" \
+    alpha.bot "import env\n\nfn at(x: int, i: int, context e: env::Env) -> int:\n    e.tick(x + i)\n"]
+
+test mrt-context-obligation-never-selects {a candidate whose context is not installed stays the call (MISSING-CONTEXT is its obligation), never the other candidate: alpha::at for an Int receiver with or without the context, std::mutable_array::at for a MutableArray receiver either way} -body {
+    set results {}
+    foreach install {"" "with context ca::CA {k: 1}\n"} {
+        foreach receiver {5 {std::mutable_array::create(2, 7)}} {
+            set hir [mrtCompile [dict merge $::mrtEnvModules [dict create main.bot "import ca\nimport alpha\nimport std::mutable_array\n\n${install}xs = $receiver\nr = xs.at(1):\n    on IndexNotFound:\n        0\nr\n"]]]
+            lappend results [list [mrtMethodCallees $hir] [lmap d [mrtShown $hir] {lindex $d 0}]]
+        }
+    }
+    set results
+} -result {{alpha::at MISSING-CONTEXT} {std::mutable_array::at {}} {alpha::at {}} {std::mutable_array::at {}}}
+
+set ::mrtErrorModules [dict create \
+    alpha.bot "error E\n\nfn g(x: int) -> int errors E:\n    if x > 100:\n        fail E\n    x\n" \
+    beta.bot "fn g(x: int) -> int:\n    x + 1\n"]
+
+test mrt-error-obligation-never-selects {a declared error nobody handles is the selected call's obligation (UNHANDLED-ERROR), never a reason to pick another candidate: the List receiver's one admitting candidate stays the call, and of two candidates that both accept an Int, the one whose error goes unhandled is still applicable -- AMBIGUOUS-METHOD-CALL, handled or not} -body {
+    set hir [mrtCompile [dict create main.bot "import std::list\nimport std::mutable_array\n\nfn f(xs: List\[int\]) -> int:\n    xs.at(0)\n\nf(\[1, 2\])\n"]]
+    list [mrtMethodCallees $hir] [lmap d [mrtShown $hir] {lindex $d 0}] \
+        [mrtKinds "import alpha\nimport beta\n\nfn h(y: int) -> int:\n    y.g()\n\nh(7)\n" $::mrtErrorModules] \
+        [mrtKinds "import alpha\nimport beta\n\nfn h(y: int) -> int:\n    r = y.g():\n        on alpha::E:\n            0\n    r\n\nh(7)\n" $::mrtErrorModules]
+} -result {std::list::at UNHANDLED-ERROR AMBIGUOUS-METHOD-CALL AMBIGUOUS-METHOD-CALL}
+
+# ---------------------------------------------------------------------------
+# Affine receivers, C calls, operators, recovery
+
+set ::mrtCoroutine "struct Message:\n    value: int\n\nfn worker(base: int, resume Message) -> int:\n    message = yield base\n    message.value\n\nfn finish(c: Coroutine{args: \[Message\], return: int}) -> int:\n    c(Message {value: 5})\n\ncoroutine {step, first} = worker(1)\n"
+
+test mrt-affine-receiver-moves {a coroutine handle receiver moves into the call as the ordinary argument does: one use runs on every backend, a second use is the same use-after-move in both spellings} -constraints nativeCoroutines -body {
+    set results [list [mrtRuns "${::mrtCoroutine}a = step.finish()\n\[first, a\]\n"]]
+    foreach call {step.finish() finish(step)} {
+        lappend results [mrtKinds "${::mrtCoroutine}a = $call\nb = $call\n\[first, a, b\]\n"]
+    }
+    set results
+} -result {{value {[1, 5]}} USE-AFTER-MOVE USE-AFTER-MOVE}
+
+test mrt-affine-receiver-kind {a coroutine handle is no String: std::str::length's receiver of that kind is the one TYPE diagnostic} -body {
+    mrtReported "import std::str\n\n${::mrtCoroutine}n = step.length()\n\[first, n\]\n"
+} -result {{TYPE 14:5 {argument 1 of native std::str::length requires str, but the receiver has type Coroutine{args: [Message], return: int, errors: []}: the call could only fail when it runs}}}
+
+set ::mrtExtern "import std::ffi::c\n\nextern c fn scale(x: std::ffi::c::Int, k: std::ffi::c::Int) -> std::ffi::c::Int\n\n"
+
+test mrt-c-call-receiver {a C function's method-style call is held to its foreign contract like the ordinary call: an Int receiver compiles, a String receiver is the foreign contract's TYPE in both spellings} -body {
+    list [mrtKinds "${::mrtExtern}fn f(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    n.scale(2)\n\n1\n"] \
+        [mrtReported "${::mrtExtern}fn f(s: str) -> std::ffi::c::Int:\n    s.scale(2)\n\n1\n"] \
+        [mrtReported "${::mrtExtern}fn f(s: str) -> std::ffi::c::Int:\n    scale(s, 2)\n\n1\n"]
+} -result {{} {{TYPE 6:5 {argument 1 of scale cannot be proven to satisfy std::ffi::c::Int (argument type: str)}}} {{TYPE 6:11 {argument 1 of scale cannot be proven to satisfy std::ffi::c::Int (argument type: str)}}}}
+
+test mrt-c-call-method-eligible {METHOD-ELIGIBLE is unchanged for a C function: its ordinary call with a valid receiver warns, its method-style call does not} -body {
+    set ordinary [surface::compile "${::mrtExtern}fn f(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    scale(n, 2)\n\n1\n" t.bot -warnings default -warning-channel ""]
+    set method [surface::compile "${::mrtExtern}fn f(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    n.scale(2)\n\n1\n" t.bot -warnings default -warning-channel ""]
+    list [lmap w [hir::warnings::of $ordinary] {dict get $w code}] [lmap w [hir::warnings::of $method] {dict get $w code}]
+} -result {METHOD-ELIGIBLE {}}
+
+test mrt-operators {an operator is a call of a native: an operand statically of another kind is the same TYPE diagnostic, named as an operand; an `any` operand is checked when it runs} -body {
+    list [mrtReported "fn f(xs: List\[int\]) -> int:\n    xs + 1\n\nf(\[1\])\n"] \
+        [mrtReported "fn f(s: str) -> int:\n    1 - s\n\nf(\"a\")\n"] \
+        [mrtKinds "fn f(x: any) -> int:\n    x + 1\n\nf(1)\n"]
+} -result {{{TYPE 2:5 {argument 1 of native + requires int, but this operand has type List[int]: the call could only fail when it runs}}} {{TYPE 2:9 {argument 2 of native - requires int, but this operand has type str: the call could only fail when it runs}}} {}}
+
+test mrt-recovery-no-cascade {the rejected call has no value (poison): nothing that uses its result reports again -- an outer native given its result, a method chain on it, a declared result} -body {
+    list [mrtKinds "import std::list\nimport std::str\n\nfn f(xs: List\[int\]) -> int:\n    std::list::length(std::str::length(xs))\n\nf(\[1\])\n"] \
+        [mrtKinds "import std::str\n\nfn f(xs: List\[int\]) -> int:\n    xs.length().length()\n\nf(\[1\])\n"] \
+        [mrtKinds "import std::str\n\nfn f(xs: List\[int\]) -> str:\n    std::str::length(xs)\n\nf(\[1\])\n"]
+} -result {TYPE TYPE TYPE}
+
+test mrt-independent-arguments {each argument of another kind is its own diagnostic: both of a call's wrong arguments are reported} -body {
+    mrtKinds "import std::str\n\nfn f(xs: List\[int\]) -> str:\n    std::str::substring(xs, \"a\", 1)\n\nf(\[1\])\n"
+} -result {TYPE TYPE}
+
+test mrt-mutation-receiver-place-check {a mutating operation's receiver of another kind keeps its place diagnostic, MUTABLE-PLACE-RECEIVER, alone} -body {
+    mrtKinds "import std::mutable_array\n\nfn f(a: List\[int\]) -> unit errors IndexNotFound:\n    a.set(0, 1)\n\nf(\[1\]):\n    on IndexNotFound:\n        unit\n"
+} -result MUTABLE-PLACE-RECEIVER
+
+test mrt-mutation-receiver-struct {a struct receiver the place check cannot judge (it may hold a collection: a MutableMap) is still no MutableArray: std::mutable_array::set's receiver of that kind is the call's TYPE, and among visible candidates m.set(...) is std::mutable_map::set's, by the reference rule too} -body {
+    set head "import std::mutable_array\nimport std::mutable_map\n\nfn f() -> int:\n    m = std::mutable_map::create\[int, int\]()\n"
+    list [mrtKinds "${head}    std::mutable_array::set(m, 1, 2):\n        on IndexNotFound:\n            unit\n    0\n\nf()\n"] \
+        [mrtMethodCallees [mrtCompile [dict create main.bot "${head}    m.set(1, 2)\n    m.length()\n\nf()\n"]]] \
+        [mrtRuns "${head}    m.set(1, 2)\n    m.length()\n\nf()\n"]
+} -result {TYPE {std::mutable_map::set std::mutable_map::length} {value 1}}
+
+test mrt-dead-code-checked {the call's own check judges it as written, reachable or not, like a declared parameter's: an argument of another kind after a return is TYPE, and in a function whose unbound name leaves the rest unreachable the method call is decided by its candidates' own checks (only UNBOUND reported)} -body {
+    list [mrtKinds "import std::str\n\nfn u() -> int:\n    return 0\n    std::str::length(5)\n\nu()\n"] \
+        [mrtKinds "import std::list\nimport std::str\n\nfn u() -> int:\n    q = nothere\n    \[1\].length()\n\nu()\n"] \
+        [mrtMethodCallees [mrtCompile [dict create main.bot "import std::list\nimport std::str\n\nfn u() -> int:\n    q = nothere\n    \[1\].length()\n\nu()\n"]]]
+} -result {TYPE UNBOUND std::list::length}
+
+# ---------------------------------------------------------------------------
+# The rule's one statement
+
+test mrt-rule-one-statement {the kind rule is stated once (hir::types::NativeKindMismatch): the call's own check, the typing walk and the method decision's kind proof ask it, and a call's problems in the decision state no native rule of their own} -body {
+    set verify [info body hir::range::VerifyNativeKinds]
+    set mismatch [info body hir::methods::NativeMismatch]
+    set problems [info body hir::methods::CallProblems]
+    set argument [info body hir::types::NativeArgumentMismatch]
+    list [regexp {NativeArgumentMismatch} $verify] [regexp {paramTypes|core::type::base} $verify] \
+        [regexp {NativeKindMismatch} $argument] \
+        [regexp {NativeKindMismatch} $mismatch] [regexp {paramTypes|core::type::base} $mismatch] \
+        [regexp {NativeMismatch|paramTypes|core::type::base} $problems]
+} -result {1 0 1 1 0 0}
+
+test mrt-rule-cases {NativeKindMismatch: a known kind other than the required one is a mismatch; the required kind, an unknown kind (any), never, a native that requires none, and a parameter past the native's list are none; NativeArgumentMismatch adds the rigid imprint variable} -body {
+    list [hir::types::NativeKindMismatch std::mutable_array::at 0 {list int}] \
+        [hir::types::NativeKindMismatch std::mutable_array::at 0 {mutarray int}] \
+        [hir::types::NativeKindMismatch std::mutable_array::at 0 any] \
+        [hir::types::NativeKindMismatch std::mutable_array::at 0 never] \
+        [hir::types::NativeKindMismatch std::mutable_array::at 1 str] \
+        [hir::types::NativeKindMismatch == 0 str] \
+        [hir::types::NativeKindMismatch std::mutable_array::at 5 str] \
+        [hir::types::NativeKindMismatch std::mutable_array::at 0 {imprint T}] \
+        [hir::types::NativeArgumentMismatch std::mutable_array::at 0 {imprint T}] \
+        [hir::types::NativeArgumentMismatch == 0 {imprint T}]
+} -result {{list mutarray} {} {} {} {str int} {} {} {} {imprint mutarray} {}}
+
+cleanupTests

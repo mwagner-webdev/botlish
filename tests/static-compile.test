@@ -296,10 +296,10 @@ test sc-negative-type {item 53: a static type error is code Type at the argument
     scAgree [scProbe "needs_int(\"s\")" "fn needs_int(v: int) -> int:\n    v\n\n"]
 } -result {value {[std::compiler::DiagnosticCode::Type, 7, 19, [], "argument for parameter \"v\" cannot be proven to satisfy int (argument type: str)"]}}
 
-test sc-native-type-error-is-runtime {`1 + "x"` is not a compile-time error in Botlish (a native's argument kinds are checked at run time): the body is accepted and fails with the run-time TYPE error, not CompilerError (item 53, 58)} -body {
+test sc-native-type-error-is-static {`1 + "x"` is a compile-time error (an argument statically of another kind than a native's parameter requires is the call's own TYPE, METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it used to be the run-time TYPE error): the block is rejected, and the CompilerError it completes with is Type on every backend (item 53, 58)} -body {
     list [scSites "fn f() errors std::compiler::CompilerError:\n    static compile:\n        1 + \"xy\"\n\n0\n"] \
-        [lindex [scAgree "fn f() errors std::compiler::CompilerError:\n    static compile:\n        1 + \"xy\"\n\nf()\n"] 1]
-} -result {accepted {CORE SEMANTIC TYPE}}
+        [scAgree [scProbe "1 + \"xy\""]]
+} -result {{{rejected TYPE 4 13}} {value {[std::compiler::DiagnosticCode::Type, 4, 13, [], "argument 2 of native + requires int, but this operand has type str: the call could only fail when it runs"]}}}
 
 set scErased {error E1
 error E2

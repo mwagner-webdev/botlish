@@ -1027,6 +1027,9 @@ tools.
   every backend ("std::mutable_array::at: expected mutarray, got [1, 2]");
   expected: a compile-time rejection. Reproduction:
   `audit/http-stack/repro/method-at-list.bot`. Not investigated further.
+  (Fixed since by METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md: the
+  ordinary call's check of a native's argument kinds, which the method
+  spelling shares.)
 * **B12. One expensive synchronous operation blocks the loop.** Bounded
   executor runs do not bound a single call: the slowest Rust call measured
   5.0-7.6 ms (section 13), and an unrelated task was late by 5.3-8.1 ms. Key

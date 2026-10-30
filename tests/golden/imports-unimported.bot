@@ -94,12 +94,12 @@ fn register_primitive_tests():
         static compile:
             list(1, 2) == [1, 2] and integer?(1) and string?("a") and hash(1) == hash(1) and mod(7, 3) == 1
     std::test::value("imports-root-primitives-need-no-import/root-natives", true, b_root_natives)
-    # ... and a list literal and `+` compile with no import (g is never
-    # called: adding an Int to a List fails at run time on every backend).
+    # ... and a list literal and `+` compile with no import (in g, never
+    # called: the Tcl test only compiles them).
     fn b_list_literal_and_plus() errors std::compiler::CompilerError:
         static compile:
             fn g():
-                [1, 2] + 0
+                [1, 2 + 0]
             1
     std::test::value("imports-root-primitives-need-no-import/operators", 1, b_list_literal_and_plus)
 

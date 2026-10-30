@@ -1,13 +1,13 @@
 # method-at-list.bot -- an incidental finding of the HTTP stack census
 # (HTTP-STACK-INTEGRATION-CENSUS.md, section 17, B11): with only
 # std::mutable_array imported, a method-style `a.at(0)` on a List[int]
-# parameter compiles and fails when it runs, on every backend:
+# parameter compiled and failed when it ran, on every backend:
 #
-#   tclsh9.0 main.tcl -backend interp audit/http-stack/repro/method-at-list.bot
 #   error: std::mutable_array::at: expected mutarray, got [1, 2] (CORE SEMANTIC TYPE)
 #
-# Expected: rejected at compile time (the one visible candidate's ordinary
-# call is not valid for a List receiver). Not fixed by the census.
+# Fixed by METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md: rejected at
+# compile time, a TYPE diagnostic at the receiver (15:14), on every backend
+# (tests/method-receiver-types.test's mrt-reproducer-* pin it).
 import std::mutable_array
 
 fn f(a: List[int]) errors IndexNotFound:

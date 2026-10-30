@@ -1398,13 +1398,12 @@ test fa-conversion-leftover-through-source-function {a leftover positional read 
     lindex [rejection "${::converted}std::list::get(pair(1, 2), 0, 7)" default] 0
 } -result {CORE SEMANTIC TYPE}
 
-test fa-conversion-leftover-native-read-is-a-run-time-error {GAP: a leftover direct native read (std::list::at) compiles and fails at run time with a kind error} -body {
-    set hir [compileWith "${::converted}v = std::list::at(pair(1, 2), 0):
+test fa-conversion-leftover-native-read-is-a-type-error {a leftover direct native read (std::list::at) of the converted struct is a compile-time TYPE error, as the read through a source function is (the gap that it compiled and failed at run time with a kind error was closed by METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md)} -body {
+    lindex [rejection "${::converted}v = std::list::at(pair(1, 2), 0):
     on IndexNotFound:
         0
-v" off]
-    list [catch {core::evalProgram [hir::lower $hir]} message] [string match "*expected list*" $message]
-} -result {1 1}
+v" default] 0
+} -result {CORE SEMANTIC TYPE}
 
 test fa-conversion-leftover-equality-is-silent {GAP: a leftover `==` against a list literal compiles and is silently false} -body {
     set hir [compileWith "${::converted}pair(1, 2) == \[1, 2\]" off]

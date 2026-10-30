@@ -1,0 +1,174 @@
+# Mutants of METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md
+# (audit/method-receiver-types/tools/mutate.tcl): deliberate breaks of the
+# static native-argument kind check (hir/range.tcl's VerifyNativeKinds, the
+# rule hir/types.tcl's NativeKindMismatch and NativeArgumentMismatch, the
+# poison of a rejected call) and of the method decision's refusal to select by
+# failure (hir/resolve.tcl's candidates, hir/methods.tcl's obligations). Each
+# must be killed by tests/method-receiver-types.test, by one of the tests its
+# `!!` line names -- the test that states the rule it breaks, never an
+# unrelated failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+
+# ---------------------------------------------------------------------------
+# The receiver's check
+
+@@ receiver-unchecked the first argument of a native call is never held to its kind (the census defect, for every call): a List receiver of std::mutable_array::at compiles again
+!! mrt-reproducer-rejected mrt-reproducer-strict mrt-ordinary-call-equivalent mrt-other-concrete-receivers
+## hir/range.tcl
+<<<<
+        set mismatch [hir::types::NativeArgumentMismatch $name $i $argType]
+====
+        set mismatch [if {$i == 0} {list} else {hir::types::NativeArgumentMismatch $name $i $argType}]
+>>>>
+
+@@ method-receiver-unchecked a weaker, method-specific path: only a call written in method syntax skips its receiver, the ordinary spelling is still checked
+!! mrt-reproducer-rejected mrt-ordinary-call-equivalent
+## hir/range.tcl
+<<<<
+        set mismatch [hir::types::NativeArgumentMismatch $name $i $argType]
+====
+        set mismatch [if {$i == 0 && [WrittenForm $node] eq "method"} {list} else {hir::types::NativeArgumentMismatch $name $i $argType}]
+>>>>
+
+@@ diagnostic-suppressed the mismatch still makes the call poison, but its diagnostic is never reported: the call keeps no diagnostic of its own
+!! mrt-reproducer-rejected mrt-reproducer-strict mrt-reproducer-every-backend mrt-reproducer-compiler-service
+## hir/range.tcl
+<<<<
+        hir::Diagnose hir TYPE [format {argument %d of native %s requires %s, but %s has type %s: %s} \
+====
+        list hir TYPE [format {argument %d of native %s requires %s, but %s has type %s: %s} \
+>>>>
+
+@@ subject-lost the diagnostic is reported but is no call's own (no subject): the method decision cannot read it as the candidate's problem
+!! mrt-reproducer-rejected mrt-ordinary-call-equivalent mrt-several-candidates-none-applicable mrt-mutation-receiver-struct
+## hir/range.tcl
+<<<<
+        hir::Diagnose hir TYPE [format {argument %d of native %s requires %s, but %s has type %s: %s} \
+====
+        set ::hir::checkingCall ""
+        hir::Diagnose hir TYPE [format {argument %d of native %s requires %s, but %s has type %s: %s} \
+>>>>
+
+@@ operators-exempt a special case: an operator's operands are left to the run-time check
+!! mrt-operators
+## hir/range.tcl
+<<<<
+            || [dict exists $node resolvedOperator] || [dict getdef $node operator ""] eq "/"} {
+====
+            || [dict exists $node resolvedOperator] || [dict exists $node operator]} {
+>>>>
+
+@@ reachable-only the check judges reachable calls only: a mismatch in dead code, and the candidates of a call a resolution failure leaves unreachable, go unjudged
+!! mrt-dead-code-checked
+## hir/range.tcl
+<<<<
+    if {![dict exists $node written] || [dict exists $hir semanticContext]
+====
+    if {![dict exists $node written] || [dict exists $hir semanticContext] || ![dict get $node reachable]
+>>>>
+
+@@ mutation-receivers-all-deferred every mutating operation's receiver is left to the place check, which cannot judge a struct that may hold a collection: std::mutable_array::set(m, ...) of a MutableMap compiles
+!! mrt-mutation-receiver-struct
+## hir/range.tcl
+<<<<
+        if {($i == 0 && [hir::mutvec::RejectsReceiver $hir $e $arg])
+====
+        if {($i == 0 && [hir::mutvec::OpKind $hir $e] eq "mutate")
+>>>>
+
+# ---------------------------------------------------------------------------
+# The rule and its boundaries
+
+@@ any-rejected-through-instances the check also runs in a semantic instance's view: an `any` receiver is judged by the type one caller happens to give it, never checked when the call runs
+!! mrt-any-receiver-dynamic
+## hir/range.tcl
+<<<<
+    if {![dict exists $node written] || [dict exists $hir semanticContext]
+====
+    if {![dict exists $node written]
+>>>>
+
+@@ imprint-variable-deferred an unconstrained imprint variable is treated as `any`: the body is checked against the instantiations callers give, never for every T
+!! mrt-generic-imprint-unconstrained mrt-generic-imprint-trait-constrained mrt-rule-cases
+## hir/types.tcl
+<<<<
+    if {$mismatch ne {} || ![IsImprint $type]} {
+====
+    if {1} {
+>>>>
+
+@@ poison-dropped the rejected call keeps its native's result type: what uses it is judged again (a cascade)
+!! mrt-recovery-no-cascade
+## hir/types.tcl
+<<<<
+                    if {[if {$spec} {NativeKindMismatch $name $index $argType} else {NativeArgumentMismatch $name $index $argType}] ne {}} {
+====
+                    if {$spec && [NativeKindMismatch $name $index $argType] ne {}} {
+>>>>
+
+@@ equal-kinds-rejected the rule reports a mismatch for the kind the native requires: a MutableArray receiver is rejected
+!! mrt-valid-receiver mrt-generic-untyped-satisfied mrt-rule-cases
+## hir/types.tcl
+<<<<
+    if {$kind eq "" || $wanted in {"" any} || $kind eq $wanted} {
+====
+    if {$kind eq "" || $wanted in {"" any}} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# No diagnostic-driven selection
+
+@@ fallback-to-every-namespace SFINAE: a method name is also looked up among every standard namespace's natives, imported or not, so a receiver the visible `at` rejects finds std::list::at
+!! mrt-reproducer-rejected mrt-no-fallback-single-candidate
+## hir/resolve.tcl
+<<<<
+    foreach ns [hir::imports::namespaces [CtxNamespace $ctx]] {
+        set qualified "${ns}::$name"
+====
+    foreach ns [lsort -unique [concat [hir::imports::namespaces [CtxNamespace $ctx]] [lmap n [core::native::names] {if {[namespace tail $n] ne $name || ![string match std::* $n]} continue; namespace qualifiers $n}]]] {
+        set qualified "${ns}::$name"
+>>>>
+
+@@ context-obligation-selects a context the installations do not provide counts against a candidate: an Int receiver whose candidate requires a missing context is no longer that candidate's call
+!! mrt-context-obligation-never-selects
+## hir/methods.tcl
+<<<<
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+====
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+>>>>
+
+@@ error-obligation-selects an error nobody handles counts against a candidate (the call's unhandled error made its own problem, and no longer an obligation): of two candidates that both accept an Int, the one whose error goes unhandled is ruled out and the other selected
+!! mrt-error-obligation-never-selects
+## hir/completions.tcl
+<<<<
+    if {$unhandled ne ""} {
+        hir::Diagnose hir UNHANDLED-ERROR [format \
+            {this call may produce %s, which %s neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+            [UnhandledPhrase $unhandled] [UnhandledVerb $unhandled]] $e
+    }
+}
+====
+    if {$unhandled ne ""} {
+        set ::hir::checkingCall $e
+        hir::Diagnose hir UNHANDLED-ERROR [format \
+            {this call may produce %s, which %s neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+            [UnhandledPhrase $unhandled] [UnhandledVerb $unhandled]] $e
+        set ::hir::checkingCall ""
+    }
+}
+>>>>
+## hir/methods.tcl
+<<<<
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+====
+    return {KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+>>>>

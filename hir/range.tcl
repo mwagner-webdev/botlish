@@ -1883,10 +1883,19 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
     }
     if {$targetKind eq {native}} {
         # A native's parameter types are run-time-checked kind requirements,
-        # but the natives that write a MutableArray also owe its static
+        # held statically to an argument of known kind (VerifyNativeKinds);
+        # the natives that write a MutableArray also owe its static
         # element contract (hir/containers.tcl), and an imprinted intrinsic
         # its imprinted parameter types (hir/imprint.tcl).
         set name [dict get [hir::symbol $hir $targetBlock] name]
+        if {[VerifyNativeKinds hir $e $node $name]} {
+            # An argument of another kind: the call can only fail, and every
+            # further check of it would restate that -- but for a byte owner
+            # where a C address is required, whose check says why
+            # (hir::borrow::VerifyPointerKinds).
+            hir::borrow::VerifyPointerKinds hir $e $node $name
+            return
+        }
         hir::containers::VerifyNative hir $ranges $e $node $name
         VerifyHashing hir $e $node $name
         if {[dict get [core::native::metadata $name] foreign] ne ""} {
@@ -2022,6 +2031,110 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
             [hir::semantic::ShowType $hir [ShownArgType $argType $checkedType]] [FactsClause $argType $checkedType $argRange] \
             [hir::signatures::because $hir $targetBlock $i]] $arg
     }
+}
+
+# Checks every argument of call E (NODE) of native NAME whose static type has
+# a known kind against the kind the native's parameter requires
+# (hir::types::NativeKindMismatch, the one statement of the rule): an
+# argument of another kind is a compile-time TYPE error of the call, never
+# the run-time TYPE error the native would raise
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md), and so is a rigid
+# imprint variable, which no kind admits for every T
+# (hir::types::NativeArgumentMismatch). An argument of no fixed kind (`any`)
+# still reaches the native's own check when the call runs. Like every check
+# of a call against its callee it is the call's own (hir::CheckingCall: the
+# method-call decision reads it as a candidate's problem) and judges the
+# call as written, reachable or not. Returns 1 if an argument was rejected.
+# The call itself is poison where it is reached (hir::types::Call), so
+# nothing that uses its result restates it.
+proc hir::range::VerifyNativeKinds {hirVar e node name} {
+    upvar 1 $hirVar hir
+    set meta [core::native::metadata $name]
+    if {![dict exists $node written] || [dict exists $hir semanticContext]
+            || [dict get $meta foreign] ne "" || [dict get $meta imprint] ne "" || [dict get $meta layout] ne ""
+            || [dict exists $node resolvedOperator] || [dict getdef $node operator ""] eq "/"} {
+        # (The rule is the program's as written: a call it wrote (`written`,
+        # hir/syntax.tcl), never one a construct lowers to, whose operands
+        # that construct checks (`with context`'s NOT-A-CONTEXT), nor one of
+        # core IR text, past the source boundary; never in a semantic
+        # instance's view, which types a body under one call's argument
+        # types -- an argument of no fixed kind in the body as written,
+        # `any` or an untyped parameter's value, is checked when the call
+        # runs, and the call that needs the instance is held to the checked
+        # contract the use imposes, hir/signatures.tcl's "Trusted and
+        # checked requirements". Natives that state a stronger contract than
+        # the kinds hold every argument to it: a foreign call to its C
+        # signature, hir::borrow::VerifyCall, which also records the
+        # refusals an unchecked run replays; an imprinted intrinsic to its
+        # imprinted parameter types, VerifyImprintedNative; a binary layout
+        # operation (its -layout role) to its operands' roles, hir::layouts
+        # (BINARY-OPERAND); an operator a floating-point operand selected,
+        # and `/`, to their operands' kinds, hir::operators::verify, which
+        # says what the operator means.)
+        return 0
+    }
+    set rejected 0
+    set index 0
+    foreach arg [dict get $node args] {
+        set i $index
+        incr index
+        if {$arg eq "" || [dict exists $hir poisoned $arg]} {
+            continue
+        }
+        set argType [hir::typeOf $hir $arg]
+        set mismatch [hir::types::NativeArgumentMismatch $name $i $argType]
+        if {$mismatch eq {}} {
+            continue
+        }
+        set rejected 1
+        if {($i == 0 && [hir::mutvec::RejectsReceiver $hir $e $arg])
+                || ([lindex $mismatch 1] eq "cptr" && [hir::borrow::IsOwner $argType])
+                || [hir::types::IsCAddress $argType] || [hir::types::IsNativeMemory $argType]
+                || [lindex $mismatch 1] eq "DecimalRounded"} {
+            # (Reported by a check that says what the argument is: a mutating
+            # collection operation's receiver the place check rejects, by
+            # it, MUTABLE-PLACE-RECEIVER (hir::mutvec::RejectsReceiver); a byte
+            # owner where a C address is required by the pointer check,
+            # hir::borrow::VerifyPointerKinds, byte storage is never a
+            # pointer; a C address, a native view or edit where another kind
+            # is required by hir::cabi::VerifyCallKinds, an address is no
+            # Int or any other value; another value where a DecimalRounded
+            # is required by hir::decimal::verify, nothing converts one
+            # implicitly.)
+            continue
+        }
+        lassign $mismatch kind wanted
+        set wanted [hir::types::show $wanted]
+        if {$kind eq "imprint"} {
+            set why [format {the function is checked once, for every %s, and not every %s is a %s} \
+                [hir::types::show $argType] [hir::types::show $argType] $wanted]
+        } else {
+            set why "the call could only fail when it runs"
+        }
+        hir::Diagnose hir TYPE [format {argument %d of native %s requires %s, but %s has type %s: %s} \
+            $index $name $wanted [NativeArgumentNoun $node $i] [hir::semantic::ShowType $hir $argType] $why] $arg
+    }
+    return $rejected
+}
+
+# How argument I (from 0) of call NODE is named in a diagnostic of it: the
+# receiver of a method-style call as the receiver, an operator's operand as
+# an operand (`written`, hir/syntax.tcl: a diagnostic's only reader).
+proc hir::range::NativeArgumentNoun {node i} {
+    set written [WrittenForm $node]
+    if {$written eq "method" && $i == 0} {
+        return "the receiver"
+    }
+    if {$written eq "operator"} {
+        return "this operand"
+    }
+    return "this argument"
+}
+
+# How call NODE was spelled (hir/syntax.tcl's `written`: function, method,
+# list or operator), "" for a call core IR wrote.
+proc hir::range::WrittenForm {node} {
+    return [dict getdef [dict getdef $node written {}] form ""]
 }
 
 # Checks call E of the imprinted intrinsic NAME (hir/imprint.tcl;
