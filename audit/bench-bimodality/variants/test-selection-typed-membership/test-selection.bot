@@ -1,0 +1,127 @@
+# VARIANT (BENCHMARK-SLOWDOWN-CAUSES.md): bench/test-selection.bot with
+# changed?'s membership a loop over the List of changed paths comparing
+# Strings (`c == path`, both statically str: `streq` in generated code)
+# instead of an ImmutableSet's `contains` (rt_set_contains: a scan calling
+# the type-blind `equal`, which calls `kind_of` on both operands). The same
+# number of comparisons for these one- and two-element sets.
+#
+# test-selection.bot -- dependency/test-group selection: "which test groups
+# are affected by this set of changed files?", the kind of selective-test-
+# run tooling this repository's own CI might eventually use. In-memory,
+# deterministic: no filesystem/Git/clock/host state.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md,
+# HIGHER-ORDER-DOGFOODING.md). A "test group" is a named struct, Test
+# (STRUCTS.md): it is a domain entity with a nominal identity and declared
+# field contracts, not a positional [name, dependencies] pair that every
+# reader has to remember the layout of. A "path" is an ordinary String; the
+# changed-file set is a genuine ImmutableSet[str]
+# (std::immutable_set::from_list/std::immutable_set::contains, MINIMAL-IMMUTABLE-SET.md),
+# not a List scanned linearly by hand.
+#
+# Two declared contracts, is_affected?'s test: Test and first_affected's
+# tests: List[Test], are where a struct's static field projection meets a
+# function value that can be called with anything: is_affected? is passed to
+# std::list::find as a value, so its body runs generically and `test.dependencies`
+# has to be proven there (STRUCTS.md, "select_affected"). Everything else is
+# untyped: select_affected, affected?, test_name and test_deps are analyzed
+# under the exact Test the calls pass them.
+#
+# make_changed? is an activation-dependent closure factory: changed?
+# genuinely captures changed_set, built fresh from whatever changed-file
+# List its own call received. affected? threads that closure into
+# std::list::any? as an ordinary predicate parameter: "does any of this test
+# group's own dependencies belong to the changed set?" is a genuine
+# existential query, not a hand-duplicated traversal. select_affected is
+# the returning-loop + continue selection idiom -- no std::list::filter exists
+# or is introduced.
+#
+# changed_a?/changed_b? are two closures made from the very same
+# make_changed? Block, over two different changed-file sets -- a genuine
+# same-code/different-environment pair, both actually exercised below (via
+# select_affected and, for changed_a?, also via first_affected and a direct
+# call, probe).
+#
+# first_affected genuinely needs "the first affected test group in
+# declared order" and uses std::list::find for it, handling its checked
+# NotFound error honestly: none of this corpus's own fixed data ever
+# raises it (changed_a always matches at least one test group), but the
+# handler is real, not decorative -- a changed-file set touching nothing
+# would raise it here, and this call site is where that would surface.
+#
+# untouched_by_a? is a genuine std::list::none? exclusion query: "none of
+# docs-tests' own dependencies are in changed_a's changed set" -- a real
+# universal-absence question, not "not any?" spelled out for its own sake.
+#
+# expect: [3, 1, "resolve-tests", true, true]
+
+import std::immutable_set
+import std::list
+
+struct Test:
+    name: str
+    dependencies: List[str]
+
+fn make_changed?(changed: List[str]):
+    fn changed?(path: str) -> bool:
+        loop c in changed:
+            if c == path:
+                return true
+        false
+    changed?
+
+fn test_name(test):
+    test.name
+
+fn test_deps(test):
+    test.dependencies
+
+fn affected?(test, changed?):
+    test_deps(test).any?(changed?)
+
+fn select_affected(tests, changed?):
+    loop test in tests:
+        if not test.affected?(changed?):
+            continue
+        test
+
+fn first_affected(tests: List[Test], changed?):
+    fn is_affected?(test: Test):
+        test.affected?(changed?)
+    found = tests.find(is_affected?):
+        on std::list::NotFound:
+            Test {name: "<none>", dependencies: []}
+    test_name(found)
+
+tests = [
+    Test {name: "parser-tests", dependencies: ["src/parser.bot", "src/ast.bot"]},
+    Test {name: "lexer-tests", dependencies: ["src/lexer.bot", "src/token.bot"]},
+    Test {name: "resolve-tests", dependencies: ["hir/resolve.tcl", "hir/hir.tcl"]},
+    Test {name: "types-tests", dependencies: ["hir/types.tcl", "hir/hir.tcl"]},
+    Test {name: "specialize-tests", dependencies: ["hir/specialize.tcl", "hir/range.tcl"]},
+    Test {name: "native-lower-tests", dependencies: ["native/lower.tcl", "native/native.tcl"]},
+    Test {name: "compile-tests", dependencies: ["compiler/compiler.tcl"]},
+    Test {name: "web-tests", dependencies: ["stdlib/web.bot", "stdlib/byte.bot"]},
+    Test {name: "ascii-tests", dependencies: ["stdlib/ascii.bot"]},
+    Test {name: "list-tests", dependencies: ["stdlib/list.bot"]},
+    Test {name: "byte-tests", dependencies: ["stdlib/byte.bot", "core/scalarbits.tcl"]},
+    Test {name: "char-tests", dependencies: ["stdlib/char.bot", "core/unicodechar.tcl"]},
+    Test {name: "docs-tests", dependencies: ["README.md", "AGENTS.md"]},
+    Test {name: "bench-tests", dependencies: ["bench/bench.tcl"]},
+]
+
+changed_a = ["stdlib/web.bot", "hir/hir.tcl"]
+changed_b = ["README.md"]
+
+changed_a? = make_changed?(changed_a)
+changed_b? = make_changed?(changed_b)
+
+probe = changed_a?("stdlib/web.bot")
+
+selected_a = tests.select_affected(changed_a?)
+selected_b = tests.select_affected(changed_b?)
+
+docs_deps = ["README.md", "AGENTS.md"]
+untouched_by_a? = docs_deps.none?(changed_a?)
+
+[std::list::length(selected_a), std::list::length(selected_b), tests.first_affected(changed_a?), probe, untouched_by_a?]

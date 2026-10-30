@@ -1,8 +1,10 @@
 # audit/bench-bimodality
 
 Material of [BENCHMARK-BIMODALITY.md](../../docs/BENCHMARK-BIMODALITY.md): why
-`bench/bench.tcl`'s native column sits either at Go or at Python. Audit
-only: nothing here is loaded by the compiler, the tests or CI.
+`bench/bench.tcl`'s native column sits either at Go or at Python; and of
+[BENCHMARK-SLOWDOWN-CAUSES.md](../../docs/BENCHMARK-SLOWDOWN-CAUSES.md): a
+measured cost per cause for the programs still behind Go. Audit only:
+nothing here is loaded by the compiler, the tests or CI.
 
 ## tools/
 
@@ -13,6 +15,11 @@ only: nothing here is loaded by the compiler, the tests or CI.
 * `profile.sh FILE.bot N1 N2` -- callgrind of N1 and N2 timed runs (the
   executable's driver protocol, or `botlish-native bench`), their difference
   per run: instructions by category and the top functions. Needs valgrind.
+* `instructions.sh FILE.bot RUNS FUNCTION,...` -- the executed machine
+  instructions of the named generated functions (`botlish_fn_N`, the hot
+  ones profile.sh names): callgrind's per-instruction counts joined with
+  objdump's disassembly, by instruction class, and the hottest straight-line
+  runs. Needs valgrind, objdump and python3; the program must be AOT-ready.
 * `stage.tcl` -- shared: a program with a `# bench-modules:` header is
   compiled from a private directory holding those modules, then the other
   `.bot` files of the program's own directory (which replace a listed module
@@ -25,7 +32,9 @@ native/Cargo.toml`), under `LANG=C.utf8 LC_ALL=C.utf8`.
 ## variants/
 
 Each directory is one benchmark with one change, the value unchanged
-(each file's header says what changed):
+(each file's header says what changed). The last five are
+BENCHMARK-SLOWDOWN-CAUSES.md's; each one extends the variant in its "of"
+column, so a chain removes one cause at a time:
 
 | variant | of | the change |
 |---|---|---|
@@ -41,6 +50,11 @@ Each directory is one benchmark with one change, the value unchanged
 | `source-checks-chars` | bench/source-checks.bot | the leading character as a `UnicodeChar` |
 | `refined-checks-local` | bench/refined-checks.bot | `emailish?` (its String version) copied into the program: shows what the move itself costs |
 | `refined-checks-chars` | refined-checks-local | its characters as `UnicodeChar`s |
+| `lex-strategy-chars-counted` | lex-strategy-chars-indexed | `valid_chars` counts the true classifications itself: no `List[bool]` per token |
+| `lex-strategy-chars-direct` | lex-strategy-chars-counted | an `if` per character calls the classifier directly: no callable value |
+| `source-checks-chars-listed` | source-checks-chars | the leading character's flags a List literal of four direct calls: no callable-value loop |
+| `test-selection-typed-membership` | bench/test-selection.bot | membership a loop comparing Strings instead of `ImmutableSet`'s `contains` |
+| `uri-steady-count-only` | bench/uri-steady.bot | each escaped String's length computed, the String not built (the value is the same sum) |
 
 ```bash
 export LANG=C.utf8 LC_ALL=C.utf8
