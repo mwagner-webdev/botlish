@@ -4390,6 +4390,7 @@ tests/mutable-vector.test mv-cow-loop pass
 tests/mutable-vector.test mv-cow-nested pass
 tests/mutable-vector.test mv-cow-struct-field pass
 tests/mutable-vector.test mv-element-type pass
+tests/mutable-vector.test mv-equality-other-kind pass
 tests/mutable-vector.test mv-generic pass
 tests/mutable-vector.test mv-hir-evidence pass
 tests/mutable-vector.test mv-hir-type-roundtrip pass
