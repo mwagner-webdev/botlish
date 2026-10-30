@@ -528,7 +528,45 @@ PENDING (final list).
 
 ## 41. Prerequisites for an installable macOS .app
 
-PENDING.
+The executable is a command-line Mach-O that opens a window: run from a
+terminal (or `open` on the file), it is the game. An application a person
+installs and double-clicks needs, in order:
+
+1. **A bundle**: `Icy Tower.app/Contents/{Info.plist, MacOS/icy-tower,
+   Resources/}` with `CFBundleExecutable`, a `CFBundleIdentifier`,
+   `LSMinimumSystemVersion` 11.0 (the archive's deployment target and the
+   strong UniformTypeIdentifiers and CoreHaptics links: section 12),
+   `NSHighResolutionCapable` and `NSPrincipalClass` NSApplication. The
+   executable needs no change for it: the startup policy, the static SDL3
+   and the frameworks are the same inside a bundle, and LaunchServices
+   activates a bundled application at launch, so the acceptance's focus
+   step (section 27) is a terminal-launch matter only. A bundle generator
+   for arbitrary programs is NATIVE-LINK-PLAN-MILESTONE-1.md's section 40;
+   Botlish.app's own bundle (single/macos/) is the compiler's, not a
+   template.
+2. **The launch environment**: launched from the Finder, the program has no
+   terminal (the summary line and `--help` go nowhere; a failure's report
+   should also reach the user, e.g. through an SDL message box -- the
+   game's choice, not the compiler's), its working directory is `/`, and
+   its arguments are only what LaunchServices passes: `options.bot` refuses
+   unknown options with status 2, so whether a launch passes any (old
+   releases passed `-psn_...`) must be checked on the supported releases.
+3. **Signing and notarization**: today the executable carries only Apple
+   ld's ad hoc linker signature (`codesign -dv`: `Signature=adhoc`), which
+   Gatekeeper rejects for a downloaded application. A distributable bundle
+   needs a Developer ID signature with the hardened runtime and
+   notarization -- MACOS-AARCH64-MILESTONE-9.md's "Prerequisites for
+   Developer ID signing and notarization" applies unchanged; the game is
+   ahead-of-time compiled (no JIT entitlement is needed) and links no
+   third-party dylib (no library validation exception).
+4. **Packaging**: a zip or DMG and a rolling release, as
+   `icy-tower-windows-latest` is for Windows, with its own signing job and
+   credentials (ICY-TOWER-WINDOWS.md, "Signing").
+5. **Other Macs**: an x86-64 or universal build (no x86-64 macOS target
+   exists), displays with a backing scale of 2 (the runner's is 1:
+   section 23's checks find the scale, the game draws in logical units),
+   several displays, and the weak frameworks (section 12) for a deployment
+   target below 11.
 
 ## 42. Reproduction commands and exact files changed
 
