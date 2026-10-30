@@ -133,8 +133,9 @@ worker|main-thread`; the driver's is `botlish-native executable OUT
 FILE.nir --startup worker|main-thread`. One spelling everywhere: `worker`
 and `main-thread`.
 
-The option is an option of executable emission only (**Executed**,
-Linux; `tests/main-cli.test`'s `cli-malformed-*`, exit status 2, nothing
+The option is an option of executable emission only (**Executed**: this
+sandbox, and Linux x86-64, Linux AArch64, macOS and Windows CI;
+`tests/main-cli.test`'s `cli-malformed-*`, exit status 2, nothing
 compiled):
 
 | Invocation | Outcome |
@@ -1149,7 +1150,7 @@ export BOTLISH_SDL3_STATIC_PREFIX="$HOME/Library/Caches/botlish-sdl3-static"
 bash tests/platform/link-plan-sdl3.sh dist/Botlish.app
 dist/Botlish.app/Contents/MacOS/botlish -native-startup main-thread -emit-native-executable app.bot
 otool -l app | grep -A3 LC_MAIN          # stacksize 536870912
-BOTLISH_NATIVE_STARTUP_REPORT=/dev/stdout ./app | tail -n 3   # startup main-thread / thread main / stack usable 536870912 guard ...
+BOTLISH_NATIVE_STARTUP_REPORT=report.txt ./app && tail -n 3 report.txt   # startup main-thread / thread main / stack usable 536870912 guard 16384
 python3 -I audit/main-thread-startup/tools/acceptance.py --work /tmp/mts --out mts-results \
   --sdl-prefix "$BOTLISH_SDL3_STATIC_PREFIX" --app dist/Botlish.app --repeat 10
 python3 -I audit/main-thread-startup/tools/acceptance.py --work /tmp/mts2 --out mts-results-checkout \
@@ -1157,7 +1158,9 @@ python3 -I audit/main-thread-startup/tools/acceptance.py --work /tmp/mts2 --out 
   --tclsh "$(command -v tclsh9.0)" --only identity,lc-main,report,semantics,graphical
 ```
 
-The macOS mutants, from a branch: a pushed head commit with `[ci-full]` and a
-`CI-Tests: native-aot-mutants=NAMES native-stack-mutants=NAMES` trailer
-(section 29).
+The macOS mutants, from a branch: a manual run of the macOS workflow
+(`workflow_dispatch`, `tier: full`, `tests: native-aot-mutants=NAMES
+native-stack-mutants=NAMES`), as section 29's run was started, or a pushed
+head commit with `[ci-full]` and a `CI-Tests:` trailer naming the same
+items.
 
