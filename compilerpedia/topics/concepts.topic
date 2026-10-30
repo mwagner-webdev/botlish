@@ -4743,7 +4743,7 @@ summary: `extern c fn` declares a C function by its ABI signature and pointer co
 index: concepts
 alias: C FFI; extern c; foreign function interface; call C function
 keywords: extern, c, ffi, foreign, library, link, std::ffi::c, Ptr, Int, noescape, borrow, NATIVE-ONLY, bindgen
-related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats concept.native-link-plan backend.native-only backend.native-executable error.native-only
+related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats concept.raw-c-floats concept.native-link-plan backend.native-only backend.native-executable error.native-only
 docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md C-FLOAT-FFI-MILESTONE-1.md NATIVE-LINK-PLAN-MILESTONE-1.md
 
 == WHAT IT IS
@@ -4906,8 +4906,8 @@ summary: C's float (binary32) and double (binary64) are C representations of Flo
 index: concepts
 alias: C float; C double; std::ffi::c::Float; std::ffi::c::Double; float32; binary32; single precision
 keywords: float, double, std::ffi::c::Float, std::ffi::c::Double, binary32, binary64, NonFiniteFloat, round to nearest, ties to even, subnormal, negative zero, long double, layout, extern
-related: concept.floats concept.c-ffi concept.binary-layouts concept.c-bindgen-layouts error.known-error
-docs: C-FLOAT-FFI-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md FLOAT64-MILESTONE-1.md
+related: concept.floats concept.c-ffi concept.raw-c-floats concept.binary-layouts concept.c-bindgen-layouts error.known-error
+docs: C-FLOAT-FFI-MILESTONE-1.md RAW-C-FLOAT-FFI-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md FLOAT64-MILESTONE-1.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -5017,6 +5017,97 @@ takes(1.0e39)
 
 == MORE
 C-FLOAT-FFI-MILESTONE-1.md; C-FFI.md; FLOAT64-MILESTONE-1.md.
+
+@topic concept.raw-c-floats
+title: Raw C floating values: std::ffi::c::RawFloat and std::ffi::c::RawDouble
+summary: C's float and double carried exactly as C holds them -- NaN, the infinities, negative zero, subnormals -- as values of their own kind, admitted to a Float64 only explicitly.
+index: concepts
+alias: raw float; raw double; RawFloat; RawDouble; std::ffi::c::RawFloat; std::ffi::c::RawDouble; NaN payload; signaling NaN; bit pattern
+keywords: raw, RawFloat, RawDouble, std::ffi::c::raw, bits, NaN, infinity, negative zero, subnormal, from_bits, to_bits, to_float64, from_float64, NonFiniteFloat, extern, layout
+related: concept.c-floats concept.c-ffi concept.binary-layouts concept.floats
+docs: RAW-C-FLOAT-FFI-MILESTONE-1.md C-FLOAT-FFI-MILESTONE-1.md C-FFI.md
+
+== WHAT IT IS
+    import std::ffi::c
+    import std::ffi::c::raw
+    extern c fn get() -> std::ffi::c::RawDouble
+
+    x = get()
+    if x.double_nan?(): ... else: std::ffi::c::raw::double_to_float64(x)
+
+std::ffi::c::RawFloat and std::ffi::c::RawDouble are C's float and double
+without the admission std::ffi::c::Float and std::ffi::c::Double apply:
+every binary32 or binary64 bit pattern is a value. They have exactly their
+finite counterparts' C representation (size, alignment, register class),
+so choosing raw or finite never changes a C signature. They are types of
+values too, of their own kind, written anywhere a type is.
+
+== RULES
+  * A raw argument, result, field, array element or union alternative
+    crosses as exactly its bits: no rounding, no NonFiniteFloat, no
+    normalization of negative zero, no quieting of a NaN. A C call with
+    only raw floating positions declares no NonFiniteFloat.
+  * A raw value is no number: no arithmetic, ordering, equality (==) or
+    hash, and no implicit conversion to or from a Float64, an Int or the
+    other raw type -- each is a compile-time TYPE error.
+  * Explicit operations (import std::ffi::c::raw): float_from_bits /
+    double_from_bits (a FloatBits / DoubleBits proven in range),
+    float_to_bits / double_to_bits, float_to_float64 / double_to_float64
+    (the finite types' admission: NonFiniteFloat for NaN or an infinity,
+    -0 as 0.0), float_from_float64 (rounded to nearest, ties to even; an
+    overflow NonFiniteFloat) and double_from_float64 (exact), and the
+    classifications finite?, nan?, infinite?, zero?, negative? (the sign
+    bit) of each format.
+  * A raw value is never a trailing argument of a variadic C function:
+    C promotes a trailing float to a double.
+  * A raw value's display is its C type and its bits:
+    <C double 0x8000000000000000>.
+
+== WHY
+Carrying a foreign value is not admitting it: a NaN a C library returns is
+legal C, and a program that only stores, inspects or passes it back must
+not fail first. Admission into Float64 stays an explicit, checked step.
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+import std::ffi::c::raw
+
+fn inspect(b: std::ffi::c::raw::DoubleBits) -> list:
+    x = std::ffi::c::raw::double_from_bits(b)
+    v = x.double_to_float64():
+        on NonFiniteFloat:
+            return [x.double_to_bits(), x.double_nan?(), x.double_negative?()]
+    [x.double_to_bits(), v]
+
+[inspect(18444492273895866369), inspect(9223372036854775808)]
+@caption a negative NaN kept bit for bit; negative zero admitted as 0.0
+@value [[18444492273895866369, true, true], [9223372036854775808, 0.0]]
+@end
+
+@example reject
+import std::ffi::c
+import std::ffi::c::raw
+
+x = std::ffi::c::raw::double_from_bits(0)
+x + 1.0
+@caption A raw value is no number: no arithmetic
+@error CORE SEMANTIC TYPE
+@at 5:1
+@end
+
+@example reject
+import std::ffi::c
+import std::ffi::c::raw
+
+fn half(y: Float64) -> Float64:
+    y / 2.0
+
+half(std::ffi::c::raw::double_from_bits(0))
+@caption Nothing admits a raw value to a Float64 implicitly
+@error CORE SEMANTIC TYPE
+@at 7:6
+@end
 
 @topic concept.c-bindgen-layouts
 title: Generated C record layouts: a target's and a toolchain's facts

@@ -45,7 +45,17 @@
 # * Floats. Raven's coordinates, sizes and slider values are C floats; a
 #   Float64 outside binary32's range is NonFiniteFloat before C runs
 #   (C-FLOAT-FFI-MILESTONE-1.md), and so is a non-finite float Raven
-#   returns. The functions that pass or read one say so.
+#   returns. The functions that pass or read one say so. A slider's and a
+#   spin box's value are bound raw (RAW-C-FLOAT-FFI-MILESTONE-1.md: the
+#   binding profile's representations), so the caller chooses: the C value
+#   itself, every bit of it (slider_raw_value, spin_box_raw_value), or its
+#   explicit admission to a Float64 (slider_value, spin_box_value:
+#   NonFiniteFloat for a NaN or an infinity, -0.0 as 0.0). A raw setter
+#   keeps Raven's own preconditions: a slider computes with its value and
+#   has no guard for a NaN or an infinity, so set_slider_raw_value passes
+#   finite bit patterns only (-0.0 and subnormals exactly); a spin box
+#   ignores a NaN and compares and prints infinities, so its raw setters
+#   pass any bits.
 #
 # * Method syntax. The functions that make something from a text, a
 #   number or a list (window, label, button, ...; bind_action, fire_action)
@@ -59,6 +69,7 @@ import std::binary
 import std::binary::native
 import std::byte
 import std::ffi::c
+import std::ffi::c::raw
 import std::float64
 import std::list
 import std::mutable_vector
@@ -88,6 +99,7 @@ private extern c fn botlish_raven_bind_action(name: std::ffi::c::Ptr[std::ffi::c
 private extern c fn botlish_raven_watch_button(button: std::ffi::c::UInt) -> unit
 private extern c fn botlish_raven_watch_checkbox(checkbox: std::ffi::c::UInt) -> unit
 private extern c fn botlish_raven_watch_slider(slider: std::ffi::c::UInt) -> unit
+private extern c fn botlish_raven_watch_spin_box(spin_box: std::ffi::c::UInt) -> unit
 private extern c fn botlish_raven_watch_text_input(text_input: std::ffi::c::UInt) -> unit
 private extern c fn botlish_raven_watch_combo_box(combo_box: std::ffi::c::UInt) -> unit
 private extern c fn botlish_raven_watch_window(window: std::ffi::c::UInt, allow_close: std::ffi::c::Int) -> unit
@@ -198,7 +210,7 @@ fn version() -> str:
 #
 #   Clicked         a button was pressed
 #   Toggled         a checkbox changed: value 1 checked, 0 not
-#   ValueChanged    a slider moved: number, its value
+#   ValueChanged    a slider or a spin box moved: number, its value
 #   TextChanged     a text input's text changed: text
 #   TextCommitted   Enter in a text input: text
 #   Selected        a combo box's selection changed: value, the index
@@ -772,11 +784,63 @@ nomethod fn slider(minimum: Float64, maximum: Float64) -> Widget errors NonFinit
     botlish_raven_watch_slider(id)
     Widget {id: id}
 
-fn slider_value(slider: Widget) -> Float64 errors NonFiniteFloat:
+# The slider's value as Raven holds it: its C float, every bit of it.
+fn slider_raw_value(slider: Widget) -> std::ffi::c::RawFloat:
     raven::controls::Rslider_get_value(slider.id)
 
+# The slider's value as a number: its raw value admitted, explicitly
+# (NonFiniteFloat: Raven holds no finite number; -0.0 is 0.0).
+fn slider_value(slider: Widget) -> Float64 errors NonFiniteFloat:
+    slider.slider_raw_value().float_to_float64()
+
+# Sets the slider to VALUE rounded to a C float (NonFiniteFloat: no finite
+# float holds it). Raven clamps it to the slider's range.
 fn set_slider_value(slider: Widget, value: Float64) errors NonFiniteFloat:
+    slider.id.Rslider_set_value(std::ffi::c::raw::float_from_float64(value))
+
+# Sets the slider to the C float VALUE, every bit of it: -0.0 and a
+# subnormal pass exactly. A slider is defined for numbers only (it snaps,
+# clamps and paints its value, with no guard for a NaN or an infinity), so
+# a NaN or an infinity is NonFiniteFloat before Raven runs. Raven clamps
+# the value to the slider's range.
+fn set_slider_raw_value(slider: Widget, value: std::ffi::c::RawFloat) errors NonFiniteFloat:
+    # (Its admission refuses exactly a NaN and an infinity, naming which.)
+    value.float_to_float64()
     slider.id.Rslider_set_value(value)
+
+# A spin box from MINIMUM to MAXIMUM: ValueChanged when it is stepped or
+# typed into.
+nomethod fn spin_box(minimum: Float64, maximum: Float64) -> Widget:
+    id = raven::widget::Rwidget_create(raven::widget::R_WIDGET_SPIN_BOX)
+    id.Rspin_box_set_range(std::ffi::c::raw::double_from_float64(minimum), std::ffi::c::raw::double_from_float64(maximum))
+    botlish_raven_watch_spin_box(id)
+    Widget {id: id}
+
+# Sets the spin box's range to the C doubles MINIMUM and MAXIMUM, every bit:
+# an infinity is a bound Raven compares with as C does (an unbounded side).
+fn set_spin_box_raw_range(spin_box: Widget, minimum: std::ffi::c::RawDouble, maximum: std::ffi::c::RawDouble):
+    spin_box.id.Rspin_box_set_range(minimum, maximum)
+
+# The spin box's value as Raven holds it: its C double, every bit of it.
+fn spin_box_raw_value(spin_box: Widget) -> std::ffi::c::RawDouble:
+    raven::controls::Rspin_box_get_value(spin_box.id)
+
+# The spin box's value as a number: its raw value admitted, explicitly
+# (NonFiniteFloat: an infinity its range allowed; -0.0 is 0.0).
+fn spin_box_value(spin_box: Widget) -> Float64 errors NonFiniteFloat:
+    spin_box.spin_box_raw_value().double_to_float64()
+
+# Sets the spin box to VALUE (exact: every Float64 is a C double). Raven
+# clamps it to the spin box's range.
+fn set_spin_box_value(spin_box: Widget, value: Float64):
+    spin_box.id.Rspin_box_set_value(std::ffi::c::raw::double_from_float64(value))
+
+# Sets the spin box to the C double VALUE, every bit of it. Raven's rules
+# decide what it means: it clamps the value to the range, ignores a NaN (the
+# value stays what it was) and keeps a value equal to the current one (so
+# -0.0 replaces only a nonzero value).
+fn set_spin_box_raw_value(spin_box: Widget, value: std::ffi::c::RawDouble):
+    spin_box.id.Rspin_box_set_value(value)
 
 # A one-line text input holding TEXT: TextChanged as it is edited,
 # TextCommitted on Enter.

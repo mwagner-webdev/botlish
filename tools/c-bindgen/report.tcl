@@ -545,6 +545,22 @@ proc ::cbind::report::text {model} {
     lappend out [Line "  independent" [dict get $c resultIndependent] [dict get $c ptrResults]]
     lappend out [Line "  alias of a parameter" [dict get $c resultAlias] [dict get $c ptrResults]]
     lappend out [Line "  unknown" [dict get $c resultUnknown] [dict get $c ptrResults]]
+    # The C floating positions the profile writes raw (RAW-C-FLOAT-FFI-
+    # MILESTONE-1.md): shown only when there are any.
+    set raws {}
+    foreach e [dict get $model apis] {
+        if {[dict get $e kind] in {direct alias thunk} && [dict exists $e representations]} {
+            lappend raws {*}[lmap position [dict keys [dict get $e representations]] {list [dict get $e name] $position}]
+        }
+    }
+    if {[llength $raws]} {
+        lappend out ""
+        lappend out "C floating representations (bound APIs)"
+        lappend out [Line "positions bound raw (std::ffi::c::RawFloat, RawDouble; the profile)" [llength $raws]]
+        foreach r $raws {
+            lappend out "  [lindex $r 0] [lindex $r 1]"
+        }
+    }
     lappend out ""
     lappend out "Capability pressure (API names a missing FFI capability blocks or limits)"
     lappend out [Line "C _Bool in the signature (blocked without std::ffi::c::Bool)" [dict get $c bool] $apis]
@@ -821,6 +837,14 @@ proc ::cbind::report::manifest {model files} {
         }
         foreach s [dict get $e result sources] {
             lappend lines "contract [dict get $e name] result [list [lindex $s 2]] [lindex $s 0] [list [lindex $s 1]]"
+        }
+    }
+    # Every position written raw (RAW-C-FLOAT-FFI-MILESTONE-1.md), with its
+    # source.
+    foreach e [dict get $model apis] {
+        if {[dict get $e kind] ni {direct alias thunk} || ![dict exists $e representations]} continue
+        dict for {position chosen} [dict get $e representations] {
+            lappend lines "representation [dict get $e name] $position [lindex $chosen 0] [list [lindex $chosen 1]]"
         }
     }
     # Policy for declared functions this target cannot bind: checked, kept,

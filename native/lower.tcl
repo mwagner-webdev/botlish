@@ -197,6 +197,14 @@ namespace eval native::lower {
         coroutine#yield  {op coyield} \
         std::coroutine::done? {op codone} \
         coroutine#release {op corelease} \
+        std::ffi::rawfloat::from_bits32 {op rawfrombits32} \
+        std::ffi::rawfloat::from_bits64 {op rawfrombits64} \
+        std::ffi::rawfloat::bits32      {op rawbits32} \
+        std::ffi::rawfloat::bits64      {op rawbits64} \
+        std::ffi::rawfloat::admit32     {op rawadmit32} \
+        std::ffi::rawfloat::admit64     {op rawadmit64} \
+        std::ffi::rawfloat::narrow32    {op rawnarrow32} \
+        std::ffi::rawfloat::narrow64    {op rawnarrow64} \
         std::ffi::c::null      {op cptrnull} \
         std::ffi::c::null?     {op cptrisnull} \
         std::ffi::c::clone     {op cptrsame} \
@@ -5997,11 +6005,17 @@ proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""} {want
 # NonFiniteFloat, negative zero zero) and whose stores narrow (a binary32
 # overflow is NonFiniteFloat) in the runtime's one implementation of the
 # boundary rules -- so a program with one may raise NonFiniteFloat there.
+#
+# SIGN r is a raw C floating representation of WIDTH bytes (RAW-C-FLOAT-FFI-
+# MILESTONE-1.md: 128 set): its loads make a raw value of exactly the bits
+# and its stores write exactly a raw value's bits -- no admission, no
+# narrowing, nothing raised.
 proc native::lower::LayoutEncoding {sign width endian} {
     if {$sign eq "f"} {
         RuntimeRaises NonFiniteFloat
     }
-    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
+    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)
+        + ($sign eq "r" ? 128 : 0)}]
 }
 
 # Call E (NODE) of a binary operation: {REGISTER tagged} or {never tagged}.
@@ -6608,7 +6622,7 @@ proc native::lower::ArrayRead {fnVar e mode source repr base} {
     upvar 1 $fnVar fn
     variable unrollExtent
     lassign $repr - extent stride element
-    if {[lindex $element 0] in {u i f}} {
+    if {[lindex $element 0] in {u i f r}} {
         lassign $element sign width endian
         set at [At fn $e $base 0]
         set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]
@@ -6756,7 +6770,7 @@ proc native::lower::ReprWrite {fnVar e mode target repr base value} {
         }
         array {
             lassign $repr - extent stride element
-            if {[lindex $element 0] in {u i f}} {
+            if {[lindex $element 0] in {u i f r}} {
                 lassign $element sign width endian
                 set at [At fn $e $base 0]
                 set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]

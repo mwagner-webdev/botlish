@@ -3367,6 +3367,59 @@ you change the code it mutates, keeping it a mutant of the same rule) and
 host, or under qemu-user from an `aarch64-unknown-linux-gnu` build); for the
 generator's float and double, its checks (the C binding generator, below).
 
+## Raw C floating values (std::ffi::c::RawFloat, std::ffi::c::RawDouble)
+
+`std::ffi::c::RawFloat` and `std::ffi::c::RawDouble` (RAW-C-FLOAT-FFI-
+MILESTONE-1.md) are C's float and double carried exactly: every binary32 or
+binary64 bit pattern -- NaN payloads, signaling NaNs, the infinities,
+negative zero, subnormals -- with their finite counterparts' C facts
+(core/cabi.tcl's `floatings`: `representation Float`/`Double`, `raw 1`).
+Their canonical type is the runtime kind `rawfloat32`/`rawfloat64` in every
+position (a C type and a type of values at once); the explicit operations
+are `std::ffi::c::raw`'s (stdlib/ffi/c/raw.bot, over the internal
+intrinsics `std::ffi::rawfloat::*`). Keep it so:
+
+* Carrying is not admitting: a raw argument, result, field, element or
+  alternative crosses as its bits (`bitcast`, integer loads and stores; NIR
+  `rf32`/`rf64`, layout descriptor `{r W E}`, encoding bit 128) -- never
+  an `fdemote`, `fpromote`, finiteness test, `+ 0.0` or NonFiniteFloat. A
+  raw position never changes the C signature: the same F32/F64 class and
+  registers as the finite type's (`raw_c_float_signature_is_the_finite_one`).
+* Admission and narrowing are the finite types' own rules, called
+  explicitly (`core::cabi::AdmitBits`/`Narrow`, `admit_c_float`/
+  `narrow_c_float`): never a second implementation, never implicit. Never
+  let a raw value be admitted where a Float64 is expected, a Float64 or an
+  Int become a raw value, or RawFloat and RawDouble convert, and never
+  make a raw type an alternative of a finite one anywhere (resolution,
+  conversion, admission).
+* A raw value is no number: no arithmetic, ordering, equality or hash
+  (statically `hir::cabi::VerifyCallKinds`; at run time its own kind, in
+  core/value.tcl's `incomparable` and core/hashing.tcl's `unhashable`, and
+  ops.rs's refusals). Never represent one as an Int, never add a bitwise
+  `==`, and never let a raw value be a trailing variadic argument.
+* `std::ffi::c` stays free of compiled functions: the raw operations live
+  in `std::ffi::c::raw`, imported by the programs that use them.
+* The finite types' behavior is a compatibility contract: Float and Double
+  admit, narrow and charge NonFiniteFloat exactly as before.
+* The binding generator's `representations` choose raw per function and
+  position (finite is the default); a stale or invalid rule is an error;
+  every choice is in the manifest. Never special-case a library in the
+  generator.
+
+If you change any of that (the report's section 10 lists the files), run
+`tests/raw-c-float-ffi.test` (its fixture needs `cc`), `tclsh9.0
+tests/local.tcl tests/golden/raw-c-float-ffi.bot`, `tests/c-float-ffi.test`,
+`tests/c-ffi.test`, `tests/c-abi-types.test`, `tests/hashable.test`, the
+layout test files, `cargo test --release --manifest-path native/Cargo.toml
+--lib c_float` and `--bin botlish-native raw_c_float`,
+`audit/c-float-ffi/tools/fuzz.tcl` (several seeds, once with `-gc-stress
+1`; it draws raw positions by default) and
+`audit/c-float-ffi/tools/mutate.tcl` (every mutant must still apply and be
+killed: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule; the raw ones are `raw-*`); for the
+generator or a profile's representations the C binding generator's checks
+with the pinned toolchain, and for Raven's `tests/raven.test`.
+
 ## Variadics
 
 Variadic parameters and variadic C calls (VARIADICS-VERTICAL-SLICE-1.md) are

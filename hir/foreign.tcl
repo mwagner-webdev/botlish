@@ -103,7 +103,11 @@ proc hir::foreign::AbiClass {type} {
         return bool
     }
     if {[hir::cabi::IsFloating $type]} {
-        return [dict get [hir::cabi::FloatingInfo $type] class]
+        # A raw C float or double travels in exactly its finite
+        # counterpart's register class, its bits unchanged: rf32, rf64
+        # (RAW-C-FLOAT-FFI-MILESTONE-1.md; nir.rs's CAbi::RawF32/RawF64).
+        set info [hir::cabi::FloatingInfo $type]
+        return [expr {[dict get $info raw] ? "r[dict get $info class]" : [dict get $info class]}]
     }
     if {[hir::types::IsCPtr $type] || [hir::types::IsCFnPtr $type]} {
         return ptr
@@ -232,9 +236,11 @@ proc hir::foreign::apply {decls linkDecls} {
         # and a Float64 narrowed to a C float may round to an infinity: the
         # call completes with NonFiniteFloat then (FLOAT64-MILESTONE-1.md,
         # C-FLOAT-FFI-MILESTONE-1.md) -- after C returned, or before C is
-        # called. A double argument is exact: every Float64 is a double.
+        # called. A double argument is exact: every Float64 is a double. A
+        # raw float or double crosses as its bits, either way: no error
+        # (RAW-C-FLOAT-FFI-MILESTONE-1.md).
         set errors ""
-        if {[hir::cabi::IsFloating $result] || [NarrowedParameters $abi] ne ""} {
+        if {[hir::cabi::IsFiniteFloating $result] || [NarrowedParameters $abi] ne ""} {
             set errors NonFiniteFloat
         }
         core::native::register $native -arity [expr {$variadic ? "*" : [llength $params]}] \

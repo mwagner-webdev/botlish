@@ -41,14 +41,14 @@
 use super::show::tcl_list;
 use super::value::{
     KIND_BIGINT, KIND_BYTES, KIND_CLOSURE, KIND_COROUTINE, KIND_DECIMAL, KIND_FLOAT, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_MUTBYTES, KIND_MUTVEC,
-    KIND_NATIVE, KIND_RESULT, KIND_SET, KIND_STR, KIND_STRPLAN, KIND_STRUCT,
+    KIND_NATIVE, KIND_RAWF32, KIND_RAWF64, KIND_RESULT, KIND_SET, KIND_STR, KIND_STRPLAN, KIND_STRUCT,
 };
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
 /// are indexed directly by kind byte (index 0 unused).
-pub const KIND_COUNT: usize = 19;
+pub const KIND_COUNT: usize = 21;
 
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
@@ -69,6 +69,8 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_MUTVEC => "MutableVector",
         KIND_FLOAT => "Float",
         KIND_DECIMAL => "DecimalRounded",
+        KIND_RAWF32 => "RawFloat",
+        KIND_RAWF64 => "RawDouble",
         _ => "?",
     }
 }
@@ -528,6 +530,12 @@ impl Metrics {
         // And DecimalRounded values (DECIMAL-ROUNDED-MILESTONE-1.md).
         if self.by_kind[KIND_DECIMAL as usize].allocations > 0 {
             kinds.push(KIND_DECIMAL);
+        }
+        // And raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+        for kind in [KIND_RAWF32, KIND_RAWF64] {
+            if self.by_kind[kind as usize].allocations > 0 {
+                kinds.push(kind);
+            }
         }
         let by_kind = dict(&kinds.iter().map(|&k| (kind_name(k), kind_dict(&self.by_kind[k as usize], &n))).collect::<Vec<_>>());
         let static_by_kind =

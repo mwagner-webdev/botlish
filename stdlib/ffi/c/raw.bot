@@ -1,0 +1,115 @@
+# raw.bot -- the "std::ffi::c::raw" namespace: the explicit operations of
+# the raw C floating values std::ffi::c::RawFloat and std::ffi::c::RawDouble
+# (RAW-C-FLOAT-FFI-MILESTONE-1.md; stdlib/ffi/c.bot's "Raw C floating
+# values").
+#
+# A raw value is C's float or double as C holds it: any binary32 or binary64
+# bit pattern -- NaN of any sign and payload, quiet or signaling, both
+# infinities, negative zero, subnormals. These are the only ways between one
+# and anything else, each explicit:
+#
+#   float_from_bits(b)      RawFloat     the binary32 whose bit pattern is
+#                                        B (a FloatBits: 0..2^32-1)
+#   float_to_bits(x)        FloatBits    X's bit pattern, exactly
+#   float_to_float64(x)     Float64      the number X is, widened exactly;
+#                                        a NaN or an infinity is
+#                                        NonFiniteFloat (its result names
+#                                        which), negative zero 0.0 --
+#                                        std::ffi::c::Float's own admission
+#   float_from_float64(x)   RawFloat     X rounded to nearest, ties to even;
+#                                        an overflow to an infinity is
+#                                        NonFiniteFloat of its sign, never
+#                                        clamped, a zero +0 --
+#                                        std::ffi::c::Float's own narrowing
+#   double_from_bits(b), double_to_bits(x), double_to_float64(x),
+#   double_from_float64(x)               the same for binary64 (a
+#                                        DoubleBits: 0..2^64-1), whose
+#                                        from_float64 is exact and total
+#                                        (every Float64 is a binary64)
+#
+# and the classifications, which read the bits alone:
+#
+#   float_finite?(x)    neither NaN nor an infinity (zeros, subnormals,
+#                       normals)
+#   float_nan?(x)       any NaN, quiet or signaling, of either sign
+#   float_infinite?(x)  either infinity
+#   float_zero?(x)      either zero
+#   float_negative?(x)  the sign bit: -0.0, a negative number, -inf, and a
+#                       NaN whose sign bit is set
+#   (and double_finite?, double_nan?, double_infinite?, double_zero?,
+#   double_negative?)
+#
+# So -0.0 is `x.double_zero?() and x.double_negative?()`, positive infinity
+# `x.double_infinite?() and not x.double_negative?()`. Nothing here needs
+# authority, and nothing computes on a floating value: a raw value's bits
+# are never canonicalized, quieted or rounded by an operation that does not
+# say so.
+#
+# The masks, in decimal (an Int is written in decimal): binary32's exponent
+# 2139095040 = 0x7f800000, fraction 8388607 = 0x007fffff, magnitude
+# 2147483647 = 0x7fffffff, sign 2147483648 = 0x80000000; binary64's exponent
+# 9218868437227405312 = 0x7ff0000000000000, fraction 4503599627370495 =
+# 0x000fffffffffffff, magnitude 9223372036854775807 = 0x7fffffffffffffff,
+# sign 9223372036854775808 = 0x8000000000000000.
+
+import std::ffi::c
+import std::ffi::rawfloat
+
+type FloatBits = Int in 0..4294967295
+type DoubleBits = Int in 0..18446744073709551615
+
+nomethod fn float_from_bits(bits: std::ffi::c::raw::FloatBits) -> std::ffi::c::RawFloat:
+    std::ffi::rawfloat::from_bits32(bits)
+
+fn float_to_bits(x: std::ffi::c::RawFloat) -> std::ffi::c::raw::FloatBits:
+    std::ffi::rawfloat::bits32(x)
+
+fn float_to_float64(x: std::ffi::c::RawFloat) -> Float64 errors NonFiniteFloat:
+    std::ffi::rawfloat::admit32(x)
+
+nomethod fn float_from_float64(x: Float64) -> std::ffi::c::RawFloat errors NonFiniteFloat:
+    std::ffi::rawfloat::narrow32(x)
+
+nomethod fn double_from_bits(bits: std::ffi::c::raw::DoubleBits) -> std::ffi::c::RawDouble:
+    std::ffi::rawfloat::from_bits64(bits)
+
+fn double_to_bits(x: std::ffi::c::RawDouble) -> std::ffi::c::raw::DoubleBits:
+    std::ffi::rawfloat::bits64(x)
+
+fn double_to_float64(x: std::ffi::c::RawDouble) -> Float64 errors NonFiniteFloat:
+    std::ffi::rawfloat::admit64(x)
+
+nomethod fn double_from_float64(x: Float64) -> std::ffi::c::RawDouble:
+    std::ffi::rawfloat::narrow64(x)
+
+fn float_finite?(x: std::ffi::c::RawFloat) -> bool:
+    bit_and(float_to_bits(x), 2139095040) != 2139095040
+
+fn float_nan?(x: std::ffi::c::RawFloat) -> bool:
+    bits = float_to_bits(x)
+    bit_and(bits, 2139095040) == 2139095040 and bit_and(bits, 8388607) != 0
+
+fn float_infinite?(x: std::ffi::c::RawFloat) -> bool:
+    bit_and(float_to_bits(x), 2147483647) == 2139095040
+
+fn float_zero?(x: std::ffi::c::RawFloat) -> bool:
+    bit_and(float_to_bits(x), 2147483647) == 0
+
+fn float_negative?(x: std::ffi::c::RawFloat) -> bool:
+    float_to_bits(x) >= 2147483648
+
+fn double_finite?(x: std::ffi::c::RawDouble) -> bool:
+    bit_and(double_to_bits(x), 9218868437227405312) != 9218868437227405312
+
+fn double_nan?(x: std::ffi::c::RawDouble) -> bool:
+    bits = double_to_bits(x)
+    bit_and(bits, 9218868437227405312) == 9218868437227405312 and bit_and(bits, 4503599627370495) != 0
+
+fn double_infinite?(x: std::ffi::c::RawDouble) -> bool:
+    bit_and(double_to_bits(x), 9223372036854775807) == 9218868437227405312
+
+fn double_zero?(x: std::ffi::c::RawDouble) -> bool:
+    bit_and(double_to_bits(x), 9223372036854775807) == 0
+
+fn double_negative?(x: std::ffi::c::RawDouble) -> bool:
+    double_to_bits(x) >= 9223372036854775808

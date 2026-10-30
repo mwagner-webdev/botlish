@@ -1,0 +1,585 @@
+# raw-c-float-ffi.test -- raw C floating values across the C FFI
+# (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+#
+# std::ffi::c::RawFloat and std::ffi::c::RawDouble are C's float and double
+# carried as they are: every IEEE 754 binary32 and binary64 bit pattern --
+# NaN of any sign and payload, quiet or signaling, both infinities, negative
+# zero, subnormals -- with exactly their finite counterparts' C facts
+# (format, size, alignment, register class). Unlike std::ffi::c::Float and
+# std::ffi::c::Double they are types of values too, of a runtime kind of
+# their own: no number, no implicit conversion, no equality, no hash. This
+# file pins the type model, the explicit operations (bits, classification,
+# admission to and narrowing from Float64) on every backend, every place a
+# raw value crosses -- C calls in registers and on the stack, pointers,
+# layouts over bytes and over native memory, fixed arrays, unions, function
+# pointer types -- bit for bit against C itself (tests/cffi/rawfloat-
+# fixture.c, which never computes on a float), and that the finite C types
+# behave exactly as before.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint cCompiler [testConstraint cToolchain]
+
+# The C fixture, built where C calls run (nativeCCalls).
+set ::rcfFixtureDir ""
+if {[testConstraint cCompiler] && [testConstraint nativeCCalls] && [testConstraint nativeBuilt]} {
+    set ::rcfFixtureDir [makeDirectory rawfloat-cffi-[pid]]
+    if {[catch {
+        ctool::staticLibrary $::rcfFixtureDir botlish_rawfloat_fixture [file join $::projectRoot tests cffi rawfloat-fixture.c]
+    } message]} {
+        puts stderr "raw-c-float-ffi.test: the C fixture did not build: $message"
+        set ::rcfFixtureDir ""
+    }
+}
+testConstraint rawfloatFixture [expr {$::rcfFixtureDir ne "" && [testConstraint cLinker]}]
+
+proc rcfLinkDirs {} {
+    if {$::rcfFixtureDir eq ""} {
+        return {}
+    }
+    return [list $::rcfFixtureDir]
+}
+
+# The HIR of source TEXT (warnings off).
+proc rcfHir {text args} {
+    return [surface::compile $text t.bot -warnings off {*}$args]
+}
+
+# "KIND: MESSAGE" of the first diagnostic of source TEXT (its location
+# dropped), or accepted.
+proc rcfReject {text args} {
+    if {[catch {surface::compile $text t.bot -warnings off {*}$args} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set first [lindex [dict get $options -diagnostics] 0]
+            set message [dict get $first message]
+            set code [dict get $first errorcode]
+        } else {
+            set code [dict get $options -errorcode]
+        }
+        regsub {^t\.bot:[0-9]+:[0-9]+: } [lindex [split $message \n] 0] {} message
+        return "[lindex $code end]: $message"
+    }
+    return accepted
+}
+
+# The outcome {value V} / {error KIND} of HIR on BACKEND.
+proc rcfRun {hir backend} {
+    native::withLinkDirs [rcfLinkDirs] {
+        set outcome [outcomeUnderHir $backend $hir]
+    }
+    if {[lindex $outcome 0] eq "value"} {
+        return [lrange $outcome 0 1]
+    }
+    return [list error [lindex $outcome 1 end]]
+}
+
+# The outcome of source TEXT on both native backends, which must agree.
+proc rcfNative {text} {
+    set hir [rcfHir $text]
+    set outcomes [lmap backend {cranelift cranelift-generic} {rcfRun $hir $backend}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "the native backends disagree: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The outcome of source TEXT on all four backends, which must agree.
+proc rcfAll {text} {
+    set hir [rcfHir $text]
+    set outcomes [lmap backend {interp compile cranelift-generic cranelift} {rcfRun $hir $backend}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "the backends disagree: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The bit patterns every test carries, binary32 and binary64: +0, -0, +inf,
+# -inf, quiet NaNs of both signs and several payloads, signaling NaNs, the
+# smallest and largest subnormals, the smallest normal, the largest finite of
+# both signs, and ordinary values (1.0, 0.1, -2.5).
+set ::rcfBits32 {0 2147483648 2139095040 4286578688 2143289344 4290772992 2143289345 2147483647 4294967295
+    2141192192 2139095041 4288675840 1 8388607 8388608 2139095039 4286578687 1065353216 1036831949 3223322624}
+set ::rcfBits64 {0 9223372036854775808 9218868437227405312 18442240474082181120 9221120237041090560
+    18444492273895866368 9221120237041090561 9223372036854775807 18446744073709551615 9219994337134247936
+    9218868437227405313 18443366373989023744 1 4503599627370495 4503599627370496 9218868437227405311
+    18442240474082181119 4607182418800017408 4591870180066957722 13836183955189006336}
+
+# The Botlish List text of a Tcl list.
+proc rcfList {items} {
+    return "\[[join $items {, }]\]"
+}
+
+# ---------------------------------------------------------------------------
+# The type model
+
+test rcf-types {RawFloat and RawDouble are C floating types whose every C fact is their finite counterparts' (format, size, alignment, ABI class, on every target), and types of values of a runtime kind of their own: the canonical type is the kind in every position, displayed by its source spelling} -body {
+    set facts {}
+    foreach target [core::cabi::targetNames] {
+        foreach {raw finite} {RawFloat Float RawDouble Double} {
+            set r [core::cabi::floatingInfo $raw $target]
+            set f [core::cabi::floatingInfo $finite $target]
+            foreach key {c format bytes align class} {
+                if {[dict get $r $key] ne [dict get $f $key]} {
+                    lappend facts [list $target $raw $key]
+                }
+            }
+        }
+    }
+    list $facts \
+        [lmap n {Float Double RawFloat RawDouble} {hir::cabi::FloatingType $n}] \
+        [lmap t {rawfloat32 rawfloat64} {hir::types::show $t}] \
+        [lmap t {rawfloat32 rawfloat64} {list [hir::types::kindOf $t] [hir::cabi::Carrier $t] [hir::cabi::IsFloating $t] [hir::cabi::IsFiniteFloating $t]}] \
+        [lmap t {{cfloat Float} {cfloat Double}} {list [hir::types::kindOf $t] [hir::cabi::Carrier $t]}] \
+        [lmap {a b} {rawfloat32 rawfloat64 rawfloat64 rawfloat32 rawfloat64 Float64 Float64 rawfloat64 rawfloat32 {cfloat Float} rawfloat64 {cfloat Double} rawfloat64 int} {hir::types::subtype $a $b}] \
+        [hir::types::lub rawfloat64 Float64] [hir::types::lub rawfloat32 rawfloat32]
+} -result {{} {{cfloat Float} {cfloat Double} rawfloat32 rawfloat64} {std::ffi::c::RawFloat std::ffi::c::RawDouble} {{rawfloat32 rawfloat32 1 0} {rawfloat64 rawfloat64 1 0}} {{Float64 Float64} {Float64 Float64}} {0 0 0 0 0 0 0} any rawfloat32}
+
+test rcf-positions {a raw type is written as a Botlish parameter, result, binding or List element type, and as a C type -- an extern's parameter and result, a pointee, a function pointer's signature, a layout field or element, a union alternative -- with the same meaning; its kind's bare name is no type, and the finite Float stays a C type only} -body {
+    set head "import std::ffi::c\nimport std::ffi::c::raw\nimport std::binary\n"
+    lmap body {
+        "fn f(x: std::ffi::c::RawFloat, ys: List\[std::ffi::c::RawDouble\]) -> std::ffi::c::RawDouble errors IndexNotFound:\n    std::list::at(ys, 0)\n"
+        "extern c fn g(x: std::ffi::c::RawFloat, p: std::ffi::c::Ptr\[std::ffi::c::RawDouble\], f: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::RawFloat, std::ffi::c::RawDouble\], return: std::ffi::c::RawDouble}\]) -> std::ffi::c::RawFloat\n"
+        "layout L:\n    size 24\n    align 8\n    field a: std::ffi::c::RawFloat at 0\n    field b: std::ffi::c::RawDouble at 8\n    field c: array 2 of std::ffi::c::RawFloat at 16\n"
+        "union layout U:\n    size 8\n    align 8\n    alternative f: std::ffi::c::RawFloat\n    alternative d: std::ffi::c::RawDouble\n"
+        "layout L:\n    size 8\n    align 4\n    field a: std::ffi::c::RawFloat at 6\n"
+        "fn f(x: rawfloat64) -> int:\n    1\n"
+        "fn f(x: std::ffi::c::Float) -> int:\n    1\n"
+    } {
+        rcfReject "${head}import std::list\n${body}0\n"
+    }
+} -result {accepted accepted accepted accepted {LAYOUT-FIELD-BOUNDS: field "a" of layout "L" occupies bytes 6..9 (offset 6, width 4), outside the layout's size 8} {TYPE: unknown or invalid type rawfloat64 for parameter "x": "rawfloat64" is not a type: a raw C floating value's type is spelled std::ffi::c::RawDouble} {TYPE: unknown or invalid type std::ffi::c::Float for parameter "x": std::ffi::c::Float is C's float, a foreign representation (IEEE 754 binary32) that only a C type names -- an extern c fn's parameter or result, a function pointer's signature, a pointee (std::ffi::c::Ptr[std::ffi::c::Float]) or a layout field: Botlish has no binary32 number, and a C float's value is a Float64 here (write Float64)}}
+
+test rcf-no-implicit-conversion {nothing converts implicitly: a raw value is no Float64 and no Int, a Float64 is no raw value, a RawFloat is no RawDouble, a raw pointee or signature is never its finite counterpart's, and the same register class is no type identity} -body {
+    set head "import std::ffi::c\nimport std::ffi::c::raw\nimport std::binary\nextern c fn takes_double(x: std::ffi::c::Double) -> unit\nextern c fn takes_raw(x: std::ffi::c::RawDouble) -> unit\nextern c fn gives_raw() -> std::ffi::c::RawDouble\n"
+    set raw "std::ffi::c::raw::double_from_bits(0)"
+    lmap body [list \
+        "fn f(y: Float64) -> Float64:\n    y\nf($raw)\n" \
+        "fn f(y: std::ffi::c::RawDouble) -> int:\n    1\nf(1.5)\n" \
+        "fn f(y: std::ffi::c::RawDouble) -> int:\n    1\nf(std::ffi::c::raw::float_from_bits(0))\n" \
+        "fn f(y: int) -> int:\n    y\nf($raw)\n" \
+        "takes_double($raw)\n" \
+        "takes_raw(1.5)\n" \
+        "fn f() -> Float64:\n    gives_raw()\nf()\n" \
+        "fn f(p: std::ffi::c::Ptr\[std::ffi::c::Double\]) -> int:\n    1\nf(std::ffi::c::null\[std::ffi::c::RawDouble\]())\n" \
+        "fn f(p: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::Double\], return: std::ffi::c::Double}\]) -> int:\n    1\nfn g(q: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::RawDouble\], return: std::ffi::c::RawDouble}\]) -> int:\n    f(q)\n0\n" \
+        "std::ffi::c::raw::double_to_bits(std::ffi::c::raw::float_from_bits(0))\n" \
+        "std::ffi::c::raw::float_from_bits(4294967296)\n" \
+    ] {
+        rcfReject "$head$body"
+    }
+} -result {{TYPE: argument for parameter "y" cannot be proven to satisfy Float64 (argument type: std::ffi::c::RawDouble); a raw C floating value is admitted to a Float64 only explicitly (std::ffi::c::raw::double_to_float64: NonFiniteFloat for a NaN or an infinity)} {TYPE: argument for parameter "y" cannot be proven to satisfy std::ffi::c::RawDouble (argument type: Float64); a Float64 becomes a raw C floating value only explicitly (std::ffi::c::raw::double_from_float64)} {TYPE: argument for parameter "y" cannot be proven to satisfy std::ffi::c::RawDouble (argument type: std::ffi::c::RawFloat); std::ffi::c::RawFloat and std::ffi::c::RawDouble are distinct C types, and nothing converts one into the other} {TYPE: argument for parameter "y" cannot be proven to satisfy int (argument type: std::ffi::c::RawDouble)} {TYPE: argument 1 of takes_double cannot be proven to satisfy std::ffi::c::Double, whose values are Float64s (argument type: std::ffi::c::RawDouble); a raw C floating value is admitted to a Float64 only explicitly (std::ffi::c::raw::double_to_float64: NonFiniteFloat for a NaN or an infinity)} {TYPE: argument 1 of takes_raw cannot be proven to satisfy std::ffi::c::RawDouble (argument type: Float64); a Float64 becomes a raw C floating value only explicitly (std::ffi::c::raw::double_from_float64)} {TYPE: function result does not prove declared type Float64; a raw C floating value is admitted to a Float64 only explicitly (std::ffi::c::raw::double_to_float64: NonFiniteFloat for a NaN or an infinity)} {TYPE: argument for parameter "p" cannot be proven to satisfy std::ffi::c::Ptr[std::ffi::c::Double] (argument type: std::ffi::c::Ptr[std::ffi::c::RawDouble])} {TYPE: argument for parameter "p" cannot be proven to satisfy std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Double], return: std::ffi::c::Double}] (argument type: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawDouble], return: std::ffi::c::RawDouble}])} {TYPE: argument for parameter "x" cannot be proven to satisfy std::ffi::c::RawDouble (argument type: std::ffi::c::RawFloat); std::ffi::c::RawFloat and std::ffi::c::RawDouble are distinct C types, and nothing converts one into the other} {TYPE: argument for parameter "bits" cannot be proven to satisfy int[std::ffi::c::raw::FloatBits] (argument type: int, facts: [4294967296, 4294967296] {4294967296})}}
+
+test rcf-no-number {a raw value has no arithmetic, ordering, equality or hash, statically: each is a compile-time error naming the explicit operations} -body {
+    set head "import std::ffi::c\nimport std::ffi::c::raw\nimport std::float64\nx = std::ffi::c::raw::double_from_bits(0)\n"
+    lmap body {
+        "x + 1.0\n" "x < x\n" "x == x\n" "x != x\n" "hash(x)\n" "std::float64::truncate(x)\n" "-x\n"
+    } {
+        rcfReject "$head$body"
+    }
+} -result {{TYPE: the operands of "+" are std::ffi::c::RawDouble and Float64: a Float64 operation needs Float64 operands, and nothing converts one implicitly (std::float64::from_int makes an Int a Float64)} {TYPE: argument 1 of < is std::ffi::c::RawDouble, a raw C floating value, where < requires int: a raw value is a C bit pattern, not a number (it has no arithmetic, ordering or implicit conversion; std::ffi::c::raw::double_to_float64 admits it to a Float64)} {TYPE: == is not defined for std::ffi::c::RawDouble, a raw C floating value: bit identity and numeric equality differ (two NaNs, two zeros), so compare its bits (std::ffi::c::raw::double_to_bits) or the Float64 it admits to (std::ffi::c::raw::double_to_float64)} {TYPE: == is not defined for std::ffi::c::RawDouble, a raw C floating value: bit identity and numeric equality differ (two NaNs, two zeros), so compare its bits (std::ffi::c::raw::double_to_bits) or the Float64 it admits to (std::ffi::c::raw::double_to_float64)} {TRAIT-NOT-SATISFIED: the argument of hash does not satisfy trait Hashable:} {TYPE: argument 1 of std::float64::truncate is std::ffi::c::RawDouble, a raw C floating value, where std::float64::truncate requires Float64: a raw value is a C bit pattern, not a number (it has no arithmetic, ordering or implicit conversion; std::ffi::c::raw::double_to_float64 admits it to a Float64)} {TYPE: argument 2 of - is std::ffi::c::RawDouble, a raw C floating value, where - requires int: a raw value is a C bit pattern, not a number (it has no arithmetic, ordering or implicit conversion; std::ffi::c::raw::double_to_float64 admits it to a Float64)}}
+
+test rcf-erased-no-number {through an erased value -- a List[any] element, an untyped parameter -- the runtime refuses what the checker refuses: == and hash are EQUALITY, arithmetic a TYPE error, on every backend} -body {
+    set head "import std::ffi::c\nimport std::ffi::c::raw\nimport std::list\nfn pick(xs: List\[any\]) -> any:\n    std::list::at(xs, 0):\n        on IndexNotFound:\n            return 0\nfn twice(v):\n    v + v\nr = std::ffi::c::raw::double_from_bits(9221120237041090561)\n"
+    lmap body {
+        "pick(\[r\]) == pick(\[r\])\n" "\[r\] == \[r\]\n" "hash(pick(\[r\]))\n" "twice(pick(\[r\]))\n"
+    } {
+        rcfAll "$head$body"
+    }
+} -result {{error EQUALITY} {error EQUALITY} {error EQUALITY} {error TYPE}}
+
+test rcf-abi-classes {an extern's raw parameter or result travels in its finite counterpart's register class, marked raw (rf32, rf64 in NIR's foreign table), and charges no NonFiniteFloat; the finite types keep f32 and f64 and their errors} -body {
+    set hir [rcfHir [string cat "import std::ffi::c\nimport std::ffi::c::raw\nextern c library \"m\"\n" \
+        "extern c fn raw(a: std::ffi::c::RawFloat, b: std::ffi::c::RawDouble, c: std::ffi::c::Int) -> std::ffi::c::RawFloat\n" \
+        "extern c fn rawd(a: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble\n" \
+        "extern c fn fin(a: std::ffi::c::Float, b: std::ffi::c::Double) -> std::ffi::c::Float\n" \
+        "extern c fn find(b: std::ffi::c::Double) -> unit\n" \
+        "0\n"]]
+    hir::activate $hir
+    lmap name {raw rawd fin find} {
+        set meta [core::native::metadata extern#$name]
+        list [dict get $meta extern abi params] [dict get $meta extern abi result] [dict get $meta errors]
+    }
+} -result {{{rf32 rf64 i32} rf32 {}} {rf64 rf64 {}} {{f32 f64} f32 NonFiniteFloat} {f64 void {}}}
+
+test rcf-no-authority {a raw value needs no authority: a module that makes, inspects, converts and passes raw values to C by value is ordinary (no direct module), and marking it direct is STALE-DIRECT-MODULE} -body {
+    set body [string cat "import std::ffi::c\nimport std::ffi::c::raw\nextern c library \"m\"\nextern c fn echo(x: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble\n" \
+        "fn go() -> bool:\n    x = echo(std::ffi::c::raw::double_from_bits(9221120237041090561))\n    x.double_nan?()\n0\n"]
+    list [rcfReject $body] [rcfReject "direct module\n$body"]
+} -result {accepted {STALE-DIRECT-MODULE: `direct module` is unnecessary: the entry program makes no call into a direct module, so it exposes no direct authority; remove the declaration (it must state exactly what the compiler infers)}}
+
+test rcf-invalid-positions {a C ABI position that admits no raw value still says so: a raw value is no trailing argument of a variadic C function (C promotes it), a C signature declares no errors, a List of raw values is no C type, and Float64 is still no C type} -body {
+    set head "import std::ffi::c\nimport std::ffi::c::raw\n"
+    lmap body {
+        "extern c fn v(n: std::ffi::c::Int, variadic) -> std::ffi::c::Int\nv(1, std::ffi::c::raw::double_from_bits(0))\n"
+        "extern c fn f(x: List\[std::ffi::c::RawFloat\]) -> unit\n0\n"
+        "extern c fn f(x: Float64) -> unit\n0\n"
+        "fn f(p: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::RawFloat\], return: std::ffi::c::RawFloat, errors: \[NonFiniteFloat\]}\]) -> int:\n    1\n0\n"
+    } {
+        rcfReject "$head$body"
+    }
+} -match glob -result {{TYPE: argument 2 of v, a trailing argument of a variadic C function: std::ffi::c::RawDouble is a raw C floating value, which a variadic C function cannot take as a trailing argument*} {TYPE: parameter "x" of extern c fn "f": List*is not a C ABI value type*} {TYPE: parameter "x" of extern c fn "f": Float64 is not a C ABI value type*Float64 is Botlish's number type, not a C representation*} {TYPE: unknown or invalid type std::ffi::c::FnPtr*a C function declares no Botlish errors*}}
+
+# ---------------------------------------------------------------------------
+# The explicit operations, on every backend
+
+test rcf-bits-round-trip {every bit pattern of the samples -- zeros, infinities, quiet and signaling NaNs of both signs and several payloads, subnormals, the extremes, ordinary values -- is made from its bits and gives exactly those bits back, on every backend} -body {
+    set calls32 [lmap b $::rcfBits32 {string cat "std::ffi::c::raw::float_to_bits(std::ffi::c::raw::float_from_bits($b))"}]
+    set calls64 [lmap b $::rcfBits64 {string cat "std::ffi::c::raw::double_to_bits(std::ffi::c::raw::double_from_bits($b))"}]
+    set outcome [rcfAll "import std::ffi::c\nimport std::ffi::c::raw\n\[[rcfList $calls32], [rcfList $calls64]\]\n"]
+    list [lindex $outcome 0] [expr {[lindex $outcome 1] eq "\[[rcfList $::rcfBits32], [rcfList $::rcfBits64]\]"}]
+} -result {value 1}
+
+test rcf-classify {the classifications read the bits alone: finite?, nan?, infinite?, zero?, negative? (the sign bit: -0, -inf and a negative NaN), on every backend} -body {
+    set prelude [string cat "import std::ffi::c\nimport std::ffi::c::raw\n" \
+        "fn c32(b: std::ffi::c::raw::FloatBits) -> List\[bool\]:\n    x = std::ffi::c::raw::float_from_bits(b)\n    \[x.float_finite?(), x.float_nan?(), x.float_infinite?(), x.float_zero?(), x.float_negative?()\]\n" \
+        "fn c64(b: std::ffi::c::raw::DoubleBits) -> List\[bool\]:\n    x = std::ffi::c::raw::double_from_bits(b)\n    \[x.double_finite?(), x.double_nan?(), x.double_infinite?(), x.double_zero?(), x.double_negative?()\]\n"]
+    set picks {0 1 2 3 4 5 9 12 15 16}
+    set calls [concat [lmap i $picks {string cat "c32([lindex $::rcfBits32 $i])"}] [lmap i $picks {string cat "c64([lindex $::rcfBits64 $i])"}]]
+    rcfAll "$prelude[rcfList $calls]\n"
+} -result {value {[[true, false, false, true, false], [true, false, false, true, true], [false, false, true, false, false], [false, false, true, false, true], [false, true, false, false, false], [false, true, false, false, true], [false, true, false, false, false], [true, false, false, false, false], [true, false, false, false, false], [true, false, false, false, true], [true, false, false, true, false], [true, false, false, true, true], [false, false, true, false, false], [false, false, true, false, true], [false, true, false, false, false], [false, true, false, false, true], [false, true, false, false, false], [true, false, false, false, false], [true, false, false, false, false], [true, false, false, false, true]]}}
+
+test rcf-display {a raw value's display is its C type and every hexadecimal digit of its bits, on every backend -- as a program's result and inside a runtime's own message (an erased ==, refused with the operand shown: each runtime displays it itself)} -body {
+    set results [rcfAll "import std::ffi::c\nimport std::ffi::c::raw\n\[std::ffi::c::raw::float_from_bits(2141192192), std::ffi::c::raw::float_from_bits(1), std::ffi::c::raw::double_from_bits(9223372036854775808), std::ffi::c::raw::double_from_bits(18446744073709551615)\]\n"]
+    set hir [rcfHir "import std::ffi::c\nimport std::ffi::c::raw\nimport std::list\nfn pick(xs: List\[any\]) -> any:\n    std::list::at(xs, 0):\n        on IndexNotFound:\n            return 0\n\[pick(\[std::ffi::c::raw::float_from_bits(1)\]) == 0, pick(\[std::ffi::c::raw::double_from_bits(1)\]) == 0\]\n"]
+    set messages [lsort -unique [lmap backend {interp compile cranelift-generic cranelift} {
+        lassign [outcomeUnderHir $backend $hir] tag code message
+        lindex [regexp -inline {\(<C [a-z]+ 0x[0-9a-f]+>\)} $message] 0
+    }]]
+    list $results $messages
+} -result {{value {[<C float 0x7fa00000>, <C float 0x00000001>, <C double 0x8000000000000000>, <C double 0xffffffffffffffff>]}} {{(<C float 0x00000001>)}}}
+
+test rcf-admission {*_to_float64 is the finite types' own admission, explicitly: every finite pattern is the number it is (a binary32 widened exactly, negative zero 0.0), and a NaN or an infinity is NonFiniteFloat whose payload names it, on every backend} -body {
+    set prelude [string cat "import std::ffi::c\nimport std::ffi::c::raw\n" \
+        "fn k(r: NonFiniteResult) -> Float64:\n    if r == NonFiniteResult::NotANumber:\n        -1.0\n    elif r == NonFiniteResult::PositiveInfinity:\n        -2.0\n    else:\n        -3.0\n" \
+        "fn a32(b: std::ffi::c::raw::FloatBits) -> Float64:\n    std::ffi::c::raw::float_to_float64(std::ffi::c::raw::float_from_bits(b)):\n        on NonFiniteFloat {result}:\n            return k(result)\n" \
+        "fn a64(b: std::ffi::c::raw::DoubleBits) -> Float64:\n    std::ffi::c::raw::double_to_float64(std::ffi::c::raw::double_from_bits(b)):\n        on NonFiniteFloat {result}:\n            return k(result)\n"]
+    set calls [concat [lmap b $::rcfBits32 {string cat "a32($b)"}] [lmap b $::rcfBits64 {string cat "a64($b)"}]]
+    rcfAll "$prelude[rcfList $calls]\n"
+} -result {value {[0.0, 0.0, -2.0, -3.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.401298464324817e-45, 1.1754942106924411e-38, 1.1754943508222875e-38, 3.4028234663852886e38, -3.4028234663852886e38, 1.0, 0.10000000149011612, -2.5, 0.0, 0.0, -2.0, -3.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 5.0e-324, 2.225073858507201e-308, 2.2250738585072014e-308, 1.7976931348623157e308, -1.7976931348623157e308, 1.0, 0.1, -2.5]}}
+
+test rcf-narrowing {float_from_float64 is Float's own narrowing, explicitly -- rounded to nearest, ties to even, a subnormal kept, a tiny negative number +0, the largest float kept, and a magnitude that rounds to an infinity NonFiniteFloat of its sign, never clamped; double_from_float64 is exact and total; on every backend} -body {
+    set prelude [string cat "import std::ffi::c\nimport std::ffi::c::raw\n" \
+        "fn n32(x: Float64) -> int:\n    r = std::ffi::c::raw::float_from_float64(x):\n        on NonFiniteFloat {result}:\n            if result == NonFiniteResult::PositiveInfinity:\n                return -1\n            return -2\n    std::ffi::c::raw::float_to_bits(r)\n" \
+        "fn n64(x: Float64) -> int:\n    std::ffi::c::raw::double_to_bits(std::ffi::c::raw::double_from_float64(x))\n"]
+    set values {0.0 1.401298464324817e-45 7.006492321624085e-46 2.1019476964872256e-45 1.0000000596046448 1.0000001788139343 3.4028234663852886e38 3.4028235677973362e38 3.4028235677973366e38 -3.4028235677973366e38 -1.0e-50 0.1 -2.5}
+    set calls [concat [lmap x $values {string cat "n32($x)"}] [lmap x {0.0 5.0e-324 0.1 -2.5 1.7976931348623157e308} {string cat "n64($x)"}]]
+    rcfAll "$prelude[rcfList $calls]\n"
+} -result {value {[0, 1, 0, 2, 1065353216, 1065353218, 2139095039, 2139095039, -1, -2, 0, 1036831949, 3223322624, 0, 1, 4591870180066957722, 13836183955189006336, 9218868437227405311]}}
+
+# ---------------------------------------------------------------------------
+# Byte storage (every backend)
+
+set ::rcfBytesPrelude [string cat \
+    "import std::abi\nimport std::abi::bytes\nimport std::binary\nimport std::byte\nimport std::ffi::c\nimport std::ffi::c::raw\n" \
+    "layout REC:\n    size 24\n    align 8\n    field tag: std::ffi::c::UChar at 0\n    field f: std::ffi::c::RawFloat at 4\n    field d: std::ffi::c::RawDouble at 8\n    field xs: array 2 of std::ffi::c::RawFloat at 16\n" \
+    "layout FIN:\n    size 24\n    align 8\n    field tag: std::ffi::c::UChar at 0\n    field f: std::ffi::c::Float at 4\n    field d: std::ffi::c::Double at 8\n    field xs: array 2 of std::ffi::c::Float at 16\n" \
+    "union layout NUMBER:\n    size 8\n    align 8\n    alternative f: std::ffi::c::RawFloat\n    alternative d: std::ffi::c::RawDouble\n    alternative u: std::ffi::c::ULongLong\n" \
+    "layout RAW24:\n    size 24\n    align 1\n    field bs: array 24 of std::binary::U8 at 0\n" \
+    "layout RAW8:\n    size 8\n    align 1\n    field bs: array 8 of std::binary::U8 at 0\n" \
+    "fn bytes_of(values: List\[int\]) -> std::abi::bytes::Bytes:\n    bs = loop v in values:\n        b = std::byte::from_int(v):\n            on std::byte::BelowRange:\n                0\n            on std::byte::AboveRange:\n                255\n        b\n    std::abi::bytes::from_list(bs)\n" \
+    "fn mutable(values: List\[int\]) -> std::abi::bytes::MutableBytes:\n    std::abi::bytes::from_bytes(bytes_of(values))\n" \
+    "fn raw24(b: std::abi::bytes::Bytes) -> List\[std::binary::U8\] errors LayoutLengthMismatch:\n    std::binary::parse(RAW24, b).bs\n" \
+    "fn raw8(b: std::abi::bytes::Bytes) -> List\[std::binary::U8\] errors LayoutLengthMismatch:\n    std::binary::parse(RAW8, b).bs\n"]
+
+proc rcfLe32 {bits} {
+    binary scan [binary format iu $bits] cu* out
+    return [join $out {, }]
+}
+proc rcfLe64 {bits} {
+    binary scan [binary format wu $bits] cu* out
+    return [join $out {, }]
+}
+
+test rcf-bytes {std::binary::parse, read, write and emit carry raw fields, array elements and union alternatives as their bits -- a signaling NaN, negative zero, an infinity, a NaN payload -- on every backend, and charge no NonFiniteFloat (the call needs no handler); the same bytes through the finite layout are NonFiniteFloat} -body {
+    set record "7, 0, 0, 0, [rcfLe32 0x7fa00001], [rcfLe64 0x8000000000000000], [rcfLe32 0xff800000], [rcfLe32 0x00000001]"
+    rcfAll [string cat $::rcfBytesPrelude \
+        "fn go() -> list errors LayoutLengthMismatch:\n" \
+        "    d = bytes_of(\[$record\])\n" \
+        "    s = std::binary::parse(REC, d)\n" \
+        "    parsed = \[s.tag, s.f.float_to_bits(), s.d.double_to_bits(), std::binary::read(d, REC.xs\[0\]).float_to_bits(), std::binary::read(d, REC.xs\[1\]).float_to_bits()\]\n" \
+        "    again = raw24(std::binary::emit(s))\n" \
+        "    w = std::binary::write(mutable(\[1, 2, 3, 4, 5, 6, 7, 8\]), NUMBER.f, std::ffi::c::raw::float_from_bits(2139095041))\n" \
+        "    n = std::abi::bytes::freeze(w)\n" \
+        "    finite = std::binary::parse(FIN, d):\n        on NonFiniteFloat:\n            return \[parsed, again == raw24(d), raw8(n), std::binary::read(n, NUMBER.d).double_to_bits(), -1\]\n" \
+        "    \[parsed, again == raw24(d), raw8(n), std::binary::read(n, NUMBER.d).double_to_bits(), finite.tag\]\n" \
+        "go():\n    on LayoutLengthMismatch:\n        \[\]\n"]
+} -result {value {[[7, 2141192193, 9223372036854775808, 4286578688, 1], true, [1, 0, 128, 127, 5, 6, 7, 8], 578437697824096257, -1]}}
+
+test rcf-bytes-emit {a LayoutStruct with raw fields is constructed from raw values and emitted exactly, a whole raw array written in one call, on every backend} -body {
+    rcfAll [string cat $::rcfBytesPrelude \
+        "fn go() -> list errors LayoutLengthMismatch, LayoutExtentMismatch:\n" \
+        "    nz = std::ffi::c::raw::float_from_bits(2147483648)\n" \
+        "    m = LayoutStruct\[REC\] {tag: 9, f: nz, d: std::ffi::c::raw::double_from_bits(9219994337134247936), xs: \[std::ffi::c::raw::float_from_bits(2143289345), nz\]}\n" \
+        "    e = raw24(std::binary::emit(m))\n" \
+        "    w = std::binary::write(mutable(\[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0\]), REC.xs, \[nz, std::ffi::c::raw::float_from_bits(2139095040)\])\n" \
+        "    \[e, raw24(std::abi::bytes::freeze(w))\]\n" \
+        "go():\n    on LayoutLengthMismatch:\n        \[\]\n    on LayoutExtentMismatch:\n        \[\]\n"]
+} -result {value {[[9, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 244, 127, 1, 0, 192, 127, 0, 0, 0, 128], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 128, 127]]}}
+
+test rcf-layout-errors {a layout operation over raw fields declares no NonFiniteFloat, per call, while the same operation over finite fields does: raw reads and writes cross as bits} -constraints nativeBuilt -body {
+    set hir [rcfHir [string cat $::rcfBytesPrelude \
+        "fn r(d: std::abi::bytes::Bytes) -> std::ffi::c::RawFloat errors LayoutLengthMismatch:\n    std::binary::read(d, REC.f)\n" \
+        "fn w(m: std::abi::bytes::MutableBytes, x: std::ffi::c::RawFloat) -> std::abi::bytes::MutableBytes errors LayoutLengthMismatch:\n    std::binary::write(m, REC.f, x)\n" \
+        "fn p(d: std::abi::bytes::Bytes) -> std::ffi::c::RawDouble errors LayoutLengthMismatch:\n    std::binary::parse(REC, d).d\n" \
+        "fn fr(d: std::abi::bytes::Bytes) -> Float64 errors LayoutLengthMismatch, NonFiniteFloat:\n    std::binary::read(d, FIN.f)\n" \
+        "0\n"]]
+    list [rcfReject [string cat $::rcfBytesPrelude "fn fr(d: std::abi::bytes::Bytes) -> Float64 errors LayoutLengthMismatch:\n    std::binary::read(d, FIN.f)\n0\n"]] [expr {$hir ne ""}]
+} -match glob -result {{UNHANDLED-ERROR: *NonFiniteFloat*} 1}
+
+# ---------------------------------------------------------------------------
+# C calls (tests/cffi/rawfloat-fixture.c)
+
+set ::rcfImports "import std::ffi::c\nimport std::ffi::c::raw\n"
+set ::rcfExterns [string cat \
+    "extern c library \"botlish_rawfloat_fixture\"\n" \
+    "extern c fn float_bits named \"rfx_float_bits\"(x: std::ffi::c::RawFloat) -> std::ffi::c::UInt\n" \
+    "extern c fn double_bits named \"rfx_double_bits\"(x: std::ffi::c::RawDouble) -> std::ffi::c::ULongLong\n" \
+    "extern c fn float_of_bits named \"rfx_float_of_bits\"(u: std::ffi::c::UInt) -> std::ffi::c::RawFloat\n" \
+    "extern c fn double_of_bits named \"rfx_double_of_bits\"(u: std::ffi::c::ULongLong) -> std::ffi::c::RawDouble\n" \
+    "extern c fn echo_float named \"rfx_echo_float\"(x: std::ffi::c::RawFloat) -> std::ffi::c::RawFloat\n" \
+    "extern c fn echo_double named \"rfx_echo_double\"(x: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble\n" \
+    "extern c fn finite_float_of_bits named \"rfx_float_of_bits\"(u: std::ffi::c::UInt) -> std::ffi::c::Float\n" \
+    "extern c fn finite_double_of_bits named \"rfx_double_of_bits\"(u: std::ffi::c::ULongLong) -> std::ffi::c::Double\n" \
+    "extern c fn finite_float_bits named \"rfx_float_bits\"(x: std::ffi::c::Float) -> std::ffi::c::UInt\n" \
+    "extern c fn finite_double_bits named \"rfx_double_bits\"(x: std::ffi::c::Double) -> std::ffi::c::ULongLong\n" \
+    "fn f32(b: std::ffi::c::raw::FloatBits) -> std::ffi::c::RawFloat:\n    std::ffi::c::raw::float_from_bits(b)\n" \
+    "fn f64(b: std::ffi::c::raw::DoubleBits) -> std::ffi::c::RawDouble:\n    std::ffi::c::raw::double_from_bits(b)\n"]
+set ::rcfBindings "$::rcfImports$::rcfExterns"
+
+test rcf-c-arguments {every sampled bit pattern Botlish passes as a raw float or double is exactly the bits C receives -- signaling NaNs unquieted, NaN payloads and signs, negative zero, subnormals -- on both native backends} -constraints rawfloatFixture -body {
+    set calls [concat [lmap b $::rcfBits32 {string cat "float_bits(f32($b))"}] [lmap b $::rcfBits64 {string cat "double_bits(f64($b))"}]]
+    set outcome [rcfNative "$::rcfBindings[rcfList $calls]\n"]
+    list [lindex $outcome 0] [expr {[lindex $outcome 1] eq [rcfList [concat $::rcfBits32 $::rcfBits64]]}]
+} -result {value 1}
+
+test rcf-c-results {every bit pattern C assembles and returns as a float or double is exactly the raw value Botlish receives, and one C passes straight back (an argument register returned as the result) keeps every bit, on both native backends} -constraints rawfloatFixture -body {
+    set results [concat [lmap b $::rcfBits32 {string cat "std::ffi::c::raw::float_to_bits(float_of_bits($b))"}] \
+        [lmap b $::rcfBits64 {string cat "std::ffi::c::raw::double_to_bits(double_of_bits($b))"}]]
+    set echoes [concat [lmap b $::rcfBits32 {string cat "std::ffi::c::raw::float_to_bits(echo_float(f32($b)))"}] \
+        [lmap b $::rcfBits64 {string cat "std::ffi::c::raw::double_to_bits(echo_double(f64($b)))"}]]
+    set outcome [rcfNative "$::rcfBindings\[[rcfList $results], [rcfList $echoes]\]\n"]
+    set want [rcfList [concat $::rcfBits32 $::rcfBits64]]
+    list [lindex $outcome 0] [expr {[lindex $outcome 1] eq "\[$want, $want\]"}]
+} -result {value 1}
+
+set ::rcfPickBindings [string cat \
+    "extern c fn pickf named \"rfx_pick_float_bits\"(w: std::ffi::c::Int, a0: std::ffi::c::RawFloat, a1: std::ffi::c::RawFloat, a2: std::ffi::c::RawFloat, a3: std::ffi::c::RawFloat, a4: std::ffi::c::RawFloat, a5: std::ffi::c::RawFloat, a6: std::ffi::c::RawFloat, a7: std::ffi::c::RawFloat, a8: std::ffi::c::RawFloat, a9: std::ffi::c::RawFloat, a10: std::ffi::c::RawFloat, a11: std::ffi::c::RawFloat) -> std::ffi::c::UInt\n" \
+    "extern c fn pickd named \"rfx_pick_double_bits\"(w: std::ffi::c::Int, a0: std::ffi::c::RawDouble, a1: std::ffi::c::RawDouble, a2: std::ffi::c::RawDouble, a3: std::ffi::c::RawDouble, a4: std::ffi::c::RawDouble, a5: std::ffi::c::RawDouble, a6: std::ffi::c::RawDouble, a7: std::ffi::c::RawDouble, a8: std::ffi::c::RawDouble, a9: std::ffi::c::RawDouble, a10: std::ffi::c::RawDouble, a11: std::ffi::c::RawDouble) -> std::ffi::c::ULongLong\n" \
+    "extern c fn pickm named \"rfx_pick_mixed_bits\"(w: std::ffi::c::Int, f0: std::ffi::c::RawFloat, d0: std::ffi::c::RawDouble, i0: std::ffi::c::Int, f1: std::ffi::c::RawFloat, d1: std::ffi::c::RawDouble, i1: std::ffi::c::LongLong, f2: std::ffi::c::RawFloat, d2: std::ffi::c::RawDouble, f3: std::ffi::c::RawFloat, d3: std::ffi::c::RawDouble, f4: std::ffi::c::RawFloat, d4: std::ffi::c::RawDouble, f5: std::ffi::c::RawFloat, d5: std::ffi::c::RawDouble, f6: std::ffi::c::RawFloat, d6: std::ffi::c::RawDouble, f7: std::ffi::c::RawFloat, d7: std::ffi::c::RawDouble, f8: std::ffi::c::RawFloat, d8: std::ffi::c::RawDouble) -> std::ffi::c::ULongLong\n" \
+    "extern c fn self named \"rfx_select_float\"(w: std::ffi::c::Int, a0: std::ffi::c::RawFloat, a1: std::ffi::c::RawFloat, a2: std::ffi::c::RawFloat, a3: std::ffi::c::RawFloat, a4: std::ffi::c::RawFloat, a5: std::ffi::c::RawFloat, a6: std::ffi::c::RawFloat, a7: std::ffi::c::RawFloat, a8: std::ffi::c::RawFloat) -> std::ffi::c::RawFloat\n" \
+    "extern c fn seld named \"rfx_select_double\"(w: std::ffi::c::Int, a0: std::ffi::c::RawDouble, a1: std::ffi::c::RawDouble, a2: std::ffi::c::RawDouble, a3: std::ffi::c::RawDouble, a4: std::ffi::c::RawDouble, a5: std::ffi::c::RawDouble, a6: std::ffi::c::RawDouble, a7: std::ffi::c::RawDouble, a8: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble\n"]
+
+test rcf-c-register-exhaustion {raw floats and doubles past every target's eight floating-point argument registers, then on the stack, interleaved with integers of both widths, each class in its own registers first; a raw result chosen from the stack-passed ninth argument; every argument arrives, and every result returns, as exactly its bits, on both native backends} -constraints rawfloatFixture -body {
+    set fs [lmap i {0 2 3 4 5 9 10 12 13 14 18 19} {string cat "f32([lindex $::rcfBits32 $i])"}]
+    set ds [lmap i {0 2 3 4 5 9 10 12 13 14 18 19} {string cat "f64([lindex $::rcfBits64 $i])"}]
+    set picks [concat [lmap w {0 1 2 3 4 5 6 7 8 9 10 11} {string cat "pickf($w, [join $fs {, }])"}] \
+        [lmap w {0 1 2 3 4 5 6 7 8 9 10 11} {string cat "pickd($w, [join $ds {, }])"}]]
+    set margs {}
+    foreach i {0 1 2 3 4 5 6 7 8} {
+        lappend margs "f32([lindex $::rcfBits32 [expr {$i + 6}]])" "f64([lindex $::rcfBits64 [expr {$i + 6}]])"
+        if {$i == 0} { lappend margs -5 }
+        if {$i == 1} { lappend margs -9223372036854775807 }
+    }
+    set mixed [lmap w {0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 100 101} {string cat "pickm($w, [join $margs {, }])"}]
+    set sargs [join [lmap i {9 4 10 1 12 13 14 2 8} {string cat "f32([lindex $::rcfBits32 $i])"}] {, }]
+    set dargs [join [lmap i {9 4 10 1 12 13 14 2 8} {string cat "f64([lindex $::rcfBits64 $i])"}] {, }]
+    set sels [concat [lmap w {0 8} {string cat "std::ffi::c::raw::float_to_bits(self($w, $sargs))"}] \
+        [lmap w {0 8} {string cat "std::ffi::c::raw::double_to_bits(seld($w, $dargs))"}]]
+    rcfNative "$::rcfBindings$::rcfPickBindings\[[rcfList $picks], [rcfList $mixed], [rcfList $sels]\]\n"
+} -result {value {[[0, 2139095040, 4286578688, 2143289344, 4290772992, 2141192192, 2139095041, 1, 8388607, 8388608, 1036831949, 3223322624, 0, 9218868437227405312, 18442240474082181120, 9221120237041090560, 18444492273895866368, 9219994337134247936, 9218868437227405313, 1, 4503599627370495, 4503599627370496, 4591870180066957722, 13836183955189006336], [9221120237041090561, 2143289345, 9223372036854775807, 2147483647, 18446744073709551615, 4294967295, 9219994337134247936, 2141192192, 9218868437227405313, 2139095041, 18443366373989023744, 4288675840, 1, 1, 4503599627370495, 8388607, 4503599627370496, 8388608, 4294967291, 9223372036854775809], [2141192192, 4294967295, 9219994337134247936, 18446744073709551615]]}}
+
+test rcf-c-finite-unchanged {the same C functions bound with the finite types behave exactly as before: a NaN or an infinity C returns is NonFiniteFloat, negative zero becomes zero, a Botlish zero leaves positive -- and *_to_float64 of the raw result is exactly the finite call's outcome, for every sampled pattern} -constraints rawfloatFixture -body {
+    set prelude [string cat \
+        "fn k(r: NonFiniteResult) -> Float64:\n    if r == NonFiniteResult::NotANumber:\n        -1.0\n    elif r == NonFiniteResult::PositiveInfinity:\n        -2.0\n    else:\n        -3.0\n" \
+        "fn fin32(b: std::ffi::c::UInt) -> Float64:\n    finite_float_of_bits(b):\n        on NonFiniteFloat {result}:\n            return k(result)\n" \
+        "fn raw32(b: std::ffi::c::UInt) -> Float64:\n    std::ffi::c::raw::float_to_float64(float_of_bits(b)):\n        on NonFiniteFloat {result}:\n            return k(result)\n" \
+        "fn fin64(b: std::ffi::c::ULongLong) -> Float64:\n    finite_double_of_bits(b):\n        on NonFiniteFloat {result}:\n            return k(result)\n" \
+        "fn raw64(b: std::ffi::c::ULongLong) -> Float64:\n    std::ffi::c::raw::double_to_float64(double_of_bits(b)):\n        on NonFiniteFloat {result}:\n            return k(result)\n" \
+        "fn zero_bits() -> List\[int\] errors NonFiniteFloat:\n    \[finite_float_bits(finite_float_of_bits(2147483648)), finite_double_bits(finite_double_of_bits(9223372036854775808)), finite_float_bits(-1.0e-50)\]\n"]
+    set fins [concat [lmap b $::rcfBits32 {string cat "fin32($b)"}] [lmap b $::rcfBits64 {string cat "fin64($b)"}]]
+    set raws [concat [lmap b $::rcfBits32 {string cat "raw32($b)"}] [lmap b $::rcfBits64 {string cat "raw64($b)"}]]
+    set outcome [rcfNative "$::rcfBindings${prelude}fn zeros() -> List\[int\]:\n    zero_bits():\n        on NonFiniteFloat:\n            return \[\]\n\[[rcfList $fins], [rcfList $raws], zeros()\]\n"]
+    regexp {^\[(\[[^]]*\]), (\[[^]]*\]), (\[[^]]*\])\]$} [lindex $outcome 1] -> fin raw zeros
+    list [lindex $outcome 0] [expr {$fin eq $raw}] $zeros [llength [split $fin ,]]
+} -result {value 1 {[0, 0, 0]} 40}
+
+set ::rcfMemoryImports "import std::binary\nimport std::binary::native\nimport std::list\n"
+set ::rcfMemoryBindings [string cat \
+    "layout REC:\n    size 32\n    align 8\n    field tag: std::ffi::c::UChar at 0\n    field f: std::ffi::c::RawFloat at 4\n    field d: std::ffi::c::RawDouble at 8\n    field xs: array 3 of std::ffi::c::RawFloat at 16\n    field pad: std::ffi::c::UInt at 28\n" \
+    "union layout NUMBER:\n    size 8\n    align 8\n    alternative f: std::ffi::c::RawFloat\n    alternative d: std::ffi::c::RawDouble\n    alternative u: std::ffi::c::ULongLong\n" \
+    "layout FLOATS:\n    size 64\n    align 4\n    field xs: array 16 of std::ffi::c::RawFloat at 0\n" \
+    "extern c fn record named \"rfx_record\"() -> std::ffi::c::Ptr\[std::ffi::c::Void\] independent\n" \
+    "extern c fn number named \"rfx_union\"() -> std::ffi::c::Ptr\[std::ffi::c::Void\] independent\n" \
+    "extern c fn fbuf named \"rfx_float_buffer\"() -> std::ffi::c::Ptr\[std::ffi::c::RawFloat\] independent\n" \
+    "extern c fn rec_size named \"rfx_rec_size\"() -> std::ffi::c::ULong\n" \
+    "extern c fn rec_offset_f named \"rfx_rec_offset_f\"() -> std::ffi::c::ULong\n" \
+    "extern c fn rec_offset_d named \"rfx_rec_offset_d\"() -> std::ffi::c::ULong\n" \
+    "extern c fn rec_offset_xs named \"rfx_rec_offset_xs\"() -> std::ffi::c::ULong\n" \
+    "extern c fn rec_fill named \"rfx_rec_fill\"(r: std::ffi::c::Ptr\[std::ffi::c::Void\], f: std::ffi::c::UInt, d: std::ffi::c::ULongLong, x0: std::ffi::c::UInt, x1: std::ffi::c::UInt, x2: std::ffi::c::UInt) -> unit\n" \
+    "extern c fn rec_bits named \"rfx_rec_bits\"(r: std::ffi::c::Ptr\[std::ffi::c::Void\], k: std::ffi::c::Int) -> std::ffi::c::ULongLong\n" \
+    "extern c fn union_store_float named \"rfx_union_store_float\"(u: std::ffi::c::Ptr\[std::ffi::c::Void\], bits: std::ffi::c::UInt) -> unit\n" \
+    "extern c fn union_bits named \"rfx_union_bits\"(u: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::ULongLong\n" \
+    "extern c fn store_floats named \"rfx_store_floats\"(p: std::ffi::c::Ptr\[std::ffi::c::RawFloat\], n: std::ffi::c::ULong, first: std::ffi::c::UInt) -> unit\n" \
+    "extern c fn load_float named \"rfx_load_float\"(p: std::ffi::c::Ptr\[std::ffi::c::RawFloat\], i: std::ffi::c::ULong) -> std::ffi::c::UInt\n"]
+
+test rcf-layout-matches-c {the record a layout with raw fields describes is C's struct RawRec on this target: its size and the offsets of the float, the double and the float array} -constraints rawfloatFixture -body {
+    rcfNative "$::rcfImports$::rcfMemoryImports$::rcfExterns$::rcfMemoryBindings\[rec_size(), rec_offset_f(), rec_offset_d(), rec_offset_xs()\]\n"
+} -result {value {[32, 4, 8, 16]}}
+
+test rcf-views-and-edits {raw fields and elements C stored with its own float stores are read through a native view as exactly their bits (a signaling NaN, negative zero, an infinity, a subnormal); raw values stored through a native edit are exactly the bits C reads; std::binary::load copies every field raw; nothing is NonFiniteFloat} -constraints rawfloatFixture -body {
+    set main [string cat \
+        "fn go() -> list errors NativeViewNull, NativeEditNull, IndexNotFound:\n" \
+        "    p = record()\n" \
+        "    rec_fill(p, 2141192193, 9223372036854775808, 4286578688, 1, 2143289345)\n" \
+        "    p2 = std::ffi::c::clone(p)\n    p3 = std::ffi::c::clone(p)\n" \
+        "    v = std::binary::native::view(REC, p2)\n" \
+        "    seen = \[v.tag, v.f.float_to_bits(), v.d.double_to_bits(), std::binary::element(v.xs, 0).float_to_bits(), std::binary::element(v.xs, 1).float_to_bits(), std::binary::element(v.xs, 2).float_to_bits()\]\n" \
+        "    e = std::binary::native::edit(REC, p3)\n" \
+        "    std::binary::store(e, REC.f, f32(2147483648))\n" \
+        "    std::binary::store(e, REC.d, f64(9219994337134247936))\n" \
+        "    std::binary::store_element(e.xs, 1, f32(2139095041))\n" \
+        "    after = \[rec_bits(p, 0), rec_bits(p, 1), rec_bits(p, 2), rec_bits(p, 3), rec_bits(p, 4)\]\n" \
+        "    whole = std::binary::load(v)\n" \
+        "    copied = \[whole.f.float_to_bits(), whole.d.double_to_bits(), std::list::length(whole.xs)\]\n" \
+        "    \[seen, after, copied\]\n" \
+        "go():\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n    on IndexNotFound:\n        \[\]\n"]
+    rcfNative "direct module\n$::rcfImports$::rcfMemoryImports$::rcfExterns$::rcfMemoryBindings$main"
+} -result {value {[[7, 2141192193, 9223372036854775808, 4286578688, 1, 2143289345], [2147483648, 9219994337134247936, 4286578688, 2139095041, 2143289345], [2147483648, 9219994337134247936, 3]]}}
+
+test rcf-unions-arrays-pointers {a raw float alternative is the union's low 4 bytes, and a store through it writes those bytes alone, its NaN bits intact; a whole raw array is stored and loaded through an edit and a view; floats C writes through a Ptr[RawFloat] are read raw, and raw values stored are what C loads} -constraints rawfloatFixture -body {
+    set main [string cat \
+        "fn go() -> list errors NativeViewNull, NativeEditNull, IndexNotFound, LayoutExtentMismatch:\n" \
+        "    u = number()\n    u1 = std::ffi::c::clone(u)\n    u2 = std::ffi::c::clone(u)\n    u3 = std::ffi::c::clone(u)\n" \
+        "    ue = std::binary::native::edit(NUMBER, u1)\n" \
+        "    std::binary::store(ue, NUMBER.u, 18446744073709551615)\n" \
+        "    std::binary::store(ue, NUMBER.f, f32(2141192192))\n" \
+        "    uv = std::binary::native::view(NUMBER, u2)\n" \
+        "    unions = \[union_bits(u3), uv.f.float_to_bits(), uv.d.double_to_bits()\]\n" \
+        "    union_store_float(u, 4290772993)\n" \
+        "    unions2 = \[uv.u, uv.f.float_to_bits()\]\n" \
+        "    b = fbuf()\n    b1 = std::ffi::c::clone(b)\n    b2 = std::ffi::c::clone(b)\n" \
+        "    bp = std::ffi::c::erase(std::ffi::c::clone(b))\n    bp1 = std::ffi::c::clone(bp)\n" \
+        "    store_floats(b1, 16, 2139095040)\n" \
+        "    fv = std::binary::native::view(FLOATS, bp1)\n" \
+        "    read = loop i in \[0, 1, 15\]:\n        std::binary::element(fv.xs, i).float_to_bits()\n" \
+        "    fe = std::binary::native::edit(FLOATS, bp)\n" \
+        "    std::binary::store_element(fe.xs, 3, f32(2147483649))\n" \
+        "    loaded = loop x in std::binary::load(fv.xs):\n        x.float_to_bits()\n" \
+        "    l3 = load_float(b2, 3)\n" \
+        "    \[unions, unions2, read, l3, std::list::at(loaded, 3), std::list::at(loaded, 4)\]\n" \
+        "go():\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n    on IndexNotFound:\n        \[\]\n    on LayoutExtentMismatch:\n        \[\]\n"]
+    rcfNative "direct module\n$::rcfImports$::rcfMemoryImports$::rcfExterns$::rcfMemoryBindings$main"
+} -result {value {[[18446744071555776512, 2141192192, 18446744071555776512], [18446744073705357313, 4290772993], [2139095040, 2139095041, 2139095055], 2147483649, 2147483649, 2139095044]}}
+
+set ::rcfFnPtrBindings [string cat \
+    "extern c fn negator named \"rfx_negator\"() -> std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::RawDouble\], return: std::ffi::c::RawDouble}\]\n" \
+    "extern c fn taker named \"rfx_taker\"() -> std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::RawFloat, std::ffi::c::RawDouble\], return: std::ffi::c::RawFloat}\]\n" \
+    "extern c fn apply_double named \"rfx_apply_double\"(f: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::RawDouble\], return: std::ffi::c::RawDouble}\], x: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble\n" \
+    "extern c fn apply_float named \"rfx_apply_float\"(f: std::ffi::c::FnPtr\[Fn{args: \[std::ffi::c::RawFloat, std::ffi::c::RawDouble\], return: std::ffi::c::RawFloat}\], x: std::ffi::c::RawFloat, y: std::ffi::c::RawDouble) -> std::ffi::c::RawFloat\n"]
+
+test rcf-function-pointers {a C function pointer of a raw signature is an ordinary FnPtr whose signature keeps the raw types (never its finite counterpart's): C hands one out and calls it with the raw values Botlish passes, every bit kept -- negating a NaN's sign bit, passing a signaling NaN through} -constraints rawfloatFixture -body {
+    set main [string cat \
+        "fn go() -> List\[int\]:\n" \
+        "    n = negator()\n    t = taker()\n" \
+        "    n2 = std::ffi::c::clone(n)\n    a = apply_double(n2, f64(9221120237041090561))\n" \
+        "    b = apply_double(n, f64(0))\n" \
+        "    c = apply_float(t, f32(2141192193), f64(9218868437227405312))\n" \
+        "    \[std::ffi::c::raw::double_to_bits(a), std::ffi::c::raw::double_to_bits(b), std::ffi::c::raw::float_to_bits(c)\]\n" \
+        "go()\n"]
+    rcfNative "direct module\n$::rcfBindings$::rcfFnPtrBindings$main"
+} -result {value {[18444492273895866369, 9223372036854775808, 2141192193]}}
+
+test rcf-tcl-backends {the Tcl backends refuse a C call (NATIVE-ONLY) -- a raw argument is never narrowed or refused before that -- and run every raw operation that needs no C} -body {
+    set hir [rcfHir "import std::ffi::c\nimport std::ffi::c::raw\nextern c library \"m\"\nextern c fn echo(x: std::ffi::c::RawFloat) -> std::ffi::c::RawFloat\necho(std::ffi::c::raw::float_from_bits(2139095040))\n"]
+    lmap backend {interp compile} {rcfRun $hir $backend}
+} -result {{error NATIVE-ONLY} {error NATIVE-ONLY}}
+
+# ---------------------------------------------------------------------------
+# HIR text, interchange, isolation
+
+proc rcfRoundTripProgram {} {
+    return [string cat "import std::ffi::c\nimport std::ffi::c::raw\nimport std::binary\nimport std::abi\nimport std::abi::bytes\n" \
+        "layout M:\n    size 16\n    align 8\n    field a: std::ffi::c::RawFloat at 0\n    field b: std::ffi::c::RawDouble at 8\n" \
+        "union layout U:\n    size 8\n    align 8\n    alternative f: std::ffi::c::RawFloat\n    alternative d: std::ffi::c::Double\n" \
+        "extern c fn f(x: std::ffi::c::RawFloat, p: std::ffi::c::Ptr\[std::ffi::c::RawDouble\]) -> std::ffi::c::RawDouble\n" \
+        "fn g(m: std::abi::bytes::MutableBytes, x: std::ffi::c::RawFloat) -> std::abi::bytes::MutableBytes errors LayoutLengthMismatch:\n    std::binary::write(m, M.a, x)\n" \
+        "fn go() -> int errors LayoutLengthMismatch:\n    r = g(std::abi::bytes::zeroed(std::abi::usize(16)), std::ffi::c::raw::float_from_bits(2141192193))\n    std::ffi::c::raw::float_to_bits(std::binary::parse(M, std::abi::bytes::freeze(r)).a)\n" \
+        "go():\n    on LayoutLengthMismatch:\n        -1\n"]
+}
+
+test rcf-hir-text {HIR text names raw fields, alternatives, signatures and values by their source spelling; formatting, reading back and formatting again gives the same text, and the read HIR runs to the same outcome} -constraints nativeBuilt -body {
+    set hir [rcfHir [rcfRoundTripProgram]]
+    set text [hir::format $hir]
+    set again [hir::parse $text]
+    list [regexp -all {layout M ns - size 16 align 8 fields a: std::ffi::c::RawFloat at 0, b: std::ffi::c::RawDouble at 8} $text] \
+        [regexp -all {union layout U ns - size 8 align 8 alternatives f: std::ffi::c::RawFloat, d: std::ffi::c::Double} $text] \
+        [expr {[hir::format $again] eq $text}] [lmap backend {interp cranelift} {rcfRun $again $backend}]
+} -result {1 1 1 {{value 2141192193} {value 2141192193}}}
+
+test rcf-interchange-isolation {HIR interchange keeps the raw types (a layout's raw fields, an extern's ABI classes), and compilation isolation keeps them the HIR's own: read back after another compilation declared the same names finite, the program still carries its bits on every backend} -body {
+    set dir [makeDirectory rcf-interchange-[pid]]
+    set path [file join $dir raw.hirx]
+    set raw [rcfHir [rcfRoundTripProgram]]
+    hir::interchange::writeFile $path $raw
+    set finite [rcfHir [string cat "import std::ffi::c\nimport std::ffi::c::raw\nimport std::binary\nimport std::abi\nimport std::abi::bytes\n" \
+        "layout M:\n    size 16\n    align 8\n    field a: std::ffi::c::Float at 0\n    field b: std::ffi::c::Double at 8\n" \
+        "extern c fn f(x: std::ffi::c::Float, p: std::ffi::c::Ptr\[std::ffi::c::Double\]) -> std::ffi::c::Double\n" \
+        "0\n"]]
+    set read [hir::interchange::readFile $path]
+    set outcomes [lsort -unique [lmap backend {interp compile cranelift-generic cranelift} {rcfRun $read $backend}]]
+    hir::activate $read
+    list $outcomes [dict get [core::native::metadata extern#[dict get [hir::foreign::declarations $read] f key]] extern abi params] \
+        [expr {[native::nir $read] eq [native::nir $raw]}]
+} -cleanup {removeDirectory rcf-interchange-[pid]} -result {{{value 2141192193}} {rf32 ptr} 1}
+
+# ---------------------------------------------------------------------------
+# Native code, executables, the collector
+
+test rcf-nir-clif {natively a raw float is rf32 and a raw double rf64 in NIR's foreign table, F32 and F64 in the platform C signature exactly as the finite types (the same convention, no extension attribute); an argument is its bits moved by bitcast and a result boxed from its bits by one helper -- no fdemote, fpromote, finiteness test or NonFiniteFloat path} -constraints nativeBuilt -body {
+    set hir [rcfHir "import std::ffi::c\nimport std::ffi::c::raw\nextern c library \"m\"\nextern c fn h(x: std::ffi::c::RawFloat, y: std::ffi::c::RawDouble) -> std::ffi::c::RawFloat\nfn go(a: std::ffi::c::RawFloat, b: std::ffi::c::RawDouble) -> std::ffi::c::RawFloat:\n    h(a, b)\ngo(std::ffi::c::raw::float_from_bits(0), std::ffi::c::raw::double_from_bits(0))\n"]
+    set clif [native::clif $hir]
+    set convention [dict get [native::targetFacts [dict get [core::cabi::target [core::cabi::hostTarget]] triple]] c-call-conv]
+    list [lsearch -inline -regexp [split [native::nir $hir] \n] {^foreign }] \
+        [regexp -all "sig\\d+ = \\(f32, f64\\) -> f32 $convention" $clif] \
+        [regexp -all {= bitcast\.f32 } $clif] [regexp -all {= bitcast\.f64 } $clif] [regexp -all {= bitcast\.i32 } $clif] \
+        [regexp -all {fdemote|fpromote} $clif] [regexp -all {f32const 0x1\.fffffep127} $clif]
+} -result {{foreign 0 "h" params="rf32 rf64" result=rf32 name="h"} 1 1 1 1 0 0}
+
+test rcf-executable {a program that passes and receives raw floats and doubles links as a standalone executable and runs with no Tcl and an empty environment, with the same bits as under the driver: a signaling NaN, the stack-passed ninth float, negative zero} -constraints {rawfloatFixture executableAot} -body {
+    set sargs [join [lmap i {9 4 10 1 12 13 14 2 9} {string cat "f32([lindex $::rcfBits32 $i])"}] {, }]
+    set source [string cat $::rcfBindings $::rcfPickBindings \
+        "\[float_bits(echo_float(f32(2141192193))), double_bits(f64(9223372036854775808)), std::ffi::c::raw::float_to_bits(self(8, $sargs)), std::ffi::c::raw::double_to_bits(double_of_bits(9219994337134247936))\]\n"]
+    set hir [rcfHir $source]
+    set dir [makeDirectory rcf-exe-[pid]]
+    set exe [native::withLinkDirs [rcfLinkDirs] {native::executable $hir [file join $dir program]}]
+    list [string trim [runBare $exe]] [lindex [rcfRun $hir cranelift] 1]
+} -cleanup {file delete -force [file join [temporaryDirectory] rcf-exe-[pid]]} -result {{[2141192193, 9223372036854775808, 2141192192, 9219994337134247936]} {[2141192193, 9223372036854775808, 2141192192, 9219994337134247936]}}
+
+test rcf-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection attempt at every allocation site) every raw crossing keeps its bits: C results boxed into fresh raw values, raw arguments, view and element reads, edits, whole copies, all in a loop that allocates throughout} -constraints rawfloatFixture -body {
+    set main [string cat \
+        "fn go() -> list errors NativeViewNull, NativeEditNull, IndexNotFound:\n" \
+        "    b = fbuf()\n    bp = std::ffi::c::erase(std::ffi::c::clone(b))\n    bp1 = std::ffi::c::clone(bp)\n" \
+        "    fe = std::binary::native::edit(FLOATS, bp1)\n    fv = std::binary::native::view(FLOATS, bp)\n" \
+        "    rounds = loop k from 0 to 4:\n        loop i from 0 to 16:\n" \
+        "            x = echo_double(double_of_bits(18444492273895866369))\n" \
+        "            y = float_of_bits(2141192193)\n" \
+        "            std::binary::store_element(fe.xs, i, y)\n" \
+        "            \[std::ffi::c::raw::double_to_bits(x), std::binary::element(fv.xs, i).float_to_bits(), std::list::length(std::binary::load(fv.xs)), float_bits(echo_float(y))\]\n" \
+        "    \[std::list::length(rounds), std::list::at(std::list::at(rounds, 0), 0), std::list::at(std::list::at(rounds, 3), 15)\]\n" \
+        "go():\n    on NativeViewNull:\n        \[\]\n    on NativeEditNull:\n        \[\]\n    on IndexNotFound:\n        \[\]\n"]
+    set source "direct module\n$::rcfImports$::rcfMemoryImports$::rcfExterns$::rcfMemoryBindings$main"
+    set plain [rcfNative $source]
+    set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [rcfNative $source]
+    } finally {
+        if {$saved eq ""} { unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
+    }
+    list [expr {$plain eq $stressed}] $stressed
+} -result {1 {value {[4, [18444492273895866369, 2141192193, 16, 2141192193], [18444492273895866369, 2141192193, 16, 2141192193]]}}}
+
+cleanupTests

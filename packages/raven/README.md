@@ -14,7 +14,8 @@ committed GENERATED binding of the target beside it
 pinned Raven's headers.
 
 * `raven.bot` -- the module `raven`: windows, panels and controls as
-  nominal handles, the frame loop, themes, actions, timers, synthetic input,
+  nominal handles (a slider's and a spin box's value both raw and admitted:
+  RAW-C-FLOAT-FFI-MILESTONE-1.md), the frame loop, themes, actions, timers, synthetic input,
   and the events of everything it made, polled (`raven::events()`); the
   context `raven::Ui` for what needs native memory (starting Raven, sizes,
   rectangles, its last error).

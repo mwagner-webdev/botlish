@@ -1515,7 +1515,9 @@ proc core::compiler::CompileLayoutOperation {ctxVar e name role argOps} {
         # (FIXED-LAYOUT-ARRAYS.md: the reference implementation's loop.)
         return ""
     }
-    if {[hir::layouts::DescriptorFormats $descriptor] ne {}} {
+    if {[hir::layouts::DescriptorFormats $descriptor] ne {} || [core::binary::HoldsRaw $descriptor]} {
+        # (A raw C floating field, RAW-C-FLOAT-FFI-MILESTONE-1.md, is no Int:
+        # the reference implementation's raw value.)
         # A C floating field (C-FLOAT-FFI-MILESTONE-1.md) is admitted or
         # narrowed, and may fail with NonFiniteFloat: the reference
         # implementation's boundary rules (core::cabi), never a second copy

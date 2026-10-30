@@ -8812,6 +8812,30 @@ zero is zero. Where a value type is written, std::ffi::c::Double means
 Float64 and std::ffi::c::Float is an error: Botlish has no binary32 number.
 C long double has no type.
 
+Raw C floating values (intrinsic types of this namespace,
+RAW-C-FLOAT-FFI-MILESTONE-1.md): the same two C types, carried as they are.
+
+  std::ffi::c::RawFloat     C's float, every binary32 bit pattern
+  std::ffi::c::RawDouble    C's double, every binary64 bit pattern
+
+Each has exactly its finite counterpart's C representation (format, size,
+alignment, register class), so a parameter, result, field, element or
+pointee declared raw passes the same machine values -- and every value of
+the format crosses unchanged: NaN of any sign and payload, both infinities,
+negative zero, subnormals. Unlike Float and Double they are types of values
+too, of their own kind, in every position: a raw value is no number. It has
+no arithmetic, ordering, equality or hash (`==` and `hash` refuse it, as
+they refuse a pointer), nothing converts it implicitly, and it needs no
+authority (representing a NaN is no memory access). Between a raw value and
+anything else stand only the explicit operations of the module
+std::ffi::c::raw (stdlib/ffi/c/raw.bot, imported by the programs that use
+them): a raw value from and to its bit pattern, its classification by the
+bits alone, its admission to a Float64 (Float's and Double's own rule:
+NonFiniteFloat for NaN and the infinities, negative zero 0.0) and a
+Float64's narrowing to one (Float's own rounding: to nearest, ties to even,
+an overflow NonFiniteFloat). A raw value's display is its C type and its
+bits: <C float 0x7fc00000>, <C double 0x8000000000000000>.
+
 Pointers (intrinsic types and operations of this namespace):
 
   std::ffi::c::Void         the C void: an incomplete pointee, no values
@@ -8880,6 +8904,381 @@ storing it moves it), owns nothing, is never dereferenced, and has no
 arithmetic, ordering, equality or conversion to or from an Int. Calling C
 itself is `extern c fn` (concept.c-ffi), which runs only on the native
 backends.
+
+@topic stdlib.std::ffi::c::raw::FloatBits
+title: std::ffi::c::raw::FloatBits -- Type of module std::ffi::c::raw
+summary: The type std::ffi::c::raw::FloatBits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::FloatBits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    type FloatBits = Int in 0..4294967295
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::FloatBits.
+
+@topic stdlib.std::ffi::c::raw::DoubleBits
+title: std::ffi::c::raw::DoubleBits -- Type of module std::ffi::c::raw
+summary: The type std::ffi::c::raw::DoubleBits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::DoubleBits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    type DoubleBits = Int in 0..18446744073709551615
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::DoubleBits.
+
+@topic stdlib.std::ffi::c::raw::float_from_bits
+title: std::ffi::c::raw::float_from_bits -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::float_from_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_from_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn float_from_bits(bits: std::ffi::c::raw::FloatBits) -> std::ffi::c::RawFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_from_bits.
+
+@topic stdlib.std::ffi::c::raw::float_to_bits
+title: std::ffi::c::raw::float_to_bits -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_to_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_to_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_to_bits(x: std::ffi::c::RawFloat) -> std::ffi::c::raw::FloatBits:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_to_bits or, as a method,
+receiver.float_to_bits(...).
+
+@topic stdlib.std::ffi::c::raw::float_to_float64
+title: std::ffi::c::raw::float_to_float64 -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_to_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_to_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_to_float64(x: std::ffi::c::RawFloat) -> Float64 errors NonFiniteFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_to_float64 or, as a method,
+receiver.float_to_float64(...).
+
+@topic stdlib.std::ffi::c::raw::float_from_float64
+title: std::ffi::c::raw::float_from_float64 -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::float_from_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_from_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn float_from_float64(x: Float64) -> std::ffi::c::RawFloat errors NonFiniteFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_from_float64.
+
+@topic stdlib.std::ffi::c::raw::double_from_bits
+title: std::ffi::c::raw::double_from_bits -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::double_from_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_from_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn double_from_bits(bits: std::ffi::c::raw::DoubleBits) -> std::ffi::c::RawDouble:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_from_bits.
+
+@topic stdlib.std::ffi::c::raw::double_to_bits
+title: std::ffi::c::raw::double_to_bits -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_to_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_to_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_to_bits(x: std::ffi::c::RawDouble) -> std::ffi::c::raw::DoubleBits:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_to_bits or, as a method,
+receiver.double_to_bits(...).
+
+@topic stdlib.std::ffi::c::raw::double_to_float64
+title: std::ffi::c::raw::double_to_float64 -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_to_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_to_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_to_float64(x: std::ffi::c::RawDouble) -> Float64 errors NonFiniteFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_to_float64 or, as a method,
+receiver.double_to_float64(...).
+
+@topic stdlib.std::ffi::c::raw::double_from_float64
+title: std::ffi::c::raw::double_from_float64 -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::double_from_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_from_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn double_from_float64(x: Float64) -> std::ffi::c::RawDouble:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_from_float64.
+
+@topic stdlib.std::ffi::c::raw::float_finite?
+title: std::ffi::c::raw::float_finite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_finite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_finite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_finite?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_finite? or, as a method,
+receiver.float_finite?(...).
+
+@topic stdlib.std::ffi::c::raw::float_nan?
+title: std::ffi::c::raw::float_nan? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_nan? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_nan?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_nan?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_nan? or, as a method, receiver.float_nan?(...).
+
+@topic stdlib.std::ffi::c::raw::float_infinite?
+title: std::ffi::c::raw::float_infinite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_infinite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_infinite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_infinite?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_infinite? or, as a method,
+receiver.float_infinite?(...).
+
+@topic stdlib.std::ffi::c::raw::float_zero?
+title: std::ffi::c::raw::float_zero? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_zero? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_zero?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_zero?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_zero? or, as a method, receiver.float_zero?(...).
+
+@topic stdlib.std::ffi::c::raw::float_negative?
+title: std::ffi::c::raw::float_negative? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_negative? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_negative?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_negative?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_negative? or, as a method,
+receiver.float_negative?(...).
+
+@topic stdlib.std::ffi::c::raw::double_finite?
+title: std::ffi::c::raw::double_finite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_finite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_finite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_finite?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_finite? or, as a method,
+receiver.double_finite?(...).
+
+@topic stdlib.std::ffi::c::raw::double_nan?
+title: std::ffi::c::raw::double_nan? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_nan? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_nan?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_nan?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_nan? or, as a method, receiver.double_nan?(...).
+
+@topic stdlib.std::ffi::c::raw::double_infinite?
+title: std::ffi::c::raw::double_infinite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_infinite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_infinite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_infinite?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_infinite? or, as a method,
+receiver.double_infinite?(...).
+
+@topic stdlib.std::ffi::c::raw::double_zero?
+title: std::ffi::c::raw::double_zero? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_zero? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_zero?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_zero?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_zero? or, as a method,
+receiver.double_zero?(...).
+
+@topic stdlib.std::ffi::c::raw::double_negative?
+title: std::ffi::c::raw::double_negative? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_negative? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_negative?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_negative?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_negative? or, as a method,
+receiver.double_negative?(...).
+
+@topic stdlib.module.std::ffi::c::raw
+title: std::ffi::c::raw -- standard namespace
+summary: The explicit operations of the raw C floating values std::ffi::c::RawFloat and std::ffi::c::RawDouble (RAW-C-FLOAT-FFI-MILESTONE-1.md.
+index: stdlib
+symbol: std::ffi::c::raw
+
+== DESCRIPTION
+A raw value is C's float or double as C holds it: any binary32 or binary64
+bit pattern -- NaN of any sign and payload, quiet or signaling, both
+infinities, negative zero, subnormals. These are the only ways between one
+and anything else, each explicit:
+
+  float_from_bits(b)      RawFloat     the binary32 whose bit pattern is
+                                       B (a FloatBits: 0..2^32-1)
+  float_to_bits(x)        FloatBits    X's bit pattern, exactly
+  float_to_float64(x)     Float64      the number X is, widened exactly;
+                                       a NaN or an infinity is
+                                       NonFiniteFloat (its result names
+                                       which), negative zero 0.0 --
+                                       std::ffi::c::Float's own admission
+  float_from_float64(x)   RawFloat     X rounded to nearest, ties to even;
+                                       an overflow to an infinity is
+                                       NonFiniteFloat of its sign, never
+                                       clamped, a zero +0 --
+                                       std::ffi::c::Float's own narrowing
+  double_from_bits(b), double_to_bits(x), double_to_float64(x),
+  double_from_float64(x)               the same for binary64 (a
+                                       DoubleBits: 0..2^64-1), whose
+                                       from_float64 is exact and total
+                                       (every Float64 is a binary64)
+
+and the classifications, which read the bits alone:
+
+  float_finite?(x)    neither NaN nor an infinity (zeros, subnormals,
+                      normals)
+  float_nan?(x)       any NaN, quiet or signaling, of either sign
+  float_infinite?(x)  either infinity
+  float_zero?(x)      either zero
+  float_negative?(x)  the sign bit: -0.0, a negative number, -inf, and a
+                      NaN whose sign bit is set
+  (and double_finite?, double_nan?, double_infinite?, double_zero?,
+  double_negative?)
+
+So -0.0 is `x.double_zero?() and x.double_negative?()`, positive infinity
+`x.double_infinite?() and not x.double_negative?()`. Nothing here needs
+authority, and nothing computes on a floating value: a raw value's bits are
+never canonicalized, quieted or rounded by an operation that does not say
+so.
+
+The masks, in decimal (an Int is written in decimal): binary32's exponent
+2139095040 = 0x7f800000, fraction 8388607 = 0x007fffff, magnitude 2147483647
+= 0x7fffffff, sign 2147483648 = 0x80000000; binary64's exponent
+9218868437227405312 = 0x7ff0000000000000, fraction 4503599627370495 =
+0x000fffffffffffff, magnitude 9223372036854775807 = 0x7fffffffffffffff, sign
+9223372036854775808 = 0x8000000000000000.
+
+== SOURCE
+stdlib/ffi/c/raw.bot (import std::ffi::c::raw).
+
+== MEMBERS
+    std::ffi::c::raw::DoubleBits   type
+    std::ffi::c::raw::FloatBits    type
+    std::ffi::c::raw::double_finite? function
+    std::ffi::c::raw::double_from_bits function (nomethod)
+    std::ffi::c::raw::double_from_float64 function (nomethod)
+    std::ffi::c::raw::double_infinite? function
+    std::ffi::c::raw::double_nan?  function
+    std::ffi::c::raw::double_negative? function
+    std::ffi::c::raw::double_to_bits function
+    std::ffi::c::raw::double_to_float64 function
+    std::ffi::c::raw::double_zero? function
+    std::ffi::c::raw::float_finite? function
+    std::ffi::c::raw::float_from_bits function (nomethod)
+    std::ffi::c::raw::float_from_float64 function (nomethod)
+    std::ffi::c::raw::float_infinite? function
+    std::ffi::c::raw::float_nan?   function
+    std::ffi::c::raw::float_negative? function
+    std::ffi::c::raw::float_to_bits function
+    std::ffi::c::raw::float_to_float64 function
+    std::ffi::c::raw::float_zero?  function
+
+Each member is a topic: -help NAME (e.g. -help
+std::ffi::c::raw::DoubleBits).
 
 @topic stdlib.std::float64::min
 title: std::float64::min -- Function (nomethod) of module std::float64

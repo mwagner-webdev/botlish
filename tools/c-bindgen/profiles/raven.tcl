@@ -24,6 +24,19 @@
 # parameter of the public headers, written out, never a rule by C type
 # (C-BINDGEN.md, "Contracts"). Pointers to anything else (out-parameters,
 # descriptors, user data, callbacks) carry no fact: unknown.
+#
+# Representations (RAW-C-FLOAT-FFI-MILESTONE-1.md): every C float and double
+# is bound finite (std::ffi::c::Float, Double) except these, which the
+# binding writes raw (std::ffi::c::RawFloat, RawDouble) so a caller chooses
+# between the C value itself and its explicit admission to a Float64
+# (packages/raven's slider_value and spin_box_value admit, slider_raw_value
+# and spin_box_raw_value do not): a slider's and a spin box's value, both
+# ways, and a spin box's range. The C ABI is the headers' either way. A raw
+# setter passes whatever bits it is given, and Raven's own rules decide what
+# they mean: a spin box ignores a NaN value (spin_box.c, `value != value`)
+# and compares and prints infinities (a range and a value), defined by C's
+# IEEE semantics; a slider has no such guard, so its raw values are finite
+# ones only (raven.test passes -0 and a subnormal, never a NaN).
 dict create \
     name raven \
     description "Raven 0.1.3's public C API (Raven.h and every header it includes)" \
@@ -70,5 +83,10 @@ dict create \
         {functions {Rblock_editor_set_value Rwidget_set_attribute Rxml_node_set_attribute} facts {value {read noescape}}}
         {functions {Rtheme_set_style_color Rtheme_set_style_metric Rtheme_set_style_material} facts {widget {read noescape}}}
         {functions {Rtheme_load_from_memory Rwindow_create_from_xml Rwidget_create_from_xml Rxml_register_widgets Rxml_document_parse Rxml_node_add_xml} facts {xml {read noescape}}}
+    } \
+    representations {
+        {name values functions {Rslider_get_value Rspin_box_get_value} raw {result}}
+        {name setters functions {Rslider_set_value Rspin_box_set_value} raw {value}}
+        {name ranges functions {Rspin_box_set_range} raw {minimum maximum}}
     } \
     evidence llvm

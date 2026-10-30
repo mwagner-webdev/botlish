@@ -38,6 +38,14 @@ fn flag(value: bool) -> str:
 fn int(value: int) -> str:
     std::int::to_string(value)
 
+# Which non-finite number a NonFiniteFloat names.
+fn non_finite(result: NonFiniteResult) -> str:
+    if result == NonFiniteResult::NotANumber:
+        return "NotANumber"
+    if result == NonFiniteResult::PositiveInfinity:
+        return "PositiveInfinity"
+    "NegativeInfinity"
+
 # EVENT as "KIND value extra number [text]" (number rounded); WHO names its
 # source among the handles the scenario made.
 fn event(e: raven::Event, who: str) -> str:

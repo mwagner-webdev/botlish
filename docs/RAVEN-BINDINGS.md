@@ -37,7 +37,9 @@ Three smaller gaps cost wrapper code but block nothing:
 * out-parameters to C ints and floats (41 functions);
 * reading a C string or buffer whose length is known only at run time
   (69 functions return a `const char *`);
-* C floats that make every call fallible (155 functions).
+* C floats that make every call fallible (155 functions); a caller can
+  now choose the raw C value instead, function by function
+  (RAW-C-FLOAT-FFI-MILESTONE-1.md, section 7.4).
 
 ## Contents
 
@@ -113,7 +115,9 @@ directory of its own. Each build takes about 10 s.
 * modules named by stripping the prefix `raven_` (so `raven_window.h`
   becomes `raven::window`);
 * one library, `raven`;
-* the manual contracts.
+* the manual contracts;
+* the representations: the five functions whose C floats and doubles the
+  binding writes raw (RAW-C-FLOAT-FFI-MILESTONE-1.md, section 7.4).
 
 The contracts follow from Raven's documented string convention. The
 convention is stated once in `raven_core.h` ("strings are UTF-8 and always
@@ -270,8 +274,13 @@ The surface:
     `set_title`, `keep_open`, `request_close`, `destroy_window`.
   * Panels: `vbox`, `hbox`, `add` (chainable), `set_spacing`,
     `set_padding`.
-  * Controls: `label`, `button`, `checkbox`, `slider`, `text_input`,
-    `combo_box`, with their getters and setters.
+  * Controls: `label`, `button`, `checkbox`, `slider`, `spin_box`,
+    `text_input`, `combo_box`, with their getters and setters. A slider's
+    and a spin box's value come both ways: raw (`slider_raw_value`,
+    `spin_box_raw_value`: the C float or double, every bit) and admitted
+    (`slider_value`, `spin_box_value`: the explicit admission to a Float64,
+    NonFiniteFloat for a NaN or an infinity), with raw setters beside the
+    finite ones (RAW-C-FLOAT-FFI-MILESTONE-1.md).
   * Others: `apply_theme`, `bind_action`, `set_action`, `fire_action`,
     `timer` and `cancel`.
 * **Synthetic input.** `inject_click`, `click(window, widget)` (which
@@ -494,6 +503,24 @@ Writing `set_spacing(panel, 12.0)` with a constant still makes the call
 fallible: the charge is per signature, and a proven constant does not
 discharge it.
 
+**Since RAW-C-FLOAT-FFI-MILESTONE-1.md** a binding can write a C float or
+double raw, `std::ffi::c::RawFloat` / `RawDouble`: the same C type, every
+bit pattern carried, no admission at the boundary. The profile chooses,
+per function and position (`representations`): Raven's slider and spin
+box values, both ways, and the spin box's range (`Rslider_get_value`,
+`Rslider_set_value`, `Rspin_box_get_value`, `Rspin_box_set_value`,
+`Rspin_box_set_range`); the other 150 stay finite. A raw call is not
+fallible, and the wrapper's finite accessors now state their admission
+explicitly (`slider.slider_raw_value().float_to_float64()`), while the raw
+accessors give the caller Raven's value as it is -- a spin box with an
+unbounded range returns an infinity, which only the raw accessor can
+carry. The setters keep Raven's own preconditions: a spin box ignores a
+NaN (its source checks `value != value`), a slider has no such guard, so
+`set_slider_raw_value` passes finite patterns only. The milestone also
+removes floating admission as an obstacle to the callbacks of 7.1: a
+callback parameter declared raw receives C's bits without a check that
+could fail before its body runs.
+
 ### 7.5 Smaller frictions
 
 * **Integer domains with identical ranges do not convert.** `ULong` and
@@ -559,10 +586,13 @@ The binding needed no new language or generator feature:
 | `raven-events` | Every event kind the bridge records (section 5), on both native backends. |
 | `raven-lifecycle` | Before start; start twice; size and rectangle through out-parameters; `last_error` (R_NO_ERROR, then an invalid handle's error); stop twice; a second start. |
 | `raven-timer` | A resize event; a one-shot timer fires once, after its interval; a repeating timer fires until cancelled. |
+| `raven-raw` | A slider's float and a spin box's double through the raw binding on the real library (RAW-C-FLOAT-FFI-MILESTONE-1.md): -0.0, a subnormal, binary32 0.1, both infinities an unbounded spin box holds; the finite accessors' explicit admission; Raven's NaN guard and clamping; the bits equal a C program's making the same calls (`tests/raven/raw_oracle.c`). |
 | `raven-bridge-abi` | Against a bridge of ABI 2, `start` fails with RavenFailed from the version check. |
 | `raven-desktop` | The counter on a real X11 window with Raven's Vulkan renderer (Mesa's lavapipe) under Xvfb. The same counts; the captured frame is the window's size in RGBA pixels, and the label's new text changed it. |
 
-All 16 tests pass here (Linux x86-64, Ubuntu 24.04). `tests/raven.test`
+All 16 tests passed here when the binding landed (Linux x86-64, Ubuntu
+24.04); RAW-C-FLOAT-FFI-MILESTONE-1.md added `raven-raw` and
+`cb-representations`. `tests/raven.test`
 takes about 80 s. Each program's front end over the package (with the ten
 generated modules it imports) takes 5 to 6 s, and its NIR about 1.5 s.
 

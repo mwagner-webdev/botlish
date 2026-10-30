@@ -44,9 +44,9 @@
 @@ ptr-as-int a pointer given where an Int is required is no longer diagnosed as one
 ## hir/cabi.tcl
 <<<<
-            if {![hir::types::IsCAddress $argType] || $paramType in {"" any}
+        if {![hir::types::IsCAddress $argType] || $paramType in {"" any}
 ====
-            if {1 || $paramType in {"" any}
+        if {1 || $paramType in {"" any}
 >>>>
 
 @@ implicit-ptr-conversion Ptr[A] is admitted where Ptr[B] is declared (pointee identity not invariant)

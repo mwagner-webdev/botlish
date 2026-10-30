@@ -611,6 +611,30 @@ test cb-policy-stale {a policy that matches nothing is an error, never a silent 
         [lindex [dict get [::cbind::generate::readTsv [dict get $unbindable files report.tsv]] "function bgf_long_ptr"] 2]
 } -result {{contract bgf_gone names bgf_gone, which this target's headers do not declare as a function} {contract bgf_open: bgf_open has no parameter "nosuch" (its parameters: name, flags)} {group g names bgf_gone, which this target's headers do not declare as a function} {c-bindgen: the profile's thunk signature of "BGF_NOT_A_MACRO" names no public macro of this target's headers (a stale policy)} {c-bindgen: the profile's thunk signature of "bgf_get" names a declared function, which is bound by its own declaration: remove the policy} {contract bgf_long_ptr: bgf_long_ptr has no parameter "nosuch" (its parameters: x)} {{contract-unused bgf_long_ptr {{contract bgf_long_ptr}} (not bound on this target)}} unsupported}
 
+test cb-representations {a profile's representation rule writes the C float and double positions it names raw -- std::ffi::c::RawFloat, std::ffi::c::RawDouble -- in exactly the functions it lists, with the declaration's C ABI unchanged (the ABI classes of the compiled binding are the finite ones' register classes, marked raw), and the manifest lists each choice with its rule; a rule naming a function the headers do not declare, a parameter a function does not have, a position that is no C float or double, a position another rule chose, or an unknown key is the profile's error (RAW-C-FLOAT-FFI-MILESTONE-1.md)} -constraints clang -body {
+    set rules {{name scaled functions {bgf_scale} raw {result y}} {functions {bgf_apply_float} raw {result}}}
+    set result [::cbind::generate::run [fixtureWith [dict create representations $rules]] linux-x86_64]
+    set module [dict get $result files bgf/bgf.bot]
+    set decls [lmap name {bgf_scale bgf_apply_float bgf_dot} {
+        regexp "extern c fn ${name}\\((\[^)\]*)\\) -> (\[A-Za-z:\]+)" $module -> written returns
+        list [regexp -all -inline {std::ffi::c::Raw[A-Za-z]+} $written] $returns
+    }]
+    set hir [surface::compile "import std::ffi::c\nextern c fn s named \"bgf_scale\"(x: std::ffi::c::Double, y: std::ffi::c::RawFloat) -> std::ffi::c::RawDouble\nextern c fn f named \"bgf_scale\"(x: std::ffi::c::Double, y: std::ffi::c::Float) -> std::ffi::c::Double\n0\n" t.bot -warnings off]
+    hir::activate $hir
+    set classes [lmap n {s f} {list [dict get [core::native::metadata extern#$n] extern abi params] [dict get [core::native::metadata extern#$n] extern abi result]}]
+    set errors [lmap rules [list \
+        {{functions {bgf_gone} raw {result}}} \
+        {{functions {bgf_scale} raw {nosuch}}} \
+        {{functions {bgf_dot} raw {n}}} \
+        {{functions {bgf_scale} raw {y}} {name again functions {bgf_scale} raw {y}}}] {
+        catch {::cbind::generate::run [fixtureWith [dict create representations $rules]] linux-x86_64} message
+        string trim [lindex [split $message \n] end]
+    }]
+    catch {fixtureWith [dict create representations {{functions {bgf_scale} finite {result}}}]} unknown
+    list $decls \
+        [regexp -all -inline -line {^representation .*$} [dict get $result files manifest.txt]] $classes $errors $unknown
+} -result {{{std::ffi::c::RawFloat std::ffi::c::RawDouble} {{} std::ffi::c::RawFloat} {{} std::ffi::c::Double}} {{representation bgf_scale result raw {representation scaled}} {representation bgf_scale y raw {representation scaled}} {representation bgf_apply_float result raw {representation 2}}} {{{f64 rf32} rf64} {{f64 f32} f64}} {{representation 1 names bgf_gone, which this target's headers do not declare as a function} {representation 1: bgf_scale has no parameter "nosuch" (its parameters: x, y)} {representation 1: bgf_dot's "n" is size_t (std::ffi::c::ULong), no C float or double: only a C floating position has a raw representation} {representation again: bgf_scale's "y" is already chosen by representation 1}} {c-bindgen: profile bgf: a representation rule has an unknown key "finite" (known: name, functions, raw)}}
+
 test cb-policy-conflict {two positive sources that disagree are a conflict, never a silent choice: the profile's write where the compiler proves readonly, the profile's captures where it proves nocapture} -constraints clang -body {
     lmap facts {{p {write noescape}} {p captures}} {
         catch {::cbind::generate::run [fixtureWith [dict create contracts [dict merge [dict get $::fixture contracts] [list bgf_point_x $facts]]]] linux-x86_64} message

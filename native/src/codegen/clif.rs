@@ -214,6 +214,9 @@ fn signature_n<M: Module>(module: &M, params: usize, results: usize) -> Signatur
 /// float and a C double the floating-point classes' F32 and F64: the C
 /// type's own width, never its Float64 carrier's, C-FLOAT-FFI-MILESTONE-1.md).
 fn c_type(c: nir::CAbi) -> ir::Type {
+    // (A raw float or double is its finite counterpart's machine type:
+    // RAW-C-FLOAT-FFI-MILESTONE-1.md.)
+    let c = c.machine_floating();
     if c == nir::CAbi::F32 {
         return types::F32;
     }
@@ -1367,6 +1370,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 continue;
             }
             let class = decl.params[i];
+            if class.raw_floating() {
+                // A raw C float or double (RAW-C-FLOAT-FFI-MILESTONE-1.md):
+                // exactly its bits, moved into the floating-point register
+                // its finite counterpart takes (`bitcast`: no conversion, so
+                // no NaN is quieted or canonicalized on the way).
+                words.push(v);
+                values.push(self.raw_float_argument(class, v));
+                continue;
+            }
             if class == nir::CAbi::F64 {
                 // A Float64's number, as it is: every Float64 is a double.
                 words.push(v);
@@ -1476,6 +1488,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// `foreign_call`).
     fn foreign_result(&mut self, decl: &nir::ForeignDecl, returned: ir::Value) -> ir::Value {
         let class = decl.result;
+        if class.raw_floating() {
+            // A raw C float or double: the register's bits, as they are
+            // (`bitcast`), in a raw value -- nothing admitted, nothing
+            // raised (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+            return self.raw_float_result(class, returned);
+        }
         if class.floating() {
             // A double is a Float64 only when it is a finite number
             // (FLOAT64-MILESTONE-1.md): NaN or an infinity is the call's
@@ -1957,6 +1975,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             // (A FloatObj's heap kind says which: FloatType::heap_kind.)
             Kind::Float64 => KIND_FLOAT,
             Kind::DecimalRounded => KIND_DECIMAL,
+            Kind::RawFloat32 => KIND_RAWF32,
+            Kind::RawFloat64 => KIND_RAWF64,
             Kind::Bool | Kind::Unit | Kind::UnicodeChar | Kind::Enum | Kind::CPtr => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -2545,6 +2565,26 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             IntToStr => self.call_allocating("rt_int_to_str", &[self.vm, a[0]], "inttostr", KIND_STR),
             StrToInt => {
                 let v = self.call_allocating("rt_str_to_int", &[self.vm, a[0]], "strtoint", KIND_BIGINT);
+                self.check(v);
+                v
+            }
+            // Raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md): runtime
+            // helpers of the format (0 binary32, 1 binary64), each routed by
+            // `check` (an admission's or a binary32 narrowing's declared
+            // NonFiniteFloat; RANGE and TYPE a checked program never meets).
+            RawFromBits32 | RawFromBits64 | RawBits32 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64 => {
+                let (helper, format, name, kind) = match op {
+                    RawFromBits32 => ("rt_raw_from_bits", 0, "rawfrombits32", KIND_RAWF32),
+                    RawFromBits64 => ("rt_raw_from_bits", 1, "rawfrombits64", KIND_RAWF64),
+                    RawBits32 => ("rt_raw_bits", 0, "rawbits32", KIND_BIGINT),
+                    RawBits64 => ("rt_raw_bits", 1, "rawbits64", KIND_BIGINT),
+                    RawAdmit32 => ("rt_raw_admit", 0, "rawadmit32", KIND_FLOAT),
+                    RawAdmit64 => ("rt_raw_admit", 1, "rawadmit64", KIND_FLOAT),
+                    RawNarrow32 => ("rt_raw_narrow", 0, "rawnarrow32", KIND_RAWF32),
+                    _ => ("rt_raw_narrow", 1, "rawnarrow64", KIND_RAWF64),
+                };
+                let format = self.iconst(format);
+                let v = self.call_allocating(helper, &[self.vm, format, a[0]], name, kind);
                 self.check(v);
                 v
             }
@@ -3292,6 +3332,35 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().select(nan, not_a_number, infinity)
     }
 
+    /// The machine value of the raw C floating argument V (a raw value of
+    /// CLASS, RawF32 or RawF64): its bits loaded from the object and moved
+    /// into an F32 or F64 by `bitcast`, which never changes a bit -- a
+    /// signaling NaN's payload included (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+    fn raw_float_argument(&mut self, class: nir::CAbi, v: ir::Value) -> ir::Value {
+        if class == nir::CAbi::RawF32 {
+            let bits = self.b.ins().load(types::I32, MemFlagsData::trusted(), v, FLOAT_BITS_OFFSET);
+            self.b.ins().bitcast(types::F32, MemFlagsData::new(), bits)
+        } else {
+            let bits = self.b.ins().load(I64, MemFlagsData::trusted(), v, FLOAT_BITS_OFFSET);
+            self.b.ins().bitcast(types::F64, MemFlagsData::new(), bits)
+        }
+    }
+
+    /// The raw value of a C call's floating result RETURNED of CLASS
+    /// (RawF32, RawF64): its register's bits by `bitcast`, boxed once
+    /// (`rt_raw_new`).
+    fn raw_float_result(&mut self, class: nir::CAbi, returned: ir::Value) -> ir::Value {
+        let (bits, format) = if class == nir::CAbi::RawF32 {
+            let narrow = self.b.ins().bitcast(types::I32, MemFlagsData::new(), returned);
+            (self.b.ins().uextend(I64, narrow), 0)
+        } else {
+            (self.b.ins().bitcast(I64, MemFlagsData::new(), returned), 1)
+        };
+        let format = self.iconst(format);
+        let kind = if class == nir::CAbi::RawF32 { KIND_RAWF32 } else { KIND_RAWF64 };
+        self.call_allocating("rt_raw_new", &[self.vm, format, bits], "foreigncall", kind)
+    }
+
     /// A C float argument (C-FLOAT-FFI-MILESTONE-1.md): the Float64 number X
     /// narrowed to binary32 by `fdemote`, IEEE 754's round to nearest, ties
     /// to even (the target's default rounding: Cranelift never changes it or
@@ -3733,7 +3802,7 @@ fn call_disassembly(
     let args: Vec<ir::Value> = params
         .iter()
         .enumerate()
-        .map(|(i, c)| match c {
+        .map(|(i, c)| match c.machine_floating() {
             nir::CAbi::F64 => b.ins().f64const(i as f64 + 0.5),
             nir::CAbi::F32 => b.ins().f32const(i as f32 + 0.5),
             _ => b.ins().iconst(c_type(*c), -(i as i64) - 2),
@@ -3741,7 +3810,7 @@ fn call_disassembly(
         .collect();
     let call = b.ins().call(callee, &args);
     let returned = b.inst_results(call)[0];
-    let word = match result {
+    let word = match result.machine_floating() {
         nir::CAbi::F64 => b.ins().bitcast(types::I64, MemFlagsData::new(), returned),
         nir::CAbi::F32 => {
             let wide = b.ins().fpromote(types::F64, returned);
@@ -4491,6 +4560,21 @@ mod x86_64_float_tests {
         }
         // The float result comes back in xmm0 and is widened exactly.
         assert!(code.contains("cvtss2sd"), "no widening of the float result in\n{code}");
+    }
+
+    /// A raw float or double (RAW-C-FLOAT-FFI-MILESTONE-1.md) has exactly
+    /// its finite counterpart's place in the C signature and the call -- the
+    /// same registers, the same stack slots -- on System V and on Win64.
+    #[test]
+    fn raw_c_float_signature_is_the_finite_one() {
+        use nir::CAbi::*;
+        let raw = [RawF32, I32, RawF64, RawF32, I64, RawF32, RawF64, RawF32, RawF32, RawF64, RawF32, RawF32];
+        let finite = [F32, I32, F64, F32, I64, F32, F64, F32, F32, F64, F32, F32];
+        for triple in ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"] {
+            let a = call_disassembly(triple, &raw, RawF32, c_signature);
+            let b = call_disassembly(triple, &finite, F32, c_signature);
+            assert_eq!(a, b, "the raw call differs from the finite one on {triple}");
+        }
     }
 
     /// Win64: four positional argument registers shared by every kind -- a

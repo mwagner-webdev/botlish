@@ -255,9 +255,9 @@ core::native::declareDirectNamespace std::binary::native
 @@ view-is-a-pointer a native view is accepted where a pointer operation's C address is required
 ## hir/cabi.tcl
 <<<<
-            if {[hir::types::IsNativeMemory $argType] && $paramType ni {"" any} && [hir::layouts::Role $name] eq ""
+        if {[hir::types::IsNativeMemory $argType] && $paramType ni {"" any} && [hir::layouts::Role $name] eq ""
 ====
-            if {0 && [hir::types::IsNativeMemory $argType] && $paramType ni {"" any} && [hir::layouts::Role $name] eq ""
+        if {0 && [hir::types::IsNativeMemory $argType] && $paramType ni {"" any} && [hir::layouts::Role $name] eq ""
 >>>>
 
 @@ untyped-receiver-accepted a field read through a view whose type is not static (an untyped function's instance) is accepted
