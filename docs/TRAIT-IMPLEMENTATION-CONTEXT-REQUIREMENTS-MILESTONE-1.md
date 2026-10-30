@@ -787,7 +787,7 @@ only):
 | static-decisions.yml (dispatched: every golden suite, batched against sequential) | success: no suite disagrees or fails to compile |
 | icy-tower-windows.yml (push; also on `005b6aa2`, the tree merged with main) | success |
 | macos-arm64.yml (push, `005b6aa2`, the tree merged with main): Tier A smoke, the system linker (also under GC stress), the Tier B acceptance shards, Botlish.app, the Linux control | success |
-| windows-x86_64.yml (push, `005b6aa2`) | smoke, root plans, the system linker and acceptance shard 3/4 success; shards 1, 2 and 4 still queued or running when this was written (the runners serve every branch's pushes) |
+| windows-x86_64.yml (push, `005b6aa2`): smoke, root plans, the system linker, the four acceptance shards | success |
 
 ## 13. Remaining limitations
 
