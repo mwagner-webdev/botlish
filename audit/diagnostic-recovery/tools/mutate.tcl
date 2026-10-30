@@ -87,9 +87,13 @@ proc writeFile {path text} {
     close $f
 }
 
-# A private copy of the compiler sources and tests.
+# A private copy of the compiler sources and tests -- and of what main.tcl
+# loads (the compiler service, the language server, Compilerpedia), which
+# tests/diagnostic-recovery.test runs: without them its main.tcl and
+# efficiency tests fail in the copy whatever the mutant, and would count as
+# killing every one.
 set tree [file tempdir botlish-recovery-mutants]
-foreach dir {compiler core hir surface stdlib tests audit/diagnostic-recovery} {
+foreach dir {compiler core hir surface stdlib service lsp compilerpedia tests audit/diagnostic-recovery} {
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
 }

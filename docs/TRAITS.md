@@ -363,7 +363,33 @@ not run (COMPILER-BOTTLENECKS.md, 4.2; `trait-dead-call-keeps-arguments`).
 
 Build 2 is an ordinary program: it is type-checked, analyzed, instanced and
 compiled like any other. A diagnostic there is the compiler's, said so ("in
-the monomorphized program: ...").
+the monomorphized program: ..."); a build of it whose diagnostics are all
+the compiler's own is reported as one COMPILER-INTERNAL error naming them
+(hir::recovery::entries), never an empty report.
+
+**The selected implementation graph.** What a trait operation does is what
+its selected implementation does, and build 1 knows it before build 2
+exists: hir::check's feedback (`hir::coroutines::Implementations`) takes,
+from the plan's own call resolution (`hir::traits::PlanCalls`), the
+implementation each operation binds and the specialization each call of a
+trait-polymorphic function calls, per specialization, and checks again with
+them. Every analysis of the checked program reads that one graph, never a
+resolution of its own: the coroutine analysis the implementations' yields
+and protocols (TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md), the
+context analysis their context requirements, so a specialization requires
+the contexts of the implementations it invokes and nothing of any other
+(TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md; CONTEXT-TRAITS.md,
+section 5), and hir/staticdeps.tcl their sites as the operation's call
+targets. A specialization is named there by its identity, `{FUNCTION
+WITNESSES BINDING}` (`hir::traits::Specialization`): its clone key's
+selection -- the providers of the context traits it requires -- is learned
+from the same graph. An implementation the plan replaces by clones (one
+requiring a context trait) is called through its clone, by the rule a
+context-trait operation follows (`hir::traits::CallImplementationClone`),
+and the plan checks that no action names a dropped declaration or a clone
+it does not make (`hir::traits::Dangling`: TRAIT-INTERNAL at the call). In
+build 2 such an implementation is its clone, also to conformance
+(a constrained slot's application, checked again there: `hir::traits::index`).
 
 **Recursion.** A recursive trait-polymorphic function specializes once per
 witness, each clone calling itself directly. Recursion that changes the
@@ -464,9 +490,12 @@ Context semantics are unchanged (context struct identity, exact nominal
 matching, requirement propagation, install/load, the native context area,
 the context function-value frontier). A context struct's *value* may be a
 trait witness like any struct. A requirement cannot declare a context
-parameter, and an implementation that needs one is not an implementation
+parameter, and an implementation that declares one is not an implementation
 ("context-dependent implementations are not supported yet"): there are no
 context-provided implementations and no selection among installed contexts.
+An implementation may *call* a function that requires a context; that
+requirement is its specialization's, checked at the top-level call that
+reaches it (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md).
 Trait metadata (the registry, the implementation mapping per `{type,
 trait}`, the plan's per-operation actions) is kept so such a rule can be
 added later without changing the basic theorem.

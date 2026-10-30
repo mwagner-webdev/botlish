@@ -292,6 +292,13 @@ test mv-show {a vector shows as its current elements on every backend; == and ha
         [mvCode "${mvDecls}q = empty_queue()\nq == q\n"]
 } -result {{value {[<mutable-vector ["a0", "b0"]>, <mutable-vector []>]}} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} AFFINE-EQUALITY-UNSUPPORTED}
 
+test mv-equality-other-kind {== of a vector and a value of another kind is the EQUALITY error on every backend: the runtime refuses a vector before it compares kinds, and the Tcl compiler's equality of operands of known, different kinds is no constant false for one (core::value's incomparable)} -body {
+    lmap other {{[1]} 1 {"a"}} {
+        list [lindex [mvAgree "import std::mutable_vector\nv = std::mutable_vector::from_list(\[1\])\nv == $other\n"] 1] \
+            [lindex [mvAgree "import std::mutable_vector\nv = std::mutable_vector::from_list(\[1\])\n$other == v\n"] 1]
+    }
+} -result {{{CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY}} {{CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY}} {{CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY}}}
+
 test mv-generic {item 72: an untyped function given a vector is specialized by the vector's static type: one size(xs) serves unrestricted and affine vectors (the affine one moves in and is released by the clone)} -constraints nativeCoroutines -body {
     set text "${mvDecls}fn size(xs) -> int:\n    std::mutable_vector::length(xs)\n\[size(std::mutable_vector::from_list(\[1, 2, 3\])), size(std::mutable_vector::from_list(\[make(1)\]))\]\n"
     list [mvAgree $text] [lrange [mvReleases $text] 1 2] [dict get [lindex [mvNative $text] 0] released]

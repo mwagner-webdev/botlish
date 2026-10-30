@@ -2,13 +2,14 @@
 # (TYPED-CALLABLE-ESCAPE-SOUNDNESS.md).
 #
 # A *typed callable* is a block with at least one declared parameter type
-# (hir::resolve.tcl's declaredParamTypes, STRICT-TYPED-PARAMETERS.md): it
-# imposes a caller-side precondition. hir::range::verifyDeclaredParams
-# already enforces that precondition at every call whose target resolves
-# to an exact known block (hir::types::Call's `target` field) -- but a
-# callable *value* can flow through the program in other ways (an
-# ordinary call argument, an "if" branch join, a loop break, a function
-# return) before ever being called. Whenever one of those positions would
+# other than `any` (hir::resolve.tcl's declaredParamTypes, STRICT-TYPED-
+# PARAMETERS.md): it imposes a caller-side precondition.
+# hir::range::verifyDeclaredParams already enforces that precondition at
+# every call whose target resolves to an exact known block
+# (hir::types::Call's `target` field) -- but a callable *value* can flow
+# through the program in other ways (an ordinary call argument, an "if"
+# branch join, a loop break, a function return) before ever being
+# called. Whenever one of those positions would
 # discard the value's exact `{block B arity result}` type -- the only
 # type shape verifyDeclaredParams's target resolution can ever use --
 # B's own precondition becomes permanently unenforceable at whatever
@@ -71,8 +72,9 @@ namespace eval hir::callables {}
 # 1 if TYPE is an exact callable value -- {block B ARITY RESULT} -- whose
 # block B declares at least one typed parameter (STRICT-TYPED-PARAMETERS.
 # md's own "typed callable" -- TYPED-CALLABLE-ESCAPE-SOUNDNESS.md item 10:
-# an untyped-parameter function, or one with only a declared *result*
-# type, is not precondition-bearing and gains no new restriction here) OR
+# an untyped-parameter function, one whose parameters are declared `any`,
+# or one with only a declared *result* type, is not precondition-bearing
+# and gains no new restriction here) OR
 # declares a non-empty error set (EXPLICIT-ERROR-COMPLETIONS.md item 73):
 # a declared error is exactly as much a caller-side obligation as a typed
 # parameter -- the caller (or an enclosing function's own `errors` clause)
@@ -112,8 +114,12 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
             }
             # Declared, or trusted-inferred from the block's own body
             # (hir::signatures::entryTypes): the body assumes either one.
+            # An entry type of `any` assumes nothing, so it obliges a caller
+            # to nothing an untyped parameter does not (as an Fn argument
+            # of `any`, below): `fn f(c: any)` is no more bearing than
+            # `fn f(c)`.
             foreach declared [hir::signatures::entryTypes $hir $block] {
-                if {$declared ne {}} {
+                if {$declared ni {{} any}} {
                     return 1
                 }
             }

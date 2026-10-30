@@ -193,6 +193,21 @@ here): ordinary higher-order programming with untyped callables is
 completely unaffected (spec #14, #51, pinned:
 `callable-escape-ordinary-untyped-callable-unaffected`).
 
+A parameter declared `any` counts as untyped here: `any` admits every
+value, so it obliges a caller to nothing, and the body assumes nothing
+about the argument. `fn char?(c: any) -> bool` therefore passes through every
+erasing position that `fn char?(c) -> bool` passes through, while one other
+parameter type beside the `any`s, or a declared error set, still makes the
+function typed (`hir::callables::Bearing` reads an entry type of `any` as
+no precondition; pinned: `callable-escape-any-parameters-*`). Declaring
+`any` is how a program says "compare dynamically on purpose"
+([EQUALITY-SEMANTIC-CENSUS.md](../audit/equality-semantics/EQUALITY-SEMANTIC-CENSUS.md),
+sections 5.1 and 5.2), so it must not make the function harder to
+pass around than leaving the parameter untyped does. The reverse
+direction is unchanged: a *typed* callable passed *to* a parameter declared
+`any` is still erased there. Only an untyped parameter takes a semantic
+instance's argument type as its context (`hir::callables::ArgContexts`).
+
 This is a **conservative, reject-on-erasure** rule (spec #6, #31), chosen
 over reject-on-call for a structural reason, not merely a stylistic
 preference: by the time an eroded callable value (bare `block` kind, or
