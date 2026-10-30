@@ -9,10 +9,15 @@ name: macos graphical main-thread census
 # (candidate A), its worker with every SDL call dispatched to the main
 # thread (candidate B), SDL3's main callbacks (candidate C) -- with the
 # runtime's stack, overflow, GC and coroutine probes on each thread, the
-# positive controls and the timings. Candidates A and B run on a disposable
-# experimental build: a worktree of this commit with
-# patches/main-thread-experiment.patch applied, built beside the production
-# one, which this job checks is left untouched.
+# positive controls and the timings. Candidate A is the production startup
+# policy since MAIN-THREAD-STARTUP-MILESTONE-1.md (`-native-startup
+# main-thread`: Botlish.app's system linker, the checkout's rustc linker, and
+# an 8 MiB control), which macos-arm64.yml's main-thread-startup job also
+# runs on every push; candidate B runs on the disposable experimental build:
+# a worktree of the census's base commit, 7aec2a11, with
+# patches/main-thread-experiment.patch applied (the patch is that commit's
+# and applies to no later runtime), built beside the production one, which
+# this job checks is left untouched.
 #
 # Evidence, not a test tier: nothing here gates anything, and a case's
 # outcome is recorded, never required (tools/census.py classifies each one
@@ -50,6 +55,9 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The experimental worktree is the census's base commit's.
+          fetch-depth: 0
 
       - name: Host
         run: |
@@ -105,13 +113,14 @@ jobs:
           cat "$BOTLISH_SDL3_STATIC_PREFIX/COMMIT"
           sed -n 's/^Libs.private: *//p' "$BOTLISH_SDL3_STATIC_PREFIX/lib/pkgconfig/sdl3.pc"
 
-      # Candidates A and B: a disposable worktree of this commit with the
-      # experimental patch, its native/ built from a clone of the production
-      # build directory (so only botlish-native's own crate recompiles).
-      - name: The experimental build (patches/main-thread-experiment.patch)
+      # Candidate B: a disposable worktree of the census's base commit with
+      # the experimental patch, its native/ built from a clone of the
+      # production build directory (so only botlish-native's own crate
+      # recompiles).
+      - name: The experimental build (patches/main-thread-experiment.patch at 7aec2a11)
         run: |
           exp="$RUNNER_TEMP/exp"
-          git worktree add --detach "$exp" HEAD
+          git worktree add --detach "$exp" 7aec2a118768f651d1401166cf1d1e596113ae1a
           git -C "$exp" apply "$GITHUB_WORKSPACE/audit/macos-graphical-main-thread/patches/main-thread-experiment.patch"
           git -C "$exp" diff --stat
           cp -c -R native/target "$exp/native/target"

@@ -313,15 +313,13 @@
 @@ context-reselected-per-resume every top-level resume selects the coroutine's context-trait providers again
 ## hir/contexts.tcl
 <<<<
-            if {[isLoad $hir $c]} continue
-            set target [Callee $hir $c]
+            set targets [Targets $hir $graph $regionRoot "" $c]
 ====
-            if {[isLoad $hir $c]} continue
-            set target [Callee $hir $c]
+            set targets [Targets $hir $graph $regionRoot "" $c]
             if {[hir::coroutines::NativeOf $hir $c] eq [core::coroutines::resumeNative]} {
                 set thunk [hir::coroutines::thunkOfHandle $hir [lindex [hir::get $hir $c args] 0]]
                 if {$thunk ne ""} {
-                    set target [dict get $hir coroutines thunks $thunk root]
+                    set targets [list [dict get $hir coroutines thunks $thunk root]]
                 }
             }
 >>>>

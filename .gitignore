@@ -35,3 +35,9 @@ __pycache__/
 # package and the ticker's archive).
 /examples/event-loop/native/.bot_modules/
 /examples/event-loop/native/libticker.a
+
+# tools/raven-package.tcl builds the Raven package's event bridge where it
+# installs the package, never here; and the examples' installed package.
+/packages/raven/native/*.a
+/packages/raven/native/*.o
+/examples/raven/.bot_modules/

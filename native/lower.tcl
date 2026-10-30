@@ -1710,6 +1710,13 @@ proc native::lower::Program {hirProgram args} {
             # else (layout, allocation, access) differs from an ordinary
             # named shape, and an ordinary one prints exactly as before.
             set opaque [expr {[hir::structs::isOpaque $id] ? " opaque=1" : ""}]
+            # A declared identity (REPRESENTATION-INDEPENDENT-VALUE-
+            # IDENTITY.md): its form and its fields, by name -- what the
+            # runtime's equality and hashes read of a value of this shape.
+            set identity [hir::structs::identityOf $id]
+            if {$identity ne ""} {
+                append opaque " identity=[Quote [join [concat [list [dict get $identity form]] [dict get $identity fields]] { }]]"
+            }
             lappend header "shape [dict get $shapeIds $key] named [Quote $id]$opaque fields=[Quote [join $layout { }]]"
         }
     }

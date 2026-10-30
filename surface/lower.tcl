@@ -311,6 +311,10 @@ proc surface::lower::StructDeclOf {node namespace} {
         # TYPES.md), as written: hir/structs.tcl resolves their traits.
         dict set decl slots [dict get $node slots]
     }
+    if {[dict exists $node identity]} {
+        # Its semantic identity, as written: hir/structs.tcl validates it.
+        dict set decl identity [dict get $node identity]
+    }
     return $decl
 }
 

@@ -1,0 +1,13 @@
+[package]
+name = "hs_tls"
+description = "Nonblocking BoringSSL (boring) over the census's bridge I/O, under Hyper"
+edition.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+hs_bridge = { path = "../bridge" }
+hs_hyper = { path = "../hyper" }
+hyper = { workspace = true }
+boring.workspace = true
+boring-sys.workspace = true

@@ -1,0 +1,6 @@
+# reject_provider.bot -- negative control: two BoringSSL providers in one
+# program's link plan (bssl's and bssl_other's). Expected: LINK-CONFLICT.
+import bssl
+import bssl_other
+
+bssl_other::marker()

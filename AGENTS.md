@@ -370,6 +370,9 @@ them). Keep it so:
   a cache to run, and nothing is ever written into the bundle (the
   language server's copy of the standard library goes to
   `~/Library/Caches/botlish` or `$BOTLISH_CACHE_DIR`).
+* A graphical program's executable is built with `-native-startup
+  main-thread` (Executable startup policy, above): never make the
+  application, the launcher or the driver choose it.
 * The launcher only starts Tcl and the archive; it never implements the
   command line, and never prints on standard output. It accepts only the
   bundle's own Tcl (never one from `TCL_LIBRARY`, `DYLD_FRAMEWORK_PATH`,
@@ -851,6 +854,26 @@ to those kinds or to where they are anchored also needs
 `tests/static-economics.test` (`se-property-plan-gate`, `se-equal-plan-gate`)
 and the static-decision harnesses (Static intrinsics, below).
 
+A statically selected trait implementation contributes its actual semantic
+requirements to the specialized program -- its yields and protocols, its
+context requirements -- and an unselected one contributes nothing. Every
+analysis of the checked program reads the one *selected implementation
+graph* (the HIR's `implementations`, hir::check's feedback:
+`hir::coroutines::Implementations`, from the plan's own call resolution,
+`hir::traits::PlanCalls`): the coroutine analysis, the context analysis
+(`hir::contexts::Requirements`, a node per specialization), hir/staticdeps.tcl
+and the legacy scheduler's units (`ImplementationTargets`). Never resolve a
+trait operation's implementation anywhere else, never union a requirement's
+implementations, and never let provider availability select one (SFIAE). A
+specialization is named in it by `{FUNCTION WITNESSES BINDING}`
+(`hir::traits::Specialization`), never by its clone key, whose selection the
+graph decides. The plan calls an implementation it replaces through its
+clone, by one rule for trait and context-trait operations
+(`CallImplementationClone`), and checks that no action names a dropped
+declaration or an unmade clone (`hir::traits::Dangling`, TRAIT-INTERNAL).
+If you change any of that, run what TRAIT-IMPLEMENTATION-CONTEXT-
+REQUIREMENTS-MILESTONE-1.md's "What to run when changing this" lists.
+
 ## Hashable and the keyed table hash
 
 `Hashable` (HASHABLE-AND-KEYED-HASH.md) is an intrinsic trait: an ordinary
@@ -1248,7 +1271,10 @@ guarantee). Keep it so:
 * A guard is confirmed, never assumed from a reported stack end: a host
   that cannot confirm one reports none (`guard_low == low_bound`) and
   install refuses it. The macOS main thread's lowest reported page is
-  itself inaccessible: its usable bound is above the reported one. On
+  inaccessible where Rust's runtime started the process (std's main-thread
+  guard: the rustc linker's executables, Rust test binaries) and usable
+  under a C main (the system linker's): the walk takes either, its usable
+  bound then one page above the reported one. On
   Windows an exhausted stack is an exception, not an address range: install
   confirms the system's guard page above the uncommitted reservation and a
   stack guarantee of at least `GUARANTEE` (measured: never lower it without
@@ -1288,6 +1314,68 @@ checks, and `[ci-full]` with `CI-Tests: native-stack-mutants` the
 mutants). `bench/native-stack-guard.tcl` compares a driver against a
 baseline build (`-baseline-rev main`; the tier item `native-stack-bench`
 on a macOS runner).
+
+## Executable startup policy (worker, main-thread)
+
+Which thread an executable runs its program on is a property of the
+executable (MAIN-THREAD-STARTUP-MILESTONE-1.md), fixed when it is emitted --
+main.tcl `-native-startup worker|main-thread`, `native::executable
+-startup`, the driver's `--startup` -- and recorded in the program record's
+`startup` word (`runtime::program::Startup`: 0 worker, 1 main-thread).
+`worker`, the default and every target's, runs the program on a worker the
+process's main thread starts and joins; `main-thread`, macOS AArch64's
+only, runs the same body on the process's main thread and its stack, which
+the link reserves (LC_MAIN, `-Wl,-stack_size,0x20000000`: 512 MiB, Apple
+ld's arm64 maximum). Keep it so:
+
+* The policy is the executable's: never chosen by an environment variable
+  at launch, never inferred from a library, a framework, SDL3, a context, a
+  coroutine or anything a program declares, and never a language
+  annotation. It changes no semantic analysis, no HIR, no cache key.
+* One body, one record: `runtime::aot::run` runs the same body on either
+  thread (the Vm made on the thread that runs the program, the report, the
+  snapshot, the guard, the program, the value or error); every linker's
+  startup reads the record's policy before anything else
+  (`aot::start_linked`, the stub's loader): never a second startup
+  descriptor, a generated startup per policy, or a Vm made on one thread
+  and moved to another. A panic of the body is "native executable panicked
+  (NATIVE BUG)", status 1, under both policies (`catch_unwind` on the main
+  thread). The record's layout is in the ABI fingerprint
+  (`aotimage::abi_words`); an unknown word is refused, never the default.
+* Refused before anything is written where unsupported
+  (`codegen::aot::startup_refusal`, `codegen::target::main_thread_startup`,
+  by the executable's target; the runtime's own `aot::MAIN_THREAD_STARTUP`
+  agrees): `NATIVE UNSUPPORTED startup`, an existing executable kept, no
+  linker run. Never substitute the worker silently. Linux's main thread has
+  no confirmed guard (glibc reports none) and Windows' link.exe reserves
+  1 MiB: a target joins only with its own discovery, reserve and
+  acceptance.
+* Nothing else changes: the JIT keeps its worker, a linked run (a program
+  that calls C run by the driver) is always the worker's, a native library
+  runs on its host's thread (its record's word is the worker's and ignored),
+  the guard, the collector, coroutines and the C FFI are untouched, and no
+  SDL, AppKit or event-loop code enters the runtime. The startup report
+  ends in `startup`, `process-main-thread` and `stack` lines.
+
+If you change the policy's representation (`Startup`, the record,
+`linked_startup`), `aot::run`, `start_linked`, the link flags
+(`startup_link_args`), the refusal, the driver's or the command line's
+option, run `cargo test --release --manifest-path native/Cargo.toml --lib
+-- aotimage program` and `--bin botlish-native -- aot:: target::`,
+`tests/main-thread-startup.test` (also under `BOTLISH_NATIVE_GC_STRESS=1`),
+`tests/system-linker.test`, `tests/aot-stub-linker.test`,
+`tests/native-executable.test`, `tests/native-library.test`,
+`tests/main-cli.test`, `tests/platform/native-status.tcl` and
+`audit/native-aot/tools/mutate.tcl` and `audit/native-stack/tools/mutate.tcl`
+(every mutant that applies to the host must still apply and be killed:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule; the `%% macos-aarch64` ones on macOS, the tier
+items `native-aot-mutants` and `native-stack-mutants`), and push to read
+macos-arm64.yml's `main-thread-startup` job: the policy through the
+packaged application without the checkout, and the graphical census's
+candidate A on it (`audit/macos-graphical-main-thread/tools/census.py
+--strict`: SDL3's Cocoa driver, a window and Metal on the main thread,
+every runtime probe, both linkers), every case as predicted.
 
 ## Linux AArch64
 
@@ -2508,6 +2596,76 @@ mutate.tcl` (every mutant in its `mutants.txt` must still apply and be
 killed: update a mutant's text when you change the code it mutates,
 keeping it a mutant of the same rule), plus the collections' harnesses
 (above) for a change to the engine. `bench/collection-reorder.tcl`
+regenerates the performance report.
+
+## Semantic value identity and ImmutableMap
+
+An opaque struct may declare its identity apart from its representation
+(REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md): `identity members(F)` (the
+elements of List field F, in no order) or `identity associations(K, V)`
+(the pairs of List fields K and V, in no order). `==`, the public hash and
+the keyed table hash of its values read those entries only, by one rule in
+each runtime (core::value::IdentityEqual and core::hashing::Identity;
+ops.rs's `identity_equal` and `identity_walk`), and the witness predicates
+(`hir::types::Totality`, so HashClass and the new intrinsic trait
+Equatable's EqualityClass) read the identity's elements only.
+`std::immutable_map::ImmutableMap[K satisfies Hashable, V]` is ordinary
+Botlish over a frozen ordered table (stdlib/immutable_map.bot,
+stdlib/ordered_table.bot's frozen section) that declares `identity
+associations(keys, vals)`; `MutableMap.freeze` makes one, and
+`MutableSet.freeze` makes an ImmutableSet. Keep it so:
+
+* No user code defines equality or a hash: never add an `fn ==`, a
+  `hash` implementation, an identity function, a derive or a registration;
+  a new identity form is a row of `hir::structs::identityForms`, both
+  runtimes' and the oracle's encodings, never an arbitrary body. The clause
+  is part of the declaration (owner-only, one per type, no orphan); a
+  struct with an identity is opaque, not a context, and immutable (no
+  MutableVector, MutableArray, C pointer, view or affine component:
+  `hir::structs::MutableComponent`). Never admit a mutable value.
+* Equality is multiset equality of the entries (a pair is a unit), matched
+  in place, then by hash buckets, then pairwise: equal hashes never decide
+  equality, and an unhashable entry falls back to the pairwise comparison
+  that refuses it. The hash is the form's tag, the count and the wrapping
+  SUM of each entry's whole hash from a fresh state (a pair's: the entry
+  tag, its key and its value), in both folds; never an XOR, an
+  order-dependent fold, a keyed mix of the public hash, or a fold of a
+  representation field. The runtimes find an identity by the struct's
+  shape (Tcl: `core::value::setIdentityTest`, `hir::structs::RuntimeIdentity`;
+  native: NIR `shape ... identity=`, `ShapeInfo.identity`, the program
+  descriptor), never by a type's name.
+* Totality reads an identity struct's identity elements only, named in
+  the type's terms ("the members of", "the keys of", "the values of"),
+  never its fields; ImmutableMap is Equatable and Hashable exactly when V
+  is. Hashable refines Equatable (`hir::traits::Refines`, by the
+  intrinsics' guarantees); never the reverse, and never a second witness
+  table.
+* ImmutableMap is no runtime kind: no native, NIR instruction or Tcl helper
+  of it. Iteration is its frozen order (the loop protocol), lookups the
+  frozen index of stored keyed hashes, `reordered` the relational
+  contracts of hir/relations.tcl (no immutable-specific proof). ImmutableSet
+  stays intrinsic (the report's "ImmutableSet" names the blockers); its
+  public hash is unchanged.
+
+If you change the identity grammar (surface/parser.tcl's
+`IdentityClause`), `hir/structs.tcl`'s identity checks or
+`RuntimeIdentity`, the identity branches of `hir/types.tcl`'s Totality or
+hir/decimal.tcl's `Mentions`, `hir/traits.tcl`'s Equatable or `Refines`,
+the HIR text of an identity, either runtime's identity equality or hashing
+(core/value.tcl, core/hashing.tcl, core/immutableset.tcl,
+native/src/runtime/ops.rs, the descriptor in program.rs, nir.rs's shape),
+stdlib/immutable_map.bot, the frozen section of stdlib/ordered_table.bot or
+a freeze, run `tests/value-identity.test`, `tests/immutable-map.test`, their
+golden suites (`tclsh9.0 tests/local.tcl tests/golden/value-identity.bot
+tests/golden/immutable-map.bot`), `python3 -I
+audit/value-identity/tools/oracle.py selftest`, `python3 -I
+audit/hashable/tools/oracle.py selftest`, `audit/value-identity/tools/fuzz.tcl`
+(several seeds; once with `-gc-stress 1`) and
+`audit/value-identity/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the Hashable,
+mutable-map, collection-reorder and trait harnesses (above) for a change to
+code they share, and the warning gate. `bench/value-identity.tcl`
 regenerates the performance report.
 
 ## Fixed binary layouts

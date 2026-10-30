@@ -1,0 +1,189 @@
+# raven.test -- the Raven package (packages/raven; RAVEN-BINDINGS.md): the
+# Botlish interface to the Raven GUI library over its GENERATED binding,
+# with the event bridge that turns Raven's C callbacks into events the
+# program polls.
+#
+# The scenario programs are tests/raven/*.bot and the example's
+# (examples/raven/). They run in a private application directory: the
+# programs and the package installed under .bot_modules by
+# tools/raven-package.tcl -- the way an application installs it. Each is
+# compiled with -warnings error and run on both native backends, headless
+# (Raven's null platform and renderer: the default build of
+# tests/cffi/raven.tcl). raven-desktop runs the example's script on a real
+# window -- X11 and the Vulkan renderer -- where a desktop build of Raven,
+# Xvfb and a Vulkan driver are installed (the CI job installs Mesa's
+# software one), and is skipped otherwise.
+#
+# The generated binding itself (what generation produces, its symbols, its
+# layouts, a program over it alone) is tests/c-bindgen.test's (cb-raven-*).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+source [file join $::projectRoot tests cffi raven.tcl]
+source [file join $::projectRoot tools raven-package.tcl]
+
+interp recursionlimit {} 100000
+
+# The package installs and its programs compile where the generated binding
+# exists for the host's target and the pinned Raven's headers are fetched
+# (the bridge is compiled against them); they run where libraven.so is
+# built too.
+proc ravenInstallable {} {
+    if {$::tcl_platform(os) ne "Linux" || $::tcl_platform(machine) ni {x86_64 amd64 aarch64 arm64}} {
+        return 0
+    }
+    if {[auto_execok cc] eq "" || [auto_execok ar] eq ""} { return 0 }
+    if {[catch {ravenPackage::hostTarget} target]} { return 0 }
+    if {![file isdirectory [file join $::projectRoot generated c raven $target raven]]} { return 0 }
+    set fetched [file join [expr {[info exists ::env(BOTLISH_C_HEADER_SOURCES)] && $::env(BOTLISH_C_HEADER_SOURCES) ne ""
+        ? $::env(BOTLISH_C_HEADER_SOURCES) : [file join [cffi::RavenCacheDir] c-header-src]}] raven include Raven.h]
+    return [file exists $fetched]
+}
+testConstraint ravenPackage [ravenInstallable]
+testConstraint ravenRun [expr {[testConstraint ravenPackage] && [testConstraint nativeCCalls]
+    && [testConstraint cLinker] && [cffi::ravenDir] ne ""}]
+# A real window: a desktop build, a virtual display and a Vulkan driver.
+proc vulkanDriver {} {
+    foreach dir {/usr/share/vulkan/icd.d /etc/vulkan/icd.d} {
+        if {[llength [glob -nocomplain -directory $dir *.json]]} { return 1 }
+    }
+    return 0
+}
+testConstraint ravenDesktop [expr {[testConstraint ravenPackage] && [testConstraint nativeCCalls]
+    && [testConstraint cLinker] && [cffi::ravenDesktopDir] ne "" && [auto_execok Xvfb] ne "" && [vulkanDriver]}]
+
+set ravenApp [file join [temporaryDirectory] raven-app-[pid]]
+
+# The application, made once: the scenarios, the example and the package.
+proc ravenBuild {} {
+    if {![info exists ::ravenBuilt]} {
+        set ::ravenBuilt [expr {![catch {
+            file delete -force $::ravenApp
+            file mkdir $::ravenApp
+            foreach file [concat [glob -directory [file join $::projectRoot tests raven] *.bot] \
+                    [glob -directory [file join $::projectRoot examples raven] *.bot]] {
+                file copy $file $::ravenApp
+            }
+            ravenPackage::install $::ravenApp
+        } ::ravenBuildError]}]
+    }
+    return $::ravenBuilt
+}
+
+# The HIR of program NAME of the application, compiled with -warnings
+# error, memoized.
+proc ravenHir {name} {
+    if {![info exists ::ravenHirs($name)]} {
+        if {![ravenBuild]} { error "BUILD FAILED: $::ravenBuildError" }
+        set ::ravenHirs($name) [surface::readProgramFile [file join $::ravenApp $name.bot] -warnings error -cache ""]
+    }
+    return $::ravenHirs($name)
+}
+
+# The value of program NAME on BACKEND, linked with Raven of DIR (the
+# headless build by default) and run with ENVIRONMENT; the failure as
+# {TAG VALUE MESSAGE}. Botlish adds no rpath: the linked program finds
+# libraven.so by LD_LIBRARY_PATH.
+proc ravenRun {name backend {dir ""} {environment {}}} {
+    if {$dir eq ""} { set dir [cffi::ravenDir] }
+    set hir [ravenHir $name]
+    lappend environment LD_LIBRARY_PATH $dir
+    set o [withEnvironment $environment {native::withLinkDirs [list $dir] {outcomeUnderHir $backend $hir}}]
+    lassign $o tag value message
+    return [expr {$tag eq "value" ? $value : $o}]
+}
+
+# The values of program NAME on both native backends.
+proc ravenValues {name} {
+    lmap backend {cranelift cranelift-generic} {ravenRun $name $backend}
+}
+
+test raven-install {the package installs into an application (tools/raven-package.tcl install): the module, the generated binding of the host's target staged as its raven/ tree, and the event bridge's archive built with -Werror against the pinned Raven's headers} -constraints ravenPackage -body {
+    set pkg [file join $::ravenApp .bot_modules raven]
+    list [ravenBuild] [file exists [file join $pkg raven.bot]] [file exists [file join $pkg native libraven_bridge.a]] \
+        [file exists [file join $pkg raven core.bot]] [file exists [file join $pkg raven window.bot]] \
+        [string match "*GENERATED by tools/c-bindgen.tcl (profile raven, target [ravenPackage::hostTarget])*" \
+            [readFile [file join $pkg raven core.bot]]]
+} -result {1 1 1 1 1 1}
+
+test raven-warning-clean {the package and every program over it compile under -warnings error: the module raven, the example (counter.bot, main.bot, headless.bot) and the scenarios} -constraints ravenPackage -body {
+    lmap name {counter main headless desktop events lifecycle timer abi} {
+        list $name [expr {[catch {ravenHir $name} message] ? $message : "ok"}]
+    }
+} -result {{counter ok} {main ok} {headless ok} {desktop ok} {events ok} {lifecycle ok} {timer ok} {abi ok}}
+
+test raven-authority {the generated binding's raw authority stays where it is mediated: Rinit_ex, whose pointer parameter has no contract, called from a program's top level is DIRECT; the package makes the same call under its own context Ui, so the example, which says nothing about directness, compiles (raven-warning-clean) -- STALE-DIRECT-MODULE would reject a `direct module` on it} -constraints ravenPackage -body {
+    catch {ravenHir authority} message options
+    set stale [file join $::ravenApp stale.bot]
+    set channel [open $stale w]
+    puts $channel "direct module\n\nimport counter\nimport raven\n\nwith context raven::create()\n\ncounter::caption(1)"
+    close $channel
+    catch {surface::readProgramFile $stale -warnings error -cache ""} staleMessage staleOptions
+    list [dict get $options -errorcode] [regexp {calls raven::core::Rinit_ex, a C function whose contract lets it retain pointer authority past the call} $message] \
+        [dict get $staleOptions -errorcode]
+} -result {{CORE SEMANTIC DIRECT} 1 {CORE SEMANTIC STALE-DIRECT-MODULE}}
+
+test raven-tcl-backends {the Tcl backends refuse a C call (NATIVE-ONLY): the package runs on the native backends only} -constraints ravenPackage -body {
+    lassign [outcomeUnderHir interp [ravenHir headless]] tag value message
+    list $tag [string match *NATIVE-ONLY* "$value $message"]
+} -result {error 1}
+
+test raven-example-headless {the example's counter, scripted headless (examples/raven/headless.bot): three clicks of "Click me" injected where the frame laid the button out arrive as the XML interface's action hello.clicked and count, the label says so, a click of Quit ends the loop (the next frame is false) with exit code 0 -- on both native backends} -constraints ravenRun -body {
+    ravenValues headless
+} -result {{["3", "3 clicks", "false", "0"]} {["3", "3 clicks", "false", "0"]}}
+
+test raven-events {every kind of control event, through the bridge: an XML button's click as its action (from the button), a checkbox toggled, a text input's every edit and its commit (Enter) with the text, a close request of a window kept open (value 0: still open), an error Raven reports (an invalid handle: R_ERROR_INVALID_ID, R_SEVERITY_ERROR, Raven's text); changes the program makes itself (a combo box's selection, a slider's value) are no events -- on both native backends} -constraints ravenRun -body {
+    ravenValues events
+} -result [lrepeat 2 {[["Action go 0 0 0 [hello.clicked]", "Toggled checkbox 1 0 0 []", "TextChanged input 0 0 0 [h]", "TextChanged input 0 0 0 [he]", "TextChanged input 0 0 0 [hey]", "TextCommitted input 0 0 0 [hey]", "CloseRequested window 0 0 0 []", "Error none 113 130 0 [Rwidget_destroy: invalid widget handle 0x00003039]"], ["true", "true", "true", "hey", "2", "7"]]}]
+
+test raven-lifecycle {Raven's lifetime under Ui: before start nothing runs and last_error says so; start (twice: once); a window's size and a widget's rectangle read through native out-parameters; last_error R_NO_ERROR, then an invalid handle's error with its severity and text; stop (twice: once) -- sizes are 0 again -- and a second start and stop -- on both native backends} -constraints ravenRun -body {
+    ravenValues lifecycle
+} -result [lrepeat 2 {[["false", "0", "Raven is not running"], ["true", "0.1.3", "420", "220", "420", "true", "112", "113", "130", "Rwidget_destroy: invalid widget handle 0x00001092"], ["false", "0"], ["true", "100"]]}]
+
+test raven-timer {timers and resizes: a watched window's resize is Resized with its new size; a one-shot timer of 0.2 s is reported once, from the timer, after at least 0.2 s of frames that sleep; a repeating one of 0.05 s several times, and never after it is cancelled -- on both native backends} -constraints ravenRun -body {
+    ravenValues timer
+} -result [lrepeat 2 {["Resized  200 150 0 []", "TimerElapsed  0 0 0 []", "true", "true", "0", "true", "0"]}]
+
+test raven-bridge-abi {start checks the event bridge's ABI version before anything else: against an archive built from a bridge of another version, RavenFailed from botlish_raven_bridge_abi, and nothing started} -constraints ravenRun -setup {
+    set app [file join [temporaryDirectory] raven-abi-[pid]]
+    file delete -force $app
+    file mkdir $app
+    file copy [file join $::projectRoot tests raven abi.bot] $app
+    set pkg [ravenPackage::install $app]
+    set source [file join $pkg native raven_bridge.c]
+    set text [readFile $source]
+    set channel [open $source w]
+    puts -nonewline $channel [string map {"#define BOTLISH_RAVEN_BRIDGE_ABI 1" "#define BOTLISH_RAVEN_BRIDGE_ABI 2"} $text]
+    close $channel
+    exec [ravenPackage::cc] -std=c11 -O2 -fPIC -pthread -I[ravenPackage::includeDir] -c $source -o [file join $pkg native raven_bridge.o]
+    file delete [file join $pkg native libraven_bridge.a]
+    exec ar rcs [file join $pkg native libraven_bridge.a] [file join $pkg native raven_bridge.o]
+} -body {
+    set hir [surface::readProgramFile [file join $app abi.bot] -warnings error -cache ""]
+    set dir [cffi::ravenDir]
+    lassign [withEnvironment [list LD_LIBRARY_PATH $dir] {native::withLinkDirs [list $dir] {outcomeUnderHir cranelift $hir}}] tag value
+    list [string match "*BOTLISH_RAVEN_BRIDGE_ABI 2*" [readFile $source]] $tag $value
+} -cleanup {
+    file delete -force $app
+} -result {1 value {["RavenFailed", "botlish_raven_bridge_abi"]}}
+
+# A virtual X display for the desktop test: Xvfb on a display it chooses
+# (-displayfd), its channel and display.
+proc ravenDisplay {} {
+    set channel [open "|Xvfb -displayfd 1 -screen 0 1024x768x24 -nolisten tcp 2>/dev/null" r]
+    set display [gets $channel]
+    return [list $channel :$display]
+}
+
+test raven-desktop {the example's script on a real window, X11 and Raven's Vulkan renderer, under a virtual display: the same clicks give the same counts, and the renderer drew them -- the frame Raven reads back (Rwindow_capture, copied through the bridge) is the window's size in RGBA pixels, and the label's new text changed it} -constraints ravenDesktop -setup {
+    lassign [ravenDisplay] display name
+} -body {
+    ravenRun desktop cranelift [cffi::ravenDesktopDir] [list DISPLAY $name]
+} -cleanup {
+    catch {exec kill {*}[pid $display]}
+    catch {close $display}
+} -result {["3", "3 clicks", "false", "0", "true", "true", "true"]}
+
+file delete -force $ravenApp
+cleanupTests

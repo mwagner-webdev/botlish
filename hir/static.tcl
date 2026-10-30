@@ -1466,9 +1466,11 @@ proc hir::static::Independent {hir units y z} {
 # The units of HIR (Independent): {roots {UNIT {FILE START END} ...} reach
 # {UNIT {UNIT ...} ...}}, UNIT a root ExprId (a top-level function
 # definition) or code:SCOPE (the rest of the top level of that section's
-# scope), REACH the units each unit's code transitively refers to.
+# scope), REACH the units each unit's code transitively refers to -- a
+# trait operation to its selected implementations'.
 proc hir::static::Units {hir} {
     set unitOfBinding [dict create]
+    set unitOfBlock [dict create]
     set rootsOf [dict create]
     set spans {}
     foreach r [dict get $hir roots] {
@@ -1476,6 +1478,7 @@ proc hir::static::Units {hir} {
         set unit "code:[dict get $node scope]"
         if {[dict get $node kind] eq "bind" && [dict get $hir exprs [dict get $node value] kind] eq "block"} {
             set unit $r
+            dict set unitOfBlock [dict get $node value] $r
         }
         if {[dict get $node kind] eq "bind" && [dict get $node binding] ne ""} {
             dict set unitOfBinding [dict get $node binding] $unit
@@ -1486,6 +1489,9 @@ proc hir::static::Units {hir} {
             lappend spans [list $unit [dict get $origin file] [dict get $origin start] [dict get $origin end]]
         }
     }
+    # (A trait operation refers to no function, but calls the implementation
+    # the program selects for it: hir::coroutines::ImplementationTargets.)
+    set implTargets [hir::coroutines::ImplementationTargets $hir]
     set uses [dict create]
     dict for {unit roots} $rootsOf {
         set used [dict create]
@@ -1497,6 +1503,11 @@ proc hir::static::Units {hir} {
             if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""
                     && [dict exists $unitOfBinding [dict get $node binding]]} {
                 dict set used [dict get $unitOfBinding [dict get $node binding]] 1
+            }
+            foreach b [dict getdef $implTargets $e {}] {
+                if {[dict exists $unitOfBlock $b]} {
+                    dict set used [dict get $unitOfBlock $b] 1
+                }
             }
             lappend stack {*}[hir::children $hir $e]
         }

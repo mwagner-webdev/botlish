@@ -4,6 +4,15 @@ Hosting a graphical application on macOS without compromising Botlish's
 native runtime: how an AOT-compiled Botlish program should take part in
 macOS's graphical main-thread model.
 
+> **Follow-up:** the recommendation is implemented by
+> MAIN-THREAD-STARTUP-MILESTONE-1.md: `-native-startup main-thread` builds
+> a macOS AArch64 executable that runs its program on the process's main
+> thread with a 512 MiB LC_MAIN stack, and this census's harness now runs
+> candidate A on that production policy (`tools/census.py`, macos-arm64.yml's
+> `main-thread-startup` job). Everything below is the census as it was run,
+> on the disposable experimental runtime; candidate B's experiment is
+> rebuilt at the census's base commit, the only one the patch applies to.
+
 A census, not a milestone: executable evidence, three architectures
 compared, and a recommendation for the smallest next implementation. No
 production code changed. The probes, a disposable experimental runtime

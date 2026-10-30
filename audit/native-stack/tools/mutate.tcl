@@ -21,6 +21,9 @@
 #     guard on every kind of thread, its modes, the faults it must not
 #     claim), every faulting check in a child process;
 #   * tests/native-stack-overflow.test (with a private -tmpdir);
+#   * tests/main-thread-startup.test (with a private -tmpdir: on macOS the
+#     main thread's exhaustions, faults and coroutine overflows in a
+#     main-thread executable, MAIN-THREAD-STARTUP-MILESTONE-1.md);
 #   * tests/platform/native-status.tcl (the driver's overflows: Botlish
 #     recursion, a large frame, the runtime's own recursion);
 #   * tests/platform/aot-facts.tcl (a standalone executable's overflows);
@@ -171,6 +174,13 @@ set detectors [list \
         expr {$failing eq {} ? [lastLine $output] : "[join [lrange $failing 0 5] {, }][expr {[llength $failing] > 6 ? ", ..." : ""}]"}
     } \
     native-stack-overflow.test [list $tclsh tests/native-stack-overflow.test -tmpdir TMPDIR] {
+        set failed [lsort -unique [lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]]
+        if {![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
+            return "did not complete: [lastLine $output]"
+        }
+        expr {$failed eq {} ? "" : "[llength $failed] failed: [join [lrange $failed 0 5] {, }]"}
+    } \
+    main-thread-startup.test [list $tclsh tests/main-thread-startup.test -tmpdir TMPDIR] {
         set failed [lsort -unique [lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]]
         if {![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
             return "did not complete: [lastLine $output]"

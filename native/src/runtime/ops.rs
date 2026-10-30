@@ -104,7 +104,7 @@ use super::nview::{
 };
 use super::syscall::{rt_linux_aarch64_syscall, rt_linux_x86_64_syscall};
 use super::value::*;
-use super::vm::{current_program, Vm, NativeInfo};
+use super::vm::{current_program, Identity, Vm, NativeInfo};
 use crate::nir::OpCode;
 use super::decimal::{rt_decimal_cmp, rt_decimal_round, rt_decimal_to_f64, rt_decimal_to_str};
 use super::inttext::{rt_int_to_str, rt_str_to_int};
@@ -676,6 +676,22 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             if x.shape != y.shape {
                 return Ok(false);
             }
+            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity) {
+                // A shape that declares its identity (REPRESENTATION-
+                // INDEPENDENT-VALUE-IDENTITY.md): equal when the identities
+                // are, whatever its other fields hold. Opaque, so a refusal
+                // inside it is the opaque values' (below).
+                return match identity_equal(p, identity, x.fields(), y.fields()) {
+                    Ok(r) => Ok(r),
+                    Err(()) => {
+                        let vm = vm(p);
+                        if matches!(vm.error, Some(RtError::Equality { .. })) {
+                            vm.error = Some(RtError::Equality { a, b });
+                        }
+                        Err(())
+                    }
+                };
+            }
             for (u, w) in x.fields().iter().zip(y.fields().iter()) {
                 match equal(p, *u, *w) {
                     Ok(true) => {}
@@ -715,6 +731,15 @@ fn set_equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     if xs.len() != ys.len() {
         return Ok(false);
     }
+    if xs.len() > PAIRWISE_LIMIT {
+        // A larger set is matched by hash (`bucket_match`, identity
+        // equality's matcher): expected O(n). Where a member has no hash,
+        // the comparison below is the one that refuses it.
+        let (a, b) = (Entries { keys: xs, vals: None }, Entries { keys: ys, vals: None });
+        if let Some(r) = bucket_match(p, &a, &b, 0)? {
+            return Ok(r);
+        }
+    }
     for x in xs {
         let mut found = false;
         for y in ys {
@@ -728,6 +753,152 @@ fn set_equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         }
     }
     Ok(true)
+}
+
+// ---------------------------------------------------------------------------
+// Semantic identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md;
+// core/value.tcl's IdentityEqual and BucketMatch, core/hashing.tcl's
+// Identity)
+//
+// A struct shape may declare its identity apart from its representation: the
+// elements of one List field in no order (members), or the pairs of two in no
+// order (associations). Equality is multiset equality of those entries (a
+// pair matches a pair whose key and value are both equal): set or map
+// equality for the distinct members or keys an owner keeps, and an
+// equivalence coherent with the hashes' commutative combination (`walk`)
+// whatever the representation holds. Matching is greedy, exact for an
+// equivalence: a positional prefix first (two values built alike match in
+// order, unhashed), then the rest by hash buckets (expected O(n)), or
+// pairwise where the rest is small or an entry has no hash (its comparison
+// refuses it). Nothing allocates on the managed heap and no Botlish code
+// runs, so equality stays no safepoint: the buckets are two Rust vectors per
+// comparison of more than PAIRWISE_LIMIT unmatched entries.
+
+/// Up to this many unmatched entries are compared pairwise, never hashed.
+const PAIRWISE_LIMIT: usize = 8;
+
+/// The entries of a value's identity: its members (VALS None), or its keys
+/// and their values, as many as both Lists hold.
+struct Entries<'a> {
+    keys: &'a [Value],
+    vals: Option<&'a [Value]>,
+}
+
+/// The entries of identity IDENTITY over a struct value's FIELDS.
+fn identity_entries(identity: Identity, fields: &[Value]) -> Entries<'_> {
+    match identity {
+        Identity::Members(f) => Entries { keys: list_of(fields[f]).items(), vals: None },
+        Identity::Associations(k, v) => {
+            let (keys, vals) = (list_of(fields[k]).items(), list_of(fields[v]).items());
+            let n = keys.len().min(vals.len());
+            Entries { keys: &keys[..n], vals: Some(&vals[..n]) }
+        }
+    }
+}
+
+/// Whether entry X of A equals entry Y of B: its key, and for pairs its value.
+fn entry_equal(p: *mut Vm, a: &Entries, x: usize, b: &Entries, y: usize) -> Result<bool, ()> {
+    if !equal(p, a.keys[x], b.keys[y])? {
+        return Ok(false);
+    }
+    match (a.vals, b.vals) {
+        (Some(av), Some(bv)) => equal(p, av[x], bv[y]),
+        _ => Ok(true),
+    }
+}
+
+/// Whether two values of one shape whose identity is IDENTITY, with fields
+/// XF and YF, are equal.
+fn identity_equal(p: *mut Vm, identity: Identity, xf: &[Value], yf: &[Value]) -> Result<bool, ()> {
+    let (a, b) = (identity_entries(identity, xf), identity_entries(identity, yf));
+    let n = a.keys.len();
+    if n != b.keys.len() {
+        return Ok(false);
+    }
+    let mut i = 0;
+    while i < n && entry_equal(p, &a, i, &b, i)? {
+        i += 1;
+    }
+    if i == n {
+        return Ok(true);
+    }
+    if n - i > PAIRWISE_LIMIT
+        && let Some(r) = bucket_match(p, &a, &b, i)?
+    {
+        return Ok(r);
+    }
+    let mut used = vec![false; n - i];
+    'entries: for x in i..n {
+        for y in i..n {
+            if !used[y - i] && entry_equal(p, &a, x, &b, y)? {
+                used[y - i] = true;
+                continue 'entries;
+            }
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// The keyed table hash of V as a 64-bit word, or None (the Vm's error state
+/// as it was) when V has no hash: the buckets' hash. Keyed, so no input
+/// arranged against the public hash makes the buckets degenerate; equal
+/// values hash equally in one process, which is all a bucket needs.
+fn bucket_hash(p: *mut Vm, key: (u64, u64), v: Value) -> Option<u64> {
+    let clean = vm(p).error.is_none();
+    let mut sink = Sip13::new(key.0, key.1);
+    match walk(p, &mut sink, v) {
+        Ok(()) => Some(sink.finish()),
+        Err(()) => {
+            if clean {
+                vm(p).error = None;
+            }
+            None
+        }
+    }
+}
+
+/// Matches A's entries from position FROM on against B's by hash: Some(true)
+/// when every one has an unused equal entry of B, Some(false) when one has
+/// none, None when a key has no hash (the caller compares pairwise, where
+/// that entry is refused). Equal keys hash equally, so only entries of one
+/// hash are compared; B's are found through an open-addressed index of
+/// their positions, A's probed in order.
+fn bucket_match(p: *mut Vm, a: &Entries, b: &Entries, from: usize) -> Result<Option<bool>, ()> {
+    let n = a.keys.len();
+    let m = n - from;
+    let key = table_hash_key();
+    let capacity = (2 * m).next_power_of_two().max(8);
+    let mask = capacity - 1;
+    let mut slots = vec![u32::MAX; capacity];
+    let mut hashes = Vec::with_capacity(m);
+    for y in from..n {
+        let Some(h) = bucket_hash(p, key, b.keys[y]) else { return Ok(None) };
+        let mut s = h as usize & mask;
+        while slots[s] != u32::MAX {
+            s = (s + 1) & mask;
+        }
+        slots[s] = (y - from) as u32;
+        hashes.push(h);
+    }
+    let mut used = vec![false; m];
+    for x in from..n {
+        let Some(h) = bucket_hash(p, key, a.keys[x]) else { return Ok(None) };
+        let mut s = h as usize & mask;
+        loop {
+            let j = slots[s];
+            if j == u32::MAX {
+                return Ok(Some(false));
+            }
+            let j = j as usize;
+            if !used[j] && hashes[j] == h && entry_equal(p, a, x, b, from + j)? {
+                used[j] = true;
+                break;
+            }
+            s = (s + 1) & mask;
+        }
+    }
+    Ok(Some(true))
 }
 
 #[unsafe(no_mangle)]
@@ -884,6 +1055,49 @@ trait CanonicalSink: Sized {
     fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()>;
     /// The whole 64-bit hash of set member V, from a fresh state.
     fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()>;
+    /// The whole 64-bit hash of the identity entry pairing KEY with VALUE,
+    /// from a fresh state: the entry tag, then both as nested values
+    /// (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+    fn entry(&self, p: *mut Vm, key: Value, value: Value) -> Result<u64, ()>;
+}
+
+/// The tags of an identity's canonical input (core/hashing.tcl's
+/// IdentityTag and EntryTag): its form, after the struct's declaration
+/// identity, and the first byte of each pair's own input.
+const IDENTITY_MEMBERS: u8 = 1;
+const IDENTITY_ASSOCIATIONS: u8 = 2;
+const IDENTITY_ENTRY: u8 = 3;
+
+/// Hands the identity IDENTITY of a struct value with FIELDS to SINK (the
+/// shape's declaration identity already handed): the form's tag, the entry
+/// count (8 bytes LE), then the wrapping sum of every entry's whole hash (8
+/// bytes LE) -- a member's own (`member`), a pair's (`entry`). The sum is
+/// commutative and a function of the entries' multiset, which identity
+/// equality compares, so equal values feed both folds equal input; no other
+/// field and no order is read. (A sum, never an XOR: a repeated entry does
+/// not cancel.)
+fn identity_walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, identity: Identity, fields: &[Value]) -> Result<(), ()> {
+    let entries = identity_entries(identity, fields);
+    sink.bytes(&[match identity {
+        Identity::Members(_) => IDENTITY_MEMBERS,
+        Identity::Associations(..) => IDENTITY_ASSOCIATIONS,
+    }]);
+    sink.bytes(&(entries.keys.len() as u64).to_le_bytes());
+    let mut sum = 0u64;
+    match entries.vals {
+        None => {
+            for &key in entries.keys {
+                sum = sum.wrapping_add(sink.member(p, key)?);
+            }
+        }
+        Some(vals) => {
+            for (&key, &value) in entries.keys.iter().zip(vals.iter()) {
+                sum = sum.wrapping_add(sink.entry(p, key, value)?);
+            }
+        }
+    }
+    sink.bytes(&sum.to_le_bytes());
+    Ok(())
 }
 
 /// The public hash's state: FNV-1a, 64-bit.
@@ -906,6 +1120,13 @@ impl CanonicalSink for Fnv {
     fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()> {
         let mut sub = Fnv(FNV_OFFSET);
         walk(p, &mut sub, v)?;
+        Ok(sub.0)
+    }
+    fn entry(&self, p: *mut Vm, key: Value, value: Value) -> Result<u64, ()> {
+        let mut sub = Fnv(FNV_OFFSET);
+        sub.bytes(&[IDENTITY_ENTRY]);
+        sub.child(p, key)?;
+        sub.child(p, value)?;
         Ok(sub.0)
     }
 }
@@ -1021,6 +1242,13 @@ impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
         walk(p, &mut sub, v)?;
         Ok(sub.finish())
     }
+    fn entry(&self, p: *mut Vm, key: Value, value: Value) -> Result<u64, ()> {
+        let mut sub = Self::new(self.k.0, self.k.1);
+        sub.bytes(&[IDENTITY_ENTRY]);
+        walk(p, &mut sub, key)?;
+        walk(p, &mut sub, value)?;
+        Ok(sub.finish())
+    }
 }
 
 /// Hands V's canonical input to SINK: its kind tag, then its payload,
@@ -1127,6 +1355,11 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
             current_program(|prog| {
                 let shape = &prog.shapes[obj.shape as usize];
                 sink.text(shape.name.as_deref().unwrap_or("").as_bytes());
+                if let Some(identity) = shape.identity {
+                    // A declared identity (REPRESENTATION-INDEPENDENT-VALUE-
+                    // IDENTITY.md): its entries, never the fields.
+                    return identity_walk(p, sink, identity, obj.fields());
+                }
                 sink.bytes(&(shape.fields.len() as u64).to_le_bytes());
                 for (field, item) in shape.fields.iter().zip(obj.fields().iter()) {
                     sink.text(field.as_bytes());
@@ -2503,6 +2736,60 @@ pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
 pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
     let source = list_of(l).items();
     let mut items: Vec<Value> = Vec::with_capacity(source.len());
+    if source.len() > PAIRWISE_LIMIT
+        && let Some(kept) = dedup_by_hash(p, source)
+    {
+        items = kept;
+    } else if let Err(failed) = dedup_pairwise(p, source, &mut items) {
+        return failed;
+    }
+    let elements = items.len();
+    let r = vm(p).new_set(items);
+    vm(p).metrics.record_list_copy(elements);
+    r
+}
+
+/// SOURCE's items, each kept unless an equal one was kept before it
+/// (first-occurrence order), deduplicated by hash: an item is compared only
+/// with the kept items of its hash, which are all it can equal, so the
+/// result is `dedup_pairwise`'s in expected O(n) (REPRESENTATION-
+/// INDEPENDENT-VALUE-IDENTITY.md). None when an item has no hash: the
+/// pairwise scan is then where it is refused, as it always was.
+fn dedup_by_hash(p: *mut Vm, source: &[Value]) -> Option<Vec<Value>> {
+    let key = table_hash_key();
+    let mut hashes = Vec::with_capacity(source.len());
+    for &item in source {
+        hashes.push(bucket_hash(p, key, item)?);
+    }
+    let capacity = (2 * source.len()).next_power_of_two().max(8);
+    let mask = capacity - 1;
+    let mut slots = vec![u32::MAX; capacity];
+    let mut kept: Vec<Value> = Vec::with_capacity(source.len());
+    let mut kept_hashes: Vec<u64> = Vec::with_capacity(source.len());
+    'items: for (&item, &h) in source.iter().zip(hashes.iter()) {
+        let mut s = h as usize & mask;
+        loop {
+            let j = slots[s];
+            if j == u32::MAX {
+                break;
+            }
+            // Hashable items compare totally: no comparison here refuses.
+            if kept_hashes[j as usize] == h && equal(p, kept[j as usize], item).unwrap_or(false) {
+                continue 'items;
+            }
+            s = (s + 1) & mask;
+        }
+        slots[s] = kept.len() as u32;
+        kept.push(item);
+        kept_hashes.push(h);
+    }
+    Some(kept)
+}
+
+/// SOURCE's items deduplicated pairwise into ITEMS (O(n^2): MINIMAL-
+/// IMMUTABLE-SET.md's reference construction): Err (NO_VALUE, the error
+/// recorded) when a comparison refuses its operands.
+fn dedup_pairwise(p: *mut Vm, source: &[Value], items: &mut Vec<Value>) -> Result<(), Value> {
     for &item in source {
         let mut seen = false;
         for &existing in items.iter() {
@@ -2512,17 +2799,14 @@ pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
                     break;
                 }
                 Ok(false) => {}
-                Err(()) => return NO_VALUE,
+                Err(()) => return Err(NO_VALUE),
             }
         }
         if !seen {
             items.push(item);
         }
     }
-    let elements = items.len();
-    let r = vm(p).new_set(items);
-    vm(p).metrics.record_list_copy(elements);
-    r
+    Ok(())
 }
 
 /// Membership: false for an absent value, never an Error *completion*
@@ -3655,6 +3939,7 @@ mod tests {
                         name: name.map(String::from),
                         fields: fields.iter().map(|f| f.to_string()).collect(),
                         opaque: false,
+                        identity: None,
                     })
                     .collect(),
                 enums: Vec::new(),
@@ -4027,7 +4312,7 @@ mod tests {
             std::rc::Rc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
-                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false }],
+                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false, identity: None }],
                 enums: vec![EnumInfo { name: "Color".to_string(), cases: vec!["Red".to_string(), "Green".to_string()] }],
                 errors: Vec::new(),
             }),
@@ -4115,6 +4400,7 @@ mod tests {
             name: name.map(String::from),
             fields: fields.iter().map(|f| f.to_string()).collect(),
             opaque: false,
+            identity: None,
         };
         let mut vm = Vm::new(
             std::rc::Rc::new(ProgramInfo {
@@ -4154,8 +4440,8 @@ mod tests {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: vec![
-                    ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true },
-                    ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false },
+                    ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true, identity: None },
+                    ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false, identity: None },
                 ],
                 enums: Vec::new(),
                 errors: Vec::new(),

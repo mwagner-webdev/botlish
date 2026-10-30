@@ -20,12 +20,24 @@ standard library, and nothing in them loads it.
 | the native library through SDL3's callbacks (Linux, headless) | `tools/library-callbacks.sh` |
 | recorded outcomes: each macOS run's census output (timestamps removed), the Linux run's outcomes and summary, the library-callbacks transcript | `results/macos-aarch64/run-RUN.log`, `results/linux-x86_64/` |
 
+Since MAIN-THREAD-STARTUP-MILESTONE-1.md candidate A is the production
+startup policy, and the harness runs it on that: the programs built by the
+same compiler with `-native-startup main-thread` (Botlish.app's system
+linker), by the checkout's rustc linker, and an 8 MiB control (the same
+main-thread program objects linked without LC_MAIN's stack size). No
+experimental runtime is involved in candidate A; `--exp` (the patch, applied
+to the census's base commit 7aec2a11, the only one it applies to) serves
+candidate B's dispatcher and its controls only. `--strict` makes every case
+a requirement: macos-arm64.yml's `main-thread-startup` job runs it so on
+every push.
+
 ## Running it
 
 On GitHub's macos-15 runner: `.github/workflows/macos-graphical-main-thread.yml`
 (pushes that change this directory or the workflow; workflow_dispatch once it
 is on the default branch). It builds Botlish.app, static SDL3 through it
-(`tests/platform/link-plan-sdl3.sh`), the experimental worktree, and runs:
+(`tests/platform/link-plan-sdl3.sh`), the experimental worktree (at
+7aec2a11), and runs:
 
 ```sh
 python3 -I audit/macos-graphical-main-thread/tools/census.py \
@@ -39,7 +51,7 @@ the "cocoa" cases run with the dummy driver there) and the Linux evidence
 the report quotes (the main thread's refused guard, the headless runs):
 
 ```sh
-git worktree add --detach /tmp/exp HEAD
+git worktree add --detach /tmp/exp 7aec2a118768f651d1401166cf1d1e596113ae1a
 git -C /tmp/exp apply "$PWD/audit/macos-graphical-main-thread/patches/main-thread-experiment.patch"
 cargo build --release --manifest-path /tmp/exp/native/Cargo.toml
 # a static SDL3 3.4.18 (cmake -DSDL_STATIC=ON -DSDL_SHARED=OFF -DSDL_UNIX_CONSOLE_BUILD=ON ...)

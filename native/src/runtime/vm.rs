@@ -70,6 +70,24 @@ pub struct ShapeInfo {
     /// type only; no operation, check or layout consults it. Always false for
     /// an anonymous shape.
     pub opaque: bool,
+    /// The declaration's semantic identity, when it declares one
+    /// (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md): equality, the public
+    /// hash and the table hash of a value of this shape read its identity
+    /// fields' entries in no order, and no other field (ops.rs's `equal` and
+    /// `walk`). None for every other shape, which is compared and hashed
+    /// field by field.
+    pub identity: Option<Identity>,
+}
+
+/// A struct declaration's semantic identity (`identity members(F)`,
+/// `identity associations(K, V)`): its form and its identity fields' slot
+/// positions, each a List field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Identity {
+    /// The elements of one List field, in no order.
+    Members(usize),
+    /// The pairs of two List fields (keys, values), in no order.
+    Associations(usize, usize),
 }
 
 /// One enum declaration of the program (ENUMS.md): its declaration identity
@@ -351,6 +369,13 @@ impl Vm {
         let _ = stack;
     }
 
+    /// The stack of the thread that made this Vm, as `NativeStack::current`
+    /// found it (None on a host without stack discovery): the startup
+    /// report's `stack` line (runtime::aot's `startup_lines`).
+    pub fn native_stack(&self) -> Option<NativeStack> {
+        self.native_stack
+    }
+
     /// Makes this Vm's code bound its recursion by the running stack's
     /// `stack_limit` (a native library's instance, made on the thread that
     /// owns it: runtime::library's `create`). From now on
@@ -428,7 +453,11 @@ impl Vm {
             writeln!(r, "native {i} {:?} arity {:?} params {:?} op {}", n.name, n.arity, n.params.iter().map(|k| k.map(|k| k.name())).collect::<Vec<_>>(), n.op.spelling()).unwrap();
         }
         for (i, sh) in self.info.shapes.iter().enumerate() {
-            writeln!(r, "shape {i} {:?} fields {:?} opaque {}", sh.name, sh.fields, sh.opaque).unwrap();
+            write!(r, "shape {i} {:?} fields {:?} opaque {}", sh.name, sh.fields, sh.opaque).unwrap();
+            if let Some(identity) = sh.identity {
+                write!(r, " identity {identity:?}").unwrap();
+            }
+            r.push('\n');
         }
         for (i, e) in self.info.enums.iter().enumerate() {
             writeln!(r, "enum {i} {:?} cases {:?}", e.name, e.cases).unwrap();

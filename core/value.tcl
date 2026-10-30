@@ -569,6 +569,20 @@ proc core::value::equal {a b} {
             if {[lindex $a 1] ne [lindex $b 1]} {
                 return 0
             }
+            set identity [identityOf [lindex $a 1 0]]
+            if {$identity ne ""} {
+                # A struct that declares its identity (REPRESENTATION-
+                # INDEPENDENT-VALUE-IDENTITY.md) is equal to another of its
+                # declaration when their identities are: the representation's
+                # other fields take no part. Opaque, so a refusal inside it
+                # is the opaque values' (below).
+                try {
+                    return [IdentityEqual $identity [lindex $a 2] [lindex $b 2]]
+                } trap {CORE SEMANTIC EQUALITY} {} {
+                    core::semanticError EQUALITY \
+                        "== is not defined for callables: [show $a] == [show $b]"
+                }
+            }
             if {[isOpaqueStruct [lindex $a 1 0]]} {
                 # An opaque struct's equality is its representation's, which
                 # no message may show (OPAQUE-STRUCTS.md): a refusal inside
@@ -605,6 +619,15 @@ proc core::value::equal {a b} {
             if {[llength $xs] != [llength $ys]} {
                 return 0
             }
+            if {[llength $xs] > $::core::value::pairwiseLimit} {
+                # A larger set is matched by hash (BucketMatch, the matching
+                # identity equality uses): expected O(n). Where a member has
+                # no hash, the comparison below is the one that refuses it.
+                set matched [BucketMatch $xs {} $ys {} 0 0]
+                if {$matched ne ""} {
+                    return $matched
+                }
+            }
             foreach x $xs {
                 set found 0
                 foreach y $ys {
@@ -630,6 +653,159 @@ proc core::value::equal {a b} {
             }
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Semantic identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md)
+#
+# A struct may declare its identity apart from its representation: the
+# elements of one List field in no order (`members`), or the pairs of two in
+# no order (`associations`). Which structs do, and which fields, is the
+# compilation's struct registry's knowledge (hir/structs.tcl installs the
+# test below, as it installs the opaque-struct test); a struct of no declared
+# identity is compared field by field, as always.
+#
+# Both forms are multiset equality, of the elements or of the pairs (a pair
+# matches a pair whose key and value are both equal): equal exactly when a
+# one-to-one matching of equal entries exists. That is set or map equality
+# for the distinct members or keys an owner keeps, and an equivalence
+# relation coherent with the hashes' commutative combination whatever the
+# representation holds (core/hashing.tcl). Matching is greedy, which is exact
+# for an equivalence: a positional prefix first (two values built alike match
+# in order with no hashing), then the rest by hash buckets (expected O(n)),
+# or pairwise where an entry has no hash (its comparison refuses it) or the
+# rest is small.
+
+namespace eval core::value {
+    # A command prefix taking a named-struct identity and returning its
+    # identity, {FORM {POSITION ...}} (the identity fields' slot positions),
+    # or "" (no identity, or no registry installed).
+    variable identityTest ""
+    # Up to this many entries are matched pairwise, never hashed.
+    variable pairwiseLimit 8
+}
+
+# Installs the identity test (see above); "" removes it.
+proc core::value::setIdentityTest {command} {
+    variable identityTest
+    set identityTest $command
+}
+
+# The identity {FORM {POSITION ...}} of named struct ID, or "".
+proc core::value::identityOf {id} {
+    variable identityTest
+    if {$id eq "" || $identityTest eq ""} {
+        return ""
+    }
+    return [{*}$identityTest $id]
+}
+
+# The entries of a struct value's identity, from its field values VALUES:
+# {KEYS VALUES PAIRS} -- the members (PAIRS 0, VALUES {}) or the keys and
+# values, as many as both Lists hold (PAIRS 1).
+proc core::value::IdentityEntries {identity values} {
+    lassign $identity form positions
+    switch -- $form {
+        members {
+            return [list [items [lindex $values [lindex $positions 0]]] {} 0]
+        }
+        associations {
+            set keys [items [lindex $values [lindex $positions 0]]]
+            set vals [items [lindex $values [lindex $positions 1]]]
+            set n [expr {min([llength $keys], [llength $vals])}]
+            return [list [lrange $keys 0 $n-1] [lrange $vals 0 $n-1] 1]
+        }
+    }
+    error "core::value: unknown identity form $form"
+}
+
+# 1/0: whether two struct values of one declaration whose identity is
+# IDENTITY, with field values AVALUES and BVALUES, are equal.
+proc core::value::IdentityEqual {identity avalues bvalues} {
+    variable pairwiseLimit
+    lassign [IdentityEntries $identity $avalues] aKeys aVals pairs
+    lassign [IdentityEntries $identity $bvalues] bKeys bVals
+    set n [llength $aKeys]
+    if {$n != [llength $bKeys]} {
+        return 0
+    }
+    # The positional prefix: entries equal in place are matched in place.
+    set i 0
+    while {$i < $n && [EntryEqual $aKeys $aVals $i $bKeys $bVals $i $pairs]} {
+        incr i
+    }
+    if {$i == $n} {
+        return 1
+    }
+    if {$n - $i > $pairwiseLimit} {
+        set matched [BucketMatch $aKeys $aVals $bKeys $bVals $pairs $i]
+        if {$matched ne ""} {
+            return $matched
+        }
+    }
+    # Pairwise from I on: each entry of A matched to an unused equal entry of
+    # B.
+    set used [dict create]
+    for {set x $i} {$x < $n} {incr x} {
+        set found 0
+        for {set y $i} {$y < $n} {incr y} {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+                dict set used $y 1
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# 1/0: whether entry X of A equals entry Y of B (its key and, for pairs, its
+# value).
+proc core::value::EntryEqual {aKeys aVals x bKeys bVals y pairs} {
+    if {![equal [lindex $aKeys $x] [lindex $bKeys $y]]} {
+        return 0
+    }
+    return [expr {!$pairs || [equal [lindex $aVals $x] [lindex $bVals $y]]}]
+}
+
+# Matches A's entries from position FROM on against B's by hash: 1 when
+# every one has an unused equal entry of B, 0 when one has none, or "" when
+# an entry's key has no hash (the caller then compares pairwise, which is
+# where such an entry is refused). Equal keys hash equally (the hashes'
+# coherence), so only a bucket's entries are compared. The buckets are the
+# public hash's: collisions cost time here, never a wrong answer.
+proc core::value::BucketMatch {aKeys aVals bKeys bVals pairs from} {
+    set n [llength $aKeys]
+    set buckets [dict create]
+    set aHashes {}
+    try {
+        for {set y $from} {$y < $n} {incr y} {
+            dict lappend buckets [core::hashing::Fold public [lindex $bKeys $y]] $y
+        }
+        for {set x $from} {$x < $n} {incr x} {
+            lappend aHashes [core::hashing::Fold public [lindex $aKeys $x]]
+        }
+    } trap {CORE SEMANTIC EQUALITY} {} {
+        return ""
+    }
+    set used [dict create]
+    for {set x $from} {$x < $n} {incr x} {
+        set found 0
+        foreach y [dict getdef $buckets [lindex $aHashes $x-$from] {}] {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+                dict set used $y 1
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            return 0
+        }
+    }
+    return 1
 }
 
 # ---------------------------------------------------------------------------

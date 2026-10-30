@@ -1,0 +1,463 @@
+# value-identity.test -- representation-independent equality and hashing of
+# opaque immutable values (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+#
+# An opaque struct may declare its identity apart from its representation:
+#
+#   identity members(F)           the elements of List field F, in no order
+#   identity associations(K, V)   the pairs of List fields K and V, in no order
+#
+# `==`, the public hash and the private table hash then read those entries
+# and nothing else: no other field, no order. Equality is multiset equality
+# of the entries, both hashes a commutative sum of the entries' own hashes,
+# so equal values hash equally by construction, on every backend. Whether a
+# type is Equatable (total equality) or Hashable is the totality walk over
+# its identity's elements: a conditional witness per application. Only an
+# opaque, immutable struct may declare one, in its own declaration.
+#
+# Behavioral checks run on every backend through one HIR (sourceAgree);
+# exact keyed hashes under a fixed test key are compared with the Hashable
+# oracle (audit/hashable/tools/oracle.py), an independent implementation.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint python3 [expr {[auto_execok python3] ne ""
+    && ![catch {exec python3 -I -c {print(6 * 7)}} answer] && $answer eq "42"}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::viKey {1311768467750121216 18364758544493064720}
+
+# Two user types with a declared identity, and one without.
+set ::viDecls {import std::list
+import std::int
+import std::immutable_set
+import std::mutable_vector
+
+opaque struct Bag[T]:
+    items: List[T]
+    note: str
+    identity members(items)
+
+opaque struct Dict[K, V]:
+    ks: List[K]
+    junk: int
+    vs: List[V]
+    identity associations(ks, vs)
+
+opaque struct Plain:
+    items: List[int]
+    note: str
+
+opaque struct OtherBag[T]:
+    items: List[T]
+    identity members(items)
+
+fn bag(items: List[int], note: str) -> Bag[int]:
+    Bag[int] {items: items, note: note}
+
+fn other(items: List[int]) -> OtherBag[int]:
+    OtherBag[int] {items: items}
+
+fn dict(ks: List[str], vs: List[int], junk: int) -> Dict[str, int]:
+    Dict[str, int] {ks: ks, junk: junk, vs: vs}
+
+fn plain(items: List[int], note: str) -> Plain:
+    Plain {items: items, note: note}
+
+}
+
+proc viRun {body {backends {interp compile cranelift-generic cranelift}}} {
+    return [sourceAgree "$::viDecls$body" $backends]
+}
+
+# The kind and location-free message of the first diagnostic of SOURCE, or
+# "accepted".
+proc viRejection {source} {
+    if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set first [lindex [dict get $options -diagnostics] 0]
+            set message [dict get $first message]
+            set code [dict get $first errorcode]
+        } else {
+            set code [dict get $options -errorcode]
+        }
+        set kind [if {[lindex $code 0] eq "SURFACE"} {lindex $code 1} else {lindex $code end}]
+        return [list $kind [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+    }
+    return accepted
+}
+
+proc viKind {source} {
+    return [lindex [viRejection $source] 0]
+}
+
+# The fixture module that may call the private table hash, as the standard
+# library's hash structures do (HASHABLE-AND-KEYED-HASH.md).
+set ::viFixture {import std::table_hash
+
+fn keyed(x: Hashable) -> int:
+    std::table_hash::of(x)
+}
+
+proc viWriteFixture {} {
+    set f [open [file join $::core::libraryDir hashfix.bot] w]
+    puts -nonewline $f $::viFixture
+    close $f
+}
+
+# sourceAgree of BODY (after the declarations, with the fixture importable as
+# std::hashfix) under the table hash key KEY ("" for the drawn one).
+proc viKeyed {body {key ""}} {
+    withPrivateLibrary {
+        viWriteFixture
+        core::hashing::useTableHashKey $key
+        try {
+            set result [sourceAgree "import std::hashfix\n$::viDecls$body" {interp compile cranelift-generic cranelift}]
+        } finally {
+            core::hashing::useTableHashKey ""
+        }
+    }
+    return $result
+}
+
+proc viHir {source} {
+    return [surface::compile $source t.bot -warnings off]
+}
+
+proc viNir {source} {
+    return [dict get [native::lower::program [viHir $source] -tiny-leaf-inline-opt 0] text]
+}
+
+# The `may_error=...` of the calls of function NAME in NIR's call effects.
+proc viMayError {nir name} {
+    set result {}
+    foreach line [native::Driver calls $nir] {
+        if {[string match "*callee_name=\"$name\" *" $line] && [regexp {may_error=(\w+)} $line -> e]} {
+            lappend result $e
+        }
+    }
+    return [lsort -unique $result]
+}
+
+# The NIR operations of function NAME in NIR text.
+proc viOps {nir name} {
+    set ops {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$inside && [regexp {op ([a-z0-9]+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return [lsort -unique $ops]
+}
+
+# ---------------------------------------------------------------------------
+# Declarations
+
+test vi-decl-accepted {an opaque struct declares its identity with `identity members(F)` or `identity associations(K, V)`; the registry records it, and a field named `identity` is still a field} -body {
+    set hir [viHir "$::viDecls
+opaque struct Rec:
+    identity: int
+    xs: List\[int\]
+    identity members(xs)
+1
+"]
+    list [hir::structs::identityOf Bag] [hir::structs::identityOf Dict] [hir::structs::identityOf Plain] \
+        [hir::structs::identityOf Rec] [hir::structs::names Rec]
+} -result {{form members fields items} {form associations fields {ks vs}} {} {form members fields xs} {identity xs}}
+
+test vi-decl-not-opaque {only an opaque struct may declare an identity: its owner alone makes its values} -body {
+    viRejection "struct S:\n    xs: List\[int\]\n    identity members(xs)\n1\n"
+} -match glob -result {TYPE {struct "S" declares an identity but is not opaque: only an opaque struct may define its equality by its contents*}}
+
+test vi-decl-context {a context struct cannot declare an identity} -body {
+    viKind "opaque context struct C:\n    xs: List\[int\]\n    identity members(xs)\n1\n"
+} -result TYPE
+
+test vi-decl-forms {the forms are members and associations, with one and two distinct List fields of the struct} -body {
+    lmap body {
+        "opaque struct S:\n    xs: List\[int\]\n    identity bag(xs)\n1\n"
+        "opaque struct S:\n    xs: List\[int\]\n    identity associations(xs)\n1\n"
+        "opaque struct S:\n    xs: List\[int\]\n    identity members(xs, xs)\n1\n"
+        "opaque struct S:\n    xs: List\[int\]\n    ys: List\[int\]\n    identity associations(xs, xs)\n1\n"
+        "opaque struct S:\n    xs: List\[int\]\n    identity members(ys)\n1\n"
+        "opaque struct S:\n    xs: int\n    identity members(xs)\n1\n"
+        "opaque struct S:\n    xs: List\[int\]\n    identity members(xs)\n    identity members(xs)\n1\n"
+    } {viRejection $body}
+} -result {{TYPE {unknown identity form "bag" in struct "S": the forms are members(FIELD) -- the elements of a List field, in no order -- and associations(KEYS, VALUES) -- the pairs of two List fields, in no order}} {TYPE {identity associations takes 2 fields, got 1 in struct "S"}} {TYPE {identity members takes one field, got 2 in struct "S"}} {TYPE {identity associations of struct "S" names field "xs" twice}} {TYPE {identity members of struct "S" names "ys", which is not a field of it}} {TYPE {identity members of struct "S" names field "xs" of type int: an identity field is a List (List[T]), whose elements are what the identity is made of}} {SYNTAX {duplicate "identity" clause in struct "S" (a struct has at most one identity)}}}
+
+test vi-decl-immutable {every field of a struct that declares an identity is immutable: no MutableVector, MutableArray, mutable collection, coroutine or pointer, also inside a List; a mutable opaque struct is named, never its representation} -body {
+    lmap field {
+        "v: MutableVector\[int\]"
+        "a: List\[MutableArray\[int\]\]"
+        "m: std::mutable_map::MutableMap\[int, int\]"
+        "s: std::mutable_set::MutableSet\[str\]"
+    } {
+        viRejection "import std::mutable_map\nimport std::mutable_set\nopaque struct S:\n    xs: List\[int\]\n    $field\n    identity members(xs)\n1\n"
+    }
+} -result {{TYPE {struct "S" declares an identity, so every value of it is an immutable value whose meaning never changes, but field "v" (MutableVector[int]) holds a MutableVector}} {TYPE {struct "S" declares an identity, so every value of it is an immutable value whose meaning never changes, but field "a" (List[MutableArray[int]]) holds a MutableArray}} {TYPE {struct "S" declares an identity, so every value of it is an immutable value whose meaning never changes, but field "m" (std::mutable_map::MutableMap[int, int]) holds std::mutable_map::MutableMap[int, int], a mutable value}} {TYPE {struct "S" declares an identity, so every value of it is an immutable value whose meaning never changes, but field "s" (std::mutable_set::MutableSet[str]) holds std::mutable_set::MutableSet[str], a mutable value}}}
+
+test vi-decl-immutable-allows-values {functions, slot variables and other identity structs are immutable components: a value of them never changes} -body {
+    viKind "opaque struct Inner:\n    xs: List\[int\]\n    identity members(xs)\nopaque struct S\[T\]:\n    xs: List\[T\]\n    f: Fn{args: \[int\], return: int}\n    inner: Inner\n    identity members(xs)\n1\n"
+} -result accepted
+
+test vi-decl-owner-only {an identity is part of its struct's declaration: another module cannot give an imported type one, nor construct an opaque value to fake one} -body {
+    viKind "import std::immutable_map\nm = std::immutable_map::ImmutableMap\[int, int\] {keys: \[1\], vals: \[2\], hashes: \[0\], index: \[0\]}\nm\n"
+} -result OPAQUE-CONSTRUCTION
+
+test vi-hir-text {HIR text prints a declared identity and reads it back: the same text, the same registry entry, the same outcome} -body {
+    set hir [viHir "$::viDecls\nbag(\[1, 2\], \"x\") == bag(\[2, 1\], \"y\")\n"]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [lsearch -all -inline [split $text \n] {struct Bag *}] [expr {[hir::format $back] eq $text}] \
+        [hir::structs::identityOf Bag] [core::formatValue [core::compiler::evalHir $back]]
+} -result {{{struct Bag name Bag ns - opaque slots [T] identity members(items) fields items: List[T], note: str}} 1 {form members fields items} true}
+
+test vi-interchange {interchange text carries a declared identity: read back after a compilation that declares the same name with no identity, the HIR compares by identity on every backend} -constraints nativeBuilt -body {
+    set hir [viHir "$::viDecls\n\[bag(\[1, 2\], \"x\") == bag(\[2, 1\], \"y\"), hash(bag(\[1, 2\], \"x\")) == hash(bag(\[2, 1\], \"y\"))\]\n"]
+    set text [hir::interchange::encode $hir]
+    viHir "opaque struct Bag\[T\]:\n    items: List\[T\]\n    note: str\n1\n"
+    set read [hir::interchange::decode $text]
+    list [expr {$read eq [dict remove $hir traitSource]}] [core::formatValue [core::compiler::evalHir $read]] \
+        [core::formatValue [native::evalHir $read]] [core::formatValue [native::evalHir $read -specialize 0]]
+} -result {1 {[true, true]} {[true, true]} {[true, true]}}
+
+test vi-compilation-isolation {a HIR keeps its own identities: run after another compilation declares the same struct without one, it still compares by identity (hir::activate)} -constraints nativeBuilt -body {
+    set hir [viHir "$::viDecls\nbag(\[1, 2\], \"x\") == bag(\[2, 1\], \"y\")\n"]
+    set other [viHir "opaque struct Bag\[T\]:\n    items: List\[T\]\n    note: str\nb = Bag\[int\] {items: \[1, 2\], note: \"x\"}\nb == Bag\[int\] {items: \[2, 1\], note: \"y\"}\n"]
+    list [core::formatValue [core::compiler::evalHir $hir]] [core::formatValue [native::evalHir $hir]] \
+        [core::formatValue [core::compiler::evalHir $other]] [core::formatValue [native::evalHir $other]]
+} -result {true true false false}
+
+# ---------------------------------------------------------------------------
+# Equality
+
+test vi-members-equality {members: equal when the List holds the same elements as many times, in any order (an element matches one element: two equal ones need two); the other fields take no part} -body {
+    viRun "\[
+    bag(\[1, 2, 3\], \"a\") == bag(\[3, 1, 2\], \"b\"),
+    bag(\[1, 2, 3\], \"a\") == bag(\[1, 2, 4\], \"a\"),
+    bag(\[1, 1, 2\], \"a\") == bag(\[2, 1, 1\], \"b\"),
+    bag(\[1, 1, 2\], \"a\") == bag(\[1, 2, 2\], \"a\"),
+    bag(\[1, 2\], \"a\") == bag(\[1, 2, 2\], \"a\"),
+    bag(\[2, 2, 1\], \"a\") == bag(\[1, 2, 3\], \"a\"),
+    bag(\[\], \"a\") == bag(\[\], \"b\"),
+    plain(\[1, 2\], \"a\") == plain(\[2, 1\], \"a\"),
+    plain(\[1, 2\], \"a\") == plain(\[1, 2\], \"b\")
+\]\n"
+} -result {value {[true, false, true, false, false, false, true, false, false]}}
+
+test vi-associations-equality {associations: equal when the same key-value pairs are held, in any order; a pair is a unit (values swapped across keys differ); the other fields take no part} -body {
+    viRun "\[
+    dict(\[\"a\", \"b\", \"c\"\], \[1, 2, 3\], 1) == dict(\[\"c\", \"a\", \"b\"\], \[3, 1, 2\], 9),
+    dict(\[\"a\", \"b\"\], \[1, 2\], 1) == dict(\[\"a\", \"b\"\], \[2, 1\], 1),
+    dict(\[\"a\", \"b\"\], \[1, 2\], 1) == dict(\[\"a\", \"c\"\], \[1, 2\], 1),
+    dict(\[\"a\", \"b\"\], \[1, 2\], 1) == dict(\[\"a\"\], \[1\], 1),
+    dict(\[\"a\", \"b\", \"z\"\], \[1, 2\], 1) == dict(\[\"b\", \"a\"\], \[2, 1, 7\], 1)
+\]\n"
+} -result {value {[true, false, false, false, true]}}
+
+test vi-hash-matching {more than eight unmatched entries are matched by hash buckets: a reversed order, a duplicated element in place of another (twice), keys in another order with their values, a pair whose value differs} -body {
+    viRun "fn ints(n: int) -> List\[int\]:\n    loop i from 0 to n:\n        i * 7\nfn rev(n: int) -> List\[int\]:\n    loop i down from n - 1 through 0:\n        i * 7\nfn names(n: int) -> List\[str\]:\n    loop i from 0 to n:\n        std::int::to_string(i)\nfn rnames(n: int) -> List\[str\]:\n    loop i down from n - 1 through 0:\n        std::int::to_string(i)\nfn rvals(n: int) -> List\[int\]:\n    loop i down from n - 1 through 0:\n        i\n\[
+    bag(ints(40), \"a\") == bag(rev(40), \"b\"),
+    bag(ints(40), \"a\") == bag(std::list::append(rev(39), 0), \"b\"),
+    bag(std::list::append(ints(39), 7), \"a\") == bag(rev(40), \"b\"),
+    dict(names(30), ints(30), 0) == dict(rnames(30), rev(30), 0),
+    dict(names(30), ints(30), 0) == dict(rnames(30), rvals(30), 0),
+    hash(bag(ints(40), \"a\")) == hash(bag(rev(40), \"b\")),
+    hash(dict(names(30), ints(30), 0)) == hash(dict(rnames(30), rev(30), 0))
+\]\n"
+} -result {value {[true, false, false, true, false, true, true]}}
+
+test vi-declarations-distinct {two declarations with the same identity form and the same entries are two types: their values are never equal} -body {
+    viRun "\[bag(\[1\], \"a\") == bag(\[1\], \"a\"), other(\[1\]) == other(\[1\]), \[bag(\[1\], \"a\")\] == \[bag(\[1\], \"a\")\]\]\n"
+} -result {value {[true, true, true]}}
+
+test vi-nested {identity composes: a List of identity values, a struct holding one, an identity whose entries are identity values} -body {
+    viRun "struct Doc:\n    title: str\n    data: Dict\[str, int\]\nfn bags(xs: List\[Bag\[int\]\]) -> Bag\[Bag\[int\]\]:\n    Bag\[Bag\[int\]\] {items: xs, note: \"\"}\n\[
+    \[bag(\[1, 2\], \"a\"), bag(\[3\], \"\")\] == \[bag(\[2, 1\], \"b\"), bag(\[3\], \"z\")\],
+    Doc {title: \"t\", data: dict(\[\"a\", \"b\"\], \[1, 2\], 0)} == Doc {title: \"t\", data: dict(\[\"b\", \"a\"\], \[2, 1\], 5)},
+    bags(\[bag(\[1, 2\], \"\"), bag(\[3\], \"\")\]) == bags(\[bag(\[3\], \"x\"), bag(\[2, 1\], \"y\")\]),
+    hash(bags(\[bag(\[1, 2\], \"\"), bag(\[3\], \"\")\])) == hash(bags(\[bag(\[3\], \"x\"), bag(\[2, 1\], \"y\")\])),
+    hash(Doc {title: \"t\", data: dict(\[\"a\", \"b\"\], \[1, 2\], 0)}) == hash(Doc {title: \"t\", data: dict(\[\"b\", \"a\"\], \[2, 1\], 5)})
+\]\n"
+} -result {value {[true, true, true, true, true]}}
+
+test vi-intrinsic-set-members {an ImmutableSet of identity values deduplicates and compares them by identity, and a set of more than eight members is matched by hash} -body {
+    viRun "fn ints(n: int) -> List\[int\]:\n    loop i from 0 to n:\n        i\nfn rev(n: int) -> List\[int\]:\n    loop i down from n - 1 through 0:\n        i\n\[
+    std::immutable_set::from_list(\[bag(\[1, 2\], \"a\"), bag(\[2, 1\], \"b\"), bag(\[3\], \"c\")\]) == std::immutable_set::from_list(\[bag(\[3\], \"\"), bag(\[1, 2\], \"\")\]),
+    std::immutable_set::contains(std::immutable_set::from_list(\[bag(\[1, 2\], \"a\")\]), bag(\[2, 1\], \"q\")),
+    std::immutable_set::from_list(ints(30)) == std::immutable_set::from_list(rev(30)),
+    std::immutable_set::from_list(ints(30)) == std::immutable_set::from_list(std::list::append(rev(29), 31)),
+    std::immutable_set::from_list(std::list::append(ints(30), 5)) == std::immutable_set::from_list(ints(30))
+\]\n"
+} -result {value {[true, true, true, false, true]}}
+
+test vi-intrinsic-set-unhashable {a large set of members with no hash is built pairwise, as before: the comparison that meets a function refuses it (EQUALITY), the same first comparison the pairwise construction always made} -body {
+    viRun "fn f(x):\n    x\nfn mk(xs) -> int:\n    s = std::immutable_set::from_list(xs)\n    1\nmk(\[1, 2, 3, 4, 5, 6, 7, 8, 9, f, 10, f\])\n"
+} -result {error {CORE SEMANTIC EQUALITY} {== is not defined for callables: 1 == <block (x)>}}
+
+test vi-refusal-is-opaque {a refusal inside an identity is the opaque values', never their representation} -body {
+    set src "$::viDecls\nfn mk() -> Bag\[MutableVector\[int\]\]:\n    Bag\[MutableVector\[int\]\] {items: \[std::mutable_vector::from_list(\[1\])\], note: \"secret-note\"}\nfn same(a, b) -> bool:\n    a == b\nsame(mk(), mk())\n"
+    set hir [viHir $src]
+    set result {}
+    foreach run {{core::compiler::evalHir $hir} {native::evalHir $hir}} {
+        catch $run message options
+        lappend result [lindex [dict get $options -errorcode] end] [string match {*<opaque Bag> == <opaque Bag>*} $message] [string match *secret-note* $message]
+    }
+    set result
+} -result {EQUALITY 1 0 EQUALITY 1 0}
+
+# ---------------------------------------------------------------------------
+# Hashing
+
+test vi-hash-coherent {equal values hash equally in both hashes; the other fields and the order take no part} -body {
+    viKeyed "\[
+    hash(bag(\[1, 2, 3\], \"a\")) == hash(bag(\[3, 1, 2\], \"b\")),
+    std::hashfix::keyed(bag(\[1, 2, 3\], \"a\")) == std::hashfix::keyed(bag(\[3, 1, 2\], \"b\")),
+    hash(dict(\[\"a\", \"b\"\], \[1, 2\], 1)) == hash(dict(\[\"b\", \"a\"\], \[2, 1\], 2)),
+    std::hashfix::keyed(dict(\[\"a\", \"b\"\], \[1, 2\], 1)) == std::hashfix::keyed(dict(\[\"b\", \"a\"\], \[2, 1\], 2)),
+    hash(dict(\[\"a\", \"b\"\], \[1, 2\], 1)) == hash(dict(\[\"a\", \"b\"\], \[2, 1\], 1)),
+    std::hashfix::keyed(dict(\[\"a\", \"b\"\], \[1, 2\], 1)) == std::hashfix::keyed(dict(\[\"a\", \"b\"\], \[2, 1\], 1)),
+    hash(bag(\[1, 1\], \"\")) == hash(bag(\[\], \"\")),
+    hash(bag(\[1\], \"\")) == hash(other(\[1\]))
+\]\n" $::viKey
+} -result {value {[true, true, true, true, false, false, false, false]}}
+
+test vi-hash-oracle {under a fixed test key, every backend computes the independent oracle's public and table hash of identity values, nested ones included} -constraints python3 -body {
+    set cases {
+        {bag([1, 2, 3], "a")} {{"identity": {"id": "Bag", "members": [{"int": "3"}, {"int": "1"}, {"int": "2"}]}}}
+        {bag([], "a")} {{"identity": {"id": "Bag", "members": []}}}
+        {bag([5, 5], "")} {{"identity": {"id": "Bag", "members": [{"int": "5"}, {"int": "5"}]}}}
+        {other([1])} {{"identity": {"id": "OtherBag", "members": [{"int": "1"}]}}}
+        {dict(["a", "b", "c"], [1, 2, 3], 7)} {{"identity": {"id": "Dict", "associations": [[{"str": "c"}, {"int": "3"}], [{"str": "a"}, {"int": "1"}], [{"str": "b"}, {"int": "2"}]]}}}
+        {[dict(["x"], [1], 0), dict([], [], 0)]} {{"list": [{"identity": {"id": "Dict", "associations": [[{"str": "x"}, {"int": "1"}]]}}, {"identity": {"id": "Dict", "associations": []}}]}}
+        {Bag[Bag[int]] {items: [bag([1], ""), bag([2, 3], "")], note: "n"}} {{"identity": {"id": "Bag", "members": [{"identity": {"id": "Bag", "members": [{"int": "2"}, {"int": "3"}]}}, {"identity": {"id": "Bag", "members": [{"int": "1"}]}}]}}}
+    }
+    set exprs {}
+    set jsons {}
+    foreach {e j} $cases {
+        lappend exprs "\[hash($e), std::hashfix::keyed($e)\]"
+        lappend jsons $j
+    }
+    set outcome [viKeyed "\[[join $exprs {, }]\]\n" $::viKey]
+    set out [exec python3 -I [file join $::projectRoot audit hashable tools oracle.py] hash {*}$::viKey << [join $jsons \n]]
+    set expected "\[[join [lmap line [split $out \n] {format {[%s, %s]} {*}$line}] {, }]\]"
+    expr {$outcome eq [list value $expected] ? "agree" : "$outcome != $expected"}
+} -result agree
+
+# Two Ints whose 64-bit public (FNV-1a) hash states are identical, found
+# offline (HASHABLE-AND-KEYED-HASH.md, "Why post-mixing is insufficient").
+set ::viCollide {a = 17384044247497657079
+b = 13834495523901255922
+fill = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+fn ints_dict(ks: List[int], vs: List[int]) -> Dict[int, int]:
+    Dict[int, int] {ks: ks, junk: 0, vs: vs}
+}
+
+test vi-hash-collision-not-equal {equal public hashes never make identity values equal: entries whose public hashes collide are compared by equality, pairwise and through hash buckets (more than eight unmatched entries), as members, keys and values} -body {
+    viRun "$::viCollide\[
+    hash(a) == hash(b),
+    bag(\[a\], \"\") == bag(\[b\], \"\"),
+    hash(bag(\[a\], \"\")) == hash(bag(\[b\], \"\")),
+    bag(\[a, 1, 2, 3, 4, 5, 6, 7, 8, 9\], \"\") == bag(\[9, 8, 7, 6, 5, 4, 3, 2, 1, b\], \"\"),
+    ints_dict(\[a\], \[1\]) == ints_dict(\[b\], \[1\]),
+    ints_dict(\[1\], \[a\]) == ints_dict(\[1\], \[b\]),
+    hash(ints_dict(\[1\], \[a\])) == hash(ints_dict(\[1\], \[b\])),
+    ints_dict(\[a, 1, 2, 3, 4, 5, 6, 7, 8, 9\], \[0, 1, 2, 3, 4, 5, 6, 7, 8, 9\]) == ints_dict(\[9, 8, 7, 6, 5, 4, 3, 2, 1, b\], \[9, 8, 7, 6, 5, 4, 3, 2, 1, 0\]),
+    ints_dict(\[0, 1, 2, 3, 4, 5, 6, 7, 8, 9\], \[a, 1, 2, 3, 4, 5, 6, 7, 8, 9\]) == ints_dict(\[9, 8, 7, 6, 5, 4, 3, 2, 1, 0\], \[9, 8, 7, 6, 5, 4, 3, 2, 1, b\]),
+    bag(\[a, b, 1, 2, 3, 4, 5, 6, 7, 8\], \"\") == bag(\[8, 7, 6, 5, 4, 3, 2, 1, b, a\], \"\")
+\]\n"
+} -result {value {[true, false, true, false, false, false, true, false, false, true]}}
+
+test vi-intrinsic-set-collision {a set of more than eight members keeps two members whose public hashes collide, and tells them apart: deduplication and equality by hash buckets compare the members} -body {
+    viRun "$::viCollide\[
+    std::immutable_set::from_list(std::list::append(std::list::append(fill, a), b)) == std::immutable_set::from_list(std::list::append(fill, a)),
+    std::immutable_set::contains(std::immutable_set::from_list(std::list::append(std::list::append(fill, a), b)), b),
+    std::immutable_set::from_list(std::list::append(fill, a)) == std::immutable_set::from_list(std::list::append(fill, b))
+\]\n"
+} -result {value {[false, true, false]}}
+
+test vi-executable {a standalone executable compares and hashes by identity: the program descriptor carries each shape's identity} -constraints executableAot -setup {
+    set dir [makeDirectory {vi aot}]
+} -body {
+    set hir [viHir "$::viDecls\[bag(\[1, 2, 3\], \"a\") == bag(\[3, 1, 2\], \"b\"), dict(\[\"a\", \"b\"\], \[1, 2\], 1) == dict(\[\"b\", \"a\"\], \[2, 1\], 2), hash(bag(\[1, 2, 3\], \"x\"))\]\n"]
+    set binary [native::executable $hir [file join $dir program]]
+    list [exec $binary] [core::formatValue [native::evalHir $hir]]
+} -cleanup {
+    removeDirectory {vi aot}
+} -result {{[true, true, 2303140193253857579]} {[true, true, 2303140193253857579]}}
+
+test vi-public-hash-pinned {the public hash of an identity value is fixed by its entries (deterministic across processes and backends)} -body {
+    viRun "\[hash(bag(\[1, 2, 3\], \"x\")), hash(dict(\[\"a\", \"b\", \"c\"\], \[1, 2, 3\], 1))\]\n"
+} -result {value {[2303140193253857579, 26301586116918609]}}
+
+test vi-unrelated-hashes-unchanged {the public hash of a value of no declared identity is unchanged: a struct whose fields match an identity struct's still hashes by its fields} -body {
+    viRun "\[hash(plain(\[1, 2\], \"a\")) == hash(plain(\[2, 1\], \"a\")), hash(plain(\[1, 2\], \"a\")) == hash(plain(\[1, 2\], \"b\"))\]\n"
+} -result {value {[false, false]}}
+
+# ---------------------------------------------------------------------------
+# Equatable and Hashable: conditional witnesses
+
+set ::viTraits {fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn fp(x: Hashable) -> int:
+    hash(x)
+
+}
+
+test vi-equatable-conditional {Bag[T] is Equatable exactly when T's equality is total, and Hashable exactly when T is Hashable; the reason names the identity's elements, never a field} -body {
+    list [viRun "$::viTraits\[same(bag(\[1\], \"\"), bag(\[1\], \"\")), fp(bag(\[1, 2\], \"\")) == fp(bag(\[2, 1\], \"q\")), same(Bag\[List\[int\]\] {items: \[\[1\]\], note: \"\"}, Bag\[List\[int\]\] {items: \[\[1\]\], note: \"x\"})\]\n"] \
+        [viRejection "$::viDecls$::viTraits\nfn inc(x: int) -> int:\n    x + 1\nfn mk(f: Fn{args: \[int\], return: int}) -> Bag\[Fn{args: \[int\], return: int}\]:\n    Bag\[Fn{args: \[int\], return: int}\] {items: \[f\], note: \"\"}\nb = mk(inc)\nsame(b, b)\n"]
+} -result {{value {[true, true, true]}} {TRAIT-NOT-SATISFIED {argument for parameter "a" does not satisfy trait Equatable:
+Bag[Fn{args: [int], return: int, errors: []}] does not satisfy Equatable
+the members of Bag[Fn{args: [int], return: int, errors: []}] (Fn{args: [int], return: int, errors: []}): a function has no total equality (== of two functions is not defined: there is no function identity)}}}
+
+test vi-equality-not-hash {the witness predicates read the identity's elements only: a non-identity field of a type with no total equality (DecimalRounded) makes no type non-Equatable or non-Hashable} -body {
+    viRun "$::viTraits\nopaque struct WithDecimal:\n    xs: List\[int\]\n    d: DecimalRounded{minDecimalsPreserved: 2}\n    identity members(xs)\nfn mk(xs: List\[int\]) -> WithDecimal:\n    WithDecimal {xs: xs, d: 0.25}\n\[same(mk(\[1, 2\]), mk(\[2, 1\])), fp(mk(\[1, 2\])) == fp(mk(\[2, 1\]))\]\n"
+} -result {value {[true, true]}}
+
+test vi-hashable-refines-equatable {Hashable refines Equatable: a Hashable view is accepted where Equatable is expected; an Equatable view is not Hashable} -body {
+    list [viRun "$::viTraits\nfn via(x: Hashable) -> bool:\n    same(x, x)\n\[via(bag(\[1\], \"\")), via(3)\]\n"] \
+        [viKind "$::viDecls$::viTraits\nfn back(x: Equatable) -> int:\n    fp(x)\nback(1)\n"]
+} -result {{value {[true, true]}} TRAIT-NOT-SATISFIED}
+
+test vi-equatable-slot {a struct slot may be constrained by Equatable: == of the variable is total (veqtotal) in a generic body} -constraints nativeBuilt -body {
+    set src "struct Box\[T satisfies Equatable\]:\n    x: T\nfn eq(a: Box\[T\], b: Box\[T\]) -> bool:\n    a.x == b.x\n\[eq(Box\[int\] {x: 1}, Box\[int\] {x: 1}), eq(Box\[List\[str\]\] {x: \[\"a\"\]}, Box\[List\[str\]\] {x: \[\"b\"\]})\]\n"
+    list [sourceAgree $src] [viOps [dict get [native::lower::program [viHir $src] -specialize 0] text] eq] \
+        [viKind "struct Box\[T satisfies Equatable\]:\n    x: T\nfn inc(x: int) -> int:\n    x + 1\nb = Box\[Fn{args: \[int\], return: int}\] {x: inc}\n1\n"]
+} -result {{value {[true, false]}} veqtotal TRAIT-NOT-SATISFIED}
+
+test vi-equatable-reserved {Equatable is reserved like Hashable: no type or trait of the name} -body {
+    list [viKind "struct Equatable:\n    x: int\n1\n"] [viKind "trait Equatable:\n    fn f(x: Equatable) -> int\n1\n"]
+} -result {TYPE TRAIT-NAME-COLLISION}
+
+test vi-mutable-not-eligible {the mutable collections stay neither Equatable nor Hashable} -body {
+    list [viKind "import std::mutable_map\n$::viTraits\nm = std::mutable_map::create\[int, int\]()\nsame(m, m)\n"] \
+        [viKind "import std::mutable_set\n$::viTraits\ns = std::mutable_set::create\[int\]()\nfp(s)\n"]
+} -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
+
+# ---------------------------------------------------------------------------
+# Lowering and cost
+
+test vi-nir-total {== of an Equatable identity type is veqtotal and hash of a Hashable one hashtotal: no EQUALITY edge (may_error=false), no safepoint} -constraints nativeBuilt -body {
+    set nir [viNir "$::viDecls\nfn eq(a: Dict\[str, int\], b: Dict\[str, int\]) -> bool:\n    a == b\nfn h(a: Bag\[int\]) -> int:\n    hash(a)\nfn veq(a: Bag\[MutableVector\[int\]\], b: Bag\[MutableVector\[int\]\]) -> bool:\n    a == b\nfn vb() -> Bag\[MutableVector\[int\]\]:\n    Bag\[MutableVector\[int\]\] {items: \[\], note: \"\"}\n\[eq(dict(\[\], \[\], 0), dict(\[\], \[\], 0)), h(bag(\[\], \"\")), veq(vb(), vb())\]\n"]
+    list [viOps $nir eq] [viMayError $nir eq] [viOps $nir h] [viMayError $nir h] [viOps $nir veq]
+} -result {veqtotal false hashtotal false veq}
+
+test vi-allocation-free {equality and both hashes of identity values allocate nothing on the managed heap, whatever the number of entries} -constraints nativeBuilt -body {
+    set run {n}
+    set counts {}
+    foreach n {16 64} {
+        set prelude "$::viDecls\nfn ints(n: int) -> List\[int\]:\n    loop i from 0 to n:\n        i\nfn rev(n: int) -> List\[int\]:\n    loop i down from n - 1 through 0:\n        i\na = bag(ints($n), \"\")\nb = bag(rev($n), \"\")\n"
+        set base [dict get [native::allocationReport [viHir "$prelude\n1\n"] summary] total allocations]
+        set with [dict get [native::allocationReport [viHir "$prelude\nx = \[a == b, a == b, a == b\]\nh = hash(a) + hash(b)\n1\n"] summary] total allocations]
+        lappend counts [expr {$with - $base}]
+    }
+    set counts
+} -result {2 2}
+cleanupTests

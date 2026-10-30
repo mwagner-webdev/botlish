@@ -6,16 +6,17 @@
 # module -- compiled by the ordinary front end, lowered and linked by the
 # ordinary C FFI. The synthetic fixture (tools/c-bindgen/fixture: a
 # freestanding header, its C implementation, a Botlish caller and a C
-# caller) needs only clang; the Tcl, BoringSSL and SDL3 acceptance needs
-# their pinned sources (tools/c-bindgen.tcl fetch PROFILE) and libraries
-# (the installed libtcl9.0, tests/cffi/boringssl.tcl, tests/cffi/sdl3.tcl)
-# and is skipped without them.
+# caller) needs only clang; the Tcl, BoringSSL, SDL3 and Raven acceptance
+# needs their pinned sources (tools/c-bindgen.tcl fetch PROFILE) and
+# libraries (the installed libtcl9.0, tests/cffi/boringssl.tcl,
+# tests/cffi/sdl3.tcl, tests/cffi/raven.tcl) and is skipped without them.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
 source [file join $::projectRoot native native.tcl]
 source [file join $::projectRoot tests cffi boringssl.tcl]
 source [file join $::projectRoot tests cffi sdl3.tcl]
+source [file join $::projectRoot tests cffi raven.tcl]
 source [file join $::projectRoot tools c-bindgen lib.tcl]
 source [file join $::projectRoot tools c-bindgen oracle.tcl]
 
@@ -36,7 +37,7 @@ proc sourcesFetched {name} {
     set profile [::cbind::profile::load $name]
     return [expr {![catch {::cbind::profile::sourceRoot $profile 0}]}]
 }
-foreach name {tcl boringssl sdl3} {
+foreach name {tcl boringssl sdl3 raven} {
     testConstraint ${name}Sources [expr {[testConstraint clang] && [sourcesFetched $name]}]
 }
 # libtcl9.0 as the C FFI's Tcl acceptance links it.
@@ -61,6 +62,12 @@ testConstraint sdl3Library [expr {[testConstraint nativeRun] && [testConstraint 
 if {[testConstraint sdl3Library]} {
     set ::env(SDL_VIDEO_DRIVER) dummy
     set ::env(LD_LIBRARY_PATH) [join [concat [list [cffi::sdl3Dir]] [expr {[info exists ::env(LD_LIBRARY_PATH)] ? [list $::env(LD_LIBRARY_PATH)] : {}}]] :]
+}
+# Raven's acceptance runs on its null renderer and finds the shared
+# libraven.so (the headless build of tests/cffi/raven.tcl) the same way.
+testConstraint ravenLibrary [expr {[testConstraint nativeRun] && [testConstraint ravenSources] && [cffi::ravenDir] ne ""}]
+if {[testConstraint ravenLibrary]} {
+    set ::env(LD_LIBRARY_PATH) [join [concat [list [cffi::ravenDir]] [expr {[info exists ::env(LD_LIBRARY_PATH)] ? [list $::env(LD_LIBRARY_PATH)] : {}}]] :]
 }
 
 # What the fixture's demo (and its C caller) computes on the host: its last
@@ -1401,6 +1408,77 @@ test cb-layout-gcc-bindings {GCC agrees with clang on every layout of the Tcl, T
         list $p [expr {$status ? $out : "ok"}]
     }
 } -cleanup removeScratch -match glob -result {{tcl ok} * {sdl3 ok} {boringssl ok}}
+
+# ---------------------------------------------------------------------------
+# Raven: a C11 GUI library whose every object is a handle (RAVEN-BINDINGS.md)
+
+test cb-raven-current {the committed Raven binding of this host's target is what generation produces} -constraints {ravenSources linuxNative} -body {
+    set pairs [committedPairs raven 1]
+    list [expr {[llength $pairs] > 0}] [staleBindings $pairs]
+} -result {1 {}}
+
+test cb-raven-current-cross {the committed Raven binding of the other Linux target is what generation produces there, from that target's own C library headers} -constraints {ravenSources crossLinux} -body {
+    set pairs [committedPairs raven 0]
+    list [expr {[llength $pairs] > 0}] [staleBindings $pairs]
+} -result {1 {}}
+
+test cb-raven-breadth {Raven 0.1.3 is generated from Raven.h by the normal rules: all 921 declared functions bound directly, the two function-like macros (Rerror_check, R_ID_INDEX) unsupported for want of a signature and nothing else; Rid an ABI alias of C unsigned int (no opaque pointer: handles), R_INVALID_ID a constant of its type; every const char * parameter (172) carrying the profile's read noescape (Raven copies every string it is given), every other pointer unknown; 74 bound functions take a callback no Botlish function can be; every complete record a layout} -constraints {ravenSources linuxNative} -body {
+    set result [generation [::cbind::profile::load raven] $::linuxHost]
+    set c [::cbind::report::counts [dict get $result model]]
+    set rows [::cbind::generate::readTsv [dict get $result files report.tsv]]
+    set unsupported {}
+    dict for {key row} $rows {
+        if {[lindex $row 2] eq "unsupported"} { lappend unsupported [list [lindex $row 1] [lindex $row 4]] }
+    }
+    set recs [dict get $result model layouts]
+    set statuses [dict create]
+    dict for {key rec} $recs { dict incr statuses [dict get $rec status] }
+    list [dict get $c direct] [dict get $c alias] [dict get $c thunk] [lsort $unsupported] \
+        [lrange [dict get $rows "typedef Rid"] 2 4] [lrange [dict get $rows "macro R_INVALID_ID"] 2 4] \
+        [dict get $c manual] [dict get $c proven] [dict get $c callbacks] [dict get $statuses layout-direct] \
+        [regexp {title: std::ffi::c::Ptr\[std::ffi::c::Char\] read noescape} [dict get $result files raven/window.bot]]
+} -result {921 0 0 {{R_ID_INDEX macro-needs-signature} {Rerror_check macro-needs-signature}} {scalar {} std::ffi::c::UInt} {constant raven::core std::ffi::c::UInt} 172 0 74 27 1}
+
+test cb-raven-symbols {every Raven function the binding links directly is one libraven.so exports -- in the headless build (no Vulkan backend) all but raven_vulkan.h's 14, which only a Vulkan build defines although Raven.h always declares them (a program calling one links only against a Vulkan build); in a build with the Vulkan backend every one} -constraints ravenLibrary -body {
+    set profile [::cbind::profile::load raven]
+    set rows [::cbind::generate::readTsv [dict get [generation $profile $::hostTarget] files report.tsv]]
+    set defined [dict create]
+    foreach line [split [exec nm -D --defined-only [file join [cffi::ravenDir] libraven.so]] \n] {
+        if {[regexp {^[0-9a-f]+ [TDRBWi] ([^@ ]+)} $line -> sym]} { dict set defined $sym 1 }
+    }
+    set missing {}
+    set modules {}
+    set bound 0
+    dict for {key row} $rows {
+        lassign $row kind name status module reason detail
+        if {$status ni {direct alias}} continue
+        regexp {^symbol (\S+);} $detail -> sym
+        incr bound
+        if {![dict exists $defined $sym]} {
+            lappend missing $sym
+            lappend modules $module
+        }
+    }
+    set expected [expr {"-DRAVEN_BACKEND_VULKAN=OFF" in [cffi::RavenFlags] ? {raven::vulkan 14} : {{} 0}}]
+    list $bound [expr {[list [lsort -unique $modules] [llength $missing]] eq $expected}]
+} -result {921 1}
+
+test cb-raven-acceptance {one ordinary Botlish program over the generated Raven declarations and constants alone -- Rinit on the null renderer, a window, a panel, a label and a button, a frame, the label's text and the version (C pointers, not null), handles valid and then invalid after the window is destroyed, Rshutdown -- on both native backends; it is no direct module (handles, numbers and strings lent by the profile's read noescape) and only the functions it calls reach the foreign table} -constraints ravenLibrary -body {
+    set profile [::cbind::profile::load raven]
+    set dir [staged $profile $::hostTarget [file join $::projectRoot examples ffi bindgen raven demo.bot]]
+    set foreign [llength [lsearch -all -regexp [split [native::nir [stagedHir $dir demo.bot]] \n] {^foreign }]]
+    set values [stagedValues $dir demo.bot {cranelift cranelift-generic} [list [cffi::ravenDir]]]
+    list $foreign $values
+} -cleanup removeScratch -result {14 {{[true, true, true, true, true, true, true, true]} {[true, true, true, true, true, true, true, true]}}}
+
+test cb-raven-layouts {every layout the Raven binding emits agrees with C at run time on both native backends (the runtime oracle): RInitDesc (a C float after five ints), REvent, RDropEvent, RTileItem (fixed arrays of floats), RFrameStats (doubles), the backend's draw records and vtable of function pointers, ...; RPainter, only declared, is an opaque pointee} -constraints {ravenSources nativeRun} -body {
+    set profile [::cbind::profile::load raven]
+    set recs [dict get [generation $profile $::hostTarget] model layouts]
+    lassign [layoutOracle $profile all] checks a b
+    list [expr {$checks > 200}] $a $b [lmap key {{struct RInitDesc} {struct REvent} {struct RTileItem} {struct RFrameStats} {struct RBackendVTable} {struct RPainter}} {
+        list $key [dict get $recs $key status]
+    }]
+} -cleanup removeScratch -result {1 {} {} {{{struct RInitDesc} layout-direct} {{struct REvent} layout-direct} {{struct RTileItem} layout-direct} {{struct RFrameStats} layout-direct} {{struct RBackendVTable} layout-direct} {{struct RPainter} opaque-only}}}
 
 # ---------------------------------------------------------------------------
 # Win32: MinGW-w64's headers for Windows x86-64 with the GNU ABI, from Linux

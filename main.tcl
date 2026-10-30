@@ -19,6 +19,8 @@
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
+#   -native-startup POLICY the executable's startup policy: worker (default)
+#                          or main-thread (macOS AArch64)
 #   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
 #                          native library NAME (NATIVE-LIBRARY-MILESTONE-1.md:
 #                          libNAME.a, libNAME.so, NAME.h,
@@ -115,6 +117,19 @@
 # for any other: SINGLE-EXECUTABLE.md, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
 # It does not evaluate the program.
 # Running the executable prints its value.
+# -native-startup POLICY sets the executable's startup policy
+# (MAIN-THREAD-STARTUP-MILESTONE-1.md), fixed in it when it is built, never
+# by the environment it later runs in: worker (the default) runs the
+# program on a worker thread of its own, whose stack
+# BOTLISH_NATIVE_STACK_BYTES sizes (1 GiB by default); main-thread runs it
+# on the process's main thread, which a macOS graphical program needs
+# (AppKit, so SDL3's Cocoa driver, works there only), with a 512 MiB stack
+# the link reserves (LC_MAIN) -- for a macOS AArch64 executable only, and
+# refused for any other target before anything is written. Nothing else
+# changes: the program's meaning, its output, errors and exit status are the
+# same under both. It is an option of -emit-native-executable only (no
+# other invocation makes an executable); given twice, it must name the same
+# policy.
 # -emit-hir-interchange writes each .bot or .hir input's analyzed HIR in the
 # HIR interchange format (HIR-INTERCHANGE.md) beside it, as FILE.hirx, without
 # evaluating it; a .hirx input is run like any other, on any backend, with no
@@ -203,6 +218,7 @@ set cliOptions {
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}
     -emit-native-executable {} build {build a standalone executable beside each input}
+    -native-startup POLICY build {the executable's thread: worker (default) or main-thread}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -emit-native-library NAME build {build native library NAME from the one input}
     -export FUNCTION build {export a top-level function (default: exported c fns)}
@@ -805,7 +821,7 @@ proc emitExecutable {path} {
             .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
             default { throw {NATIVE AOT INPUT} "expected a .bot, .hir or .hirx input file (native executables are built from HIR, never from core IR text): $path" }
         }
-        set executable [native::executable $hir [file rootname $path]]
+        set executable [native::executable $hir [file rootname $path] -startup $::nativeStartup]
     } message options]} {
         printError stderr "$path: " $message $options
         return 1
@@ -832,6 +848,7 @@ set injectedArgvGiven 0
 set libraryName ""
 set libraryExports {}
 set libraryDir ""
+set nativeStartup ""
 set check 0
 foreach option [dict get $commandLine options] {
     lassign $option arg value
@@ -900,6 +917,15 @@ foreach option [dict get $commandLine options] {
             set showNative library
             set libraryName $value
         }
+        -native-startup {
+            if {$value ni {worker main-thread}} {
+                usageError "unknown native startup policy \"$value\" (known: worker main-thread)"
+            }
+            if {$nativeStartup ne "" && $nativeStartup ne $value} {
+                usageError "-native-startup is given twice with different policies (\"$nativeStartup\" and \"$value\"): an executable has one"
+            }
+            set nativeStartup $value
+        }
         -export { lappend libraryExports $value }
         -out { set libraryDir $value }
         -argv - -argv-hex {
@@ -933,6 +959,14 @@ foreach option [dict get $commandLine options] {
 }
 if {$showNative ne "library" && ($libraryExports ne "" || $libraryDir ne "")} {
     usageError "-export and -out are options of -emit-native-library"
+}
+if {$nativeStartup ne "" && $showNative ne "executable"} {
+    # The policy is fixed into an executable when it is built: no other
+    # invocation makes one, and an explicit choice is never ignored.
+    usageError "-native-startup is an option of -emit-native-executable: it chooses the thread a built executable runs its program on, and nothing else this invocation does makes one (a native library runs on its host's thread; -backend cranelift runs a program on the driver's own)"
+}
+if {$nativeStartup eq ""} {
+    set nativeStartup worker
 }
 if {$showNative eq "library" && [llength $files] != 1} {
     usageError "-emit-native-library builds one library from one input file (found [llength $files])"

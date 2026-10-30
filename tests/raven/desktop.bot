@@ -1,0 +1,49 @@
+# desktop.bot -- headless.bot's script on a real window (tests/raven.test,
+# raven-desktop): Raven started with its defaults -- X11 and the Vulkan
+# renderer -- under a display (Xvfb, with a software Vulkan driver in CI
+# and containers): the same clicks, the same counts; and the renderer
+# drew them -- the frame Raven reads back is the window's size in pixels,
+# and the label's new text changed it.
+import counter
+import raven
+import std::abi::bytes
+import std::int
+import std::list
+
+with context raven::create()
+
+fn text(value: bool) -> str:
+    if value:
+        return "true"
+    "false"
+
+# COUNT after a click of the button named NAME and the frame that follows.
+fn press(window: raven::Window, name: str, count: int, context ui: raven::Ui) -> int errors NonFiniteFloat:
+    window.click(window.find(name))
+    drawn = raven::draw_frame()
+    window.step(count)
+
+fn main(context ui: raven::Ui) -> List[str] errors raven::RavenFailed, NonFiniteFloat, IndexNotFound:
+    raven::start(raven::desktop())
+    window = counter::open()
+    laid_out = raven::draw_frame()
+    before = raven::capture(window)
+    clicked = window.press("click", window.press("click", window.press("click", 0)))
+    ended = window.press("quit", clicked)
+    running = raven::draw_frame()
+    label = raven::label_text(window.find("status"))
+    after = raven::capture(window)
+    size = raven::size(window)
+    drawn = [text(before.width == size.width and before.height == size.height), text(before.pixels.length().value == 4 * size.width * size.height), text(before.pixels != after.pixels)]
+    code = raven::exit_code()
+    raven::stop()
+    [std::int::to_string(ended), label, text(running), std::int::to_string(code)].append(drawn.at(0)).append(drawn.at(1)).append(drawn.at(2))
+
+result = main():
+    on raven::RavenFailed failure:
+        ["RavenFailed", failure.call, failure.detail]
+    on NonFiniteFloat:
+        ["NonFiniteFloat"]
+    on IndexNotFound:
+        ["IndexNotFound"]
+result

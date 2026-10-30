@@ -25,6 +25,7 @@ pub mod unwind;
 use crate::nir::{FuncId, Program};
 use crate::runtime::framemap;
 use crate::runtime::ops::helpers;
+use crate::runtime::program::Startup;
 use crate::runtime::value::*;
 use crate::runtime::vm::Vm;
 use cranelift_codegen::isa::OwnedTargetIsa;
@@ -413,18 +414,30 @@ pub struct ObjectProgram {
     pub functions: Vec<clif::DefineResult>,
 }
 
+/// The program object of a worker-startup executable (the tests' object).
+#[cfg(test)]
 pub fn emit_object(program: &Program) -> Result<ObjectProgram, BackendError> {
-    emit_object_with(program, isa(true)?, None)
+    emit_executable_object(program, Startup::Worker)
+}
+
+/// The program object of an executable whose startup policy is STARTUP
+/// (MAIN-THREAD-STARTUP-MILESTONE-1.md): its record's `startup` word, which
+/// every linker's startup reads (runtime::aot's `start_linked`). The policy
+/// changes nothing else in the object.
+pub fn emit_executable_object(program: &Program, startup: Startup) -> Result<ObjectProgram, BackendError> {
+    emit_object_with(program, isa(true)?, None, startup)
 }
 
 /// The program object of native library NAME (NATIVE-LIBRARY-MILESTONE-1.md):
 /// the program's code, descriptor and record with local symbols only, and the
 /// library's public C functions (codegen::library), its only global ones.
+/// Its record's startup word is the worker's: a library has no startup of
+/// its own (its host calls it on its own thread), and nothing reads it.
 pub fn emit_library_object(program: &Program, name: &str) -> Result<ObjectProgram, BackendError> {
-    emit_object_with(program, isa(true)?, Some(name))
+    emit_object_with(program, isa(true)?, Some(name), Startup::Worker)
 }
 
-fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str>) -> Result<ObjectProgram, BackendError> {
+fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str>, startup: Startup) -> Result<ObjectProgram, BackendError> {
     let builder = cranelift_object::ObjectBuilder::new(isa, "botlish", cranelift_module::default_libcall_names())
         .map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
     let mut module = cranelift_object::ObjectModule::new(builder);
@@ -436,7 +449,7 @@ fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str
         functions.push(clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false, false)?);
     }
     let linkage = if library.is_some() { cranelift_module::Linkage::Local } else { cranelift_module::Linkage::Export };
-    let record = define_program_record(&mut module, &symbols, program, &pool, &functions, linkage)?;
+    let record = define_program_record(&mut module, &symbols, program, &pool, &functions, linkage, startup)?;
     if let Some(name) = library {
         library::define(&mut module, program, name, record)?;
     }
@@ -456,8 +469,9 @@ fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str
 /// its code table (`botlish_code`: each function's direct and generic entry
 /// address, relocated by the link) and the record that points at both
 /// (`botlish_program`, a LinkedProgram, with LINKAGE: global for an
-/// executable, whose startup names it, local for a library). Returns the
-/// record's id.
+/// executable, whose startup names it, local for a library), whose last
+/// word is the executable's startup policy STARTUP. Returns the record's
+/// id.
 fn define_program_record(
     module: &mut cranelift_object::ObjectModule,
     symbols: &clif::Symbols,
@@ -465,8 +479,9 @@ fn define_program_record(
     pool: &ConstPool,
     functions: &[clif::DefineResult],
     linkage: cranelift_module::Linkage,
+    startup: Startup,
 ) -> Result<cranelift_module::DataId, BackendError> {
-    use crate::runtime::program::{FunctionShape, LINKED_MAGIC, ProgramDescriptor, program_info};
+    use crate::runtime::program::{FunctionShape, LINKED_MAGIC, LinkedProgram, ProgramDescriptor, program_info};
     use cranelift_module::{DataDescription, Linkage, Module};
     let error = |e: cranelift_module::ModuleError| BackendError::Codegen(format!("{e:?}"));
     let descriptor = ProgramDescriptor {
@@ -501,11 +516,16 @@ fn define_program_record(
     module.define_data(code_id, &data).map_err(error)?;
 
     let record_id = module.declare_data("botlish_program", linkage, false, false).map_err(error)?;
-    let mut record = vec![0u8; 48];
+    // runtime::program's LinkedProgram, word by word: its size and the
+    // startup word's offset are the runtime's own (the ABI fingerprint holds
+    // both).
+    let mut record = vec![0u8; std::mem::size_of::<LinkedProgram>()];
     record[0..8].copy_from_slice(&LINKED_MAGIC.to_le_bytes());
     record[8..16].copy_from_slice(&crate::runtime::aotimage::abi_fingerprint().to_le_bytes());
     record[24..32].copy_from_slice(&(descriptor_len as u64).to_le_bytes());
     record[40..48].copy_from_slice(&(count as u64).to_le_bytes());
+    let at = std::mem::offset_of!(LinkedProgram, startup);
+    record[at..at + 8].copy_from_slice(&startup.word().to_le_bytes());
     let mut data = DataDescription::new();
     data.define(record.into_boxed_slice());
     data.set_align(8);
@@ -1124,7 +1144,7 @@ mod object_format_tests {
             "    %12 = op iadd %11 %4\n    %13 = op iadd %12 %5\n    %14 = op iadd %13 %6\n    ret %14\nend\n",
         );
         let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
-        let object = emit_object_with(&program, isa_for("x86_64-pc-windows-msvc"), None).unwrap_or_else(|e| panic!("{}", e.message()));
+        let object = emit_object_with(&program, isa_for("x86_64-pc-windows-msvc"), None, Startup::Worker).unwrap_or_else(|e| panic!("{}", e.message()));
         let file = cranelift_object::object::File::parse(&*object.bytes).unwrap();
         let pdata = file.section_by_name(".pdata").expect(".pdata");
         let xdata = file.section_by_name(".xdata").expect(".xdata");

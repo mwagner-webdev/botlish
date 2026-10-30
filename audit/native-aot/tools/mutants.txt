@@ -171,8 +171,8 @@ const C_CALLS: bool = cfg!(any(
 ## native/src/runtime/aot.rs
 <<<<
         let _guard = {
-            let stack = super::native_stack::NativeStack::current().expect("pthread stack bounds");
-            super::platform::OverflowGuard::install_executable(&stack).expect("pthread stack guard")
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
         };
         let result = entry(&mut *vm);
 ====
@@ -312,9 +312,9 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 @@ sys-runtime-variable-ignored BOTLISH_NATIVE_RUNTIME is not read: the archive beside the driver is always linked
 ## native/src/codegen/aot.rs
 <<<<
-    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
+    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME").filter(|p| !p.is_empty()) {
 ====
-    let path = match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
+    let (path, built) = match std::env::var_os("BOTLISH_NATIVE_RUNTIME_IGNORED").filter(|p| !p.is_empty()) {
 >>>>
 
 @@ sys-runtime-bundle-ignored a driver in a macOS application bundle looks for the runtime archive beside itself, in Contents/MacOS, never in the bundle's Contents/Resources (MACOS-AARCH64-MILESTONE-9.md)
@@ -386,9 +386,17 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
 @@ sys-startup-failure-succeeds a system-linked executable whose record cannot be read exits with status 0
 ## native/src/runtime/aot.rs
 <<<<
-                    std::process::exit(1);
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 1;
+        }
+    };
+    run(startup, process_argv(), move || {
 ====
-                    std::process::exit(0);
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 0;
+        }
+    };
+    run(startup, process_argv(), move || {
 >>>>
 
 @@ sys-helper-unclassified a runtime archive without a helper the program calls is taken for an error of the program's link, not the archive's
@@ -492,4 +500,197 @@ fn crt_args_for(flavor: LinkerFlavor, _program: &Program) -> Vec<String> {
             if libc::fcntl(fd, libc::F_GETFD) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
 ====
             if false && libc::fcntl(fd, libc::F_GETFD) == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
+>>>>
+
+# ---------------------------------------------------------------------------
+# The startup policy (MAIN-THREAD-STARTUP-MILESTONE-1.md): where it is
+# chosen, carried, recorded, read and refused, and what the main thread's
+# startup does differently. A mutant macOS alone compiles or exercises
+# differently is macos-aarch64's (the tier item native-aot-mutants on a
+# macOS runner); tests/main-thread-startup.test is the detector of most.
+
+@@ cli-drops-main-thread main.tcl's -native-startup main-thread is dropped: the executable is the worker's
+## main.tcl
+<<<<
+        set executable [native::executable $hir [file rootname $path] -startup $::nativeStartup]
+====
+        set executable [native::executable $hir [file rootname $path] -startup worker]
+>>>>
+
+@@ cli-default-main-thread main.tcl's default policy is the main thread's, not the worker's
+## main.tcl
+<<<<
+if {$nativeStartup eq ""} {
+    set nativeStartup worker
+}
+====
+if {$nativeStartup eq ""} {
+    set nativeStartup main-thread
+}
+>>>>
+
+@@ api-replaces-main-with-worker native::executable hands the driver the worker's policy whatever -startup says
+## native/native.tcl
+<<<<
+    set lines [Driver executable $text [file normalize $path] --startup $startup]
+====
+    set lines [Driver executable $text [file normalize $path] --startup worker]
+>>>>
+
+@@ api-default-main-thread native::executable's default policy is the main thread's
+## native/native.tcl
+<<<<
+    set startup worker
+    if {[dict exists $args -startup]} {
+====
+    set startup main-thread
+    if {[dict exists $args -startup]} {
+>>>>
+
+@@ driver-default-main-thread the driver's default policy (executable without --startup) is the main thread's
+## native/src/main.rs
+<<<<
+    let startup = startup.unwrap_or(runtime::program::Startup::Worker);
+====
+    let startup = startup.unwrap_or(runtime::program::Startup::MainThread);
+>>>>
+
+@@ driver-startup-for-run the driver takes --startup for run and bench, where no executable is made (the JIT)
+## native/src/main.rs
+<<<<
+    if startup.is_some() && !matches!(command, "executable" | "object") {
+====
+    if startup.is_some() && !matches!(command, "executable" | "object" | "run" | "bench") {
+>>>>
+
+@@ linked-run-main-thread a linked run (a program that calls C, run by the driver) is emitted with the main thread's policy
+## native/src/main.rs
+<<<<
+    let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs, runtime::program::Startup::Worker) {
+====
+    let executable = match codegen::aot::emit_executable(program, &work.join("program"), link_dirs, runtime::program::Startup::MainThread) {
+>>>>
+
+@@ policy-not-recorded the program record's startup word is never written: every executable is the worker's
+## native/src/codegen/mod.rs
+<<<<
+    record[at..at + 8].copy_from_slice(&startup.word().to_le_bytes());
+====
+    let _ = (at, startup);
+>>>>
+
+@@ library-record-main-thread a native library's record names the main thread's policy
+%% linux-x86_64 linux-aarch64
+## native/src/codegen/mod.rs
+<<<<
+    emit_object_with(program, isa(true)?, Some(name), Startup::Worker)
+====
+    emit_object_with(program, isa(true)?, Some(name), Startup::MainThread)
+>>>>
+
+@@ record-policy-ignored the runtime reads every record as the worker's, whatever its word
+## native/src/runtime/program.rs
+<<<<
+    Startup::of_word(linked.startup)
+}
+====
+    let _ = linked.startup;
+    Ok(Startup::Worker)
+}
+>>>>
+
+@@ unknown-policy-accepted a record's unknown startup word is taken for the worker's
+## native/src/runtime/program.rs
+<<<<
+            other => Err(format!("the program record names an unknown startup policy ({other})")),
+====
+            _ => Ok(Startup::Worker),
+>>>>
+
+@@ fingerprint-ignores-record the ABI fingerprint leaves the program record's layout out: a runtime reads another layout's startup word
+## native/src/runtime/aotimage.rs
+<<<<
+        std::mem::size_of::<LinkedProgram>() as u64,
+        std::mem::offset_of!(LinkedProgram, startup) as u64,
+    ];
+====
+    ];
+>>>>
+
+@@ system-link-no-stack-size the system linker links a main-thread executable without LC_MAIN's stack size: the 8 MiB default main stack
+## native/src/codegen/aot.rs
+<<<<
+            for arg in startup_link_args(flavor, startup) {
+                push(&arg);
+            }
+====
+            let _ = startup;
+>>>>
+
+@@ rustc-link-no-stack-size the rustc linker links a main-thread executable without LC_MAIN's stack size
+%% macos-aarch64
+## native/src/codegen/aot.rs
+<<<<
+        .args(startup_link_args(LINKER, startup).into_iter().flat_map(|arg| ["-C".to_string(), format!("link-arg={arg}")]))
+====
+>>>>
+
+@@ linux-accepts-main-thread the driver emits main-thread executables for Linux, whose main thread has no confirmed guard
+%% linux-x86_64 linux-aarch64
+## native/src/codegen/target.rs
+<<<<
+    matches!(target.operating_system, OperatingSystem::Darwin(_) | OperatingSystem::MacOSX(_))
+        && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_))
+====
+    matches!(target.operating_system, OperatingSystem::Darwin(_) | OperatingSystem::MacOSX(_) | OperatingSystem::Linux)
+        && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_) | target_lexicon::Architecture::X86_64)
+>>>>
+
+@@ windows-accepts-main-thread the driver emits main-thread executables for Windows, whose main thread has link.exe's 1 MiB
+%% windows-x86_64
+## native/src/codegen/target.rs
+<<<<
+    matches!(target.operating_system, OperatingSystem::Darwin(_) | OperatingSystem::MacOSX(_))
+        && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_))
+====
+    matches!(target.operating_system, OperatingSystem::Darwin(_) | OperatingSystem::MacOSX(_) | OperatingSystem::Windows)
+        && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_) | target_lexicon::Architecture::X86_64)
+>>>>
+
+@@ runtime-main-thread-on-linux the Linux runtime runs a record that asks for the main thread there, instead of refusing it
+%% linux-x86_64 linux-aarch64
+## native/src/runtime/aot.rs
+<<<<
+pub const MAIN_THREAD_STARTUP: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+====
+pub const MAIN_THREAD_STARTUP: bool = cfg!(any(all(target_os = "macos", target_arch = "aarch64"), target_os = "linux"));
+>>>>
+
+@@ stub-ignores-policy the stub's loader runs every image as the worker's, a main-thread record included
+%% linux-x86_64
+## native/src/runtime/aotimage.rs
+<<<<
+    let startup = match loaded.startup() {
+        Ok(startup) => startup,
+====
+    let startup = match loaded.startup() {
+        Ok(_) => super::program::Startup::Worker,
+>>>>
+
+@@ main-thread-on-a-worker the main-thread policy runs the body on a thread it starts (the Vm made there), not on the process's main thread
+%% macos-aarch64
+## native/src/runtime/aot.rs
+<<<<
+        Startup::MainThread => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+====
+        Startup::MainThread => match std::thread::scope(|scope| scope.spawn(body).join()) {
+>>>>
+
+@@ main-thread-panic-escapes a panic of the main thread's body is not caught: Rust's status 101, not NATIVE BUG
+%% macos-aarch64
+## native/src/runtime/aot.rs
+<<<<
+        Startup::MainThread => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+====
+        Startup::MainThread => match Ok::<i32, ()>(body()) {
 >>>>

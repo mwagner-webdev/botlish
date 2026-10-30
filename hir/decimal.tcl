@@ -105,7 +105,7 @@ proc hir::decimal::Precision {type} {
 }
 
 # 1 if TYPE mentions a DecimalRounded type (itself, or in a List, set,
-# vector, array or struct field).
+# vector, array or struct field) where equality reads it.
 proc hir::decimal::Mentions {type {seen {}}} {
     set type [hir::types::Unrefined $type]
     if {[IsDecimal $type]} {
@@ -130,7 +130,17 @@ proc hir::decimal::Mentions {type {seen {}}} {
         if {$type in $seen} {
             return 0
         }
-        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        set fields [hir::structs::AppliedFieldTypes $type]
+        set identity [hir::structs::identityOf [lindex $type 1]]
+        if {$identity ne ""} {
+            # A struct that declares its identity (REPRESENTATION-
+            # INDEPENDENT-VALUE-IDENTITY.md) is compared by it alone: what
+            # its equality reads are its identity fields, never the rest.
+            set fields [concat {*}[lmap field [dict get $identity fields] {
+                list $field [dict get $fields $field]
+            }]]
+        }
+        foreach {name t} $fields {
             if {[Mentions $t [concat $seen [list $type]]]} {
                 return 1
             }

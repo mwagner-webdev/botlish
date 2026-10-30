@@ -42,7 +42,8 @@
 #                                       BEST-US is fractional (nanosecond-
 #                                       derived) microseconds, not truncated
 #                                       to a whole number
-#   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test)
+#   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test;
+#                                         -startup POLICY as native::executable's)
 #   native::targetFacts TRIPLE          how the driver reads a target triple
 #   native::linkPlan HIR ?OPTIONS?      the program's link plan as this host
 #                                         links it, one record per dependency
@@ -65,7 +66,16 @@
 #                                         toolchain, SINGLE-EXECUTABLE.md),
 #                                         system (the host's C driver and
 #                                         the runtime archive, no rustc) or
-#                                         auto (system for C, else stub)
+#                                         auto (system for C, else stub).
+#                                         -startup worker|main-thread is the
+#                                         executable's startup policy
+#                                         (MAIN-THREAD-STARTUP-MILESTONE-1.md):
+#                                         worker (the default) or, on a
+#                                         macOS aarch64 target only
+#                                         (capability mainThreadStartup), the
+#                                         process's main thread; elsewhere
+#                                         {NATIVE UNSUPPORTED startup}, before
+#                                         anything is written
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
@@ -164,6 +174,13 @@ namespace eval native {
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
 #                codegen/library.rs's SUPPORTED; the archive's partial link
 #                and symbol localization are GNU binutils')
+#   mainThreadStartup  executables started on the process's main thread
+#                (native::executable -startup main-thread, MAIN-THREAD-
+#                STARTUP-MILESTONE-1.md: runtime/aot.rs's MAIN_THREAD_STARTUP,
+#                codegen/target.rs's main_thread_startup): macOS AArch64,
+#                whose main-thread stack has a confirmed guard and whose link
+#                reserves its size (LC_MAIN, 512 MiB); every other target
+#                starts its executables on a worker only
 #   frameRoots   GC roots in native frames, found by the frame walk
 #                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS: the frame-pointer
 #                chain, on Windows with Windows' unwinder across Rust frames);
@@ -193,7 +210,8 @@ namespace eval native {
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        libraries {linux-x86_64 linux-aarch64}]
+        libraries {linux-x86_64 linux-aarch64} \
+        mainThreadStartup {macos-aarch64}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this
@@ -500,7 +518,24 @@ proc native::executableFile {path} {
     return $path
 }
 
+# The startup policy (-startup worker|main-thread, worker when absent) of
+# native::executable's or native::object's options ARGS, checked, and the
+# options without it: {POLICY OPTIONS}. The driver decides whether the
+# program's target supports it (codegen/aot.rs's startup_refusal).
+proc native::StartupOption {command args} {
+    set startup worker
+    if {[dict exists $args -startup]} {
+        set startup [dict get $args -startup]
+        dict unset args -startup
+        if {$startup ni {worker main-thread}} {
+            error "$command: -startup must be worker or main-thread, not \"$startup\""
+        }
+    }
+    return [list $startup $args]
+}
+
 proc native::executable {hir path args} {
+    lassign [StartupOption native::executable {*}$args] startup args
     set analysisOptions [dict create -specialize 1]
     foreach {option variable} {
         -call-facts-opt BOTLISH_NATIVE_CALL_FACTS_OPT
@@ -533,7 +568,7 @@ proc native::executable {hir path args} {
         throw {NATIVE AOT NOT-READY} "program is not AOT-ready:\n[join $failures \n]"
     }
     set text [nir $hir {*}$args {*}$analysisOptions]
-    set lines [Driver executable $text [file normalize $path]]
+    set lines [Driver executable $text [file normalize $path] --startup $startup]
     foreach line $lines {
         if {[lindex $line 0] eq "error"} { Outcome $lines }
     }
@@ -1059,7 +1094,8 @@ proc native::codeSize {hir args} {
 }
 
 proc native::object {hir path args} {
-    set lines [Driver object [nir $hir {*}$args] $path]
+    lassign [StartupOption native::object {*}$args] startup args
+    set lines [Driver object [nir $hir {*}$args] $path --startup $startup]
     if {[regexp {^error } [lindex $lines 0]]} {
         Outcome $lines
     }

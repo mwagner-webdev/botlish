@@ -212,6 +212,11 @@ proc core::hashing::Encode {mode v} {
             # is folded in so {x: 1} and {y: 1} do not collide by design.
             set fields [core::value::structFields $v]
             Text out $mode [Utf8Bytes [core::value::structId $v]]
+            set identity [core::value::identityOf [core::value::structId $v]]
+            if {$identity ne ""} {
+                Identity out $mode $identity [core::value::structValues $v]
+                return $out
+            }
             lappend out {*}[LeBytes [llength $fields]]
             foreach field $fields item [core::value::structValues $v] {
                 Text out $mode [Utf8Bytes $field]
@@ -271,6 +276,58 @@ proc core::hashing::Encode {mode v} {
         }
     }
     return $out
+}
+
+# Appends the identity IDENTITY ({FORM {POSITION ...}}, core::value's) of a
+# struct value with field values VALUES to OUTVAR's canonical input in MODE
+# (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md), after its declaration
+# identity: the form's tag, the entry count (8 bytes LE), and the wrapping
+# 64-bit sum of every entry's full hash (8 bytes LE) -- an entry's hash is
+# its own fold from a fresh state: a member's own (Fold), a pair's of the
+# entry tag, its key and its value (FoldEntry). The sum is commutative, so the
+# input is the same in any order of the entries, and it is a function of
+# their multiset, which is what the identity's equality compares: equal
+# values have equal inputs in both modes. Nothing else of the value is read:
+# not its other fields, not the order. (A sum, not an XOR: a repeated entry
+# never cancels.)
+namespace eval core::hashing {
+    variable IdentityTag [dict create members 1 associations 2]
+    variable EntryTag 3
+}
+proc core::hashing::Identity {outVar mode identity values} {
+    upvar 1 $outVar out
+    variable IdentityTag
+    variable Mask64
+    lassign [core::value::IdentityEntries $identity $values] keys vals pairs
+    lappend out [dict get $IdentityTag [lindex $identity 0]]
+    lappend out {*}[LeBytes [llength $keys]]
+    set sum 0
+    if {$pairs} {
+        foreach key $keys value $vals {
+            set sum [expr {($sum + [FoldEntry $mode $key $value]) & $Mask64}]
+        }
+    } else {
+        foreach key $keys {
+            set sum [expr {($sum + [Fold $mode $key]) & $Mask64}]
+        }
+    }
+    lappend out {*}[LeBytes $sum]
+}
+
+# The full 64-bit hash, in MODE, of the identity entry pairing KEY with
+# VALUE: the fold of the entry tag, then KEY and VALUE as nested values
+# (Child), from a fresh state -- a pair is one unit, so no rearrangement of
+# keys and values across entries keeps the sum.
+proc core::hashing::FoldEntry {mode key value} {
+    variable FnvOffset
+    variable EntryTag
+    set in [list $EntryTag]
+    Child in $mode $key
+    Child in $mode $value
+    if {$mode eq "public"} {
+        return [Bytes $FnvOffset $in]
+    }
+    return [SipHash13 {*}[TableKey] $in]
 }
 
 # Appends the variable-length text BYTES to OUTVAR's canonical input in
