@@ -857,9 +857,13 @@ CI on the branch `claude/confident-archimedes-9gikyw`, at the last code
 commit (a7e803ba): `tests.yml`, `tests-arm64.yml` and `static-decisions.yml`
 dispatched by hand (static-decisions because the front end and the standard
 library changed: the batched against the sequential scheduler, never run
-locally), the macOS and Windows workflows on push. The Windows Icy Tower
-workflow passed; the others were still queued behind the repository's
-runner backlog when this was written, so they are **pending, not passed**.
+locally), the macOS and Windows workflows on push. Passed: the Windows
+Icy Tower workflow, and the Windows workflow's smoke job (its Rust tests,
+native status, GC workloads under GC stress and the unwind check, the
+Windows-relevant test files) and root-plans job. Still queued behind the
+repository's runner backlog when this was written, so **pending, not
+passed**: `tests.yml`, `tests-arm64.yml`, `static-decisions.yml`, the macOS
+workflow, and the Windows acceptance shards and system-linker job.
 
 ## Limitations
 
