@@ -535,7 +535,12 @@ branch, are recorded below as they complete.
 
 ## 34. Windows CI results
 
-(Pending.)
+* `icy-tower (windows x86-64)` at 95e3648f (run 40960887711)
+  **[executed, Windows x86-64]**: success -- the game's MSVC SDL3 binding
+  generated, the game compiled and linked by link.exe as a worker
+  executable carrying the new record, its Windows tests, its headless and
+  SDL dummy-driver plays, the signing dry run and the signed copies' plays.
+* `tests (windows x86-64)` at 95e3648f (run 40960887683): pending.
 
 ## 35. Documentation and Compilerpedia
 
