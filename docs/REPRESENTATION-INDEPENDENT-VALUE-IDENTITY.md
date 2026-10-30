@@ -516,8 +516,13 @@ f = m.freeze()                          iterates a, b
 g = n.freeze()                          iterates b, a
 f == g                                  true
 hash(f) == hash(g)                      true
-r = f.reordered(g.order())  -- unproven: g's order, f's keys (REORDER-NOT-PROVEN)
-r = f.reordered(f.validate_order(g.order()))  -- checked once; r iterates b, a; r == f
+f.reordered(g.order())                  REORDER-NOT-PROVEN: g's order is
+                                        not known to hold f's keys
+o = f.validate_order(g.order()):        checked once
+    on std::immutable_map::OrderMismatch:
+        f.order()
+r = f.reordered(o)                      iterates b, a; r == f and
+                                        hash(r) == hash(f)
 ```
 
 `im-equality-ignores-order`, `im-freeze-histories`, `im-representation-
@@ -578,11 +583,145 @@ public hash and the keyed hash under a fixed key. `selftest` checks both.
 
 ## Fuzzing
 
-(Filled in below with the final runs.)
+`audit/value-identity/tools/fuzz.tcl` builds programs of several
+MutableMaps, each through a random history, freezes them and observes
+everything identity decides (its header has the full list). It biases
+toward the cases that matter: the same associations inserted in another
+order or reordered through a validated candidate; the same content after
+another history (a reserved capacity, junk keys added and removed so dead
+entries and compaction differ, values set wrong then replaced, a clear
+midway, a run of fresh keys drained again); one value or one key changed;
+one key more or fewer; and a frozen map's `reordered` copy. Key kinds are
+Int, Ints of the public hash's collision corpus, String, a struct, a List
+and a small ImmutableMap (maps keyed by maps); value kinds Int, String,
+List and ImmutableMap. Per program it observes each map's length and
+iteration, the pairwise equality of the maps and of their public hashes,
+each map's exact public hash and its table hash under a fixed key (through
+a privileged fixture module), and the maps used as keys (distinct count in
+a MutableMap and in a MutableSet, the first equal map found as a key).
+Every observation must equal the oracle's.
+
+| Run | Programs | Observations | Backend runs | Disagreements |
+|---|---:|---:|---:|---:|
+| seed 2, compiled backends | 6 | -- | 18 | 0 |
+| seed 11, all four backends (interp every third program) | 10 | 1,520 | 34 | 0 |
+| seed 12, all four backends | 10 | 1,570 | 34 | 0 |
+| seed 13, all four backends | 10 | 1,290 | 34 | 0 |
+| seed 21, compiled backends and native GC stress | 6 | 742 | 24 | 0 |
+
+The mutation harness runs it once more per mutant (seed 5, six programs,
+the compiled backends).
 
 ## Mutation testing
 
-(Filled in below with the final run.)
+`audit/value-identity/tools/mutate.tcl` applies each mutant of its
+`mutants.txt` to a private copy of the tree (rebuilding the native backend
+for a native mutant), then runs the detectors in order until one kills it:
+`tests/value-identity.test`, `tests/immutable-map.test`, then the fuzzer.
+**66 mutants, 66 killed, none survived.** The first detector of each:
+
+| Mutant | The bug | First detector |
+|---|---|---|
+| `identity-non-opaque-admitted` | an identity declared by a struct that is not opaque is accepted | value-identity.test: `vi-decl-not-opaque` |
+| `identity-context-admitted` | a context struct may declare an identity | value-identity.test: `vi-decl-context` |
+| `identity-field-not-list-admitted` | an identity field need not be a List | value-identity.test: `vi-decl-forms` |
+| `identity-mutable-admitted` | a struct with an identity may hold a MutableVector, a MutableArray or an affine value | value-identity.test: `vi-decl-immutable` |
+| `identity-lost-in-hir-text` | HIR text prints no identity clause | value-identity.test: `vi-hir-text` |
+| `identity-lost-in-read` | reading HIR text drops the identity clause | value-identity.test: `vi-hir-text` |
+| `identity-lost-in-install` | installing a HIR's declarations (compilation isolation) drops the struct's identity | value-identity.test: `vi-hir-text` |
+| `runtime-identity-positions-wrong` | the runtimes' identity test gives every identity field the first slot | value-identity.test: `vi-associations-equality`, `vi-hash-coherent` and more |
+| `native-lowering-drops-identity` | the NIR shape of a struct with an identity carries none | value-identity.test: `vi-associations-equality`, `vi-compilation-isolation` and more |
+| `tcl-identity-ignored-in-equality` | == of two values of an identity struct compares every field (the representation) | value-identity.test: `vi-associations-equality`, `vi-compilation-isolation` and more |
+| `tcl-equality-by-order` | == of two identity values compares the entries in order (no matching after the positional prefix) | value-identity.test: `vi-associations-equality`, `vi-compilation-isolation` and more |
+| `tcl-equality-ignores-length` | == of two identity values matches the first one's entries without comparing the counts | value-identity.test: `vi-members-equality` |
+| `tcl-equal-by-hash` | == of two members identities is the equality of their entries' public hashes (same length, same hashes) | value-identity.test: `vi-hash-collision-not-equal` |
+| `tcl-pair-value-ignored` | an association matches on its key alone (the value takes no part) | value-identity.test: `vi-associations-equality`, `vi-hash-collision-not-equal` and more |
+| `tcl-pairwise-reuses-entry` | pairwise matching lets two entries match one entry (a set's equality, not the multiset's) | value-identity.test: `vi-members-equality` |
+| `tcl-bucket-reuses-entry` | matching by hash buckets lets two entries match one entry | value-identity.test: `vi-hash-matching` |
+| `tcl-bucket-trusts-hash` | matching by hash buckets takes an entry of the same public hash as equal (identities and large sets) | value-identity.test: `vi-hash-collision-not-equal`, `vi-hash-matching` and more |
+| `tcl-set-dedup-trusts-hash` | a large ImmutableSet's construction drops a member whose public hash equals a kept one's | value-identity.test: `vi-intrinsic-set-collision` |
+| `tcl-hash-includes-representation` | the hash of an identity value also folds every field after its identity | value-identity.test: `vi-equality-not-hash`, `vi-equatable-conditional` and more |
+| `tcl-pair-hash-in-order` | an associations identity's entry hashes are combined in order (sum times 31) | value-identity.test: `vi-hash-coherent`, `vi-hash-matching` and more |
+| `tcl-member-hash-in-order` | a members identity's member hashes are combined in order (sum times 31) | value-identity.test: `vi-equality-not-hash`, `vi-equatable-conditional` and more |
+| `tcl-members-xor` | a members identity's member hashes are XOR-combined (a repeated member cancels) | value-identity.test: `vi-hash-oracle`, `vi-public-hash-pinned` |
+| `tcl-hash-omits-value` | an association's hash leaves out its value | value-identity.test: `vi-hash-coherent`, `vi-hash-oracle` and more |
+| `tcl-hash-omits-key` | an association's hash leaves out its key | value-identity.test: `vi-hash-coherent`, `vi-hash-oracle` and more |
+| `tcl-pair-boundary-lost` | an association's hash is the sum of its key's and its value's (keys and values rearranged across pairs keep the sum) | value-identity.test: `vi-hash-coherent`, `vi-hash-oracle` and more |
+| `tcl-domain-tag-omitted` | the hash of an identity folds no form tag | value-identity.test: `vi-hash-oracle`, `vi-public-hash-pinned` |
+| `tcl-count-omitted` | the hash of an identity folds no entry count | value-identity.test: `vi-hash-oracle`, `vi-public-hash-pinned` |
+| `tcl-keyed-post-mixes-public` | the table hash of an identity folds its entries' public hashes (a keyed mix of the unkeyed hash) | value-identity.test: `vi-hash-oracle` |
+| `native-identity-ignored-in-equality` | native == of two values of an identity shape compares every field | value-identity.test: `vi-associations-equality`, `vi-compilation-isolation` and more |
+| `native-equality-by-order` | native == of two identity values compares the entries in order | value-identity.test: `vi-associations-equality`, `vi-compilation-isolation` and more |
+| `native-pair-value-ignored` | a native association matches on its key alone | value-identity.test: `vi-associations-equality`, `vi-hash-collision-not-equal` and more |
+| `native-bucket-ignores-value` | native matching by hash buckets compares an entry's key, never its value | value-identity.test: `vi-hash-collision-not-equal`, `vi-hash-matching` |
+| `native-pairwise-reuses-entry` | native pairwise matching lets two entries match one entry | value-identity.test: `vi-members-equality` |
+| `native-hash-includes-representation` | the native hash of an identity value also walks every field | value-identity.test: `vi-equatable-conditional`, `vi-executable` and more |
+| `native-pair-hash-in-order` | native association hashes are combined in order | value-identity.test: `vi-hash-coherent`, `vi-hash-matching` and more |
+| `native-member-hash-in-order` | native member hashes are combined in order | value-identity.test: `vi-equality-not-hash`, `vi-equatable-conditional` and more |
+| `native-hash-omits-value` | a native association's hash (public and keyed) leaves out its value | value-identity.test: `vi-hash-coherent`, `vi-hash-oracle` and more |
+| `native-domain-tag-omitted` | the native hash of an identity folds no form tag | value-identity.test: `vi-executable`, `vi-hash-oracle` and more |
+| `native-descriptor-drops-identity` | a standalone executable's program descriptor loses every shape's identity | value-identity.test: `vi-executable` |
+| `witness-reads-representation` | Totality walks every field of an identity struct (its representation), not its identity's elements | value-identity.test: `vi-equality-not-hash`, `vi-equatable-conditional` |
+| `conditional-witness-always` | an identity's elements are taken to be total whatever their type (Bag[MutableVector[int]] is Equatable) | value-identity.test: `vi-equatable-conditional`, `vi-nir-total` |
+| `refines-dropped` | Hashable no longer refines Equatable (a Hashable view is not Equatable) | value-identity.test: `vi-hashable-refines-equatable` |
+| `refines-reversed` | the refinement runs backwards (an Equatable view is accepted as Hashable) | value-identity.test: `vi-hashable-refines-equatable` |
+| `decimal-guard-reads-representation` | == of an identity struct is refused for a DecimalRounded field of its representation | value-identity.test: `vi-equality-not-hash` |
+| `identity-reads-stored-hashes` | the map's identity pairs its keys with its stored hashes, not its values | immutable-map.test: `im-conditional-witness`, `im-different-secrets` and more |
+| `identity-reads-index` | the map's identity is the members of its index (the hidden placement) | immutable-map.test: `im-conditional-witness`, `im-equality-associations` and more |
+| `identity-keys-only` | the map's identity is its keys alone (values take no part) | immutable-map.test: `im-conditional-witness`, `im-equality-associations` and more |
+| `k-constraint-dropped` | the map's key slot is unconstrained | immutable-map.test: `im-allocation`, `im-conditional-witness` and more |
+| `iteration-reversed` | iteration visits the associations last to first | immutable-map.test: `im-equality-ignores-order`, `im-freeze-basic` and more |
+| `at-off-by-one` | `at` returns the value after the key's | immutable-map.test: `im-freeze-basic`, `im-freeze-histories` and more |
+| `reordered-not-permuted` | `reordered` returns the map in its own order | immutable-map.test: `im-reordered` |
+| `reordered-drops-values` | `reordered` permutes the keys and their hashes but not the values | immutable-map.test: `im-reordered` |
+| `reordered-stale-index` | `reordered` keeps the source's index over the permuted hashes | immutable-map.test: `im-reordered` |
+| `validate-order-not-checked` | `validate_order` accepts any candidate | immutable-map.test: `im-validate-mismatch` |
+| `freeze-keeps-dead-keys` | freezing keeps the keys of removed entries | immutable-map.test: `im-freeze-histories`, `im-freeze-snapshot` and more |
+| `freeze-values-misaligned` | freezing keeps the values of removed entries (values shift against their keys) | immutable-map.test: `im-freeze-histories`, `im-freeze-snapshot` |
+| `freeze-keeps-dead-hashes` | freezing keeps the hashes of removed entries (the index points past them) | immutable-map.test: `im-freeze-histories` |
+| `freeze-empty-index` | freezing builds an index that places no entry | immutable-map.test: `im-freeze-basic`, `im-freeze-histories` and more |
+| `place-frozen-overwrites` | building the frozen index overwrites an occupied slot instead of probing on | immutable-map.test: `im-freeze-histories`, `im-full-hash-collisions` and more |
+| `frozen-probe-trusts-hash` | a frozen lookup takes an entry of the same keyed hash for the key | immutable-map.test: `im-full-hash-collisions` |
+| `frozen-probe-stops-early` | a frozen lookup stops at the first occupied slot of another key | immutable-map.test: `im-allocation`, `im-freeze-basic` and more |
+| `set-freeze-first-member-lost` | a frozen MutableSet loses its first member | immutable-map.test: `im-set-freeze`, `im-sets-of-maps` |
+| `reordered-contract-dropped` | `reordered` has no contract: an unproven order is accepted | immutable-map.test: `im-reordered-not-proven` |
+| `order-not-minted` | `order` mints no fact: m.reordered(m.order()) is unproven | immutable-map.test: `im-reordered` |
+| `reordered-value-receiver-unchecked` | a receiver that is no place (a call's result) is taken to hold the order's members | immutable-map.test: `im-reordered-not-proven` |
+| `immutable-map-not-iterable` | a loop over an ImmutableMap is no loop protocol's | immutable-map.test: `im-allocation`, `im-conditional-witness` and more |
+
+Notes on the families the brief names:
+
+* Order-sensitive equality and hashes (`*-by-order`, `*-in-order`), hashes
+  of representation (`*-includes-representation`, `identity-reads-index`,
+  `identity-reads-stored-hashes`, `freeze-keeps-dead-*`), trust-hash
+  equality (`tcl-equal-by-hash`, `tcl-bucket-trusts-hash`,
+  `tcl-set-dedup-trusts-hash`, `frozen-probe-trusts-hash`), the encoding
+  (`*-domain-tag-omitted`, `tcl-count-omitted`, `tcl-pair-boundary-lost`,
+  `tcl-members-xor`, `*-hash-omits-*`, `tcl-keyed-post-mixes-public`),
+  conditional witnesses (`conditional-witness-always`,
+  `witness-reads-representation`, `k-constraint-dropped`,
+  `identity-keys-only`), owner and coherence rules
+  (`identity-non-opaque-admitted`, `identity-context-admitted`,
+  `identity-mutable-admitted`), trait views (`refines-*`), and the
+  cross-backend walk (every `native-*` mutant, the descriptor's included)
+  are all killed.
+* `k-constraint-dropped` and `immutable-map-not-iterable` are killed by a
+  compile-time rejection, which is the property they break (without the
+  constraint the module itself does not compile: the keyed hash requires
+  Hashable statically).
+* Equivalent mutants, not in the file (its header records why): the
+  native buckets trusting a bucket's hash (they are the keyed hash's: a
+  wrong answer needs a 64-bit SipHash collision under the process key), the
+  Equatable witness read from the hash predicate (the two refusal lists are
+  the same list today), and freeze aliasing the mutable map or a frozen map
+  becoming mutable (a frozen map holds Lists, immutable values; the
+  declaration check refuses any mutable component).
+* Two kills were not of the property and were fixed before the final run:
+  `set-freeze-first-member-lost` first failed to compile (the module did
+  not import `std::list`); it now compiles and dies in `im-set-freeze`. The
+  collision tests first never reached the hash buckets (a matching
+  positional prefix came first); they now put the colliding entry before
+  nine reordered fillers, which is what kills `tcl-bucket-trusts-hash`.
 
 ## Performance
 
@@ -590,7 +729,46 @@ public hash and the keyed hash under a fixed key. `selftest` checks both.
 
 ## Regression and CI
 
-(Filled in below with the final runs.)
+Run in this container (4 cores), on the final code:
+
+| Check | Result |
+|---|---|
+| `tests/value-identity.test` | 33/33 |
+| `tests/immutable-map.test` | 26/26 |
+| both, under `BOTLISH_NATIVE_GC_STRESS=1` | 33/33, 26/26 |
+| golden `value-identity.bot`, `immutable-map.bot` | 18 and 30 tests, all four backends |
+| `tests/local.tcl` (every Tcl test file on interp and compile, every golden suite on four backends; two runs, the second the files the first had not reached when it stopped, and the files and suites the fix below touches) | 0 failures |
+| `cargo test --release --lib` / `--bins` | 302 / 109 passed |
+| `python3 -I audit/value-identity/tools/oracle.py selftest`, Hashable's, MutableMap's | ok |
+| `audit/hir-interchange/tools/roundtrip.tcl` (default suites; and value-identity, immutable-map, mutable-map, collection-reorder, hashable, `-via interchange` and `-via cache`) | 108, 45 and 50 artifacts and outcomes, 0 differ |
+| `audit/compilation-isolation/tools/interleave.tcl` (default suites; and the four suites above) | 96 and 32 compared, 0 differ |
+| `audit/refactor/tools/gate.tcl` (the warning gate) | passed (`stdlib/immutable_map.bot` is listed like `mutable_map.bot`: it imports the internal engine) |
+| `tools/compilerpedia.tcl check` | 1098 topics, 659 examples, 0 problems |
+| golden manifest (`merge.tcl -check 1`) | consistent (11,875 rows) |
+| value-identity fuzzer | 0 disagreements (above) |
+| mutation harnesses: value-identity, Hashable, traits, trait-constrained types, mutable-map, collection-reorder (with its proof fuzzer) | 66/66, 45/45, 40/40, 43/43, 57/57, 46/46 killed |
+
+What the runs found:
+
+* `tests/method-filter.test`'s `mf-nominal-receivers-decided` failed once:
+  std::mutable_map imports std::immutable_map (for `freeze`), so every
+  program importing the collections compiles `immutable_map.bot`, whose
+  `m.vals.at(p)` and `iteration_at`'s two `at` calls had the module's own
+  `at` as a second, lexical candidate -- three deviation builds per
+  compilation where the test pins none. The engine's rule applies (the
+  collections' own method calls are written so the kind proofs decide
+  them): the three calls are now qualified, `std::list::at`.
+* Hashable's mutant `keyed-is-keyed-mix-of-hash-native` no longer applied
+  (its anchor, the start of a SipHash walk, now also opens `bucket_hash`);
+  it is retargeted at `table_hash_with_key`, the same rule.
+* Three mutants of other harnesses do not apply to this checkout
+  (native-aot's `startup-no-guard` and `sys-runtime-variable-ignored`,
+  native-view's `view-is-a-pointer`); they edit files this milestone does
+  not touch, and were not run.
+
+CI on the branch (`tests.yml`, `tests-arm64.yml` and `static-decisions.yml`
+dispatched by hand; the macOS and Windows workflows on push): see the
+final note of this section.
 
 ## Limitations
 
