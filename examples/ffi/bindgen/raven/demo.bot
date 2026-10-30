@@ -1,0 +1,60 @@
+# demo.bot -- one ordinary Botlish program over GENERATED Raven declarations
+# and constants alone (RAVEN-BINDINGS.md, "The generated binding"): start
+# Raven on its null renderer, build a window of a panel, a label and a
+# button, lay it out and draw a frame, read back the label's text and the
+# version, destroy and stop. No wrapper, no event: the raw C API, called as
+# C would call it.
+#
+#   tclsh9.0 tests/cffi/raven.tcl          (once: builds libraven.so)
+#   LD_LIBRARY_PATH=DIR tclsh9.0 tools/c-bindgen.tcl run raven examples/ffi/bindgen/raven/demo.bot \
+#       -backend cranelift -L DIR
+#
+# DIR is what raven.tcl prints. The value is a List of true.
+#
+# Not a direct module: every call takes handles (Rid, a C unsigned int),
+# numbers and strings, and Raven's profile states that each string
+# parameter is read and copied (`read noescape`), so a NUL-terminated
+# Botlish Bytes is lent to the call and nothing escapes. Raven's strings
+# come back as C pointers; this program only checks that they are there
+# (reading one needs a copy into Botlish storage: the raven package's).
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::ffi::c
+import std::list
+import std::str
+import raven::controls
+import raven::core
+import raven::layout
+import raven::widget
+import raven::window
+
+fn nul() -> std::byte::Byte:
+    0
+
+# The bytes of TEXT and the NUL the C API needs.
+fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))
+
+started = raven::core::Rinit(raven::core::R_BACKEND_NULL)
+window = cstring("Botlish over generated Raven").Rwindow_create(420, 220, raven::window::R_WINDOW_DEFAULT)
+box = raven::widget::Rwidget_create(raven::widget::R_WIDGET_VBOX)
+window.Rwindow_set_content(box)
+label = box.Rwidget_add_child(cstring("Hello from Botlish").Rlabel_create())
+button = box.Rwidget_add_child(cstring("Quit").Rbutton_create())
+count = raven::widget::Rwidget_get_child_count(box)
+drawn = raven::core::Rdraw_frame()
+text = raven::controls::Rlabel_get_text(label)
+version = raven::core::Rget_version()
+valid = raven::widget::Rwidget_is_valid(button)
+raven::window::Rwindow_destroy(window)
+gone = raven::widget::Rwidget_is_valid(button)
+raven::core::Rshutdown()
+[started == raven::core::R_TRUE,
+ window != raven::core::R_INVALID_ID,
+ count == 2,
+ drawn == raven::core::R_TRUE,
+ not text.null?(),
+ not version.null?(),
+ valid == raven::core::R_TRUE,
+ gone == raven::core::R_FALSE]

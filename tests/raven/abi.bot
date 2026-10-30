@@ -1,0 +1,16 @@
+# abi.bot -- start against a bridge archive of another ABI version
+# (tests/raven.test, raven-bridge-abi): RavenFailed from the version check,
+# before Raven is started or any memory allocated.
+import raven
+
+with context raven::create()
+
+fn main(context ui: raven::Ui) -> List[str] errors raven::RavenFailed:
+    raven::start(raven::headless())
+    raven::stop()
+    ["started"]
+
+result = main():
+    on raven::RavenFailed failure:
+        ["RavenFailed", failure.call]
+result

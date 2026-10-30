@@ -1,0 +1,26 @@
+# main.bot -- the counter on the desktop (RAVEN-BINDINGS.md, "The example"):
+# Raven started with its defaults (real windows, the Vulkan renderer), the
+# window open until it is closed or Quit is clicked.
+#
+#   BOTLISH_RAVEN_CMAKE_FLAGS="" tclsh9.0 tests/cffi/raven.tcl      # once: X11 + Vulkan
+#   tclsh9.0 tools/raven-package.tcl install examples/raven
+#   LD_LIBRARY_PATH=DIR tclsh9.0 main.tcl -backend cranelift -L DIR examples/raven/main.bot
+#
+# DIR is what raven.tcl prints. The value is the number of clicks counted.
+import counter
+import raven
+
+with context raven::create()
+
+fn main(context ui: raven::Ui) -> int errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::desktop())
+    count = counter::open().run(0)
+    raven::stop()
+    count
+
+result = main():
+    on raven::RavenFailed failure:
+        0 - failure.code
+    on NonFiniteFloat:
+        0 - 1
+result

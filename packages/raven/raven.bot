@@ -1,0 +1,861 @@
+# raven.bot -- a Botlish interface to Raven, the C GUI library
+# (github.com/oscar-soirey/Raven; RAVEN-BINDINGS.md), a package: installed
+# as APP/.bot_modules/raven (tools/raven-package.tcl install APP), beside the
+# GENERATED binding of the target (raven::core, raven::window, ...:
+# generated/c/raven/TARGET/raven/) and the event bridge's archive
+# (native/libraven_bridge.a, built by the install from native/raven_bridge.c).
+#
+#   with context raven::create()
+#   ...
+#   raven::start(raven::desktop())          Rinit_ex
+#   w = raven::window("Hello", 420, 220)
+#   b = raven::button("Quit")
+#   w.set_content(raven::vbox().add(b))
+#   ... a frame loop: wait_frame, then events() (examples/raven/counter.bot's run)
+#   raven::stop()
+#
+# What this module is, and is not:
+#
+# * Handles. Every Raven object is a uint32_t handle (Rid) that Raven checks
+#   on every call (a deleted object's handle is reported, never a crash). A
+#   Window, Widget or Timer here is one handle under a nominal type, so a
+#   widget is never passed where a window is meant; its `id` is the Rid, for
+#   anything this module leaves to the generated binding
+#   (`raven::controls::Rlabel_set_markdown(label.id, 1)`).
+#
+# * Events. Raven reports what happens by calling C callbacks, and no
+#   Botlish function can be one (RAVEN-BINDINGS.md, "Callbacks"). So the
+#   controls this module makes are watched by the event bridge, C code whose
+#   callbacks only record what they are given, and the program takes the
+#   records -- events() -- after each frame it asks for (draw_frame,
+#   wait_frame). No Botlish code runs inside Raven, and a handler is
+#   ordinary code in the program's own loop.
+#
+# * Authority (DIRECT-MODULES.md). Calls that take only handles, numbers
+#   and strings are ordinary: Raven's convention is that every string it is
+#   given is copied (the binding's profile states `read noescape` for each),
+#   so a String is lent to the call as bytes and nothing escapes. What needs
+#   raw authority -- native memory for Rinit_ex's descriptor and for the
+#   out-parameters of Rwindow_get_size, Rwidget_get_rect and
+#   Rerror_get_last, which take pointers to C ints, floats and strings no
+#   Botlish storage can be lent as -- requires Ui, the context this module
+#   declares: the entry program installs it (`with context raven::create()`)
+#   and nothing above this module is direct for using Raven.
+#
+# * Floats. Raven's coordinates, sizes and slider values are C floats; a
+#   Float64 outside binary32's range is NonFiniteFloat before C runs
+#   (C-FLOAT-FFI-MILESTONE-1.md), and so is a non-finite float Raven
+#   returns. The functions that pass or read one say so.
+#
+# * Method syntax. The functions that make something from a text, a
+#   number or a list (window, label, button, ...; bind_action, fire_action)
+#   are `nomethod`: a title or an action's name is no receiver.
+#
+# * Threads. Raven's functions are for the thread that called Rinit; a
+#   Botlish program runs on one thread, which is that one.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::ffi::c
+import std::float64
+import std::list
+import std::mutable_vector
+import std::str
+import raven::controls
+import raven::core
+import raven::ctypes
+import raven::layout
+import raven::layouts
+import raven::resources
+import raven::style
+import raven::widget
+import raven::window
+import raven::xml
+
+extern c library "raven_bridge" static at "native/libraven_bridge.a"
+
+# ---------------------------------------------------------------------------
+# The event bridge (native/raven_bridge.c), ABI version 1: its contracts are
+# its own code's -- every string it is given is read during the call, the
+# text it copies out is written into OUT only.
+
+private extern c fn botlish_raven_bridge_abi() -> std::ffi::c::Int
+private extern c fn botlish_raven_watch_errors() -> unit
+private extern c fn botlish_raven_watch_actions() -> unit
+private extern c fn botlish_raven_bind_action(name: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> unit
+private extern c fn botlish_raven_watch_button(button: std::ffi::c::UInt) -> unit
+private extern c fn botlish_raven_watch_checkbox(checkbox: std::ffi::c::UInt) -> unit
+private extern c fn botlish_raven_watch_slider(slider: std::ffi::c::UInt) -> unit
+private extern c fn botlish_raven_watch_text_input(text_input: std::ffi::c::UInt) -> unit
+private extern c fn botlish_raven_watch_combo_box(combo_box: std::ffi::c::UInt) -> unit
+private extern c fn botlish_raven_watch_window(window: std::ffi::c::UInt, allow_close: std::ffi::c::Int) -> unit
+private extern c fn botlish_raven_timer(interval_seconds: std::ffi::c::Double, repeat: std::ffi::c::Int) -> std::ffi::c::UInt
+private extern c fn botlish_raven_next() -> std::ffi::c::Int
+private extern c fn botlish_raven_source() -> std::ffi::c::UInt
+private extern c fn botlish_raven_value() -> std::ffi::c::Int
+private extern c fn botlish_raven_extra() -> std::ffi::c::Int
+private extern c fn botlish_raven_number() -> std::ffi::c::Double
+private extern c fn botlish_raven_text() -> std::ffi::c::Ptr[std::ffi::c::Char]
+private extern c fn botlish_raven_pending() -> std::ffi::c::ULong
+private extern c fn botlish_raven_lost() -> std::ffi::c::ULong
+private extern c fn botlish_raven_clear() -> unit
+private extern c fn botlish_raven_text_length(text: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::ULong
+private extern c fn botlish_raven_bytes_copy(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, out: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, count: std::ffi::c::ULong) -> std::ffi::c::ULong
+private extern c fn botlish_raven_text_copy(text: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, out: std::ffi::c::Ptr[std::ffi::c::Char] write noescape, capacity: std::ffi::c::ULong) -> std::ffi::c::ULong
+
+# The C library's allocator, for the native memory of descriptors and
+# out-parameters (independent of Raven's own heap, which Rshutdown checks
+# for leaks).
+private extern c fn calloc(count: std::ffi::c::ULong, size: std::ffi::c::ULong) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+private extern c fn free(memory: std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
+
+# ---------------------------------------------------------------------------
+# Handles
+
+# A window (a Rid of Raven's).
+struct Window:
+    id: std::ffi::c::UInt
+
+# A widget: a panel or a control (a Rid of Raven's).
+struct Widget:
+    id: std::ffi::c::UInt
+
+# A timer whose ticks are TimerElapsed events (a Rid of Raven's).
+struct Timer:
+    id: std::ffi::c::UInt
+
+# Where a widget was laid out, in its window's logical units.
+struct Rect:
+    x: Float64
+    y: Float64
+    width: Float64
+    height: Float64
+
+# A window's last frame: WIDTH x HEIGHT pixels, RGBA8, row by row from the
+# top (PIXELS holds 4 * WIDTH * HEIGHT bytes).
+struct Image:
+    width: int
+    height: int
+    pixels: std::abi::bytes::Bytes
+
+# A window's content size, in logical units.
+struct Size:
+    width: int
+    height: int
+
+# ---------------------------------------------------------------------------
+# Strings
+
+private fn nul() -> std::byte::Byte:
+    0
+
+# TEXT's UTF-8 bytes and the NUL a C string needs.
+private fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))
+
+# The text of the NUL-terminated string P (Raven's or the bridge's, read at
+# once: Raven keeps a string it returns only until the next call returning
+# one of its kind): its length, then its bytes copied by the bridge into
+# Botlish storage lent for that call (C-POINTER-BORROWING.md), decoded as
+# UTF-8; "" for a null P. The two integer errors cannot happen (a C length
+# is a size_t, every one a Usize) but are declared by the conversion;
+# InvalidUtf8, bytes that are no UTF-8.
+private fn copy_text(p: std::ffi::c::Ptr[std::ffi::c::Char]) -> str errors std::abi::AbiIntegerBelowRange, std::abi::AbiIntegerAboveRange, UpperOverrun, InvalidUtf8:
+    n = botlish_raven_text_length(p)
+    copied = p.botlish_raven_text_copy(std::abi::bytes::zeroed(std::abi::usize(n)), n)
+    data = copied.out.freeze_prefix(std::abi::usize(copied.result))
+    std::abi::bytes::decode_utf8(data)
+
+# The text of P, "" for a null P or a string that is not UTF-8 (Raven's
+# strings are: an empty text is all a reader could make of another).
+private fn text_of(p: std::ffi::c::Ptr[std::ffi::c::Char]) -> str:
+    text = copy_text(p):
+        on std::abi::AbiIntegerBelowRange:
+            ""
+        on std::abi::AbiIntegerAboveRange:
+            ""
+        on UpperOverrun:
+            ""
+        on InvalidUtf8:
+            ""
+    text
+
+private fn c_bool(value: bool) -> std::ffi::c::Int:
+    if value:
+        return 1
+    0
+
+# Raven's version, "0.1.3".
+fn version() -> str:
+    text_of(raven::core::Rget_version())
+
+# ---------------------------------------------------------------------------
+# Events
+
+# What an event reports, with the Event fields it fills:
+#
+#   Clicked         a button was pressed
+#   Toggled         a checkbox changed: value 1 checked, 0 not
+#   ValueChanged    a slider moved: number, its value
+#   TextChanged     a text input's text changed: text
+#   TextCommitted   Enter in a text input: text
+#   Selected        a combo box's selection changed: value, the index
+#   Action          an action fired (an XML interface's OnClicked=..., a
+#                   widget given one by set_action, fire_action): text, its
+#                   name; source, the widget that fired it (or none)
+#   CloseRequested  a watched window was asked to close: value 1 when it
+#                   closed, 0 when it is kept open for the program to decide
+#   Resized         a watched window's size changed: value, the width,
+#                   extra, the height
+#   TimerElapsed    a timer's interval elapsed
+#   Error           Raven reported an error: value, the RError; extra, the
+#                   RSeverity; text, Raven's description
+enum EventKind:
+    Clicked,
+    Toggled,
+    ValueChanged,
+    TextChanged,
+    TextCommitted,
+    Selected,
+    Action,
+    CloseRequested,
+    Resized,
+    TimerElapsed,
+    Error,
+
+# One thing that happened, as the bridge recorded it. SOURCE is the Rid of
+# the widget, window or timer it happened to (R_INVALID_ID when none).
+struct Event:
+    kind: EventKind
+    source: std::ffi::c::UInt
+    value: int
+    extra: int
+    number: Float64
+    text: str
+
+# The bridge's record kinds (raven_bridge.c's BR_*), 1 to 12; the ABI
+# version start checks fixes the set, so 12 is the only other.
+private fn kind_of(code: int) -> EventKind:
+    if code == 1:
+        return EventKind::Clicked
+    if code == 2:
+        return EventKind::Toggled
+    if code == 3:
+        return EventKind::ValueChanged
+    if code == 4:
+        return EventKind::TextChanged
+    if code == 5:
+        return EventKind::TextCommitted
+    if code == 6 or code == 7:
+        return EventKind::Selected
+    if code == 8:
+        return EventKind::Action
+    if code == 9:
+        return EventKind::CloseRequested
+    if code == 10:
+        return EventKind::Resized
+    if code == 11:
+        return EventKind::TimerElapsed
+    EventKind::Error
+
+# EVENTS followed by every record of the bridge's queue, oldest first.
+private fn drain(events: List[Event]) -> List[Event] errors NonFiniteFloat:
+    code = botlish_raven_next()
+    if code == 0:
+        return events
+    event = Event {
+        kind: kind_of(code),
+        source: botlish_raven_source(),
+        value: botlish_raven_value(),
+        extra: botlish_raven_extra(),
+        number: botlish_raven_number(),
+        text: text_of(botlish_raven_text())
+    }
+    drain(events.append(event))
+
+# Every event recorded since the last call, oldest first (and the queue
+# empty). NonFiniteFloat: a value Raven reported is no finite number
+# (no Float64 is one).
+fn events() -> List[Event] errors NonFiniteFloat:
+    drain([])
+
+# How many events are waiting.
+fn pending() -> int:
+    botlish_raven_pending()
+
+# How many events the bridge could not record (no memory): 0 unless the
+# process ran out.
+fn lost() -> int:
+    botlish_raven_lost()
+
+# Whether EVENT happened to WIDGET (to WINDOW, to TIMER).
+fn from?(event: Event, widget: Widget) -> bool:
+    event.source == widget.id
+
+fn from_window?(event: Event, window: Window) -> bool:
+    event.source == window.id
+
+fn from_timer?(event: Event, timer: Timer) -> bool:
+    event.source == timer.id
+
+# ---------------------------------------------------------------------------
+# The context: Raven's lifetime and the native memory of its out-parameters
+
+# Native memory this module lends Raven: Rinit_ex's descriptor and one cell
+# per out-parameter (C has no address of a Botlish value, and Botlish no
+# pointer offset, so each out-parameter is its own allocation). Private and
+# opaque: only this module names one, makes one or looks inside.
+private opaque struct Scratch:
+    desc: std::ffi::c::Ptr[raven::ctypes::RInitDesc]
+    detail: std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]
+    severity: std::ffi::c::Ptr[std::ffi::c::UInt]
+    width: std::ffi::c::Ptr[std::ffi::c::Int]
+    height: std::ffi::c::Ptr[std::ffi::c::Int]
+    x: std::ffi::c::Ptr[std::ffi::c::Float]
+    y: std::ffi::c::Ptr[std::ffi::c::Float]
+    w: std::ffi::c::Ptr[std::ffi::c::Float]
+    h: std::ffi::c::Ptr[std::ffi::c::Float]
+
+# The capability to start and stop Raven and to read what it returns
+# through out-parameters, and Raven's state: the scratch memory while it
+# runs (the one element of OPEN; none while Raven is stopped). The context
+# owns the scratch pointers, and every operation reaches them where they
+# are stored (`ui.open.element(0).width`): nothing is copied out of it.
+# Opaque: only this module makes one or looks inside.
+opaque context struct Ui:
+    open: MutableVector[Scratch]
+
+# Raven, not started. Makes no call, so it needs no authority: the entry
+# program installs it, `with context raven::create()`.
+fn create() -> Ui:
+    Ui {open: std::mutable_vector::from_list([])}
+
+# A Raven call failed: CALL, Raven's RError (0 when Raven reported none)
+# and its description.
+error RavenFailed:
+    call: str
+    code: int
+    detail: str
+
+# What Raven reported last: its RError (raven::core::R_NO_ERROR, 112, when
+# nothing), its RSeverity and its description.
+struct Report:
+    code: int
+    severity: int
+    detail: str
+
+# The renderer Raven draws with.
+#
+#   Vulkan   the GPU (libvulkan.so.1, loaded when Raven starts)
+#   Null     nothing is drawn: tests and headless runs
+enum Backend:
+    Vulkan,
+    Null,
+
+# How start starts Raven (RInitDesc): the renderer, whether windows are
+# real (headless: none, the null platform), the worker threads of its job
+# system (0: one per spare core; negative: none) and a scale on top of the
+# monitor's (0.0: 1.0).
+struct Options:
+    backend: Backend
+    headless: bool
+    worker_threads: std::ffi::c::Int
+    ui_scale: Float64
+
+# Real windows drawn on the GPU, Raven's defaults.
+fn desktop() -> Options:
+    Options {backend: Backend::Vulkan, headless: false, worker_threads: 0, ui_scale: 0.0}
+
+# No window system and nothing drawn, no worker threads: for tests and
+# headless runs (input comes from inject_*).
+fn headless() -> Options:
+    Options {backend: Backend::Null, headless: true, worker_threads: -1, ui_scale: 0.0}
+
+# One cell of each kind an out-parameter points to.
+private layout IntCell:
+    size 4
+    align 4
+    field value: std::ffi::c::Int at 0
+
+private layout UIntCell:
+    size 4
+    align 4
+    field value: std::ffi::c::UInt at 0
+
+private layout FloatCell:
+    size 4
+    align 4
+    field value: std::ffi::c::Float at 0
+
+private layout TextCell:
+    size 8
+    align 8
+    field value: std::ffi::c::Ptr[std::ffi::c::Char] at 0
+
+# N zeroed bytes of native memory (null when there is none).
+private fn zeroed(n: std::ffi::c::ULong, context ui: Ui) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    calloc(1, n)
+
+private fn release(memory: std::ffi::c::Ptr[std::ffi::c::Void], context ui: Ui):
+    free(memory)
+
+# Releases the scratch memory (free of a null pointer does nothing, so a
+# partly made Scratch is released too).
+private fn release_scratch(scratch: Scratch, context ui: Ui):
+    {desc, detail, severity, width, height, x, y, w, h} = scratch
+    release(std::ffi::c::erase(desc))
+    release(std::ffi::c::erase(detail))
+    release(std::ffi::c::erase(severity))
+    release(std::ffi::c::erase(width))
+    release(std::ffi::c::erase(height))
+    release(std::ffi::c::erase(x))
+    release(std::ffi::c::erase(y))
+    release(std::ffi::c::erase(w))
+    release(std::ffi::c::erase(h))
+
+# The scratch memory, every cell zeroed. RavenFailed: no memory (what was
+# allocated is released again).
+private fn allocate(context ui: Ui) -> Scratch errors RavenFailed:
+    desc = std::ffi::c::retype[raven::ctypes::RInitDesc](zeroed(std::binary::layout_length(raven::layouts::RInitDesc)))
+    detail = std::ffi::c::retype[std::ffi::c::Ptr[std::ffi::c::Char]](zeroed(std::binary::layout_length(TextCell)))
+    severity = std::ffi::c::retype[std::ffi::c::UInt](zeroed(std::binary::layout_length(UIntCell)))
+    width = std::ffi::c::retype[std::ffi::c::Int](zeroed(std::binary::layout_length(IntCell)))
+    height = std::ffi::c::retype[std::ffi::c::Int](zeroed(std::binary::layout_length(IntCell)))
+    x = std::ffi::c::retype[std::ffi::c::Float](zeroed(std::binary::layout_length(FloatCell)))
+    y = std::ffi::c::retype[std::ffi::c::Float](zeroed(std::binary::layout_length(FloatCell)))
+    w = std::ffi::c::retype[std::ffi::c::Float](zeroed(std::binary::layout_length(FloatCell)))
+    h = std::ffi::c::retype[std::ffi::c::Float](zeroed(std::binary::layout_length(FloatCell)))
+    missing = desc.null?() or detail.null?() or severity.null?() or width.null?() or height.null?() or x.null?() or y.null?() or w.null?() or h.null?()
+    scratch = Scratch {desc: desc, detail: detail, severity: severity, width: width, height: height, x: x, y: y, w: w, h: h}
+    if missing:
+        release_scratch(scratch)
+        fail RavenFailed {call: "calloc", code: 0, detail: "no memory for Raven's descriptor and out-parameters"}
+    scratch
+
+private fn backend_code(backend: Backend) -> std::ffi::c::UInt:
+    if backend == Backend::Null:
+        return raven::core::R_BACKEND_NULL
+    raven::core::R_BACKEND_VULKAN
+
+# Writes OPTIONS into the session's descriptor (zeroed: app_name stays
+# NULL, the other fields Raven's defaults until written).
+private fn session_describe(options: Options, context ui: Ui) -> bool errors IndexNotFound, NativeEditNull, NonFiniteFloat:
+    e = std::binary::native::edit(raven::layouts::RInitDesc, ui.open.element(0).desc)
+    std::binary::store(e, raven::layouts::RInitDesc.backend, backend_code(options.backend))
+    std::binary::store(e, raven::layouts::RInitDesc.worker_threads, options.worker_threads)
+    std::binary::store(e, raven::layouts::RInitDesc.headless, c_bool(options.headless))
+    std::binary::store(e, raven::layouts::RInitDesc.ui_scale, options.ui_scale)
+    true
+
+private fn session_init(context ui: Ui) -> std::ffi::c::Int errors IndexNotFound:
+    raven::core::Rinit_ex(ui.open.element(0).desc)
+
+# Rerror_get_last, through the session's out-parameters.
+private fn session_report(context ui: Ui) -> Report errors IndexNotFound, NativeViewNull:
+    code = ui.open.element(0).detail.Rerror_get_last(ui.open.element(0).severity)
+    severity = std::binary::native::view(UIntCell, ui.open.element(0).severity).value
+    detail = std::binary::native::view(TextCell, ui.open.element(0).detail).value
+    Report {code: code, severity: severity, detail: text_of(detail)}
+
+# What Raven reported last (code R_NO_ERROR when nothing; code 0, "Raven is
+# not running", while it is stopped).
+fn last_error(context ui: Ui) -> Report:
+    report = session_report():
+        on IndexNotFound:
+            Report {code: 0, severity: 0, detail: "Raven is not running"}
+        on NativeViewNull:
+            Report {code: 0, severity: 0, detail: "no out-parameter memory"}
+    report
+
+# Whether Raven runs (start succeeded and stop has not been called).
+fn running?(context ui: Ui) -> bool:
+    not ui.open.empty?()
+
+# Stops Raven (Rshutdown: every window, widget and timer is destroyed) and
+# releases the scratch memory and every event not taken. Stopping a stopped
+# Raven does nothing.
+fn stop(context ui: Ui):
+    scratch = ui.open.pop():
+        on IndexNotFound:
+            return unit
+    raven::core::Rshutdown()
+    botlish_raven_clear()
+    release_scratch(scratch)
+
+# Starts Raven with OPTIONS (Rinit_ex): this thread becomes its UI thread,
+# and errors and unbound actions are events from now on. Starting a started
+# Raven changes nothing. RavenFailed: the bridge is not ABI 1, no memory,
+# OPTIONS' ui_scale is no C float, or Rinit_ex failed (with Raven's error).
+fn start(options: Options, context ui: Ui) errors RavenFailed:
+    if not ui.open.empty?():
+        return unit
+    if botlish_raven_bridge_abi() != 1:
+        fail RavenFailed {call: "botlish_raven_bridge_abi", code: 0, detail: "native/libraven_bridge.a is not the event bridge this raven.bot reads (ABI 1)"}
+    ui.open.push(allocate())
+    described = session_describe(options):
+        on IndexNotFound:
+            false
+        on NativeEditNull:
+            false
+        on NonFiniteFloat:
+            false
+    if not described:
+        stop()
+        fail RavenFailed {call: "Rinit_ex", code: 0, detail: "the options are no RInitDesc (ui_scale out of a C float's range)"}
+    botlish_raven_watch_errors()
+    started = session_init():
+        on IndexNotFound:
+            0
+    if started == 0:
+        report = last_error()
+        stop()
+        fail RavenFailed {call: "Rinit_ex", code: report.code, detail: report.detail}
+    botlish_raven_watch_actions()
+
+# ---------------------------------------------------------------------------
+# Frames
+
+# Processes the events, timers and tasks, lays out and draws the windows
+# that changed, without waiting: false once quit was called or the last
+# window closed.
+fn draw_frame() -> bool:
+    raven::core::Rdraw_frame() != 0
+
+# As draw_frame, after sleeping until something happens or TIMEOUT seconds
+# pass (negative: no limit).
+fn wait_frame(timeout: Float64) -> bool:
+    raven::core::Rwait_frame(timeout) != 0
+
+# Ends the loop: the next frame returns false, and exit_code is CODE.
+fn quit(code: std::ffi::c::Int):
+    raven::core::Rquit(code)
+
+fn exit_code() -> int:
+    raven::core::Rget_exit_code()
+
+# ---------------------------------------------------------------------------
+# Themes
+
+enum Theme:
+    Dark,
+    Light,
+    GlassDark,
+    GlassLight,
+    HighContrastDark,
+    HighContrastLight,
+
+fn apply_theme(theme: Theme):
+    code = if theme == Theme::Dark:
+        raven::style::R_THEME_DARK
+    else:
+        if theme == Theme::Light:
+            raven::style::R_THEME_LIGHT
+        else:
+            if theme == Theme::GlassDark:
+                raven::style::R_THEME_GLASS_DARK
+            else:
+                if theme == Theme::GlassLight:
+                    raven::style::R_THEME_GLASS_LIGHT
+                else:
+                    if theme == Theme::HighContrastDark:
+                        raven::style::R_THEME_HIGH_CONTRAST_DARK
+                    else:
+                        raven::style::R_THEME_HIGH_CONTRAST_LIGHT
+    raven::style::Rtheme_apply(code)
+
+# ---------------------------------------------------------------------------
+# Windows
+
+# A window titled TITLE with content WIDTH x HEIGHT; a close request closes
+# it (CloseRequested, value 1) and a resize is Resized.
+nomethod fn window(title: str, width: std::ffi::c::Int, height: std::ffi::c::Int) -> Window:
+    id = cstring(title).Rwindow_create(width, height, raven::window::R_WINDOW_DEFAULT)
+    id.botlish_raven_watch_window(1)
+    Window {id: id}
+
+# The window XML describes (Raven's XML interfaces: RAVEN-BINDINGS.md); its
+# controls' actions (OnClicked="...") are Action events. A close request
+# closes it. Its id is R_INVALID_ID when the XML is not a window (an Error
+# event says why).
+nomethod fn window_from_xml(xml: str) -> Window:
+    data = std::str::encode_utf8(xml)
+    id = cstring(xml).Rwindow_create_from_xml(data.length())
+    id.botlish_raven_watch_window(1)
+    Window {id: id}
+
+# Whether a close request of WINDOW closes it (true, the default) or only
+# reports CloseRequested (false): the program then closes it itself
+# (destroy_window), or not.
+fn keep_open(window: Window, keep: bool):
+    allow = if keep:
+        0
+    else:
+        1
+    window.id.botlish_raven_watch_window(allow)
+
+# Whether WINDOW is still a window (not destroyed, not closed).
+fn open?(window: Window) -> bool:
+    raven::window::Rwindow_is_valid(window.id) != 0
+
+fn set_content(window: Window, content: Widget):
+    window.id.Rwindow_set_content(content.id)
+
+fn set_title(window: Window, title: str):
+    window.id.Rwindow_set_title(cstring(title))
+
+# Asks WINDOW to close, as its title bar would (CloseRequested).
+fn request_close(window: Window):
+    raven::window::Rwindow_close(window.id)
+
+fn destroy_window(window: Window):
+    raven::window::Rwindow_destroy(window.id)
+
+# The widget named NAME (an XML Name="..." or set_name) in WINDOW; its id is
+# R_INVALID_ID when there is none.
+fn find(window: Window, name: str) -> Widget:
+    Widget {id: window.id.Rwidget_find(cstring(name))}
+
+private fn session_size(window: Window, context ui: Ui) -> Size errors IndexNotFound, NativeViewNull:
+    window.id.Rwindow_get_size(ui.open.element(0).width, ui.open.element(0).height)
+    width = std::binary::native::view(IntCell, ui.open.element(0).width).value
+    height = std::binary::native::view(IntCell, ui.open.element(0).height).value
+    Size {width: width, height: height}
+
+# WINDOW's content size (0 x 0 when Raven is not running).
+fn size(window: Window, context ui: Ui) -> Size:
+    measured = session_size(window):
+        on IndexNotFound:
+            Size {width: 0, height: 0}
+        on NativeViewNull:
+            Size {width: 0, height: 0}
+    measured
+
+# The frame Rwindow_capture read back, copied into PIXELS (a buffer of
+# 4 * WIDTH * HEIGHT bytes); Raven's buffer released. A frame larger than
+# 4 GiB, which no window has, is no Image (0 x 0).
+private fn copy_frame(frame: std::ffi::c::Ptr[std::ffi::c::UChar], width: int, height: int, context ui: Ui) -> Image errors std::abi::AbiIntegerBelowRange, std::abi::AbiIntegerAboveRange, UpperOverrun:
+    count = 4 * width * height
+    if count < 0 or count > 4294967295:
+        raven::resources::Rpixels_free(frame)
+        return Image {width: 0, height: 0, pixels: std::abi::bytes::from_list([])}
+    copied = frame.botlish_raven_bytes_copy(std::abi::bytes::zeroed(std::abi::usize(count)), count)
+    raven::resources::Rpixels_free(frame)
+    Image {width: width, height: height, pixels: copied.out.freeze_prefix(std::abi::usize(copied.result))}
+
+private fn session_capture(window: Window, context ui: Ui) -> Image errors IndexNotFound, NativeViewNull, std::abi::AbiIntegerBelowRange, std::abi::AbiIntegerAboveRange, UpperOverrun:
+    frame = window.id.Rwindow_capture(ui.open.element(0).width, ui.open.element(0).height)
+    if frame.null?():
+        raven::resources::Rpixels_free(frame)
+        return Image {width: 0, height: 0, pixels: std::abi::bytes::from_list([])}
+    width = std::binary::native::view(IntCell, ui.open.element(0).width).value
+    height = std::binary::native::view(IntCell, ui.open.element(0).height).value
+    frame.copy_frame(width, height)
+
+# WINDOW's last rendered frame (Rwindow_capture: it waits for the frame to
+# be rendered). 0 x 0 and no pixels when the renderer cannot read frames
+# back (the null renderer) or Raven is not running.
+fn capture(window: Window, context ui: Ui) -> Image:
+    none = Image {width: 0, height: 0, pixels: std::abi::bytes::from_list([])}
+    image = session_capture(window):
+        on IndexNotFound:
+            none
+        on NativeViewNull:
+            none
+        on std::abi::AbiIntegerBelowRange:
+            none
+        on std::abi::AbiIntegerAboveRange:
+            none
+        on UpperOverrun:
+            none
+    image
+
+# ---------------------------------------------------------------------------
+# Widgets and panels
+
+# A vertical (horizontal) panel: its children one below (beside) another.
+fn vbox() -> Widget:
+    Widget {id: raven::widget::Rwidget_create(raven::widget::R_WIDGET_VBOX)}
+
+fn hbox() -> Widget:
+    Widget {id: raven::widget::Rwidget_create(raven::widget::R_WIDGET_HBOX)}
+
+# Adds CHILD at the end of PARENT, which owns it from now on; PARENT, so
+# that adds chain: `raven::vbox().add(a).add(b)`.
+fn add(parent: Widget, child: Widget) -> Widget:
+    added = parent.id.Rwidget_add_child(child.id)
+    parent
+
+fn child_count(widget: Widget) -> int:
+    raven::widget::Rwidget_get_child_count(widget.id)
+
+# Whether WIDGET is still a widget (not destroyed).
+fn valid?(widget: Widget) -> bool:
+    raven::widget::Rwidget_is_valid(widget.id) != 0
+
+# Deletes WIDGET and its children.
+fn destroy(widget: Widget):
+    raven::widget::Rwidget_destroy(widget.id)
+
+# Names WIDGET, for find.
+fn set_name(widget: Widget, name: str):
+    widget.id.Rwidget_set_name(cstring(name))
+
+fn set_enabled(widget: Widget, enabled: bool):
+    widget.id.Rwidget_set_enabled(c_bool(enabled))
+
+fn set_tooltip(widget: Widget, text: str):
+    widget.id.Rwidget_set_tooltip(cstring(text))
+
+# The space between a panel's children.
+fn set_spacing(panel: Widget, spacing: Float64) errors NonFiniteFloat:
+    panel.id.Rpanel_set_spacing(spacing)
+
+# The space around WIDGET inside its parent's slot.
+fn set_padding(widget: Widget, left: Float64, top: Float64, right: Float64, bottom: Float64) errors NonFiniteFloat:
+    widget.id.Rslot_set_padding(left, top, right, bottom)
+
+private fn session_rect(widget: Widget, context ui: Ui) -> Rect errors IndexNotFound, NativeViewNull, NonFiniteFloat:
+    widget.id.Rwidget_get_rect(ui.open.element(0).x, ui.open.element(0).y, ui.open.element(0).w, ui.open.element(0).h)
+    x = std::binary::native::view(FloatCell, ui.open.element(0).x).value
+    y = std::binary::native::view(FloatCell, ui.open.element(0).y).value
+    width = std::binary::native::view(FloatCell, ui.open.element(0).w).value
+    height = std::binary::native::view(FloatCell, ui.open.element(0).h).value
+    Rect {x: x, y: y, width: width, height: height}
+
+# Where WIDGET was laid out in its window by the last frame (all 0.0 when
+# Raven is not running). NonFiniteFloat: Raven's numbers were not finite.
+fn rect(widget: Widget, context ui: Ui) -> Rect errors NonFiniteFloat:
+    laid_out = session_rect(widget):
+        on IndexNotFound:
+            Rect {x: 0.0, y: 0.0, width: 0.0, height: 0.0}
+        on NativeViewNull:
+            Rect {x: 0.0, y: 0.0, width: 0.0, height: 0.0}
+    laid_out
+
+# ---------------------------------------------------------------------------
+# Controls. Each control that reports something is watched when it is made:
+# its events are in events().
+
+nomethod fn label(text: str) -> Widget:
+    Widget {id: cstring(text).Rlabel_create()}
+
+fn set_text(label: Widget, text: str):
+    label.id.Rlabel_set_text(cstring(text))
+
+fn label_text(label: Widget) -> str:
+    text_of(raven::controls::Rlabel_get_text(label.id))
+
+# A button: Clicked when it is pressed.
+nomethod fn button(text: str) -> Widget:
+    id = cstring(text).Rbutton_create()
+    botlish_raven_watch_button(id)
+    Widget {id: id}
+
+# A checkbox: Toggled when it changes.
+nomethod fn checkbox(text: str) -> Widget:
+    id = cstring(text).Rcheckbox_create()
+    botlish_raven_watch_checkbox(id)
+    Widget {id: id}
+
+fn checked?(checkbox: Widget) -> bool:
+    raven::controls::Rcheckbox_is_checked(checkbox.id) != 0
+
+fn set_checked(checkbox: Widget, checked: bool):
+    checkbox.id.Rcheckbox_set_checked(c_bool(checked))
+
+# A slider from MINIMUM to MAXIMUM: ValueChanged when it moves.
+nomethod fn slider(minimum: Float64, maximum: Float64) -> Widget errors NonFiniteFloat:
+    id = raven::widget::Rwidget_create(raven::widget::R_WIDGET_SLIDER)
+    id.Rslider_set_range(minimum, maximum)
+    botlish_raven_watch_slider(id)
+    Widget {id: id}
+
+fn slider_value(slider: Widget) -> Float64 errors NonFiniteFloat:
+    raven::controls::Rslider_get_value(slider.id)
+
+fn set_slider_value(slider: Widget, value: Float64) errors NonFiniteFloat:
+    slider.id.Rslider_set_value(value)
+
+# A one-line text input holding TEXT: TextChanged as it is edited,
+# TextCommitted on Enter.
+nomethod fn text_input(text: str) -> Widget:
+    id = raven::widget::Rwidget_create(raven::widget::R_WIDGET_TEXT_INPUT)
+    id.Rtext_input_set_text(cstring(text))
+    botlish_raven_watch_text_input(id)
+    Widget {id: id}
+
+fn input_text(input: Widget) -> str:
+    text_of(raven::controls::Rtext_input_get_text(input.id))
+
+fn set_input_text(input: Widget, text: str):
+    input.id.Rtext_input_set_text(cstring(text))
+
+private fn add_items(combo: std::ffi::c::UInt, items: List[str]):
+    loop item in items:
+        index = combo.Rcombo_box_add_item(cstring(item))
+
+# A combo box of ITEMS: Selected (the index) when its selection changes.
+nomethod fn combo_box(items: List[str]) -> Widget:
+    id = raven::widget::Rwidget_create(raven::widget::R_WIDGET_COMBO_BOX)
+    id.add_items(items)
+    botlish_raven_watch_combo_box(id)
+    Widget {id: id}
+
+# The index of a combo box's selection (-1 when none).
+fn selected(combo: Widget) -> int:
+    raven::controls::Rcombo_box_get_selected(combo.id)
+
+fn select(combo: Widget, index: std::ffi::c::Int):
+    combo.id.Rcombo_box_set_selected(index)
+
+# ---------------------------------------------------------------------------
+# Actions and timers
+
+# NAME's actions are Action events (they are anyway while no other code
+# binds NAME: start makes the bridge every unbound action's handler).
+nomethod fn bind_action(name: str):
+    botlish_raven_bind_action(cstring(name))
+
+# Gives WIDGET's main event (a click, a change, Enter) the action NAME.
+fn set_action(widget: Widget, name: str):
+    widget.id.Rwidget_set_action(cstring(name))
+
+# Fires the action NAME as if a widget had (no sender).
+nomethod fn fire_action(name: str):
+    cstring(name).Raction_fire(raven::core::R_INVALID_ID)
+
+# A timer: TimerElapsed after INTERVAL seconds, and every INTERVAL seconds
+# after that when REPEAT.
+nomethod fn timer(interval: Float64, repeat: bool) -> Timer:
+    Timer {id: interval.botlish_raven_timer(c_bool(repeat))}
+
+fn cancel(timer: Timer):
+    raven::core::Rtimer_destroy(timer.id)
+
+# ---------------------------------------------------------------------------
+# Synthetic input (tests, scripted runs: Raven's Rwindow_inject_*)
+
+# A left click at X, Y of WINDOW: the pointer moves there, the button goes
+# down and up.
+fn inject_click(window: Window, x: Float64, y: Float64) errors NonFiniteFloat:
+    window.id.Rwindow_inject_mouse_move(x, y)
+    window.id.Rwindow_inject_mouse_button(raven::window::R_MOUSE_LEFT, 1)
+    window.id.Rwindow_inject_mouse_button(raven::window::R_MOUSE_LEFT, 0)
+
+# A left click at the middle of WIDGET, where the last frame laid it out in
+# WINDOW.
+fn click(window: Window, widget: Widget, context ui: Ui) errors NonFiniteFloat:
+    r = rect(widget)
+    window.inject_click(r.x + r.width / 2.0, r.y + r.height / 2.0)
+
+# TEXT typed into WINDOW's focused widget.
+fn inject_text(window: Window, text: str):
+    window.id.Rwindow_inject_text(cstring(text))
+
+# A key (an RKey: raven::window::R_KEY_ENTER, ...) pressed and released
+# with MODIFIERS (raven::window::R_MOD_*, ORed; 0 for none).
+fn inject_key(window: Window, key: std::ffi::c::UInt, modifiers: std::ffi::c::UInt):
+    window.id.Rwindow_inject_key(key, 1, modifiers)
+    window.id.Rwindow_inject_key(key, 0, modifiers)

@@ -1,0 +1,54 @@
+# counter.bot -- the Raven guide's "Any language" program in Botlish
+# (RAVEN-BINDINGS.md, "The example"): the interface is Raven's XML, the code
+# is ordinary Botlish over the raven package. The window holds a label and
+# two buttons whose clicks fire the actions hello.clicked and app.quit;
+# each hello.clicked counts, and the label says how many. Nothing here
+# names a platform or a renderer: main.bot runs it on the desktop,
+# headless.bot scripted with synthetic input.
+import raven
+import std::int
+import std::list
+import std::str
+
+# The interface (the guide's main.xml, and a Quit button).
+fn interface() -> str:
+    "<Window Title=\"Hello\" Width=\"400\" Height=\"200\"><VBox Spacing=\"12\" Slot.Padding=\"24\"><Label Name=\"status\">Not clicked yet</Label><Button Name=\"click\" Text=\"Click me\" Style=\"Primary\" OnClicked=\"hello.clicked\"/><Button Name=\"quit\" Text=\"Quit\" OnClicked=\"app.quit\"/></VBox></Window>"
+
+# The window, from the interface.
+fn open() -> raven::Window:
+    raven::window_from_xml(interface())
+
+# What COUNT clicks say.
+fn caption(count: int) -> str:
+    if count == 1:
+        return "1 click"
+    std::int::to_string(count).concat(" clicks")
+
+# COUNT after EVENT: hello.clicked counts (and the label says so), app.quit
+# ends the loop; nothing else changes it.
+fn handle(window: raven::Window, event: raven::Event, count: int) -> int:
+    action = event.kind == raven::EventKind::Action
+    if action and event.text == "hello.clicked":
+        window.find("status").set_text(caption(count + 1))
+        return count + 1
+    if action and event.text == "app.quit":
+        raven::quit(0)
+    count
+
+# COUNT after the events of EVENTS from the Ith on.
+fn handle_from(window: raven::Window, events: List[raven::Event], i: int, count: int) -> int:
+    event = events.at(i):
+        on IndexNotFound:
+            return count
+    window.handle_from(events, i + 1, window.handle(event, count))
+
+# COUNT after every event waiting.
+fn step(window: raven::Window, count: int) -> int errors NonFiniteFloat:
+    window.handle_from(raven::events(), 0, count)
+
+# The program's loop: a frame whenever something happens, its events
+# handled after it, until the window closes or Quit is clicked; the count.
+fn run(window: raven::Window, count: int) -> int errors NonFiniteFloat:
+    if not raven::wait_frame(-1.0):
+        return count
+    window.run(window.step(count))
