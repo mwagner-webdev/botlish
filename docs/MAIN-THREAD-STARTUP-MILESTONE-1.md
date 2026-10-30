@@ -936,7 +936,7 @@ executables, the native Rust unit tests, the warning gate, the
 cranelift-generic coverage and the method-call oracle all passed. The
 cranelift coverage job lost its runner after two hours ("The hosted runner
 lost communication with the server"; on main the job takes 66 minutes):
-its one re-run: LINUX-RERUN-PENDING. `main-thread-startup.test` under
+its one re-run passed (83 minutes), and the run is green. `main-thread-startup.test` under
 `CORE_BACKEND=cranelift` takes 16 seconds here.
 
 Before CI, this sandbox (Linux x86-64, four cores) ran the whole local
