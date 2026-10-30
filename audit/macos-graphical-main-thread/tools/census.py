@@ -929,9 +929,9 @@ class Census:
                 shapes = depths if label != "main-rustc" else {"down": [1000000]}
                 for shape, ns in shapes.items():
                     for n in ns:
-                        want = {"overflow": True} if (shape, n) in exhausts else {"value": expected[shape](n)}
+                        depth_expect = {"overflow": True} if (shape, n) in exhausts else {"value": expected[shape](n)}
                         self.case(f"a-{label}-depth-{shape}-{n}", "candidate-a", [exe("depth"), shape, str(n)], "runtime",
-                                  expect={**want, **no}, timeout=120, build=f"{where}/depth")
+                                  expect={**depth_expect, **no}, timeout=120, build=f"{where}/depth")
                     self.case(f"a-{label}-overflow-{shape}", "candidate-a", [exe("depth"), shape, "0"], "runtime",
                               expect={"overflow": True, **no}, timeout=180, build=f"{where}/depth")
                 if label == "main-rustc":
