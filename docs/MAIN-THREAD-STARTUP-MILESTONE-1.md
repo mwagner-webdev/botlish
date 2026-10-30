@@ -459,8 +459,53 @@ native-stack mutants of publication (`publish-before-switch`,
 `start-publishes-thread-stack`, `resume-not-published`,
 `yield-not-restored`), whose detectors now include the main-thread test;
 "compiler bundle omits updated runtime" is the existing macOS application
-mutants (`sys-runtime-bundle-*`, `audit/macos-app`), unchanged. The macOS
-and Windows verdicts are in section 31 and 34.
+mutants (`sys-runtime-bundle-*`, `audit/macos-app`), unchanged.
+
+**macOS AArch64 [executed]** (macos-arm64.yml run 40960887650, Tier C
+shard 1, 95e3648f: `tier.tcl native-aot-mutants=... native-stack-mutants=...`
+on `macos-15`): native-aot 9 mutants reported 8 killed, 0 survived, 1
+skipped (`windows-accepts-main-thread`, Windows' code); native-stack 3 of
+3 killed.
+
+| Mutant | macOS, run 40960887650 (a tree without `audit/`; see below): what failed |
+|---|---|
+| `rustc-link-no-stack-size` | `mts-main-lc-main` and the other main-thread tests of the rustc link (10), aot-facts' `main-thread-lc-main` |
+| `system-link-no-stack-size` | `main_thread_startup_link_args`, main-thread-startup.test (10, `mts-main-lc-main` among them), aot-facts |
+| `main-thread-on-a-worker` | main-thread-startup.test (9: `mts-main-identity`, `mts-main-capacity`, `mts-main-overflow`, ...), aot-facts, native-status's `main-thread-executable` |
+| `main-thread-panic-escapes` | main-thread-startup.test (10), aot-facts |
+| `cli-drops-main-thread` | main-thread-startup.test (9), aot-facts' `main-thread-lc-main` |
+| `api-replaces-main-with-worker` | main-thread-startup.test (10), aot-facts, native-status |
+| `record-policy-ignored` | `linked_program_startup_policy`, main-thread-startup.test (10), aot-facts, native-status |
+| `policy-not-recorded` | `executable_object_records_the_startup_policy`, main-thread-startup.test (10, `mts-driver-option` among them), aot-facts, native-status |
+| `main-thread-unguarded` (native-stack) | main-thread-startup.test (5: `mts-main-identity`, `mts-main-overflow`, `mts-main-process-semantics`, `mts-main-report-parity`, `mts-main-rustc-overflow`) |
+| `macos-reported-bottom-trusted`, `macos-guard-assumed` (native-stack, existing) | native_stack's main-thread and pthread checks, as before |
+
+**That run's native-aot verdicts are not evidence.** The native-aot
+harness's private tree left out `audit/`, so every main-thread test that
+runs a census program (`mts-main-capacity`, `-gc-stress`,
+`-kept-coroutines`, `-overflow`, `-process-semantics`, ...) failed in it
+for every mutant -- and would have on the unmutated tree, which the harness
+never ran. Its kills of `rustc-link-no-stack-size`, `main-thread-on-a-worker`
+and `main-thread-panic-escapes` (the three only macOS compiles) may be
+those failures alone; the others are also killed by a unit test or by
+aot-facts or native-status, which read no census program. Fixed: the tree
+holds what the detectors read (`audit/`, `bench/`, `service/` and `lsp/`,
+as audit/native-stack's does), and the harness now runs every detector on
+the unmutated tree first and judges no mutant unless that baseline passes.
+The native-stack harness's tree was complete (it copies `audit/`):
+`main-thread-unguarded`'s five failures, with every capacity, GC and
+coroutine test passing beside them, are a kill. The re-run on macOS:
+section 31.
+
+**Windows x86-64 [executed]** (windows-x86_64.yml run 40960887683, Tier C
+shard 1): 5 killed, 0 survived, 4 skipped -- and `windows-accepts-main-thread`
+among the skipped, "not compiled differently for windows nt-x86_64". The
+harness named a Windows host by Tcl's `tcl_platform(os)`, "Windows NT",
+so no `%% windows-x86_64` mutant of audit/native-aot ever applied on
+Windows (`c-calls-refused-on-windows`, from WINDOWS-X86-64-MILESTONE-2.md,
+neither; no report counted it). Fixed: the host is `windows-x86_64` there,
+as audit/c-ffi's and audit/native-link-plan's harnesses name it. The two
+Windows mutants' run on Windows, behind the new baseline: section 34.
 
 ## 30. Executable size and performance
 
