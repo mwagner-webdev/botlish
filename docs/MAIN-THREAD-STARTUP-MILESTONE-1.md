@@ -518,6 +518,8 @@ stress, beside C's own SDL program; and every executable's size): section
 | native-executable, system-linker, aot-stub-linker, native-library, argv, native-program-output, native-stack-overflow, c-ffi, c-byte-borrowing, c-ffi-error-capture, native-link-plan, coroutines, linux-syscall, main-cli | all pass |
 | the stub-linker job's 65 files (`BOTLISH_NATIVE_LINKER=stub`) | 3410 tests: 1 failure, `linux-syscall-machine-code-routes-registers` -- the startup report's thread check had made every executable import libc's `getpid`; fixed (both ids by the raw system call, 95e3648f) and the file passes with the stub, rustc and system linkers |
 | the system-linker job's files (`BOTLISH_NATIVE_LINKER=system`) | all pass |
+| `tests/local.tcl -parts golden` (every golden suite, all four backends, the driver's changed command line on the JIT's path) | 109 suites, 0 failed: interp 5257, compile 5257, cranelift-generic 5165, cranelift 5267 |
+| `cargo check --target aarch64-unknown-linux-gnu --all-targets` | clean (type-checked only; section 33 has the run) |
 | `tests/platform/native-status.tcl`, `tests/platform/aot-facts.tcl` | as recorded (the refusal probes included) |
 | `tools/compilerpedia.tcl check` | 1084 topics, 666 examples, 0 problems |
 | `audit/golden/migration/merge.tcl -check 1` | the manifest is current (23 census rows) |
