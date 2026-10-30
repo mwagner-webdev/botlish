@@ -918,9 +918,12 @@ proc hir::read::ParseType {text number} {
         return never
     }
     if {[catch {core::type::normalize $text} type]} {
-        if {[hir::imprint::IsVariableName $text]} {
+        if {[hir::imprint::IsVariableName $text] || [regexp {^[A-Z][0-9]*'$} $text]} {
             # An imprint variable (hir/imprint.tcl): a variable name that
-            # names no type, as in the source signature it came from.
+            # names no type, as in the source signature it came from, or an
+            # inherited one as hir::types::show prints it (T', T2': the
+            # parameter it belongs to is not printed; the names of one
+            # function's variables and of its enclosing functions' differ).
             return [list imprint $text]
         }
         Fail $number "bad type \"$text\": $type"
@@ -1802,11 +1805,11 @@ proc hir::read::CanonicalBlockTypes {hirVar} {
 }
 
 # Gives the enclosing functions' variables a nested function's signature
-# names their constraints (hir::imprint::Inherit), as resolution does:
-# Constrain derived the signature's own, which are not theirs. Enclosing
-# blocks are visited first, so each one's signature is final when the
-# blocks inside it read it (hir::imprint::Inherited).
-proc hir::read::InheritSignatures {hirVar} {
+# names their constraints (hir::imprint::ConstrainEnclosing), as resolution
+# does: Constrain derived the signature's own, which are not theirs.
+# Enclosing blocks are visited first, so each one's signature is final
+# when the blocks inside it read it (hir::imprint::EnclosingOf).
+proc hir::read::ConstrainEnclosingSignatures {hirVar} {
     upvar 1 $hirVar hir
     if {[string first imprint [dict get $hir types]] < 0} {
         return
@@ -1821,7 +1824,7 @@ proc hir::read::InheritSignatures {hirVar} {
         if {[string first imprint $params$declared] < 0} {
             continue
         }
-        lassign [hir::imprint::Inherit $params $declared [hir::imprint::Inherited $hir $e]] params declared
+        lassign [hir::imprint::ConstrainEnclosing $params $declared [hir::imprint::EnclosingOf $hir $e]] params declared
         SetField hir $e declaredParamTypes $params
         SetField hir $e declaredResult $declared
     }
@@ -1848,7 +1851,7 @@ proc hir::read::ConstrainBodies {hirVar} {
                 || ![dict exists $hir exprs [lindex $t 1]]} {
             continue
         }
-        set constraints [hir::imprint::Inherited $hir [lindex $t 1]]
+        set constraints [hir::imprint::EnclosingOf $hir [lindex $t 1]]
         set sig [hir::imprint::BlockSignature $hir [lindex $t 1]]
         if {$sig ne ""} {
             dict for {name traits} [hir::imprint::ConstraintsOf $sig] {
@@ -1896,7 +1899,7 @@ proc hir::read::ConstrainBodies {hirVar} {
 
 proc hir::read::Finish {hirVar} {
     upvar 1 $hirVar hir
-    InheritSignatures hir
+    ConstrainEnclosingSignatures hir
     CanonicalBlockTypes hir
     ConstrainBodies hir
     foreach e [hir::walk $hir] {

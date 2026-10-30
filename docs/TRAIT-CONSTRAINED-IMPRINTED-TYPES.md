@@ -129,6 +129,12 @@ The consequences that distinguish this from generic functions:
 * There is no instantiation step: the body is checked once, with the
   variables rigid and their obligations as facts; each call is checked by
   imprinting and by validating the applications its binding makes.
+* An untyped parameter forwarded to `Map[K, V]` (`fn size(m): m.length()`)
+  takes the requirement with variables of its function's own, established
+  at each of its calls, constraints included -- the signature the
+  programmer could have written, never a declared parameter list
+  (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md, "Inherited imprint variables";
+  `tc-inherited-forwarder-set`, `-map`, `-constraint`).
 
 ## Syntax
 
@@ -294,7 +300,7 @@ in `fn get(m: Map[K, V], key: K) -> V`, every occurrence of K becomes
   contract (`tc-constraint-forgetting`, above).
 * **Nested signatures:** an enclosing function's variable in a nested
   signature carries exactly the enclosing signature's constraints
-  (`hir::imprint::Inherit`): K of `outer(h: H[K])` is Hashable in a nested
+  (`hir::imprint::ConstrainEnclosing`): K of `outer(h: H[K])` is Hashable in a nested
   `g(x: K)`, and a nested signature adds none -- `g(h: H[K])` inside
   `outer(b: Box[K])` is TRAIT-NOT-SATISFIED, as a construction in the body
   would be (`tc-constraint-nested-enclosing`). HIR text prints the variable

@@ -1095,9 +1095,9 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # variable, never one of its own -- in a specialization of the
             # enclosing function for a binding of its variables
             # (cloneImprints) too.
-            set inherited [hir::imprint::EnclosingVariables $hir $ctx]
+            set enclosing [hir::imprint::EnclosingVariables $hir $ctx]
             if {$head eq ""} {
-                lappend inherited {*}[dict keys [dict getdef $ctx cloneImprints {}]]
+                lappend enclosing {*}[dict keys [dict getdef $ctx cloneImprints {}]]
             }
             # The variadic parameter (VARIADICS-VERTICAL-SLICE-1.md, hir/
             # variadic.tcl): the last ordinary one, a List.
@@ -1130,7 +1130,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     # A bare List in the variadic section: List[T] of a fresh
                     # imprint variable, the element type each call imprints.
                     lappend declaredParamTypes [hir::types::MakeList [list imprint \
-                        [hir::variadic::ElementVariable $node [CtxNamespace $ctx] $inherited]] {} 0 0]
+                        [hir::variadic::ElementVariable $node [CtxNamespace $ctx] $enclosing]] {} 0 0]
                     continue
                 }
                 # (With imprint variables: hir/imprint.tcl.)
@@ -1164,7 +1164,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # Imprint variables (hir/imprint.tcl): each one a parameter uses
             # must be established by an earlier one.
             set declaredParamTypes [hir::imprint::CheckSignature hir $e $declaredParamTypes \
-                [lmap param [dict get $node params] {lindex $param 0}] $inherited]
+                [lmap param [dict get $node params] {lindex $param 0}] $enclosing]
             if {$head ne ""} {
                 # The block of a trait clone (TRAITS.md, "Monomorphization"):
                 # each trait parameter takes its witness type -- the
@@ -1236,17 +1236,17 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # structs give its imprint variables, written on every
             # occurrence -- derived from the contract, never declared.
             lassign [hir::imprint::Constrain $declaredParamTypes $declared] constrainedParams declared
-            if {$inherited ne {}} {
+            if {$enclosing ne {}} {
                 # An enclosing function's variable is that function's, as a
-                # type written in its body names it (hir::imprint::Inherit):
+                # type written in its body names it (hir::imprint::ConstrainEnclosing):
                 # constrained as its signature constrains it, or, in a
                 # specialization of it, the type the binding imprints.
                 set constraints [hir::imprint::EnclosingConstraints $hir $ctx]
-                set enclosing [dict create]
-                foreach name $inherited {
-                    dict set enclosing $name [dict getdef $constraints $name {}]
+                set traits [dict create]
+                foreach name $enclosing {
+                    dict set traits $name [dict getdef $constraints $name {}]
                 }
-                lassign [hir::imprint::Inherit $constrainedParams $declared $enclosing] constrainedParams declared
+                lassign [hir::imprint::ConstrainEnclosing $constrainedParams $declared $traits] constrainedParams declared
                 set constrainedParams [lmap t $constrainedParams {
                     if {$t eq {}} { set t } else { hir::imprint::BodyType $ctx $t }
                 }]

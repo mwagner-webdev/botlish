@@ -459,7 +459,7 @@ The rules (hir/imprint.tcl):
   but not `Box {value: "s"}` (TYPE). A nested function whose every variable
   is an enclosing one has no imprint signature: it takes no explicit
   imprint and may be used as a value (`hir::imprint::BlockSignature`,
-  `Inherited`, `Inherit`). Before, the nested function bound such a T anew
+  `EnclosingOf`, `ConstrainEnclosing`). Before, the nested function bound such a T anew
   at each call while its body's captured values kept the enclosing T --
   one term `{imprint T}` for two variables -- and an ill-typed program
   was accepted.

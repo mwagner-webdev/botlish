@@ -239,12 +239,12 @@ proc hir::cabi::PointeeProblem {pointee} {
             if {![hir::types::IsCPtr $arg]} {
                 return [FormMismatch $param $arg $index]
             }
-            return [MatchInner [lindex $param 1] [lindex $arg 1] binding $index $inherited]
+            return [MatchInner [lindex $param 1] [lindex $arg 1] binding $index $enclosing]
 ====
             if {![hir::types::IsCPtr $arg] && ![hir::types::IsCFnPtr $arg]} {
                 return [FormMismatch $param $arg $index]
             }
-            return [MatchInner [lindex $param 1] [lindex $arg 1] binding $index $inherited]
+            return [MatchInner [lindex $param 1] [lindex $arg 1] binding $index $enclosing]
 >>>>
 
 @@ imprint-variable-not-rigid an imprint variable admits every type in its function's body

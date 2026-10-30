@@ -2430,7 +2430,7 @@ proc hir::types::Totality {operation type {seen {}}} {
                 return {total ""}
             }
         }
-        return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
+        return [list unknown "its type is the imprint variable [hir::imprint::Shown [lindex $type 1]], which no constraint holds to total equality and hashing"]
     }
     if {[hir::cabi::IsFloating $type]} {
         return [Totality $operation [hir::cabi::Carrier $type] $seen]
@@ -2779,8 +2779,9 @@ proc hir::types::show {type} {
                 return "NativeEdit\[[hir::layouts::ShowNative [lindex $type 1]]\]"
             }
             imprint {
-                # An imprint variable, by its name (hir/imprint.tcl).
-                return [lindex $type 1]
+                # An imprint variable, by its name (hir/imprint.tcl; an
+                # inferred one as hir::imprint::Shown names it).
+                return [hir::imprint::Shown [lindex $type 1]]
             }
             srefined {
                 # A scalar refinement, by its source spelling

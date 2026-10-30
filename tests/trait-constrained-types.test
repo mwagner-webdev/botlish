@@ -535,7 +535,7 @@ test tc-diagnostic-order {imprinting comes first: a variable that cannot be esta
 # (hir::imprint::EnclosingVariables): so is a name in the signature. Only the
 # variables no enclosing function has are the nested function's own, bound
 # at its calls; an enclosing one is rigid there and never bound at a call
-# (hir::imprint::BlockSignature, Bind, Inherit).
+# (hir::imprint::BlockSignature, Bind, ConstrainEnclosing).
 
 # The program the bug was found with: g's T is outer's, so g(Box {value:
 # "s"}) cannot pass a Box[str] for outer's T (once accepted, `ys` was a
@@ -795,6 +795,29 @@ test tc-ordinary-nested-enclosing-operation {a nested function that applies a tr
 
 # ---------------------------------------------------------------------------
 # Runtime representation: one struct per constructor
+
+test tc-inherited-forwarder-set {an untyped forwarder of MutableSet[T]'s length inherits MutableSet[T'], its own variable with T's constraint (Hashable), established at each call (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md, "Inherited imprint variables"): it compiles and runs on every backend, for an empty and a filled set} -body {
+    set src "import std::mutable_set\nfn size(s):\n    s.length()\nfn has(s, x):\n    s.contains(x)\ne = std::mutable_set::create\[str\]()\nf = std::mutable_set::create\[int\]()\nf.add(1)\nf.add(2)\n\[size(e), size(f), has(f, 2), has(f, 3)\]\n"
+    set hir [tcHir $src]
+    set arg [lindex [hir::types::StructArgs [lindex [hir::signatures::entryTypes $hir [tcBlock $hir size]] 0]] 0]
+    list [hir::types::show $arg] [hir::types::ImprintConstraints $arg] \
+        [hir::signatures::text $hir [tcBlock $hir has]] [sourceAgree $src] \
+        [tcRejection "import std::mutable_set\nfn has(s, x):\n    s.contains(x)\nhas(std::mutable_set::create\[str\](), 1)\n"]
+} -result {T' Hashable {fn has(s: std::mutable_set::MutableSet[T'], x: T') -> bool} {value {[0, 2, true, false]}} {TYPE {argument for parameter "x" cannot be proven to satisfy str, the parameter type inferred from the function body (argument type: int); inferred from the function body: argument 2 of std::mutable_set::contains (declared T) requires T' (at 3:16)}}}
+
+test tc-inherited-forwarder-map {an untyped forwarder of MutableMap[K, V] operations inherits K' and V', K' Hashable as K is, V' unconstrained; each call establishes both} -body {
+    set src "import std::mutable_map\nfn lookup(m, k):\n    if m.contains(k):\n        m.length()\n    else:\n        0\nm = std::mutable_map::create\[str, int\]()\nm.set(\"a\", 5)\n\[lookup(m, \"a\"), lookup(m, \"b\")\]\n"
+    set hir [tcHir $src]
+    set args [hir::types::StructArgs [lindex [hir::signatures::entryTypes $hir [tcBlock $hir lookup]] 0]]
+    list [hir::signatures::text $hir [tcBlock $hir lookup]] [lmap t $args {hir::types::ImprintConstraints $t}] [sourceAgree $src]
+} -result {{fn lookup(m: std::mutable_map::MutableMap[K', V'], k: K') -> int} {Hashable {}} {value {[1, 0]}}}
+
+test tc-inherited-forwarder-constraint {the constraint an inherited variable carries is a fact of the forwarder's body, as a declared variable's is: the body may build an H of its K' (H requires Hashable), and an argument holding a function is no H at all} -body {
+    set src [tcProgram "fn key_of(h: H\[K\]) -> K:\n    h.key\nfn rewrap(h):\n    H {key: key_of(h)}\n\[rewrap(H {key: 3}).key, rewrap(H {key: \"a\"}).key\]\n"]
+    set hir [tcHir $src]
+    list [hir::signatures::text $hir [tcBlock $hir rewrap]] [sourceAgree $src] \
+        [tcKind [tcProgram "fn key_of(h: H\[K\]) -> K:\n    h.key\nfn rewrap(h):\n    H {key: key_of(h)}\nrewrap(H {key: twice})\n"]]
+} -result {{fn rewrap(h: H[K']) -> H[K']} {value {[3, "a"]}} TRAIT-NOT-SATISFIED}
 
 test tc-runtime-shared {applications share their constructor's runtime representation: a Pair[int, str] and a Pair[str, int] are the same kind of struct value (no type-argument vector, witness or generic header), on the Tcl backends and in NIR (one shape)} -constraints nativeBuilt -body {
     set hir [tcHir [tcProgram "a = Pair\[int, str\] {first: 1, second: \"x\"}\nb = Pair\[str, int\] {first: \"y\", second: 2}\n\[a, b\]\n"]]

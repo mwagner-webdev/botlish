@@ -2974,9 +2974,12 @@ The scalars are per-compilation source types the loader declares for the
 target when a file imports std::ffi::c (`hir::cabi::NamespaceTypeDecls`): the
 target is a front-end input, in `surface::cache::Key`. Imprinting
 (hir/imprint.tcl) is general, not generics: one binding path for Botlish
-functions (their declared types) and intrinsics (`-imprint`), variables
-established by applied types left to right, explicit imprints all or
-nothing in first-occurrence order. Never add declared type parameters
+functions (their declared types, and the inherited variables an untyped
+parameter's contract takes from a callee's:
+INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md, "Inherited imprint variables")
+and intrinsics (`-imprint`), variables established by applied types left
+to right, explicit imprints all or nothing in first-occurrence order.
+Never add declared type parameters
 (`fn f[T]`), a constraint written on a function or a variable (the only
 constraints are a struct slot's, which a signature's applications carry:
 Parameterized structs and constrained slots, above), or specialization
@@ -2986,7 +2989,8 @@ witness selection, not imprinting's). A nested function's signature names
 an enclosing function's variable as that variable: rigid there, never bound
 at the nested function's calls, constrained as the enclosing signature
 constrains it (`hir::imprint::BlockSignature`'s own variables exclude
-`Inherited`; `Inherit` at resolution and in hir/read.tcl). Variables are
+`EnclosingOf`; `ConstrainEnclosing` at resolution and in hir/read.tcl).
+Enclosing variables are not a forwarder's inherited ones. Variables are
 identified by name only, so never let a nested function bind a variable of
 an enclosing one's name.
 
