@@ -318,6 +318,14 @@ reservation of address space -- the kernel maps the stack below the main
 thread with one inaccessible guard page -- not memory allocated at startup.
 No general stack-size option exists.
 
+**The limit [executed, macOS AArch64]** (census run 41036403542, its
+`stack` group, Xcode's ld on `macos-15`): a C program linked with
+`-stack_size` 0x4000000, 0x10000000 and 0x20000000 runs with that main
+stack, touches it to within 256 KiB of its bottom and faults in its guard
+below; 0x40000000 and 0x80000000 do not link (`ld: -stack_size must be <=
+512MB on arm64 platforms`). 512 MiB is the largest reservation the linker
+accepts.
+
 ## 13. LC_MAIN inspection
 
 **[executed, macOS AArch64]** (macos-arm64.yml run 40992453520 at
@@ -363,6 +371,18 @@ system linker's value from both linkers and failed on the rustc one; each
 linker's value is pinned now (`mtsMainUsable`), the reports compared but
 for the `stack` line, and the census harness's `report-main-rustc` expects
 the page less. The worker's stack is the same under both linkers.
+
+The census on the production policy (run 41036403542) read the same
+reports **[executed, macOS AArch64]**: `report-main` (Botlish.app's system
+linker) `startup main-thread`, `process-main-thread 1`, 536,870,912 usable
+bytes over a 16 KiB guard; `report-main-rustc` 536,854,528 over 32 KiB
+(Rust's page and the kernel's); `report-worker` `startup worker`,
+`process-main-thread 0`, the worker's 1,073,754,112 over 16 KiB. Its
+`identity` rows agree by Foundation's `NSThread.isMainThread` as well as
+libpthread: `id-botlish-main` and `id-botlish-main-rustc` on the main
+thread (one thread in the process, the main thread's thread id), every
+worker executable and the linked run (`id-botlish-linked-run`) on a second
+thread.
 
 ## 15. Overflow-guard acceptance
 
@@ -458,15 +478,86 @@ HIR interchange field, no front-end cache key, no compiler-service fact.
 
 ## 25. Packaged Botlish.app acceptance
 
-(From macos-arm64.yml's `main-thread-startup` job; section 31.)
+**Botlish.app's compiler builds main-thread executables [executed, macOS
+AArch64]** (census run 41036403542 at 44a5b4fa): the application built
+from the branch (`single/macos/build.sh`, signed ad hoc) compiled every
+"main" probe of the census with its own `botlish -native-startup
+main-thread -emit-native-executable` -- the system linker, the
+application's `auto` for a program that calls C, the runtime archive in
+its Resources, no rustc -- and every one ran on the process's main thread
+with the 512 MiB stack (sections 14 and 26); after the census the
+application's signature still verified (`codesign --verify --deep
+--strict`, the job's last check), the compiler having written nothing
+into it. A main-thread and a worker executable of the same program are
+the same size (848,120 bytes for the identity program, 3,675,080 for the
+SDL one): the policy is a word of the record and a link flag.
+
+**Without the checkout, Cargo or rustup, from a path with a space and
+non-ASCII characters** -- macos-arm64.yml's `main-thread-startup` job
+(`$RUNNER_TEMP/Prögram Fïles/Botlish.app`; the checkout, `~/.cargo` and
+`~/.rustup` moved away and no `cargo`, `rustc` or `rustup` on PATH; a
+main-thread and a worker executable built, their LC_MAIN, their thread by
+`pthread_main_np` through a C call and a kept coroutine, the startup
+report, the signature after): section 31.
 
 ## 26. Cocoa/Metal graphical acceptance
 
-(From the census harness on the production policy; section 31.)
+**EXECUTED-COCOA [executed, macOS AArch64]** (census run 41036403542,
+`macos-15`, the runner's graphical session: one 1024x768 display, the
+console user logged in). The census's SDL program -- the pinned static
+SDL3 3.4.18 linked into a Botlish executable through the link plan (its
+22 libraries the system's and Apple's frameworks, Cocoa, Metal and AppKit
+among them, none SDL3's: `deps-main-sdl`), a window, a Metal renderer, 30 presented frames of
+which 3 from inside a kept coroutine on its own stack, a pushed quit event
+polled back, the renderer, window and SDL shut down -- compiled by
+Botlish.app with `-native-startup main-thread` and run with no
+environment variable:
+
+| Case | Build | Class | What the fixture saw |
+|---|---|---|---|
+| `a-main-cocoa` | Botlish.app, system linker | EXECUTED-COCOA | driver `cocoa`, a Cocoa window, renderer `metal`, 30 frames presented (3 in the coroutine), 7 events, the quit polled, everything destroyed; every SDL stage with `pthread_main_np() == 1`; the window captured: its centre (255, 0, 255), 89.5 % of it the drawn colour |
+| `a-main-cocoa-gc` | the same, `BOTLISH_NATIVE_GC_STRESS=1` | EXECUTED-COCOA | the same, a collection at every allocation |
+| `a-main-rustc-cocoa` | the checkout, rustc linker | EXECUTED-COCOA | the same |
+| `t-a-main-sdl` (five timed runs) | Botlish.app | EXECUTED-COCOA | the same, each run (section 30) |
+| `s-main-sigterm-sdl` | Botlish.app | EXECUTED-COCOA | SIGTERM one second in: SDL's handler, installed on the main thread, makes it a quit event, polled back; status 0, everything shut down |
+| `a-main-headless`, `-gc` | Botlish.app, `SDL_VIDEODRIVER=dummy` | EXECUTED-HEADLESS | the dummy driver on the main thread: never counted as Cocoa |
+
+The class is the census's unchanged classifier (MACOS-GRAPHICAL-MAIN-
+THREAD-CENSUS.md, section 19): EXECUTED-COCOA only when SDL's video driver
+is `cocoa`, the window has a Cocoa window, every stage ran where
+`pthread_main_np()` -- never SDL's own answer -- said main, frames were
+presented, the pushed quit came back and everything was shut down; its
+self-tests (an incomplete record, a dummy driver claiming Cocoa, Cocoa off
+the main thread, a window the fixture did not see, a quit never polled)
+classify as they must in the same run. Nothing in the runtime knows SDL,
+Cocoa or AppKit: the executable is an ordinary Botlish program whose
+startup word is the main thread's.
 
 ## 27. Graphical positive controls
 
-(Section 31.)
+**[executed, macOS AArch64]** (census run 41036403542): each control fails
+where it must, on the same host, in the same run --
+
+| Case | What runs | Class (as predicted) | Why it fails |
+|---|---|---|---|
+| `a-worker-cocoa` | the very program of `a-main-cocoa`, built by Botlish.app with the default (worker) startup | FAILED-CORRECTNESS | SDL_Init: "No available video device"; `pthread_main_np() == 0` at every stage, no window, nothing presented |
+| `bl-worker-cocoa`, `-hint` | the census's production baseline on the worker (with `SDL_VIDEODRIVER=cocoa`) | FAILED-CORRECTNESS | "No available video device"; "cocoa not available" |
+| `c-worker-cocoa` | C's own SDL program on a pthread | FAILED-CORRECTNESS | "No available video device" |
+| `c-appkit-worker` | an NSWindow made on a pthread | FAILED-CORRECTNESS | AppKit: "NSWindow should only be instantiated on the main thread!" |
+| `c-main-cocoa`, `c-appkit-main` | the same C programs on the main thread | EXECUTED-COCOA, EXECUTED-THREAD | the reference the Botlish main-thread executable matches |
+| `pc-main-baddriver` | `a-main-cocoa`'s executable with `SDL_VIDEODRIVER=nonexistent` | FAILED-CORRECTNESS | SDL_Init fails: never a window, even on the main thread |
+| `pc-nopump`, `pc-nodestroy`, `pc-baddriver` | C controls: the quit never polled, no cleanup, a missing driver | FAILED-CORRECTNESS | the classifier notices each missing stage |
+| `pc-dummy-not-cocoa` | the dummy driver on the main thread | EXECUTED-HEADLESS | a headless run is never Cocoa |
+| `a-main-8mib-*` | the main-thread program objects linked without `-stack_size` (8 MiB) | NATIVE LIMIT STACK on the three recursions the 512 MiB stack holds | the reservation is what holds them, and the guard reports the smaller stack's exhaustion too |
+
+The worker's Cocoa failure is the reason for the policy: the same source,
+the same compiler and the same SDL fail on the worker and succeed on the
+main thread, the startup word being the only difference. The census's
+candidates B (a dispatcher to the main thread) and C (SDL's main
+callbacks) ran on the experimental build beside it as before (B's Cocoa
+dispatch and C's callbacks EXECUTED-COCOA, B's two deadlock controls
+FAILED-CORRECTNESS as predicted); they are the census's record, not this
+milestone's.
 
 ## 28. Process and linked-run parity
 
@@ -682,12 +773,37 @@ host linker; medians of interleaved runs on the 4-core sandbox, 400 runs of
   slower, the stub's not -- is placement and the shared machine's noise,
   not a cost of the policy, which runs nothing after the program starts.
 
-**The main thread against the worker on macOS** (the census harness's
-`timing` section, five repetitions each: the identity program's startup,
-the SDL program with a window on the main thread and headless on both
-policies, both headless runs and the kept-coroutine program under GC
-stress, beside C's own SDL program; and every executable's size): section
-31.
+**The main thread against the worker on macOS [executed, macOS
+AArch64]** (census run 41036403542, its `timing` section: five repetitions
+of each case on one `macos-15` runner, medians with [min, max]; the
+programs built by Botlish.app's system linker but the C reference):
+
+| Case | wall ms | entry since exec ms | SDL init ms | frame ms | SDL_PumpEvents us | threads |
+|---|---|---|---|---|---|---|
+| identity, worker | 18.1 [10.5, 22.7] | 13.9 [9.3, 20.4] | - | - | - | 2 |
+| identity, main thread | 11.0 [8.2, 12.2] | 10.4 [7.5, 10.9] | - | - | - | 1 |
+| SDL, main thread, Cocoa (EXECUTED-COCOA) | 1934.8 [1786.9, 2152.5] | 13.1 [10.6, 24.8] | 92.0 [71.7, 157.5] | 50.6 [49.4, 56.8] | 9.83 [5.36, 12.73] | 5 |
+| SDL, main thread, headless | 2081.5 [1651.8, 3428.6] | 17.8 [14.6, 37.6] | 0.20 [0.17, 0.24] | 64.6 [49.0, 102.3] | 0.17 [0.09, 0.21] | 3 |
+| SDL, worker, headless | 2846.6 [2464.3, 2932.7] | 13.9 [10.0, 21.2] | 0.16 [0.12, 0.28] | 84.4 [72.0, 88.4] | 0.10 [0.07, 0.17] | 4 |
+| SDL, main thread, headless, GC stress | 2741.9 [2490.3, 3280.9] | 8.0 [6.5, 10.1] | 0.10 [0.10, 0.22] | 85.5 [73.1, 97.4] | 0.09 [0.08, 0.09] | 3 |
+| SDL, worker, headless, GC stress | 2855.2 [2035.7, 2946.2] | 7.6 [6.7, 9.2] | 0.10 [0.10, 0.11] | 82.2 [61.5, 93.5] | 0.09 [0.08, 0.10] | 4 |
+| kept coroutines, GC stress, main thread | 2.67 [2.56, 6.93] | - | - | - | - | - |
+| kept coroutines, GC stress, worker | 3.01 [2.88, 6.72] | - | - | - | - | - |
+| C's SDL program, main thread, Cocoa | 2692.2 [2500.6, 3126.2] | 12.0 [7.6, 37.0] | 44.9 [42.0, 46.8] | 85.2 [79.8, 100.8] | - | 6 |
+
+* The main-thread executable has one thread fewer -- the worker's -- and
+  nothing else measurable here: startup, frames and the GC-stressed runs
+  of the two policies overlap within their ranges on a shared runner, and
+  this table claims no speed-up for either. Frame times are the census
+  program's own pacing over 30 frames, not a rendering benchmark.
+* A Botlish main-thread executable's Cocoa run costs what C's does
+  (SDL init 92 against 45 ms, frames 51 against 85 ms, both within the
+  runner's spread); `SDL_PumpEvents` on the main thread with a real
+  window is about 10 us.
+* Sizes: a main-thread and a worker executable of one program and linker
+  are the same number of bytes (identity 848,120 by the system linker and
+  924,312 by the rustc linker under both policies; the SDL program
+  3,675,080); the policy is the record's word and a link flag.
 
 ## 31. macOS CI results
 
@@ -743,6 +859,16 @@ harness's Linux dry run (every group the main-thread startup job selects,
 `--strict`, the checkout's compiler; on Linux every main-thread row is a
 predicted FAILED-BUILD) completes with no case not as predicted
 **[executed, Linux x86-64]**.
+
+**The census on the production policy** (the census workflow, run
+41036403542 at 44a5b4fa, `repeat 5`) **[executed, macOS AArch64]**: every
+group -- env, identity, stack, c-graphical, botlish-baseline, candidate A
+(production), semantics, startup, candidate B and C (the experimental
+build), controls, timing -- 170 records: EXECUTED-COCOA 12,
+EXECUTED-HEADLESS 13, EXECUTED-THREAD 125, FAILED-CORRECTNESS 13 (each a
+predicted one: sections 26 and 27), FAILED-BUILD 2 (the linker's 512 MB
+limit), UNAVAILABLE-GUI 0, NOT-TESTED 0; **not as predicted: none**. The
+production tree and Botlish.app's signature were unchanged after it.
 
 ## 32. Linux x86-64 CI results
 
