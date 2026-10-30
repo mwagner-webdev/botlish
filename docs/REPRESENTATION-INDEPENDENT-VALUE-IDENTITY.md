@@ -853,9 +853,13 @@ What the runs found:
   native-view's `view-is-a-pointer`); they edit files this milestone does
   not touch, and were not run.
 
-CI on the branch (`tests.yml`, `tests-arm64.yml` and `static-decisions.yml`
-dispatched by hand; the macOS and Windows workflows on push): see the
-final note of this section.
+CI on the branch `claude/confident-archimedes-9gikyw`, at the last code
+commit (a7e803ba): `tests.yml`, `tests-arm64.yml` and `static-decisions.yml`
+dispatched by hand (static-decisions because the front end and the standard
+library changed: the batched against the sequential scheduler, never run
+locally), the macOS and Windows workflows on push. The Windows Icy Tower
+workflow passed; the others were still queued behind the repository's
+runner backlog when this was written, so they are **pending, not passed**.
 
 ## Limitations
 
