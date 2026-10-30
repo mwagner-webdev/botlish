@@ -1255,8 +1255,8 @@ summary: NATIVE STARTUP means an executable could not read its program image or 
 index: errors backends
 alias: no program image; bare botlish-aot-stub
 keywords: executable, stub linker, system linker, program image, program record, botlish-aot-stub, libbotlish_runtime, startup, thread, format
-related: backend.native-executable backend.single-executable error.native-io error.native-link
-docs: SINGLE-EXECUTABLE.md
+related: backend.native-executable backend.native-startup backend.single-executable error.native-io error.native-link
+docs: SINGLE-EXECUTABLE.md MAIN-THREAD-STARTUP-MILESTONE-1.md
 code: NATIVE STARTUP
 
 == MEANING
@@ -1281,6 +1281,13 @@ read it:
     not a Botlish program record
     the program was compiled for a different native runtime build
     the program record's code table does not match its descriptor
+    the program record names an unknown startup policy (N)
+    this executable asks to run its program on the process's main
+    thread (startup policy main-thread), which only macOS AArch64
+    executables do
+
+(the last two: a record altered after the link, or moved to another
+host: the startup policy is the executable's own, backend.native-startup).
 
 It is also reported when the runtime cannot create its worker thread
 (for example a BOTLISH_NATIVE_STACK_BYTES the system refuses), and by
@@ -1335,11 +1342,12 @@ summary: NATIVE UNSUPPORTED KIND reports a valid construct the native backends c
 index: errors backends
 alias: native lowering does not support; not supported natively
 keywords: struct-shape, CONTEXT-NATIVE-LOWERING-UNSUPPORTED, value, foreign, sequence-mode, validator contract, cranelift-generic, context struct
-related: backend.cranelift backend.cranelift-generic backend.native-only concept.contexts concept.specialization error.native-bug
-docs: README.md CONTEXTS.md DIRECT-HIR-NATIVE-PATH.md
+related: backend.cranelift backend.cranelift-generic backend.native-only backend.native-startup concept.contexts concept.specialization error.native-bug
+docs: README.md CONTEXTS.md DIRECT-HIR-NATIVE-PATH.md MAIN-THREAD-STARTUP-MILESTONE-1.md
 code: NATIVE UNSUPPORTED
 code: NATIVE UNSUPPORTED CONTEXT-NATIVE-LOWERING-UNSUPPORTED
 code: NATIVE UNSUPPORTED struct-shape
+code: NATIVE UNSUPPORTED startup
 
 == MEANING
 On the native backends; the program is valid and runs on interp and
@@ -1362,6 +1370,9 @@ of the code says what:
     test suite's instrumentation natives).
   * foreign: batch timing or allocation reports of a program that calls
     C, or such a program run with an empty argument vector.
+  * startup: -native-startup main-thread for an executable of a target
+    other than macOS AArch64 (backend.native-startup), refused before
+    anything is linked or written: an existing executable is kept.
   * validator contract, ambient binding, DynamicBinding,
     UnresolvedControl, sequence-mode: HIR that only unchecked programs or
     the embedding API produce.
@@ -1401,6 +1412,8 @@ CONTEXT-NATIVE-LOWERING-UNSUPPORTED)". Declaring `type Depth = Int in
     Lists as ordinary parameters (or keep them in a MutableVector field).
   * value: end the program with data (call the function), not with a
     function.
+  * startup: build the executable with the default worker startup, or on
+    and for macOS AArch64.
   * anything else: run on interp or compile, and report the program if
     it is ordinary Botlish source.
 

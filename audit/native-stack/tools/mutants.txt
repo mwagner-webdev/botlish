@@ -598,3 +598,24 @@ pub fn set_active_stack(stack: &NativeStack) {
 ====
 ));
 >>>>
+
+# ---------------------------------------------------------------------------
+# The process's main thread (MAIN-THREAD-STARTUP-MILESTONE-1.md): a
+# main-thread executable's program runs on the main thread's own stack,
+# under the same guard. macOS AArch64 only: no other host starts one.
+
+@@ main-thread-unguarded a main-thread executable runs its program without the stack-overflow guard: its exhaustion is the raw fault
+%% macos-aarch64
+## native/src/runtime/aot.rs
+<<<<
+        let _guard = {
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
+        };
+====
+        let _guard = (startup == Startup::Worker).then(|| {
+            let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+            super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
+        });
+>>>>
+

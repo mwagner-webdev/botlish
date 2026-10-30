@@ -171,6 +171,68 @@ executable's machine code uses
 the target's baseline instruction set, whichever native backend the
 command line names: it is always the closed, specialized program.
 
+== WHICH THREAD
+An executable runs its program on a worker thread of its own by default;
+-native-startup main-thread builds one that runs it on the process's main
+thread, which a macOS graphical program needs (backend.native-startup).
+
+@topic backend.native-startup
+title: An executable's startup policy: worker or main thread
+summary: -native-startup fixes the thread an executable runs its program on: a worker of its own (the default) or the process's main thread, with a 512 MiB stack (macOS AArch64 only).
+index: backends
+alias: native startup; startup policy; main thread; main-thread; run on the main thread; native-startup
+keywords: -native-startup, worker, main-thread, main thread, Cocoa, AppKit, SDL3, LC_MAIN, stack_size, 512 MiB, pthread_main_np, macOS, graphical, window
+related: backend.native-executable backend.platforms backend.macos-application cli.options error.native-unsupported error.native-startup error.native-limit-stack
+docs: MAIN-THREAD-STARTUP-MILESTONE-1.md MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md SINGLE-EXECUTABLE.md
+
+== WHAT IT IS
+A property of the executable, fixed when -emit-native-executable builds it
+and recorded in it: never chosen by an environment variable when it runs,
+by a library it links, a context or anything the program declares.
+
+    worker        the default: the process's main thread starts a worker
+                  thread, the program runs on it, and the main thread
+                  waits for it; the worker's stack is
+                  BOTLISH_NATIVE_STACK_BYTES (1 GiB by default)
+    main-thread   the program runs on the process's main thread itself,
+                  the thread that entered the executable's main, on its
+                  own stack: 512 MiB, reserved by the link (Mach-O's
+                  LC_MAIN, Apple ld's largest on arm64);
+                  BOTLISH_NATIVE_STACK_BYTES does not apply
+
+    botlish -native-startup main-thread -emit-native-executable game.bot
+
+== WHY
+On macOS, AppKit -- and so SDL3's Cocoa video driver -- works on the
+process's main thread only: on the worker, SDL_Init(SDL_INIT_VIDEO) fails
+with "No available video device" (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md).
+An executable built with main-thread runs the same compiled program on
+the main thread, where a window, a Metal renderer and its events work,
+from the program's own direct C calls; a coroutine's stack is switched to
+on that same thread, so C calls made from a coroutine are on the main
+thread too.
+
+== WHAT IS THE SAME
+The program's meaning, output, argv(), errors, exit statuses and the
+driver protocol; the collector and its roots; coroutines; the stack
+guard: exhausting the main thread's stack is NATIVE LIMIT STACK, status 1,
+as on the worker (error.native-limit-stack), and a Rust panic is "native
+executable panicked (NATIVE BUG)", status 1. What differs is the thread
+and the stack's size: 512 MiB against the worker's 1 GiB, so the deepest
+recursion a worker holds may not fit (it is then NATIVE LIMIT STACK).
+
+== WHERE
+main-thread is supported for macOS AArch64 executables only, through the
+system linker (Botlish.app's) and the rustc linker alike. Every other
+target refuses it before anything is written (NATIVE UNSUPPORTED startup):
+Linux reports no guard below its main thread's stack, which the stack
+guard needs; Windows' main thread has link.exe's 1 MiB unless a link
+reserves more. The worker is supported everywhere. Nothing selects
+main-thread automatically: linking SDL3 or Cocoa does not, and a program
+that links them may run on the worker. -native-startup is an option of
+-emit-native-executable only: a native run (-backend cranelift) keeps the
+driver's worker, and a native library runs on its host's thread.
+
 @topic backend.native-library
 title: Native libraries: Botlish functions a C host calls
 summary: `exported c fn` declares a C export; -emit-native-library NAME builds libNAME.a, libNAME.so, NAME.h and a manifest that any C host can link and call.
@@ -313,7 +375,9 @@ runs of programs that call no C need nothing else installed. Every
 executable is linked by the system linker (there is no stub on macOS), so
 -emit-native-executable, and a native run of a program that calls C (Darwin
 I/O does), need Apple's Command Line Tools (xcode-select --install) or
-Xcode; never Rust. Diagnostics in library code name //zipfs:/app/...
+Xcode; never Rust. A graphical program's executable (SDL3's Cocoa driver,
+AppKit) is built with -native-startup main-thread (backend.native-startup).
+Diagnostics in library code name //zipfs:/app/...
 paths; the language server copies the standard library to
 ~/Library/Caches/botlish (or $BOTLISH_CACHE_DIR) for an editor. The
 application is ad-hoc signed, not notarized: a copy downloaded through a
@@ -404,7 +468,7 @@ summary: The Tcl backends need only Tcl 9; the native backend runs on Linux, mac
 index: backends
 alias: platforms; operating systems; aarch64; arm64; x86-64; supported platforms
 keywords: Linux, x86-64, AArch64, arm64, macOS, Windows, MSVC, Tcl 9, coroutines, stub
-related: backend.targets backend.overview backend.native-executable backend.single-executable backend.macos-application
+related: backend.targets backend.overview backend.native-executable backend.native-startup backend.single-executable backend.macos-application
 docs: README.md LINUX-SYSCALL-TRANSPORTS.md COROUTINES.md WINDOWS-X86-64-MILESTONE-1.md WINDOWS-X86-64-MILESTONE-2.md WINDOWS-X86-64-MILESTONE-3.md WINDOWS-X86-64-MILESTONE-5.md MACOS-AARCH64-MILESTONE-8.md MACOS-AARCH64-MILESTONE-9.md
 
 == WHAT IS TESTED
@@ -458,6 +522,10 @@ other platforms.
                              and AArch64, stub linker x86-64 only; macOS
                              AArch64, Mach-O: rustc linker; Windows
                              x86-64, PE (NAME.exe): rustc and link.exe
+    main-thread startup      macOS AArch64 executables only
+                             (-native-startup main-thread:
+                             backend.native-startup); everywhere else
+                             the worker, the default
     C calls (extern c fn)    Linux, glibc (GNU ld's link plan, the SysV
                              and AAPCS64 C ABIs), macOS AArch64 (Apple's
                              ld, Apple's arm64 C ABI) and Windows x86-64
@@ -586,8 +654,8 @@ title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
-related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-library concept.argv
+keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library concept.argv
 docs: README.md
 
 == RUNNING
@@ -623,6 +691,12 @@ own process arguments.
 == BUILDING (nothing runs)
     -emit-native-executable   a standalone executable beside each input
                               (backend.native-executable)
+    -native-startup POLICY    the executable's startup policy: worker (the
+                              default: a worker thread of its own) or
+                              main-thread (the process's main thread, a
+                              512 MiB stack; macOS AArch64 only), fixed
+                              into the executable (backend.native-startup);
+                              an option of -emit-native-executable only
     -emit-hir-interchange     each input's analyzed HIR as FILE.hirx
                               (backend.hir-interchange)
     -emit-native-library NAME the native library NAME from the one input:
@@ -691,7 +765,9 @@ own process arguments.
 
 == MALFORMED INVOCATIONS
 An unknown option, an option without its argument (`-backend` last), an
-unknown backend, mode or target, a malformed -argv-hex, -check beside an
+unknown backend, mode or target, a malformed -argv-hex, an unknown
+-native-startup policy, -native-startup without -emit-native-executable
+or given twice with different policies, -check beside an
 option it does not take or with an input that is not Botlish source, -lsp
 beside an option it does not take or with an input file, an unknown
 -lsp-scheduler, or options without an input file print a message on stderr

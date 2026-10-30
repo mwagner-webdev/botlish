@@ -250,6 +250,20 @@ the original findings with their resolution.
 | vm.rs :242-248, :278-301 (non-Linux branches) | without the platform layer: `native_stack: None`, a 32 MiB shadow stack (4M slots) as the depth bound, `publish_active_stack` a no-op | linux | **resolved**: on macOS `native_stack` is the discovered stack, the shadow array is empty and publication is live | high | 4 (done) | M (done) |
 | main.rs :563-567, runtime/aot.rs :52-56, :101-106 | the guard is installed for JIT runs and executables on Linux only | linux | **resolved**: installed at the same three points on the three hosts (`runtime::platform::OverflowGuard`) | medium | 4 (done) | M (done) |
 
+**The process's main thread (MAIN-THREAD-STARTUP-MILESTONE-1.md).** A macOS
+executable emitted with `-native-startup main-thread` runs its program on
+the process's main thread -- the one AppKit and SDL3's Cocoa driver require
+(MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md) -- instead of the worker, with a
+512 MiB stack its link reserves (LC_MAIN, through the system and the rustc
+linker). The same discovery (`platform/macos.rs`) confirms the main thread's
+one-page guard below that stack, and the same guard reports its exhaustion
+and its coroutines'. The worker stays the default; the policy is refused for
+every other target (`NATIVE UNSUPPORTED startup`). macos-arm64.yml's
+`main-thread-startup` job accepts it on every push (the packaged application
+without the checkout, and the graphical census's candidate A on the
+production policy); `tests/main-thread-startup.test` is in the acceptance
+tier.
+
 ## 7. GC roots and the frame walk
 
 | Where | Linux assumption | Class | macOS adaptation | Risk | M | Check |
@@ -627,6 +641,7 @@ secret or a self-hosted runner.
 |---|---|---|---|---|
 | `smoke` | A | `macos-15` | host facts (fails unless `Darwin`/`arm64`, not Rosetta); `tests/platform/toolchain-smoke.sh`; `.github/actions/setup-macos` (tests/platform/setup-macos.sh: Tcl 9.0.1 from source, cached; stable Rust); `tests/platform/cabi-facts.tcl`; the native build (`.github/actions/build-native`, cached); `cargo test --lib`; `cargo test --test native_stack` (the stack facts and the guard, in child processes; since milestone 4); `tests/platform/native-status.tcl`; `tests/platform/aot-facts.tcl` (a program object and an executable as the host's tools see them, the standalone runs; since milestone 5); `tier.tcl smoke` | 1 min 18 s with warm caches (run 4); about 3 min more for the one-time Tcl build |
 | `acceptance` (2 shards) | B | `macos-15` | `tier.tcl -shard I/2 -backends interp acceptance` | 20 and 27 min (run 4), 23 and 17 (run 7) |
+| `main-thread-startup` | B | `macos-15` | after `app`: the main-thread startup policy through the downloaded application (the checkout and Rust moved away: LC_MAIN, the thread, the report), static SDL3 (`tests/platform/link-plan-sdl3.sh`), the graphical census's candidate A on the production policy with `--strict` (`audit/macos-graphical-main-thread/tools/census.py`), `tests/main-thread-startup.test` plainly and under GC stress (MAIN-THREAD-STARTUP-MILESTONE-1.md) | see the report |
 | `linux-control` | A | `ubuntu-latest` | the smoke commands on Linux x86-64 at the same commit | 1-4 min |
 | `full` (3 shards) | C | `macos-15` | opt-in (below) | 4-5 min for a dozen named files (runs 4 and 5); 4 s for a shard with nothing to run; the default payload was not run in milestone 1 |
 
