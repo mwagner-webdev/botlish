@@ -654,8 +654,8 @@ verdict for every probe.
 `audit/trait-constrained-types/tools/mutate.tcl` applies each mutant of
 `audit/trait-constrained-types/tools/mutants.txt` to a private copy of the
 tree and runs `tests/trait-constrained-types.test` and the fuzzer (six
-programs, seed 3) against it. All 43 mutants -- the 28 the milestone brief
-names and 15 more -- apply exactly once and are killed (the run on the
+programs, seed 3) against it. All 49 mutants -- the 28 the milestone brief
+names and 21 more -- apply exactly once and are killed (the run on the
 final tree). The table gives the
 number of failing tests (and the first ones) and the failing fuzz programs.
 
@@ -704,6 +704,12 @@ number of failing tests (and the first ones) and the failing fuzz programs.
 | `application-argument-cut-early` | 1: `tc-construction-deep-values` | - |
 | `nested-application-cut-early` | 1: `tc-construction-deep-values` | - |
 | `specialization-keyed-by-every-variable` | 1: `tc-ordinary-polymorphic-recursion` | - |
+| `nested-enclosing-variable-own` | 5: `tc-constraint-nested-enclosing`, `tc-hir-text-nested`, `tc-imprint-nested-enclosing-uses`, ... | - |
+| `nested-enclosing-bound-in-mixed-parameter` | 1: `tc-imprint-nested-enclosing-uses` | - |
+| `nested-enclosing-unestablished` | 4: `tc-constraint-nested-enclosing`, `tc-hir-text-nested`, `tc-imprint-nested-enclosing-uses`, ... | - |
+| `nested-enclosing-constraint-own` | 3: `tc-constraint-nested-enclosing`, `tc-hir-text-nested`, `tc-ordinary-nested-enclosing-operation` | - |
+| `nested-enclosing-clone-binding-ignored` | 1: `tc-ordinary-nested-enclosing-operation` | - |
+| `read-nested-constraints-own` | 1: `tc-hir-text-nested` | - |
 
 ## Performance
 
