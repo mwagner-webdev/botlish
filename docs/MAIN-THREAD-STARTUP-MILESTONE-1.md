@@ -67,7 +67,48 @@ Evidence from the census's disposable experimental runtime is marked
 
 ## 1. Result
 
-(Filled in from the CI evidence: see section 31.)
+Census candidate A is a supported startup policy. `botlish -native-startup
+main-thread -emit-native-executable app.bot` makes a macOS AArch64
+executable that runs its ordinary compiled program on the process's
+original main thread, with no worker, over a 512 MiB main stack its link
+reserves (LC_MAIN, through the system and the rustc linker alike). The
+policy is the executable's: one word of the existing `botlish_program`
+record, covered by the ABI fingerprint, read before anything else at
+startup, an unknown word refused. `worker` stays the default everywhere,
+and every other target refuses `main-thread` before anything is written
+(NATIVE UNSUPPORTED startup). Nothing else changed: semantics, the C FFI,
+contexts, the collector, coroutines, the stack guard, the JIT, linked
+runs, native libraries and the stub linker behave as before, and a panic
+of the main thread's body is NATIVE BUG, status 1, as the worker's is.
+
+What was executed, and where (section 31 and the sections it names):
+
+* **macOS AArch64** (GitHub's `macos-15`, never a shared Mac): the
+  policy's tests (`tests/main-thread-startup.test`: the main thread by
+  libpthread's answer, also inside a kept coroutine; LC_MAIN; each linker's
+  usable stack; every exhaustion as NATIVE LIMIT STACK; finite recursions
+  the worker holds; GC stress; kept coroutines; faults; process semantics
+  and the startup report against the worker's), plainly and under GC
+  stress; the acceptance tier; the graphical census on the production
+  policy with every case as predicted -- the main-thread executable
+  **EXECUTED-COCOA** (a Cocoa window, Metal, presented frames, events,
+  shutdown, all on the main thread) through Botlish.app's system linker,
+  the rustc linker and under GC stress, the same program on the worker
+  FAILED-CORRECTNESS as the positive control; Botlish.app building
+  main-thread executables, its signature intact (section 25); every
+  mutant of the policy that compiles on macOS killed (11 of 11, one of
+  them after a test this milestone added for it).
+* **Linux x86-64, Linux AArch64, Windows x86-64**: the refusal, the worker
+  default unchanged (the whole Tcl suite, golden suites, executables,
+  every linker, GC stress), and their mutants killed (Linux x86-64: 19 of
+  19 applicable; Windows: 7 of 7).
+
+Not implemented (section 36): main-thread startup on any other target, a
+stack-size option, coordination with a host's run loop, an application
+bundle, Developer ID signing or notarization of executables, macOS native
+libraries, iOS, the graphical Icy Tower build (section 37 lists what it
+needs). The census's own evidence is kept apart from this milestone's
+(section 2; MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md).
 
 ## 2. Starting census findings
 
