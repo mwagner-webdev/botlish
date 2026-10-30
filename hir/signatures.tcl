@@ -828,7 +828,7 @@ proc hir::signatures::ArgSinks {hir AVar e node ctx} {
             set i 0
             foreach d [dict get $tnode declaredParamTypes] {
                 set label "argument [expr {$i + 1}] of $name"
-                set imprinted [expr {$sig ne "" ? [lindex [dict get $sig params] $i] : ""}]
+                set imprinted [if {$sig ne ""} {lindex [dict get $sig params] $i} else {string cat ""}]
                 if {$d ne {} && [hir::types::IsTraitConstraint $d]} {
                     # A trait-typed parameter is an explicit boundary
                     # (TRAITS.md): it never makes an untyped parameter
