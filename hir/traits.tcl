@@ -941,7 +941,7 @@ proc hir::traits::satisfies {type id} {
         if {$id in [hir::types::ImprintConstraints $type]} {
             dict set result ok 1
         } else {
-            set name [lindex $type 1]
+            set name [hir::imprint::Shown [lindex $type 1]]
             dict set result reason "its type is the imprint variable $name, and its function's contract does not say $name satisfies $id: $name satisfies exactly the traits the constrained slots of its signature's applications require"
         }
     } else {

@@ -918,9 +918,12 @@ proc hir::read::ParseType {text number} {
         return never
     }
     if {[catch {core::type::normalize $text} type]} {
-        if {[hir::imprint::IsVariableName $text]} {
+        if {[hir::imprint::IsVariableName $text] || [regexp {^[A-Z][0-9]*'$} $text]} {
             # An imprint variable (hir/imprint.tcl): a variable name that
-            # names no type, as in the source signature it came from.
+            # names no type, as in the source signature it came from, or an
+            # inherited one as hir::types::show prints it (T', T2': the
+            # parameter it belongs to is not printed; the names of one
+            # function's variables and of its enclosing functions' differ).
             return [list imprint $text]
         }
         Fail $number "bad type \"$text\": $type"

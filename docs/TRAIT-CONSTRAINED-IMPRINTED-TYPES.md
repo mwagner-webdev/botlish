@@ -129,6 +129,12 @@ The consequences that distinguish this from generic functions:
 * There is no instantiation step: the body is checked once, with the
   variables rigid and their obligations as facts; each call is checked by
   imprinting and by validating the applications its binding makes.
+* An untyped parameter forwarded to `Map[K, V]` (`fn size(m): m.length()`)
+  takes the requirement with variables of its function's own, established
+  at each of its calls, constraints included -- the signature the
+  programmer could have written, never a declared parameter list
+  (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md, "Inherited imprint variables";
+  `tc-inherited-forwarder-set`, `-map`, `-constraint`).
 
 ## Syntax
 

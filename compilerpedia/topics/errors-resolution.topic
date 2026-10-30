@@ -480,6 +480,11 @@ checks every call of the function in two ways:
     body: argument 1 of native + requires int (at 2:5)"). If two uses in
     the body need types that nothing satisfies, the function itself is
     rejected ("cannot infer a sound type for parameter ...").
+    When g's parameter type holds an imprint variable (`b: Box[T]`), x
+    takes it with a variable of its own function's, shown T': the
+    function is imprinted as if declared `fn f(x: Box[T])`, and each call
+    establishes T' from its argument (see "Inherited imprint variables"
+    in INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
   * Semantic instance. A direct call is also analyzed with the actual
     argument types, as if the body had been written for them. A problem
     found there is reported at the call that made it:

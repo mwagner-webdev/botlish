@@ -460,6 +460,111 @@ pred_use(std::str::is_tcl_alpha)} 1 $::icDeclsStr]]
 } -result {1 {{}} same {CORE SEMANTIC NOT-BOOLEAN}}
 
 # ---------------------------------------------------------------------------
+# Inherited imprint variables (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md,
+# "Inherited imprint variables"): a callee parameter type holding an imprint
+# variable is instantiated at the call; a variable only untyped parameters'
+# values establish becomes the forwarder's own, established at its calls.
+
+set ::icBox {struct Box[T]:
+    value: T
+fn unbox(b: Box[T]) -> T:
+    b.value
+fn pair_boxes(a: Box[T], b: Box[T]) -> List[T]:
+    [a.value, b.value]
+fn take_int(n: int) -> int:
+    n
+}
+
+# The program's outcome on all four backends from its own HIR (the lowered
+# core IR has no declared types, so no imprint variable to inherit).
+proc icAgree {src} {
+    sourceAgree "$::icDecls$src"
+}
+
+# {KIND MESSAGE} of SRC's first compile diagnostic, location-free, or
+# "accepted".
+proc icFirst {src} {
+    if {![catch {icCompile $src} message options]} {
+        return accepted
+    }
+    set first [lindex [dict get $options -diagnostics] 0]
+    list [lindex [dict get $first errorcode] end] [dict get $first record message]
+}
+
+test ic-inherited-imprint-forwarder {an untyped parameter forwarded to Box[T] inherits Box[T'], a variable of the forwarder's own belonging to that parameter -- never the callee's T, which only the callee's calls bind -- and each call of the forwarder establishes it: forward(Box {value: 1}) is 1 on every backend} -body {
+    set src "${::icBox}fn forward(b):\n    unbox(b)\nforward(Box {value: 1})\n"
+    set h [icCompile $src]
+    set e [icBlock $h forward]
+    set entry [lindex [hir::signatures::entryTypes $h $e] 0]
+    list [icSig $h forward] [hir::signatures::text $h $e] \
+        [expr {[regexp {^nstruct Box \{\{imprint (T'#b[0-9]+:0)\}\}$} $entry -> name]
+            && [hir::imprint::InferredParam $name] eq [lindex [hir::get $h $e params] 0]}] \
+        [expr {[dict get [hir::imprint::BlockSignature $h $e] vars] eq [list $name]}] \
+        [icAgree $src]
+} -result {{{b: Box[T'] (inferred trusted)}} {fn forward(b: Box[T']) -> T'} 1 1 {value 1}}
+
+test ic-inherited-imprint-each-call {each call of the forwarder imprints its variable for itself, and its result with it: a Box[int] call's result is the int a declared int parameter requires, a Box[str] call's a str} -body {
+    icAgree "${::icBox}fn forward(b):\n    unbox(b)\n\[take_int(forward(Box {value: 1})), std::str::length(forward(Box {value: \"abc\"}))\]\n"
+} -result {value {[1, 3]}}
+
+test ic-inherited-imprint-independent {two parameters forwarded to two calls get two variables (a value has one type at a position; two values have two), shown apart within the function, so arguments of different types are accepted} -body {
+    set src "${::icBox}fn both(a, b):\n    unbox(b)\n    unbox(a)\n\[both(Box {value: 1}, Box {value: \"x\"}), both(Box {value: \"y\"}, Box {value: 2})\]\n"
+    set h [icCompile $src]
+    list [hir::signatures::text $h [icBlock $h both]] [icAgree $src]
+} -result {{fn both(a: Box[T'], b: Box[T2']) -> T'} {value {[1, "y"]}}}
+
+test ic-inherited-imprint-same-position {every requirement establishing a variable at one position of one parameter's value names the same variable, whichever call states it: unbox(b) twice, or a forwarded List and its element (in either parameter order) -- no conflict, and the relation holds at the forwarder's calls} -body {
+    set h2 "fn h(xs: List\[T\], d: T) -> T:\n    d\n"
+    set src "${::icBox}${h2}fn twice(b):\n    unbox(b)\n    unbox(b)\nfn f(d, xs):\n    h(xs, d)\n\[twice(Box {value: 7}), f(2, \[1\]), f(\"a\", \[\"b\"\])\]\n"
+    set h [icCompile $src]
+    list [icSig $h twice] [hir::signatures::text $h [icBlock $h f]] [icAgree $src] \
+        [icFirst "${::icBox}${h2}fn f(d, xs):\n    h(xs, d)\nf(\"a\", \[1\])\n"]
+} -result {{{b: Box[T'] (inferred trusted)}} {fn f(d: T', xs: List[T']) -> T'} {value {[7, 2, "a"]}} {TYPE {argument for parameter "d" cannot be proven to satisfy int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 2 of h (declared T) requires T' (at 18:11)}}}
+
+test ic-inherited-imprint-related {a call establishing one callee variable from two parameters' values relates them: one variable for both, held at the forwarder's calls (IMPRINT for two element types), also through a later use of one of them} -body {
+    set rel "fn rel(a, b):\n    unbox(a)\n    pair_boxes(a, b)\n    unbox(b)\n"
+    set h [icCompile "${::icBox}${rel}1\n"]
+    list [hir::signatures::text $h [icBlock $h rel]] \
+        [icAgree "${::icBox}${rel}rel(Box {value: 1}, Box {value: 2})\n"] \
+        [icFirst "${::icBox}${rel}rel(Box {value: 1}, Box {value: \"x\"})\n"]
+} -result {{fn rel(a: Box[T'], b: Box[T']) -> T'} {value 2} {IMPRINT {rel: imprint variable T' is int by an earlier argument but str by argument 2}}}
+
+test ic-inherited-imprint-settled {a variable another argument of the call establishes is that argument's type: pair_boxes(b, Box {value: 1}) requires b : Box[int], an ordinary contract with no variable} -body {
+    set src "${::icBox}fn with_one(b):\n    pair_boxes(b, Box {value: 1})\n"
+    set h [icCompile "${src}1\n"]
+    list [icSig $h with_one] [hir::imprint::BlockSignature $h [icBlock $h with_one]] \
+        [icAgree "${src}with_one(Box {value: 2})\n"] \
+        [lindex [icFirst "${src}with_one(Box {value: \"x\"})\n"] 0]
+} -result {{{b: Box[int] (inferred trusted)}} {} {value {[2, 1]}} TYPE}
+
+test ic-inherited-imprint-no-variable-unchanged {a forwarder whose inherited type holds no imprint variable keeps exactly its contract: a declared Byte parameter, an imprinted callee's int parameter, and a bare T the call's own List argument settles} -body {
+    set src "${::icBox}fn take_byte(b: Byte) -> int:\n    b\nfn sized(xs: List\[T\], n: int) -> int:\n    n\nfn h(xs: List\[T\], d: T) -> T:\n    d\nfn fwd(x):\n    take_byte(x)\nfn g(n):\n    sized(\[1\], n)\nfn k(d):\n    h(\[1, 2\], d)\n\[fwd(200), g(3), k(4)\]\n"
+    set h [icCompile $src]
+    list [icSig $h fwd] [icSig $h g] [icSig $h k] [icAgree $src]
+} -result {{{x: int[Byte] (inferred trusted)}} {{n: int (inferred trusted)}} {{d: int (inferred trusted)}} {value {[200, 3, 4]}}}
+
+test ic-inherited-imprint-chains {inherited variables propagate through forwarders of forwarders and recursion to a fixed point: each forwarder's variable is its own, instantiated at every call} -body {
+    set src "${::icBox}fn forward(b):\n    unbox(b)\nfn fwd2(c):\n    forward(c)\nfn fwd3(d):\n    fwd2(d)\nfn count(b, n):\n    if n == 0:\n        unbox(b)\n    else:\n        count(b, n - 1)\n\[fwd3(Box {value: 5}), fwd2(Box {value: \"s\"}), count(Box {value: 9}, 3)\]\n"
+    set h [icCompile $src]
+    list [icSig $h fwd3] [icSig $h count] [icAgree $src]
+} -result {{{d: Box[T'] (inferred trusted)}} {{b: Box[T'] (inferred trusted)} {n: int (inferred checked)}} {value {[5, "s", 9]}}}
+
+test ic-inherited-imprint-boundaries {an inherited variable makes the forwarder an imprinted callable like a declared one: not a value (IMPRINT), an argument of static type any is not proven Box[...] (spec item 71), and explicit imprints give its variables in order} -body {
+    set fwd "${::icBox}fn forward(b):\n    unbox(b)\n"
+    list [icFirst "${fwd}f = forward\nf(Box {value: 1})\n"] \
+        [lindex [icFirst "${fwd}fn first_of(xs):\n    std::list::at(xs, 0):\n        on IndexNotFound:\n            0\nforward(first_of(\[Box {value: 1}, 2\]))\n"] 0] \
+        [icAgree "${fwd}forward\[int\](Box {value: 1})\n"]
+} -result {{IMPRINT {forward has imprint variables, so it is not a value: an imprinted callable is only called, where each call imprints its variables (wrap the call in a function to pass it on)}} TYPE {value 1}}
+
+test ic-inherited-imprint-nested {a nested forwarder's variable is its own, shown apart from the enclosing one's; one its enclosing function's parameter establishes is the enclosing function's, rigid in its body (so a Box[int] there is no Box of it), as for declared types} -body {
+    set outer "fn outer(b):\n    fn g(c):\n        \[unbox(c), unbox(b)\]\n    g(Box {value: \"s\"})\n"
+    set h [icCompile "${::icBox}${outer}1\n"]
+    list [hir::signatures::text $h [icBlock $h g]] \
+        [icAgree "${::icBox}${outer}outer(Box {value: 4})\n"] \
+        [lindex [icFirst "${::icBox}fn outer(b):\n    fn g(c):\n        pair_boxes(b, c)\n    g(Box {value: 3})\nouter(Box {value: 4})\n"] 0]
+} -result {{fn g(c: Box[T2']) -> list} {value {["s", 4]}} TYPE}
+
+# ---------------------------------------------------------------------------
 # Callable parameters (spec items 15-22, 27-29, 72)
 
 set ::icPredUse "fn pred_use(p):\n    if p(\"x\"):\n        1\n    else:\n        0\n"

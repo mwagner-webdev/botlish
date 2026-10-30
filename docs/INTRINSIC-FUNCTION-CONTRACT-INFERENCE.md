@@ -190,7 +190,10 @@ same place `hir::range::VerifyCall` gets its proof obligation:
   this milestone the forwarding body itself was a static error (`x : any`
   cannot be proven `T`); it is now valid, and its own callers are held to `T`
   (`ic-trusted-forwarder-now-valid`, `callable-escape-capture-untyped-
-  wrapper-rejected`, `fn-accept-untyped-forwarder`).
+  wrapper-rejected`, `fn-accept-untyped-forwarder`). When `T` holds an
+  imprint variable of `g`'s (`Box[T]`), the requirement is `T` as this call
+  instantiates it, never `g`'s variable itself: see "Inherited imprint
+  variables".
 - `g`'s parameter is **untyped**: an edge -- `x` requires whatever `g`'s
   parameter's intrinsic contract turns out to be (trusted part trusted,
   checked part checked), solved to a fixed point.
@@ -394,6 +397,117 @@ language cannot tell the two apart from the type alone (both are `any`), so
 argument type: every `any` is conservatively relational. It can miss an
 inference where `any` genuinely meant "any value"; it can never mis-type a
 generic helper.
+
+## Inherited imprint variables
+
+**The question.** A callee's declared parameter type may mention an
+imprint variable (C-ABI-TYPES.md, "Imprinting";
+TRAIT-CONSTRAINED-IMPRINTED-TYPES.md): `fn unbox(b: Box[T]) -> T`,
+`std::mutable_set::length(s: MutableSet[T])`. What does an untyped
+parameter forwarded to it require?
+
+```botlish
+struct Box[T]:
+    value: T
+fn unbox(b: Box[T]) -> T:
+    b.value
+fn forward(b):
+    unbox(b)
+forward(Box {value: 1})
+```
+
+Until this decision the requirement was copied as written: `b : Box[T]`,
+`T` unbox's variable. But `T` is whatever each call of `unbox` imprints;
+in `forward`'s contract nothing bound it, so it was a rigid type no argument
+satisfies, and every call of `forward` was rejected (`Box[int] and Box[T]
+are distinct applications`; found by the equality semantics census, its
+`i4-imprint-forwarder` cases). The same held for every untyped helper over
+a `MutableSet`, a `MutableMap` or a `List[T]`-taking function.
+
+**Two answers were open, and one is not enough.** The requirement could be
+*relational* -- no trusted contract, as for a callable parameter whose
+argument is an element of a caller's List ("Relational/generic
+constraints"). Measured, that leaves `b : any` in `forward`'s body, and the
+body is then the error: `unbox(b)` imprints `T = any` and an argument of
+static type `any` is not proven `Box[any]` (spec item 71's rule for every
+trusted parameter, which a declared imprinted callee's parameter is). For a
+`MutableSet` it is worse: `MutableSet[any]` is no valid application at all
+(`any` satisfies no `Hashable`, `tc-constraint-any`). So the requirement is
+kept, with its variables made the forwarder's own and established at the
+forwarder's calls -- the other answer.
+
+**The rule** (`hir::signatures::Instantiate`). At each call of a callee
+with an imprint signature (its declared one, or its own inherited
+variables: below), each parameter type that holds a variable is the
+requirement *as this call instantiates it*, the way `hir::imprint` would
+bind it there:
+
+- a variable another argument establishes -- one that is not the value of
+  an untyped parameter -- is that argument's type there:
+  `pair_boxes(b, Box {value: 1})` over `Box[T], Box[T]` requires `b :
+  Box[int]`, an ordinary contract (`ic-inherited-imprint-settled`;
+  `h([1, 2], d)` over `List[T], T` requires `d : int`);
+- a variable only untyped parameters' values establish is an **inherited
+  imprint variable** of the forwarder: the variable of parameter `P`'s
+  value at the position it is established at (`T'#P:PATH` internally,
+  shown `T'`, `T2'`, ...: no source can spell it, so it never captures and
+  is never captured by a written variable). A value has one type at a
+  position, so every requirement establishing a variable there names the
+  same one, whichever call states it -- `unbox(b)` twice, a forwarded
+  `List[T]` and its element `T` in either parameter order, a
+  `MutableSet[T]` and its element -- and needs no unification
+  (`ic-inherited-imprint-same-position`); two parameters' values have two
+  (`both(a, b)`: `Box[T']`, `Box[T2']`, `ic-inherited-imprint-independent`).
+  A call establishing one callee variable from several parameters' values
+  (`pair_boxes(a, b)`) relates them: their variables are one, the
+  outermost parameter's (`ic-inherited-imprint-related`);
+- a variable nothing establishes leaves the requirement relational (none).
+
+The variables carry their callee's constraints: `fn size(s): s.length()`
+infers `s : std::mutable_set::MutableSet[T']` with `T'` Hashable as `T` is
+(`tc-inherited-forwarder-set`, `tc-inherited-forwarder-map`), and the
+forwarder's body may rely on it as a declared function's body relies on
+its own (`tc-inherited-forwarder-constraint`: it builds an `H[K']`).
+
+**The forwarder is imprinted by its inherited variables, exactly as by
+declared ones** (`hir::imprint::BlockSignature` reads them from its trusted
+contracts). Its body is typed with them rigid; each of its calls
+establishes them from its arguments (`hir::imprint::Bind`), is held to the
+signature they imprint, and gets the result they imprint:
+`take_int(forward(Box {value: 1}))` is valid, `forward(Box {value: "s"})` is
+a `str` (`ic-inherited-imprint-each-call`). Like any imprinted callable it is
+not a value (IMPRINT), an argument of static type `any` does not prove its
+`Box[...]` (spec item 71), and explicit imprints give its variables in the
+order they first occur (`ic-inherited-imprint-boundaries`). Forwarders of
+forwarders and recursion reach the fixed point as other contracts do
+(`ic-inherited-imprint-chains`): a callee's own inherited variable is never
+copied through an edge, but instantiated at the call once its contract is
+seeded (the next round); a round in which a call merged two variables or
+settled one replaces the earlier round's contract (`Refines`). A nested
+forwarder's variable is its own, shown apart from the enclosing one's; a
+variable an enclosing function's parameter establishes stays the enclosing
+function's, rigid in the nested body as a declared one would be
+(`ic-inherited-imprint-nested`).
+
+**Not generics.** Nothing is declared, no constraint is written on a
+function, and the forwarder's contract is what its body requires, as for
+every untyped parameter (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md, "Why this is
+not generic functions"): it is the signature the programmer could have
+written, `fn forward(b: Box[T]) -> T`, with the variable named after the
+parameter that establishes it.
+
+**What it does not do.** An inherited variable is never unified with
+another use of the value: `take_int(head(xs))` passes a `T'` where a
+declared `int` is required, which is the body's error exactly as for `fn
+f(xs: List[T]): take_int(head(xs))` (a native that re-checks at run time,
+`head(xs) + 1`, accepts it as it accepts a declared `T`). A requirement on a
+callable parameter's *result* (`unbox(g())`) is not inherited: a Fn type
+establishes no variable, so it is instantiated by `g()`'s own static type,
+as any other argument's -- `g : Fn{args: [], return: Box[any], ...}`, which
+a function returning a `Box[int]` does not satisfy (applications are
+invariant), as no contract did before. A forwarder whose inherited type
+holds no imprint variable keeps exactly the contract it had
+(`ic-inherited-imprint-no-variable-unchanged`).
 
 ## Why list helpers remain partly untyped
 
@@ -895,6 +1009,10 @@ and Cranelift agree). Canonical sources are unchanged, and
   (generics, to keep the corpus valid) or caller-ingress facts.
 - **Relational callable parameters stay `any`**: the list helpers and
   `ht_fold` (item 88's stop condition, deliberately not solved).
+- **Inherited imprint variables are not unified** with other uses of the
+  value ("Inherited imprint variables"): a forwarder whose body needs its
+  `T'` to be a concrete type for a declared parameter is rejected as the
+  same function declared with `T` would be; write the parameter's type.
 - **No union types**: two uses separated by a type test of the parameter
   constrain nothing; two incompatible uses otherwise are a conflict error,
   even when an unrelated flag keeps them on different paths.
@@ -944,7 +1062,9 @@ propagation", "Meet", "Fixed-point algorithm", "Termination". Native Q10-Q14:
 "Native admissibility requirements". Callable Q15-Q20: "Callable-parameter
 inference". Scanner Q21-Q27: "scan_while before/after". Local predicates
 Q28-Q33: "local_char?" / "is_label_char?". Generic helpers Q34-Q38:
-"Relational/generic constraints", "Why list helpers remain partly untyped".
+"Relational/generic constraints", "Why list helpers remain partly untyped";
+an inherited requirement holding an imprint variable: "Inherited imprint
+variables".
 Result inference Q39-Q42: "Result-type precision". Corpus Q43-Q49:
 "Corpus-wide inferred-parameter census". Callable census Q50-Q53: "Any/bare/Fn
 callable-site census".

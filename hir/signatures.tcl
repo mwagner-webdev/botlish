@@ -28,6 +28,9 @@
 #                               (hir::range::VerifyCall's proof), or
 #                               its own inferred contract (an edge,
 #                               solved to a fixed point below)       both
+#                               -- as this call instantiates it when
+#                               it holds an imprint variable
+#                               ("Inherited imprint variables")
 #   argument i through an Fn    the contract's argument type
 #                               (VerifyStructuralCall's proof)       TRUSTED
 #   a declared result position  the declared result type
@@ -299,7 +302,7 @@ proc hir::signatures::infer {hirVar {demote {}} {roundsVar ""}} {
             Install typed $seeds {} {}
             hir::types::infer typed
             set A [Collect $typed]
-            set solution [Solve $typed $A]
+            set solution [Established $typed $A [Solve $typed $A]]
         }
         set next [dict create]
         dict for {p contract} $solution {
@@ -308,12 +311,18 @@ proc hir::signatures::infer {hirVar {demote {}} {roundsVar ""}} {
                 dict set next $p $t
             }
         }
-        # Monotone across rounds: a trusted contract only ever narrows.
+        # Monotone across rounds: a trusted contract only ever narrows. (An
+        # inherited variable another round made one with another, or
+        # settled, is that round's contract: Refines.)
         dict for {p t} $seeds {
             if {![dict exists $next $p]} {
                 dict set next $p $t
             } else {
-                set m [Meet $t [dict get $next $p]]
+                set new [dict get $next $p]
+                set m [Meet $t $new]
+                if {$m eq "" && [Refines $t $new]} {
+                    set m $new
+                }
                 dict set next $p [if {$m eq ""} {set t} else {set m}]
             }
         }
@@ -352,7 +361,10 @@ proc hir::signatures::Install {hirVar seeds solution A} {
             lappend trusted $t
             if {$d eq {} && [dict exists $solution $b]} {
                 set c [dict get $solution $b checked]
-                lappend checked [if {$c eq "any" || $c eq $t} {string cat {}} else {set c}]
+                # (A checked part holding an inherited variable is never
+                # more than the trusted one: each call binds the variables
+                # of the trusted contract only.)
+                lappend checked [if {$c eq "any" || $c eq $t || [string first "'#" $c] >= 0} {string cat {}} else {set c}]
                 lappend why [dict get $solution $b why]
                 lappend notes [dict get $solution $b note]
             } else {
@@ -390,7 +402,8 @@ proc hir::signatures::Install {hirVar seeds solution A} {
 
 proc hir::signatures::Collect {hir} {
     set A [dict create params {} slots {} seeds {} alias {} resultOf {} \
-        reqs {} edges {} calls {} rets {} escapes {} fnEdges {}]
+        reqs {} edges {} calls {} rets {} escapes {} fnEdges {} \
+        depth {program 0} enclosing {} keys {} positions {} parent {} settled {}]
     dict for {e node} [dict get $hir exprs] {
         switch -- [dict get $node kind] {
             block {
@@ -439,6 +452,7 @@ proc hir::signatures::Collect {hir} {
     }
     set ctx [dict create block program handled {} tested {}]
     Seq $hir A [hir::roots $hir] drop $ctx
+    Normalize A
     return $A
 }
 
@@ -550,6 +564,8 @@ proc hir::signatures::Value {hir AVar e sink ctx} {
             # A nested function is walked where it is created, so it
             # inherits the path-dependence of its creation point (its body
             # starts from the facts known there, hir::types::Block).
+            dict set A depth $e [expr {[dict get $A depth [dict get $ctx block]] + 1}]
+            dict set A enclosing $e [dict get $ctx block]
             dict set ctx block $e
             Seq $hir A [dict get $node body] [ResultSink $hir $e] $ctx
         }
@@ -742,7 +758,7 @@ proc hir::signatures::Call {hir AVar e sink ctx} {
         return
     }
     Value $hir A $callee drop $ctx
-    foreach arg $args sink [ArgSinks $hir $e $node] {
+    foreach arg $args sink [ArgSinks $hir A $e $node $ctx] {
         Value $hir A $arg $sink $ctx
     }
 }
@@ -756,8 +772,10 @@ proc hir::signatures::BlockErrors {hir e} {
 }
 
 # The sink of each argument of call E: its callee's own admissibility
-# metadata for that position (see the header's table).
-proc hir::signatures::ArgSinks {hir e node} {
+# metadata for that position (see the header's table). CTX is the call's
+# walk context (Instantiate reads which parameters are path-dependent).
+proc hir::signatures::ArgSinks {hir AVar e node ctx} {
+    upvar 1 $AVar A
     set args [dict get $node args]
     set n [llength $args]
     set flows [lrepeat $n flow]
@@ -797,15 +815,36 @@ proc hir::signatures::ArgSinks {hir e node} {
                 return $flows
             }
             set name [Name $hir $target]
+            # A callee with imprint variables (its declared signature's, or
+            # its own inherited ones): each parameter type that holds one is
+            # this call's (Instantiate), never the callee's variable itself,
+            # which only the callee's own calls bind.
+            set sig [hir::imprint::BlockSignature $hir $target]
+            set instances {}
+            if {$sig ne ""} {
+                set instances [Instantiate $hir A $node $sig $ctx]
+            }
             set sinks {}
             set i 0
             foreach d [dict get $tnode declaredParamTypes] {
                 set label "argument [expr {$i + 1}] of $name"
+                set imprinted [if {$sig ne ""} {lindex [dict get $sig params] $i} else {string cat ""}]
                 if {$d ne {} && [hir::types::IsTraitConstraint $d]} {
                     # A trait-typed parameter is an explicit boundary
                     # (TRAITS.md): it never makes an untyped parameter
                     # implicitly trait-polymorphic.
                     lappend sinks flow
+                } elseif {$imprinted ne {} && [hir::imprint::Mentions $imprinted]} {
+                    set instance [lindex $instances $i]
+                    if {$instance eq ""} {
+                        # A variable this call does not establish: what the
+                        # parameter requires depends on nothing the body
+                        # says (relational).
+                        lappend sinks flow
+                    } else {
+                        lappend sinks [list type $instance trusted \
+                            "$label ([expr {$d ne {} ? "declared" : "inferred"}] [hir::types::show $imprinted])"]
+                    }
                 } elseif {$d ne {}} {
                     lappend sinks [list type $d trusted "$label (declared [hir::types::show $d])"]
                 } else {
@@ -846,6 +885,357 @@ proc hir::signatures::ContractSinks {calleeType n} {
         }
     }
     return $sinks
+}
+
+# ---------------------------------------------------------------------------
+# Inherited imprint variables
+#
+# A callee's parameter type that holds an imprint variable (`fn unbox(b:
+# Box[T]) -> T`) is no requirement as it is written: T is whatever each call
+# of the callee imprints, so `Box[T]` copied into a forwarder's contract
+# would name a variable nothing binds, and every call of the forwarder would
+# be rejected. Nor can the requirement be dropped: the forwarder's body
+# calls unbox with the parameter, which an untyped (any) argument does not
+# satisfy. So the requirement is instantiated at the call, as hir::imprint
+# would bind it there:
+#
+#   * a variable another argument of the call establishes (one that is not
+#     the value of an untyped parameter) is that argument's type there;
+#   * a variable only untyped parameters' values establish is a variable of
+#     the forwarder's own -- an *inherited* imprint variable -- belonging to
+#     the parameter P and the position PATH of P's value it is established
+#     at: `T'#P:PATH` (hir::imprint::IsInferred; shown as T'). A value has
+#     one type at a position, so every requirement establishing a variable
+#     there names the same one, whichever callee states it (`unbox(b)` and
+#     `b.size()` both say b : Box[T']), and a call establishing one variable
+#     from several parameters' values (`pair(a, b)` over Box[T], Box[T])
+#     relates them: their variables are one (Union), the outermost
+#     parameter's, or a concrete type when another argument gives one;
+#   * a variable nothing establishes leaves the requirement relational
+#     (no requirement).
+#
+# The forwarder is then imprinted by its inherited variables exactly as by
+# declared ones (hir::imprint::BlockSignature): its body is typed with them
+# rigid, each of its calls establishes them from its arguments and is held to
+# the signature they imprint, and it is not a value. The variables carry
+# their callees' constraints (K satisfies Hashable from MutableSet[K]). It is
+# imprinting, not generics: no declaration, no constraint written anywhere,
+# and the forwarder's contract is what its body requires, as for every
+# untyped parameter. An inherited variable is never unified with another use
+# of the parameter's value: `take_int(head(xs))` passes a T' where a declared
+# int is required, which is the body's error as it is for `fn f(xs: List[T]):
+# take_int(head(xs))` (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md, "Inherited
+# imprint variables").
+
+# The parameter types of imprint signature SIG as call NODE instantiates
+# them (above), one per parameter: "" for none (no type there, or one holding
+# a variable this call does not establish). CTX is the call's walk context.
+proc hir::signatures::Instantiate {hir AVar node sig ctx} {
+    upvar 1 $AVar A
+    set args [dict get $node args]
+    set params [dict get $sig params]
+    # The arguments that are the values of untyped parameters (a use of one,
+    # or of an immutable alias of one, not refined by a test of it).
+    set forwarded [dict create]
+    set j 0
+    foreach arg $args {
+        if {[hir::kind $hir $arg] eq "ref" && [hir::get $hir $arg reachable]
+                && [hir::get $hir $arg binding] ne ""} {
+            set r [Root A [hir::get $hir $arg binding]]
+            if {[lindex $r 0] eq "param" && ![dict exists $ctx tested [lindex $r 1]]} {
+                dict set forwarded $j [lindex $r 1]
+            }
+        }
+        incr j
+    }
+    set constraints [hir::imprint::ConstraintsOf $sig]
+    set beta [dict create]
+    set unestablished {}
+    foreach v [dict get $sig vars] {
+        set traits [dict getdef $constraints $v {}]
+        set concrete ""
+        set keys {}
+        set j 0
+        foreach param $params arg $args {
+            if {$param ne "" && $arg ne ""} {
+                foreach occurrence [hir::imprint::Paths $param] {
+                    lassign $occurrence name path establishing
+                    if {$name ne $v || !$establishing} {
+                        continue
+                    }
+                    if {[dict exists $forwarded $j]} {
+                        lappend keys [Key A [dict get $forwarded $j] $path $v $traits]
+                    } elseif {$concrete eq "" && ![dict exists $hir poisoned $arg]} {
+                        set binding [dict create]
+                        if {[hir::imprint::Match $param [hir::typeOf $hir $arg] binding [expr {$j + 1}]] eq ""
+                                && [dict exists $binding $v] && [dict get $binding $v] ne "never"} {
+                            set concrete [dict get $binding $v]
+                        }
+                    }
+                }
+            }
+            incr j
+        }
+        if {$concrete ne ""} {
+            dict set beta $v $concrete
+            foreach k $keys {
+                Settle A $k $concrete
+            }
+        } elseif {$keys ne {}} {
+            foreach k [lrange $keys 1 end] {
+                Union A [lindex $keys 0] $k
+            }
+            dict set beta $v [hir::types::MakeImprint [lindex $keys 0] $traits]
+        } else {
+            lappend unestablished $v
+        }
+    }
+    return [lmap param $params {
+        set open 0
+        foreach o [hir::imprint::Occurrences $param] {
+            if {[lindex $o 0] in $unestablished} {
+                set open 1
+            }
+        }
+        if {$param eq "" || $open} {
+            string cat ""
+        } else {
+            hir::types::canonical [hir::imprint::Substitute $param $beta]
+        }
+    }]
+}
+
+# The inherited variable of untyped parameter P at position PATH of its
+# value, first instantiating variable V (with constraints TRAITS) there:
+# its name, recorded in A's keys with the traits every instantiation gives it.
+proc hir::signatures::Key {AVar p path v traits} {
+    upvar 1 $AVar A
+    set position "$p:[join $path .]"
+    if {[dict exists $A positions $position]} {
+        set name [dict get $A positions $position]
+    } else {
+        set name "[regsub {'.*$} $v ""]'#$position"
+        dict set A positions $position $name
+        set block [dict get $A params $p block]
+        dict set A keys $name [dict create param $p path $path traits {} \
+            depth [dict getdef $A depth $block 0] index [dict get $A params $p index]]
+    }
+    dict set A keys $name traits [lsort -unique [concat [dict get $A keys $name traits] $traits]]
+    return $name
+}
+
+proc hir::signatures::Find {AVar name} {
+    upvar 1 $AVar A
+    while {[dict exists $A parent $name]} {
+        set name [dict get $A parent $name]
+    }
+    return $name
+}
+
+# Makes inherited variables A and B one (a call establishes one variable of
+# its callee from both).
+proc hir::signatures::Union {AVar a b} {
+    upvar 1 $AVar A
+    set ra [Find A $a]
+    set rb [Find A $b]
+    if {$ra eq $rb} {
+        return
+    }
+    dict set A parent $rb $ra
+    if {[dict exists $A settled $rb]} {
+        if {![dict exists $A settled $ra]} {
+            dict set A settled $ra [dict get $A settled $rb]
+        }
+        dict unset A settled $rb
+    }
+}
+
+# Inherited variable NAME is TYPE: another argument of a call establishes
+# it (the first one to say so is kept; another is that call's own error).
+proc hir::signatures::Settle {AVar name type} {
+    upvar 1 $AVar A
+    set r [Find A $name]
+    if {![dict exists $A settled $r]} {
+        dict set A settled $r $type
+    }
+}
+
+# Rewrites every requirement type of A with each inherited variable as its
+# class stands: the type another argument settled it to, else the class's
+# outermost member (by nesting, parameter, position: a variable of an
+# enclosing function's parameter is in scope in a nested one, never the other
+# way round), constrained by every trait any member was given.
+proc hir::signatures::Normalize {AVar} {
+    upvar 1 $AVar A
+    if {[dict size [dict get $A keys]] == 0} {
+        return
+    }
+    set classes [dict create]
+    foreach name [lsort [dict keys [dict get $A keys]]] {
+        dict lappend classes [Find A $name] $name
+    }
+    set map [dict create]
+    set reps {}
+    dict for {root members} $classes {
+        if {[dict exists $A settled $root]} {
+            foreach m $members {
+                dict set map $m [dict get $A settled $root]
+            }
+            continue
+        }
+        set ranked [lmap m $members {
+            set info [dict get $A keys $m]
+            list [dict get $info depth] [dict get $info index] [join [dict get $info path] .] $m
+        }]
+        # (lsort is stable: by depth, then parameter, then position.)
+        set ranked [lsort -index 2 $ranked]
+        set ranked [lsort -integer -index 1 $ranked]
+        set ranked [lsort -integer -index 0 $ranked]
+        set traits {}
+        foreach m $members {
+            lappend traits {*}[dict get $A keys $m traits]
+        }
+        lappend reps [list {*}[lrange [lindex $ranked 0] 0 2] [lindex $ranked 0 3] $members [lsort -unique $traits]]
+    }
+    # Each variable's name, as messages show it, is its own among those of
+    # its function and the functions around it (T', T2', ...): outer
+    # functions first, then by parameter and position.
+    set reps [lsort -index 2 $reps]
+    set reps [lsort -integer -index 1 $reps]
+    set reps [lsort -integer -index 0 $reps]
+    set shown [dict create]
+    foreach r $reps {
+        lassign $r depth index path name members traits
+        set block [dict get $A params [dict get $A keys $name param] block]
+        set taken {}
+        for {set b $block} {$b ne "" && $b ne "program"} {set b [dict getdef $A enclosing $b ""]} {
+            lappend taken {*}[dict getdef $shown $b {}]
+        }
+        regexp {^(.*?)'#(.*)$} $name -> base position
+        set candidate $base
+        set n 1
+        while {"$candidate'" in $taken} {
+            incr n
+            regexp {^(.*?)[0-9]*$} $base -> stem
+            set candidate $stem$n
+        }
+        dict lappend shown $block "$candidate'"
+        set target [hir::types::MakeImprint "$candidate'#$position" $traits]
+        foreach m $members {
+            dict set map $m $target
+        }
+    }
+    # (A settled type may itself hold an inherited variable: resolved too,
+    # a bounded number of times.)
+    for {set i 0} {$i < 8} {incr i} {
+        set changed 0
+        dict for {m t} $map {
+            set u [hir::types::canonical [hir::imprint::Substitute $t $map]]
+            if {$u ne $t} {
+                dict set map $m $u
+                set changed 1
+            }
+        }
+        if {!$changed} {
+            break
+        }
+    }
+    foreach field {reqs rets} {
+        dict for {p recs} [dict get $A $field] {
+            dict set A $field $p [lmap rec $recs {
+                if {[dict exists $rec type]} {
+                    dict set rec type [hir::types::canonical [hir::imprint::Substitute [dict get $rec type] $map]]
+                }
+                set rec
+            }]
+        }
+    }
+}
+
+# The inherited variables TYPE holds that belong to a parameter of block E.
+proc hir::signatures::OwnInherited {AVar e type} {
+    upvar 1 $AVar A
+    if {[string first "'#" $type] < 0} {
+        return {}
+    }
+    set own {}
+    foreach o [hir::imprint::Occurrences $type] {
+        set p [hir::imprint::InferredParam [lindex $o 0]]
+        if {$p ne "" && [dict exists $A params $p] && [dict get $A params $p block] eq $e} {
+            lappend own [lindex $o 0]
+        }
+    }
+    return $own
+}
+
+# SOLUTION with every contract dropped (to any) that holds an inherited
+# variable its owner's parameters do not establish (a requirement that would
+# have established it was proven at its use, or conflicted): hir::imprint
+# could not bind it at the owner's calls.
+proc hir::signatures::Established {hir A solution} {
+    while 1 {
+        set established [dict create]
+        dict for {p contract} $solution {
+            set block [dict get $A params $p block]
+            foreach o [hir::imprint::Occurrences [dict get $contract trusted]] {
+                lassign $o name establishing
+                if {$establishing && [OwnInherited A $block [list imprint $name]] ne {}} {
+                    dict set established $name 1
+                }
+            }
+        }
+        set bad {}
+        dict for {p contract} $solution {
+            foreach o [hir::imprint::Occurrences [dict get $contract trusted]] {
+                set name [lindex $o 0]
+                if {[hir::imprint::IsInferred $name] && ![dict exists $established $name]} {
+                    lappend bad $p
+                    break
+                }
+            }
+        }
+        if {$bad eq {}} {
+            return $solution
+        }
+        foreach p $bad {
+            dict set solution $p trusted any
+            if {[string first "'#" [dict get $solution $p checked]] >= 0} {
+                dict set solution $p checked any
+            }
+        }
+    }
+}
+
+# 1 if NEW is OLD with some of OLD's inherited variables replaced
+# (consistently) by types: another round's view of the same contract, in
+# which a call made two variables one or settled one (a class's
+# representative or settled type depends on the calls a round sees).
+proc hir::signatures::Refines {old new {bindingVar ""}} {
+    if {$bindingVar ne ""} {
+        upvar 1 $bindingVar binding
+    } else {
+        set binding [dict create]
+    }
+    if {$old eq $new} {
+        return 1
+    }
+    if {[hir::types::IsImprint $old] && [hir::imprint::IsInferred [lindex $old 1]]} {
+        set name [lindex $old 1]
+        if {[dict exists $binding $name]} {
+            return [expr {[dict get $binding $name] eq $new}]
+        }
+        dict set binding $name $new
+        return 1
+    }
+    if {[llength $old] < 2 || [llength $old] != [llength $new] || [lindex $old 0] ne [lindex $new 0]} {
+        return 0
+    }
+    foreach a [lrange $old 1 end] b [lrange $new 1 end] {
+        if {![Refines $a $b binding]} {
+            return 0
+        }
+    }
+    return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -996,6 +1386,12 @@ proc hir::signatures::Contract {hir AVar contracts p} {
     if {[dict exists $A edges $p]} {
         foreach edge [dict get $A edges $p] {
             set target [SlotContract A $contracts [dict get $edge block] [dict get $edge index]]
+            if {[OwnInherited A [dict get $edge block] [dict get $target checked]] ne {}} {
+                # The callee's own inherited variable (its calls bind it):
+                # once its contract is seeded, the call instantiates it
+                # (ArgSinks, the next round), never copies it.
+                continue
+            }
             set use [dict get $edge use]
             set full [dict get $target checked]
             if {$full eq "any" || ($use ne "" && [hir::types::Admits $full $use])} {
@@ -1124,6 +1520,10 @@ proc hir::signatures::CallableContract {hir AVar contracts p} {
         foreach ret [dict get $A rets $p] {
             if {[dict exists $ret block]} {
                 set type [dict get [SlotContract A $contracts [dict get $ret block] [dict get $ret index]] checked]
+                if {[OwnInherited A [dict get $ret block] $type] ne {}} {
+                    # (As for an edge: the callee's own variable.)
+                    continue
+                }
                 set ret [dict replace $ret type $type what "[dict get $ret what] (inferred)"]
             } else {
                 set type [dict get $ret type]
