@@ -861,8 +861,7 @@ locally), the macOS and Windows workflows on push.
 
 | Workflow | Result |
 |---|---|
-| `tests.yml`: the Tcl suite on interp and on compile, cranelift coverage, the golden suites beside their Tcl originals (4 shards), native Rust unit tests, stub- and system-linked executables (also under GC stress), the method-call decision's oracle and reference audit, the warning gate | passed |
-| `tests.yml`: cranelift-generic coverage | running at the time of writing |
+| `tests.yml`: the Tcl suite on interp and on compile, cranelift and cranelift-generic coverage, the golden suites beside their Tcl originals (4 shards), native Rust unit tests, stub- and system-linked executables (also under GC stress), the method-call decision's oracle and reference audit, the warning gate | passed |
 | `tests-arm64.yml` (Linux AArch64) | passed |
 | `static-decisions.yml`: every golden suite, batched against sequential (mutable-array.bot and four shards) | passed: no disagreement |
 | macOS arm64 | passed |
