@@ -719,7 +719,30 @@ The packaged step moved `~/.cargo` and `~/.rustup` away and then required
 whose proxies (`/opt/homebrew/opt/rustup/bin/cargo`) stay on PATH without
 `~/.rustup`, so the check stopped the step. The step now leaves out every
 PATH directory holding `cargo`, `rustc` or `rustup` for its duration and
-requires all three gone (4d449294). The re-run: below.
+requires all three gone (4d449294).
+
+**Run 41029861079** (macos-arm64.yml at 4d449294, `tier full`, Tier C
+`native-aot-mutants=cli-drops-main-thread main-thread-startup.test`)
+**[executed]**: Botlish.app, smoke, acceptance 1/2, system linker,
+Botlish.app without developer tools and the Linux control passed; Tier C
+killed `cli-drops-main-thread` (section 29) and passed
+`tests/main-thread-startup.test` on interp and compile (24 tests, 21
+passed, 3 skipped, 0 failed). Cancelled before its main-thread startup
+job ran: that job's census step would have run the harness bug below.
+
+**The census on the production policy, first attempt** (the census
+workflow, run 41029857631 at 4d449294) **[executed]**: every candidate-A
+case up to the semantics group ran as predicted -- the worker's, the main
+thread's (Botlish.app's system linker), the rustc linker's and the 8 MiB
+control's depths, overflows, kept coroutines, GC stress, faults and large
+frames (the control exhausting exactly the three recursions the census
+measured) -- and then the harness failed: candidate A's depth loop named
+its expectation `want`, the name of `cases()`'s group filter, so
+`want("semantics")` called a dictionary (TypeError). Fixed (44a5b4fa); the
+harness's Linux dry run (every group the main-thread startup job selects,
+`--strict`, the checkout's compiler; on Linux every main-thread row is a
+predicted FAILED-BUILD) completes with no case not as predicted
+**[executed, Linux x86-64]**.
 
 ## 32. Linux x86-64 CI results
 
