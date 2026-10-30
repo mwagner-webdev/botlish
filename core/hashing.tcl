@@ -210,6 +210,12 @@ proc core::hashing::Encode {mode v} {
             # text (empty for an anonymous struct), the field count, then
             # each slot's name text and its value in slot order. The shape
             # is folded in so {x: 1} and {y: 1} do not collide by design.
+            set child [core::value::treeChildOf [core::value::structId $v]]
+            if {$child ne ""} {
+                # A tree struct's value (TREE-STRUCT-MILESTONE-1.md): this
+                # very input, made without the host's recursion (TreeEncode).
+                return [TreeEncode $mode $v $child]
+            }
             set fields [core::value::structFields $v]
             Text out $mode [Utf8Bytes [core::value::structId $v]]
             set identity [core::value::identityOf [core::value::structId $v]]
@@ -312,6 +318,134 @@ proc core::hashing::Identity {outVar mode identity values} {
         }
     }
     lappend out {*}[LeBytes $sum]
+}
+
+# ---------------------------------------------------------------------------
+# Tree values (TREE-STRUCT-MILESTONE-1.md)
+#
+# The canonical input of a tree struct's value V in MODE, whose child field
+# is slot CHILD: exactly what Encode's struct case makes of any struct -- the
+# declaration identity, the field count, each slot's name and value, the
+# child List as a List of nested values -- computed with work stacks instead
+# of the host's recursion, so a tree's depth never bounds its hash. Both
+# hashes read the same nodes, slots and child order the recursive walk reads:
+# the table input is a pre-order stream (a nested value is inline), the
+# public one folds every node's own input bottom-up (a nested value is its
+# sub-hash). Nothing of the representation is read: no address, no
+# allocation order, no traversal of the program's.
+proc core::hashing::TreeEncode {mode v child} {
+    variable KindTag
+    set shape [lindex $v 1]
+    # Every node of the tree has this shape: its constant bytes once.
+    set head [list [dict get $KindTag struct]]
+    Text head $mode [Utf8Bytes [lindex $shape 0]]
+    lappend head {*}[LeBytes [expr {[llength $shape] - 1}]]
+    set names {}
+    foreach field [lrange $shape 1 end] {
+        set name {}
+        Text name $mode [Utf8Bytes $field]
+        lappend names $name
+    }
+    if {$mode eq "table"} {
+        return [TreeEncodeTable $v $shape $child $head $names]
+    }
+    return [TreeEncodePublic $v $shape $child $head $names]
+}
+
+# The table input: a stack of pieces -- bytes, or a node still to encode --
+# emitted in pre-order.
+proc core::hashing::TreeEncodeTable {v shape child head names} {
+    variable KindTag
+    set out {}
+    set stack [list [list node $v]]
+    while {[llength $stack] > 0} {
+        lassign [lpop stack] what piece
+        if {$what eq "bytes"} {
+            lappend out {*}$piece
+            continue
+        }
+        if {![core::value::IsTreeNode $piece $shape]} {
+            lappend out {*}[Encode table $piece]
+            continue
+        }
+        set pieces [list [list bytes $head]]
+        set slot 0
+        foreach name $names item [lindex $piece 2] {
+            lappend pieces [list bytes $name]
+            if {$slot == $child && [core::value::kind $item] eq "list"} {
+                set kids [lindex $item 1]
+                lappend pieces [list bytes [list [dict get $KindTag list] {*}[LeBytes [llength $kids]]]]
+                foreach kid $kids {
+                    lappend pieces [list node $kid]
+                }
+            } else {
+                lappend pieces [list bytes [Encode table $item]]
+            }
+            incr slot
+        }
+        lappend stack {*}[lreverse $pieces]
+    }
+    return $out
+}
+
+# The public input: every descendant node's input folded to its sub-hash
+# after its children's (a stack of {NODE EXPANDED} frames and a stack of the
+# folds made), the root's input returned unfolded.
+proc core::hashing::TreeEncodePublic {v shape child head names} {
+    variable FnvOffset
+    variable KindTag
+    set stack [list [list $v 0]]
+    set folds {}
+    while {[llength $stack] > 0} {
+        lassign [lpop stack] node expanded
+        set item [lindex $node 2 $child]
+        set kids {}
+        if {[core::value::kind $item] eq "list"} {
+            set kids [lindex $item 1]
+        }
+        if {!$expanded} {
+            lappend stack [list $node 1]
+            foreach kid [lreverse $kids] {
+                if {[core::value::IsTreeNode $kid $shape]} {
+                    lappend stack [list $kid 0]
+                }
+            }
+            continue
+        }
+        set count 0
+        foreach kid $kids {
+            if {[core::value::IsTreeNode $kid $shape]} {
+                incr count
+            }
+        }
+        set mine [lrange $folds end-[expr {$count - 1}] end]
+        set folds [lreplace $folds[set folds {}] end-[expr {$count - 1}] end]
+        set out $head
+        set slot 0
+        foreach name $names value [lindex $node 2] {
+            lappend out {*}$name
+            if {$slot == $child && [core::value::kind $value] eq "list"} {
+                set list [list [dict get $KindTag list] {*}[LeBytes [llength $kids]]]
+                set i 0
+                foreach kid $kids {
+                    if {[core::value::IsTreeNode $kid $shape]} {
+                        lappend list {*}[LeBytes [lindex $mine $i]]
+                        incr i
+                    } else {
+                        lappend list {*}[LeBytes [Fold public $kid]]
+                    }
+                }
+                lappend out {*}[LeBytes [Bytes $FnvOffset $list]]
+            } else {
+                Child out public $value
+            }
+            incr slot
+        }
+        if {[llength $stack] == 0} {
+            return $out
+        }
+        lappend folds [Bytes $FnvOffset $out]
+    }
 }
 
 # The full 64-bit hash, in MODE, of the identity entry pairing KEY with

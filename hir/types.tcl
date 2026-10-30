@@ -2487,7 +2487,16 @@ proc hir::types::Totality {operation type {seen {}}} {
                     }
                     return [Components $operation $parts [concat $seen [list $type]]]
                 }
+                set child [hir::structs::treeField $id]
                 foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+                    if {$name eq $child} {
+                        # A tree struct's child field (TREE-STRUCT-
+                        # MILESTONE-1.md) is a List of values of this very
+                        # application: it adds no requirement of its own,
+                        # so the tree is total exactly when its other
+                        # fields are (every tree is finite).
+                        continue
+                    }
                     lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
                 }
                 return [Components $operation $parts [concat $seen [list $type]]]
@@ -3417,6 +3426,28 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             # (An element read of MutableVector[never]: see
             # IterationElementOf.)
+            return $result
+        }
+        tree-children {
+            # std::tree::children(t) (core/tree.tcl, TREE-STRUCT-
+            # MILESTONE-1.md): the child List of a tree struct's value, the
+            # type of its declaration's child field for this application
+            # (List[Self]).
+            lassign $shape _ t
+            set tree [Unrefined [lindex $argTypes $t]]
+            if {[IsNamedStruct $tree]} {
+                set field [hir::structs::treeField [lindex $tree 1]]
+                if {$field ne ""} {
+                    return [hir::structs::AppliedFieldType $tree $field]
+                }
+            }
+            if {$tree eq "never" || [kindOf $tree] ni {"" struct}
+                    || ([IsNamedStruct $tree] && [hir::structs::declared [lindex $tree 1]])} {
+                # No value, or a value of a known type that is no tree
+                # struct's: the call never completes (TREE-OPERAND is its
+                # diagnostic, hir/structs.tcl's TreeChildrenProblem).
+                return never
+            }
             return $result
         }
         mutvec-to-list {

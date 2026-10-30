@@ -286,8 +286,8 @@ proc hir::read::EnumDeclLine {content number} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(?:slots \[([^\]]*)\] )?(?:identity ([a-z]+)\(([^)]*)\) )?fields (.*)$} $content -> id name ns opaqueWord contextWord slotsText identityForm identityFields fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] \[identity FORM(FIELD,...)\] fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(?:slots \[([^\]]*)\] )?(?:identity ([a-z]+)\(([^)]*)\) )?(?:tree (\S+) )?fields (.*)$} $content -> id name ns opaqueWord contextWord slotsText identityForm identityFields treeField fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] \[identity FORM(FIELD,...)\] \[tree FIELD\] fields FIELD: TYPE, ...\""
     }
     # A parameterized struct's slots (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
     # {SLOT {TRAIT ...}} pairs, as hir::format::TypeDecl printed them.
@@ -332,6 +332,14 @@ proc hir::read::StructDeclLine {content number} {
         # the registry's {form FORM fields {FIELD ...}}, as the entry
         # hir::structs::apply returned held it.
         dict set decl identity [dict create form $identityForm fields [split $identityFields ,]]
+    }
+    if {$treeField ne ""} {
+        # A tree struct (TREE-STRUCT-MILESTONE-1.md): its child field, as
+        # the entry hir::structs::apply returned held it.
+        if {$treeField ni $names} {
+            Fail $number "the tree field \"$treeField\" of struct $id is not one of its fields"
+        }
+        dict set decl tree $treeField
     }
     return $decl
 }

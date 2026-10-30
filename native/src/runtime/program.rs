@@ -37,8 +37,9 @@ use std::rc::Rc;
 /// The first word of a `LinkedProgram`.
 pub const LINKED_MAGIC: u64 = u64::from_le_bytes(*b"BOTLPRG1");
 /// The descriptor's own format revision, its first word. 2: a shape carries
-/// its identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
-const FORMAT: u32 = 2;
+/// its identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md). 3: and its
+/// tree struct's child slot (TREE-STRUCT-MILESTONE-1.md).
+const FORMAT: u32 = 3;
 
 /// The record the compiler emits as `botlish_program` (module doc). Its
 /// layout is a contract between codegen (which writes it as data) and this
@@ -163,7 +164,13 @@ pub fn program_info(program: &nir::Program) -> ProgramInfo {
         shapes: program
             .shapes
             .iter()
-            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone(), opaque: s.opaque, identity: s.identity })
+            .map(|s| ShapeInfo {
+                name: s.name.clone(),
+                fields: s.fields.clone(),
+                opaque: s.opaque,
+                identity: s.identity,
+                tree: s.tree,
+            })
             .collect(),
         enums: program.enums.iter().map(|e| EnumInfo { name: e.name.clone(), cases: e.cases.clone() }).collect(),
         errors: program.errors.clone(),
@@ -302,6 +309,15 @@ impl ProgramDescriptor {
                     w.len(v);
                 }
             }
+            // A tree struct's child slot (TREE-STRUCT-MILESTONE-1.md): 0
+            // for none, 1 and the slot.
+            match s.tree {
+                None => w.u32(0),
+                Some(child) => {
+                    w.u32(1);
+                    w.len(child);
+                }
+            }
         }
         w.len(info.enums.len());
         for e in &info.enums {
@@ -416,7 +432,15 @@ impl ProgramDescriptor {
             {
                 return Err("a shape identity names no field of its shape".to_string());
             }
-            info.shapes.push(ShapeInfo { name, fields, opaque, identity });
+            let tree = match r.u32()? {
+                0 => None,
+                1 => Some(r.len()?),
+                other => return Err(format!("unknown shape tree form {other}")),
+            };
+            if tree.is_some_and(|child| child >= fields.len()) {
+                return Err("a shape's tree slot names no field of its shape".to_string());
+            }
+            info.shapes.push(ShapeInfo { name, fields, opaque, identity, tree });
         }
         for _ in 0..r.len()? {
             let name = r.str()?;
@@ -570,19 +594,28 @@ mod tests {
                     NativeInfo { name: "list".into(), arity: None, params: vec![None], op: OpCode::ListNew },
                 ],
                 shapes: vec![
-                    ShapeInfo { name: None, fields: vec!["a".into(), "b".into()], opaque: false, identity: None },
-                    ShapeInfo { name: Some("m::Point".into()), fields: vec!["x".into()], opaque: true, identity: None },
+                    ShapeInfo { name: None, fields: vec!["a".into(), "b".into()], opaque: false, identity: None, tree: None },
+                    ShapeInfo { name: Some("m::Point".into()), fields: vec!["x".into()], opaque: true, identity: None, tree: None },
                     ShapeInfo {
                         name: Some("m::Bag".into()),
                         fields: vec!["items".into(), "note".into()],
                         opaque: true,
                         identity: Some(Identity::Members(0)),
+                        tree: None,
                     },
                     ShapeInfo {
                         name: Some("m::Map".into()),
                         fields: vec!["keys".into(), "vals".into(), "index".into()],
                         opaque: true,
                         identity: Some(Identity::Associations(0, 1)),
+                        tree: None,
+                    },
+                    ShapeInfo {
+                        name: Some("Node".into()),
+                        fields: vec!["value".into(), "children".into()],
+                        opaque: false,
+                        identity: None,
+                        tree: Some(1),
                     },
                 ],
                 enums: vec![EnumInfo { name: "Color".into(), cases: vec!["Red".into(), "Green".into()] }],
@@ -620,6 +653,8 @@ mod tests {
         assert_eq!(decoded.info.shapes[1].identity, None);
         assert_eq!(decoded.info.shapes[2].identity, Some(Identity::Members(0)));
         assert_eq!(decoded.info.shapes[3].identity, Some(Identity::Associations(0, 1)));
+        assert_eq!(decoded.info.shapes[3].tree, None);
+        assert_eq!(decoded.info.shapes[4].tree, Some(1));
         assert_eq!(decoded.info.errors, descriptor.info.errors);
     }
 

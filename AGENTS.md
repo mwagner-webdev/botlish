@@ -2668,6 +2668,67 @@ mutable-map, collection-reorder and trait harnesses (above) for a change to
 code they share, and the warning gate. `bench/value-identity.tcl`
 regenerates the performance report.
 
+## Tree structs and std::tree::walk
+
+A `tree struct NAME[SLOTS]:` (TREE-STRUCT-MILESTONE-1.md) is an ordinary
+immutable struct with exactly one recursive field, its *child field*, of
+type `List[Self]` (Self the declaration applied to its own slots in order):
+a finite rooted ordered tree value. The registry records the child field
+(`hir::structs::treeField`, the sourceTypes entry's and HIR text's `tree
+FIELD`), and everything that treats a tree specially reads that, never a
+field that happens to be recursive. Keep it so:
+
+* One shape: no second recursive field, no field of Self, no Self nested
+  deeper or inside another container, map, set, function type or another
+  application of the declaration, no mutual recursion (TREE-STRUCT-SHAPE);
+  never opaque, a context or an identity struct (TREE-STRUCT-COMBINATION);
+  never affine, also through an application (`Node[Coroutine...]`:
+  AFFINE-CONTAINER-UNSUPPORTED). A general recursive type stays an ordinary
+  `struct`'s (STRUCTS.md); never widen the tree shape to make one fit.
+* A tree is a value: no reference, node handle, node id, parent link,
+  pointer equality, mutation through a subtree or cycle, and nothing a
+  program does may observe how the runtimes hold the recursion (today a
+  struct object whose child List holds its children's objects: no arena).
+  Never let equality, a hash or a walk read an address, an allocation order
+  or a construction history.
+* ==, the public hash, the keyed table hash and the printer of a tree mean
+  exactly what they mean for any struct (the same comparisons in the same
+  order, the canonical input byte for byte, the same text) and walk the
+  topology with work stacks, never the host's recursion: core/value.tcl's
+  TreeEqual and TreeShow, core/hashing.tcl's TreeEncode, ops.rs's
+  `tree_equal` and `tree_walk` (the sinks' `open_nested`/`close_nested`),
+  show.rs's `tree_show`. The runtimes learn the child slot from the
+  registry (core::value's tree test) and the shape (NIR `tree=`,
+  `ShapeInfo::tree`, the program descriptor, format 3): never by a type's
+  name. Totality skips exactly the child field (hir::types::Totality).
+* std::tree::walk (stdlib/tree.bot) is ordinary Botlish: one function whose
+  every yield is its own, a preorder stack and a compacting breadth-first
+  queue, no visited set. It reads the child field through the internal
+  `std::tree::children` (core/tree.tcl: `-result-shape tree-children`,
+  declareInternalMember; a static `structget` natively, `treechildren` only
+  where no static type names the shape). Its nodes are typed as the tree's
+  own type because a coroutine construction takes its outward type from the
+  root call's semantic instance (hir::coroutines::InstanceOutward,
+  hir::semantic::ConstructionOutward): never give the walk a callback, a
+  cursor, a handle type or a trait view.
+
+If you change any of that (the grammar's `tree` modifier, hir/structs.tcl's
+tree section, `TreeChildrenProblem` or GenericLive's thunks, the tree cases
+of hir/types.tcl, HIR text, the runtimes' tree walks, core/tree.tcl,
+stdlib/tree.bot, the shape's `tree=`, the descriptor, or how a construction's
+outward type is computed), run `tests/tree-struct.test`, its golden suite
+(`tclsh9.0 tests/local.tcl tests/golden/tree-struct.bot`), `python3 -I
+audit/tree-struct/tools/oracle.py selftest`, `audit/tree-struct/tools/fuzz.tcl`
+(several seeds, once with `-gc-stress 1`), `audit/tree-struct/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule) and `cargo test --release --manifest-path native/Cargo.toml
+--lib -- tree deep_trees program`, plus `tests/coroutines.test`,
+`tests/semantic-instances.test` and `tests/structs.test` for a change to
+construction typing or generic liveness, and the Hashable and value-identity
+harnesses for a change to the hash walks. `bench/tree-struct.tcl` regenerates
+the performance report.
+
 ## Fixed binary layouts
 
 A `layout` (BINARY-LAYOUT.md) is a compile-time schema of a fixed number of

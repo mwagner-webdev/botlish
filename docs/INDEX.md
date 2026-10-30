@@ -26,6 +26,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [STRUCT-DESTRUCTURING.md](STRUCT-DESTRUCTURING.md) -- struct destructuring
 - [ENUMS.md](ENUMS.md) -- enums: named, closed, nominal sums of payload-free cases
 - [OPAQUE-STRUCTS.md](OPAQUE-STRUCTS.md) -- `opaque struct`: module-owned representation and construction authority
+- [TREE-STRUCT-MILESTONE-1.md](TREE-STRUCT-MILESTONE-1.md) -- `tree struct Node:` with exactly one `List[Self]` field: finite ordered recursive values with no references, node identity or cycles; structural, order-sensitive `==` and hashes and the printer walked without host recursion in both runtimes; `std::tree::walk` (preorder and breadth-first) handing over subtrees typed as the tree's own type; the oracle, fuzzer, mutants and benchmarks (completion report)
 - [MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md](MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md) -- `private` module-local declarations (PRIVATE-ACCESS, PRIVATE-TYPE-ESCAPE; orthogonal to `opaque`) and the `CONTEXT-RESOURCE-ESCAPE` warning on an airlock handing raw pointers, views or open records to other modules; Icy Tower's SDL helpers made private, the census re-run with the warning (completion report)
 - [UNICODE-CHAR-LITERALS.md](UNICODE-CHAR-LITERALS.md) -- `UnicodeChar`: a scalar type distinct from Int and String
 - [FLOAT64-MILESTONE-1.md](FLOAT64-MILESTONE-1.md) -- `Float64`: finite binary64 numbers, decimal literals, `/`, `NonFiniteFloat`, C `double` (completion report)

@@ -446,38 +446,21 @@ proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
 proc core::value::coroutineId {v} { Require coroutine $v; return [lindex $v 1] }
 proc core::value::mutvecId {v}    { Require mutvec $v; return [lindex $v 1] }
 
-# 1 if V is a Block or contains one (in a list or Result).
+# 1 if V is a Block or contains one (in a list, set, struct, Result, vector or
+# array), at any depth: a work list of the values still to look into, never
+# the host's recursion (a tree struct's value nests as deep as a program
+# builds it: TREE-STRUCT-MILESTONE-1.md).
 proc core::value::containsBlock {v} {
-    switch -- [kind $v] {
-        block  { return 1 }
-        list - immutableSet {
-            foreach item [lindex $v 1] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
-        }
-        struct {
-            foreach item [lindex $v 2] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
-        }
-        result { return [containsBlock [lindex $v 2]] }
-        mutvec {
-            foreach item [core::mutvec::items $v] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
-        }
-        mutarray {
-            foreach item [core::mutarray::items $v] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
+    set pending [list $v]
+    while {[llength $pending] > 0} {
+        set v [lpop pending]
+        switch -- [kind $v] {
+            block  { return 1 }
+            list - immutableSet { lappend pending {*}[lindex $v 1] }
+            struct { lappend pending {*}[lindex $v 2] }
+            result { lappend pending [lindex $v 2] }
+            mutvec { lappend pending {*}[core::mutvec::items $v] }
+            mutarray { lappend pending {*}[core::mutarray::items $v] }
         }
     }
     return 0
@@ -569,6 +552,13 @@ proc core::value::equal {a b} {
             if {[lindex $a 1] ne [lindex $b 1]} {
                 return 0
             }
+            set child [treeChildOf [lindex $a 1 0]]
+            if {$child ne ""} {
+                # A tree struct's value (TREE-STRUCT-MILESTONE-1.md): the
+                # same comparison, slot by slot and child by child, walked
+                # with a work stack instead of the host's recursion.
+                return [TreeEqual $a $b $child]
+            }
             set identity [identityOf [lindex $a 1 0]]
             if {$identity ne ""} {
                 # A struct that declares its identity (REPRESENTATION-
@@ -653,6 +643,162 @@ proc core::value::equal {a b} {
             }
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Tree values (TREE-STRUCT-MILESTONE-1.md)
+#
+# A tree struct's value is an ordinary struct value whose child field holds a
+# List of values of the same declaration: a finite rooted ordered tree, as
+# deep as a program builds it. Equality, both hashes (core/hashing.tcl) and
+# the display (show) of such a value mean exactly what they mean for any
+# struct -- the same comparisons in the same order, the same canonical input,
+# the same text -- but they walk the tree's topology with a work stack of
+# their own, so its depth is bounded by memory, never by the host's
+# recursion (a chain of a million nodes compares, hashes and prints). Which
+# struct identities are tree structs, and which slot is the child field, is
+# the compilation's struct registry's knowledge (hir/structs.tcl installs the
+# test below); nothing here reads an address, an allocation order or anything
+# else of the representation.
+
+namespace eval core::value {
+    # A command prefix taking a named-struct identity and returning the slot
+    # position of its child field if it is a tree struct, else "" (also when
+    # no registry is installed).
+    variable treeTest ""
+}
+
+# Installs the tree test (see above); "" removes it.
+proc core::value::setTreeTest {command} {
+    variable treeTest
+    set treeTest $command
+}
+
+# The child field's slot position of named struct ID if it is a tree struct,
+# else "".
+proc core::value::treeChildOf {id} {
+    variable treeTest
+    if {$id eq "" || $treeTest eq ""} {
+        return ""
+    }
+    return [{*}$treeTest $id]
+}
+
+# 1 if V is a node of the tree struct whose shape is SHAPE (an element of a
+# child List of such a node: a value of the same declaration).
+proc core::value::IsTreeNode {v shape} {
+    return [expr {[lindex $v 0] eq "struct" && [lindex $v 1] eq $shape}]
+}
+
+# equal's struct case for A and B, values of the tree struct whose child
+# field is slot CHILD (same shape: equal checked it). The recursive
+# comparison's exact order -- slot by slot, the child List's length before
+# its elements, each child completely before the next slot -- run from a work
+# stack of frames {fields XS YS I} (compare slots I.. of two nodes) and {kids
+# XS YS I} (compare child pairs I..). The first unequal pair answers 0; a
+# refusal (EQUALITY) propagates as the recursive comparison's would: as the
+# opaque values' own when the tree struct is opaque, else as the pair that
+# raised it.
+proc core::value::TreeEqual {a b child} {
+    set shape [lindex $a 1]
+    if {[isOpaqueStruct [lindex $shape 0]]} {
+        try {
+            return [TreeEqualWalk $a $b $shape $child]
+        } trap {CORE SEMANTIC EQUALITY} {} {
+            core::semanticError EQUALITY \
+                "== is not defined for callables: [show $a] == [show $b]"
+        }
+    }
+    return [TreeEqualWalk $a $b $shape $child]
+}
+
+proc core::value::TreeEqualWalk {a b shape child} {
+    set stack [list [list fields [lindex $a 2] [lindex $b 2] 0]]
+    while {[llength $stack] > 0} {
+        lassign [lpop stack] what xs ys i
+        if {$what eq "kids"} {
+            if {$i >= [llength $xs]} {
+                continue
+            }
+            set x [lindex $xs $i]
+            set y [lindex $ys $i]
+            lappend stack [list kids $xs $ys [expr {$i + 1}]]
+            if {[IsTreeNode $x $shape] && [IsTreeNode $y $shape]} {
+                lappend stack [list fields [lindex $x 2] [lindex $y 2] 0]
+            } elseif {![equal $x $y]} {
+                return 0
+            }
+            continue
+        }
+        set n [llength $xs]
+        for {} {$i < $n} {incr i} {
+            set x [lindex $xs $i]
+            set y [lindex $ys $i]
+            if {$i == $child && [kind $x] eq "list" && [kind $y] eq "list"} {
+                set kx [lindex $x 1]
+                set ky [lindex $y 1]
+                if {[llength $kx] != [llength $ky]} {
+                    return 0
+                }
+                lappend stack [list fields $xs $ys [expr {$i + 1}]] [list kids $kx $ky 0]
+                break
+            }
+            if {![equal $x $y]} {
+                return 0
+            }
+        }
+    }
+    return 1
+}
+
+# show's text for V, a value of the tree struct of shape SHAPE whose child
+# field is slot CHILD (DEBUG and REVEAL as show takes them): the recursive
+# rendering's exact text, produced from a work stack of pieces -- literal
+# text, or a node still to render.
+proc core::value::TreeShow {v shape child debug reveal} {
+    set name [lindex $shape 0]
+    set fields [lrange $shape 1 end]
+    set out ""
+    set stack [list [list node $v]]
+    while {[llength $stack] > 0} {
+        lassign [lpop stack] what piece
+        if {$what eq "text"} {
+            append out $piece
+            continue
+        }
+        if {![IsTreeNode $piece $shape]} {
+            append out [show $piece $debug $reveal]
+            continue
+        }
+        # The node's pieces, last first.
+        set pieces {}
+        set slot 0
+        foreach field $fields item [lindex $piece 2] {
+            if {$slot == 0} {
+                lappend pieces [list text "$name \{$field: "]
+            } else {
+                lappend pieces [list text ", $field: "]
+            }
+            if {$slot == $child && [kind $item] eq "list"} {
+                lappend pieces [list text "\["]
+                set first 1
+                foreach kid [lindex $item 1] {
+                    if {!$first} {
+                        lappend pieces [list text ", "]
+                    }
+                    set first 0
+                    lappend pieces [list node $kid]
+                }
+                lappend pieces [list text "\]"]
+            } else {
+                lappend pieces [list text [show $item $debug $reveal]]
+            }
+            incr slot
+        }
+        lappend pieces [list text "\}"]
+        lappend stack {*}[lreverse $pieces]
+    }
+    return $out
 }
 
 # ---------------------------------------------------------------------------
@@ -882,6 +1028,12 @@ proc core::value::show {v {debug 0} {reveal 0}} {
             # opaque struct is its nominal type only (above), unless REVEAL.
             if {!$reveal && [isOpaqueStruct [lindex $v 1 0]]} {
                 return "<opaque [lindex $v 1 0]>"
+            }
+            set child [treeChildOf [lindex $v 1 0]]
+            if {$child ne ""} {
+                # A tree struct's value: the same text, rendered without
+                # the host's recursion (Tree values, above).
+                return [TreeShow $v [lindex $v 1] $child $debug $reveal]
             }
             set parts {}
             foreach field [lrange [lindex $v 1] 1 end] item [lindex $v 2] {

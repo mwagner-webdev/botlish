@@ -145,6 +145,7 @@ namespace eval native::lower {
         std::char::is_tcl_alnum {op chartclalnum} \
         argv         {op argv} \
         std::list::length {op listlen} \
+        std::tree::children {op treechildren} \
         std::list::at     {op listget} \
         std::list::append {op listappend} \
         list#with_length {op listwithlen} \
@@ -1716,6 +1717,13 @@ proc native::lower::Program {hirProgram args} {
             set identity [hir::structs::identityOf $id]
             if {$identity ne ""} {
                 append opaque " identity=[Quote [join [concat [list [dict get $identity form]] [dict get $identity fields]] { }]]"
+            }
+            # A tree struct (TREE-STRUCT-MILESTONE-1.md): its child field, by
+            # name -- what the runtime's equality, hashes and printer walk a
+            # value of this shape's topology by.
+            set child [hir::structs::treeField $id]
+            if {$child ne ""} {
+                append opaque " tree=[Quote $child]"
             }
             lappend header "shape [dict get $shapeIds $key] named [Quote $id]$opaque fields=[Quote [join $layout { }]]"
         }
@@ -10404,6 +10412,21 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     set raw [RawIntOp fn $e $argExprs $argRegs $op $want]
     if {$raw ne ""} {
         return $raw
+    }
+    if {$op eq "treechildren"} {
+        # std::tree::children (TREE-STRUCT-MILESTONE-1.md) of a value whose
+        # static type is a tree struct: its child field, read from the slot
+        # the type names, as a projection is. Only where no static type
+        # names one (one compile of a generic body: -specialize 0) is it
+        # the runtime's read of the slot the value's shape records.
+        set type [hir::types::Unrefined [hir::typeOf $hir [lindex $argExprs 0]]]
+        if {[hir::types::IsNamedStruct $type]} {
+            set field [hir::structs::treeField [lindex $type 1]]
+            set slot [lsearch -exact [hir::types::StructLayout $type] $field]
+            if {$field ne "" && $slot >= 0} {
+                return [list [Assign fn "structget $slot [lindex $argRegs 0]" $e] tagged]
+            }
+        }
     }
     return [list [Assign fn [string trimright "op $op [join $argRegs { }]"] $e] tagged]
 }

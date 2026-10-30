@@ -3009,6 +3009,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         StrRegionIsTclAlpha => ("rt_str_region_is_tcl_alpha", None, true, None),
                         StrRegionIsTclAlnum => ("rt_str_region_is_tcl_alnum", None, true, None),
                         ListLen => ("rt_list_len", None, false, None),
+                        TreeChildren => ("rt_tree_children", None, true, None),
                         ListGet => ("rt_list_get", None, true, None),
                         ListWithLength => ("rt_list_with_length", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),

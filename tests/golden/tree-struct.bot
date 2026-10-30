@@ -1,0 +1,363 @@
+# tree-struct.bot -- tree structs: finite recursive ordered values and their
+# traversal (TREE-STRUCT-MILESTONE-1.md), ported from tests/tree-struct.test.
+#
+# * A tree struct has exactly one recursive field, of type List[Self]; its
+#   values are finite rooted ordered trees, built from children that exist,
+#   and a subtree is a value.
+# * == and both hashes are structural and order-sensitive; a tree is
+#   Equatable and Hashable exactly when its fields other than the child
+#   field are, and a payload's own identity composes.
+# * std::tree::walk traverses any tree in preorder (DepthFirst) or
+#   breadth-first order, handing over the subtrees themselves, typed as the
+#   tree's own type; no depth bounds the walks, ==, or the hashes.
+
+# What a Botlish program cannot observe stays in the Tcl suite: the struct
+# registry, HIR text, interchange and isolation of the designation, the
+# declaration checks (a struct declaration cannot sit in a static compile
+# block), the NIR shape, the printed text, the private table hash (a
+# privileged fixture module) and its oracle, the run-time EQUALITY refusal,
+# the native stack-size and standalone-executable facts, and the
+# definition-level rejection of an escaping untyped walker.
+import std::compiler
+import std::coroutine
+import std::immutable_map
+import std::immutable_set
+import std::list
+import std::mutable_array
+import std::mutable_map
+import std::mutable_vector
+import std::test
+import std::tree
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only): tsDecls of the Tcl file.
+
+tree struct Node:
+    value: int
+    children: List[Node]
+
+tree struct Labeled[T]:
+    label: T
+    kids: List[Labeled[T]]
+    weight: int
+
+struct Plain:
+    value: int
+    children: List[Plain]
+
+nomethod fn leaf(v: int) -> Node:
+    Node {value: v, children: []}
+
+nomethod fn node(v: int, kids: List[Node]) -> Node:
+    Node {value: v, children: kids}
+
+nomethod fn chain(n: int, bottom: int) -> Node:
+    acc = std::mutable_vector::from_list([leaf(bottom)])
+    loop i from 1 through n:
+        below = acc.pop():
+            on IndexNotFound:
+                leaf(0)
+        acc.push(node(i, [below]))
+    acc.at(0):
+        on IndexNotFound:
+            leaf(0)
+
+nomethod fn values(root: Node, order: std::tree::Order) -> List[int]:
+    out = std::mutable_vector::from_list([root.value])
+    out.clear()
+    coroutine {step, first} = std::tree::walk(root, order)
+    out.push(first.value)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(step().value)
+    loop v in out:
+        v
+
+nomethod fn digest(root: Node, order: std::tree::Order) -> List[int]:
+    acc = std::mutable_array::create(2, 0)
+    coroutine {step, first} = std::tree::walk(root, order)
+    acc.set(0, 1):
+        on IndexNotFound:
+            unit
+    acc.set(1, first.value):
+        on IndexNotFound:
+            unit
+    loop:
+        if std::coroutine::done?(step):
+            break
+        n = step()
+        c = acc.at(0):
+            on IndexNotFound:
+                0
+        d = acc.at(1):
+            on IndexNotFound:
+                0
+        acc.set(0, c + 1):
+            on IndexNotFound:
+                unit
+        acc.set(1, mod(d * 1000003 + n.value + 7, 2305843009213693951)):
+            on IndexNotFound:
+                unit
+    std::mutable_array::freeze(acc, 2)
+
+nomethod fn labels(root: Labeled[str], order: std::tree::Order) -> List[str]:
+    out = std::mutable_vector::from_list([root.label])
+    coroutine {step, first} = std::tree::walk(root, order)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(step().label)
+    loop s in out:
+        s
+
+nomethod fn lb(s: str, kids: List[Labeled[str]]) -> Labeled[str]:
+    Labeled {label: s, kids: kids, weight: 0}
+
+# ts-decl-tree-is-contextual: a struct, a field and a function named tree.
+struct tree:
+    tree: int
+
+nomethod fn tree_of(tree: int) -> tree:
+    tree {tree: tree}
+
+# ts-decl-other-trees-allowed: a tree holding another tree and an ordinary
+# recursive struct.
+tree struct Doc:
+    outline: Node
+    plain: List[Plain]
+    sections: List[Doc]
+
+# ts-identity-payload: a payload with a representation-independent identity.
+tree struct Elem:
+    attrs: std::immutable_map::ImmutableMap[str, int]
+    children: List[Elem]
+
+nomethod fn attrs(ks: List[str]) -> std::immutable_map::ImmutableMap[str, int]:
+    m = std::mutable_map::create[str, int]()
+    loop k in ks:
+        m.set(k, 1)
+    m.freeze()
+
+# ts-generic-construction-typed: an untyped yielding function.
+fn gen(x):
+    loop c in x.children:
+        yield c
+    x
+
+# ts-filesystem-specimen: the motivating shape.
+tree struct FileTree:
+    path: str
+    children: List[FileTree]
+
+nomethod fn file(path: str) -> FileTree:
+    FileTree {path: path, children: []}
+
+nomethod fn paths(root: FileTree, order: std::tree::Order) -> List[str]:
+    out = std::mutable_vector::from_list([root.path])
+    coroutine {step, first} = std::tree::walk(root, order)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(step().path)
+    loop p in out:
+        p
+
+# ---------------------------------------------------------------------------
+# Declarations and values
+
+fn register_value_tests():
+    # `tree` is a modifier only before `struct`: a variable, a function, a field and a struct named tree are ordinary
+    fn b_ts_decl_tree_is_contextual() errors std::compiler::CompilerError:
+        static compile:
+            tree = 3
+            [tree, tree_of(tree).tree]
+    std::test::value("ts-decl-tree-is-contextual", [3, 3], b_ts_decl_tree_is_contextual)
+
+    # an ordinary field may hold another tree struct, or an ordinary recursive struct of another declaration
+    fn b_ts_decl_other_trees_allowed() errors std::compiler::CompilerError:
+        static compile:
+            d = Doc {outline: node(1, [leaf(2)]), plain: [], sections: [Doc {outline: leaf(3), plain: [], sections: []}]}
+            [d == d, values(d.outline, std::tree::Order::DepthFirst) == [1, 2]]
+    std::test::value("ts-decl-other-trees-allowed", [true, true], b_ts_decl_other_trees_allowed)
+
+    # a tree is built with ordinary struct construction and read with ordinary projections and destructuring
+    fn b_ts_construction_and_access() errors std::compiler::CompilerError:
+        static compile:
+            t = node(1, [node(2, [leaf(4)]), leaf(3)])
+            l = Labeled {label: "a", kids: [Labeled {label: "b", kids: [], weight: 2}], weight: 1}
+            {value: v, children: kids} = t
+            [t.value, std::list::length(t.children), std::list::length(l.kids), l.weight, v, std::list::length(kids)]
+    std::test::value("ts-construction-and-access", [1, 2, 1, 1, 1, 2], b_ts_construction_and_access)
+
+    # a subtree read from a tree is the value it represents: no handle into its parent
+    fn b_ts_subtree_is_a_value() errors std::compiler::CompilerError:
+        static compile:
+            t = node(1, [node(2, [leaf(4)]), leaf(3)])
+            sub = t.children.at(0):
+                on IndexNotFound:
+                    leaf(0)
+            bigger = node(9, [sub, sub])
+            [sub == node(2, [leaf(4)]), bigger.children == [sub, sub], t == node(1, [node(2, [leaf(4)]), leaf(3)]), hash(sub) == hash(node(2, [leaf(4)]))]
+    std::test::value("ts-subtree-is-a-value", [true, true, true, true], b_ts_subtree_is_a_value)
+
+    # == is structural and order-sensitive
+    fn b_ts_equality() errors std::compiler::CompilerError:
+        static compile:
+            a = node(1, [node(2, [leaf(4), leaf(5)]), leaf(3)])
+            [
+                a == node(1, [node(2, [leaf(4), leaf(5)]), leaf(3)]),
+                a == node(1, [node(2, [leaf(4), leaf(6)]), leaf(3)]),
+                a == node(1, [leaf(3), node(2, [leaf(4), leaf(5)])]),
+                a == node(1, [node(2, [leaf(5), leaf(4)]), leaf(3)]),
+                a == node(1, [node(2, [leaf(4), leaf(5)]), leaf(3), leaf(3)]),
+                a == node(1, [node(2, [leaf(4)]), leaf(3)]),
+                chain(300, 7) == chain(300, 7),
+                chain(300, 7) == chain(300, 8),
+                chain(300, 7) == chain(301, 7),
+                Plain {value: 1, children: []} == Plain {value: 1, children: []},
+                [leaf(1)] == [leaf(1)]
+            ]
+    std::test::value("ts-equality", [true, false, false, false, false, false, true, false, false, true, true], b_ts_equality)
+
+    # two equal subtrees are two occurrences: both are compared and visited
+    fn b_ts_repeated_subtrees() errors std::compiler::CompilerError:
+        static compile:
+            x = node(2, [leaf(3)])
+            t = node(1, [x, x])
+            [t == node(1, [node(2, [leaf(3)]), node(2, [leaf(3)])]), t == node(1, [x]), values(t, std::tree::Order::DepthFirst) == [1, 2, 3, 2, 3], values(t, std::tree::Order::BreadthFirst) == [1, 2, 2, 3, 3]]
+    std::test::value("ts-repeated-subtrees", [true, false, true, true], b_ts_repeated_subtrees)
+
+# ---------------------------------------------------------------------------
+# Hashing, Equatable, Hashable
+
+fn register_hash_tests():
+    # the public hash of a tree is fixed by its structure
+    fn b_ts_hash_pinned() errors std::compiler::CompilerError:
+        static compile:
+            [hash(leaf(5)), hash(node(1, [node(2, [leaf(4)]), leaf(3)]))]
+    std::test::value("ts-hash-pinned", [642836735067814376, 1750255903726798086], b_ts_hash_pinned)
+
+    # a tree application is Equatable and Hashable when its other fields are: MutableMap keys, set members
+    fn b_ts_totality_witnesses() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[Node, str]()
+            m.set(node(1, [leaf(2)]), "a")
+            m.set(node(1, [leaf(3)]), "b")
+            m.set(node(1, [leaf(2)]), "c")
+            got = m.at(node(1, [leaf(2)])):
+                on std::mutable_map::KeyNotFound:
+                    "none"
+            s = std::immutable_set::from_list([leaf(1), leaf(1), node(1, [leaf(1)])])
+            k = Labeled {label: [1, 2], kids: [], weight: 0}
+            [std::mutable_map::length(m) == 2, got == "c", s == std::immutable_set::from_list([node(1, [leaf(1)]), leaf(1)]), std::immutable_set::contains(s, leaf(1)), hash(k) == hash(Labeled {label: [1, 2], kids: [], weight: 0})]
+    std::test::value("ts-totality-witnesses", [true, true, true, true, true], b_ts_totality_witnesses)
+
+    # a payload without total hashing makes the application not Hashable
+    fn b_ts_totality_refused() errors std::compiler::CompilerError:
+        static compile:
+            hash(Labeled {label: std::mutable_vector::from_list([1]), kids: [], weight: 0})
+    std::test::rejects("ts-totality-refused", std::compiler::DiagnosticCode::TraitNotSatisfied, b_ts_totality_refused)
+
+    # a payload's own representation-independent identity composes
+    fn b_ts_identity_payload() errors std::compiler::CompilerError:
+        static compile:
+            a = Elem {attrs: attrs(["id", "class"]), children: [Elem {attrs: attrs(["xx", "yyy"]), children: []}]}
+            b = Elem {attrs: attrs(["class", "id"]), children: [Elem {attrs: attrs(["yyy", "xx"]), children: []}]}
+            c = Elem {attrs: attrs(["class", "id"]), children: [Elem {attrs: attrs(["yyy"]), children: []}]}
+            [a == b, hash(a) == hash(b), a == c]
+    std::test::value("ts-identity-payload", [true, true, false], b_ts_identity_payload)
+
+# ---------------------------------------------------------------------------
+# Traversal
+
+fn register_walk_tests():
+    # DepthFirst is preorder, BreadthFirst level by level, siblings in order
+    fn b_ts_walk_orders() errors std::compiler::CompilerError:
+        static compile:
+            t = node(1, [node(2, [leaf(4), leaf(5)]), leaf(3)])
+            [values(t, std::tree::Order::DepthFirst), values(t, std::tree::Order::BreadthFirst), values(leaf(9), std::tree::Order::DepthFirst), values(leaf(9), std::tree::Order::BreadthFirst)]
+    std::test::value("ts-walk-orders", [[1, 2, 4, 5, 3], [1, 2, 3, 4, 5], [9], [9]], b_ts_walk_orders)
+
+    # breadth-first visits depths in non-decreasing order on an irregular tree
+    fn b_ts_walk_levels() errors std::compiler::CompilerError:
+        static compile:
+            t = node(0, [node(10, [node(20, [leaf(30)]), leaf(21)]), leaf(11), node(12, [leaf(22), node(23, [leaf(31), leaf(32)])])])
+            [values(t, std::tree::Order::BreadthFirst), values(t, std::tree::Order::DepthFirst)]
+    std::test::value("ts-walk-levels", [[0, 10, 11, 12, 20, 21, 22, 23, 30, 31, 32], [0, 10, 20, 30, 21, 11, 12, 22, 23, 31, 32]], b_ts_walk_levels)
+
+    # a walk hands over the subtree values themselves, of the tree's own type
+    fn b_ts_walk_yields_subtrees() errors std::compiler::CompilerError:
+        static compile:
+            t = node(1, [node(2, [leaf(4)]), leaf(3)])
+            coroutine {step, first} = std::tree::walk(t, std::tree::Order::DepthFirst)
+            second = step()
+            third = step()
+            [first == t, second == node(2, [leaf(4)]), third.value == 4, std::list::length(second.children) == 1, std::coroutine::done?(step)]
+    std::test::value("ts-walk-yields-subtrees", [true, true, true, true, false], b_ts_walk_yields_subtrees)
+
+    # a parameterized tree is walked in both orders
+    fn b_ts_walk_parameterized() errors std::compiler::CompilerError:
+        static compile:
+            t = lb("r", [lb("a", [lb("c", [])]), lb("b", [])])
+            [labels(t, std::tree::Order::DepthFirst), labels(t, std::tree::Order::BreadthFirst)]
+    std::test::value("ts-walk-parameterized", [["r", "a", "c", "b"], ["r", "a", "b", "c"]], b_ts_walk_parameterized)
+
+    # walking a value that is no tree struct's is the call's TYPE error
+    fn b_ts_walk_not_a_tree() errors std::compiler::CompilerError:
+        static compile:
+            fn walk_int() -> int:
+                coroutine {step, first} = std::tree::walk(5, std::tree::Order::DepthFirst)
+                1
+            walk_int()
+    std::test::rejects("ts-walk-not-a-tree", std::compiler::DiagnosticCode::Type, b_ts_walk_not_a_tree)
+
+    # a coroutine constructed from an untyped function is typed by the call's semantic instance
+    fn b_ts_generic_construction_typed() errors std::compiler::CompilerError:
+        static compile:
+            r = node(1, [leaf(2), leaf(3)])
+            coroutine {step, first} = gen(r)
+            b = step()
+            c = step()
+            [first.value, b.value, c.value]
+    std::test::value("ts-generic-construction-typed", [2, 3, 1], b_ts_generic_construction_typed)
+
+    # the motivating shape: a FileTree walked breadth-first and depth-first
+    fn b_ts_filesystem_specimen() errors std::compiler::CompilerError:
+        static compile:
+            src = FileTree {path: "/src", children: [file("/src/main.bot"), FileTree {path: "/src/lib", children: [file("/src/lib/a.bot")]}]}
+            root = FileTree {path: "/", children: [src, file("/README.md")]}
+            [paths(root, std::tree::Order::BreadthFirst), paths(root, std::tree::Order::DepthFirst)]
+    std::test::value("ts-filesystem-specimen", [["/", "/src", "/README.md", "/src/main.bot", "/src/lib", "/src/lib/a.bot"], ["/", "/src", "/src/main.bot", "/src/lib", "/src/lib/a.bot", "/README.md"]], b_ts_filesystem_specimen)
+
+# ---------------------------------------------------------------------------
+# Deep and wide trees
+
+fn register_scale_tests():
+    # a chain 20,000 nodes deep is built, compared, hashed and walked with no host recursion
+    fn b_ts_deep_chain() errors std::compiler::CompilerError:
+        static compile:
+            a = chain(20000, 1)
+            b = chain(20000, 1)
+            c = chain(20000, 2)
+            [a == b, a == c, hash(a) == hash(b), hash(a) == hash(c), digest(a, std::tree::Order::DepthFirst) == [20001, 2244320372828816551], digest(a, std::tree::Order::BreadthFirst) == [20001, 2244320372828816551]]
+    std::test::value("ts-deep-chain", [true, false, true, false, true, true], b_ts_deep_chain)
+
+    # a 2,000-child root is walked and compared on every backend
+    fn b_ts_wide_interp() errors std::compiler::CompilerError:
+        static compile:
+            kids = loop i from 0 to 2000:
+                node(i, [leaf(i)])
+            a = node(7, kids)
+            [a == node(7, kids), digest(a, std::tree::Order::DepthFirst), digest(a, std::tree::Order::BreadthFirst)]
+    std::test::value("ts-wide-interp", [true, [4001, 1063359645131734756], [4001, 491805807458027375]], b_ts_wide_interp)
+
+fn register_tree_struct_tests():
+    register_value_tests()
+    register_hash_tests()
+    register_walk_tests()
+    register_scale_tests()
+
+with context std::test::suite()
+register_tree_struct_tests()
+std::test::report()

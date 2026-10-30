@@ -976,6 +976,14 @@ proc core::native::ValidShape {shape count} {
         # (context#unreachable, core/contexts.tcl).
         return 1
     }
+    if {[lindex $shape 0] eq {tree-children}} {
+        # {tree-children I}: the result is the child List of argument I, a
+        # tree struct's value -- its declaration's child field type for its
+        # application (std::tree::children, core/tree.tcl;
+        # TREE-STRUCT-MILESTONE-1.md), resolved by hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
+    }
     if {[lindex $shape 0] eq {layout-struct}} {
         # {layout-struct I}: the result is a LayoutStruct[L] whose layout L
         # is described by argument I's descriptor constant (std::binary::parse,

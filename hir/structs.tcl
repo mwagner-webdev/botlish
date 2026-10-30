@@ -385,6 +385,14 @@ proc hir::structs::ApplicationProblem {type} {
                     $slot [hir::types::presented $type] $trait $why]
             }
         }
+        if {[treeField $id] ne "" && [lsearch -exact [lmap arg [lindex $type 2] {hir::types::IsAffine $arg}] 1] >= 0} {
+            # A tree struct applied to an affine type (TREE-STRUCT-
+            # MILESTONE-1.md): its values would be affine trees, nested to
+            # any depth -- the recursive affine type a declaration may not
+            # be either (apply's AFFINE-CONTAINER-UNSUPPORTED).
+            return [format {%s applies tree struct "%s" to an affine type: a tree of affine values nests to any depth, and an affine value is released by a static, finite walk of its type (a tree struct holds unrestricted values)} \
+                [hir::types::presented $type] [display $id]]
+        }
     }
     foreach t [hir::imprint::Parts $type] {
         set problem [ApplicationProblem $t]
@@ -393,6 +401,16 @@ proc hir::structs::ApplicationProblem {type} {
         }
     }
     return ""
+}
+
+# The diagnostic kind of ApplicationProblem's answer for TYPE: AFFINE-
+# CONTAINER-UNSUPPORTED for an affine application of a tree struct (the
+# declaration rule's kind), TRAIT-NOT-SATISFIED for every other problem.
+proc hir::structs::ProblemKind {problem} {
+    if {[string match {* applies tree struct * to an affine type: *} $problem]} {
+        return AFFINE-CONTAINER-UNSUPPORTED
+    }
+    return TRAIT-NOT-SATISFIED
 }
 
 # Diagnoses the invalid applications HIR's code writes or makes
@@ -417,14 +435,14 @@ proc hir::structs::verifyApplications {hirVar} {
                     if {$t eq ""} continue
                     set problem [ApplicationProblem $t]
                     if {$problem ne ""} {
-                        hir::Diagnose hir TRAIT-NOT-SATISFIED "the type of parameter \"$name\" is invalid: $problem" $e
+                        hir::Diagnose hir [ProblemKind $problem] "the type of parameter \"$name\" is invalid: $problem" $e
                     }
                 }
                 set result [dict getdef $node declaredResult {}]
                 if {$result ne ""} {
                     set problem [ApplicationProblem $result]
                     if {$problem ne ""} {
-                        hir::Diagnose hir TRAIT-NOT-SATISFIED "the declared result type is invalid: $problem" $e
+                        hir::Diagnose hir [ProblemKind $problem] "the declared result type is invalid: $problem" $e
                     }
                 }
             }
@@ -433,7 +451,7 @@ proc hir::structs::verifyApplications {hirVar} {
                 # construction is poison.)
                 if {![dict exists $node structApplicationProblem]} continue
                 if {[dict exists $node reachable] && ![dict get $node reachable]} continue
-                hir::Diagnose hir TRAIT-NOT-SATISFIED \
+                hir::Diagnose hir [ProblemKind [dict get $node structApplicationProblem]] \
                     "the construction is invalid: [dict get $node structApplicationProblem]" $e
             }
             call {
@@ -477,9 +495,9 @@ proc hir::structs::VerifyDeclarations {} {
                 append message " (a type slot satisfies exactly the traits its declaration states: struct [dict get $entry name]\[... satisfies TRAIT\])"
             }
             if {$span eq ""} {
-                core::semanticError TRAIT-NOT-SATISFIED $message
+                core::semanticError [ProblemKind $problem] $message
             }
-            Fail $span $message TRAIT-NOT-SATISFIED
+            Fail $span $message [ProblemKind $problem]
         }
     }
     foreach {error fields spans} [hir::errordecls::PayloadTypes] {
@@ -763,6 +781,19 @@ proc hir::structs::apply {decls} {
         }
         lappend entries $entry
     }
+    # Tree structs (TREE-STRUCT-MILESTONE-1.md), once every field type of
+    # the batch is resolved (a field reaches other declarations' fields):
+    # each one's recursive field, checked against the one shape there is.
+    set index 0
+    foreach decl $decls {
+        if {[dict exists $decl tree] && [dict get $decl tree]} {
+            set id [identity [dict get $decl name] [dict get $decl namespace]]
+            set field [ValidateTree $decl $id [dict get $registry $id types]]
+            dict set registry $id tree $field
+            lset entries $index [dict replace [lindex $entries $index] tree $field]
+        }
+        incr index
+    }
     # (Affinity read while field types were still being resolved is stale.)
     set affinity [dict create]
     foreach decl $decls {
@@ -813,8 +844,248 @@ proc hir::structs::applyEntries {entries} {
         if {[dict exists $entry identity]} {
             dict set registry [dict get $entry id] identity [dict get $entry identity]
         }
+        if {[dict exists $entry tree]} {
+            dict set registry [dict get $entry id] tree [dict get $entry tree]
+        }
     }
     set affinity [dict create]
+}
+
+# ---------------------------------------------------------------------------
+# Tree structs (TREE-STRUCT-MILESTONE-1.md)
+#
+# `tree struct NAME[SLOTS]:` declares a finite recursive value: an ordinary
+# immutable struct whose one recursive field -- its *child field* -- has
+# exactly the type List[NAME[SLOTS]], the declaration applied to its own
+# slots in order (Self). Its values are the finite rooted ordered trees the
+# fields describe, built from child values that already exist: there is no
+# reference, node identity, parent link or cycle, and a subtree is a value.
+# The declaration records which field is the child field (the registry's and
+# the sourceTypes entry's `tree`), so nothing later finds tree-ness by
+# looking for a recursive field: totality skips exactly that edge
+# (hir::types::Totality), both runtimes compare, hash and print a tree
+# value's topology iteratively by it (core::value's tree test, NIR's shape
+# `tree=`), and std::tree::walk reads it (`std::tree::children`).
+#
+# The shape is deliberately strict. Self occurs exactly once in the
+# declaration, as that field's List element. Every other field is an
+# ordinary non-recursive field: it never reaches the declaration again,
+# directly (`child: Node`), through a container (`kids: MutableVector[Node]`,
+# an ImmutableMap's value, an Optional-like struct), nested
+# (`List[List[Node]]`), through another application of the declaration
+# (`List[Node[int]]` in `Node[T]`) or through another declaration (mutual
+# recursion). A general recursive type -- a field of Self, a second
+# recursive edge, a map of Self -- is an ordinary `struct`'s business
+# (STRUCTS.md), never a tree's: what a tree struct promises (depth-unbounded
+# equality, hashing and traversal over one ordered child edge) holds for
+# this shape only.
+
+# The child field of tree struct ID, or "" when ID is no tree struct.
+proc hir::structs::treeField {id} {
+    variable registry
+    if {$id eq "" || ![dict exists $registry $id tree]} {
+        return ""
+    }
+    return [dict get $registry $id tree]
+}
+
+# What the runtimes read (core::value's tree test, NIR's shape `tree=`):
+# the slot position of tree struct ID's child field, or "" for any other
+# struct.
+proc hir::structs::RuntimeTree {id} {
+    variable registry
+    set field [treeField $id]
+    if {$field eq ""} {
+        return ""
+    }
+    return [lsearch -exact [dict get $registry $id names] $field]
+}
+
+# The type Self of struct ID: {nstruct ID} or, for a parameterized struct,
+# its application to its own slots in declared order.
+proc hir::structs::SelfType {id} {
+    variable registry
+    set slots [dict get $registry $id slots]
+    if {$slots eq {}} {
+        return [list nstruct $id]
+    }
+    set constraints [dict get $registry $id constraints]
+    return [list nstruct $id [lmap slot $slots {
+        hir::types::MakeImprint $slot [dict get $constraints $slot]
+    }]]
+}
+
+# The child field of tree struct declaration DECL (apply's; ID its identity,
+# TYPES its resolved field types {FIELD TYPE ...}), checked: exactly one
+# field of type List[Self], and no other occurrence of the declaration in
+# any field type, the child field's element included (header).
+proc hir::structs::ValidateTree {decl id types} {
+    set name [dict get $decl name]
+    set rule "a tree struct has exactly one recursive field, of type List\[[ShowSelf $id]\]"
+    if {[dict exists $decl identity]} {
+        Fail [dict get $decl identity span] "tree struct \"$name\" cannot declare an identity: a tree's equality and hashing are its structure -- its fields and its ordered children, recursively -- and an identity clause would give it a second meaning" TREE-STRUCT-COMBINATION
+    }
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail [dict get $decl treeSpan] "context struct \"$name\" cannot be a tree struct: a context is installed and required by its type, never a recursive value" TREE-STRUCT-COMBINATION
+    }
+    if {[dict exists $decl opaque] && [dict get $decl opaque]} {
+        # std::tree::walk takes any tree apart into its subtrees, which for
+        # an opaque struct only its owner may do (OPAQUE-STRUCTS.md).
+        Fail [dict get $decl treeSpan] "tree struct \"$name\" cannot be opaque: std::tree::walk takes any tree apart into its subtrees, and taking an opaque struct's value apart is its owning module's alone (wrap the tree in an opaque struct of its own to hide it)" TREE-STRUCT-COMBINATION
+    }
+    set self [SelfType $id]
+    set child ""
+    foreach field [dict get $decl fields] {
+        set fieldName [dict get $field name]
+        set type [dict get $types $fieldName]
+        set span [dict get $field typeSpan]
+        if {[hir::types::IsList $type] && [llength $type] == 2 && [lindex $type 1] eq $self} {
+            if {$child ne ""} {
+                Fail $span "tree struct \"$name\" has a second recursive field \"$fieldName\" (the first is \"$child\"): $rule" TREE-STRUCT-SHAPE
+            }
+            set child $fieldName
+            continue
+        }
+        set how [TreeOccurrence $type $id {}]
+        if {$how ne ""} {
+            Fail $span "field \"$fieldName\" of tree struct \"$name\" ([hir::types::show $type]) [TreeOccurrenceText $how $name $self]: $rule, and every other field is an ordinary value that does not contain \"$name\"" TREE-STRUCT-SHAPE
+        }
+    }
+    if {$child eq ""} {
+        Fail [dict get $decl nameSpan] "tree struct \"$name\" has no recursive field: $rule (the field that holds its ordered children)" TREE-STRUCT-SHAPE
+    }
+    return $child
+}
+
+# How declaration ID occurs in TYPE (a field type of a tree struct other
+# than its child field), the first occurrence found: "" for none, else one
+# of {self} (TYPE is the declaration itself), {list INNER} (a List whose
+# element holds it some other way: INNER, recursively), {application}
+# (another application of the declaration than Self), {container KIND}
+# (a MutableVector, MutableArray, ImmutableSet, function or coroutine type
+# holds it), {through OTHER} (another declaration's fields reach it). SEEN
+# bounds the walk through declarations.
+proc hir::structs::TreeOccurrence {type id seen} {
+    set type [hir::types::Unrefined $type]
+    if {[hir::types::IsNamedStruct $type]} {
+        set other [lindex $type 1]
+        if {$other eq $id} {
+            if {[llength $type] > 2 && $type ne [SelfType $id]} {
+                return {application}
+            }
+            return {self}
+        }
+        foreach arg [lrange $type 2 end] {
+            foreach t $arg {
+                if {[TreeOccurrence $t $id $seen] ne ""} {
+                    # An argument of another type constructor (an
+                    # ImmutableMap's value, a Pair's component): a
+                    # container this shape does not have.
+                    return [list container [display $other]]
+                }
+            }
+        }
+        if {$other in $seen || ![declared $other]} {
+            return ""
+        }
+        if {[catch {AppliedFieldTypes $type} fields]} {
+            set fields [fieldTypes $other]
+        }
+        foreach {name t} $fields {
+            if {$t eq {}} continue
+            if {[TreeOccurrence $t $id [concat $seen [list $other]]] ne ""} {
+                return [list through [display $other]]
+            }
+        }
+        return ""
+    }
+    if {[hir::types::IsList $type]} {
+        if {[llength $type] == 2} {
+            set inner [TreeOccurrence [lindex $type 1] $id $seen]
+            if {$inner eq ""} {
+                return ""
+            }
+            return [list list $inner]
+        }
+        foreach t [lindex $type 2] {
+            set inner [TreeOccurrence $t $id $seen]
+            if {$inner ne ""} {
+                return [list list $inner]
+            }
+        }
+        return ""
+    }
+    if {[hir::types::IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            set inner [TreeOccurrence $t $id $seen]
+            if {$inner ne ""} {
+                return $inner
+            }
+        }
+        return ""
+    }
+    foreach {test label} {IsMutVec MutableVector IsMutArray MutableArray IsSet ImmutableSet} {
+        if {[hir::types::$test $type]} {
+            if {[TreeOccurrence [lindex $type 1] $id $seen] ne ""} {
+                return [list container $label]
+            }
+            return ""
+        }
+    }
+    if {[hir::types::IsFn $type] || [hir::types::IsCoroutine $type]} {
+        set contract [lindex $type 1]
+        foreach t [concat [dict getdef $contract args {}] [list [dict getdef $contract return any]]] {
+            if {[TreeOccurrence $t $id $seen] ne ""} {
+                return [list container [expr {[hir::types::IsFn $type] ? "function type" : "coroutine type"}]]
+            }
+        }
+        return ""
+    }
+    return ""
+}
+
+# The words of a ValidateTree diagnostic for occurrence HOW (TreeOccurrence)
+# of the tree struct NAME, whose Self type is SELF; WHERE says that the
+# occurrence is inside a List.
+proc hir::structs::TreeOccurrenceText {how name self {where ""}} {
+    switch -- [lindex $how 0] {
+        self {
+            return "holds \"$name\" itself$where, a recursive field that is not the List of its children"
+        }
+        application {
+            return "holds another application of \"$name\" than [hir::types::show $self]$where, but the children of a tree are values of its own type"
+        }
+        list {
+            # Through the Lists to what holds the declaration: Self itself
+            # in a List of Lists is nesting; anything else is said of what
+            # it is.
+            while {[lindex $how 0] eq "list"} {
+                set how [lindex $how 1]
+            }
+            if {[lindex $how 0] eq "self"} {
+                return "nests \"$name\" deeper than one List"
+            }
+            return [TreeOccurrenceText $how $name $self " (inside a List)"]
+        }
+        container {
+            return "holds \"$name\" inside a [lindex $how 1]$where, a recursive edge a tree struct does not have"
+        }
+        through {
+            return "reaches \"$name\" again through \"[lindex $how 1]\"$where, which is mutual recursion between declarations, not a tree"
+        }
+    }
+    return "holds \"$name\""
+}
+
+# How Self of struct ID is written in a diagnostic: NAME or NAME[SLOT, ...].
+proc hir::structs::ShowSelf {id} {
+    variable registry
+    set name [dict get $registry $id name]
+    set slots [dict get $registry $id slots]
+    if {$slots eq {}} {
+        return $name
+    }
+    return "$name\[[join $slots {, }]\]"
 }
 
 # ---------------------------------------------------------------------------
@@ -1352,6 +1623,14 @@ proc hir::structs::verifyExprs {hirVar exprs} {
             }
             continue
         }
+        if {[dict get $node kind] eq "call"} {
+            set problem [TreeChildrenProblem $hir $e]
+            if {$problem ne ""} {
+                lassign $problem kind message
+                hir::Diagnose hir $kind $message $e
+            }
+            continue
+        }
         if {[dict get $node kind] ne "project"} continue
         set problem [ProjectionProblem $hir $e]
         if {$problem ne ""} {
@@ -1359,6 +1638,45 @@ proc hir::structs::verifyExprs {hirVar exprs} {
             hir::DiagnoseAt hir $kind $message $e [dict get $node nameOrigin]
         }
     }
+}
+
+# "": E is no std::tree::children call (TREE-STRUCT-MILESTONE-1.md), or its
+# argument is proven a tree struct's value in HIR's current types -- the
+# children are its declaration's child field -- else {KIND MESSAGE}:
+# UNPROVEN-FIELD when the argument's type is not known (std::tree::walk's
+# generic body: the one problem a semantic instance cures, a projection's
+# rule), TREE-OPERAND when it is statically some other type. A call is
+# recognized by its native's registered result shape, never by its name.
+proc hir::structs::TreeChildrenProblem {hir e} {
+    set node [dict get $hir exprs $e]
+    if {[dict get $node kind] ne "call" || ![dict exists $node target]} {
+        return ""
+    }
+    lassign [dict get $node target] targetKind target
+    if {$targetKind ne "native" || [dict exists $node reachable] && ![dict get $node reachable]} {
+        return ""
+    }
+    set name [dict get [hir::symbol $hir $target] name]
+    if {![core::native::exists $name]
+            || [lindex [dict get [core::native::metadata $name] resultShape] 0] ne "tree-children"} {
+        return ""
+    }
+    set arg [lindex [dict get $node args] 0]
+    if {$arg eq "" || [dict get $hir exprs $arg type] eq ""} {
+        return ""
+    }
+    set type [hir::types::Unrefined [hir::typeOf $hir $arg]]
+    if {$type eq "never"} {
+        # (No value, or poison: hir/types.tcl.)
+        return ""
+    }
+    if {[hir::types::IsNamedStruct $type] && [treeField [lindex $type 1]] ne ""} {
+        return ""
+    }
+    if {[hir::types::kindOf $type] eq "" || $type eq "struct"} {
+        return [list UNPROVEN-FIELD "cannot take the children of a tree: the value's type is not known here (its type is [hir::types::show $type]), and a tree's child field is found statically, from its tree struct type, never at run time (std::tree::walk walks a root whose tree struct type its call states)"]
+    }
+    return [list TREE-OPERAND "a tree's children are taken of a value of a tree struct, but this value's type is [hir::types::show $type] (a tree struct is declared \"tree struct NAME:\" with one field of type List\[NAME\])"]
 }
 
 # The generic verification of the whole program (hir::CheckOnce): every
@@ -1375,6 +1693,20 @@ proc hir::structs::verify {hirVar} {
             if {$problem ne ""} {
                 hir::DiagnoseAt hir AMBIGUOUS-METHOD-CALL $problem $e [dict get $node method nameOrigin]
             }
+            continue
+        }
+        if {[dict get $node kind] eq "call"} {
+            set problem [TreeChildrenProblem $hir $e]
+            if {$problem eq ""} continue
+            lassign $problem kind message
+            if {$kind eq "UNPROVEN-FIELD"} {
+                if {$live eq ""} {
+                    set live [GenericLive $hir]
+                }
+                set owner [OwnerBlock $hir $e]
+                if {$owner ne "program" && $owner ni $live} continue
+            }
+            hir::Diagnose hir $kind $message $e
             continue
         }
         if {[dict get $node kind] ne "project"} continue
@@ -1487,7 +1819,13 @@ proc hir::structs::OwnerBlock {hir e} {
 # The blocks whose generic analysis can actually run (see the header): a
 # list of block ExprIds (`program` is always live).
 proc hir::structs::GenericLive {hir} {
-    # Every exact call, with its callee block and the block it is in.
+    # Every exact call, with its callee block and the block it is in -- a
+    # coroutine construction's thunk being no block of its own: it takes no
+    # argument and runs its one call exactly when the code that constructs
+    # the coroutine does (hir/coroutines.tcl), so that call is the
+    # constructing block's (TREE-STRUCT-MILESTONE-1.md: before, a function
+    # reached only as a coroutine's root was never generically live).
+    set thunks [dict getdef $hir coroutines thunks {}]
     set calls {}
     set callees [dict create]
     set escapes [dict create]
@@ -1497,7 +1835,11 @@ proc hir::structs::GenericLive {hir} {
             dict set callees [dict get $node callee] 1
             lassign [dict get $node target] kind target
             if {$kind eq "block"} {
-                lappend calls [list $e $target [OwnerBlock $hir $e]]
+                set owner [OwnerBlock $hir $e]
+                while {[dict exists $thunks $owner]} {
+                    set owner [OwnerBlock $hir $owner]
+                }
+                lappend calls [list $e $target $owner]
             }
         }
     }
@@ -1565,3 +1907,6 @@ core::value::setOpaqueStructTest hir::structs::isOpaque
 # Likewise, equality and both hashes read a struct's declared identity from
 # this registry (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
 core::value::setIdentityTest hir::structs::RuntimeIdentity
+# And which structs are tree structs, and their child slot, for the
+# depth-unbounded walks of a tree value (TREE-STRUCT-MILESTONE-1.md).
+core::value::setTreeTest hir::structs::RuntimeTree

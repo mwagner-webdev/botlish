@@ -531,7 +531,7 @@ proc hir::semantic::Create {block entry key} {
         set env [dict get $state envs $block]
     }
     dict set state instances $id [dict create id $id block $block args $entry key $key \
-        env $env status analyzing result never passes 0 dirty 0 assumes 0 snapshot {}]
+        env $env status analyzing result never outward never passes 0 dirty 0 assumes 0 snapshot {}]
     dict set state keys $key $id
     Bump byBlock $block
     dict lappend state instsOf $block $id
@@ -563,8 +563,10 @@ proc hir::semantic::Analyze {id} {
             incr passes
             dict set state instances $id dirty 0
             dict set state instances $id assumes 0
-            lassign [Walk $id] walked scratch
+            lassign [Walk $id] walked scratch outward
             dict incr state walks
+            dict set state instances $id outward \
+                [hir::types::lub [dict get $state instances $id outward] $outward]
             set old [dict get $state instances $id result]
             set new [hir::types::lub $old $walked]
             if {$new ne $old && $passes >= $passLimit} {
@@ -661,7 +663,50 @@ proc hir::semantic::Walk {id} {
         set result [hir::traits::ViewResult $declared $result]
     }
     dict set scratch exprs $block resultType [hir::types::intern scratch $result]
-    return [list $result $scratch]
+    return [list $result $scratch [Outward $scratch $block $result]]
+}
+
+# The outward type of a coroutine rooted at BLOCK, as this instance walk
+# typed it (SCRATCH, its result RESULT): the join of the result and of every
+# value one of BLOCK's own yields sends (hir::coroutines::Outward's join,
+# with the instance's types). A construction whose root call has an
+# instance is typed with it (ConstructionOutward).
+proc hir::semantic::Outward {scratch block result} {
+    if {![dict exists $scratch coroutines direct $block]} {
+        return $result
+    }
+    foreach y [dict get $scratch coroutines direct $block] {
+        set value [lindex [dict get $scratch exprs $y args] 0]
+        if {$value eq "" || [dict get $scratch exprs $value type] eq ""} continue
+        set result [hir::types::lub $result [hir::typeOf $scratch $value]]
+    }
+    return $result
+}
+
+# The outward type the instance of the exact call E (typed in typing context
+# CTX) gives a coroutine whose root that call is, or "" when the call has no
+# instance (or no run is in progress): what its block's own yields send and
+# it returns, under the call's argument types. A semantic instance types a
+# construction the way it types an ordinary call's result
+# (TREE-STRUCT-MILESTONE-1.md, "Typed traversal").
+# Outside a run (a codegen instance's typing, hir/specialize.tcl), the
+# program's own call E answers from the instance the run left in HIR, as
+# GenericResult does for an ordinary call.
+proc hir::semantic::ConstructionOutward {hir ctx e} {
+    variable state
+    if {$state eq ""} {
+        if {![dict exists $hir semantic calls [list generic $e]]} {
+            return ""
+        }
+        set id [dict get $hir semantic calls [list generic $e]]
+        return [dict getdef [dict get $hir semantic instances $id] outward ""]
+    }
+    set callKey [list [dict getdef $ctx inst "generic"] $e]
+    if {![dict exists $state calls $callKey]} {
+        return ""
+    }
+    set id [dict get $state calls $callKey]
+    return [dict get $state instances $id outward]
 }
 
 # ---------------------------------------------------------------------------
