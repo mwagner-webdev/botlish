@@ -426,6 +426,31 @@ test workload-icy-tower-oracle {the executable's headless summaries equal the in
     list $status [lindex [split $output \n] end]
 } -result {0 {0 differences}}
 
+testConstraint cc [expr {[auto_execok cc] ne ""}]
+testConstraint clangxx [expr {[auto_execok clang++] ne ""}]
+
+# The pinned SDL3 source (tools/c-bindgen.tcl fetch sdl3): there whenever
+# the package-owned SDL3 is built.
+proc icySdlSource {} {
+    set fetched [exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] fetch sdl3]
+    return [lindex [split [string trim $fetched] \n] end]
+}
+
+test workload-icy-tower-trace-reference {the SDL call trace of the Linux executable's deterministic dummy-driver run (--autopilot --fixed-step --frames 600 --seed 7), normalized and cut into frames, is the committed reference the macOS executable's traces are compared with (audit/icy-tower/trace-reference.txt; audit/icy-tower/tools/trace-reference.sh EXECUTABLE write after a change to what the game draws or calls)} -constraints {icyTowerExecutable python3 cc} -body {
+    withEnv [dict create SDL3_DIR [cffi::sdl3Dir]] {
+        set status [catch {exec sh [file join $::projectRoot audit icy-tower tools trace-reference.sh] $::executable check} output]
+    }
+    list $status [lindex [split $output \n] end]
+} -result {0 {identical: every call, argument and result of every frame, and the teardown}}
+
+test workload-icy-tower-abi-check {every SDL function, constant and layout the game uses has, in the committed generated binding of this target, the C types SDL3's own headers give it (audit/icy-tower/tools/abi-check.py: the parameter and result types by template deduction from the prototypes, the values, the sizes and offsets; the tool the macOS build runs against its generated binding)} -constraints {icyTowerExecutable python3 clangxx} -body {
+    set work [file join [tcltest::temporaryDirectory] icy-tower-abi]
+    set status [catch {exec python3 -I [file join $::projectRoot audit icy-tower tools abi-check.py] \
+        [file join $::projectRoot generated c sdl3 [core::cabi::hostTarget]] [file join [icySdlSource] include] $work} output]
+    file delete -force $work
+    list $status [regexp {(\d+) checks, 0 failed$} $output -> n] [expr {$n >= 100}]
+} -result {0 1 1}
+
 file delete -force [file dirname $executable]
 
 # ---------------------------------------------------------------------------
@@ -490,5 +515,102 @@ test workload-icy-tower-windows-usage {the Windows executable's usage error is s
 } -result {2 {icy-tower: unknown option: --fly} 0 {usage: icy-tower [--seed N] [--frames N] [--headless] [--autopilot] [--fixed-step] [--help]}}
 
 file delete -force $windowsGame
+
+# ---------------------------------------------------------------------------
+# The macOS executable (ICY-TOWER-MACOS-MILESTONE-1.md)
+
+# An Apple Silicon Mac with Apple's developer tools, a built native backend,
+# executables, and CMake and git for the static SDL3 and the binding
+# build-macos.sh makes (or reuses: ICY_TOWER_BINDING_FROM). The compiler is
+# ICY_TOWER_BOTLISH (Botlish.app) when set, else this checkout's.
+testConstraint icyTowerMacosExecutable [expr {$::tcl_platform(os) eq "Darwin" &&
+    $::tcl_platform(machine) eq "arm64" && [testConstraint nativeBuilt] && [testConstraint executableAot] &&
+    [auto_execok clang] ne "" && [auto_execok cmake] ne "" && [auto_execok git] ne ""}]
+
+set macosGame [file join [tcltest::temporaryDirectory] icy-tower-macos]
+
+# Runs the macOS executable with ARGS, on SDL's dummy video driver: it needs
+# no library path (SDL3 is linked into it).
+proc icyRunMacos {env args} {
+    icyExec [file join $::macosGame icy-tower] $env {*}$args
+}
+
+# The dynamic libraries of the Mach-O PATH (otool -L), and its LC_MAIN stack
+# size.
+proc icyMachO {path} {
+    set libs [lmap line [lrange [split [exec otool -L $path] \n] 1 end] {lindex [string trim $line] 0}]
+    regexp {cmd LC_MAIN.*?stacksize (\d+)} [exec otool -l $path] -> stack
+    list $libs $stack
+}
+
+test workload-icy-tower-macos-builds {build-macos.sh stages the game with the macos-aarch64 SDL3 binding and the pinned static SDL3 (macos_link.bot checked against SDL3's sdl3.pc), compiles main-macos.bot under -warnings error with -native-startup main-thread and links it with the link plan: a Mach-O arm64 executable with LC_MAIN's 512 MiB stack, SDL3 inside it, every dynamic library the system's (/usr/lib, /System/Library) and none SDL3's} -constraints icyTowerMacosExecutable -body {
+    file delete -force $macosGame
+    exec bash [file join $gameDir build-macos.sh] $macosGame 2>@1
+    set exe [file join $macosGame icy-tower]
+    lassign [icyMachO $exe] libs stack
+    set foreign [lsearch -all -inline -not -regexp $libs {^(/usr/lib/|/System/Library/)}]
+    list [string match "*Mach-O 64-bit executable arm64*" [exec file $exe]] $stack \
+        [lsearch -all -inline -nocase $libs *sdl*] $foreign [expr {"/System/Library/Frameworks/Metal.framework/Versions/A/Metal" in $libs}]
+} -result {1 536870912 {} {} 1}
+
+test workload-icy-tower-macos-headless {the macOS executable's --headless run prints seed 7's summary, the oracle's, and exits 0} -constraints icyTowerMacosExecutable -body {
+    icyRunMacos {} --headless --frames 600 --seed 7
+} -result [list 0 "\"$seed7\"" {}]
+
+test workload-icy-tower-macos-dummy-driver {the real SDL loop on macOS, on SDL's dummy video driver, on the process's main thread -- SDL_Init, a window, a renderer, events, the keyboard state, every frame drawn and presented, everything released -- plays the same 600 frames as the headless run} -constraints icyTowerMacosExecutable -body {
+    icyRunMacos {} --autopilot --fixed-step --frames 600 --seed 7
+} -result [list 0 "\"$seed7\"" {}]
+
+test workload-icy-tower-macos-gc-stress {the macOS dummy-driver run under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation, the main thread's stack walked): 120 frames, the same state as without} -constraints icyTowerMacosExecutable -body {
+    set plain [icyRunMacos {} --autopilot --fixed-step --frames 120 --seed 11]
+    set stressed [icyRunMacos {BOTLISH_NATIVE_GC_STRESS 1} --autopilot --fixed-step --frames 120 --seed 11]
+    list [lindex $plain 0] [expr {$plain eq $stressed}]
+} -result {0 1}
+
+test workload-icy-tower-macos-restarts {a long autopilot run on the dummy driver loses and restarts games and ends cleanly} -constraints icyTowerMacosExecutable -body {
+    lassign [icyRunMacos {} --autopilot --fixed-step --frames 2400 --seed 7] code out err
+    list $code [regexp {round=([2-9]|\d\d)} $out] $err
+} -result {0 1 {}}
+
+test workload-icy-tower-macos-sdl-failure {when SDL cannot start (an unknown video driver), the macOS executable releases what it made, reports SDL's own error on standard error (std::darwin::io) and exits 1} -constraints icyTowerMacosExecutable -body {
+    icyRunMacos {SDL_VIDEO_DRIVER nosuch} --frames 10
+} -result {1 {} {Icy Tower: SDL_Init failed: nosuch not available}}
+
+test workload-icy-tower-macos-renderer-failure {when the renderer cannot be made, the window and SDL are released again, SDL's error is reported and the run exits 1} -constraints icyTowerMacosExecutable -body {
+    icyRunMacos {SDL_RENDER_DRIVER nosuch} --frames 10
+} -result {1 {} {Icy Tower: SDL_CreateRenderer failed: nosuch not available}}
+
+test workload-icy-tower-macos-usage {the macOS executable's usage error is status 2; --help prints the usage, status 0} -constraints icyTowerMacosExecutable -body {
+    lassign [icyRunMacos {} --fly] code1 out1 err1
+    lassign [icyRunMacos {} --help] code2 out2 err2
+    list $code1 [lindex [split $err1 \n] 0] $code2 [lindex [split $out2 \n] 0]
+} -result {2 {icy-tower: unknown option: --fly} 0 {usage: icy-tower [--seed N] [--frames N] [--headless] [--autopilot] [--fixed-step] [--help]}}
+
+test workload-icy-tower-macos-oracle {the macOS executable's headless summaries equal the independent oracle's for 8 seeds and 1, 60, 600 and 3600 frames} -constraints {icyTowerMacosExecutable python3} -body {
+    set status [catch {exec python3 [file join $::projectRoot audit icy-tower oracle.py] compare [file join $::macosGame icy-tower]} output]
+    list $status [lindex [split $output \n] end]
+} -result {0 {0 differences}}
+
+test workload-icy-tower-macos-failed-build-keeps-old {a build that fails (here the link: an archive without SDL3 in it) leaves the executable of the last good build as it was} -constraints icyTowerMacosExecutable -body {
+    set exe [file join $::macosGame icy-tower]
+    set before [exec shasum -a 256 $exe]
+    set work [file join [tcltest::temporaryDirectory] icy-tower-empty]
+    file mkdir $work
+    exec clang -c -x c /dev/null -o [file join $work empty.o]
+    exec ar rcs [file join $work libempty.a] [file join $work empty.o]
+    withEnv [dict create ICY_TOWER_SDL3_ARCHIVE [file join $work libempty.a]] {
+        set status [catch {exec bash [file join $::gameDir build-macos.sh] $::macosGame 2>@1} output]
+    }
+    file delete -force $work
+    list $status [regexp {Undefined symbols} $output] [regexp {the compilation failed \(OUTDIR is unchanged\)} $output] \
+        [expr {[exec shasum -a 256 $exe] eq $before}]
+} -result {1 1 1 1}
+
+file delete -force $macosGame
+
+test workload-icy-tower-macos-session-selftest {the macOS graphical acceptance's frame checks (audit/icy-tower/tools/macos-session.py selftest) pass on synthetic frames of the oracle's worlds and reject their positive controls: a blank capture, the player missing, platforms not where the oracle puts them, the wrong banner, a frame that did not change, a player that did not move} -constraints python3 -body {
+    set status [catch {exec python3 -I [file join $::projectRoot audit icy-tower tools macos-session.py] selftest} output]
+    list $status [lindex [split $output \n] end]
+} -result {0 {10 selftest checks, 0 failed}}
 
 cleanupTests
