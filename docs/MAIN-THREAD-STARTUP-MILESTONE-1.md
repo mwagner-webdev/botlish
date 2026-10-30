@@ -492,7 +492,11 @@ aot-facts or native-status, which read no census program. Fixed: the tree
 holds what the detectors read (`audit/`, `bench/`, `service/` and `lsp/`,
 as audit/native-stack's does), and the harness now runs every detector on
 the unmutated tree first and judges no mutant unless that baseline passes.
-The native-stack harness's tree was complete (it copies `audit/`):
+On Linux x86-64 the fixed harness's baseline passes and its kills are the
+earlier run's (`-only linux-accepts-main-thread,policy-not-recorded`: 2 of
+2, by the same detectors) **[executed]**; on Linux no main-thread test
+reads a census program (they are macOS's), so the 19 Linux verdicts above
+stand. The native-stack harness's tree was complete (it copies `audit/`):
 `main-thread-unguarded`'s five failures, with every capacity, GC and
 coroutine test passing beside them, are a kill. The re-run on macOS:
 section 31.
