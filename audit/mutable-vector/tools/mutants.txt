@@ -834,6 +834,14 @@ core::native::register std::mutable_vector::clear
         Emit ctx "foreach $item \[core::mutvec::items \$$items\] \{"
 >>>>
 
+@@ equality-folds-vector-compiled `==` of a vector and a value of another kind is the constant false (Tcl compiler): its fast path refuses only Block, native and MutableArray operands, not the runtime's whole incomparable list
+## compiler/compiler.tcl
+<<<<
+    if {$ka eq "" || $kb eq "" || $ka in $::core::value::incomparable || $kb in $::core::value::incomparable} {
+====
+    if {$ka eq "" || $kb eq "" || $ka in {block native mutarray} || $kb in {block native mutarray}} {
+>>>>
+
 
 @@ continue-leaks `continue` leaks the current affine element (no exit releases on continue)
 ## hir/affine.tcl
