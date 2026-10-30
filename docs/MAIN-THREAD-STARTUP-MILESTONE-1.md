@@ -987,6 +987,21 @@ warning gate and the method-call decision's oracle and reference audit.
 Its `native GC-stress` job runs on pushes to main only (skipped here).
 The later commits change only tests, harnesses and documents (section 38).
 
+**At the branch's final code [executed, Linux x86-64]**: `tests`
+dispatched again at 8516cb00 (run 41048290639, after every change of
+sections 29 and 31): the same 13 jobs passed, `native GC-stress` skipped
+as before (main only).
+
+**The merge into main [executed, Linux x86-64]**: main at 756cc265 merged
+into the branch without a conflict (`native/src/runtime/program.rs` and
+`vm.rs` auto-merged beside main's descriptor format 2, the shapes'
+identity); on the merged tree the native build, `cargo test --lib` (306
+passed) and `--bins` (114 passed), `merge.tcl` (the regenerated manifest
+equal to the merged one), `tools/compilerpedia.tcl check` (0 problems)
+and `tests/local.tcl` over main-thread-startup, native-executable,
+system-linker, aot-stub-linker, native-library and main-cli (142 passed,
+14 skipped by host, 0 failed, on interp and on compile).
+
 ## 33. Linux AArch64 CI results
 
 **[executed, Linux AArch64]** (`tests (linux arm64)` dispatched on the
