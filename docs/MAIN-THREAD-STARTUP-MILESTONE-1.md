@@ -464,7 +464,42 @@ and Windows verdicts are in section 31 and 34.
 
 ## 30. Executable size and performance
 
-(Section 31.)
+**Worker executables against the tree before the milestone [executed,
+Linux x86-64]** (e43a37fe, built beside this tree; three programs, every
+host linker; medians of interleaved runs on the 4-core sandbox, 400 runs of
+`value`, 41 of `fib`, 31 of `deep`):
+
+| Program | Linker | Size before | Size after | Median before | Median after |
+|---|---|---:|---:|---:|---:|
+| `40 + 2` | system | 9,942,672 | 9,973,056 | 1.66 ms | 1.69 ms |
+| | rustc | 10,046,944 | 10,069,648 | 1.66 ms | 1.70 ms |
+| | stub | 10,440,852 | 10,472,812 | 1.83 ms | 1.86 ms |
+| `fib(30)` | system | 9,942,744 | 9,973,136 | 7.45 ms | 7.72 ms |
+| | rustc | 10,047,296 | 10,069,992 | 7.46 ms | 7.74 ms |
+| | stub | 10,440,972 | 10,472,932 | 7.92 ms | 8.00 ms |
+| `down(10^6)` | system | 9,957,360 | 9,991,848 | 50.52 ms | 50.60 ms |
+| | rustc | 10,061,144 | 10,083,936 | 51.79 ms | 52.10 ms |
+| | stub | 10,441,322 | 10,473,282 | 51.35 ms | 51.14 ms |
+
+* Every executable grows by 22-34 KB (0.2-0.3 %): the runtime's policy
+  code that every executable carries (the record's policy read, the
+  main-thread body behind `catch_unwind`, the report's three lines), one
+  record word, and nothing per program. Every output and status is
+  identical.
+* Startup (`40 + 2`) costs about 0.03 ms more of a 1.7 ms run, the same on
+  every linker. The two compute-bound programs run the same machine code:
+  `fib`'s two functions are instruction for instruction the program before
+  the milestone's, at other addresses (the runtime before them grew), so
+  their spread -- from -0.4 % to +3.7 %, the rustc and system links
+  slower, the stub's not -- is placement and the shared machine's noise,
+  not a cost of the policy, which runs nothing after the program starts.
+
+**The main thread against the worker on macOS** (the census harness's
+`timing` section, five repetitions each: the identity program's startup,
+the SDL program with a window on the main thread and headless on both
+policies, both headless runs and the kept-coroutine program under GC
+stress, beside C's own SDL program; and every executable's size): section
+31.
 
 ## 31. macOS CI results
 
@@ -502,7 +537,33 @@ branch, are recorded below as they complete.
 
 ## 35. Documentation and Compilerpedia
 
-(Section 38 lists the files.)
+* **Compilerpedia** (`compilerpedia/topics/`): a new topic,
+  `backend.native-startup` (what the policy is, why a macOS graphical
+  program needs it, what stays the same -- meaning, errors, statuses, the
+  collector, coroutines, the guard -- what differs -- the thread and
+  512 MiB against 1 GiB -- and where it is supported); `cli.options` lists
+  `-native-startup` and its usage errors;
+  `backend.native-executable` gains "WHICH THREAD", `backend.platforms`
+  the target row, `backend.macos-application` the graphical program's
+  build; `error.native-unsupported` the `startup` kind (code `NATIVE
+  UNSUPPORTED startup`) with its cause and fix, `error.native-startup` the
+  record's two new refusals. `tools/compilerpedia.tcl check`: 0 problems
+  **[executed, Linux x86-64]**.
+* **SINGLE-EXECUTABLE.md**: "The startup policy" (the two policies, the
+  record word, the link's stack, the refusal) and the macOS application's
+  "Graphical programs" bullet.
+* **MACOS-AARCH64-PORT-AUDIT.md**: the main thread in section 6 (stacks and
+  the guard) and the `main-thread-startup` job in the CI table.
+* **MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md**: a follow-up note at its head,
+  pointing here; its evidence is unchanged and stays the census's.
+* **AGENTS.md**: "Executable startup policy (worker, main-thread)" -- the
+  rules to keep (the policy is the executable's; one body, one record; the
+  refusal before anything is written; nothing else changes) and what to run
+  when changing it -- and the macOS application's rule that neither the
+  application, the launcher nor the driver chooses the policy.
+* **INDEX.md**: this report.
+* main.tcl's header comment and `cliOptions` (which `tests/main-cli.test`
+  compares with `cli.options`), native/native.tcl's header (`-startup`).
 
 ## 36. Remaining limitations
 
@@ -561,7 +622,38 @@ order:
 
 ## 38. Exact files changed
 
-(See the final text.)
+Against e43a37fe, the tree the milestone started from:
+
+| File | Change |
+|---|---|
+| `native/src/runtime/program.rs` | `LinkedProgram.startup` (the seventh word); `Startup` (`word`, `of_word`, `spelling`, `parse`); `linked_startup`; `read_linked` reads through it; unit tests of the word and the layout |
+| `native/src/runtime/aot.rs` | `MAIN_THREAD_STARTUP`; `start_linked`; `run(startup, argv, init)` with one body, the worker's spawn and join and the main thread's `catch_unwind`; `startup_lines` and `process_main_thread`; `linked_main` through `start_linked` |
+| `native/src/runtime/aotimage.rs` | `abi_words` (the fingerprint's inputs, now with the record's size and the word's offset); `Loaded::startup`; the stub's main passes the policy |
+| `native/src/runtime/vm.rs` | `Vm::native_stack` (the stack the Vm recorded, for the report) |
+| `native/src/codegen/mod.rs` | `emit_executable_object(program, startup)`; the record's word in `define_program_record`; a library's record the worker's |
+| `native/src/codegen/target.rs` | `main_thread_startup(target)`, `executable_triple`; tests against the runtime's rule |
+| `native/src/codegen/aot.rs` | the startup crate's `start_linked`; `MAIN_THREAD_STACK_BYTES`, `startup_link_args`, `startup_refusal`; `emit_executable`'s policy (the refusal first, both links' stack size, the stub's refusal); tests |
+| `native/src/main.rs` | `--startup` for `executable` and `object` (`extract_startup`), refused for every other command; linked runs the worker's; `NATIVE UNSUPPORTED startup` |
+| `native/native.tcl` | `native::executable`/`native::object` `-startup`; `StartupOption`; the capability `mainThreadStartup` |
+| `main.tcl` | `-native-startup POLICY` (`cliOptions`, validation, usage errors, the header comment) |
+| `tests/main-thread-startup.test` | new: 23 tests (10 on every host, 13 on macOS AArch64) |
+| `tests/helpers.tcl` | the `mainThreadStartup` constraint |
+| `tests/platform/native-status.tcl` | the `main-thread-executable` probe (macOS: runs on the main thread; elsewhere: the refusal) |
+| `tests/platform/aot-facts.tcl` | LC_MAIN of both policies, the signature, the run and the main thread's exhaustion on macOS; the refusal elsewhere |
+| `tests/platform/tier.tcl` | `native-aot-mutants=NAMES`, `native-stack-mutants=NAMES` |
+| `tests/golden/manifest.tsv`, `audit/golden/migration/census/main-thread-startup.tsv`, `audit/golden/migration/tcl-names.txt` | the new tests' census rows (KEEP-INTERNAL), the manifest regenerated |
+| `audit/native-aot/tools/mutants.txt`, `mutate.tcl` | 20 policy mutants, 3 refreshed; the new test file among the detectors |
+| `audit/native-stack/tools/mutants.txt`, `mutate.tcl` | `main-thread-unguarded`; the new test file among the detectors |
+| `audit/macos-graphical-main-thread/tools/census.py`, `README.md` | candidate A on the production policy (the application's system linker, the rustc linker, the 8 MiB control), the startup group, `--strict` |
+| `.github/workflows/macos-arm64.yml` | the `main-thread-startup` job |
+| `.github/workflows/macos-graphical-main-thread.yml` | the experiment's runtime at its base commit |
+| `compilerpedia/topics/backends.topic`, `errors-runtime.topic` | section 35 |
+| `docs/MAIN-THREAD-STARTUP-MILESTONE-1.md` | this report |
+| `docs/INDEX.md`, `docs/SINGLE-EXECUTABLE.md`, `docs/MACOS-AARCH64-PORT-AUDIT.md`, `docs/MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md`, `AGENTS.md` | section 35 |
+
+No file of the front end (`core/`, `hir/`, `surface/`, `stdlib/`), the Tcl
+compiler, the collector, coroutines, the stack guard, the C FFI, the JIT,
+`runtime::library` or the single executable's packing changed.
 
 ## 39. Commands for reproducing the acceptance
 

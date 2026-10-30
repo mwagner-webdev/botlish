@@ -1354,7 +1354,6 @@ candidate A on it (`audit/macos-graphical-main-thread/tools/census.py
 every runtime probe, both linkers), every case as predicted.
 
 ## Linux AArch64
-## Linux AArch64
 
 The native backend runs on Linux AArch64 (the `tests-arm64.yml` CI jobs) with
 the x86-64 feature set except what is tied to the x86-64 instruction set:
