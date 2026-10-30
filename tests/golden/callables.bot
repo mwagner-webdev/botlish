@@ -29,7 +29,8 @@
 #     callee's contract with the argument types that reach it (and an
 #     instance is keyed by types, so even a valid-looking literal is not
 #     proven); a callable whose only declared type is its result stays
-#     unrestricted;
+#     unrestricted, and so does one whose every parameter is declared `any`
+#     (an obligation of no caller's) while it declares no error;
 #   * exact callable identity through higher-order helpers
 #     (EXACT-CALLABLE-CLOSED-CALLER.md) and Int-keyed closures
 #     (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1): a function value, a
@@ -75,7 +76,7 @@ import std::test
 # (structural-fn-types.test's fnDecls: Byte, Nibble, NotFound,
 # PermissionDenied; typed-callable-escape.test's byteDecl and its Small and
 # Mark programs; exact-callable-typed-callable-with-errors' NotFound, the
-# same payload-free declaration).
+# same payload-free declaration; its `any` parameter programs' structs).
 
 type Byte = Int in 0..255
 type Nibble = Int in 0..15
@@ -84,6 +85,12 @@ type Mark = Int in {0,4,8,12}
 
 error NotFound
 error PermissionDenied
+
+struct AnyBox:
+    value: any
+
+struct Cell[T]:
+    value: T
 
 # ===========================================================================
 # tests/structural-fn-types.test
@@ -761,7 +768,7 @@ fn register_callable_escape_helper_tests(run: bool):
     # the callee's own admissibility wording (not the erasure diagnostic's
     # "cannot be preserved"), reported at the call of apply.
     std::test::rejects_containing("callable-escape-bug-is-an-admissibility-error-in-the-instance/wording", std::compiler::DiagnosticCode::Type, "cannot be proven to satisfy", bug)
-    std::test::rejects_at("callable-escape-bug-is-an-admissibility-error-in-the-instance/at-the-call-of-apply", std::compiler::DiagnosticCode::Type, 757, 13, bug)
+    std::test::rejects_at("callable-escape-bug-is-an-admissibility-error-in-the-instance/at-the-call-of-apply", std::compiler::DiagnosticCode::Type, 764, 13, bug)
 
     # callable-escape-apply-good-arg-still-rejected: an instance is keyed by
     # types, not values: 7 is an int, not proven Byte inside it.
@@ -1188,10 +1195,334 @@ fn register_callable_escape_join_tests():
             chooser(true)(9999)
     std::test::rejects("callable-escape-return-join-different-structural/rejected", std::compiler::DiagnosticCode::Type, return_join_rejected)
 
+# ---------------------------------------------------------------------------
+# A parameter declared `any`: no obligation of its caller's
+
+fn register_callable_escape_any_tests(run: bool):
+    # callable-escape-any-parameters-unrestricted: a function whose every
+    # parameter is declared `any` obliges a caller to nothing an untyped one
+    # does not, so each erasing position accepts it as it accepts the untyped
+    # function (each block holds both) -- and the erased value still calls
+    # it. RUN is false: comparing callables (native-argument) would raise
+    # EQUALITY at run time, which no handler catches.
+    fn any_native_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            if run:
+                [any_only == any_only, untyped == untyped]
+            else:
+                [false, false]
+    std::test::value("callable-escape-any-parameters-unrestricted/native-argument", [false, false], any_native_argument)
+
+    fn any_list_element() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            xs = [any_only, 5]
+            ys = [untyped, 5]
+            [std::list::length(xs), std::list::length(ys)]
+    std::test::value("callable-escape-any-parameters-unrestricted/list-element", [2, 2], any_list_element)
+
+    fn any_any_parameter() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            fn keep(v: any):
+                v
+            [keep(any_only)(1, 1), keep(untyped)(1, 2)]
+    std::test::value("callable-escape-any-parameters-unrestricted/any-parameter", [true, false], any_any_parameter)
+
+    fn any_if_join() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            fn pick(flag):
+                if flag:
+                    any_only
+                else:
+                    5
+            fn pick_untyped(flag):
+                if flag:
+                    untyped
+                else:
+                    5
+            [pick(true)(2, 2), pick_untyped(true)(2, 3)]
+    std::test::value("callable-escape-any-parameters-unrestricted/if-join", [true, false], any_if_join)
+
+    fn any_return() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            fn pick(flag):
+                if flag:
+                    return any_only
+                5
+            fn pick_untyped(flag):
+                if flag:
+                    return untyped
+                5
+            [pick(true)(3, 3), pick_untyped(true)(3, 4)]
+    std::test::value("callable-escape-any-parameters-unrestricted/return", [true, false], any_return)
+
+    fn any_any_field() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            a = AnyBox {value: any_only}
+            u = AnyBox {value: untyped}
+            fa = a.value
+            fu = u.value
+            [fa(4, 4), fu(4, 5)]
+    std::test::value("callable-escape-any-parameters-unrestricted/any-field", [true, false], any_any_field)
+
+    fn any_struct_element() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            s = {handler: any_only}
+            t = {handler: untyped}
+            xs = [s, 5, t]
+            std::list::length(xs)
+    std::test::value("callable-escape-any-parameters-unrestricted/struct-element", 3, any_struct_element)
+
+    fn any_applied_struct_element() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            c = Cell {value: any_only}
+            d = Cell {value: untyped}
+            xs = [c, 5, d]
+            std::list::length(xs)
+    std::test::value("callable-escape-any-parameters-unrestricted/applied-struct-element", 3, any_applied_struct_element)
+
+    fn any_collected_element() errors std::compiler::CompilerError:
+        static compile:
+            fn any_only(c: any, d: any) -> bool:
+                c == d
+            fn untyped(c, d) -> bool:
+                c == d
+            nested = [[[any_only]]]
+            nested_untyped = [[[untyped]]]
+            ys = loop x in [1]:
+                nested
+            zs = loop x in [1]:
+                nested_untyped
+            [std::list::length(ys), std::list::length(zs)]
+    std::test::value("callable-escape-any-parameters-unrestricted/collected-element", [1, 1], any_collected_element)
+
+    # callable-escape-any-beside-typed-parameter-rejected: one typed
+    # parameter beside `any` ones still bears, and every erasing position
+    # rejects the function.
+    fn mixed_native_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            mixed == mixed
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/native-argument", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_native_argument)
+
+    fn mixed_list_element() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            xs = [mixed, 5]
+            xs
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/list-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_list_element)
+
+    fn mixed_any_parameter() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            fn keep(v: any):
+                v
+            keep(mixed)
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/any-parameter", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_any_parameter)
+
+    fn mixed_if_join() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            fn pick(flag):
+                if flag:
+                    mixed
+                else:
+                    5
+            pick(true)
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/if-join", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_if_join)
+
+    fn mixed_return() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            fn pick(flag):
+                if flag:
+                    return mixed
+                5
+            pick(true)
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/return", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_return)
+
+    fn mixed_any_field() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            b = AnyBox {value: mixed}
+            b
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/any-field", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_any_field)
+
+    fn mixed_struct_element() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            s = {handler: mixed}
+            xs = [s, 5]
+            xs
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/struct-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_struct_element)
+
+    fn mixed_applied_struct_element() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            c = Cell {value: mixed}
+            xs = [c, 5]
+            xs
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/applied-struct-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_applied_struct_element)
+
+    fn mixed_collected_element() errors std::compiler::CompilerError:
+        static compile:
+            fn mixed(c: any, d: int) -> bool:
+                c == d
+            nested = [[[mixed]]]
+            ys = loop x in [1]:
+                nested
+            ys
+    std::test::rejects_containing("callable-escape-any-beside-typed-parameter-rejected/collected-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", mixed_collected_element)
+
+    # callable-escape-any-parameters-with-errors-rejected: a declared error
+    # set still bears when every parameter is `any`: every erasing position
+    # rejects the function (NotFound, the suite's declaration, for the Tcl
+    # test's Oops).
+    fn errs_native_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            errs == errs
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/native-argument", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_native_argument)
+
+    fn errs_list_element() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            xs = [errs, 5]
+            xs
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/list-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_list_element)
+
+    fn errs_any_parameter() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            fn keep(v: any):
+                v
+            keep(errs)
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/any-parameter", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_any_parameter)
+
+    fn errs_if_join() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            fn pick(flag):
+                if flag:
+                    errs
+                else:
+                    5
+            pick(true)
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/if-join", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_if_join)
+
+    fn errs_return() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            fn pick(flag):
+                if flag:
+                    return errs
+                5
+            pick(true)
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/return", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_return)
+
+    fn errs_any_field() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            b = AnyBox {value: errs}
+            b
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/any-field", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_any_field)
+
+    fn errs_struct_element() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            s = {handler: errs}
+            xs = [s, 5]
+            xs
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/struct-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_struct_element)
+
+    fn errs_applied_struct_element() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            c = Cell {value: errs}
+            xs = [c, 5]
+            xs
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/applied-struct-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_applied_struct_element)
+
+    fn errs_collected_element() errors std::compiler::CompilerError:
+        static compile:
+            fn errs(c: any, d: any) -> bool errors NotFound:
+                if c == d:
+                    fail NotFound
+                true
+            nested = [[[errs]]]
+            ys = loop x in [1]:
+                nested
+            ys
+    std::test::rejects_containing("callable-escape-any-parameters-with-errors-rejected/collected-element", std::compiler::DiagnosticCode::Type, "typed parameter requirements that cannot be preserved", errs_collected_element)
+
 fn register_typed_callable_escape_tests():
     register_callable_escape_helper_tests(false)
     register_callable_escape_identity_tests()
     register_callable_escape_join_tests()
+    register_callable_escape_any_tests(false)
 
 # ===========================================================================
 # tests/closure-int-keys.test: closures with a String capture called with

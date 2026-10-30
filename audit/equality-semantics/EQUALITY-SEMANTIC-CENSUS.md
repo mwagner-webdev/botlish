@@ -106,7 +106,11 @@ evidence.
    - They differ in two places:
      - contract inference never strengthens a declared `any`;
      - the erasure audit treats a function with an `any` parameter as
-       precondition-bearing (`i5-declared-any-bearing`, a quirk).
+       precondition-bearing (`i5-declared-any-bearing`, a quirk; fixed
+       since: `hir::callables::Bearing` reads an entry type of `any` as no
+       precondition, and the probe compiles and raises `EQUALITY` at run
+       time like `i5-untyped-not-bearing`. TYPED-CALLABLE-ESCAPE-SOUNDNESS.md,
+       "Chosen enforcement rule").
    - "Untyped parameters acquire obligations, declared `any` permits
      heterogeneous comparison" fits the model only if no semantic instance
      imposes an equality obligation, because instances see through a
@@ -538,7 +542,7 @@ replaces a certain `EQUALITY`.
 
 | origin | in HIR | contract inference | semantic instance | specialization | erasure audit | probes |
 |---|---|---|---|---|---|---|
-| declared `any` parameter | `declaredParamTypes` holds `any`; entry type `any` | never inferred (declared) | sees through it: the instance's entry type is the argument's | adopts the argument type (narrow of `any`) | **bearing**: the function cannot be erased (`char? == char?` is a static `TYPE`) | `i3-any-char`, `i3-any-same`, `i5-declared-any-bearing` |
+| declared `any` parameter | `declaredParamTypes` holds `any`; entry type `any` | never inferred (declared) | sees through it: the instance's entry type is the argument's | adopts the argument type (narrow of `any`) | **bearing** on the census's tree: the function cannot be erased (`char? == char?` is a static `TYPE`); not bearing since (item 4) | `i3-any-char`, `i3-any-same`, `i5-declared-any-bearing` |
 | untyped parameter, no contract | `declaredParamTypes` `{}`; no inferred types | inferred from uses; `==` imposes nothing | sees through it | adopts the argument type | not bearing | `i3-untyped-char`, `i5-untyped-not-bearing` |
 | untyped parameter with a CHECKED contract | `checkedParamTypes` | from a native's `-param-types`, an `if`, a loop | held to the contract per call (known argument types only) | | not bearing | `i3-checked-then-compared`, `i4-checked-native` |
 | narrowed by a kind test | the use's type is the kind | uses under the test constrain nothing | | | | `i3-kind-test`, `i4-branch` |

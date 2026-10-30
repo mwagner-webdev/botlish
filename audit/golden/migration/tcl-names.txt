@@ -8264,6 +8264,11 @@ tests/type-predicates.test tp-type-name-not-a-value pass
 tests/type-predicates.test tp-type-name-not-a-value-messages pass
 tests/typed-callable-escape.test callable-escape-alias-invalid pass
 tests/typed-callable-escape.test callable-escape-alias-valid pass
+tests/typed-callable-escape.test callable-escape-any-beside-typed-parameter-rejected pass
+tests/typed-callable-escape.test callable-escape-any-parameters-equality-is-dynamic pass
+tests/typed-callable-escape.test callable-escape-any-parameters-not-bearing pass
+tests/typed-callable-escape.test callable-escape-any-parameters-unrestricted pass
+tests/typed-callable-escape.test callable-escape-any-parameters-with-errors-rejected pass
 tests/typed-callable-escape.test callable-escape-apply-bad-arg-rejected pass
 tests/typed-callable-escape.test callable-escape-apply-good-arg-still-rejected pass
 tests/typed-callable-escape.test callable-escape-arity-mismatch-is-a-runtime-error pass
