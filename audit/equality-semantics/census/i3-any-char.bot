@@ -1,0 +1,4 @@
+# I3 a parameter declared any compared with a character
+fn char?(c: any):
+    c == '-'
+[char?("-"), char?('-'), char?(45)]

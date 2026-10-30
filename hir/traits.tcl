@@ -80,15 +80,26 @@ namespace eval hir::traits {
     # known to have total (hir::types::Totality). A source program cannot
     # declare a witness of one, or a type or trait of its name.
     #
-    #   Hashable  total equality and total hashing, so equal values hash
-    #             equally: the key contract of the standard library's hash
-    #             structures. Its one operation is the public hash.
+    #   Hashable   total equality and total hashing, so equal values hash
+    #              equally: the key contract of the standard library's hash
+    #              structures. Its one operation is the public hash.
+    #   Equatable  total equality (REPRESENTATION-INDEPENDENT-VALUE-
+    #              IDENTITY.md): `==` of two such values never refuses
+    #              them. It has no operation (`==` is every value's), and
+    #              every Hashable type is Equatable: Hashable's witnesses
+    #              are its witnesses with total hashing too, and a view of
+    #              Hashable is Equatable (its guarantees include equality).
     variable intrinsics [dict create \
         Hashable [dict create \
             requirements {{name hash nameSpan {} span {} params {{name value type {trait Hashable} self 1}} result {type int self 0} errors {}}} \
             impls {hash hash} \
             witness hir::types::HashClass \
-            guarantees {equality hash}]]
+            guarantees {equality hash}] \
+        Equatable [dict create \
+            requirements {} \
+            impls {} \
+            witness hir::types::EqualityClass \
+            guarantees {equality}]]
 }
 
 # The names of the intrinsic traits.
@@ -118,6 +129,24 @@ proc hir::traits::intrinsicGuarantees {id} {
         return {}
     }
     return [dict get $intrinsics $id guarantees]
+}
+
+# 1 if intrinsic trait A refines intrinsic trait B: every operation B
+# guarantees total, A does, so every witness of A is one of B and a view of A
+# is accepted where B is expected (Hashable refines Equatable,
+# REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md). Only intrinsic traits
+# refine: a source trait's view satisfies its own trait alone.
+proc hir::traits::Refines {a b} {
+    variable intrinsics
+    if {$a eq $b || ![dict exists $intrinsics $a] || ![dict exists $intrinsics $b]} {
+        return 0
+    }
+    foreach operation [dict get $intrinsics $b guarantees] {
+        if {$operation ni [dict get $intrinsics $a guarantees]} {
+            return 0
+        }
+    }
+    return 1
 }
 
 # The declarations (declare's) of the intrinsic traits the syntax NODES and
@@ -545,6 +574,7 @@ proc hir::traits::index {hir} {
     variable impls
     variable cache
     variable unitNames
+    variable cloneBindings
     set impls [dict create]
     set cache [dict create]
     set unitNames [dict create]
@@ -587,6 +617,33 @@ proc hir::traits::index {hir} {
             }
             dict set impls $unit $name $info
             dict set unitNames $b [list $unit $name]
+        }
+    }
+    if {[Planning]} {
+        # The monomorphized program (monomorphize): a function the plan
+        # replaces by its one clone under the program's selection -- one
+        # whose requirement includes a context trait, an implementation
+        # among them -- is that clone there, bound under the clone's name
+        # where the plan places it. Conformance by name (a constrained
+        # slot's application, checked again in this build) finds it as the
+        # function it replaces, in its own namespace.
+        variable plan
+        dict for {key clone} [dict get $plan clones] {
+            if {[lindex $key 1] ne {} || [llength $key] > 3 || [dict get $clone node] eq {}} continue
+            set unit [dict get $clone namespace]
+            set name [dict get $clone fname]
+            if {[dict exists $impls $unit $name] || ![dict exists $cloneBindings $key]} continue
+            set b [CloneBinding $key]
+            set value [dict get $hir exprs [dict get $hir bindings $b declaredBy] value]
+            set node [dict get $hir exprs $value]
+            set flags [dict getdef $node flags {}]
+            set arity [expr {[llength [dict get $node params]] - [llength $flags]}]
+            dict set impls $unit $name [dict create kind block binding $b block $value origin [dict get $hir bindings $b origin] \
+                params [lrange [dict get $node declaredParamTypes] 0 [expr {$arity - 1}]] \
+                result [dict get $node declaredResult] errors [dict get $node declaredErrors] \
+                flags $flags contexts [dict getdef $node contextParams {}] \
+                variadic [dict exists $node variadic] places [dict getdef $node places {}] \
+                private [expr {[hir::privacy::Entry $decls $unit values $name] ne ""}]]
         }
     }
 }
@@ -970,7 +1027,7 @@ proc hir::traits::SpanText {span} {
 proc hir::traits::Accept {type constraint} {
     set id [lindex $constraint 1]
     if {[hir::types::IsTrait $type]} {
-        if {[lindex $type 1] ne $id} {
+        if {[lindex $type 1] ne $id && ![Refines [lindex $type 1] $id]} {
             return 0
         }
         return [expr {[hir::types::IsTraitConstraint $type]
@@ -991,6 +1048,12 @@ proc hir::traits::EntryView {type constraint} {
     set id [lindex $constraint 1]
     if {[hir::types::IsView $type] && [hir::types::ViewTrait $type] eq $id} {
         return $type
+    }
+    if {[hir::types::IsView $type] && [Refines [hir::types::ViewTrait $type] $id]} {
+        # A view of a refining intrinsic trait (a Hashable view at an
+        # Equatable parameter) is the view of this one with the same hidden
+        # witness.
+        return [hir::types::MakeView $id [hir::types::ViewWitness $type]]
     }
     if {![hir::types::IsTrait $type] && $type ne "never" && [dict get [satisfies $type $id] ok]} {
         return [hir::types::MakeView $id [hir::types::canonical [hir::types::ForgetInferred $type]]]
@@ -2139,6 +2202,12 @@ proc hir::traits::PlanCalls {hir syntax} {
     set livePos [dict create]
     set edges [dict create]
     set implUses {}
+    # {CKEY SID} -> the trait, context or redirect action of every call
+    # whose callee the walk bound -- also of one the plan makes a
+    # placeholder of because no provider reaches it: what hir::check's
+    # feedback reads (hir::coroutines::Implementations), whatever the
+    # selection of the check that asked.
+    set bound [dict create]
     set queue [list live]
     set seen [dict create live 1]
     while {$queue ne {}} {
@@ -2183,7 +2252,14 @@ proc hir::traits::PlanCalls {hir syntax} {
                 set binding [InstanceBinding $hir $h [dict get $inst args]]
             }
             set fn [dict get $polys $h]
-            set ckey [list $h $params [dict get $fn selection]]
+            if {[lindex $context 0] eq "contextfn"} {
+                set ckey [list $h $params [dict get $fn selection]]
+            } else {
+                # (A specialization's selection is its own requirement's:
+                # SpecializationTraits.)
+                set ckey [list $h $params [SpecializationSelection $hir $fn \
+                    [SpecializationTraits $hir $fn $h $params $binding]]]
+            }
             if {[lindex $context 0] ne "contextfn" && [dict get $fn imprint] && $binding ne {}} {
                 # (A specialization for a binding is keyed by it too.)
                 lappend ckey $binding
@@ -2203,7 +2279,13 @@ proc hir::traits::PlanCalls {hir syntax} {
                 }
                 set qualified [QualifiedName [dict get $fn namespace] [dict get $fn name]]
                 set parts [lmap {i w} $params {WitnessName $w}]
-                foreach {c w} [dict get $fn selection] {
+                # (The clone's selection, its key's: its function's, or its
+                # specialization's own -- SpecializationTraits.)
+                set selection [lindex $ckey 2]
+                if {$selection eq "-"} {
+                    set selection {}
+                }
+                foreach {c w} $selection {
                     lappend parts "$c=$w"
                 }
                 set imprints [lindex $ckey 3]
@@ -2212,7 +2294,7 @@ proc hir::traits::PlanCalls {hir syntax} {
                 }
                 dict set clones $ckey [dict create key $ckey node $node namespace [dict get $fn namespace] \
                     function [dict get $fn sid] params $params result $result source $qualified \
-                    selection [dict get $fn selection] imprints $imprints \
+                    fname [dict get $fn name] selection $selection imprints $imprints \
                     name "$qualified<[join $parts ,]>" block $h]
                 dict incr cloneCounts $h
                 if {[dict get $cloneCounts $h] > [ImprintCloneLimit]} {
@@ -2224,7 +2306,11 @@ proc hir::traits::PlanCalls {hir syntax} {
         # The context traits this context's code has a provider for: the
         # clone's selection (live code has none: a context-trait operation or
         # a context-trait-dependent call there is never executed).
-        if {$ckey eq "live"} {
+        if {$ckey eq "live" || [lindex $ckey 2] eq "-"} {
+            # (A clone with no selection is walked only while the
+            # requirements that select its providers are not yet known:
+            # hir::check's feedback, which reads the bindings. The plan
+            # itself never makes one: TRAIT-INTERNAL.)
             set provided {}
         } else {
             set provided [lindex $ckey 2]
@@ -2261,22 +2347,14 @@ proc hir::traits::PlanCalls {hir syntax} {
                         set operation [dict create trait $id requirement $req witness [list nstruct $w] \
                             impl [ImplIdent $impl] contract [RequiredFn [requirement $id $req] ""] \
                             implementation [QualifiedName [dict get $impl unit] [dict get $impl name]] context 1]
-                        set implBlock [dict get $impl block]
-                        if {[dict exists $polys $implBlock]} {
+                        if {[IsReplaced $polys $impl]} {
                             # The implementation itself requires a context
                             # trait: it is replaced by its own clone.
-                            set k [list $implBlock {} [dict get $polys $implBlock selection]]
-                            SetAction actions diagnostics $ckey $sid [list context $operation $k] $e
-                            dict set edges $ckey $k 1
-                            set j [list contextfn $implBlock]
-                            if {![dict exists $seen $j]} {
-                                dict set seen $j 1
-                                lappend queue $j
-                            }
+                            CallImplementationClone context $operation $impl 0
                         } else {
                             SetAction actions diagnostics $ckey $sid [list context $operation] $e
-                            lappend implUses [list $ckey $impl $e]
                         }
+                        lappend implUses [list $ckey $impl $e]
                     } elseif {[dict exists $node traitCall]} {
                         set record [dict get $node traitCall]
                         if {[dict exists $record unknown]} {
@@ -2308,10 +2386,19 @@ proc hir::traits::PlanCalls {hir syntax} {
                         }
                         set req [dict get $record requirement]
                         set impl [dict get [dict get $s impls] $req]
-                        set action [list trait [dict create trait $id requirement $req witness $w \
+                        set operation [dict create trait $id requirement $req witness $w \
                             impl [ImplIdent $impl] contract [RequiredFn [requirement $id $req] $w] \
-                            implementation [if {[dict get $impl kind] eq "native"} {dict get $impl name} else {QualifiedName [dict get $impl unit] [dict get $impl name]}]]]
-                        SetAction actions diagnostics $ckey $sid $action $e
+                            implementation [if {[dict get $impl kind] eq "native"} {dict get $impl name} else {QualifiedName [dict get $impl unit] [dict get $impl name]}]]
+                        if {[IsReplaced $polys $impl]} {
+                            # The implementation requires a context trait, so
+                            # the monomorphized program replaces it by its
+                            # clone: the operation calls that clone, by the
+                            # one rule a context-trait operation's call of a
+                            # replaced implementation follows.
+                            CallImplementationClone trait $operation $impl 1
+                        } else {
+                            SetAction actions diagnostics $ckey $sid [list trait $operation] $e
+                        }
                         lappend implUses [list $ckey $impl $e]
                     } else {
                         lassign [dict get $node target] tk tb
@@ -2373,21 +2460,9 @@ proc hir::traits::PlanCalls {hir syntax} {
                                 continue
                             }
                             set j [list imprintfn $tb $callBinding]
-                            set witnesses {}
-                            set k [list $tb {} [dict get $fn selection] $callBinding]
-                            SetAction actions diagnostics $ckey $sid [list redirect $k] $e
-                            if {$ckey eq "live"} {
-                                set top [TopIndex $parents $rootIndex $e]
-                                if {![dict exists $livePos $k] || $top < [dict get $livePos $k]} {
-                                    dict set livePos $k $top
-                                }
-                            } else {
-                                dict set edges $ckey $k 1
-                            }
-                            if {![dict exists $seen $j]} {
-                                dict set seen $j 1
-                                lappend queue $j
-                            }
+                            set traits [SpecializationTraits $hir $fn $tb {} $callBinding]
+                            set k [list $tb {} [SpecializationSelection $hir $fn $traits] $callBinding]
+                            CallSpecialization $k $j $traits
                             continue
                         }
                         if {[dict get $fn trait]} {
@@ -2450,32 +2525,21 @@ proc hir::traits::PlanCalls {hir syntax} {
                                 continue
                             }
                         }
-                        set k [list $tb $witnesses [dict get $fn selection]]
+                        set calleeBinding [dict create]
                         if {[dict get $fn imprint]} {
                             # (A trait-polymorphic function also specialized
                             # per binding: TRAIT-CONSTRAINED-IMPRINTED-
                             # TYPES.md.)
-                            set calleeBinding [dict create]
                             dict for {v t} [SelectingBinding $hir $tb [hir::imprint::BindingOf $view $e]] {
                                 dict set calleeBinding $v [hir::types::canonical [hir::imprint::Substitute $t $binding]]
                             }
-                            if {$calleeBinding ne {}} {
-                                lappend k $calleeBinding
-                            }
                         }
-                        SetAction actions diagnostics $ckey $sid [list redirect $k] $e
-                        if {$ckey eq "live"} {
-                            set top [TopIndex $parents $rootIndex $e]
-                            if {![dict exists $livePos $k] || $top < [dict get $livePos $k]} {
-                                dict set livePos $k $top
-                            }
-                        } else {
-                            dict set edges $ckey $k 1
+                        set traits [SpecializationTraits $hir $fn $tb $witnesses $calleeBinding]
+                        set k [list $tb $witnesses [SpecializationSelection $hir $fn $traits]]
+                        if {$calleeBinding ne {}} {
+                            lappend k $calleeBinding
                         }
-                        if {![dict exists $seen $j]} {
-                            dict set seen $j 1
-                            lappend queue $j
-                        }
+                        CallSpecialization $k $j $traits
                     }
                 }
                 block {
@@ -2504,7 +2568,182 @@ proc hir::traits::PlanCalls {hir syntax} {
     }
     return [dict create diagnostics $diagnostics roots $roots rootIndex $rootIndex parents $parents \
         polys $polys home $home byHome $byHome actions $actions clones $clones livePos $livePos \
-        edges $edges implUses $implUses]
+        edges $edges implUses $implUses bound $bound]
+}
+
+# 1 if the polymorphic-function record FN (PlanCalls' `polys`) is a
+# declaration the monomorphized program replaces by its clones -- a
+# trait-polymorphic function (one clone per witness tuple), one whose
+# requirement includes a context trait (one clone under the selection), one
+# specialized per binding of its constrained variables -- and drops (Plan).
+# A generic function specialized for affine arguments stays: its other
+# calls call it.
+proc hir::traits::Replaces {fn} {
+    return [expr {[dict get $fn trait] || [dict get $fn contextTraits] ne {} || [dict get $fn imprint]}]
+}
+
+# 1 if implementation IMPL (a satisfaction's `impls` entry) is a function
+# POLYS says the monomorphized program replaces by its clones (Replaces).
+proc hir::traits::IsReplaced {polys impl} {
+    if {[dict get $impl kind] ne "block" || ![dict exists $polys [dict get $impl block]]} {
+        return 0
+    }
+    return [Replaces [dict get $polys [dict get $impl block]]]
+}
+
+# The context traits of the specialization of block H (FN its record in
+# PlanCalls' `polys`) for clone witnesses PARAMS and imprint binding BINDING:
+# its function's own (FN's `contextTraits`) and those the specialization
+# requires through the implementations its operations bind -- the context
+# analysis's requirement of the specialization (hir::contexts::verify's
+# `specialized`, from hir::check's selected implementation graph;
+# TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md). Sorted.
+proc hir::traits::SpecializationTraits {hir fn h params binding} {
+    set traits [dict get $fn contextTraits]
+    if {![dict get $fn trait] && ![dict get $fn imprint]} {
+        return $traits
+    }
+    set key [list $h $params [if {[dict get $fn imprint]} {set binding} else {dict create}]]
+    if {![dict exists $hir contexts specialized $key]} {
+        return $traits
+    }
+    foreach id [dict get $hir contexts specialized $key] {
+        if {[isContext $id]} {
+            lappend traits $id
+        }
+    }
+    return [lsort -unique $traits]
+}
+
+# The selection of a clone of FN whose context traits are TRAITS
+# (SpecializationTraits): FN's own when they are its function's, else the
+# program's providers of them (ContextSelection).
+proc hir::traits::SpecializationSelection {hir fn traits} {
+    if {$traits eq [dict get $fn contextTraits]} {
+        return [dict get $fn selection]
+    }
+    return [ContextSelection $hir $traits]
+}
+
+# The specialization identity of clone key K, {FUNCTION PARAMS BINDING}
+# (BINDING {} for a key without one): what the selected implementation graph
+# names a specialization by (hir::coroutines::Implementations). The key's
+# selection is a function of it -- the program's providers of the context
+# traits the specialization requires -- so the identity does not change
+# while hir::check's feedback learns those.
+proc hir::traits::Specialization {k} {
+    return [list [lindex $k 0] [lindex $k 1] [lindex $k 3]]
+}
+
+# PlanCalls' walk, at the call of a trait-polymorphic or per-binding
+# function under examination (its variables: CKEY, SID, E, PROVIDED, ...):
+# the call calls clone K, walked as queue entry J; TRAITS are the context
+# traits of that specialization (SpecializationTraits). A specialization
+# whose requirement includes context traits its function as written does
+# not (an implementation one of its operations binds needs one) is reached
+# exactly as a call of a function requiring a context trait is: only where
+# the selection is -- a reachable top-level call, or a reachable call in a
+# clone that provides those traits -- and is never-executed code (the
+# placeholder) anywhere else.
+proc hir::traits::CallSpecialization {k j traits} {
+    upvar 1 hir hir fn fn e e sid sid ckey ckey provided provided parents parents \
+        actions actions diagnostics diagnostics bound bound
+    if {$traits ne [dict get $fn contextTraits]} {
+        dict set bound [list $ckey $sid] [list redirect $k]
+        set reaches [hir::get $hir $e reachable]
+        if {$reaches && $ckey eq "live"} {
+            set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+        } elseif {$reaches} {
+            foreach c $traits {
+                if {![dict exists $provided $c]} {
+                    set reaches 0
+                }
+            }
+        }
+        if {!$reaches} {
+            SetAction actions diagnostics $ckey $sid [list unreachable] $e
+            return
+        }
+        if {[lindex $k 2] eq "-"} {
+            lappend diagnostics [list TRAIT-INTERNAL "a call of [dict get $fn name] has no selected context provider" $e]
+        }
+    }
+    SetAction actions diagnostics $ckey $sid [list redirect $k] $e
+    uplevel 1 [list hir::traits::CallsClone $k $j]
+}
+
+# PlanCalls' walk, at a trait operation (KIND trait) or context-trait
+# operation (KIND context) under examination that binds implementation
+# block IMPL, a function the monomorphized program replaces by its clones
+# (IsReplaced), with the operation record OPERATION. The one rule for every
+# call of a replaced implementation (TRAIT-IMPLEMENTATION-CONTEXT-
+# REQUIREMENTS-MILESTONE-1.md): the action is {KIND OPERATION KEY}, KEY the
+# clone the selection in force makes of it, with the placement edge and the
+# clone walked, as for a call of any replaced function -- never the dropped
+# declaration. A function whose requirement includes a context trait has
+# one clone, under the program's providers, and its call reaches it as a
+# call of such a function does: only where the selection is (CONSULT 1: a
+# reachable top-level call, or a reachable call in a clone that provides
+# its context traits), and is never-executed code -- the placeholder --
+# anywhere else; a context-trait operation is called only where its own
+# provider is (CONSULT 0), which provides its implementation's selection.
+# One replaced per witness tuple or per binding cannot be an implementation
+# today (TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md, section 3), and the
+# call names no clone of it: TRAIT-INTERNAL.
+proc hir::traits::CallImplementationClone {kind operation impl consult} {
+    upvar 1 hir hir polys polys e e sid sid ckey ckey actions actions \
+        diagnostics diagnostics bound bound provided provided parents parents
+    set implBlock [dict get $impl block]
+    set fn [dict get $polys $implBlock]
+    if {[dict get $fn trait] || [dict get $fn imprint]} {
+        lappend diagnostics [list TRAIT-INTERNAL "the implementation [dict get $operation implementation] is replaced by specializations this operation selects none of" $e]
+        dict set bound [list $ckey $sid] [list $kind $operation]
+        return
+    }
+    set k [list $implBlock {} [dict get $fn selection]]
+    set reaches 1
+    if {$consult} {
+        set reaches [hir::get $hir $e reachable]
+        if {$reaches && $ckey eq "live"} {
+            set reaches [expr {[OwnerBlock $hir $parents $e] eq "program"}]
+        } elseif {$reaches} {
+            foreach c [dict get $fn contextTraits] {
+                if {![dict exists $provided $c]} {
+                    set reaches 0
+                }
+            }
+        }
+    }
+    if {!$reaches} {
+        dict set bound [list $ckey $sid] [list $kind $operation $k]
+        SetAction actions diagnostics $ckey $sid [list unreachable] $e
+        return
+    }
+    if {[dict get $fn selection] eq "-"} {
+        lappend diagnostics [list TRAIT-INTERNAL "the implementation [dict get $operation implementation] has no selected context provider" $e]
+    }
+    SetAction actions diagnostics $ckey $sid [list $kind $operation $k] $e
+    uplevel 1 [list hir::traits::CallsClone $k [list contextfn $implBlock]]
+}
+
+# PlanCalls' walk, at the call under examination (E in context CKEY): it
+# calls clone K, walked as queue entry J -- placed before the top-level
+# statement it is in (live code) or before the clone that calls it.
+proc hir::traits::CallsClone {k j} {
+    upvar 1 ckey ckey e e parents parents rootIndex rootIndex livePos livePos edges edges \
+        queue queue seen seen
+    if {$ckey eq "live"} {
+        set top [TopIndex $parents $rootIndex $e]
+        if {![dict exists $livePos $k] || $top < [dict get $livePos $k]} {
+            dict set livePos $k $top
+        }
+    } else {
+        dict set edges $ckey $k 1
+    }
+    if {![dict exists $seen $j]} {
+        dict set seen $j 1
+        lappend queue $j
+    }
 }
 
 # The monomorphization plan of checked HIR (the source build), or {diagnostics
@@ -2586,7 +2825,7 @@ proc hir::traits::Plan {hir syntax} {
     # it).
     set drop [dict create]
     dict for {block fn} $polys {
-        if {[dict get $fn trait] || [dict get $fn contextTraits] ne {} || [dict get $fn imprint]} {
+        if {[Replaces $fn]} {
             dict set drop [dict get $fn sid] 1
         }
     }
@@ -2598,8 +2837,7 @@ proc hir::traits::Plan {hir syntax} {
                 # An alias of a context-trait-dependent function.
                 set fn [hir::contexts::Denotes $hir [dict get $node binding]]
             }
-            if {$fn ne "" && [dict exists $polys $fn]
-                    && ([dict get $polys $fn trait] || [dict get $polys $fn contextTraits] ne {} || [dict get $polys $fn imprint])} {
+            if {$fn ne "" && [dict exists $polys $fn] && [Replaces [dict get $polys $fn]]} {
                 dict set drop [dict get $node sid] 1
             }
         }
@@ -2658,8 +2896,92 @@ proc hir::traits::Plan {hir syntax} {
             }
         }
     }
+    # No call of the monomorphized program names a declaration it drops,
+    # or a clone it does not make: a plan that would is the compiler's
+    # error, reported at the call, never a malformed build.
+    set diagnostics [Dangling $hir $clones $actions $drop $methods]
+    if {$diagnostics ne {}} {
+        return [dict create diagnostics $diagnostics]
+    }
     return [dict create clones $clones actions $actions place $place drop $drop \
         externals $externals methods $methods polys $polys]
+}
+
+# The plan's invariant over its call actions (TRAIT-IMPLEMENTATION-CONTEXT-
+# REQUIREMENTS-MILESTONE-1.md): every planned call of checked HIR -- ACTIONS
+# per context and call syntax, METHODS per clone function and call syntax --
+# names an identity build 2 can resolve: never a declaration DROP (by sid)
+# says the clones replace, never a clone CLONES does not have. A TRAIT-
+# INTERNAL diagnostic per violation, at the call: the actions' referents
+# are an implementation's identity ({entry NAME}, {module NS NAME}), a
+# method-syntax call's chosen function, or a clone key.
+proc hir::traits::Dangling {hir clones actions drop methods} {
+    if {[dict size $drop] == 0 && [dict size $actions] == 0} {
+        return {}
+    }
+    # The identities of the dropped declarations, and the call of each
+    # syntax node.
+    set dropped [dict create]
+    set callOf [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {![dict exists $node sid]} continue
+        switch -- [dict get $node kind] {
+            bind {
+                if {[dict exists $drop [dict get $node sid]]} {
+                    set ident [IdentOf $hir [dict get $node binding]]
+                    if {$ident ne ""} {
+                        dict set dropped $ident 1
+                    }
+                }
+            }
+            call {
+                if {![dict exists $callOf [dict get $node sid]]} {
+                    dict set callOf [dict get $node sid] $e
+                }
+            }
+        }
+    }
+    set result {}
+    set check {}
+    dict for {key action} $actions {
+        lappend check $key $action
+    }
+    dict for {k clone} $clones {
+        dict for {sid action} [dict getdef $methods [dict get $clone function] {}] {
+            if {![dict exists $actions [list $k $sid]]} {
+                lappend check [list $k $sid] $action
+            }
+        }
+    }
+    foreach {key action} $check {
+        set sid [lindex $key 1]
+        set problem ""
+        switch -- [lindex $action 0] {
+            redirect {
+                if {![dict exists $clones [lindex $action 1]]} {
+                    set problem "the specialization [lindex $action 1], which the plan does not make"
+                }
+            }
+            trait - context {
+                if {[llength $action] > 2} {
+                    if {![dict exists $clones [lindex $action 2]]} {
+                        set problem "the clone [lindex $action 2] of [dict get [lindex $action 1] implementation], which the plan does not make"
+                    }
+                } elseif {[dict exists $dropped [dict get [lindex $action 1] impl]]} {
+                    set problem "the implementation [dict get [lindex $action 1] implementation], a declaration the monomorphized program replaces by its clones"
+                }
+            }
+            method {
+                if {[dict exists $dropped [lindex $action 1]]} {
+                    set problem "[lindex $action 1 end], a declaration the monomorphized program replaces by its clones"
+                }
+            }
+        }
+        if {$problem ne "" && [dict exists $callOf $sid]} {
+            lappend result [list TRAIT-INTERNAL "the trait plan makes this call call $problem: no such function exists in the monomorphized program" [dict get $callOf $sid]]
+        }
+    }
+    return $result
 }
 
 # The most specializations one imprinted function gets for the bindings of
@@ -2869,13 +3191,17 @@ proc hir::traits::WitnessText {params} {
 }
 
 proc hir::traits::SetAction {actionsVar diagnosticsVar ckey sid action e} {
-    upvar 1 $actionsVar actions $diagnosticsVar diagnostics
+    upvar 1 $actionsVar actions $diagnosticsVar diagnostics bound bound
     set key [list $ckey $sid]
     if {[dict exists $actions $key] && [dict get $actions $key] ne $action} {
         lappend diagnostics [list TRAIT-INTERNAL "conflicting specializations of one expression: [dict get $actions $key] and $action" $e]
         return
     }
     dict set actions $key $action
+    if {[lindex $action 0] in {trait context redirect}} {
+        # (What the call binds: PlanCalls' `bound`.)
+        dict set bound $key $action
+    }
 }
 
 # The index (in ROOTINDEX) of the top-level statement expression E is in.

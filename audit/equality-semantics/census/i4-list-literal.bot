@@ -1,0 +1,4 @@
+# I4 an untyped parameter compared with a List literal: what a concrete contract List[int] would reject
+fn same_list?(xs):
+    xs == [1, 2]
+[same_list?([1, 2]), same_list?([]), same_list?(["a"]), same_list?("12")]

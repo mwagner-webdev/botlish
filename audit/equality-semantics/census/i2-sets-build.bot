@@ -1,0 +1,7 @@
+# I2 building a set of two callables compares them
+import std::immutable_set
+fn f(x):
+    x
+fn g(x):
+    x
+std::immutable_set::from_list([f, g])

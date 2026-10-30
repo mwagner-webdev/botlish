@@ -1,0 +1,6 @@
+# I2 Lists of DecimalRounded values through an untyped function
+fn two() -> DecimalRounded{minDecimalsPreserved: 2}:
+    1.25
+fn same?(a, b):
+    a == b
+same?([two()], [two()])

@@ -2181,8 +2181,10 @@ proc hir::resolve::ResolveIdent {hirVar e ident ctx} {
 }
 
 # Resolves call E (syntax NODE) as the trait plan's ACTION says: {redirect
-# KEY} calls clone KEY, {trait IDENT ...} the implementation IDENT names, the
-# receiver of a method-syntax call becoming the first argument; {context
+# KEY} calls clone KEY, {trait OPERATION ?KEY?} the implementation the
+# operation record names (or, with KEY, that implementation's clone: one the
+# plan replaces), the receiver of a method-syntax call becoming the first
+# argument; {context
 # OPERATION ?KEY?} the selected context's implementation of a context-trait
 # operation (or, with KEY, that implementation's own clone), with the written
 # arguments only -- the context-trait binding that was the receiver is no
@@ -2247,7 +2249,13 @@ proc hir::resolve::ResolvePlannedCall {hirVar e node action ctx} {
             ResolveIdent hir $c [list clone [lindex $action 1]] $ctx
         }
         trait {
-            ResolveIdent hir $c [dict get [lindex $action 1] impl] $ctx
+            if {[llength $action] > 2} {
+                # (An implementation the plan replaces by its clone:
+                # hir::traits::CallImplementationClone.)
+                ResolveIdent hir $c [list clone [lindex $action 2]] $ctx
+            } else {
+                ResolveIdent hir $c [dict get [lindex $action 1] impl] $ctx
+            }
             SetField hir $e traitImpl [lindex $action 1]
         }
         method {

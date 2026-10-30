@@ -1,0 +1,5 @@
+# I8 the warning's respelling as an ImmutableSet needle
+import std::immutable_set
+fn dash?(s: ImmutableSet[str]) -> bool:
+    s.contains('-')
+dash?(std::immutable_set::from_list(["-"]))

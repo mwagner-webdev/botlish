@@ -255,6 +255,12 @@ proc hir::format::TypeDecl {entry} {
                 }
             }] {, }]\] "
         }
+        if {[dict exists $entry identity]} {
+            # A declared identity (REPRESENTATION-INDEPENDENT-VALUE-
+            # IDENTITY.md): "identity FORM(F1,F2) ", printed only for one.
+            set identity [dict get $entry identity]
+            append opaque "identity [dict get $identity form]([join [dict get $identity fields] ,]) "
+        }
         return "struct [dict get $entry id] name [dict get $entry name] ns [if {$ns eq ""} {string cat "-"} else {set ns}] ${opaque}fields [join $fields {, }]"
     }
     set domain [dict get $entry domain]

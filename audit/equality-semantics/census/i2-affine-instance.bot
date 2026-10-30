@@ -1,0 +1,6 @@
+# I2 an affine value reaching == through an untyped function
+import std::ffi::c
+fn same?(a, b):
+    a == b
+p = std::ffi::c::null[std::ffi::c::Int]()
+same?(p, 1)

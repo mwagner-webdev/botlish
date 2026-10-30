@@ -1,0 +1,8 @@
+# I5 a CHECKED inferred contract is not part of a Fn type: a str function stored as Fn{args: [int]} and called with an Int
+import std::str
+struct H:
+    f: Fn{args: [int], return: bool}
+fn len1?(s):
+    std::str::length(s) == 1
+h = H {f: len1?}
+h.f(5)

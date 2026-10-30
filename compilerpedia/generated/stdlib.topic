@@ -9146,6 +9146,277 @@ they compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
 result, no math library beyond these, and no bit-level access to a Float64.
 
+@topic stdlib.std::immutable_map::ImmutableMap
+title: std::immutable_map::ImmutableMap -- Opaque struct of module std::immutable_map
+summary: The opaque struct std::immutable_map::ImmutableMap of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::ImmutableMap
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    opaque struct ImmutableMap[K satisfies Hashable, V]:
+        keys: List[K]
+        vals: List[V]
+        hashes: List[int]
+        index: List[int]
+        identity associations(keys, vals)
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::ImmutableMap.
+
+@topic stdlib.std::immutable_map::ImmutableMapEntry
+title: std::immutable_map::ImmutableMapEntry -- Struct of module std::immutable_map
+summary: One association of a map, as a loop over it visits it.
+index: stdlib
+symbol: std::immutable_map::ImmutableMapEntry
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    struct ImmutableMapEntry[K, V]:
+        key: K
+        value: V
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::ImmutableMapEntry.
+
+== DESCRIPTION
+One association of a map, as a loop over it visits it.
+
+@topic stdlib.std::immutable_map::KeyNotFound
+title: std::immutable_map::KeyNotFound -- Error of module std::immutable_map
+summary: A key with no association in the map.
+index: stdlib
+symbol: std::immutable_map::KeyNotFound
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    error KeyNotFound
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::KeyNotFound.
+
+== DESCRIPTION
+A key with no association in the map.
+
+@topic stdlib.std::immutable_map::OrderMismatch
+title: std::immutable_map::OrderMismatch -- Error of module std::immutable_map
+summary: A candidate order that does not hold exactly the map's keys.
+index: stdlib
+symbol: std::immutable_map::OrderMismatch
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    error OrderMismatch
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::OrderMismatch.
+
+== DESCRIPTION
+A candidate order that does not hold exactly the map's keys.
+
+@topic stdlib.std::immutable_map::empty
+title: std::immutable_map::empty -- Function of module std::immutable_map
+summary: The function std::immutable_map::empty of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::empty
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn empty() -> ImmutableMap[K, V]:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::empty or, as a method, receiver.empty(...).
+
+@topic stdlib.std::immutable_map::length
+title: std::immutable_map::length -- Function of module std::immutable_map
+summary: The function std::immutable_map::length of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::length
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn length(m: ImmutableMap[K, V]) -> int:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::length or, as a method, receiver.length(...).
+
+@topic stdlib.std::immutable_map::empty?
+title: std::immutable_map::empty? -- Function of module std::immutable_map
+summary: The function std::immutable_map::empty? of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::empty?
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn empty?(m: ImmutableMap[K, V]) -> bool:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::empty? or, as a method, receiver.empty?(...).
+
+@topic stdlib.std::immutable_map::contains
+title: std::immutable_map::contains -- Function of module std::immutable_map
+summary: The function std::immutable_map::contains of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::contains
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn contains(m: ImmutableMap[K, V], key: K) -> bool:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::contains or, as a method, receiver.contains(...).
+
+@topic stdlib.std::immutable_map::at
+title: std::immutable_map::at -- Function of module std::immutable_map
+summary: The function std::immutable_map::at of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::at
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn at(m: ImmutableMap[K, V], key: K) -> V errors KeyNotFound:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::at or, as a method, receiver.at(...).
+
+@topic stdlib.std::immutable_map::order
+title: std::immutable_map::order -- Function of module std::immutable_map
+summary: M's keys in M's iteration order
+index: stdlib
+symbol: std::immutable_map::order
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn order(m: ImmutableMap[K, V]) -> std::mutable_set::MutableSet[K]:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::order or, as a method, receiver.order(...).
+
+== DESCRIPTION
+M's keys in M's iteration order: a MutableSet of exactly M's keys, which the
+compiler knows it is (an order M.reordered admits). O(n).
+
+@topic stdlib.std::immutable_map::validate_order
+title: std::immutable_map::validate_order -- Function of module std::immutable_map
+summary: CANDIDATE unchanged, once checked to hold exactly M's keys, in any order (OrderMismatch otherwise)
+index: stdlib
+symbol: std::immutable_map::validate_order
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn validate_order(m: ImmutableMap[K, V], candidate: std::mutable_set::MutableSet[K]) -> std::mutable_set::MutableSet[K] errors OrderMismatch:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::validate_order or, as a method,
+receiver.validate_order(...).
+
+== DESCRIPTION
+CANDIDATE unchanged, once checked to hold exactly M's keys, in any order
+(OrderMismatch otherwise): the compiler then knows it is an order of M.
+O(n), no key hashed again.
+
+@topic stdlib.std::immutable_map::reordered
+title: std::immutable_map::reordered -- Function of module std::immutable_map
+summary: The map of M's associations in ORDER's order
+index: stdlib
+symbol: std::immutable_map::reordered
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn reordered(m: ImmutableMap[K, V], order: std::mutable_set::MutableSet[K]) -> ImmutableMap[K, V]:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::reordered or, as a method, receiver.reordered(...).
+
+== DESCRIPTION
+The map of M's associations in ORDER's order: equal to M (the same
+associations), with the same hashes, iterating in ORDER's order. ORDER must
+be known to hold exactly M's current keys (order, validate_order:
+REORDER-NOT-PROVEN otherwise); nothing is checked at run time. O(n), no key
+hashed again.
+
+@topic stdlib.module.std::immutable_map
+title: std::immutable_map -- standard namespace
+summary: ImmutableMap[K, V], an immutable, insertion-ordered map of Hashable keys whose equality and hashes are its associations' (REPRESENTATION-INDEPENDEN.
+index: stdlib
+symbol: std::immutable_map
+
+== DESCRIPTION
+  m.freeze()                       (std::mutable_map) the ImmutableMap of a
+                                   MutableMap's current associations, in
+                                   its current order
+  std::immutable_map::empty[K, V]()
+                                   the map with no association
+  m.length()                       the number of associations
+  m.empty?()                       whether there is none
+  m.contains(key)                  whether KEY has an association
+  m.at(key)                        KEY's value, or the error KeyNotFound
+  m.order()                        the keys in their order: a
+                                   std::mutable_set::MutableSet[K] of
+                                   exactly m's keys, known so
+  m.validate_order(candidate)      CANDIDATE, once checked to hold exactly
+                                   m's keys (any order), or OrderMismatch
+  m.reordered(order)               the map with m's associations in
+                                   ORDER's order: ORDER must be known to
+                                   hold exactly m's keys
+  loop e in m:                     every association, in order, as an
+                                   ImmutableMapEntry[K, V]
+  a == b, hash(m)                  by the associations, in no order
+
+An ImmutableMap is an immutable VALUE. Its *identity* is its associations --
+which keys map to which values -- and nothing else: two maps holding the
+same associations are equal (`==`) and hash equally, publicly and in the
+standard library's keyed tables, whatever order they iterate in and however
+they were built. Its *order* is observable and is no part of its identity: a
+loop visits the associations in the order the map was frozen with (its
+MutableMap's insertion order, or the last reorder's), and `reordered`
+returns an equal map that iterates in another order.
+
+It is Equatable exactly when V is (K, being Hashable, always is), and
+Hashable exactly when V is: a map of Hashable keys and values may itself be
+a key of a map, an element of a set or a field of a Hashable value.
+
+Expected cost: O(1) for contains and at, O(n) for freeze, a loop, equality
+and either hash (no sort, no key hashed again by equality's own lookup
+structure beyond one table hash per key), O(n) for order, validate_order and
+reordered.
+
+The representation is std::ordered_table's, frozen into Lists, opaque: no
+program sees a slot, a stored hash or a capacity, and no equality or hash
+reads them (the `identity` clause below).
+
+== SOURCE
+stdlib/immutable_map.bot (import std::immutable_map).
+
+== MEMBERS
+    std::immutable_map::ImmutableMap opaque struct
+    std::immutable_map::ImmutableMapEntry struct -- One association of a ma...
+    std::immutable_map::KeyNotFound error -- A key with no association in t...
+    std::immutable_map::OrderMismatch error -- A candidate order that does ...
+    std::immutable_map::at         function
+    std::immutable_map::contains   function
+    std::immutable_map::empty      function
+    std::immutable_map::empty?     function
+    std::immutable_map::length     function
+    std::immutable_map::order      function -- M's keys in M's iteration order
+    std::immutable_map::reordered  function -- The map of M's associations ...
+    std::immutable_map::validate_order function -- CANDIDATE unchanged, onc...
+
+Each member is a topic: -help NAME (e.g. -help
+std::immutable_map::ImmutableMap).
+
 @topic stdlib.std::immutable_set::contains
 title: std::immutable_set::contains -- intrinsic of namespace std::immutable_set
 summary: Whether a value is a member of an ImmutableSet (by ==), written s.contains(v); total: an absent value or one of another kind is false.
@@ -13526,6 +13797,27 @@ only the iteration order changes. ORDER must be known to hold exactly M's
 current keys (order, validate_order: REORDER-NOT-PROVEN otherwise); nothing
 is checked at run time. O(n), no key hashed again.
 
+@topic stdlib.std::mutable_map::freeze
+title: std::mutable_map::freeze -- Function of module std::mutable_map
+summary: The ImmutableMap of M's current associations, in M's current order
+index: stdlib
+symbol: std::mutable_map::freeze
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn freeze(m: MutableMap[K, V]) -> std::immutable_map::ImmutableMap[K, V]:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::freeze or, as a method, receiver.freeze(...).
+
+== DESCRIPTION
+The ImmutableMap of M's current associations, in M's current order: its live
+entries copied into Lists (keys, values and their stored hashes, so nothing
+is hashed again) and an index of them at M's own slot count. M is a value
+parameter, so nothing later done to the caller's map reaches the result, and
+the result is never changed. O(n + slots).
+
 @topic stdlib.module.std::mutable_map
 title: std::mutable_map -- standard namespace
 summary: MutableMap[K, V], a mutable, insertion-ordered map of Hashable keys (ORDERED-MUTABLE-MAP-SET.md).
@@ -13562,6 +13854,13 @@ symbol: std::mutable_map
   loop e in m:                              every entry, in insertion order
                                             (or the last reorder's), as a
                                             MutableMapEntry[K, V]
+  m.freeze()                                the std::immutable_map::
+                                            ImmutableMap of m's current
+                                            associations, in m's current
+                                            order: an immutable value,
+                                            equal and hashed by its
+                                            associations, which no later
+                                            change of m reaches
 
 A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing m,
 returning it, storing it in a struct) makes a logical copy, and mutating one
@@ -13600,6 +13899,7 @@ stdlib/mutable_map.bot (import std::mutable_map).
     std::mutable_map::contains     function
     std::mutable_map::create       function
     std::mutable_map::empty?       function
+    std::mutable_map::freeze       function -- The ImmutableMap of M's curr...
     std::mutable_map::length       function
     std::mutable_map::order        function -- M's keys in M's iteration order
     std::mutable_map::remove       function
@@ -13814,6 +14114,27 @@ order changes. ORDER must be known to hold exactly S's current elements
 (order, a copy, validate_order: REORDER-NOT-PROVEN otherwise); nothing is
 checked at run time. O(n), no element hashed again.
 
+@topic stdlib.std::mutable_set::freeze
+title: std::mutable_set::freeze -- Function of module std::mutable_set
+summary: The ImmutableSet of S's current elements
+index: stdlib
+symbol: std::mutable_set::freeze
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn freeze(s: MutableSet[T]) -> ImmutableSet[T]:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::freeze or, as a method, receiver.freeze(...).
+
+== DESCRIPTION
+The ImmutableSet of S's current elements: equal to another exactly when
+their members are, and hashed by its members, whatever the order. S is a
+value parameter, so nothing later done to the caller's set reaches it. The
+intrinsic set deduplicates by hash, so this is O(n) expected (its elements
+are distinct already).
+
 @topic stdlib.module.std::mutable_set
 title: std::mutable_set -- standard namespace
 summary: MutableSet[T], a mutable, insertion-ordered set of Hashable elements (ORDERED-MUTABLE-MAP-SET.md).
@@ -13847,6 +14168,11 @@ symbol: std::mutable_set
                                           exactly s's elements
   loop x in s:                            every element, in insertion order
                                           (or the last reorder's)
+  s.freeze()                              the ImmutableSet[T] of s's
+                                          current elements: an immutable
+                                          value, equal and hashed by its
+                                          members, which no later change
+                                          of s reaches
 
 A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
 copy, and mutating one copy never changes another. The mutating operations
@@ -13878,6 +14204,7 @@ stdlib/mutable_set.bot (import std::mutable_set).
     std::mutable_set::contains     function
     std::mutable_set::create       function
     std::mutable_set::empty?       function
+    std::mutable_set::freeze       function -- The ImmutableSet of S's curr...
     std::mutable_set::length       function
     std::mutable_set::order        function -- S's elements in S's iteratio...
     std::mutable_set::remove       function

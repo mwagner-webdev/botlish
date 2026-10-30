@@ -1,0 +1,55 @@
+# I6 an invalid instance (big(n): n > 5 given a str through apply) requested before 16 other instances of apply
+fn big(n):
+    n > 5
+fn apply(g, x):
+    g(x)
+fn k1(n):
+    n
+fn k2(n):
+    n
+fn k3(n):
+    n
+fn k4(n):
+    n
+fn k5(n):
+    n
+fn k6(n):
+    n
+fn k7(n):
+    n
+fn k8(n):
+    n
+fn k9(n):
+    n
+fn k10(n):
+    n
+fn k11(n):
+    n
+fn k12(n):
+    n
+fn k13(n):
+    n
+fn k14(n):
+    n
+fn k15(n):
+    n
+fn k16(n):
+    n
+bad = apply(big, "a")
+r1 = apply(k1, 1)
+r2 = apply(k2, 2)
+r3 = apply(k3, 3)
+r4 = apply(k4, 4)
+r5 = apply(k5, 5)
+r6 = apply(k6, 6)
+r7 = apply(k7, 7)
+r8 = apply(k8, 8)
+r9 = apply(k9, 9)
+r10 = apply(k10, 10)
+r11 = apply(k11, 11)
+r12 = apply(k12, 12)
+r13 = apply(k13, 13)
+r14 = apply(k14, 14)
+r15 = apply(k15, 15)
+r16 = apply(k16, 16)
+bad

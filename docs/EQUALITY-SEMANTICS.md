@@ -1,5 +1,16 @@
 # EQUALITY-SEMANTICS.md
 
+> Partially superseded by the semantic census,
+> [EQUALITY-SEMANTIC-CENSUS.md](../audit/equality-semantics/EQUALITY-SEMANTIC-CENSUS.md).
+> Its comparability relation also rejects applications that differ only in
+> type arguments (a slot no field names lets their values be equal) and
+> disjoint integer domains (a fact about values, not a different kind); the
+> census recommends structural comparability. Its Level 1 check in semantic
+> instances would make validity depend on instance budgets; the census
+> recommends the generic HIR only. Its Level 2 contracts would have to be
+> kind-level CHECKED requirements, which callable conversion erases. The
+> census's section 12 is the revised first milestone.
+
 How Botlish's `==` treats operands of unrelated types, why that makes the
 `ONE-CHAR-STRING-LITERAL` warning's advice unsafe at comparisons, and a
 checked model of equality on the pattern of integer-domain admission. An

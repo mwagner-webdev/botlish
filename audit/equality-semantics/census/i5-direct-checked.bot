@@ -1,0 +1,5 @@
+# I5 the same function called directly: the checked contract rejects the call
+import std::str
+fn len1?(s):
+    std::str::length(s) == 1
+len1?(5)

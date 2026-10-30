@@ -1,0 +1,4 @@
+# I7 ImmutableSet: a needle of another kind is false, sets of disjoint element types are equal when empty
+import std::immutable_set
+s = std::immutable_set::from_list(["-", "+"])
+[s.contains('-'), s.contains("-"), s.contains(1), s == std::immutable_set::from_list([]), std::immutable_set::from_list([]) == std::immutable_set::from_list([])]

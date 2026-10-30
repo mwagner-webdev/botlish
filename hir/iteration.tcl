@@ -57,7 +57,7 @@
 namespace eval hir::iteration {
     # The iterable struct types the implementation supplies: their
     # declaration identities.
-    variable iterables {std::mutable_map::MutableMap std::mutable_set::MutableSet}
+    variable iterables {std::mutable_map::MutableMap std::mutable_set::MutableSet std::immutable_map::ImmutableMap}
     # The loop protocol's operations, by role: their names in the owner
     # namespace.
     variable operations {end iteration_end live iteration_live? at iteration_at}

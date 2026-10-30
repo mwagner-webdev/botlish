@@ -1,0 +1,4 @@
+# I8 the warning's respelling inside an anonymous struct: the same shape, a field type of another kind
+fn dash?(s: str) -> bool:
+    {c: s} == {c: '-'}
+dash?("-")

@@ -428,6 +428,75 @@ apply(f, 7)} $::byteDecl]
 } -result 1
 
 # ---------------------------------------------------------------------------
+# A parameter declared `any` obliges a caller to nothing an untyped one does
+# not: a function whose every parameter is `any` is no typed callable, and
+# passes through every erasing position as the untyped function does. One
+# typed parameter beside `any`s, or a declared error set, still bears.
+
+# Every erasing position, for the callable F that DECL declares: an
+# untyped native's argument, a List literal's element, a declared-`any`
+# parameter, an "if" join and a "return" with a non-callable, a field
+# declared `any`, an anonymous and an applied struct holding F erased as
+# List elements, and a returning loop's element past the aggregate depth.
+proc erasingPositions {decl f} {
+    dict create \
+        native-argument "${decl}$f == $f" \
+        list-element "${decl}xs = \[$f, 5\]\nxs" \
+        any-parameter "${decl}fn keep(v: any):\n    v\nkeep($f)" \
+        if-join "${decl}fn pick(flag):\n    if flag:\n        $f\n    else:\n        5\npick(true)" \
+        return "${decl}fn pick(flag):\n    if flag:\n        return $f\n    5\npick(true)" \
+        any-field "struct Box:\n    value: any\n${decl}b = Box {value: $f}\nb" \
+        struct-element "${decl}s = {handler: $f}\nxs = \[s, 5\]\nxs" \
+        applied-struct-element "struct Cell\[T\]:\n    value: T\n${decl}c = Cell {value: $f}\nxs = \[c, 5\]\nxs" \
+        collected-element "${decl}nested = \[\[\[$f\]\]\]\nys = loop x in \[1\]:\n    nested\nys"
+}
+
+# {POSITION OUTCOME ...}: accepted, or the rejection's error code and
+# whether it is the erasure diagnostic, for F (declared by DECL) in each.
+proc erasingOutcomes {decl f} {
+    set outcomes {}
+    dict for {position source} [erasingPositions $decl $f] {
+        if {[catch {surface::compile $source $position.bot} message options]} {
+            lappend outcomes $position [list [dict get $options -errorcode] \
+                [string match {*typed parameter requirements that cannot be preserved*} $message]]
+        } else {
+            lappend outcomes $position accepted
+        }
+    }
+    return $outcomes
+}
+
+test callable-escape-any-parameters-unrestricted {a function whose parameters are all declared `any` is accepted in every erasing position, exactly as the same function with untyped parameters} -body {
+    list [erasingOutcomes "fn any_only(c: any, d: any) -> bool:\n    c == d\n" any_only] \
+        [erasingOutcomes "fn untyped(c, d) -> bool:\n    c == d\n" untyped]
+} -result [lrepeat 2 {native-argument accepted list-element accepted any-parameter accepted if-join accepted return accepted any-field accepted struct-element accepted applied-struct-element accepted collected-element accepted}]
+
+test callable-escape-any-parameters-not-bearing {Bearing reads an entry type of `any` as no precondition: the exact type of an all-`any` function bears exactly what an untyped one's does} -body {
+    set h [surface::compile "fn any_only(c: any) -> bool:\n    c == '-'\nfn untyped(c) -> bool:\n    c == '-'\nfn mixed(c: any, d: int) -> bool:\n    c == d\nerror Oops\nfn errs(c: any) -> bool errors Oops:\n    if c == '-':\n        fail Oops\n    true\n" bearing.bot]
+    lmap e [hirFind $h block] {
+        if {![llength [hir::get $h $e params]]} continue
+        hir::callables::Bearing $h [hir::typeOf $h $e]
+    }
+} -result {0 0 1 1}
+
+test callable-escape-any-parameters-equality-is-dynamic {comparing an all-`any` function with itself compiles and fails at run time with EQUALITY on every backend, as the untyped function does (audit/equality-semantics/census/'s i5-declared-any-bearing and i5-untyped-not-bearing)} -body {
+    list [sourceAgree "fn char?(c: any) -> bool:\n    c == '-'\nchar? == char?"] \
+        [sourceAgree "fn char?(c) -> bool:\n    c == '-'\nchar? == char?"]
+} -result [lrepeat 2 {error {CORE SEMANTIC EQUALITY} {== is not defined for callables: <block (c)> == <block (c)>}}]
+
+test callable-escape-any-beside-typed-parameter-rejected {one typed parameter beside `any` ones still bears: rejected in every erasing position} -body {
+    erasingOutcomes "fn mixed(c: any, d: int) -> bool:\n    c == d\n" mixed
+} -result [concat {*}[lmap position {native-argument list-element any-parameter if-join return any-field struct-element applied-struct-element collected-element} {
+    list $position {{CORE SEMANTIC TYPE} 1}
+}]]
+
+test callable-escape-any-parameters-with-errors-rejected {a declared error set still bears when every parameter is `any`: rejected in every erasing position} -body {
+    erasingOutcomes "error Oops\nfn errs(c: any, d: any) -> bool errors Oops:\n    if c == d:\n        fail Oops\n    true\n" errs
+} -result [concat {*}[lmap position {native-argument list-element any-parameter if-join return any-field struct-element applied-struct-element collected-element} {
+    list $position {{CORE SEMANTIC TYPE} 1}
+}]]
+
+# ---------------------------------------------------------------------------
 # Source-defined types, not just Byte (spec #54-55)
 
 test callable-escape-source-defined-type-alias-valid {a source-defined bounded type's callable survives an exact alias} -body {

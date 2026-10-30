@@ -1,0 +1,4 @@
+# I2 a MutableArray compared with itself
+import std::mutable_array
+a = std::mutable_array::create(1, 0)
+a == a

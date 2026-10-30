@@ -2472,6 +2472,21 @@ proc hir::types::Totality {operation type {seen {}}} {
                 }
                 set parts {}
                 set shown [show $type]
+                set identity [hir::structs::identityOf $id]
+                if {$identity ne ""} {
+                    # A struct that declares its identity
+                    # (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md) is
+                    # compared and hashed by it alone: its identity fields'
+                    # elements are its components, named in the type's own
+                    # terms (its representation is its owner's), and every
+                    # other field takes no part.
+                    set fields [hir::structs::AppliedFieldTypes $type]
+                    foreach field [dict get $identity fields] label [hir::structs::IdentityLabels [dict get $identity form]] {
+                        set t [dict get $fields $field]
+                        lappend parts [list "the $label of $shown" [if {$t eq {}} {string cat any} else {elementOf $t}]]
+                    }
+                    return [Components $operation $parts [concat $seen [list $type]]]
+                }
                 foreach {name t} [hir::structs::AppliedFieldTypes $type] {
                     lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
                 }
@@ -2549,6 +2564,12 @@ proc hir::types::NoTotality {operation kind} {
 # component (the element of List[never]) it is vacuously total.
 proc hir::types::IsEqualityTotal {type} {
     return [expr {$type ne "never" && [lindex [Totality equality $type] 0] eq "total"}]
+}
+
+# {CLASS WHY}: TYPE against the intrinsic trait Equatable -- total equality
+# (Totality's equality column; REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+proc hir::types::EqualityClass {type} {
+    return [Totality equality $type]
 }
 
 # {CLASS WHY}: TYPE against the intrinsic trait Hashable -- total equality and

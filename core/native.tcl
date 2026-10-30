@@ -1398,6 +1398,9 @@ core::native::declareInternalModule std::io::bytepath
 # ... and the internal members of its public ones (declareInternalMember).
 core::native::declareInternalMember std::mutable_set::table_of
 core::native::declareInternalMember std::mutable_set::of_table
+# ... and the frozen map std::mutable_map's freeze builds from a table's
+# parts (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+core::native::declareInternalMember std::immutable_map::of_parts
 # ... and the native path of a text a platform's path module already proved
 # a valid path (WINDOWS-X86-64-MILESTONE-7.md): std::linux::path::native and
 # its siblings build it with no second validation.

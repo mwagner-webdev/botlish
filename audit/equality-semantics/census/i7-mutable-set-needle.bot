@@ -1,0 +1,5 @@
+# I7 MutableSet[str].contains with a character: a static TYPE error at the needle
+import std::mutable_set
+s = std::mutable_set::create[str]()
+s.add("-")
+s.contains('-')
