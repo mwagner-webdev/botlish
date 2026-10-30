@@ -534,12 +534,30 @@ the same size (848,120 bytes for the identity program, 3,675,080 for the
 SDL one): the policy is a word of the record and a link flag.
 
 **Without the checkout, Cargo or rustup, from a path with a space and
-non-ASCII characters** -- macos-arm64.yml's `main-thread-startup` job
-(`$RUNNER_TEMP/Prögram Fïles/Botlish.app`; the checkout, `~/.cargo` and
-`~/.rustup` moved away and no `cargo`, `rustc` or `rustup` on PATH; a
-main-thread and a worker executable built, their LC_MAIN, their thread by
-`pthread_main_np` through a C call and a kept coroutine, the startup
-report, the signature after): section 31.
+non-ASCII characters [executed, macOS AArch64]** (macos-arm64.yml run
+41036399870 at 44a5b4fa, the `main-thread-startup` job). The application
+from the run's `app` job, verified by its checksum and `codesign --verify
+--deep --strict`, was unpacked to `$RUNNER_TEMP/Prögram Fïles/Botlish.app`;
+the checkout, `~/.cargo` and `~/.rustup` were moved away and every PATH
+directory holding `cargo`, `rustc` or `rustup` left out, the step requiring
+all three gone. From a directory of its own (`startup kit`) the
+application's `botlish` built `-native-startup main-thread
+-emit-native-executable identity.bot` (0.31 s) and the same program with
+the default (0.34 s), a program that calls `pthread_main_np` through `extern
+c fn`, directly and from inside a kept coroutine:
+
+* both are `Mach-O 64-bit executable arm64`; `otool -l`: the main-thread
+  one's LC_MAIN `stacksize 536870912`, the worker's `stacksize 0`;
+* the main-thread executable prints `[1, 1]` (the main thread, also in the
+  coroutine), the worker `[0, 0]`;
+* the main-thread one's startup report ends in `startup main-thread`,
+  `process-main-thread 1`, `stack 536870912 16384`;
+* the application's signature verified afterwards, and again at the job's
+  end, after the strict census and the policy's tests had used it.
+
+The first attempt (run 41004334314) stopped at the step's own check: the
+runner's rustup is Homebrew's, whose proxies stay on PATH without
+`~/.rustup` (section 31).
 
 ## 26. Cocoa/Metal graphical acceptance
 
@@ -910,6 +928,33 @@ EXECUTED-HEADLESS 13, EXECUTED-THREAD 125, FAILED-CORRECTNESS 13 (each a
 predicted one: sections 26 and 27), FAILED-BUILD 2 (the linker's 512 MB
 limit), UNAVAILABLE-GUI 0, NOT-TESTED 0; **not as predicted: none**. The
 production tree and Botlish.app's signature were unchanged after it.
+
+**Run 41036399870** (macos-arm64.yml, `workflow_dispatch` at 44a5b4fa,
+`tier acceptance`) **[executed]**: every job passed --
+
+| Job | Result |
+|---|---|
+| Botlish.app (build, verify, smoke, FFI smoke, app-test, compare, bench) | passed |
+| smoke (Tier A) | passed |
+| acceptance (Tier B), shard 1/2 | passed: 121 Tcl test files on interp, 55 golden suites, 2 checks, 0 failed |
+| acceptance (Tier B), shard 2/2 | passed: 120 Tcl test files on interp, 54 golden suites, 0 failed |
+| system linker (its tests, the executable and C test files system-linked, both under GC stress) | passed |
+| Botlish.app without developer tools | passed |
+| static SDL3 through Botlish.app | passed |
+| linux control (Tier A, ubuntu x86-64) | passed |
+| **main-thread startup** | passed: the packaged step (section 25); the strict census -- env, identity, stack, c-graphical, botlish-baseline, candidate A, semantics, startup, controls, timing: EXECUTED-COCOA 8, EXECUTED-HEADLESS 11, EXECUTED-THREAD 120, FAILED-CORRECTNESS 9, FAILED-BUILD 2, **not as predicted: none**; `tests/main-thread-startup.test` 24 tests, 21 passed, 3 skipped, 0 failed, plainly and under `BOTLISH_NATIVE_GC_STRESS=1`; the application untouched |
+
+With run 41029861079's Tier C (the mutants, section 29; at 4d449294, which
+differs from 44a5b4fa in `census.py` alone) and the census workflow's run
+41036403542, every macOS acceptance the milestone names has run on the
+branch's final code; the commits after 44a5b4fa change only this report.
+Linux and Windows CI ran earlier (sections 32-34: 95e3648f, 3c87f83a);
+what changed on their side since is test and harness code -- the
+main-thread tests' per-linker stack (guarded by `mainThreadStartup`),
+`mts-cli-main-thread` (macOS only), aot-facts' `LC_MAIN` parse (macOS
+only), the native-aot harness's CRLF reading (Windows) and the census
+rows -- run locally on Linux x86-64 (`tests/main-thread-startup.test`: 10
+passed, 14 skipped by host, 0 failed; `tests/golden-duplicates.test`).
 
 ## 32. Linux x86-64 CI results
 
