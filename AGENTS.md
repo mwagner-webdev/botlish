@@ -4194,6 +4194,17 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
 * No entitlement, no `--deep`, no JIT or library-validation exception: the
   game needs none. The hardened runtime is on in every mode, so ordinary CI
   plays the bundle under it.
+* No job changes a trust setting (`add-trusted-cert`, `authorizationdb
+  write`, `spctl --master-disable`): a release trusts Apple's root, which
+  is the system's, and the dry run's throwaway identity, which no runner
+  can trust without a person, has its signature classified
+  ENVIRONMENT-BLOCKED -- only codesign's chain refusal, never any other
+  failure, and never counted as passed.
+* The notarization key must be laid out as App Store Connect's .p8 (the
+  curve inside its ECPrivateKey): notarytool 1.0.0 (38) traps, printing
+  nothing, on the same key re-encoded without it, so the preflight refuses
+  that layout, and the fixtures make Apple's (`fixtures.apple_p8`). Relax
+  it only with a notarytool version's evidence.
 * A notarization timeout is not a rejection: resume the submission
   (`notarize --resume ID`; the workflow's `resume_run` and
   `resume_submission`), never upload another copy for it.

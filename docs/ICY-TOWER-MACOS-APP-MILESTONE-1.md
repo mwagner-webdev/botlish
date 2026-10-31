@@ -75,7 +75,52 @@ The macOS evidence is GitHub's macos-15 runners' (Apple Silicon), through
 
 ## 1. Result
 
-RESULT-PLACEHOLDER
+**Ready for a credentialed release; the release itself has not run.** The
+seven GitHub values (section 10) are not configured, so the Developer ID
+signature, notarization, stapling, Gatekeeper's notarized verdict, the
+notarized download played and the GitHub Release are **Credential-blocked**
+(section 44). Everything before them, and every check after them, is
+implemented, tested against recording stand-ins of Apple's tools, and as
+far as a runner allows, run on macOS:
+
+* **Executed** (run 41224177467, every step green; and runs 41201527696
+  to 41224177467): `Icy Tower.app` assembled from build-macos.sh's
+  executable byte for byte (3,772 KiB, a validated Info.plist, two
+  licenses), signed ad hoc with the hardened runtime, verified strictly,
+  refused when tampered with, refused by Gatekeeper, packaged and verified
+  from a fresh extraction; LaunchServices recognizes it and starts it as
+  the Finder does (launchd its parent, no arguments, the working
+  directory `/`, frontmost by itself) with the build's products hidden;
+  it plays under the hardened runtime (keys, relaunch, its close button,
+  GC stress); every startup and runtime failure reaches a person in an
+  alert while the terminal run stays silent; the quarantined download of
+  a non-notarized build is refused by Gatekeeper's real first-launch
+  dialog. The earlier milestone's graphical acceptance is kept whole
+  (12 of 12 cases).
+* **Executed, the credential path**: the preflight's 63 tests (every
+  mistake of the brief's table, each with its code and remedy, no secret
+  printed, nothing written), the stages' 63 tests, the workflow's 23 trust
+  tests, and 70 of 70 mutants killed, on Linux and on macOS; on the
+  runner, a rehearsal with a throwaway identity: the preflight, the
+  temporary keychain, the identity selected by its SHA-1, Apple's own
+  answer to an unknown key (HTTP 401, classified MACOS-NOTARY-AUTH), never
+  publishable, the cleanup verified.
+* **Environment-blocked**: the rehearsal's signature. codesign signs only
+  with a chain that reaches a trusted root, and a runner cannot trust a
+  throwaway root without a person (section 25). No trust setting is
+  changed by any job.
+* **Found on the way, and handled**: notarytool 1.0.0 (38) crashes,
+  printing nothing, on a .p8 re-encoded without the curve inside its
+  ECPrivateKey (the runner's A/B: Apple's layout reaches Apple, the other
+  traps). The preflight refuses such a key with the remedy (section 18).
+  `store-credentials` gives no reason for a refusal; the release asks Apple
+  why with one read request (section 20).
+* **Not this milestone's, recorded**: the earlier milestone's `restart`
+  case failed intermittently (section 34); the macOS integration's
+  mutants: MUTANTS-RESULT.
+
+Linux and Windows are unchanged (section 41): no shared module changed, and
+their workflows pass.
 
 ## 2. Starting executable and native dependencies
 
@@ -723,7 +768,18 @@ dry run in ordinary CI). The runs established, in this order:
    The fixtures now make App Store Connect's layout, and the preflight
    refuses the other (section 18): a real .p8 re-encoded by a tool would
    otherwise reach notarytool and fail with no message at all.
-3. NOTARY-AUTH-RUN
+3. With both changes, in one run (41224177467): `store-credentials` printed
+"Credential validation failed. Please verify your inputs.", notary-auth's
+read request got Apple's answer and classified it --
+
+       $ xcrun notarytool history --key .../notary-key.p8 --key-id DRYRUN0000 --issuer 7a12c2b0-... --output-format json
+       MACOS-NOTARY-AUTH: The key is structurally valid, but Apple's notarization service rejected the configured Key ID / Issuer ID / private-key combination
+       Error: HTTP status code: 401. Unauthenticated. Ensure that all authentication arguments are correct.
+
+   -- and the control, the same key without the curve in its
+   ECPrivateKey, asked the same way, trapped (`notarytool exited 133:
+   ... Trace/BPT trap: 5`). The dry run requires MACOS-NOTARY-AUTH or
+   MACOS-NOTARY-SERVICE here, and fails on anything else.
 
 **Credential-blocked**: Apple's acceptance of the release's real key
 (`notary-auth: Apple validated the Key ID, the Issuer ID and the key
@@ -1132,15 +1188,26 @@ The milestone keeps the earlier acceptance whole and adds the bundle's.
   binding's ABI (123 checks) and macos_app.bot's (26 checks, 0 failed), the
   staged application moved and rebuilt by Botlish.app alone.
 
-The original session failed twice in this milestone's runs, both times
-intermittently: once in an early run its `restart` case (the player not yet
-centred in round 2; the earlier milestone's case, which passed when run
-again), and once in run 41205557290 (commit c0f3165), whose log was lost
-when that run, hung in another step, was cancelled, so the failing case is
-not known. It passed in runs 41197431104, 41201527696, 41207619549,
-41210576736 and 41212691891. It is recorded as an intermittent failure
-whose second occurrence has no known cause, not as passed. The Developer
-ID-signed application played under the hardened runtime (section 27) is
+The original session (the earlier milestone's cases, unchanged here)
+failed intermittently, three times in this milestone's runs, never in a
+case of the bundle:
+
+* run 41220843007 (and an early run of this milestone): `restart`, `FAIL
+  R: the new game's player centred, its feet at view row 645 ...`. The
+  check is of the player's x as well as its feet: the round's summary ends
+  `x=434` -- round 2's player ran to the right wall, as if Right were still
+  held. The case sends Right's key-up and waits at least 0.5 s before it
+  taps R, so a key-up reached the game after R or was not seen at all;
+  which, the runs do not show.
+* run 41205557290 (commit c0f3165): its log was lost when that run, hung
+  in another step, was cancelled, so the failing case is not known.
+
+It passed in runs 41197431104, 41201527696, 41207619549, 41210576736,
+41212691891, 41217612371, 41219310772 and 41224177467. It is recorded as a
+pre-existing intermittent failure of the earlier milestone's keyboard case
+whose cause is not established, not as passed; this milestone changes
+neither the game nor that harness case. The Developer ID-signed
+application played under the hardened runtime (section 27) is
 **Credential-blocked**.
 
 ## 35. Clean-environment independence
@@ -1357,7 +1424,30 @@ notarization, stapling, the notarized download played) have no timing:
 
 ## 43. macOS CI runs
 
-RUNS-PLACEHOLDER
+`icy-tower (macos arm64)` on this milestone's branch, macos-15 (macOS
+15.8.2, Xcode 16.4, Apple clang 17.0.0, SDK 15.5), in order. A cancelled
+run was superseded by the next push unless said otherwise.
+
+| run | commit | conclusion | what it established |
+|---|---|---|---|
+| 41195624753 | c2c55c2 | failure | the build and the original graphical acceptance passed; the macOS test section failed (the bundle test compared `shasum` lines, paths included: it compares digests since) and the release tooling's environment did not install (no pinned wheel for the image's Python: a pinned Python 3.13 since), so no bundle step ran |
+| 41197431104 | 593e4f5 | failure | every LaunchServices case ran (sections 5, 6, 8: the evidence quoted there); two checks read the helper's Objective-C booleans wrongly (fixed); the Gatekeeper case's `open` waited for the dialog (run beside it since) |
+| 41201527696 | 08ef6f4 | failure | every graphical and LaunchServices case EXECUTED; the dry run's signature refused by codesign ("unable to build chain to self-signed root", section 25) |
+| 41205557290 | c0f3165 | cancelled | the dry run's `sudo security add-trusted-cert -d` waited for SecurityAgent's dialog (cancelled by hand); the original session failed (log lost) |
+| 41207619549 | e0231c4 | failure | every case EXECUTED; the dry run's trust change, its output discarded, failed |
+| 41210576736 | a6e32b0 | failure | every case EXECUTED, the LaunchServices cases with the build hidden; the admin trust settings' rule cannot be lifted (`NO (-60005)`), the rule unchanged |
+| 41212691891 | 246076d | failure | every case EXECUTED (the acceptance evidence quoted in sections 4 to 42); 68 of 68 release mutants; notary-auth unclassified (notarytool printed nothing) |
+| 41217612371 | e9d7c57 | failure | notarytool trapped (exit -5) on the throwaway key, in cryptography's layout |
+| 41219310772 | fbc6b54 | failure | `--verbose`: the trap at "Generating new JWT", before any request; no crash report |
+| 41220843007 | 7c78a33 | failure | the key in App Store Connect's layout: Apple's HTTP 401 (section 20); the original session's `restart` failed (section 34) |
+| **41224177467** | **ba18cda** | **success** | every step: the build, the 12 tests, the oracle, the original graphical acceptance (12 of 12 EXECUTED), the release tooling's tests and 70 of 70 mutants, the ad hoc bundle, the LaunchServices acceptance (13 of 13 EXECUTED, the build hidden), the dry run (MACOS-NOTARY-AUTH from Apple; the control trapped; the signature ENVIRONMENT-BLOCKED; never publishable; cleanup verified) |
+| MUTANTS-RUN | | | the macOS integration's mutants (`mutants: true`) |
+
+The general workflows started by the same pushes: `icy-tower (windows
+x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531) and ba18cda
+(41224177532); `icy-tower` (Linux) passed at c0f3165 (41205692581, a
+manual run); `tests (macos arm64)` and `tests (windows x86-64)` were
+cancelled by each next push until ba18cda, GENERAL-TESTS.
 
 ## 44. The release run and its notarization
 
@@ -1429,8 +1519,22 @@ its run ID and notarization submission ID belong here.
   the Developer ID-signed application played, notarization, stapling,
   Gatekeeper's notarized verdict, the notarized download launched and the
   publication are implemented, tested against stand-ins of Apple's tools
-  and rehearsed on the runner up to Apple's service with a throwaway
-  identity (section 25), and not yet run by Apple (section 44).
+  and rehearsed on the runner with a throwaway identity up to Apple's
+  service (section 20), and not yet run by Apple (section 44).
+* **The rehearsal cannot sign (Environment-blocked).** codesign refuses an
+  identity whose root the system does not trust, and a GitHub-hosted
+  runner cannot trust a throwaway root without a person (SecurityAgent's
+  dialog; the admin trust settings' rule refuses root, `NO (-60005)`). So
+  codesign with a keychain identity -- the release's own sign stage, its
+  `--keychain` and SHA-1 selection on a real keychain -- has run against
+  the stand-ins and as far as codesign's chain check on the runner, never
+  to a signature; the first release is its first run.
+* **notarytool's dependence on the key's layout** was observed with
+  notarytool 1.0.0 (38) (Xcode 16.4). The preflight refuses the layout
+  that version traps on; a later notarytool may accept it, and the rule
+  can then be relaxed with the evidence of that version.
+* **An intermittent failure of the earlier milestone's `restart` case**
+  (section 34): its cause is not established.
 * **The runner's SIP.** GitHub's macOS runners report System Integrity
   Protection disabled (MACOS-AARCH64-MILESTONE-9.md, section 41; the
   session records `csrutil status`), where the hardened runtime may be
