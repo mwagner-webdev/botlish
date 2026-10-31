@@ -838,8 +838,17 @@ bcacf3c8), success -- the Windows executable built from the same shared
 modules and tested, the tests file's new Linux and macOS tests skipped
 there by their constraints. On the acceptance commit 9340caef: run
 41164897203, success. The general Windows workflow (`tests (windows
-x86-64)`, run 41164897164) covers nothing this milestone changed but the
-shared test file: PENDING.
+x86-64)`, run 41164897164): the smoke job (the Windows-relevant test
+files, tests/workload-icy-tower.test among them), the four acceptance
+shards and the system linker passed. Its `root plans` job failed one Rust
+test of the fallback-roots build, `codegen::clif::win64_variadic_tests::
+ffi_win64_variadic_integers_direct`, whose captured registers held another
+test's doubles (0.5, -1.25, 6.0, ...): the module's tests share one
+`static mut CAPTURED` buffer and cargo runs them on parallel threads. This
+branch changes nothing in `native/` (its diff from the merge base has no
+file there), and the same job passes on main (run 41134581250): a race in
+that test module, recorded here and left to its owner, not fixed in this
+milestone. The failed job was run again: PENDING.
 
 ## 35. Mutation testing
 
@@ -976,8 +985,13 @@ The other workflows on the acceptance commit: `icy-tower` (Linux) run
 41164900037 success, `icy-tower (windows x86-64)` run 41164897203
 success; `tests (macos arm64)` (macos-arm64.yml: the link-plan-sdl3 job,
 whose archive recipe moved into `sdl3-static-macos.sh`, and the
-main-thread-startup job) run 41164897166 and `tests (windows x86-64)` run
-41164897164: PENDING.
+main-thread-startup job) run 41164897166: the Botlish.app job, the smoke
+tier, the Linux control, the system linker (also under GC stress), the
+application without developer tools, `static SDL3 through Botlish.app`
+(link-plan-sdl3.sh on the shared recipe) and `main-thread startup` (its
+static SDL3 through the application, the graphical census `--strict`, the
+policy's tests plainly and under GC stress) passed; the acceptance tier's
+two shards: PENDING. `tests (windows x86-64)` run 41164897164: section 34.
 
 ## 39. Generated artifacts and their provenance
 
