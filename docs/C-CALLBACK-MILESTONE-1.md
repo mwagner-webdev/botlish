@@ -318,7 +318,7 @@ locked instruction on the transition's path).
 Then the callback runs nested in that Vm: `ACTIVE` is cleared (the Vm is no
 longer waiting in C: a C call the callback makes needs its own transition,
 and a pointer C calls from a non-transition call made by the callback is
-INACTIVE), its segment is pushed (section 6), and on return both are
+INACTIVE: `cb-refused-inside-callback`), its segment is pushed (section 6), and on return both are
 restored exactly -- the segment popped, the Vm waiting in C again, so C
 may call the callback again during the same call (`cb-decisions`: a
 thousand calls in one C loop) and nested transitions stack
@@ -551,6 +551,7 @@ under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site)
 | `cb-refused-thread` | calls a callback on a pthread while the Botlish thread waits | NATIVE CALLBACK THREAD |
 | `cb-refused-stack` | calls a callback on a ucontext stack of its own (Linux) | NATIVE CALLBACK STACK |
 | `cb-refused-retained` | keeps a pointer past the call and calls it in a later call | NATIVE CALLBACK INACTIVE |
+| `cb-refused-inside-callback` | calls a kept pointer during a call (no transition) a callback makes, an outer transition open | NATIVE CALLBACK INACTIVE |
 | `cb-refused-arguments` | a `_Bool` byte 2; an address no word holds | NATIVE CALLBACK ARGUMENT |
 | `cb-failure-is-fatal` | callbacks whose bodies fail (division by zero; a NATIVE ADDRESS inside), after successful calls | NATIVE CALLBACK FAILED with the failure's code |
 | `cb-stack-exhaustion` | a callback that recurses without bound | NATIVE LIMIT STACK |
@@ -638,33 +639,70 @@ main.rs's `run_linked` passing `BOTLISH_NATIVE_ALLOC` to the executable's
 driver protocol). No instrumentation was added to allocation: the counters'
 off state is the existing single branch.
 
-BENCHMARK_TABLE
+Linux x86-64 (a 4-core container), release build, best of 7 runs, N =
+200,000 calls per scenario (`tclsh9.0 bench/c-callbacks.tcl -runs 7 -n
+200000`, 2026-10-31). ns/call for the first three rows is the Botlish loop
+with the call minus the same loop without it; for the others the total
+over N (C's loop included, about 1 ns). Allocations, bytes and FloatObjs
+are per call; gc is the collections of one run.
+
+| scenario | cranelift ns/call | cranelift-generic ns/call | allocs | bytes | Float64 | RawFloat | RawDouble | gc |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| botlish-call (internal-call baseline) | -0.2 | 0.4 | 0 | 0 | 0 | 0 | 0 | 1 |
+| c-plain (C call, no callback) | 1.1 | 1.2 | 0 | 0 | 0 | 0 | 0 | 1 |
+| transition (C call that may call back, does not) | 4.7 | 5.0 | 0 | 0 | 0 | 0 | 0 | 1 |
+| callback-int (trivial int callback) | 17.8 | 17.9 | 0 | 0 | 0 | 0 | 0 | 0 |
+| callback-decision (C acts on the answer) | 17.4 | 17.8 | 0 | 0 | 0 | 0 | 0 | 0 |
+| raw-float-in | 54.4 | 55.8 | 1.00 | 16 | 0 | 1.00 | 0 | 3 |
+| raw-double-in | 51.5 | 53.4 | 1.00 | 16 | 0 | 0 | 1.00 | 3 |
+| raw-float-trip (in and out) | 51.5 | 51.8 | 1.00 | 16 | 0 | 1.00 | 0 | 3 |
+| raw-double-trip (in and out) | 57.2 | 52.9 | 1.00 | 16 | 0 | 0 | 1.00 | 3 |
+| raw-inspect (bits classified) | 109.7 | 96.7 | 1.33 | 32 | 0 | 0 | 1.00 | 6 |
+| raw-admit (explicit Float64) | 91.5 | 100.5 | 2.00 | 32 | 1.00 | 0 | 1.00 | 6 |
+| nested-2 (two levels per outer call) | 41.0 | 40.3 | 0 | 0 | 0 | 0 | 0 | 0 |
+| allocating (a String per call) | 120.0 | 115.1 | 2.00 | 69.9 | 0 | 0 | 0 | 13 |
+
+A second cranelift sample of the same command differed by at most 2 ns per
+call below 60 ns and about 20 ns for raw-inspect (91 against 110): treat
+differences of that size as noise.
+
+Under GC stress (`-gc-stress 1 -runs 3 -n 20000`, a collection at every
+allocation site), the scenarios that allocate collect once per allocation:
+raw-float-in 231 ns per call (20,000 collections), raw-admit 547 ns (40,000),
+allocating 659 ns (40,000), while callback-int (17.6 ns) and nested-2
+(45.5 ns) allocate nothing and collect never. A collection during a
+callback -- the walk of the callback's frames, the jump across C, the
+waiting frames, and the sweep -- costs about 180 ns here.
 
 Reading it:
 
-* **A callback costs CALLBACK_NS ns** (callback-int: C ABI entry, the
-  runtime's checks and conversions, the generic entry, the result, the
-  activation's save and restore), against C_PLAIN_NS ns for a C call
-  without one and BOTLISH_NS ns for a Botlish call (below the loop's noise:
-  the call is inlined). The transition alone -- a call of a C function that
-  may call back and does not -- adds TRANSITION_NS ns (two runtime calls,
-  a thread-local and a Vec push and pop).
+* **A callback costs about 18 ns** (callback-int: C's indirect call, the
+  entry point's stores, the runtime's checks and conversions, the generic
+  entry, the result, the activation's save and restore), against about
+  1 ns for a C call without one and nothing measurable for a Botlish call
+  (inlined: below the loop's noise). The transition alone -- a call of a C
+  function that may call back and does not -- costs about 3.5 ns more than
+  that plain C call (the shim's two runtime calls, a thread-local, a Vec
+  push and pop).
 * **Raw floating values allocate one FloatObj per incoming parameter and
   per raw value returned through a raw-producing operation**: raw-float-in
   and raw-double-in measure exactly 1.00 RawFloat or RawDouble allocation
   per call, 16 bytes each; a raw value returned (raw-*-trip) is the same
   object, unboxed by the result conversion (no second allocation). The
-  cost of the box is RAW_BOX_NS ns per call over callback-int.
+  cost of the box is about 35 ns per call over callback-int: the existing
+  allocator's (Vm::alloc, a 16-byte FloatObj and its registration) and the
+  sweep of three collections per run.
 * **Inspection** (raw-inspect) adds a third of an allocation per call:
   `double_nan?` reads the bits as an Int, and the bits of negative zero,
   one pattern in three, are beyond the small-Int range (a BigInt).
 * **Explicit admission** (raw-admit) adds one Float64 FloatObj per call (2
   allocations: the raw value and the admitted Float64).
 * **Two levels** (nested-2: an outer callback that calls C that calls an
-  inner one) cost NESTED_NS ns per outer call.
-* **Collector**: no scenario but the allocating ones collects during the
-  measured run; `allocating` (a String per call) shows the collections it
-  causes.
+  inner one) cost about 40 ns per outer call: two callbacks and a
+  transition.
+* **Collector**: the scenarios that allocate collect (3 to 13 times in
+  200,000 calls); under GC stress a collection inside a callback is about
+  180 ns.
 
 What cannot be isolated with this instrumentation: the C ABI entry
 (the entry point's stores and loads) and the activation (the runtime's
@@ -745,7 +783,44 @@ callback at run time (section 14).
 
 ### Regression
 
-Run after the change: REGRESSION_RESULTS
+Run on the final tree, Linux x86-64, the release driver (each file directly,
+`tclsh9.0 tests/X.test -tmpdir DIR`; Total / Passed / Skipped / Failed):
+
+| file | result |
+|---|---|
+| c-callbacks.test | 35 / 35 / 0 / 0; under BOTLISH_NATIVE_GC_STRESS=1 35 / 35 / 0 / 0 |
+| c-ffi.test | 129 / 123 / 6 / 0 (the skips are its other hosts' tests) |
+| c-abi-types.test | 73 / 73 / 0 / 0 |
+| raw-c-float-ffi.test | 31 / 31 / 0 / 0 |
+| static-compile.test | 83 / 83 / 0 / 0 (the census: 118 kinds) |
+| golden-framework.test | 42 / 42 / 0 / 0 |
+| compilerpedia.test | 42 / 42 / 0 / 0 (and `tools/compilerpedia.tcl check`) |
+| hir-interchange.test | 11 / 11 / 0 / 0 |
+| hir-cache.test | 19 / 19 / 0 / 0 |
+| hir-syntax.test | 12 / 12 / 0 / 0 |
+| surface-parser.test | 139 / 139 / 0 / 0 |
+| syntax-recovery.test | 33 / 33 / 0 / 0 |
+| compiler-service.test | 55 / 55 / 0 / 0 |
+| warnings.test | 90 / 90 / 0 / 0 |
+| direct-modules.test | 56 / 55 / 1 / 0 |
+| coroutines.test | 81 / 81 / 0 / 0 |
+| native-executable.test | 19 / 19 / 0 / 0 |
+| native-library.test | 28 / 28 / 0 / 0 |
+| native-stack-overflow.test | 21 / 21 / 0 / 0 |
+| system-linker.test | 15 / 15 / 0 / 0 |
+| aot-stub-linker.test | 6 / 6 / 0 / 0 |
+
+and the warning gate (`audit/refactor/tools/gate.tcl`: 84 corpus programs,
+38 library loaders, the observed warnings exactly the manifest), the golden
+suite on all four backends, and the Rust tests (`cargo test --release
+--manifest-path native/Cargo.toml`). GOLDEN_LOCAL_RESULTS
+
+Two mutants of other audits mutate code this milestone changed, and their
+texts were updated to it (keeping each a mutant of the same rule):
+audit/coroutines' `gc-resumer-frames-untraced` (the collector's walk is now
+`walk_from_segmented`) and audit/c-ffi's `va-win64-fixed-calls-stubbed`
+(a foreign call now first asks whether it is a transition).
+OTHER_MUTANTS_RESULTS
 
 ## 14. Limitations and the next milestone
 
