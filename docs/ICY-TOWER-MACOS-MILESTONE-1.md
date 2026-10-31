@@ -570,4 +570,66 @@ installs and double-clicks needs, in order:
 
 ## 42. Reproduction commands and exact files changed
 
-PENDING.
+On an Apple Silicon Mac with Apple's developer tools, CMake, git, Tcl
+9.0.1 (`tests/platform/setup-macos.sh`) and this checkout (the native
+backend built), exactly as `.github/workflows/icy-tower-macos.yml` runs it:
+
+```sh
+single/macos/build.sh -o dist                      # Botlish.app
+(cd "$PLACE" && unzip -q "$OLDPWD/dist/botlish-macos-aarch64.zip")
+ICY_TOWER_BOTLISH="$PLACE/Botlish.app" ICY_TOWER_BINDING="$PWD/out/sdl3-binding" \
+  ICY_TOWER_STAGE="$TMPDIR/stage/icy tower" \
+  examples/games/icy-tower/build-macos.sh out/icy-tower-macos-aarch64
+out/icy-tower-macos-aarch64/icy-tower              # play: Left/A, Right/D, R, Escape
+out/icy-tower-macos-aarch64/icy-tower --headless --frames 600 --seed 7
+python3 audit/icy-tower/oracle.py compare out/icy-tower-macos-aarch64/icy-tower
+python3 -I audit/icy-tower/tools/abi-check.py out/sdl3-binding/macos-aarch64 SDL3_SOURCE/include "$TMPDIR/abi"
+ICY_TOWER_BOTLISH="$PLACE/Botlish.app" ICY_TOWER_BINDING_FROM="$PWD/out/sdl3-binding" \
+  tclsh9.0 tests/workload-icy-tower.test -tmpdir "$(mktemp -d)" -match 'workload-icy-tower-macos-*'
+bash audit/icy-tower/tools/traced-archive.sh ~/Library/Caches/botlish-sdl3-static/lib/libSDL3.a "$TMPDIR/traced/libSDL3.a"
+ICY_TOWER_BOTLISH="$PLACE/Botlish.app" ICY_TOWER_BINDING_FROM="$PWD/out/sdl3-binding" \
+  ICY_TOWER_SDL3_ARCHIVE="$TMPDIR/traced/libSDL3.a" examples/games/icy-tower/build-macos.sh out/probe
+clang -fobjc-arc -framework AppKit -framework ApplicationServices -o "$TMPDIR/macos-input" audit/icy-tower/tools/macos-input.m
+python3 -I audit/icy-tower/tools/macos-session.py run --exe out/icy-tower-macos-aarch64/icy-tower \
+  --probe out/probe/icy-tower --worker WORKER --helper "$TMPDIR/macos-input" \
+  --reference audit/icy-tower/trace-reference.txt --out out/session --strict
+tclsh9.0 audit/icy-tower/mutate.tcl -macos 1 -app "$PLACE/Botlish.app" -binding out/sdl3-binding \
+  -prefix ~/Library/Caches/botlish-sdl3-static -helper "$TMPDIR/macos-input"
+```
+
+(WORKER: the staged application compiled by Botlish.app without
+`-native-startup`.) On Linux: `tclsh9.0 tests/workload-icy-tower.test`
+(the trace reference, the ABI check against the committed binding, the
+session's selftest), `python3 -I audit/icy-tower/tools/macos-session.py
+selftest` and `sh audit/icy-tower/tools/trace-reference.sh EXE check`.
+
+Files added:
+
+| File | What |
+|---|---|
+| `examples/games/icy-tower/main-macos.bot` | the macOS entry |
+| `examples/games/icy-tower/macos_link.bot` | the macOS executable's link plan (checked against sdl3.pc) |
+| `examples/games/icy-tower/build-macos.sh` | the macOS build |
+| `tests/platform/sdl3-static-macos.sh` | the pinned SDL3, static, and its link interface (shared with link-plan-sdl3.sh) |
+| `audit/icy-tower/tools/abi-check.py` | the binding's C ABI against the target's headers |
+| `audit/icy-tower/tools/sdl-trace.py`, `trace-reference.sh`, `audit/icy-tower/trace-reference.txt` | the trace's normalization and comparison, and the Linux reference |
+| `audit/icy-tower/tools/traced-archive.sh` | the probe build's archive (link-time wrappers) |
+| `audit/icy-tower/tools/macos-session.py`, `macos-input.m` | the graphical acceptance |
+| `audit/icy-tower/macos-mutants.txt`, `audit/icy-tower/macos-mutate.tcl` | the port's mutants and mutate.tcl's macOS mode |
+| `.github/workflows/icy-tower-macos.yml` | the macOS workflow |
+| `docs/ICY-TOWER-MACOS-MILESTONE-1.md` | this report |
+
+Files changed:
+
+| File | What |
+|---|---|
+| `audit/icy-tower/context-refactor/tools/sdltrace.c` | its `SDLTRACE_LINKED` mode and the probe's `SDLTRACE_INFO` account (the LD_PRELOAD build is unchanged) |
+| `audit/icy-tower/mutate.tcl` | `-macos 1` |
+| `tests/platform/link-plan-sdl3.sh` | builds and reads SDL3 through sdl3-static-macos.sh |
+| `tests/workload-icy-tower.test` | the macOS section; the trace-reference, ABI and selftest tests |
+| `.github/workflows/icy-tower.yml` | the macOS tests' skips allowed beside the Windows ones |
+| `.github/workflows/macos-arm64.yml`, `macos-graphical-main-thread.yml` | the static SDL3 cache keyed by sdl3-static-macos.sh |
+| `AGENTS.md`, `docs/INDEX.md`, `docs/ICY-TOWER-VERTICAL-SLICE-1.md`, `docs/ICY-TOWER-WINDOWS.md`, `docs/MAIN-THREAD-STARTUP-MILESTONE-1.md`, `docs/NATIVE-LINK-PLAN-MILESTONE-1.md`, `docs/MACOS-AARCH64-PORT-AUDIT.md`, `compilerpedia/topics/backends.topic` | cross-references |
+
+No file of `core/`, `hir/`, `surface/`, `compiler/`, `native/`, `stdlib/`,
+`tools/` or the game's shared modules changed.
