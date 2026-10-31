@@ -353,7 +353,12 @@ int main(int argc, char **argv) {
                 NSURL *one = [[NSWorkspace sharedWorkspace] URLForApplicationWithBundleIdentifier:b.bundleIdentifier];
                 if (one && ![registered containsObject:one.path]) [registered addObject:one.path];
             }
+            // the keys that make an agent or a background-only application, as macOS reads the Info.plist
+            NSMutableArray *agent = [NSMutableArray array];
+            for (NSString *k in @[@"LSUIElement", @"LSBackgroundOnly", @"NSUIElement", @"NSBGOnly"])
+                if ([b objectForInfoDictionaryKey:k] != nil) [agent addObject:k];
             json(@{@"bundle": @(b != nil ? YES : NO), @"identifier": b.bundleIdentifier ?: @"", @"executable": b.executablePath ?: @"",
+                   @"agent_keys": agent,
                    @"name": [b objectForInfoDictionaryKey:@"CFBundleName"] ?: @"",
                    @"version": [b objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"",
                    @"build": [b objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"",

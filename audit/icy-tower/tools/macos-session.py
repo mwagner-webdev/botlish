@@ -1492,6 +1492,8 @@ def case_app_bundle(s):
               (os.path.realpath(d.get("executable", "")) == os.path.join(real, "Contents", "MacOS", "icy-tower"),
                "its executable: %s" % d.get("executable")),
               (d.get("package_type") == "APPL", "CFBundlePackageType: %s" % d.get("package_type")),
+              (d.get("agent_keys") == [], "a regular application as macOS reads its Info.plist: no LSUIElement, "
+               "LSBackgroundOnly, NSUIElement or NSBGOnly (%s)" % (d.get("agent_keys") or "none")),
               (any(os.path.realpath(p) == real for p in d.get("registered", [])),
                "LaunchServices knows it for %s (%d registered)" % (want, len(d.get("registered", []))))]
     return s.verdict("app-bundle", checks, d, "bundle-metadata")
