@@ -1,0 +1,72 @@
+# safe.bot -- calls the library's emitters only with values the exploratory
+# checker would infer as safe: digit_unchecked(3), digit_checked(4),
+# digit_of(5), json_string of a plain text. The library's certificates must
+# not depend on it (MODULAR-EMISSION-PROOFS-MILESTONE-1.md, section 5).
+
+import emitlib
+import std::coroutine
+
+fn src_string() -> int errors IndexNotFound:
+    emitlib::json_string("plain")
+    -1
+
+fn src_unchecked() -> int:
+    emitlib::digit_unchecked(3)
+    -1
+
+fn src_checked() -> int errors emitlib::NotADigit:
+    emitlib::digit_checked(4)
+    -1
+
+fn src_of() -> int:
+    emitlib::digit_of(5)
+    -1
+
+fn run_string() -> List[int] errors IndexNotFound:
+    coroutine {step, first} = src_string()
+    loop k from 0 to 12:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn run_unchecked() -> List[int]:
+    coroutine {step, first} = src_unchecked()
+    loop k from 0 to 3:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn run_checked() -> List[int] errors emitlib::NotADigit:
+    coroutine {step, first} = src_checked()
+    loop k from 0 to 3:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn run_of() -> List[int]:
+    coroutine {step, first} = src_of()
+    loop k from 0 to 3:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn all() -> List[List[int]] errors IndexNotFound, emitlib::NotADigit:
+    [run_string(), run_unchecked(), run_checked(), run_of()]
+
+all():
+    on IndexNotFound:
+        [[-2]]
+    on emitlib::NotADigit:
+        [[-3]]

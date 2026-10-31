@@ -1,0 +1,1285 @@
+# emission-proofs.test -- modular, caller-independent certification of
+# emitters (MODULAR-EMISSION-PROOFS-MILESTONE-1.md): the checker's rules,
+# each with the counter-case that must be rejected; the guarantee's
+# independence of callers; certificates, their reuse and their
+# invalidation; the recognizer semantics against the reference
+# interpreter; native erasure. An exploratory prototype, like
+# audit/emitter/tests: tests/local.tcl and CI do not run it.
+#
+#   tclsh9.0 audit/emission-proofs/tests/emission-proofs.test ?-match PATTERN?
+#
+# EMISSION_PROOFS_TOOLS, when set, is the directory the checker's sources
+# are read from (audit/emission-proofs/tools/mutate.tcl points it at a
+# mutated copy).
+
+set auditDir [file dirname [file dirname [file normalize [info script]]]]
+set toolsDir [file join $auditDir tools]
+if {[info exists ::env(EMISSION_PROOFS_TOOLS)]} {
+    set toolsDir $::env(EMISSION_PROOFS_TOOLS)
+}
+source [file join $toolsDir concrete.tcl]
+source [file join $toolsDir workspace.tcl]
+source [file join $toolsDir modcheck.tcl]
+source [file join $toolsDir conformance.tcl]
+source [file join [file dirname $auditDir] emitter tools emitcheck.tcl]
+interp recursionlimit {} 100000
+core::useProgramRecursionLimit
+
+# The claims of the program TEXT (main.bot, beside the JSON workspace and
+# the library; FILES more files), checked: {NAME VERDICT KINDS}..., NAME
+# unqualified, KINDS its diagnostics' kinds.
+proc claims {text args} {
+    set options [dict merge {-files {} -witness 0 -compose certificate -facts declared -emits {} -all 0} $args]
+    set dir [epws::scratch main.bot $text {*}[dict get $options -files]]
+    set r [modcheck::check [file join $dir main.bot] -witness [dict get $options -witness] \
+        -compose [dict get $options -compose] -facts [dict get $options -facts] -emits [dict get $options -emits]]
+    set out {}
+    foreach c [dict get $r claims] {
+        set name [namespace tail [dict get $c name]]
+        if {![dict get $options -all]} {
+            # (Only the claims of main.bot and FILES: not the workspace's.)
+            set loc [file tail [lindex [split [dict get $c location] :] 0]]
+            if {$loc ni [concat main.bot [dict keys [dict get $options -files]]]} continue
+        }
+        lappend out [list $name [dict get $c verdict] [lsort -unique [lmap d [dict get $c diagnostics] {dict get $d kind}]]]
+    }
+    return $out
+}
+
+proc verdicts {text args} {
+    return [lmap c [claims $text {*}$args] {list [lindex $c 0] [lindex $c 1]}]
+}
+
+# A program: imports, then BODY.
+proc program {body {imports {json_lex json_grammar}}} {
+    set text ""
+    foreach i $imports {
+        append text "import $i\n"
+    }
+    return "$text\n$body\n"
+}
+
+# ---------------------------------------------------------------------------
+# The guarantee is the declaration's
+
+test ep-declared-domain {an unguarded digit is rejected from its declared domain, though the program only ever passes 3} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn digit(d: int) -> unit:
+    yield 48 + d
+    unit
+
+fn src() -> int:
+    digit(3)
+    -1
+
+coroutine {step, first} = src()
+first}]
+} -result {{digit not-proved}}
+
+test ep-declared-domain-witness {...and a concrete counterexample disproves it} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn digit(d: int) -> unit:
+    yield 48 + d
+    unit
+
+0}] -witness 1
+} -result {{digit disproven}}
+
+test ep-unused {a function no program calls is certified, or rejected, all the same} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn good(d: int) -> unit:
+    if d >= 0 and d <= 9:
+        yield 48 + d
+    else:
+        yield 48
+    unit
+
+#: emits json_grammar::digit_symbol
+fn bad(d: int) -> unit:
+    if d >= 0 and d <= 10:
+        yield 48 + d
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{good proven} {bad not-proved}}
+
+test ep-domain-parameter {a declared integer domain is a parameter fact: 0..9 proves a digit, 0..10 does not} -body {
+    verdicts [program {type D9 = Int in 0..9
+type D10 = Int in 0..10
+
+#: emits json_grammar::digit_symbol
+fn nine(d: D9) -> unit:
+    yield 48 + d
+    unit
+
+#: emits json_grammar::digit_symbol
+fn ten(d: D10) -> unit:
+    yield 48 + d
+    unit
+
+0}]
+} -result {{nine proven} {ten not-proved}}
+
+test ep-observed-is-caller-dependent {the same check with the program's own call facts (the exploratory model) proves the unguarded digit when the only call passes 3, and has nothing to check without a call} -body {
+    set p [program {#: emits json_grammar::digit_symbol
+fn digit(d: int) -> unit:
+    yield 48 + d
+    unit
+
+fn src() -> int:
+    digit(3)
+    -1
+
+coroutine {step, first} = src()
+first}]
+    list [verdicts $p -facts observed] [verdicts [program {#: emits json_grammar::digit_symbol
+fn digit(d: int) -> unit:
+    yield 48 + d
+    unit
+
+0}] -facts observed]
+} -result {{{digit proven}} {{digit not-proved}}}
+
+test ep-invocation {invocation level: a call passing 48 is proved where it is, the function is not} -body {
+    set dir [epws::scratch main.bot [program {#: emits json_grammar::digit_symbol
+fn digit(c: int) -> unit:
+    yield c
+    unit
+
+fn src() -> int:
+    digit(48)
+    -1
+
+fn bad(n: int) -> int:
+    digit(n)
+    -1
+
+0}]]
+    set r [modcheck::check [file join $dir main.bot] -witness 0 \
+        -invocation {src digit json_grammar::digit_symbol bad digit json_grammar::digit_symbol}]
+    list [dict get [lindex [dict get $r claims] 0] verdict] [lmap i [dict get $r invocations] {list [dict get $i caller] [dict get $i arguments] [dict get $i verdict]}]
+} -result {not-proved {{src 48 proven} {bad -inf..+inf not-proved}}}
+
+test ep-callers-stable {the library's verdicts are the same from a program that calls it with safe values and from one that does not call it} -body {
+    set safe [readFile [file join $auditDir callers safe.bot]]
+    set unused [readFile [file join $auditDir callers unused.bot]]
+    set names {json_string digit_unchecked digit_checked digit_of member pair_glued json_string_source digit_checked_source}
+    set a [lmap c [claims $safe -all 1] {if {[lindex $c 0] ni $names} continue; list [lindex $c 0] [lindex $c 1]}]
+    set b [lmap c [claims $unused -all 1] {if {[lindex $c 0] ni $names} continue; list [lindex $c 0] [lindex $c 1]}]
+    list [expr {$a eq $b}] [llength $a]
+} -result {1 8}
+
+proc readFile {path} {
+    set f [open $path]
+    fconfigure $f -encoding utf-8
+    set t [read $f]
+    close $f
+    return $t
+}
+
+testConstraint python3 [expr {![catch {exec python3 -c "import json"}]}]
+
+test ep-library-json-string-runs {emitter A run on the texts the milestone names -- empty, quotation marks, reverse solidi, every control, supplementary characters, U+2028, 2,000 characters -- every output one strict JSON string token for the reference interpreter, and decoding (CPython) to its text} -constraints python3 -body {
+    set dir [epws::scratch main.bot "import emitlib\n\n0\n"]
+    set controls ""
+    for {set c 0} {$c < 32} {incr c} { append controls [format %c $c] }
+    set texts [list "" "\"" "\\" "\"\\\"" $controls "\x7f/é" "😀a😀" "\u2028\u2029" "\ud7ff\ue000\uffff" \
+        [string repeat "aé😀\"\\\n" 333]]
+    set saved $::concrete::limit
+    set ::concrete::limit 4000
+    set runs [concrete::traces [file join $dir main.bot] emitlib::json_string_source {str} {IndexNotFound} [lmap t $texts {list $t}]]
+    set ::concrete::limit $saved
+    set model [dfaref::load [list "" [file join $dir main.bot] json_lex [file join $dir json_lex.bot]]]
+    set bad {}
+    set lines {}
+    foreach run $runs t $texts {
+        lassign $run tuple outcome symbols
+        if {$outcome ne "complete" || [concrete::judge $model {json_lex json_string_strict} $outcome $symbols] ne "ok"} {
+            lappend bad [list $tuple $outcome]
+        }
+        lappend lines [join [lmap c $symbols {format %c $c}] ""]
+    }
+    set f [open [file join $dir out.txt] w]
+    fconfigure $f -encoding utf-8 -translation lf
+    puts -nonewline $f [join $lines \n]
+    close $f
+    set decoded [exec python3 -I -c {
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    print(" ".join(str(ord(c)) for c in json.loads(line)))
+} [file join $dir out.txt]]
+    set want [join [lmap t $texts {join [lmap ch [split $t ""] {scan $ch %c}] " "}] \n]
+    list $bad [expr {$decoded eq $want}] [llength $runs]
+} -result {{} 1 10}
+
+# ---------------------------------------------------------------------------
+# Value facts
+
+test ep-negation-holes {`c == 34 or c == 92` false excludes both values from a scalar value: a raw character of the string body} -body {
+    verdicts [program {import std::char
+import std::str
+
+fn body(c: int) -> unit:
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        yield 92
+        yield 110
+    else:
+        yield c
+    unit
+
+#: emits json_lex::json_string
+fn s(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        body(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+fn body_bad(c: int) -> unit:
+    if c == 34:
+        yield 92
+        yield c
+    elif c < 32:
+        yield 92
+        yield 110
+    else:
+        yield c
+    unit
+
+#: emits json_lex::json_string
+fn s_bad(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        body_bad(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+0} {json_lex}]
+} -result {{s proven} {s_bad not-proved}}
+
+test ep-trusted-scalar {a scalar value is never a surrogate (the trusted fact), but its controls are not excluded: raw scalar values above the controls are a string body, all of them are not} -body {
+    verdicts [program {import std::char
+import std::str
+
+#: emits json_lex::json_string
+fn upper(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        c = std::char::scalar_value(text.char_at(i))
+        if c >= 93:
+            yield c
+        continue
+    yield 34
+    unit
+
+#: emits json_lex::json_string
+fn all(text: str) -> unit errors IndexNotFound:
+    yield 34
+    loop i from 0 to text.length():
+        c = std::char::scalar_value(text.char_at(i))
+        if c != 34 and c != 92:
+            yield c
+        continue
+    yield 34
+    unit
+
+0} {json_lex}]
+} -result {{upper proven} {all not-proved}}
+
+test ep-surrogate-codes {an Int from a List may be a surrogate until a check excludes it; json_string_strict rejects a raw surrogate} -body {
+    verdicts [program {import std::list
+
+error NotScalar:
+    at: int
+
+#: emits json_lex::json_string_strict
+fn checked(codes: List[int]) -> unit errors NotScalar:
+    yield 34
+    loop c in codes:
+        if c < 93 or c > 1114111 or (c >= 55296 and c <= 57343):
+            fail NotScalar {at: c}
+        yield c
+        continue
+    yield 34
+    unit
+
+#: emits json_lex::json_string_strict
+fn unchecked(codes: List[int]) -> unit errors NotScalar:
+    yield 34
+    loop c in codes:
+        if c < 93 or c > 1114111:
+            fail NotScalar {at: c}
+        yield c
+        continue
+    yield 34
+    unit
+
+0} {json_lex}]
+} -result {{checked proven} {unchecked not-proved}}
+
+test ep-arithmetic {hir::range's transfers, per component: 48 + d, 57 - d, (v - 64) shift_right 1, v mod 10} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn add(d: int) -> unit:
+    if d >= 0 and d <= 9:
+        yield 48 + d
+    else:
+        yield 49
+    unit
+
+#: emits json_grammar::digit_symbol
+fn sub(d: int) -> unit:
+    if d >= 0 and d <= 9:
+        yield 57 - d
+    else:
+        yield 49
+    unit
+
+#: emits json_grammar::digit_symbol
+fn sub_bad(d: int) -> unit:
+    if d >= 0 and d <= 9:
+        yield 58 - d
+    else:
+        yield 49
+    unit
+
+#: emits json_grammar::digit_symbol
+fn shift(v: int) -> unit:
+    if v >= 64 and v <= 83:
+        yield 48 + (v - 64).shift_right(1)
+    else:
+        yield 49
+    unit
+
+#: emits json_grammar::digit_symbol
+fn modulo(v: int) -> unit:
+    yield 48 + v.mod(10)
+    unit
+
+#: emits json_grammar::digit_symbol
+fn modulo_bad(v: int) -> unit:
+    yield 48 + v.mod(11)
+    unit
+
+0}]
+} -result {{add proven} {sub proven} {sub_bad not-proved} {shift proven} {modulo proven} {modulo_bad not-proved}}
+
+test ep-hole-edge {`c != 48` removes 48, and only 48: 47 is still possible} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn edge(c: int) -> unit:
+    if c != 48 and c >= 47 and c <= 57:
+        yield c
+    else:
+        yield 48
+    unit
+
+#: emits json_grammar::digit_symbol
+fn inner(c: int) -> unit:
+    if c != 47 and c >= 47 and c <= 57:
+        yield c
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{edge not-proved} {inner proven}}
+
+test ep-lift-components {an operator applies to every component of a value with holes, on either side: v + 48 and 48 + v for v in {1, 15} may be '?'} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn two(v: int) -> unit:
+    if v == 1 or v == 15:
+        yield v + 48
+    else:
+        yield 48
+    unit
+
+#: emits json_grammar::digit_symbol
+fn two_right(v: int) -> unit:
+    if v == 1 or v == 15:
+        yield 48 + v
+    else:
+        yield 48
+    unit
+
+#: emits json_grammar::digit_symbol
+fn two_ok(v: int) -> unit:
+    if v == 1 or v == 9:
+        yield v + 48
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{two not-proved} {two_right not-proved} {two_ok proven}}
+
+test ep-context-sensitive {one helper, two calls with different facts: each analyzed with its own} -body {
+    verdicts [program {fn put(n: int) -> unit:
+    yield 48 + n
+    unit
+
+#: emits json_lex::json_number
+fn twice(d: int) -> unit:
+    if d >= 1 and d <= 9:
+        put(d)
+        put(d + 20)
+    else:
+        yield 49
+    unit
+
+#: emits json_lex::json_number
+fn twice_ok(d: int) -> unit:
+    if d >= 1 and d <= 9:
+        put(d)
+        put(d - 1)
+    else:
+        yield 49
+    unit
+
+0} {json_lex}]
+} -result {{twice not-proved} {twice_ok proven}}
+
+test ep-order-narrowing {branches narrow by order, on both outcomes} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn clamp(c: int) -> unit:
+    if c < 48:
+        yield 48
+    elif c > 57:
+        yield 57
+    else:
+        yield c
+    unit
+
+#: emits json_grammar::digit_symbol
+fn clamp_bad(c: int) -> unit:
+    if c < 48:
+        yield 48
+    elif c > 58:
+        yield 57
+    else:
+        yield c
+    unit
+
+#: emits json_grammar::digit_symbol
+fn reversed(c: int) -> unit:
+    if 48 <= c and 57 >= c:
+        yield c
+    else:
+        yield 50
+    unit
+
+0}]
+} -result {{clamp proven} {clamp_bad not-proved} {reversed proven}}
+
+test ep-sentinel {a value past every bound the recognizers use is still a value: 10^23 is rejected} -body {
+    claims [program {#: emits json_lex::json_number
+fn big() -> unit:
+    yield 49
+    yield 100000000000000000000000
+    unit
+
+0}]
+} -result {{big not-proved EMIT-REJECTED}}
+
+test ep-end-symbol {-1 is the end, never a symbol} -body {
+    claims [program {#: emits json_grammar::digit_symbol
+fn m(n: int) -> unit:
+    if n >= 0 and n <= 10:
+        yield n - 1
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{m not-proved {EMIT-END-SYMBOL EMIT-REJECTED}}}
+
+test ep-not-symbol {a String yielded is no symbol} -body {
+    claims [program {#: emits json_grammar::digit_symbol
+fn s() -> unit:
+    yield "1"
+    unit
+
+0}]
+} -result {{s not-proved EMIT-NOT-SYMBOL}}
+
+# ---------------------------------------------------------------------------
+# Control flow
+
+test ep-loop-fixpoint {a loop of digits after a nonzero one is a number; after a zero it is not} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn one_then_zeros(n: int) -> unit:
+    yield 49
+    loop i from 0 to n:
+        yield 48
+        continue
+    unit
+
+#: emits json_lex::json_number
+fn zero_then_ones(n: int) -> unit:
+    yield 48
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+0} {json_lex}]
+} -result {{one_then_zeros proven} {zero_then_ones not-proved}}
+
+test ep-loop-first-iteration {the list printer's separator, `if i > 0:`, proved by the first iteration's own facts; without it, rejected} -body {
+    verdicts [program {import number_emit
+
+#: emits json_grammar::json_text
+fn list(n: int) -> unit errors IndexNotFound:
+    yield 91
+    loop i from 0 to n:
+        if i > 0:
+            yield 44
+        number_emit::integer(i)
+        continue
+    yield 93
+    unit
+
+#: emits json_grammar::json_text
+fn list_bad(n: int) -> unit errors IndexNotFound:
+    yield 91
+    loop i from 0 to n:
+        number_emit::integer(i)
+        continue
+    yield 93
+    unit
+
+0}]
+} -result {{list proven} {list_bad not-proved}}
+
+test ep-loop-second-iteration {the loop's fixpoint: a '.' in a second iteration, after a '0', is rejected in the fraction it starts} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn dots(n: int) -> unit:
+    yield 49
+    loop i from 0 to n:
+        if i.mod(2) == 0:
+            yield 48
+        else:
+            yield 46
+        continue
+    unit
+
+#: emits json_lex::json_number
+fn dotted(n: int) -> unit:
+    yield 49
+    loop:
+        if n > 5:
+            break
+        yield 46
+        yield 48
+        continue
+    unit
+
+0} {json_lex}]
+} -result {{dots not-proved} {dotted not-proved}}
+
+test ep-loop-later-iterations {a counted loop's later iterations are past its start: what only they write is checked} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn later(n: int) -> unit:
+    loop i from 0 to n:
+        if i > 0:
+            yield 120
+        yield 49
+        continue
+    yield 49
+    unit
+
+0} {json_lex}]
+} -result {{later not-proved}}
+
+test ep-loop-exact-count {a loop of exactly one iteration emits one digit; one of n iterations may emit none} -body {
+    verdicts [program {#: emits json_grammar::digit_symbol
+fn once() -> unit:
+    loop i from 0 to 1:
+        yield 55
+        continue
+    unit
+
+#: emits json_grammar::digit_symbol
+fn twice() -> unit:
+    loop i from 0 to 2:
+        yield 55
+        continue
+    unit
+
+#: emits json_lex::json_number
+fn maybe(n: int) -> unit:
+    loop i from 0 to n:
+        yield 55
+        continue
+    unit
+
+0}]
+} -result {{once proven} {twice not-proved} {maybe not-proved}}
+
+test ep-recursion-second-round {recursion to a fixpoint: what follows a recursive call that returns is checked in the states it returns in} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn rec(n: int) -> unit:
+    if n > 0:
+        rec(n - 1)
+        yield 120
+    else:
+        yield 49
+    unit
+
+0} {json_lex}]
+} -result {{rec not-proved}}
+
+test ep-recursion-same-context {a recursive call in its own argument context reads the previous round's summary: only a later round sees what follows it} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn r(b: bool) -> unit:
+    if b:
+        r(false)
+        yield 120
+    else:
+        yield 49
+    unit
+
+0} {json_lex}]
+} -result {{r not-proved}}
+
+test ep-join-states {a helper called from several states is summarized from each: a digit after a leading zero is rejected, though after a nonzero digit it is not} -body {
+    verdicts [program {fn two() -> unit:
+    yield 50
+    unit
+
+#: emits json_lex::json_number
+fn lead(n: int) -> unit:
+    if n > 0:
+        yield 49
+    else:
+        yield 48
+    two()
+    unit
+
+0} {json_lex}]
+} -result {{lead not-proved}}
+
+test ep-break-continue {break and continue reach their targets: a digit then a break; a skipped iteration} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn first(n: int) -> unit:
+    yield 49
+    loop i from 0 to n:
+        if i == 2:
+            break
+        if i == 0:
+            continue
+        yield 48
+        continue
+    unit
+
+#: emits json_grammar::digit_symbol
+fn broken(n: int) -> unit:
+    loop:
+        yield 49
+        if n > 0:
+            break
+        yield 50
+        break
+    unit
+
+0} {json_lex json_grammar}]
+} -result {{first proven} {broken not-proved}}
+
+test ep-early-return {a return before the symbol leaves the token incomplete} -body {
+    claims [program {#: emits json_grammar::digit_symbol
+fn early(n: int) -> unit:
+    if n > 0:
+        return unit
+    yield 49
+    unit
+
+#: emits json_grammar::digit_symbol
+fn after(n: int) -> unit:
+    yield 49
+    if n > 0:
+        return unit
+    unit
+
+0}]
+} -result {{early not-proved EMIT-INCOMPLETE} {after proven {}}}
+
+test ep-recursion {a recursive run of ones: proven when one comes first, rejected when the base case may be all} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn ones(n: int) -> unit:
+    if n > 0:
+        yield 49
+        ones(n - 1)
+    unit
+
+#: emits json_lex::json_number
+fn ones1(n: int) -> unit:
+    yield 49
+    ones(n - 1)
+    unit
+
+0} {json_lex}]
+} -result {{ones not-proved} {ones1 proven}}
+
+test ep-never-returns {an emitter that never completes claims nothing, every prefix checked: ones forever is proven, a zero after a one is not} -body {
+    verdicts [program {#: emits json_lex::json_number
+fn forever() -> unit:
+    yield 49
+    loop:
+        yield 49
+        continue
+    unit
+
+#: emits json_lex::json_number
+fn forever_bad() -> unit:
+    yield 48
+    loop:
+        yield 49
+        continue
+    unit
+
+0} {json_lex}]
+} -result {{forever proven} {forever_bad not-proved}}
+
+# ---------------------------------------------------------------------------
+# Failures and handlers
+
+test ep-fail-after-yield {a helper that fails after its quotation mark, caught by a handler that writes another: rejected (the exploratory checker proved it)} -body {
+    set p [program {error Oops:
+    at: int
+
+fn h(n: int) -> unit errors Oops:
+    yield 34
+    if n > 0:
+        fail Oops {at: 1}
+    unit
+
+#: emits json_lex::json_string
+fn s(n: int) -> unit:
+    yield 34
+    h(n):
+        on Oops:
+            yield 34
+    unit
+
+fn src(n: int) -> int:
+    s(n)
+    -1
+
+coroutine {step, first} = src(0)
+first} {json_lex}]
+    set dir [epws::scratch main.bot $p]
+    list [claims $p] [llength [dict get [emitcheck::check [file join $dir main.bot]] diagnostics]]
+} -result {{{s not-proved EMIT-AFTER-TOKEN}} 0}
+
+test ep-fail-before-yield {a guarded helper fails before its symbol: the handler's digit is the token} -body {
+    verdicts [program {import std::dfa
+
+error NotDigit:
+    at: int
+
+#: emits json_grammar::digit_symbol
+fn guarded(c: int) -> unit errors NotDigit:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail NotDigit {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail NotDigit {at: 0}
+    yield c
+    unit
+
+#: emits json_grammar::digit_symbol
+fn safe(c: int) -> unit:
+    guarded(c):
+        on NotDigit:
+            yield 48
+    unit
+
+0} {json_grammar}]
+} -result {{guarded proven} {safe proven}}
+
+test ep-native-may-fail {a native that may fail after a symbol (std::list::at) and a handler that writes another: rejected} -body {
+    claims [program {import std::list
+
+#: emits json_lex::json_string
+fn s(xs: List[int]) -> unit:
+    yield 34
+    yield 34
+    std::list::at(xs, 3):
+        on IndexNotFound:
+            yield 34
+            0
+    unit
+
+0} {json_lex}]
+} -result {{s not-proved EMIT-AFTER-TOKEN}}
+
+test ep-guard-facts {a guard proves its own binding, on the paths where it completed: not another binding, not a value computed from it, not after a handler absorbed its failure} -body {
+    verdicts [program {import std::dfa
+
+error Bad:
+    at: int
+
+#: emits json_grammar::digit_symbol
+fn good(c: int) -> unit errors Bad:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    yield c
+    unit
+
+#: emits json_grammar::digit_symbol
+fn other(c: int, d: int) -> unit errors Bad:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    yield d
+    unit
+
+#: emits json_grammar::digit_symbol
+fn derived(c: int) -> unit errors Bad:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    yield c + 1
+    unit
+
+#: emits json_grammar::digit_symbol
+fn absorbed(c: int) -> unit:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            0
+        on std::dfa::UnexpectedEnd:
+            0
+    yield c
+    unit
+
+0} {json_grammar}]
+} -result {{good proven} {other not-proved} {derived not-proved} {absorbed not-proved}}
+
+# ---------------------------------------------------------------------------
+# Coroutine boundaries
+
+test ep-separate-coroutine {a coroutine an emitter constructs is another execution: its yields are not the emitter's; what it resumes from one is an unknown Int} -body {
+    verdicts [program {import std::coroutine
+
+fn junk() -> int:
+    yield 120
+    yield 121
+    -1
+
+#: emits json_grammar::digit_symbol
+fn outer() -> unit:
+    coroutine {step, first} = junk()
+    if first > 0 and not std::coroutine::done?(step):
+        step()
+    yield 55
+    unit
+
+#: emits json_grammar::digit_symbol
+fn forward() -> unit:
+    coroutine {step, first} = junk()
+    yield first
+    unit
+
+0} {json_grammar}]
+} -result {{outer proven} {forward not-proved}}
+
+# ---------------------------------------------------------------------------
+# Recognizer semantics
+
+test ep-dfa-accept-before {a number ends before ',' or ']' in a text, the text reconsidering it; before a digit it would absorb it} -body {
+    claims [program {#: emits json_grammar::json_text
+fn ok() -> unit:
+    yield 91
+    yield 49
+    yield 44
+    yield 50
+    yield 93
+    unit
+
+#: emits json_grammar::json_text
+fn spaced() -> unit:
+    yield 49
+    yield 32
+    yield 50
+    unit
+
+0}]
+} -result {{ok proven {}} {spaced proven {}}}
+
+test ep-dfa-continuations {a number then a string's quote, a literal then a letter: each token rejects the symbol that would follow it} -body {
+    claims [program {#: emits json_grammar::json_text
+fn number_string() -> unit:
+    yield 49
+    yield 34
+    yield 120
+    yield 34
+    unit
+
+#: emits json_grammar::json_text
+fn literal_x() -> unit:
+    yield 110
+    yield 117
+    yield 108
+    yield 108
+    yield 120
+    unit
+
+#: emits json_grammar::json_text
+fn string_comma() -> unit:
+    yield 34
+    yield 34
+    yield 44
+    unit
+
+0}]
+} -result {{number_string not-proved EMIT-REJECTED} {literal_x not-proved EMIT-REJECTED} {string_comma proven {}}}
+
+test ep-dfa-beyond {a number claimed whole, then a ',' it ends before: beyond its token} -body {
+    claims [program {#: emits json_lex::json_number
+fn n() -> unit:
+    yield 49
+    yield 44
+    unit
+
+0}]
+} -result {{n not-proved EMIT-BEYOND-TOKEN}}
+
+test ep-dfa-after {a string, then a space after its closing quote} -body {
+    claims [program {#: emits json_lex::json_string
+fn s() -> unit:
+    yield 34
+    yield 34
+    yield 32
+    unit
+
+0}]
+} -result {{s not-proved EMIT-AFTER-TOKEN}}
+
+test ep-dfa-incomplete {a completion in a state that rejects the end} -body {
+    claims [program {#: emits json_lex::json_number
+fn minus() -> unit:
+    yield 45
+    unit
+
+0}]
+} -result {{minus not-proved EMIT-INCOMPLETE}}
+
+test ep-dfa-lookahead-two {`accept before 2`: a token whose last two symbols would not be part of it is beyond the token, never read as before 1} -body {
+    claims [program {#: emits la::ab
+fn abc() -> unit:
+    yield 97
+    yield 98
+    yield 99
+    unit
+
+#: emits la::ab
+fn ab_only() -> unit:
+    yield 97
+    yield 98
+    unit
+
+0} {la}] -files [list la.bot "import std::dfa\n\ndfa ab over ascii:\n    start:\n        'a' -> one\n    one:\n        'b' -> two\n    two:\n        'c' -> accept before 2\n        end -> accept\n"]
+} -result {{abc not-proved EMIT-BEYOND-TOKEN} {ab_only proven {}}}
+
+test ep-conformance {dfasem's step against the reference interpreter on every case dfatest makes for the JSON recognizers and three with lookahead two, a call `then accept` and a call `then STATE` that reconsiders: the same outcome everywhere} -body {
+    set dir [epws::scratch main.bot "import json_grammar\nimport la\n\n0\n" la.bot \
+        "import std::dfa\n\ndfa ab over ascii:\n    start:\n        'a' -> one\n    one:\n        'b' -> two\n    two:\n        'c' -> accept before 2\n        end -> accept\n\ndfa ab_more over ascii:\n    start:\n        'b' -> more\n    more:\n        'b' -> more\n        ')' 'c' -> accept before\n        end -> reject\n\ndfa wrap over ascii:\n    start:\n        '(' -> inner\n    inner:\n        'a' -> call ab then accept\n        'b' -> call ab_more then close\n    close:\n        ')' -> accept\n        'c' -> accept\n"]
+    set entry [file join $dir main.bot]
+    set keys [dfasem::load $entry]
+    lassign [conformance::run $entry $keys 12 3] cases mismatches
+    list [expr {$cases > 2000}] [lrange $mismatches 0 2]
+} -result {1 {}}
+
+# ---------------------------------------------------------------------------
+# Boundaries and composition
+
+test ep-boundary-adjacent {two numbers back to back in a text are one number: each integer's boundary obligation is broken} -body {
+    claims [program {import number_emit
+
+#: emits json_grammar::json_text
+fn pair(a: int, b: int) -> unit errors IndexNotFound:
+    yield 91
+    number_emit::integer(a)
+    number_emit::integer(b)
+    yield 93
+    unit
+
+#: emits json_grammar::json_text
+fn pair_ok(a: int, b: int) -> unit errors IndexNotFound:
+    yield 91
+    number_emit::integer(a)
+    yield 44
+    number_emit::integer(b)
+    yield 93
+    unit
+
+0}]
+} -result {{pair not-proved {EMIT-BOUNDARY EMIT-REJECTED}} {pair_ok proven {}}}
+
+test ep-boundary-branch {a number written on one branch only: the obligation is on that branch's exits, so a separator after the branches is proven, a digit is not (and, composed by the certificate, which may end in `zero`, also rejected)} -body {
+    claims [program {import number_emit
+
+#: emits json_grammar::json_text
+fn branch_ok(a: int, b: int) -> unit errors IndexNotFound:
+    yield 91
+    if a > 0:
+        number_emit::integer(a)
+        yield 44
+    number_emit::integer(b)
+    yield 93
+    unit
+
+#: emits json_grammar::json_text
+fn branch_bad(a: int) -> unit errors IndexNotFound:
+    yield 91
+    if a > 0:
+        number_emit::integer(a)
+    yield 53
+    yield 93
+    unit
+
+0}]
+} -result {{branch_ok proven {}} {branch_bad not-proved {EMIT-BOUNDARY EMIT-REJECTED}}}
+
+test ep-boundary-nested {a certificate carries its helpers' open obligations: after a member (whose number is still open) a digit breaks the number's boundary (and, after a zero, is rejected), a ',' does not} -body {
+    claims [program {import emitlib
+
+#: emits json_grammar::json_text
+fn after_digit(k: str, n: int) -> unit errors IndexNotFound:
+    yield 123
+    emitlib::member(k, n)
+    yield 49
+    yield 125
+    unit
+
+#: emits json_grammar::json_text
+fn after_comma(k: str, n: int) -> unit errors IndexNotFound:
+    yield 123
+    emitlib::member(k, n)
+    yield 44
+    emitlib::member(k, n)
+    yield 125
+    unit
+
+0} {json_grammar}]
+} -result {{after_digit not-proved {EMIT-BOUNDARY EMIT-REJECTED}} {after_comma proven {}}}
+
+test ep-compose-weaker-certificate {a helper certified for the permissive string grammar, composed into a strict claim: its tokens may hold a lone surrogate escape} -body {
+    list [verdicts [program {#: emits json_lex::json_string
+fn lone() -> unit:
+    yield 34
+    yield 92
+    yield 117
+    yield 100
+    yield 56
+    yield 48
+    yield 48
+    yield 34
+    unit
+
+#: emits json_lex::json_string_strict
+fn strict() -> unit:
+    lone()
+    unit
+
+0} {json_lex}]] [verdicts [program {#: emits json_lex::json_string
+fn lone() -> unit:
+    yield 34
+    yield 92
+    yield 117
+    yield 100
+    yield 56
+    yield 48
+    yield 48
+    yield 34
+    unit
+
+#: emits json_lex::json_string_strict
+fn strict() -> unit:
+    lone()
+    unit
+
+0} {json_lex}] -compose body]
+} -result {{{lone proven} {strict not-proved}} {{lone proven} {strict not-proved}}}
+
+test ep-statement-digest {what a certificate states -- its exits, visits, failure states, result -- is in its statement digest} -body {
+    set cert [dict create function f recognizer r depends [dict create recognizers [dict create r X]] \
+        domain int exits {a} visits {a b} fails {a} result {{-1 -1}} follow self]
+    set d0 [modcheck::StatementDigest $cert]
+    set out {}
+    foreach {k v} {exits {b} visits {a} fails {} result {{0 0}} follow {}} {
+        lappend out [expr {[modcheck::StatementDigest [dict replace $cert $k $v]] ne $d0}]
+    }
+    set out
+} -result {1 1 1 1 1}
+
+test ep-compose-modes {body composition and certificate composition decide the JSON emitters alike} -body {
+    set dir [epws::scratch]
+    set a [modcheck::check [file join $dir check_all.bot] -witness 0 -compose body]
+    set b [modcheck::check [file join $dir check_all.bot] -witness 0 -compose certificate]
+    set va [lmap c [dict get $a claims] {dict get $c verdict}]
+    set vb [lmap c [dict get $b claims] {dict get $c verdict}]
+    list [expr {$va eq $vb}] [llength [lsearch -all $va proven]]
+} -result {1 22}
+
+# ---------------------------------------------------------------------------
+# Certificates
+
+test ep-store-reuse {a certificate store proved once, reused by another compilation of another program} -body {
+    set dir [epws::scratch]
+    foreach c {safe unused} {
+        file copy -force [file join $auditDir callers $c.bot] [file join $dir $c.bot]
+    }
+    set store [file join $dir certs.store]
+    set a [modcheck::check [file join $dir safe.bot] -witness 0 -store $store]
+    set b [modcheck::check [file join $dir unused.bot] -witness 0 -store $store]
+    set reused [llength [lmap c [dict get $b claims] {if {![dict exists $c reused]} continue; set c}]]
+    set proven [llength [lmap c [dict get $a claims] {if {[dict get $c verdict] ne "proven"} continue; set c}]]
+    list [expr {$reused == $proven}] [expr {$reused > 0}]
+} -result {1 1}
+
+test ep-store-invalidate {a helper's change invalidates its function's certificate, not the certificate of a caller that composed by it; a recognizer's change invalidates both} -body {
+    set dir [epws::scratch]
+    file copy -force [file join $auditDir callers unused.bot] [file join $dir unused.bot]
+    set store [file join $dir certs.store]
+    modcheck::check [file join $dir unused.bot] -witness 0 -store $store
+    set lib [file join $dir emitlib.bot]
+    set text [readFile $lib]
+    set f [open $lib w]; puts -nonewline $f [string map {"        yield 87 + n" "        yield 55 + n"} $text]; close $f
+    set r1 [modcheck::check [file join $dir unused.bot] -witness 0 -store $store]
+    set f [open $lib w]; puts -nonewline $f $text; close $f
+    modcheck::check [file join $dir unused.bot] -witness 0 -store $store
+    set lex [file join $dir json_lex.bot]
+    set ltext [readFile $lex]
+    set f [open $lex w]; puts -nonewline $f [string map {"'\"' '\\\\' '/' 'b'" "'\"' '\\\\' 'b'"} $ltext]; close $f
+    set r2 [modcheck::check [file join $dir unused.bot] -witness 0 -store $store]
+    set again {}
+    foreach r [list $r1 $r2] {
+        lappend again [lsort [lmap c [dict get $r claims] {
+            if {[dict exists $c reused] || [dict get $c verdict] ne "proven"} continue
+            if {![string match emitlib::* [dict get $c name]]} continue
+            namespace tail [dict get $c name]
+        }]]
+    }
+    set again
+} -result {json_string {json_string json_string_source member}}
+
+test ep-fingerprint {a function's fingerprint ignores comments and unrelated code, and changes with a constant} -body {
+    set p1 [program {fn f(n: int) -> unit:
+    yield 48 + n
+    unit
+
+0}]
+    set p2 [program {# a comment
+fn g() -> int:
+    5
+
+fn f(n: int) -> unit:
+    # another
+    yield 48 + n
+    unit
+
+0}]
+    set p3 [program {fn f(n: int) -> unit:
+    yield 49 + n
+    unit
+
+0}]
+    set out {}
+    foreach p [list $p1 $p2 $p3] {
+        set dir [epws::scratch main.bot $p]
+        modcheck::Reset
+        modcheck::Load [file join $dir main.bot] {}
+        lappend out [modcheck::FunctionFingerprint [dict get $modcheck::byName f]]
+    }
+    list [expr {[lindex $out 0] eq [lindex $out 1]}] [expr {[lindex $out 0] ne [lindex $out 2]}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# The exploratory baseline's false proofs (kept as found)
+
+test ep-exploratory-false-proofs {the exploratory checker certified a symbol of 10^23 and a quotation mark after a caught failure; the modular checker rejects both} -body {
+    set p [program {error Oops:
+    at: int
+
+fn h(n: int) -> unit errors Oops:
+    yield 34
+    if n > 0:
+        fail Oops {at: 1}
+    unit
+
+#: emits json_lex::json_string
+fn s(n: int) -> unit:
+    yield 34
+    h(n):
+        on Oops:
+            yield 34
+    unit
+
+#: emits json_lex::json_number
+fn big() -> unit:
+    yield 49
+    yield 100000000000000000000000
+    unit
+
+fn src(n: int) -> int:
+    s(n)
+    big()
+    -1
+
+coroutine {step, first} = src(1)
+first} {json_lex}]
+    set dir [epws::scratch main.bot $p]
+    set o [emitcheck::check [file join $dir main.bot]]
+    list [lmap e [dict get $o emitters] {dict get $e name}] [llength [dict get $o diagnostics]] [verdicts $p]
+} -result {{s big} 0 {{s not-proved} {big not-proved}}}
+
+# ---------------------------------------------------------------------------
+# Native erasure
+
+test ep-claim-erased {a claim is erased: the library with and without its eight claims compiles to the same functions (every fingerprint equal; number_emit keeps its four)} -body {
+    set out {}
+    foreach strip {0 1} {
+        set dir [epws::scratch main.bot "import emitlib\n\n0\n"]
+        if {$strip} {
+            set lib [file join $dir emitlib.bot]
+            set text [readFile $lib]
+            set f [open $lib w]
+            puts -nonewline $f [regsub -all -line {^#: emits .*$} $text "#"]
+            close $f
+        }
+        modcheck::Reset
+        modcheck::Load [file join $dir main.bot] {}
+        set fps {}
+        foreach name [lsort [dict keys $modcheck::byName]] {
+            if {![string match emitlib::* $name]} continue
+            lappend fps $name [modcheck::FunctionFingerprint [dict get $modcheck::byName $name]]
+        }
+        lappend out [list [llength $modcheck::claims] $fps]
+    }
+    lassign $out a b
+    list [lindex $a 0] [lindex $b 0] [expr {[lindex $a 1] eq [lindex $b 1]}] [expr {[llength [lindex $a 1]] > 20}]
+} -result {12 4 1 1}
+
+test ep-native-erasure {a certified emitter's fused code holds no transition of its grammar; a guarded one keeps only its guard's} -constraints nativeCoroutines -body {
+    set main "import emitlib\nimport std::coroutine\n\nfn text(t: str) -> int errors IndexNotFound:\n    coroutine {step, first} = emitlib::json_string_source(t)\n    n = first\n    loop:\n        if std::coroutine::done?(step):\n            break\n        step()\n        continue\n    n\n\ntext(\"a\\\"b\"):\n    on IndexNotFound:\n        -2\n"
+    set dir [epws::scratch main.bot $main]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+    set nir [native::fusedNir $hir]
+    list [regexp -all {rtabload} $nir] [regexp -all -line {^\s*switch } $nir] [regexp -all {dfa#transition} $nir]
+} -result {0 0 0}
+
+emitws::cleanup
+cleanupTests

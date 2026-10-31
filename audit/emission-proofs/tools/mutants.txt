@@ -1,0 +1,361 @@
+# Mutants of the modular emission checker (audit/emission-proofs/tools/
+# mutate.tcl; MODULAR-EMISSION-PROOFS-MILESTONE-1.md, section 15): one
+# deliberate bug per proof rule the milestone introduced or changed, each
+# a way a certificate could be false.
+#
+#   @@ NAME DESCRIPTION
+#   %% match PATTERN...         the tests run first (tcltest -match globs)
+#   ## FILE                     a file of audit/emission-proofs/tools
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant every test of its `match` misses is run against the whole test
+# file before it is reported as surviving.
+
+@@ declared-narrowed parameter-domain initialization: an Int parameter enters as 0..9, not every Int
+%% match ep-declared-domain ep-unused ep-hole-edge
+## modcheck.tcl
+<<<<
+            lappend out [TypeValue $t]
+====
+            lappend out [intset::inter [TypeValue $t] {{0 9}}]
+>>>>
+
+@@ caller-facts-leak call-site fact leakage: every claim entered with what the program's calls pass (the exploratory model)
+%% match ep-declared-domain ep-unused
+## modcheck.tcl
+<<<<
+    if {$::modcheck::facts eq "observed"} {
+        # The exploratory model, for comparison only: the arguments the
+====
+    if {1} {
+        # The exploratory model, for comparison only: the arguments the
+>>>>
+
+@@ negation-strict branch negation: `x < K` false read as `x > K` (K itself dropped)
+%% match ep-order-narrowing ep-hole-edge ep-negation-holes ep-arithmetic ep-loop-* ep-recursion*
+## modcheck.tcl
+<<<<
+                set op [dict get {< >= <= > > <= >= < == !=} $op]
+====
+                set op [dict get {< > <= > > < >= < == !=} $op]
+>>>>
+
+@@ negation-equality branch negation: `x == K` false read as true
+%% match ep-negation-holes ep-hole-edge ep-lift-components
+## modcheck.tcl
+<<<<
+                set op [dict get {< >= <= > > <= >= < == !=} $op]
+====
+                set op [dict get {< >= <= > > <= >= < == ==} $op]
+>>>>
+
+@@ minus-extra-point interval subtraction removes the point below the hole too
+%% match ep-hole-edge ep-negation-holes
+## intset.tcl
+<<<<
+                lappend next [list $xl [Pred $yl]]
+====
+                lappend next [list $xl [Pred [Pred $yl]]]
+>>>>
+
+@@ inter-wide interval intersection keeps the larger upper bound
+%% match ep-arithmetic ep-order-narrowing ep-dfa-* ep-negation-holes
+## intset.tcl
+<<<<
+            set lo [MaxB $xl $yl]
+            set hi [MinB $xh $yh]
+====
+            set lo [MaxB $xl $yl]
+            set hi [MaxB $xh $yh]
+>>>>
+
+@@ sub-as-add arithmetic transfer: `-` computed as hir::range::add
+%% match ep-arithmetic ep-context-sensitive
+## intset.tcl
+<<<<
+        - { return [Lift2 hir::range::sub $a $b] }
+====
+        - { return [Lift2 hir::range::add $a $b] }
+>>>>
+
+@@ lift-first-component a two-operand transfer reads only the first component of its left operand
+%% match ep-lift-components ep-negation-holes
+## intset.tcl
+<<<<
+    set out {}
+    foreach x $a {
+        foreach y $b {
+====
+    set out {}
+    foreach x [lrange $a 0 0] {
+        foreach y $b {
+>>>>
+
+@@ narrow-order-ignored an order comparison narrows to the other side's hull bound, off by one
+%% match ep-order-narrowing ep-hole-edge
+## intset.tcl
+<<<<
+            set rb [HullRange $b]
+====
+            set rb [HullRange [Arith + $b {{1 1}}]]
+>>>>
+
+@@ handler-keeps-guard guard failure facts: a handler starts with the facts of the call's success
+%% match ep-guard-facts
+## modcheck.tcl
+<<<<
+        # A handler runs where the call failed: none of the call's own
+        # facts (a guard's) hold there.
+        set env $before
+====
+        # A handler runs where the call failed: none of the call's own
+        # facts (a guard's) hold there.
+>>>>
+
+@@ guard-any-binding guard success facts: the guard's set given to its argument even when the argument is no binding's reference (the next yield's binding)
+%% match ep-guard-facts
+## modcheck.tcl
+<<<<
+            set b [RefBinding [lindex [dict get $node args] 0]]
+            if {$b ne "" && [dict exists $env $b] && [dict get $env $b] ne "*"} {
+====
+            set b [RefBinding [lindex [dict get $node args] 0]]
+            foreach {k v} $env { if {$v ne "*"} { dict set env $k [intset::inter $v [dict get $guards $t]] } }
+            if {$b ne "" && [dict exists $env $b] && [dict get $env $b] ne "*"} {
+>>>>
+
+@@ fail-not-a-failure-point error-handler propagation: a `fail` records no failure state
+%% match ep-fail-after-yield ep-exploratory-false-proofs
+## modcheck.tcl
+<<<<
+            # A failure point.
+            Failing $s
+====
+            # A failure point.
+>>>>
+
+@@ natives-never-fail error-handler propagation: no native call may fail
+%% match ep-native-may-fail
+## modcheck.tcl
+<<<<
+    if {[dict get $m errors] ne {} || [dict get $m errorsFrom] ne {}} { return 1 }
+====
+    if {0} { return 1 }
+>>>>
+
+@@ handlers-unreached error-handler propagation: a handler starts nowhere
+%% match ep-fail-after-yield ep-native-may-fail ep-exploratory-false-proofs
+## modcheck.tcl
+<<<<
+    set inside [lsort -unique $fails]
+====
+    set inside {}
+>>>>
+
+@@ loop-one-round loop fixed points: the loop body analyzed for one round only
+%% match ep-loop-*
+## modcheck.tcl
+<<<<
+            if {$next eq $head} break
+====
+            break
+>>>>
+
+@@ peel-later-is-first loop fixed points: a counted loop's later iterations read as its first
+%% match ep-loop-*
+## modcheck.tcl
+<<<<
+        set later [intset::inter $all [intset::interval [expr {$k + 1}] +inf]]
+====
+        set later $first
+>>>>
+
+@@ unroll-short an exactly counted loop unrolled one iteration short
+%% match ep-loop-*
+## modcheck.tcl
+<<<<
+    if {$endKind ne "exclusive"} { incr n }
+====
+    if {$endKind ne "exclusive"} { incr n }
+    incr n -1
+>>>>
+
+@@ join-first-state function-summary joins: a call's exits from its first entry state only
+%% match ep-join-states ep-loop-* ep-boundary-* ep-recursion* ep-break-continue
+## modcheck.tcl
+<<<<
+    set certificates [UsableCertificates $t]
+    foreach c $s {
+====
+    set certificates [UsableCertificates $t]
+    foreach c [lrange $s 0 0] {
+>>>>
+
+@@ recursion-one-round recursive helper summaries: the solve stops after one round
+%% match ep-recursion* ep-loop-*
+## modcheck.tcl
+<<<<
+        if {!$changed} break
+====
+        break
+>>>>
+
+@@ summary-context-free function summaries keyed without their arguments
+%% match ep-context-sensitive ep-arithmetic
+## modcheck.tcl
+<<<<
+    set key [list $b $c $args_]
+    if {[dict exists $cache $key]} {
+====
+    set key [list $b $c]
+    if {[dict exists $cache $key]} {
+>>>>
+
+@@ accept-before-taken DFA acceptance: the outermost token ending before a symbol read as ending on it
+%% match ep-dfa-* ep-conformance
+## dfasem.tcl
+<<<<
+                current { expr {$atEnd ? 0 : 1} }
+====
+                current { expr 0 }
+>>>>
+
+@@ reconsider-dropped delegation return: a callee's unread symbol dropped instead of reconsidered by `then STATE`
+%% match ep-conformance ep-dfa-*
+## dfasem.tcl
+<<<<
+                # c or -1: THEN reconsiders it at once.
+                foreach r [StepBase [list $rest $ckey $then] $part] {
+                    lassign $r y2 result md
+                    lappend out [list $y2 $result [expr {min($md, $depth - 1)}]]
+                }
+====
+                # c or -1: THEN reconsiders it at once.
+                lappend out [list $part [list $rest $ckey $then] [expr {$depth - 1}]]
+>>>>
+
+@@ more-as-one `accept before N` read as `accept before 1`
+%% match ep-conformance ep-dfa-lookahead-two
+## dfasem.tcl
+<<<<
+                more { lindex $class 1 }
+====
+                more { expr 1 }
+>>>>
+
+@@ end-not-checked EOF: a completion never checked against the end
+%% match ep-dfa-incomplete ep-early-return ep-recursion ep-loop-*
+## modcheck.tcl
+<<<<
+proc modcheck::Finish {exits b key} {
+    variable END
+    set out {}
+====
+proc modcheck::Finish {exits b key} {
+    variable END
+    set out {}
+    return {}
+>>>>
+
+@@ boundary-same-depth token boundary: an obligation discharged when its frame takes the symbol
+%% match ep-boundary-*
+## dfasem.tcl
+<<<<
+                if {$md >= $depth} {
+====
+                if {$md > $depth} {
+>>>>
+
+@@ boundary-never token boundary: a helper's exit never carries its obligation
+%% match ep-boundary-*
+## modcheck.tcl
+<<<<
+        if {$d < 0 || [dfasem::FrameDepth $c $key] >= 0} continue
+====
+        continue
+>>>>
+
+@@ reattach-dropped token boundary: a certificate's open obligations dropped at its caller
+%% match ep-boundary-nested
+## dfasem.tcl
+<<<<
+            lappend out [list $nd $key $helper $call]
+====
+            continue
+>>>>
+
+@@ certificate-violations-dropped certificate composition: symbols of the helper's language the caller rejects not reported
+%% match ep-compose-weaker-certificate
+## modcheck.tcl
+<<<<
+            lassign $violations cert vs
+            foreach v $vs {
+====
+            lassign $violations cert vs
+            foreach v [lrange $vs 0 -1] {
+>>>>
+
+@@ valid-ignores-functions cached certificate invalidation: a stored certificate valid whatever its functions' code
+%% match ep-store-*
+## modcheck.tcl
+<<<<
+        if {[FunctionFingerprint [dict get $byName $name]] ne $fp} { return [list 0 "$name changed"] }
+====
+>>>>
+
+@@ valid-ignores-recognizers cached certificate invalidation: a stored certificate valid whatever its recognizers
+%% match ep-store-*
+## modcheck.tcl
+<<<<
+        if {![dfasem::Has $key] || [dfasem::DeepFingerprint $key] ne $fp} { return [list 0 "recognizer $r changed"] }
+====
+>>>>
+
+@@ fingerprint-ignores-constants a function's fingerprint without its constants
+%% match ep-fingerprint ep-store-*
+## modcheck.tcl
+<<<<
+        const { lappend out [dict get $node value] }
+====
+        const { }
+>>>>
+
+@@ statement-without-exits a certificate's statement digest without its exits
+%% match ep-statement-digest
+## modcheck.tcl
+<<<<
+        [dict get $cert domain] [dict get $cert exits] [dict get $cert visits] [dict get $cert fails] [dict get $cert result] \
+====
+        [dict get $cert domain] [dict get $cert visits] [dict get $cert fails] [dict get $cert result] \
+>>>>
+
+@@ trusted-scalar-narrow a trusted native fact narrower than the implementation: a scalar value is never a control
+%% match ep-trusted-scalar
+## modcheck.tcl
+<<<<
+        std::char::scalar_value [dict create set {{0 55295} {57344 1114111}} \
+====
+        std::char::scalar_value [dict create set {{32 55295} {57344 1114111}} \
+>>>>
+
+@@ coroutine-yields-counted coroutine boundaries: a value resumed from another coroutine read as a digit
+%% match ep-separate-coroutine
+## modcheck.tcl
+<<<<
+        if {[TypeOf $e] eq "never"} {
+            return [list {} {}]
+        }
+        return [list $s [NativeValue $e $name $vals]]
+====
+        if {[TypeOf $e] eq "never"} {
+            return [list {} {}]
+        }
+        if {$name eq "coroutine#start"} {
+            return [list $s {{48 57}}]
+        }
+        return [list $s [NativeValue $e $name $vals]]
+>>>>
