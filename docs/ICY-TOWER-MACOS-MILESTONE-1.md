@@ -18,8 +18,10 @@ platform), **Inspected** (source, objects or arguments read without
 running), **Environment-blocked** (the test environment prevented it) or
 **Not implemented**.
 
-PENDING: the results of the macOS runs are filled in below as
-`.github/workflows/icy-tower-macos.yml` reports them.
+The macOS evidence is GitHub's macos-15 runners' (Apple Silicon, macOS
+15.8.2, Xcode 16.4), through `.github/workflows/icy-tower-macos.yml`; the
+acceptance run is **41164897163** (commit 9340caef), and the runs before
+it are cited where they found something.
 
 ## Contents
 
@@ -68,7 +70,48 @@ PENDING: the results of the macOS runs are filled in below as
 
 ## 1. Result
 
-PENDING (the macOS runs).
+**Icy Tower plays on macOS AArch64 as a Cocoa application**, **Executed**
+on GitHub's macos-15 runners (acceptance run 41164897163, commit 9340caef):
+
+* Botlish.app, built from the commit and run from outside the checkout,
+  compiles the unchanged game -- tower.bot, hud.bot, options.bot,
+  render.bot, sdl.bot and game.bot as they are on Linux and Windows -- with
+  the macOS entry `main-macos.bot` (std::darwin::io, sdl::Sdl) and
+  `macos_link.bot` under `-warnings error` and `-native-startup
+  main-thread`, into one Mach-O arm64 executable (3.8 MB, 3.3 MB stripped)
+  whose LC_MAIN reserves 512 MiB and whose runtime reports the program on
+  the process's main thread.
+* SDL3 3.4.18 is linked into it from a static archive built from the
+  pinned commit; the 15 Apple frameworks and 2 libraries SDL3 needs are
+  declared in Botlish source, checked against SDL3's own sdl3.pc; the
+  executable depends on system libraries only and runs with SDL3's build,
+  its source, the staged application and Botlish.app moved away (and the
+  application rebuilds with the checkout, cargo and rustup gone).
+* The SDL3 binding is the generator's, run on the Mac with Apple clang
+  (1,231 API names bound, unchanged generator), staged as the application's
+  package; its every declaration the game uses agrees with Apple clang's
+  own types and layouts (123 of 123 checks).
+* It opens a real Cocoa window and renders with Metal; captures of the
+  window match the independent oracle's geometry (walls, platforms where
+  the oracle puts them, the player, the HUD, the banners); it is played
+  with keyboard events posted through the window system -- Left/Right and
+  A/D move the player, both together cancel, R restarts a game that is
+  over into the generator's next tower, Escape quits, the close button
+  quits, and a key held when the focus is lost is not stuck after it
+  returns; every SDL call is on the main thread; real time runs at the
+  display's 60 frames a second.
+* Its SDL call trace for a fixed-step run is the Linux executable's, call
+  for call, on SDL's dummy driver and in the Cocoa window; its headless
+  summaries equal the oracle's (32 of 32); under GC stress, in a Cocoa
+  window too, it does what it does without.
+* 25 of 25 mutants of the integration are killed; the Linux and Windows
+  icy-tower workflows pass on the same commit.
+
+No game rule changed and no shared module was forked: the port is three
+new files in the game's directory, a build-time recipe shared with the
+link-plan acceptance, and test tooling. Not done here, by the milestone's
+own scope: an application bundle, distribution signing, notarization, a
+release (sections 40 and 41).
 
 ## 2. Starting application architecture
 
@@ -785,15 +828,18 @@ normalization) and every Linux test of tests/workload-icy-tower.test, the
 two new ones included (`workload-icy-tower-trace-reference`,
 `workload-icy-tower-abi-check`). Locally: tests/workload-icy-tower.test
 39 tests, 23 passed, 16 skipped (the 10 macOS and 6 Windows executable
-tests), 0 failed; `audit/icy-tower/mutate.tcl`: 26 of 26 killed.
-PENDING (the final commit).
+tests), 0 failed; `audit/icy-tower/mutate.tcl`: 26 of 26 killed. On the
+acceptance commit 9340caef: `icy-tower.yml` run 41164900037, success.
 
 ## 34. Windows regressions
 
 `icy-tower (windows x86-64)` on the branch: run 41140375585 (commit
 bcacf3c8), success -- the Windows executable built from the same shared
 modules and tested, the tests file's new Linux and macOS tests skipped
-there by their constraints. PENDING (the final commit).
+there by their constraints. On the acceptance commit 9340caef: run
+41164897203, success. The general Windows workflow (`tests (windows
+x86-64)`, run 41164897164) covers nothing this milestone changed but the
+shared test file: PENDING.
 
 ## 35. Mutation testing
 
@@ -810,12 +856,12 @@ session, the relocation, the failed build -- with the failure text that
 detector must report. Before any mutant, every detector used is run on the
 unmutated game and must pass (a detector that fails there kills nothing).
 
-| mutant | the defect | detector | run 41154281867 |
+| mutant | the defect | detector | run 41164897163 |
 |---|---|---|---|
 | startup-flag-omitted | built without `-native-startup main-thread` | build (LC_MAIN) | killed |
 | startup-worker | built with `-native-startup worker` | build (LC_MAIN) | killed |
-| startup-worker-unchecked | a worker build with the LC_MAIN check removed too | session:cocoa | blocked, not killed (below) |
-| link-dynamic | SDL3 declared as a shared library, the prefix's lib searched | build | failed for another reason (below) |
+| startup-worker-unchecked | a worker build with the LC_MAIN check removed too | session:cocoa | killed |
+| link-dynamic | SDL3 declared as a shared library, the prefix's lib searched | build | killed |
 | archive-path-ignored | `static`, the archive's path dropped | build | killed |
 | framework-dropped | Metal not declared | build (against sdl3.pc) | killed |
 | archive-in-working-directory | the archive staged beside the working directory | build | killed |
@@ -838,11 +884,20 @@ unmutated game and must pass (a detector that fails there kills nothing).
 | sdl-not-quit | SDL_Quit skipped | session:trace-dummy | killed |
 | failed-link-hidden | a failed compilation reported as success | failed-build | killed |
 
-**Executed** (run 41154281867): 23 of 25 killed, each by its own detector
-with its own text (for instance `input-swapped`: `Right: the player moved
-+0 units`; `player-shifted`: `start frame: the player at x 268, the
-oracle's 227`; `sdl-not-quit`: the trace's teardown differs from Linux's).
-Not yet a pass, for three reasons, all the harness's:
+**Executed** (run 41164897163): every detector passed on the unmutated
+game, and **25 of 25 mutants were killed**, each by its own detector with
+its own text -- for instance `startup-worker-unchecked`: `a Cocoa window
+appears (status 1: Icy Tower: SDL_Init failed: cocoa not available)`;
+`link-dynamic`: `macos_link.bot does not declare the staged archive`;
+`binding-scalar-type`: `FAIL SDL_RenderLine parameter 2 (x1):
+std::ffi::c::Double`; `event-type-offset` and `close-ignored`: the close
+button pressed and the game killed after 6 s, never quitting;
+`player-shifted`: `start frame: the player at x 268, the oracle's 227`;
+`sdl-not-quit`: the trace's teardown differs from Linux's. 29 minutes for
+the 25.
+
+The run before (41154281867) killed 23; the three reasons it was not yet a
+pass were all the harness's:
 
 * The baseline restart case failed once (its one Right press never
   reached the game: the player stayed at x 227); the press is now
@@ -856,8 +911,6 @@ Not yet a pass, for three reasons, all the harness's:
 * `link-dynamic` was refused by build-macos.sh's check against sdl3.pc
   (an extra `library SDL3`), not by the archive check its detector names;
   the archive check now runs first.
-
-PENDING (the run of commit 9340caef).
 
 ## 36. Fuzzing
 
@@ -898,7 +951,33 @@ times from `/usr/bin/time`.
 
 ## 38. macOS CI results
 
-PENDING.
+`.github/workflows/icy-tower-macos.yml`, on every push to any branch
+(documentation-only pushes excepted), `game` job on `macos-15`:
+
+| run | commit | result | what it established or found |
+|---|---|---|---|
+| 41140375636 | bcacf3c8 | failure | the first run: the binding generated, the ABI (123/123), the build, LC_MAIN, the relocation, the oracle, Cocoa and Metal, both traces, the close button, GC stress and the worker control passed; the harness's expectations of the keyboard, restart, focus, autopilot and HUD cases were wrong, a regex read one digit of LC_MAIN's stack, two shell pipelines died of SIGPIPE, a grep matched USDLib |
+| 41154281867 | 4a10d061 | failure | every graphical case EXECUTED under `--strict`; 23 of 25 mutants; a capture's name refused by the artifact upload; the standalone step's `sort \| head` |
+| **41164897163** | **9340caef** | **success** | every step: the build, the binding, the ABI, the Mach-O, the relocation, the 11 tests, the oracle, the probes, the graphical acceptance (12 of 12 cases EXECUTED, `not EXECUTED: none`), the executable without its build, 25 of 25 mutants, the measurements; the artifact uploaded |
+
+The acceptance run's session, case by case: env 2 of 2 checks, cocoa 20 of
+20, keyboard 14 of 14, restart 9 of 9, close 3 of 3, focus 5 of 5,
+autopilot 6 of 6, trace-dummy 5 of 5, trace-cocoa 7 of 7, gc-stress 3 of 3,
+worker 3 of 3, controls 4 of 4. Its keyboard moves: Right +116, Left -109,
+D +109, A -104 units, both keys +0; focus: Right held +108, Left after the
+focus came back -110. The workflow's own summary table classifies any
+failure (build, binding generation, native link, headless mismatch,
+graphical, keyboard, test harness) and never counts an
+ENVIRONMENT-BLOCKED case as passed. No case of any run was
+environment-blocked: the runners granted event posting and Accessibility
+and had a window server and a display.
+
+The other workflows on the acceptance commit: `icy-tower` (Linux) run
+41164900037 success, `icy-tower (windows x86-64)` run 41164897203
+success; `tests (macos arm64)` (macos-arm64.yml: the link-plan-sdl3 job,
+whose archive recipe moved into `sdl3-static-macos.sh`, and the
+main-thread-startup job) run 41164897166 and `tests (windows x86-64)` run
+41164897164: PENDING.
 
 ## 39. Generated artifacts and their provenance
 
