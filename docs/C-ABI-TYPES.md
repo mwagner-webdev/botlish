@@ -362,10 +362,13 @@ runtime kind and its operations `null?` and `clone`. It is **affine**, like a
 data pointer, for consistency: both are raw foreign addresses whose lifetime
 Botlish does not manage (a function pointer can point into an unloaded
 library or a freed trampoline), and Botlish's own `Fn` values are
-unrestricted only because Botlish manages their lifetime. Nothing produces
-one yet but the test fixture: function-pointer values come with `exported c
-fn`, and a null one with it (`null[T]()` makes a `Ptr[T]`, so a null
-callback needs its own operation then).
+unrestricted only because Botlish manages their lifetime. C returns them
+(an `extern c fn` result), the test fixture makes them, and since
+C-CALLBACK-MILESTONE-1.md `std::ffi::c::callback(NAME)` makes one of a
+`callback c fn` NAME: the address of its C entry point, of exactly its
+declared C signature, affine like the others. Nothing converts a Botlish
+`Fn` into one, and Botlish still never calls a `FnPtr`. A null one still
+has no operation (`null[T]()` makes a `Ptr[T]`).
 
 The archaeology's specimens (`ca-fnptr-specimens`):
 
@@ -713,9 +716,14 @@ For **`exported c fn`** and **static callback passing**:
 
 1. producing a `FnPtr` value from a top-level, non-capturing Botlish
    function with a C signature (its address, a C-ABI entry trampoline into
-   the Botlish calling convention);
-2. a null function pointer operation (`null[T]()` makes a `Ptr[T]`);
-3. the same error/yield restrictions in the other direction;
+   the Botlish calling convention) -- done: `callback c fn` and
+   `std::ffi::c::callback` (C-CALLBACK-MILESTONE-1.md), for synchronous,
+   non-retaining callbacks into the active execution environment;
+2. a null function pointer operation (`null[T]()` makes a `Ptr[T]`) --
+   still open;
+3. the same error/yield restrictions in the other direction -- done
+   (C-CALLBACK-MILESTONE-1.md: CALLBACK-SIGNATURE, CALLBACK-ENVIRONMENT,
+   and a run-time failure ends the process);
 4. userdata: already expressible as `Ptr[Void]` with `erase`/`retype`.
 
 No new basic value type is on either list.

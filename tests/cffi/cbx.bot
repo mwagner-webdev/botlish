@@ -55,6 +55,7 @@ extern c fn record_pointer named "cbx_record_pointer"(index: std::ffi::c::Int, p
 extern c fn bytes_around named "cbx_bytes_around"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, len: std::ffi::c::ULong, f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::LongLong], return: std::ffi::c::LongLong}] noescape, x: std::ffi::c::LongLong) -> std::ffi::c::Int
 
 extern c fn call_on_thread named "cbx_call_on_thread"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn call_on_other_stack named "cbx_call_on_other_stack"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
 extern c fn store named "cbx_store"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] captures) -> unit
 extern c fn call_stored named "cbx_call_stored"(x: std::ffi::c::Int) -> std::ffi::c::Int
 extern c fn bad_bool named "cbx_bad_bool"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Bool], return: std::ffi::c::Int}] noescape) -> std::ffi::c::Int

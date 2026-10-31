@@ -402,6 +402,17 @@ the wrapper; the compiler's diagnostics are quoted where it gave one.
 
 ### 7.1 Callbacks into Botlish (blocking)
 
+*Since C-CALLBACK-MILESTONE-1.md* a Botlish function can be a C callback
+(`callback c fn`, `std::ffi::c::callback`), but only a synchronous,
+non-retaining one: C calls it during the call that received it, on that
+call's thread. Every one of Raven's 74 callback-taking functions registers
+a callback Raven keeps and calls during a later frame (70) or calls it on a
+worker thread (4) -- audit/c-callbacks/raven-callbacks.tsv, that report's
+section 11 -- so none is usable yet, and the bridge stays the event path.
+The report names the smallest retained-registration feature that would
+unlock custom painting. What follows is this binding's account as it was
+written.
+
 C cannot call Botlish. `std::ffi::c::FnPtr[F]` types a C function pointer,
 but no Botlish function can be one: C-FFI.md, "Not here" ("Callbacks
 (Botlish code called from C) ... calling an `FnPtr`"). C-ABI-TYPES.md

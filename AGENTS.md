@@ -3240,6 +3240,71 @@ extension) and `audit/react-native/tools/host-spike.tcl` (Hermes) are the
 foreign-host probes; `audit/react-native/tools/libmode.tcl` is history and
 no longer runs.
 
+## C callbacks (callback c fn)
+
+`callback c fn NAME(PARAMS) -> T:` and `std::ffi::c::callback(NAME)`
+(C-CALLBACK-MILESTONE-1.md) are synchronous C callbacks: a top-level,
+environment-free function whose C signature's conversions are total,
+declaring no errors and never suspending (hir/callbacks.tcl), and its C
+function pointer -- the address of a C entry point the native backend emits
+for it (native/src/codegen/callback.rs). C may call it only during a call of
+a C function whose `FnPtr` parameter is noescape (`hir::foreign::CallsBack`,
+NIR's `callbacks=1`): every such call goes through a transition shim that
+records the waiting Botlish frame (`rt_ffi_open`, `rt_ffi_close`), and the
+callback runs nested in that execution environment
+(native/src/runtime/callback.rs). Keep it so:
+
+* The pointer selects no execution environment and grants no authority:
+  never create a Vm, actor, context or heap on callback entry, never run a
+  callback on a thread, stack or moment no open transition of the calling
+  thread permits (THREAD, INACTIVE, STACK are refused before any Botlish
+  code), and never treat retention as permission: a captures or unknown
+  `FnPtr` parameter is a retaining call (DIRECT) and no transition.
+  Retained registrations, context-bearing callbacks and worker-thread entry
+  are later milestones: never fake one with a transition.
+* Never read a C frame: the collector's walk jumps from the callback's
+  entry frame (`run`'s record) to the transition shim's
+  (`framewalk::walk_segmented`, `Vm::callback_segments`), whose return
+  address is the waiting Botlish frame's safepoint. Keep `ForeignCall` a
+  safepoint, `run` and the shim real frames (never inlined, always
+  calling), and the segment stack balanced (`rt_ffi_close` refuses a
+  stale one). The tests' C fixture calls the nesting callbacks with its
+  frame-pointer register holding no frame; keep it adversarial.
+* No Botlish error, panic or suspension crosses C, and no answer is made
+  up: a failure the front end cannot exclude ends the process after its
+  report (`Fatal::terminate`, `platform::report_fatal`), never returns a
+  value to C. Never add a fallback value, a host error channel or
+  unwinding through C.
+* Conversions are total by construction: a callback's parameters are C
+  integer scalars, Bool, RawFloat, RawDouble, Ptr, FnPtr (never a finite
+  Float or Double: CALLBACK-SIGNATURE), its result one of those, Float64 (C
+  double) or unit; raw values cross as their bits (bitcasts, never a
+  conversion instruction). No libffi, executable-memory trampoline or
+  run-time code generation: every entry point is a static function of the
+  program.
+* A callback's function is a root: its generic instance (open, its
+  declared contract) through specialization's `-exports`, kept by fusion's
+  dead-code elimination. Never let a caller's facts reach it.
+* Windows (its unwinder walk) and the fallback root plan refuse a callback
+  at run time (NATIVE CALLBACK UNSUPPORTED, `runtime::callback::SUPPORTED`);
+  never enable one there without a walk that crosses a transition.
+
+If you change any of that (hir/callbacks.tcl, `hir::foreign::CallsBack`,
+the callback-pointer shape, NIR's `callback`/`cbaddr`/`callbacks=1`,
+codegen/callback.rs, the shim's call in clif.rs's `foreign_call`,
+runtime/callback.rs, `walk_segmented`, `Vm::foreign_open` or
+`callback_segments`), run `tests/c-callbacks.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/c-callbacks.bot`), `cargo test --release --manifest-path
+native/Cargo.toml callback`, `audit/c-callbacks/tools/fuzz.tcl` (several
+seeds, once with `-gc-stress 1`) and `audit/c-callbacks/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus `tests/c-ffi.test`, `tests/native-library.test`,
+`tests/coroutines.test` and `tests/raw-c-float-ffi.test` for a change to
+code they share. `bench/c-callbacks.tcl` regenerates the performance table;
+`audit/c-callbacks/tools/raven-census.tcl` the Raven census.
+
 ## C FFI error capture
 
 A C function that fails the POSIX way (a sentinel result, the reason in

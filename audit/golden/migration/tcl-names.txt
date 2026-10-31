@@ -9082,6 +9082,7 @@ tests/c-callbacks.test cb-qsort pass
 tests/c-callbacks.test cb-executable pass
 tests/c-callbacks.test cb-refused-thread pass
 tests/c-callbacks.test cb-refused-retained pass
+tests/c-callbacks.test cb-refused-inside-callback pass
 tests/c-callbacks.test cb-refused-arguments pass
 tests/c-callbacks.test cb-failure-is-fatal pass
 tests/c-callbacks.test cb-stack-exhaustion pass

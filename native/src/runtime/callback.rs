@@ -77,11 +77,13 @@ thread_local! {
     static ACTIVE: Cell<*mut Vm> = const { Cell::new(std::ptr::null_mut()) };
 }
 
-/// The transitions open in this runtime, on every thread: what tells a
-/// callback on a thread with none (NATIVE CALLBACK THREAD) from one outside
-/// any transition (NATIVE CALLBACK INACTIVE). A diagnosis only: the refusal
-/// is the same.
-static OPEN: AtomicUsize = AtomicUsize::new(0);
+/// The thread that opened a transition in this runtime last (the address of
+/// its ACTIVE slot, a token no other live thread has), or 0: what tells a
+/// callback on another thread (NATIVE CALLBACK THREAD) from one on the
+/// program's own thread outside any transition (NATIVE CALLBACK INACTIVE).
+/// A diagnosis only -- the refusal is the same -- kept with plain loads and
+/// stores, so a transition costs no locked instruction.
+static LAST_THREAD: AtomicUsize = AtomicUsize::new(0);
 
 /// The C ABI classes a callback descriptor names, by code (codegen::callback
 /// writes them; `class_of` reads them).
@@ -122,23 +124,42 @@ pub fn descriptor(params: &[CAbi], result: CAbi, name: &str) -> Vec<u8> {
     bytes
 }
 
-struct Descriptor {
+/// A callback's descriptor as read in place: nothing is allocated to read
+/// one (a callback's success path allocates nothing of the runtime's own;
+/// only the messages of a failure do).
+struct Descriptor<'a> {
     result: CAbi,
-    params: Vec<CAbi>,
-    name: String,
+    /// The parameters' class codes, every one valid (`read_descriptor`).
+    params: &'a [u8],
+    name: &'a [u8],
+}
+
+impl Descriptor<'_> {
+    /// "callback NAME", for messages.
+    fn what(&self) -> String {
+        format!("callback {}", String::from_utf8_lossy(self.name))
+    }
+
+    fn param(&self, index: usize) -> CAbi {
+        class_of(self.params[index]).unwrap_or(CAbi::Void)
+    }
 }
 
 /// Reads the descriptor at DESC, LEN bytes long.
 ///
 /// # Safety
-/// DESC is a callback entry point's own descriptor.
-unsafe fn read_descriptor(desc: *const u8, len: usize) -> Option<Descriptor> {
+/// DESC is a callback entry point's own descriptor, which lives as long as
+/// the program's code.
+unsafe fn read_descriptor<'a>(desc: *const u8, len: usize) -> Option<Descriptor<'a>> {
     // SAFETY: the caller's contract.
     let bytes = unsafe { std::slice::from_raw_parts(desc, len) };
     let result = class_of(*bytes.first()?)?;
     let count = *bytes.get(1)? as usize;
-    let params = bytes.get(2..2 + count)?.iter().map(|&c| class_of(c)).collect::<Option<Vec<_>>>()?;
-    let name = String::from_utf8_lossy(bytes.get(2 + count..)?).into_owned();
+    let params = bytes.get(2..2 + count)?;
+    if params.iter().any(|&c| class_of(c).is_none()) {
+        return None;
+    }
+    let name = bytes.get(2 + count..)?;
     Some(Descriptor { result, params, name })
 }
 
@@ -150,8 +171,13 @@ fn open(p: *mut Vm, caller: usize) -> *mut Vm {
     // SAFETY: generated code passes the Vm it runs on.
     let vm = unsafe { &mut *p };
     vm.foreign_open.push(caller);
-    OPEN.fetch_add(1, Ordering::Relaxed);
-    ACTIVE.with(|a| a.replace(p))
+    ACTIVE.with(|a| {
+        let me = a as *const Cell<*mut Vm> as usize;
+        if LAST_THREAD.load(Ordering::Relaxed) != me {
+            LAST_THREAD.store(me, Ordering::Relaxed);
+        }
+        a.replace(p)
+    })
 }
 
 /// `rt_ffi_open(vm)`, called by a transition shim right before its C call:
@@ -176,9 +202,14 @@ pub extern "C" fn rt_ffi_open(p: *mut Vm) -> u64 {
 pub extern "C" fn rt_ffi_close(p: *mut Vm, previous: u64) -> u64 {
     // SAFETY: generated code passes the Vm it runs on.
     let vm = unsafe { &mut *p };
-    vm.foreign_open.pop();
-    OPEN.fetch_sub(1, Ordering::Relaxed);
+    let closed = vm.foreign_open.pop();
     ACTIVE.with(|a| a.set(previous as *mut Vm));
+    // Every callback that entered through this transition has returned:
+    // a segment still naming it would let the collector jump into frames
+    // that no longer exist.
+    if closed.is_some() && vm.callback_segments.last().is_some_and(|&(_, t)| Some(t) == closed) {
+        Fatal::new(&["NATIVE", "CALLBACK", "BUG"], "a callback's segment outlived the foreign call it entered through").terminate();
+    }
     0
 }
 
@@ -255,30 +286,31 @@ type GenericEntry = unsafe extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 #[inline(never)]
 unsafe fn run(entry: usize, decl: &Descriptor, args: &[u64], out: *mut u64) -> Result<(), Fatal> {
     let p = ACTIVE.with(|a| a.get());
-    let what = format!("callback {}", decl.name);
     if !SUPPORTED {
         return Err(Fatal::new(
             &["NATIVE", "CALLBACK", "UNSUPPORTED"],
-            format!("{what}: C callbacks run on Linux x86-64 and AArch64 and macOS AArch64, where the collector walks frames by frame pointer across a foreign call (C-CALLBACK-MILESTONE-1.md); nothing ran"),
+            format!("{}: C callbacks run on Linux x86-64 and AArch64 and macOS AArch64, where the collector walks frames by frame pointer across a foreign call (C-CALLBACK-MILESTONE-1.md); nothing ran", decl.what()),
         ));
     }
     if p.is_null() {
-        if OPEN.load(Ordering::Relaxed) > 0 {
+        let me = ACTIVE.with(|a| a as *const Cell<*mut Vm> as usize);
+        let last = LAST_THREAD.load(Ordering::Relaxed);
+        if last != 0 && last != me {
             return Err(Fatal::new(
                 &["NATIVE", "CALLBACK", "THREAD"],
-                format!("{what} was called on a thread with no Botlish execution environment waiting in a foreign call: a callback runs only synchronously, on the thread of the foreign call that may call it back, never on another thread; nothing ran"),
+                format!("{} was called on a thread with no Botlish execution environment waiting in a foreign call: a callback runs only synchronously, on the thread of the foreign call that may call it back, never on another thread; nothing ran", decl.what()),
             ));
         }
         return Err(Fatal::new(
             &["NATIVE", "CALLBACK", "INACTIVE"],
-            format!("{what} was called outside every foreign call that may call it back: C may call a callback only during a call whose contract lets it (a std::ffi::c::FnPtr parameter declared noescape), never after the call returned or during another; nothing ran"),
+            format!("{} was called outside every foreign call that may call it back: C may call a callback only during a call whose contract lets it (a std::ffi::c::FnPtr parameter declared noescape), never after the call returned or during another; nothing ran", decl.what()),
         ));
     }
     // SAFETY: ACTIVE holds the Vm waiting in this thread's open transition,
     // alive while it waits.
     let vm = unsafe { &mut *p };
     let Some(&transition) = vm.foreign_open.last() else {
-        return Err(Fatal::new(&["NATIVE", "CALLBACK", "BUG"], format!("{what}: an active execution environment with no open transition")));
+        return Err(Fatal::new(&["NATIVE", "CALLBACK", "BUG"], format!("{}: an active execution environment with no open transition", decl.what())));
     };
     let record = super::framewalk::frame_record();
     let on_stack = match vm.running_stack() {
@@ -288,17 +320,27 @@ unsafe fn run(entry: usize, decl: &Descriptor, args: &[u64], out: *mut u64) -> R
     if !on_stack {
         return Err(Fatal::new(
             &["NATIVE", "CALLBACK", "STACK"],
-            format!("{what} was called on another stack than the foreign call that may call it back: a callback runs on the stack of that call, which C left; nothing ran"),
+            format!("{} was called on another stack than the foreign call that may call it back: a callback runs on the stack of that call, which C left; nothing ran", decl.what()),
         ));
     }
     ACTIVE.with(|a| a.set(std::ptr::null_mut()));
     vm.callback_segments.push((record, transition));
     let roots = vm.temp_roots.len();
-    let mut values = Vec::with_capacity(args.len());
-    for (index, (&class, &word)) in decl.params.iter().zip(args).enumerate() {
-        let value = argument(vm, class, word).map_err(|why| Fatal::new(&["NATIVE", "CALLBACK", "ARGUMENT"], format!("{what}: argument {}: {why}; nothing ran", index + 1)))?;
+    // The arguments, rooted while the others are made (a raw value or a
+    // BigInt allocates); up to sixteen in this frame, more in a Vec.
+    let mut inline = [NO_VALUE; 16];
+    let mut spilled = Vec::new();
+    let values: &mut [Value] = if args.len() <= inline.len() {
+        &mut inline[..args.len()]
+    } else {
+        spilled.resize(args.len(), NO_VALUE);
+        &mut spilled
+    };
+    for (index, &word) in args.iter().enumerate() {
+        let value = argument(vm, decl.param(index), word)
+            .map_err(|why| Fatal::new(&["NATIVE", "CALLBACK", "ARGUMENT"], format!("{}: argument {}: {why}; nothing ran", decl.what(), index + 1)))?;
         vm.temp_roots.push(value);
-        values.push(value);
+        values[index] = value;
     }
     // SAFETY: ENTRY is a generic entry, called with one tagged Value per
     // parameter of the callback's declared types.
@@ -312,10 +354,10 @@ unsafe fn run(entry: usize, decl: &Descriptor, args: &[u64], out: *mut u64) -> R
         let code = error.error_code().join(" ");
         return Err(Fatal::new(
             &["NATIVE", "CALLBACK", "FAILED"],
-            format!("{what} failed, and a C callback has no error channel to its C caller: {} ({code})", vm.describe_error(&error)),
+            format!("{} failed, and a C callback has no error channel to its C caller: {} ({code})", decl.what(), vm.describe_error(&error)),
         ));
     }
-    let word = result_word(decl.result, result).map_err(|why| Fatal::new(&["NATIVE", "CALLBACK", "RESULT"], format!("{what}: its result {why}")))?;
+    let word = result_word(decl.result, result).map_err(|why| Fatal::new(&["NATIVE", "CALLBACK", "RESULT"], format!("{}: its result {why}", decl.what())))?;
     vm.callback_segments.pop();
     ACTIVE.with(|a| a.set(p));
     // SAFETY: the caller's contract.
@@ -427,9 +469,9 @@ mod tests {
     fn descriptors_read_back() {
         let bytes = descriptor(&[CAbi::I32, CAbi::RawF64, CAbi::Ptr, CAbi::Bool], CAbi::U64, "m::cb");
         let decl = unsafe { read_descriptor(bytes.as_ptr(), bytes.len()) }.unwrap();
-        assert_eq!(decl.params, vec![CAbi::I32, CAbi::RawF64, CAbi::Ptr, CAbi::Bool]);
+        assert_eq!((0..decl.params.len()).map(|i| decl.param(i)).collect::<Vec<_>>(), vec![CAbi::I32, CAbi::RawF64, CAbi::Ptr, CAbi::Bool]);
         assert_eq!(decl.result, CAbi::U64);
-        assert_eq!(decl.name, "m::cb");
+        assert_eq!(decl.what(), "callback m::cb");
         for c in CLASSES {
             assert_eq!(class_of(class_code(c)), Some(c));
         }

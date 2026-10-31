@@ -281,6 +281,15 @@ declaration (`cf-decl-facts`). Where the facts come from -- a header, an
 ABI probe, a compiler's `nocapture`/`returned` attribute, a person -- is
 nothing the compiler knows (section 25).
 
+A function pointer parameter's escape is also its callback contract
+(C-CALLBACK-MILESTONE-1.md, section 8): `noescape` (declared or proven) on
+a `std::ffi::c::FnPtr` parameter says C may call the pointer during the
+call and keeps it no longer, so every call of that function is a *foreign
+transition* during which C may call a Botlish callback back (NIR's
+`callbacks=1`). `captures` or nothing stated is a retaining call (section 9)
+and no transition: a callback C calls then, or later, is refused at run
+time. A data pointer's noescape says nothing of callbacks.
+
 ## 5. Calls
 
 A call of an extern c fn is an ordinary call node of a root native
@@ -1053,11 +1062,13 @@ libcrypto needed at run time: `cf-sha256-executable`).
 Under `BOTLISH_NATIVE_GC_STRESS=1` (a collection attempt at every allocation
 site) the exposures survive real C calls: the fixture's read and write
 borrows, the Tcl script bytes and the SHA-256 read and write borrows
-(`cf-gc-stress`), and every fuzzer program (section 22). C cannot reach the
-collector during a call (no callbacks), so a collection inside a foreign
-call -- the borrowing milestone's `read_reentrant` -- is not reachable from
-real C; that synthetic test (`cb-liveness-reentrant`) remains the guard of
-an exposed storage's liveness across one, as it was designed to be.
+(`cf-gc-stress`), and every fuzzer program (section 22). Until
+C-CALLBACK-MILESTONE-1.md C could not reach the collector during a call,
+and the synthetic `read_reentrant` (`cb-liveness-reentrant`) was the guard
+of an exposed storage's liveness across a collection inside one; now a
+callback can allocate during a foreign call, and c-callbacks.test's
+`cb-exposure-survives` holds an exposure across real callbacks that
+collect.
 
 ## 21. Performance
 
@@ -1294,7 +1305,7 @@ and in CI).
 | A foreign call is not automatically direct. | **Confirmed.** Only a contract that may retain a pointer (captures, unknown) makes a call an authority source (`cf-direct-noescape-ordinary`). |
 | Temporary byte borrowing still requires noescape. | **Confirmed.** The admission is the borrowing milestone's, unchanged (`cf-borrow-refusals`). |
 | Raw foreign Ptr values can cross calls independently of borrowing. | **Confirmed.** A `Ptr` is a raw address word, passed and returned as one; a pointer result is borrowing's concern only when the same call exposes storage (section 7). |
-| No callback/export mechanism exists yet. | **Confirmed.** Botlish never calls an `FnPtr`, and exports no C symbol. |
+| No callback/export mechanism exists yet. | **Confirmed** at the time; native libraries export C symbols since NATIVE-LIBRARY-MILESTONE-1.md, and C calls Botlish back synchronously since C-CALLBACK-MILESTONE-1.md (`callback c fn`, `std::ffi::c::callback`). Botlish still never calls an `FnPtr`. |
 | No aggregate/varargs ABI exists yet. | **Confirmed** at the time; varargs since VARIADICS-VERTICAL-SLICE-1.md (`variadic`, a per-call signature). Structs, unions and arrays by value are declaration errors (floating point was too until FLOAT64-MILESTONE-1.md added `std::ffi::c::Double`; `float` and `long double` still are). |
 
 ## 25. For a binding generator
@@ -1331,8 +1342,11 @@ writes exactly these declarations, which compile like hand-written ones.
   FLOAT64-MILESTONE-1.md), structs, unions and arrays by value, `va_list`,
   bitfields. (Variadic calls are VARIADICS-VERTICAL-SLICE-1.md's: no format
   string is read, no runtime argument list built.)
-* Callbacks (Botlish code called from C), exported C symbols, calling an
-  `FnPtr`.
+* Calling an `FnPtr` from Botlish. (Exported C symbols are
+  NATIVE-LIBRARY-MILESTONE-1.md's; synchronous callbacks -- Botlish code C
+  calls during a call whose function pointer parameter is noescape -- are
+  C-CALLBACK-MILESTONE-1.md's; retained callback registrations are not
+  here yet.)
 * `dlopen`/`dlsym`, lazy binding, a runtime library path policy.
 * C strings, a dereference, reading C memory, an ownership policy for
   `Ptr` (who frees what), retained stable storage (C-POINTER-BORROWING.md

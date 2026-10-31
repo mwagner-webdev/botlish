@@ -8818,9 +8818,9 @@ related: concept.c-ffi concept.affine
 
 == DESCRIPTION
 These are the values a C boundary carries, modeled as C's ABI sees them, not
-as C's source language spells them. Nothing here calls C yet: there is no
-`extern c fn`, no linking and no callback (C-ABI-TYPES.md, "What is not
-here").
+as C's source language spells them. Nothing here calls C: C calls are
+`extern c fn` declarations (C-FFI.md), and C calling Botlish back is a
+`callback c fn` (C-CALLBACK-MILESTONE-1.md, below).
 
 C integer scalars (intrinsic types of this namespace):
 
@@ -8898,6 +8898,21 @@ Pointers (intrinsic types and operations of this namespace):
   std::ffi::c::clone(p)          p's type    a second alias of p (p.clone())
   std::ffi::c::erase(p)          Ptr[Void]   the same address as void *
   std::ffi::c::retype[T](p)      Ptr[T]      the same address of a Ptr[Void]
+  std::ffi::c::callback(NAME)    FnPtr[...]  the C function pointer of the
+                                             `callback c fn` NAME, of its
+                                             declared C signature
+
+Callbacks (C-CALLBACK-MILESTONE-1.md). A top-level, environment-free
+function declared `callback c fn NAME(...) -> T:` with C types whose
+conversions are total (the C integer scalars, Bool, RawFloat, RawDouble,
+Ptr, FnPtr; for the result also Float64, C's double, and unit) and no errors
+has a C entry point; std::ffi::c::callback(NAME) is its address. C may call
+it during a call of a C function whose FnPtr parameter is declared noescape,
+synchronously, on that call's thread: it then runs in the Botlish execution
+environment waiting in the call. Anywhere else -- another thread, after the
+call returned, during a call whose contract does not let C call back -- the
+runtime refuses it before any Botlish code runs, and ends the process
+(NATIVE CALLBACK). Native backends only.
 
 A pointer is affine: binding, passing, returning or storing it moves it, and
 `p.clone()` is the one way to have two aliases. Affinity is not ownership: a

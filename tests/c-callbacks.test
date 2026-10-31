@@ -40,6 +40,7 @@ if {[testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstra
     }
 }
 testConstraint cbFixture [expr {$::cbFixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
+testConstraint linuxHost [string match linux-* [core::cabi::hostTarget]]
 testConstraint cbNative [expr {[testConstraint nativeBuilt] && [testConstraint nativeCCalls] && [testConstraint nativeCCallbacks] && [testConstraint cLinker]}]
 
 set ::cbxModule [core::ReadFile [file join $::projectRoot tests cffi cbx.bot]]
@@ -165,15 +166,17 @@ callback c fn level2(x: std::ffi::c::Int) -> std::ffi::c::Int:
     x + k
 
 callback c fn level1(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    held = std::str::concat("held-by-level-one-", std::int::to_string(x))
     k = churn(20)
     cb = std::ffi::c::callback(level2)
     r = cbx::inner(cb, x)
-    if r > 100000 or r < -100000 or k > 1000 or k < 0:
+    n = std::str::length(held)
+    if r > 100000 or r < -100000 or k > 1000 or k < 0 or n != 20:
         return 0
     r + k
 
 fn main() -> List[str]:
-    a = [std::str::concat("keep", std::int::to_string(1)), std::str::concat("keep", std::int::to_string(2))]
+    a = [std::str::concat("kept-by-main-", std::int::to_string(1)), std::str::concat("kept-by-main-", std::int::to_string(2))]
     cb = std::ffi::c::callback(level1)
     r = cbx::outer(cb, 10)
     k = churn(30)
@@ -336,7 +339,7 @@ test cb-decisions {synchronous decisions C acts on at once, checked by C's own a
 
 test cb-nested-gc {the central test: Botlish main holds heap values, C outer calls callback 1, which allocates (collecting at every allocation under GC stress) and calls C inner, whose callback 2 allocates and returns; main's values survive and the results are C's -- with C's frame-pointer register holding no frame at both calls} -constraints cbFixture -body {
     cbAgree $::cbNested
-} -cleanup removeCbApps -result {same: ["keep1", "keep2", "205"]}
+} -cleanup removeCbApps -result {same: ["kept-by-main-1", "kept-by-main-2", "205"]}
 
 test cb-recursion {re-entry 300 levels deep: each callback calls C, which calls the callback again (no frame chain), and C checks every level's answer; repeated entry and exit leave no activation behind} -constraints cbFixture -body {
     cbAgree "import std::ffi::c\nimport std::int\nimport std::str\nimport cbx\n\ncallback c fn rec(depth: std::ffi::c::Int) -> std::ffi::c::Int:\n    if depth <= 0:\n        return 0\n    s = std::str::concat(\"level\", std::int::to_string(depth))\n    self = std::ffi::c::callback(rec)\n    r = cbx::recurse(self, depth - 1)\n    if r < 0 or r > 100000 or std::str::length(s) < 6:\n        return -1\n    r + 1\n\nr = std::ffi::c::callback(rec)\n\[cbx::recurse(r, 300), cbx::recurse(r, 10), cbx::recursion_errors()\]\n"
@@ -459,7 +462,7 @@ test cb-executable {a standalone executable runs the nested callbacks with no Tc
     file rename $exe $moved
     file delete -force $dir
     list [string trim [runBare $moved]] [string trim [exec env -i BOTLISH_NATIVE_GC_STRESS=1 $moved]]
-} -cleanup {removeCbApps; file delete -force [file join [temporaryDirectory] cb-moved-[pid]]} -result {{["keep1", "keep2", "205"]} {["keep1", "keep2", "205"]}}
+} -cleanup {removeCbApps; file delete -force [file join [temporaryDirectory] cb-moved-[pid]]} -result {{["kept-by-main-1", "kept-by-main-2", "205"]} {["kept-by-main-1", "kept-by-main-2", "205"]}}
 
 # ---------------------------------------------------------------------------
 # What the runtime refuses: each ends the (linked) program's process, fail-
@@ -469,8 +472,16 @@ test cb-refused-thread {C calling a callback on another thread -- a real C threa
     cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\ncbx::call_on_thread(cb, 5)\n" {cranelift cranelift-generic}
 } -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK THREAD} {callback twice was called on a thread with no Botlish execution environment waiting in a foreign call: a callback runs only synchronously, on the thread of the foreign call that may call it back, never on another thread; nothing ran}}]
 
+test cb-refused-stack {C calling a callback on a stack of its own (ucontext), while the Botlish frames wait on theirs, is refused: the collector's walk crosses from a callback's frames to the waiting ones on one stack only -- NATIVE CALLBACK STACK, nothing ran} -constraints {cbFixture linuxHost} -body {
+    cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\ncbx::call_on_other_stack(cb, 5)\n" {cranelift cranelift-generic}
+} -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK STACK} {callback twice was called on another stack than the foreign call that may call it back: a callback runs on the stack of that call, which C left; nothing ran}}]
+
 test cb-refused-retained {a callback kept past the call that gave it (a captures parameter, in a direct module) and called during a later call that may not call back is refused: NATIVE CALLBACK INACTIVE -- after the same pointer ran during a noescape call, so the activation closed when that call returned} -constraints cbFixture -body {
     cbValues "direct module\nimport std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\nfirst = cbx::apply(cb, 4)\ncbx::store(cb)\n\[first, cbx::call_stored(5)\]\n" {cranelift cranelift-generic}
+} -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK INACTIVE} {callback twice was called outside every foreign call that may call it back: C may call a callback only during a call whose contract lets it (a std::ffi::c::FnPtr parameter declared noescape), never after the call returned or during another; nothing ran}}]
+
+test cb-refused-inside-callback {while a callback runs its execution environment is no longer waiting in C: a C call the callback makes that may not call back (here one that calls a pointer it kept) is no transition, and C's call of a callback during it is refused -- NATIVE CALLBACK INACTIVE -- though an outer transition is open} -constraints cbFixture -body {
+    cbValues "direct module\nimport std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncallback c fn outer(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    r = cbx::call_stored(x)\n    if r > 1000 or r < -1000:\n        return 0\n    r + 1\n\nkept = std::ffi::c::callback(twice)\ncbx::store(kept)\no = std::ffi::c::callback(outer)\ncbx::apply(o, 5)\n" {cranelift cranelift-generic}
 } -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK INACTIVE} {callback twice was called outside every foreign call that may call it back: C may call a callback only during a call whose contract lets it (a std::ffi::c::FnPtr parameter declared noescape), never after the call returned or during another; nothing ran}}]
 
 test cb-refused-arguments {a C argument that is no value of the parameter's C type -- a _Bool byte other than 0 or 1, an address no C address word holds -- is refused before the body runs: NATIVE CALLBACK ARGUMENT} -constraints cbFixture -body {

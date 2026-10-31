@@ -533,7 +533,15 @@ An instance records the thread that created it.
   runs.
 * A call from inside one of the instance's own calls, through a C function
   Botlish called, is `REENTRANT-CALL`. Another instance may be called
-  there (`nl-reentrant`, `nl-nested-libraries`).
+  there (`nl-reentrant`, `nl-nested-libraries`). This is unchanged by
+  C-CALLBACK-MILESTONE-1.md: a host entering an instance through its
+  export trampoline is a new call of the library's C API, refused while the
+  instance runs one. A `callback c fn` of the library's program that a C
+  function the instance called calls back is another operation -- it runs
+  nested in the instance's waiting call, through the callback's own entry
+  point and the call's foreign transition, never through
+  `botlish_library_call` (C-CALLBACK-MILESTONE-1.md, "Relationship to
+  exported c fn").
 * Instances on different threads run concurrently (`nl-threads`: four at
   once, with allocation). Each has its own heap, and the registry's mutex is
   held only for the lookup.

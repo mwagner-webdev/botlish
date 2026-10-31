@@ -105,11 +105,15 @@ static int call_without_frame(cbx_unary f, int x) {
     return (int)r;
 #elif defined(__aarch64__) && !defined(_WIN32)
     int r;
+    /* Both inputs are read before x29 is overwritten (with frame pointers
+     * omitted the compiler may have placed one there); x16 is a clobbered
+     * scratch register. */
     __asm__ volatile(
+        "mov x16, %[f]\n\t"
+        "mov w0, %w[x]\n\t"
         "stp x29, x30, [sp, #-16]!\n\t"
         "mov x29, #16\n\t"
-        "mov w0, %w[x]\n\t"
-        "blr %[f]\n\t"
+        "blr x16\n\t"
         "ldp x29, x30, [sp], #16\n\t"
         "mov %w[r], w0\n\t"
         : [r] "=r"(r)
@@ -411,6 +415,36 @@ int cbx_call_on_thread(cbx_unary f, int x) {
     pthread_join(thread, 0);
     return call.result;
 }
+
+/* Called on another stack: C switches to a stack of its own (ucontext, on
+ * Linux) and calls f there, while the Botlish frames wait on theirs. */
+#if defined(__linux__)
+#include <ucontext.h>
+#include <stdlib.h>
+static ucontext_t waiting_context, other_context;
+static cbx_unary other_f;
+static int other_x, other_result;
+static void other_body(void) { other_result = other_f(other_x); }
+int cbx_call_on_other_stack(cbx_unary f, int x) {
+    size_t size = 1 << 20;
+    void *stack = malloc(size);
+    if (!stack || getcontext(&other_context) != 0) {
+        return -2;
+    }
+    other_f = f;
+    other_x = x;
+    other_result = -1;
+    other_context.uc_stack.ss_sp = stack;
+    other_context.uc_stack.ss_size = size;
+    other_context.uc_link = &waiting_context;
+    makecontext(&other_context, other_body, 0);
+    swapcontext(&waiting_context, &other_context);
+    free(stack);
+    return other_result;
+}
+#else
+int cbx_call_on_other_stack(cbx_unary f, int x) { (void)f; (void)x; return -3; }
+#endif
 
 /* Kept past the call (a `captures` parameter), and called by a later call
  * that has no callback parameter. */

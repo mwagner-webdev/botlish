@@ -443,11 +443,11 @@
 @@ gc-resumer-frames-untraced the collector does not trace the frames suspended below a running coroutine (its resumers' stacks)
 ## native/src/runtime/vm.rs
 <<<<
-            super::framewalk::walk_from(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), |addr| {
+            super::framewalk::walk_from_segmented(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), jumps, |addr| {
                 native_frame_roots.push(unsafe { *addr })
             });
 ====
-            let _ = (bounds, resumer_sp, suspended_rbp(0));
+            let _ = (bounds, resumer_sp, suspended_rbp(0), jumps);
 >>>>
 
 # ---------------------------------------------------------------------------
