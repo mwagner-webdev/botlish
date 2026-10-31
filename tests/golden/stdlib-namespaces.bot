@@ -232,6 +232,9 @@ fn register_char_tests(a: UnicodeChar, e_acute: UnicodeChar, grinning: UnicodeCh
             std::char::codepoint('A')
     std::test::rejects_message("ns-char-scalar-value-is-canonical/no-codepoint", std::compiler::DiagnosticCode::UnknownSymbol, "namespace \"std::char\" has no definition \"codepoint\" (its members are the intrinsics: is_tcl_alnum, is_tcl_alpha, scalar_value)", b_no_codepoint)
 
+    # (An Int where the intrinsic requires a UnicodeChar: the block is
+    # rejected with Type. This case was int-argument-accepted, the call
+    # under a false registration parameter, until the kind became static.)
     fn b_int_argument_rejected() errors std::compiler::CompilerError:
         static compile:
             std::char::scalar_value(65)

@@ -491,4 +491,31 @@ RESULTS-REGRESSION
 
 ## 12. Remaining limitations
 
-RESULTS-LIMITATIONS
+Concrete, independently reproducible issues only:
+
+* **An `if` condition statically of another kind than Bool compiles and
+  fails when it runs.** The same gap for a construct that is not a call:
+
+  ```
+  fn f(a: List[int]) -> int:
+      if a:
+          1
+      else:
+          2
+
+  f([1])
+  ```
+
+  is accepted and raises `if condition must be a Boolean, got [1] (CORE
+  SEMANTIC NOT-BOOLEAN)` on every backend (checked on interp and cranelift).
+  An untyped parameter used as a condition already gets a checked `bool`
+  contract (hir/signatures.tcl), as a native's argument did before this
+  milestone; the condition itself is not held to it. It is no call, so it is
+  outside this milestone; the fix would be the same shape (the condition's
+  own check, the value poison, `any` dynamic).
+
+Not limitations, but boundaries this milestone keeps on purpose (section 6,
+7): an argument of type `any` is checked when the call runs; core IR text,
+which has no declarations, keeps its run-time semantics (a strict core IR
+build is not held to the kinds); a call a construct lowers to is checked by
+that construct (`with context 5` is NOT-A-CONTEXT).
