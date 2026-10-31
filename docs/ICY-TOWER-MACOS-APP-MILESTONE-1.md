@@ -697,7 +697,14 @@ legacy 3DES/SHA-1), a container with a key and an unrelated certificate, a
 container damaged inside with its MAC recomputed, and App Store Connect-
 shaped keys (EC P-256 PKCS#8) with their wrong relatives (SEC1, RSA, P-384,
 Ed25519, public, encrypted). `fixtures.py dry-run DIR` writes the
-throwaway identity ordinary CI rehearses the release with (section 25).
+throwaway identity ordinary CI rehearses the release with (section 25),
+under an authority named as its own ("Icy Tower Dry Run Certification
+Authority", with subject and authority key identifiers), a precaution so
+that macOS's chain building cannot take Apple's real Developer ID
+intermediate, which the system holds under the Apple-shaped name, for the
+leaf's issuer. codesign signs only with an identity whose chain ends at a
+trusted root, so the dry run trusts its throwaway root for code signing,
+for that step alone (section 25).
 
 ## 22. Credential negative tests
 
@@ -828,7 +835,7 @@ same construction in every mode, so ordinary CI tests what a release signs:
 | mode | identity | flags | where |
 |---|---|---|---|
 | adhoc | `-` | `--options runtime --timestamp=none` | ordinary CI: the bundle every LaunchServices case plays |
-| dry-run | a throwaway test identity in the temporary keychain | `--options runtime --timestamp=none` (Apple's time stamp service signs only Apple-issued identities) | ordinary CI: the release's keychain, selection, signing and cleanup, rehearsed |
+| dry-run | a throwaway test identity in the temporary keychain, its root trusted for code signing for the step alone | `--options runtime --timestamp=none` (no throwaway signature is sent to Apple's timestamp service) | ordinary CI: the release's keychain, selection, signing and cleanup, rehearsed |
 | release | the Developer ID Application identity | `--options runtime --timestamp` | the release job |
 
 A release never falls back: its sign stage refuses to run without the
