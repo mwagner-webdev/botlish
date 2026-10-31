@@ -1240,7 +1240,7 @@ line names run there):
 | the bundle's checks (6) | worker-startup-accepted, architecture-unchecked, dynamic-sdl-accepted, permissions-unchecked, executable-name-unchecked, package-replaces-on-failure |
 | the workflow's trust boundary (17) | release-on-pull-requests, release-on-any-ref, pull-request-target, secret-in-game-job, secret-in-script, trace-with-secrets, secret-files-uploaded, release-adhoc, workflow-no-staple, workflow-no-notary-auth, publish-before-release, release-assets-unchecked, upload-submission-zip, release-writes, release-trusts-a-root, dry-run-trusts-its-root, dry-run-blocked-as-passed |
 
-**Executed**: 68 of 68 killed on Linux (this checkout, 153 s); on macOS in
+**Executed**: 70 of 70 killed on Linux (this checkout, 165 s); on macOS in
 every acceptance run, as the game job's step (run 41207619549: 66 of 66,
 the set before its last three; run 41212691891: 68 of 68, 180 s). Every
 named test passes on the unmutated tree first (the harness's baseline), so
