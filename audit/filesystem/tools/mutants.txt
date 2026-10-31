@@ -21,19 +21,19 @@
 @@ win-drive-relative-as-absolute a bare drive designator is joined with a separator: "C:" and "a" become "C:\a" (the drive's root) instead of "C:a" (the drive's current directory)
 ## stdlib/windows/fs.bot
 <<<<
-    if base.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and base.length() == 2):
+    if bu.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and bu.length() == 2):
 ====
-    if base.ends_separated?(k == PathKind::Verbatim):
+    if bu.ends_separated?(k == PathKind::Verbatim):
 >>>>
 
 @@ win-always-separator a separator is inserted even after one: "C:\x\" and "a" become "C:\x\\a"
 ## stdlib/windows/fs.bot
 <<<<
-        return base.joined(name)
-    base.append(backslash()).joined(name)
+        return std::abi::bytes::join([base, name])
+    std::abi::bytes::join([base, backslash_unit(), name])
 ====
-        return base.append(backslash()).joined(name)
-    base.append(backslash()).joined(name)
+        return std::abi::bytes::join([base, backslash_unit(), name])
+    std::abi::bytes::join([base, backslash_unit(), name])
 >>>>
 
 @@ win-verbatim-dot-dot ".." is accepted under a verbatim path, where Win32 does not resolve it (NTFS refuses it: a name that opens nothing, or another entry)
@@ -63,20 +63,22 @@
 @@ win-lossy-surrogate-text a native name holding an unpaired surrogate gets a text (U+FFFD in its place) instead of NotText: the text names another file
 ## stdlib/windows/fs.bot
 <<<<
-    if unpaired.length() > 0:
-        fail std::io::path::NotText
-    decoded(cs.utf8_of())
+    std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            fail std::io::path::NotText
 ====
-    decoded(cs.utf8_of())
+    std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            return path.units_of().lossy()
 >>>>
 
 @@ win-enumeration-loses-native-name a listed name is kept as the units of its lossy display, not its own units: an unpaired surrogate becomes U+FFFD, and the name reopens another file or none
 %% windows-x86_64
 ## stdlib/windows/fs.bot
 <<<<
-    out.push(Entry {name: NativePath {units: name}, kind: attributes.kind_of_entry(tag)})
+    out.push(Entry {name: NativePath {data: named}, kind: attributes.kind_of_entry(tag)})
 ====
-    out.push(Entry {name: NativePath {units: decoded(name.scalars().utf8_of()).utf16()}, kind: attributes.kind_of_entry(tag)})
+    out.push(Entry {name: NativePath {data: std::abi::bytes::encode_utf16le(name.lossy())}, kind: attributes.kind_of_entry(tag)})
 >>>>
 
 @@ win-last-error-read-late another Win32 call (GetFileAttributesW of an invalid name, ERROR_INVALID_NAME) runs between a failed CreateFileW and the read of its last-error code
@@ -86,9 +88,63 @@
     failure = c_get_last_error()
     if handle.clone().invalid?():
 ====
-    stray = c_get_attributes(wide([60]))
+    stray = c_get_attributes(wide_of(std::abi::bytes::from_list([std::byte::from_int(60), std::byte::from_int(0)])))
     failure = c_get_last_error()
     if handle.clone().invalid?():
+>>>>
+
+# ---------------------------------------------------------------------------
+# Windows native paths on byte storage (UTF16-BYTE-STORAGE-MILESTONE-1.md)
+
+@@ win-call-buffer-unterminated the Win32 call boundary passes a path's bytes without the NUL unit an LPCWSTR ends with: the function reads past the name
+## stdlib/windows/fs.bot
+<<<<
+    std::abi::bytes::join([data, nul_unit()])
+====
+    data
+>>>>
+
+@@ win-terminator-in-native-path the NUL unit is stored in the native path from text, not added at the call boundary: the path's units end with 0
+## stdlib/windows/fs.bot
+<<<<
+    if not std::abi::bytes::utf16le_units(data).valid_units?():
+        fail std::io::path::NotAPath
+    NativePath {data: data}
+====
+    if not std::abi::bytes::utf16le_units(data).valid_units?():
+        fail std::io::path::NotAPath
+    NativePath {data: wide_of(data)}
+>>>>
+
+@@ win-open-through-lossy-text the Win32 call is given the bytes of the path's display, not its own units: a name holding an unpaired surrogate opens the file whose name holds U+FFFD
+## stdlib/windows/fs.bot
+<<<<
+    wide_of(path.data)
+====
+    wide_of(std::abi::bytes::encode_utf16le(path.display()))
+>>>>
+
+@@ win-text-normalized a native path's text is normalized (lowercased): "C:a" reads back as "c:a", another spelling than the path's
+## stdlib/windows/fs.bot
+<<<<
+    std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            fail std::io::path::NotText
+====
+    t = std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            fail std::io::path::NotText
+    std::str::lowercase(t)
+>>>>
+
+@@ win-units-reencoded a native path's units are read back through its lossy text, not its bytes: an unpaired surrogate reads back as U+FFFD
+## stdlib/windows/fs.bot
+<<<<
+fn units(path: NativePath) -> List[int]:
+    path.units_of()
+====
+fn units(path: NativePath) -> List[int]:
+    std::abi::bytes::utf16le_units(std::abi::bytes::encode_utf16le(path.display()))
 >>>>
 
 @@ win-context-bypassed create_directory needs no filesystem context: a path is authority

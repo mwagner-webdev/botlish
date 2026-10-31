@@ -396,20 +396,24 @@ jobs:
           tclsh9.0 tests/platform/tier.tcl smoke argv.test target-model.test native-executable.test \
             main-cli.test application-modules.test workload-2048.test native.test c-abi-types.test \
             c-ffi.test windows-io.test c-byte-borrowing.test c-float-ffi.test native-link-plan.test \
-            filesystem.test abi-bytes.test \
+            filesystem.test abi-bytes.test utf16-bytes.test \
             coroutines.test coroutine-fusion.test native-stack-overflow.test coroutines.bot 2>&1 | tee tier.log
 
       # Paths and files on NTFS (WINDOWS-X86-64-MILESTONE-7.md) once more,
       # every run under GC stress: CreateFileW, ReadFile, WriteFile,
       # FindFirstFileW and the path conversions, with a collection at every
-      # allocation, in programs and in an executable.
+      # allocation, in programs and in an executable -- and the UTF-16LE
+      # codec those conversions use (UTF16-BYTE-STORAGE-MILESTONE-1.md).
       - name: Filesystem under GC stress
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          mkdir -p filesystem-tmp
+          mkdir -p filesystem-tmp utf16-tmp
           BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/filesystem.test -match 'fs-windows-*' -tmpdir "$(pwd -W)/filesystem-tmp" 2>&1 | tee filesystem-gc.log
           grep -aq 'Failed	0' filesystem-gc.log
           ! grep -aq 'Passed	0' filesystem-gc.log
+          BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/utf16-bytes.test -tmpdir "$(pwd -W)/utf16-tmp" 2>&1 | tee utf16-gc.log
+          grep -aq 'Failed	0' utf16-gc.log
+          ! grep -aq 'Passed	0' utf16-gc.log
 
       # Variadic C calls (WINDOWS-X86-64-MILESTONE-6.md) once more, every
       # one under GC stress: the machine state each arrives in against

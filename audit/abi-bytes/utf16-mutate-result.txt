@@ -1,0 +1,64 @@
+KILLED tcl-byte-order-swapped -- the Tcl backends encode UTF-16BE
+    named: u16-encode-vectors fuzz
+    failed: u16-encode-vectors, u16-encode-ascii-chunks, u16-decode-accepted, u16-roundtrip, u16-platform-free, u16-large, fuzz
+KILLED tcl-encode-appends-nul -- the Tcl backends append a NUL unit to every encoding
+    named: u16-encode-vectors fuzz
+    failed: u16-encode-vectors, u16-encode-ascii-chunks, u16-decode-accepted, u16-roundtrip, u16-platform-free, u16-large, fuzz
+KILLED tcl-accepts-odd-count -- the Tcl backends drop a trailing odd byte instead of refusing the bytes
+    named: u16-decode-rejected fuzz
+    failed: u16-decode-rejected, fuzz
+KILLED tcl-replaces-malformed -- the Tcl backends replace malformed UTF-16 with U+FFFD instead of raising InvalidUtf16
+    named: u16-decode-rejected u16-error-handleable fuzz
+    failed: u16-decode-rejected, u16-error-handleable, fuzz
+KILLED tcl-bom-removed -- the Tcl backends treat a leading FF FE as a byte-order mark and drop it
+    named: u16-decode-accepted
+    failed: u16-decode-accepted
+KILLED rust-byte-order-swapped -- the native encoder writes each unit high byte first (UTF-16BE)
+    named: u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+    failed: rust:utf16le_encodes_exact_bytes, u16-encode-vectors, u16-encode-ascii-chunks, u16-decode-accepted, u16-roundtrip, u16-large, u16-gc-stress, fuzz
+KILLED rust-ascii-byte-order-swapped -- the native encoder's ASCII path writes each unit's zero byte first
+    named: u16-encode-vectors u16-encode-ascii-chunks rust:utf16le_encodes_exact_bytes fuzz
+    failed: rust:utf16le_encodes_exact_bytes, u16-encode-vectors, u16-encode-ascii-chunks, u16-decode-accepted, u16-roundtrip
+KILLED rust-high-byte-omitted -- the native encoder keeps each unit's low byte and writes 0 for its high byte (the length unchanged)
+    named: u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+    failed: rust:utf16le_encodes_exact_bytes, u16-encode-vectors, u16-decode-accepted, u16-roundtrip, u16-large, u16-gc-stress, fuzz
+KILLED rust-supplementary-as-two-values -- a supplementary scalar is written as two unrelated 16-bit values (its high and low halves), not as a surrogate pair
+    named: u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+    failed: rust:utf16le_encodes_exact_bytes, u16-encode-vectors, u16-decode-accepted, u16-roundtrip, u16-large, u16-gc-stress, fuzz
+KILLED rust-surrogate-pair-miscalculated -- the high surrogate is computed from the scalar without subtracting 0x10000 (off by 64 units)
+    named: u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+    failed: rust:utf16le_encodes_exact_bytes, u16-encode-vectors, u16-decode-accepted, u16-roundtrip, u16-large, u16-gc-stress, fuzz
+KILLED rust-encode-appends-nul -- the native encoder appends a NUL unit (a C-style terminator) to every encoding
+    named: u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+    failed: rust:utf16le_encodes_exact_bytes, u16-encode-vectors, u16-encode-ascii-chunks, u16-decode-accepted, u16-roundtrip, u16-large, u16-gc-stress, fuzz
+KILLED rust-oversized-length-unchecked -- the encoding's length is doubled with wrapping arithmetic and never held to the ceiling: an oversized String's length wraps or passes the Bytes limit
+    named: rust:utf16le_length_never_overflows_or_passes_the_ceiling
+    failed: rust:utf16le_length_never_overflows_or_passes_the_ceiling
+KILLED rust-decode-byte-order-swapped -- the native decoder reads each byte pair high byte first
+    named: u16-decode-accepted u16-no-order-detection rust:utf16le_decodes_strictly fuzz
+    failed: rust:utf16le_decodes_strictly, rust:utf16le_length_never_overflows_or_passes_the_ceiling, rust:utf16le_units_bridge_reads_low_byte_first, u16-decode-accepted, u16-decode-rejected, u16-no-order-detection, u16-roundtrip, u16-error-handleable, u16-large, u16-gc-stress, fuzz
+KILLED rust-accepts-lone-high -- an unpaired high surrogate is accepted (shown as U+FFFD) instead of InvalidUtf16
+    named: u16-decode-rejected rust:utf16le_decodes_strictly fuzz
+    failed: rust:utf16le_length_never_overflows_or_passes_the_ceiling, rust:utf16le_decodes_strictly, u16-decode-rejected, u16-error-handleable, fuzz
+KILLED rust-accepts-lone-low -- an unpaired low surrogate is accepted (shown as U+FFFD) instead of InvalidUtf16
+    named: u16-decode-rejected rust:utf16le_decodes_strictly fuzz
+    failed: rust:utf16le_decodes_strictly, u16-decode-rejected, fuzz
+KILLED rust-accepts-odd-count -- an odd byte count is accepted, its last byte ignored
+    named: u16-decode-rejected rust:utf16le_decodes_strictly fuzz
+    failed: rust:utf16le_decodes_strictly, u16-decode-rejected, fuzz
+KILLED rust-replaces-malformed -- the native decoder replaces every unpaired surrogate with U+FFFD instead of raising InvalidUtf16
+    named: u16-decode-rejected u16-error-handleable rust:utf16le_decodes_strictly fuzz
+    failed: rust:utf16le_decodes_strictly, rust:utf16le_length_never_overflows_or_passes_the_ceiling, u16-decode-rejected, u16-error-handleable, fuzz
+KILLED rust-bom-removed -- the native decoder treats a leading FF FE as a byte-order mark and drops it
+    named: u16-decode-accepted rust:utf16le_decodes_strictly
+    failed: rust:utf16le_decodes_strictly, u16-decode-accepted
+KILLED rust-decode-error-panics -- an unpaired high surrogate is an unchecked Rust panic instead of the declared InvalidUtf16
+    named: u16-decode-rejected u16-error-handleable rust:utf16le_decodes_strictly fuzz
+    failed: rust:did-not-complete, u16-decode-rejected, u16-error-handleable, fuzz
+KILLED rust-units-bridge-byte-order-swapped -- the internal units bridge reads each byte pair high byte first (std::windows::fs's syntax sees other units)
+    named: rust:utf16le_units_bridge_reads_low_byte_first
+    failed: rust:utf16le_units_bridge_reads_low_byte_first
+KILLED rust-gc-roots-lost -- the conversions are classified as never allocating: values live across one are not rooted, and a collection inside it frees them
+    named: u16-gc-stress
+    failed: u16-gc-stress
+mutants 21 killed 21 not killed by their detector 0

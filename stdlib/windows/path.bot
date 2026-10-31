@@ -59,10 +59,15 @@ import std::windows::fs
 
 refined type WindowsPath = str
 
-# true when no character of VALUE is U+0000.
+# true when no character of VALUE is U+0000: when no byte of its UTF-8
+# encoding is 0 (U+0000 is the one character whose encoding holds one). One
+# pass over the bytes (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Performance"): a
+# loop over std::str::char_at locates every non-ASCII character from the
+# start of the String again, so it was quadratic in the path's length --
+# 9.0 ms for 4096 mixed characters -- where this is linear (36 us).
 fn nul_free?(value: str) -> bool:
-    loop i from 0 to value.length():
-        if value.char_at(i).scalar_value() == 0:
+    loop b in value.encode_utf8():
+        if b == 0:
             return false
     true
 

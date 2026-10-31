@@ -1,0 +1,360 @@
+# utf16-bytes.test -- UTF-16LE on byte storage (UTF16-BYTE-STORAGE-MILESTONE-1.md):
+#
+#   std::abi::bytes::encode_utf16le(text: str) -> std::abi::bytes::Bytes
+#   std::abi::bytes::decode_utf16le(data: std::abi::bytes::Bytes) -> str errors InvalidUtf16
+#
+# Every test compares exact bytes or exact scalar values with expectations
+# written here, never with another run of the codec: an input String is built
+# from its UTF-8 bytes (std::abi::bytes::decode_utf8, the existing strict
+# decoder), an input Bytes from its byte list, an encoding is compared with
+# its literal UTF-16LE hex through the harness's internal reveal
+# (`<bytes N: HEX>`), and a decoding with the literal list of its scalar
+# values. Every program runs on all four backends, which must agree.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set allBackends {interp compile cranelift-generic cranelift}
+set nativeBackends {cranelift-generic cranelift}
+
+set scratch [makeDirectory utf16-bytes-scratch]
+set programCounter 0
+
+# The HIR of program TEXT compiled for TARGET (default the host's).
+proc u16Hir {text {target ""} {strict 1}} {
+    if {$target eq ""} {
+        set target [core::cabi::hostTarget]
+    }
+    set path [file join $::scratch p[incr ::programCounter].bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+    return [surface::readProgramFile $path -strict $strict -target $target]
+}
+
+# The one shown value (the internal reveal) every backend of BACKENDS agrees
+# on for program TEXT, or a description of the disagreement or error.
+proc u16Agree {text {backends ""} {target ""}} {
+    if {$backends eq ""} {
+        set backends $::allBackends
+    }
+    set hir [u16Hir $text $target]
+    set outcomes [lmap backend $backends {lrange [outcomeUnderHir $backend $hir] 0 1}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $backends o $outcomes {list $b $o}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] ne "value"} {
+        return "ERROR: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+# {KIND MESSAGE} of the first diagnostic a strict compilation of TEXT
+# raises, or "accepted".
+proc u16Rejection {text {target ""}} {
+    if {![catch {u16Hir $text $target} message options]} {
+        return accepted
+    }
+    regexp {^[^ ]*:[0-9]+:[0-9]+: (.*)$} [lindex [split $message \n] 0] -> message
+    return [list [lindex [dict get $options -errorcode] end] $message]
+}
+
+# TEXT's UTF-8 bytes as a Botlish List literal (Tcl's own encoder: the
+# input is built independently of the codec under test).
+proc utf8List {text} {
+    binary scan [encoding convertto utf-8 $text] cu* codes
+    return "\[[join $codes {, }]\]"
+}
+
+# HEX (pairs of hexadecimal digits, spaces ignored) as a Botlish List of
+# bytes.
+proc hexList {hex} {
+    binary scan [binary decode hex [string map {" " ""} $hex]] cu* codes
+    return "\[[join $codes {, }]\]"
+}
+
+# The reveal of the Bytes holding HEX.
+proc revealed {hex} {
+    set hex [string tolower [string map {" " ""} $hex]]
+    return "std::abi::bytes::Bytes {storage: <bytes [expr {[string length $hex] / 2}]: $hex>}"
+}
+
+set prelude "import std::abi
+import std::abi::bytes
+import std::byte
+import std::char
+import std::list
+import std::str
+
+# The Bytes holding the bytes XS (each 0..255).
+fn raw(xs: List\[int\]) -> std::abi::bytes::Bytes:
+    bs = loop x in xs:
+        std::byte::from_int(x):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                0
+    std::abi::bytes::from_list(bs)
+
+# The String whose UTF-8 bytes are XS (built without the UTF-16 codec).
+fn s(xs: List\[int\]) -> str:
+    std::abi::bytes::decode_utf8(raw(xs)):
+        on InvalidUtf8:
+            \"<not UTF-8>\"
+
+# The scalar values of TEXT, in order.
+fn scalars(text: str) -> List\[int\]:
+    loop i from 0 to text.length():
+        text.char_at(i).scalar_value()
+
+# The decoding of the bytes XS as scalar values, or \"InvalidUtf16\".
+fn d(xs: List\[int\]) -> any:
+    t = std::abi::bytes::decode_utf16le(raw(xs)):
+        on InvalidUtf16:
+            return \"InvalidUtf16\"
+    scalars(t)
+
+# The decoding of the bytes XS and its encoding again (both shown), or
+# \"InvalidUtf16\".
+fn dd(xs: List\[int\]) -> any:
+    t = std::abi::bytes::decode_utf16le(raw(xs)):
+        on InvalidUtf16:
+            return \"InvalidUtf16\"
+    \[scalars(t), std::abi::bytes::encode_utf16le(t)\]
+"
+
+# ---------------------------------------------------------------------------
+# Registration
+
+test u16-natives-registered {two public natives and one internal bridge: encode_utf16le takes a String and makes a storage (no declared error), decode_utf16le takes a storage and makes a String or fails with the declared builtin error InvalidUtf16 -- builtin error 13, after InvalidUtf8 (12), every earlier id unchanged; all context-free. std::byte_store::utf16le_units and its wrapper std::abi::bytes::utf16le_units are internal members of the standard library} -body {
+    set out {}
+    foreach name {std::byte_store::encode_utf16le std::byte_store::decode_utf16le std::byte_store::utf16le_units} {
+        set m [core::native::metadata $name]
+        lappend out [list $name [dict get $m arity] [dict get $m paramTypes] [dict get $m resultType] \
+            [dict get $m errors] [dict get $m contextFree] [core::native::isInternalMember $name]]
+    }
+    lappend out [lmap e {InvalidUtf8 InvalidUtf16} {core::native::builtinErrorIndex $e}] \
+        [core::native::isInternalMember std::abi::bytes::utf16le_units]
+} -result {{std::byte_store::encode_utf16le 1 str any {} 1 0} {std::byte_store::decode_utf16le 1 any str InvalidUtf16 1 0} {std::byte_store::utf16le_units 1 any list {} 1 1} {12 13} 1}
+
+test u16-public-surface {std::abi::bytes declares the pair with their contracts: encode_utf16le(text: str) -> Bytes declares no error, decode_utf16le(data: Bytes) -> str errors InvalidUtf16 -- an ordinary typed function over the byte storage, beside decode_utf8} -body {
+    set text [core::ReadFile [file join $::projectRoot stdlib abi bytes.bot]]
+    lmap name {encode_utf16le decode_utf16le utf16le_units} {
+        regexp -inline -line "^(?:nomethod )?fn $name\\(.*\$" $text
+    }
+} -result {{{fn encode_utf16le(text: str) -> Bytes:}} {{fn decode_utf16le(data: Bytes) -> str errors InvalidUtf16:}} {{nomethod fn utf16le_units(data: Bytes) -> List[int]:}}}
+
+# ---------------------------------------------------------------------------
+# Encoding: exact bytes
+
+test u16-encode-vectors {each String's exact UTF-16LE bytes on every backend: two bytes per code unit, low byte first, a supplementary scalar as its surrogate pair (high unit first); no byte-order mark, no terminator, no normalization: "" is no bytes, U+0000 is 00 00, U+FEFF is FF FE (data, not a mark)} -body {
+    set vectors {
+        "" {}
+        A {41 00}
+        \u0000 {00 00}
+        é {e9 00}
+        € {ac 20}
+        \U1F600 {3d d8 00 de}
+        � {fd ff}
+        ﻿ {ff fe}
+        \U10000 {00 d8 00 dc}
+        \U10FFFF {ff db ff df}
+        ퟿ {ff d7}
+         {00 e0}
+        ￿ {ff ff}
+        ￾ {fe ff}
+        \U1FFFE {3f d8 fe df}
+        "aé€\U1F600z" {61 00 e9 00 ac 20 3d d8 00 de 7a 00}
+        "﻿A﻿" {ff fe 41 00 ff fe}
+        "é" {65 00 01 03}
+        "é" {e9 00}
+        "x\u0000y" {78 00 00 00 79 00}
+        "\U1D11E\U1D11E" {34 d8 1e dd 34 d8 1e dd}
+    }
+    set calls [join [lmap {t -} $vectors {string cat "std::abi::bytes::encode_utf16le(s([utf8List $t]))"}] ",\n    "]
+    set got [u16Agree "${::prelude}\[$calls\]\n"]
+    set want "\[[join [lmap {- h} $vectors {revealed $h}] {, }]\]"
+    expr {$got eq $want ? "ok" : "got $got\nwant $want"}
+} -result ok
+
+test u16-encode-ascii-chunks {the native ASCII path widens 64 characters at a time: Strings of 63, 64, 65, 128 and 129 characters (and one with a non-ASCII character after 64 ASCII ones) encode to every unit, in order} -body {
+    set calls {}
+    set want {}
+    foreach n {63 64 65 128 129} {
+        set t [string range [string repeat abcdefghijklmnopqrstuvwxyz0123456789 4] 0 [expr {$n - 1}]]
+        lappend calls "std::abi::bytes::encode_utf16le(\"$t\")"
+        lappend want [revealed [join [lmap c [split $t ""] {format %02x00 [scan $c %c]}] ""]]
+    }
+    set t "[string repeat a 64]é"
+    lappend calls "std::abi::bytes::encode_utf16le(s([utf8List $t]))"
+    lappend want [revealed "[string repeat 6100 64]e900"]
+    set got [u16Agree "${::prelude}\[[join $calls {, }]\]\n"]
+    expr {$got eq "\[[join $want {, }]\]" ? "ok" : "got $got"}
+} -result ok
+
+# ---------------------------------------------------------------------------
+# Decoding: strict
+
+test u16-decode-accepted {well-formed UTF-16LE decodes to exactly its scalars, and encodes back to exactly its bytes: empty input, ASCII, multibyte BMP, surrogate pairs (alone, surrounded, repeated), U+0000, U+FFFD and noncharacters as characters, U+FEFF at the start and in the middle as a character (never a byte-order mark: nothing skipped)} -body {
+    set cases {
+        {}
+        {41 00}
+        {e9 00 ac 20}
+        {3d d8 00 de}
+        {61 00 3d d8 00 de 62 00}
+        {3d d8 00 de 3d d8 00 de 34 d8 1e dd}
+        {00 00}
+        {fd ff}
+        {ff ff fe ff 3f d8 fe df}
+        {ff fe 41 00}
+        {41 00 ff fe 42 00}
+        {ff db ff df 00 d8 00 dc}
+    }
+    u16Agree "${::prelude}\[[join [lmap c $cases {string cat "dd([hexList $c])"}] {, }]\]\n"
+} -result [string cat {[[[], std::abi::bytes::Bytes {storage: <bytes 0: >}], } \
+    {[[65], std::abi::bytes::Bytes {storage: <bytes 2: 4100>}], } \
+    {[[233, 8364], std::abi::bytes::Bytes {storage: <bytes 4: e900ac20>}], } \
+    {[[128512], std::abi::bytes::Bytes {storage: <bytes 4: 3dd800de>}], } \
+    {[[97, 128512, 98], std::abi::bytes::Bytes {storage: <bytes 8: 61003dd800de6200>}], } \
+    {[[128512, 128512, 119070], std::abi::bytes::Bytes {storage: <bytes 12: 3dd800de3dd800de34d81edd>}], } \
+    {[[0], std::abi::bytes::Bytes {storage: <bytes 2: 0000>}], } \
+    {[[65533], std::abi::bytes::Bytes {storage: <bytes 2: fdff>}], } \
+    {[[65535, 65534, 131070], std::abi::bytes::Bytes {storage: <bytes 8: fffffeff3fd8fedf>}], } \
+    {[[65279, 65], std::abi::bytes::Bytes {storage: <bytes 4: fffe4100>}], } \
+    {[[65, 65279, 66], std::abi::bytes::Bytes {storage: <bytes 6: 4100fffe4200>}], } \
+    {[[1114111, 65536], std::abi::bytes::Bytes {storage: <bytes 8: ffdbffdf00d800dc>}]]}]
+
+test u16-decode-rejected {every malformed input is the declared InvalidUtf16 on every backend, never a replacement: one byte, an odd count of otherwise valid units, a lone high or low surrogate (leading, trailing, alone), a reversed pair, two highs, two lows, a high before an ordinary unit, a high before a high before a low, U+FFFD followed by a lone low surrogate} -body {
+    set cases {
+        {41}
+        {41 00 42}
+        {41 00 42 00 43}
+        {3d d8 00}
+        {00 d8 41 00}
+        {41 00 00 d8}
+        {00 dc 41 00}
+        {00 d8}
+        {00 dc}
+        {00 dc 00 d8}
+        {00 d8 00 d8}
+        {00 dc 00 dc}
+        {3d d8 41 00}
+        {00 d8 00 d8 00 dc}
+        {fd ff 00 dc}
+        {61 00 3d d8 00 de 00 de}
+    }
+    lsort -unique [split [string trim [u16Agree "${::prelude}\[[join [lmap c $cases {string cat "d([hexList $c])"}] {, }]\]\n"] {[]}] ", "]
+} -result {{} {"InvalidUtf16"}}
+
+test u16-no-order-detection {the byte order is the format's, never detected: the big-endian bytes of "AB" decode as U+4100 U+4200 (not as "AB"), and a big-endian mark FE FF is the character U+FFFE, which switches nothing} -body {
+    u16Agree "${::prelude}\[d([hexList {00 41 00 42}]), d([hexList {fe ff 00 41}])\]\n"
+} -result {[[16640, 16896], [65534, 16640]]}
+
+test u16-roundtrip {decode_utf16le(encode_utf16le(s)) == s, for Strings of every width -- ASCII, Latin, BMP CJK, combining marks, U+0000, U+FFFD, astral -- and long mixed ones} -body {
+    set texts [list "" a "\u0000" "�﻿" "é̂" "中文路径" "\U1F600\U10FFFF\U10000" \
+        [string repeat "aé中\U1F600büx\U1D11E" 300] [string repeat "\u0000�" 50]]
+    set calls [join [lmap t $texts {string cat "rt(s([utf8List $t]))"}] ", "]
+    u16Agree "${::prelude}fn rt(t: str) -> List\[any\]:
+    back = std::abi::bytes::decode_utf16le(std::abi::bytes::encode_utf16le(t)):
+        on InvalidUtf16:
+            return \[\"InvalidUtf16\"\]
+    \[back == t, std::abi::bytes::length(std::abi::bytes::encode_utf16le(t)).value\]
+\[$calls\]\n"
+} -result {[[true, 0], [true, 2], [true, 2], [true, 4], [true, 6], [true, 8], [true, 12], [true, 6000], [true, 200]]}
+
+# ---------------------------------------------------------------------------
+# Errors, contracts, platforms
+
+test u16-error-handleable {InvalidUtf16 is an ordinary declared error: handled by `on InvalidUtf16:`, propagated through a function that declares it, and a call that neither handles nor declares it is rejected at compile time (UNHANDLED-ERROR); the conversion itself never panics} -body {
+    set ok [u16Agree "${::prelude}fn strict(data: std::abi::bytes::Bytes) -> str errors InvalidUtf16:
+    std::abi::bytes::decode_utf16le(data)
+
+fn tolerant(data: std::abi::bytes::Bytes) -> str:
+    strict(data):
+        on InvalidUtf16:
+            \"refused\"
+
+\[tolerant(raw([hexList {00 d8}])), tolerant(raw([hexList {41 00}]))\]\n"]
+    set bad [u16Rejection "${::prelude}fn f(data: std::abi::bytes::Bytes) -> str:
+    std::abi::bytes::decode_utf16le(data)
+f(std::abi::bytes::from_list(\[\]))\n"]
+    list $ok [lindex $bad 0]
+} -result {{["refused", "A"]} UNHANDLED-ERROR}
+
+test u16-platform-free {the codec is the language's own, for every target: the same program compiles for linux-x86_64, windows-x86_64 and macos-aarch64 with no platform module, no context and no direct authority, and runs on the Tcl backends whatever the host} -body {
+    set text "${::prelude}std::abi::bytes::encode_utf16le(s([utf8List "\U1F600"]))\n"
+    set out {}
+    foreach target {linux-x86_64 windows-x86_64 macos-aarch64} {
+        set hir [u16Hir $text $target]
+        lappend out [lindex [outcomeUnderHir interp $hir] 1] [lindex [outcomeUnderHir compile $hir] 1]
+    }
+    lsort -unique $out
+} -result [list [revealed {3d d8 00 de}]]
+
+test u16-internal-bridge {the units bridge is internal to the standard library: a program that names std::abi::bytes::utf16le_units or std::byte_store::utf16le_units is refused} -body {
+    list [lindex [u16Rejection "${::prelude}std::abi::bytes::utf16le_units(std::abi::bytes::from_list(\[\]))\n"] 0] \
+        [lindex [u16Rejection "${::prelude}std::byte_store::utf16le_units(0)\n"] 0]
+} -result {INTERNAL-NAMESPACE INTERNAL-NAMESPACE}
+
+test u16-nir-one-operation {natively each conversion is one runtime operation on the storage: encode_utf16le's body is `op strencodeutf16le` and decode_utf16le's `op bytesdecodeutf16le`, with no List built (no strutf8bytes, listnew or bytesfromlist)} -body {
+    set hir [u16Hir "${::prelude}fn e(t: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::encode_utf16le(t)
+fn g(data: std::abi::bytes::Bytes) -> str errors InvalidUtf16:
+    std::abi::bytes::decode_utf16le(data)
+g(e(\"x\")):
+    on InvalidUtf16:
+        \"\"\n"]
+    set nir [native::nir $hir]
+    list [regexp {op strencodeutf16le} $nir] [regexp {op bytesdecodeutf16le} $nir] \
+        [regexp {op (strutf8bytes|listnew|bytesfromlist)} $nir]
+} -result {1 1 0}
+
+test u16-large {a long String (32,768 characters, a quarter of them astral) encodes to exactly 2 bytes per unit -- 81,920 bytes -- and decodes back, on every backend} -body {
+    u16Agree "${::prelude}fn doubled(t: str, k: int) -> str:
+    if k == 0:
+        return t
+    doubled(std::str::concat(t, t), k - 1)
+fn main() -> List\[any\] errors InvalidUtf16:
+    t = doubled(s([utf8List "a\u00e9\u4e2d\U1F600b\u00fcx\U1D11E"]), 12)
+    data = std::abi::bytes::encode_utf16le(t)
+    back = std::abi::bytes::decode_utf16le(data)
+    \[t.length(), std::abi::bytes::length(data).value, back == t\]
+main():
+    on InvalidUtf16:
+        \[\]\n"
+} -result {[32768, 81920, true]}
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+test u16-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation), on both native backends, every value live across a conversion survives it: the Strings, the Bytes of earlier encodings and the Strings of earlier decodings are all intact after the loops that convert them} -constraints nativeBuilt -body {
+    set text "${::prelude}fn main() -> List\[any\] errors InvalidUtf16:
+    texts = \[s([utf8List "C:\\Users\\\u00e9t\u00e9\\\U1F600.txt"]), s([utf8List "\u4e2d\u6587\U1D11E\u0000z"]), s([utf8List [string repeat "ab\u00e9\U1F600" 40]]), s([utf8List ""])\]
+    encoded = loop t in texts:
+        std::abi::bytes::encode_utf16le(t)
+    decoded = loop e in encoded:
+        std::abi::bytes::decode_utf16le(e)
+    again = loop t in decoded:
+        std::abi::bytes::encode_utf16le(t)
+    sizes = loop e in encoded:
+        std::abi::bytes::length(e).value
+    \[texts == decoded, encoded == again, sizes\]
+main():
+    on InvalidUtf16:
+        \[\]\n"
+    set hir [u16Hir $text]
+    set saved [array get ::env BOTLISH_NATIVE_GC_STRESS]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set out [lmap backend $::nativeBackends {lindex [outcomeUnderHir $backend $hir] 1}]
+    } finally {
+        unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+        array set ::env $saved
+    }
+    lsort -unique $out
+} -result {{[true, true, [38, 12, 400, 0]]}}
+
+cleanupTests

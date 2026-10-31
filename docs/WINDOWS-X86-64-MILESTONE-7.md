@@ -785,6 +785,10 @@ What the rows say:
   operation the path is for. The fix is a byte-storage primitive pair for
   UTF-16 (`std::abi::bytes` has UTF-8's), not a second statement of the
   syntax on Strings; it is the first item of "Next" (section 15).
+  (Later: UTF16-BYTE-STORAGE-MILESTONE-1.md added that pair --
+  `std::abi::bytes::encode_utf16le` and `decode_utf16le` -- and holds a
+  Windows NativePath as its units' UTF-16LE bytes; its report measures the
+  rows again. The numbers here are this milestone's.)
 * **Windows' file calls cost more per call** (open + close 26 us,
   enumeration 7.5 us per entry, a small read 54 us): kernel32's
   CreateFileW, FindFirstFileW and CloseHandle on a shared runner's NTFS,
@@ -824,14 +828,16 @@ standard library names none of those APIs.
   (TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md);
 * native joins walk byte lists in Botlish, and Windows' conversions
   between Strings and UTF-16 units are Botlish list passes: a Windows
-  textual concat costs about one open + close (section 14);
+  textual concat costs about one open + close (section 14) -- the Windows
+  half addressed by UTF16-BYTE-STORAGE-MILESTONE-1.md;
 * reserved device names are documented, not refused (they are valid syntax,
   and which names are devices depends on the Windows version: W3);
 * the airlock is the library's convention on Windows and macOS (section 10).
 
 **Next**: a UTF-16 byte-storage primitive pair (encode a String to code
 units, decode units strictly to a String), which removes the Windows path
-costs of section 14 without restating the syntax; associated types for a
+costs of section 14 without restating the syntax (done:
+UTF16-BYTE-STORAGE-MILESTONE-1.md); associated types for a
 portable `open`; a resource feature (section 8's five requirements);
 metadata (`stat`, GetFileInformationByHandle) and renaming, which are the
 next operations programs ask for.
@@ -841,7 +847,8 @@ next operations programs ask for.
 If you change std::io::fs, std::io::bytepath, std::linux::fs,
 std::windows::fs, std::windows::path, std::darwin::fs, the path modules'
 FilePath implementations, the Linux path syscalls, or `std::abi::bytes::join`,
-`slice` or `decode_utf8`:
+`slice`, `decode_utf8`, `encode_utf16le` or `decode_utf16le` (and for the
+codec itself, UTF16-BYTE-STORAGE-MILESTONE-1.md's "What to run"):
 
 * `tclsh9.0 tests/filesystem.test` (the Windows and macOS tests on their
   hosts: the Windows workflow's smoke and GC-stress steps, the macOS

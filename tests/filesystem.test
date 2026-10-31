@@ -424,6 +424,81 @@ test fs-windows-join-one-rule {text and native paths share one join: for every p
     lsort -unique [split [string trim [lindex [outcomeUnderHir interp $hir] 1] {[]}] ", "]
 } -result {{} true}
 
+# The value of the windows-x86_64 program HIR on native BACKEND, run on this
+# Linux host (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Correctness tests"): its
+# NIR with the host's target line and no link plan -- a pure program calls
+# no C (one that would is refused) -- so the native runtime runs
+# std::windows's own path code.
+proc fsWindowsOnHost {hir backend} {
+    if {![info exists ::fsHostTargetLine]} {
+        set host [fsHir "0\n" [core::cabi::hostTarget]]
+        set ::fsHostTargetLine [lsearch -inline [split [native::nir $host] \n] {target *}]
+    }
+    set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
+    set lines {}
+    foreach line [split [native::nir $hir {*}$options] \n] {
+        if {[string match {foreign *} $line]} {
+            error "the program calls C: it cannot run on [core::cabi::hostTarget]"
+        }
+        if {[string match {link *} $line]} continue
+        if {[string match {target *} $line]} {
+            set line $::fsHostTargetLine
+        }
+        lappend lines $line
+    }
+    return [core::value::show [native::Outcome [native::RunDriver "" run [join $lines \n] {}]] 1]
+}
+
+test fs-windows-call-buffer {the LPCWSTR a Win32 call is given is the path's UTF-16LE bytes and one NUL unit, added at the call boundary after the last whole unit (a surrogate pair stays whole before it) -- an unpaired surrogate is passed as itself, never as U+FFFD -- and no native path holds the terminator: its stored bytes and its units are exactly the units it was made of. Read through a probe of std::windows::fs's private `wide`, appended to a private copy of the standard library (every host, the Tcl backends)} -body {
+    withPrivateLibrary {
+        set module [file join $::core::libraryDir windows fs.bot]
+        set f [open $module a]
+        fconfigure $f -encoding utf-8 -translation lf
+        puts $f "\n# The test probe of tests/filesystem.test's fs-windows-call-buffer.\nfn probe_wide(path: NativePath) -> std::abi::bytes::Bytes:\n    wide(path)"
+        close $f
+        set text "[fsImports windows]fn main() -> List\[any\] errors std::io::path::NotAPath:
+    astral = std::windows::fs::from_text(\"a𝄞\")
+    lone = std::windows::fs::from_units(\[117, 55296\])
+    low = std::windows::fs::from_units(\[56320, 97\])
+    joined = std::windows::fs::from_text(\"C:\\\\d\").join(lone)
+    \[std::windows::fs::probe_wide(astral), std::windows::fs::probe_wide(lone), std::windows::fs::probe_wide(low), std::windows::fs::probe_wide(joined), astral, astral.units(), joined.units()\]
+main():
+    on std::io::path::NotAPath:
+        \[\]
+"
+        set hir [fsHir $text windows-x86_64]
+        lsort -unique [lmap b {interp compile} {lindex [outcomeUnderHir $b $hir] 1}]
+    }
+} -result {{[std::abi::bytes::Bytes {storage: <bytes 8: 610034d81edd0000>}, std::abi::bytes::Bytes {storage: <bytes 6: 750000d80000>}, std::abi::bytes::Bytes {storage: <bytes 6: 00dc61000000>}, std::abi::bytes::Bytes {storage: <bytes 16: 43003a005c0064005c00750000d80000>}, std::windows::fs::NativePath {data: std::abi::bytes::Bytes {storage: <bytes 6: 610034d81edd>}}, [97, 55348, 56606], [67, 58, 92, 100, 92, 117, 55296]]}}
+
+test fs-windows-native-runtime {std::windows's path code on the native runtime (this Linux host runs the windows-x86_64 programs, which call no C), normally and under GC stress, gives the Tcl backends' values: the native paths, units, text and display of fs-windows-native-paths, and kinds, concat and join of every pair of fs-windows-join-one-rule's bases and parts} -constraints nativeLinux -body {
+    set paths "[fsImports windows]fn n(us: List\[int\]) -> str:\n    p = std::windows::fs::from_units(us):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    p.text():\n        on std::io::path::NotText:\n            return std::str::concat(\"NotText \", p.display())\nfn main() -> List\[any\] errors std::io::path::NotAPath:\n    lone = std::windows::fs::from_units(\[117, 55296, 120\])\n    named = std::windows::fs::from_text(\"C:\\\\d\").join(lone)\n    \[n(\[\]), n(\[97, 0\]), n(\[65536\]), n(\[117, 55296, 120\]), n(\[56320\]), n(\[55348, 56606\]), n(\[233\]), named.units(), std::windows::fs::from_text(\"𝄞\").units()\]\nmain():\n    on std::io::path::NotAPath:\n        \[\]\n"
+    set bases {C: C:\\ C:x \\ a \\\\s\\t \\\\?\\C:\\x \\??\\C:\\x \\\\.\\X C:\\x\\ C:/x/ é\\𝄞}
+    set parts {a b\\c a/b .. trail. "sp " \\y C:y 1:y ab:c 𝄞x ""}
+    set calls {}
+    foreach a $bases { foreach c $parts { lappend calls "j([fsString $a], [fsString $c])" } }
+    set joins "[fsImports windows]fn joined_text(a: str, c: str) -> str:\n    std::windows::path::validate(a):\n        on std::io::path::NotAPath:\n            return \"invalid\"\n    r = std::windows::path::concat(a, c):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    r\nfn j(a: str, c: str) -> List\[any\]:\n    std::windows::path::validate(a):\n        on std::io::path::NotAPath:\n            return \[\"invalid\"\]\n    textual = joined_text(a, c)\n    cn = std::windows::fs::from_text(c):\n        on std::io::path::NotAPath:\n            return \[a.kind(), textual, \"no name\"\]\n    joined = a.native().join(cn):\n        on std::io::path::NotAPath:\n            return \[a.kind(), textual, \"NotAPath\"\]\n    \[a.kind(), textual, joined.units()\]\n\[[join $calls {, }]\]\n"
+    set out {}
+    foreach program [list $paths $joins] {
+        set hir [fsHir $program windows-x86_64]
+        set want [lindex [outcomeUnderHir interp $hir] 1]
+        foreach stress {0 1} {
+            if {$stress} { set ::env(BOTLISH_NATIVE_GC_STRESS) 1 }
+            try {
+                foreach backend {cranelift-generic cranelift} {
+                    set got [fsWindowsOnHost $hir $backend]
+                    if {$got ne $want} {
+                        lappend out [list $backend stress $stress got $got want $want]
+                    }
+                }
+            } finally {
+                unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+            }
+        }
+    }
+    set out
+} -result {}
+
 # ===========================================================================
 # The Tcl backends
 
@@ -871,6 +946,17 @@ fsWindows native-roundtrip {    lone = std::windows::fs::from_units([117, 45, 55
             []
     [reached, portable.length()]}
 
+fsWindows astral {    named = nroot.concat("a𝄞.txt")
+    named.write_file(bytes_of("astral"))
+    sub = nroot.concat("𝄞dir")
+    sub.create_directory()
+    sub.concat("é😀").write_file(bytes_of("deep"))
+    names = loop e in nroot.entries():
+        [e.name.units(), e.name.text()]
+    deep = loop e in sub.entries():
+        [e.name.units(), text_of(sub.join(e.name).read_file())]
+    [names, text_of(named.read_file()), deep]}
+
 fsWindows verbatim {    verbatim = std::windows::fs::from_text(std::str::concat("\\\\?\\", root))
     verbatim.concat("verb.").write_file(bytes_of("kept"))
     nroot.concat("plain").write_file(bytes_of("plain"))
@@ -997,6 +1083,10 @@ test fs-windows-modes {the four open modes on NTFS: Read needs the file (NotFoun
 test fs-windows-native-roundtrip {NTFS keeps a name with an unpaired surrogate: made from raw code units, listed, joined and opened again, it reaches its own file -- and so does the file whose name is its lossy spelling; the portable listing refuses the directory (NotText); display shows U+FFFD} -constraints windowsIO -body {
     fsValue [fsWindowsProgram native-roundtrip [fsDir]]
 } -result {[[[[117, 45, 55296], "lone", "u-�"], [[117, 45, 65533], "lossy", "u-�"]], 0]}
+
+test fs-windows-astral-names {supplementary-plane names through the wide functions: every call's buffer ends with its NUL unit after the whole surrogate pair -- a file and a directory made from text holding astral characters are listed with exactly their units (and text), and reached again through the listed names} -constraints windowsIO -body {
+    fsValue [fsWindowsProgram astral [fsDir]]
+} -result {[[[[97, 55348, 56606, 46, 116, 120, 116], "a𝄞.txt"], [[55348, 56606, 100, 105, 114], "𝄞dir"]], "astral", [[[233, 55357, 56832], "deep"]]]}
 
 test fs-windows-verbatim {Win32 drops a component's trailing period, \\?\ keeps it: a name made through a verbatim directory ("verb.") is listed as written and reached again only through that verbatim directory -- joined to the Win32 spelling of the directory it is refused (NotAPath), never opened as another file} -constraints windowsIO -body {
     fsValue [fsWindowsProgram verbatim [fsDir]]

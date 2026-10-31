@@ -30,6 +30,7 @@ Float64#neg	intrinsic		internal	intrinsic
 IndexNotFound	builtin-error		builtin	intrinsic	core/native.tcl			
 InvalidArgumentEncoding	builtin-error		builtin	intrinsic	core/native.tcl			
 InvalidIntegerText	builtin-error		builtin	intrinsic	core/native.tcl			
+InvalidUtf16	builtin-error		builtin	intrinsic	core/native.tcl			
 InvalidUtf8	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutExtentMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutLengthMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
@@ -72,7 +73,7 @@ decimal_rounded#to_string	intrinsic		internal	intrinsic	core/decimal.tcl:830
 dfa#transition	intrinsic		internal	intrinsic	core/dfa.tcl:64			
 error?	intrinsic		primitive	intrinsic	core/predicates.tcl:55			
 foreign#refused	intrinsic		internal	intrinsic				
-hash	intrinsic		primitive	intrinsic	core/hashing.tcl:507			
+hash	intrinsic		primitive	intrinsic	core/hashing.tcl:641			
 integer?	intrinsic		primitive	intrinsic				
 list	intrinsic		primitive	intrinsic	core/primitives.tcl:102			
 list#with_length	intrinsic		internal	intrinsic	core/listlength.tcl:49			
@@ -141,18 +142,21 @@ std::abi::aarch64::to_int	function	std::abi::aarch64	api	source	stdlib/abi/aarch
 std::abi::bytes	namespace		api	source	stdlib/abi/bytes.bot			
 std::abi::bytes::Bytes	opaque-struct	std::abi::bytes	api	source	stdlib/abi/bytes.bot:97			
 std::abi::bytes::MutableBytes	opaque-struct	std::abi::bytes	api	source	stdlib/abi/bytes.bot:100			
+std::abi::bytes::decode_utf16le	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:155			
 std::abi::bytes::decode_utf8	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:134			
-std::abi::bytes::detach	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:178			
-std::abi::bytes::freeze	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:183			
-std::abi::bytes::freeze_prefix	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:189			
-std::abi::bytes::from_bytes	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:154			
+std::abi::bytes::detach	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:207			
+std::abi::bytes::encode_utf16le	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:144			
+std::abi::bytes::freeze	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:212			
+std::abi::bytes::freeze_prefix	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:218			
+std::abi::bytes::from_bytes	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:183			
 std::abi::bytes::from_list	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:108			
 std::abi::bytes::join	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:115			
-std::abi::bytes::length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:140			
-std::abi::bytes::mutable_length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:159			
-std::abi::bytes::replace	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:165			
+std::abi::bytes::length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:169			
+std::abi::bytes::mutable_length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:188			
+std::abi::bytes::replace	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:194			
 std::abi::bytes::slice	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:124			
-std::abi::bytes::zeroed	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:149			
+std::abi::bytes::utf16le_units	function	std::abi::bytes	std-internal	source	stdlib/abi/bytes.bot:163			
+std::abi::bytes::zeroed	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:178			
 std::abi::i16	function	std::abi	api	source	stdlib/abi.bot:201			
 std::abi::i32	function	std::abi	api	source	stdlib/abi.bot:209			
 std::abi::i64	function	std::abi	api	source	stdlib/abi.bot:217			
@@ -228,10 +232,13 @@ std::byte::position_low	function	std::byte	api	source	stdlib/byte.bot:125
 std::byte::set	function	std::byte	api	source	stdlib/byte.bot:174			
 std::byte_store	namespace		api	intrinsic				
 std::byte_store::byte_count	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:242			
+std::byte_store::decode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:93			
 std::byte_store::decode_utf8	intrinsic	std::byte_store	api	intrinsic	core/utf8text.tcl:51			
+std::byte_store::encode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:91			
 std::byte_store::from_list	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:235			
 std::byte_store::join	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:237			
 std::byte_store::slice	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:239			
+std::byte_store::utf16le_units	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:96			
 std::char	namespace		api	intrinsic				
 std::char::is_tcl_alnum	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:150			
 std::char::is_tcl_alpha	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:148			
@@ -1184,7 +1191,7 @@ std::str::length	intrinsic	std::str	api	intrinsic	core/strings.tcl:114
 std::str::lowercase	intrinsic	std::str	api	intrinsic	core/strings.tcl:120			
 std::str::substring	intrinsic	std::str	api	intrinsic	core/strings.tcl:116			
 std::table_hash	namespace		std-internal	intrinsic				
-std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:515			
+std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:649			
 std::test	namespace		api	source	stdlib/test.bot			
 std::test::Erased	struct	std::test	api	source	stdlib/test.bot:270			
 std::test::Match	struct	std::test	api	source	stdlib/test.bot:95			
@@ -1226,6 +1233,12 @@ std::test::summarize	function	std::test	api	source	stdlib/test.bot:700
 std::test::summary_line	function	std::test	api	source	stdlib/test.bot:733			
 std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
 std::test::value	function	std::test	api	source	stdlib/test.bot:591			
+std::tree	namespace		api	source+intrinsic	stdlib/tree.bot			
+std::tree::Order	enum	std::tree	api	source	stdlib/tree.bot:47			
+std::tree::Order::BreadthFirst	enum-case	std::tree::Order	api	source	stdlib/tree.bot:47			
+std::tree::Order::DepthFirst	enum-case	std::tree::Order	api	source	stdlib/tree.bot:47			
+std::tree::children	intrinsic	std::tree	api	intrinsic	core/tree.tcl:30			
+std::tree::walk	function	std::tree	api	source	stdlib/tree.bot:55			
 std::web	namespace		api	source	stdlib/web.bot			
 std::web::Emailish	refined-type	std::web	api	source	stdlib/web.bot:71			
 std::web::UriQueryValue	refined-type	std::web	api	source	stdlib/web.bot:226			
@@ -1247,108 +1260,113 @@ std::windows::c_get_last_error	extern-fn	std::windows	api	source	stdlib/windows.
 std::windows::c_get_std_handle	extern-fn	std::windows	api	source	stdlib/windows.bot:69	windows		
 std::windows::c_write_file	extern-fn	std::windows	api	source	stdlib/windows.bot:78	windows		
 std::windows::fs	namespace		api	source	stdlib/windows/fs.bot	windows		
-std::windows::fs::Dword	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:568	windows		
-std::windows::fs::Entry	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:188	windows		
-std::windows::fs::File	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:173	windows		
-std::windows::fs::FindData	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:785	windows		
-std::windows::fs::HandleBits	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:548	windows		
-std::windows::fs::HandleWord	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:543	windows		
-std::windows::fs::NativePath	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:165	windows		
-std::windows::fs::PathKind	enum	std::windows::fs	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Device	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::DriveAbsolute	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::DriveRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Relative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::RootRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Unc	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Verbatim	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::Read	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:178	windows		
-std::windows::fs::WindowsFS	context-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:169	windows		
-std::windows::fs::Written	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:183	windows		
-std::windows::fs::access	function	std::windows::fs	private	source	stdlib/windows/fs.bot:585	windows		
-std::windows::fs::backslash	function	std::windows::fs	private	source	stdlib/windows/fs.bot:364	windows		
-std::windows::fs::byte_vector	function	std::windows::fs	private	source	stdlib/windows/fs.bot:214	windows		
-std::windows::fs::c_close_handle	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:138	windows		
-std::windows::fs::c_create_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:153	windows		
-std::windows::fs::c_create_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:127	windows		
-std::windows::fs::c_delete_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:156	windows		
-std::windows::fs::c_find_close	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:147	windows		
-std::windows::fs::c_find_first	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:141	windows		
-std::windows::fs::c_find_next	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:144	windows		
-std::windows::fs::c_get_attributes	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:150	windows		
-std::windows::fs::c_get_last_error	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:162	windows		
-std::windows::fs::c_read_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:131	windows		
-std::windows::fs::c_remove_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:159	windows		
-std::windows::fs::c_write_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:135	windows		
-std::windows::fs::chunk_size	function	std::windows::fs	private	source	stdlib/windows/fs.bot:654	windows		
-std::windows::fs::chunks	function	std::windows::fs	private	source	stdlib/windows/fs.bot:646	windows		
-std::windows::fs::close	function	std::windows::fs	api	source	stdlib/windows/fs.bot:751	windows		
-std::windows::fs::concat	function	std::windows::fs	api	source	stdlib/windows/fs.bot:495	windows		
-std::windows::fs::create	function	std::windows::fs	api	source	stdlib/windows/fs.bot:205	windows		
-std::windows::fs::create_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:869	windows		
-std::windows::fs::create_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:777	windows		
-std::windows::fs::decoded	function	std::windows::fs	private	source	stdlib/windows/fs.bot:289	windows		
-std::windows::fs::directory?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:528	windows		
-std::windows::fs::display	function	std::windows::fs	api	source	stdlib/windows/fs.bot:361	windows		
-std::windows::fs::disposition	function	std::windows::fs	private	source	stdlib/windows/fs.bot:594	windows		
-std::windows::fs::dword	function	std::windows::fs	private	source	stdlib/windows/fs.bot:573	windows		
-std::windows::fs::dword_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:577	windows		
-std::windows::fs::ends_separated?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:460	windows		
-std::windows::fs::entries	function	std::windows::fs	api	source	stdlib/windows/fs.bot:849	windows		
-std::windows::fs::find_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:792	windows		
-std::windows::fs::found	function	std::windows::fs	private	source	stdlib/windows/fs.bot:795	windows		
-std::windows::fs::from_text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:333	windows		
-std::windows::fs::from_units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:325	windows		
-std::windows::fs::high_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:298	windows		
-std::windows::fs::high_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:249	windows		
-std::windows::fs::holds_slash?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:421	windows		
-std::windows::fs::ints	function	std::windows::fs	private	source	stdlib/windows/fs.bot:211	windows		
-std::windows::fs::invalid?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:555	windows		
-std::windows::fs::join	function	std::windows::fs	api	source	stdlib/windows/fs.bot:488	windows		
-std::windows::fs::joinable?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:452	windows		
-std::windows::fs::joined	function	std::windows::fs	private	source	stdlib/windows/fs.bot:464	windows		
-std::windows::fs::joined_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:474	windows		
-std::windows::fs::kind	function	std::windows::fs	api	source	stdlib/windows/fs.bot:394	windows		
-std::windows::fs::kind_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:373	windows		
-std::windows::fs::kind_of_entry	function	std::windows::fs	private	source	stdlib/windows/fs.bot:802	windows		
-std::windows::fs::last_error	function	std::windows::fs	private	source	stdlib/windows/fs.bot:523	windows		
-std::windows::fs::low_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:295	windows		
-std::windows::fs::low_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:252	windows		
-std::windows::fs::of_valid_text	function	std::windows::fs	std-internal	source	stdlib/windows/fs.bot:339	windows		
-std::windows::fs::open	function	std::windows::fs	api	source	stdlib/windows/fs.bot:606	windows		
-std::windows::fs::push_utf8	function	std::windows::fs	private	source	stdlib/windows/fs.bot:233	windows		
-std::windows::fs::read	function	std::windows::fs	api	source	stdlib/windows/fs.bot:641	windows		
-std::windows::fs::read_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:689	windows		
-std::windows::fs::read_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:759	windows		
-std::windows::fs::read_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:676	windows		
-std::windows::fs::read_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:624	windows		
-std::windows::fs::reason_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:534	windows		
-std::windows::fs::reason_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:502	windows		
-std::windows::fs::release	function	std::windows::fs	private	source	stdlib/windows/fs.bot:617	windows		
-std::windows::fs::remove_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:885	windows		
-std::windows::fs::remove_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:877	windows		
-std::windows::fs::request	function	std::windows::fs	private	source	stdlib/windows/fs.bot:696	windows		
-std::windows::fs::rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:832	windows		
-std::windows::fs::rewritten?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:413	windows		
-std::windows::fs::scalars	function	std::windows::fs	private	source	stdlib/windows/fs.bot:263	windows		
-std::windows::fs::segments	function	std::windows::fs	private	source	stdlib/windows/fs.bot:398	windows		
-std::windows::fs::separator?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:368	windows		
-std::windows::fs::take	function	std::windows::fs	private	source	stdlib/windows/fs.bot:811	windows		
-std::windows::fs::text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:348	windows		
-std::windows::fs::unit_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:256	windows		
-std::windows::fs::units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:343	windows		
-std::windows::fs::utf16	function	std::windows::fs	private	source	stdlib/windows/fs.bot:219	windows		
-std::windows::fs::utf8_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:277	windows		
-std::windows::fs::valid_units?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:315	windows		
-std::windows::fs::verbatim_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:430	windows		
-std::windows::fs::wide	function	std::windows::fs	private	source	stdlib/windows/fs.bot:302	windows		
-std::windows::fs::win32_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:440	windows		
-std::windows::fs::write	function	std::windows::fs	api	source	stdlib/windows/fs.bot:716	windows		
-std::windows::fs::write_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:745	windows		
-std::windows::fs::write_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:772	windows		
-std::windows::fs::write_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:724	windows		
-std::windows::fs::write_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:704	windows		
-std::windows::fs::write_with	function	std::windows::fs	private	source	stdlib/windows/fs.bot:766	windows		
+std::windows::fs::Dword	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:608	windows		
+std::windows::fs::Entry	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:203	windows		
+std::windows::fs::File	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:188	windows		
+std::windows::fs::FindData	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:825	windows		
+std::windows::fs::HandleBits	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:588	windows		
+std::windows::fs::HandleWord	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:583	windows		
+std::windows::fs::NativePath	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:180	windows		
+std::windows::fs::PathKind	enum	std::windows::fs	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Device	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::DriveAbsolute	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::DriveRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Relative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::RootRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Unc	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Verbatim	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::Read	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:193	windows		
+std::windows::fs::WindowsFS	context-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:184	windows		
+std::windows::fs::Written	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:198	windows		
+std::windows::fs::access	function	std::windows::fs	private	source	stdlib/windows/fs.bot:625	windows		
+std::windows::fs::backslash_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:330	windows		
+std::windows::fs::byte_vector	function	std::windows::fs	private	source	stdlib/windows/fs.bot:232	windows		
+std::windows::fs::c_close_handle	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:150	windows		
+std::windows::fs::c_create_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:165	windows		
+std::windows::fs::c_create_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:139	windows		
+std::windows::fs::c_delete_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:168	windows		
+std::windows::fs::c_find_close	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:159	windows		
+std::windows::fs::c_find_first	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:153	windows		
+std::windows::fs::c_find_next	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:156	windows		
+std::windows::fs::c_get_attributes	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:162	windows		
+std::windows::fs::c_get_last_error	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:174	windows		
+std::windows::fs::c_read_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:143	windows		
+std::windows::fs::c_remove_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:171	windows		
+std::windows::fs::c_write_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:147	windows		
+std::windows::fs::chunk_size	function	std::windows::fs	private	source	stdlib/windows/fs.bot:694	windows		
+std::windows::fs::chunks	function	std::windows::fs	private	source	stdlib/windows/fs.bot:686	windows		
+std::windows::fs::close	function	std::windows::fs	api	source	stdlib/windows/fs.bot:791	windows		
+std::windows::fs::concat	function	std::windows::fs	api	source	stdlib/windows/fs.bot:531	windows		
+std::windows::fs::create	function	std::windows::fs	api	source	stdlib/windows/fs.bot:220	windows		
+std::windows::fs::create_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:921	windows		
+std::windows::fs::create_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:817	windows		
+std::windows::fs::data_of_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:316	windows		
+std::windows::fs::decoded	function	std::windows::fs	private	source	stdlib/windows/fs.bot:296	windows		
+std::windows::fs::directory?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:568	windows		
+std::windows::fs::display	function	std::windows::fs	api	source	stdlib/windows/fs.bot:397	windows		
+std::windows::fs::disposition	function	std::windows::fs	private	source	stdlib/windows/fs.bot:634	windows		
+std::windows::fs::dword	function	std::windows::fs	private	source	stdlib/windows/fs.bot:613	windows		
+std::windows::fs::dword_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:617	windows		
+std::windows::fs::ends_separated?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:495	windows		
+std::windows::fs::entries	function	std::windows::fs	api	source	stdlib/windows/fs.bot:901	windows		
+std::windows::fs::find_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:837	windows		
+std::windows::fs::found	function	std::windows::fs	private	source	stdlib/windows/fs.bot:840	windows		
+std::windows::fs::from_text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:370	windows		
+std::windows::fs::from_units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:361	windows		
+std::windows::fs::high_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:311	windows		
+std::windows::fs::high_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:256	windows		
+std::windows::fs::holds_slash?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:456	windows		
+std::windows::fs::invalid?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:595	windows		
+std::windows::fs::join	function	std::windows::fs	api	source	stdlib/windows/fs.bot:525	windows		
+std::windows::fs::join_parts	function	std::windows::fs	private	source	stdlib/windows/fs.bot:511	windows		
+std::windows::fs::joinable?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:487	windows		
+std::windows::fs::joined_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:503	windows		
+std::windows::fs::kind	function	std::windows::fs	api	source	stdlib/windows/fs.bot:429	windows		
+std::windows::fs::kind_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:408	windows		
+std::windows::fs::kind_of_entry	function	std::windows::fs	private	source	stdlib/windows/fs.bot:847	windows		
+std::windows::fs::last_error	function	std::windows::fs	private	source	stdlib/windows/fs.bot:563	windows		
+std::windows::fs::lossy	function	std::windows::fs	private	source	stdlib/windows/fs.bot:304	windows		
+std::windows::fs::low_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:308	windows		
+std::windows::fs::low_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:259	windows		
+std::windows::fs::name_offset	function	std::windows::fs	private	source	stdlib/windows/fs.bot:834	windows		
+std::windows::fs::nul_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:327	windows		
+std::windows::fs::of_valid_text	function	std::windows::fs	std-internal	source	stdlib/windows/fs.bot:380	windows		
+std::windows::fs::open	function	std::windows::fs	api	source	stdlib/windows/fs.bot:646	windows		
+std::windows::fs::push_utf8	function	std::windows::fs	private	source	stdlib/windows/fs.bot:240	windows		
+std::windows::fs::read	function	std::windows::fs	api	source	stdlib/windows/fs.bot:681	windows		
+std::windows::fs::read_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:729	windows		
+std::windows::fs::read_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:799	windows		
+std::windows::fs::read_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:716	windows		
+std::windows::fs::read_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:664	windows		
+std::windows::fs::reason_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:574	windows		
+std::windows::fs::reason_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:542	windows		
+std::windows::fs::release	function	std::windows::fs	private	source	stdlib/windows/fs.bot:657	windows		
+std::windows::fs::remove_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:937	windows		
+std::windows::fs::remove_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:929	windows		
+std::windows::fs::request	function	std::windows::fs	private	source	stdlib/windows/fs.bot:736	windows		
+std::windows::fs::rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:884	windows		
+std::windows::fs::rewritten?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:448	windows		
+std::windows::fs::scalars	function	std::windows::fs	private	source	stdlib/windows/fs.bot:270	windows		
+std::windows::fs::segments	function	std::windows::fs	private	source	stdlib/windows/fs.bot:433	windows		
+std::windows::fs::separator?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:403	windows		
+std::windows::fs::star_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:333	windows		
+std::windows::fs::take	function	std::windows::fs	private	source	stdlib/windows/fs.bot:856	windows		
+std::windows::fs::text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:389	windows		
+std::windows::fs::unit_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:263	windows		
+std::windows::fs::units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:384	windows		
+std::windows::fs::units_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:236	windows		
+std::windows::fs::utf8_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:284	windows		
+std::windows::fs::valid_units?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:351	windows		
+std::windows::fs::verbatim_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:465	windows		
+std::windows::fs::wide	function	std::windows::fs	private	source	stdlib/windows/fs.bot:344	windows		
+std::windows::fs::wide_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:340	windows		
+std::windows::fs::win32_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:475	windows		
+std::windows::fs::write	function	std::windows::fs	api	source	stdlib/windows/fs.bot:756	windows		
+std::windows::fs::write_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:785	windows		
+std::windows::fs::write_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:812	windows		
+std::windows::fs::write_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:764	windows		
+std::windows::fs::write_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:744	windows		
+std::windows::fs::write_with	function	std::windows::fs	private	source	stdlib/windows/fs.bot:806	windows		
 std::windows::io	namespace		api	source	stdlib/windows/io.bot	windows		
 std::windows::io::WindowsIO	context-struct	std::windows::io	api	source	stdlib/windows/io.bot:66	windows		
 std::windows::io::create	function	std::windows::io	api	source	stdlib/windows/io.bot:72	windows		
@@ -1362,20 +1380,20 @@ std::windows::io::write_text	function	std::windows::io	api	source	stdlib/windows
 std::windows::last_error	function	std::windows	api	source	stdlib/windows.bot:122	windows		
 std::windows::path	namespace		api	source	stdlib/windows/path.bot	windows		
 std::windows::path::WindowsPath	refined-type	std::windows::path	api	source	stdlib/windows/path.bot:60	windows		
-std::windows::path::concat	function	std::windows::path	api	source	stdlib/windows/path.bot:100	windows		
-std::windows::path::create_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:132	windows		
-std::windows::path::create_file	function	std::windows::path	api	source	stdlib/windows/path.bot:120	windows		
-std::windows::path::entries	function	std::windows::path	api	source	stdlib/windows/path.bot:126	windows		
-std::windows::path::kind	function	std::windows::path	api	source	stdlib/windows/path.bot:93	windows		
-std::windows::path::native	function	std::windows::path	api	source	stdlib/windows/path.bot:89	windows		
-std::windows::path::nul_free?	function	std::windows::path	api	source	stdlib/windows/path.bot:63	windows		
-std::windows::path::read_file	function	std::windows::path	api	source	stdlib/windows/path.bot:112	windows		
-std::windows::path::remove_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:140	windows		
-std::windows::path::remove_file	function	std::windows::path	api	source	stdlib/windows/path.bot:136	windows		
-std::windows::path::text	function	std::windows::path	api	source	stdlib/windows/path.bot:85	windows		
-std::windows::path::valid?	function	std::windows::path	api	source	stdlib/windows/path.bot:71	windows		
-std::windows::path::validate	function	std::windows::path	api	source	stdlib/windows/path.bot:77	windows		
-std::windows::path::write_file	function	std::windows::path	api	source	stdlib/windows/path.bot:116	windows		
+std::windows::path::concat	function	std::windows::path	api	source	stdlib/windows/path.bot:105	windows		
+std::windows::path::create_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:137	windows		
+std::windows::path::create_file	function	std::windows::path	api	source	stdlib/windows/path.bot:125	windows		
+std::windows::path::entries	function	std::windows::path	api	source	stdlib/windows/path.bot:131	windows		
+std::windows::path::kind	function	std::windows::path	api	source	stdlib/windows/path.bot:98	windows		
+std::windows::path::native	function	std::windows::path	api	source	stdlib/windows/path.bot:94	windows		
+std::windows::path::nul_free?	function	std::windows::path	api	source	stdlib/windows/path.bot:68	windows		
+std::windows::path::read_file	function	std::windows::path	api	source	stdlib/windows/path.bot:117	windows		
+std::windows::path::remove_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:145	windows		
+std::windows::path::remove_file	function	std::windows::path	api	source	stdlib/windows/path.bot:141	windows		
+std::windows::path::text	function	std::windows::path	api	source	stdlib/windows/path.bot:90	windows		
+std::windows::path::valid?	function	std::windows::path	api	source	stdlib/windows/path.bot:76	windows		
+std::windows::path::validate	function	std::windows::path	api	source	stdlib/windows/path.bot:82	windows		
+std::windows::path::write_file	function	std::windows::path	api	source	stdlib/windows/path.bot:121	windows		
 std::windows::request	function	std::windows	api	source	stdlib/windows.bot:127	windows		
 std::windows::selector	function	std::windows	api	source	stdlib/windows.bot:106	windows		
 std::windows::standard_handle	function	std::windows	api	source	stdlib/windows.bot:117	windows		

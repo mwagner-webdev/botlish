@@ -2,6 +2,7 @@
 # (WINDOWS-X86-64-MILESTONE-7.md, "Performance").
 #
 #   tclsh9.0 bench/filesystem.tcl ?-runs N? ?-scale F? ?-compile-only TARGET?
+#       ?-root DIR | -baseline-rev REV?
 #
 # Measured on the host's own platform -- std::linux::fs (raw syscalls) on
 # Linux, std::windows::fs (kernel32's wide functions) on Windows,
@@ -20,6 +21,13 @@
 #   concat (text)        a validated path joined with a component
 #   join (native)        a native path joined with a native name
 #   text (native)        a native name's String (strict UTF-8 / UTF-16)
+#   display (native)     the same name for people (lossy where it has no text)
+#   ... 256 mixed        validate + native, text and concat of a 256-character
+#                        text of mixed widths (a, é, 中, 😀, ...: a quarter of
+#                        them astral; UTF16-BYTE-STORAGE-MILESTONE-1.md)
+#   encode/decode 40     std::abi::bytes::encode_utf16le of a 40-character
+#                        text and decode_utf16le of its bytes: the platform-
+#                        free primitives (n/a in a tree without them)
 #   open + close         open(Read) and close of an existing file
 #   write_file 64 B      create-or-replace a file with 64 bytes (open, write,
 #                        close)
@@ -33,26 +41,75 @@
 #                        native name: per entry
 #
 # -scale F multiplies every N (smaller for a quick look). Prints a table;
-# the report quotes it. -compile-only TARGET (linux-x86_64, windows-x86_64,
+# the report quotes it. -root DIR measures another checkout's compiler and
+# standard library -- the tree before a change, a git worktree -- with this
+# checkout's driver unless DIR has its own build (the driver runs any older
+# program): before and after on one machine. -baseline-rev REV does both: REV
+# in a temporary worktree (bench/baseline-tree.tcl), then this tree, and a
+# table of the two differences and their ratio. -compile-only TARGET (linux-x86_64, windows-x86_64,
 # macos-aarch64) only compiles every program for TARGET's platform and runs
 # none: a check, on any host, of the programs another host will run.
 
 set here [file dirname [file normalize [info script]]]
 set root [file dirname $here]
-source [file join $root surface surface.tcl]
-source [file join $root native native.tcl]
 
 set runs 5
 set scale 1.0
 set compileOnly ""
+set treeRoot $root
+set baselineRev ""
 foreach {option value} $argv {
     switch -- $option {
         -runs { set runs $value }
         -scale { set scale $value }
         -compile-only { set compileOnly $value }
+        -root { set treeRoot [file normalize $value] }
+        -baseline-rev { set baselineRev $value }
         default { error "unknown option $option" }
     }
 }
+if {$baselineRev ne ""} {
+    source [file join $here baseline-tree.tcl]
+    set args [baselineTree::childArgs [dict create -runs $runs -scale $scale]]
+    set tree [baselineTree::add $root $baselineRev]
+    try {
+        set before [baselineTree::run [info script] -root $tree {*}$args]
+        set after [baselineTree::run [info script] {*}$args]
+    } finally {
+        baselineTree::remove $root $tree
+    }
+    # The rows of a run's table: LABEL -> {DIFFERENCE UNIT}.
+    proc rowsOf {text} {
+        set rows [dict create]
+        foreach line [lrange [split $text \n] 2 end] {
+            set label [string trim [string range $line 0 21]]
+            set rest [string range $line 22 end]
+            if {$label eq "" || [llength $rest] < 3} continue
+            dict set rows $label [list [lindex $rest 2] [lindex $rest 3]]
+        }
+        return $rows
+    }
+    set b [rowsOf $before]
+    set a [rowsOf $after]
+    puts "\nbefore: $baselineRev; after: this tree (difference per operation)"
+    puts [format "%-22s %12s %12s %12s" "" before after after/before]
+    dict for {label value} $a {
+        lassign $value now unit
+        set was [lindex [dict getdef $b $label {n/a ""}] 0]
+        puts [format "%-22s %12s %12s %12s %s" $label $was $now [baselineTree::ratio $was $now] $unit]
+    }
+    exit 0
+}
+if {![info exists ::env(BOTLISH_NATIVE_BIN)]
+        && ![file exists [file join $treeRoot native target release botlish-native]]
+        && ![file exists [file join $treeRoot native target release botlish-native.exe]]} {
+    set own [file join $root native target release botlish-native]
+    if {$::tcl_platform(platform) eq "windows"} { append own .exe }
+    set ::env(BOTLISH_NATIVE_BIN) $own
+}
+source [file join $treeRoot surface surface.tcl]
+source [file join $treeRoot native native.tcl]
+set hasCodec [expr {![catch {core::native::metadata std::byte_store::encode_utf16le}]}]
 
 set target [expr {$compileOnly ne "" ? $compileOnly : [core::cabi::hostTarget]}]
 switch -glob -- $target {
@@ -102,7 +159,7 @@ fn reread(dir: std::$platform\::fs::NativePath) -> int errors std::io::fs::FileE
 proc program {setup body n} {
     set inner [expr {$body eq "0" ? "0" : "$body\n        0"}]
     return "$::prelude
-fn f() -> int errors std::io::fs::FileError, std::io::path::NotAPath, std::io::path::NotText:
+fn f() -> int errors std::io::fs::FileError, std::io::path::NotAPath, std::io::path::NotText[expr {$::hasCodec ? ", InvalidUtf16" : ""}]:
     root = [literal $::dirText]
     std::$::platform\::path::validate(root)
     nroot = root.native()
@@ -119,7 +176,7 @@ f():
         -2
     on std::io::path::NotText:
         -3
-"
+[expr {$::hasCodec ? "    on InvalidUtf16:\n        -4\n" : ""}]"
 }
 
 # The best time (microseconds) of one run of program TEXT, inside one
@@ -171,7 +228,11 @@ set programs 0
 
 # "LOOP OPERATION DIFFERENCE" in ns per iteration (or per UNIT: the
 # difference divided by PER).
-proc row {label setup body n {per 1} {unit ns}} {
+proc row {label setup body n {per 1} {unit ns} {needsCodec 0}} {
+    if {$needsCodec && !$::hasCodec} {
+        puts [format "%-22s %12s %12s %12s" $label - - n/a]
+        return
+    }
     set n [expr {max(1, int($n * $::scale))}]
     set baseline [expr {1000.0 * [best [program $setup 0 $n]] / $n}]
     set t [expr {1000.0 * [best [program $setup $body $n]] / $n}]
@@ -183,13 +244,22 @@ proc row {label setup body n {per 1} {unit ns}} {
     }
 }
 
-puts "bench/filesystem.tcl: $platform on $target, best of $runs runs, in $dirText"
+set revision ""
+catch {set revision " ([string range [exec git -C $treeRoot rev-parse HEAD] 0 9])"}
+puts "bench/filesystem.tcl: $platform on $target, best of $runs runs, in $dirText, tree $treeRoot$revision"
 puts [format "%-22s %12s %12s %12s" "" loop "with it" difference]
 set name [string repeat a 40]
 row "validate + native" "    text = [literal $name]" "std::$platform\::path::validate(text)\n        text.native()" 20000
 row "concat (text)" "" "std::$platform\::path::concat(root, \"component.txt\")" 20000
 row "join (native)" "    leaf = std::$platform\::fs::from_text(\"component.txt\")" "nroot.join(leaf)" 20000
 row "text (native)" "    leaf = nroot.concat(\"component.txt\")" "leaf.text()" 20000
+row "display (native)" "    leaf = nroot.concat(\"component.txt\")" "leaf.display()" 20000
+set mixed [string range [string repeat "a\u00e9\u4e2d\U1F600b\u00fcx\U1D11E" 32] 0 255]
+row "validate+native 256 mx" "    text = [literal $mixed]" "std::$platform\::path::validate(text)\n        text.native()" 2000
+row "text 256 mixed" "    leaf = nroot.concat([literal $mixed])" "leaf.text()" 2000
+row "concat 256 mixed" "    base = std::$platform\::path::concat(root, [literal $mixed])" "std::$platform\::path::concat(base, \"component.txt\")" 2000
+row "encode_utf16le 40" "    text = [literal $name]" "std::abi::bytes::encode_utf16le(text)" 20000 1 ns 1
+row "decode_utf16le 40" "    data = std::abi::bytes::encode_utf16le([literal $name])" "std::abi::bytes::decode_utf16le(data)" 20000 1 ns 1
 row "open + close" "    small = nroot.concat(\"small.txt\")" "small.open(std::io::fs::OpenMode::Read).close()" 2000
 row "write_file 64 B" "    out = nroot.concat(\"out.txt\")\n    data = bytes_of([literal [string repeat y 64]])" "out.write_file(data)" 2000
 row "read_file 64 B" "    small = nroot.concat(\"small.txt\")" "small.read_file()" 2000

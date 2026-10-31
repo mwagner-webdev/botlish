@@ -1,0 +1,321 @@
+# Mutants of UTF-16LE on byte storage (audit/abi-bytes/tools/utf16-mutate.tcl;
+# UTF16-BYTE-STORAGE-MILESTONE-1.md, "Mutation testing"): deliberate breaks
+# of the codec's contract, in the Tcl backends' implementation
+# (core/utf16text.tcl) and the native runtime's (native/src/runtime/ops.rs).
+# Each must be killed, and by the detector its `!!` line names -- the test
+# (or the Rust test, `rust:NAME`, or the fuzzer, `fuzz`) that checks the
+# contract the mutant violates; a mutant killed only by something else is
+# reported as such and counted as a failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! DETECTOR ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# The path-level mutants (the Win32 terminator, a terminator in a native
+# path, normalized path text, lossy text, a surrogate replaced on open) are
+# audit/filesystem/tools/mutants.txt's.
+
+# ---------------------------------------------------------------------------
+# Encoding
+
+@@ rust-byte-order-swapped the native encoder writes each unit high byte first (UTF-16BE)
+!! u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+## native/src/runtime/ops.rs
+<<<<
+                buffer[n..n + 2].copy_from_slice(&unit.to_le_bytes());
+====
+                buffer[n..n + 2].copy_from_slice(&unit.to_be_bytes());
+>>>>
+
+@@ tcl-byte-order-swapped the Tcl backends encode UTF-16BE
+!! u16-encode-vectors fuzz
+## core/utf16text.tcl
+<<<<
+    return [core::value::bytestore [binary encode hex [encoding convertto -profile strict utf-16le $s]]]
+====
+    return [core::value::bytestore [binary encode hex [encoding convertto -profile strict utf-16be $s]]]
+>>>>
+
+@@ rust-ascii-byte-order-swapped the native encoder's ASCII path writes each unit's zero byte first
+!! u16-encode-vectors u16-encode-ascii-chunks rust:utf16le_encodes_exact_bytes fuzz
+## native/src/runtime/ops.rs
+<<<<
+                    buffer[2 * i] = b;
+                    buffer[2 * i + 1] = 0;
+====
+                    buffer[2 * i] = 0;
+                    buffer[2 * i + 1] = b;
+>>>>
+
+@@ rust-high-byte-omitted the native encoder keeps each unit's low byte and writes 0 for its high byte (the length unchanged)
+!! u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+## native/src/runtime/ops.rs
+<<<<
+                buffer[n..n + 2].copy_from_slice(&unit.to_le_bytes());
+====
+                buffer[n..n + 2].copy_from_slice(&[unit.to_le_bytes()[0], 0]);
+>>>>
+
+@@ rust-supplementary-as-two-values a supplementary scalar is written as two unrelated 16-bit values (its high and low halves), not as a surrogate pair
+!! u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+## native/src/runtime/ops.rs
+<<<<
+            for unit in text.encode_utf16() {
+====
+            for unit in text.chars().flat_map(|c| {
+                let v = c as u32;
+                if v > 0xFFFF { vec![(v >> 16) as u16, (v & 0xFFFF) as u16] } else { vec![v as u16] }
+            }) {
+>>>>
+
+@@ rust-surrogate-pair-miscalculated the high surrogate is computed from the scalar without subtracting 0x10000 (off by 64 units)
+!! u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+## native/src/runtime/ops.rs
+<<<<
+            for unit in text.encode_utf16() {
+====
+            for unit in text.chars().flat_map(|c| {
+                let v = c as u32;
+                if v > 0xFFFF { vec![(0xD800 + (v >> 10)) as u16, (0xDC00 + (v & 0x3FF)) as u16] } else { vec![v as u16] }
+            }) {
+>>>>
+
+@@ rust-encode-appends-nul the native encoder appends a NUL unit (a C-style terminator) to every encoding
+!! u16-encode-vectors rust:utf16le_encodes_exact_bytes fuzz
+## native/src/runtime/ops.rs
+<<<<
+    let Some(len) = utf16le_encoded_len(units) else {
+====
+    let Some(len) = utf16le_encoded_len(units + 1) else {
+>>>>
+## native/src/runtime/ops.rs
+<<<<
+            init.push_slice(&buffer[..n]);
+        }
+    });
+    vm(p).metrics.record_list_copy(len);
+====
+            init.push_slice(&buffer[..n]);
+        }
+        init.push_slice(&[0, 0]);
+    });
+    vm(p).metrics.record_list_copy(len);
+>>>>
+
+@@ tcl-encode-appends-nul the Tcl backends append a NUL unit to every encoding
+!! u16-encode-vectors fuzz
+## core/utf16text.tcl
+<<<<
+    return [core::value::bytestore [binary encode hex [encoding convertto -profile strict utf-16le $s]]]
+====
+    return [core::value::bytestore [binary encode hex [encoding convertto -profile strict utf-16le $s]\x00\x00]]
+>>>>
+
+@@ rust-oversized-length-unchecked the encoding's length is doubled with wrapping arithmetic and never held to the ceiling: an oversized String's length wraps or passes the Bytes limit
+!! rust:utf16le_length_never_overflows_or_passes_the_ceiling
+## native/src/runtime/ops.rs
+<<<<
+    units.checked_mul(2).filter(|&n| n <= MAX_COLLECTION_LENGTH)
+====
+    Some(units.wrapping_mul(2))
+>>>>
+
+# ---------------------------------------------------------------------------
+# Decoding
+
+@@ rust-decode-byte-order-swapped the native decoder reads each byte pair high byte first
+!! u16-decode-accepted u16-no-order-detection rust:utf16le_decodes_strictly fuzz
+## native/src/runtime/ops.rs
+<<<<
+    data.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+====
+    data.chunks_exact(2).map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+>>>>
+
+@@ rust-accepts-lone-high an unpaired high surrogate is accepted (shown as U+FFFD) instead of InvalidUtf16
+!! u16-decode-rejected rust:utf16le_decodes_strictly fuzz
+## native/src/runtime/ops.rs
+<<<<
+    let mut units = utf16le_units_of(data);
+    while let Some(unit) = units.next() {
+====
+    let mut units = utf16le_units_of(data).peekable();
+    while let Some(unit) = units.next() {
+>>>>
+## native/src/runtime/ops.rs
+<<<<
+            0xD800..=0xDBFF => match units.next() {
+                Some(0xDC00..=0xDFFF) => 4,
+                _ => return None,
+            },
+====
+            0xD800..=0xDBFF => match units.peek() {
+                Some(0xDC00..=0xDFFF) => {
+                    units.next();
+                    4
+                }
+                _ => 3,
+            },
+>>>>
+## native/src/runtime/ops.rs
+<<<<
+        for c in char::decode_utf16(utf16le_units_of(data)).flatten() {
+====
+        for c in char::decode_utf16(utf16le_units_of(data)).map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER)) {
+>>>>
+
+@@ rust-accepts-lone-low an unpaired low surrogate is accepted (shown as U+FFFD) instead of InvalidUtf16
+!! u16-decode-rejected rust:utf16le_decodes_strictly fuzz
+## native/src/runtime/ops.rs
+<<<<
+            0xDC00..=0xDFFF => return None,
+            _ => 3,
+====
+            0xDC00..=0xDFFF => 3,
+            _ => 3,
+>>>>
+## native/src/runtime/ops.rs
+<<<<
+        for c in char::decode_utf16(utf16le_units_of(data)).flatten() {
+====
+        for c in char::decode_utf16(utf16le_units_of(data)).map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER)) {
+>>>>
+
+@@ rust-accepts-odd-count an odd byte count is accepted, its last byte ignored
+!! u16-decode-rejected rust:utf16le_decodes_strictly fuzz
+## native/src/runtime/ops.rs
+<<<<
+    if data.len() % 2 != 0 {
+        return None;
+    }
+    let mut byte_len = 0usize;
+====
+    let mut byte_len = 0usize;
+>>>>
+
+@@ tcl-accepts-odd-count the Tcl backends drop a trailing odd byte instead of refusing the bytes
+!! u16-decode-rejected fuzz
+## core/utf16text.tcl
+<<<<
+    set raw [binary decode hex [core::value::bytestoreHex $storage]]
+    if {[catch {encoding convertfrom -profile strict utf-16le $raw} text]} {
+====
+    set raw [binary decode hex [core::value::bytestoreHex $storage]]
+    if {[string length $raw] % 2} {
+        set raw [string range $raw 0 end-1]
+    }
+    if {[catch {encoding convertfrom -profile strict utf-16le $raw} text]} {
+>>>>
+
+@@ tcl-replaces-malformed the Tcl backends replace malformed UTF-16 with U+FFFD instead of raising InvalidUtf16
+!! u16-decode-rejected u16-error-handleable fuzz
+## core/utf16text.tcl
+<<<<
+    if {[catch {encoding convertfrom -profile strict utf-16le $raw} text]} {
+====
+    if {[catch {encoding convertfrom -profile replace utf-16le $raw} text]} {
+>>>>
+
+@@ rust-replaces-malformed the native decoder replaces every unpaired surrogate with U+FFFD instead of raising InvalidUtf16
+!! u16-decode-rejected u16-error-handleable rust:utf16le_decodes_strictly fuzz
+## native/src/runtime/ops.rs
+<<<<
+    let mut units = utf16le_units_of(data);
+    while let Some(unit) = units.next() {
+====
+    let mut units = utf16le_units_of(data).peekable();
+    while let Some(unit) = units.next() {
+>>>>
+## native/src/runtime/ops.rs
+<<<<
+            0xD800..=0xDBFF => match units.next() {
+                Some(0xDC00..=0xDFFF) => 4,
+                _ => return None,
+            },
+====
+            0xD800..=0xDBFF => match units.peek() {
+                Some(0xDC00..=0xDFFF) => {
+                    units.next();
+                    4
+                }
+                _ => 3,
+            },
+>>>>
+## native/src/runtime/ops.rs
+<<<<
+            0xDC00..=0xDFFF => return None,
+            _ => 3,
+====
+            0xDC00..=0xDFFF => 3,
+            _ => 3,
+>>>>
+## native/src/runtime/ops.rs
+<<<<
+        for c in char::decode_utf16(utf16le_units_of(data)).flatten() {
+====
+        for c in char::decode_utf16(utf16le_units_of(data)).map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER)) {
+>>>>
+
+@@ rust-bom-removed the native decoder treats a leading FF FE as a byte-order mark and drops it
+!! u16-decode-accepted rust:utf16le_decodes_strictly
+## native/src/runtime/ops.rs
+<<<<
+    let data = bytes_of(v);
+    let Some((byte_len, chars)) = utf16le_measure(data) else {
+====
+    let data = bytes_of(v);
+    let data = if data.starts_with(&[0xff, 0xfe]) { &data[2..] } else { data };
+    let Some((byte_len, chars)) = utf16le_measure(data) else {
+>>>>
+
+@@ tcl-bom-removed the Tcl backends treat a leading FF FE as a byte-order mark and drop it
+!! u16-decode-accepted
+## core/utf16text.tcl
+<<<<
+    set raw [binary decode hex [core::value::bytestoreHex $storage]]
+    if {[catch {encoding convertfrom -profile strict utf-16le $raw} text]} {
+====
+    set raw [binary decode hex [core::value::bytestoreHex $storage]]
+    if {[string range $raw 0 1] eq "\xff\xfe"} {
+        set raw [string range $raw 2 end]
+    }
+    if {[catch {encoding convertfrom -profile strict utf-16le $raw} text]} {
+>>>>
+
+@@ rust-decode-error-panics an unpaired high surrogate is an unchecked Rust panic instead of the declared InvalidUtf16
+!! u16-decode-rejected u16-error-handleable rust:utf16le_decodes_strictly fuzz
+## native/src/runtime/ops.rs
+<<<<
+                Some(0xDC00..=0xDFFF) => 4,
+                _ => return None,
+====
+                Some(0xDC00..=0xDFFF) => 4,
+                _ => panic!("well-formed UTF-16 expected"),
+>>>>
+
+# ---------------------------------------------------------------------------
+# The units bridge and the collector
+
+@@ rust-units-bridge-byte-order-swapped the internal units bridge reads each byte pair high byte first (std::windows::fs's syntax sees other units)
+!! rust:utf16le_units_bridge_reads_low_byte_first
+## native/src/runtime/ops.rs
+<<<<
+    let items: Vec<Value> = utf16le_units_of(data).map(|u| make_small(u as i64)).collect();
+====
+    let items: Vec<Value> = utf16le_units_of(data).map(|u| make_small(u.swap_bytes() as i64)).collect();
+>>>>
+
+@@ rust-gc-roots-lost the conversions are classified as never allocating: values live across one are not rooted, and a collection inside it frees them
+!! u16-gc-stress
+## native/src/runtime/ops.rs
+<<<<
+            | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits
+            // The writable storage family (MUTABLE-BYTES.md): each of these
+====
+            // The writable storage family (MUTABLE-BYTES.md): each of these
+>>>>

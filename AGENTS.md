@@ -1855,7 +1855,8 @@ Paths have two layers (WINDOWS-X86-64-MILESTONE-7.md): textual paths a
 program writes (`std::linux::path::LinuxPath`, `std::windows::path::WindowsPath`,
 `std::darwin::path::DarwinPath`: refinements of str, syntax only) and native
 paths the system takes and returns (`std::PLATFORM::fs::NativePath`: Linux and
-macOS bytes through `std::io::bytepath`, Windows UTF-16 code units). The
+macOS bytes through `std::io::bytepath`, Windows UTF-16 code units held as
+their UTF-16LE bytes: next section). The
 portable layer is `std::io::fs` (FileError, OpenMode, EntryKind, the eager
 trait FilePath); the platform layers are `std::linux::fs` (raw syscalls),
 `std::windows::fs` (kernel32's wide functions) and `std::darwin::fs`
@@ -1888,12 +1889,14 @@ trait FilePath); the platform layers are `std::linux::fs` (raw syscalls),
   right after the failed call (errno; `__error()`; GetLastError before
   any other call). Validation failures stay `NotAPath`.
 * The Win32 and libSystem declarations are `private`; helpers of the
-  platform modules are `private`; `of_valid_text` is an internal member.
+  platform modules are `private`; `of_valid_text` is an internal member
+  (and std::abi::bytes's `utf16le_units`, std::windows::fs's units bridge).
 * No watching, asynchronous I/O, event loop, metadata, links or renaming
   here (`fs-no-watchers`).
 
-If you change any of that, or `std::abi::bytes::join`, `slice` or
-`decode_utf8`, or the Linux path syscalls, run `tests/filesystem.test` (its
+If you change any of that, or `std::abi::bytes::join`, `slice`,
+`decode_utf8`, `encode_utf16le` or `decode_utf16le`, or the Linux path
+syscalls, run `tests/filesystem.test` (its
 Windows and macOS tests run on their hosts: the Windows workflow's smoke
 and GC-stress steps, the macOS acceptance tier), `tests/linux-path.test`,
 `tests/portable-io.test`, `tests/darwin-io.test`, `tests/windows-io.test`,
@@ -1903,7 +1906,53 @@ mutant in its `mutants.txt` that applies to the host must still apply and
 be killed: update a mutant's text when you change the code it mutates,
 keeping it a mutant of the same rule; the `%% windows-x86_64` ones on
 Windows, the tier item `filesystem-mutants`), and the warning gate.
-`bench/filesystem.tcl` regenerates the performance table.
+`bench/filesystem.tcl` regenerates the performance table (`-baseline-rev
+REV` against another revision, on the same machine).
+
+## UTF-16LE on byte storage
+
+`std::abi::bytes::encode_utf16le(text) -> Bytes` and
+`decode_utf16le(data) -> str errors InvalidUtf16`
+(UTF16-BYTE-STORAGE-MILESTONE-1.md) convert between a String and its
+UTF-16LE bytes on the byte storage, platform-free, on every backend:
+core/utf16text.tcl (Tcl's strict utf-16le) and native/src/runtime/ops.rs
+(`rt_str_encode_utf16le`, `rt_bytes_decode_utf16le`: one allocation each,
+no intermediate List or Rust String). std::windows::fs's NativePath holds
+its units as those bytes. Keep it so:
+
+* The format is UTF-16LE whatever the host: each unit's two bytes written
+  and read explicitly, low byte first (`to_le_bytes`, `from_le_bytes`),
+  never the payload reinterpreted as a `[u16]`. No byte-order mark (FF FE is
+  U+FEFF: never detected, skipped or added), no terminator, no
+  normalization; U+0000 is 00 00. Encoding is total.
+* Decoding is strict: an odd byte count or an unpaired surrogate is the
+  declared builtin error InvalidUtf16 (builtin error 13), never a
+  replacement character or a panic. Never reuse InvalidUtf8 or
+  std::io::path::NotText for it (the Windows path layer translates it to
+  NotText), and never add a lossy public decoder, UTF-16BE, byte-order
+  detection, code pages or a second string representation without a
+  demonstrated need.
+* A NativePath is its units' bytes, exactly (an unpaired surrogate
+  included, no terminator): `text` is decode_utf16le, `display` the strict
+  text or, for a name without one, the module's own lossy decoding (nothing
+  but `display` calls it: never a path); the LPCWSTR of a Win32 call is the
+  bytes and one NUL unit joined at the call boundary (`wide`), never stored.
+  The path syntax reads the units through the internal
+  `std::abi::bytes::utf16le_units` and stays the one statement of Win32's
+  syntax: never a second parser over Strings.
+
+If you change any of that, run `tests/utf16-bytes.test`,
+`tests/filesystem.test` (its Windows tests on Windows; `fs-windows-call-buffer`
+and `fs-windows-native-runtime` everywhere they run), `tests/abi-bytes.test`,
+`cargo test --release --manifest-path native/Cargo.toml --lib utf16le`,
+`python3 -I audit/abi-bytes/tools/utf16-oracle.py selftest`,
+`audit/abi-bytes/tools/utf16-fuzz.tcl` (several seeds, once with
+`-gc-stress 1`), `audit/abi-bytes/tools/utf16-mutate.tcl` (every mutant in
+`utf16-mutants.txt` must apply and be killed by the detector its `!!` line
+names: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule; the tier item `utf16-mutants` on another
+host), and the filesystem harnesses above. `bench/utf16-bytes.tcl` is the
+performance report (`-baseline-rev REV`; the tier item `utf16-bench`).
 
 ## Affine values
 
