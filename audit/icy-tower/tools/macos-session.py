@@ -35,14 +35,19 @@ The cases:
                 and SDL_RENDER_DRIVER), every SDL call on the process's main
                 thread, the window, the start banner and the tower of seed 7
                 as the oracle places it, the frame intervals, then Escape
-  keyboard      EXE, seed 7: Right/Left and D/A move the player right and
-                back left, Left and Right held together do not move it,
-                Escape quits (status 0, over=no)
+  keyboard      EXE, seed 7: Right, Left, D and A, each a timed tap from
+                rest with room to move, move the player their way; Left and
+                Right held together do not move it; Escape quits (status 0).
+                The tower climbs while the keys move the player, and a game
+                a fall ends is restarted with R (the summary's round counts
+                them) and the move tried again
   restart       EXE, seed 254: Right held from 3.5 s reaches game over
                 (the oracle: within 1.7 s, whatever the frame times), the
                 game-over banner, R, a new game -- round 2 on the next tower
                 of the same generator, its platforms where the oracle puts
-                them -- then Escape
+                them, its player where the oracle's run of it with no key
+                down draws it between R and the capture, the summary's
+                floor the oracle's at its time -- then Escape
   close         EXE, seed 7: the window's close button pressed
                 (Accessibility, else a click on it): SDL's quit, status 0
   focus         EXE, seed 7: Right held, the focus taken by another
@@ -50,7 +55,8 @@ The cases:
                 in the game, Left moves the player left (a stuck Right would
                 cancel it, as the keyboard case shows both keys do)
   autopilot     PROBE, seed 3 --autopilot, real time for 20 s: the tower
-                climbs (the frames change, the camera rises), the frame
+                climbs (the frames change, the camera rises), every frame
+                presented, about 60 a second (vertical sync), the frame
                 timing distribution, the event pump's time, then Escape
   trace-dummy   PROBE on SDL's dummy driver, --autopilot --fixed-step
                 --frames 600 --seed 7: the SDL call trace equals the Linux
@@ -76,6 +82,7 @@ every case is EXECUTED. Writes DIR/results.json, DIR/summary.md, every
 capture (PNG) and every run's output.
 """
 import argparse
+import copy
 import json
 import os
 import re
@@ -135,6 +142,17 @@ def nearest(c, limit=40):
 
 def is_(c, *colors):
     return nearest(c) in colors
+
+
+def blend_of(c, a, b, lo, hi, limit=24):
+    """Whether C is a mixture a + t (b - a) of A and B with LO <= t <= HI (within LIMIT): what a renderer's
+    filtering makes of an edge between the two."""
+    d = [b[i] - a[i] for i in range(3)]
+    dd = sum(v * v for v in d)
+    t = sum((c[i] - a[i]) * d[i] for i in range(3)) / float(dd)
+    if not lo <= t <= hi:
+        return False
+    return sum((c[i] - a[i] - t * d[i]) ** 2 for i in range(3)) <= limit * limit
 
 
 # ---------------------------------------------------------------------------
@@ -284,9 +302,21 @@ class Frame:
         return runs
 
     def hud(self):
-        dark = self.fraction((24, 4, 148, 52), [PANEL, INK], 2)
-        ink = self.fraction((24, 4, 148, 52), [INK], 2)
-        return dark, ink
+        """The fraction of the HUD panel's samples that are the panel, the text, or a mixture of the two (a
+        glyph's edge where the renderer scales the 8-pixel debug font: a blend well inside the segment
+        from PANEL to INK, never the sky's few units from the panel's end), and the fraction of text."""
+        x0, y0, x1, y1 = 24, 4, 148, 52
+        total = dark = ink = 0
+        for ly in range(y0, y1, 2):
+            for lx in range(x0, x1, 2):
+                c = self.lp(lx, ly)
+                total += 1
+                n = nearest(c)
+                if n == INK:
+                    ink += 1
+                if n in (PANEL, INK) or blend_of(c, PANEL, INK, 0.15, 0.85):
+                    dark += 1
+        return dark / float(total), ink / float(total)
 
     def player(self):
         xs, ys = [], []
@@ -590,17 +620,41 @@ class Game:
             mode = "pid:%d" % self.p.pid
         self.s.tool("key", name, action, mode)
 
-    def hold(self, name, seconds):
-        self.key(name, "down")
-        time.sleep(seconds)
-        self.key(name, "up")
+    def hold(self, names, seconds, mode=None):
+        """NAMES (comma-separated) pressed together for SECONDS, timed by the helper (one process: the
+        keys' events back to back, the hold not stretched by starting a second process)."""
+        mode = mode or self.s.key_mode
+        if mode == "pid":
+            mode = "pid:%d" % self.p.pid
+        return self.s.tool("hold", names, "%.3f" % seconds, mode)
+
+    def ready(self, label, restarts):
+        """A frame of a game in play -- the player drawn, no game-over banner -- taking R when the game is
+        over (counted in RESTARTS, a one-element list) and waiting for the new game's player."""
+        for _ in range(4):
+            f, problem = self.frame(label, retries=4)
+            if f is not None and f.banner() is None:
+                return f
+            img, _ = self.shot(label + "-over?")
+            try:
+                b = Frame(img).banner() if img is not None else None
+            except NotTheGame:
+                b = None
+            if b is not None and b["kind"] == "game-over":
+                self.key("r", "tap")
+                restarts[0] += 1
+                time.sleep(0.8)
+        return None
 
     def shot(self, label):
         self.shots += 1
         png = os.path.join(self.s.out, "%s-%02d-%s.png" % (self.name, self.shots, label))
         if not self.win:
             return None, png
-        return capture(self.win["id"], png), png
+        t0 = time.time()
+        img = capture(self.win["id"], png)
+        self.taken = (t0, time.time())  # the capture was made between these two moments
+        return img, png
 
     def frame(self, label, retries=8):
         """A located frame of the window (retaken while the player is hidden, as xvfb-session.py does)."""
@@ -618,6 +672,7 @@ class Game:
                 time.sleep(0.1)
                 continue
             f.png = png
+            f.taken = self.taken
             if f.player() is not None:
                 return f, None
             last_error = "no player in the capture"
@@ -729,13 +784,53 @@ def keyboard_blocked(s, g, focus):
     return None
 
 
+# A tap's run, from rest, and the room it needs: 0.18 s of RUN_ACCEL reaches
+# MAX_RUN, then friction slides the player on (about 90 units in all), and a
+# wall within that would turn the move back (REBOUND). The player is first
+# moved away from a wall it is too near.
+TAP = 0.18
+RIGHT_LIMIT, LEFT_LIMIT = 330, 150
+
+
+def measure_key(g, key, sign, label, restarts):
+    """KEY tapped (TAP seconds, from rest) moves the player by more than 20 units in direction SIGN:
+    (ok, text, before, after). A game the tower ends during a move (it climbs while the keys
+    move the player; a fall below the camera ends it) is restarted with R and the move tried again,
+    up to three times: a move is judged only between two captures of one game in play."""
+    last = "the player was not found in both captures"
+    for attempt in range(3):
+        before = g.ready(label + "-before", restarts)
+        for _ in range(3):
+            if before is None:
+                break
+            c = before.player()["centre_x"]
+            away = "left" if sign > 0 and c > RIGHT_LIMIT else "right" if sign < 0 and c < LEFT_LIMIT else None
+            if away is None:
+                break
+            g.hold(away, 0.22)
+            time.sleep(0.35)
+            before = g.ready(label + "-before", restarts)
+        if before is None:
+            last = "no capture of the game in play before the move"
+            continue
+        g.hold(key, TAP)
+        time.sleep(0.3)  # friction stops a full run in 0.23 s
+        after, _ = g.frame(label, retries=3)
+        if after is None or after.banner() is not None:
+            last = "the game ended during the move (attempt %d)" % (attempt + 1)
+            continue
+        ok, t = moved_check(before.player(), after.player(), 20, sign)
+        return ok, t, before.player(), after.player()
+    return False, last, None, None
+
+
 def case_keyboard(s):
     g = Game(s, "keyboard", s.args.exe, ["--seed", "7"])
     checks, facts = [], {}
     if g.window() is None:
         code, how, out, err = g.finish(3)
         return s.verdict("keyboard", [(False, "a window (status %s: %s)" % (code, err[-200:]))], {"stderr": err}, "graphical-correctness")
-    time.sleep(3.5)  # the start banner (3 s) is drawn over the player
+    time.sleep(max(0.0, 3.5 - (time.time() - g.window_at)))  # the start banner (3 s) is drawn over the player
     focus = g.focus()
     facts["focus"] = focus
     facts["window"] = g.win
@@ -747,69 +842,54 @@ def case_keyboard(s):
     if start is not None:
         c, f = check_static(start, oracle.World(7, 1).platforms, 0.0, None, player_x=227)
         checks += [(ok, "the start: " + t) for ok, t in c]
+    restarts = [0]
     # Which of Quartz's paths delivers the keys: the HID event tap (as a
     # keyboard's events enter), else the session's, else posting to the
     # game's process. The first that moves the player is kept for every case.
     tried = []
     for mode in ("hid", "session", "pid"):
-        before, _ = g.frame("calibrate-%s-before" % mode)
-        g.key("right", "down", mode)
-        time.sleep(0.3)
-        g.key("right", "up", mode)
-        after, _ = g.frame("calibrate-%s-after" % mode)
-        ok, t = moved_check(before.player() if before else None, after.player() if after else None, 15, 1)
+        s.key_mode = mode
+        ok, t, _, _ = measure_key(g, "right", 1, "calibrate-%s" % mode, restarts)
         tried.append({"mode": mode, "moved": ok, "how": t})
         if ok:
-            s.key_mode = mode
             break
     facts["key_paths"] = tried
     facts["key_mode"] = s.key_mode if any(t["moved"] for t in tried) else None
-    if facts["key_mode"]:
-        g.hold("left", 0.3)
-        time.sleep(0.6)
-        start, _ = g.frame("start-again")
-    positions = {"start": start.player() if start else None}
-
-    def step(key, seconds, label):
-        g.hold(key, seconds)
-        f, _ = g.frame(label)
-        positions[label] = f.player() if f else None
-        return positions[label]
-
-    step("right", 0.45, "right")
-    step("left", 0.9, "left")
-    step("d", 0.45, "d")
-    step("a", 0.9, "a")
+    if facts["key_mode"] is None:
+        s.key_mode = "hid"
+    positions = {}
+    for key, sign, name in (("right", 1, "Right"), ("left", -1, "Left"), ("d", 1, "D"), ("a", -1, "A")):
+        ok, t, before, after = measure_key(g, key, sign, key, restarts)
+        positions[key] = [before, after]
+        checks.append((ok, "%s: %s" % (name, t)))
     # Both held: run_velocity's neither-or-both rule, friction only (from
-    # rest: friction stops a full run in 0.23 s).
-    time.sleep(0.6)
-    rest_before, _ = g.frame("rest")
-    positions["rest"] = rest_before.player() if rest_before else None
-    g.key("left", "down")
-    g.key("right", "down")
-    time.sleep(0.5)
-    g.key("right", "up")
-    g.key("left", "up")
-    both, _ = g.frame("both")
-    positions["both"] = both.player() if both else None
-    ok, t = moved_check(positions["start"], positions["right"], 20, 1)
-    checks.append((ok, "Right: " + t))
-    ok, t = moved_check(positions["right"], positions["left"], 20, -1)
-    checks.append((ok, "then Left: " + t))
-    ok, t = moved_check(positions["left"], positions["d"], 20, 1)
-    checks.append((ok, "D: " + t))
-    ok, t = moved_check(positions["d"], positions["a"], 20, -1)
-    checks.append((ok, "then A: " + t))
-    if positions["rest"] and positions["both"]:
-        d = positions["both"]["centre_x"] - positions["rest"]["centre_x"]
-        checks.append((abs(d) <= 12, "Left and Right held together: the player moved %+.0f units (friction only)" % d))
-    else:
-        checks.append((False, "Left and Right held together: the player was not found"))
+    # rest: both keys' events posted together, so neither runs alone).
+    both_ok, both_text = False, "Left and Right held together: the player was not found in both captures"
+    for attempt in range(3):
+        time.sleep(0.4)
+        rest = g.ready("rest", restarts)
+        if rest is None:
+            continue
+        g.hold("left,right", 0.5)
+        time.sleep(0.1)
+        both, _ = g.frame("both", retries=3)
+        if both is None or both.banner() is not None:
+            continue
+        d = both.player()["centre_x"] - rest.player()["centre_x"]
+        positions["both"] = [rest.player(), both.player()]
+        both_ok = abs(d) <= 12
+        both_text = "Left and Right held together: the player moved %+.0f units (friction only)" % d
+        break
+    checks.append((both_ok, both_text))
     code, how, out, err = g.escape()
-    facts.update({"positions": positions, "status": code, "ended": how, "summary": out, "stderr": err[-300:]})
+    fields = summary_fields(out)
+    facts.update({"positions": positions, "restarts": restarts[0], "status": code, "ended": how, "summary": out,
+                  "stderr": err[-300:]})
     checks.append((code == 0 and how == "exited", "Escape quits: status %s (%s)" % (code, how)))
-    checks.append(("over=no" in out and "frames=" in out, "the summary: " + out))
-    moved_any = any(ok for ok, t in checks if t.startswith(("Right:", "then Left:")))
+    checks.append((fields.get("round") == str(1 + restarts[0]) and "frames=" in out,
+                   "the summary, round %d (the games the tower ended were restarted with R %d time(s)): %s"
+                   % (1 + restarts[0], restarts[0], out)))
+    moved_any = any(ok for ok, t in checks if t.startswith(("Right:", "Left:")))
     blocked = None
     if not moved_any:
         blocked = keyboard_blocked(s, g, focus)
@@ -831,6 +911,17 @@ def round_two(seed, final_rng, final_platforms):
         for _ in range(3):
             state = oracle.lcg(state)
     return None
+
+
+def no_input_run(world, seconds):
+    """The oracle's run of WORLD with no key down, 60 steps a second, for SECONDS:
+    [(time, y, floor, camera)]."""
+    w = copy.deepcopy(world)
+    out = [(w.time, w.y, w.floor, w.bottom)]
+    while w.time < seconds:
+        w.step(False, False, False, oracle.FRAME)
+        out.append((w.time, w.y, w.floor, w.bottom))
+    return out
 
 
 def case_restart(s):
@@ -872,24 +963,21 @@ def case_restart(s):
             still = Frame(img) if img else None
         b = still.banner() if still else None
         checks.append((b is not None and b["kind"] == "game-over", "a game that is over stays over until R (%s)" % b))
+        r_sent = time.time()
         g.key("r", "tap")
+        r_done = time.time()
         time.sleep(0.6)
         fresh, problem = g.frame("restarted")
         if fresh is None:
             checks.append((False, "a capture after R: " + problem))
         else:
-            p = fresh.player()
             checks.append((fresh.banner() is None, "R: the banner is gone (round 2 has no start banner)"))
-            # A new game's player bounces on the ground platform (y 40 to 216: rows 504 to 680).
-            checks.append((p is not None and abs(p["x"] - 227) <= 4 and 498 <= p["bottom"] <= 684,
-                           "R: the player back on the ground platform, centred (%s)" % p))
             facts["restarted"] = fresh.facts()
     code, how, out, err = g.escape()
     fields = summary_fields(out)
     facts.update({"status": code, "ended": how, "summary": out})
     checks.append((code == 0 and how == "exited", "Escape quits: status %s (%s)" % (code, how)))
-    checks.append((fields.get("round") == "2" and fields.get("over") == "no" and fields.get("floor") == "0",
-                   "the summary: round 2, not over, floor 0: " + out))
+    checks.append((fields.get("round") == "2" and fields.get("over") == "no", "the summary: round 2, not over: " + out))
     if over is not None and fields.get("rng") and fields.get("platforms"):
         found = round_two(254, int(fields["rng"]), int(fields["platforms"]))
         if found is None:
@@ -898,6 +986,33 @@ def case_restart(s):
             k, state, w = found
             facts["round_two"] = {"platforms_placed_before": k, "seed": state}
             checks.append((True, "the new game is the next tower of the same generator (after %d platforms: seed %d)" % (k, state)))
+            # No key is down in round 2: its player stays at the centre and
+            # bounces where the oracle's run of that tower with no input does
+            # (the ground, then whatever platform it lands on), and the
+            # summary's floor is that run's at the summary's time.
+            run = no_input_run(w, 4.0)
+            p = fresh.player() if fresh is not None else None
+            if p is None:
+                checks.append((False, "R: the new game's player: not found"))
+            else:
+                # Round 2's clock started as the game read R (between the
+                # helper's start and its exit) and runs in real time; the
+                # capture was made between two known moments. Where the
+                # oracle's player is drawn in that interval (its feet's view
+                # row, the camera's), the capture's must be.
+                lo = fresh.taken[0] - r_done - 0.05
+                hi = fresh.taken[1] - r_sent + 0.05
+                rows = [VIEW_H - (y - camera) for (tt, y, _, camera) in run if lo <= tt <= hi]
+                feet = p["bottom"] + 1
+                checks.append((bool(rows) and abs(p["x"] - 227) <= 4 and min(rows) - 4 <= feet <= max(rows) + 4,
+                               "R: the new game's player centred, its feet at view row %d, where the oracle's run of "
+                               "round 2 with no key down draws them %.1f to %.1f s after R (rows %s to %s)"
+                               % (feet, lo, hi, rows and round(min(rows)), rows and round(max(rows)))))
+            t = float(fields.get("time", "-1"))
+            floors = sorted({f for (tt, _, f, _) in run if abs(tt - t) <= 0.2})
+            checks.append((fields.get("floor") is not None and int(fields["floor"]) in floors,
+                           "the summary's floor %s is the oracle's at %.1f s of round 2 with no key down (%s)"
+                           % (fields.get("floor"), t, floors)))
             if fresh is not None:
                 checked, matched, misses = fresh.platforms(w.platforms, 0.0, [(20, 0, 152, 56)] + (
                     [(fresh.player()["x"] - 4, fresh.player()["top"] - 8, fresh.player()["right"] + 4, fresh.player()["bottom"] + 4)]
@@ -947,7 +1062,7 @@ def case_focus(s):
     if g.window() is None:
         code, how, out, err = g.finish(3)
         return s.verdict("focus", [(False, "a window (status %s)" % code)], {"stderr": err}, "graphical-correctness")
-    time.sleep(3.5)
+    time.sleep(max(0.0, 3.5 - (time.time() - g.window_at)))
     focus = g.focus()
     facts = {"focus": focus}
     if focus is None:
@@ -955,9 +1070,16 @@ def case_focus(s):
         return s.verdict("focus", [(False, "the window could take the keyboard focus")], facts, "keyboard-correctness",
                          keyboard_blocked(s, g, focus))
     checks = []
+    restarts = [0]
+    before = g.ready("before", restarts)
+    if before is not None and before.player()["centre_x"] > RIGHT_LIMIT:
+        g.hold("left", 0.22)
+        time.sleep(0.35)
+        before = g.ready("before", restarts)
+    # Right goes down and stays down: the game runs the player right.
     g.key("right", "down")
-    time.sleep(1.0)
-    wall, _ = g.frame("held")
+    time.sleep(0.3)
+    held, _ = g.frame("held", retries=2)
     # Another application takes the focus while Right is down; the key is released there.
     thief = subprocess.Popen([s.helper, "steal-focus", "3"], stdout=subprocess.PIPE, text=True)
     ready = json.loads(thief.stdout.readline() or "{}")
@@ -972,17 +1094,18 @@ def case_focus(s):
     thief.wait(timeout=10)
     back = g.focus()
     time.sleep(0.4)
-    settled, _ = g.frame("back")
-    g.hold("left", 0.5)
-    left, _ = g.frame("left")
+    # Back in the game, no key down. Left alone must move the player left:
+    # with Right stuck down, the two would cancel (the keyboard case's
+    # both-held check), and the player would not move.
+    ok, t, settled, left = measure_key(g, "left", -1, "left", restarts)
     code, how, out, err = g.escape()
-    pw, ps, pl = [f.player() if f else None for f in (wall, settled, left)]
-    facts.update({"focus_lost_to": who, "refocused": back, "held": pw, "back": ps, "after_left": pl, "status": code, "ended": how,
-                  "summary": out})
-    checks.append((pw is not None and pw["x"] >= 400, "Right held runs the player to the right wall (%s)" % (pw and pw["x"])))
+    pb, ph = [f.player() if f else None for f in (before, held)]
+    facts.update({"focus_lost_to": who, "refocused": back, "before": pb, "held": ph, "back": settled, "after_left": left,
+                  "restarts": restarts[0], "status": code, "ended": how, "summary": out})
+    ok_held, t_held = moved_check(pb, ph, 20, 1)
+    checks.append((ok_held, "Right held runs the player right: " + t_held))
     checks.append((lost, "another application took the keyboard focus (frontmost: %s)" % who.get("name")))
     checks.append((back is not None, "the game's window took the focus back (%s)" % back))
-    ok, t = moved_check(ps, pl, 40, -1)
     checks.append((ok, "Left alone moves the player left after the focus came back, so Right is not stuck: " + t))
     checks.append((code == 0 and how == "exited", "Escape quits: status %s (%s)" % (code, how)))
     blocked = None if lost else ("focus-change-unavailable" if not ok else None)
@@ -1009,9 +1132,19 @@ def case_autopilot(s):
     i = info_of(info)
     changes = sum(1 for a, b in zip(rows, rows[1:]) if a != b)
     facts = {"focus": focus, "status": code, "ended": how, "summary": out, "info": i, "captures": shots, "wall_seconds": round(g.wall, 1)}
+    frames = i.get("frames", {})
+    mean = float(frames.get("mean_ms", "0") or 0)
+    # Real time, the renderer's vertical sync: about 60 frames a second, as
+    # xvfb-session.py's autopilot (40 to 72). The autopilot is the game's
+    # own driver for a fixed step; in real time a frame's dt follows the
+    # display, and a game it loses it restarts (the round counts them).
     checks = [(len(rows) >= 4, "%d of 5 captures located" % len(rows)),
               (changes >= len(rows) - 2 >= 1, "the tower moves between captures (%d of %d changes)" % (changes, max(len(rows) - 1, 0))),
-              (int(fields.get("floor", "0")) >= 10, "the autopilot climbed: floor %s" % fields.get("floor")),
+              (fields.get("frames") == i.get("summary", {}).get("presents"),
+               "every frame the game counted was presented: %s frames, %s presents"
+               % (fields.get("frames"), i.get("summary", {}).get("presents"))),
+              (12.0 <= mean <= 25.0, "real time with vertical sync: a frame every %.1f ms on average (40 to 83 a second; "
+               "median %s ms, 99th percentile %s ms)" % (mean, frames.get("p50_ms"), frames.get("p99_ms"))),
               (i.get("summary", {}).get("off_main") == "0", "every SDL call on the main thread"),
               (code == 0, "status %s (%s): %s" % (code, how, out))]
     return s.verdict("autopilot", checks, facts, "graphical-correctness")

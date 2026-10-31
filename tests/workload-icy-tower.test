@@ -539,7 +539,16 @@ proc icyRunMacos {env args} {
 # size.
 proc icyMachO {path} {
     set libs [lmap line [lrange [split [exec otool -L $path] \n] 1 end] {lindex [string trim $line] 0}]
-    regexp {cmd LC_MAIN.*?stacksize (\d+)} [exec otool -l $path] -> stack
+    # The stacksize line of the LC_MAIN command (a line-based read: in a
+    # Tcl ARE the first quantifier's greediness is the whole expression's,
+    # so `LC_MAIN.*?stacksize (\d+)` would take one digit).
+    set stack ""
+    set inMain 0
+    foreach line [split [exec otool -l $path] \n] {
+        set line [string trim $line]
+        if {[string match "cmd *" $line]} { set inMain [expr {$line eq "cmd LC_MAIN"}] }
+        if {$inMain && [scan $line "stacksize %lld" n] == 1} { set stack $n; break }
+    }
     list $libs $stack
 }
 

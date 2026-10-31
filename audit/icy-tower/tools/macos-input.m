@@ -27,6 +27,12 @@
 //                                      cmd+NAME with the Command key) posted
 //                                      as a keyboard event (Quartz events:
 //                                      the HID tap by default)
+//   macos-input hold NAMES SECONDS [hid|session|pid:PID]
+//                                      NAMES (comma-separated) pressed
+//                                      together, held SECONDS, released
+//                                      together: every key's event posted
+//                                      back to back, the hold timed here
+//                                      rather than across two processes
 //   macos-input steal-focus SECONDS    an application window of this
 //                                      process's own (top left), made key
 //                                      and active for SECONDS: another
@@ -38,6 +44,7 @@
 #import <ApplicationServices/ApplicationServices.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static void json(NSDictionary *d) {
@@ -185,6 +192,42 @@ int main(int argc, char **argv) {
             }
             json(@{@"key": @(argv[2]), @"code": @(code), @"action": @(action), @"mode": @(mode),
                    @"post_event": @(CGPreflightPostEventAccess())});
+            return 0;
+        }
+        if (!strcmp(cmd, "hold") && (argc == 4 || argc == 5)) {
+            int codes[8], n = 0;
+            char names[256];
+            snprintf(names, sizeof names, "%s", argv[2]);
+            for (char *save = NULL, *name = strtok_r(names, ",", &save); name; name = strtok_r(NULL, ",", &save)) {
+                int code = keycode(name);
+                if (code < 0 || n == 8) {
+                    fprintf(stderr, "usage: macos-input hold NAME[,NAME...] SECONDS [hid|session|pid:PID]\n");
+                    return 2;
+                }
+                codes[n++] = code;
+            }
+            double seconds = atof(argv[3]);
+            const char *mode = argc == 5 ? argv[4] : "hid";
+            if (n == 0 || seconds <= 0 || seconds > 10) {
+                fprintf(stderr, "usage: macos-input hold NAME[,NAME...] SECONDS [hid|session|pid:PID]\n");
+                return 2;
+            }
+            struct timespec t0 = {0, 0}, t1 = {0, 0};
+            for (int down = 1; down >= 0; down--) {
+                for (int i = 0; i < n; i++) {
+                    CGEventRef e = CGEventCreateKeyboardEvent(NULL, (CGKeyCode)codes[i], down == 1);
+                    if (!strncmp(mode, "pid:", 4)) CGEventPostToPid(atoi(mode + 4), e);
+                    else CGEventPost(!strcmp(mode, "session") ? kCGSessionEventTap : kCGHIDEventTap, e);
+                    CFRelease(e);
+                }
+                if (down) {
+                    clock_gettime(CLOCK_MONOTONIC, &t0);
+                    usleep((useconds_t)(seconds * 1e6));
+                    clock_gettime(CLOCK_MONOTONIC, &t1);
+                }
+            }
+            json(@{@"keys": @(argv[2]), @"held": @((t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9),
+                   @"mode": @(mode), @"post_event": @(CGPreflightPostEventAccess())});
             return 0;
         }
         if (!strcmp(cmd, "steal-focus") && argc == 3) {
