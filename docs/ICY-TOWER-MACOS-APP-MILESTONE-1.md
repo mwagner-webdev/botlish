@@ -117,7 +117,11 @@ far as a runner allows, run on macOS:
   why with one read request (section 20).
 * **Not this milestone's, recorded**: the earlier milestone's `restart`
   case failed intermittently (section 34); the macOS integration's
-  mutants: MUTANTS-RESULT.
+  mutants: 31 of 31 killed in their last run (41245041656), after two
+  harness defects the earlier runs exposed were fixed (a stale alert
+  across cases; a launch check SDL3's own activation makes a race), with
+  that run's harness exit 1 for the baseline's LaunchServices lookup in
+  a temporary directory (section 39).
 
 Linux and Windows are unchanged (section 41): no shared module changed, and
 their workflows pass.
@@ -255,7 +259,10 @@ identifier (`URLsForApplicationsWithBundleIdentifier:`). **Executed** (run
 "registered":[".../out/app/Icy Tower.app"], ...}`; every check held but one
 that read the helper's `bundle` field, an Objective-C comparison boxed as
 the number 1, as anything but `true` (a harness bug, fixed; the acceptance
-run 41212691891: 8 of 8).
+run 41212691891: 8 of 8). Since run 41245041656 the case has a ninth
+check: the Info.plist as macOS reads it (NSBundle) has no LSUIElement,
+LSBackgroundOnly, NSUIElement or NSBGOnly -- the observable an agent
+bundle cannot hide (section 4).
 
 ## 6. Finder-style startup
 
@@ -1373,7 +1380,23 @@ policy read regular. The launch is no deterministic observable of an
 LSUIElement bundle; the Info.plist as macOS reads it is, and the mutant is
 now killed there (section 4). The baseline of `session:restart` failed
 (section 34).
-MUTANTS-RERUN
+**Executed** (run 41245041656): **31 of 31 mutants killed**, each by its
+own detector with its own text -- `agent-application` by `app-bundle`: "a
+regular application as macOS reads its Info.plist: no LSUIElement,
+LSBackgroundOnly, NSUIElement or NSBGOnly (['LSUIElement'])",
+`launch-environment-dropped` by `app-alert-renderer`: "an alert appears:
+None" -- and the harness still exited 1, for a baseline: the unmutated
+bundle's `app-bundle` case failed one check, "LaunchServices knows it for
+org.botlish.examples.icy-tower.mutant (0 registered)". The harness builds
+its bundles in the runner's temporary directory (`/var/folders/...`), and
+LaunchServices' lookup by identifier found none there, while the same case
+on the session's bundle in the workspace finds it every run (section 5).
+The likely cause is that LaunchServices does not index that location; it
+is not established, and it is no property the agent mutant's check reads
+(the Info.plist). Not fixed in this milestone: the remedy is to build the
+harness's bundles outside the temporary directory, and its proof is
+another hour's run. The `session:restart` baseline held in that run; the
+session's own `restart` failed (section 34).
 
 ## 40. Negative artifact controls
 
@@ -1493,13 +1516,17 @@ run was superseded by the next push unless said otherwise.
 | 41219310772 | fbc6b54 | failure | `--verbose`: the trap at "Generating new JWT", before any request; no crash report |
 | 41220843007 | 7c78a33 | failure | the key in App Store Connect's layout: Apple's HTTP 401 (section 20); the original session's `restart` failed (section 34) |
 | **41224177467** | **ba18cda** | **success** | every step: the build, the 12 tests, the oracle, the original graphical acceptance (12 of 12 EXECUTED), the release tooling's tests and 70 of 70 mutants, the ad hoc bundle, the LaunchServices acceptance (13 of 13 EXECUTED, the build hidden), the dry run (MACOS-NOTARY-AUTH from Apple; the control trapped; the signature ENVIRONMENT-BLOCKED; never publishable; cleanup verified) |
-| MUTANTS-RUN | | | the macOS integration's mutants (`mutants: true`) |
+| 41228596109 | 6d244e2 | failure | `mutants: true` (manual): every step but the mutants green again; the integration's mutants 30 of 31 (a stale alert across cases); the `restart` baseline failed |
+| 41235898277 | 223a0e2 | failure | the alert fix: `launch-environment-dropped` killed; `agent-application` failed the launch for another check (SDL3 sets the regular policy itself); the session's `restart` failed |
+| 41240614881 | 0e90386 | failure | `agent-application` survived the launch checks (LaunchServices activated the agent); the `restart` baseline failed |
+| 41245041656 | bf73c0d | failure | the Info.plist check: 31 of 31 mutants killed; the harness's `app-bundle` baseline failed its LaunchServices lookup in a temporary directory; the session's `restart` failed (section 39) |
 
 The general workflows started by the same pushes: `icy-tower (windows
-x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531) and ba18cda
-(41224177532); `icy-tower` (Linux) passed at c0f3165 (41205692581, a
+x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531), ba18cda
+(41224177532) and bf73c0d, the last commit with code (41245041660); `icy-tower` (Linux) passed at c0f3165 (41205692581, a
 manual run); `tests (macos arm64)` and `tests (windows x86-64)` were
-cancelled by each next push until ba18cda, GENERAL-TESTS.
+cancelled by each next push; for bf73c0d, the last commit with code, they
+were queued or running when this report was written (GENERAL-TESTS-STATUS).
 
 ## 44. The release run and its notarization
 
@@ -1712,7 +1739,7 @@ Changed:
 |---|---|
 | `examples/games/icy-tower/main-macos.bot` | installs `macos_app::create()` instead of `std::darwin::io::create()` |
 | `audit/icy-tower/tools/macos-session.py` | the `app` mode (LaunchServices launches, the alert and Gatekeeper cases, App Translocation), SIP and Gatekeeper recorded |
-| `audit/icy-tower/tools/macos-input.m` | `app-info`, `apps`, `ax-texts`, `ax-press` |
+| `audit/icy-tower/tools/macos-input.m` | `app-info` (with the agent and background-only keys NSBundle reads), `apps`, `ax-texts`, `ax-press` |
 | `audit/icy-tower/context-refactor/tools/sdltrace.c` | `SDLTRACE_FAIL` fault injection (window creation, the Nth present); without it nothing changes |
 | `audit/icy-tower/macos-mutate.tcl`, `audit/icy-tower/macos-mutants.txt` | the `app:CASES` detector (the mutant's executable bundled, signed ad hoc, launched through LaunchServices); `darwin-io-silent` renamed `app-io-silent` for the new entry; six bundle mutants |
 | `tests/workload-icy-tower.test` | `workload-icy-tower-app-module`, `-app-module-shared-sources-untouched`, `-release-tooling`, `-macos-app-bundle` |
