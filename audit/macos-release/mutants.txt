@@ -185,6 +185,15 @@
     if label not in ("PRIVATE KEY", "EC PRIVATE KEY"):
 >>>>
 
+@@ p8-layout-unchecked a P-256 key re-encoded without the curve in its ECPrivateKey is accepted, and notarytool traps on it later without a message
+!! test_credentials.Preflight.test_reencoded_p8_without_curve
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if 0xA0 not in tags:
+====
+    if False:
+>>>>
+
 @@ issuer-uuid-unchecked a malformed Issuer ID is accepted
 !! test_credentials.Preflight.test_malformed_issuer
 ## examples/games/icy-tower/macos/credentials.py
@@ -251,6 +260,15 @@
 ====
         work.add("notary-auth", True, {"code": cls, "status": code})
         return
+>>>>
+
+@@ unspecific-auth-unexplained store-credentials' bare "Credential validation failed" left unexplained: no read request asks Apple why, the release reports an unrecognized tool failure
+!! test_release.Stages.test_notary_unspecific_validation_failure_asks_apple_why test_release.Stages.test_notary_unspecific_validation_failure_offline
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if cls == "MACOS-NOTARY-TOOL" and re.search(r"Credential validation failed", text, re.I):
+====
+        if False:
 >>>>
 
 @@ auth-misclassified every notarytool failure is reported as a malformed key

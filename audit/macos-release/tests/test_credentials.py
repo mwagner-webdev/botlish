@@ -316,6 +316,14 @@ class Preflight(unittest.TestCase):
         self.refused(self.p8_env(pem.strip().replace("\n", "\\n")), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64",
                      r"literal \\n sequences instead of line breaks")
 
+    def test_reencoded_p8_without_curve(self):
+        # the same P-256 key in cryptography's PKCS#8 (no curve inside the
+        # ECPrivateKey): the layout notarytool traps on
+        reencoded = fx.pem_private(fx.notary_key())
+        self.assertTrue("".join(reencoded.decode().splitlines()[1:-1]).startswith("MIGHAgEA"))
+        self.refused(self.p8_env(reencoded.decode()), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64",
+                     r"re-encoded without the curve inside its ECPrivateKey")
+
     def test_fixture_key_is_app_store_connects_layout(self):
         # the synthetic .p8 is laid out as App Store Connect's are (the
         # curve inside the ECPrivateKey), the layout notarytool needs

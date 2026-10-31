@@ -747,6 +747,24 @@ def check_notary_key(data):
     if key.curve.name != "secp256r1":
         raise Problem("MACOS-NOTARY-KEY-FORMAT", v, "is an EC key on the %s curve: wrong curve. App Store Connect API "
                       "keys are P-256 (secp256r1, ES256)." % key.curve.name, original)
+    # App Store Connect's .p8 carries the curve inside its ECPrivateKey too
+    # ([0] parameters; Base64 MIGTAgEA...BHkwdwIBAQQg). A key re-encoded
+    # without it (openssl pkcs8 -topk8, a crypto library's PKCS#8: MIGHAgEA...)
+    # is the same key, and notarytool 1.0.0 (38) traps on it, printing
+    # nothing, while it makes its token (ICY-TOWER-MACOS-APP-MILESTONE-1.md,
+    # section 20): refused here, where the remedy can be named.
+    try:
+        inner = der[parts[2][1]:parts[2][2]]
+        s2, e2 = whole(inner)
+        fields = children(inner, s2, e2)
+        tags = [f[0] for f in fields]
+    except (Malformed, IndexError, ValueError) as m:
+        raise Problem("MACOS-NOTARY-KEY-FORMAT", v, "holds a PKCS#8 key whose ECPrivateKey is not well-formed (%s)." % m,
+                      original)
+    if 0xA0 not in tags:
+        raise Problem("MACOS-NOTARY-KEY-FORMAT", v, "is a P-256 key re-encoded without the curve inside its "
+                      "ECPrivateKey (as openssl pkcs8 -topk8 or a crypto library writes it): App Store Connect's .p8 "
+                      "holds it, and notarytool fails without a message on a key that does not.", original)
     pem = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(lines) + "\n-----END PRIVATE KEY-----\n"
     return pem, {"algorithm": "EC P-256", "public_sha256": hashlib.sha256(key.public_key().public_bytes(
         serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()}

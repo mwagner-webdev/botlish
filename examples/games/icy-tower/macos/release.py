@@ -378,6 +378,20 @@ def stage_notary_auth(work, args):
     if code != 0 or not re.search(r"validated|Success", text, re.I):
         cls, why, remedy = classify_notary(text)
         print(text if text else "(notarytool printed nothing)")
+        if cls == "MACOS-NOTARY-TOOL" and re.search(r"Credential validation failed", text, re.I):
+            # store-credentials names no reason ("Credential validation
+            # failed. Please verify your inputs."): Apple's own answer to one
+            # read request with the same key is its reason
+            hcode, hout, herr = run(["xcrun", "notarytool", "history", "--key", key, "--key-id", pre["notary"]["key_id"],
+                                     "--issuer", pre["notary"]["issuer_id"], "--output-format", "json"],
+                                    check=False, timeout=300)
+            htext = (hout + herr).strip()
+            print(htext if htext else "(notarytool printed nothing)")
+            with open(os.path.join(work.path, "notary-auth.log"), "a") as f:
+                f.write("--- notarytool history (the reason) ---\n" + htext + "\n")
+            if hcode != 0:
+                cls, why, remedy = classify_notary(htext)
+                code = hcode
         if cls == "MACOS-NOTARY-TOOL":
             why = "%s (it exited %d%s)" % (why, code, ", printing nothing" if not text else "")
         work.add("notary-auth", False, {"code": cls, "status": code})

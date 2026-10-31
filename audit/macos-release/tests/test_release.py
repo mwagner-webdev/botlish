@@ -244,6 +244,20 @@ class Stages(unittest.TestCase):
         self.assertFalse([c for c in self.calls() if c[0] == "codesign"], "signed after a failed notary authentication")
         return out
 
+    def test_notary_unspecific_validation_failure_asks_apple_why(self):
+        # store-credentials says only "Credential validation failed" (as on
+        # the runner): the reason is Apple's answer to a read request
+        out = self.notary_auth_fails("unspecific", "MACOS-NOTARY-AUTH")
+        self.assertIn("Credential validation failed", out)
+        self.assertIn("HTTP status code: 401", out)
+        self.assertTrue([c for c in self.calls() if c[:3] == ["xcrun", "notarytool", "history"]])
+
+    def test_notary_unspecific_validation_failure_offline(self):
+        # the same bare message while Apple cannot be reached: the service's,
+        # never the key's
+        out = self.notary_auth_fails("unspecific-offline", "MACOS-NOTARY-SERVICE")
+        self.assertNotIn("MACOS-NOTARY-AUTH", out)
+
     def test_notary_tool_silent_failure_reports_its_status(self):
         out = self.notary_auth_fails("silent", "MACOS-NOTARY-TOOL")
         self.assertIn("exited 70, printing nothing", out)

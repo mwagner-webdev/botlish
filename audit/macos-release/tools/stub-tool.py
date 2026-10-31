@@ -280,6 +280,9 @@ def notarytool():
         if mode == "silent":
             sys.exit(70)
         print("This process stores your credentials securely in the Keychain.\nValidating your credentials...")
+        if mode.startswith("unspecific"):
+            print("Credential validation failed. Please verify your inputs.")
+            sys.exit(1)
         answers = {
             "ok": None,
             "401": "Error: HTTP status code: 401. Unable to authenticate. Invalid authentication (Unauthorized). Ensure that all authentication arguments are correct.",
@@ -292,6 +295,16 @@ def notarytool():
             print(answers[mode])
             sys.exit(1)
         print("Success. Credentials validated.\nCredentials saved to Keychain.")
+        return
+    if sub == "history":
+        mode = CFG.get("notary_auth", "ok")
+        if mode == "unspecific":
+            print("Error: HTTP status code: 401. Unauthenticated. Ensure that all authentication arguments are correct.")
+            sys.exit(1)
+        if mode == "unspecific-offline":
+            print("Error: The Internet connection appears to be offline.")
+            sys.exit(1)
+        print(json.dumps({"history": [], "message": "Successfully received submission history."}))
         return
     if sub == "submit":
         if CFG.get("submit") == "fail":
