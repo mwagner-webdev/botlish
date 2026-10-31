@@ -620,7 +620,7 @@ char signedness, its `long`), and what the symbols are (its label prefix).
 | fixture | `bgf_ms` (an `ms_abi` function) only on x86-64; `bgf_arm_only` only on AArch64; `BGF_HIGH_CHAR` -56 vs 200 | `bgf_linux_only` vs `bgf_apple_only`; `uint64_t` (`bgf_u64`, `BGF_BIG`, `bgf_mix`'s fourth parameter) `unsigned long` vs `unsigned long long`; `bgf_ms` |
 | tcl | none in the report | not generated (section 34) |
 | boringssl | `OPENSSL_X86_64` vs `OPENSSL_AARCH64` (empty macros) | not generated |
-| sdl3 | 17 functions: `wchar_t` is `int` on x86-64 Linux and `unsigned int` on AArch64 Linux (`SDL_wcslen` ... `SDL_hid_get_indexed_string`) | not generated |
+| sdl3 | 17 functions: `wchar_t` is `int` on x86-64 Linux and `unsigned int` on AArch64 Linux (`SDL_wcslen` ... `SDL_hid_get_indexed_string`) | not generated here; since ICY-TOWER-MACOS-MILESTONE-1.md generated on macOS runners (not committed): 123 differences, `int64_t`/`uint64_t` `long long` (Sint64, Uint64 and the types, functions and constants over them) and the platform macros |
 
 Beyond the report, thunk modules differ between targets in their shim
 library's name only (the shim's text names its target). The fixture's
@@ -1089,6 +1089,12 @@ relocation change), and anything on macOS (section 34).
   backend, which this tree does not have. So no macOS binding of a real
   library is committed and no macOS acceptance has run. On a Mac with the
   SDK: `tclsh9.0 tools/c-bindgen.tcl generate sdl3 -target macos-aarch64`.
+  (Since ICY-TOWER-MACOS-MILESTONE-1.md, sections 5 to 8: that command runs
+  on GitHub's macos-15 runners with Apple clang 17 and the SDK it finds
+  itself, unchanged -- 1,231 of 1,389 API names bound, 1,655 constants --
+  and the Icy Tower macOS build plays a game linked against it; the binding
+  is generated where it is used and uploaded with the run, as ICY-TOWER-
+  WINDOWS.md does for MSVC, so none is committed.)
 * **Calling an `FnPtr`, callbacks into Botlish**: 50 Tcl, 452 BoringSSL and
   36 SDL3 bound functions take a callback, which can be passed along (a C
   function pointer from C) but not made from a Botlish function.
