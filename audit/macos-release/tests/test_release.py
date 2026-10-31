@@ -244,6 +244,11 @@ class Stages(unittest.TestCase):
         self.assertFalse([c for c in self.calls() if c[0] == "codesign"], "signed after a failed notary authentication")
         return out
 
+    def test_notary_tool_silent_failure_reports_its_status(self):
+        out = self.notary_auth_fails("silent", "MACOS-NOTARY-TOOL")
+        self.assertIn("exited 70, printing nothing", out)
+        self.assertNotIn("MACOS-NOTARY-AUTH", out)
+
     def test_notary_auth_rejected(self):
         out = self.notary_auth_fails("401", "MACOS-NOTARY-AUTH")
         self.assertIn("Key ID / Issuer ID / private-key combination", out)

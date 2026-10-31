@@ -377,8 +377,10 @@ def stage_notary_auth(work, args):
         f.write(text + "\n")
     if code != 0 or not re.search(r"validated|Success", text, re.I):
         cls, why, remedy = classify_notary(text)
-        print(text)
-        work.add("notary-auth", False, {"code": cls})
+        print(text if text else "(notarytool printed nothing)")
+        if cls == "MACOS-NOTARY-TOOL":
+            why = "%s (it exited %d%s)" % (why, code, ", printing nothing" if not text else "")
+        work.add("notary-auth", False, {"code": cls, "status": code})
         raise Failed(cls, why, remedy)
     work.add("notary-auth", True, {"profile": PROFILE})
     print("notary-auth: Apple validated the Key ID, the Issuer ID and the key together (profile %s of the temporary keychain)" % PROFILE)

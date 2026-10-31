@@ -246,10 +246,10 @@
 !! test_release.Stages.test_notary_auth_rejected test_release.Stages.test_notary_service_unreachable
 ## examples/games/icy-tower/macos/release.py
 <<<<
-        work.add("notary-auth", False, {"code": cls})
+        work.add("notary-auth", False, {"code": cls, "status": code})
         raise Failed(cls, why, remedy)
 ====
-        work.add("notary-auth", True, {"code": cls})
+        work.add("notary-auth", True, {"code": cls, "status": code})
         return
 >>>>
 

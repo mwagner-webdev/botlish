@@ -277,6 +277,8 @@ def notarytool():
     sub = ARGS[1]
     if sub == "store-credentials":
         mode = CFG.get("notary_auth", "ok")
+        if mode == "silent":
+            sys.exit(70)
         print("This process stores your credentials securely in the Keychain.\nValidating your credentials...")
         answers = {
             "ok": None,

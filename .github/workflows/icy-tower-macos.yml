@@ -506,7 +506,16 @@ jobs:
             cat "$dry/notary-auth.txt"; echo "::error::Apple validated a key it never issued"; exit 1
           fi
           cat "$dry/notary-auth.txt"
-          grep -qE '^MACOS-NOTARY-(AUTH|SERVICE):' "$dry/notary-auth.txt"
+          if ! grep -qE '^MACOS-NOTARY-(AUTH|SERVICE):' "$dry/notary-auth.txt"; then
+            # not Apple's refusal: what notarytool does, asked directly
+            # (a read request with the same throwaway key; no secret printed)
+            xcrun notarytool --version || true
+            status=0
+            bounded xcrun notarytool history --key "$w/secret/notary-key.p8" --key-id "$APPLE_NOTARY_KEY_ID" \
+              --issuer "$APPLE_NOTARY_ISSUER_ID" --output-format json </dev/null || status=$?
+            echo "(notarytool history exited $status)"
+            echo "::error::Apple's answer to a key it never issued was not classified as authentication or service"; exit 1
+          fi
           started=$(date +%s)
           if rel sign --work "$w" --app "$dry/app/Icy Tower.app" >"$dry/sign.txt" 2>&1; then
             cat "$dry/sign.txt"
