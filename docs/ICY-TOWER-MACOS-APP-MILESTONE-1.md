@@ -1321,7 +1321,34 @@ launch-environment-dropped, agent-application -- each killed only by a
 LaunchServices case failing with its own text, the `app:CASES` detector:
 the mutant's executable built, bundled by the tree's package-macos.sh,
 signed ad hoc by its release.py and launched through LaunchServices):
-MUTANTS-MACOS
+
+**Executed** (run 41228596109, a manual run with `mutants: true`): every
+baseline detector but one held for the unmutated game (the bundle's five
+app detectors among them), and 30 of 31 mutants were killed, each by its
+own detector with its own text. The bundle's:
+
+| mutant | killed by | its text |
+|---|---|---|
+| alert-never-shown | app:app-alert-renderer | an alert appears: None |
+| alert-always | app:app-terminal-failure | no alert: a terminal run reports on standard error only |
+| alert-before-write | app:app-alert-usage | the report is on standard error as well |
+| alert-wrong-text | app:app-alert-video | the alert says what failed ('Icy Tower: SDL_Init failed: nosuch not available') |
+| agent-application | app:app-launch | a regular (foreground) application, not an agent: policy 1 |
+| app-io-silent | output | the usage was not printed |
+| launch-environment-dropped | -- | FAILED FOR ANOTHER REASON: app-alert-renderer's "the alert says what failed" |
+
+`launch-environment-dropped` was not killed by its rule's check: an alert
+*was* on screen, of another run's text. The harness left it there:
+`alert-always`'s detector, the terminal case, saw its mutant's alert and
+failed as it should, but never dismissed it, and an alert is
+UserNotificationCenter's, outliving the game. A harness defect, fixed:
+every alert case and the terminal case dismiss any alert of the game before
+they start and after they end (`dismiss_alerts`, recorded as
+`stale_alerts`). And the one baseline that failed was `session:restart`,
+the earlier milestone's intermittent case (section 34), so that run's kill
+of `restart-ignored` is not conclusive (run 41164897163 of the earlier
+milestone killed it with a passing baseline). The rerun with the fix:
+MUTANTS-RERUN
 
 ## 40. Negative artifact controls
 
