@@ -315,6 +315,12 @@ proc surface::lower::StructDeclOf {node namespace} {
         # Its semantic identity, as written: hir/structs.tcl validates it.
         dict set decl identity [dict get $node identity]
     }
+    if {[dict exists $node tree]} {
+        # A tree struct (TREE-STRUCT-MILESTONE-1.md): hir/structs.tcl finds
+        # and checks its one recursive field.
+        dict set decl tree 1
+        dict set decl treeSpan [dict get $node treeSpan]
+    }
     return $decl
 }
 

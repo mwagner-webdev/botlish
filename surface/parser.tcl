@@ -279,10 +279,13 @@
 #                  `fields` are its alternatives, each at offset 0
 #   structDecl   = { structModifier } "struct" IDENT [ typeSlots ] ":" NEWLINE INDENT structField { structField } DEDENT
 #   structModifier = "opaque"       -- OPAQUE-STRUCTS.md; contextual (below)
-#                  | "context"      -- CONTEXTS.md; contextual (below). The
-#                  modifiers are independent boolean properties, in any
-#                  order, each at most once; canonical spelling
-#                  `opaque context struct`
+#                  | "context"      -- CONTEXTS.md; contextual (below)
+#                  | "tree"         -- TREE-STRUCT-MILESTONE-1.md; contextual
+#                  (below): a finite recursive value whose one recursive
+#                  field is `List[Self]`. The modifiers are independent
+#                  boolean properties, in any order, each at most once;
+#                  canonical spelling `opaque context struct`, `opaque tree
+#                  struct`
 #   typeSlots    = "[" typeSlot { "," typeSlot } [ "," ] "]"
 #   typeSlot     = IDENT [ "satisfies" typeName ]
 #                  -- TRAIT-CONSTRAINED-IMPRINTED-TYPES.md: the struct is a
@@ -438,9 +441,10 @@ namespace eval surface::parser {
     # The contextual words that may precede `struct` in a struct declaration
     # (see the grammar above). Each names one boolean property of the
     # `structdecl` node (`opaque` -> `opaque 0|1`, `opaqueSpan`; `context`
-    # -> `context 0|1`, `contextSpan`). A future `resource` is one more
-    # entry here and one more property, nothing else.
-    variable structModifiers {opaque context}
+    # -> `context 0|1`, `contextSpan`; `tree` -> `tree 1`, `treeSpan`,
+    # present only on a tree struct). A future `resource` is one more entry
+    # here and one more property, nothing else.
+    variable structModifiers {opaque context tree}
     # The contextual words that may precede `fn` in a function declaration
     # (see the grammar above). Each names one property of the `function`
     # node: `nomethod` -> `nomethod 0|1`, `nomethodSpan`; `exported`, always
@@ -4967,6 +4971,12 @@ proc surface::parser::StructDecl {pVar} {
     if {$identity ne ""} {
         # Likewise present only for a struct that declares its identity.
         dict set node identity $identity
+    }
+    if {[dict exists $modifiers tree]} {
+        # And only for a tree struct (TREE-STRUCT-MILESTONE-1.md): which
+        # field is its recursive one is hir/structs.tcl's to decide.
+        dict set node tree 1
+        dict set node treeSpan [dict get $modifiers tree]
     }
     return $node
 }

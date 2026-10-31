@@ -40,6 +40,70 @@ pub fn show_fields(shape: u32, fields: &[Value]) -> String {
     out
 }
 
+/// The text of ROOT, an object of the tree shape SHAPE (declaration NAME,
+/// slot names FIELDS) whose child field is slot CHILD: show_into's struct
+/// rendering of every node, character for character (core::value::TreeShow),
+/// from a stack of the nodes being rendered -- each with its next slot, and
+/// its next child while its child List is being rendered.
+fn tree_show(root: Value, shape: u32, name: &str, fields: &[String], child: usize, out: &mut String) {
+    struct Frame<'a> {
+        values: &'a [Value],
+        field: usize,
+        kid: Option<usize>,
+    }
+    let node = |v: Value| kind_of(v) == Kind::Struct && struct_of(v).shape == shape;
+    out.push_str(name);
+    out.push_str(" {");
+    let mut frames = vec![Frame { values: struct_of(root).fields(), field: 0, kid: None }];
+    while let Some(top) = frames.last_mut() {
+        let f = top.field;
+        if f == top.values.len() {
+            out.push('}');
+            frames.pop();
+            continue;
+        }
+        let value = top.values[f];
+        if top.kid.is_none() {
+            if f > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&fields[f]);
+            out.push_str(": ");
+        }
+        if f == child && kind_of(value) == Kind::List {
+            let kids = list_of(value).items();
+            let k = match top.kid {
+                Some(k) => k,
+                None => {
+                    out.push('[');
+                    0
+                }
+            };
+            if k < kids.len() {
+                if k > 0 {
+                    out.push_str(", ");
+                }
+                top.kid = Some(k + 1);
+                let kid = kids[k];
+                if node(kid) {
+                    out.push_str(name);
+                    out.push_str(" {");
+                    frames.push(Frame { values: struct_of(kid).fields(), field: 0, kid: None });
+                } else {
+                    show_into(kid, out);
+                }
+                continue;
+            }
+            out.push(']');
+            top.field += 1;
+            top.kid = None;
+            continue;
+        }
+        show_into(value, out);
+        top.field += 1;
+    }
+}
+
 fn show_into(v: Value, out: &mut String) {
     match kind_of(v) {
         Kind::Int => out.push_str(&int_text(v)),
@@ -110,9 +174,9 @@ fn show_into(v: Value, out: &mut String) {
             // struct (fields in canonical order), `Person {name: "Ada",
             // age: 36}` for a named one (declared slot order).
             let obj = struct_of(v);
-            let (name, fields, opaque) = current_program(|prog| {
+            let (name, fields, opaque, tree) = current_program(|prog| {
                 let shape = &prog.shapes[obj.shape as usize];
-                (shape.name.clone(), shape.fields.clone(), shape.opaque)
+                (shape.name.clone(), shape.fields.clone(), shape.opaque, shape.tree)
             });
             if opaque {
                 // An opaque struct (OPAQUE-STRUCTS.md) is rendered by its
@@ -120,6 +184,12 @@ fn show_into(v: Value, out: &mut String) {
                 // user-facing text never dumps a private representation.
                 // (`tcl_value`, the host's runtime value, stays complete.)
                 out.push_str(&format!("<opaque {}>", name.unwrap_or_default()));
+                return;
+            }
+            if let Some(child) = tree {
+                // A tree struct's value (TREE-STRUCT-MILESTONE-1.md): the
+                // same text, without the host's recursion.
+                tree_show(v, obj.shape, name.as_deref().unwrap_or(""), &fields, child, out);
                 return;
             }
             if let Some(name) = name {

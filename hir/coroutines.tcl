@@ -1497,8 +1497,12 @@ proc hir::coroutines::ShapeResult {hir shape argExprs argTypes {ctx {}}} {
             if {$root eq "" || $info eq ""} {
                 return [hir::types::MakeCoroutine unit any {}]
             }
+            set outward [Outward $hir $root]
+            if {$n eq ""} {
+                set outward [InstanceOutward $hir $ctx $thunk $root $outward]
+            }
             return [hir::types::MakeCoroutine [Resolved [dict get $info protocol]] \
-                [Outward $hir $root] [dict get $hir exprs [BlockOf $root] declaredErrors]]
+                $outward [dict get $hir exprs [BlockOf $root] declaredErrors]]
         }
         coroutine-outward {
             set handle [lindex $argTypes 0]
@@ -1572,6 +1576,38 @@ proc hir::coroutines::Outward {hir root} {
         set result [hir::types::lub $result $type]
     }
     return $result
+}
+
+# The outward type of the construction whose thunk is THUNK and root ROOT,
+# OUTWARD as Outward gives it, made precise by its root call's semantic
+# instance (hir/semantic.tcl) when it has one: the instance types the
+# root's own yields and result under the call's arguments, exactly as it
+# types an ordinary call's result, and every other yield the coroutine can
+# reach keeps its generic type. A declared result is the outward type
+# whatever the instance proves; an instance that says less never replaces
+# OUTWARD.
+proc hir::coroutines::InstanceOutward {hir ctx thunk root outward} {
+    set block [BlockOf $root]
+    if {[llength $root] != 1 || [dict get $hir exprs $block declaredResult] ne ""} {
+        return $outward
+    }
+    set call [dict get $hir coroutines thunks $thunk call]
+    if {$call eq ""} {
+        return $outward
+    }
+    set precise [hir::semantic::ConstructionOutward $hir $ctx $call]
+    if {$precise eq ""} {
+        return $outward
+    }
+    foreach {y type} [YieldTypes $hir $root 0] {
+        if {[dict get $hir coroutines yields $y] ne $block} {
+            set precise [hir::types::lub $precise $type]
+        }
+    }
+    if {![hir::semantic::Refines $precise $outward]} {
+        return $outward
+    }
+    return $precise
 }
 
 # {YIELD TYPE ...}: every yield the coroutine rooted at node ROOT can reach

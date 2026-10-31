@@ -16380,6 +16380,98 @@ stdlib/test.bot (import std::test).
 
 Each member is a topic: -help NAME (e.g. -help std::test::Erased).
 
+@topic stdlib.std::tree::Order
+title: std::tree::Order -- Enum of module std::tree
+summary: How a traversal orders a tree's nodes (std::tree::Order::DepthFirst, std::tree::Order::BreadthFirst).
+index: stdlib
+symbol: std::tree::Order
+related: stdlib.module.std::tree
+
+== DECLARATION
+    enum Order:
+        DepthFirst,
+        BreadthFirst,
+
+== MODULE
+stdlib/tree.bot: import std::tree, then write std::tree::Order.
+
+== DESCRIPTION
+How a traversal orders a tree's nodes (std::tree::Order::DepthFirst,
+std::tree::Order::BreadthFirst).
+
+@topic stdlib.std::tree::walk
+title: std::tree::walk -- Function (nomethod) of module std::tree
+summary: The nodes of ROOT, a tree struct's value, in ORDER
+index: stdlib
+symbol: std::tree::walk
+related: stdlib.module.std::tree
+
+== DECLARATION
+    nomethod fn walk(root, order: Order):
+
+== MODULE
+stdlib/tree.bot: import std::tree, then write std::tree::walk.
+
+== DESCRIPTION
+The nodes of ROOT, a tree struct's value, in ORDER: a coroutine handing over
+each node (each subtree, root included, once per occurrence) in turn, the
+last one its result. Start it with `coroutine {step, first} =
+std::tree::walk(root, order)`.
+
+@topic stdlib.module.std::tree
+title: std::tree -- standard namespace
+summary: Order and walk, the depth-first (preorder) and breadth-first traversal of tree struct values (TREE-STRUCT-MILESTONE-1.md).
+index: stdlib
+symbol: std::tree
+
+== DESCRIPTION
+A `tree struct` is a finite recursive value: an ordinary immutable struct
+whose one recursive field, its child field, is a List of values of its own
+type. `walk` traverses any tree struct's value by that field -- the
+declaration says which field it is, so no children callback is passed -- and
+is an ordinary coroutine whose every segment hands over one node: the
+subtree value itself, of the tree's own type, never a handle, a cursor or a
+reference into the tree.
+
+    coroutine {step, first} = std::tree::walk(root, std::tree::Order::BreadthFirst)
+    visit(first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        visit(step())
+
+A tree has at least one node, its root: the first segment hands over the
+first node, each resume the next, and the last node is the coroutine's
+result (std::coroutine::done? is true once it is handed over).
+
+  DepthFirst    preorder: a node, then each of its children's subtrees,
+                first child to last. A
+                                               ├─ B
+                                               │  ├─ D
+                                               │  └─ E
+                                               └─ C          is A B D E C.
+  BreadthFirst  every node at depth N before any at depth N + 1, and the
+                children of each node in their order: A B C D E.
+
+Neither recursion nor the host's stack bounds a tree: the depth-first walk
+keeps the nodes still to visit on an explicit stack (at most the depth times
+the widest node's child count), the breadth-first walk a queue of the
+frontier, whose visited prefix is dropped as it grows (at most about twice
+the widest level). A tree is a tree by construction, so neither walk keeps a
+visited set: two equal subtrees are two occurrences, visited twice.
+
+The child field is read by the internal std::tree::children (core/tree.tcl),
+which the compiler resolves to the field of the walked tree's own type.
+
+== SOURCE
+stdlib/tree.bot (import std::tree).
+
+== MEMBERS
+    std::tree::Order               enum -- How a traversal orders a tree's ...
+    std::tree::walk                function (nomethod) -- The nodes of ROOT...
+
+Each member is a topic: -help NAME (e.g. -help std::tree::Order).
+
 @topic stdlib.std::web::Emailish
 title: std::web::Emailish -- Type of module std::web
 summary: A String proven to have the shape of an e-mail address by std::web::emailish? (a refinement of str, with a String's representation).

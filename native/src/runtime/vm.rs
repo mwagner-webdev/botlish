@@ -77,6 +77,14 @@ pub struct ShapeInfo {
     /// `walk`). None for every other shape, which is compared and hashed
     /// field by field.
     pub identity: Option<Identity>,
+    /// The slot of the child field, when the declaration is a tree struct
+    /// (TREE-STRUCT-MILESTONE-1.md): a List of values of this very shape.
+    /// Equality, both hashes and `show` walk a value of it with a work stack
+    /// of their own (ops.rs's `tree_equal`, `tree_walk`; show.rs), so a
+    /// tree's depth is never bounded by the host's stack, and `treechildren`
+    /// reads the slot for a receiver whose shape no static type gave. None
+    /// for every other shape.
+    pub tree: Option<usize>,
 }
 
 /// A struct declaration's semantic identity (`identity members(F)`,
@@ -456,6 +464,9 @@ impl Vm {
             write!(r, "shape {i} {:?} fields {:?} opaque {}", sh.name, sh.fields, sh.opaque).unwrap();
             if let Some(identity) = sh.identity {
                 write!(r, " identity {identity:?}").unwrap();
+            }
+            if let Some(child) = sh.tree {
+                write!(r, " tree {child}").unwrap();
             }
             r.push('\n');
         }

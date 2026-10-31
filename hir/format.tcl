@@ -261,6 +261,11 @@ proc hir::format::TypeDecl {entry} {
             set identity [dict get $entry identity]
             append opaque "identity [dict get $identity form]([join [dict get $identity fields] ,]) "
         }
+        if {[dict exists $entry tree]} {
+            # A tree struct (TREE-STRUCT-MILESTONE-1.md): "tree FIELD ", its
+            # child field, printed only for one.
+            append opaque "tree [dict get $entry tree] "
+        }
         return "struct [dict get $entry id] name [dict get $entry name] ns [if {$ns eq ""} {string cat "-"} else {set ns}] ${opaque}fields [join $fields {, }]"
     }
     set domain [dict get $entry domain]

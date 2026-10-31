@@ -54,6 +54,7 @@
 //! | rt_str_region_is_tcl_alnum | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
 //! | rt_list_len            | List                | Int                          | no        |
+//! | rt_tree_children       | tree struct object  | its child List; TYPE if none | no        |
 //! | rt_list_get            | List, Int           | element; declared            | no        |
 //! |                        |                     | IndexNotFound (list::at)     |           |
 //! | rt_list_get_proven     | List, Int           | element (index proven valid  | no        |
@@ -699,6 +700,11 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             if x.shape != y.shape {
                 return Ok(false);
             }
+            if let Some(child) = current_program(|prog| prog.shapes[x.shape as usize].tree) {
+                // A tree struct's value (TREE-STRUCT-MILESTONE-1.md): the
+                // same comparison, walked with a work stack of its own.
+                return tree_equal(p, a, b, x.shape, child);
+            }
             if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity) {
                 // A shape that declares its identity (REPRESENTATION-
                 // INDEPENDENT-VALUE-IDENTITY.md): equal when the identities
@@ -740,6 +746,170 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         }
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr => unreachable!(),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Tree values (TREE-STRUCT-MILESTONE-1.md; core/value.tcl's TreeEqual and
+// TreeShow, core/hashing.tcl's TreeEncode)
+//
+// A tree struct's value is an ordinary struct object whose child field holds
+// a List of objects of the same shape: a finite rooted ordered tree, as deep
+// as a program builds it. Equality, both hashes and `show` of such a value
+// mean exactly what they mean for any struct -- the same comparisons in the
+// same order, the same canonical input byte for byte, the same text -- but
+// walk the tree's topology with a work stack on the heap instead of the
+// host's stack, so its depth is bounded by memory, never by the worker's
+// stack (a native library runs on its caller's). Nothing here reads an
+// address, an allocation order or the GC's state: only shapes, slots and
+// child order. None of them allocates on the managed heap or runs Botlish
+// code (no safepoint).
+
+/// 1 if V is an object of struct shape SHAPE (a node of that tree).
+fn tree_node(v: Value, shape: u32) -> bool {
+    kind_of(v) == Kind::Struct && struct_of(v).shape == shape
+}
+
+/// equal's struct case for A and B, objects of the tree shape SHAPE whose
+/// child field is slot CHILD. A refusal inside an opaque tree is the opaque
+/// values' own, as the recursive comparison reported it (OPAQUE-STRUCTS.md):
+/// every node has the root's shape, so the outermost opaque pair is the
+/// root's.
+fn tree_equal(p: *mut Vm, a: Value, b: Value, shape: u32, child: usize) -> Result<bool, ()> {
+    let result = tree_equal_walk(p, a, b, shape, child);
+    if result.is_err() && current_program(|prog| prog.shapes[shape as usize].opaque) {
+        let vm = vm(p);
+        if matches!(vm.error, Some(RtError::Equality { .. })) {
+            vm.error = Some(RtError::Equality { a, b });
+        }
+    }
+    result
+}
+
+/// What remains of one comparison: slots I.. of two nodes, or child pairs
+/// I.. of two child Lists of equal length.
+enum TreeFrame<'a> {
+    Fields(&'a [Value], &'a [Value], usize),
+    Kids(&'a [Value], &'a [Value], usize),
+}
+
+/// The recursive comparison's exact order -- slot by slot, the child List's
+/// length before its elements, each child completely before the next slot
+/// -- from a stack of frames.
+fn tree_equal_walk(p: *mut Vm, a: Value, b: Value, shape: u32, child: usize) -> Result<bool, ()> {
+    let mut stack = vec![TreeFrame::Fields(struct_of(a).fields(), struct_of(b).fields(), 0)];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            TreeFrame::Kids(xs, ys, i) => {
+                if i >= xs.len() {
+                    continue;
+                }
+                let (x, y) = (xs[i], ys[i]);
+                stack.push(TreeFrame::Kids(xs, ys, i + 1));
+                if tree_node(x, shape) && tree_node(y, shape) {
+                    stack.push(TreeFrame::Fields(struct_of(x).fields(), struct_of(y).fields(), 0));
+                } else if !equal(p, x, y)? {
+                    return Ok(false);
+                }
+            }
+            TreeFrame::Fields(xs, ys, mut i) => {
+                while i < xs.len() {
+                    let (x, y) = (xs[i], ys[i]);
+                    if i == child && kind_of(x) == Kind::List && kind_of(y) == Kind::List {
+                        let (kx, ky) = (list_of(x).items(), list_of(y).items());
+                        if kx.len() != ky.len() {
+                            return Ok(false);
+                        }
+                        stack.push(TreeFrame::Fields(xs, ys, i + 1));
+                        stack.push(TreeFrame::Kids(kx, ky, 0));
+                        break;
+                    }
+                    if !equal(p, x, y)? {
+                        return Ok(false);
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// One node of a tree walk in progress: its slot values, the next slot, and
+/// the next child while its child List is being walked.
+struct TreeWalkFrame<'a> {
+    values: &'a [Value],
+    field: usize,
+    kid: Option<usize>,
+}
+
+/// Hands the rest of a tree value's canonical input to SINK, ROOT an object
+/// of the tree shape SHAPE (declaration NAME, slot names FIELDS) whose child
+/// field is slot CHILD, its kind tag and declaration identity already
+/// handed: walk's struct case byte for byte -- the field count, each slot's
+/// name and value, the child List as a List of nested values, each child as
+/// a nested struct -- with a stack of frames. A nested value is opened and
+/// closed around its input (`open_nested`, `close_nested`): a public
+/// sub-hash folded into its parent, or the table hash's inline input.
+fn tree_walk<S: CanonicalSink>(
+    p: *mut Vm,
+    sink: &mut S,
+    root: Value,
+    shape: u32,
+    name: &str,
+    fields: &[String],
+    child: usize,
+) -> Result<(), ()> {
+    let mut saved = Vec::new();
+    sink.bytes(&(fields.len() as u64).to_le_bytes());
+    let mut frames = vec![TreeWalkFrame { values: struct_of(root).fields(), field: 0, kid: None }];
+    while let Some(top) = frames.last_mut() {
+        let f = top.field;
+        if f == top.values.len() {
+            frames.pop();
+            if !frames.is_empty() {
+                // A child's input ends.
+                sink.close_nested(&mut saved);
+            }
+            continue;
+        }
+        let value = top.values[f];
+        if f == child && kind_of(value) == Kind::List {
+            let kids = list_of(value).items();
+            let k = match top.kid {
+                Some(k) => k,
+                None => {
+                    sink.text(fields[f].as_bytes());
+                    sink.open_nested(&mut saved);
+                    sink.bytes(&[4]);
+                    sink.bytes(&(kids.len() as u64).to_le_bytes());
+                    0
+                }
+            };
+            if k < kids.len() {
+                top.kid = Some(k + 1);
+                let kid = kids[k];
+                if tree_node(kid, shape) {
+                    sink.open_nested(&mut saved);
+                    sink.bytes(&[8]);
+                    sink.text(name.as_bytes());
+                    sink.bytes(&(fields.len() as u64).to_le_bytes());
+                    frames.push(TreeWalkFrame { values: struct_of(kid).fields(), field: 0, kid: None });
+                } else {
+                    sink.child(p, kid)?;
+                }
+                continue;
+            }
+            // The child List's input ends.
+            sink.close_nested(&mut saved);
+            top.field += 1;
+            top.kid = None;
+            continue;
+        }
+        sink.text(fields[f].as_bytes());
+        sink.child(p, value)?;
+        top.field += 1;
+    }
+    Ok(())
 }
 
 /// Set equality, independent of construction/insertion order (MINIMAL-
@@ -1082,6 +1252,12 @@ trait CanonicalSink: Sized {
     /// from a fresh state: the entry tag, then both as nested values
     /// (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
     fn entry(&self, p: *mut Vm, key: Value, value: Value) -> Result<u64, ()>;
+    /// A nested value's input begins: what `child` does around a walk, for
+    /// `tree_walk`, which walks the nested value itself (SAVED keeps the
+    /// enclosing states it needs).
+    fn open_nested(&mut self, saved: &mut Vec<u64>);
+    /// The nested value's input that `open_nested` began ends.
+    fn close_nested(&mut self, saved: &mut Vec<u64>);
 }
 
 /// The tags of an identity's canonical input (core/hashing.tcl's
@@ -1151,6 +1327,17 @@ impl CanonicalSink for Fnv {
         sub.child(p, key)?;
         sub.child(p, value)?;
         Ok(sub.0)
+    }
+    // A nested value is its own sub-hash (`child`): a fresh state, folded
+    // into the enclosing one when it ends.
+    fn open_nested(&mut self, saved: &mut Vec<u64>) {
+        saved.push(self.0);
+        self.0 = FNV_OFFSET;
+    }
+    fn close_nested(&mut self, saved: &mut Vec<u64>) {
+        let sub = self.0;
+        self.0 = saved.pop().expect("a nested value was opened");
+        self.bytes(&sub.to_le_bytes());
     }
 }
 
@@ -1272,6 +1459,9 @@ impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
         walk(p, &mut sub, value)?;
         Ok(sub.finish())
     }
+    // A nested value is inline (`child`): nothing begins or ends.
+    fn open_nested(&mut self, _saved: &mut Vec<u64>) {}
+    fn close_nested(&mut self, _saved: &mut Vec<u64>) {}
 }
 
 /// Hands V's canonical input to SINK: its kind tag, then its payload,
@@ -1382,6 +1572,12 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
             current_program(|prog| {
                 let shape = &prog.shapes[obj.shape as usize];
                 sink.text(shape.name.as_deref().unwrap_or("").as_bytes());
+                if let Some(child) = shape.tree {
+                    // A tree struct's value (TREE-STRUCT-MILESTONE-1.md):
+                    // this very input, without the host's recursion.
+                    let name = shape.name.as_deref().unwrap_or("");
+                    return tree_walk(p, sink, v, obj.shape, name, &shape.fields, child);
+                }
                 if let Some(identity) = shape.identity {
                     // A declared identity (REPRESENTATION-INDEPENDENT-VALUE-
                     // IDENTITY.md): its entries, never the fields.
@@ -2623,6 +2819,23 @@ pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
     vm(p).new_int(list_of(l).len as i64)
 }
 
+/// `std::tree::children(t)` where no static type named T's tree shape
+/// (native/lower.tcl's NativeCall; TREE-STRUCT-MILESTONE-1.md): the child List
+/// of T, read from the slot its shape records. TYPE for any other value, which
+/// a checked program never passes (hir/structs.tcl's TreeChildrenProblem).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_tree_children(p: *mut Vm, t: Value) -> Value {
+    if kind_of(t) == Kind::Struct {
+        let obj = struct_of(t);
+        if let Some(child) = current_program(|prog| prog.shapes[obj.shape as usize].tree) {
+            return obj.fields()[child];
+        }
+    }
+    let message = format!("std::tree::children: {} is not a tree struct value", super::show::show(t));
+    vm(p).fail(RtError::Semantic { kind: "TYPE", message });
+    NO_VALUE
+}
+
 /// `list::at` / `mutable_array::at` with an Int index that designates no
 /// element: records the declared builtin error IndexNotFound (its NIR id as
 /// the pending declared error, plus an UNCAUGHT-ERROR fallback for the
@@ -3608,6 +3821,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         CharIsTclAlpha => rt_char_is_tcl_alpha(p, a[0]),
         CharIsTclAlnum => rt_char_is_tcl_alnum(p, a[0]),
         ListLen => rt_list_len(p, a[0]),
+        TreeChildren => rt_tree_children(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
         ListWithLength => rt_list_with_length(p, a[0], a[1]),
@@ -3907,6 +4121,7 @@ runtime_helpers! {
     (rt_list_new, 3),
     (rt_struct_new, 4),
     (rt_list_len, 2),
+    (rt_tree_children, 2),
     (rt_list_get, 3),
     (rt_list_with_length, 3),
     (rt_list_get_proven, 3),
@@ -4007,6 +4222,7 @@ mod tests {
                         fields: fields.iter().map(|f| f.to_string()).collect(),
                         opaque: false,
                         identity: None,
+                        tree: None,
                     })
                     .collect(),
                 enums: Vec::new(),
@@ -4379,7 +4595,7 @@ mod tests {
             std::rc::Rc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
-                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false, identity: None }],
+                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false, identity: None, tree: None }],
                 enums: vec![EnumInfo { name: "Color".to_string(), cases: vec!["Red".to_string(), "Green".to_string()] }],
                 errors: Vec::new(),
             }),
@@ -4468,6 +4684,7 @@ mod tests {
             fields: fields.iter().map(|f| f.to_string()).collect(),
             opaque: false,
             identity: None,
+            tree: None,
         };
         let mut vm = Vm::new(
             std::rc::Rc::new(ProgramInfo {
@@ -4496,6 +4713,126 @@ mod tests {
         assert_eq!(rt_hash(&mut *vm, anon), reference_hash(anon));
     }
 
+    /// A VM whose shape 0 is the tree struct `Node {value, children}`
+    /// (TREE-STRUCT-MILESTONE-1.md) and shape 1 the same declaration as an
+    /// ordinary struct: what differs between them is how the runtime walks a
+    /// value, never what the walk means.
+    fn tree_vm() -> Box<Vm> {
+        use crate::runtime::vm::ShapeInfo;
+        let node = |tree| ShapeInfo {
+            name: Some("Node".into()),
+            fields: vec!["value".into(), "children".into()],
+            opaque: false,
+            identity: None,
+            tree,
+        };
+        Vm::new(
+            std::rc::Rc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: vec![node(Some(1)), node(None)],
+                enums: Vec::new(),
+                errors: Vec::new(),
+            }),
+            AllocMode::Summary,
+        )
+    }
+
+    /// A node of SHAPE with VALUE and the children KIDS.
+    fn tree_node(vm: &mut Vm, shape: u32, value: i64, kids: Vec<Value>) -> Value {
+        let list = rooted!(vm, vm.new_list(kids));
+        rooted!(vm, vm.new_struct(shape, vec![small(value), list]))
+    }
+
+    /// The chain of N + 1 nodes of SHAPE: the leaf BOTTOM under roots 1..N.
+    fn tree_chain(vm: &mut Vm, shape: u32, n: i64, bottom: i64) -> Value {
+        let mut t = tree_node(vm, shape, bottom, Vec::new());
+        for i in 1..=n {
+            t = tree_node(vm, shape, i, vec![t]);
+        }
+        t
+    }
+
+    /// node(1, [node(2, [leaf(4), leaf(5)]), leaf(3)]) of SHAPE, its two
+    /// first children swapped when SWAP.
+    fn tree_sample(vm: &mut Vm, shape: u32, swap: bool) -> Value {
+        let four = tree_node(vm, shape, 4, Vec::new());
+        let five = tree_node(vm, shape, 5, Vec::new());
+        let two = tree_node(vm, shape, 2, vec![four, five]);
+        let three = tree_node(vm, shape, 3, Vec::new());
+        let kids = if swap { vec![three, two] } else { vec![two, three] };
+        tree_node(vm, shape, 1, kids)
+    }
+
+    #[test]
+    fn tree_walks_are_the_struct_walks() {
+        // TREE-STRUCT-MILESTONE-1.md: ==, both hashes and the text of a tree
+        // are its struct's, computed with work stacks instead of recursion.
+        use crate::runtime::show::show;
+        let mut vm = tree_vm();
+        let tree = tree_sample(&mut vm, 0, false);
+        let again = tree_sample(&mut vm, 0, false);
+        let swapped = tree_sample(&mut vm, 0, true);
+        let plain = tree_sample(&mut vm, 1, false);
+        let plain_swapped = tree_sample(&mut vm, 1, true);
+        let deep = tree_chain(&mut vm, 0, 300, 7);
+        let deep_plain = tree_chain(&mut vm, 1, 300, 7);
+        for (t, p) in [(tree, plain), (swapped, plain_swapped), (deep, deep_plain)] {
+            assert_eq!(rt_hash(&mut *vm, t), rt_hash(&mut *vm, p));
+            assert_eq!(rt_hash(&mut *vm, t), reference_hash(p));
+            let key = (0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210);
+            assert_eq!(table_hash_with_key(&mut *vm, t, key), table_hash_with_key(&mut *vm, p, key));
+            assert_eq!(show(t), show(p));
+        }
+        assert_eq!(rt_value_eq(&mut *vm, tree, again), TRUE);
+        assert_eq!(rt_value_eq(&mut *vm, tree, swapped), FALSE);
+        assert_ne!(rt_hash(&mut *vm, tree), rt_hash(&mut *vm, swapped));
+        // A list of trees, and a tree inside a plain struct, walk the same.
+        let list = rooted!(vm, vm.new_list(vec![tree, deep]));
+        let plain_list = rooted!(vm, vm.new_list(vec![plain, deep_plain]));
+        assert_eq!(rt_hash(&mut *vm, list), rt_hash(&mut *vm, plain_list));
+        assert_eq!(show(list), show(plain_list));
+        assert_eq!(show(tree), "Node {value: 1, children: [Node {value: 2, children: [Node {value: 4, children: []}, Node {value: 5, children: []}]}, Node {value: 3, children: []}]}");
+    }
+
+    #[test]
+    fn tree_children_reads_the_recorded_slot() {
+        let mut vm = tree_vm();
+        let tree = tree_sample(&mut vm, 0, false);
+        let kids = rt_tree_children(&mut *vm, tree);
+        assert_eq!(kids, struct_of(tree).fields()[1]);
+        // A struct of no tree shape is refused (a checked program never
+        // passes one).
+        let plain = tree_sample(&mut vm, 1, false);
+        assert_eq!(rt_tree_children(&mut *vm, plain), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn deep_trees_need_no_host_stack() {
+        // A chain 200,000 nodes deep is compared, hashed (both hashes) and
+        // shown on a thread whose whole stack is 256 KiB: none of them
+        // recurses per level.
+        let worker = std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
+            let mut vm = tree_vm();
+            let a = tree_chain(&mut vm, 0, 200_000, 1);
+            let b = tree_chain(&mut vm, 0, 200_000, 1);
+            let c = tree_chain(&mut vm, 0, 200_000, 2);
+            let key = (1, 2);
+            (
+                rt_value_eq(&mut *vm, a, b) == TRUE,
+                rt_value_eq(&mut *vm, a, c) == FALSE,
+                rt_hash(&mut *vm, a) == rt_hash(&mut *vm, b),
+                rt_hash(&mut *vm, a) != rt_hash(&mut *vm, c),
+                table_hash_with_key(&mut *vm, a, key) == table_hash_with_key(&mut *vm, b, key),
+                crate::runtime::show::show(a).len(),
+            )
+        });
+        let (eq, ne, hash, hash_ne, table, shown) = worker.expect("thread").join().expect("no stack overflow");
+        assert!(eq && ne && hash && hash_ne && table);
+        assert!(shown > 200_000 * 30);
+    }
+
     #[test]
     fn an_opaque_struct_shows_its_nominal_type_only() {
         // OPAQUE-STRUCTS.md: user-facing text never dumps a private
@@ -4507,8 +4844,8 @@ mod tests {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: vec![
-                    ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true, identity: None },
-                    ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false, identity: None },
+                    ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true, identity: None, tree: None },
+                    ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false, identity: None, tree: None },
                 ],
                 enums: Vec::new(),
                 errors: Vec::new(),

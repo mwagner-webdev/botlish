@@ -167,7 +167,8 @@
 #              `satisfies` or "": TRAIT-CONSTRAINED-IMPRINTED-TYPES.md),
 #              and for a struct with an `identity` clause only, identity
 #              ({form formSpan fields fieldSpans span}: REPRESENTATION-
-#              INDEPENDENT-VALUE-IDENTITY.md)
+#              INDEPENDENT-VALUE-IDENTITY.md), and for a tree struct only,
+#              tree (1) and treeSpan (TREE-STRUCT-MILESTONE-1.md)
 #              -- a top-level nominal struct declaration ("struct NAME:"
 #              followed by its indented "field: Type" lines; STRUCTS.md).
 #              A declaration like typedecl: no runtime meaning, no binding.

@@ -60,6 +60,10 @@ pub enum OpCode {
     /// exactly as StrCat is (the collection-length ceiling).
     StrAppendChar,
     ListLen,
+    /// `std::tree::children(t)` where no static type names T's tree shape
+    /// (TREE-STRUCT-MILESTONE-1.md): the child field of a tree struct's
+    /// object, by the slot its shape records (`ShapeInfo::tree`).
+    TreeChildren,
     ListGet,
     ListAppend,
     /// `list#with_length(L, N)` (core/listlength.tcl, LIST-CARDINALITY-
@@ -859,6 +863,7 @@ op_spellings! {
     "strcat" => StrCat,
     "strappendchar" => StrAppendChar,
     "listlen" => ListLen,
+    "treechildren" => TreeChildren,
     "listget" => ListGet,
     "listappend" => ListAppend,
     "listwithlen" => ListWithLength,
@@ -1115,7 +1120,7 @@ impl OpCode {
             ListNew => None,
             Argv | CPtrNull | CoFailed => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
-            StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
+            StrLen | StrLower | ListLen | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharIsTclAlpha | CharIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
@@ -1692,12 +1697,15 @@ pub struct NativeDecl {
 /// OPAQUE-STRUCTS.md): a rendering fact only, see `ShapeInfo::opaque`; and
 /// `identity="members F"` or `identity="associations K V"` (the declaration's
 /// semantic identity, REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md, by field
-/// name): what equality and the hashes read, see `ShapeInfo::identity`.
+/// name): what equality and the hashes read, see `ShapeInfo::identity`; and
+/// `tree="F"` (the declaration is a tree struct whose child field is F,
+/// TREE-STRUCT-MILESTONE-1.md), see `ShapeInfo::tree`.
 pub struct ShapeDecl {
     pub name: Option<String>,
     pub fields: Vec<String>,
     pub opaque: bool,
     pub identity: Option<crate::runtime::vm::Identity>,
+    pub tree: Option<usize>,
 }
 
 /// One statically assigned context slot (`context N "ID" offset=O words=W
@@ -2669,7 +2677,22 @@ fn parse_shape(p: &Parser, tokens: &[Token]) -> Result<(u32, ShapeDecl), NirErro
             Some(identity)
         }
     };
-    Ok((index, ShapeDecl { name, fields, opaque, identity }))
+    let tree = match kv.get("tree") {
+        None => None,
+        Some(field) => {
+            let Some(slot) = fields.iter().position(|f| f == field) else {
+                return p.err("shape tree= names a field the shape does not have");
+            };
+            if name.is_none() {
+                return p.err("an anonymous shape cannot be a tree struct's");
+            }
+            if identity.is_some() {
+                return p.err("a tree struct's shape has no identity");
+            }
+            Some(slot)
+        }
+    };
+    Ok((index, ShapeDecl { name, fields, opaque, identity, tree }))
 }
 
 fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError> {
@@ -4247,6 +4270,23 @@ mod struct_tests {
         let body = "    %0 = unit\n    ret %0";
         assert!(message(text("shape 0 anon opaque=1 fields=\"x\"\n", body)).contains("anonymous shape cannot be opaque"));
         assert!(message(text("shape 0 named \"T\" opaque=2 fields=\"x\"\n", body)).contains("0 or 1"));
+    }
+
+    #[test]
+    fn a_tree_shape_names_its_child_field() {
+        // TREE-STRUCT-MILESTONE-1.md: `tree="F"` records a tree struct's
+        // child field, by name, as the slot the runtime walks.
+        let p = parse(&text(
+            "shape 0 named \"Node\" tree=\"children\" fields=\"value children\"\nshape 1 named \"Plain\" fields=\"value children\"\n",
+            "    %0 = unit\n    ret %0",
+        ))
+        .unwrap();
+        assert_eq!(p.shapes[0].tree, Some(1));
+        assert_eq!(p.shapes[1].tree, None);
+        let body = "    %0 = unit\n    ret %0";
+        assert!(message(text("shape 0 named \"Node\" tree=\"kids\" fields=\"value children\"\n", body)).contains("does not have"));
+        assert!(message(text("shape 0 anon tree=\"x\" fields=\"x\"\n", body)).contains("anonymous"));
+        assert!(message(text("shape 0 named \"N\" opaque=1 identity=\"members x\" tree=\"x\" fields=\"x\"\n", body)).contains("no identity"));
     }
 
     #[test]

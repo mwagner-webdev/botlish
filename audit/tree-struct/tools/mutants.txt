@@ -1,0 +1,513 @@
+# Mutants of tree structs and std::tree::walk
+# (audit/tree-struct/tools/mutate.tcl; TREE-STRUCT-MILESTONE-1.md, "Mutation
+# testing"): the families the milestone brief names, each a deliberate bug in
+# the declaration's checks, its HIR text, the runtimes' equality, hashing and
+# printing of a tree value, the totality walk, the program descriptor, the
+# traversal (stdlib/tree.bot) or the typing that hands a walk's nodes over
+# as the tree's own type.
+#
+#   @@ NAME DESCRIPTION
+#   %% tests FILE ...      (optional) test files run first for this mutant
+#   ## FILE
+#   <<<<                   (or `<<<< all`: replace every occurrence, at
+#   text to replace         least one; plain `<<<<` must occur exactly once)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant editing native/src/ is a native mutant: mutate.tcl rebuilds the
+# native backend for it.
+#
+# Brief mutants with no non-equivalent mutant in this representation:
+#
+#   * "subtree node index participates in equality / hash": the chosen
+#     representation has no node index or arena (a tree is a struct object
+#     whose child List holds its children's objects), so the only physical
+#     facts a walk could read are object addresses. The mutants
+#     native-equality-reads-addresses and native-hash-reads-addresses read
+#     them (the analog of an index), and the Tcl runtime has no address to
+#     read at all.
+
+# ---------------------------------------------------------------------------
+# The Tcl runtime (core/value.tcl, core/hashing.tcl)
+
+@@ tcl-equality-child-order-ignored equality compares the children against the other node's children in reverse (child order ignored for a two-child swap)
+## core/value.tcl
+<<<<
+            set x [lindex $xs $i]
+            set y [lindex $ys $i]
+            lappend stack [list kids $xs $ys [expr {$i + 1}]]
+====
+            set x [lindex $xs $i]
+            set y [lindex $ys end-$i]
+            lappend stack [list kids $xs $ys [expr {$i + 1}]]
+>>>>
+
+@@ tcl-equality-children-ignored equality compares the payload fields only: the child field is skipped
+## core/value.tcl
+<<<<
+                lappend stack [list fields $xs $ys [expr {$i + 1}]] [list kids $kx $ky 0]
+                break
+====
+                continue
+>>>>
+
+@@ tcl-hash-child-order-ignored the public hash combines the children's sub-hashes by a sum: their order takes no part
+## core/hashing.tcl
+<<<<
+                set list [list [dict get $KindTag list] {*}[LeBytes [llength $kids]]]
+                set i 0
+                foreach kid $kids {
+                    if {[core::value::IsTreeNode $kid $shape]} {
+                        lappend list {*}[LeBytes [lindex $mine $i]]
+                        incr i
+====
+                set list [list [dict get $KindTag list] {*}[LeBytes [llength $kids]]]
+                set i 0
+                set sum 0
+                foreach kid $kids {
+                    if {[core::value::IsTreeNode $kid $shape]} {
+                        set sum [expr {($sum + [lindex $mine $i]) & 0xFFFFFFFFFFFFFFFF}]
+                        incr i
+>>>>
+## core/hashing.tcl
+<<<<
+                lappend out {*}[LeBytes [Bytes $FnvOffset $list]]
+====
+                lappend out {*}[LeBytes [Bytes $FnvOffset [concat $list [LeBytes $sum]]]]
+>>>>
+
+@@ tcl-hash-declaration-omitted a tree's canonical input leaves out its declaration identity
+## core/hashing.tcl
+<<<<
+    Text head $mode [Utf8Bytes [lindex $shape 0]]
+====
+    Text head $mode [Utf8Bytes ""]
+>>>>
+
+@@ tcl-table-hash-diverges the table hash's input of a tree's child List leaves out the List's kind tag: the keyed hash no longer encodes what the public one does
+## core/hashing.tcl
+<<<<
+                lappend pieces [list bytes [list [dict get $KindTag list] {*}[LeBytes [llength $kids]]]]
+====
+                lappend pieces [list bytes [LeBytes [llength $kids]]]
+>>>>
+
+@@ tcl-tree-test-not-installed the Tcl runtime is never told which structs are trees: their values are compared, hashed and printed by the host's recursion
+## hir/structs.tcl
+<<<<
+core::value::setTreeTest hir::structs::RuntimeTree
+====
+core::value::setTreeTest ""
+>>>>
+
+# ---------------------------------------------------------------------------
+# The native runtime (native/src/runtime/ops.rs, program.rs, show.rs)
+
+@@ native-equality-child-order-ignored native equality compares the children against the other node's children in reverse
+## native/src/runtime/ops.rs
+<<<<
+                let (x, y) = (xs[i], ys[i]);
+                stack.push(TreeFrame::Kids(xs, ys, i + 1));
+====
+                let (x, y) = (xs[i], ys[ys.len() - 1 - i]);
+                stack.push(TreeFrame::Kids(xs, ys, i + 1));
+>>>>
+
+@@ native-equality-children-ignored native equality compares the payload fields only
+## native/src/runtime/ops.rs
+<<<<
+                        stack.push(TreeFrame::Fields(xs, ys, i + 1));
+                        stack.push(TreeFrame::Kids(kx, ky, 0));
+                        break;
+====
+                        i += 1;
+                        continue;
+>>>>
+
+@@ native-equality-by-identity native equality of a tree compares the two objects' identity: a reference equality
+## native/src/runtime/ops.rs
+<<<<
+                return tree_equal(p, a, b, x.shape, child);
+====
+                let _ = child;
+                return Ok(a == b);
+>>>>
+
+@@ native-equality-children-by-backing native equality compares two child Lists by their backing (the same List object), never their elements
+## native/src/runtime/ops.rs
+<<<<
+                        let (kx, ky) = (list_of(x).items(), list_of(y).items());
+                        if kx.len() != ky.len() {
+                            return Ok(false);
+                        }
+====
+                        let (kx, ky) = (list_of(x).items(), list_of(y).items());
+                        if kx.len() != ky.len() || x != y {
+                            return Ok(false);
+                        }
+>>>>
+
+@@ native-equality-reads-addresses native equality also requires each pair of children to lie in the same address order relative to their Lists (allocation order participates)
+## native/src/runtime/ops.rs
+<<<<
+                if tree_node(x, shape) && tree_node(y, shape) {
+                    stack.push(TreeFrame::Fields(struct_of(x).fields(), struct_of(y).fields(), 0));
+====
+                if (x > xs[0]) != (y > ys[0]) {
+                    return Ok(false);
+                }
+                if tree_node(x, shape) && tree_node(y, shape) {
+                    stack.push(TreeFrame::Fields(struct_of(x).fields(), struct_of(y).fields(), 0));
+>>>>
+
+@@ native-hash-child-order-ignored both native hashes walk the children last to first
+## native/src/runtime/ops.rs
+<<<<
+                top.kid = Some(k + 1);
+                let kid = kids[k];
+                if tree_node(kid, shape) {
+                    sink.open_nested(&mut saved);
+====
+                top.kid = Some(k + 1);
+                let kid = kids[kids.len() - 1 - k];
+                if tree_node(kid, shape) {
+                    sink.open_nested(&mut saved);
+>>>>
+
+@@ native-hash-reads-addresses both native hashes fold each child's address into its input
+## native/src/runtime/ops.rs
+<<<<
+                    sink.bytes(&[8]);
+                    sink.text(name.as_bytes());
+====
+                    sink.bytes(&[8]);
+                    sink.bytes(&(kid as u64 >> 4).to_le_bytes());
+                    sink.text(name.as_bytes());
+>>>>
+
+@@ native-hash-declaration-omitted both native hashes leave a child node's declaration identity out
+## native/src/runtime/ops.rs
+<<<<
+                    sink.bytes(&[8]);
+                    sink.text(name.as_bytes());
+====
+                    sink.bytes(&[8]);
+                    sink.text(b"");
+>>>>
+
+@@ native-table-hash-diverges the native table hash writes an extra byte where a nested value begins: the keyed hash no longer encodes what the public one does
+## native/src/runtime/ops.rs
+<<<<
+    fn open_nested(&mut self, _saved: &mut Vec<u64>) {}
+====
+    fn open_nested(&mut self, _saved: &mut Vec<u64>) {
+        self.write(&[0]);
+    }
+>>>>
+
+@@ native-descriptor-drops-tree the program descriptor of an executable records no shape's tree slot
+## native/src/runtime/program.rs
+<<<<
+                Some(child) => {
+                    w.u32(1);
+                    w.len(child);
+                }
+====
+                Some(_) => w.u32(0),
+>>>>
+
+@@ native-show-children-reversed the native printer renders a tree's children last to first
+## native/src/runtime/show.rs
+<<<<
+                let kid = kids[k];
+====
+                let kid = kids[kids.len() - 1 - k];
+>>>>
+
+@@ nir-shape-drops-tree native lowering writes no tree= on a tree struct's shape
+## native/lower.tcl
+<<<<
+            if {$child ne ""} {
+                append opaque " tree=[Quote $child]"
+            }
+====
+            if {0} {
+                append opaque " tree=[Quote $child]"
+            }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Totality (hir/types.tcl)
+
+@@ totality-equatable-unconditional every tree application is total for both operations, whatever its payload
+## hir/types.tcl
+<<<<
+                set child [hir::structs::treeField $id]
+                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+====
+                set child [hir::structs::treeField $id]
+                if {$child ne ""} {
+                    return {total ""}
+                }
+                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+>>>>
+
+@@ totality-hashable-unconditional every tree application is hash-total, whatever its payload
+## hir/types.tcl
+<<<<
+                set child [hir::structs::treeField $id]
+                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+====
+                set child [hir::structs::treeField $id]
+                if {$child ne "" && $operation eq "hash"} {
+                    return {total ""}
+                }
+                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+>>>>
+
+@@ totality-child-infinite the child field is walked as an independent requirement, the application not remembered as walked: an infinite totality recursion
+## hir/types.tcl
+<<<<
+                    if {$name eq $child} {
+                        # A tree struct's child field (TREE-STRUCT-
+                        # MILESTONE-1.md) is a List of values of this very
+                        # application: it adds no requirement of its own,
+                        # so the tree is total exactly when its other
+                        # fields are (every tree is finite).
+                        continue
+                    }
+====
+                    if {$name eq $child} {
+                        lassign [Totality $operation $t $seen] class why
+                        continue
+                    }
+>>>>
+
+@@ totality-child-unknown the child field is treated as an independent requirement it cannot decide: no tree is ever Equatable or Hashable
+## hir/types.tcl
+<<<<
+                    if {$name eq $child} {
+                        # A tree struct's child field (TREE-STRUCT-
+                        # MILESTONE-1.md) is a List of values of this very
+                        # application: it adds no requirement of its own,
+                        # so the tree is total exactly when its other
+                        # fields are (every tree is finite).
+                        continue
+                    }
+====
+                    if {$name eq $child} {
+                        lappend parts [list "field \"$name\" of $shown" any]
+                        continue
+                    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The traversal (stdlib/tree.bot)
+
+@@ walk-dfs-is-bfs DepthFirst walks breadth-first
+## stdlib/tree.bot
+<<<<
+    breadth = order == Order::BreadthFirst
+====
+    breadth = true
+>>>>
+
+@@ walk-bfs-is-dfs BreadthFirst walks depth-first
+## stdlib/tree.bot
+<<<<
+    breadth = order == Order::BreadthFirst
+====
+    breadth = order == Order::BreadthFirst and false
+>>>>
+
+@@ walk-dfs-siblings-reversed depth-first visits each node's children last to first
+## stdlib/tree.bot
+<<<<
+        loop i down from std::list::length(kids) - 1 through 0:
+====
+        loop i from 0 to std::list::length(kids):
+>>>>
+
+@@ walk-bfs-siblings-reversed breadth-first queues each node's children last to first
+## stdlib/tree.bot
+<<<<
+            loop kid in kids:
+                pending.push(kid)
+====
+            loop i down from std::list::length(kids) - 1 through 0:
+                kid = kids.at(i):
+                    on IndexNotFound:
+                        node
+                pending.push(kid)
+>>>>
+
+@@ walk-omits-root a walk starts at the root's children
+## stdlib/tree.bot
+<<<<
+    pending = std::mutable_vector::from_list([root])
+====
+    pending = std::mutable_vector::from_list(std::list::append(std::tree::children(root), root))
+    lost = pending.pop():
+        on IndexNotFound:
+            root
+>>>>
+
+@@ walk-duplicates-root a walk hands the root over twice
+## stdlib/tree.bot
+<<<<
+    head = std::mutable_vector::from_list([0])
+    loop:
+====
+    head = std::mutable_vector::from_list([0])
+    yield root
+    loop:
+>>>>
+
+@@ walk-skips-leaves a walk hands over no leaf but the last node
+## stdlib/tree.bot
+<<<<
+        if done:
+            return node
+        yield node
+====
+        if done:
+            return node
+        if std::list::length(kids) > 0:
+            yield node
+>>>>
+
+@@ walk-bfs-compaction-loses-a-node breadth-first compaction drops the first node not yet visited
+## stdlib/tree.bot
+<<<<
+                rest = loop j from visited to std::mutable_vector::length(pending):
+====
+                rest = loop j from visited + 1 to std::mutable_vector::length(pending):
+>>>>
+
+# ---------------------------------------------------------------------------
+# HIR text (hir/format.tcl, hir/read.tcl)
+
+@@ hir-text-drops-tree HIR text does not print a tree struct's designation
+## hir/format.tcl
+<<<<
+            append opaque "tree [dict get $entry tree] "
+====
+            append opaque ""
+>>>>
+
+@@ hir-text-drops-child-field HIR text read back takes a tree struct's first field for its child field
+## hir/read.tcl
+<<<<
+        dict set decl tree $treeField
+====
+        dict set decl tree [lindex $names 0]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The declaration (hir/structs.tcl)
+
+@@ decl-second-recursive-field-admitted a second List[Self] field is accepted (the last one becomes the child field)
+## hir/structs.tcl
+<<<<
+            if {$child ne ""} {
+                Fail $span "tree struct \"$name\" has a second recursive field
+====
+            if {0} {
+                Fail $span "tree struct \"$name\" has a second recursive field
+>>>>
+
+@@ decl-self-field-admitted a field of Self itself (or Self anywhere but the child field) is accepted
+## hir/structs.tcl
+<<<<
+        set how [TreeOccurrence $type $id {}]
+====
+        set how ""
+>>>>
+
+@@ decl-mutual-recursion-admitted recursion through another declaration's fields is not seen
+## hir/structs.tcl
+<<<<
+        foreach {name t} $fields {
+            if {$t eq {}} continue
+            if {[TreeOccurrence $t $id [concat $seen [list $other]]] ne ""} {
+                return [list through [display $other]]
+            }
+        }
+====
+        foreach {name t} $fields {
+            if {$t eq {}} continue
+        }
+>>>>
+
+@@ decl-opaque-admitted an opaque tree struct is accepted
+## hir/structs.tcl
+<<<<
+    if {[dict exists $decl opaque] && [dict get $decl opaque]} {
+        # std::tree::walk takes any tree apart
+====
+    if {0} {
+        # std::tree::walk takes any tree apart
+>>>>
+
+@@ decl-affine-application-admitted a tree struct applied to an affine type is accepted
+## hir/structs.tcl
+<<<<
+        if {[treeField $id] ne "" && [lsearch -exact [lmap arg [lindex $type 2] {hir::types::IsAffine $arg}] 1] >= 0} {
+====
+        if {0} {
+>>>>
+
+@@ children-unproven-accepted the children of a value of unknown type are accepted where its function may run generically
+## hir/structs.tcl
+<<<<
+    if {[hir::types::kindOf $type] eq "" || $type eq "struct"} {
+        return [list UNPROVEN-FIELD
+====
+    if {[hir::types::kindOf $type] eq "" || $type eq "struct"} {
+        return ""
+        return [list UNPROVEN-FIELD
+>>>>
+
+@@ generic-live-ignores-thunks a call inside a coroutine construction's thunk makes nothing generically live (the gap the milestone closed)
+## hir/structs.tcl
+<<<<
+                while {[dict exists $thunks $owner]} {
+====
+                while {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Typing a walk's construction (hir/coroutines.tcl, hir/semantic.tcl)
+
+@@ construction-outward-generic a coroutine construction is typed by its root's generic analysis only: a walk's nodes are any
+## hir/coroutines.tcl
+<<<<
+            if {$n eq ""} {
+                set outward [InstanceOutward $hir $ctx $thunk $root $outward]
+            }
+====
+            if {0} {
+                set outward [InstanceOutward $hir $ctx $thunk $root $outward]
+            }
+>>>>
+
+@@ construction-outward-result-only a construction's instance outward type is its result alone, without the values its yields send
+## hir/semantic.tcl
+<<<<
+    return [list $result $scratch [Outward $scratch $block $result]]
+====
+    return [list $result $scratch $result]
+>>>>
+
+@@ tree-children-result-any std::tree::children is typed List[any] for a tree too
+## hir/types.tcl
+<<<<
+                if {$field ne ""} {
+                    return [hir::structs::AppliedFieldType $tree $field]
+                }
+====
+                if {$field ne ""} {
+                    return $result
+                }
+>>>>

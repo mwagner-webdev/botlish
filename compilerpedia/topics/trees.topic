@@ -1,0 +1,233 @@
+Tree structs (TREE-STRUCT-MILESTONE-1.md): the recursive value construct,
+its traversal and its diagnostics.
+
+@topic concept.tree-structs
+title: Tree structs: finite recursive values without references
+summary: `tree struct Node:` with one `List[Node]` field declares a finite ordered immutable tree; == and hash are structural, and std::tree::walk traverses it.
+index: concepts
+alias: tree struct; tree; recursive struct; recursive value; children; subtree; depth-first; breadth-first; preorder; tree traversal
+keywords: tree, recursive, children, List[Self], subtree, walk, DepthFirst, BreadthFirst, preorder, traversal, ==, hash, Hashable, Equatable, TREE-STRUCT-SHAPE, TREE-STRUCT-COMBINATION
+related: concept.structs concept.coroutines concept.hashable concept.equatable error.tree-struct-shape error.tree-struct-combination error.tree-operand
+docs: TREE-STRUCT-MILESTONE-1.md STRUCTS.md
+
+== WHAT IT IS
+    tree struct FileTree:
+        path: str
+        children: List[FileTree]          the one recursive field
+
+    tree struct Node[T]:                  a parameterized tree
+        value: T
+        children: List[Node[T]]
+
+A tree struct is an ordinary immutable struct whose one recursive field
+holds its ordered children: values of its own type. A value means the
+finite rooted ordered tree it describes, built from children that already
+exist -- there is no reference, node identity, parent link, cycle or
+shared node, and a subtree (`t.children`'s elements, what a walk hands
+over) is a value, never a view into its parent. How the runtimes store the
+recursion is representation: nothing a program does observes it.
+
+    coroutine {step, first} = std::tree::walk(root, std::tree::Order::BreadthFirst)
+    visit(first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        visit(step())
+
+== RULES
+  * Exactly one field of type `List[Self]` -- Self the declaration applied
+    to its own slots in order (`List[Node[T]]` in `Node[T]`) -- and no
+    other mention of the declaration in any field: not `child: Node`,
+    `List[List[Node]]`, `MutableVector[Node]`, a map or set of Node, a
+    function type over Node, another application (`List[Node[int]]`), or
+    mutual recursion through another declaration (TREE-STRUCT-SHAPE). A
+    general recursive type is an ordinary `struct` (concept.structs).
+  * A tree struct is never opaque, a context or an identity struct
+    (TREE-STRUCT-COMBINATION), and never affine: a tree of coroutines, or
+    a `Node[T]` applied to an affine type, is AFFINE-CONTAINER-UNSUPPORTED.
+  * == compares the declaration, every field and the children in order,
+    recursively; both hashes read the same, in order. Two trees built
+    differently but equal as trees are equal and hash equally.
+  * Node[T] is Equatable or Hashable exactly when its other fields are:
+    the child field adds no requirement (Node[int] is Hashable,
+    Node[MutableVector[int]] is neither).
+  * std::tree::walk(root, order) is a coroutine handing over every node
+    (each subtree, root first, once per occurrence), the last as its
+    result: Order::DepthFirst is preorder (a node, then its children's
+    subtrees, first to last), Order::BreadthFirst every node at depth N
+    before any at depth N + 1. Neither keeps a visited set.
+  * No depth limit comes from the host: ==, the hashes, the printer and
+    both walks keep their own work stacks (a chain of a million nodes
+    compares, hashes and walks).
+
+== WHY
+A file tree, a document outline or a parse tree is a value: its meaning is
+its contents and their order. Allowing exactly this recursive shape gives
+recursive data without references, aliasing or cycles, and lets every
+operation that compares, hashes or traverses walk it without recursion.
+
+== EXAMPLES
+@example accept
+import std::coroutine
+import std::mutable_vector
+import std::tree
+
+tree struct Node:
+    label: str
+    children: List[Node]
+
+fn leaf(label: str) -> Node:
+    Node {label: label, children: []}
+
+nomethod fn labels(root: Node, order: std::tree::Order) -> List[str]:
+    seen = std::mutable_vector::from_list([root.label])
+    coroutine {step, first} = std::tree::walk(root, order)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        seen.push(step().label)
+    loop s in seen:
+        s
+
+t = Node {label: "root", children: [Node {label: "bb", children: [leaf("dd"), leaf("ee")]}, leaf("cc")]}
+[labels(t, std::tree::Order::DepthFirst), labels(t, std::tree::Order::BreadthFirst)]
+@caption Preorder and breadth-first traversal of one tree
+@value [["root", "bb", "dd", "ee", "cc"], ["root", "bb", "cc", "dd", "ee"]]
+@end
+
+@example accept
+tree struct Node:
+    value: int
+    children: List[Node]
+
+a = Node {value: 1, children: [Node {value: 2, children: []}, Node {value: 3, children: []}]}
+b = Node {value: 1, children: [Node {value: 3, children: []}, Node {value: 2, children: []}]}
+[a == a, a == b, hash(a) == hash(a)]
+@caption Children are ordered: reordering them makes another tree
+@value [true, false, true]
+@end
+
+@example reject
+tree struct Node:
+    child: Node
+    children: List[Node]
+
+0
+@caption A recursive field that is not the List of children
+@error CORE SEMANTIC TREE-STRUCT-SHAPE
+@at 2:12
+@end
+
+== MORE
+TREE-STRUCT-MILESTONE-1.md; concept.coroutines for constructing and
+resuming a walk.
+
+@topic error.tree-struct-shape
+title: TREE-STRUCT-SHAPE: exactly one recursive field, of type List[Self]
+summary: A tree struct declaration must have exactly one field of type List[Self] and no other occurrence of its own type.
+index: errors
+alias: tree struct shape; recursive field; List[Self]
+keywords: tree, recursive, children, List[Self], mutual recursion, Optional, map of Self
+related: concept.tree-structs concept.structs error.tree-struct-combination
+docs: TREE-STRUCT-MILESTONE-1.md
+code: CORE SEMANTIC TREE-STRUCT-SHAPE
+
+== MEANING
+Reported at a tree struct's declaration when its recursion is not the one
+shape a tree struct has: no field of type List[Self], a second one, the
+declaration itself as a field (`child: Node`), nested deeper
+(`List[List[Node]]`), inside another container (a MutableVector, a set, a
+map, a function type), another application of a parameterized declaration
+(`List[Node[int]]` in `Node[T]`), or reached again through another
+declaration (mutual recursion).
+
+== LIKELY CAUSES
+  * a binary tree written with `left` and `right` fields;
+  * an optional parent or child field;
+  * two declarations meant to alternate (a directory of files of
+    directories).
+
+== WHAT TO DO
+Keep the children in one `children: List[Node]` field: a binary node's two
+children are that List's first and second elements, and alternating kinds
+are one tree struct with an enum field saying which kind a node is. A
+general recursive type that is no tree is an ordinary `struct`.
+
+@example reject
+tree struct Node:
+    left: List[Node]
+    right: List[Node]
+
+0
+@caption Two recursive fields
+@error CORE SEMANTIC TREE-STRUCT-SHAPE
+@at 3:12
+@end
+
+@example reject
+tree struct A:
+    bs: List[B]
+    children: List[A]
+
+tree struct B:
+    as: List[A]
+    children: List[B]
+
+0
+@caption Mutual recursion between two declarations
+@error CORE SEMANTIC TREE-STRUCT-SHAPE
+@at 2:9
+@end
+
+@topic error.tree-struct-combination
+title: TREE-STRUCT-COMBINATION: no opaque, context or identity tree struct
+summary: `tree` does not combine with `opaque`, `context` or an `identity` clause.
+index: errors
+alias: opaque tree struct; context tree struct; tree identity
+keywords: tree, opaque, context, identity, combination
+related: concept.tree-structs concept.opaque-structs concept.value-identity error.tree-struct-shape
+docs: TREE-STRUCT-MILESTONE-1.md
+code: CORE SEMANTIC TREE-STRUCT-COMBINATION
+
+== MEANING
+A tree's equality and hashing are its structure, so it has no identity
+clause; a context is installed by its type and is no recursive value; and
+std::tree::walk takes any tree apart into its subtrees, which for an opaque
+struct only its owning module may do.
+
+== WHAT TO DO
+To hide a tree's representation, wrap it in an opaque struct of its own
+(`opaque struct Outline: tree: Section`) and give the module the
+operations its clients need.
+
+@example reject
+opaque tree struct Node:
+    children: List[Node]
+
+0
+@caption An opaque tree struct
+@error CORE SEMANTIC TREE-STRUCT-COMBINATION
+@at 1:8
+@end
+
+@topic error.tree-operand
+title: TREE-OPERAND: a tree's children taken of a value that is no tree
+summary: The standard library's internal std::tree::children was given a value of a type that is not a tree struct.
+index: errors
+alias: tree operand
+keywords: tree, children, walk, operand
+related: concept.tree-structs error.type
+docs: TREE-STRUCT-MILESTONE-1.md
+code: CORE SEMANTIC TREE-OPERAND
+
+== MEANING
+Only the standard library reads a tree's child field generically
+(std::tree::walk). A program that walks a value whose type is no tree
+struct sees this as the TYPE error of its call to std::tree::walk ("call
+to std::tree::walk with root : int ... is invalid"), whose explanation is
+this one.
+
+== WHAT TO DO
+Walk a value of a tree struct type (`tree struct NAME:`); to traverse
+another recursive structure, write the traversal as a function over its
+fields.
