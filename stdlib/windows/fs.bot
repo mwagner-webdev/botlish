@@ -512,7 +512,7 @@ private fn join_parts(path: NativePath, name: std::abi::bytes::Bytes, nu: List[i
     bu = path.units_of()
     if not bu.kind_of().joinable?(nu):
         fail std::io::path::NotAPath
-    NativePath {data: joined_data(path.data, bu, name)}
+    NativePath {data: path.data.joined_data(bu, name)}
 
 # PATH joined with the relative native NAME, by Win32's syntax
 # (`joined_data`); std::io::path::NotAPath when NAME is no relative path,
@@ -899,7 +899,7 @@ private fn rest(find: std::ffi::c::Ptr[std::ffi::c::Void], place out: MutableVec
 # entries: ERROR_FILE_NOT_FOUND) is empty; a name that is no directory is
 # NotADirectory (ERROR_DIRECTORY, W9).
 fn entries(dir: NativePath, context fs: WindowsFS) -> List[Entry] errors std::io::fs::FileError:
-    pattern = joined_data(dir.data, dir.units_of(), star_unit())
+    pattern = dir.data.joined_data(dir.units_of(), star_unit())
     r = wide_of(pattern).c_find_first(find_data())
     failure = c_get_last_error()
     {result: find, data} = r

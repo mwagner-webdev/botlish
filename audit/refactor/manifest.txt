@@ -176,7 +176,7 @@ program stdlib/web.bot
   ONE-CHAR-STRING-LITERAL 275:9 none -- char->text: pct's "%" begins every escape it writes as text
 program stdlib/windows.bot
 program stdlib/abi/aarch64.bot
-program stdlib/abi/bytes.bot
+fails stdlib/abi/bytes.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: bytes.bot's utf16le_units calls the standard library's internal std::byte_store::utf16le_units (std::windows::fs's units bridge, UTF16-BYTE-STORAGE-MILESTONE-1.md), which an entry program may not name (verified through `import std::abi::bytes`)
 program stdlib/abi/x86_64.bot
 fails stdlib/darwin/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::darwin::io`)
 fails stdlib/darwin/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: fs.bot imports the standard library's internal std::io::bytepath (the byte-path syntax it shares with std::linux::fs), which only standard-library modules may import, never an entry program (verified through `import std::darwin::fs`)
@@ -193,6 +193,6 @@ fails stdlib/linux/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member
   ONE-CHAR-STRING-LITERAL 103:49 none -- char->text: the "/" joining PATH and COMPONENT is a single character appended as text
 program stdlib/linux/sys.aarch64.bot
 program stdlib/linux/sys.x86_64.bot
-fails stdlib/windows/fs.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (remove_directory) requires a context (verified through `import std::windows::fs`)
+fails stdlib/windows/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: fs.bot reads a native path's units through the standard library's internal std::abi::bytes::utf16le_units (UTF16-BYTE-STORAGE-MILESTONE-1.md), which an entry program may not name; compiled as a module its last declaration (remove_directory) would also require a context, as for stdlib/linux/io.bot (verified through `import std::windows::fs`)
 fails stdlib/windows/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::windows::io`)
 fails stdlib/windows/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: as for stdlib/darwin/path.bot, std::windows::fs::of_valid_text (verified through `import std::windows::path`)
