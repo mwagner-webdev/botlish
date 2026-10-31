@@ -197,7 +197,7 @@ class Preflight(unittest.TestCase):
                      "MACOS-CREDENTIAL-BASE64", "APPLE_NOTARY_KEY_BASE64", r"shell command")
 
     def test_raw_pem_instead_of_base64(self):
-        pem = fx.pem_private(fx.notary_key()).decode()
+        pem = fx.apple_p8(fx.notary_key()).decode()
         self.refused(self.env(APPLE_NOTARY_KEY_BASE64=pem), "MACOS-CREDENTIAL-BASE64", "APPLE_NOTARY_KEY_BASE64", r"PEM text itself")
 
     # --- the .p12 ---------------------------------------------------------------
@@ -302,22 +302,29 @@ class Preflight(unittest.TestCase):
                      "APPLE_NOTARY_KEY_BASE64", r"encoded twice")
 
     def test_truncated_pem(self):
-        pem = fx.pem_private(fx.notary_key()).decode()
+        pem = fx.apple_p8(fx.notary_key()).decode()
         self.refused(self.p8_env(pem[:pem.index("-----END")]), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64", r"truncated PEM")
 
     def test_damaged_pem_body(self):
-        pem = fx.pem_private(fx.notary_key()).decode()
+        pem = fx.apple_p8(fx.notary_key()).decode()
         lines = pem.splitlines()
         lines[1] = lines[1][:-3]
         self.refused(self.p8_env("\n".join(lines) + "\n"), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64", r"not valid Base64|not a well-formed")
 
     def test_literal_backslash_n(self):
-        pem = fx.pem_private(fx.notary_key()).decode()
+        pem = fx.apple_p8(fx.notary_key()).decode()
         self.refused(self.p8_env(pem.strip().replace("\n", "\\n")), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64",
                      r"literal \\n sequences instead of line breaks")
 
+    def test_fixture_key_is_app_store_connects_layout(self):
+        # the synthetic .p8 is laid out as App Store Connect's are (the
+        # curve inside the ECPrivateKey), the layout notarytool needs
+        body = "".join(fx.apple_p8(fx.notary_key()).decode().splitlines()[1:-1])
+        self.assertTrue(body.startswith("MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg"), body[:48])
+        self.assertEqual(len(base64.b64decode(body)), 150)
+
     def test_crlf_accepted(self):
-        pem = fx.pem_private(fx.notary_key()).decode()
+        pem = fx.apple_p8(fx.notary_key()).decode()
         status, output, _ = self.run_check(self.p8_env(pem.replace("\n", "\r\n")))
         self.assertEqual(status, 0, output)
 
@@ -347,12 +354,12 @@ class Preflight(unittest.TestCase):
         self.refused(self.p8_env(enc), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64", r"encrypted private key")
 
     def test_extra_pem_block(self):
-        pem = fx.pem_private(fx.notary_key()).decode()
+        pem = fx.apple_p8(fx.notary_key()).decode()
         cert = AUTHORITY.leaf(NAMES["application"]).public_bytes(serialization.Encoding.PEM).decode()
         self.refused(self.p8_env(pem + cert), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64", r"2 PEM blocks")
 
     def test_extra_text(self):
-        pem = fx.pem_private(fx.notary_key()).decode()
+        pem = fx.apple_p8(fx.notary_key()).decode()
         self.refused(self.p8_env("Key for notarization:\n" + pem), "MACOS-NOTARY-KEY-FORMAT", "APPLE_NOTARY_KEY_BASE64",
                      r"unexpected text")
 

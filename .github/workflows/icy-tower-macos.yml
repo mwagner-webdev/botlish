@@ -544,6 +544,14 @@ jobs:
             fi
             echo "::error::Apple's answer to a key it never issued was not classified as authentication or service"; exit 1
           fi
+          # the control: the same key in cryptography's own PKCS#8 layout
+          # (no curve inside its ECPrivateKey), asked the same way; the
+          # key above is laid out as App Store Connect's .p8 files are
+          status=0
+          bounded xcrun notarytool history --key "$dry/control-openssl-layout.p8" --key-id "$APPLE_NOTARY_KEY_ID" \
+            --issuer "$APPLE_NOTARY_ISSUER_ID" --output-format json </dev/null >"$dry/control.txt" 2>&1 || status=$?
+          echo "control (the same key without the curve in its ECPrivateKey): notarytool exited $status: $(head -c 300 "$dry/control.txt" | tr '\n' ' ')" \
+            | tee "$dry/control-class.txt"
           started=$(date +%s)
           if rel sign --work "$w" --app "$dry/app/Icy Tower.app" >"$dry/sign.txt" 2>&1; then
             cat "$dry/sign.txt"
@@ -571,6 +579,7 @@ jobs:
           cp "$w/state.json" out/logs/dry-run-state.json
           cp "$dry/notary-auth.txt" out/logs/dry-run-notary-auth.txt
           cp "$dry/sign-class.txt" out/logs/dry-run-sign.txt
+          cp "$dry/control-class.txt" out/logs/dry-run-notary-control.txt
 
       # What a release job (below) builds its bundle from: the executable
       # this job built and tested, byte for byte, its SHA-256 a job output

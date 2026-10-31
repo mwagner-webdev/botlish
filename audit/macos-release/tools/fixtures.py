@@ -140,6 +140,26 @@ def pem_private(key, fmt=serialization.PrivateFormat.PKCS8, enc=None):
     return key.private_bytes(serialization.Encoding.PEM, fmt, enc or serialization.NoEncryption())
 
 
+def _tlv(tag, body):
+    n = len(body)
+    head = bytes([n]) if n < 128 else bytes([0x81, n]) if n < 256 else bytes([0x82]) + n.to_bytes(2, "big")
+    return bytes([tag]) + head + body
+
+
+def apple_p8(key):
+    """KEY as App Store Connect's AuthKey_<KEY_ID>.p8 lays it out: PKCS#8 whose ECPrivateKey carries the curve
+    ([0] parameters) and the public key -- 150 bytes, Base64 beginning MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg.
+    (cryptography's PKCS#8 leaves the curve out of the ECPrivateKey -- 138 bytes, MIGHAgEA...: as valid, and the
+    layout notarytool 1.0.0 (38) traps on while making its token, the dry run's control.)"""
+    sec1 = key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.TraditionalOpenSSL,
+                             serialization.NoEncryption())
+    algorithm = bytes.fromhex("301306072a8648ce3d020106082a8648ce3d030107")
+    der = _tlv(0x30, b"\x02\x01\x00" + algorithm + _tlv(0x04, sec1))
+    body = base64.b64encode(der).decode()
+    return ("-----BEGIN PRIVATE KEY-----\n" + "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
+            + "\n-----END PRIVATE KEY-----\n").encode()
+
+
 def notary_key():
     if "notary" not in _keys:
         _keys["notary"] = ec.generate_private_key(ec.SECP256R1())
@@ -165,7 +185,7 @@ def good_env(authority):
     return {
         "MACOS_CERTIFICATE_P12_BASE64": b64(p12(cert, rsa_key("leaf"))),
         "MACOS_CERTIFICATE_PASSWORD": PASSWORD,
-        "APPLE_NOTARY_KEY_BASE64": b64(pem_private(notary_key())),
+        "APPLE_NOTARY_KEY_BASE64": b64(apple_p8(notary_key())),
         "APPLE_NOTARY_KEY_ID": KEY_ID,
         "APPLE_NOTARY_ISSUER_ID": ISSUER_ID,
         "APPLE_TEAM_ID": TEAM,
@@ -218,10 +238,11 @@ def dry_run(directory):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     cert = a.leaf("Developer ID Application: Icy Tower Dry Run (DRYRUN0000)", team="DRYRUN0000", key=key)
     password = uuid.uuid4().hex
+    notary = ec.generate_private_key(ec.SECP256R1())
     env = {
         "MACOS_CERTIFICATE_P12_BASE64": b64(p12(cert, key, password, legacy=True)),
         "MACOS_CERTIFICATE_PASSWORD": password,
-        "APPLE_NOTARY_KEY_BASE64": b64(pem_private(ec.generate_private_key(ec.SECP256R1()))),
+        "APPLE_NOTARY_KEY_BASE64": b64(apple_p8(notary)),
         "APPLE_NOTARY_KEY_ID": "DRYRUN0000",
         "APPLE_NOTARY_ISSUER_ID": str(uuid.uuid4()),
         "APPLE_TEAM_ID": "DRYRUN0000",
@@ -234,6 +255,10 @@ def dry_run(directory):
     # verify its chain with security verify-cert
     with open(os.path.join(directory, "leaf.cer"), "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.DER))
+    # the same notary key in cryptography's own PKCS#8 layout (no curve in the ECPrivateKey): the control
+    with open(os.path.join(directory, "control-openssl-layout.p8"), "wb") as f:
+        f.write(pem_private(notary))
+    os.chmod(os.path.join(directory, "control-openssl-layout.p8"), 0o600)
     print("dry-run identity: %s (a throwaway test certificate, never Apple's); %s/env, %s/anchors"
           % ("Developer ID Application: Icy Tower Dry Run (DRYRUN0000)", directory, directory))
 
