@@ -9072,6 +9072,7 @@ tests/c-callbacks.test cb-fixture-built pass
 tests/c-callbacks.test cb-round-trip pass
 tests/c-callbacks.test cb-decisions pass
 tests/c-callbacks.test cb-nested-gc pass
+tests/c-callbacks.test cb-nested-repeated pass
 tests/c-callbacks.test cb-recursion pass
 tests/c-callbacks.test cb-scalars pass
 tests/c-callbacks.test cb-raw-floats pass

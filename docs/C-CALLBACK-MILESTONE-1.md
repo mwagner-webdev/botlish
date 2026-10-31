@@ -322,7 +322,9 @@ INACTIVE: `cb-refused-inside-callback`), its segment is pushed (section 6), and 
 restored exactly -- the segment popped, the Vm waiting in C again, so C
 may call the callback again during the same call (`cb-decisions`: a
 thousand calls in one C loop) and nested transitions stack
-(`cb-nested-gc`, `cb-recursion`: 300 levels of Botlish -> C -> Botlish).
+(`cb-nested-gc`, `cb-recursion`: 300 levels of Botlish -> C -> Botlish), a
+closed one popped before C calls again (`cb-nested-repeated`: a later call
+enters through C's own transition, never one its predecessor closed).
 `rt_ffi_close` checks the balance: a segment still naming the closing
 transition is NATIVE CALLBACK BUG, so a missing pop cannot pass silently.
 
@@ -540,6 +542,7 @@ under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site)
 | `cb-round-trip` | calls an int callback, before and after an unrelated C call | 42, 5, 44, -14 |
 | `cb-decisions` | acts on parity answers (C counts wrong ones), filters by a callback, calls a void callback of no arguments 7 times, sums 1000 calls in a tight loop | 0, 45, 7, 999000 |
 | `cb-nested-gc` | the central test: main holds heap values; C outer calls callback 1, which allocates and calls C inner, whose callback 2 allocates; both C calls with no frame chain | main's values intact, C's result 205 |
+| `cb-nested-repeated` | C calls a callback eight times; each makes a nested C call that calls a second callback, holding a heap value across it | main's value intact, C's sum 36 |
 | `cb-recursion` | recursion C -> Botlish -> C ... 300 levels, C checking each level | 300, 10, 0 errors |
 | `cb-scalars` | every integer class and `_Bool` and a pointer at their limits, in and out | 0 wrong each |
 | `cb-raw-floats` | thirteen bit patterns through raw callbacks: identity, bits, classification, admission | 0 wrong each |
@@ -722,7 +725,7 @@ custom-painting callback receiving four floats per call would pay.
 
 ## 13. Tests, fuzzing, mutation, backends
 
-### tests/c-callbacks.test (35 tests)
+### tests/c-callbacks.test (36 tests)
 
 Static, on every host: the declaration and its HIR text (`cb-declaration-hir`),
 the grammar (`cb-modifier-grammar`), the signature rules
@@ -776,7 +779,49 @@ does catch is shown by the mutants it kills (next section).
 
 ### Mutation (audit/c-callbacks/tools/mutate.tcl)
 
-MUTATION_RESULTS
+28 mutants (audit/c-callbacks/tools/mutants.txt), one or more for each
+class the brief names: callback root retention (2), calling-convention
+selection (2), raw bit preservation (3), activation restoration (3),
+thread, actor and stack verification (3), GC rooting of the waiting frames
+(2), argument and result conversion (3), non-retention (2), re-entry depth
+(2), no error or suspension across C (2) and the further front-end rules
+(4). Each is applied to a private copy of the tree (a native mutant
+rebuilds the copy's driver) and run against tests/c-callbacks.test, three
+fuzzer programs (seed 7) and, for a native mutant, the Rust tests
+(`callback`). A mutant is killed when any of them fails.
+
+Final run, on the final tree: **28 applied, 28 killed, 0 survived.**
+
+| killed by | mutants |
+|---|---:|
+| the tests | 27 |
+| also the fuzzer | 7 |
+| also the Rust tests | 2 |
+| the Rust tests alone | 1 (`entry-system-v-convention`) |
+
+`entry-system-v-convention` (every entry point in System V's convention) is
+killed only by `codegen::callback`'s cross-target test: on this host System
+V *is* the C convention, so no run here can tell; the test compiles entry
+points for Linux, Apple and Windows triples and checks each signature's
+convention.
+
+How the set got there, run by run:
+
+* The first run killed 25 of 28. Two survivors were equivalent mutants,
+  replaced by the rules they meant to test: `entry-default-convention`
+  (Cranelift's default convention for a triple *is* its C convention, so
+  dropping the selection changes nothing) became
+  `entry-system-v-convention`; `narrow-argument-unextended` (the runtime
+  reads only a narrow argument's own bits, so how the entry point extends
+  it cannot matter) became `signed-char-argument-unsigned`. The third,
+  `activation-kept-during-callback`, was a real gap: no test made a C call
+  without a transition from inside a callback and had C call a kept
+  pointer there. `cb-refused-inside-callback` was added and kills it.
+* The second run killed all 28, but `transition-not-popped` only through
+  the fuzzer: no test had C call a nesting callback again after the
+  transition it made had closed, the one place a transition left open is
+  read. `cb-nested-repeated` was added; run alone, the mutant is killed by
+  it (and the fuzzer).
 
 ### Backends and hosts
 
@@ -798,7 +843,7 @@ Run on the final tree, Linux x86-64, the release driver (each file directly,
 
 | file | result |
 |---|---|
-| c-callbacks.test | 35 / 35 / 0 / 0; under BOTLISH_NATIVE_GC_STRESS=1 35 / 35 / 0 / 0 |
+| c-callbacks.test | 36 / 36 / 0 / 0; the whole file under BOTLISH_NATIVE_GC_STRESS=1 36 / 36 / 0 / 0 (each running test runs its program normally and under GC stress either way: `cbAgree`) |
 | c-ffi.test | 129 / 123 / 6 / 0 (the skips are its other hosts' tests) |
 | c-abi-types.test | 73 / 73 / 0 / 0 |
 | raw-c-float-ffi.test | 31 / 31 / 0 / 0 |
@@ -824,14 +869,16 @@ and the warning gate (`audit/refactor/tools/gate.tcl`: 84 corpus programs,
 38 library loaders, the observed warnings exactly the manifest), the golden
 suite (`tclsh9.0 tests/local.tcl tests/golden/c-callbacks.bot`: 9/9 on
 interp, compile, cranelift-generic and cranelift) and the Rust tests
-(`cargo test --release --manifest-path native/Cargo.toml`: RUST_RESULTS).
+(`cargo test --release --manifest-path native/Cargo.toml`: 312 library
+and 117 driver unit tests, and every native stack check).
 
 Two mutants of other audits mutate code this milestone changed, and their
 texts were updated to it (keeping each a mutant of the same rule):
 audit/coroutines' `gc-resumer-frames-untraced` (the collector's walk is now
 `walk_from_segmented`) and audit/c-ffi's `va-win64-fixed-calls-stubbed`
 (a foreign call now first asks whether it is a transition).
-OTHER_MUTANTS_RESULTS
+`gc-resumer-frames-untraced` applies and is killed (5 coroutine tests fail
+with it); `va-win64-fixed-calls-stubbed`: C_FFI_MUTANT.
 
 ## 14. Limitations and the next milestone
 
