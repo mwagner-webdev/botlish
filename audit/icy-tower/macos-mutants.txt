@@ -357,8 +357,11 @@ type_ == sdl3::events::SDL_EVENT_TERMINATING:
     }
 >>>>
 
+# agent-application is killed by either check of app-launch that states its rule: LaunchServices does not
+# activate an agent, and SDL3's Cocoa_RegisterApp sets the regular activation policy itself, so the policy
+# read after SDL started may already say regular.
 @@ agent-application the bundle marked LSUIElement (an agent: no Dock icon, never the active application by LaunchServices' own launch)
-?? app:app-launch a regular \(foreground\) application
+?? app:app-launch LaunchServices made it the active application|a regular \(foreground\) application
 ## examples/games/icy-tower/macos/bundle.py
 <<<<
         "NSPrincipalClass": "NSApplication",
