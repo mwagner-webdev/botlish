@@ -4812,12 +4812,21 @@ mod tests {
     fn deep_trees_need_no_host_stack() {
         // A chain 200,000 nodes deep is compared, hashed (both hashes) and
         // shown on a thread whose whole stack is 256 KiB: none of them
-        // recurses per level.
+        // recurses per level. The chains are built without
+        // BOTLISH_NATIVE_GC_STRESS's collection at every allocation, which
+        // would mark every node built so far at each of the 1.2 million
+        // allocations (hours, not milliseconds); what is measured here is the
+        // host stack, and the walks allocate nothing on the managed heap.
+        // tree_walks_are_the_struct_walks keeps the stressed coverage of the
+        // walks' rooting.
         let worker = std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
             let mut vm = tree_vm();
+            let stressed = std::env::var("BOTLISH_NATIVE_GC_STRESS").is_ok_and(|v| v == "1");
+            vm.heap.set_stress_for_test(false);
             let a = tree_chain(&mut vm, 0, 200_000, 1);
             let b = tree_chain(&mut vm, 0, 200_000, 1);
             let c = tree_chain(&mut vm, 0, 200_000, 2);
+            vm.heap.set_stress_for_test(stressed);
             let key = (1, 2);
             (
                 rt_value_eq(&mut *vm, a, b) == TRUE,

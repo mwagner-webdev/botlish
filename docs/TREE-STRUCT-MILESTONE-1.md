@@ -463,6 +463,19 @@ who wants a hidden tree wraps a tree struct in an opaque struct of its own.
 | Rust `deep_trees_need_no_host_stack` | a 256 KiB thread | a 200,000-deep chain: `==`, both hashes, `show` |
 | `ts-wide` | compile, cranelift-generic, cranelift | a root with 30,000 children of one child each: order, `==`, hashes, both walks (the BFS queue compacts) |
 | `ts-wide-interp` | all four | a 2,000-child root |
+| `ts-gc-stress` | all four, the native ones under `BOTLISH_NATIVE_GC_STRESS=1` | 1,500-deep chains and a 300-child root: `==`, hashes, both walks, printing |
+
+The size tests measure the host stack and the walks' work, so their native
+processes run without a suite-wide `BOTLISH_NATIVE_GC_STRESS=1` (CI's
+gc-stress jobs), and the Rust test builds its chains with its Vm's stress
+off (`set_stress_for_test`): a collection at every allocation marks every
+node built so far, so building N nodes under it costs on the order of N^2
+mark steps. On the merge's first run of Linux arm64's gc-stress job, the
+suite reached tests/tree-struct.test after 1 h 42 min and spent the rest of
+the job's six-hour limit there, and the Rust unit tests under the stress
+took 3 h 34 min (31 seconds on the commit before).
+`ts-gc-stress` keeps tree operations under the stress in every run, at a
+size it makes cheap (16 seconds on all four backends).
 
 Before/after on the same programs (section 2's table, re-run with `tree
 struct`): the 100,000-deep chain on a 2 MiB native stack and the 60,000-deep

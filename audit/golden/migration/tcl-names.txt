@@ -8343,6 +8343,7 @@ tests/tree-struct.test ts-deep-chain-print pass
 tests/tree-struct.test ts-deep-native pass
 tests/tree-struct.test ts-wide pass
 tests/tree-struct.test ts-wide-interp pass
+tests/tree-struct.test ts-gc-stress pass
 tests/tree-struct.test ts-representation-independence pass
 tests/tree-struct.test ts-filesystem-specimen pass
 tests/tree-struct.test ts-executable pass

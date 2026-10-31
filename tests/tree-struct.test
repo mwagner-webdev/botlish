@@ -121,6 +121,38 @@ proc tsHir {source} {
     return [surface::compile $source t.bot -warnings off]
 }
 
+# Runs SCRIPT with BOTLISH_NATIVE_GC_STRESS set to VALUE (unset when VALUE
+# is "") for the native processes it starts, and restores it.
+proc tsWithGcStress {value script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [if {$had} {set ::env(BOTLISH_NATIVE_GC_STRESS)} else {string cat}]
+    if {$value eq ""} {
+        unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+    } else {
+        set ::env(BOTLISH_NATIVE_GC_STRESS) $value
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+# Runs SCRIPT -- a test of a tree's size: its depth on a small host stack,
+# its width -- without a suite-wide BOTLISH_NATIVE_GC_STRESS=1 (CI's
+# gc-stress jobs). A collection at every allocation marks every node built
+# so far, so building a tree of N nodes under it takes on the order of N^2
+# steps: hours for these trees, and what they measure is the host stack and
+# the walks' work, not rooting. ts-gc-stress runs the same operations under
+# the stress in every run, at a size it makes cheap.
+proc tsWithoutGcStress {script} {
+    return [uplevel 1 [list tsWithGcStress "" $script]]
+}
+
 # The kind and location-free message of the first diagnostic of SOURCE, or
 # "accepted".
 proc tsRejection {source} {
@@ -461,7 +493,7 @@ test ts-generic-construction-typed {a coroutine constructed from an untyped func
 # Deep and wide trees
 
 test ts-deep-chain {a chain 20,000 nodes deep -- twenty times the harness's recursion limit -- is built, compared equal and unequal near its leaf, hashed and walked in both orders on every backend, with no host recursion} -body {
-    tsRun "a = chain(20000, 1)\nb = chain(20000, 1)\nc = chain(20000, 2)\n\[a == b, a == c, hash(a) == hash(b), hash(a) == hash(c), digest(a, std::tree::Order::DepthFirst), digest(a, std::tree::Order::BreadthFirst)\]\n"
+    tsWithoutGcStress {tsRun "a = chain(20000, 1)\nb = chain(20000, 1)\nc = chain(20000, 2)\n\[a == b, a == c, hash(a) == hash(b), hash(a) == hash(c), digest(a, std::tree::Order::DepthFirst), digest(a, std::tree::Order::BreadthFirst)\]\n"}
 } -result {value {[true, false, true, false, [20001, 2244320372828816551], [20001, 2244320372828816551]]}}
 
 test ts-deep-chain-print {a chain thousands deep prints without host recursion} -body {
@@ -477,19 +509,25 @@ test ts-deep-native {natively, a chain a million nodes deep compares, hashes, pr
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_STACK_BYTES)] ? $::env(BOTLISH_NATIVE_STACK_BYTES) : ""}]
     set ::env(BOTLISH_NATIVE_STACK_BYTES) 1048576
     try {
-        core::formatValue [native::evalHir $hir]
+        tsWithoutGcStress {core::formatValue [native::evalHir $hir]}
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_STACK_BYTES) } else { set ::env(BOTLISH_NATIVE_STACK_BYTES) $saved }
     }
 } -result {[true, false, true, false, [1000001, 1785376435676727901], [1000001, 1785376435676727901]]}
 
 test ts-wide {a root with 30,000 children, each with one child: child order, equality, hashes and both walks (the breadth-first queue drops its visited prefix as it goes)} -body {
-    tsRun "fn wide(n: int, twist: int) -> Node:\n    kids = loop i from 0 to n:\n        if i == twist:\n            node(i, \[leaf(0 - i)\])\n        else:\n            node(i, \[leaf(i)\])\n    node(7, kids)\na = wide(30000, -1)\nb = wide(30000, -1)\nc = wide(30000, 29999)\n\[a == b, a == c, hash(a) == hash(b), hash(a) == hash(c), digest(a, std::tree::Order::DepthFirst), digest(a, std::tree::Order::BreadthFirst), values(node(1, \[leaf(2), leaf(3), leaf(4), leaf(5)\]), std::tree::Order::BreadthFirst)\]\n" {compile cranelift-generic cranelift}
+    tsWithoutGcStress {tsRun "fn wide(n: int, twist: int) -> Node:\n    kids = loop i from 0 to n:\n        if i == twist:\n            node(i, \[leaf(0 - i)\])\n        else:\n            node(i, \[leaf(i)\])\n    node(7, kids)\na = wide(30000, -1)\nb = wide(30000, -1)\nc = wide(30000, 29999)\n\[a == b, a == c, hash(a) == hash(b), hash(a) == hash(c), digest(a, std::tree::Order::DepthFirst), digest(a, std::tree::Order::BreadthFirst), values(node(1, \[leaf(2), leaf(3), leaf(4), leaf(5)\]), std::tree::Order::BreadthFirst)\]\n" {compile cranelift-generic cranelift}}
 } -result {value {[true, false, true, false, [60001, 2133005430066698954], [60001, 1260954226244719589], [1, 2, 3, 4, 5]]}}
 
 test ts-wide-interp {the interpreter walks and compares a 2,000-child root as the other backends do} -body {
     tsRun "kids = loop i from 0 to 2000:\n    node(i, \[leaf(i)\])\na = node(7, kids)\n\[a == node(7, kids), digest(a, std::tree::Order::DepthFirst), digest(a, std::tree::Order::BreadthFirst)\]\n"
 } -result {value {[true, [4001, 1063359645131734756], [4001, 491805807458027375]]}}
+
+test ts-gc-stress {under a collection at every allocation (BOTLISH_NATIVE_GC_STRESS=1, in every run) the native backends build chains and a wide root, compare, hash, print and walk them in both orders exactly as the Tcl backends do: every node, child List, work stack and walk the runtimes hold is rooted (the size tests above run without the stress)} -body {
+    tsWithGcStress 1 {
+        tsRun "a = chain(1500, 1)\nb = chain(1500, 1)\nc = chain(1500, 2)\nkids = loop i from 0 to 300:\n    node(i, \[leaf(i)\])\nw = node(7, kids)\n\[a == b, a == c, hash(a) == hash(b), hash(a) == hash(c), digest(a, std::tree::Order::DepthFirst), digest(a, std::tree::Order::BreadthFirst), w == node(7, kids), w == node(7, \[leaf(1)\]), digest(w, std::tree::Order::DepthFirst), digest(w, std::tree::Order::BreadthFirst), values(node(1, \[node(2, \[leaf(4)\]), leaf(3)\]), std::tree::Order::BreadthFirst), node(1, \[node(2, \[leaf(4)\]), leaf(3)\])\]\n"
+    }
+} -result {value {[true, false, true, false, [1501, 304994205239850860], [1501, 304994205239850860], true, false, [601, 308574842294845312], [601, 1117836737116723159], [1, 2, 3, 4], Node {value: 1, children: [Node {value: 2, children: [Node {value: 4, children: []}]}, Node {value: 3, children: []}]}]}}
 
 # ---------------------------------------------------------------------------
 # Representation independence
@@ -580,7 +618,7 @@ test ts-executable {a standalone executable compares, hashes, walks and prints t
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_STACK_BYTES)] ? $::env(BOTLISH_NATIVE_STACK_BYTES) : ""}]
     set ::env(BOTLISH_NATIVE_STACK_BYTES) 1048576
     try {
-        list [exec $binary] [core::formatValue [native::evalHir $hir]]
+        tsWithoutGcStress {list [exec $binary] [core::formatValue [native::evalHir $hir]]}
     } finally {
         if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_STACK_BYTES) } else { set ::env(BOTLISH_NATIVE_STACK_BYTES) $saved }
     }
