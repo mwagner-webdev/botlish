@@ -107,7 +107,10 @@ proc hir::foreign::AbiClass {type} {
         # counterpart's register class, its bits unchanged: rf32, rf64
         # (RAW-C-FLOAT-FFI-MILESTONE-1.md; nir.rs's CAbi::RawF32/RawF64).
         set info [hir::cabi::FloatingInfo $type]
-        return [expr {[dict get $info raw] ? "r[dict get $info class]" : [dict get $info class]}]
+        if {[dict get $info raw]} {
+            return "r[dict get $info class]"
+        }
+        return [dict get $info class]
     }
     if {[hir::types::IsCPtr $type] || [hir::types::IsCFnPtr $type]} {
         return ptr

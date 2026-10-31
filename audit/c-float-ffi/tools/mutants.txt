@@ -183,9 +183,15 @@
 @@ extern-float-class-f64 an extern's C float parameter or result is passed in the ABI class of a double (f64): C reads a binary64 where it expects a binary32
 ## hir/foreign.tcl
 <<<<
-        return [expr {[dict get $info raw] ? "r[dict get $info class]" : [dict get $info class]}]
+        if {[dict get $info raw]} {
+            return "r[dict get $info class]"
+        }
+        return [dict get $info class]
 ====
-        return [expr {[dict get $info raw] ? "rf64" : "f64"}]
+        if {[dict get $info raw]} {
+            return rf64
+        }
+        return f64
 >>>>
 
 @@ extern-narrowing-undeclared a call with a C float parameter (and no floating result) declares no NonFiniteFloat: its overflow is an error no handler may name
@@ -289,7 +295,10 @@
 @@ raw-class-as-finite an extern's raw parameter or result travels in the finite ABI class (f32, f64): its arguments narrowed from Float64s, its results admitted
 ## hir/foreign.tcl
 <<<<
-        return [expr {[dict get $info raw] ? "r[dict get $info class]" : [dict get $info class]}]
+        if {[dict get $info raw]} {
+            return "r[dict get $info class]"
+        }
+        return [dict get $info class]
 ====
         return [dict get $info class]
 >>>>
