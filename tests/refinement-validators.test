@@ -211,11 +211,11 @@ test validator-predicate-is-no-validator {a predicate's call completing proves n
     rejectionKind "$prelude\nfn use(s: str) -> int:\n    mail?(s)\n    send(s)\nuse(\"abcd\")\n"
 } -result TYPE
 
-test validator-not-a-condition {a validator's call is a unit, not a Boolean: as an if condition it raises NOT-BOOLEAN on every backend, and its contract records no branch facts} -body {
+test validator-not-a-condition {a validator's call is a unit, not a Boolean: as an if condition it is a compile-time TYPE (STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md; it used to raise NOT-BOOLEAN on every backend), and its contract records no branch facts} -body {
     set source "$prelude\nfn use(s: str) -> int:\n    if validate_any_mail(s):\n        1\n    else:\n        0\nuse(\"abcd\")\n"
-    set hir [surface::compile $source -warnings off]
-    list [lrange [sourceAgree $source] 0 1] [hir::get $hir [lindex [hirFind $hir if] end] refinements]
-} -result {{error {CORE SEMANTIC NOT-BOOLEAN}} {1 {} 0 {}}}
+    set hir [surface::compile $source -warnings off -strict 0]
+    list [rejection $source] [hir::get $hir [lindex [hirFind $hir if] end] refinements]
+} -result {{TYPE {the condition of an if requires bool, but this condition has type unit: testing it could only fail when it runs}} {1 {} 0 {}}}
 
 test validator-no-implicit-strengthening {without a validator call, a carrier value is still no refinement; the diagnostic names both proofs} -body {
     rejection "$prelude\nfn use(s: str) -> int:\n    send(s)\nuse(\"abcd\")\n"

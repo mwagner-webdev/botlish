@@ -318,14 +318,19 @@ test lower-boolean-short-circuit {the right operand is not evaluated when the le
     core::formatValue [core::evalProgram [hir::lower $h]]
 } -result {[true, false]}
 
-test lower-boolean-operands {operands must be Booleans} -body {
+test lower-boolean-operands {operands must be Booleans: an operand statically of another kind is a compile-time TYPE in its operator's name (STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md); an `any` one is tested when the operator runs, NOT-BOOLEAN} -body {
     set results {}
     foreach source {"1 and true" "true and 1" "false or 1" "not 1"} {
-        catch {core::evalProgram [hir::lower [surface::compile $source t.bot]]} message options
+        catch {surface::compile $source t.bot} message options
+        lappend results [list [dict get $options -errorcode] [regsub {^t\.bot:\d+:\d+: (.*?) requires bool.*$} $message {\1}]]
+    }
+    foreach source {"1 and true" "true and 1" "false or 1" "not 1"} {
+        set source "fn f(a: any) -> bool:\n    [string map {1 a} $source]\n\nf(1)\n"
+        catch {core::evalProgram [hir::lower [surface::compile $source t.bot -warnings off]]} message options
         lappend results [dict get $options -errorcode]
     }
     set results
-} -result {{CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN}}
+} -result {{{CORE SEMANTIC TYPE} {the left operand of and}} {{CORE SEMANTIC TYPE} {the right operand of and}} {{CORE SEMANTIC TYPE} {the right operand of or}} {{CORE SEMANTIC TYPE} {the operand of not}} {CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN}}
 
 test lower-boolean-types {Boolean operators have type bool} -body {
     set h [surface::compile "fn f(a, b):\n    c = a and b\n    d = not a\n    e = a != b\n    \[c, d, e\]" t.bot]

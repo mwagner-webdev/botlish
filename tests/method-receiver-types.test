@@ -419,16 +419,18 @@ test mrt-dead-code-checked {the call's own check judges it as written, reachable
 # ---------------------------------------------------------------------------
 # The rule's one statement
 
-test mrt-rule-one-statement {the kind rule is stated once (hir::types::NativeKindMismatch): the call's own check, the typing walk and the method decision's kind proof ask it, and a call's problems in the decision state no native rule of their own} -body {
+test mrt-rule-one-statement {the kind rule is stated once (hir::types::NativeKindMismatch, over the kind comparison KindMismatch that Boolean conditions share since STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md): the call's own check, the typing walk and the method decision's kind proof ask it, and a call's problems in the decision state no native rule of their own} -body {
     set verify [info body hir::range::VerifyNativeKinds]
     set mismatch [info body hir::methods::NativeMismatch]
     set problems [info body hir::methods::CallProblems]
     set argument [info body hir::types::NativeArgumentMismatch]
+    set native [info body hir::types::NativeKindMismatch]
     list [regexp {NativeArgumentMismatch} $verify] [regexp {paramTypes|core::type::base} $verify] \
-        [regexp {NativeKindMismatch} $argument] \
+        [regexp {RequirementMismatch \[NativeParamKind} $argument] [regexp {KindMismatch \[NativeParamKind} $native] \
+        [regexp {kindOf} $native$argument] \
         [regexp {NativeKindMismatch} $mismatch] [regexp {paramTypes|core::type::base} $mismatch] \
         [regexp {NativeMismatch|paramTypes|core::type::base} $problems]
-} -result {1 0 1 1 0 0}
+} -result {1 0 1 1 0 1 0 0}
 
 test mrt-rule-cases {NativeKindMismatch: a known kind other than the required one is a mismatch; the required kind, an unknown kind (any), never, a native that requires none, and a parameter past the native's list are none; NativeArgumentMismatch adds the rigid imprint variable} -body {
     list [hir::types::NativeKindMismatch std::mutable_array::at 0 {list int}] \

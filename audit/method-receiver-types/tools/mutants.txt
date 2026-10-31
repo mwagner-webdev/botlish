@@ -1,7 +1,9 @@
 # Mutants of METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md
 # (audit/method-receiver-types/tools/mutate.tcl): deliberate breaks of the
 # static native-argument kind check (hir/range.tcl's VerifyNativeKinds, the
-# rule hir/types.tcl's NativeKindMismatch and NativeArgumentMismatch, the
+# rule hir/types.tcl's NativeKindMismatch and NativeArgumentMismatch -- since
+# STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md stated once, for natives
+# and conditions alike, as KindMismatch and RequirementMismatch -- the
 # poison of a rejected call) and of the method decision's refusal to select by
 # failure (hir/resolve.tcl's candidates, hir/methods.tcl's obligations). Each
 # must be killed by tests/method-receiver-types.test, by one of the tests its
@@ -109,7 +111,7 @@
 !! mrt-generic-imprint-unconstrained mrt-generic-imprint-trait-constrained mrt-generic-imprint-inherited mrt-rule-cases
 ## hir/types.tcl
 <<<<
-    if {$mismatch ne {} || ![IsImprint $type]} {
+    if {$mismatch ne {} || ![IsImprint $type] || $wanted in {"" any}} {
 ====
     if {1} {
 >>>>
@@ -127,9 +129,9 @@
 !! mrt-valid-receiver mrt-generic-untyped-satisfied mrt-rule-cases
 ## hir/types.tcl
 <<<<
-    if {$kind eq "" || $wanted in {"" any} || $kind eq $wanted} {
+    if {$kind eq "" || $kind eq $wanted} {
 ====
-    if {$kind eq "" || $wanted in {"" any}} {
+    if {$kind eq ""} {
 >>>>
 
 # ---------------------------------------------------------------------------

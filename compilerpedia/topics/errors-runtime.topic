@@ -215,11 +215,11 @@ program's value, which every backend prints; print only at a native edge
 
 @topic error.not-boolean
 title: NOT-BOOLEAN: an if condition that is not a Boolean
-summary: CORE SEMANTIC NOT-BOOLEAN stops a run when an if (or and, or, not) condition evaluates to something other than true or false.
+summary: CORE SEMANTIC NOT-BOOLEAN stops a run when an if (or and, or, not) condition of type any evaluates to something other than true or false.
 index: errors
 alias: condition is not a Boolean; non-Boolean condition
 keywords: if, condition, bool, true, false, any, truthy, run time
-related: concept.booleans concept.if-expressions concept.types error.not-callable
+related: concept.booleans concept.if-expressions concept.types error.type error.not-callable
 docs: README.md
 code: CORE SEMANTIC NOT-BOOLEAN
 
@@ -229,11 +229,15 @@ Bool: there is no truthiness, so 0, "", [] and unit are not false. The
 message shows the value: "if condition must be a Boolean, got V" -- also
 for an operand of `and`, `or` and `not`, which are conditions too.
 
-Where the compiler infers a parameter's type from its use as a condition,
-a non-Boolean argument is rejected statically (TYPE). Where it cannot --
-a parameter declared `any`, a value from untyped code -- the check happens
-when the condition runs. The front end does not reject every condition
-whose type it knows today: even `if 3:` compiles and fails here.
+Only a condition whose type the compiler does not know reaches this
+check: a parameter declared `any`, an element of a List of mixed values, a
+value from untyped code. A condition whose type is statically of another
+kind -- `if 3:`, a List, a String, unit, a struct, or a rigid imprint
+variable T -- is a compile-time TYPE error at the condition instead
+(error.type), and an untyped parameter used as a condition gets the
+inferred contract bool, so a call that gives it a non-Boolean of known
+type is rejected at the call (rule.type-generic-call). NOT-BOOLEAN is no
+declared error: no `on` handler catches it.
 
 == EXAMPLE
     fn choose(flag: any) -> int:

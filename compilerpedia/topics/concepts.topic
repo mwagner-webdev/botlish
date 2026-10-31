@@ -863,8 +863,11 @@ operand only when needed. `==` and `!=` compare two values.
 
 == RULES
   * An `if` condition and every operand of `and`, `or`, `not` must be a
-    Bool; anything else (an Int, a List) fails with NOT-BOOLEAN when the
-    condition is evaluated.
+    Bool. One statically of another kind (an Int, a List, a function value
+    written without its call) is a compile-time TYPE error at the operand
+    (error.type); one of type `any` is tested when the condition is
+    evaluated, and anything but a Bool then fails with NOT-BOOLEAN
+    (error.not-boolean).
   * Predicates conventionally end in `?` (`empty?`); a function whose
     `true` result proves a refinement declares it (concept.refinements).
   * Passing several boolean literals to one function draws
@@ -2594,7 +2597,9 @@ when no branch is taken. Each branch is a scope of its own.
     "return""): bind the `if` to a name, then use the name.
   * There is no one-line form (`if c: a else: b`) and no ternary operator.
   * `else if` is written `elif` (rule.else-if).
-  * A condition must be a Bool (NOT-BOOLEAN when it is evaluated).
+  * A condition must be a Bool: a TYPE error at compile time when its type
+    is statically another kind, NOT-BOOLEAN when it is evaluated when its
+    type is `any`.
   * Branches may end in `return`, `fail`, `break` or `continue`.
 
 == WHY

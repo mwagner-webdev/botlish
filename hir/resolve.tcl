@@ -1514,6 +1514,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 SetField hir $e ${role}Body [Sequence hir $body [dict replace $ctx scope $branch]]
             }
             SetField hir $e refinements [dict create 1 {} 0 {}]
+            if {[dict exists $node written]} {
+                # The Boolean-consuming construct the program wrote
+                # (hir/syntax.tcl): what the condition's own check names
+                # (hir::range::VerifyCondition).
+                lassign [dict get $node written] form operand
+                SetField hir $e written [if {$operand eq ""} {dict create form $form} else {dict create form $form operand $operand}]
+            }
         }
         loop {
             set body [dict get $node body]

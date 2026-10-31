@@ -95,6 +95,23 @@
 # A call that came from core IR carries no `written` field. The marker is
 # written in every compilation mode and read by diagnostics only: no analysis,
 # lowering or backend consults it.
+#
+# Likewise every `if` node a source frontend builds for a construct of the
+# program carries `written {FORM ?OPERAND?}`: which Boolean-consuming
+# construct its condition is the operand of
+# (STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md):
+#
+#   if, elif   `if c:` / `elif c:`: the condition C
+#   not        `not a`: the operand A
+#   and, or    `a and b` / `a or b`: OPERAND left (the outer if, testing A)
+#              or right (the inner if, testing B)
+#   !=         `a != b`: the test of the inner `==`'s result
+#
+# An `if` a front end synthesizes (a recognizer's dispatch, surface/dfa.tcl; a
+# static block's, hir/static.tcl) or core IR wrote carries none. The marker
+# scopes the condition's own check to the conditions the program wrote
+# (hir::range::VerifyCondition) and names the construct in its diagnostic; no
+# lowering or backend consults it.
 #   return    value
 #   break     value (node or "")
 #   continue
@@ -420,6 +437,20 @@ proc hir::syntax::contextInstallNodes {origin temp value} {
 proc hir::syntax::ifNode {origin condition thenOrigin thenBody elseOrigin elseBody} {
     return [Node if $origin condition $condition thenOrigin $thenOrigin thenBody $thenBody \
         elseOrigin $elseOrigin elseBody $elseBody]
+}
+
+# IF (an `if` node) marked as the Boolean-consuming construct FORM (if | elif
+# | not | and | or | !=) the program wrote, OPERAND (left | right) the operand
+# of `and`/`or` its condition is (see this file's header).
+proc hir::syntax::withWrittenIf {if form {operand ""}} {
+    if {$form ni {if elif not and or !=}} {
+        core::malformed "an if's written form must be if, elif, not, and, or or !=" [list if $form]
+    }
+    if {($form in {and or}) != ($operand in {left right})} {
+        core::malformed "only an and or an or names its operand, left or right" [list if $form $operand]
+    }
+    dict set if written [concat [list $form] $operand]
+    return $if
 }
 
 proc hir::syntax::loopNode {origin bodyOrigin body} {

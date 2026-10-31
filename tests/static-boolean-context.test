@@ -1,0 +1,605 @@
+# static-boolean-context.test -- a Boolean-consuming construct holds its
+# operand to Bool statically (STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md).
+#
+# `if` and `elif` conditions, the operand of `not` and both operands of `and`
+# and `or` test their operand as an `if` does (surface/lower.tcl lowers all of
+# them to HIR `if`s). A condition statically known to be of another kind than
+# Bool used to compile and raise NOT-BOOLEAN when it ran, on every backend --
+# the construct-level twin of METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md's
+# native arguments. The if's own check now rejects it
+# (hir::range::VerifyCondition; the rule hir::types::ConditionMismatch, which
+# shares hir::types::KindMismatch with the native-argument rule), and these
+# tests pin
+#
+#   * the reproducer, rejected before it runs, on every backend and through
+#     the compiler service, and its HIR;
+#   * every construct, in its own name, at its operand; every concrete kind;
+#     dead code; nested positions;
+#   * generic code: an untyped parameter's checked contract (unchanged), a
+#     rigid imprint variable (declared, trait-constrained, inherited) at the
+#     definition; `any` stays dynamic, never judged through an instance;
+#   * the existing stronger checks kept (a trait view, an affine value), no
+#     selection by the condition (a method-style call), core IR unchanged;
+#   * recovery: one diagnostic per independent condition, no cascade (the
+#     rejected test narrows nothing), poison not restated, syntax recovery;
+#   * accepted programs unchanged on every backend: valid conditions,
+#     refinements, short circuits, evaluation order, yields, errors;
+#   * the rule's one statement.
+#
+# audit/static-boolean-context/tools/mutate.tcl's mutants must be killed here.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot service service.tcl]
+interp recursionlimit {} 100000
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# The reproducer of the milestone (METHOD-RECEIVER-TYPE-CORRECTNESS-
+# MILESTONE-1.md, section 12).
+set ::sbcRepro [file join $::projectRoot audit static-boolean-context repro if-list-condition.bot]
+
+# Compiles the application FILES (a dict: file name -> text, `main.bot` the
+# entry) in a fresh directory, -strict 0 (a rejection stays a diagnostic),
+# with the method decision's reference audit on: the HIR.
+proc sbcCompile {files args} {
+    set dir [makeDirectory sbc-app-[pid]-[incr ::sbcCounter]]
+    try {
+        dict for {name text} $files {
+            set f [open [file join $dir $name] w]
+            fconfigure $f -encoding utf-8 -translation lf
+            puts -nonewline $f $text
+            close $f
+        }
+        set saved $hir::methodReferenceAudit
+        set hir::methodReferenceAudit 1
+        try {
+            return [surface::readProgramFile [file join $dir main.bot] -strict 0 -warnings off -cache "" {*}$args]
+        } finally {
+            set hir::methodReferenceAudit $saved
+        }
+    } finally {
+        removeDirectory sbc-app-[pid]-$::sbcCounter
+    }
+}
+set ::sbcCounter 0
+
+# What HIR reports, as a strict compilation raises it: {KIND LINE:COLUMN
+# MESSAGE} each, in order.
+proc sbcShown {hir} {
+    lmap d [hir::recovery::reported $hir] {
+        list [dict get $d kind] \
+            [regsub {^.*:(\d+:\d+)$} [hir::originLocation $hir [hir::methods::DiagnosticOrigin $hir $d]] {\1}] \
+            [dict get $d message]
+    }
+}
+
+# What the entry program TEXT (beside the modules MODULES) reports.
+proc sbcReported {text {modules {}}} {
+    sbcShown [sbcCompile [dict merge $modules [dict create main.bot $text]]]
+}
+
+# The kinds sbcReported reports.
+proc sbcKinds {text {modules {}}} {
+    lmap d [sbcReported $text $modules] {lindex $d 0}
+}
+
+# The outcome of the program TEXT, compiled strictly, on every backend: the
+# one outcome they agree on (sourceAgree), without the effect log.
+proc sbcRuns {text} {
+    lrange [sourceAgree $text $::allBackends] 0 1
+}
+
+# The message of the condition's diagnostic for CONSTRUCT NOUN TYPE (the
+# concrete case).
+proc sbcMessage {construct noun type} {
+    return "$construct requires bool, but $noun has type $type: testing it could only fail when it runs"
+}
+
+# The `if` nodes of HIR written in main.bot (or FILE), in source order: {LINE:COLUMN
+# WRITTEN CONDITION-TYPE} each.
+proc sbcIfs {hir {file main.bot}} {
+    set ifs {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "if"} {
+            continue
+        }
+        set where [hir::originLocation $hir [dict get $node origin]]
+        if {[regexp "/[string map {. \\.} $file]:(\\d+):(\\d+)\$" $where -> line column]} {
+            lappend ifs [list [format %06d:%06d $line $column] $line:$column [dict getdef $node written -] \
+                [hir::types::show [hir::typeOf $hir [dict get $node condition]]]]
+        }
+    }
+    lmap i [lsort -index 0 $ifs] {lrange $i 1 end}
+}
+
+# ---------------------------------------------------------------------------
+# The reproducer
+
+test sbc-reproducer-rejected {the reproducer (an if condition declared List[int]) is rejected at compile time with one TYPE diagnostic at the condition, naming the construct, Bool and the condition's type; the diagnostic is the construct's own, no call's (no subject)} -body {
+    set hir [surface::readProgramFile $::sbcRepro -strict 0 -warnings off -cache ""]
+    set reported [hir::recovery::reported $hir]
+    set d [lindex $reported 0]
+    list [llength $reported] [lindex [sbcShown $hir] 0] [dict exists $d subject] \
+        [expr {[dict get $d expr] eq [hir::get $hir [lindex [hirFind $hir if] 0] condition]}]
+} -result {1 {TYPE 9:8 {the condition of an if requires bool, but this condition has type List[int]: testing it could only fail when it runs}} 0 1}
+
+test sbc-reproducer-strict {a strict compilation raises the diagnostic as {CORE SEMANTIC TYPE}, the program's only one} -body {
+    catch {surface::readProgramFile $::sbcRepro -warnings off -cache ""} message options
+    list [dict get $options -errorcode] [llength [dict get $options -diagnostics]]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test sbc-reproducer-every-backend {main.tcl rejects the reproducer before it runs on every backend: the compile-time diagnostic at 9:8, never the run-time NOT-BOOLEAN} -body {
+    set results {}
+    foreach backend $::allBackends {
+        set status [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -backend $backend $::sbcRepro 2>@1} output]
+        lappend results [list $backend $status \
+            [regexp {if-list-condition\.bot:9:8: the condition of an if requires bool, but this condition has type List\[int\]} $output] \
+            [regexp {NOT-BOOLEAN|must be a Boolean} $output]]
+    }
+    set results
+} -result {{interp 1 1 0} {compile 1 1 0} {cranelift-generic 1 1 0} {cranelift 1 1 0}}
+
+test sbc-reproducer-compiler-service {the compiler service reports the same diagnostic, at the condition's range, through its ordinary checking path} -body {
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set rev [service::analyze $ws $::sbcRepro]
+        list [dict get [service::revision $rev] outcome] [lmap d [service::diagnostics $rev] {
+            list [dict get $d severity] [dict get $d code] [dict get $d line] [dict get $d column] [dict get $d endColumn] [dict get $d message]
+        }]
+    } finally {
+        service::closeWorkspace $ws
+    }
+} -result {semantic {{error {CORE SEMANTIC TYPE} 9 8 9 {the condition of an if requires bool, but this condition has type List[int]: testing it could only fail when it runs}}}}
+
+test sbc-reproducer-hir {the reproducer's HIR: one source if, written as an if, its condition a reference of static type List[int]; the if keeps its branches' type (int) and both branches stay reachable: the rejected condition decides nothing} -body {
+    set hir [surface::readProgramFile $::sbcRepro -strict 0 -warnings off -cache ""]
+    set e [lindex [hirFind $hir if] 0]
+    set node [hir::node $hir $e]
+    set c [dict get $node condition]
+    list [dict get $node written] [hir::kind $hir $c] [hir::types::show [hir::typeOf $hir $c]] \
+        [hir::types::show [hir::typeOf $hir $e]] [dict exists $hir poisoned $c] [dict exists $hir poisoned $e] \
+        [lmap role {thenBody elseBody} {hir::get $hir [lindex [dict get $node $role] 0] reachable}] \
+        [dict get $node refinements]
+} -result {{form if} ref {List[int]} int 0 0 {1 1} {1 {} 0 {}}}
+
+# ---------------------------------------------------------------------------
+# Every Boolean-consuming construct
+
+set ::sbcConstructs {
+    {if {fn f(a: bool, x: int) -> int:
+    if x:
+        1
+    else:
+        2
+
+f(true, 1)
+} 2:8 {the condition of an if} {this condition} int}
+    {elif {fn f(a: bool, x: str) -> int:
+    if a:
+        1
+    elif x:
+        2
+    else:
+        3
+
+f(true, "ab")
+} 4:10 {the condition of an elif} {this condition} str}
+    {not {fn f(a: bool, x: List[int]) -> bool:
+    not x
+
+f(true, [1])
+} 2:9 {the operand of not} {this operand} List[int]}
+    {and-left {fn f(a: bool, x: int) -> bool:
+    x and a
+
+f(true, 1)
+} 2:5 {the left operand of and} {this operand} int}
+    {and-right {fn f(a: bool, x: int) -> bool:
+    a and x
+
+f(true, 1)
+} 2:11 {the right operand of and} {this operand} int}
+    {or-left {fn f(a: bool, x: str) -> bool:
+    x or a
+
+f(true, "ab")
+} 2:5 {the left operand of or} {this operand} str}
+    {or-right {fn f(a: bool, x: str) -> bool:
+    a or x
+
+f(true, "ab")
+} 2:10 {the right operand of or} {this operand} str}
+}
+
+test sbc-constructs {every Boolean-consuming construct is rejected at its operand, in its own name: if and elif conditions, the operand of not, each operand of and and or -- one TYPE each, before running (strict: CORE SEMANTIC TYPE)} -body {
+    set results {}
+    foreach case $::sbcConstructs {
+        lassign $case name text at construct noun type
+        set reported [sbcReported $text]
+        catch {surface::compile $text -warnings off} message options
+        lappend results [list $name [expr {$reported eq [list [list TYPE $at [sbcMessage $construct $noun $type]]]}] \
+            [dict get $options -errorcode]]
+    }
+    set results
+} -result {{if 1 {CORE SEMANTIC TYPE}} {elif 1 {CORE SEMANTIC TYPE}} {not 1 {CORE SEMANTIC TYPE}} {and-left 1 {CORE SEMANTIC TYPE}} {and-right 1 {CORE SEMANTIC TYPE}} {or-left 1 {CORE SEMANTIC TYPE}} {or-right 1 {CORE SEMANTIC TYPE}}}
+
+test sbc-constructs-every-backend {every construct's rejection is the front end's: main.tcl on each backend exits 1 with the TYPE diagnostic and never reaches NOT-BOOLEAN} -body {
+    set dir [makeDirectory sbc-backends-[pid]]
+    set results {}
+    try {
+        foreach case $::sbcConstructs {
+            lassign $case name text at
+            set path [file join $dir $name.bot]
+            set f [open $path w]
+            fconfigure $f -encoding utf-8 -translation lf
+            puts -nonewline $f $text
+            close $f
+            set row [list $name]
+            foreach backend $::allBackends {
+                set status [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -backend $backend $path 2>@1} output]
+                lappend row [list $status [regexp "$name\\.bot:$at: .* requires bool, .*CORE SEMANTIC TYPE" $output] [regexp {NOT-BOOLEAN} $output]]
+            }
+            lappend results $row
+        }
+    } finally {
+        removeDirectory sbc-backends-[pid]
+    }
+    lsort -unique [lmap row $results {lrange $row 1 end}]
+} -result {{{1 1 0} {1 1 0} {1 1 0} {1 1 0}}}
+
+test sbc-written-markers {the front end marks every if it builds for a construct with that construct (if, elif, not, and/or with the operand, !=); an if a construct synthesizes carries none: a recognizer's dispatch (surface/dfa.tcl), core IR's} -body {
+    set hir [sbcCompile [dict create main.bot "fn f(a: bool, b: bool) -> List\[bool\]:\n    x = if a:\n        true\n    elif b:\n        false\n    else:\n        a\n    \[not a, a and b, a or b, a != b, x\]\n\nf(true, false)\n"]]
+    set dfa [surface::compile "import std::dfa\n\ndfa digits over ascii:\n    start:\n        '0'..'9' -> more\n    more:\n        '0'..'9' -> more\n        end -> accept\n\n0\n" t.bot -warnings off]
+    set ir [hir::build {{if {ref true} {block {} {const 1}} {block {} {const 2}}}} -strict 0]
+    list [lmap i [sbcIfs $hir] {lindex $i 1}] \
+        [expr {[llength [hirFind $dfa if]] > 0}] [lsort -unique [lmap e [hirFind $dfa if] {dict getdef [hir::node $dfa $e] written -}]] \
+        [lmap e [hirFind $ir if] {dict getdef [hir::node $ir $e] written -}]
+} -result {{{form if} {form elif} {form not} {form and operand left} {form and operand right} {form or operand left} {form or operand right} {form !=}} 1 - -}
+
+test sbc-ne-tests-equality {`a != b` tests the inner `==`'s result, a Bool: Lists, Strings and structs compare, nothing to reject, on every backend} -body {
+    sbcRuns "struct P:\n    x: int\n\nfn f(a: List\[int\], s: str) -> List\[bool\]:\n    \[a != \[1\], s != \"ab\", P {x: 1} != P {x: 2}\]\n\nf(\[1\], \"ab\")\n"
+} -result {value {[false, false, true]}}
+
+# ---------------------------------------------------------------------------
+# Every statically known kind
+
+set ::sbcKindPrelude {import std::mutable_vector
+import std::ffi::c
+import std::ffi::c::raw
+
+struct P:
+    x: int
+
+enum Color:
+    Red, Green
+
+fn ready() -> bool:
+    true
+
+fn dec(x: DecimalRounded{minDecimalsPreserved: 2}) -> DecimalRounded{minDecimalsPreserved: 2}:
+    x
+
+}
+
+test sbc-other-concrete-kinds {every condition of a known kind other than bool is rejected, whatever the kind: Int, String, UnicodeChar, Float64, unit, List, struct, enum, MutableVector, a function reference (`if ready:` for `if ready():`), a native, a DecimalRounded value, a raw C floating value} -body {
+    set results {}
+    foreach {expression setup} {
+        {3} {}
+        {"ab"} {}
+        {'a'} {}
+        {1.5} {}
+        {unit} {}
+        {[1, 2]} {}
+        {P {x: 1}} {}
+        {Color::Red} {}
+        {v} {v = std::mutable_vector::from_list([1])}
+        {ready} {}
+        {std::mutable_vector::length} {}
+        {d} {d = dec(1.25)}
+        {r} {r = std::ffi::c::raw::double_from_float64(1.5)}
+    } {
+        set text "$::sbcKindPrelude\nfn f() -> int:\n    $setup\n    if $expression:\n        1\n    else:\n        2\n\nf()\n"
+        set reported [sbcReported $text]
+        lappend results [list $expression [llength $reported] [lindex $reported 0 0] \
+            [regexp {^the condition of an if requires bool, but this condition has type (.*): testing it could only fail when it runs$} [lindex $reported 0 2] -> shown] $shown]
+    }
+    set results
+} -result {{3 1 TYPE 1 int} {{"ab"} 1 TYPE 1 str} {'a' 1 TYPE 1 UnicodeChar} {1.5 1 TYPE 1 Float64} {unit 1 TYPE 1 unit} {{[1, 2]} 1 TYPE 1 {List[int]{length: 2}}} {{P {x: 1}} 1 TYPE 1 P} {Color::Red 1 TYPE 1 Color} {v 1 TYPE 1 {MutableVector[int]}} {ready 1 TYPE 1 {ready/0 -> bool}} {std::mutable_vector::length 1 TYPE 1 {native std::mutable_vector::length}} {d 1 TYPE 1 {DecimalRounded{minDecimalsPreserved: 2}}} {r 1 TYPE 1 std::ffi::c::RawDouble}}
+
+test sbc-dead-code-checked {a condition is checked as written, reachable or not (a declared parameter's type is known in dead code too): an invalid condition under `if false:` is rejected; the program used to run} -body {
+    sbcReported "fn f(a: List\[int\]) -> int:\n    if false:\n        if a:\n            return 1\n    2\n\nf(\[1\])\n"
+} -result {{TYPE 3:12 {the condition of an if requires bool, but this condition has type List[int]: testing it could only fail when it runs}}}
+
+test sbc-nested-positions {a construct is checked wherever it is written: an operand of `not` inside a call's argument and a List element, an `and` inside a nested function, an elif inside a loop body, a condition inside a handler, a nested `not (a or b)`} -body {
+    sbcReported "import std::list\n\nerror Bad\n\nfn g(b: bool) -> bool:\n    b\n\nfn may(n: int) -> int errors Bad:\n    if n < 0:\n        fail Bad\n    n\n\nfn f(a: bool, n: int, xs: List\[int\]) -> int:\n    y = g(not n)\n    z = \[a, not xs\]\n    fn inner(k: int) -> bool:\n        a and k\n    loop x in xs:\n        if a:\n            1\n        elif x:\n            2\n    r = may(n):\n        on Bad:\n            if xs:\n                0\n            else:\n                1\n    w = not (a or n)\n    r\n\nf(true, 1, \[1\])\n"
+} -result {{TYPE 14:15 {the operand of not requires bool, but this operand has type int: testing it could only fail when it runs}} {TYPE 15:17 {the operand of not requires bool, but this operand has type List[int]: testing it could only fail when it runs}} {TYPE 21:14 {the condition of an elif requires bool, but this condition has type int: testing it could only fail when it runs}} {TYPE 25:16 {the condition of an if requires bool, but this condition has type List[int]: testing it could only fail when it runs}} {TYPE 29:19 {the right operand of or requires bool, but this operand has type int: testing it could only fail when it runs}} {TYPE 17:15 {the right operand of and requires bool, but this operand has type int: testing it could only fail when it runs}}}
+
+# ---------------------------------------------------------------------------
+# Generic code: contracts, rigid imprint variables, `any`
+
+test sbc-generic-untyped-definition {an untyped parameter used as a condition gets the checked contract bool (hir/signatures.tcl, unchanged): the function alone compiles, its body is not rejected} -body {
+    set hir [sbcCompile [dict create main.bot "fn f(a):\n    if a:\n        1\n    else:\n        2\n\n0\n"]]
+    set block [lindex [hirFind $hir block] 0]
+    list [sbcShown $hir] [lmap t [hir::signatures::checkedTypes $hir $block] {hir::types::show $t}]
+} -result {{} bool}
+
+test sbc-generic-untyped-satisfied {a caller that gives the untyped parameter a Bool runs, every operand form alike, on every backend} -body {
+    sbcRuns "fn f(a, b):\n    x = if a:\n        1\n    else:\n        2\n    \[x, not a, a and b, a or b\]\n\n\[f(true, false), f(false, true)\]\n"
+} -result {value {[[1, false, false, true], [2, true, false, true]]}}
+
+test sbc-generic-untyped-violated {a caller that gives it a List is rejected at the call, once, by the contract the condition imposes; the condition itself is not reported (the body sees `any`, and the semantic instance typed under the List does not judge it again)} -body {
+    sbcReported "fn f(a):\n    if a:\n        1\n    else:\n        2\n\nf(\[1\])\n"
+} -result {{TYPE 7:3 {argument for parameter "a" is statically incompatible with bool, the parameter type inferred from the function body (argument type: List[int]); inferred from the function body: the condition of an if (or not/and/or) requires bool (at 2:8)}}}
+
+set ::sbcBox "struct Box\[T\]:\n    v: T\n\n"
+
+test sbc-generic-imprint-unconstrained {a rigid imprint variable is checked once, for every T: `if b.v:` with b: Box[T] is rejected at the definition with no call, with a convenient call (a Bool, which used to run) and with an inconvenient one (a List, which used to raise NOT-BOOLEAN) alike} -body {
+    set body "fn f(b: Box\[T\]) -> int:\n    if b.v:\n        1\n    else:\n        2\n\n"
+    lmap call {0 {f(Box {v: true})} {f(Box {v: [1]})}} {
+        sbcReported "$::sbcBox$body$call\n"
+    }
+} -result {{{TYPE 5:8 {the condition of an if requires bool, but this condition has type T: the function is checked once, for every T, and not every T is bool}}} {{TYPE 5:8 {the condition of an if requires bool, but this condition has type T: the function is checked once, for every T, and not every T is bool}}} {{TYPE 5:8 {the condition of an if requires bool, but this condition has type T: the function is checked once, for every T, and not every T is bool}}}}
+
+test sbc-generic-imprint-operands {every construct holds a rigid imprint variable alike: `not b.v`, `b.v and true`, `false or b.v`} -body {
+    sbcKinds "${::sbcBox}fn f(b: Box\[T\]) -> List\[bool\]:\n    \[not b.v, b.v and true, false or b.v\]\n\n0\n"
+} -result {TYPE TYPE TYPE}
+
+test sbc-generic-imprint-trait-constrained {a trait constraint names no kind: T satisfies Hashable is not every Bool either, and the condition is rejected at the definition} -body {
+    sbcReported "struct Box\[T satisfies Hashable\]:\n    v: T\n\nfn f(b: Box\[T\]) -> int:\n    if b.v:\n        1\n    else:\n        2\n\nf(Box {v: true})\n"
+} -result {{TYPE 5:8 {the condition of an if requires bool, but this condition has type T: the function is checked once, for every T, and not every T is bool}}}
+
+test sbc-generic-imprint-inherited {an inherited imprint variable (an untyped forwarder's, INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md) is held the same way: `if unbox(b):` and `not unbox(b)` are rejected at the definition, though the one call gives a Bool} -body {
+    set prelude "${::sbcBox}fn unbox(b: Box\[T\]) -> T:\n    b.v\n\n"
+    list [sbcReported "${prelude}fn first(b):\n    if unbox(b):\n        1\n    else:\n        2\n\nfirst(Box {v: true})\n"] \
+        [sbcKinds "${prelude}fn first(b):\n    not unbox(b)\n\nfirst(Box {v: true})\n"]
+} -result {{{TYPE 8:8 {the condition of an if requires bool, but this condition has type T': the function is checked once, for every T', and not every T' is bool}}} TYPE}
+
+test sbc-generic-imprint-kind-free {an imprint variable in an operation that requires no kind is valid for every T: `b.v == b.v` is a Bool condition, and it runs for a List and for a Bool on every backend} -body {
+    sbcRuns "${::sbcBox}fn f(b: Box\[T\]) -> int:\n    if b.v == b.v:\n        1\n    else:\n        2\n\n\[f(Box {v: \[1\]}), f(Box {v: true})\]\n"
+} -result {value {[1, 1]}}
+
+test sbc-any-dynamic-true-false {an `any` condition is tested when it runs: a Bool in it selects the branch, on every backend, every construct alike} -body {
+    sbcRuns "fn f(a: any) -> List\[int\]:\n    x = if a:\n        1\n    else:\n        2\n    y = if not a:\n        3\n    else:\n        4\n    z = if a and true:\n        5\n    else:\n        6\n    w = if false or a:\n        7\n    else:\n        8\n    \[x, y, z, w\]\n\n\[f(true), f(false)\]\n"
+} -result {value {[[1, 4, 5, 7], [2, 3, 6, 8]]}}
+
+test sbc-any-dynamic-incompatible {an `any` condition holding a List compiles -- even when the one caller's type is known, the program as written says `any` -- and raises the run-time NOT-BOOLEAN on every backend, unchanged} -body {
+    list [sbcReported "fn f(a: any) -> int:\n    if a:\n        1\n    else:\n        2\n\nf(\[1\])\n"] \
+        [sbcRuns "fn f(a: any) -> int:\n    if a:\n        1\n    else:\n        2\n\nf(\[1\])\n"]
+} -result {{} {error {CORE SEMANTIC NOT-BOOLEAN}}}
+
+test sbc-any-dynamic-operands {each operand form of an `any` holding a List raises NOT-BOOLEAN when it is tested, and only then: `false and a` and `true or a` never test it} -body {
+    lmap expression {{not a} {a and true} {true and a} {false or a} {a or true} {false and a} {true or a}} {
+        lindex [sbcRuns "fn f(a: any) -> bool:\n    $expression\n\nf(\[1\])\n"] 0
+    }
+} -result {error error error error error value value}
+
+test sbc-any-element {a mixed List's element is `any` (its static type says nothing more): a condition on it is the run-time check's} -body {
+    sbcRuns "import std::list\n\nfn f(i: int) -> int errors IndexNotFound:\n    xs = \[1, true\]\n    if std::list::at(xs, i):\n        1\n    else:\n        2\n\nr = f(1):\n    on IndexNotFound:\n        0\ns = f(0):\n    on IndexNotFound:\n        0\n\[r, s\]\n"
+} -result {error {CORE SEMANTIC NOT-BOOLEAN}}
+
+test sbc-any-after-observable-operations {an `any` condition's dynamic check runs exactly where the condition is tested, after the operations before it: a coroutine's yields before the test are observed, and the failure comes only when the resume reaches the test} -constraints nativeCoroutines -body {
+    set head "import std::coroutine\n\nfn log(n: int, v: any) -> any:\n    yield n\n    v\n\nfn run() -> int:\n    if log(1, true) and log(2, \[1\]):\n        1\n    else:\n        2\n\n"
+    list [sbcRuns "${head}fn drive():\n    coroutine {step, first} = run()\n    \[first, step()\]\n\ndrive()\n"] \
+        [sbcRuns "${head}fn drive():\n    coroutine {step, first} = run()\n    \[first, step(), step()\]\n\ndrive()\n"]
+} -result {{value {[1, 2]}} {error {CORE SEMANTIC NOT-BOOLEAN}}}
+
+test sbc-any-in-coroutine {a dynamic condition inside a coroutine body, given a Bool by a resume message, selects as before on every backend} -constraints nativeCoroutines -body {
+    sbcRuns "import std::coroutine\n\nstruct In:\n    flag: any\n\nfn g(resume In) -> int:\n    m = yield 0\n    if m.flag:\n        1\n    else:\n        2\n\nfn drive(b: bool) -> int:\n    coroutine {step} = g()\n    step(In {flag: b})\n\n\[drive(true), drive(false)\]\n"
+} -result {value {[1, 2]}}
+
+# ---------------------------------------------------------------------------
+# Existing stronger checks, no selection, core IR
+
+test sbc-trait-view-misuse-kept {a trait view as a condition keeps its own diagnostic, TRAIT-VIEW-MISUSE (a view has no kind; the kind rule says nothing more)} -body {
+    sbcKinds "trait Shown:\n    fn show(self: Shown) -> str\n\nstruct W:\n    x: int\n\nfn show(w: W) -> str:\n    \"w\"\n\nfn f(x: Shown) -> int:\n    if x:\n        1\n    else:\n        2\n\nf(W {x: 3})\n"
+} -result {TRAIT-VIEW-MISUSE}
+
+test sbc-affine-condition-kept {a reachable affine condition (a coroutine handle) keeps the ownership discipline's diagnostic, AFFINE-ERASURE-UNSUPPORTED, alone; in dead code, where that analysis never looks, the condition's own TYPE reports it} -body {
+    set head "import std::coroutine\n\nfn gen() -> int:\n    yield 1\n    2\n\nfn f() -> int:\n    coroutine {step: s, first: v} = gen()\n"
+    list [sbcKinds "$head    if s:\n        1\n    else:\n        2\n\nf()\n"] \
+        [sbcKinds "$head    if false:\n        if s:\n            return 1\n    v\n\nf()\n"]
+} -result {AFFINE-ERASURE-UNSUPPORTED TYPE}
+
+test sbc-method-condition-not-a-subject {the condition's diagnostic is the construct's, never a method-style call's problem: with two visible candidates, one returning bool and one int, `if s.ready():` stays AMBIGUOUS-METHOD-CALL -- the condition does not select the bool one} -body {
+    set modules [dict create a.bot "fn ready(s: str) -> bool:\n    true\n" b.bot "fn ready(s: str) -> int:\n    1\n"]
+    set hir [sbcCompile [dict merge $modules [dict create main.bot "import a\nimport b\n\nfn f(s: str) -> int:\n    if s.ready():\n        1\n    else:\n        2\n\nf(\"ab\")\n"]]]
+    lmap d [hir::recovery::reported $hir] {dict get $d kind}
+} -result {AMBIGUOUS-METHOD-CALL}
+
+test sbc-method-condition-decided-alone {a method-style call decided by its own checks keeps its decision: the one applicable candidate returns int, and the condition is then rejected for it, in the construct's name} -body {
+    sbcReported "import a\nimport b\n\nfn f(s: str) -> int:\n    if s.ready():\n        1\n    else:\n        2\n\nf(\"ab\")\n" \
+        [dict create a.bot "fn ready(s: str) -> int:\n    1\n" b.bot "fn ready(n: int) -> bool:\n    true\n"]
+} -result {{TYPE 5:8 {the condition of an if requires bool, but this condition has type int: testing it could only fail when it runs}}}
+
+test sbc-core-ir-unchanged {core IR text is past the source boundary and keeps its run-time semantics: `if (const 1)` builds strictly and raises NOT-BOOLEAN when it runs (control.test's if-4)} -body {
+    set hir [hir::build {{if {const 1} {block {} {const 1}} {block {} {const 0}}}}]
+    list [llength [hir::diagnostics $hir]] [lindex [outcomeUnderHir compile $hir] 1]
+} -result {0 {CORE SEMANTIC NOT-BOOLEAN}}
+
+test sbc-static-compile-rejects {a static compile block holding an invalid condition is rejected with the diagnostic, reified as std::compiler::DiagnosticCode::Type} -body {
+    sourceAgree "import std::compiler\n\nfn probe() errors std::compiler::CompilerError:\n    static compile:\n        if 3:\n            1\n\nr = probe():\n    on std::compiler::CompilerError {code, primary, message}:\n        \[code, primary.line, primary.column, message\]\nr\n"
+} -result {value {[std::compiler::DiagnosticCode::Type, 5, 12, "the condition of an if requires bool, but this condition has type int: testing it could only fail when it runs"]}}
+
+# ---------------------------------------------------------------------------
+# Diagnostics and recovery
+
+test sbc-independent-conditions {independently invalid conditions are independent diagnostics, in source order: an if's and its elif's, and two operands of one `and`} -body {
+    list [sbcReported "fn f(a: List\[int\], s: str) -> int:\n    if a:\n        1\n    elif s:\n        2\n    else:\n        3\n\nf(\[1\], \"ab\")\n"] \
+        [sbcKinds "fn f(a: int, b: str) -> bool:\n    a and b\n\nf(1, \"ab\")\n"]
+} -result {{{TYPE 2:8 {the condition of an if requires bool, but this condition has type List[int]: testing it could only fail when it runs}} {TYPE 4:10 {the condition of an elif requires bool, but this condition has type str: testing it could only fail when it runs}}} {TYPE TYPE}}
+
+test sbc-no-cascade-invalid-operand {an expression already rejected (poison) is no second diagnostic as a condition: `if a + "s":`, an unknown field, an unbound name report only their own error} -body {
+    list [sbcKinds "fn f(a: int) -> int:\n    if a + \"s\":\n        1\n    else:\n        2\n\nf(1)\n"] \
+        [sbcKinds "struct P:\n    x: int\n\nfn f(p: P) -> int:\n    if p.nope:\n        1\n    else:\n        2\n\nf(P {x: 1})\n"] \
+        [sbcKinds "fn f() -> int:\n    if nosuch:\n        1\n    else:\n        2\n\nf()\n"]
+} -result {TYPE UNKNOWN-FIELD UNBOUND}
+
+test sbc-no-cascade-after {a rejected condition decides nothing: its value is never narrowed to bool, so later uses of it -- after the if and in either branch -- are judged by its own type (they used to report "has type bool" for the List)} -body {
+    lmap use {after then} {
+        set body [expr {$use eq "after"
+            ? "    if a:\n        1\n    else:\n        2\n    std::list::length(a)\n"
+            : "    if a:\n        std::list::length(a)\n    else:\n        2\n"}]
+        sbcReported "import std::list\n\nfn f(a: List\[int\]) -> int:\n$body\nf(\[1\])\n"
+    }
+} -result {{{TYPE 4:8 {the condition of an if requires bool, but this condition has type List[int]: testing it could only fail when it runs}}} {{TYPE 4:8 {the condition of an if requires bool, but this condition has type List[int]: testing it could only fail when it runs}}}}
+
+test sbc-no-cascade-dead-code {the rejected test narrows nothing in dead code either, where the native-argument check also judges: one diagnostic} -body {
+    sbcKinds "import std::list\n\nfn f(a: List\[int\]) -> int:\n    if false:\n        if a:\n            return 1\n        return std::list::length(a)\n    2\n\nf(\[1\])\n"
+} -result {TYPE}
+
+test sbc-recovery-branches-checked {both branches of a rejected condition stay reachable and keep every check of their own: an independent error in each branch is reported beside the condition's} -body {
+    sbcReported "fn f(a: int) -> int:\n    if a:\n        1 + \"s\"\n    else:\n        2 - \[1\]\n\nf(1)\n"
+} -result {{TYPE 2:8 {the condition of an if requires bool, but this condition has type int: testing it could only fail when it runs}} {TYPE 3:13 {argument 2 of native + requires int, but this operand has type str: the call could only fail when it runs}} {TYPE 5:13 {argument 2 of native - requires int, but this operand has type List[int]{length: 1}: the call could only fail when it runs}}}
+
+test sbc-recovery-result-used {the if keeps its branches' type, so a use of its value is judged by what the branches give: a valid use reports nothing more, an invalid one is its own independent error} -body {
+    set head "import std::list\n\nfn f(a: int) -> int errors IndexNotFound:\n    x = if a:\n        \[1\]\n    else:\n        \[2\]\n"
+    list [sbcKinds "$head    std::list::at(x, 0)\n\nr = f(1):\n    on IndexNotFound:\n        0\nr\n"] \
+        [sbcKinds "$head    x + 1\n\nr = f(1):\n    on IndexNotFound:\n        0\nr\n"]
+} -result {TYPE {TYPE TYPE}}
+
+test sbc-recovery-later-statements {statements after a rejected condition stay reachable and checked: an unrelated error after it is reported} -body {
+    sbcKinds "fn f(a: str) -> int:\n    if a:\n        1\n    else:\n        2\n    a + 1\n\nf(\"ab\")\n"
+} -result {TYPE TYPE}
+
+test sbc-syntax-recovery {past a syntax error, a separately analyzable conditional still gets its semantic check: the syntax error first, then the condition's TYPE (a hole condition itself reports nothing more)} -body {
+    set dir [makeDirectory sbc-syntax-[pid]]
+    try {
+        set path [file join $dir main.bot]
+        set f [open $path w]
+        puts -nonewline $f "fn f(a: List\[int\]) -> int:\n    if a:\n        1\n    else:\n        2\n\nx = foo(\nif (:\n    1\n"
+        close $f
+        catch {surface::readProgramFile $path -cache "" -recover-syntax 1} message options
+        lmap entry [dict get $options -diagnostics] {list [dict get $entry location line]:[dict get $entry location column] [core::ShownCode $entry]}
+    } finally {
+        removeDirectory sbc-syntax-[pid]
+    }
+} -result {{7:8 {SURFACE SYNTAX}} {8:5 {SURFACE SYNTAX}} {2:8 {CORE SEMANTIC TYPE}}}
+
+# ---------------------------------------------------------------------------
+# Accepted programs are unchanged
+
+test sbc-valid-conditions {valid conditions compile and run as before on every backend: a literal, a Bool parameter, an ordinary function's result, a comparison, logical operators, an untyped helper's result, a refinement predicate's proof} -body {
+    sbcRuns "refined type Yes = bool\n\nfn yes?(b: bool) -> bool proves b: Yes:\n    b\n\nfn positive(n: int) -> bool:\n    n > 0\n\nfn helper(x):\n    x == 1\n\nfn f(b: bool, n: int) -> List\[int\]:\n    r1 = if true:\n        1\n    else:\n        0\n    r2 = if b:\n        1\n    else:\n        0\n    r3 = if positive(n):\n        1\n    else:\n        0\n    r4 = if n == 2 and not b or false:\n        1\n    else:\n        0\n    r5 = if helper(n):\n        1\n    else:\n        0\n    r6 = if yes?(b):\n        1\n    else:\n        0\n    \[r1, r2, r3, r4, r5, r6\]\n\n\[f(true, 1), f(false, 2)\]\n"
+} -result {value {[[1, 1, 1, 0, 1, 1], [1, 0, 1, 1, 0, 0]]}}
+
+test sbc-valid-conditions-no-diagnostic {the same program has no diagnostic at all, and its refinement still narrows (a proven branch's facts are the predicate's)} -body {
+    set hir [sbcCompile [dict create main.bot "refined type Yes = bool\n\nfn yes?(b: bool) -> bool proves b: Yes:\n    b\n\nfn take(b: Yes) -> int:\n    1\n\nfn f(b: bool) -> int:\n    if yes?(b):\n        take(b)\n    else:\n        0\n\nf(true)\n"]]
+    sbcShown $hir
+} -result {}
+
+test sbc-valid-errors-in-conditions {a condition that may fail with a declared error keeps its error edge: the error propagates from the condition, and a handled one is handled, on every backend} -body {
+    sbcRuns "error Bad\n\nfn check(n: int) -> bool errors Bad:\n    if n < 0:\n        fail Bad\n    n > 5\n\nfn f(n: int) -> int errors Bad:\n    if check(n) and check(n - 10):\n        1\n    else:\n        2\n\nfn g(n: int) -> int:\n    r = f(n):\n        on Bad:\n            -1\n    r\n\n\[g(-1), g(3), g(7), g(20)\]\n"
+} -result {value {[-1, 2, -1, 1]}}
+
+test sbc-valid-yields-in-conditions {a condition that yields keeps its protocol: the operands' yields happen in written order, the right operand only when needed, on every backend} -constraints nativeCoroutines -body {
+    sbcRuns "import std::coroutine\n\nfn log(n: int, v: bool) -> bool:\n    yield \[n\]\n    v\n\nfn run() -> List\[int\]:\n    a = if log(1, false) and log(2, true):\n        10\n    else:\n        11\n    b = if log(3, true) and log(4, true):\n        12\n    else:\n        13\n    \[a, b\]\n\nfn drive():\n    coroutine {step, first} = run()\n    rest = loop i from 0 to 10:\n        if std::coroutine::done?(step):\n            break\n        step()\n    \[first, rest\]\n\ndrive()\n"
+} -result {value {[[1], [[3], [4], [11, 12]]]}}
+
+test sbc-valid-affine-in-branches {ownership is unchanged around a valid condition: a coroutine handle moved in one branch and released in the other} -constraints nativeCoroutines -body {
+    sbcRuns "import std::coroutine\n\nfn gen() -> int:\n    yield 1\n    2\n\nfn use(c: Coroutine{args: \[\], return: int}) -> int:\n    c()\n\nfn f(b: bool) -> int:\n    coroutine {step: s, first: v} = gen()\n    if b and v == 1:\n        use(s)\n    else:\n        0\n\n\[f(true), f(false)\]\n"
+} -result {value {[2, 0]}}
+
+test sbc-valid-context-in-condition {a condition that reads an installed context compiles and runs as before} -body {
+    sbcRuns "context struct Flags:\n    enabled: bool\n\nfn enabled(context flags: Flags) -> bool:\n    flags.enabled\n\nfn f(context flags: Flags) -> int:\n    if enabled():\n        1\n    else:\n        2\n\nwith context Flags {enabled: true}\nf()\n"
+} -result {value 1}
+
+test sbc-valid-backend-code-unchanged {an accepted program's generated code is unchanged by the check: the Tcl compiler's code and the specialized NIR of a function with every construct are the same with and without the if markers (the check adds no run-time operation)} -body {
+    set source "fn f(a: bool, b: bool, c: any) -> List\[bool\]:\n    x = if a:\n        true\n    elif b:\n        false\n    else:\n        a\n    \[not a, a and b, a or c, a != b, x\]\n\nf(true, false, true)\n"
+    set marked [surface::compile $source -warnings off]
+    set unmarked $marked
+    foreach e [hirFind $unmarked if] {
+        dict unset unmarked exprs $e written
+    }
+    # (The Tcl compiler numbers its procedures and variables per process.)
+    set normal {apply {{code} {regsub -all {\m(block|unit|v|t)[0-9]+} $code {\1N}}}}
+    list [expr {[{*}$normal [dict get [core::compiler::compileHir $marked] code]] eq [{*}$normal [dict get [core::compiler::compileHir $unmarked] code]]}] \
+        [expr {[native::nir $marked] eq [native::nir $unmarked]}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# The compiler service and the front-end cache
+
+test sbc-compiler-service-revisions {the compiler service's diagnostics follow the current source revision: List[int] rejected, Bool clean, back to List[int] rejected, `any` clean, the condition removed clean, restored rejected} -body {
+    set dir [makeDirectory sbc-service-[pid]]
+    set path [file join $dir main.bot]
+    set f [open $path w]
+    puts -nonewline $f "0\n"
+    close $f
+    set ws [service::workspace -warnings off -cache ""]
+    set results {}
+    try {
+        foreach {type body} {
+            {List[int]} "    if a:\n        1\n    else:\n        2\n"
+            bool "    if a:\n        1\n    else:\n        2\n"
+            {List[int]} "    if a:\n        1\n    else:\n        2\n"
+            any "    if a:\n        1\n    else:\n        2\n"
+            {List[int]} "    1\n"
+            {List[int]} "    if a:\n        1\n    else:\n        2\n"
+        } {
+            service::setDocument $ws $path "fn f(a: $type) -> int:\n$body\n0\n"
+            set rev [service::analyze $ws $path]
+            lappend results [list $type [dict get [service::revision $rev] outcome] [lmap d [service::diagnostics $rev] {
+                list [dict get $d code] [dict get $d line]:[dict get $d column]
+            }]]
+        }
+    } finally {
+        service::closeWorkspace $ws
+        removeDirectory sbc-service-[pid]
+    }
+    set results
+} -result {{{List[int]} semantic {{{CORE SEMANTIC TYPE} 2:8}}} {bool ok {}} {{List[int]} semantic {{{CORE SEMANTIC TYPE} 2:8}}} {any ok {}} {{List[int]} ok {}} {{List[int]} semantic {{{CORE SEMANTIC TYPE} 2:8}}}}
+
+test sbc-cache-hit-equals-build {through the front-end cache a valid program's entry equals its build, the if markers included (the HIR keeps them, HIR-INTERCHANGE.md), and a rejected one is rejected again on a second compilation} -body {
+    set dir [makeDirectory sbc-cache-[pid]]
+    set cache [makeDirectory sbc-cache-store-[pid]]
+    try {
+        set good [file join $dir good.bot]
+        set bad [file join $dir bad.bot]
+        foreach {path text} [list $good "fn f(a: bool) -> bool:\n    not a and a or a\n\nf(true)\n" $bad "fn f(a: int) -> bool:\n    not a\n\nf(1)\n"] {
+            set f [open $path w]
+            puts -nonewline $f $text
+            close $f
+        }
+        set first [surface::readProgramFile $good -warnings off -cache $cache]
+        set second [surface::readProgramFile $good -warnings off -cache $cache]
+        set again {}
+        foreach i {1 2} {
+            catch {surface::readProgramFile $bad -warnings off -cache $cache} message options
+            lappend again [dict get $options -errorcode]
+        }
+        list [lsort [lmap e [hirFind $second if] {dict get [hir::node $second $e] written}]] \
+            [expr {[lmap e [hirFind $first if] {dict get [hir::node $first $e] written}] eq [lmap e [hirFind $second if] {dict get [hir::node $second $e] written}]}] \
+            $again
+    } finally {
+        removeDirectory sbc-cache-[pid]
+        removeDirectory sbc-cache-store-[pid]
+    }
+} -result {{{form and operand left} {form and operand right} {form not} {form or operand left} {form or operand right}} 1 {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}}
+
+# ---------------------------------------------------------------------------
+# The rule, stated once
+
+test sbc-rule-cases {ConditionMismatch: a known kind other than bool is a mismatch; bool, a refinement whose values are Bools, any, never, a structural function type and a trait view are none; a rigid imprint variable is {imprint bool}} -body {
+    list [hir::types::ConditionMismatch {list int}] [hir::types::ConditionMismatch int] [hir::types::ConditionMismatch str] \
+        [hir::types::ConditionMismatch bool] [hir::types::ConditionMismatch any] [hir::types::ConditionMismatch never] \
+        [hir::types::ConditionMismatch {fn {args {} return bool errors {}}}] [hir::types::ConditionMismatch {trait Shown}] \
+        [hir::types::ConditionMismatch {imprint T}] [hir::types::KindMismatch bool int] [hir::types::KindMismatch "" int] [hir::types::KindMismatch any int]
+} -result {{list bool} {int bool} {str bool} {} {} {} {} {} {imprint bool} {int bool} {} {}}
+
+test sbc-rule-one-statement {the kind rule is stated once (hir::types::KindMismatch): the native-argument rule, the condition rule and region inference's dead if ask it; the condition's check asks ConditionMismatch and states no kind of its own} -body {
+    set kind [info body hir::types::KindMismatch]
+    set requirement [info body hir::types::RequirementMismatch]
+    set native [info body hir::types::NativeKindMismatch]
+    set argument [info body hir::types::NativeArgumentMismatch]
+    set condition [info body hir::types::ConditionMismatch]
+    set verify [info body hir::range::VerifyCondition]
+    set if [info body hir::types::If]
+    list [regexp {kindOf} $kind] [regexp {KindMismatch} $requirement] [regexp {KindMismatch} $native] \
+        [regexp {RequirementMismatch} $argument] [regexp {RequirementMismatch bool} $condition] \
+        [regexp {kindOf} $native$argument$condition$requirement] \
+        [regexp {ConditionMismatch} $verify] [regexp {kindOf|core::type::base} $verify] \
+        [regexp {KindMismatch bool \$test} $if] [regexp {kindOf \$test} $if]
+} -result {1 1 1 1 1 0 1 0 1 0}
+
+cleanupTests

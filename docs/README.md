@@ -2117,7 +2117,15 @@ program binds (§16, "Root references and hygiene").
 
 `not`, `and`, `or` and `!=` are conditions, not calls. `and` and `or`
 evaluate their right operand only when needed. Every operand must be a
-Boolean (`NOT-BOOLEAN` otherwise), so the result is always a Boolean. A
+Boolean, so the result is always a Boolean. Like an `if` condition, an
+operand whose type is statically of another kind (an Int, a List, a
+function value, a rigid imprint variable) is a compile-time `TYPE` error at
+the operand, in the construct's name ("the right operand of and requires
+bool, ..."), and only an operand of type `any` is tested when it runs
+(`NOT-BOOLEAN` otherwise): STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md.
+Each `if` these and the `if` and `elif` rules build carries `written` (the
+construct and, for `and`/`or`, the operand), which the condition's check
+reads; no lowering or backend does. A
 program may bind `list`, or name a parameter `list`, without changing what
 `[...]` means.
 

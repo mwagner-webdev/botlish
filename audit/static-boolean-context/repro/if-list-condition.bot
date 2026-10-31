@@ -1,0 +1,14 @@
+# The reproducer of STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md, section 12): an `if`
+# condition whose declared type is List[int]. It used to compile and raise
+# NOT-BOOLEAN ("if condition must be a Boolean, got [1]") on every backend;
+# the condition is now a compile-time TYPE error at 9:8, before any backend
+# runs.
+
+fn f(a: List[int]) -> int:
+    if a:
+        1
+    else:
+        2
+
+f([1])

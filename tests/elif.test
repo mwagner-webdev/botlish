@@ -737,10 +737,11 @@ test elif-error-in-branch {an unbound name in an elif branch is reported at that
     set message
 } -result {t.bot:5:5: unbound name "missing"}
 
-test elif-non-boolean-condition {a non-Boolean elif condition is the same error as for a nested if} -body {
-    bothSpellings "x = 1\nif x == 0:\n    1\nelif 5:\n    2\nelse:\n    3" \
-        "x = 1\nif x == 0:\n    1\nelse:\n    if 5:\n        2\n    else:\n        3"
-} -result {error {CORE SEMANTIC NOT-BOOLEAN} {if condition must be a Boolean, got 5}}
+test elif-non-boolean-condition {a non-Boolean elif condition is the same error as for a nested if: a compile-time TYPE at the condition in both spellings, before any backend runs (STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md; it used to be the run-time NOT-BOOLEAN), each naming the construct as written} -body {
+    set elif [parity "x = 1\nif x == 0:\n    1\nelif 5:\n    2\nelse:\n    3"]
+    set nested [parity "x = 1\nif x == 0:\n    1\nelse:\n    if 5:\n        2\n    else:\n        3"]
+    list [expr {[string map {elif if} $elif] eq $nested}] $elif
+} -result {1 {error {CORE SEMANTIC TYPE} {t.bot:L:C: the condition of an elif requires bool, but this condition has type int: testing it could only fail when it runs}}}
 
 test elif-reserved-word {elif is a keyword: it cannot name a binding or a function} -body {
     list [catch {surface::compile "elif = 1" t.bot} m1] $m1 [catch {surface::compile "fn elif():\n    1" t.bot} m2] $m2

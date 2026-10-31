@@ -2620,53 +2620,80 @@ proc hir::types::IsHashable {type} {
     return [expr {[lindex [HashClass $type] 0] eq "total"}]
 }
 
-# {KIND WANTED} when an argument of static type TYPE at position INDEX of a
-# call of native NAME is of a statically known kind KIND other than the kind
-# WANTED the native's parameter requires (core/native.tcl's -param-types),
-# else {}: the call can only raise TYPE when it runs, whatever the value is.
-# The one statement of the rule: the call's own check reports it
-# (hir::range::VerifyNativeKinds), the call is poison in the generic walk and
-# dead in region inference (Call), and the method-call decision's kind proofs
-# rule a candidate out by it (hir::methods::Excluded)
-# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md). A type of no fixed kind
-# (`any`, a structural function type, `never`; an imprint variable, which
-# NativeArgumentMismatch judges) is no mismatch: the call checks it when it
-# runs.
-proc hir::types::NativeKindMismatch {name index type} {
-    set paramType [lindex [dict get [core::native::metadata $name] paramTypes] $index]
-    if {$paramType in {"" any} || $type eq "never"} {
+# {KIND WANTED} when every value of static TYPE has the runtime kind KIND
+# (kindOf) and KIND is not the kind WANTED a position requires, else {}: no
+# value of TYPE can be used there, so the operation can only fail when it
+# runs, whatever the value is. The one statement of when a statically known
+# kind excludes a required one, which every static use of a required kind
+# asks: a native's argument (NativeKindMismatch: WANTED the kind its
+# -param-types entry names) and a Boolean-consuming construct's operand
+# (ConditionMismatch: WANTED bool). A type of no fixed kind (`any`, a
+# structural function type, a trait view, `never`; an imprint variable, which
+# RequirementMismatch judges) is no mismatch: the operation checks it when it
+# runs. Nor is anything for a position that requires no kind ("", `any`).
+proc hir::types::KindMismatch {wanted type} {
+    if {$wanted in {"" any} || $type eq "never"} {
         return {}
     }
     set kind [kindOf $type]
-    set wanted [core::type::base $paramType]
-    if {$kind eq "" || $wanted in {"" any} || $kind eq $wanted} {
+    if {$kind eq "" || $kind eq $wanted} {
         return {}
     }
     return [list $kind $wanted]
 }
 
-# NativeKindMismatch, or {imprint WANTED} when TYPE is a rigid imprint
-# variable (hir/imprint.tcl) and the native's parameter INDEX requires the
-# kind WANTED: a body is checked once, for every T, and no kind admits every
-# T -- the call is valid only for the arguments some caller happens to give
-# it, which no check of the body may count on (its constraints are traits,
-# which name no kind). The call's own check reports both
-# (hir::range::VerifyNativeKinds); only the first is a call that can only
-# fail (region inference, whose types are concrete, never sees the second).
-proc hir::types::NativeArgumentMismatch {name index type} {
-    set mismatch [NativeKindMismatch $name $index $type]
-    if {$mismatch ne {} || ![IsImprint $type]} {
+# KindMismatch, or {imprint WANTED} when TYPE is a rigid imprint variable
+# (hir/imprint.tcl) and the position requires the kind WANTED: a body is
+# checked once, for every T, and no kind admits every T -- the operation is
+# valid only for the arguments some caller happens to give it, which no check
+# of the body may count on (its constraints are traits, which name no kind).
+# The program's own checks report both; only the first is an operation that
+# can only fail (region inference, whose types are concrete, never sees the
+# second).
+proc hir::types::RequirementMismatch {wanted type} {
+    set mismatch [KindMismatch $wanted $type]
+    if {$mismatch ne {} || ![IsImprint $type] || $wanted in {"" any}} {
         return $mismatch
     }
+    return [list imprint $wanted]
+}
+
+# The runtime kind argument INDEX of a call of native NAME requires: the
+# kind of its -param-types entry (core/native.tcl), "" past its parameter
+# list or for a parameter of no kind.
+proc hir::types::NativeParamKind {name index} {
     set paramType [lindex [dict get [core::native::metadata $name] paramTypes] $index]
     if {$paramType in {"" any}} {
-        return {}
+        return ""
     }
-    set wanted [core::type::base $paramType]
-    if {$wanted in {"" any}} {
-        return {}
-    }
-    return [list imprint $wanted]
+    return [core::type::base $paramType]
+}
+
+# KindMismatch for an argument of static type TYPE at position INDEX of a
+# call of native NAME: the call can only raise TYPE when it runs. The call's
+# own check reports it (hir::range::VerifyNativeKinds), the call is poison in
+# the generic walk and dead in region inference (Call), and the method-call
+# decision's kind proofs rule a candidate out by it (hir::methods::Excluded)
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md).
+proc hir::types::NativeKindMismatch {name index type} {
+    return [KindMismatch [NativeParamKind $name $index] $type]
+}
+
+# RequirementMismatch for that argument: what the call's own check reports
+# (hir::range::VerifyNativeKinds).
+proc hir::types::NativeArgumentMismatch {name index type} {
+    return [RequirementMismatch [NativeParamKind $name $index] $type]
+}
+
+# RequirementMismatch for the operand, of static type TYPE, of a
+# Boolean-consuming construct -- an `if` or `elif` condition, the operand of
+# `not`, either operand of `and`/`or`, all of which test their operand as an
+# `if` does (surface/lower.tcl) -- which requires a Bool (runtime kind bool):
+# the `if`'s own check reports it (hir::range::VerifyCondition), the
+# condition decides nothing in the generic walk (If), and region inference
+# types the `if` dead (STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md).
+proc hir::types::ConditionMismatch {type} {
+    return [RequirementMismatch bool $type]
 }
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.
@@ -4958,6 +4985,22 @@ proc hir::types::CallResult {hirVar e halts} {
     return [Poison hir $e]
 }
 
+# 1 if the generic walk (CTX) types an `if` (NODE) whose condition, of static
+# type TYPE, the if's own check rejects (hir::range::VerifyCondition): a
+# condition the program wrote (`written`, hir/syntax.tcl) of another kind
+# than Bool, or a rigid imprint variable (ConditionMismatch), in a source
+# program (MakesPoison). Never in a semantic instance's walk -- a body typed
+# under one call's argument types, where the condition's value of no fixed
+# kind in the program as written (`any`, an untyped parameter's) is the
+# run-time check's, and the call is held to the checked bool contract the
+# use imposes (hir/signatures.tcl) -- nor in region inference, which types
+# such an if dead. Reachable or not: the check judges the program as
+# written, and a rejected test's narrowing would restate it in dead code too.
+proc hir::types::RejectsCondition {hir ctx node type} {
+    return [expr {[dict exists $node written] && ![dict exists $ctx inst] && [MakesPoison $hir $ctx]
+        && [ConditionMismatch $type] ne {}}]
+}
+
 # The Boolean (1/0) CONDITION is statically known to evaluate to, or "":
 # a decided call, or a reference to a Boolean root binding (a constant).
 proc hir::types::KnownOutcome {hir condition} {
@@ -5003,14 +5046,27 @@ proc hir::types::If {hirVar ctxVar e} {
     set known ""
     set refinements [dict create 1 {} 0 {}]
     set implication [hir::refine::Nothing]
-    if {[dict exists $ctx spec] && [kindOf $test] ni {"" bool}} {
-        # Region inference: the condition is statically not a Boolean, so
-        # the if always raises NOT-BOOLEAN.
+    set rejected 0
+    if {[dict exists $ctx spec]} {
+        if {[KindMismatch bool $test] ne {}} {
+            # Region inference: the condition is statically not a Boolean,
+            # so the if always raises NOT-BOOLEAN.
+            set test never
+        }
+    } elseif {[RejectsCondition $hir $ctx $node $test]} {
+        # A condition the if's own check rejects (hir::range::VerifyCondition:
+        # statically of another kind than Bool, or a rigid imprint variable)
+        # decides nothing, as a poisoned one does: both branches reachable,
+        # neither refined, and its value never narrowed to bool -- nothing
+        # after the if is judged by a type the rejected test would imply
+        # (a List condition narrowed to bool made every later use of the List
+        # a second, wrong diagnostic). The if keeps its branches' type.
         set test never
+        set rejected 1
     }
     # A poisoned condition decides nothing: both branches are reachable,
     # neither refined.
-    set poisonTest [expr {$test eq "never" && [Poisoned $hir $condition]}]
+    set poisonTest [expr {$test eq "never" && ($rejected || [Poisoned $hir $condition])}]
     set live [expr {$entry && ($test ne "never" || $poisonTest)}]
     if {$test ne "never"} {
         set known [KnownOutcome $hir $condition]

@@ -407,6 +407,16 @@ Other compile-time families, reported as TYPE with this page:
     (`fn f(b: Box[T])`), a value of type T is no particular kind: "... has
     type T: the function is checked once, for every T, and not every T is
     mutarray".
+  * Conditions: an `if` or `elif` condition, the operand of `not` and
+    either operand of `and` and `or` require a Bool, and one whose type is
+    statically of another kind -- an Int, a String, a List, unit, a
+    struct, a function value written without its call (`if ready:` for
+    `if ready():`) -- or a rigid imprint variable T is rejected at the
+    condition, in the construct's name: "the condition of an if requires
+    bool, but this condition has type List[int]: testing it could only fail
+    when it runs", "the right operand of and requires bool, ...". There is
+    no truthiness, so no other kind is ever a condition. A condition of
+    type `any` is tested when it runs instead (error.not-boolean).
 
 At run time, TYPE has a different source. The primitive operations and
 the standard-library intrinsics also check the kinds of their arguments
@@ -477,6 +487,19 @@ fn first(a: List[int]) errors IndexNotFound:
 @caption A List receiver of std::mutable_array::at, which requires a MutableArray
 @error CORE SEMANTIC TYPE
 @at 4:5
+@end
+
+@example reject
+fn pick(xs: List[int]) -> int:
+    if xs:
+        1
+    else:
+        2
+
+pick([1])
+@caption A List as an if condition: there is no truthiness
+@error CORE SEMANTIC TYPE
+@at 2:8
 @end
 
 @topic rule.type-generic-call

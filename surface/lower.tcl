@@ -132,7 +132,13 @@
 # Boolean (NOT-BOOLEAN otherwise), so their value is always a Boolean. As the
 # condition of an `if`, the compilers lower these `if`s straight to branches
 # (hir/condition.tcl, BRANCH-FORM-BOOLEAN-LOWERING.md); HIR keeps no other
-# form of them.
+# form of them. Every `if` these rules and the `if` rule build is marked with
+# the construct it was written as (`written`: if, elif, not, and/or with the
+# operand, !=; hir/syntax.tcl), so that the condition the program wrote is
+# held to Bool where it is written, in that construct's name
+# (hir::range::VerifyCondition, STATIC-BOOLEAN-CONTEXT-CORRECTNESS-
+# MILESTONE-1.md): an operand statically of another kind is a compile-time
+# TYPE error, never the run-time NOT-BOOLEAN.
 #
 # Origins: every syntax node gets {file f1 node ID start .. end .. line ..
 # column .. endLine .. endColumn ..} from the AST node it comes from (ID is
@@ -845,7 +851,8 @@ proc surface::lower::Node {node} {
                 set equal [hir::syntax::withOperator [hir::syntax::withWritten [hir::syntax::callNode $origin \
                     [hir::syntax::rootRef $opOrigin ==] \
                     [Node [dict get $node left]] [Node [dict get $node right]]] operator] ==]
-                return [Branch $origin $equal [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]
+                return [hir::syntax::withWrittenIf [Branch $origin $equal \
+                    [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]] !=]
             }
             set call [hir::syntax::withWritten [hir::syntax::callNode $origin [hir::syntax::rootRef $opOrigin $op] \
                 [Node [dict get $node left]] [Node [dict get $node right]]] operator]
@@ -865,21 +872,22 @@ proc surface::lower::Node {node} {
         }
         not {
             set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
-            return [Branch $origin [Node [dict get $node operand]] \
-                [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]
+            return [hir::syntax::withWrittenIf [Branch $origin [Node [dict get $node operand]] \
+                [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]] not]
         }
         logical {
             set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
             set right [dict get $node right]
             set rightOrigin [OriginOf $right test]
-            set test [Branch $rightOrigin [Node $right] \
-                [list [Bool $rightOrigin true]] [list [Bool $rightOrigin false]]]
-            if {[dict get $node op] eq "and"} {
-                return [Branch $origin [Node [dict get $node left]] \
-                    [list $test] [list [Bool $opOrigin false]]]
+            set op [dict get $node op]
+            set test [hir::syntax::withWrittenIf [Branch $rightOrigin [Node $right] \
+                [list [Bool $rightOrigin true]] [list [Bool $rightOrigin false]]] $op right]
+            if {$op eq "and"} {
+                return [hir::syntax::withWrittenIf [Branch $origin [Node [dict get $node left]] \
+                    [list $test] [list [Bool $opOrigin false]]] and left]
             }
-            return [Branch $origin [Node [dict get $node left]] \
-                [list [Bool $opOrigin true]] [list $test]]
+            return [hir::syntax::withWrittenIf [Branch $origin [Node [dict get $node left]] \
+                [list [Bool $opOrigin true]] [list $test]] or left]
         }
         bind {
             return [hir::syntax::bindNode $origin [dict get $node name] \
@@ -965,8 +973,9 @@ proc surface::lower::Node {node} {
                 set elseOrigin [OriginOf $else]
                 set elseBody [Sequence [dict get $else body]]
             }
-            return [hir::syntax::ifNode $origin [Node [dict get $node condition]] \
-                [OriginOf $then] [Sequence [dict get $then body]] $elseOrigin $elseBody]
+            return [hir::syntax::withWrittenIf [hir::syntax::ifNode $origin [Node [dict get $node condition]] \
+                [OriginOf $then] [Sequence [dict get $then body]] $elseOrigin $elseBody] \
+                [if {[dict getdef $node elif 0]} {string cat elif} else {string cat if}]]
         }
         loop {
             set body [dict get $node body]

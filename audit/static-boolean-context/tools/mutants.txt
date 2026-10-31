@@ -1,0 +1,194 @@
+# Mutants of STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md
+# (audit/static-boolean-context/tools/mutate.tcl): deliberate breaks of the
+# static check of Boolean-consuming constructs -- the front end's construct
+# markers (surface/lower.tcl), the condition's own check (hir/range.tcl's
+# VerifyCondition), the rule (hir/types.tcl's ConditionMismatch over the
+# shared KindMismatch), the rejected condition's recovery (hir/types.tcl's
+# If), the untyped parameter's contract (hir/signatures.tcl). Each must be
+# killed by tests/static-boolean-context.test, by one of the tests its `!!`
+# line names -- the test that states the rule it breaks, never an unrelated
+# failure.
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Botlish has no conditional loop (`loop` takes no condition, a counted loop
+# Int bounds, a loop over a collection its iterable) and no guard of a
+# pattern or a handler, so the mutation catalog's "loop condition unchecked"
+# has no implementation path to mutate; every Boolean-consuming construct is
+# one of the `if`s below.
+
+# ---------------------------------------------------------------------------
+# The condition's check
+
+@@ condition-unchecked the census defect for every construct: the check finds no mismatch, so a List condition compiles and raises NOT-BOOLEAN when it runs (the if still decides nothing)
+!! sbc-reproducer-rejected sbc-reproducer-strict sbc-reproducer-every-backend sbc-reproducer-compiler-service sbc-constructs sbc-constructs-every-backend
+## hir/range.tcl
+<<<<
+    set mismatch [hir::types::ConditionMismatch $type]
+====
+    set mismatch {}
+>>>>
+
+@@ if-unchecked the original defect for `if` (and `elif`) alone: the operands of not, and and or are still checked
+!! sbc-reproducer-rejected sbc-constructs sbc-other-concrete-kinds
+## hir/range.tcl
+<<<<
+    set mismatch [hir::types::ConditionMismatch $type]
+====
+    set mismatch [if {[dict get $node written form] in {if elif}} {list} else {hir::types::ConditionMismatch $type}]
+>>>>
+
+@@ logical-operands-unmarked the front end builds `and` and `or` without their construct marker: both operands of a logical operator go unchecked
+!! sbc-constructs sbc-written-markers
+## surface/lower.tcl
+<<<<
+            if {$op eq "and"} {
+                return [hir::syntax::withWrittenIf [Branch $origin [Node [dict get $node left]] \
+                    [list $test] [list [Bool $opOrigin false]]] and left]
+            }
+            return [hir::syntax::withWrittenIf [Branch $origin [Node [dict get $node left]] \
+                [list [Bool $opOrigin true]] [list $test]] or left]
+====
+            dict unset test written
+            if {$op eq "and"} {
+                return [Branch $origin [Node [dict get $node left]] \
+                    [list $test] [list [Bool $opOrigin false]]]
+            }
+            return [Branch $origin [Node [dict get $node left]] \
+                [list [Bool $opOrigin true]] [list $test]]
+>>>>
+
+@@ right-operand-unmarked only the right operand's test (the inner if of `and`/`or`) loses its marker: the operand evaluated only when needed goes unchecked
+!! sbc-constructs sbc-written-markers sbc-nested-positions
+## surface/lower.tcl
+<<<<
+            set test [hir::syntax::withWrittenIf [Branch $rightOrigin [Node $right] \
+                [list [Bool $rightOrigin true]] [list [Bool $rightOrigin false]]] $op right]
+====
+            set test [Branch $rightOrigin [Node $right] \
+                [list [Bool $rightOrigin true]] [list [Bool $rightOrigin false]]]
+>>>>
+
+@@ not-unmarked the front end builds `not` without its marker: its operand goes unchecked
+!! sbc-constructs sbc-written-markers sbc-nested-positions
+## surface/lower.tcl
+<<<<
+            return [hir::syntax::withWrittenIf [Branch $origin [Node [dict get $node operand]] \
+                [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]] not]
+====
+            return [Branch $origin [Node [dict get $node operand]] \
+                [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]
+>>>>
+
+@@ diagnostic-suppressed the mismatch still makes the condition decide nothing, but its diagnostic is never reported: the program compiles and fails when it runs
+!! sbc-reproducer-rejected sbc-reproducer-strict sbc-reproducer-every-backend sbc-reproducer-compiler-service
+## hir/range.tcl
+<<<<
+    hir::Diagnose hir TYPE [format {%s requires bool, but %s has type %s: %s} \
+====
+    list hir TYPE [format {%s requires bool, but %s has type %s: %s} \
+>>>>
+
+@@ dead-code-exempt the check skips a condition in dead code: an invalid condition under `if false:` compiles again
+!! sbc-dead-code-checked sbc-no-cascade-dead-code sbc-affine-condition-kept
+## hir/range.tcl
+<<<<
+    if {[dict exists $hir semanticContext] || ![dict exists $node written]} {
+====
+    if {[dict exists $hir semanticContext] || ![dict exists $node written] || ![dict get $node reachable]} {
+>>>>
+
+@@ construct-misnamed the diagnostic names every construct an if: the operand of not, and, or and an elif's condition are misdescribed
+!! sbc-constructs sbc-nested-positions
+## hir/range.tcl
+<<<<
+    lassign [ConditionConstruct $node] construct noun
+====
+    lassign {{the condition of an if} {this condition}} construct noun
+>>>>
+
+# ---------------------------------------------------------------------------
+# The static/dynamic distinction
+
+@@ any-rejected `any` is treated as a known incompatible kind: a dynamic condition holding a Bool no longer compiles
+!! sbc-any-dynamic-true-false sbc-any-dynamic-incompatible sbc-any-dynamic-operands sbc-any-element sbc-any-after-observable-operations sbc-any-in-coroutine sbc-rule-cases
+## hir/types.tcl
+<<<<
+    return [RequirementMismatch bool $type]
+====
+    if {$type eq "any"} {
+        return {any bool}
+    }
+    return [RequirementMismatch bool $type]
+>>>>
+
+@@ imprint-variable-deferred a rigid imprint variable is treated as `any`: the body is checked against the instantiations callers give (a Bool runs, a List fails when it runs), never for every T
+!! sbc-generic-imprint-unconstrained sbc-generic-imprint-operands sbc-generic-imprint-trait-constrained sbc-generic-imprint-inherited sbc-rule-cases
+## hir/types.tcl
+<<<<
+    return [RequirementMismatch bool $type]
+====
+    return [KindMismatch bool $type]
+>>>>
+
+@@ instance-contamination the check also runs in a semantic instance's view: an `any` condition is judged by the type one caller happens to give it, and an untyped parameter's violated contract is reported a second time
+!! sbc-any-dynamic-incompatible sbc-generic-untyped-violated
+## hir/range.tcl
+<<<<
+    if {[dict exists $hir semanticContext] || ![dict exists $node written]} {
+====
+    if {![dict exists $node written]} {
+>>>>
+
+@@ untyped-contract-dropped an untyped parameter used as a condition imposes no contract: a caller giving it a List compiles and fails when it runs
+!! sbc-generic-untyped-definition sbc-generic-untyped-violated
+## hir/signatures.tcl
+<<<<
+                {type bool checked "the condition of an if (or not/and/or)"} $ctx
+====
+                {type any checked "the condition of an if (or not/and/or)"} $ctx
+>>>>
+
+# ---------------------------------------------------------------------------
+# Recovery and ownership of the diagnostic
+
+@@ poison-dropped a rejected condition still decides as a valid one does: its value is narrowed to bool, and later uses of the List restate the rejection as "has type bool"
+!! sbc-no-cascade-after sbc-no-cascade-dead-code
+## hir/types.tcl
+<<<<
+    } elseif {[RejectsCondition $hir $ctx $node $test]} {
+====
+    } elseif {0 && [RejectsCondition $hir $ctx $node $test]} {
+>>>>
+
+@@ affine-restated a reachable affine condition is reported twice: the condition's TYPE beside the ownership discipline's established AFFINE-ERASURE-UNSUPPORTED
+!! sbc-affine-condition-kept
+## hir/range.tcl
+<<<<
+    if {[hir::types::IsAffine $type] && [dict get $node reachable]} {
+====
+    if {0} {
+>>>>
+
+@@ condition-selects the condition's diagnostic is made a method-style call's own problem (a subject): the condition selects the candidate whose result is a Bool, SFIAE for a use of a call's value
+!! sbc-method-condition-not-a-subject
+## hir/range.tcl
+<<<<
+    hir::Diagnose hir TYPE [format {%s requires bool, but %s has type %s: %s} \
+        $construct $noun [hir::semantic::ShowType $hir $type] $why] $condition
+====
+    set message [format {%s requires bool, but %s has type %s: %s} \
+        $construct $noun [hir::semantic::ShowType $hir $type] $why]
+    if {[hir::kind $hir $condition] eq "call"} {
+        hir::CheckingCall $condition {hir::Diagnose hir TYPE $message $condition}
+    } else {
+        hir::Diagnose hir TYPE $message $condition
+    }
+>>>>

@@ -1842,12 +1842,80 @@ proc hir::range::VerifyCallArguments {hirVar ranges e} {
     if {$kind eq {struct}} {
         VerifyStruct hir $ranges $e $node
     }
+    if {$kind eq {if}} {
+        VerifyCondition hir $e $node
+    }
     if {$kind eq {block}} {
         return
     }
     foreach child [hir::children $hir $e] {
         VerifyCallArguments hir $ranges $child
     }
+}
+
+# Checks the condition of `if` E (NODE) -- the operand of the
+# Boolean-consuming construct the program wrote there (`written`,
+# hir/syntax.tcl: an if or elif condition, the operand of not, either
+# operand of and/or) -- against Bool, the kind it requires: a condition
+# whose static type has a known kind other than bool is a compile-time TYPE
+# error of the construct, at the condition, never the run-time NOT-BOOLEAN
+# it would raise, and so is a rigid imprint variable, which a body is checked
+# for every T of (hir::types::ConditionMismatch, the rule native arguments
+# share: hir::types::KindMismatch;
+# STATIC-BOOLEAN-CONTEXT-CORRECTNESS-MILESTONE-1.md). A condition of no fixed
+# kind (`any`) is still tested when it runs. The diagnostic is the
+# construct's own, no call's (no subject: a method-style call whose result is
+# the condition is never decided by it). Like a call's check it judges the
+# program as written, reachable or not, never in a semantic instance's view.
+# The if decides nothing on such a condition (hir::types::If), so nothing
+# after it restates it.
+proc hir::range::VerifyCondition {hirVar e node} {
+    upvar 1 $hirVar hir
+    if {[dict exists $hir semanticContext] || ![dict exists $node written]} {
+        # (A semantic instance's view, a test a construct synthesizes, core
+        # IR's: VerifyNativeKinds's boundaries.)
+        return
+    }
+    set condition [dict get $node condition]
+    if {[dict exists $hir poisoned $condition]} {
+        # (An expression an earlier diagnostic rejected: its own error is the
+        # one to report.)
+        return
+    }
+    set type [hir::typeOf $hir $condition]
+    set mismatch [hir::types::ConditionMismatch $type]
+    if {$mismatch eq {}} {
+        return
+    }
+    if {[hir::types::IsAffine $type] && [dict get $node reachable]} {
+        # (An affine value -- a coroutine handle, a C pointer -- is the
+        # ownership discipline's to report where its analysis runs: the
+        # condition does not carry ownership, AFFINE-ERASURE-UNSUPPORTED,
+        # hir/affine.tcl.)
+        return
+    }
+    lassign [ConditionConstruct $node] construct noun
+    if {[lindex $mismatch 0] eq "imprint"} {
+        set why [format {the function is checked once, for every %s, and not every %s is bool} \
+            [hir::types::show $type] [hir::types::show $type]]
+    } else {
+        set why "testing it could only fail when it runs"
+    }
+    hir::Diagnose hir TYPE [format {%s requires bool, but %s has type %s: %s} \
+        $construct $noun [hir::semantic::ShowType $hir $type] $why] $condition
+}
+
+# {CONSTRUCT NOUN}: how a diagnostic of `if` NODE's condition names the
+# construct that requires it and the condition itself (`written`).
+proc hir::range::ConditionConstruct {node} {
+    set written [dict get $node written]
+    switch -- [dict get $written form] {
+        if   { return {{the condition of an if} {this condition}} }
+        elif { return {{the condition of an elif} {this condition}} }
+        not  { return {{the operand of not} {this operand}} }
+        !=   { return {{the test of !=} {the comparison}} }
+    }
+    return [list "the [dict get $written operand] operand of [dict get $written form]" {this operand}]
 }
 
 # Checks one call E's arguments against its target's declared parameter
