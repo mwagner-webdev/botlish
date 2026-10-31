@@ -1464,6 +1464,22 @@ def dialog(s, agent, needle, timeout):
     return None, None
 
 
+def dismiss_alerts(s, needle="Icy Tower stopped", limit=5):
+    """Every alert of the game still shown (UserNotificationCenter's: it outlives the process that asked
+    for it), each dismissed with its first button: the texts of those found. A case that may meet one
+    calls this before it starts and after it ends, so no case reads another's alert."""
+    found = []
+    for _ in range(limit):
+        pid, w = dialog(s, "UserNotificationCenter", needle, 0.5)
+        if w is None:
+            break
+        found.append(" / ".join(w.get("texts", []))[:200])
+        buttons = w.get("buttons") or []
+        s.tool("ax-press", pid, "OK" if "OK" in buttons or not buttons else buttons[0])
+        time.sleep(0.5)
+    return found
+
+
 def case_app_bundle(s):
     rc, d = s.tool("app-info", s.args.app)
     want = s.bundle_id(s.args.app)
@@ -1588,10 +1604,12 @@ def alert_case(s, name, app, args, env, wanted, window_first=False):
     """A failure in a LaunchServices launch: the alert, its text WANTED (the report's line), OK pressed,
     the process gone; the line on standard error too. Bounded: an alert that never comes is a failure,
     and the process is killed."""
+    stale = dismiss_alerts(s)
     g = AppGame(s, name, app, args, env)
-    facts = {"open": g.open_result}
+    facts = {"open": g.open_result, "stale_alerts": stale}
     checks = [(g.p.pid is not None, "LaunchServices started it")]
     if g.p.pid is None:
+        dismiss_alerts(s)
         return s.verdict(name, checks, facts, "error-reporting")
     if window_first:
         win = g.window(20.0)
@@ -1613,21 +1631,24 @@ def alert_case(s, name, app, args, env, wanted, window_first=False):
     checks.append((how == "exited", "after the alert the game ends by itself (%s)" % how))
     checks.append((left is None, "no alert is left behind"))
     checks.append((wanted in err, "the report is on standard error as well: %s" % err[-200:]))
-    facts.update({"ended": how, "stderr": err[-400:], "stdout": out[-200:]})
+    facts.update({"ended": how, "stderr": err[-400:], "stdout": out[-200:], "dismissed_after": dismiss_alerts(s)})
     return s.verdict(name, checks, facts, "error-reporting")
 
 
 def case_app_no_alert_terminal(s):
     """The bundle's Mach-O run from a terminal: the same failure, standard error only, no alert, prompt exit."""
     exe = os.path.join(s.args.app, "Contents", "MacOS", "icy-tower")
+    stale = dismiss_alerts(s)
     g = Game(s, "app-terminal-failure", exe, ["--seed", "7"], {"SDL_VIDEO_DRIVER": "nosuch"})
     code, how, out, err = g.finish(15.0)
     _, w = dialog(s, "UserNotificationCenter", "Icy Tower stopped", 2.0)
+    # an alert shown here is this case's failure; it is dismissed so that it is no later case's
+    dismiss_alerts(s)
     checks = [(code == 1 and how == "exited", "status 1 (%s, %s)" % (code, how)),
               ("Icy Tower: SDL_Init failed" in err, "the report on standard error: %s" % err[-200:]),
               (w is None, "no alert: a terminal run reports on standard error only"),
               (g.wall < 10, "it ends at once (%.1f s): nothing waits for a dialog" % g.wall)]
-    return s.verdict("app-terminal-failure", checks, {"stderr": err}, "error-reporting")
+    return s.verdict("app-terminal-failure", checks, {"stderr": err, "stale_alerts": stale}, "error-reporting")
 
 
 def case_app_gatekeeper(s):
