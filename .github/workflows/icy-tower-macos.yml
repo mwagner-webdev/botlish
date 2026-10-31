@@ -455,6 +455,7 @@ jobs:
       - name: The release path's dry run (a throwaway identity)
         id: dry-run
         if: always() && steps.bundle.outcome == 'success'
+        timeout-minutes: 15
         run: |
           dry="$RUNNER_TEMP/dry-run"
           rm -rf "$dry"
@@ -470,8 +471,29 @@ jobs:
           # errSecInternalComponent): the throwaway root is trusted for code
           # signing, in the admin trust domain, for this step alone -- removed
           # however it ends. A release never does this: Apple's root is the
-          # system's.
-          untrust() { sudo security remove-trusted-cert -d "$dry/anchors/root.cer" 2>/dev/null || true; }
+          # system's. Changing the admin trust settings asks a person to
+          # authorize it (SecurityAgent's dialog: nobody answers one on a
+          # runner, and the step waited for it), so the authorization rule
+          # com.apple.trust-settings.admin is lifted for each of the two
+          # changes alone and put back exactly as it was read (checked below);
+          # every call is bounded, never left waiting.
+          bounded() { perl -e '$t = shift; alarm $t; exec @ARGV or die "$ARGV[0]: $!\n"' 60 "$@"; }
+          rule="$dry/trust-settings-admin.plist"
+          security authorizationdb read com.apple.trust-settings.admin >"$rule" 2>/dev/null
+          same_rule() {
+            security authorizationdb read com.apple.trust-settings.admin 2>/dev/null | python3 -I -c '
+          import plistlib, sys
+          drop = lambda d: {k: v for k, v in d.items() if k not in ("created", "modified", "version")}
+          sys.exit(drop(plistlib.load(sys.stdin.buffer)) != drop(plistlib.load(open(sys.argv[1], "rb"))))' "$rule"
+          }
+          trusting() {
+            local status=0
+            bounded sudo security authorizationdb write com.apple.trust-settings.admin allow >/dev/null 2>&1 || status=1
+            [ $status = 0 ] && { bounded "$@" || status=1; }
+            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" >/dev/null 2>&1 || status=1
+            return $status
+          }
+          untrust() { trusting sudo security remove-trusted-cert -d "$dry/anchors/root.cer" 2>/dev/null || true; }
           trap 'untrust; rel cleanup --work "$w"' EXIT
           started=$(date +%s)
           rel preflight --work "$w" --mode dry-run --trust-anchors "$dry/anchors"
@@ -479,8 +501,10 @@ jobs:
           started=$(date +%s)
           rel keychain --work "$w"
           echo "keychain: $(( $(date +%s) - started )) s"
-          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$w/secret/icy-tower-signing.keychain-db" "$dry/anchors/root.cer"
-          security find-identity -v -p codesigning "$w/secret/icy-tower-signing.keychain-db"
+          trusting sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$w/secret/icy-tower-signing.keychain-db" "$dry/anchors/root.cer" \
+            || { echo "::error::the throwaway root could not be trusted for code signing"; exit 1; }
+          same_rule || { echo "::error::the trust settings' authorization rule was not put back"; exit 1; }
+          bounded security find-identity -v -p codesigning "$w/secret/icy-tower-signing.keychain-db"
           started=$(date +%s)
           rel sign --work "$w" --app "$dry/app/Icy Tower.app"
           echo "sign: $(( $(date +%s) - started )) s"
@@ -499,6 +523,8 @@ jobs:
           if security dump-trust-settings -d 2>/dev/null | grep -q "Icy Tower Test Root CA"; then
             echo "::error::the throwaway root is still trusted"; exit 1
           fi
+          same_rule || { echo "::error::the trust settings' authorization rule was not put back"; exit 1; }
+          echo "the throwaway root's trust removed; com.apple.trust-settings.admin as it was"
           after=$(security list-keychains -d user)
           [ "$before" = "$after" ] || { echo "::error::the keychain search list was not restored"; exit 1; }
           [ ! -e "$w/secret" ] || { echo "::error::the decoded credentials were left behind"; exit 1; }

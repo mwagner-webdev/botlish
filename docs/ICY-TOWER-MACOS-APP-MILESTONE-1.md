@@ -968,7 +968,7 @@ CLEAN-PLACEHOLDER
 ## 36. GitHub Actions trust boundaries
 
 `.github/workflows/icy-tower-macos.yml` (read by
-`audit/macos-release/tests/test_workflow.py`, 21 tests, which parse it as
+`audit/macos-release/tests/test_workflow.py`, 23 tests, which parse it as
 GitHub does):
 
 * triggers: push (branches, and `icy-tower-macos-v*` tags), pull_request,
@@ -1265,7 +1265,7 @@ Added:
 | `examples/games/icy-tower/macos/apple-ca/` | Apple Root CA and the Developer ID Certification Authorities G1 and G2 (public, pinned) |
 | `audit/macos-release/tests/test_credentials.py`, `test_release.py`, `test_workflow.py` | the preflight's negative tests, the stages against stand-ins and the bundle's controls, the workflow's trust boundary |
 | `audit/macos-release/tools/fixtures.py`, `machofake.py`, `stub-tool.py` | synthetic credentials, synthetic Mach-O files, recording stand-ins of Apple's tools |
-| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 64 mutants and their harness |
+| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 66 mutants and their harness |
 | `audit/macos-release/requirements.txt` | the tests' environment (PyYAML beside the release's) |
 | `audit/icy-tower/tools/app-abi-check.py` | macos_app.bot's C declarations against the SDK |
 | `docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md` | this report |

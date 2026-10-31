@@ -140,6 +140,30 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("--trust-anchors", body)
         self.assertIn("preflight --work \"$WORK\" --mode release", body)
 
+    def test_release_changes_no_trust_setting(self):
+        # Apple's root is the system's: a release trusts no certificate and
+        # lifts no authorization rule (only the game job's dry run does, for
+        # its throwaway root, and puts the rule back)
+        body = "\n".join(runs(self.release) + runs(self.publish))
+        for word in ("add-trusted-cert", "remove-trusted-cert", "authorizationdb", "trust-settings"):
+            self.assertNotIn(word, body)
+
+    def test_dry_run_puts_the_trust_rule_back(self):
+        game = self.jobs["game"]
+        i = step_index(game, "The release path's dry run")
+        self.assertIsNotNone(i)
+        st = game["steps"][i]
+        body = st["run"]
+        self.assertLessEqual(int(st.get("timeout-minutes", 10 ** 6)), 30)
+        lifted = body.count("authorizationdb write com.apple.trust-settings.admin allow")
+        self.assertEqual(lifted, 1, "the rule is lifted in one place, trusting()")
+        self.assertIn('authorizationdb write com.apple.trust-settings.admin <"$rule"', body)
+        self.assertIn("same_rule ||", body)
+        self.assertIn("trap 'untrust;", body)
+        for line in body.splitlines():
+            if "add-trusted-cert" in line or "remove-trusted-cert" in line:
+                self.assertIn("trusting ", line, "a trust change outside trusting(): %r" % line.strip())
+
     # --- the order of the release -----------------------------------------------------
 
     def test_stages_in_order(self):

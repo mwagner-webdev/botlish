@@ -829,8 +829,8 @@ def check_sums(directory):
 
 def stage_publishable(work, args):
     if work.mode not in SEQUENCE:
-        raise Failed("MACOS-PUBLISH", "a %s build is never published: only a release (Developer ID, notarized, stapled)"
-                     % work.mode)
+        raise Failed("MACOS-PUBLISH", "%s build is never published: only a release (Developer ID, notarized, stapled)"
+                     % {"adhoc": "an ad hoc", "dry-run": "a dry-run"}.get(work.mode, "a %s" % work.mode))
     seq = SEQUENCE[work.mode]
     stages = work.state["stages"]
     failed = [s["stage"] for s in stages if not s["ok"]]

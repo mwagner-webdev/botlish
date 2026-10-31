@@ -810,3 +810,21 @@ rm -rf "$out/Icy Tower.app"
     permissions:
       contents: write
 >>>>
+
+@@ release-trusts-a-root the release job trusts a certificate of its own for code signing (as the dry run does its throwaway root): Apple's root is no longer the only anchor
+!! test_workflow.Workflow.test_release_changes_no_trust_setting
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          "$PY" -I examples/games/icy-tower/macos/release.py keychain --work "$WORK"
+====
+          "$PY" -I examples/games/icy-tower/macos/release.py keychain --work "$WORK"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign "$WORK/secret/identity.cer"
+>>>>
+
+@@ trust-rule-not-restored the dry run lifts the trust settings' authorization rule and never puts it back
+!! test_workflow.Workflow.test_dry_run_puts_the_trust_rule_back
+## .github/workflows/icy-tower-macos.yml
+<<<<
+            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" >/dev/null 2>&1 || status=1
+====
+>>>>
