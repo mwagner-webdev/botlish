@@ -4013,15 +4013,19 @@ layering:
 * `game.bot` is the program (the frame loop, play, failure reports,
   `main`), one source for every platform; an entry program only installs
   the contexts -- `main.bot` std::linux::io's, `main-windows.bot`
-  std::windows::io's, `main-macos.bot` std::darwin::io's (and imports
-  `macos_link`, the macOS executable's link plan), each `sdl::create()` --
+  std::windows::io's, `main-macos.bot` the macOS application's
+  (`macos_app.bot`'s App: next section but one; and imports `macos_link`,
+  the macOS executable's link plan), each `sdl::create()` --
   and runs `game::main`. Keep everything else out of the entries, and every
   platform name out of the other modules.
-* `sdl.bot` is the one module with raw authority: every function of it
-  that makes a retaining C call or a native view or edit requires its own
+* `sdl.bot` is the one module with SDL's raw authority: every function of
+  it that makes a retaining C call or a native view or edit requires its own
   `Sdl` context, so `render.bot`, `game.bot` and the entries stay ordinary modules
   (`workload-icy-tower-sdl-modules-warning-clean` checks
-  `hir::direct::summary`). Do not mark a game module `direct module`.
+  `hir::direct::summary`). Do not mark a game module `direct module`. The
+  macOS-only `macos_app.bot` is the one other module that calls C (libSystem's
+  write and getenv, CoreFoundation's alert), mediated the same way by its
+  own App context (`workload-icy-tower-app-module`); it calls no SDL.
 * SDL's objects stay behind that context (ICY-TOWER-CONTEXT-REFACTOR-
   CENSUS.md): the installed `Sdl` owns the open session -- the window,
   the renderer and the scratch memory as affine pointers in a private
@@ -4114,9 +4118,22 @@ branch): Botlish.app from the commit, the archive from
 generated on the runner (none is committed), the tests' macOS section, the
 oracle and the graphical acceptance. Keep it so:
 
-* `main-macos.bot` installs `std::darwin::io`'s context and `sdl::Sdl` and
-  imports `macos_link` -- nothing else; the startup policy is the build's
-  (`-native-startup main-thread` in build-macos.sh), never the source's.
+* `main-macos.bot` installs `macos_app::create()` (the application's
+  std::io::IO: next item) and `sdl::Sdl` and imports `macos_link` --
+  nothing else; the startup policy is the build's (`-native-startup
+  main-thread` in build-macos.sh), never the source's.
+* `macos_app.bot` (ICY-TOWER-MACOS-APP-MILESTONE-1.md) is the macOS
+  application's process environment: std::io::IO over std::darwin::write
+  with std::darwin::io's completion policy (change the two together), and,
+  only when the bundle's LSEnvironment sets `ICY_TOWER_ERROR_ALERTS=1`, the
+  run's first standard-error text shown in a CoreFoundation alert
+  (CFUserNotificationDisplayAlert: no SDL, no window, no second event loop)
+  before the write returns. A terminal run of the Mach-O never shows one.
+  Its C declarations are hand-written and private, checked against the SDK
+  by `audit/icy-tower/tools/app-abi-check.py`; never move the alert, or any
+  macOS name, into a shared module (`workload-icy-tower-app-module-shared-
+  sources-untouched`): the Linux and Windows executables are built from the
+  same sources as before.
 * `macos_link.bot` declares the staged archive (`static at
   "native/macos/libSDL3.a"`, relative to the application root) and exactly
   the frameworks and libraries SDL3's sdl3.pc names, in its order:
@@ -4145,6 +4162,55 @@ the head commit's message (`audit/icy-tower/mutate.tcl -macos 1`: every
 mutant in `audit/icy-tower/macos-mutants.txt` must still apply and be killed
 by the detector its `??` line names; update a mutant's text when you change
 the code it mutates, keeping it a mutant of the same rule).
+
+### Icy Tower.app and its release (Developer ID, notarization)
+
+`examples/games/icy-tower/package-macos.sh` assembles `Icy Tower.app` from
+build-macos.sh's executable, byte for byte (`macos/bundle.py`: a structured
+Info.plist, the Mach-O and the bundle checked as a whole);
+`macos/credentials.py` validates the release's seven GitHub values;
+`macos/release.py` is the trust path as gated stages (keychain,
+notarytool's credential validation, sign, verify, record an acceptance,
+notarize, staple, Gatekeeper, tamper, package, publishable, cleanup) in
+three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
+`release` job (ICY-TOWER-MACOS-APP-MILESTONE-1.md). Keep it so:
+
+* Credentials live only in the `macos-release` environment and reach only
+  the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
+  tag of main's history, pushed or run by hand -- never a branch, a pull
+  request, a fork, `pull_request_target`, another job or another workflow;
+  each secret only in the `env` of the step that reads it, never in a
+  script, a `with` or a job's `env`; no step holding one traces commands.
+  Nothing is committed: no certificate but Apple's public ones
+  (`macos/apple-ca/`, pinned by SHA-256 in credentials.py), no key, no
+  password.
+* The preflight runs before any Apple tool and reports every problem under
+  its stable code without a byte of a secret; a malformed value is never
+  left for `security`, `codesign` or `notarytool` to report. A release never
+  takes test trust anchors, never falls back to an ad hoc or dry-run
+  signature, never skips a stage (each refuses to run unless the stages it
+  depends on passed: `publishable` checks the whole sequence, one CDHash
+  and one ZIP digest), and never publishes over an existing release.
+* No entitlement, no `--deep`, no JIT or library-validation exception: the
+  game needs none. The hardened runtime is on in every mode, so ordinary CI
+  plays the bundle under it.
+* A notarization timeout is not a rejection: resume the submission
+  (`notarize --resume ID`; the workflow's `resume_run` and
+  `resume_submission`), never upload another copy for it.
+* Apple's tools are found on PATH (release.py never names their paths), so
+  `audit/macos-release/`'s stand-ins can run every stage on any host.
+
+If you change `package-macos.sh`, `macos/`, `macos_app.bot`, the release
+jobs or `macos-session.py app`, run `audit/macos-release/tests/`
+(test_credentials, test_release, test_workflow; `tests/workload-icy-tower.test`'s
+`workload-icy-tower-release-tooling` runs them) and
+`audit/macos-release/tools/mutate.py` (every mutant in its `mutants.txt`
+must still apply and be killed by a test its `!!` line names: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule) with the pinned environment of
+`audit/macos-release/requirements.txt`, and push to read the game job's
+bundle, LaunchServices and dry-run steps; the release path itself runs only
+for a release tag.
 
 ## Application modules, native program output, the recursion limit
 

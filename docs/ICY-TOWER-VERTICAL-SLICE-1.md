@@ -39,7 +39,10 @@ AArch64 as a Cocoa application: `main-macos.bot` installs `std::darwin::io`
 and imports `macos_link.bot` (the pinned SDL3 as a static archive inside
 the application and the frameworks its sdl3.pc names), and
 `examples/games/icy-tower/build-macos.sh` builds it with Botlish.app and
-`-native-startup main-thread`; every other module is the same file.
+`-native-startup main-thread`; every other module is the same file. **Since
+ICY-TOWER-MACOS-APP-MILESTONE-1.md** it is also `Icy Tower.app`
+(`package-macos.sh`), whose failures reach a Finder user in an alert
+(`macos_app.bot`), with a Developer ID, notarized release path.
 
 ![Three frames of the X11 window under Xvfb: the start, floor 26, a restarted game](../audit/icy-tower/screenshots/xvfb-x11.png)
 

@@ -197,6 +197,8 @@ jobs:
           python3 -I audit/icy-tower/tools/abi-check.py "$STAGE/.bot_modules/sdl3" "$SDLSRC/include" "$RUNNER_TEMP/abi-staged" | tail -n 1
           clang -fsyntax-only --target=arm64-apple-macos11 -I "$SDLSRC/include" out/sdl3-binding/macos-aarch64/layouts-check.c
           echo "layouts-check.c: every generated layout compiles against Apple clang ($(grep -c _Static_assert out/sdl3-binding/macos-aarch64/layouts-check.c) static assertions)"
+          echo "== macos_app.bot's own C declarations (getenv, CoreFoundation's alert) against the SDK"
+          python3 -I audit/icy-tower/tools/app-abi-check.py "$RUNNER_TEMP/app-abi" 2>&1 | tee out/logs/app-abi-check.log
 
       - name: The executable (Mach-O, LC_MAIN, dynamic libraries, size)
         id: macho

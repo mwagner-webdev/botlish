@@ -111,7 +111,11 @@ No game rule changed and no shared module was forked: the port is three
 new files in the game's directory, a build-time recipe shared with the
 link-plan acceptance, and test tooling. Not done here, by the milestone's
 own scope: an application bundle, distribution signing, notarization, a
-release (sections 40 and 41).
+release (sections 40 and 41) -- **since done by
+ICY-TOWER-MACOS-APP-MILESTONE-1.md** (Icy Tower.app, its terminal-free
+error reports, the Developer ID release path). main-macos.bot now installs
+macos_app.bot's application IO context instead of std::darwin::io's (the
+same writes, and an alert of a LaunchServices launch's first diagnostic).
 
 ## 2. Starting application architecture
 
@@ -1049,6 +1053,10 @@ is a CI artifact, because only a Mac builds one.
   and close cases are ENVIRONMENT-BLOCKED, never counted as passed.
 
 ## 41. Prerequisites for an installable macOS .app
+
+**Done since: ICY-TOWER-MACOS-APP-MILESTONE-1.md** (items 1 to 4: the
+bundle, the launch environment and its alerts, Developer ID signing and
+notarization, the ZIP and a versioned release; item 5 remains).
 
 The executable is a command-line Mach-O that opens a window: run from a
 terminal (or `open` on the file), it is the game. An application a person

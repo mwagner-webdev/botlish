@@ -5,6 +5,8 @@ counterpart of xvfb-session.py on a Mac's own window system.
 
     python3 -I macos-session.py run --exe EXE --probe PROBE --worker WORKER
         --helper MACOS_INPUT --reference TRACE_REFERENCE --out DIR [--strict]
+    python3 -I macos-session.py app --app "Icy Tower.app" --helper MACOS_INPUT --out DIR
+        [--probe-app PROBE.app] [--zip ZIP --gatekeeper refused|notarized] [--strict] [--only CASES]
     python3 -I macos-session.py selftest [--out DIR]
 
 EXE is the game as build-macos.sh builds it (main-thread startup, static
@@ -72,6 +74,36 @@ The cases:
   controls      the frame checks reject a capture that is not the game: no
                 window, a blank window, the player painted out, a player that
                 did not move, a frame that did not change, a dummy-driver run
+
+The `app` mode (ICY-TOWER-MACOS-APP-MILESTONE-1.md) launches the bundle as
+the Finder does -- LaunchServices, through `open -n` (its standard output
+and error caught by open's --stdout and --stderr, variables by --env,
+arguments only by --args) -- and finds the process LaunchServices started
+by the bundle identifier and the executable's path: launchd's child, whose
+exit status nobody can read, so a run's end is the process gone and its
+summary what --stdout caught. Its cases:
+  app-bundle    NSBundle, LaunchServices (LSRegisterURL) and the content
+                type: an application bundle, its identifier and executable
+  app-launch    the Finder's launch: no argument (no -psn_), launchd the
+                parent, LaunchServices' working directory, a regular
+                application made active, the game drawn, Escape, the summary
+  app-keyboard  --args --seed 7: Right and Left move the player, Escape
+  app-relaunch  launched again, ended by its window's close button
+  app-gc-stress BOTLISH_NATIVE_GC_STRESS=1: the oracle's summary
+  app-alert-*   a failure (SDL_VIDEO_DRIVER=nosuch, SDL_RENDER_DRIVER=nosuch,
+                --fly; with PROBE.app, the probe's injected SDL_CreateWindow
+                and a present after Cocoa and Metal started): the alert
+                (UserNotificationCenter's window, read through
+                Accessibility) shows the report's line, the game waits,
+                OK is pressed, the game ends, the line is on standard
+                error too, no alert is left; bounded (25 s for the alert)
+  app-terminal-failure  the bundle's Mach-O run directly: standard error
+                only, no alert, an immediate exit
+  app-gatekeeper  ZIP extracted fresh, quarantined (xattr), assessed by
+                spctl and opened: Gatekeeper's dialog (CoreServicesUIAgent)
+                must offer Open for a notarized release (pressed: the
+                window, Right, Left, Escape) and refuse an ad hoc one
+                (Done pressed, the game never started)
 
 Each case is EXECUTED (it ran and every check held), FAILED (it ran and a
 check did not hold: the category says which kind), or ENVIRONMENT-BLOCKED
@@ -747,7 +779,10 @@ def case_env(s):
     code, pre = s.tool("preflight")
     facts = {"preflight": pre, "macos": subprocess.run(["sw_vers", "-productVersion"], capture_output=True, text=True).stdout.strip(),
              "windowserver": subprocess.run(["pgrep", "-x", "WindowServer"], capture_output=True).returncode == 0,
-             "console_user": subprocess.run(["stat", "-f", "%Su", "/dev/console"], capture_output=True, text=True).stdout.strip()}
+             "console_user": subprocess.run(["stat", "-f", "%Su", "/dev/console"], capture_output=True, text=True).stdout.strip(),
+             # (SIP's status bounds what a run here says of the hardened runtime: MACOS-AARCH64-MILESTONE-9.md, section 41)
+             "sip": subprocess.run(["csrutil", "status"], capture_output=True, text=True).stdout.strip(),
+             "gatekeeper": subprocess.run(["spctl", "--status"], capture_output=True, text=True).stdout.strip()}
     s.env = facts
     checks = [(facts["windowserver"], "a WindowServer runs"), (pre.get("screens", 0) >= 1, "%s display(s)" % pre.get("screens"))]
     blocked = None if facts["windowserver"] else "cocoa-unavailable"
@@ -1549,9 +1584,11 @@ def alert_case(s, name, app, args, env, wanted, window_first=False):
         text = " ".join(w.get("texts", []))
         checks.append((wanted in text, "the alert says what failed (%r)" % wanted))
         checks.append((g.p.poll() is None, "the game waits while the alert is shown (the report is not lost)"))
-        rc, d = s.tool("ax-press", pid, (w.get("buttons") or ["OK"])[0])
+        buttons = w.get("buttons") or []
+        button = "OK" if "OK" in buttons or not buttons else buttons[0]
+        rc, d = s.tool("ax-press", pid, button)
         facts["press"] = d
-        checks.append((rc == 0, "the alert's button pressed (%s)" % ((w.get("buttons") or ["OK"])[0])))
+        checks.append((rc == 0, "the alert's %s button pressed (its buttons: %s)" % (button, buttons)))
     code, how, out, err = g.finish(10.0)
     _, left = dialog(s, "UserNotificationCenter", "Icy Tower stopped", 1.0)
     checks.append((how == "exited", "after the alert the game ends by itself (%s)" % how))

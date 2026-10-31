@@ -1092,7 +1092,9 @@ own refusal of a main-thread record, as on x86-64.
 
 ## 37. Prerequisites for graphical macOS Icy Tower
 
-**Done since: ICY-TOWER-MACOS-MILESTONE-1.md** (each item below, built by
+**Done since: ICY-TOWER-MACOS-MILESTONE-1.md** (and the application bundle,
+ICY-TOWER-MACOS-APP-MILESTONE-1.md: the same main-thread executable inside
+Icy Tower.app, launched by LaunchServices; each item below, built by
 `examples/games/icy-tower/build-macos.sh` with this policy). What a
 graphical macOS build of examples/games/icy-tower needed, in order:
 
