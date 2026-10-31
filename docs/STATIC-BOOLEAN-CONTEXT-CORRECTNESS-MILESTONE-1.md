@@ -164,7 +164,7 @@ The reproducer's `if` was traced through each stage:
 2. **The condition's static type**: `List[int]`, from the declared
    parameter, in the generic typing walk (`hir::types::If` types the
    condition first).
-3. **The Boolean requirement** was known in three places, and each used it
+3. **The Boolean requirement** was known in four places, and each used it
    for something other than rejecting the program -- the shape the receiver
    milestone found for natives:
    * the generic walk (`hir::types::If`) *narrowed* the condition's binding
@@ -369,8 +369,8 @@ fn f(a: List[int]) -> int:
     std::list::length(a)
 ```
 
-was rejected on `f9e0ed0` -- for the wrong reason, once the native-argument
-check existed -- with "argument 1 of native std::list::length requires list,
+was rejected on `f9e0ed0` -- for the wrong reason, by the native-argument
+check -- with "argument 1 of native std::list::length requires list,
 but this argument has type bool" at 8:23, and is now rejected with the
 condition's diagnostic alone (`sbc-no-cascade-after`, also inside a branch,
 and in dead code: `sbc-no-cascade-dead-code`).
@@ -395,7 +395,8 @@ pin:
 * valid conditions of every source (a literal, a Bool parameter, a function's
   result, a comparison, logical operators, an untyped helper's inferred
   result, a refinement predicate's proof; `sbc-valid-conditions`), the
-  refinement still narrowing (`sbc-valid-conditions-no-diagnostic`);
+  refinement still narrowing and a value of a refinement of bool itself a
+  condition (`sbc-valid-conditions-no-diagnostic`);
 * short-circuiting and evaluation order: `false and a`, `true or a` never
   test an `any` operand holding a List (`sbc-any-dynamic-operands`); the
   operands' yields happen in written order, the right one only when needed
@@ -415,8 +416,10 @@ an acceptable condition.
 **Where the guarantee is established.** In the front end, once: the generic
 walk's types, read by `hir::range::VerifyCondition` during the program's
 checks (`hir::CheckOnce`). A source program with such a condition is
-rejected there; a lenient (`-strict 0`) HIR keeps the diagnostic and is
-never compiled with it unpoisoned (`hir::recovery::runnable`, unchanged). The
+rejected there; a lenient (`-strict 0`) HIR keeps the diagnostic, and a
+backend given one compiles it checked again without poison
+(`hir::recovery::runnable`, unchanged), where the `if` keeps its run-time
+test. The
 four backends have no rejection logic of their own and gained none: they
 lower the `if` as before and keep their defensive run-time test of a
 condition whose kind is not established (`core::runtime`'s, the Tcl
@@ -447,8 +450,8 @@ Region inference still types an `if` with a statically non-Bool condition
   condition restored (TYPE): each revision's diagnostics are its own source's.
 * `sbc-cache-hit-equals-build`: through the front-end cache, a valid
   program's entry carries the markers exactly as its build did, and a
-  rejected program is rejected again on its second compilation (a rejected
-  compilation is never stored). The front end's fingerprint covers
+  rejected program is rejected again on its second compilation. The front
+  end's fingerprint covers
   `surface/` and `hir/`, so every older entry was invalidated by the change.
 
 ## 12. Mutation evidence

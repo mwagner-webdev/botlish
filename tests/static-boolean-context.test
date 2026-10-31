@@ -483,10 +483,11 @@ test sbc-valid-conditions {valid conditions compile and run as before on every b
     sbcRuns "refined type Yes = bool\n\nfn yes?(b: bool) -> bool proves b: Yes:\n    b\n\nfn positive(n: int) -> bool:\n    n > 0\n\nfn helper(x):\n    x == 1\n\nfn f(b: bool, n: int) -> List\[int\]:\n    r1 = if true:\n        1\n    else:\n        0\n    r2 = if b:\n        1\n    else:\n        0\n    r3 = if positive(n):\n        1\n    else:\n        0\n    r4 = if n == 2 and not b or false:\n        1\n    else:\n        0\n    r5 = if helper(n):\n        1\n    else:\n        0\n    r6 = if yes?(b):\n        1\n    else:\n        0\n    \[r1, r2, r3, r4, r5, r6\]\n\n\[f(true, 1), f(false, 2)\]\n"
 } -result {value {[[1, 1, 1, 0, 1, 1], [1, 0, 1, 1, 0, 0]]}}
 
-test sbc-valid-conditions-no-diagnostic {the same program has no diagnostic at all, and its refinement still narrows (a proven branch's facts are the predicate's)} -body {
-    set hir [sbcCompile [dict create main.bot "refined type Yes = bool\n\nfn yes?(b: bool) -> bool proves b: Yes:\n    b\n\nfn take(b: Yes) -> int:\n    1\n\nfn f(b: bool) -> int:\n    if yes?(b):\n        take(b)\n    else:\n        0\n\nf(true)\n"]]
-    sbcShown $hir
-} -result {}
+test sbc-valid-conditions-no-diagnostic {a refinement still narrows (a proven branch's facts are the predicate's), and a value of a refinement of bool is itself a valid condition: no diagnostic, and it runs on every backend} -body {
+    set source "refined type Yes = bool\n\nfn yes?(b: bool) -> bool proves b: Yes:\n    b\n\nfn take(b: Yes) -> int:\n    if b:\n        1\n    else:\n        2\n\nfn f(b: bool) -> int:\n    if yes?(b):\n        take(b)\n    else:\n        0\n\n\[f(true), f(false)\]\n"
+    set hir [sbcCompile [dict create main.bot $source]]
+    list [sbcShown $hir] [lmap i [sbcIfs $hir] {lindex $i 2}] [sbcRuns $source]
+} -result {{} {{bool[Yes]} bool} {value {[1, 0]}}}
 
 test sbc-valid-errors-in-conditions {a condition that may fail with a declared error keeps its error edge: the error propagates from the condition, and a handled one is handled, on every backend} -body {
     sbcRuns "error Bad\n\nfn check(n: int) -> bool errors Bad:\n    if n < 0:\n        fail Bad\n    n > 5\n\nfn f(n: int) -> int errors Bad:\n    if check(n) and check(n - 10):\n        1\n    else:\n        2\n\nfn g(n: int) -> int:\n    r = f(n):\n        on Bad:\n            -1\n    r\n\n\[g(-1), g(3), g(7), g(20)\]\n"
