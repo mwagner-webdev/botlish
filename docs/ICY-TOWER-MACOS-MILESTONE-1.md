@@ -551,11 +551,45 @@ its samples the panel's or the text's colors. The renderer scales the
 blend of the two; the check now counts a pixel well inside the segment
 between the panel's color and the text's as the panel's (never the sky's,
 a few units from the panel's end), and that run's 83 captures, read again,
-measure 95 to 97 %. PENDING (the next run).
+measure 95 to 97 %. **Executed** (run 41154281867): every check of the `cocoa`
+case held -- the start frame and the frame after the banner, the HUD panel
+96 % of its samples, the player at x 228 against the oracle's 227, the
+oracle's platforms 6 of 6 and 7 of 7 -- and every capture the other cases
+judged was located the same way.
 
 ## 24. Keyboard input: left and right
 
-PENDING.
+Each key is a tap: the helper presses it and releases it after 0.18 s
+(`macos-input hold`: the down and up events posted by one process, the
+hold timed there), from rest, with room to move -- the player is first
+moved away from a wall it would hit (a tap runs about 90 units: RUN_ACCEL
+to MAX_RUN, then friction). The player's x is read from the capture
+before and after. The tower does not wait: the player bounces and climbs
+while the keys move it, and a fall below the camera ends the game, so a
+game that ended during a move is restarted with R and the move made again
+(the run's summary counts the rounds). The oracle, over 300 runs of the
+sequence with random capture delays, judged every move.
+
+Which of Quartz's paths delivers a key is calibrated first: the HID event
+tap (as a keyboard's events enter), else the session's tap, else posting to
+the game's process. **Executed** (run 41154281867), through the HID tap:
+
+    PASS Right: the player moved +88 units (wanted +20)
+    PASS Left: the player moved -116 units (wanted -20)
+    PASS D: the player moved +117 units (wanted +20)
+    PASS A: the player moved -96 units (wanted -20)
+    PASS Left and Right held together: the player moved +0 units (friction only)
+    PASS Escape quits: status 0 (exited)
+    PASS the summary, round 2 (the games the tower ended were restarted with R 1 time(s))
+
+Both keys are pressed together (one helper process, both down events back
+to back), so neither runs alone for a frame: the game's neither-or-both
+rule holds the player.
+
+The first run (41140375636) held keys for 0.45 to 0.9 s, which carried the
+player up six floors and into a fall; its later captures had no player. The
+keys themselves had worked (Right moved the player +185 units); the
+harness was changed, not the game.
 
 ## 25. Keyboard input: restart and Escape
 
@@ -579,7 +613,25 @@ draws them on between the moment R was posted and the moment of the
 capture (both timed; the camera included), and the summary's floor the
 oracle's at the summary's time (with no key down the player bounces from
 the ground onto floor 1 within a second, onto floor 2 by 1.5 s: the first
-run's expectation of floor 0 was wrong, not the game). PENDING (the run).
+run's expectation of floor 0 was wrong, not the game). **Executed** (run 41154281867):
+
+    PASS Right held reaches game over (the oracle: within 1.7 s of the press)
+    PASS a game that is over stays over until R (the game-over banner)
+    PASS R: the banner is gone (round 2 has no start banner)
+    PASS the summary: round 2, not over
+    PASS the new game is the next tower of the same generator (after 11 platforms: seed 224168805)
+    PASS R: the new game's player centred, its feet at view row 613, where the oracle's
+         run of round 2 with no key down draws them 0.6 to 1.0 s after R (rows 560 to 680)
+    PASS the summary's floor 0 is the oracle's at 0.9 s of round 2 with no key down ([0])
+    PASS round 2's platforms where the oracle's next tower puts them: 7 of 7
+    PASS Escape quits: status 0 (exited)
+
+Escape quits during play in every keyboard case (`keyboard`, `restart`,
+`focus`: status 0, the summary printed). A press the window system delivers
+before SDL has given the window the keyboard focus does not reach the game
+(the mutation runner's baseline run once saw it: Right held, the player
+never moved); a held key is therefore confirmed by the player's move and
+pressed again after the focus is taken again.
 
 ## 26. Window-close behavior
 
@@ -606,7 +658,20 @@ and makes the window key), else Accessibility -- and records which one
 worked. When a window loses the focus, SDL resets the whole keyboard state
 (`SDL_SetKeyboardFocus(NULL)` calls `SDL_ResetKeyboard`): the game's own
 polling then reads Right as released. The focus case checks that from
-outside. PENDING (the run).
+outside. **Executed** (run 41154281867):
+
+    PASS Right held runs the player right: the player moved +100 units (wanted +20)
+    PASS another application took the keyboard focus (frontmost: macos-input)
+    PASS the game's window took the focus back (a click on the window)
+    PASS Left alone moves the player left after the focus came back, so Right is not stuck:
+         the player moved -118 units (wanted -20)
+    PASS Escape quits: status 0 (exited)
+
+Right went down in the game and up in another application (the helper's own
+window, made key); back in the game, Left alone moved the player: a stuck
+Right would have cancelled it (the both-held check, section 24). The game
+also pumps its events every frame without input: the `autopilot` case's
+1,266 frames in 21 s, every frame presented, 0.23 s of it in SDL_PollEvent.
 
 ## 28. SDL call-trace comparison
 
@@ -669,7 +734,26 @@ teardowns are the Linux reference's, call for call.
 
 ## 30. Error and exit behavior
 
-PENDING (the macOS section of tests/workload-icy-tower.test).
+The macOS section of tests/workload-icy-tower.test, **Executed** (run 41154281867:
+11 tests, 11 passed, the session's selftest among them):
+
+| test | what it holds |
+|---|---|
+| `-macos-builds` | build-macos.sh: Mach-O arm64, LC_MAIN 536870912, no SDL library, Metal linked |
+| `-macos-headless` | seed 7's 600 frames: the oracle's summary, status 0 |
+| `-macos-dummy-driver` | the real SDL loop on the dummy driver: the same summary |
+| `-macos-gc-stress` | under GC stress: the same summary as without |
+| `-macos-restarts` | 2400 autopilot frames on the dummy driver: games lost and restarted, a later round, a clean end |
+| `-macos-sdl-failure` | `SDL_VIDEO_DRIVER=nosuch`: what it made released, `Icy Tower: SDL_Init failed: nosuch not available` on standard error (std::darwin::io), status 1, no summary |
+| `-macos-renderer-failure` | `SDL_RENDER_DRIVER=nosuch`: the window and SDL released again, `Icy Tower: SDL_CreateRenderer failed: nosuch not available`, status 1 |
+| `-macos-usage` | `--fly`: `icy-tower: unknown option: --fly`, status 2; `--help`: the usage, status 0 |
+| `-macos-oracle` | `oracle.py compare`: 0 differences |
+| `-macos-failed-build-keeps-old` | an archive without SDL3: the link fails (`Undefined symbols`), build-macos.sh says the compilation failed, status 1, the previous executable byte for byte as it was |
+
+and from the session: Escape (status 0, the summary), the window's close
+button (status 0, the summary), a worker-startup executable refused by
+SDL's Cocoa video (status 1, `SDL_Init failed: cocoa not available`, no
+window).
 
 ## 31. GC-stress execution
 
@@ -713,7 +797,67 @@ there by their constraints. PENDING (the final commit).
 
 ## 35. Mutation testing
 
-PENDING.
+Two sets. The rules' mutants (`audit/icy-tower/mutants.txt`, 26) are
+unchanged and still killed by golden.bot: 26 of 26 (Linux, locally). The
+port's own, `audit/icy-tower/macos-mutants.txt`, 25 mutants of the macOS
+integration, run on the macOS runner by `audit/icy-tower/mutate.tcl -macos
+1` (`macos-mutate.tcl`; the workflow's mutants step, on
+`[ci-icy-tower-mutants]` or a manual run's `mutants`): each in a private
+tree, built with Botlish.app against the generated binding and the cached
+archive, and met by the detector its `??` line names -- the build's own
+checks, the ABI check, the executable's output, a graphical case of the
+session, the relocation, the failed build -- with the failure text that
+detector must report. Before any mutant, every detector used is run on the
+unmutated game and must pass (a detector that fails there kills nothing).
+
+| mutant | the defect | detector | run 41154281867 |
+|---|---|---|---|
+| startup-flag-omitted | built without `-native-startup main-thread` | build (LC_MAIN) | killed |
+| startup-worker | built with `-native-startup worker` | build (LC_MAIN) | killed |
+| startup-worker-unchecked | a worker build with the LC_MAIN check removed too | session:cocoa | blocked, not killed (below) |
+| link-dynamic | SDL3 declared as a shared library, the prefix's lib searched | build | failed for another reason (below) |
+| archive-path-ignored | `static`, the archive's path dropped | build | killed |
+| framework-dropped | Metal not declared | build (against sdl3.pc) | killed |
+| archive-in-working-directory | the archive staged beside the working directory | build | killed |
+| archive-path-absolute | the archive named by the stage's absolute path | build | killed |
+| linux-binding | the committed linux-aarch64 binding staged | build (provenance) | killed |
+| binding-not-staged | no binding in the staged application | build | killed |
+| binding-hand-written | a hand-written timer module in the binding | build (provenance) | killed |
+| binding-scalar-type | SDL_RenderLine's x1 a double | abi | killed |
+| binding-scalar-type-traced | SDL_SetRenderScale's scaleX a double | session:trace-dummy | killed |
+| darwin-io-silent | a context that writes nothing for std::darwin::io's | output | killed |
+| event-type-offset | SDL_Event's type read 4 bytes in | session:close | killed |
+| input-swapped | Left and Right swapped | session:keyboard | killed |
+| held-keys-ignored | the keyboard state never read as held | session:keyboard | killed |
+| escape-ignored | Escape does not quit | session:keyboard | killed |
+| restart-ignored | R does not restart | session:restart | killed |
+| close-ignored | the close request compared with another event type | session:close | killed |
+| present-dropped | every frame drawn, none presented | session:cocoa | killed |
+| player-shifted | the player drawn 40 units right | session:cocoa | killed |
+| renderer-not-destroyed | the renderer never destroyed | session:trace-dummy | killed |
+| sdl-not-quit | SDL_Quit skipped | session:trace-dummy | killed |
+| failed-link-hidden | a failed compilation reported as success | failed-build | killed |
+
+**Executed** (run 41154281867): 23 of 25 killed, each by its own detector
+with its own text (for instance `input-swapped`: `Right: the player moved
++0 units`; `player-shifted`: `start frame: the player at x 268, the
+oracle's 227`; `sdl-not-quit`: the trace's teardown differs from Linux's).
+Not yet a pass, for three reasons, all the harness's:
+
+* The baseline restart case failed once (its one Right press never
+  reached the game: the player stayed at x 227); the press is now
+  confirmed by the player's move and made again after the focus is taken
+  again (section 25).
+* `startup-worker-unchecked` reached the session, where SDL refused the
+  worker thread (`cocoa not available`) -- the defect, found -- but the
+  cocoa case classified that refusal as the environment's. It is the
+  environment's only where the session has no window server or display;
+  with both, it is the executable's failure.
+* `link-dynamic` was refused by build-macos.sh's check against sdl3.pc
+  (an extra `library SDL3`), not by the archive check its detector names;
+  the archive check now runs first.
+
+PENDING (the run of commit 9340caef).
 
 ## 36. Fuzzing
 
