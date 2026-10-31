@@ -12,10 +12,13 @@
 #      -- into $BOTLISH_SDL3_STATIC_PREFIX when that names a directory
 #      holding a previous build of the same commit (CI caches it), else into
 #      a private directory -- and records the version, the commit, the
-#      flags, the SDK, the archive's architecture and checksum;
+#      flags, the SDK, the archive's architecture and checksum
+#      (tests/platform/sdl3-static-macos.sh build: the recipe the macOS Icy
+#      Tower build shares);
 #   2. reads the Apple frameworks and system libraries the archive needs from
 #      SDL3's own build metadata (its pkg-config file's Libs.private, which
-#      SDL3's CMake writes from its targets' link interface), and writes an
+#      SDL3's CMake writes from its targets' link interface:
+#      tests/platform/sdl3-static-macos.sh link-interface), and writes an
 #      application -- in a directory whose name holds a space and a
 #      non-ASCII letter -- whose binding module declares them
 #      (`extern c framework`, `extern c library`) beside `extern c library
@@ -59,6 +62,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 step() { echo; echo "== $*"; }
 
 # --- 1. SDL3, static and shared, from the pinned release ---------------------
+# (tests/platform/sdl3-static-macos.sh: the one recipe, shared with the
+# macOS Icy Tower build.)
 profile="$checkout/tools/c-bindgen/profiles/sdl3.tcl"
 read -r url tag commit < <(sed -n 's/.*source {url \([^ ]*\) tag \([^ ]*\) commit \([0-9a-f]\{40\}\)}.*/\1 \2 \3/p' "$profile" | head -n 1)
 [[ -n ${commit:-} ]] || fail "no pinned SDL3 source in $profile"
@@ -66,69 +71,27 @@ version=${tag#release-}
 IFS=. read -r major minor patch <<<"$version"
 expected_version=$((major * 1000000 + minor * 1000 + patch))
 prefix=${BOTLISH_SDL3_STATIC_PREFIX:-$work/prefix}
-flags=(-DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=ON -DSDL_SHARED=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF
-  -DSDL_EXAMPLES=OFF -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0)
 step "SDL3 $version ($commit), static and shared"
-echo "   source: $url, tag $tag"
-echo "   macOS $(sw_vers -productVersion), SDK $(xcrun --show-sdk-version), $(cc --version | head -n 1)"
-echo "   CMake flags: ${flags[*]}"
-if [[ -f $prefix/lib/libSDL3.a && $(cat "$prefix/COMMIT" 2>/dev/null) == "$commit" ]]; then
-  echo "   (reusing the build in $prefix)"
-else
-  rm -rf "$prefix"
-  git clone --quiet --depth 1 --branch "$tag" "$url" "$work/SDL"
-  got=$(git -C "$work/SDL" rev-parse HEAD)
-  [[ $got == "$commit" ]] || fail "tag $tag is commit $got, not the pinned $commit"
-  started=$(date +%s)
-  cmake -S "$work/SDL" -B "$work/build" -DCMAKE_INSTALL_PREFIX="$prefix" "${flags[@]}" >"$work/cmake.log"
-  cmake --build "$work/build" --parallel "$(sysctl -n hw.ncpu)" >"$work/build.log" || { tail -n 40 "$work/build.log"; fail "SDL3 did not build"; }
-  cmake --install "$work/build" >"$work/install.log"
-  echo "$commit" >"$prefix/COMMIT"
-  echo "   built in $(( $(date +%s) - started )) s"
-fi
+bash "$checkout/tests/platform/sdl3-static-macos.sh" build "$prefix" || fail "SDL3 did not build"
 static=$prefix/lib/libSDL3.a
 shared=$(cd "$prefix/lib" && ls libSDL3.*.dylib | head -n 1)
 [[ -f $static && -n $shared ]] || fail "no libSDL3.a and libSDL3.dylib in $prefix/lib"
-echo "   archive: $(lipo -info "$static")"
-echo "   archive: $(wc -c <"$static" | tr -d ' ') bytes, sha256 $(shasum -a 256 "$static" | cut -d' ' -f1)"
 echo "   shared:  $prefix/lib/$shared"
 
 # --- 2. the dependencies, from SDL3's own metadata ---------------------------
 pc="$prefix/lib/pkgconfig/sdl3.pc"
 [[ -f $pc ]] || fail "no pkg-config file $pc"
-private=$(sed -n 's/^Libs.private: *//p' "$pc")
 step "SDL3's static link interface (sdl3.pc Libs.private)"
-echo "   $private"
+echo "   $(sed -n 's/^Libs.private: *//p' "$pc")"
+interface=$(bash "$checkout/tests/platform/sdl3-static-macos.sh" link-interface "$prefix") || fail "SDL3's link interface"
 frameworks=()
 libraries=()
-next=""
-for word in $private; do
-  if [[ -n $next ]]; then frameworks+=("$word"); next=""; continue; fi
-  case $word in
-    -Wl,-framework,*) frameworks+=("${word#-Wl,-framework,}") ;;
-    -Wl,-weak_framework,*) frameworks+=("${word#-Wl,-weak_framework,}") ;;
-    -framework|-weak_framework) next=1 ;;
-    -l*) libraries+=("${word#-l}") ;;
-    -pthread) ;;  # libSystem's on macOS: nothing to link
-    *) fail "an entry of SDL3's link interface this acceptance does not translate: $word" ;;
+while read -r kind name; do
+  case $kind in
+    framework) frameworks+=("$name") ;;
+    library) libraries+=("$name") ;;
   esac
-done
-# One declaration per framework and library (the plan merges repeats anyway;
-# no mapfile: macOS's /bin/bash is 3.2).
-unique() {
-  local seen=" " item
-  for item in "$@"; do
-    case $seen in *" $item "*) ;; *) seen="$seen$item "; printf '%s\n' "$item" ;; esac
-  done
-}
-deduplicated=()
-while IFS= read -r item; do deduplicated+=("$item"); done < <(unique "${frameworks[@]}")
-frameworks=("${deduplicated[@]}")
-deduplicated=()
-if (( ${#libraries[@]} )); then
-  while IFS= read -r item; do deduplicated+=("$item"); done < <(unique "${libraries[@]}")
-  libraries=("${deduplicated[@]}")
-fi
+done <<<"$interface"
 (( ${#frameworks[@]} > 0 )) || fail "SDL3's metadata names no framework"
 echo "   frameworks: ${frameworks[*]}"
 echo "   libraries:  ${libraries[*]:-none}"

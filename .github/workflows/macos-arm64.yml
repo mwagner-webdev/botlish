@@ -455,7 +455,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/botlish-sdl3-static
-          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/link-plan-sdl3.sh') }}
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/sdl3-static-macos.sh') }}
 
       - name: Static SDL3 (tests/platform/link-plan-sdl3.sh)
         run: |
@@ -521,7 +521,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/botlish-sdl3-static
-          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/link-plan-sdl3.sh') }}
+          key: sdl3-static-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/sdl3-static-macos.sh') }}
 
       - name: Static SDL3 through the application (tests/platform/link-plan-sdl3.sh)
         run: |

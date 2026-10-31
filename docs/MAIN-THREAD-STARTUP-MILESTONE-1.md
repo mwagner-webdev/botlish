@@ -1092,8 +1092,9 @@ own refusal of a main-thread record, as on x86-64.
 
 ## 37. Prerequisites for graphical macOS Icy Tower
 
-What a graphical macOS build of examples/games/icy-tower now needs, in
-order:
+**Done since: ICY-TOWER-MACOS-MILESTONE-1.md** (each item below, built by
+`examples/games/icy-tower/build-macos.sh` with this policy). What a
+graphical macOS build of examples/games/icy-tower needed, in order:
 
 1. **A macOS AArch64 SDL3 binding**: the committed bindings are Linux's
    (generated/c/sdl3/); the generator's `-target macos-aarch64` needs the

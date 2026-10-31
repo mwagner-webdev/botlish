@@ -64,18 +64,22 @@ jobs:
           BOTLISH_SDL3_CMAKE_FLAGS="-DSDL_WAYLAND=OFF -DSDL_X11_XCURSOR=OFF -DSDL_X11_XINPUT=OFF -DSDL_X11_XRANDR=OFF -DSDL_X11_XSCRNSAVER=OFF -DSDL_X11_XSHAPE=OFF -DSDL_X11_XFIXES=OFF -DSDL_X11_XDBE=OFF -DSDL_X11_XTEST=OFF -DSDL_X11_XSYNC=OFF" \
             tclsh9.0 tests/cffi/sdl3.tcl
 
-      # None skipped but the Windows executable's tests
-      # (icyTowerWindowsExecutable), which need Windows and run in
-      # icy-tower-windows.yml: every skip must be one of theirs.
-      - name: Run the slice's tests (none skipped but the Windows ones)
+      # None skipped but the Windows and the macOS executables' tests
+      # (icyTowerWindowsExecutable, icyTowerMacosExecutable), which need
+      # their hosts and run in icy-tower-windows.yml and icy-tower-macos.yml:
+      # every skip must be one of theirs. (The SDL call trace reference and
+      # the ABI check run here: icy-tower-macos.yml compares the macOS
+      # executable's traces with the reference this job keeps current.)
+      - name: Run the slice's tests (none skipped but the Windows and macOS ones)
         run: |
           tmp=$(mktemp -d)
           tclsh9.0 tests/workload-icy-tower.test -tmpdir "$tmp" | tee "$tmp/log"
           grep -qP 'Failed\t0$' "$tmp/log"
           skipped=$(grep -oP 'Skipped\t\K[0-9]+' "$tmp/log")
           windows=$(grep -oP '^\t\K[0-9]+(?=\ticyTowerWindowsExecutable$)' "$tmp/log" || true)
-          [ "$skipped" = "${windows:-0}" ] || {
-            echo "::error::$skipped tests skipped, ${windows:-0} of them the Windows executable's"
+          macos=$(grep -oP '^\t\K[0-9]+(?=\ticyTowerMacosExecutable$)' "$tmp/log" || true)
+          [ "$skipped" = "$(( ${windows:-0} + ${macos:-0} ))" ] || {
+            echo "::error::$skipped tests skipped, ${windows:-0} of them the Windows executable's, ${macos:-0} the macOS executable's"
             exit 1
           }
 

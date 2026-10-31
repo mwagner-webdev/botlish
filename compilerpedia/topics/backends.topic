@@ -183,7 +183,7 @@ index: backends
 alias: native startup; startup policy; main thread; main-thread; run on the main thread; native-startup
 keywords: -native-startup, worker, main-thread, main thread, Cocoa, AppKit, SDL3, LC_MAIN, stack_size, 512 MiB, pthread_main_np, macOS, graphical, window
 related: backend.native-executable backend.platforms backend.macos-application cli.options error.native-unsupported error.native-startup error.native-limit-stack
-docs: MAIN-THREAD-STARTUP-MILESTONE-1.md MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md SINGLE-EXECUTABLE.md
+docs: MAIN-THREAD-STARTUP-MILESTONE-1.md MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md SINGLE-EXECUTABLE.md ICY-TOWER-MACOS-MILESTONE-1.md
 
 == WHAT IT IS
 A property of the executable, fixed when -emit-native-executable builds it
@@ -201,6 +201,11 @@ by a library it links, a context or anything the program declares.
                   BOTLISH_NATIVE_STACK_BYTES does not apply
 
     botlish -native-startup main-thread -emit-native-executable game.bot
+
+examples/games/icy-tower/build-macos.sh builds the Icy Tower game this way
+with Botlish.app: one Mach-O with the pinned SDL3 linked into it as a
+static archive, played in a Cocoa window with Metal
+(ICY-TOWER-MACOS-MILESTONE-1.md).
 
 == WHY
 On macOS, AppKit -- and so SDL3's Cocoa video driver -- works on the

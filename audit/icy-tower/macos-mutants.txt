@@ -1,0 +1,299 @@
+# Mutants of the Icy Tower macOS integration (ICY-TOWER-MACOS-MILESTONE-1.md,
+# "Mutation testing"; audit/icy-tower/mutate.tcl -macos 1, on an Apple
+# Silicon Mac): each a plausible defect of the port -- the build, the link
+# plan, the binding, the entry program, the game's native boundary -- in the
+# format of audit/icy-tower/mutants.txt (audit/golden/tools/mutants.txt),
+# with one more line per mutant, which that format ignores:
+#
+#   ?? DETECTOR REGEX
+#
+# the check that must kill it and the text its failure must show (a Tcl
+# regular expression): a mutant is killed only when that detector fails for
+# that reason -- never because the mutant did not build when the detector is
+# not the build, never because a runner did not allow a case (an
+# ENVIRONMENT-BLOCKED case kills nothing). Detectors:
+#
+#   build         build-macos.sh fails (its checks: the dependencies against
+#                 sdl3.pc, the binding's provenance, the link plan, the
+#                 Mach-O's LC_MAIN and libraries, or the link itself)
+#   abi           abi-check.py of the staged package against SDL3's headers
+#   output        the executable's standard output and error (--help; an
+#                 unknown video driver's report)
+#   session:CASES macos-session.py's CASES (comma-separated) on the
+#                 mutant's executable and probe build: a case FAILED with a
+#                 failing check matching REGEX
+#   relocate      the staged application moved and built again by
+#                 Botlish.app alone
+#   failed-build  the build run again with an archive holding no SDL3: it
+#                 must fail and leave the previous executable as it was
+#
+# FILE is a path of the repository, or @binding/PATH: a file of the generated
+# macos-aarch64 binding (a private copy of it, given to build-macos.sh as
+# ICY_TOWER_BINDING_FROM). The game's rules have their own mutants
+# (mutants.txt, killed by golden.bot); these leave the rules alone.
+#
+# Not here, with the reason: the LC_MAIN reservation itself (the driver's
+# link arguments: audit/native-aot's main-thread mutants, MAIN-THREAD-
+# STARTUP-MILESTONE-1.md; build-macos.sh's LC_MAIN check is what the two
+# startup mutants below meet), and a GC-stress-only failure (no game-level
+# change fails only under GC stress; the collector's own mutants are
+# audit/native-stack's and the native harnesses').
+
+@@ startup-flag-omitted the executable built without -native-startup main-thread: the default worker
+?? build has no 512 MiB LC_MAIN stack
+## examples/games/icy-tower/build-macos.sh
+<<<<
+"${botlish[@]}" -warnings error -native-startup main-thread \
+====
+"${botlish[@]}" -warnings error \
+>>>>
+
+@@ startup-worker the executable built with -native-startup worker
+?? build has no 512 MiB LC_MAIN stack
+## examples/games/icy-tower/build-macos.sh
+<<<<
+"${botlish[@]}" -warnings error -native-startup main-thread \
+====
+"${botlish[@]}" -warnings error -native-startup worker \
+>>>>
+
+@@ startup-worker-unchecked a worker executable with the build's LC_MAIN check gone too: Cocoa must refuse it
+?? session:cocoa SDL_Init failed|video device|cocoa not available
+## examples/games/icy-tower/build-macos.sh
+<<<<
+"${botlish[@]}" -warnings error -native-startup main-thread \
+====
+"${botlish[@]}" -warnings error -native-startup worker \
+>>>>
+## examples/games/icy-tower/build-macos.sh
+<<<<
+[[ $(grep -A4 'cmd LC_MAIN' <<<"$loads") == *"stacksize 536870912"* ]] || fail
+====
+true || fail
+>>>>
+
+@@ link-dynamic SDL3 linked as a shared library: the ordinary declaration and the prefix's lib directory searched
+?? build does not declare the staged archive|link plan does not name the staged archive|dynamic SDL3
+## examples/games/icy-tower/macos_link.bot
+<<<<
+extern c library "SDL3" static at "native/macos/libSDL3.a"
+====
+extern c library "SDL3"
+>>>>
+## examples/games/icy-tower/build-macos.sh
+<<<<
+    -emit-native-executable "$app/main-macos.bot") || fail
+====
+    -L "$prefix/lib" -emit-native-executable "$app/main-macos.bot") || fail
+>>>>
+
+@@ archive-path-ignored SDL3 required static but searched for, its archive's path dropped
+?? build does not declare the staged archive|NATIVE LINK
+## examples/games/icy-tower/macos_link.bot
+<<<<
+extern c library "SDL3" static at "native/macos/libSDL3.a"
+====
+extern c library "SDL3" static
+>>>>
+
+@@ framework-dropped Metal, one of the frameworks SDL3 needs, not declared
+?? build does not declare exactly the frameworks
+## examples/games/icy-tower/macos_link.bot
+<<<<
+extern c framework "Metal"
+====
+>>>>
+
+@@ archive-in-working-directory the archive staged beside the working directory, not inside the application root
+?? build NATIVE LINK|libSDL3.a
+## examples/games/icy-tower/build-macos.sh
+<<<<
+cp "$archive" "$app/native/macos/libSDL3.a"
+====
+mkdir -p "$work/native/macos" && cp "$archive" "$work/native/macos/libSDL3.a"
+>>>>
+
+@@ archive-path-absolute the staged application names the archive by the stage's absolute path (not relocatable)
+?? build link plan does not name the staged archive
+## examples/games/icy-tower/build-macos.sh
+<<<<
+: >"$app/.icy-tower-stage"
+====
+: >"$app/.icy-tower-stage"; sed -i '' "s#static at \"native/macos/libSDL3.a\"#static at \"$app/native/macos/libSDL3.a\"#" "$app/macos_link.bot"
+>>>>
+
+@@ linux-binding the committed linux-aarch64 binding staged instead of the macos-aarch64 one generated on the Mac
+?? build is not the generated binding
+## examples/games/icy-tower/build-macos.sh
+<<<<
+    -app "$here" -into "$app" -package 1 >/dev/null
+====
+    -app "$here" -into "$app" -package 1 >/dev/null; rm -rf "$app/.bot_modules/sdl3/sdl3"; cp -R "$root/generated/c/sdl3/linux-aarch64/sdl3" "$app/.bot_modules/sdl3/sdl3"
+>>>>
+
+@@ binding-not-staged the binding left out of the staged application
+?? build is not the generated binding
+## examples/games/icy-tower/build-macos.sh
+<<<<
+: >"$app/.icy-tower-stage"
+====
+: >"$app/.icy-tower-stage"; rm -rf "$app/.bot_modules"
+>>>>
+
+@@ binding-hand-written a hand-written module in place of the generated binding's timer module
+?? build is not the generated binding
+## examples/games/icy-tower/build-macos.sh
+<<<<
+: >"$app/.icy-tower-stage"
+====
+: >"$app/.icy-tower-stage"; printf 'import std::ffi::c\n\nextern c fn SDL_GetTicksNS() -> std::ffi::c::ULongLong\nextern c fn SDL_DelayNS(ns: std::ffi::c::ULongLong) -> unit\nextern c fn SDL_GetPerformanceCounter() -> std::ffi::c::ULongLong\n' >"$app/.bot_modules/sdl3/sdl3/timer.bot"
+>>>>
+
+@@ binding-scalar-type SDL_RenderLine's x1 a C double in the binding, not a float
+?? abi SDL_RenderLine parameter 2
+## @binding/sdl3/render.bot
+<<<<
+    x1: std::ffi::c::Float,
+====
+    x1: std::ffi::c::Double,
+>>>>
+
+@@ binding-scalar-type-traced SDL_SetRenderScale's scaleX a C double: the calls' arguments differ from Linux's
+?? session:trace-dummy the SDL call trace is the Linux executable's
+## @binding/sdl3/render.bot
+<<<<
+    scaleX: std::ffi::c::Float,
+====
+    scaleX: std::ffi::c::Double,
+>>>>
+
+@@ darwin-io-silent main-macos.bot installs a context of its own that writes nothing, instead of std::darwin::io's
+?? output usage|SDL_Init failed
+## examples/games/icy-tower/main-macos.bot
+<<<<
+import std::darwin::io
+
+with context std::darwin::io::create()
+====
+
+context struct Silent:
+    quiet: bool
+
+fn write_text(text: str, context io: Silent) -> unit errors std::io::WriteFailed:
+    unit
+
+fn write_error_text(text: str, context io: Silent) -> unit errors std::io::WriteFailed:
+    unit
+
+with context Silent {quiet: true}
+>>>>
+
+@@ event-type-offset sdl.bot reads an SDL_Event's type 4 bytes in: the quit never seen
+?? session:close closing the window ends the run
+## examples/games/icy-tower/sdl.bot
+<<<<
+    field type_: std::ffi::c::UInt at 0
+====
+    field type_: std::ffi::c::UInt at 4
+>>>>
+
+@@ input-swapped Left and Right swapped in the game's input
+?? session:keyboard Right:
+## examples/games/icy-tower/game.bot
+<<<<
+        left: held.get(0, false) or held.get(1, false),
+        right: held.get(2, false) or held.get(3, false),
+====
+        left: held.get(2, false) or held.get(3, false),
+        right: held.get(0, false) or held.get(1, false),
+>>>>
+
+@@ held-keys-ignored the keyboard state read as never held
+?? session:keyboard Right:
+## examples/games/icy-tower/sdl.bot
+<<<<
+.down, scancode) != 0
+====
+.down, scancode) == 2
+>>>>
+
+@@ escape-ignored Escape does not quit
+?? session:keyboard Escape quits
+## examples/games/icy-tower/game.bot
+<<<<
+    if quit or held.escape?():
+====
+    if quit:
+>>>>
+
+@@ restart-ignored R does not restart a game that is over
+?? session:restart R:|round 2
+## examples/games/icy-tower/game.bot
+<<<<
+        restart: held.get(4, false),
+====
+        restart: false,
+>>>>
+
+@@ close-ignored the window's close request not seen: the quit compared with another event type
+?? session:close closing the window ends the run
+## examples/games/icy-tower/sdl.bot
+<<<<
+type_ == sdl3::events::SDL_EVENT_QUIT:
+====
+type_ == sdl3::events::SDL_EVENT_TERMINATING:
+>>>>
+
+@@ present-dropped every frame drawn but none presented
+?? session:cocoa start frame|after the banner
+## examples/games/icy-tower/render.bot
+<<<<
+    shown = sdl::present()
+====
+    shown = sdl::clear()
+>>>>
+
+@@ player-shifted the player drawn 40 units to the right of where it is
+?? session:cocoa the player at x
+## examples/games/icy-tower/render.bot
+<<<<
+    body = sdl::fill(p.x, top, tower::player_width, tower::player_height)
+====
+    body = sdl::fill(p.x + 40.0, top, tower::player_width, tower::player_height)
+>>>>
+
+@@ renderer-not-destroyed the renderer never destroyed
+?? session:trace-dummy the SDL call trace is the Linux executable's
+## examples/games/icy-tower/sdl.bot
+<<<<
+    if not renderer.null?():
+        renderer.SDL_DestroyRenderer()
+====
+>>>>
+
+@@ sdl-not-quit SDL_Quit skipped when the game ends
+?? session:trace-dummy the SDL call trace is the Linux executable's
+## examples/games/icy-tower/sdl.bot
+<<<<
+    release(window, renderer, rect, text, event)
+    sdl3::init::SDL_Quit()
+    reason
+====
+    release(window, renderer, rect, text, event)
+    reason
+>>>>
+
+@@ failed-link-hidden a failed compilation reported as success, the previous executable left as the result
+?? failed-build exit status 0|replaced
+## examples/games/icy-tower/build-macos.sh
+<<<<
+    -emit-native-executable "$app/main-macos.bot") || fail "the compilation failed (OUTDIR is unchanged)"
+====
+    -emit-native-executable "$app/main-macos.bot") || true
+>>>>
+## examples/games/icy-tower/build-macos.sh
+<<<<
+[[ -x $exe ]] || fail "no executable $exe"
+====
+[[ -x $exe ]] || exe=$out/icy-tower
+>>>>
