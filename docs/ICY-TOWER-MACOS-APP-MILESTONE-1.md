@@ -209,12 +209,15 @@ NSPrincipalClass). So the key names the kind of application the bundle is,
 as every AppKit application's does, and starts no second lifecycle: SDL's
 object is the only NSApplication. No LSUIElement, LSBackgroundOnly or
 NSUIElement: `bundle.py check` refuses each (an agent, a background-only
-application), and the `agent-application` mutant is killed by the
-LaunchServices launch: LaunchServices does not make an agent the active
-application. (Its other check, the activation policy, is a race: SDL3's
-`Cocoa_RegisterApp` sets NSApplicationActivationPolicyRegular itself, so an
-LSUIElement bundle read after SDL started already says regular; run
-41228596109 read policy 1, run 41235898277 policy 0.)
+application), and the `agent-application` mutant is killed by
+`app-bundle`'s check of the Info.plist as macOS reads it (NSBundle: no
+LSUIElement, LSBackgroundOnly, NSUIElement or NSBGOnly). Not by the launch:
+SDL3's `Cocoa_RegisterApp` sets NSApplicationActivationPolicyRegular
+itself, so an LSUIElement bundle read after SDL started already says
+regular, and LaunchServices activated the agent in one run and not in
+another (policy 1 in run 41228596109; not activated in 41235898277;
+activated, policy 0, in 41240614881, where the mutant survived the launch
+checks).
 
 `bundle.py` validates before writing and after: the identifier
 (reverse-DNS, at least two components, letters, digits, hyphens and
@@ -1192,28 +1195,32 @@ The milestone keeps the earlier acceptance whole and adds the bundle's.
   binding's ABI (123 checks) and macos_app.bot's (26 checks, 0 failed), the
   staged application moved and rebuilt by Botlish.app alone.
 
-The original session (the earlier milestone's cases, unchanged here)
-failed intermittently, three times in this milestone's runs, never in a
-case of the bundle:
+The original session's `restart` case (the earlier milestone's, unchanged
+here) failed intermittently, never a case of the bundle:
 
-* runs 41220843007 and 41235898277 (and an early run of this milestone):
-  `restart`, `FAIL R: the new game's player centred, its feet at view row
-  645 ...` (561 in the second). The check is of the player's x as well as
-  its feet: both rounds' summaries end `x=434` -- round 2's player ran to
-  the right wall, as if Right were still held. The case sends Right's
-  key-up and waits at least 0.5 s before it taps R, so a key-up reached the
-  game after R or was not seen at all; which, the runs do not show.
-* run 41205557290 (commit c0f3165): its log was lost when that run, hung
-  in another step, was cancelled, so the failing case is not known.
+| run | where | its failure |
+|---|---|---|
+| an early run of this milestone | the session | the new game's player not centred in round 2 |
+| 41205557290 | the session | unknown: the log was lost when the run, hung in another step, was cancelled |
+| 41220843007 | the session | `R: the new game's player centred, its feet at view row 645 ...`; the summary `x=434` |
+| 41228596109 | the mutant harness's baseline | the same check |
+| 41235898277 | the session | the same check, feet at row 561; the summary `x=434` |
+| 41240614881 | the mutant harness's baseline | the same check, feet at row 611 |
 
-It passed in runs 41197431104, 41201527696, 41207619549, 41210576736,
-41212691891, 41217612371, 41219310772, 41224177467 and 41228596109 (and in
-the mutant harness's baseline of 41235898277, but not in 41228596109's). It is recorded as a
-pre-existing intermittent failure of the earlier milestone's keyboard case
-whose cause is not established, not as passed; this milestone changes
-neither the game nor that harness case. The Developer ID-signed
-application played under the hardened runtime (section 27) is
-**Credential-blocked**.
+The check is of the player's x as well as its feet, and every failure
+whose summary was read ends round 2 at `x=434`: round 2's player ran to the
+right wall, as if Right were still held. The case holds Right until the
+game is over, sends its key-up, waits at least 0.5 s and taps R; so the
+game saw Right's release after R, or never. Whether a key-up is lost on
+its way (the posted event, the window's key status) or the game's input
+misses one, the runs do not show; this milestone changes neither the game
+nor that case, and does not paper over it in the harness. It passed in
+runs 41197431104, 41201527696, 41207619549, 41210576736, 41212691891,
+41217612371, 41219310772, 41224177467, 41228596109 and 41240614881 (the
+session), and in 41235898277's baseline: it is recorded as a pre-existing
+intermittent failure, about one run in three of this milestone's, cause
+not established. The Developer ID-signed application played under the
+hardened runtime (section 27) is **Credential-blocked**.
 
 ## 35. Clean-environment independence
 
@@ -1360,6 +1367,12 @@ check (`app:app-alert-renderer: an alert appears: None`), and 30 of 31 --
 active application (frontmost: Finder)", while the policy check that had
 killed it before passed: SDL3 sets the regular policy itself (section 4).
 Both checks state the mutant's rule, and its `??` line now names both.
+**Executed** (run 41240614881): 30 of 31 again, and `agent-application`
+SURVIVED the launch checks: LaunchServices activated the agent and its
+policy read regular. The launch is no deterministic observable of an
+LSUIElement bundle; the Info.plist as macOS reads it is, and the mutant is
+now killed there (section 4). The baseline of `session:restart` failed
+(section 34).
 MUTANTS-RERUN
 
 ## 40. Negative artifact controls
