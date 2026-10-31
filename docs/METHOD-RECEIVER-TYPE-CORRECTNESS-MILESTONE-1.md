@@ -565,16 +565,16 @@ first: program 1001, the oracle expecting TYPE). The fuzzer, not the
 compiler, is out of date; this milestone does not touch it beyond the model
 of case arithmetic and ordering.
 
-**Not run here.** The sequential-scheduler comparison of the golden suites
+**In CI.** The sequential-scheduler comparison of the golden suites
 (`audit/static-decisions/tools/compare.tcl`) runs in CI only (AGENTS.md):
-the `static-decisions` workflow is dispatched on the branch, and so is
+the `static-decisions` workflow was dispatched on the branch, and so was
 `tests.yml` (the whole Tcl suite with its duplicates on interp and compile,
 the cranelift coverage, the golden suites beside their Tcl originals, the
 method-call decision's oracle under the reference audit; the GC-stress job
-runs on pushes to main). Both were dispatched on `9d6ca0b` (the final code:
-the commits after it change only this report), and neither had started a
-job when this report was written -- every job still queued: their verdicts
-are pending, not passed. Read the two runs' jobs before merging.
+runs on pushes to main). Both ran on `9d6ca0b` (the final code: the commits
+after it change only this report) and passed: `tests.yml` run 41156803237
+and `static-decisions.yml` run 41156805434, every job successful (no
+`DISAGREE`, no `DOES NOT COMPILE`).
 
 ## 12. Remaining limitations
 
