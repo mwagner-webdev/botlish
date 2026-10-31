@@ -842,7 +842,7 @@ CLEAN-PLACEHOLDER
 ## 36. GitHub Actions trust boundaries
 
 `.github/workflows/icy-tower-macos.yml` (read by
-`audit/macos-release/tests/test_workflow.py`, 22 tests, which parse it as
+`audit/macos-release/tests/test_workflow.py`, 21 tests, which parse it as
 GitHub does):
 
 * triggers: push (branches, and `icy-tower-macos-v*` tags), pull_request,

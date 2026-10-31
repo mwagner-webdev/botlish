@@ -119,6 +119,8 @@ jobs:
           echo "Xcode: $(xcode-select -p), SDK $(xcrun --show-sdk-version), $(clang --version | head -n 1)"
           echo "console user: $(stat -f %Su /dev/console), this user: $(id -un)"
           pgrep -lx WindowServer || echo "no WindowServer process"
+          csrutil status || true
+          spctl --status || true
           system_profiler SPDisplaysDataType 2>/dev/null | sed -n '/Displays:/,$p' | head -n 20 || true
           if [[ $(uname -s) != Darwin || $(uname -m) != arm64 ]]; then
             echo "::error::not a native arm64 macOS runner: $(uname -s) $(uname -m)"
