@@ -525,7 +525,47 @@ accepted; thunks invisible to generic liveness again; constructions typed
 generically again, or by the instance's result only; the children's result
 typed List[any].
 
-MUTATION-RESULTS
+**Result: 42 mutants, 42 killed** (every mutant applies to the final
+sources). The run (`-jobs 3`, plus the last six native mutants in a second
+copy to share the serial native rebuilds) first left three survivors, each
+of which taught something and was answered in the tests or the mutant:
+
+* `totality-child-infinite` survived as first written: dropping the last
+  entry of `seen` was equivalent, because the application is added to
+  `seen` by the later `Components` call anyway. Rewritten to walk the child
+  field with the outer `seen` (the real infinite recursion), it is killed by
+  every test that types a tree.
+* `construction-outward-result-only` (a construction typed by the instance's
+  result alone, without its yields) survived because every generator in the
+  tests yielded and returned one type. `ts-generic-construction-typed` now
+  also constructs a generator that yields a `List[Node]` and returns `[]`
+  (`List[never]`), which kills it.
+* `native-show-children-reversed` survived because a test reads native
+  results through `tcl_value` and the Tcl printer; only an executable prints
+  its own result with the native printer. `ts-executable` now prints a tree,
+  which kills it.
+
+What killed the others (the first detector to fail, the test file): the Tcl
+and native equality, hash and printer mutants by `ts-equality`,
+`ts-hash-oracle`, `ts-hash-pinned`, `ts-printing-same-as-struct`,
+`ts-representation-independence` and the deep and wide tests (a backend
+disagreeing with the others fails `sourceAgree`); the address-reading
+mutants by `ts-representation-independence` and `ts-hash-coherent`; the
+descriptor's and the NIR shape's by `ts-executable`, `ts-nir-shape` and
+`ts-deep-native` (a dropped tree slot sends a deep chain back to the host's
+recursion, NATIVE LIMIT STACK on a 1 MiB stack); the totality mutants by
+`ts-totality-refused`, `ts-totality-walk` and `ts-totality-witnesses`; the
+traversal mutants by `ts-walk-orders`, `ts-walk-levels`, `ts-wide` and the
+filesystem specimen; the HIR text mutants by `ts-hir-text`; the declaration
+mutants by `ts-decl-shapes-rejected`, `ts-decl-combinations` and
+`ts-decl-affine`; the liveness and typing mutants by `ts-walk-generic-caller`
+and every walk test. No mutant needed the fuzzer to be killed: the test file
+caught every one first, and the fuzzer is the second detector.
+
+The three trait-constrained-types mutants that quote `ApplicationProblem`'s
+callers were updated to the refactored `ApplicationIssue` (the same rules)
+and are killed (`audit/trait-constrained-types/tools/mutate.tcl -only` the
+three).
 
 ## 18. Performance
 
@@ -676,7 +716,12 @@ What the numbers establish:
   discipline applies to applications).
 * **Coroutine construction typing** takes the root instance's own yields;
   yields in other functions the coroutine reaches keep their generic types.
-  `walk` yields only in itself.
+  `walk` yields only in itself. And it needs an instance: a call whose
+  generic result is `never` -- a generator that never returns, `loop: yield
+  x` -- gets none (hir::semantic::Call answers it with the generic result
+  before requesting one), so such a construction still yields `any` from an
+  untyped function. Typing it means creating instances for yielding calls
+  whose result is `never`; not needed by `walk`, not done here.
 
 ## 21. Recommendation for the next feature
 

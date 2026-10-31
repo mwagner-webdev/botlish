@@ -453,9 +453,9 @@ test ts-children-internal {std::tree::children is internal to the standard libra
     tsRejection "import std::tree\ntree struct Node:\n    children: List\[Node\]\nstd::tree::children(Node {children: \[\]})\n"
 } -result {INTERNAL-NAMESPACE {"std::tree::children" is internal to the standard library: it gives the standard library's own modules a representation of "std::tree" that only they may see (the entry program is not one)}}
 
-test ts-generic-construction-typed {a coroutine constructed from an untyped function is typed by the call's semantic instance: its first value and every resume have the instance's outward type} -body {
-    tsRun "fn gen(x):\n    loop c in x.children:\n        yield c\n    x\nr = node(1, \[leaf(2), leaf(3)\])\ncoroutine {step, first} = gen(r)\nb = step()\nc = step()\n\[first.value, b.value, c.value, std::coroutine::done?(step)\]\n"
-} -result {value {[2, 3, 1, true]}}
+test ts-generic-construction-typed {a coroutine constructed from an untyped function is typed by the call's semantic instance: its first value and every resume have the instance's outward type, the join of what its yields send and what it returns (yielding a List of nodes and returning the empty List, its type is the List of nodes)} -body {
+    tsRun "fn gen(x):\n    loop c in x.children:\n        yield c\n    x\nfn kids_then_none(x):\n    yield x.children\n    \[\]\nr = node(1, \[leaf(2), leaf(3)\])\ncoroutine {step, first} = gen(r)\nb = step()\nc = step()\ncoroutine {step: more, first: kids} = kids_then_none(r)\nvalues_of = loop k in kids:\n    k.value\n\[first.value, b.value, c.value, std::coroutine::done?(step), values_of, more()\]\n"
+} -result {value {[2, 3, 1, true, [2, 3], []]}}
 
 # ---------------------------------------------------------------------------
 # Deep and wide trees
@@ -572,10 +572,10 @@ root = FileTree {path: "/", children: [src, file("/README.md")]}
 # ---------------------------------------------------------------------------
 # Standalone executables
 
-test ts-executable {a standalone executable compares, hashes and walks trees as the JIT does: the program descriptor carries each tree shape's child slot, so a chain 300,000 deep compares on a 1 MiB stack} -constraints executableAot -setup {
+test ts-executable {a standalone executable compares, hashes, walks and prints trees as the JIT does: the program descriptor carries each tree shape's child slot, so a chain 300,000 deep compares on a 1 MiB stack, and the executable prints its result with the native printer} -constraints executableAot -setup {
     set dir [makeDirectory {ts aot}]
 } -body {
-    set hir [tsHir "$::tsDecls\na = chain(300000, 1)\n\[a == chain(300000, 1), a == chain(300000, 2), hash(node(1, \[leaf(2)\])), values(node(1, \[node(2, \[leaf(4)\]), leaf(3)\]), std::tree::Order::BreadthFirst)\]\n"]
+    set hir [tsHir "$::tsDecls\na = chain(300000, 1)\n\[a == chain(300000, 1), a == chain(300000, 2), hash(node(1, \[leaf(2)\])), values(node(1, \[node(2, \[leaf(4)\]), leaf(3)\]), std::tree::Order::BreadthFirst), node(1, \[node(2, \[leaf(4)\]), leaf(3)\])\]\n"]
     set binary [native::executable $hir [file join $dir program]]
     set saved [expr {[info exists ::env(BOTLISH_NATIVE_STACK_BYTES)] ? $::env(BOTLISH_NATIVE_STACK_BYTES) : ""}]
     set ::env(BOTLISH_NATIVE_STACK_BYTES) 1048576
@@ -586,6 +586,6 @@ test ts-executable {a standalone executable compares, hashes and walks trees as 
     }
 } -cleanup {
     removeDirectory {ts aot}
-} -result {{[true, false, 1938861805063967348, [1, 2, 3, 4]]} {[true, false, 1938861805063967348, [1, 2, 3, 4]]}}
+} -result {{[true, false, 1938861805063967348, [1, 2, 3, 4], Node {value: 1, children: [Node {value: 2, children: [Node {value: 4, children: []}]}, Node {value: 3, children: []}]}]} {[true, false, 1938861805063967348, [1, 2, 3, 4], Node {value: 1, children: [Node {value: 2, children: [Node {value: 4, children: []}]}, Node {value: 3, children: []}]}]}}
 
 cleanupTests

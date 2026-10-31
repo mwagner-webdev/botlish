@@ -139,11 +139,16 @@ nomethod fn attrs(ks: List[str]) -> std::immutable_map::ImmutableMap[str, int]:
         m.set(k, 1)
     m.freeze()
 
-# ts-generic-construction-typed: an untyped yielding function.
+# ts-generic-construction-typed: untyped yielding functions, one whose
+# yields and result have different types.
 fn gen(x):
     loop c in x.children:
         yield c
     x
+
+fn kids_then_none(x):
+    yield x.children
+    []
 
 # ts-filesystem-specimen: the motivating shape.
 tree struct FileTree:
@@ -319,8 +324,11 @@ fn register_walk_tests():
             coroutine {step, first} = gen(r)
             b = step()
             c = step()
-            [first.value, b.value, c.value]
-    std::test::value("ts-generic-construction-typed", [2, 3, 1], b_ts_generic_construction_typed)
+            coroutine {step: more, first: kids} = kids_then_none(r)
+            values_of = loop k in kids:
+                k.value
+            [first.value == 2, b.value == 3, c.value == 1, values_of == [2, 3], std::list::length(more()) == 0]
+    std::test::value("ts-generic-construction-typed", [true, true, true, true, true], b_ts_generic_construction_typed)
 
     # the motivating shape: a FileTree walked breadth-first and depth-first
     fn b_ts_filesystem_specimen() errors std::compiler::CompilerError:
