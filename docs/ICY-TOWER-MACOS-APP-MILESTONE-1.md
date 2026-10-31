@@ -1526,7 +1526,15 @@ x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531), ba18cda
 (41224177532) and bf73c0d, the last commit with code (41245041660); `icy-tower` (Linux) passed at c0f3165 (41205692581, a
 manual run); `tests (macos arm64)` and `tests (windows x86-64)` were
 cancelled by each next push; for bf73c0d, the last commit with code, they
-were queued or running when this report was written (GENERAL-TESTS-STATUS).
+were still queued when this report was written (runs 41245041652 and
+41245041828): **pending**, never counted as passed. So is a manual run of
+`icy-tower` (Linux) on the final commit (41250651088, queued). Since its
+last passing run (c0f3165) the commits changed the release tooling, the
+macOS harness and the documentation only -- nothing the Linux executable
+is built from -- and the Linux-runnable tests of the final code passed in
+this checkout: `workload-icy-tower-app-module`,
+`-app-module-shared-sources-untouched` and `-release-tooling` (the release
+tooling's 63 + 63 + 23 tests), and 70 of 70 release mutants.
 
 ## 44. The release run and its notarization
 
