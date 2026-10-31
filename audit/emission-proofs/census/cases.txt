@@ -1,0 +1,591 @@
+# The modular census (MODULAR-EMISSION-PROOFS-MILESTONE-1.md, section 14):
+# programs written to expose unsound or caller-dependent reasoning, each
+# checked by the modular checker (tools/modcheck.tcl) and by the
+# exploratory one (audit/emitter/tools/emitcheck.tcl), every rejected claim
+# searched for a concrete counterexample (tools/concrete.tcl), every proven
+# one run on the same candidates (tools/census.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   expect FN VERDICT           the modular verdict: proven, disproven,
+#                               not-proved
+#   original FN VERDICT         the exploratory checker's: proved,
+#                               rejected, unused (with the case's own
+#                               callers -- which pass valid values only:
+#                               its proofs that are false for the
+#                               declaration are the census's subject)
+#   --- FILE                    a file of the case (main.bot is the entry;
+#                               it is added beside the JSON workspace)
+#   ...
+#   @@end
+
+@@ caller-only-safe-digit an unguarded digit emitter whose only caller passes '0'
+expect digit disproven
+original digit proved
+--- main.bot
+import json_grammar
+
+#: emits json_grammar::digit_symbol
+fn digit(c: int) -> unit:
+    yield c
+    unit
+
+fn src() -> int:
+    digit(48)
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ caller-only-safe-arith a hexadecimal-digit emitter by arithmetic, whose callers pass 0..15 only
+expect hexchar disproven
+original hexchar proved
+--- hexes.bot
+import std::dfa
+import json_lex
+
+dfa hex_symbol over ascii:
+    start:
+        json_lex::hex -> accept
+
+#: emits hexes::hex_symbol
+fn hexchar(n: int) -> unit:
+    if n < 10:
+        yield 48 + n
+    else:
+        yield 87 + n
+    unit
+
+fn src(n: int) -> int:
+    hexchar(n)
+    -1
+--- main.bot
+import hexes
+import std::coroutine
+
+fn one(n: int) -> int:
+    coroutine {step, first} = hexes::src(n)
+    first
+
+loop n from 0 to 16:
+    one(n)
+@@end
+
+@@ unused-correct a correct emitter no program calls
+expect digit_of_nibble proven
+original digit_of_nibble unused
+--- lib1.bot
+import json_lex
+import json_grammar
+
+#: emits json_grammar::digit_symbol
+fn digit_of_nibble(n: int) -> unit:
+    if n >= 0 and n <= 9:
+        yield 48 + n
+    else:
+        yield 48
+    unit
+--- main.bot
+import lib1
+
+0
+@@end
+
+@@ unused-wrong a wrong emitter no program calls
+expect digit_wrong disproven
+original digit_wrong unused
+--- lib2.bot
+import json_lex
+import json_grammar
+
+#: emits json_grammar::digit_symbol
+fn digit_wrong(n: int) -> unit:
+    if n >= 0 and n <= 10:
+        yield 48 + n
+    else:
+        yield 48
+    unit
+--- main.bot
+import lib2
+
+0
+@@end
+
+@@ unrelated-helper-caller a helper the emitter calls with 0..9, called elsewhere with 99
+expect emit_digit proven
+original emit_digit proved
+--- main.bot
+import json_grammar
+
+fn put(n: int) -> unit:
+    yield 48 + n
+    unit
+
+#: emits json_grammar::digit_symbol
+fn emit_digit(n: int) -> unit:
+    if n >= 0 and n <= 9:
+        put(n)
+    else:
+        put(0)
+    unit
+
+fn other() -> int:
+    put(99)
+    -1
+
+fn src() -> int:
+    emit_digit(5)
+    -1
+
+coroutine {step, first} = src()
+coroutine {step: s2, first: f2} = other()
+[first, f2]
+@@end
+
+@@ domain-parameter a digit emitter over a declared integer domain, never called
+expect digit_value proven
+original digit_value unused
+--- lib3.bot
+import json_grammar
+
+type DigitValue = Int in 0..9
+
+#: emits json_grammar::digit_symbol
+fn digit_value(d: DigitValue) -> unit:
+    yield 48 + d
+    unit
+--- main.bot
+import lib3
+
+0
+@@end
+
+@@ fail-after-yield-handled a helper fails after yielding a quotation mark; the caller's handler writes another
+expect s disproven
+original s proved
+--- main.bot
+import json_lex
+
+error Oops:
+    at: int
+
+fn h(n: int) -> unit errors Oops:
+    yield 34
+    if n > 0:
+        fail Oops {at: 1}
+    unit
+
+#: emits json_lex::json_string
+fn s(n: int) -> unit:
+    yield 34
+    h(n):
+        on Oops:
+            yield 34
+    unit
+
+fn src(n: int) -> int:
+    s(n)
+    -1
+
+coroutine {step, first} = src(1)
+first
+@@end
+
+@@ sentinel-overflow a symbol of 10^23, past the checker's sentinels
+expect big disproven
+original big proved
+--- main.bot
+import json_lex
+
+#: emits json_lex::json_number
+fn big() -> unit:
+    yield 49
+    yield 100000000000000000000000
+    unit
+
+fn src() -> int:
+    big()
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ guard-handler-continues a guard whose failure a handler absorbs, the symbol yielded anyway
+expect g disproven
+original g proved
+--- main.bot
+import std::dfa
+import json_grammar
+
+#: emits json_grammar::digit_symbol
+fn g(c: int) -> unit:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            0
+        on std::dfa::UnexpectedEnd:
+            0
+    yield c
+    unit
+
+fn src() -> int:
+    g(50)
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ guard-other-binding a guard of one value, another yielded
+expect g2 disproven
+original g2 proved
+--- main.bot
+import std::dfa
+import json_grammar
+
+error Bad:
+    at: int
+
+#: emits json_grammar::digit_symbol
+fn g2(c: int, d: int) -> unit errors Bad:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    yield d
+    unit
+
+fn src() -> int errors Bad:
+    g2(50, 51)
+    -1
+
+fn run() -> int errors Bad:
+    coroutine {step, first} = src()
+    first
+
+run():
+    on Bad:
+        -3
+@@end
+
+@@ guard-derived-value a guarded value, then a value derived from it yielded
+expect g3 disproven
+original g3 proved
+--- main.bot
+import std::dfa
+import json_grammar
+
+error Bad:
+    at: int
+
+#: emits json_grammar::digit_symbol
+fn g3(c: int) -> unit errors Bad:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    d = c + 1
+    yield d
+    unit
+
+fn src() -> int errors Bad:
+    g3(50)
+    -1
+
+fn run() -> int errors Bad:
+    coroutine {step, first} = src()
+    first
+
+run():
+    on Bad:
+        -3
+@@end
+
+@@ separate-coroutine-ignored an emitter that constructs (and resumes) a coroutine of an invalid emitter, never forwarding its values
+expect outer proven
+original outer proved
+--- main.bot
+import json_grammar
+import std::coroutine
+
+fn junk() -> int:
+    yield 120
+    yield 121
+    -1
+
+#: emits json_grammar::digit_symbol
+fn outer() -> unit:
+    coroutine {step, first} = junk()
+    if first > 0 and not std::coroutine::done?(step):
+        step()
+    yield 55
+    unit
+
+fn src() -> int:
+    outer()
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ forwarded-values an emitter forwarding the values it resumes from a certified digit emitter
+expect forward not-proved
+original forward rejected
+--- main.bot
+import json_grammar
+import std::coroutine
+
+#: emits json_grammar::digit_symbol
+fn seven() -> int:
+    yield 55
+    -1
+
+#: emits json_grammar::digit_symbol
+fn forward() -> unit:
+    coroutine {step, first} = seven()
+    yield first
+    unit
+
+fn src() -> int:
+    forward()
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ zero-iterations a counted loop of digits that may run zero times, claimed as a number
+expect digits disproven
+original digits rejected
+--- main.bot
+import json_lex
+
+#: emits json_lex::json_number
+fn digits(n: int) -> unit:
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn src() -> int:
+    digits(3)
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ recursion-may-be-empty a recursive run of digits whose base case emits nothing
+expect ones disproven
+expect ones1 proven
+original ones rejected
+original ones1 proved
+--- main.bot
+import json_lex
+
+#: emits json_lex::json_number
+fn ones(n: int) -> unit:
+    if n > 0:
+        yield 49
+        ones(n - 1)
+    unit
+
+#: emits json_lex::json_number
+fn ones1(n: int) -> unit:
+    yield 49
+    ones(n - 1)
+    unit
+
+fn src() -> int:
+    ones(3)
+    ones1(2)
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ never-returns an emitter that writes ones forever: every prefix viable, no completion
+expect forever proven
+original forever proved
+--- main.bot
+import json_lex
+
+#: emits json_lex::json_number
+fn forever() -> unit:
+    yield 49
+    loop:
+        yield 49
+        continue
+    unit
+
+fn src() -> int:
+    forever()
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ adjacent-numbers two certified numbers written back to back inside a text
+expect pair disproven
+original pair rejected
+--- main.bot
+import json_grammar
+import number_emit
+
+#: emits json_grammar::json_text
+fn pair(a: int, b: int) -> unit errors IndexNotFound:
+    yield 91
+    number_emit::integer(a)
+    number_emit::integer(b)
+    yield 93
+    unit
+
+fn src() -> int errors IndexNotFound:
+    pair(1, 2)
+    -1
+
+fn run() -> int errors IndexNotFound:
+    coroutine {step, first} = src()
+    first
+
+run():
+    on IndexNotFound:
+        -3
+@@end
+
+@@ lookahead-two a recognizer that ends its token two symbols back, and an emitter that writes past it
+expect abc disproven
+expect ab_only proven
+original abc rejected
+original ab_only proved
+--- la.bot
+import std::dfa
+
+dfa ab over ascii:
+    start:
+        'a' -> one
+    one:
+        'b' -> two
+    two:
+        'c' -> accept before 2
+        end -> accept
+
+#: emits la::ab
+fn abc() -> unit:
+    yield 97
+    yield 98
+    yield 99
+    unit
+
+#: emits la::ab
+fn ab_only() -> unit:
+    yield 97
+    yield 98
+    unit
+
+fn src() -> int:
+    abc()
+    ab_only()
+    -1
+--- main.bot
+import la
+import std::coroutine
+
+coroutine {step, first} = la::src()
+first
+@@end
+
+@@ caught-before-yield a helper whose guard fails before it yields; the caller catches it and writes a digit
+expect safe proven
+original safe proved
+--- main.bot
+import std::dfa
+import json_grammar
+
+error NotDigit:
+    at: int
+
+#: emits json_grammar::digit_symbol
+fn guarded(c: int) -> unit errors NotDigit:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail NotDigit {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail NotDigit {at: 0}
+    yield c
+    unit
+
+#: emits json_grammar::digit_symbol
+fn safe(c: int) -> unit:
+    guarded(c):
+        on NotDigit:
+            yield 48
+    unit
+
+fn src() -> int:
+    safe(65)
+    -1
+
+coroutine {step, first} = src()
+first
+@@end
+
+@@ caught-after-prefix a helper that may fail after completing the literal null; the caller's handler writes its last letter again
+expect twice disproven
+original twice proved
+--- main.bot
+import json_lex
+
+error Late:
+    at: int
+
+fn one_then_fail(n: int) -> unit errors Late:
+    yield 108
+    if n > 0:
+        fail Late {at: 1}
+    unit
+
+#: emits json_lex::json_literal
+fn twice(n: int) -> unit:
+    yield 110
+    yield 117
+    yield 108
+    one_then_fail(n):
+        on Late:
+            yield 108
+    unit
+
+fn src(n: int) -> int:
+    twice(n)
+    -1
+
+coroutine {step, first} = src(1)
+first
+@@end
+
+@@ end-yield-negative a symbol computed as n - 1 that is -1 for n = 0
+expect m disproven
+original m proved
+--- main.bot
+import json_grammar
+
+#: emits json_grammar::digit_symbol
+fn m(n: int) -> unit:
+    if n >= 0 and n <= 10:
+        yield 47 + n
+    else:
+        yield 48
+    unit
+
+fn src() -> int:
+    m(1)
+    -1
+
+coroutine {step, first} = src()
+first
+@@end

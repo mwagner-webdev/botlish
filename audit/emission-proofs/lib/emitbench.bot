@@ -1,0 +1,142 @@
+# emitbench.bot -- the run-time cost of the ways a digit or a string can be
+# made valid (MODULAR-EMISSION-PROOFS-MILESTONE-1.md, section 9): each
+# workload drives one of emitlib's emitters per token in the function that
+# constructs it (coroutine fusion takes every one), folding each symbol into
+# a checksum that stores nothing.
+#
+#   digits_domain     digit_of: the digit proved from its declared domain
+#                     (DigitValue), no check at run time
+#   digits_guarded    digit_checked: a guard recognizer per symbol, then the
+#                     symbol (proved given the guard)
+#   digits_unchecked  digit_unchecked: no check, no certificate
+#   digits_validated  digit_unchecked, each symbol fed to the recognizer as
+#                     it is emitted (the exploration's design A)
+#   strings_static    emitlib::json_string (proved, no check)
+#   strings_validated the same, fed to json_string_strict as emitted
+
+import emitlib
+import json_lex
+import json_grammar
+import std::dfa
+import std::coroutine
+import std::list
+import std::mutable_array
+
+error Invalid:
+    at: int
+
+fn mix(h: int, x: int) -> int:
+    (h * 31 + x).mod(1000000007)
+
+fn digits_domain(count: int) -> List[int]:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = emitlib::digit_of_source(i.mod(10))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn digits_guarded(count: int) -> List[int] errors emitlib::NotADigit:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = emitlib::digit_checked_source(i.mod(10))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn digits_unchecked(count: int) -> List[int]:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = emitlib::digit_unchecked_source(i.mod(10))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn digits_validated(count: int) -> List[int] errors Invalid:
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = emitlib::digit_unchecked_source(i.mod(10))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            json_grammar::digit_symbol(st.at(2)):
+                on std::dfa::UnrecognizedInput:
+                    fail Invalid {at: i}
+                on std::dfa::UnexpectedEnd:
+                    fail Invalid {at: i}
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn texts() -> List[str]:
+    ["plain text", "a \"quoted\" one", "tab\tand\nnewline", "é😀 unicode", "", "x", "back\\slash/solidus", "  separator"]
+
+fn strings_static(count: int) -> List[int] errors IndexNotFound:
+    pieces = texts()
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = emitlib::json_string_source(std::list::at(pieces, i.mod(8)))
+        st.set(2, first)
+        loop:
+            if std::coroutine::done?(step):
+                break
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            st.set(2, step())
+        continue
+    [st.at(1), st.at(0)]
+
+fn strings_validated(count: int) -> List[int] errors IndexNotFound, Invalid:
+    pieces = texts()
+    st = std::mutable_array::create(3, 0)
+    loop i from 0 to count:
+        coroutine {step, first} = emitlib::json_string_source(std::list::at(pieces, i.mod(8)))
+        coroutine {step: feed} = json_lex::json_string_strict(first):
+            on std::dfa::UnrecognizedInput:
+                fail Invalid {at: i}
+            on std::dfa::UnexpectedEnd:
+                fail Invalid {at: i}
+        st.set(2, first)
+        loop:
+            st.set(0, st.at(0).mix(st.at(2)))
+            st.set(1, st.at(1) + 1)
+            x = step()
+            if std::coroutine::done?(step):
+                break
+            if std::coroutine::done?(feed):
+                fail Invalid {at: i}
+            feed(std::dfa::Symbol {code: x}):
+                on std::dfa::UnrecognizedInput:
+                    fail Invalid {at: i}
+                on std::dfa::UnexpectedEnd:
+                    fail Invalid {at: i}
+            st.set(2, x)
+        if not std::coroutine::done?(feed):
+            feed(std::dfa::Symbol {code: -1}):
+                on std::dfa::UnrecognizedInput:
+                    fail Invalid {at: i}
+                on std::dfa::UnexpectedEnd:
+                    fail Invalid {at: i}
+        continue
+    [st.at(1), st.at(0)]

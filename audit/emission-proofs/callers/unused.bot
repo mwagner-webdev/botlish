@@ -1,0 +1,8 @@
+# unused.bot -- imports the library and calls none of its emitters: the
+# exploratory checker had no facts then (EMIT-UNUSED); a certificate is a
+# property of the declaration, so the modular one decides every claim the
+# same as in any other program.
+
+import emitlib
+
+0
