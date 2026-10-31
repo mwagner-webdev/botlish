@@ -210,7 +210,11 @@ as every AppKit application's does, and starts no second lifecycle: SDL's
 object is the only NSApplication. No LSUIElement, LSBackgroundOnly or
 NSUIElement: `bundle.py check` refuses each (an agent, a background-only
 application), and the `agent-application` mutant is killed by the
-LaunchServices launch's check that the process is a regular application.
+LaunchServices launch: LaunchServices does not make an agent the active
+application. (Its other check, the activation policy, is a race: SDL3's
+`Cocoa_RegisterApp` sets NSApplicationActivationPolicyRegular itself, so an
+LSUIElement bundle read after SDL started already says regular; run
+41228596109 read policy 1, run 41235898277 policy 0.)
 
 `bundle.py` validates before writing and after: the identifier
 (reverse-DNS, at least two components, letters, digits, hyphens and
@@ -1192,18 +1196,19 @@ The original session (the earlier milestone's cases, unchanged here)
 failed intermittently, three times in this milestone's runs, never in a
 case of the bundle:
 
-* run 41220843007 (and an early run of this milestone): `restart`, `FAIL
-  R: the new game's player centred, its feet at view row 645 ...`. The
-  check is of the player's x as well as its feet: the round's summary ends
-  `x=434` -- round 2's player ran to the right wall, as if Right were still
-  held. The case sends Right's key-up and waits at least 0.5 s before it
-  taps R, so a key-up reached the game after R or was not seen at all;
-  which, the runs do not show.
+* runs 41220843007 and 41235898277 (and an early run of this milestone):
+  `restart`, `FAIL R: the new game's player centred, its feet at view row
+  645 ...` (561 in the second). The check is of the player's x as well as
+  its feet: both rounds' summaries end `x=434` -- round 2's player ran to
+  the right wall, as if Right were still held. The case sends Right's
+  key-up and waits at least 0.5 s before it taps R, so a key-up reached the
+  game after R or was not seen at all; which, the runs do not show.
 * run 41205557290 (commit c0f3165): its log was lost when that run, hung
   in another step, was cancelled, so the failing case is not known.
 
 It passed in runs 41197431104, 41201527696, 41207619549, 41210576736,
-41212691891, 41217612371, 41219310772 and 41224177467. It is recorded as a
+41212691891, 41217612371, 41219310772, 41224177467 and 41228596109 (and in
+the mutant harness's baseline of 41235898277, but not in 41228596109's). It is recorded as a
 pre-existing intermittent failure of the earlier milestone's keyboard case
 whose cause is not established, not as passed; this milestone changes
 neither the game nor that harness case. The Developer ID-signed
@@ -1348,6 +1353,13 @@ they start and after they end (`dismiss_alerts`, recorded as
 the earlier milestone's intermittent case (section 34), so that run's kill
 of `restart-ignored` is not conclusive (run 41164897163 of the earlier
 milestone killed it with a passing baseline). The rerun with the fix:
+**Executed** (run 41235898277, with the fix): every baseline detector held,
+`session:restart` included; `launch-environment-dropped` killed by its own
+check (`app:app-alert-renderer: an alert appears: None`), and 30 of 31 --
+`agent-application` failed `app-launch` by "LaunchServices made it the
+active application (frontmost: Finder)", while the policy check that had
+killed it before passed: SDL3 sets the regular policy itself (section 4).
+Both checks state the mutant's rule, and its `??` line now names both.
 MUTANTS-RERUN
 
 ## 40. Negative artifact controls
