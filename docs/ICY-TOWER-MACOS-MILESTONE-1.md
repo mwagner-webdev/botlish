@@ -902,11 +902,56 @@ PENDING.
 
 ## 39. Generated artifacts and their provenance
 
-PENDING.
+Nothing macOS-generated is committed: each is made on the runner from
+committed, pinned inputs and uploaded with the run (the artifact
+`icy-tower-macos-aarch64`), as the Windows build does for its MSVC binding.
+
+| artifact | made from | where |
+|---|---|---|
+| the SDL3 binding, `sdl3-binding/macos-aarch64/` (modules, `manifest.txt`, `report.txt`, `layouts-check.c`) | `tools/c-bindgen.tcl generate sdl3 -target macos-aarch64`: the profile's pinned SDL3 source (tag release-3.4.18, commit 829a65d7...), Apple clang and the runner's SDK, all recorded in the manifest | the run's artifact; build-macos.sh checks the staged package against it, file for file, and its revision against the pin |
+| `libSDL3.a` | `tests/platform/sdl3-static-macos.sh build` from the same pinned source: one CMake invocation, printed with its flags, the SDK and the archive's SHA-256 | the runner's cache (`icy-tower-macos-sdl3-...`, keyed by the profile and the script); staged into the application root |
+| the executable, `icy-tower-macos-aarch64/icy-tower`, and its `link.log` | build-macos.sh with Botlish.app built from the same commit | the run's artifact |
+| the probe (`probe/icy-tower`) and the worker build (`worker/icy-tower-worker`) | the same staged game, linked against the traced archive; built with the default startup | the run's artifact |
+| the session: every capture (PNG), each case's output, `results.json`, `summary.md`, the traces and SDLTRACE_INFO files | macos-session.py | the run's artifact (`session/`) |
+| `audit/icy-tower/trace-reference.txt` | the Linux x86-64 executable's trace, `trace-reference.sh EXE write` | committed; `workload-icy-tower-trace-reference` keeps it current |
+
+The Linux executable stays committed (`audit/icy-tower/artifacts/icy-tower`,
+unchanged by this milestone: no game source changed); a macOS executable
+is a CI artifact, because only a Mac builds one.
 
 ## 40. Remaining limitations
 
-PENDING (final list).
+* **Not an application bundle, not signed for distribution, not
+  notarized.** The executable is a command-line Mach-O with the linker's ad
+  hoc signature: run from a terminal it is the game; a copy downloaded from
+  the internet is quarantined by Gatekeeper. Section 41 lists what an
+  installable application needs. No release publishes it.
+* **arm64 only.** No x86-64 slice, no universal binary: the native backend
+  is AArch64's on macOS (MACOS-AARCH64-PORT-AUDIT.md).
+* **Weak frameworks linked strongly.** SDL3 links UniformTypeIdentifiers
+  and CoreHaptics weakly; Botlish's `extern c framework` has no weak form.
+  Both exist on macOS 11 and later, the archive's deployment target, so
+  nothing fails today; an older deployment target would need a weak form
+  (a language decision, not this milestone's).
+* **The binding is generated per build.** Building needs Xcode's Apple
+  clang and the macOS SDK on the Mac (as Windows needs Visual Studio); no
+  macOS binding of SDL3 is committed or checked by a Linux job.
+* **Tested on one kind of display.** GitHub's runner has one 1024 x 768
+  display at scale 1, which makes the window manager fit the window under
+  the menu bar (SDL letterboxes the view at 0.91). The frame checks find the
+  scale from the walls and handle any; a Retina display (scale 2) and
+  several displays were not run.
+* **Real time is real.** In a real-time Cocoa run the frame times follow
+  the display, and the autopilot (a fixed-step driver) can lose a round;
+  determinism is the fixed-step runs' (the traces, the oracle), as on
+  Linux.
+* **The game's limits are unchanged**: SDL's debug text, no audio, no
+  gamepad, no resizing behavior beyond SDL's letterbox.
+* **Input reaches the game through the window system only.** The
+  acceptance needs the runner's permission to post events (Quartz) and to
+  use Accessibility; GitHub's macos-15 runners grant both (the `env`
+  case's preflight). Where a runner does not, the keyboard, restart, focus
+  and close cases are ENVIRONMENT-BLOCKED, never counted as passed.
 
 ## 41. Prerequisites for an installable macOS .app
 
