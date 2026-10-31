@@ -51,7 +51,10 @@ was exactly as wrong as the ordinary one; it had no separate path to fix.
 
 Now the call's own check rejects an argument whose type is statically of a
 known kind other than the one the native's parameter requires, for every
-argument of every native call the program writes, in every spelling:
+argument of every native call the program writes, in every spelling (where
+a more specific check already held an argument statically -- a C call's,
+a layout operation's, a mutation's place check -- that check keeps it,
+section 7):
 
 ```
 method-at-list.bot:15:14: argument 1 of native std::mutable_array::at requires
@@ -487,7 +490,91 @@ moved; each was updated to the new text, keeping its rule (section 11).
 
 ## 11. Regression results
 
-RESULTS-REGRESSION
+All on the final code, in a 4-core container (`LANG=C.utf8`, Tcl 9.0.1, the
+native driver built from this tree). The machine's speed and the session's
+2-hour limit on a background command split the whole local run into parts.
+
+| check | command | outcome |
+|---|---|---|
+| the regression file | `tclsh9.0 tests/method-receiver-types.test` | 35 passed, 0 failed |
+| against the base | the same file on `6572767` | 18 failed (every test of the defect), 17 passed (the invariants: `any`, generic contracts, decisions, obligations, affine moves, C calls, METHOD-ELIGIBLE, the place check) |
+| Tcl tests, part 1 (the 52 files a first, interrupted run had not reached, and every file this milestone edits) | `tclsh9.0 tests/local.tcl -parts tcl FILES` | interp 1807 passed, compile 1803 passed, 0 failed (warning-gate.test among them: the shipped stdlib, libraries, examples and benchmarks compile as before) |
+| golden suites, all 111, four backends | `tclsh9.0 tests/local.tcl -parts golden` | 109 suites passed; 2 failed (below) |
+| Tcl tests, part 2 (the other 170 files) and the 2 golden suites | `tclsh9.0 tests/local.tcl FILES SUITES` | 7 tests failed on each backend (below); the 2 suites 195/195 on each backend |
+| the 4 files fixed after part 2 | `tclsh9.0 tests/local.tcl -parts tcl FILES` | 64 passed on each backend, 0 failed |
+| the golden duplicates local.tcl skips (FROZEN-DUPLICATE-ORACLE: CI runs them) | each file `-match` its manifest names, interp and compile | 266 runs, 4,700 test executions, 0 failed |
+| the golden manifest | `tclsh9.0 audit/golden/migration/merge.tcl -names audit/golden/migration/tcl-names.txt -check 1` | no problem (12,021 rows) |
+| Compilerpedia | `tclsh9.0 tools/compilerpedia.tcl check` | 1105 topics, 676 examples, 0 problems |
+| this milestone's mutants | `tclsh9.0 audit/method-receiver-types/tools/mutate.tcl` | all 14 apply exactly once and are killed by a test their `!!` line names (exit 0) |
+| the method decision's mutants this milestone's change moved | `tclsh9.0 audit/method-filter/tools/mutate.tcl 2 'native-*'`; `tclsh9.0 audit/method-resolution/tools/mutate.tcl -only nested-call-problems-charged` | `native-equal-kinds-excluded`, `native-type-problem-lost`, `nested-call-problems-charged`: each applies and is killed by the unit tests |
+| the method decision's independent oracle | `tclsh9.0 audit/method-resolution/tools/oracle.tcl 200 1` and with `-contexts 1` | 200 programs, 1128 calls, 0 disagreements; 200 programs, 1202 calls (18 rejected by an obligation), 0 disagreements |
+| the kind proofs' fuzzer (decisions under the reference audit) | `tclsh9.0 audit/method-filter/tools/fuzz.tcl 8 1` | 8 programs, 654 audited builds, 0 disagreements |
+| the static-decision schedulers' fuzzer | `tclsh9.0 audit/static-decisions/tools/fuzz.tcl -n 4 -seed 17` and `-seed 41` | 120 and 132 sites, 0 failures each |
+| diagnostic recovery's corpus | `tclsh9.0 audit/diagnostic-recovery/tools/efficiency.tcl` | 15 files: every known primary reported, no cascade, every case clean once fixed |
+| the one-character-literal fuzzer (its catalog of rewrites) | `tclsh9.0 audit/one-char-string-literal/tools/fuzz.tcl 40 1` | 0 failures; a character passed to a native's `str` parameter is now catalogued `rejected/TYPE` |
+| the enums fuzzer (its model updated) | `tclsh9.0 audit/enums/tools/fuzz.tcl -n 100 -seed 1000` | case arithmetic and ordering now static TYPE (run-time-rejected 2 -> 0); 46 disagreements, **the same 46 on the base** -- unrelated, below |
+
+**What failed along the way, and why.** Every failure was a test or a
+fuzzer model that pinned the old behavior -- a statically wrong native
+argument compiling and failing at run time -- or a program that relied on
+it; none was a wrong rejection of a valid program:
+
+* pinned the run-time TYPE: `sc-native-type-error-is-runtime` (now
+  `-is-static`), `ns-char-scalar-value-is-canonical`,
+  `oc-str-native-argument-warns`, `fa-conversion-leftover-native-read-is-a-
+  run-time-error` (a GAP, now `-is-a-type-error`), `ic-native-direct-
+  unchanged` (now `-static`), `mutarray-arg-1`, `char-scalar-value-static-
+  contract`, `enum-principal-rejections`, `enum-arithmetic-rejected`,
+  `enum-ordering-rejected`, `abi-numeric-not-arithmetic`,
+  `abi-numeric-collections-stay-int`, `linux-syscall-register64-is-transport-
+  not-arithmetic`, `str-append-char-type-*`, and their golden ports where
+  they have one;
+* needed a value only the run-time check sees (now an `any`): `opaque-print-
+  runtime-errors-all-backends`, `opaque-print-ordinary-struct-error-
+  unchanged`, `gf-registration-would-abort`, `gf-runtime-only-failure-aborts`,
+  `opt-tail-7`, `str-append-char-type-dynamic`, `hir-specialize-11` (an
+  untyped parameter), `hir-aot-12` (core IR);
+* carried a wrong expression the test did not care about:
+  `vt-gc-frontier-strings` (a never-called String added to an Int),
+  `imports-root-primitives-need-no-import` (`[1, 2] + 0`),
+  `loop-interval-lockstep` (a U8 added to an Int);
+* reported one more independent error, correctly: `sr-strict-unchanged`
+  (`1 + "s"` beside a syntax error);
+* stated the method decision's removed rule: `mf-native-rule-one-statement`,
+  `mr-diag-candidate-explanations` (the explanation's text),
+  `mf-never-receiver-is-not-guessed` (its `never` receiver came from the
+  now-rejected call: `mf-poisoned-call-narrows-nothing`);
+* the place check's, the context check's, the layout checks' and the
+  decimal check's established diagnostics, which the first version of the
+  check preceded or duplicated (`ma-place-receiver/not-an-array`,
+  `contexts-not-a-context-install`, `ne-not-a-pointer`,
+  `ne-write-diagnostics`, the DecimalRounded Compilerpedia example) -- the
+  deferrals of section 7;
+* the two golden suites of the part-2 failures: shortening a test moved the
+  lines that `rejects_at` and the `sc-diag-exact-*` values pin; the comments
+  now keep every later line where it was;
+* the enums fuzzer's model (`audit/enums/tools/fuzz.tcl`: case arithmetic
+  and ordering are TYPE at compile time now).
+
+**An unrelated mainline failure.** `audit/enums/tools/fuzz.tcl -n 100 -seed
+1000` reports 46 disagreements on `6572767` too: its programs `import fz`
+and are compiled from text, which has no application root since
+application modules (IMPORTS.md), so the compiler rejects them with
+UNKNOWN-NAMESPACE where the model predicts each program's own fault (the
+first: program 1001, the oracle expecting TYPE). The fuzzer, not the
+compiler, is out of date; this milestone does not touch it beyond the model
+of case arithmetic and ordering.
+
+**Not run here.** The sequential-scheduler comparison of the golden suites
+(`audit/static-decisions/tools/compare.tcl`) runs in CI only (AGENTS.md):
+the `static-decisions` workflow is dispatched on the branch, and so is
+`tests.yml` (the whole Tcl suite with its duplicates on interp and compile,
+the cranelift coverage, the golden suites beside their Tcl originals, the
+method-call decision's oracle under the reference audit; the GC-stress job
+runs on pushes to main). Both were dispatched on `9d6ca0b` (the final code:
+the commits after it change only this report), and neither had started a
+job when this report was written -- every job still queued: their verdicts
+are pending, not passed. Read the two runs' jobs before merging.
 
 ## 12. Remaining limitations
 
