@@ -1120,7 +1120,36 @@ the release job compiles nothing; the executable is the game job's.
 
 ## 39. Mutation results
 
-MUTATION-PLACEHOLDER
+Two mutant sets, both in the repository's mutant format, each killed only
+by the check that states the rule it breaks.
+
+**The release pipeline** (`audit/macos-release/mutants.txt`, 68 mutants,
+`audit/macos-release/tools/mutate.py`: each applied to a private copy of
+macos/, package-macos.sh, the workflow and the tests, the tests its `!!`
+line names run there):
+
+| group | mutants |
+|---|---|
+| the credential preflight (13) | base64-permissive, base64-padding-unchecked, p8-double-encoding-accepted, p12-accepts-pem, no-private-key-accepted, certificate-type-unchecked, team-unchecked, apple-chain-unchecked, validity-unchecked, p8-algorithm-unchecked, p8-curve-unchecked, pkcs8-unchecked, issuer-uuid-unchecked |
+| the release's stages (32) | preflight-prints-a-secret, continue-after-failed-preflight, test-anchors-in-release, remote-auth-skipped, continue-after-auth-failure, auth-misclassified, secrets-printed, secret-files-kept, adhoc-fallback, adhoc-signature-accepted, no-hardened-runtime, runtime-unchecked, no-timestamp, timestamp-unchecked, entitlements-unchecked, seal-unchecked, notarization-ignored, rejected-as-accepted, ticket-unchecked, timeout-as-failure, staple-retries-everything, stapling-omitted, gatekeeper-ignored, tamper-not-tampered, zip-modes-unchecked, sums-unchecked, publish-before-final-launch, acceptance-not-required, identity-may-change, ambiguous-identity-chosen, adhoc-publishable, sign-remedy-misleads |
+| the bundle's checks (6) | worker-startup-accepted, architecture-unchecked, dynamic-sdl-accepted, permissions-unchecked, executable-name-unchecked, package-replaces-on-failure |
+| the workflow's trust boundary (17) | release-on-pull-requests, release-on-any-ref, pull-request-target, secret-in-game-job, secret-in-script, trace-with-secrets, secret-files-uploaded, release-adhoc, workflow-no-staple, workflow-no-notary-auth, publish-before-release, release-assets-unchecked, upload-submission-zip, release-writes, release-trusts-a-root, dry-run-trusts-its-root, dry-run-blocked-as-passed |
+
+**Executed**: 68 of 68 killed on Linux (this checkout, 153 s); on macOS in
+every acceptance run, as the game job's step (run 41207619549: 66 of 66,
+the set before its last three; run RUN_A: MUTANTS-RELEASE-MACOS). Every
+named test passes on the unmutated tree first (the harness's baseline), so
+no mutant is killed by a test that fails anyway.
+
+**The macOS integration** (`audit/icy-tower/macos-mutants.txt`, 31
+mutants: the earlier milestone's 25, `darwin-io-silent` renamed
+`app-io-silent` for the new entry, and six of the bundle's -- alert-never-
+shown, alert-always, alert-before-write, alert-wrong-text,
+launch-environment-dropped, agent-application -- each killed only by a
+LaunchServices case failing with its own text, the `app:CASES` detector:
+the mutant's executable built, bundled by the tree's package-macos.sh,
+signed ad hoc by its release.py and launched through LaunchServices):
+MUTANTS-MACOS
 
 ## 40. Negative artifact controls
 
