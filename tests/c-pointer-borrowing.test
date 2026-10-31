@@ -454,8 +454,9 @@ test cb-no-pointer-value {byte storage never becomes a std::ffi::c::Ptr: given t
         [cbKind "data = mk(2, 1)\nstd::ffi::c::retype\[std::ffi::c::UChar\](data)"]
 } -result {{TYPE {argument for parameter "p" cannot be proven to satisfy std::ffi::c::Ptr[std::ffi::c::UChar] (argument type: std::abi::bytes::Bytes); byte storage is never a pointer value: a std::abi::bytes::Bytes is exposed to C only as the argument of a foreign call whose parameter's contract admits it (noescape, a known access, a byte-sized pointee), for that call alone}} TYPE TYPE TYPE {TYPE {argument 1 of std::ffi::c::clone must be a C pointer (argument type: std::abi::bytes::Bytes); byte storage is never a pointer value: a std::abi::bytes::Bytes is exposed to C only as the argument of a foreign call whose parameter's contract admits it (noescape, a known access, a byte-sized pointee), for that call alone}} TYPE IMPRINT TYPE}
 
-test cb-no-pointer-producing-native {no operation makes a pointer of anything but a pointer or an Int: every native whose result is a C address takes only C addresses and Ints -- so no byte owner, storage or exposure can become one (the test fixture's address[T](n) is the one Int source, and only a test can name it)} -body {
+test cb-no-pointer-producing-native {no operation makes a pointer of anything but a pointer or an Int: every native whose result is a C address takes only C addresses and Ints -- so no byte owner, storage or exposure can become one (the test fixture's address[T](n) is the one Int source, and only a test can name it). The one other maker is the callback pointer (result shape callback-pointer, C-CALLBACK-MILESTONE-1.md): the address of a callback's entry point, a static function of the program, made only of a `callback c fn` named directly -- a byte owner or storage given to it is CALLBACK-REFERENCE} -body {
     set bad {}
+    set callbackPointers {}
     foreach name [core::native::names] {
         set meta [core::native::metadata $name]
         set result [dict get $meta resultType]
@@ -464,14 +465,20 @@ test cb-no-pointer-producing-native {no operation makes a pointer of anything bu
         set makes [expr {$result eq "cptr" || ($imprint ne "" && [lindex [dict get $imprint result] 0] in {cptr cfnptr})
             || ($foreign ne "" && [lindex [dict get $foreign result] 0] in {cptr cfnptr})}]
         if {!$makes} continue
+        if {[lindex [dict get $meta resultShape] 0] eq "callback-pointer"} {
+            lappend callbackPointers $name \
+                [cbKind "b = std::abi::bytes::from_list(\[std::byte::from_int(1)\])\nf = $name\(b)\n1"] \
+                [cbKind "m = std::abi::bytes::zeroed(std::abi::usize(2))\nf = $name\(m)\n1"]
+            continue
+        }
         foreach kind [dict get $meta paramTypes] {
             if {$kind ni {cptr int}} {
                 lappend bad $name
             }
         }
     }
-    set bad
-} -cleanup {unset -nocomplain bad name meta result imprint foreign makes kind} -result {}
+    list $bad $callbackPointers
+} -cleanup {unset -nocomplain bad callbackPointers name meta result imprint foreign makes kind} -result {{} {std::ffi::c::callback CALLBACK-REFERENCE CALLBACK-REFERENCE}}
 
 test cb-foreign-operation-only-called {a foreign operation is only called: a function value of one would have no contract at its calls, so referring to it otherwise is refused (TYPE; IMPRINT for an imprinted one)} -body {
     list [cbKind "f = ffi_fixture::copy\n1"] [cbKind "g = ffi_fixture::read\n1"] [cbKind "\[ffi_fixture::mixed\]"]

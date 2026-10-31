@@ -864,6 +864,9 @@ Run on the final tree, Linux x86-64, the release driver (each file directly,
 | native-stack-overflow.test | 21 / 21 / 0 / 0 |
 | system-linker.test | 15 / 15 / 0 / 0 |
 | aot-stub-linker.test | 6 / 6 / 0 / 0 |
+| c-pointer-borrowing.test | 62 / 62 / 0 / 0 |
+| linux-syscall.test | 37 / 37 / 0 / 0 |
+| stdlib-namespaces.test | 74 / 74 / 0 / 0 |
 
 and the warning gate (`audit/refactor/tools/gate.tcl`: 84 corpus programs,
 38 library loaders, the observed warnings exactly the manifest), the golden
@@ -871,6 +874,14 @@ suite (`tclsh9.0 tests/local.tcl tests/golden/c-callbacks.bot`: 9/9 on
 interp, compile, cranelift-generic and cranelift) and the Rust tests
 (`cargo test --release --manifest-path native/Cargo.toml`: 312 library
 and 117 driver unit tests, and every native stack check).
+
+The last three are inventories of the native registry, which the new
+intrinsic changes; the macOS acceptance tier found them before a local run
+did. Two add `std::ffi::c::callback` to their lists. The third,
+`cb-no-pointer-producing-native` (no operation makes a pointer of a byte
+owner), now names the callback pointer as the one other maker, by its
+result shape `callback-pointer` (never by name), and checks that a `Bytes`
+or `MutableBytes` given to it is CALLBACK-REFERENCE.
 
 Two mutants of other audits mutate code this milestone changed, and their
 texts were updated to it (keeping each a mutant of the same rule):
