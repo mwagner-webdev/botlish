@@ -445,7 +445,7 @@ test sr-valid-programs-unchanged {a program without syntax errors compiles to th
 # ===========================================================================
 # Strict compilation: a program with syntax errors never runs
 
-test sr-strict-unchanged {a compilation still rejects a program with syntax errors with exactly its syntax errors, on every entry point; requested with recovery, a strict compilation raises the syntax errors first, then the independent semantic ones} -body {
+test sr-strict-unchanged {a compilation still rejects a program with syntax errors with exactly its syntax errors, on every entry point; requested with recovery, a strict compilation raises the syntax errors first, then the independent semantic ones (`1 + "s"` among them since METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md)} -body {
     set dir [sr::Dir strict]
     set path [sr::Put $dir/main.bot "x = foo(\ny = 1 + \"s\"\nz = nosuch\n"]
     set out {}
@@ -456,7 +456,7 @@ test sr-strict-unchanged {a compilation still rejects a program with syntax erro
     }
     catch {surface::readProgramFile $path -cache "" -recover-syntax 1} message options
     lappend out [lmap entry [dict get $options -diagnostics] {list [dict get $entry location line]:[dict get $entry location column] [core::ShownCode $entry]}]
-} -cleanup {file delete -force $dir; unset -nocomplain dir path out command message options entry} -result {{SURFACE SYNTAX} 1 {SURFACE SYNTAX} 1 {SURFACE SYNTAX} 1 {{1:8 {SURFACE SYNTAX}} {3:5 {CORE SEMANTIC UNBOUND}}}}
+} -cleanup {file delete -force $dir; unset -nocomplain dir path out command message options entry} -result {{SURFACE SYNTAX} 1 {SURFACE SYNTAX} 1 {SURFACE SYNTAX} 1 {{1:8 {SURFACE SYNTAX}} {3:5 {CORE SEMANTIC UNBOUND}} {2:9 {CORE SEMANTIC TYPE}}}}
 
 test sr-backends-refuse {every backend entry point refuses a recovered HIR (HIR SYNTAX-RECOVERED), read back from interchange text too: it analyzes a program with syntax errors and is never compiled or run} -body {
     set dir [sr::Dir backends]

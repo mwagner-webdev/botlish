@@ -296,7 +296,7 @@ test imports-entry-program-no-implicit-imports {an entry program gets no implici
 } -result {MISSING-IMPORT MISSING-IMPORT MISSING-IMPORT MISSING-IMPORT MISSING-IMPORT}
 
 test imports-root-primitives-need-no-import {the language primitives are not a namespace and need no import} -body {
-    agree "x = \[1, 2] + 0\n"
+    agree "x = \[1, 2 + 0]\n"
     agree "list(1, 2) == \[1, 2] and integer?(1) and string?(\"a\") and hash(1) == hash(1) and mod(7, 3) == 1\n"
 } -result true
 

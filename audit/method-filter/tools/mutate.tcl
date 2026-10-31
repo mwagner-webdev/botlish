@@ -18,9 +18,9 @@ set only [expr {[llength $argv] > 1 ? [lindex $argv 1] : "*"}]
 
 # {NAME FILE OLD NEW}: OLD must occur exactly once in FILE.
 set mutants [list \
-    [list native-equal-kinds-excluded hir/methods.tcl \
-        "    if \{\$wanted eq \"\" || \$kind eq \$wanted\} \{\n        return \{\}\n    \}" \
-        "    if \{\$wanted eq \"\"\} \{\n        return \{\}\n    \}"] \
+    [list native-equal-kinds-excluded hir/types.tcl \
+        "    if \{\$kind eq \"\" || \$wanted in \{\"\" any\} || \$kind eq \$wanted\} \{\n        return \{\}\n    \}" \
+        "    if \{\$kind eq \"\" || \$wanted in \{\"\" any\}\} \{\n        return \{\}\n    \}"] \
     [list bare-name-excluded hir/methods.tcl \
         "    if \{!\[regexp \{^(.+)::\[^:\]+\$\} \$cand -> ns\]\} \{\n        return 0\n    \}" \
         "    if \{!\[regexp \{^(.+)::\[^:\]+\$\} \$cand -> ns\]\} \{\n        return 1\n    \}"] \
@@ -81,9 +81,9 @@ set mutants [list \
     [list audit-reference-keeps-kind-proofs hir/hir.tcl \
         "    set methodKindProofs 0\n    hir::activate \$hir" \
         "    hir::activate \$hir"] \
-    [list native-type-problem-lost hir/methods.tcl \
-        "                set mismatch \[NativeMismatch \$native \[hir::typeOf \$hir \$receiver\]\]" \
-        "                set mismatch \[expr \{\[hir::typeOf \$hir \$receiver\] eq \"never\" ? \"\" : \"\"\}\]"] \
+    [list native-type-problem-lost hir/range.tcl \
+        "        hir::Diagnose hir TYPE \[format \{argument %d of native %s requires" \
+        "        set ::hir::checkingCall \"\"\n        hir::Diagnose hir TYPE \[format \{argument %d of native %s requires"] \
 ]
 
 proc readText {path} {

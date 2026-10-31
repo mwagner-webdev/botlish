@@ -231,7 +231,8 @@ compile time; see the next sections for why an argument of static type
 
 **Q14. Is this semantic change tested? Yes**: `ic-native-wrapper-static`,
 `ic-native-wrapper-known-kind`, `ic-native-wrapper-before`,
-`ic-native-wrapper-any-argument`, `ic-native-direct-unchanged`, and the
+`ic-native-wrapper-any-argument`, `ic-native-direct-unchanged` (now
+`ic-native-direct-static`), and the
 updated `stdlib-string_reverse-not-a-string` / new
 `stdlib-string_reverse-not-a-string-static`.
 
@@ -499,13 +500,15 @@ parameter that establishes it.
 **What it does not do.** An inherited variable is never unified with
 another use of the value: `take_int(head(xs))` passes a `T'` where a
 declared `int` is required, which is the body's error exactly as for `fn
-f(xs: List[T]): take_int(head(xs))` (a native that re-checks at run time,
-`head(xs) + 1`, accepts it as it accepts a declared `T`). A requirement on a
-callable parameter's *result* (`unbox(g())`) is not inherited: a Fn type
-establishes no variable, so it is instantiated by `g()`'s own static type,
-as any other argument's -- `g : Fn{args: [], return: Box[any], ...}`, which
-a function returning a `Box[int]` does not satisfy (applications are
-invariant), as no contract did before. A forwarder whose inherited type
+f(xs: List[T]): take_int(head(xs))`; a native's argument, `head(xs) + 1`,
+is rejected the same way, as for a declared `T` (the function is checked
+once, for every `T'`: METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md). A
+requirement on a callable parameter's *result* (`unbox(g())`) is not
+inherited: a Fn type establishes no variable, so it is instantiated by
+`g()`'s own static type, as any other argument's --
+`g : Fn{args: [], return: Box[any], ...}`, which a function returning a
+`Box[int]` does not satisfy (applications are invariant), as no contract
+did before. A forwarder whose inherited type
 holds no imprint variable keeps exactly the contract it had
 (`ic-inherited-imprint-no-variable-unchanged`).
 
@@ -912,7 +915,10 @@ wrapper(123)
   body proves it can only ever succeed on a `str`.
 
 Direct native calls are unchanged (`length(123)` is still the run-time
-error, `ic-native-direct-unchanged`), and so is a wrapper call whose
+error, `ic-native-direct-unchanged`; since
+METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md a direct call is held to
+its native's kinds at compile time too, `ic-native-direct-static`), and so
+is a wrapper call whose
 argument's static type is `any` (it reaches `length`'s own check,
 `ic-native-wrapper-any-argument`). Where no strict HIR build runs (core IR
 on interp; the compile backend's `-strict 0`), the old run-time behavior is

@@ -217,33 +217,11 @@ proc hir::methods::DiagnosticOrigin {hir d} {
 
 # The own problems of call E of HIR, OWNED its OwnedBySubject.
 proc hir::methods::CallProblems {hir e owned} {
-    set problems [dict getdef $owned $e {}]
-    # A native called with a first argument of a statically known other kind
-    # is not diagnosed at compile time (it is the native's run-time TYPE
-    # error, as for any call), but it is plainly not the function the
-    # method-style call means when another candidate accepts the receiver.
-    set node [dict get $hir exprs $e]
-    if {[dict get $node kind] eq "call" && [dict get $node args] ne ""} {
-        set callee [dict get $hir exprs [dict get $node callee]]
-        if {[dict get $callee kind] eq "ref" && [dict get $callee binding] ne ""} {
-            set binding [dict get $hir bindings [dict get $callee binding]]
-            if {[dict get $binding kind] eq "root" && [dict get $binding symbol] ne ""
-                    && [dict get $hir symbols [dict get $binding symbol] kind] eq "native"} {
-                set native [dict get $binding name]
-                set receiver [lindex [dict get $node args] 0]
-                # (The one statement of this rule, which the kind proofs,
-                # Excluded, rule candidates out by.)
-                set mismatch [NativeMismatch $native [hir::typeOf $hir $receiver]]
-                if {$mismatch ne {}} {
-                    lassign $mismatch kind wanted
-                    lappend problems [list TYPE \
-                        "the receiver is a $kind, but argument 1 of native $native requires $wanted" $receiver \
-                        [hir::get $hir $receiver origin]]
-                }
-            }
-        }
-    }
-    return [lsort -unique $problems]
+    # (A native called with a first argument of a statically known other
+    # kind is one of them: its own check reports it, hir::range::
+    # VerifyNativeKinds -- the ordinary call's TYPE error, never a rule of
+    # method calls, METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md.)
+    return [lsort -unique [dict getdef $owned $e {}]]
 }
 
 # ---------------------------------------------------------------------------
@@ -251,25 +229,12 @@ proc hir::methods::CallProblems {hir e owned} {
 
 # {KIND WANTED} when the receiver of type RECEIVERTYPE is of a statically
 # known kind other than the one the first parameter of NATIVE requires --
-# the ordinary call is a TYPE error -- else {}. The one statement of this
-# rule: CallProblems reports it, Excluded rules a candidate out by it.
+# the ordinary call's own check reports it as a TYPE error
+# (hir::range::VerifyNativeKinds) -- else {}. The rule is
+# hir::types::NativeKindMismatch's, stated once; Excluded rules a candidate
+# out by it.
 proc hir::methods::NativeMismatch {native receiverType} {
-    if {$receiverType eq "never"} {
-        return {}
-    }
-    set kind [hir::types::kindOf $receiverType]
-    if {$kind eq ""} {
-        return {}
-    }
-    set paramTypes [dict get [core::native::metadata $native] paramTypes]
-    if {$paramTypes eq ""} {
-        return {}
-    }
-    set wanted [core::type::base [lindex $paramTypes 0]]
-    if {$wanted eq "" || $kind eq $wanted} {
-        return {}
-    }
-    return [list $kind $wanted]
+    return [hir::types::NativeKindMismatch $native 0 $receiverType]
 }
 
 # The kinds of the contracts on the first parameter of module function CAND

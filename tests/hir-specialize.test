@@ -125,10 +125,10 @@ test hir-specialize-10 {results propagate up a callee-first chain that ends in a
          [specStatus $hir $analysis use<int>]
 } -result {str str str {closed 0}}
 
-test hir-specialize-11 {a path that always raises does not join the result} -body {
-    lassign [specOf "import std::str\nfn f(s):\n    if std::str::length(s) > 3:\n        return 1 + \"x\"\n    s\n\nf(\"ab\")"] hir analysis
+test hir-specialize-11 {a path that always raises does not join the result: one only the instance knows raises (`1 + t` with t a str there; generically t is untyped, so the generic result joins it -- an operand statically of another kind would be the call's compile-time TYPE in the generic walk too, METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md)} -body {
+    lassign [specOf "import std::str\nfn f(s, t):\n    if std::str::length(s) > 3:\n        return 1 + t\n    s\n\nf(\"ab\", \"x\")"] hir analysis
     set block [hir::get $hir [lindex [hir::roots $hir] 0] value]
-    list [specResult $analysis f<str>] [hir::types::show [hir::type $hir [hir::get $hir $block resultType]]]
+    list [specResult $analysis {f<str, str>}] [hir::types::show [hir::type $hir [hir::get $hir $block resultType]]]
 } -result {str any}
 
 test hir-specialize-12 {explosion control: a per-function limit, then the generic instance} -body {

@@ -535,6 +535,17 @@ proc hir::mutvec::OperationValueProblem {hir e} {
     return "$op mutates its receiver in place, so it can only be called, never used as a value: a call through a function value has no receiver this check can see, and would update whatever $name its caller passes -- a copy, whose update is lost, or a place's own header (call it on a place, `$call`, or wrap it in a function of your own that takes the $kind and returns it)"
 }
 
+# 1 if verify rejects receiver R of call E, a mutating collection operation,
+# as no place of a collection (MUTABLE-PLACE-RECEIVER, ReceiverProblem): what
+# a mutation needs, which hir::range::VerifyNativeKinds leaves to it. (Not a
+# receiver of a kind the place check cannot judge -- a struct that may hold
+# a collection --, an element place's, whose receiver is a context place, or
+# one in code verify does not judge, unreachable.)
+proc hir::mutvec::RejectsReceiver {hir e r} {
+    expr {[dict get $hir exprs $e reachable] && ![hir::affine::ElementPlace $hir $e]
+        && [OpKind $hir $e] eq "mutate" && [ReceiverProblem $hir $e $r] ne ""}
+}
+
 # Why receiver R of mutating call E is not a place, or "".
 proc hir::mutvec::ReceiverProblem {hir e r} {
     set op [hir::affine::NativeName $hir $e]

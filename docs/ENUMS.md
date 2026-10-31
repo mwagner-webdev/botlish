@@ -769,7 +769,10 @@ loop that collects Ints.
 * **Arithmetic and ordering on a case are run-time `TYPE` errors** (24, 25):
   that is how Botlish's ordinary typing treats a native applied to a
   statically known other kind (`"a" + 1`); natively they are known-error
-  guards, but there is no compile-time diagnostic.
+  guards, but there is no compile-time diagnostic. (Closed by
+  METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md: an operand statically of
+  another kind is now the call's compile-time TYPE, `enum-arithmetic-
+  rejected`, `enum-ordering-rejected`.)
 * **Refinements over an enum carrier are unsupported**
   (`enum-refinement-unsupported`, `REFINEMENT-CARRIER`): a refinement lives on
   the core type lattice as a primitive kind refined by named facts, which

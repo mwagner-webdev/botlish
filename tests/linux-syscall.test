@@ -229,12 +229,12 @@ n = std::abi::x86_64::to_int(std::abi::x86_64::register64(0 - 922337203685477580
 }
 } -result {[9223372036854775808, -9223372036854775809, 18446744073709551614]}
 
-test linux-syscall-register64-is-transport-not-arithmetic {a Register64 has no arithmetic or ordering (the ordinary TYPE error any struct gets), only the language's structural equality; it prints as the nominal struct it is} -body {
-    list [lrange [lindex [outcomesOf "import std::abi::x86_64\nr = std::abi::x86_64::register64(20)\nr + 5" {interp}] 0] 0 2] \
-        [lsort -unique [lmap o [outcomesOf "import std::abi::x86_64\nr = std::abi::x86_64::register64(20)\nr * 8" {interp compile cranelift}] {lrange $o 0 1}]] \
-        [lsort -unique [lmap o [outcomesOf "import std::abi::x86_64\nr = std::abi::x86_64::register64(20)\nr < r" {interp compile cranelift}] {lrange $o 0 1}]] \
+test linux-syscall-register64-is-transport-not-arithmetic {a Register64 has no arithmetic or ordering (the ordinary TYPE error any struct gets, at compile time: an operand statically of another kind than the operator requires, METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md), only the language's structural equality; it prints as the nominal struct it is} -body {
+    list [diagKinds "import std::abi::x86_64\nr = std::abi::x86_64::register64(20)\nr + 5"] \
+        [diagKinds "import std::abi::x86_64\nr = std::abi::x86_64::register64(20)\nr * 8"] \
+        [diagKinds "import std::abi::x86_64\nr = std::abi::x86_64::register64(20)\nr < r"] \
         [agree "import std::abi::x86_64\nr = std::abi::x86_64::register64(20)\n\[r == std::abi::x86_64::register64(20), r == std::abi::x86_64::register64(21), r == 20, r\]"]
-} -result {{error {CORE SEMANTIC TYPE} {+: expected int, got std::abi::x86_64::Register64 {word: 20}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}} {[true, false, false, std::abi::x86_64::Register64 {word: 20}]}}
+} -result {TYPE TYPE TYPE {[true, false, false, std::abi::x86_64::Register64 {word: 20}]}}
 
 test linux-syscall-register64-construction-needs-proof {constructing a Register64 directly is sound without privacy: its word must be proven in the domain statically (no runtime guard exists to forget)} -body {
     list [diagKinds "import std::abi::x86_64

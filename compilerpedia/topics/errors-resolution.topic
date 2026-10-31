@@ -339,7 +339,7 @@ pairs
 
 @topic error.type
 title: TYPE: a value, annotation or declaration that does not fit its type
-summary: The broad type diagnostic: a value cannot be proven to have the type its context declares, a type expression or declaration is invalid, or, at run time, an intrinsic got an argument of the wrong kind.
+summary: The broad type diagnostic: a value not proven to have the type its context declares, an intrinsic's argument of another kind, an invalid type expression or declaration.
 index: errors
 alias: type error; type mismatch; wrong type
 keywords: type, cannot be proven, declared type, admissible, annotation, parameter type, result type, expected, got, kind
@@ -397,18 +397,30 @@ Other compile-time families, reported as TYPE with this page:
   * The C ABI: an `extern c fn` signature that is not one ("unit is not a C
     parameter type"), and `std::ffi::c::Void {...}` (SURFACE MODULE TYPE,
     reported by the loader: C's void has no values).
+  * Intrinsics and operators: an argument whose type is statically of
+    another kind than the intrinsic's parameter requires, in an ordinary
+    call, a method-style call (its receiver is argument 1) or an operator:
+    "argument 2 of native + requires int, but this operand has type str:
+    the call could only fail when it runs" (`1 + "a"`), "argument 1 of
+    native std::mutable_array::at requires mutarray, but the receiver has
+    type List[int]: ...". Inside a function with an imprint variable T
+    (`fn f(b: Box[T])`), a value of type T is no particular kind: "... has
+    type T: the function is checked once, for every T, and not every T is
+    mutarray".
 
 At run time, TYPE has a different source. The primitive operations and
-the standard-library intrinsics check the kinds of their arguments when
-they run, and a value of the wrong kind stops the program with this code:
+the standard-library intrinsics also check the kinds of their arguments
+when they run, and a value of the wrong kind stops the program with this
+code:
 
     +: expected int, got "a"
     std::str::length: expected str, got 5
 
-A direct call of an intrinsic or operator is not rejected at compile
-time for an argument of the wrong kind (`1 + "a"` compiles); the
-argument is rejected statically only when it flows into a declared or
-inferred parameter type of a Botlish function.
+Only an argument whose kind the compiler does not know reaches that
+check: a declared `any` parameter's value, or any other value of type
+`any`. (An untyped parameter's body imposes the kind as its inferred
+contract, which every call whose argument type is known is held to:
+rule.type-generic-call.)
 
 == LIKELY CAUSES
   * A value whose type the compiler does not know precisely enough:
@@ -453,6 +465,18 @@ std::ffi::c::Void {}
 @caption C's void has no values
 @error SURFACE MODULE TYPE
 @at 3:1
+@end
+
+@example reject
+import std::mutable_array
+
+fn first(a: List[int]) errors IndexNotFound:
+    a.at(0)
+
+1
+@caption A List receiver of std::mutable_array::at, which requires a MutableArray
+@error CORE SEMANTIC TYPE
+@at 4:5
 @end
 
 @topic rule.type-generic-call
@@ -1915,8 +1939,9 @@ parentheses) or the call as a whole (its instance, an imprint):
     method-style call "length": none of the visible functions of that
     name accepts the call (length rejects the receiver: argument for
     parameter "s" cannot be proven to satisfy str (argument type: int);
-    std::list::length rejects the receiver: the receiver is a int, but
-    argument 1 of native std::list::length requires list)
+    std::list::length rejects the receiver: argument 1 of native
+    std::list::length requires list, but the receiver has type int: the
+    call could only fail when it runs)
 
 A note for each candidate declared in source (`note:` lines under the
 error; an editor's related information) says where it is declared.
@@ -1931,8 +1956,9 @@ the call is not reported: its failure depends on that first error.
 Botlish has no overloading: candidates are not ranked or converted to,
 they are only tried. With a single candidate there is nothing to choose:
 the call is that function's call, checked like any other (a typed
-parameter rejects a wrong receiver as TYPE at compile time; an intrinsic
-checks its argument's kind when it runs).
+parameter rejects a wrong receiver as TYPE at compile time, and so does
+an intrinsic whose parameter requires another kind than the receiver's
+type has; a receiver of type `any` is checked when the call runs).
 
 == LIKELY CAUSES
   * A receiver of the wrong type: an int where a list was meant.
@@ -1941,9 +1967,9 @@ checks its argument's kind when it runs).
 
 == HOW TO INVESTIGATE
 The message gives each candidate's reason, separated by ";": "rejects the
-receiver" when the receiver's type is wrong for it ("the receiver is a
-int"), "rejects argument N" when a later argument is. The notes locate the
-candidates.
+receiver" when the receiver's type is wrong for it ("... but the
+receiver has type int"), "rejects argument N" when a later argument is.
+The notes locate the candidates.
 
 == WHAT TO DO
 Read each candidate's reason; fix the receiver's or the argument's type,

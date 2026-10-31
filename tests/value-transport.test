@@ -569,7 +569,7 @@ test vt-deterministic-planning {the plan is a pure function of the program: lowe
 
 set vtGc(frontier-strings) {import std::str
 fn f0(r, k):
-    std::str::concat(r.a, r.b) + k
+    std::str::length(std::str::concat(r.a, r.b)) + k
 fn f1(r, k):
     f0(r, k)
 fn f2(r, k):

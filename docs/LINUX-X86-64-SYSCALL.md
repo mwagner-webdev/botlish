@@ -124,7 +124,9 @@ fn to_int(register: Register64) -> Register64Word:
 
 It is a struct: `r + 5`, `r * 8`, `r < r` are the ordinary run-time TYPE
 error any struct operand gets (`+: expected int, got std::abi::x86_64::Register64
-{word: 20}`), identically on every backend. There is no wrapping, bitwise,
+{word: 20}`), identically on every backend. (Since
+METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md an operand statically of
+another kind is the call's compile-time TYPE instead.) There is no wrapping, bitwise,
 ordering, pointer or promotion API, and none was added. The language's
 generic structural equality applies (`register64(1) == register64(1)`), as
 for every struct. It prints as the nominal struct it is.

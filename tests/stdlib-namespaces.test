@@ -166,15 +166,14 @@ immutable_set_contains(std::immutable_set::from_list([1]), 1)}
     }
 } -result [lrepeat 19 UNBOUND]
 
-test ns-char-scalar-value-is-canonical {std::char::scalar_value is the one spelling: the intrinsic itself (no char module, no codepoint wrapper); a direct call with an Int is its run-time TYPE error, like any intrinsic's} -body {
+test ns-char-scalar-value-is-canonical {std::char::scalar_value is the one spelling: the intrinsic itself (no char module, no codepoint wrapper); a direct call with an Int is a compile-time TYPE error, like any intrinsic's argument statically of another kind (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md)} -body {
     list [rejection {import std::char
 std::char::codepoint('A')}] [rejection {import std::char
-std::char::scalar_value(65)}] [agree {import std::char
 std::char::scalar_value(65)}] \
         [agree {import std::char
 [std::char::scalar_value('A'), std::char::scalar_value('é'), std::char::scalar_value('😀')]}] \
         [core::native::isQualifiedNative std::char::scalar_value] [file exists [file join $::projectRoot stdlib char.bot]]
-} -match glob -result {{UNKNOWN-SYMBOL {*: namespace "std::char" has no definition "codepoint" (its members are the intrinsics: is_tcl_alnum, is_tcl_alpha, scalar_value)}} accepted {error {CORE SEMANTIC TYPE}} {\[65, 233, 128512\]} 1 0}
+} -match glob -result {{UNKNOWN-SYMBOL {*: namespace "std::char" has no definition "codepoint" (its members are the intrinsics: is_tcl_alnum, is_tcl_alpha, scalar_value)}} {TYPE {*: argument 1 of native std::char::scalar_value requires UnicodeChar, but this argument has type int: the call could only fail when it runs}} {\[65, 233, 128512\]} 1 0}
 
 test ns-historical-module-is-gone {the mutarray module became mutable_array (one namespace per family)} -body {
     list [lindex [rejection {import mutarray

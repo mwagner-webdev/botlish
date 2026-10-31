@@ -71,8 +71,11 @@ test opt-tail-6 {closures calling themselves in tail position keep their own env
 test opt-tail-7 {errors inside a looped call are unchanged} -body {
     # concat's run-time TYPE error, reached through an Int that is not the
     # parameter itself: `std::str::concat(acc, n)` directly would now be a compile-time
-    # conflict (opt-tail-7-static, INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
-    differential [sourceIR "import std::list\nimport std::str\nfn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, std::str::concat(acc, std::list::at(\[n\], 0)))\n\nf(3, \"x\")"]
+    # conflict (opt-tail-7-static, INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md), and
+    # so would an Int the compiler knows is one (METHOD-RECEIVER-TYPE-
+    # CORRECTNESS-MILESTONE-1.md: `std::list::at([n], 0)` after `n - 1`); an
+    # `any` (erased's declared result) reaches concat's own check.
+    differential [sourceIR "import std::str\nfn erased(x: any) -> any:\n    x\n\nfn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, std::str::concat(acc, erased(n)))\n\nf(3, \"x\")"]
 } -result same
 
 test opt-tail-7-static {a parameter used both as an Int and as a String by its own body has no sound contract: a compile-time error naming both uses, before any backend runs (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md)} -body {
