@@ -462,13 +462,22 @@ jobs:
           rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
           w="$dry/work"
           before=$(security list-keychains -d user)
-          trap 'rel cleanup --work "$w"' EXIT
+          # codesign signs only with an identity whose chain ends at a trusted
+          # root ("unable to build chain to self-signed root",
+          # errSecInternalComponent): the throwaway root is trusted for code
+          # signing, in the admin trust domain, for this step alone -- removed
+          # however it ends. A release never does this: Apple's root is the
+          # system's.
+          untrust() { sudo security remove-trusted-cert -d "$dry/anchors/root.cer" 2>/dev/null || true; }
+          trap 'untrust; rel cleanup --work "$w"' EXIT
           started=$(date +%s)
           rel preflight --work "$w" --mode dry-run --trust-anchors "$dry/anchors"
           echo "preflight: $(( $(date +%s) - started )) s"
           started=$(date +%s)
           rel keychain --work "$w"
           echo "keychain: $(( $(date +%s) - started )) s"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$w/secret/icy-tower-signing.keychain-db" "$dry/anchors/root.cer"
+          security find-identity -v -p codesigning "$w/secret/icy-tower-signing.keychain-db"
           started=$(date +%s)
           rel sign --work "$w" --app "$dry/app/Icy Tower.app"
           echo "sign: $(( $(date +%s) - started )) s"
@@ -481,8 +490,12 @@ jobs:
           if rel publishable --work "$w" --out "$dry"; then echo "::error::a dry run was judged publishable"; exit 1; fi
           python3 -I audit/icy-tower/tools/macos-session.py app --app "$dry/app/Icy Tower.app" --helper "$RUNNER_TEMP/macos-input" \
             --out out/dry-run-session --only app-launch --strict
+          untrust
           rel cleanup --work "$w"
           trap - EXIT
+          if security dump-trust-settings -d 2>/dev/null | grep -q "Icy Tower Test Root CA"; then
+            echo "::error::the throwaway root is still trusted"; exit 1
+          fi
           after=$(security list-keychains -d user)
           [ "$before" = "$after" ] || { echo "::error::the keychain search list was not restored"; exit 1; }
           [ ! -e "$w/secret" ] || { echo "::error::the decoded credentials were left behind"; exit 1; }

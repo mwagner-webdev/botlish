@@ -176,19 +176,81 @@ and build the release asked for, no forbidden key. A property list that
 does not parse, a missing one, a wrong CFBundleExecutable or a missing,
 non-executable or wrong-architecture executable are refused (section 40).
 
-BUNDLE-EVIDENCE-PLACEHOLDER
+**Executed** (run 41197431104 and the acceptance run RUN_A, macos-15): from
+build-macos.sh's executable (3,846,184 bytes), package-macos.sh printed
+`executable: Mach-O arm64, LC_MAIN stack 536870912, macOS 11.0.0 (SDK
+15.5.0), 22 system libraries, none SDL3's`, `lipo: arm64; otool: LC_MAIN
+536870912, 22 system libraries`, `plutil: the Info.plist is valid;
+CFBundleIdentifier org.botlish.examples.icy-tower.ci, CFBundleExecutable
+icy-tower`, and the bundle, 3,772 KiB, in 1 s. `workload-icy-tower-macos-
+app-bundle` (the macOS test file's twelfth) assembles the built executable
+again and checks it byte for byte, the identifier, LSEnvironment's
+ICY_TOWER_ERROR_ALERTS, LSMinimumSystemVersion 11.0 (plutil), the ad hoc
+signature with the hardened runtime, and strict verification. **Executed**
+on Linux: every negative control of section 40 (BundleControls, 17 tests).
 
 ## 5. LaunchServices recognition
 
-LAUNCHSERVICES-PLACEHOLDER
+`macos-session.py app`'s `app-bundle` case asks the system, through the
+helper's `app-info` (macos-input.m): NSBundle reads the bundle (its
+identifier, executable, versions, package type), its content type
+(NSURLTypeIdentifierKey) conforms to `com.apple.application-bundle`, the
+Finder treats it as one item (`isFilePackageAtPath:`), `LSRegisterURL`
+registers it (status 0), and LaunchServices then knows it for its
+identifier (`URLsForApplicationsWithBundleIdentifier:`). **Executed** (run
+41197431104): `{"type":"com.apple.application-bundle","identifier":
+"org.botlish.examples.icy-tower.ci","register_status":0,"package":true,
+"registered":[".../out/app/Icy Tower.app"], ...}`; every check held but one
+that read the helper's `bundle` field, an Objective-C comparison boxed as
+the number 1, as anything but `true` (a harness bug, fixed; the acceptance
+run RUN_A: 8 of 8).
 
 ## 6. Finder-style startup
 
-FINDER-PLACEHOLDER
+The `app-launch` case launches the bundle as the Finder does -- `open -n`
+(LaunchServices; `--stdout` and `--stderr` catch what the game writes, no
+argument) -- and reads the process LaunchServices started from outside.
+**Executed** (run 41197431104):
+
+    PASS LaunchServices started it: pid 19127
+    PASS its parent is launchd (pid 1), not a terminal or this harness
+    PASS its arguments: the executable alone ('.../out/app/Icy Tower.app/Contents/MacOS/icy-tower'): LaunchServices passed none (no -psn_)
+    PASS its working directory is LaunchServices' (/), not the harness's
+    PASS its window appears
+    PASS LaunchServices made it the active application (frontmost: {'pid': 19127, 'name': 'Icy Tower', 'bundle': 'org.botlish.examples.icy-tower.ci'})
+    PASS the game: the walls: 100.0% of their samples wall or mortar
+    PASS the game: the walls' mortar lines: 13 (one every 48 units)
+    PASS the game: the HUD panel: 96% panel or text, 5.4% text
+    PASS the game: the player: 26 x 34 units at x 228
+    PASS the game: no banner (found: None)
+    PASS Escape ends it (exited, focus by already active)
+    PASS its summary reached open's --stdout: "frames=250 round=1 floor=0 score=0 best=1.7 time=4.2 over=no x=227 y=92 camera=0 platforms=11 rng=397172474"
+    PASS nothing on standard error
+
+(the check of NSRunningApplication's activation policy, 0 --
+NSApplicationActivationPolicyRegular -- read the helper's boxed 1 as
+false, the same harness bug: fixed, and the acceptance run RUN_A holds
+it.) **Launch arguments**: macOS 15 passes a LaunchServices launch no
+argument at all -- no `-psn_` -- so options.bot needs no accommodation and
+none was added; the game's own `--fly` through `open --args` is still a
+usage error (section 8). The working directory is `/`, and the game, which
+reads no file, does not care (section 35). A second launch after the first
+ended (`app-relaunch`) is a new process, its window closed by its close
+button (Accessibility's AXCloseButton): status gone, the summary printed,
+nothing on standard error (run 41197431104: pid 19403, `frames=128 ...
+over=no`).
 
 ## 7. Activation and focus
 
-ACTIVATION-PLACEHOLDER
+A LaunchServices launch activates the application: the game was the
+frontmost application when its window appeared, with no help from the
+harness ("focus by already active" -- where a terminal-launched executable
+needed the harness's activation, ICY-TOWER-MACOS-MILESTONE-1.md, section
+27), and its key presses reached it (`app-keyboard`, run 41197431104: Right
++111 units, Left -89 units, Escape quits, round 1's summary). It is a
+regular application -- a Dock icon, the menu bar, no agent or background
+key -- SDL's Cocoa_RegisterApp sets NSApplicationActivationPolicyRegular,
+and bundle.py refuses LSUIElement and LSBackgroundOnly.
 
 ## 8. Terminal-free error reporting
 
@@ -245,7 +307,28 @@ macos-aarch64 under `-warnings error` (the linux-aarch64 binding standing
 in), and no shared module names macos_app, CoreFoundation or the variable
 (`workload-icy-tower-app-module-shared-sources-untouched`).
 
-ALERT-EVIDENCE-PLACEHOLDER
+**Executed** (run 41197431104; the probe's bundle for the two injected
+failures, `SDLTRACE_FAIL`, sdltrace.c's fault injection): every case
+launched through LaunchServices, the alert read through Accessibility from
+UserNotificationCenter's window, the game still waiting while it was up,
+its OK pressed, the game gone after it by itself, no alert left, the report
+on standard error too (`open --stderr`):
+
+| case | the failure | the alert's text |
+|---|---|---|
+| app-alert-video | `SDL_VIDEO_DRIVER=nosuch` (SDL's video cannot start) | Icy Tower stopped / Icy Tower: SDL_Init failed: nosuch not available |
+| app-alert-window | the probe, `SDLTRACE_FAIL=SDL_CreateWindow` | Icy Tower stopped / Icy Tower: SDL_CreateWindow failed: SDLTRACE_FAIL: SDL_CreateWindow injected |
+| app-alert-renderer | `SDL_RENDER_DRIVER=nosuch` | Icy Tower stopped / Icy Tower: SDL_CreateRenderer failed: nosuch not available |
+| app-alert-usage | `--fly` (the application's configuration: an unknown option) | Icy Tower stopped / icy-tower: unknown option: --fly |
+| app-alert-runtime | the probe, `SDLTRACE_FAIL=SDL_RenderPresent@90`: a frame that cannot be drawn, after the Cocoa window and Metal started | Icy Tower stopped / Icy Tower: drawing a frame failed: SDLTRACE_FAIL: SDL_RenderPresent injected |
+
+The video failure is the one SDL's own message box could not have shown
+(its driver selection follows the very hint that failed); the CoreFoundation
+alert showed it. And the terminal run (`app-terminal-failure`, the bundle's
+Mach-O run directly with `SDL_VIDEO_DRIVER=nosuch`): status 1, the line on
+standard error, no alert, the process gone at once (0.0 s). Every case is
+bounded: 25 s for the alert to appear, 10 s for the game to end after it;
+an alert that never comes fails the case and the process is killed.
 
 ## 9. Bundle identity and versioning
 
@@ -1014,11 +1097,58 @@ its run ID and notarization submission ID belong here.
   the Internet, noting Apple checked it for malicious software.
 * **Supported systems.** macOS 11 (Big Sur) and later on Apple Silicon:
   LSMinimumSystemVersion and the executable's minimum are 11.0. Tested:
-  TESTED-VERSIONS-PLACEHOLDER.
+  macOS 15 (GitHub's macos-15 runners, Apple Silicon); macOS 11 to 14 were not run (section 46).
 
 ## 46. Remaining limitations
 
-LIMITATIONS-PLACEHOLDER
+* **No real Developer ID release has run (Credential-blocked).** The
+  Developer ID signature, its authority chain, team and secure timestamp,
+  the Developer ID-signed application played, notarization, stapling,
+  Gatekeeper's notarized verdict, the notarized download launched and the
+  publication are implemented, tested against stand-ins of Apple's tools
+  and rehearsed on the runner up to Apple's service with a throwaway
+  identity (section 25), and not yet run by Apple (section 44).
+* **The runner's SIP.** GitHub's macOS runners report System Integrity
+  Protection disabled (MACOS-AARCH64-MILESTONE-9.md, section 41; the
+  session records `csrutil status`), where the hardened runtime may be
+  enforced less than on a user's Mac. The game needs no exception the
+  hardened runtime refuses (no JIT, no unsigned executable memory, no
+  third-party library, no DYLD variable), and every LaunchServices case ran
+  with `flags=adhoc,runtime`, but a Mac with SIP enabled is where that is
+  finally shown; no entitlement is added on speculation.
+* **The quarantine is simulated**: `xattr -w -r com.apple.quarantine
+  "0083;...;Safari;..."` on the extracted bundle, not a browser's download
+  and Archive Utility's extraction (recorded as such in the case's facts).
+  Gatekeeper's assessments are on on the runner (`spctl --status`:
+  assessments enabled) and its first-launch decision is the real one.
+* **Tested systems.** macOS 15 on GitHub's macos-15 Apple Silicon runners
+  only. LSMinimumSystemVersion is 11.0 (the executable's minimum and the
+  static SDL3's deployment target), and macOS 11 to 14 were not run; in
+  particular whether a LaunchServices launch passes `-psn_` there was not
+  observed (macOS 15 passes nothing, and the game does not accommodate one:
+  a launch with one would show the usage alert). Apple Silicon only (no
+  x86-64 or universal build); one display at scale 1 (no Retina display,
+  several displays); English (the alert's OK).
+* **The alert is the system's**: CFUserNotificationDisplayAlert's panel
+  (the stop icon, "Icy Tower stopped", the report's line, OK), owned by
+  UserNotificationCenter, not an NSAlert of the game's own with its icon --
+  the price of an alert that needs no AppKit, SDL or window of the game's.
+  The first diagnostic of a run is shown (a usage error's first line, not
+  the usage).
+* **A LaunchServices-launched process's exit status** is launchd's, not
+  observable by the harness: a run's end is the process gone, its summary
+  what `open --stdout` caught.
+* **Passwords on command lines**: `security create-keychain -p` and
+  `security import -P` take them as arguments (visible to the runner
+  user's processes while those commands run; never printed).
+* **The tag's protection is configuration**: the deployment rule of the
+  macos-release environment and a tag ruleset (section 11) are the
+  developer's to set; the workflow itself requires the tag's form, that it
+  names the run's commit and that the commit is in main's history.
+* **No icon, no DMG** (section 3).
+* **Weak frameworks linked strongly** (UniformTypeIdentifiers,
+  CoreHaptics: ICY-TOWER-MACOS-MILESTONE-1.md, section 12), which is why
+  the minimum stays 11.0.
 
 ## 47. Reproduction commands
 
