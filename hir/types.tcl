@@ -4022,15 +4022,18 @@ proc hir::types::Struct {hirVar ctxVar e} {
                     return [Poison hir $e]
                 }
             }
-            set problem [hir::structs::ApplicationProblem $type]
-            if {$problem ne ""} {
+            set issue [hir::structs::ApplicationIssue $type]
+            if {$issue ne ""} {
+                lassign $issue kind problem
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
                     dict set hir exprs $e structApplicationProblem $problem
+                    dict set hir exprs $e structApplicationKind $kind
                 }
                 return [Poison hir $e]
             }
             if {[dict exists $hir exprs $e structApplicationProblem]} {
                 dict unset hir exprs $e structApplicationProblem
+                dict unset hir exprs $e structApplicationKind
             }
             return $type
         }

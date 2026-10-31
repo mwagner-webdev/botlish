@@ -489,7 +489,18 @@ program observes every tree's preorder and breadth-first ids through
 hash (fixed key {1 2}, privileged fixture module), and the trees as
 MutableMap keys (the distinct count, each tree's first equal index).
 
-FUZZ-RESULTS
+Runs on the final tree (`-n 12` per seed; the interpreter every third
+program, the three other backends always):
+
+| seed | programs | observations | backend runs | disagreements |
+|---|---:|---:|---:|---:|
+| 1 | 12 | 3,890 | 40 | 0 |
+| 2 | 12 | 4,748 | 40 | 0 |
+| 3 | 12 | 5,852 | 40 | 0 |
+| 4, `-gc-stress 1` (compile, cranelift, and cranelift under BOTLISH_NATIVE_GC_STRESS=1) | 8 | 4,715 | 24 | 0 |
+
+Every observation is checked exactly: every walk's sequence, every pair's
+`==`, every exact public and table hash, every MutableMap answer.
 
 ## 17. Mutation testing
 
@@ -524,11 +535,118 @@ compared cancels). "plain" is the same declaration as an ordinary recursive
 struct: the very same values, compared and hashed by the host's recursion,
 traversed by hand -- the closest pre-milestone representation.
 
-BENCH-RESULTS
+Run on a 4-core Linux x86-64 container, the benchmark at a higher
+priority than a mutation run that occupied the other cores (so single-
+thread timings, but noisy: differences under about 20% are within
+run-to-run variation). Per-node nanoseconds at N = 65,536 (the 1,024 runs
+agree within noise: no per-node cost grows with N), managed allocations
+per node from the allocation report, and the peak live bytes per node of a
+one-pass run:
+
+| shape | mode | tree ns/node | plain ns/node | tree allocations/node | tree peak bytes/node |
+|---|---|---:|---:|---:|---:|
+| chain | build | 180 | 175 | 2.000 | 80 |
+| chain | eq-equal | 29 | 54 | 0 | 160 (two trees) |
+| chain | eq-late | 21 | 38 | 0 | 160 |
+| chain | hash | 60 | 49 | 0 | 80 |
+| chain | table-hash | 91 | 117 | 0 | 80 |
+| chain | dfs (walk) | 21 | -- | 0.0001 | 80 |
+| chain | bfs (walk) | 50 | -- | 0.047 | 82 |
+| chain | manual-dfs | 6 | 14 | 0.0000 | 80 |
+| balanced | build | 246 | 249 | 2.703 | 108 |
+| balanced | eq-equal | 57 | 56 | 0 | 216 |
+| balanced | eq-late | 40 | 56 | 0 | 216 |
+| balanced | hash | 85 | 78 | 0 | 108 |
+| balanced | table-hash | 135 | 120 | 0 | 108 |
+| balanced | dfs (walk) | 38 | -- | 0.0001 | 108 |
+| balanced | bfs (walk) | 112 | -- | 0.0006 | 127 |
+| balanced | manual-dfs | 39 | 63 | 0.0000 | 108 |
+| wide | build | 172 | 186 | 2.000 | 88 |
+| wide | eq-equal | 7 | 12 | 0 | 168 |
+| wide | eq-late | 29 | 28 | 0 | 168 |
+| wide | hash | 30 | 57 | 0 | 88 |
+| wide | table-hash | 73 | 91 | 0 | 88 |
+| wide | dfs (walk) | 23 | -- | 0.0001 | 88 |
+| wide | bfs (walk) | 84 | -- | 0.0005 | 96 |
+| wide | manual-dfs | 19 | 23 | 0.0000 | 88 |
+
+(The raw rows, both sizes and every mode, are bench/tree-struct.tcl's
+output; `eq-early` -- trees whose roots differ -- is one comparison of a
+constant cost, below the run-to-run noise of building the trees it is a
+difference from at both sizes, so its per-comparison column is noise and
+left out.)
+
+What the numbers establish:
+
+* **No accidental O(n^2).** Every per-node cost is flat from 1,024 to 65,536
+  nodes; the deep chain's equality and hashes run at the same per-node cost
+  as the balanced and wide trees'.
+* **The iterative walks cost what recursion cost.** Tree and plain equality
+  and hashes are within noise of each other (the tree is faster in most rows:
+  no Rust frame per level); equality and both hashes allocate nothing on the
+  managed heap (their work stacks are Rust vectors, a few words per level).
+* **Traversal allocates per walk, not per node.** A depth-first walk makes a
+  handful of allocations however large the tree (the pending vector and its
+  growth: 0.0001 per node at 65,536), a breadth-first walk a few per
+  compaction (0.0005 per node on the balanced and wide trees, 0.047 on a
+  chain, whose queue is one node long and compacts never: those are the
+  vector's own). The coroutine costs about 15-30 ns per node over a
+  hand-written loop (manual-dfs), the price of handing each node over
+  through a resume.
+* **Auxiliary memory is the frontier.** The walks' peak live bytes exceed
+  the tree's own (build) by at most the pending vector: none for a chain's
+  depth-first walk, the widest level for breadth-first (8 bytes per wide
+  child), O(depth x widest child count) for depth-first.
+* **Construction** is two allocations per node (the struct and its child
+  List), as for an ordinary struct, and no slower: there is no packing,
+  arena or copy to amortize. Nothing measured suggests that an arena (section
+  4, B) would pay for its representation risk at these sizes.
 
 ## 19. Regression/CI
 
-REGRESSION-RESULTS
+* **`tclsh9.0 tests/local.tcl`** on the milestone's tree (every Tcl test file
+  on interp and compile, every golden suite on all four backends, 4 jobs):
+  595 of 601 items passed; the 6 failures were three census pins that list
+  every qualified native, every `nomethod` native and every stdlib module
+  using the typed MutableArray API, each run on both passes
+  (linux-syscall.test's `linux-syscall-native-registered` and
+  method-eligible.test's `me-nomethod-native-default-off` now list
+  `std::tree::children`; mutable-array-type.test's `mat-fence-1` led to
+  stdlib/tree.bot keeping its queue head in a one-element MutableVector
+  instead). All three pass after the fix. Directly affected suites, also run
+  on their own: coroutines.test (81), semantic-instances.test (80),
+  structs.test (89), hashable.test (48), value-identity.test (33),
+  opaque-struct.test (141), stdlib-namespaces.test (74), std-namespace.test
+  (36): all pass.
+* **tests/tree-struct.test**: 44 tests, all pass (under `tests/local.tcl`, 16
+  of them are deferred to their golden ports).
+* **tests/golden/tree-struct.bot**: 19 tests, 19/19 on interp, compile,
+  cranelift-generic and cranelift; `audit/golden/tools/perturb.tcl`: 19 of
+  19 fail when their verdict is inverted and when their expectation is
+  altered; `tests/golden.test` with the suite agrees with the manifest
+  (regenerated by `audit/golden/migration/merge.tcl` from the census and
+  fragment rows; `-check 1` clean).
+* **Rust**: `cargo test --release --lib` -- `tree_walks_are_the_struct_walks`,
+  `tree_children_reads_the_recorded_slot`, `deep_trees_need_no_host_stack`
+  (a 200,000-deep chain on a 256 KiB thread), `a_tree_shape_names_its_child_field`
+  and the descriptor round trip (`program::tests`, format 3 with a tree
+  shape).
+* **The warning gate** (`audit/refactor/tools/gate.tcl`) passes: stdlib/tree.bot
+  is warning-clean through its loader, and listed as a module an entry
+  program cannot compile (it names the internal std::tree::children).
+  **Compilerpedia** (`tools/compilerpedia.tcl check`): 1,112 topics, 681
+  examples, 0 problems.
+* **Static decisions.** Typing a construction by its root call's instance is
+  a cross-function fact. tests/static-economics.test and
+  tests/static-compile.test pass; a reproducer whose blocks' verdicts depend
+  on instance-typed constructions (an accepted construction from an untyped
+  generator, a rejected walk of an Int, an accepted walk, an unrelated
+  rejection) gives the same outcomes under the batched and the sequential
+  scheduler (`[2, -2, -1, 3]`). The golden suites' batched-against-sequential
+  comparison is CI's (static-decisions.yml): dispatch it on the branch before
+  the change merges.
+* **CI not run here**: the macOS, Windows, Linux arm64, GC-stress and
+  static-decisions workflows; push the branch and dispatch them.
 
 ## 20. Explicit limitations
 
@@ -562,7 +680,51 @@ REGRESSION-RESULTS
 
 ## 21. Recommendation for the next feature
 
-NEXT-RECOMMENDATION
+**First, a soundness fix this milestone found: affine applications of
+ordinary parameterized structs.** `hir::types::IsAffine` of `Pair[T]`
+applied to a coroutine handle reads the declaration only (its fields are
+the unrestricted slot T), so a value holding a handle through a slot is
+treated as unrestricted: copyable, never released by its owner. Tree structs
+now refuse such an application (`ApplicationProblem`); every other
+parameterized struct still accepts it. The fix is small and local -- an
+application's affinity is its fields' under the application's arguments,
+`AppliedFieldTypes` -- and its harnesses exist (the affine fuzzer and
+mutants, trait-constrained-types'). It should come before any new feature.
+
+**The next feature: depth-unbounded walks for every value, not only for
+trees.** The evidence:
+
+* The iterative walks cost what the recursive ones did (section 18: within
+  noise, faster in most rows, nothing allocated) and are byte-for-byte the
+  same encoding and the same order (the oracle, the pinned hashes and
+  `tree_walks_are_the_struct_walks` show it), so making them the only walks
+  changes no observable answer.
+* The depth failures they remove are not specific to trees. The same chain
+  declared as an ordinary recursive struct still stops at 100,000 deep on a
+  2 MiB native stack and at 60,000 deep on the Tcl compiler (section 2), and
+  so would a List nested as deep, a Result chain or a struct nested in its
+  own fields' Lists through two declarations -- any value whose shape no
+  tree struct describes. A native library runs on its caller's stack, where
+  2 MiB is ordinary.
+* Three more recursive walks over values remain, found while making these
+  depth-safe: the native driver's conversion of a result to its Tcl value
+  (`tcl_value`), the Tcl printer's `show` of a nested List, and the native
+  `equal`/`walk` of non-tree composites. They are the same three walks with
+  the same work-stack structure; the tree versions are their template.
+
+Generalizing them -- equality, both hashes, the printer and the result
+conversion over any composite value, with a work stack -- would make "a
+value's depth is bounded by memory, never by the host" a property of the
+language rather than of one declaration form, and leave `tree struct` what
+it should be: the designation of the one shape that has a child field, a
+generic traversal and depth-unbounded construction idioms.
+
+What the evidence does not support yet: a consumption form for coroutines
+(every consumer of `walk` here writes the same `first` / `done?` / `step()`
+loop, but COROUTINES.md's "a coroutine is not an iterator" is a deliberate
+decision this milestone gives no new reason to revisit), wider tree shapes
+(`left`/`right`, `Optional[Self]`: no test, workload or specimen needed one),
+and an arena representation (section 18 shows no cost it would recover).
 
 ## Files
 

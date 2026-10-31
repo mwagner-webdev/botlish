@@ -173,23 +173,23 @@
 ## hir/structs.tcl
 <<<<
     foreach t [hir::imprint::Parts $type] {
-        set problem [ApplicationProblem $t]
+        set issue [ApplicationIssue $t]
 ====
     foreach t [lrange [hir::imprint::Parts $type] 0 -1] {
-        set problem [ApplicationProblem $t]
+        set issue [ApplicationIssue $t]
 >>>>
 
 @@ enclosing-declaration-hides-obligation a declaration need not state the obligation of an application its field holds (a field over a slot variable is not checked)
 ## hir/structs.tcl
 <<<<
         foreach {name t} [dict get $entry types] {
-            set problem [ApplicationProblem $t]
-            if {$problem eq ""} continue
+            set issue [ApplicationIssue $t]
+            if {$issue eq ""} continue
 ====
         foreach {name t} [dict get $entry types] {
             if {[string first imprint $t] >= 0} continue
-            set problem [ApplicationProblem $t]
-            if {$problem eq ""} continue
+            set issue [ApplicationIssue $t]
+            if {$issue eq ""} continue
 >>>>
 
 @@ arity-ignored an application's arity is not checked (missing slots resolve to whatever comes, extra arguments are dropped)
@@ -483,11 +483,13 @@
 <<<<
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
                     dict set hir exprs $e structApplicationProblem $problem
+                    dict set hir exprs $e structApplicationKind $kind
                 }
                 return [Poison hir $e]
 ====
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
                     dict set hir exprs $e structApplicationProblem $problem
+                    dict set hir exprs $e structApplicationKind $kind
                 }
                 return $type
 >>>>

@@ -359,7 +359,7 @@ proc hir::structs::AppliedFieldTypes {type} {
 # constrained variable's own constraints) -- else the first failure's
 # message, in source terms. A `never` argument (no value) is vacuous; `any`
 # satisfies nothing, though some of its values might.
-proc hir::structs::ApplicationProblem {type} {
+proc hir::structs::ApplicationIssue {type} {
     if {[string first nstruct $type] < 0} {
         return ""
     }
@@ -381,8 +381,8 @@ proc hir::structs::ApplicationProblem {type} {
                     # was found (hir::traits::explain, past its first line).
                     set why [join [lrange [split [hir::traits::explain $arg $trait] \n] 1 end] \n]
                 }
-                return [format {type argument for "%s" in %s does not satisfy %s: %s} \
-                    $slot [hir::types::presented $type] $trait $why]
+                return [list TRAIT-NOT-SATISFIED [format {type argument for "%s" in %s does not satisfy %s: %s} \
+                    $slot [hir::types::presented $type] $trait $why]]
             }
         }
         if {[treeField $id] ne "" && [lsearch -exact [lmap arg [lindex $type 2] {hir::types::IsAffine $arg}] 1] >= 0} {
@@ -390,27 +390,22 @@ proc hir::structs::ApplicationProblem {type} {
             # MILESTONE-1.md): its values would be affine trees, nested to
             # any depth -- the recursive affine type a declaration may not
             # be either (apply's AFFINE-CONTAINER-UNSUPPORTED).
-            return [format {%s applies tree struct "%s" to an affine type: a tree of affine values nests to any depth, and an affine value is released by a static, finite walk of its type (a tree struct holds unrestricted values)} \
-                [hir::types::presented $type] [display $id]]
+            return [list AFFINE-CONTAINER-UNSUPPORTED [format {%s applies tree struct "%s" to an affine type: a tree of affine values nests to any depth, and an affine value is released by a static, finite walk of its type (a tree struct holds unrestricted values)} \
+                [hir::types::presented $type] [display $id]]]
         }
     }
     foreach t [hir::imprint::Parts $type] {
-        set problem [ApplicationProblem $t]
-        if {$problem ne ""} {
-            return $problem
+        set issue [ApplicationIssue $t]
+        if {$issue ne ""} {
+            return $issue
         }
     }
     return ""
 }
 
-# The diagnostic kind of ApplicationProblem's answer for TYPE: AFFINE-
-# CONTAINER-UNSUPPORTED for an affine application of a tree struct (the
-# declaration rule's kind), TRAIT-NOT-SATISFIED for every other problem.
-proc hir::structs::ProblemKind {problem} {
-    if {[string match {* applies tree struct * to an affine type: *} $problem]} {
-        return AFFINE-CONTAINER-UNSUPPORTED
-    }
-    return TRAIT-NOT-SATISFIED
+# ApplicationIssue's message alone ("" when every application is valid).
+proc hir::structs::ApplicationProblem {type} {
+    return [lindex [ApplicationIssue $type] 1]
 }
 
 # Diagnoses the invalid applications HIR's code writes or makes
@@ -433,16 +428,18 @@ proc hir::structs::verifyApplications {hirVar} {
                 set names [lmap b [dict get $node params] {hir::semantic::SourceName $hir $b}]
                 foreach t [dict get $node declaredParamTypes] name $names {
                     if {$t eq ""} continue
-                    set problem [ApplicationProblem $t]
-                    if {$problem ne ""} {
-                        hir::Diagnose hir [ProblemKind $problem] "the type of parameter \"$name\" is invalid: $problem" $e
+                    set issue [ApplicationIssue $t]
+                    if {$issue ne ""} {
+                        lassign $issue kind problem
+                        hir::Diagnose hir $kind "the type of parameter \"$name\" is invalid: $problem" $e
                     }
                 }
                 set result [dict getdef $node declaredResult {}]
                 if {$result ne ""} {
-                    set problem [ApplicationProblem $result]
-                    if {$problem ne ""} {
-                        hir::Diagnose hir [ProblemKind $problem] "the declared result type is invalid: $problem" $e
+                    set issue [ApplicationIssue $result]
+                    if {$issue ne ""} {
+                        lassign $issue kind problem
+                        hir::Diagnose hir $kind "the declared result type is invalid: $problem" $e
                     }
                 }
             }
@@ -451,7 +448,7 @@ proc hir::structs::verifyApplications {hirVar} {
                 # construction is poison.)
                 if {![dict exists $node structApplicationProblem]} continue
                 if {[dict exists $node reachable] && ![dict get $node reachable]} continue
-                hir::Diagnose hir [ProblemKind [dict get $node structApplicationProblem]] \
+                hir::Diagnose hir [dict getdef $node structApplicationKind TRAIT-NOT-SATISFIED] \
                     "the construction is invalid: [dict get $node structApplicationProblem]" $e
             }
             call {
@@ -486,8 +483,9 @@ proc hir::structs::VerifyDeclarations {} {
     dict for {id entry} $registry {
         set spans [dict getdef $entry typeSpans {}]
         foreach {name t} [dict get $entry types] {
-            set problem [ApplicationProblem $t]
-            if {$problem eq ""} continue
+            set issue [ApplicationIssue $t]
+            if {$issue eq ""} continue
+            lassign $issue kind problem
             set span [dict getdef $spans $name ""]
             set message [format {invalid type %s for field "%s" of struct "%s": %s} \
                 [hir::types::show $t] $name [dict get $entry name] $problem]
@@ -495,9 +493,9 @@ proc hir::structs::VerifyDeclarations {} {
                 append message " (a type slot satisfies exactly the traits its declaration states: struct [dict get $entry name]\[... satisfies TRAIT\])"
             }
             if {$span eq ""} {
-                core::semanticError [ProblemKind $problem] $message
+                core::semanticError $kind $message
             }
-            Fail $span $message [ProblemKind $problem]
+            Fail $span $message $kind
         }
     }
     foreach {error fields spans} [hir::errordecls::PayloadTypes] {

@@ -279,8 +279,7 @@ core::value::setTreeTest ""
                     }
 ====
                     if {$name eq $child} {
-                        lappend parts [list "field \"$name\" of $shown" $t]
-                        set seen [lrange $seen 0 end-1]
+                        lassign [Totality $operation $t $seen] class why
                         continue
                     }
 >>>>
