@@ -556,12 +556,17 @@ originals, the method-call decision's oracle under the reference audit) and
 comparison, which runs in CI only) were dispatched on the branch: runs
 41221431429 and 41221434171 on `802ae4f` (the change before the `bool`
 short circuit of section 14, which changes no result and whose final code
-the local rows above cover). Both are **pending** as this is written: of
-`tests.yml`, the method-call decision job (its oracle and fuzzer, and every
-golden suite under the reference audit) and golden shard 1/4 have passed,
-the rest are running or queued; `static-decisions.yml` is queued. The push
-also ran `icy-tower (windows x86-64)` and `icy-tower (macos arm64)`, which
-passed.
+the local rows above cover). Both are **pending** as this is written, their
+jobs waiting for runners: of `tests.yml`, the method-call decision job (its
+oracle and fuzzer, and every golden suite under the reference audit), golden
+shard 1/4 (the golden suites beside their Tcl originals) and the warning
+gate have passed; the interp and compile suites and the native Rust unit
+tests are running; the cranelift and cranelift-generic coverage, the stub-
+and system-linked executables and golden shards 2-4 are queued. Of
+`static-decisions.yml`, the batched-against-sequential comparison has passed
+for mutable-array.bot and shards 2/4 and 3/4 (no `DISAGREE`, no `DOES NOT
+COMPILE`); shards 1/4 and 4/4 are queued. The push also ran `icy-tower
+(windows x86-64)` and `icy-tower (macos arm64)`, which passed.
 
 ## 14. Performance
 
