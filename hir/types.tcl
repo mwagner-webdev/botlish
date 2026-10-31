@@ -4996,9 +4996,11 @@ proc hir::types::CallResult {hirVar e halts} {
 # use imposes (hir/signatures.tcl) -- nor in region inference, which types
 # such an if dead. Reachable or not: the check judges the program as
 # written, and a rejected test's narrowing would restate it in dead code too.
+# (A condition typed bool, nearly every one, is decided by the first test:
+# the walk asks this at every if of every round.)
 proc hir::types::RejectsCondition {hir ctx node type} {
-    return [expr {[dict exists $node written] && ![dict exists $ctx inst] && [MakesPoison $hir $ctx]
-        && [ConditionMismatch $type] ne {}}]
+    return [expr {$type ne "bool" && [dict exists $node written] && ![dict exists $ctx inst]
+        && [MakesPoison $hir $ctx] && [ConditionMismatch $type] ne {}}]
 }
 
 # The Boolean (1/0) CONDITION is statically known to evaluate to, or "":
