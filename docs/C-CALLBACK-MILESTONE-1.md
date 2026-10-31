@@ -878,7 +878,8 @@ audit/coroutines' `gc-resumer-frames-untraced` (the collector's walk is now
 `walk_from_segmented`) and audit/c-ffi's `va-win64-fixed-calls-stubbed`
 (a foreign call now first asks whether it is a transition).
 `gc-resumer-frames-untraced` applies and is killed (5 coroutine tests fail
-with it); `va-win64-fixed-calls-stubbed`: C_FFI_MUTANT.
+with it); `va-win64-fixed-calls-stubbed` applies and is killed (4 c-ffi tests fail
+with it).
 
 ## 14. Limitations and the next milestone
 
