@@ -96,7 +96,7 @@ use super::ffifixture::{
     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
     rt_ffi_fixture_read_reentrant,
 };
-use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word, rt_ffi_word_cmp};
+use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word, rt_ffi_word_cmp, rt_raw_admit, rt_raw_bits, rt_raw_from_bits, rt_raw_narrow, rt_raw_new};
 use super::nview::{
     rt_cptr_fixture_bytes, rt_cptr_fixture_memory, rt_cptr_offset, rt_mbytes_write, rt_mbytes_write_ptr, rt_native_load,
     rt_bin_load_array, rt_native_load_array, rt_bin_store_array, rt_native_store_array, rt_bin_store_ptr,
@@ -140,6 +140,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         // An Int's text is a String, a text's Int may be a BigInt
         // (runtime::inttext).
         IntToStr | StrToInt |
+        // A raw C floating value is a heap object (KIND_RAWF32/64), its bit
+        // pattern may be a BigInt, its admission a Float64
+        // (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+        RawFromBits32 | RawFromBits64 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64 |
         IAdd | ISub | IMul | IMod | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat | StrAppendChar
             | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
             // The owned byte storage is one allocation (a collection may run
@@ -221,6 +225,10 @@ pub fn op_may_error(op: OpCode) -> bool {
         // InvalidIntegerText (runtime::inttext). Its inverse, IntToStr, and
         // the other conversions to text and to Int never fail.
         | StrToInt
+        // A raw value's admission or a binary32 narrowing: the declared
+        // NonFiniteFloat; a bit pattern out of the format's range: RANGE; an
+        // operand of another kind: TYPE (a checked program reaches neither).
+        | RawFromBits32 | RawFromBits64 | RawBits32 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64
         // The raw mod's zero divisor (ARITHMETIC, IMod's own error).
         // RIModTotal is not here: native/lower.tcl emits it only where the
         // divisor's Range excludes 0 (see OpCode::RIMod).
@@ -601,8 +609,23 @@ pub extern "C" fn rt_int_cmp(_p: *mut Vm, a: Value, b: Value) -> i64 {
 pub const DECIMAL_EQUALITY_MESSAGE: &str = "== of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)";
 pub const DECIMAL_HASH_MESSAGE: &str = "hash of a DecimalRounded value needs the precision of its type, which a hash does not know";
 
+/// core::value::equal's and core::hashing::Encode's refusals of a raw C
+/// floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md), word for word.
+pub fn raw_equality_message(v: Value) -> String {
+    format!("== is not defined for a raw C floating value ({}): compare its bits (std::ffi::c::raw::float_to_bits, std::ffi::c::raw::double_to_bits) or the Float64 it admits to", super::show::show(v))
+}
+pub fn raw_hash_message(v: Value) -> String {
+    format!("hash is not defined for a raw C floating value ({}): hash its bits", super::show::show(v))
+}
+
 fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     let (ka, kb) = (kind_of(a), kind_of(b));
+    for (k, v) in [(ka, a), (kb, b)] {
+        if matches!(k, Kind::RawFloat32 | Kind::RawFloat64) {
+            vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_equality_message(v) });
+            return Err(());
+        }
+    }
     // MutableArray, like Block/Native, has no structural equality (req #31:
     // its identity/equality semantics are a separate design question).
     if matches!(ka, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr)
@@ -640,7 +663,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         Kind::Float64 => float_bits(a) == float_bits(b),
         // (Refused above: a DecimalRounded value has no type-blind
         // equality.)
-        Kind::DecimalRounded => unreachable!(),
+        Kind::DecimalRounded | Kind::RawFloat32 | Kind::RawFloat64 => unreachable!(),
         // Exact byte-sequence equality (core::value::equal's bytestore
         // case): length and every byte, never the storage's identity or
         // address -- a static constant, a heap buffer and a copy of either
@@ -1257,6 +1280,10 @@ impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
 /// the kinds `equal` refuses, as rt_hash always did.
 fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> {
     let kind = kind_of(v);
+    if matches!(kind, Kind::RawFloat32 | Kind::RawFloat64) {
+        vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_hash_message(v) });
+        return Err(());
+    }
     if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr) {
         vm(p).fail(RtError::Unhashable { value: v });
         return Err(());
@@ -1284,7 +1311,7 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
         Kind::Enum => 11,
         Kind::Float64 => 12,
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr
-        | Kind::DecimalRounded => unreachable!(),
+        | Kind::DecimalRounded | Kind::RawFloat32 | Kind::RawFloat64 => unreachable!(),
     };
     sink.bytes(&[tag]);
     match kind {
@@ -1318,7 +1345,7 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
         // The bits, 8 bytes little-endian (core/hashing.tcl's Float64 case):
         // consistent with the bit equality above.
         Kind::Float64 => sink.bytes(&float_bits(v).to_le_bytes()),
-        Kind::DecimalRounded => unreachable!(),
+        Kind::DecimalRounded | Kind::RawFloat32 | Kind::RawFloat64 => unreachable!(),
         // core/hashing.tcl's enum case, byte for byte (ENUMS.md): the enum's
         // declaration identity text, a 0xFF separator, the case's declared
         // name -- never the numbers the word carries.
@@ -1642,28 +1669,38 @@ pub(super) struct BinEncoding {
     pub signed: bool,
     pub big: bool,
     pub float: Option<CFloatFormat>,
+    /// A raw C floating representation (RAW-C-FLOAT-FFI-MILESTONE-1.md):
+    /// its bits are a raw value's, both ways.
+    pub raw: Option<CFloatFormat>,
 }
 
 /// The scalar encoding word of `binload`/`binstore`: width in bytes (1, 2, 4
 /// or 8, the low four bits), signed (16), big-endian (32), a C floating
-/// representation (64: the IEEE 754 format of 4 or 8 bytes, never signed)
-/// -- or None for a malformed word.
+/// representation (64: the IEEE 754 format of 4 or 8 bytes, never signed),
+/// a raw C floating representation (128: the same formats, never signed or
+/// both) -- or None for a malformed word.
 pub(super) fn bin_encoding(code: Value) -> Option<BinEncoding> {
     let c = int_small(code)?;
     let width = (c & 15) as usize;
-    if !matches!(width, 1 | 2 | 4 | 8) || c & !127 != 0 {
+    if !matches!(width, 1 | 2 | 4 | 8) || c & !255 != 0 {
         return None;
     }
     let signed = c & 16 != 0;
-    let float = if c & 64 != 0 {
+    if c & 64 != 0 && c & 128 != 0 {
+        return None;
+    }
+    let format = |flag: i64| -> Option<Option<CFloatFormat>> {
+        if c & flag == 0 {
+            return Some(None);
+        }
         if signed {
             return None;
         }
-        Some(CFloatFormat::of_width(width)?)
-    } else {
-        None
+        Some(Some(CFloatFormat::of_width(width)?))
     };
-    Some(BinEncoding { width, signed, big: c & 32 != 0, float })
+    let float = format(64)?;
+    let raw = format(128)?;
+    Some(BinEncoding { width, signed, big: c & 32 != 0, float, raw })
 }
 
 /// The storage, offset and encoding operands of a fixed-layout op, checked:
@@ -1729,6 +1766,10 @@ pub(super) fn bin_decode(p: *mut Vm, bytes: &[u8], encoding: BinEncoding) -> Val
         word[..width].reverse();
     }
     let raw = u64::from_le_bytes(word);
+    if let Some(format) = encoding.raw {
+        // A raw C floating field: the bits, as they are.
+        return vm(p).new_raw_float(format, raw);
+    }
     if let Some(format) = encoding.float {
         return match admit_c_float(format, raw) {
             Ok(bits) => vm(p).new_float(FloatType::Float64, bits),
@@ -1784,7 +1825,20 @@ pub extern "C" fn rt_bin_store(p: *mut Vm, storage: Value, offset: Value, code: 
 /// anything: never a truncation, a wrap or a reinterpretation.
 pub(super) fn bin_encode(p: *mut Vm, value: Value, encoding: BinEncoding, context: &str) -> Result<[u8; 8], Value> {
     use num_traits::ToPrimitive;
-    let BinEncoding { width, signed, big, float } = encoding;
+    let BinEncoding { width, signed, big, float, raw } = encoding;
+    if let Some(format) = raw {
+        // A raw C floating field: a raw value of the field's format, its
+        // bits written as they are (never narrowed or normalized).
+        if raw_format_of(value) != Some(format) {
+            let expected = if format == CFloatFormat::Binary32 { Kind::RawFloat32 } else { Kind::RawFloat64 };
+            return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected, got: value }));
+        }
+        let mut bytes = raw_bits(value).to_le_bytes();
+        if big {
+            bytes[..width].reverse();
+        }
+        return Ok(bytes);
+    }
     if let Some(format) = float {
         if heap_kind(value) != KIND_FLOAT {
             return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::Float64, got: value }));
@@ -3640,6 +3694,14 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         F64Round => rt_f64_round(p, a[0]),
         IntToStr => rt_int_to_str(p, a[0]),
         StrToInt => rt_str_to_int(p, a[0]),
+        RawFromBits32 => super::ffi::rt_raw_from_bits(p, 0, a[0]),
+        RawFromBits64 => super::ffi::rt_raw_from_bits(p, 1, a[0]),
+        RawBits32 => super::ffi::rt_raw_bits(p, 0, a[0]),
+        RawBits64 => super::ffi::rt_raw_bits(p, 1, a[0]),
+        RawAdmit32 => super::ffi::rt_raw_admit(p, 0, a[0]),
+        RawAdmit64 => super::ffi::rt_raw_admit(p, 1, a[0]),
+        RawNarrow32 => super::ffi::rt_raw_narrow(p, 0, a[0]),
+        RawNarrow64 => super::ffi::rt_raw_narrow(p, 1, a[0]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
         Hash | HashTotal => rt_hash(p, a[0]),
@@ -3740,6 +3802,11 @@ runtime_helpers! {
     (rt_str_to_int, 2),
     (rt_f64_round, 2),
     (rt_float_nonfinite, 2),
+    (rt_raw_new, 3),
+    (rt_raw_from_bits, 3),
+    (rt_raw_bits, 3),
+    (rt_raw_admit, 3),
+    (rt_raw_narrow, 3),
     (rt_f64_from_int, 2),
     (rt_f64_trunc, 2),
     (rt_cptr_fixture, 2),
@@ -5448,6 +5515,92 @@ mod tests {
             let back = rt_bin_load(p, s, make_small(3), enc(*width, *signed));
             assert_eq!(int_to_big(back), *n, "load {width}/{signed}");
         }
+    }
+
+    /// Raw C floating encodings (RAW-C-FLOAT-FFI-MILESTONE-1.md): 128 marks
+    /// one, of 4 or 8 bytes, never signed and never also a finite float's
+    /// (64). A load makes a raw value of exactly the bytes' bits -- a
+    /// signaling NaN, a negative NaN payload, negative zero, a subnormal --
+    /// and a store writes exactly a raw value's bits; a raw value of the
+    /// other format, or a Float64, is refused (TYPE), never converted.
+    #[test]
+    fn raw_c_float_codec_keeps_every_bit() {
+        assert!(matches!(bin_encoding(make_small(128 + 4)), Some(BinEncoding { width: 4, raw: Some(CFloatFormat::Binary32), float: None, .. })));
+        assert!(matches!(bin_encoding(make_small(128 + 8)), Some(BinEncoding { width: 8, raw: Some(CFloatFormat::Binary64), float: None, .. })));
+        assert!(bin_encoding(make_small(128 + 16 + 4)).is_none(), "a raw encoding is never signed");
+        assert!(bin_encoding(make_small(128 + 64 + 8)).is_none(), "raw and finite at once is malformed");
+        assert!(bin_encoding(make_small(128 + 2)).is_none(), "no 2-byte C floating format");
+        assert!(bin_encoding(make_small(256 + 4)).is_none());
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let cases: &[(usize, u64)] = &[
+            (4, 0x7fa0_0001), (4, 0xffc0_0001), (4, 0x8000_0000), (4, 0x0000_0001), (4, 0x7f80_0000), (4, 0xff80_0000),
+            (8, 0x7ff4_0000_0000_0000), (8, 0xfff8_0000_0000_0001), (8, 0x8000_0000_0000_0000), (8, 1), (8, u64::MAX),
+        ];
+        for &(width, bits) in cases {
+            vm.temp_roots.clear();
+            let encoding = bin_encoding(make_small(128 + width as i64)).unwrap();
+            let bytes = bits.to_le_bytes();
+            let v = bin_decode(p, &bytes[..width], encoding);
+            vm.temp_roots.push(v);
+            assert_eq!(raw_bits(v), bits, "load {width}/{bits:#x}");
+            assert_eq!(heap_kind(v), if width == 4 { KIND_RAWF32 } else { KIND_RAWF64 });
+            let back = bin_encode(p, v, encoding, "test").map_err(|_| ()).unwrap();
+            assert_eq!(&back[..width], &bytes[..width], "store {width}/{bits:#x}");
+            let other = bin_encoding(make_small(128 + if width == 4 { 8 } else { 4 })).unwrap();
+            assert!(bin_encode(p, v, other, "test").is_err(), "a raw value of the other format is refused");
+            assert!(vm.error.take().is_some());
+        }
+        let x = vm.new_float(FloatType::Float64, 1.5f64.to_bits());
+        vm.temp_roots.push(x);
+        assert!(bin_encode(p, x, bin_encoding(make_small(128 + 8)).unwrap(), "test").is_err(), "a Float64 is no raw value");
+        assert!(vm.error.take().is_some());
+    }
+
+    /// The raw helpers (codegen's and the generic ops'): bits in and out
+    /// exactly, admission and narrowing by the finite types' one rule.
+    #[test]
+    fn raw_c_float_helpers() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let f = rooted!(vm, rt_raw_from_bits(p, 0, make_small(0x7fa0_0001)));
+        assert_eq!(raw_bits(f), 0x7fa0_0001);
+        assert_eq!(int_small(rt_raw_bits(p, 0, f)), Some(0x7fa0_0001));
+        let big = rooted!(vm, vm.new_big(BigInt::from(0xfff8_0000_0000_0001u64)));
+        let d = rooted!(vm, rt_raw_from_bits(p, 1, big));
+        assert_eq!(raw_bits(d), 0xfff8_0000_0000_0001);
+        let back = rooted!(vm, rt_raw_bits(p, 1, d));
+        assert_eq!(int_to_big(back), BigInt::from(0xfff8_0000_0000_0001u64));
+        // Out of the format's range: RANGE, never truncated.
+        assert_eq!(rt_raw_from_bits(p, 0, make_small(1 << 32)), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        assert_eq!(rt_raw_from_bits(p, 0, make_small(-1)), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        // Admission: NaN and the infinities fail, -0 is 0.0, a binary32
+        // widens exactly.
+        assert_eq!(rt_raw_admit(p, 0, f), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        let nz = rooted!(vm, rt_raw_new(p, 1, 0x8000_0000_0000_0000));
+        let zero = rooted!(vm, rt_raw_admit(p, 1, nz));
+        assert_eq!(float64_of(zero).to_bits(), 0);
+        let sub = rooted!(vm, rt_raw_new(p, 0, 1));
+        let wide = rooted!(vm, rt_raw_admit(p, 0, sub));
+        assert_eq!(float64_of(wide), f32::from_bits(1) as f64);
+        // Narrowing: binary32 rounded (a tie to even), an overflow fails;
+        // binary64 exact.
+        let tie = rooted!(vm, vm.new_float(FloatType::Float64, (1.0f64 + 2f64.powi(-24)).to_bits()));
+        let narrowed = rooted!(vm, rt_raw_narrow(p, 0, tie));
+        assert_eq!(raw_bits(narrowed), 1.0f32.to_bits() as u64);
+        let huge = rooted!(vm, vm.new_float(FloatType::Float64, 1e39f64.to_bits()));
+        assert_eq!(rt_raw_narrow(p, 0, huge), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        let exact = rooted!(vm, rt_raw_narrow(p, 1, huge));
+        assert_eq!(raw_bits(exact), 1e39f64.to_bits());
+        // A raw value of the other format, or no raw value: TYPE.
+        assert_eq!(rt_raw_bits(p, 1, f), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        assert_eq!(rt_raw_admit(p, 0, make_small(3)), NO_VALUE);
+        assert!(vm.error.take().is_some());
     }
 
     #[test]

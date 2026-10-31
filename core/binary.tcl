@@ -170,10 +170,56 @@ proc core::binary::DecodeRepr {repr bytes at name structId} {
             return [core::cabi::FloatingValue "field \"$name\" of $structId" \
                 [core::cabi::DecodeFloating $format $bytes $at]]
         }
+        r {
+            # A raw C floating field (RAW-C-FLOAT-FFI-MILESTONE-1.md): its
+            # bits, as they are.
+            return [RawDecode $repr $bytes $at]
+        }
     }
     lassign $repr sign width endian
     binary scan $bytes @$at[Letter $width $sign $endian] n
     return [core::value::intFromNumber $n]
+}
+
+# 1 if DESCRIPTOR holds a raw C floating field or element ({r ...} words),
+# directly, in a nested layout, an array or a union alternative.
+proc core::binary::HoldsRaw {descriptor} {
+    foreach field [lindex $descriptor 3] {
+        if {[ReprHoldsRaw [lrange $field 2 end]]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+proc core::binary::ReprHoldsRaw {repr} {
+    switch -- [lindex $repr 0] {
+        r { return 1 }
+        layout - union { return [HoldsRaw [lindex $repr 1]] }
+        array { return [ReprHoldsRaw [lindex $repr 3]] }
+    }
+    return 0
+}
+
+# The raw C floating value the representation words REPR ({r WIDTH ENDIAN})
+# hold at byte AT of BYTES: exactly its bits.
+proc core::binary::RawDecode {repr bytes at} {
+    lassign $repr - width endian
+    binary scan $bytes @$at[Letter $width u $endian] n
+    return [core::cabi::rawValue [core::cabi::formatOfWidth $width] $n]
+}
+
+# The bytes of the raw C floating VALUE written by OPERATION into the
+# representation REPR ({r WIDTH ENDIAN}; WHAT names the place): exactly its
+# bits, never narrowed, normalized or refused (a value of the other format
+# is a TYPE error a checked program never reaches).
+proc core::binary::RawPiece {operation repr value what} {
+    lassign $repr - width endian
+    set kind [core::cabi::RawKindOf [core::cabi::formatOfWidth $width]]
+    if {[core::value::kind $value] ne $kind} {
+        core::semanticError TYPE "$operation: $what is a [core::cabi::rawName $kind], not [core::value::show $value]"
+    }
+    return [ScalarPiece [core::cabi::rawBitsOf $value] u $width $endian]
 }
 
 # BYTES with VALUE (a LayoutStruct of DESCRIPTOR) written at byte BASE.
@@ -221,6 +267,9 @@ proc core::binary::EncodeRepr {operation repr value bytes at what} {
         }
         f {
             return [string replace $bytes $at [expr {$at + [lindex $repr 1] - 1}] [FloatPiece $operation $repr $value $what]]
+        }
+        r {
+            return [string replace $bytes $at [expr {$at + [lindex $repr 1] - 1}] [RawPiece $operation $repr $value $what]]
         }
     }
     lassign $repr sign width endian
@@ -617,6 +666,11 @@ proc core::binary::write {data path value} {
     if {$sign eq "f"} {
         # A C floating field: narrowed (C-FLOAT-FFI-MILESTONE-1.md).
         set piece [FloatPiece std::binary::write [lrange [lindex $path 3] 2 end] $value "field [PathText $path]"]
+        return [MutableBytesValue [string replace $bytes $offset [expr {$offset + $width - 1}] $piece]]
+    }
+    if {$sign eq "r"} {
+        # A raw C floating field: its bits (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+        set piece [RawPiece std::binary::write [lrange [lindex $path 3] 2 end] $value "field [PathText $path]"]
         return [MutableBytesValue [string replace $bytes $offset [expr {$offset + $width - 1}] $piece]]
     }
     set n [core::value::intOf $value]

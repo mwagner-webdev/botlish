@@ -108,10 +108,10 @@ test raven-install {the package installs into an application (tools/raven-packag
 } -result {1 1 1 1 1 1}
 
 test raven-warning-clean {the package and every program over it compile under -warnings error: the module raven, the example (counter.bot, main.bot, headless.bot) and the scenarios} -constraints ravenPackage -body {
-    lmap name {counter main headless desktop events lifecycle timer abi} {
+    lmap name {counter main headless desktop events lifecycle timer abi raw} {
         list $name [expr {[catch {ravenHir $name} message] ? $message : "ok"}]
     }
-} -result {{counter ok} {main ok} {headless ok} {desktop ok} {events ok} {lifecycle ok} {timer ok} {abi ok}}
+} -result {{counter ok} {main ok} {headless ok} {desktop ok} {events ok} {lifecycle ok} {timer ok} {abi ok} {raw ok}}
 
 test raven-authority {the generated binding's raw authority stays where it is mediated: Rinit_ex, whose pointer parameter has no contract, called from a program's top level is DIRECT; the package makes the same call under its own context Ui, so the example, which says nothing about directness, compiles (raven-warning-clean) -- STALE-DIRECT-MODULE would reject a `direct module` on it} -constraints ravenPackage -body {
     catch {ravenHir authority} message options
@@ -144,6 +144,23 @@ test raven-lifecycle {Raven's lifetime under Ui: before start nothing runs and l
 test raven-timer {timers and resizes: a watched window's resize is Resized with its new size; a one-shot timer of 0.2 s is reported once, from the timer, after at least 0.2 s of frames that sleep; a repeating one of 0.05 s several times, and never after it is cancelled -- on both native backends} -constraints ravenRun -body {
     ravenValues timer
 } -result [lrepeat 2 {["Resized  200 150 0 []", "TimerElapsed  0 0 0 []", "true", "true", "0", "true", "0"]}]
+
+test raven-raw {a slider's C float and a spin box's C double through the binding's raw representation (Rslider_get_value, Rspin_box_get_value and their setters: RAW-C-FLOAT-FFI-MILESTONE-1.md), on the real library: every bit Raven holds is the bit read -- negative zero, a subnormal, a binary32 0.1, both infinities a spin box's infinite range admits -- beside the finite accessors' explicit admission (0.0 for -0.0, NonFiniteFloat for an infinity); a slider's raw setter refuses a NaN before Raven runs, a spin box ignores one as its C code says, and clamps to its range; a frame draws with an infinite value; the bits agree with a C program making the same calls (tests/raven/raw_oracle.c) -- on both native backends} -constraints ravenRun -body {
+    set values [ravenValues raw]
+    set oracle [file join [temporaryDirectory] raven-raw-oracle-[pid]]
+    exec [ravenPackage::cc] -std=c11 -O2 -I[ravenPackage::includeDir] [file join $::projectRoot tests raven raw_oracle.c] \
+        -L[cffi::ravenDir] -lraven -o $oracle
+    set c [withEnvironment [list LD_LIBRARY_PATH [cffi::ravenDir]] {exec $oracle}]
+    file delete $oracle
+    # The bits of every step but the refused one, and the frame's flag, as
+    # the scenario shows them.
+    set bits {}
+    foreach {- n flag} [regexp -all -inline {\[(\d+),|\], (true), (?=\[)} [lindex $values 0]] {
+        lappend bits [expr {$n ne "" ? $n : 1}]
+    }
+    list [lindex $values 0] [expr {[lindex $values 0] eq [lindex $values 1]}] \
+        [join $bits { }] $c
+} -result {{[[[1056964608, 0.5, false], [2147483648, 0.0, true], [1, 1.401298464324817e-45, false], "NotANumber", [1, 1.401298464324817e-45, false], [1036831949, 0.10000000149011612, false]], [[4612811918334230528, 2.5, false], [4612811918334230528, 2.5, false], [9223372036854775808, 0.0, true], [4621819117588971520, 10.0, false], [9218868437227405312, "PositiveInfinity", false], true, [9218868437227405312, "PositiveInfinity", false], [18442240474082181120, "NegativeInfinity", true], [0, 0.0, false]]]} 1 {1056964608 2147483648 1 1 1036831949 4612811918334230528 4612811918334230528 9223372036854775808 4621819117588971520 9218868437227405312 1 9218868437227405312 18442240474082181120 0} {1056964608 2147483648 1 1 1036831949 4612811918334230528 4612811918334230528 9223372036854775808 4621819117588971520 9218868437227405312 1 9218868437227405312 18442240474082181120 0}}
 
 test raven-bridge-abi {start checks the event bridge's ABI version before anything else: against an archive built from a bridge of another version, RavenFailed from botlish_raven_bridge_abi, and nothing started} -constraints ravenRun -setup {
     set app [file join [temporaryDirectory] raven-abi-[pid]]

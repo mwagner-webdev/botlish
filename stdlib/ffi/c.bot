@@ -39,6 +39,32 @@
 # Float64 and std::ffi::c::Float is an error: Botlish has no binary32 number. C
 # long double has no type.
 #
+# Raw C floating values (intrinsic types of this namespace,
+# RAW-C-FLOAT-FFI-MILESTONE-1.md): the same two C types, carried as they
+# are.
+#
+#   std::ffi::c::RawFloat     C's float, every binary32 bit pattern
+#   std::ffi::c::RawDouble    C's double, every binary64 bit pattern
+#
+# Each has exactly its finite counterpart's C representation (format, size,
+# alignment, register class), so a parameter, result, field, element or
+# pointee declared raw passes the same machine values -- and every value of
+# the format crosses unchanged: NaN of any sign and payload, both
+# infinities, negative zero, subnormals. Unlike Float and Double they are
+# types of values too, of their own kind, in every position: a raw value is
+# no number. It has no arithmetic, ordering, equality or hash (`==` and
+# `hash` refuse it, as they refuse a pointer), nothing converts it
+# implicitly, and it needs no authority (representing a NaN is no memory
+# access). Between a raw value and anything else stand only the explicit
+# operations of the module std::ffi::c::raw (stdlib/ffi/c/raw.bot, imported
+# by the programs that use them): a raw value from and to its bit pattern,
+# its classification by the bits alone, its admission to a Float64 (Float's
+# and Double's own rule: NonFiniteFloat for NaN and the infinities,
+# negative zero 0.0) and a Float64's narrowing to one (Float's own
+# rounding: to nearest, ties to even, an overflow NonFiniteFloat). A raw
+# value's display is its C type and its bits: <C float 0x7fc00000>,
+# <C double 0x8000000000000000>.
+#
 # Pointers (intrinsic types and operations of this namespace):
 #
 #   std::ffi::c::Void         the C void: an incomplete pointee, no values

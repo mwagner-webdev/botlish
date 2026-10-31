@@ -44,12 +44,12 @@ UnrepresentableDecimal	builtin-error		builtin	intrinsic	core/native.tcl
 UpperOverrun	builtin-error		builtin	intrinsic	core/native.tcl			
 affine#drop	intrinsic		internal	intrinsic	core/affine.tcl:124			
 argv	intrinsic		primitive	intrinsic	core/process.tcl:115			
-binary#element	intrinsic		internal	intrinsic	core/binary.tcl:805			
-binary#emit	intrinsic		internal	intrinsic	core/binary.tcl:756			
-binary#load	intrinsic		internal	intrinsic	core/binary.tcl:778			
-binary#load_array	intrinsic		internal	intrinsic	core/binary.tcl:815			
-binary#store_element	intrinsic		internal	intrinsic	core/binary.tcl:812			
-binary#view_field	intrinsic		internal	intrinsic	core/binary.tcl:781			
+binary#element	intrinsic		internal	intrinsic	core/binary.tcl:859			
+binary#emit	intrinsic		internal	intrinsic	core/binary.tcl:810			
+binary#load	intrinsic		internal	intrinsic	core/binary.tcl:832			
+binary#load_array	intrinsic		internal	intrinsic	core/binary.tcl:869			
+binary#store_element	intrinsic		internal	intrinsic	core/binary.tcl:866			
+binary#view_field	intrinsic		internal	intrinsic	core/binary.tcl:835			
 bit_and	intrinsic		primitive	intrinsic				
 bit_or	intrinsic		primitive	intrinsic				
 bit_xor	intrinsic		primitive	intrinsic				
@@ -72,7 +72,7 @@ decimal_rounded#to_string	intrinsic		internal	intrinsic	core/decimal.tcl:830
 dfa#transition	intrinsic		internal	intrinsic	core/dfa.tcl:64			
 error?	intrinsic		primitive	intrinsic	core/predicates.tcl:55			
 foreign#refused	intrinsic		internal	intrinsic				
-hash	intrinsic		primitive	intrinsic	core/hashing.tcl:501			
+hash	intrinsic		primitive	intrinsic	core/hashing.tcl:507			
 integer?	intrinsic		primitive	intrinsic				
 list	intrinsic		primitive	intrinsic	core/primitives.tcl:102			
 list#with_length	intrinsic		internal	intrinsic	core/listlength.tcl:49			
@@ -197,20 +197,20 @@ std::binary::U16	type	std::binary	api	source	stdlib/binary.bot:56
 std::binary::U32	type	std::binary	api	source	stdlib/binary.bot:57			
 std::binary::U64	type	std::binary	api	source	stdlib/binary.bot:58			
 std::binary::U8	type	std::binary	api	source	stdlib/binary.bot:55			
-std::binary::element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:802			
-std::binary::emit	intrinsic	std::binary	api	intrinsic	core/binary.tcl:753			
-std::binary::layout_alignment	intrinsic	std::binary	api	intrinsic	core/binary.tcl:770			
-std::binary::layout_length	intrinsic	std::binary	api	intrinsic	core/binary.tcl:768			
-std::binary::load	intrinsic	std::binary	api	intrinsic	core/binary.tcl:775			
+std::binary::element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:856			
+std::binary::emit	intrinsic	std::binary	api	intrinsic	core/binary.tcl:807			
+std::binary::layout_alignment	intrinsic	std::binary	api	intrinsic	core/binary.tcl:824			
+std::binary::layout_length	intrinsic	std::binary	api	intrinsic	core/binary.tcl:822			
+std::binary::load	intrinsic	std::binary	api	intrinsic	core/binary.tcl:829			
 std::binary::native	namespace		api	intrinsic				1
-std::binary::native::edit	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:784			
-std::binary::native::view	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:772			
-std::binary::parse	intrinsic	std::binary	api	intrinsic	core/binary.tcl:750			
-std::binary::read	intrinsic	std::binary	api	intrinsic	core/binary.tcl:765			
-std::binary::store	intrinsic	std::binary	api	intrinsic	core/binary.tcl:787			
-std::binary::store_element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:808			
-std::binary::write	intrinsic	std::binary	api	intrinsic	core/binary.tcl:790			
-std::binary::write_foreign	intrinsic	std::binary	api	intrinsic	core/binary.tcl:794			
+std::binary::native::edit	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:838			
+std::binary::native::view	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:826			
+std::binary::parse	intrinsic	std::binary	api	intrinsic	core/binary.tcl:804			
+std::binary::read	intrinsic	std::binary	api	intrinsic	core/binary.tcl:819			
+std::binary::store	intrinsic	std::binary	api	intrinsic	core/binary.tcl:841			
+std::binary::store_element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:862			
+std::binary::write	intrinsic	std::binary	api	intrinsic	core/binary.tcl:844			
+std::binary::write_foreign	intrinsic	std::binary	api	intrinsic	core/binary.tcl:848			
 std::byte	namespace		api	source	stdlib/byte.bot			
 std::byte::AboveRange	error	std::byte	api	source	stdlib/byte.bot:75			
 std::byte::BelowRange	error	std::byte	api	source	stdlib/byte.bot:74			
@@ -809,6 +809,8 @@ std::ffi::c::Int	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl
 std::ffi::c::Long	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::LongLong	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::Ptr	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
+std::ffi::c::RawDouble	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
+std::ffi::c::RawFloat	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
 std::ffi::c::SChar	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::Short	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::UChar	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
@@ -817,11 +819,32 @@ std::ffi::c::ULong	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl
 std::ffi::c::ULongLong	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::UShort	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::Void	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
-std::ffi::c::clone	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:596			
-std::ffi::c::erase	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:598			
-std::ffi::c::null	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:592			
-std::ffi::c::null?	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:594			
-std::ffi::c::retype	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:601			
+std::ffi::c::clone	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:794			
+std::ffi::c::erase	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:796			
+std::ffi::c::null	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:790			
+std::ffi::c::null?	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:792			
+std::ffi::c::raw	namespace		api	source	stdlib/ffi/c/raw.bot			
+std::ffi::c::raw::DoubleBits	type	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:59			
+std::ffi::c::raw::FloatBits	type	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:58			
+std::ffi::c::raw::double_finite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:101			
+std::ffi::c::raw::double_from_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:73			
+std::ffi::c::raw::double_from_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:82			
+std::ffi::c::raw::double_infinite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:108			
+std::ffi::c::raw::double_nan?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:104			
+std::ffi::c::raw::double_negative?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:114			
+std::ffi::c::raw::double_to_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:76			
+std::ffi::c::raw::double_to_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:79			
+std::ffi::c::raw::double_zero?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:111			
+std::ffi::c::raw::float_finite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:85			
+std::ffi::c::raw::float_from_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:61			
+std::ffi::c::raw::float_from_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:70			
+std::ffi::c::raw::float_infinite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:92			
+std::ffi::c::raw::float_nan?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:88			
+std::ffi::c::raw::float_negative?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:98			
+std::ffi::c::raw::float_to_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:64			
+std::ffi::c::raw::float_to_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:67			
+std::ffi::c::raw::float_zero?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:95			
+std::ffi::c::retype	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:799			
 std::float64	namespace		api	source+intrinsic	stdlib/float64.bot			
 std::float64::abs	function	std::float64	api	source	stdlib/float64.bot:38			
 std::float64::clamp	function	std::float64	api	source	stdlib/float64.bot:44			
@@ -1141,6 +1164,15 @@ std::ordered_table::slot_of	function	std::ordered_table	std-internal	source	stdl
 std::ordered_table::slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:508			
 std::ordered_table::slots_for	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:72			
 std::ordered_table::truncate	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:253			
+std::rawfloat	namespace		std-internal	intrinsic				
+std::rawfloat::admit32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::admit64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::bits32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::bits64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::from_bits32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::from_bits64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::narrow32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::narrow64	intrinsic	std::rawfloat	std-internal	intrinsic				
 std::str	namespace		api	intrinsic				
 std::str::append_char	intrinsic	std::str	api	intrinsic	core/strings.tcl:124			
 std::str::char_at	intrinsic	std::str	api	intrinsic	core/strings.tcl:129			
@@ -1152,7 +1184,7 @@ std::str::length	intrinsic	std::str	api	intrinsic	core/strings.tcl:114
 std::str::lowercase	intrinsic	std::str	api	intrinsic	core/strings.tcl:120			
 std::str::substring	intrinsic	std::str	api	intrinsic	core/strings.tcl:116			
 std::table_hash	namespace		std-internal	intrinsic				
-std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:509			
+std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:515			
 std::test	namespace		api	source	stdlib/test.bot			
 std::test::Erased	struct	std::test	api	source	stdlib/test.bot:270			
 std::test::Match	struct	std::test	api	source	stdlib/test.bot:95			

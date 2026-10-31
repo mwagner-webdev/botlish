@@ -333,8 +333,8 @@ function	Rcheckbox_is_checked	direct	raven::controls	direct	symbol Rcheckbox_is_
 function	Rcheckbox_set_style	direct	raven::controls	direct	symbol Rcheckbox_set_style; (std::ffi::c::UInt, std::ffi::c::UInt) -> unit
 function	Rcheckbox_set_changed_callback	direct	raven::controls	direct	symbol Rcheckbox_set_changed_callback; (std::ffi::c::UInt, std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::Int, std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
 function	Rslider_set_range	direct	raven::controls	direct	symbol Rslider_set_range; (std::ffi::c::UInt, std::ffi::c::Float, std::ffi::c::Float) -> unit
-function	Rslider_set_value	direct	raven::controls	direct	symbol Rslider_set_value; (std::ffi::c::UInt, std::ffi::c::Float) -> unit
-function	Rslider_get_value	direct	raven::controls	direct	symbol Rslider_get_value; (std::ffi::c::UInt) -> std::ffi::c::Float
+function	Rslider_set_value	direct	raven::controls	direct	symbol Rslider_set_value; (std::ffi::c::UInt, std::ffi::c::RawFloat) -> unit
+function	Rslider_get_value	direct	raven::controls	direct	symbol Rslider_get_value; (std::ffi::c::UInt) -> std::ffi::c::RawFloat
 function	Rslider_get_range	direct	raven::controls	direct	symbol Rslider_get_range; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float], std::ffi::c::Ptr[std::ffi::c::Float]) -> unit
 function	Rslider_set_step	direct	raven::controls	direct	symbol Rslider_set_step; (std::ffi::c::UInt, std::ffi::c::Float) -> unit
 function	Rslider_set_orientation	direct	raven::controls	direct	symbol Rslider_set_orientation; (std::ffi::c::UInt, std::ffi::c::UInt) -> unit
@@ -358,9 +358,9 @@ function	Rtext_input_set_max_length	direct	raven::controls	direct	symbol Rtext_i
 function	Rtext_input_select_all	direct	raven::controls	direct	symbol Rtext_input_select_all; (std::ffi::c::UInt) -> unit
 function	Rtext_input_set_changed_callback	direct	raven::controls	direct	symbol Rtext_input_set_changed_callback; (std::ffi::c::UInt, std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
 function	Rtext_input_set_committed_callback	direct	raven::controls	direct	symbol Rtext_input_set_committed_callback; (std::ffi::c::UInt, std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}], std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
-function	Rspin_box_set_range	direct	raven::controls	direct	symbol Rspin_box_set_range; (std::ffi::c::UInt, std::ffi::c::Double, std::ffi::c::Double) -> unit
-function	Rspin_box_set_value	direct	raven::controls	direct	symbol Rspin_box_set_value; (std::ffi::c::UInt, std::ffi::c::Double) -> unit
-function	Rspin_box_get_value	direct	raven::controls	direct	symbol Rspin_box_get_value; (std::ffi::c::UInt) -> std::ffi::c::Double
+function	Rspin_box_set_range	direct	raven::controls	direct	symbol Rspin_box_set_range; (std::ffi::c::UInt, std::ffi::c::RawDouble, std::ffi::c::RawDouble) -> unit
+function	Rspin_box_set_value	direct	raven::controls	direct	symbol Rspin_box_set_value; (std::ffi::c::UInt, std::ffi::c::RawDouble) -> unit
+function	Rspin_box_get_value	direct	raven::controls	direct	symbol Rspin_box_get_value; (std::ffi::c::UInt) -> std::ffi::c::RawDouble
 function	Rspin_box_get_range	direct	raven::controls	direct	symbol Rspin_box_get_range; (std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Double], std::ffi::c::Ptr[std::ffi::c::Double], std::ffi::c::Ptr[std::ffi::c::Double]) -> unit
 function	Rspin_box_set_step	direct	raven::controls	direct	symbol Rspin_box_set_step; (std::ffi::c::UInt, std::ffi::c::Double) -> unit
 function	Rspin_box_set_decimals	direct	raven::controls	direct	symbol Rspin_box_set_decimals; (std::ffi::c::UInt, std::ffi::c::Int) -> unit

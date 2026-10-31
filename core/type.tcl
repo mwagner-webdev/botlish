@@ -121,7 +121,15 @@ namespace eval core::type {
     # annotation must write (the bare name is no annotation:
     # hir::types::resolveNamed). It is no float type: no float operation
     # takes it, and it is never a Float64.
-    variable primitives [list int str bool unit list result block native mutarray UnicodeChar immutableSet struct coroutine mutvec enum cptr {*}[dict keys $floats] DecimalRounded]
+    # rawfloat32 and rawfloat64 are the runtime kinds of the raw C floating
+    # values (RAW-C-FLOAT-FFI-MILESTONE-1.md, core/cabi.tcl's "Raw C floating
+    # values"): std::ffi::c::RawFloat and std::ffi::c::RawDouble, a binary32 or
+    # binary64 bit pattern of any value -- NaN, an infinity, negative zero
+    # included. They are no float type (no float operation takes one, and
+    # nothing converts one implicitly), and never source-spellable bare:
+    # their spelling is std::ffi::c::RawFloat and std::ffi::c::RawDouble
+    # (hir::types::resolveNamed).
+    variable primitives [list int str bool unit list result block native mutarray UnicodeChar immutableSet struct coroutine mutvec enum cptr {*}[dict keys $floats] DecimalRounded rawfloat32 rawfloat64]
     # NAME -> {name NAME base KIND validator CMD parents {NAME...}
     # integerDomain DOMAIN source 0|1 refinement {} | {carrier TYPE owner NS
     # span SPAN} cabi {} | {c SPELLING target TARGET bits N signed 0|1}}
@@ -668,6 +676,11 @@ proc core::type::narrow {current fact} {
 
 proc core::type::show {type} {
     set type [normalize $type]
+    if {$type in {rawfloat32 rawfloat64}} {
+        # A raw C floating value's kind, by its source spelling
+        # (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+        return [core::cabi::rawName $type]
+    }
     if {[lindex $type 0] eq "refined"} {
         return "[lindex $type 1]\[[join [lindex $type 2] ,]\]"
     }

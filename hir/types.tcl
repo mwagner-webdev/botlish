@@ -166,6 +166,13 @@
 #                                   type of a Botlish value: the values that
 #                                   cross the boundary are its carrier's,
 #                                   Float64 (hir::cabi::Carrier)
+#   rawfloat32, rawfloat64          a raw C float or double, std::ffi::c::
+#                                   RawFloat or std::ffi::c::RawDouble
+#                                   (RAW-C-FLOAT-FFI-MILESTONE-1.md): a C
+#                                   floating type that is also a type of
+#                                   values -- every bit pattern of binary32
+#                                   or binary64 -- of a runtime kind of its
+#                                   own; no number, never a Float64
 #   {nview L}                       a read-only native view NativeView[L]
 #                                   (NATIVE-LAYOUT-VIEWS.md): live native
 #                                   memory read through layout L, whose
@@ -398,6 +405,15 @@ proc hir::types::resolveNamed {name {ns ""}} {
     if {$name eq [hir::cabi::FloatName]} {
         # C float names a C type only: no Botlish value is a binary32.
         return -code error -errorcode {BOTLISH TYPE} [hir::cabi::FloatMessage]
+    }
+    if {$name in [list [hir::cabi::RawFloatName] [hir::cabi::RawDoubleName]]} {
+        # A raw C float or double (RAW-C-FLOAT-FFI-MILESTONE-1.md): a C type
+        # and a type of values at once, its runtime kind in every position.
+        return [hir::cabi::FloatingType [namespace tail $name]]
+    }
+    if {$name in {rawfloat32 rawfloat64}} {
+        # The raw kinds are spelled by their C type's name only.
+        return -code error -errorcode {BOTLISH TYPE} [hir::cabi::RawKindMessage $name]
     }
     if {$name eq [hir::cabi::VoidName]} {
         # The C void (C-ABI-TYPES.md): a pointee identity, never the type of
@@ -2432,7 +2448,7 @@ proc hir::types::Totality {operation type {seen {}}} {
         }
         return [list unknown "its type is the imprint variable [hir::imprint::Shown [lindex $type 1]], which no constraint holds to total equality and hashing"]
     }
-    if {[hir::cabi::IsFloating $type]} {
+    if {[hir::cabi::IsFiniteFloating $type]} {
         return [Totality $operation [hir::cabi::Carrier $type] $seen]
     }
     if {[hir::refinements::IsRefined $type] && [hir::refinements::IsApplied [hir::refinements::Family $type]]} {
@@ -2550,6 +2566,9 @@ proc hir::types::NoTotality {operation kind} {
         DecimalRounded {
             return "a DecimalRounded value has no $op: it is equal to another only at its type's precision, which [expr {$operation eq "hash" ? "a hash" : "a type-blind equality"}] does not know"
         }
+        rawfloat32 - rawfloat64 {
+            return "a [core::cabi::rawName $kind] value has no $op: a raw C floating value is a bit pattern, whose bits or admitted Float64 are compared explicitly"
+        }
     }
     return "a value of kind $kind has no $op"
 }
@@ -2594,7 +2613,7 @@ proc hir::types::IsHashable {type} {
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc hir::types::kindOf {type} {
-    if {[hir::cabi::IsFloating $type]} {
+    if {[hir::cabi::IsFiniteFloating $type]} {
         # (Never an expression's type: the values a C floating type
         # describes are its carrier's, hir::cabi::Carrier.)
         return [kindOf [hir::cabi::Carrier $type]]
@@ -2627,7 +2646,7 @@ proc hir::types::kindOf {type} {
 
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
-    if {[hir::cabi::IsFloating $type]} {
+    if {[hir::cabi::IsFiniteFloating $type]} {
         return [semantic [hir::cabi::Carrier $type]]
     }
     if {[IsCFnPtr $type] || [IsNativeMemory $type]} {

@@ -795,13 +795,17 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 @@ va-float-vararg-parses NIR accepts a C float as a trailing argument's class (no Botlish value is one, and C promotes a float to a double)
 ## native/src/nir.rs
 <<<<
-        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::RawF32 | CAbi::RawF64 | CAbi::Ptr | CAbi::Void);
         let valid = match class {
-            CAbi::Void | CAbi::F32 => false,
+            // (No trailing argument is a raw C floating value:
+            // hir::cabi::VariadicArgument refuses one.)
+            CAbi::Void | CAbi::F32 | CAbi::RawF32 | CAbi::RawF64 => false,
 ====
-        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F64 | CAbi::RawF32 | CAbi::RawF64 | CAbi::Ptr | CAbi::Void);
         let valid = match class {
-            CAbi::Void => false,
+            // (No trailing argument is a raw C floating value:
+            // hir::cabi::VariadicArgument refuses one.)
+            CAbi::Void | CAbi::RawF32 | CAbi::RawF64 => false,
 >>>>
 
 # --- Win64 variadic calls (WINDOWS-X86-64-MILESTONE-6.md) ---------------------

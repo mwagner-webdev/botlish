@@ -2165,6 +2165,10 @@ proc hir::range::FactsClause {type declared r} {
 # is a nominal type, so equal field layouts (std::abi::I64 and std::abi::Isize, both
 # one Int field over the same domain) never make one the other.
 proc hir::range::MismatchClause {argType declared} {
+    set raw [hir::cabi::RawMismatchClause $argType $declared]
+    if {$raw ne ""} {
+        return $raw
+    }
     if {[hir::types::IsTrait $argType] && ![hir::types::IsTrait $declared] && $declared ne "any"} {
         return [format {; the value is a %s trait view: only the operations %s declares are available on it, and its concrete type is never recovered (there is no cast, type test or downcast from a trait)} \
             [hir::types::show $argType] [hir::types::show $argType]]

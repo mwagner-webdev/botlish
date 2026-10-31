@@ -178,6 +178,7 @@ validates it):
 | `exclude` | explicit deny patterns of API names |
 | `contracts` | `{FUNCTION {PARAM FACTS ... result FACTS}}`: the binding author's foreign contracts |
 | `groups` | one contract stated for an explicit list of functions |
+| `representations` | `{{functions {F ...} raw {POSITION ...}} ...}`: the C float and double positions (a parameter's C name, or `result`) of an explicit list of functions written raw, `std::ffi::c::RawFloat` / `RawDouble` instead of `Float` / `Double` (RAW-C-FLOAT-FFI-MILESTONE-1.md): the C ABI unchanged, every choice in the manifest (`representation F POSITION raw RULE`) |
 | `thunks` | `{NAME {C PROTOTYPE}}`: the signature of a function-like macro API to thunk |
 | `stubs` | `thunk` or `unsupported`: what a stub-table redirection becomes |
 | `evidence` | `none` or `llvm` (section 13) |
@@ -193,7 +194,11 @@ target cannot bind (a blocker in the report: a double, a `_Bool` under
 parameters and kept, applied to nothing, and the manifest lists it
 (`contract-unused`); a fact a declaration cannot carry (a contract on an
 `int`, a provenance on a parameter) is the profile's error
-(`cb-policy-facts`).
+(`cb-policy-facts`). A representation rule is checked the same way: a
+function the headers do not declare, a parameter it does not have, a
+position that is no C float or double, or one another rule already chose,
+is the profile's error (`cb-representations`); finite is the default, and
+a rule never changes the C signature the headers and the compiler give.
 
 Tcl's and BoringSSL's profiles reuse the archaeology's header profiles as
 they are (`tcl-embed`, `boringssl-static` with the acceptance's

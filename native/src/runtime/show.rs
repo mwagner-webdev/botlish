@@ -66,6 +66,10 @@ fn show_into(v: Value, out: &mut String) {
         // No digits (core::value::show's DecimalRounded case): a type-blind
         // rendering does not know the precision the value's type guarantees.
         Kind::DecimalRounded => out.push_str("<DecimalRounded>"),
+        // Matches core::cabi::showRaw: the C type and every hexadecimal
+        // digit of the bits (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+        Kind::RawFloat32 => out.push_str(&format!("<C float 0x{:08x}>", super::value::raw_bits(v))),
+        Kind::RawFloat64 => out.push_str(&format!("<C double 0x{:016x}>", super::value::raw_bits(v))),
         Kind::UnicodeChar => {
             // Matches core::value::show's UnicodeChar rendering exactly
             // (core/value.tcl): single-quoted, the same escape vocabulary
@@ -292,6 +296,10 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         // text that reads back as exactly that number (a transport, never a
         // display).
         Kind::DecimalRounded => tcl_list(&["DecimalRounded".to_string(), float_text(float64_of(v))]),
+        // core::cabi::rawValue's representation ({rawfloat64 BITS}): the bit
+        // pattern, unsigned decimal.
+        Kind::RawFloat32 => tcl_list(&["rawfloat32".to_string(), super::value::raw_bits(v).to_string()]),
+        Kind::RawFloat64 => tcl_list(&["rawfloat64".to_string(), super::value::raw_bits(v).to_string()]),
         // Matches core::value::enumValue's own representation exactly
         // ({enum ID CASE}, core/value.tcl): the names, never the numbers.
         Kind::Enum => {

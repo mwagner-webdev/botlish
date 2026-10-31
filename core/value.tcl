@@ -167,7 +167,7 @@
 namespace eval core::value {
     # Every row of core/type.tcl's float family is a kind of its own here;
     # type.tcl checks that the two lists agree when it loads.
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec enum cptr Float64 DecimalRounded}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec enum cptr Float64 DecimalRounded rawfloat32 rawfloat64}
     # The kinds whose values have no type-blind structural equality: `equal`
     # refuses them (EQUALITY), and the compiler's equality-totality proof
     # (hir::types::HashClass, HASHABLE-AND-KEYED-HASH.md) reads this very
@@ -176,9 +176,13 @@ namespace eval core::value {
     # MutableVector have none (their header's identity is never a value's); a
     # C pointer's or native view's address is never observable; a
     # DecimalRounded value is equal to another only at its static type's
-    # precision, which a type-blind comparison does not know. native/src/
-    # runtime/ops.rs's `equal` refuses the same kinds.
-    variable incomparable {block native mutarray coroutine mutvec cptr DecimalRounded}
+    # precision, which a type-blind comparison does not know; a raw C
+    # floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md) is a foreign bit
+    # pattern, neither a number nor equal to another by any rule a
+    # comparison could guess (its bits are compared explicitly,
+    # std::ffi::c::raw::double_to_bits). native/src/runtime/ops.rs's `equal`
+    # refuses the same kinds.
+    variable incomparable {block native mutarray coroutine mutvec cptr DecimalRounded rawfloat32 rawfloat64}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -500,6 +504,15 @@ proc core::value::equal {a b} {
     # (MUTABLE-ARRAY.md, MUTABLE-VECTOR.md: none was added for either; a
     # header's identity is never a value's). The refused kinds are the
     # `incomparable` list above.
+    foreach k [list $ka $kb] v [list $a $b] {
+        if {$k in {rawfloat32 rawfloat64}} {
+            # A raw C floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md) has no
+            # type-blind equality: bit identity and numeric equality differ
+            # (two NaNs, two zeros), and neither is the comparison's to pick.
+            core::semanticError EQUALITY \
+                "== is not defined for a raw C floating value ([show $v]): compare its bits (std::ffi::c::raw::float_to_bits, std::ffi::c::raw::double_to_bits) or the Float64 it admits to"
+        }
+    }
     if {($ka in $incomparable && $ka ne "DecimalRounded") || ($kb in $incomparable && $kb ne "DecimalRounded")} {
         core::semanticError EQUALITY \
             "== is not defined for callables: [show $a] == [show $b]"
@@ -930,6 +943,7 @@ proc core::value::show {v {debug 0} {reveal 0}} {
         }
         coroutine { return "<coroutine>" }
         cptr { return [core::cabi::show $v] }
+        rawfloat32 - rawfloat64 { return [core::cabi::showRaw $v] }
         mutvec {
             # The current elements (a value's contents, never its header).
             set parts {}

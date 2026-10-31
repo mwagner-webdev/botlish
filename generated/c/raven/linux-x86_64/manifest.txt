@@ -1,7 +1,7 @@
 c-bindgen manifest (C-BINDGEN.md, "Manifest")
 generator_version 2
 profile raven
-profile_file tools/c-bindgen/profiles/raven.tcl 83a848e7
+profile_file tools/c-bindgen/profiles/raven.tcl 7e24c89e
 target linux-x86_64
 library raven
 source {url https://github.com/oscar-soirey/Raven tag v0.1.3 commit cd228d8ec05e1b8f1e85ae2520600835ad2c3585}
@@ -44,7 +44,7 @@ file layouts-check.c 326 80b83e3a
 file layouts.tsv 232 c2522582
 file raven/accessibility.bot 142 c48c66b3
 file raven/backend.bot 38 b2f5cbe9
-file raven/controls.bot 822 b4367bfa
+file raven/controls.bot 822 dc429fad
 file raven/core.bot 248 e9a35f4d
 file raven/ctypes.bot 127 77fef7ab
 file raven/dialogs.bot 213 5d3fd021
@@ -64,8 +64,8 @@ file raven/vulkan.bot 80 302d8fae
 file raven/widget.bot 511 81a5a7bf
 file raven/window.bot 565 cfdbb373
 file raven/xml.bot 317 0ee9b2a2
-file report.tsv 1655 82c08323
-file report.txt 138 b42757e9
+file report.tsv 1655 70d065a4
+file report.txt 147 52be7e5a
 libraries raven/accessibility.bot raven
 libraries raven/backend.bot raven
 libraries raven/controls.bot raven
@@ -306,3 +306,9 @@ contract Rwidget_set_text_key key {access read escape declared-noescape} manual 
 contract Rwidget_set_accessible_name name {access read escape declared-noescape} manual {group 17}
 contract Rwidget_set_accessible_description description {access read escape declared-noescape} manual {group 8}
 contract Raccessibility_announce text {access read escape declared-noescape} manual {group 24}
+representation Rslider_set_value value raw {representation setters}
+representation Rslider_get_value result raw {representation values}
+representation Rspin_box_set_range minimum raw {representation ranges}
+representation Rspin_box_set_range maximum raw {representation ranges}
+representation Rspin_box_set_value value raw {representation setters}
+representation Rspin_box_get_value result raw {representation values}

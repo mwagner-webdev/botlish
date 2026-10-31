@@ -62,11 +62,15 @@
 # is the C type's, never the carrier's: the two share a carrier and differ in
 # width, alignment, ABI class, element stride and outbound conversion.
 #
-#   floatings        NAME -> {c C-SPELLING carrier CARRIER}: the C floating
-#                    types, in declaration order (no `long double`: its
-#                    representation differs by target -- x87 extended,
-#                    binary128, binary64 -- and is a row of its own, with its
-#                    own model entry, when it comes)
+#   floatings        NAME -> {c C-SPELLING carrier CARRIER representation
+#                    REP raw 0|1}: the C floating types, in declaration
+#                    order (no `long double`: its representation differs by
+#                    target -- x87 extended, binary128, binary64 -- and is a
+#                    row of its own, with its own model entry, when it
+#                    comes). REP names the model entry whose format and
+#                    alignment the type has: a raw type's is its finite
+#                    counterpart's (below), so the two can never differ in
+#                    any C fact
 #   floatingModels   MODEL -> NAME -> {format FORMAT align BYTES}: what a
 #                    target's C compiler makes of each (a target row's
 #                    `floating`); every supported target is IEEE (C11 Annex
@@ -96,6 +100,36 @@
 #           it underflows to a zero of either sign (a finite result), and a
 #           subnormal when that is the nearest
 #   Encode/Decode   Narrow and Admit with the bytes of a little-endian FORMAT
+#
+# Raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md)
+# ------------------------------------------------------
+# std::ffi::c::RawFloat and std::ffi::c::RawDouble are the same two C types
+# without the admission: every binary32 or binary64 bit pattern is a value
+# -- every NaN (sign and payload, quiet or signaling), both infinities, both
+# zeros, every subnormal. Their carrier is a runtime kind of their own,
+# rawfloat32 and rawfloat64 (core/type.tcl), never Float64, so a raw C type
+# is a type of values too, as a C integer scalar is: the canonical type of
+# std::ffi::c::RawFloat is rawfloat32 wherever it is written (hir/cabi.tcl).
+# Crossing the boundary changes nothing: a raw argument is passed as, and a
+# raw result or field is, exactly its bits (no Narrow, no Admit). The
+# explicit operations of this namespace are the only way between a raw
+# value and anything else:
+#
+#   std::ffi::c::raw::float_from_bits(b)     RawFloat   bits B (0..2^32-1)
+#   std::ffi::c::raw::float_to_bits(x)       Int        X's bits, exactly
+#   std::ffi::c::raw::float_to_float64(x)    Float64    Admit (NonFiniteFloat;
+#                                                       -0 is 0.0, a binary32
+#                                                       widened exactly)
+#   std::ffi::c::raw::float_from_float64(x)  RawFloat   Narrow (to nearest,
+#                                                       ties to even; an
+#                                                       overflow NonFiniteFloat)
+#   and double_from_bits, double_to_bits, double_to_float64,
+#   double_from_float64 (total: every Float64 is a binary64)
+#
+# with the classifications the module writes over the bits (stdlib/ffi/c/
+# raw.bot: finite?, nan?, infinite?, zero?, negative?). A raw value has no
+# arithmetic, ordering, equality or hash: `==` and `hash` refuse
+# it (core::value::equal, EQUALITY), as they refuse a pointer.
 #
 # Values
 # ------
@@ -161,8 +195,10 @@ namespace eval core::cabi {
     # The C floating types (the file header's "The C floating types"), in
     # declaration order, and what each target's C compiler makes of them.
     variable floatings [dict create \
-        Float  {c float carrier Float64} \
-        Double {c double carrier Float64}]
+        Float     {c float carrier Float64 representation Float raw 0} \
+        Double    {c double carrier Float64 representation Double raw 0} \
+        RawFloat  {c float carrier rawfloat32 representation Float raw 1} \
+        RawDouble {c double carrier rawfloat64 representation Double raw 1}]
     variable floatingModels [dict create \
         IEEE {Float {format binary32 align 4} Double {format binary64 align 8}}]
     variable floatingFormats [dict create \
@@ -369,11 +405,47 @@ proc core::cabi::isFloating {name} {
     return [dict exists $floatings $name]
 }
 
+# 1 if C floating type NAME is a raw one (RawFloat, RawDouble: the file
+# header's "Raw C floating values").
+proc core::cabi::isRawFloating {name} {
+    variable floatings
+    return [expr {[dict exists $floatings $name] && [dict get $floatings $name raw]}]
+}
+
+# The C floating type whose carrier is the raw kind KIND (rawfloat32 ->
+# RawFloat), or "".
+proc core::cabi::rawFloatingOf {kind} {
+    variable floatings
+    dict for {name meta} $floatings {
+        if {[dict get $meta raw] && [dict get $meta carrier] eq $kind} {
+            return $name
+        }
+    }
+    return ""
+}
+
+# The source spelling of the raw kind KIND (std::ffi::c::RawFloat).
+proc core::cabi::rawName {kind} {
+    variable namespace
+    return "${namespace}::[rawFloatingOf $kind]"
+}
+
+# The IEEE 754 format of the raw kind KIND's bits (binary32, binary64): its C
+# type's on every target (the representation's model entry; no target has
+# another).
+proc core::cabi::rawFormat {kind} {
+    variable floatings
+    variable floatingModels
+    set rep [dict get $floatings [rawFloatingOf $kind] representation]
+    return [dict get $floatingModels IEEE $rep format]
+}
+
 # The metadata of C floating type NAME on TARGET: {c SPELLING carrier
-# CARRIER format FORMAT bytes N align A class CLASS target TARGET} -- its C
-# spelling, its Botlish carrier type, the IEEE 754 format the target's C
-# compiler gives it, its size and alignment there, and the ABI transport
-# class it travels in. Nothing here is derived from the carrier.
+# CARRIER format FORMAT bytes N align A class CLASS raw 0|1 target TARGET} --
+# its C spelling, its Botlish carrier type, the IEEE 754 format the target's
+# C compiler gives it, its size and alignment there, the ABI transport class
+# it travels in (a raw type's is its finite counterpart's: the same C type)
+# and whether it is raw. Nothing here is derived from the carrier.
 proc core::cabi::floatingInfo {name target} {
     variable floatings
     variable floatingModels
@@ -382,12 +454,12 @@ proc core::cabi::floatingInfo {name target} {
         error "core::cabi: unknown C floating type \"$name\""
     }
     set model [dict get [core::cabi::target $target] floating]
-    set entry [dict get $floatingModels $model $name]
-    set format [dict get $entry format]
     set meta [dict get $floatings $name]
+    set entry [dict get $floatingModels $model [dict get $meta representation]]
+    set format [dict get $entry format]
     return [dict create c [dict get $meta c] carrier [dict get $meta carrier] format $format \
         bytes [dict get $floatingFormats $format bytes] align [dict get $entry align] \
-        class [dict get $floatingFormats $format class] target $target]
+        class [dict get $floatingFormats $format class] raw [dict get $meta raw] target $target]
 }
 
 # The facts of IEEE 754 interchange format FORMAT (binary32, binary64):
@@ -539,6 +611,132 @@ proc core::cabi::NarrowValue {what format v} {
     core::native::failDeclared NonFiniteFloat \
         "$what: [core::float::text $v] has no finite $format value (it rounds to an infinity)" [core::float::Payload $result]
 }
+
+# ---------------------------------------------------------------------------
+# Raw C floating values (the file header's "Raw C floating values")
+#
+# A value is {KIND BITS}: KIND rawfloat32 or rawfloat64, BITS the bit pattern
+# as a canonical unsigned decimal (0..2^32-1, 0..2^64-1).
+
+# The largest bit pattern of FORMAT (binary32, binary64).
+proc core::cabi::RawMaxBits {format} {
+    return [expr {(1 << (8 * [dict get [formatInfo $format] bytes])) - 1}]
+}
+
+# The raw kind of FORMAT's values.
+proc core::cabi::RawKindOf {format} {
+    switch -- $format {
+        binary32 { return rawfloat32 }
+        binary64 { return rawfloat64 }
+    }
+    error "core::cabi::RawKindOf: unknown floating format \"$format\""
+}
+
+# The raw value of FORMAT whose bits are the unsigned integer BITS.
+proc core::cabi::rawValue {format bits} {
+    if {$bits < 0 || $bits > [RawMaxBits $format]} {
+        error "core::cabi::rawValue: $bits is no $format bit pattern"
+    }
+    return [list [RawKindOf $format] [expr {$bits + 0}]]
+}
+
+# The bit pattern of the raw value V (an unsigned integer).
+proc core::cabi::rawBitsOf {v} {
+    set kind [core::value::kind $v]
+    if {$kind ni {rawfloat32 rawfloat64}} {
+        error "core::cabi::rawBitsOf: not a raw C floating value: \"$v\""
+    }
+    return [lindex $v 1]
+}
+
+# The display text of a raw C floating value (show.rs's must be the same):
+# its C type and its bits, every hexadecimal digit of the format.
+proc core::cabi::showRaw {v} {
+    if {[lindex $v 0] eq "rawfloat32"} {
+        return [format {<C float 0x%08llx>} [lindex $v 1]]
+    }
+    return [format {<C double 0x%016llx>} [lindex $v 1]]
+}
+
+# The raw value V of kind KIND, or a TYPE error naming WHAT.
+proc core::cabi::RawOperand {kind v what} {
+    if {[core::value::kind $v] ne $kind} {
+        core::semanticError TYPE "$what: expected [rawName $kind], got [core::value::show $v]"
+    }
+    return [lindex $v 1]
+}
+
+# from_bits32 / from_bits64: the raw value of FORMAT whose
+# bits are the Int N (its static type, the bit pattern domain, proves the
+# range; an unchecked program out of it is RANGE).
+proc core::cabi::rawFromBitsImpl {format n} {
+    set n [core::value::intOf $n]
+    if {$n < 0 || $n > [RawMaxBits $format]} {
+        core::semanticError RANGE "$n is not a $format bit pattern (0..[RawMaxBits $format])"
+    }
+    return [rawValue $format $n]
+}
+
+# bits32 / bits64: the bits of the raw value V.
+proc core::cabi::rawToBitsImpl {kind v} {
+    return [core::value::intFromNumber [RawOperand $kind $v "[rawName $kind] bits"]]
+}
+
+# admit32 / admit64: Admit (the file header):
+# the Float64 the bits stand for, or NonFiniteFloat.
+proc core::cabi::rawToFloat64Impl {kind what v} {
+    set bits [RawOperand $kind $v $what]
+    return [FloatingValue $what [AdmitBits [rawFormat $kind] $bits]]
+}
+
+# narrow32 / narrow64: Narrow (the file
+# header): the raw value of the bits a Float64 leaves Botlish as, or
+# NonFiniteFloat (binary32 only).
+proc core::cabi::rawFromFloat64Impl {format what v} {
+    if {[core::value::kind $v] ne "Float64"} {
+        core::semanticError TYPE "$what: expected Float64, got [core::value::show $v]"
+    }
+    set x [NarrowValue $what $format $v]
+    switch -- $format {
+        binary32 { binary scan [binary format r $x] iu bits }
+        binary64 { binary scan [binary format q $x] wu bits }
+    }
+    return [rawValue $format $bits]
+}
+
+# The intrinsics of the raw values, internal to the standard library
+# (core::native::declareInternalNamespace): the functions of std::ffi::c::raw
+# (stdlib/ffi/c/raw.bot) are their public, declared spelling -- a bit
+# pattern in its domain, a raw value of its own type -- and nothing else
+# imports them. NAME32 is the binary32 operation, NAME64 the binary64 one.
+#
+#   std::rawfloat::from_bits32(n)     rawfloat32  bits N, as they are
+#   std::rawfloat::bits32(x)          Int         X's bits
+#   std::rawfloat::admit32(x)         Float64     Admit (NonFiniteFloat)
+#   std::rawfloat::narrow32(x)        rawfloat32  Narrow (NonFiniteFloat)
+#   ... and from_bits64, bits64, admit64, narrow64 (exact)
+namespace eval core::cabi {
+    # The internal namespace of the raw values' intrinsics.
+    variable rawNamespace std::rawfloat
+}
+foreach {format kind width stem} {binary32 rawfloat32 32 float binary64 rawfloat64 64 double} {
+    set ns $core::cabi::rawNamespace
+    core::native::register ${ns}::from_bits$width -arity 1 \
+        -impl [list core::cabi::rawFromBitsImpl $format] -param-types {int} -result-type $kind \
+        -context-free 1 -nomethod 1
+    core::native::register ${ns}::bits$width -arity 1 \
+        -impl [list core::cabi::rawToBitsImpl $kind] -param-types [list $kind] -result-type int \
+        -result-range [list interval 0 [core::cabi::RawMaxBits $format]] -context-free 1 -nomethod 1
+    core::native::register ${ns}::admit$width -arity 1 \
+        -impl [list core::cabi::rawToFloat64Impl $kind ${core::cabi::namespace}::raw::${stem}_to_float64] \
+        -param-types [list $kind] -result-type Float64 -errors {NonFiniteFloat} -context-free 1 -nomethod 1
+    core::native::register ${ns}::narrow$width -arity 1 \
+        -impl [list core::cabi::rawFromFloat64Impl $format ${core::cabi::namespace}::raw::${stem}_from_float64] \
+        -param-types {Float64} -result-type $kind \
+        -errors [expr {$format eq "binary32" ? "NonFiniteFloat" : ""}] -context-free 1 -nomethod 1
+}
+core::native::declareInternalNamespace $core::cabi::rawNamespace
+unset format kind width stem ns
 
 # ---------------------------------------------------------------------------
 # Values

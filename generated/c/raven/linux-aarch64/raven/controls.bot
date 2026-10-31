@@ -164,11 +164,11 @@ extern c fn Rslider_set_range(
 # C: void Rslider_set_value(Rid slider, float value)
 extern c fn Rslider_set_value(
     slider: std::ffi::c::UInt,
-    value: std::ffi::c::Float
+    value: std::ffi::c::RawFloat
 ) -> unit
 
 # C: float Rslider_get_value(Rid slider)
-extern c fn Rslider_get_value(slider: std::ffi::c::UInt) -> std::ffi::c::Float
+extern c fn Rslider_get_value(slider: std::ffi::c::UInt) -> std::ffi::c::RawFloat
 
 # C: void Rslider_get_range(Rid slider, float *minimum, float *maximum, float *step)
 extern c fn Rslider_get_range(
@@ -309,18 +309,18 @@ extern c fn Rtext_input_set_committed_callback(
 # C: void Rspin_box_set_range(Rid spin_box, double minimum, double maximum)
 extern c fn Rspin_box_set_range(
     spin_box: std::ffi::c::UInt,
-    minimum: std::ffi::c::Double,
-    maximum: std::ffi::c::Double
+    minimum: std::ffi::c::RawDouble,
+    maximum: std::ffi::c::RawDouble
 ) -> unit
 
 # C: void Rspin_box_set_value(Rid spin_box, double value)
 extern c fn Rspin_box_set_value(
     spin_box: std::ffi::c::UInt,
-    value: std::ffi::c::Double
+    value: std::ffi::c::RawDouble
 ) -> unit
 
 # C: double Rspin_box_get_value(Rid spin_box)
-extern c fn Rspin_box_get_value(spin_box: std::ffi::c::UInt) -> std::ffi::c::Double
+extern c fn Rspin_box_get_value(spin_box: std::ffi::c::UInt) -> std::ffi::c::RawDouble
 
 # C: void Rspin_box_get_range(Rid spin_box, double *minimum, double *maximum, double *step)
 extern c fn Rspin_box_get_range(
