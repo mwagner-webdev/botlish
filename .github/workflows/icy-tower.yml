@@ -70,6 +70,15 @@ jobs:
       # every skip must be one of theirs. (The SDL call trace reference and
       # the ABI check run here: icy-tower-macos.yml compares the macOS
       # executable's traces with the reference this job keeps current.)
+      # The macOS release tooling's tests (audit/macos-release/; the
+      # workload test file's workload-icy-tower-release-tooling) need the
+      # cryptography and PyYAML packages: pinned, hash-checked, private.
+      - name: The macOS release tooling's Python (pinned, hash-checked)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r audit/macos-release/requirements.txt
+          echo "BOTLISH_RELEASE_PYTHON=$RUNNER_TEMP/venv/bin/python" >>"$GITHUB_ENV"
+
       - name: Run the slice's tests (none skipped but the Windows and macOS ones)
         run: |
           tmp=$(mktemp -d)

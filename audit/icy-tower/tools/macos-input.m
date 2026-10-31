@@ -38,6 +38,25 @@
 //                                      and active for SECONDS: another
 //                                      application takes the keyboard focus
 //
+// For the application bundle (ICY-TOWER-MACOS-APP-MILESTONE-1.md):
+//
+//   macos-input app-info APP           what LaunchServices and the bundle
+//                                      APIs say of APP: NSBundle's
+//                                      identifier, executable and version,
+//                                      its content type (an application
+//                                      bundle?), LSRegisterURL's result and
+//                                      the applications registered for its
+//                                      identifier
+//   macos-input apps BUNDLE_ID         the running applications of
+//                                      BUNDLE_ID: pid, executable, whether
+//                                      active, finished launching, regular
+//                                      (a foreground application)
+//   macos-input ax-texts PID           Accessibility: PID's windows, each
+//                                      with its title, its static texts and
+//                                      its buttons (an alert's, a dialog's)
+//   macos-input ax-press PID TITLE     Accessibility: press the button
+//                                      titled TITLE in one of PID's windows
+//
 // Every command prints one line of JSON and exits 0 when it did what it
 // says, 1 otherwise (the JSON then says why), 2 on a usage error.
 #import <AppKit/AppKit.h>
@@ -84,6 +103,61 @@ static void post_mouse(CGEventType type, CGPoint p) {
     CGEventRef e = CGEventCreateMouseEvent(NULL, type, p, kCGMouseButtonLeft);
     CGEventPost(kCGHIDEventTap, e);
     CFRelease(e);
+}
+
+static void collect(AXUIElementRef e, NSMutableArray *texts, NSMutableArray *buttons, int depth) {
+    if (depth > 12) return;
+    CFTypeRef role = NULL, value = NULL, title = NULL;
+    AXUIElementCopyAttributeValue(e, kAXRoleAttribute, &role);
+    NSString *r = role ? (__bridge NSString *)role : @"";
+    if ([r isEqualToString:(__bridge NSString *)kAXStaticTextRole] || [r isEqualToString:(__bridge NSString *)kAXTextAreaRole]) {
+        if (AXUIElementCopyAttributeValue(e, kAXValueAttribute, &value) == kAXErrorSuccess && value &&
+            CFGetTypeID(value) == CFStringGetTypeID())
+            [texts addObject:(__bridge NSString *)value];
+    }
+    if ([r isEqualToString:(__bridge NSString *)kAXButtonRole]) {
+        if (AXUIElementCopyAttributeValue(e, kAXTitleAttribute, &title) == kAXErrorSuccess && title &&
+            CFGetTypeID(title) == CFStringGetTypeID())
+            [buttons addObject:(__bridge NSString *)title];
+    }
+    if (role) CFRelease(role);
+    if (value) CFRelease(value);
+    if (title) CFRelease(title);
+    CFArrayRef kids = NULL;
+    if (AXUIElementCopyAttributeValue(e, kAXChildrenAttribute, (CFTypeRef *)&kids) == kAXErrorSuccess && kids) {
+        for (CFIndex i = 0; i < CFArrayGetCount(kids); i++)
+            collect((AXUIElementRef)CFArrayGetValueAtIndex(kids, i), texts, buttons, depth + 1);
+        CFRelease(kids);
+    }
+}
+
+static AXUIElementRef find_button(AXUIElementRef e, NSString *want, int depth) {
+    if (depth > 12) return NULL;
+    CFTypeRef role = NULL, title = NULL;
+    AXUIElementCopyAttributeValue(e, kAXRoleAttribute, &role);
+    BOOL button = role && [(__bridge NSString *)role isEqualToString:(__bridge NSString *)kAXButtonRole];
+    if (role) CFRelease(role);
+    if (button && AXUIElementCopyAttributeValue(e, kAXTitleAttribute, &title) == kAXErrorSuccess && title) {
+        BOOL match = CFGetTypeID(title) == CFStringGetTypeID() && [(__bridge NSString *)title isEqualToString:want];
+        CFRelease(title);
+        if (match) return (AXUIElementRef)CFRetain(e);
+    }
+    CFArrayRef kids = NULL;
+    AXUIElementRef found = NULL;
+    if (AXUIElementCopyAttributeValue(e, kAXChildrenAttribute, (CFTypeRef *)&kids) == kAXErrorSuccess && kids) {
+        for (CFIndex i = 0; i < CFArrayGetCount(kids) && !found; i++)
+            found = find_button((AXUIElementRef)CFArrayGetValueAtIndex(kids, i), want, depth + 1);
+        CFRelease(kids);
+    }
+    return found;
+}
+
+static CFArrayRef windows_of(pid_t pid, AXError *error) {
+    AXUIElementRef app = AXUIElementCreateApplication(pid);
+    CFArrayRef windows = NULL;
+    *error = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef *)&windows);
+    CFRelease(app);
+    return *error == kAXErrorSuccess ? windows : NULL;
 }
 
 int main(int argc, char **argv) {
@@ -262,7 +336,79 @@ int main(int argc, char **argv) {
             json(@{@"event": @"done", @"was_active": @(active), @"frontmost": frontmost()});
             return 0;
         }
-        fprintf(stderr, "usage: macos-input preflight|frontmost|windows PID|activate PID|ax-raise PID|ax-close PID|click X Y|key NAME ACTION [MODE]|steal-focus SECONDS\n");
+        if (!strcmp(cmd, "app-info") && argc == 3) {
+            NSString *path = [NSString stringWithUTF8String:argv[2]];
+            NSURL *url = [NSURL fileURLWithPath:path];
+            NSBundle *b = [NSBundle bundleWithURL:url];
+            OSStatus reg = LSRegisterURL((__bridge CFURLRef)url, true);
+            NSString *type = nil;
+            [url getResourceValue:&type forKey:NSURLTypeIdentifierKey error:nil];
+            BOOL conforms = type ? [[NSWorkspace sharedWorkspace] type:type conformsToType:@"com.apple.application-bundle"] : NO;
+            NSMutableArray *registered = [NSMutableArray array];
+            if (b.bundleIdentifier) {
+                if (@available(macOS 12.0, *)) {
+                    for (NSURL *u in [[NSWorkspace sharedWorkspace] URLsForApplicationsWithBundleIdentifier:b.bundleIdentifier])
+                        [registered addObject:u.path];
+                }
+                NSURL *one = [[NSWorkspace sharedWorkspace] URLForApplicationWithBundleIdentifier:b.bundleIdentifier];
+                if (one && ![registered containsObject:one.path]) [registered addObject:one.path];
+            }
+            json(@{@"bundle": @(b != nil), @"identifier": b.bundleIdentifier ?: @"", @"executable": b.executablePath ?: @"",
+                   @"name": [b objectForInfoDictionaryKey:@"CFBundleName"] ?: @"",
+                   @"version": [b objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"",
+                   @"build": [b objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"",
+                   @"package_type": [b objectForInfoDictionaryKey:@"CFBundlePackageType"] ?: @"",
+                   @"type": type ?: @"", @"application_bundle": @(conforms), @"register_status": @(reg),
+                   @"package": @([[NSWorkspace sharedWorkspace] isFilePackageAtPath:path]), @"registered": registered});
+            return b && conforms && reg == noErr ? 0 : 1;
+        }
+        if (!strcmp(cmd, "apps") && argc == 3) {
+            NSMutableArray *out = [NSMutableArray array];
+            for (NSRunningApplication *a in [NSRunningApplication runningApplicationsWithBundleIdentifier:
+                                             [NSString stringWithUTF8String:argv[2]]]) {
+                [out addObject:@{@"pid": @(a.processIdentifier), @"executable": a.executableURL.path ?: @"",
+                                 @"bundle": a.bundleURL.path ?: @"", @"active": @(a.active),
+                                 @"finished": @(a.finishedLaunching), @"terminated": @(a.terminated),
+                                 @"regular": @(a.activationPolicy == NSApplicationActivationPolicyRegular),
+                                 @"policy": @(a.activationPolicy)}];
+            }
+            json(@{@"apps": out, @"frontmost": frontmost()});
+            return 0;
+        }
+        if (!strcmp(cmd, "ax-texts") && argc == 3) {
+            AXError err;
+            CFArrayRef windows = windows_of(atoi(argv[2]), &err);
+            NSMutableArray *out = [NSMutableArray array];
+            for (CFIndex i = 0; windows && i < CFArrayGetCount(windows); i++) {
+                AXUIElementRef w = (AXUIElementRef)CFArrayGetValueAtIndex(windows, i);
+                CFTypeRef title = NULL;
+                AXUIElementCopyAttributeValue(w, kAXTitleAttribute, &title);
+                NSMutableArray *texts = [NSMutableArray array], *buttons = [NSMutableArray array];
+                collect(w, texts, buttons, 0);
+                [out addObject:@{@"title": (title && CFGetTypeID(title) == CFStringGetTypeID()) ? (__bridge NSString *)title : @"",
+                                 @"texts": texts, @"buttons": buttons}];
+                if (title) CFRelease(title);
+            }
+            if (windows) CFRelease(windows);
+            json(@{@"error": @(err), @"windows": out});
+            return err == kAXErrorSuccess ? 0 : 1;
+        }
+        if (!strcmp(cmd, "ax-press") && argc == 4) {
+            AXError err, press = kAXErrorFailure;
+            CFArrayRef windows = windows_of(atoi(argv[2]), &err);
+            NSString *want = [NSString stringWithUTF8String:argv[3]];
+            for (CFIndex i = 0; windows && i < CFArrayGetCount(windows) && press != kAXErrorSuccess; i++) {
+                AXUIElementRef b = find_button((AXUIElementRef)CFArrayGetValueAtIndex(windows, i), want, 0);
+                if (b) {
+                    press = AXUIElementPerformAction(b, kAXPressAction);
+                    CFRelease(b);
+                }
+            }
+            if (windows) CFRelease(windows);
+            json(@{@"error": @(err), @"press_error": @(press)});
+            return press == kAXErrorSuccess ? 0 : 1;
+        }
+        fprintf(stderr, "usage: macos-input preflight|frontmost|windows PID|activate PID|ax-raise PID|ax-close PID|click X Y|key NAME ACTION [MODE]|steal-focus SECONDS|app-info APP|apps BUNDLE_ID|ax-texts PID|ax-press PID TITLE\n");
         return 2;
     }
 }

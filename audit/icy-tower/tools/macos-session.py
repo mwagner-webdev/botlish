@@ -1267,6 +1267,420 @@ def case_controls(s):
     return s.verdict("controls", checks, {}, "test-harness")
 
 
+# ---------------------------------------------------------------------------
+# The application bundle (ICY-TOWER-MACOS-APP-MILESTONE-1.md): the same
+# game, launched the way the Finder launches it -- LaunchServices, through
+# `open` -- and read from outside as before. A process LaunchServices starts
+# is launchd's child, not ours: its exit status is nobody's to read, so a
+# run's end is the process gone, its summary what `open --stdout` caught.
+
+class Launched:
+    """A process LaunchServices started, as much of subprocess.Popen as Game uses."""
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.returncode = None
+
+    def poll(self):
+        if self.pid is None:
+            return "gone"
+        try:
+            os.kill(self.pid, 0)
+        except ProcessLookupError:
+            return "gone"
+        except PermissionError:
+            return None
+        r = subprocess.run(["ps", "-o", "stat=", "-p", str(self.pid)], capture_output=True, text=True)
+        return "gone" if not r.stdout.strip() or r.stdout.strip().startswith("Z") else None
+
+    def wait(self, timeout=None):
+        until = time.time() + (timeout if timeout is not None else 1e9)
+        while self.poll() is None:
+            if time.time() > until:
+                raise subprocess.TimeoutExpired("launched app", timeout)
+            time.sleep(0.1)
+        return None
+
+    def send_signal(self, sig):
+        try:
+            os.kill(self.pid, sig)
+        except (ProcessLookupError, TypeError):
+            pass
+
+    def kill(self):
+        self.send_signal(signal.SIGKILL)
+
+
+def app_pids(s, bundle_id):
+    _, d = s.tool("apps", bundle_id)
+    return {a["pid"]: a for a in d.get("apps", [])}
+
+
+class AppGame(Game):
+    """One LaunchServices launch of the bundle APP: `open -n` (a new instance), the game's standard
+    output and error caught by open's --stdout and --stderr, ENV given with --env, ARGS with --args."""
+
+    def __init__(self, session, name, app, args=(), env=None, wait=20.0):
+        self.s, self.name, self.app = session, name, app
+        self.log_out = os.path.join(session.out, name + ".stdout")
+        self.log_err = os.path.join(session.out, name + ".stderr")
+        for path in (self.log_out, self.log_err):
+            open(path, "w").close()
+        self.env = env or {}
+        self.bundle_id = session.bundle_id(app)
+        before = set(app_pids(session, self.bundle_id))
+        cmd = ["open", "-n", "--stdout", self.log_out, "--stderr", self.log_err]
+        for k, v in sorted(self.env.items()):
+            cmd += ["--env", "%s=%s" % (k, v)]
+        cmd.append(app)
+        if args:
+            cmd += ["--args"] + list(args)
+        self.started = time.time()
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        self.open_result = {"status": r.returncode, "output": (r.stdout + r.stderr).strip()[-300:]}
+        self.before = before
+        self.win = None
+        self.shots = 0
+        self.p = Launched(None)
+        self.launch_info = None
+        self.find(wait)
+
+    def find(self, wait):
+        """The launched process: a new instance of the bundle, its executable this bundle's (WAIT seconds)."""
+        until = time.time() + wait
+        exe = os.path.join(os.path.realpath(self.app), "Contents", "MacOS", "icy-tower")
+        while self.p.pid is None:
+            for p_, a in app_pids(self.s, self.bundle_id).items():
+                if p_ not in self.before and os.path.realpath(a.get("executable", "")) == exe:
+                    self.p, self.launch_info = Launched(p_), a
+            if self.p.pid is not None or time.time() > until:
+                break
+            time.sleep(0.2)
+        return self.p.pid
+
+    def process_facts(self):
+        """What the system says of the launched process: its parent, its arguments, its working directory."""
+        if self.p.pid is None:
+            return {}
+        pid = str(self.p.pid)
+        ppid = subprocess.run(["ps", "-o", "ppid=", "-p", pid], capture_output=True, text=True).stdout.strip()
+        args = subprocess.run(["ps", "-ww", "-o", "args=", "-p", pid], capture_output=True, text=True).stdout.strip()
+        cwd = subprocess.run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"], capture_output=True, text=True).stdout
+        cwd = [line[1:] for line in cwd.splitlines() if line.startswith("n")]
+        return {"ppid": ppid, "args": args, "cwd": cwd[0] if cwd else None}
+
+    def finish(self, timeout=10.0):
+        how = "exited"
+        try:
+            self.p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.p.send_signal(signal.SIGTERM)
+            try:
+                self.p.wait(timeout=5)
+                how = "SIGTERM"
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+                self.p.wait(timeout=5)
+                how = "killed"
+        if self.p.pid is None:
+            how = "never started"
+        self.wall = time.time() - self.started
+        out = open(self.log_out).read().strip()
+        err = open(self.log_err).read().strip()
+        return None, how, out, err
+
+
+def agent_pid(name):
+    r = subprocess.run(["pgrep", "-x", name], capture_output=True, text=True)
+    pids = [int(x) for x in r.stdout.split()]
+    return pids[0] if pids else None
+
+
+def dialog(s, agent, needle, timeout):
+    """(pid, window) of AGENT's window whose texts contain NEEDLE, within TIMEOUT seconds, or (None, None)."""
+    until = time.time() + timeout
+    while time.time() < until:
+        pid = agent_pid(agent)
+        if pid:
+            _, d = s.tool("ax-texts", pid)
+            for w in d.get("windows", []):
+                if any(needle in t for t in w.get("texts", [])) or needle in w.get("title", ""):
+                    return pid, w
+        time.sleep(0.25)
+    return None, None
+
+
+def case_app_bundle(s):
+    rc, d = s.tool("app-info", s.args.app)
+    want = s.bundle_id(s.args.app)
+    real = os.path.realpath(s.args.app)
+    checks = [(d.get("bundle") is True, "NSBundle reads it as a bundle"),
+              (d.get("application_bundle") is True, "its content type, %s, is an application bundle" % d.get("type")),
+              (d.get("package") is True, "the Finder shows it as one item (a package)"),
+              (d.get("register_status") == 0, "LaunchServices registers it (LSRegisterURL: %s)" % d.get("register_status")),
+              (d.get("identifier") == want, "its identifier: %s" % d.get("identifier")),
+              (os.path.realpath(d.get("executable", "")) == os.path.join(real, "Contents", "MacOS", "icy-tower"),
+               "its executable: %s" % d.get("executable")),
+              (d.get("package_type") == "APPL", "CFBundlePackageType: %s" % d.get("package_type")),
+              (any(os.path.realpath(p) == real for p in d.get("registered", [])),
+               "LaunchServices knows it for %s (%d registered)" % (want, len(d.get("registered", []))))]
+    return s.verdict("app-bundle", checks, d, "bundle-metadata")
+
+
+def case_app_launch(s):
+    """The Finder's launch: no argument, no terminal, LaunchServices' environment and working directory."""
+    g = AppGame(s, "app-launch", s.args.app)
+    facts = {"open": g.open_result, "launch": g.launch_info}
+    if g.p.pid is None:
+        return s.verdict("app-launch", [(False, "LaunchServices started the application (open: %s)" % g.open_result)], facts, "launch")
+    pf = g.process_facts()
+    facts["process"] = pf
+    win = g.window(20.0)
+    checks = [(True, "LaunchServices started it: pid %d" % g.p.pid),
+              (pf.get("ppid") == "1", "its parent is launchd (pid %s), not a terminal or this harness" % pf.get("ppid")),
+              (pf.get("args") == os.path.join(os.path.realpath(s.args.app), "Contents", "MacOS", "icy-tower")
+               or pf.get("args") == os.path.join(s.args.app, "Contents", "MacOS", "icy-tower"),
+               "its arguments: the executable alone (%r): LaunchServices passed none (no -psn_)" % pf.get("args")),
+              (pf.get("cwd") not in (None, os.getcwd()), "its working directory is LaunchServices' (%s), not the harness's" % pf.get("cwd")),
+              ((g.launch_info or {}).get("regular") is True, "a regular (foreground) application, not an agent: policy %s"
+               % (g.launch_info or {}).get("policy")),
+              (win is not None, "its window appears")]
+    if win is None:
+        code, how, out, err = g.finish(3)
+        facts["stderr"] = err[-400:]
+        return s.verdict("app-launch", checks, facts, "launch")
+    _, d = s.tool("apps", g.bundle_id)
+    active = [a for a in d.get("apps", []) if a["pid"] == g.p.pid]
+    facts["activated_by_launch"] = bool(active and active[0]["active"])
+    checks.append((facts["activated_by_launch"] or g.frontmost(), "LaunchServices made it the active application "
+                   "(frontmost: %s)" % d.get("frontmost")))
+    time.sleep(max(0.0, 3.6 - (time.time() - g.window_at)))
+    f, problem = g.frame("after-banner")
+    if f is None:
+        checks.append((False, "a capture of the game: " + problem))
+    else:
+        c, ff = check_static(f, None, 0.0, None)
+        checks += [(ok, "the game: " + t) for ok, t in c]
+        facts["frame"] = ff
+    focus = g.focus()
+    code, how, out, err = g.escape() if focus else g.finish(0.5)
+    fields = summary_fields(out)
+    facts.update({"focus": focus, "ended": how, "summary": out, "stderr": err[-300:]})
+    checks.append((how == "exited", "Escape ends it (%s, focus by %s)" % (how, focus)))
+    checks.append(("frames=" in out and fields.get("round") == "1", "its summary reached open's --stdout: %s" % out))
+    checks.append((err == "", "nothing on standard error"))
+    return s.verdict("app-launch", checks, facts, "launch")
+
+
+def case_app_keyboard(s):
+    g = AppGame(s, "app-keyboard", s.args.app, ["--seed", "7"])
+    if g.p.pid is None or g.window(20.0) is None:
+        g.finish(3)
+        return s.verdict("app-keyboard", [(False, "the application's window")], {"open": g.open_result}, "launch")
+    time.sleep(max(0.0, 3.5 - (time.time() - g.window_at)))
+    focus = g.focus()
+    facts = {"focus": focus}
+    if focus is None:
+        g.finish(0.5)
+        return s.verdict("app-keyboard", [(False, "the window could take the keyboard focus")], facts, "keyboard-correctness",
+                         keyboard_blocked(s, g, focus))
+    checks, restarts = [], [0]
+    for key, sign, name in (("right", 1, "Right"), ("left", -1, "Left")):
+        ok, t, before, after = measure_key(g, key, sign, key, restarts)
+        checks.append((ok, "%s: %s" % (name, t)))
+    code, how, out, err = g.escape()
+    facts.update({"restarts": restarts[0], "ended": how, "summary": out})
+    checks.append((how == "exited", "Escape quits (%s)" % how))
+    checks.append(("frames=" in out and summary_fields(out).get("round") == str(1 + restarts[0]),
+                   "the summary, round %d: %s" % (1 + restarts[0], out)))
+    return s.verdict("app-keyboard", checks, facts, "keyboard-correctness")
+
+
+def case_app_relaunch(s):
+    """Launched again (the first run ended), then ended by its window's close button."""
+    g = AppGame(s, "app-relaunch", s.args.app)
+    if g.p.pid is None or g.window(20.0) is None:
+        g.finish(3)
+        return s.verdict("app-relaunch", [(False, "a second launch's window")], {"open": g.open_result}, "launch")
+    time.sleep(1.5)
+    before, _ = g.frame("before")
+    rc, d = s.tool("ax-close", g.p.pid)
+    method = "Accessibility: the close button pressed"
+    if rc != 0:
+        method = "Command-W"
+        if g.focus():
+            g.key("cmd+w", "tap")
+    code, how, out, err = g.finish(8.0)
+    checks = [(True, "LaunchServices launched it again: pid %d" % g.p.pid),
+              (before is not None, "the game was drawn"),
+              (how == "exited", "the close button ends it (%s, by %s)" % (how, method)),
+              ("frames=" in out and "over=no" in out, "the summary: " + out),
+              (err == "", "nothing on standard error")]
+    return s.verdict("app-relaunch", checks, {"ax_close": d, "ended": how, "summary": out}, "launch")
+
+
+def case_app_gc(s):
+    g = AppGame(s, "app-gc-stress", s.args.app, ["--autopilot", "--fixed-step", "--frames", "120", "--seed", "11"],
+                {"BOTLISH_NATIVE_GC_STRESS": "1"})
+    win = g.window(30.0)
+    code, how, out, err = g.finish(600)
+    want = oracle.summary(11, 120)
+    checks = [(win is not None, "the application's Cocoa window under GC stress"), (how == "exited", "it ends (%s)" % how),
+              (out.strip('"') == want, "the summary is the oracle's: %s" % out)]
+    return s.verdict("app-gc-stress", checks, {"summary": out, "stderr": err[-300:], "wall_seconds": round(g.wall, 1)}, "runtime-safety")
+
+
+def alert_case(s, name, app, args, env, wanted, window_first=False):
+    """A failure in a LaunchServices launch: the alert, its text WANTED (the report's line), OK pressed,
+    the process gone; the line on standard error too. Bounded: an alert that never comes is a failure,
+    and the process is killed."""
+    g = AppGame(s, name, app, args, env)
+    facts = {"open": g.open_result}
+    checks = [(g.p.pid is not None, "LaunchServices started it")]
+    if g.p.pid is None:
+        return s.verdict(name, checks, facts, "error-reporting")
+    if window_first:
+        win = g.window(20.0)
+        checks.append((win is not None, "its Cocoa window appeared first (the failure is after Cocoa and Metal started)"))
+    pid, w = dialog(s, "UserNotificationCenter", "Icy Tower stopped", 25.0)
+    facts["alert"] = w
+    checks.append((w is not None, "an alert appears: %s" % (w and " / ".join(w.get("texts", []))[:300])))
+    if w is not None:
+        text = " ".join(w.get("texts", []))
+        checks.append((wanted in text, "the alert says what failed (%r)" % wanted))
+        checks.append((g.p.poll() is None, "the game waits while the alert is shown (the report is not lost)"))
+        rc, d = s.tool("ax-press", pid, (w.get("buttons") or ["OK"])[0])
+        facts["press"] = d
+        checks.append((rc == 0, "the alert's button pressed (%s)" % ((w.get("buttons") or ["OK"])[0])))
+    code, how, out, err = g.finish(10.0)
+    _, left = dialog(s, "UserNotificationCenter", "Icy Tower stopped", 1.0)
+    checks.append((how == "exited", "after the alert the game ends by itself (%s)" % how))
+    checks.append((left is None, "no alert is left behind"))
+    checks.append((wanted in err, "the report is on standard error as well: %s" % err[-200:]))
+    facts.update({"ended": how, "stderr": err[-400:], "stdout": out[-200:]})
+    return s.verdict(name, checks, facts, "error-reporting")
+
+
+def case_app_no_alert_terminal(s):
+    """The bundle's Mach-O run from a terminal: the same failure, standard error only, no alert, prompt exit."""
+    exe = os.path.join(s.args.app, "Contents", "MacOS", "icy-tower")
+    g = Game(s, "app-terminal-failure", exe, ["--seed", "7"], {"SDL_VIDEO_DRIVER": "nosuch"})
+    code, how, out, err = g.finish(15.0)
+    _, w = dialog(s, "UserNotificationCenter", "Icy Tower stopped", 2.0)
+    checks = [(code == 1 and how == "exited", "status 1 (%s, %s)" % (code, how)),
+              ("Icy Tower: SDL_Init failed" in err, "the report on standard error: %s" % err[-200:]),
+              (w is None, "no alert: a terminal run reports on standard error only"),
+              (g.wall < 10, "it ends at once (%.1f s): nothing waits for a dialog" % g.wall)]
+    return s.verdict("app-terminal-failure", checks, {"stderr": err}, "error-reporting")
+
+
+def case_app_gatekeeper(s):
+    """The downloaded artifact: the release ZIP extracted into a fresh directory, quarantined as a browser
+    quarantines a download, assessed, and opened through LaunchServices -- whose first launch of a
+    quarantined application is Gatekeeper's decision, shown in CoreServicesUIAgent's dialog."""
+    expect = s.args.gatekeeper
+    fresh = os.path.join(s.out, "downloaded")
+    shutil.rmtree(fresh, ignore_errors=True)
+    os.makedirs(fresh)
+    subprocess.run(["ditto", "-x", "-k", s.args.zip, fresh], check=True)
+    app = os.path.join(fresh, "Icy Tower.app")
+    stamp = "%x" % int(time.time())
+    q = "0083;%s;Safari;%s" % (stamp, subprocess.run(["uuidgen"], capture_output=True, text=True).stdout.strip())
+    subprocess.run(["xattr", "-w", "-r", "com.apple.quarantine", q, app], check=True)
+    subprocess.run(["xattr", "-w", "com.apple.quarantine", q, s.args.zip], check=False)
+    read = subprocess.run(["xattr", "-p", "com.apple.quarantine", app], capture_output=True, text=True).stdout.strip()
+    status = subprocess.run(["spctl", "--status"], capture_output=True, text=True)
+    assess = subprocess.run(["spctl", "--assess", "--type", "execute", "--verbose=4", app], capture_output=True, text=True)
+    facts = {"quarantine": read, "spctl_status": (status.stdout + status.stderr).strip(),
+             "assessment": (assess.stdout + assess.stderr).strip(), "assessment_status": assess.returncode,
+             "simulated": "the quarantine attribute was written with xattr (a browser's download path was not run)"}
+    checks = [(read.startswith("0083;"), "the extracted bundle carries a quarantine attribute (%s)" % read),
+              ("enabled" in facts["spctl_status"], "Gatekeeper's assessments are enabled (%s)" % facts["spctl_status"])]
+    if "enabled" not in facts["spctl_status"]:
+        return s.verdict("app-gatekeeper", checks, facts, "gatekeeper", "gatekeeper-disabled")
+    if expect == "notarized":
+        checks.append((assess.returncode == 0 and "source=Notarized Developer ID" in facts["assessment"],
+                       "spctl accepts it as a notarized Developer ID application: %s" % facts["assessment"]))
+    else:
+        checks.append((assess.returncode != 0, "spctl refuses it (not notarized): %s" % facts["assessment"]))
+    g = AppGame(s, "app-gatekeeper", app, ["--seed", "7"], wait=0.0)
+    pid, w = dialog(s, "CoreServicesUIAgent", "Icy Tower", 25.0)
+    facts["dialog"] = w
+    buttons = (w or {}).get("buttons", [])
+    if expect == "notarized":
+        if w is not None:
+            checks.append(("Open" in buttons, "Gatekeeper's first-launch dialog offers Open: %s / %s" % (" ".join(w.get("texts", []))[:300], buttons)))
+            s.tool("ax-press", pid, "Open")
+        else:
+            checks.append((True, "no first-launch dialog was shown (the assessment let it start)"))
+        win = g.window(25.0) if g.find(25.0) else None
+        checks.append((win is not None, "the downloaded application opens its window"))
+        if win is not None:
+            time.sleep(max(0.0, 3.5 - (time.time() - g.window_at)))
+            focus = g.focus()
+            restarts = [0]
+            ok, t, _, _ = measure_key(g, "right", 1, "right", restarts) if focus else (False, "no focus", None, None)
+            checks.append((ok, "Right: %s" % t))
+            ok, t, _, _ = measure_key(g, "left", -1, "left", restarts) if focus else (False, "no focus", None, None)
+            checks.append((ok, "Left: %s" % t))
+            code, how, out, err = g.escape()
+            checks.append((how == "exited" and "frames=" in out, "Escape quits (%s): %s" % (how, out)))
+        else:
+            g.finish(1)
+    else:
+        checks.append((w is not None, "Gatekeeper's dialog refuses it: %s" % (w and " / ".join(w.get("texts", []))[:300])))
+        checks.append((w is not None and "Open" not in buttons, "and offers no Open: %s" % buttons))
+        if w is not None:
+            for b in ("Done", "OK", "Cancel"):
+                if b in buttons:
+                    s.tool("ax-press", pid, b)
+                    break
+        started = g.find(3.0)
+        checks.append((started is None, "the game never started"))
+        if started:
+            g.p.kill()
+    facts["key_mode"] = s.key_mode
+    return s.verdict("app-gatekeeper", checks, facts, "gatekeeper")
+
+
+def run_app(args):
+    s = Session(args)
+
+    def bundle_id(app):
+        import plistlib
+        with open(os.path.join(app, "Contents", "Info.plist"), "rb") as f:
+            return plistlib.load(f)["CFBundleIdentifier"]
+    s.bundle_id = bundle_id
+    cases = [("env", case_env), ("app-bundle", case_app_bundle), ("app-launch", case_app_launch),
+             ("app-keyboard", case_app_keyboard), ("app-relaunch", case_app_relaunch), ("app-gc-stress", case_app_gc),
+             ("app-alert-video", lambda s: alert_case(s, "app-alert-video", s.args.app, (), {"SDL_VIDEO_DRIVER": "nosuch"},
+                                                      "Icy Tower: SDL_Init failed: nosuch not available")),
+             ("app-alert-renderer", lambda s: alert_case(s, "app-alert-renderer", s.args.app, (), {"SDL_RENDER_DRIVER": "nosuch"},
+                                                         "Icy Tower: SDL_CreateRenderer failed")),
+             ("app-alert-usage", lambda s: alert_case(s, "app-alert-usage", s.args.app, ("--fly",), {},
+                                                      "icy-tower: unknown option: --fly")),
+             ("app-terminal-failure", case_app_no_alert_terminal)]
+    if args.probe_app:
+        cases += [("app-alert-window", lambda s: alert_case(s, "app-alert-window", s.args.probe_app, (),
+                                                            {"SDLTRACE_FAIL": "SDL_CreateWindow"},
+                                                            "Icy Tower: SDL_CreateWindow failed: SDLTRACE_FAIL: SDL_CreateWindow injected")),
+                  ("app-alert-runtime", lambda s: alert_case(s, "app-alert-runtime", s.args.probe_app, ("--seed", "7"),
+                                                             {"SDLTRACE_FAIL": "SDL_RenderPresent@90"},
+                                                             "Icy Tower: drawing a frame failed: SDLTRACE_FAIL: SDL_RenderPresent injected",
+                                                             window_first=True))]
+    if args.zip:
+        cases.append(("app-gatekeeper", case_app_gatekeeper))
+    only = set(args.only.split(",")) if args.only else None
+    for name, case in cases:
+        if only and name not in only and name != "env":
+            continue
+        try:
+            case(s)
+        except Exception as e:  # a harness failure is a result of its own, never a pass
+            s.record(name, "FAILED", "test-harness", [(False, "the harness failed: %r" % e)], {})
+    return report(s, args)
+
+
 def run(args):
     s = Session(args)
     cases = [("env", case_env), ("cocoa", case_cocoa), ("keyboard", case_keyboard), ("restart", case_restart),
@@ -1283,6 +1697,10 @@ def run(args):
             case(s)
         except Exception as e:  # a harness failure is a result of its own, never a pass
             s.record(name, "FAILED", "test-harness", [(False, "the harness failed: %r" % e)], {})
+    return report(s, args)
+
+
+def report(s, args):
     lines = ["| case | class | category | checks |", "|---|---|---|---|"]
     for c in s.cases:
         lines.append("| %s | %s | %s | %d of %d |" % (c["name"], c["class"], c["category"] or "",
@@ -1303,15 +1721,23 @@ def main():
         r.add_argument("--" + k, required=True)
     r.add_argument("--strict", action="store_true")
     r.add_argument("--only", default="")
+    a = sub.add_parser("app")
+    for k in ("app", "helper", "out"):
+        a.add_argument("--" + k, required=True)
+    a.add_argument("--probe-app", default="")
+    a.add_argument("--zip", default="")
+    a.add_argument("--gatekeeper", choices=("notarized", "refused"), default="refused")
+    a.add_argument("--strict", action="store_true")
+    a.add_argument("--only", default="")
     t = sub.add_parser("selftest")
     t.add_argument("--out", default="")
     args = ap.parse_args()
     if args.command == "selftest":
         return 1 if selftest(args.out) else 0
     if not APPLE:
-        print("macos-session.py run: macOS only", file=sys.stderr)
+        print("macos-session.py %s: macOS only" % args.command, file=sys.stderr)
         return 2
-    return run(args)
+    return run_app(args) if args.command == "app" else run(args)
 
 
 if __name__ == "__main__":

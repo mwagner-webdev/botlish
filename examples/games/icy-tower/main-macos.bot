@@ -1,9 +1,12 @@
 # main-macos.bot -- main.bot on macOS AArch64 (ICY-TOWER-MACOS-MILESTONE-1.md):
-# the same game (game.bot) and SDL (sdl.bot), with macOS's std::io::IO
-# context installed -- std::darwin::io's, whose writes are libSystem's
-# write(2) -- and the executable's native dependencies imported:
-# macos_link.bot, the pinned SDL3 as a static archive of the application and
-# the Apple frameworks and system libraries SDL3's own metadata names.
+# the same game (game.bot) and SDL (sdl.bot), with the macOS application's
+# std::io::IO context installed -- macos_app.bot's, whose writes are
+# libSystem's write(2), as std::darwin::io's, and which also shows the first
+# diagnostic of a run LaunchServices launched in an alert
+# (ICY-TOWER-MACOS-APP-MILESTONE-1.md) -- and the executable's native
+# dependencies imported: macos_link.bot, the pinned SDL3 as a static archive
+# of the application and the Apple frameworks and system libraries SDL3's
+# own metadata names.
 #
 # Built with -native-startup main-thread (MAIN-THREAD-STARTUP-MILESTONE-1.md):
 # Cocoa needs SDL's video subsystem on the process's main thread, which is
@@ -12,12 +15,12 @@
 #
 #   examples/games/icy-tower/build-macos.sh    the macOS executable
 import game
+import macos_app
 import macos_link
 import sdl
 import std::io
-import std::darwin::io
 
-with context std::darwin::io::create()
+with context macos_app::create()
 with context sdl::create()
 
 result = game::main(game::arguments()):

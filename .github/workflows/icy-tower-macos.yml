@@ -35,9 +35,29 @@ name: icy-tower (macos arm64)
 #      loads); the measurements.
 #
 # The executable, the probe and worker builds, the generated binding, every
-# log and every capture are the run's icy-tower-macos-aarch64 artifact. No
-# release is published, and no signing credential is used (the executable
-# is linker-signed ad hoc, as every arm64 Mach-O Apple's ld makes).
+# log and every capture are the run's icy-tower-macos-aarch64 artifact.
+#
+# Icy Tower.app (ICY-TOWER-MACOS-APP-MILESTONE-1.md): the game job also
+# assembles the bundle (package-macos.sh), signs it ad hoc with the hardened
+# runtime (macos/release.py --mode adhoc), plays it through LaunchServices
+# (macos-session.py app: the Finder's launch, keys, the close button, every
+# failure's alert, the quarantined download refused by Gatekeeper),
+# rehearses the release's keychain and signing with a throwaway identity
+# (--mode dry-run) and runs the release tooling's tests and mutants
+# (audit/macos-release/) -- with no credential: the game job has none.
+#
+# The release path is the release and publish jobs, for a tag
+# icy-tower-macos-vX.Y.Z of main's history only (pushed, or a manual run on
+# it): the release job, in the protected environment macos-release (the only
+# holder of the Developer ID identity and the notarization key), builds the
+# bundle from the executable this run's game job built and tested (its
+# SHA-256 checked), validates the credentials locally and with Apple, signs
+# it with Developer ID (hardened runtime, secure timestamp), plays the
+# signed bundle, notarizes, staples, asks Gatekeeper, makes the ZIP and plays
+# the quarantined download of it; the publish job, the only one with
+# contents: write, publishes exactly that ZIP, SHA256SUMS and the provenance
+# as the tag's GitHub Release. Any failed or skipped stage publishes nothing;
+# an existing release is never replaced.
 #
 # Pushes to any branch run it, as the Windows game's workflow does; a pull
 # request from this repository's own branches skips (its push already ran),
@@ -46,6 +66,11 @@ name: icy-tower (macos arm64)
 
 on:
   push:
+    branches: ["**"]
+    # A release (ICY-TOWER-MACOS-APP-MILESTONE-1.md, "Releasing"): the
+    # release and publish jobs below run for these tags only. (Path filters
+    # are not applied to tag pushes.)
+    tags: ["icy-tower-macos-v*"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -55,13 +80,21 @@ on:
         description: "Also run the macOS integration's mutants (audit/icy-tower/macos-mutants.txt)"
         type: boolean
         default: false
+      resume_run:
+        description: "Release only (a run on an icy-tower-macos-v* tag): the run whose notarization timed out"
+        type: string
+        default: ""
+      resume_submission:
+        description: "Release only: that run's notarization submission ID, continued instead of uploading again"
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
   group: icy-tower-macos-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 
 defaults:
   run:
@@ -72,7 +105,9 @@ jobs:
     name: icy-tower (Botlish.app, static SDL3, Cocoa; macOS arm64)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: macos-15
-    timeout-minutes: 150
+    timeout-minutes: 180
+    outputs:
+      exe_sha256: ${{ steps.release-input.outputs.exe_sha256 }}
     steps:
       - uses: actions/checkout@v5
 
@@ -239,8 +274,9 @@ jobs:
           export ICY_TOWER_BOTLISH="$APP" ICY_TOWER_BINDING_FROM="$PWD/out/sdl3-binding"
           tmp=$(mktemp -d)
           tclsh9.0 tests/workload-icy-tower.test -tmpdir "$tmp" -match 'workload-icy-tower-macos-*' 2>&1 | tee out/logs/workload-tests.log
-          # Every macOS test ran and passed (with -match, the others count as skipped).
-          grep -qE 'Passed[[:space:]]+11[[:space:]]' out/logs/workload-tests.log
+          # Every macOS test ran and passed (with -match, the others count as skipped):
+          # the 11 of the executable and the bundle's (ICY-TOWER-MACOS-APP-MILESTONE-1.md).
+          grep -qE 'Passed[[:space:]]+12[[:space:]]' out/logs/workload-tests.log
           grep -qE 'Failed[[:space:]]+0$' out/logs/workload-tests.log
 
       - name: The independent oracle (audit/icy-tower/oracle.py compare)
@@ -273,7 +309,7 @@ jobs:
         id: session
         if: always() && steps.probes.outcome == 'success'
         run: |
-          clang -fobjc-arc -framework AppKit -framework ApplicationServices -o "$RUNNER_TEMP/macos-input" audit/icy-tower/tools/macos-input.m
+          clang -fobjc-arc -framework AppKit -framework ApplicationServices -framework CoreServices -o "$RUNNER_TEMP/macos-input" audit/icy-tower/tools/macos-input.m
           "$RUNNER_TEMP/macos-input" preflight
           python3 -I audit/icy-tower/tools/macos-session.py run --exe "$EXE" --probe "$PROBE" --worker "$WORKER" \
             --helper "$RUNNER_TEMP/macos-input" --reference audit/icy-tower/trace-reference.txt --out out/session --strict \
@@ -306,6 +342,175 @@ jobs:
           # which pipefail makes the step's failure)
           grep -o '/[^ ]*' "$RUNNER_TEMP/dyld.txt" | sed 's#^#   #' | sort -u >"$RUNNER_TEMP/images.txt"
           head -n 40 "$RUNNER_TEMP/images.txt"
+
+      # --- Icy Tower.app (ICY-TOWER-MACOS-APP-MILESTONE-1.md) -----------------
+      # The release tooling's Python: the cryptography package (PKCS#12,
+      # X.509, PKCS#8) and PyYAML (the workflow's own trust checks), pinned by
+      # version and wheel hash, in a private environment.
+      - name: The release tooling's Python (pinned, hash-checked)
+        id: python
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r audit/macos-release/requirements.txt
+          "$RUNNER_TEMP/venv/bin/python" -c 'import cryptography, yaml; print("cryptography", cryptography.__version__, "PyYAML", yaml.__version__)'
+          echo "PY=$RUNNER_TEMP/venv/bin/python" >>"$GITHUB_ENV"
+
+      # The credential preflight against synthetic credentials (every
+      # mistake a developer makes entering the seven values), the release
+      # stages against recording stand-ins of Apple's tools, the bundle's
+      # negative controls, the workflow's trust boundaries, and the
+      # mutants of all of it (audit/macos-release/mutants.txt): no real
+      # credential is involved.
+      - name: The release tooling's tests and mutants (audit/macos-release)
+        id: release-tests
+        if: always() && steps.python.outcome == 'success'
+        run: |
+          for t in test_credentials test_release test_workflow; do
+            "$PY" -I "audit/macos-release/tests/$t.py" 2>&1 | tail -n 4 | tee -a out/logs/release-tests.log
+          done
+          "$PY" -I audit/macos-release/tools/mutate.py 2>&1 | tee out/logs/release-mutants.log
+
+      # package-macos.sh: the executable build-macos.sh made, byte for byte,
+      # in a bundle with its Info.plist (the CI's bundle identifier; a
+      # release's is the repository's MACOS_BUNDLE_ID) and the licenses; the
+      # probe build in a bundle of its own (the failure alerts' fault
+      # injection). Then the ad hoc trust path, as a release's but without
+      # credentials: an ad hoc signature with the hardened runtime, its
+      # checks, the tamper control, Gatekeeper's refusal (no notarization),
+      # the ZIP made and verified again from a fresh extraction.
+      - name: Icy Tower.app, ad hoc signed (package-macos.sh, release.py --mode adhoc)
+        id: bundle
+        if: always() && steps.python.outcome == 'success' && steps.probes.outcome == 'success'
+        run: |
+          licence="$SDLSRC/LICENSE.txt"
+          ci_id=org.botlish.examples.icy-tower.ci
+          started=$(date +%s)
+          examples/games/icy-tower/package-macos.sh "$EXE" out/app --bundle-id "$ci_id" --version 0.0.0 --build 0.0.0 \
+            --sdl3-license "$licence" 2>&1 | tee out/logs/package.log
+          echo "assembled in $(( $(date +%s) - started )) s" | tee -a out/logs/package.log
+          examples/games/icy-tower/package-macos.sh "$PROBE" out/probe-app --bundle-id "$ci_id.probe" --version 0.0.0 \
+            --build 0.0.0 --sdl3-license "$licence" >out/logs/package-probe.log 2>&1
+          rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
+          app="out/app/Icy Tower.app"
+          rel sign --work out/release-adhoc --mode adhoc --app "$app"
+          rel verify-signature --work out/release-adhoc --app "$app"
+          rel tamper --work out/release-adhoc --app "$app"
+          rel gatekeeper --work out/release-adhoc --app "$app" --expect refused
+          rel package --work out/release-adhoc --app "$app" --out out/app-dist \
+            --provenance "{\"mode\": \"ci\", \"source_commit\": \"$GITHUB_SHA\", \"version\": \"0.0.0\"}"
+          if rel publishable --work out/release-adhoc --out out/app-dist; then
+            echo "::error::an ad hoc build was judged publishable"; exit 1
+          fi
+          rel sign --work out/release-adhoc-probe --mode adhoc --app "out/probe-app/Icy Tower.app"
+          codesign -dvvv "$app" 2>&1 | grep -E '^(Identifier|Format|CodeDirectory|Signature|TeamIdentifier|CDHash)='
+          plutil -p "$app/Contents/Info.plist"
+          ls -l out/app-dist
+          du -sk "$app" | tee -a out/logs/package.log
+          echo "APPDIR=$PWD/out/app/Icy Tower.app" >>"$GITHUB_ENV"
+
+      # The bundle launched as the Finder launches it (LaunchServices,
+      # `open`): recognition, the first launch (no argument, launchd's
+      # child, its working directory not ours, a regular application made
+      # active), keys, Escape, a relaunch ended by the close button, GC
+      # stress, every failure's alert (SDL's video, the renderer, a usage
+      # error, the window -- injected in the probe -- and a frame that
+      # cannot be drawn after Cocoa and Metal started), no alert in a
+      # terminal run, and the downloaded ZIP: extracted, quarantined, refused
+      # by Gatekeeper (an ad hoc signature is not notarized).
+      - name: LaunchServices acceptance (macos-session.py app --strict)
+        id: app-session
+        if: always() && steps.bundle.outcome == 'success' && steps.session.outcome != 'skipped'
+        run: |
+          "$RUNNER_TEMP/macos-input" app-info "$APPDIR" || true
+          spctl --status || true
+          python3 -I audit/icy-tower/tools/macos-session.py app --app "$APPDIR" --probe-app "$PWD/out/probe-app/Icy Tower.app" \
+            --zip "$PWD/out/app-dist/icy-tower-macos-aarch64.zip" --gatekeeper refused \
+            --helper "$RUNNER_TEMP/macos-input" --out out/app-session --strict 2>&1 | tee out/logs/app-session.log
+
+      # The release path rehearsed with a throwaway identity
+      # (audit/macos-release/tools/fixtures.py dry-run: a test certificate
+      # authority, never Apple's): the same preflight, temporary keychain,
+      # identity selection, codesign with the hardened runtime, signature
+      # checks and cleanup a release runs -- without Apple's trust, a
+      # timestamp or notarization, and never publishable. Apple's service is
+      # asked to validate a key it never issued: the answer must be
+      # classified as an authentication rejection (or the service as
+      # unreachable), never as a key-format problem.
+      - name: The release path's dry run (a throwaway identity)
+        id: dry-run
+        if: always() && steps.bundle.outcome == 'success'
+        run: |
+          dry="$RUNNER_TEMP/dry-run"
+          rm -rf "$dry"
+          "$PY" -I audit/macos-release/tools/fixtures.py dry-run "$dry"
+          set -a; . "$dry/env"; set +a
+          mkdir -p "$dry/app"
+          ditto "$APPDIR" "$dry/app/Icy Tower.app"
+          rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
+          w="$dry/work"
+          before=$(security list-keychains -d user)
+          trap 'rel cleanup --work "$w"' EXIT
+          started=$(date +%s)
+          rel preflight --work "$w" --mode dry-run --trust-anchors "$dry/anchors"
+          echo "preflight: $(( $(date +%s) - started )) s"
+          started=$(date +%s)
+          rel keychain --work "$w"
+          echo "keychain: $(( $(date +%s) - started )) s"
+          started=$(date +%s)
+          rel sign --work "$w" --app "$dry/app/Icy Tower.app"
+          echo "sign: $(( $(date +%s) - started )) s"
+          rel verify-signature --work "$w" --app "$dry/app/Icy Tower.app"
+          if rel notary-auth --work "$w" >"$dry/notary-auth.txt" 2>&1; then
+            cat "$dry/notary-auth.txt"; echo "::error::Apple validated a key it never issued"; exit 1
+          fi
+          cat "$dry/notary-auth.txt"
+          grep -qE '^MACOS-NOTARY-(AUTH|SERVICE):' "$dry/notary-auth.txt"
+          if rel publishable --work "$w" --out "$dry"; then echo "::error::a dry run was judged publishable"; exit 1; fi
+          python3 -I audit/icy-tower/tools/macos-session.py app --app "$dry/app/Icy Tower.app" --helper "$RUNNER_TEMP/macos-input" \
+            --out out/dry-run-session --only app-launch --strict
+          rel cleanup --work "$w"
+          trap - EXIT
+          after=$(security list-keychains -d user)
+          [ "$before" = "$after" ] || { echo "::error::the keychain search list was not restored"; exit 1; }
+          [ ! -e "$w/secret" ] || { echo "::error::the decoded credentials were left behind"; exit 1; }
+          cp "$w/state.json" out/logs/dry-run-state.json
+          cp "$dry/notary-auth.txt" out/logs/dry-run-notary-auth.txt
+
+      # What a release job (below) builds its bundle from: the executable
+      # this job built and tested, byte for byte, its SHA-256 a job output
+      # the release job checks the download against.
+      - name: The release's input (the tested executable)
+        id: release-input
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          mkdir -p out/release-input
+          cp "$EXE" out/release-input/icy-tower
+          cp "$SDLSRC/LICENSE.txt" out/release-input/LICENSE-SDL3.txt
+          {
+            echo "source_commit=$GITHUB_SHA"
+            echo "sdl3_revision=$(sed -n 's/^revision //p' out/sdl3-binding/macos-aarch64/manifest.txt)"
+            echo "botlish=$("$APP/Contents/MacOS/botlish" -version 2>&1 | head -n 1)"
+            echo "toolchain=$(clang --version | head -n 1)"
+            echo "sdk=$(xcrun --show-sdk-version)"
+            echo "macos_runner=$(sw_vers -productVersion)"
+          } >out/release-input/build.txt
+          cat out/release-input/build.txt
+          echo "exe_sha256=$(shasum -a 256 out/release-input/icy-tower | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.release-input.outcome == 'success'
+        with:
+          name: icy-tower-macos-release-input
+          path: out/release-input/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.bundle.outcome == 'success'
+        with:
+          name: icy-tower-macos-app-ci
+          path: out/app-dist/
+          if-no-files-found: error
 
       # The macOS integration's mutants (opt-in: "[ci-icy-tower-mutants]"
       # in the pushed head commit's message, or a manual run's mutants):
@@ -358,6 +563,10 @@ jobs:
           SESSION: ${{ steps.session.outcome }}
           ALONE: ${{ steps.alone.outcome }}
           MUTANTS: ${{ steps.mutants.outcome }}
+          RELEASE_TESTS: ${{ steps.release-tests.outcome }}
+          BUNDLE: ${{ steps.bundle.outcome }}
+          APP_SESSION: ${{ steps.app-session.outcome }}
+          DRY_RUN: ${{ steps.dry-run.outcome }}
         run: |
           classify_build() {
             local log=out/logs/build.log stage
@@ -384,8 +593,14 @@ jobs:
             echo "| graphical acceptance | $SESSION | (the cases below) |"
             echo "| without its build | $ALONE | $([ "$ALONE" = failure ] && echo 'native-link failure (a dependency)') |"
             echo "| macOS mutants | ${MUTANTS:-not run} | $(tail -n 1 out/logs/mutants.log 2>/dev/null) |"
+            echo "| release tooling tests and mutants | $RELEASE_TESTS | $(tail -n 1 out/logs/release-mutants.log 2>/dev/null) |"
+            echo "| Icy Tower.app, ad hoc | $BUNDLE | $([ "$BUNDLE" = failure ] && echo 'bundle or signature failure (the log)') |"
+            echo "| LaunchServices acceptance | $APP_SESSION | (the app cases below) |"
+            echo "| release dry run | $DRY_RUN | $(grep -hE '^MACOS-' out/logs/dry-run-notary-auth.txt 2>/dev/null | head -n 1) |"
             echo
             cat out/session/summary.md 2>/dev/null || echo "the graphical session did not run"
+            echo
+            cat out/app-session/summary.md 2>/dev/null || echo "the LaunchServices session did not run"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -395,3 +610,328 @@ jobs:
           path: |
             out/
           if-no-files-found: warn
+
+  # The trusted release (ICY-TOWER-MACOS-APP-MILESTONE-1.md, "Releasing";
+  # the configuration is its "GitHub configuration"). Only for a tag
+  # icy-tower-macos-vX.Y.Z -- pushed, or a manual run on it -- never for a
+  # branch, a pull request or a fork: the macos-release environment holds the
+  # seven values, and its deployment rule should admit those tags alone. It
+  # signs nothing an earlier job made but the executable the game job built
+  # and tested in this run, at this commit (its SHA-256 a job output); the
+  # bundle is assembled here, with the release's identifier and version.
+  # Secrets reach exactly the steps that read them, through env; nothing
+  # here prints one (release.py redacts every tool's output); the
+  # temporary keychain and the decoded files are removed however the job
+  # ends. It never falls back to an ad hoc signature: each stage refuses
+  # to run unless the ones before it passed.
+  release:
+    name: release (Developer ID, notarization, Gatekeeper)
+    needs: game
+    if: >-
+      always() && needs.game.result == 'success'
+      && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-15
+    timeout-minutes: 240
+    environment: macos-release
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      zip_sha256: ${{ steps.package.outputs.zip_sha256 }}
+      version: ${{ steps.revision.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The tag names the version and a commit of main's history (reviewed
+      # code), and is this run's commit.
+      - name: The release's revision
+        id: revision
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#icy-tower-macos-v}"
+          if ! [[ $version =~ ^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]]; then
+            echo "::error::MACOS-BUNDLE-METADATA: the tag $tag is not icy-tower-macos-vX.Y.Z"; exit 1
+          fi
+          [ "$(git rev-parse "refs/tags/$tag^{commit}")" = "$GITHUB_SHA" ] || { echo "::error::the tag $tag does not name this run's commit"; exit 1; }
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$tag ($GITHUB_SHA) is not a commit of main's history: a release is built from reviewed code only"; exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+          echo "VERSION=$version" >>"$GITHUB_ENV"
+          echo "WORK=$RUNNER_TEMP/release" >>"$GITHUB_ENV"
+          echo "DIST=$RUNNER_TEMP/dist" >>"$GITHUB_ENV"
+          echo "release $tag: version $version, commit $GITHUB_SHA"
+
+      # Nothing is compiled here but the session's input helper: no Tcl,
+      # Rust or Botlish.app (the executable is the game job's).
+      - name: The release tooling's Python (pinned, hash-checked)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r examples/games/icy-tower/macos/requirements.txt
+          echo "PY=$RUNNER_TEMP/venv/bin/python" >>"$GITHUB_ENV"
+          clang -fobjc-arc -framework AppKit -framework ApplicationServices -framework CoreServices -o "$RUNNER_TEMP/macos-input" audit/icy-tower/tools/macos-input.m
+          "$RUNNER_TEMP/macos-input" preflight
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: icy-tower-macos-release-input
+          path: ${{ runner.temp }}/input
+
+      # The executable the game job built and tested, byte for byte; the
+      # bundle assembled with the release's identity and version.
+      - name: Icy Tower.app from the tested executable
+        env:
+          EXE_SHA256: ${{ needs.game.outputs.exe_sha256 }}
+          MACOS_BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID }}
+        run: |
+          exe="$RUNNER_TEMP/input/icy-tower"
+          got=$(shasum -a 256 "$exe" | awk '{print $1}')
+          [ -n "$EXE_SHA256" ] && [ "$got" = "$EXE_SHA256" ] || { echo "::error::the executable is not the one the game job built and tested ($got, not $EXE_SHA256)"; exit 1; }
+          chmod 0755 "$exe"
+          if [ -z "$MACOS_BUNDLE_ID" ]; then
+            echo "::error::MACOS-CONFIG-MISSING: MACOS_BUNDLE_ID is not set (a variable of the macos-release environment)"; exit 1
+          fi
+          examples/games/icy-tower/package-macos.sh "$exe" "$RUNNER_TEMP/release-app" --bundle-id "$MACOS_BUNDLE_ID" \
+            --version "$VERSION" --build "$VERSION" --sdl3-license "$RUNNER_TEMP/input/LICENSE-SDL3.txt"
+          echo "RAPP=$RUNNER_TEMP/release-app/Icy Tower.app" >>"$GITHUB_ENV"
+
+      # The local preflight: every value checked before any Apple tool sees
+      # one (credentials.py; nothing is signed or sent when it fails).
+      - name: Credential preflight (local)
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          MACOS_BUNDLE_ID: ${{ vars.MACOS_BUNDLE_ID }}
+        run: |
+          started=$(date +%s)
+          "$PY" -I examples/games/icy-tower/macos/release.py preflight --work "$WORK" --mode release
+          echo "preflight: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+
+      # The bundle identifier of every earlier release: never another.
+      - name: The application's identity (earlier releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          prev=()
+          for t in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | grep '^icy-tower-macos-v' || true); do
+            [ "$t" = "$GITHUB_REF_NAME" ] && continue
+            if gh release download "$t" --repo "$GITHUB_REPOSITORY" --pattern provenance.json --dir "$RUNNER_TEMP/previous/$t" 2>/dev/null; then
+              prev+=(--previous "$RUNNER_TEMP/previous/$t/provenance.json")
+            fi
+          done
+          "$PY" -I examples/games/icy-tower/macos/release.py identity --work "$WORK" "${prev[@]}"
+
+      - name: Temporary keychain and the Developer ID identity
+        env:
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          started=$(date +%s)
+          "$PY" -I examples/games/icy-tower/macos/release.py keychain --work "$WORK"
+          echo "keychain and import: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+
+      # Apple's own validation of the Key ID, Issuer ID and key together
+      # (notarytool store-credentials, validating): before anything is
+      # uploaded; a rejection here is never reported as a format problem.
+      - name: Apple's validation of the notarization credentials
+        run: |
+          "$PY" -I examples/games/icy-tower/macos/release.py notary-auth --work "$WORK"
+
+      - name: Developer ID signature (hardened runtime, secure timestamp)
+        if: inputs.resume_submission == ''
+        run: |
+          started=$(date +%s)
+          "$PY" -I examples/games/icy-tower/macos/release.py sign --work "$WORK" --app "$RAPP"
+          echo "sign: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+          mkdir -p "$RUNNER_TEMP/signed"
+          ditto -c -k --keepParent "$RAPP" "$RUNNER_TEMP/signed/icy-tower-macos-signed.zip"
+
+      # Resuming a notarization that timed out: the bundle that run signed
+      # and submitted (its artifact), from a run of this very commit,
+      # adopted after its signature is checked as this release's.
+      - name: Resume -- the bundle the earlier run signed
+        if: inputs.resume_submission != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUME_RUN: ${{ inputs.resume_run }}
+          RESUME_SUBMISSION: ${{ inputs.resume_submission }}
+        run: |
+          [[ $RESUME_RUN =~ ^[0-9]+$ ]] || { echo "::error::resume_run must be the earlier run's ID"; exit 1; }
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RESUME_RUN" --jq .head_sha)
+          [ "$sha" = "$GITHUB_SHA" ] || { echo "::error::run $RESUME_RUN built $sha, not this release's $GITHUB_SHA"; exit 1; }
+          gh run download "$RESUME_RUN" --repo "$GITHUB_REPOSITORY" --name icy-tower-macos-signed --dir "$RUNNER_TEMP/resumed"
+          rm -rf "$RUNNER_TEMP/release-app"
+          mkdir -p "$RUNNER_TEMP/release-app"
+          ditto -x -k "$RUNNER_TEMP/resumed/icy-tower-macos-signed.zip" "$RUNNER_TEMP/release-app"
+          "$PY" -I examples/games/icy-tower/macos/release.py adopt --work "$WORK" --app "$RAPP" --resume "$RESUME_SUBMISSION"
+
+      - name: The signature (Developer ID, team, hardened runtime, timestamp, no entitlement)
+        run: |
+          "$PY" -I examples/games/icy-tower/macos/release.py verify-signature --work "$WORK" --app "$RAPP"
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.resume_submission == ''
+        with:
+          name: icy-tower-macos-signed
+          path: ${{ runner.temp }}/signed/icy-tower-macos-signed.zip
+          if-no-files-found: error
+
+      # The Developer ID-signed application under the hardened runtime,
+      # before notarization, played through LaunchServices.
+      - name: Hardened-runtime acceptance (the signed application)
+        run: |
+          python3 -I audit/icy-tower/tools/macos-session.py app --app "$RAPP" --helper "$RUNNER_TEMP/macos-input" \
+            --out "$RUNNER_TEMP/session-signed" --strict \
+            --only app-bundle,app-launch,app-keyboard,app-relaunch,app-gc-stress,app-alert-renderer,app-terminal-failure
+          "$PY" -I examples/games/icy-tower/macos/release.py record --work "$WORK" --label hardened-runtime \
+            --results "$RUNNER_TEMP/session-signed/results.json" --app "$RAPP" \
+            --cases app-bundle,app-launch,app-keyboard,app-relaunch,app-gc-stress,app-alert-renderer,app-terminal-failure
+
+      - name: Notarization (notarytool, Accepted required, the log inspected)
+        env:
+          RESUME_SUBMISSION: ${{ inputs.resume_submission }}
+        run: |
+          started=$(date +%s)
+          resume=()
+          [ -n "$RESUME_SUBMISSION" ] && resume=(--resume "$RESUME_SUBMISSION")
+          "$PY" -I examples/games/icy-tower/macos/release.py notarize --work "$WORK" --app "$RAPP" --timeout 5400 "${resume[@]}"
+          echo "notarization (upload and Apple's processing): $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+
+      - name: Stapling, the stapled signature, Gatekeeper, the tamper control
+        run: |
+          rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
+          started=$(date +%s)
+          rel staple --work "$WORK" --app "$RAPP"
+          echo "staple: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+          rel verify-signature --work "$WORK" --app "$RAPP" --label stapled
+          started=$(date +%s)
+          rel gatekeeper --work "$WORK" --app "$RAPP" --expect notarized
+          echo "gatekeeper: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+          rel tamper --work "$WORK" --app "$RAPP"
+
+      # The ZIP is made of the stapled bundle (never the submission's), then
+      # extracted into a fresh directory and verified there.
+      - name: The release ZIP, SHA256SUMS and the provenance
+        id: package
+        env:
+          TEAM: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          prov=$("$PY" -I -c '
+          import json, os, sys
+          facts = dict(l.strip().split("=", 1) for l in open(sys.argv[1]) if "=" in l)
+          facts.update({"tag": os.environ["GITHUB_REF_NAME"], "version": os.environ["VERSION"], "target": "macos-aarch64 (arm64)",
+                        "minimum_macos": "11.0", "workflow_run": os.environ["GITHUB_SERVER_URL"] + "/" + os.environ["GITHUB_REPOSITORY"]
+                        + "/actions/runs/" + os.environ["GITHUB_RUN_ID"]})
+          print(json.dumps(facts))' "$RUNNER_TEMP/input/build.txt")
+          "$PY" -I examples/games/icy-tower/macos/release.py package --work "$WORK" --app "$RAPP" --out "$DIST" --provenance "$prov"
+          cat "$DIST/SHA256SUMS"
+          echo "zip_sha256=$(shasum -a 256 "$DIST/icy-tower-macos-aarch64.zip" | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+
+      # The downloaded artifact: the ZIP extracted into a fresh directory,
+      # quarantined, assessed, opened through LaunchServices (Gatekeeper's
+      # first-launch dialog answered Open), played and quit.
+      - name: The downloaded release, launched (quarantine, Gatekeeper, keys)
+        run: |
+          started=$(date +%s)
+          python3 -I audit/icy-tower/tools/macos-session.py app --app "$RAPP" --zip "$DIST/icy-tower-macos-aarch64.zip" \
+            --gatekeeper notarized --helper "$RUNNER_TEMP/macos-input" --out "$RUNNER_TEMP/session-final" --strict --only app-gatekeeper
+          echo "extraction and launch: $(( $(date +%s) - started )) s" | tee -a "$RUNNER_TEMP/timings.txt"
+          "$PY" -I examples/games/icy-tower/macos/release.py record --work "$WORK" --label final-artifact \
+            --results "$RUNNER_TEMP/session-final/results.json" --zip "$DIST/icy-tower-macos-aarch64.zip" --cases app-gatekeeper
+
+      - name: Publishable (every stage passed, on the same signature and ZIP)
+        run: |
+          "$PY" -I examples/games/icy-tower/macos/release.py publishable --work "$WORK" --out "$DIST"
+
+      - name: Remove the temporary keychain and the decoded credentials
+        if: always()
+        run: |
+          if [ -d "$WORK" ]; then "$PY" -I examples/games/icy-tower/macos/release.py cleanup --work "$WORK"; fi
+          security list-keychains -d user
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icy-tower-macos-release
+          path: |
+            ${{ runner.temp }}/dist/icy-tower-macos-aarch64.zip
+            ${{ runner.temp }}/dist/SHA256SUMS
+            ${{ runner.temp }}/dist/provenance.json
+          if-no-files-found: error
+
+      # Public facts only: the stages' state, the submission and Apple's log,
+      # the sessions' results and captures, the timings -- never the work
+      # directory's secret/ (removed above, and not listed here).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: icy-tower-macos-release-diagnostics
+          path: |
+            ${{ runner.temp }}/release/state.json
+            ${{ runner.temp }}/release/notary-submission.json
+            ${{ runner.temp }}/release/notary-log.json
+            ${{ runner.temp }}/release/notary-auth.log
+            ${{ runner.temp }}/session-signed/
+            ${{ runner.temp }}/session-final/
+            ${{ runner.temp }}/timings.txt
+          if-no-files-found: warn
+
+  # The GitHub Release of the tag: exactly the release job's ZIP (its SHA-256
+  # that job's output), SHA256SUMS and the provenance. The only job with
+  # contents: write; never for a failed or skipped release job; an existing
+  # release of the tag is never replaced.
+  publish:
+    name: publish the GitHub Release
+    needs: [game, release]
+    if: >-
+      always() && needs.release.result == 'success'
+      && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: icy-tower-macos-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ZIP_SHA256: ${{ needs.release.outputs.zip_sha256 }}
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: icy-tower-macos-release
+          path: dist
+
+      - name: Publish the tag's release
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c SHA256SUMS
+          got=$(sha256sum icy-tower-macos-aarch64.zip | awk '{print $1}')
+          [ "$got" = "$ZIP_SHA256" ] || { echo "::error::MACOS-PUBLISH: the ZIP is not the release job's ($got, not $ZIP_SHA256)"; exit 1; }
+          [ "$(jq -r .version provenance.json)" = "$VERSION" ] || { echo "::error::MACOS-PUBLISH: the provenance is not this version's"; exit 1; }
+          [ "$(jq -r .mode provenance.json)" = release ] || { echo "::error::MACOS-PUBLISH: not a release build"; exit 1; }
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::error::MACOS-PUBLISH: the release $GITHUB_REF_NAME exists already: it is never replaced (tag a new version)"; exit 1
+          fi
+          notes=$(jq -r '"Icy Tower \(.version) for macOS 11 and later on Apple Silicon (arm64): a game written in Botlish (docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md).
+
+          Download icy-tower-macos-aarch64.zip, open it, and move Icy Tower.app to Applications; open it from the Finder. It is signed with Developer ID (team \(.team)), notarized by Apple (submission \(.notarization_submission)) and its ticket is stapled, so Gatekeeper opens it after the usual question about a downloaded application.
+
+          Left/A and Right/D run, landing bounces, R restarts after a fall, Escape or the close button quits.
+
+          Verify: shasum -a 256 -c SHA256SUMS; codesign --verify --deep --strict --verbose=2 \"Icy Tower.app\"; xcrun stapler validate \"Icy Tower.app\"; spctl --assess --type execute --verbose=4 \"Icy Tower.app\".
+
+          Provenance: commit \(.source_commit), bundle \(.bundle_id), SDL3 \(.sdl3_revision), \(.toolchain), macOS SDK \(.sdk); built and tested by \(.workflow_run). icy-tower-macos-aarch64.zip SHA-256 \(.zip_sha256)."' provenance.json)
+          gh release create "$GITHUB_REF_NAME" icy-tower-macos-aarch64.zip SHA256SUMS provenance.json --verify-tag \
+            --title "Icy Tower $VERSION for macOS (Apple Silicon)" --notes "$notes"
+          gh release view "$GITHUB_REF_NAME" --json url,assets --jq '.url, (.assets[] | "\(.name) \(.size)")'

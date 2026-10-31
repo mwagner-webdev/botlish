@@ -22,6 +22,11 @@
 #   session:CASES macos-session.py's CASES (comma-separated) on the
 #                 mutant's executable and probe build: a case FAILED with a
 #                 failing check matching REGEX
+#   app:CASES     macos-session.py app's CASES on the mutant's executable,
+#                 assembled into Icy Tower.app by the tree's package-macos.sh
+#                 and signed ad hoc by its release.py, launched through
+#                 LaunchServices (ICY-TOWER-MACOS-APP-MILESTONE-1.md): a case
+#                 FAILED with a failing check matching REGEX
 #   relocate      the staged application moved and built again by
 #                 Botlish.app alone
 #   failed-build  the build run again with an archive holding no SDL3: it
@@ -167,13 +172,11 @@ mkdir -p "$work/native/macos" && cp "$archive" "$work/native/macos/libSDL3.a"
     scaleX: std::ffi::c::Double,
 >>>>
 
-@@ darwin-io-silent main-macos.bot installs a context of its own that writes nothing, instead of std::darwin::io's
+@@ app-io-silent main-macos.bot installs a context of its own that writes nothing, instead of the application's (macos_app.bot, std::darwin::write underneath)
 ?? output usage|SDL_Init failed
 ## examples/games/icy-tower/main-macos.bot
 <<<<
-import std::darwin::io
-
-with context std::darwin::io::create()
+with context macos_app::create()
 ====
 
 context struct Silent:
@@ -296,4 +299,77 @@ type_ == sdl3::events::SDL_EVENT_TERMINATING:
 [[ -x $exe ]] || fail "no executable $exe"
 ====
 [[ -x $exe ]] || exe=$out/icy-tower
+>>>>
+
+# ---------------------------------------------------------------------------
+# The application bundle (ICY-TOWER-MACOS-APP-MILESTONE-1.md)
+
+@@ alert-never-shown a LaunchServices launch's failure is reported on standard error only: macos_app.bot never asks for the alert
+?? app:app-alert-renderer an alert appears
+## examples/games/icy-tower/macos_app.bot
+<<<<
+    if app.alerted.empty?() and alerts_requested?():
+====
+    if false:
+>>>>
+
+@@ alert-always the alert shown in a terminal run too: the bundle's LSEnvironment no longer decides
+?? app:app-terminal-failure no alert
+## examples/games/icy-tower/macos_app.bot
+<<<<
+    if value.null?():
+        return false
+====
+    if value.null?():
+        return true
+>>>>
+
+@@ alert-before-write the alert shown, and the report then lost: standard error is never written when the alert is
+?? app:app-alert-usage the report is on standard error as well
+## examples/games/icy-tower/macos_app.bot
+<<<<
+    ok = standard_error().wrote?(std::str::encode_utf8(text))
+====
+    ok = app.alerted.empty?() or standard_error().wrote?(std::str::encode_utf8(text))
+>>>>
+
+@@ alert-wrong-text the alert shows a fixed text instead of the run's diagnostic
+?? app:app-alert-video the alert says what failed
+## examples/games/icy-tower/macos_app.bot
+<<<<
+        shown = text.without_newline().show_alert()
+====
+        shown = "Something went wrong.".show_alert()
+>>>>
+
+@@ launch-environment-dropped the bundle's Info.plist without LSEnvironment: a Finder launch's failure reaches no person
+?? app:app-alert-renderer an alert appears
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+        "LSEnvironment": dict(LAUNCH_ENVIRONMENT),
+====
+>>>>
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+        "LSEnvironment": LAUNCH_ENVIRONMENT,
+    }
+====
+    }
+>>>>
+
+@@ agent-application the bundle marked LSUIElement (an agent: no Dock icon, never the active application by LaunchServices' own launch)
+?? app:app-launch a regular \(foreground\) application
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+        "NSPrincipalClass": "NSApplication",
+        "NSHumanReadableCopyright"
+====
+        "NSPrincipalClass": "NSApplication",
+        "LSUIElement": True,
+        "NSHumanReadableCopyright"
+>>>>
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+    "LSUIElement": "an agent (no Dock icon, no menu bar)",
+====
 >>>>

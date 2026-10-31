@@ -1,0 +1,812 @@
+# Mutants of the macOS release pipeline (ICY-TOWER-MACOS-APP-MILESTONE-1.md,
+# "Credential-validation mutation testing"; audit/macos-release/tools/
+# mutate.py): each a plausible defect of the credential preflight
+# (credentials.py), the release's stages (release.py), the bundle's checks
+# (bundle.py, package-macos.sh) or the workflow's trust boundary, in the
+# repository's mutant format, with the tests that must kill it:
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...                      FILE.CLASS.METHOD of audit/macos-release/tests/
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant is killed only by a named test failing: the test that states the
+# rule the mutant breaks, never an unrelated failure.
+
+# ---------------------------------------------------------------------------
+# The credential preflight
+
+@@ base64-permissive the decoder accepts malformed Base64: no alphabet check, a permissive decode that discards what it does not know
+!! test_credentials.Preflight.test_invalid_base64_character test_credentials.Preflight.test_url_safe_alphabet
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+        raise Problem("MACOS-CREDENTIAL-BASE64", variable, "is not valid Base64: %s at character %d" % (what, i + 1),
+                      "Encode the file with the standard alphabet: base64 < FILE | tr -d '\\n' (macOS and Linux)")
+====
+        text = text.replace(c, "")
+        break
+>>>>
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+        data = binascii.a2b_base64(text, strict_mode=True)
+====
+        data = base64.b64decode(text + "==")
+>>>>
+
+@@ base64-padding-unchecked a value cut short (its padding lost) is decoded anyway
+!! test_credentials.Preflight.test_invalid_base64_padding
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if len(text) % 4:
+        raise Problem("MACOS-CREDENTIAL-BASE64", variable, "is not valid Base64: invalid padding (%d characters, not a "
+====
+    if len(text) % 4:
+        text = text + "=" * (-len(text) % 4)
+    if False:
+        raise Problem("MACOS-CREDENTIAL-BASE64", variable, "is not valid Base64: invalid padding (%d characters, not a "
+>>>>
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+        data = binascii.a2b_base64(text, strict_mode=True)
+    except (binascii.Error, ValueError):
+====
+        data = binascii.a2b_base64(text)
+    except (binascii.Error, ValueError):
+>>>>
+
+@@ p8-double-encoding-accepted a .p8 Base64-encoded twice is not recognized: it fails later, as some other format problem
+!! test_credentials.Preflight.test_double_encoded_p8
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+        if again is not None and b"-----BEGIN" in again:
+====
+        if False:
+>>>>
+
+@@ p12-accepts-pem the .p12's container check takes PEM text for a container (it then fails as an undecryptable file, the wrong diagnosis)
+!! test_credentials.Preflight.test_base64_of_pem_certificate
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    v = "MACOS_CERTIFICATE_P12_BASE64"
+    text = as_text(data)
+    if text is None:
+        return None
+====
+    v = "MACOS_CERTIFICATE_P12_BASE64"
+    return None
+    text = as_text(data)
+>>>>
+
+@@ no-private-key-accepted a .p12 holding only a certificate is not refused for its missing key
+!! test_credentials.Preflight.test_certificate_only
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if key is None:
+        if cert is None and not leaves:
+====
+    if key is None and False:
+        if cert is None and not leaves:
+>>>>
+
+@@ certificate-type-unchecked any Apple certificate kind passes: Developer ID Installer, Apple Development, Apple Distribution
+!! test_credentials.Preflight.test_developer_id_installer test_credentials.Preflight.test_apple_development test_credentials.Preflight.test_apple_distribution
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    kind = certificate_kind(cert)
+====
+    kind = None
+>>>>
+
+@@ team-unchecked the certificate's team is never compared with APPLE_TEAM_ID
+!! test_credentials.Preflight.test_team_mismatch test_credentials.Preflight.test_other_teams_certificate
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    elif team is not None and TEAM_ID.fullmatch(team) and teams != {team}:
+====
+    elif False:
+>>>>
+
+@@ apple-chain-unchecked the issuer is never verified: a self-signed "Developer ID Application" certificate passes
+!! test_credentials.Preflight.test_self_signed_refused test_credentials.Preflight.test_synthetic_identity_refused_under_apple_anchors
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if issuer is None:
+        issuer_cn = [a.value for a in cert.issuer.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.3"))]
+====
+    if False:
+        issuer_cn = [a.value for a in cert.issuer.get_attributes_for_oid(x509.ObjectIdentifier("2.5.4.3"))]
+>>>>
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+        "issuer": cn(issuer[1]),
+        "intermediate": issuer[0],
+====
+        "issuer": cn(issuer[1]) if issuer else "",
+        "intermediate": issuer[0] if issuer else None,
+>>>>
+
+@@ validity-unchecked an expired certificate is accepted
+!! test_credentials.Preflight.test_expired_certificate
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if t > cert.not_valid_after_utc:
+====
+    if False:
+>>>>
+
+@@ p8-algorithm-unchecked a .p8 of any algorithm is accepted (RSA, Ed25519)
+!! test_credentials.Preflight.test_rsa_key test_credentials.Preflight.test_ed25519_key
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if not isinstance(key, ec.EllipticCurvePrivateKey):
+====
+    if False:
+>>>>
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if key.curve.name != "secp256r1":
+====
+    if isinstance(key, ec.EllipticCurvePrivateKey) and key.curve.name != "secp256r1":
+>>>>
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    pem = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(lines) + "\n-----END PRIVATE KEY-----\n"
+    return pem, {"algorithm": "EC P-256", "public_sha256": hashlib.sha256(key.public_key().public_bytes(
+====
+    pem = "-----BEGIN PRIVATE KEY-----\n" + "\n".join(lines) + "\n-----END PRIVATE KEY-----\n"
+    return pem, {"algorithm": "EC P-256" if isinstance(key, ec.EllipticCurvePrivateKey) else "?", "public_sha256": hashlib.sha256(key.public_key().public_bytes(
+>>>>
+
+@@ p8-curve-unchecked an EC key on another curve than P-256 is accepted
+!! test_credentials.Preflight.test_wrong_curve
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if key.curve.name != "secp256r1":
+====
+    if False:
+>>>>
+
+@@ pkcs8-unchecked a SEC1 (BEGIN EC PRIVATE KEY) key is not refused as the wrong container: it is read on as if it were PKCS#8
+!! test_credentials.Preflight.test_sec1_container
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if label in wrong:
+====
+    if label in wrong and label != "EC PRIVATE KEY":
+>>>>
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if label != "PRIVATE KEY":
+====
+    if label not in ("PRIVATE KEY", "EC PRIVATE KEY"):
+>>>>
+
+@@ issuer-uuid-unchecked a malformed Issuer ID is accepted
+!! test_credentials.Preflight.test_malformed_issuer
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    if not UUID.fullmatch(value):
+        raise Problem("MACOS-NOTARY-CONFIG", v, "is not a valid UUID (8-4-4-4-12 hexadecimal digits)", remedy)
+====
+    if False:
+        raise Problem("MACOS-NOTARY-CONFIG", v, "is not a valid UUID (8-4-4-4-12 hexadecimal digits)", remedy)
+>>>>
+
+@@ preflight-prints-a-secret a diagnostic quotes the start of the value it refuses
+!! test_credentials.Preflight.test_invalid_base64_character test_credentials.Preflight.test_wrong_password
+## examples/games/icy-tower/macos/credentials.py
+<<<<
+    def render(self):
+        line = "%s: %s %s" % (self.code, self.variable, self.text) if self.variable else "%s: %s" % (self.code, self.text)
+====
+    def render(self):
+        import os as _os
+        line = "%s: %s %s (value begins %r)" % (self.code, self.variable, self.text, _os.environ.get(self.variable, "")[:24]) if self.variable else "%s: %s" % (self.code, self.text)
+>>>>
+
+# ---------------------------------------------------------------------------
+# The release's stages
+
+@@ continue-after-failed-preflight release mode records a failed preflight as passed and goes on to the keychain and Apple's tools
+!! test_release.Stages.test_failed_preflight_stops_everything
+## examples/games/icy-tower/macos/release.py
+<<<<
+        work.add("preflight", False, {"codes": sorted({p.code for p in problems})})
+====
+        work.add("preflight", True, {"codes": sorted({p.code for p in problems}), "identity": {"sha1": "", "subject": ""},
+                                     "anchors": "apple", "team": "", "bundle_id": "", "notary": {"key_id": "", "issuer_id": ""}})
+        return
+>>>>
+
+@@ test-anchors-in-release a release accepts the test trust anchors
+!! test_release.Stages.test_release_refuses_test_anchors
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if work.mode == "release" and anchors:
+====
+    if False:
+>>>>
+
+@@ remote-auth-skipped signing does not wait for Apple's validation of the notarization credentials
+!! test_release.Stages.test_notary_auth_rejected
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if mode == "release":
+            work.require("notary-auth")
+====
+        if False:
+            work.require("notary-auth")
+>>>>
+
+@@ continue-after-auth-failure a rejected notarization credential is recorded as validated
+!! test_release.Stages.test_notary_auth_rejected test_release.Stages.test_notary_service_unreachable
+## examples/games/icy-tower/macos/release.py
+<<<<
+        work.add("notary-auth", False, {"code": cls})
+        raise Failed(cls, why, remedy)
+====
+        work.add("notary-auth", True, {"code": cls})
+        return
+>>>>
+
+@@ auth-misclassified every notarytool failure is reported as a malformed key
+!! test_release.Stages.test_notary_service_unreachable test_release.Stages.test_notary_auth_rejected
+## examples/games/icy-tower/macos/release.py
+<<<<
+    for code, pattern, why, remedy in AUTH_CLASSES:
+        if pattern.search(text):
+            return code, why, remedy
+====
+    return "MACOS-NOTARY-KEY-FORMAT", "the notarization key is malformed", "Supply the original .p8"
+>>>>
+
+@@ secrets-printed tools' output is printed unredacted (security echoing its -P password)
+!! test_release.Stages.test_secrets_redacted_from_tool_output
+## examples/games/icy-tower/macos/release.py
+<<<<
+def redact(text):
+    for v in SECRET_VALUES:
+====
+def redact(text):
+    return text
+    for v in SECRET_VALUES:
+>>>>
+
+@@ secret-files-kept cleanup leaves the decoded credentials in the work directory (which a diagnostics upload could take)
+!! test_release.Stages.test_full_release_is_publishable
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if os.path.isdir(work.secret):
+        shutil.rmtree(work.secret, ignore_errors=True)
+====
+    if False:
+        shutil.rmtree(work.secret, ignore_errors=True)
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if os.path.exists(work.secret):
+        problems.append("the decoded credentials still exist")
+====
+>>>>
+
+@@ adhoc-fallback a release without its keychain identity signs ad hoc instead of refusing
+!! test_release.Stages.test_release_never_signs_ad_hoc
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if mode == "adhoc":
+        identity, keychain_args, timestamp = "-", [], "--timestamp=none"
+====
+    if mode == "adhoc" or not work.passed("keychain"):
+        identity, keychain_args, timestamp = "-", [], "--timestamp=none"
+>>>>
+
+@@ adhoc-signature-accepted verification takes an ad hoc signature for a release's
+!! test_release.Stages.test_release_refuses_an_ad_hoc_signature test_release.Stages.test_adopt_refuses_another_signature
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if f["Signature"] == "adhoc" or not f["authority"]:
+            problems.append("it is an ad hoc signature, not the %s identity's: no fallback is allowed" % mode)
+        if mode == "release":
+====
+        if mode == "release" and f["Signature"] != "adhoc":
+>>>>
+
+@@ no-hardened-runtime the bundle is signed without the hardened runtime
+!! test_release.Stages.test_full_release_is_publishable
+## examples/games/icy-tower/macos/release.py
+<<<<
+        run(["codesign", "--force", "--sign", identity] + keychain_args + ["--options", "runtime", timestamp, app], timeout=600)
+====
+        run(["codesign", "--force", "--sign", identity] + keychain_args + [timestamp, app], timeout=600)
+>>>>
+
+@@ runtime-unchecked verification never asks for the hardened runtime
+!! test_release.Stages.test_missing_hardened_runtime
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if "runtime" not in f["flags"]:
+====
+    if False:
+>>>>
+
+@@ no-timestamp a release is signed without a secure timestamp
+!! test_release.Stages.test_full_release_is_publishable
+## examples/games/icy-tower/macos/release.py
+<<<<
+        timestamp = "--timestamp" if mode == "release" else "--timestamp=none"
+====
+        timestamp = "--timestamp=none"
+>>>>
+
+@@ timestamp-unchecked verification never asks for the secure timestamp
+!! test_release.Stages.test_missing_secure_timestamp
+## examples/games/icy-tower/macos/release.py
+<<<<
+            if not f["Timestamp"]:
+====
+            if False:
+>>>>
+
+@@ entitlements-unchecked verification lets entitlements through (a JIT entitlement nothing needs)
+!! test_release.Stages.test_entitlement_refused
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if ents:
+====
+    if False:
+>>>>
+
+@@ seal-unchecked notarization does not verify the seal: a bundle changed after signing is submitted
+!! test_release.Stages.test_modified_after_signing
+## examples/games/icy-tower/macos/release.py
+<<<<
+    cdhash = sealed(app, "MACOS-NOTARIZE")
+====
+    cdhash = current_cdhash(app)
+>>>>
+
+@@ notarization-ignored the notarization's result is ignored: an Invalid submission goes on to stapling
+!! test_release.Stages.test_notarization_invalid
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if status != "Accepted":
+        work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
+====
+    if False:
+        work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if entry.get("status") != "Accepted" or errors:
+====
+    if False:
+>>>>
+
+@@ rejected-as-accepted a Rejected notarization is treated as Accepted
+!! test_release.Stages.test_notarization_rejected
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if status != "Accepted":
+        work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
+====
+    if status not in ("Accepted", "Rejected"):
+        work.add("notarize", False, {"id": sid, "status": status, "issues": len(issues)})
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if entry.get("status") != "Accepted" or errors:
+====
+    if entry.get("status") not in ("Accepted", "Rejected") or errors:
+>>>>
+
+@@ ticket-unchecked the notarization's ticket is not compared with the bundle's CDHash
+!! test_release.Stages.test_notarization_ticket_of_another_artifact
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if cdhash.lower() not in tickets:
+====
+    if False:
+>>>>
+
+@@ timeout-as-failure a notarization timeout uploads again instead of resuming the submission
+!! test_release.Stages.test_notarization_timeout_then_resume
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if args.resume:
+        if not credentials.UUID.fullmatch(args.resume):
+====
+    if False:
+        if not credentials.UUID.fullmatch(args.resume):
+>>>>
+
+@@ staple-retries-everything stapling retries a fatal failure as if Apple had not published the ticket yet
+!! test_release.Stages.test_staple_fatal_is_not_retried
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if not TRANSIENT_STAPLE.search(last):
+====
+        if False:
+>>>>
+
+@@ stapling-omitted Gatekeeper's check, the package and publication no longer require the stapled ticket
+!! test_release.Stages.test_stapling_required
+## examples/games/icy-tower/macos/release.py
+<<<<
+        work.require("staple", code="MACOS-GATEKEEPER")
+====
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+        work.require("staple", "gatekeeper", "tamper", "verify-signature:stapled", code="MACOS-PUBLISH")
+====
+        work.require("gatekeeper", "tamper", code="MACOS-PUBLISH")
+>>>>
+
+@@ gatekeeper-ignored Gatekeeper's rejection is ignored
+!! test_release.Stages.test_gatekeeper_failure_blocks_publication
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if not ok:
+            work.add("gatekeeper", False, facts)
+====
+        if False:
+            work.add("gatekeeper", False, facts)
+>>>>
+
+@@ tamper-not-tampered the tamper control changes nothing in its copy
+!! test_release.Stages.test_tamper_control
+## examples/games/icy-tower/macos/release.py
+<<<<
+                f.write(bytes([b[0] ^ 0x01]))
+====
+                f.write(bytes([b[0]]))
+>>>>
+
+@@ zip-modes-unchecked a ZIP that loses the executable's permissions is packaged
+!! test_release.Stages.test_zip_losing_permissions_refused
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if tree(unpacked) != tree(app):
+            raise Failed("MACOS-PUBLISH", "the ZIP's bundle differs from the bundle it was made of (files, modes or bytes)")
+        mode = os.stat(os.path.join(unpacked, "Contents", "MacOS", bundle.EXECUTABLE)).st_mode & 0o777
+        if mode != 0o755:
+====
+        mode = os.stat(os.path.join(unpacked, "Contents", "MacOS", bundle.EXECUTABLE)).st_mode & 0o777
+        if False:
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+        check_signature(unpacked, work.mode)
+        if work.mode == "release":
+            run(["xcrun", "stapler", "validate", unpacked])
+====
+>>>>
+
+@@ sums-unchecked publishable trusts its record instead of the files: a swapped ZIP (the unstapled submission) is published
+!! test_release.Stages.test_unstapled_submission_zip_never_published test_release.Stages.test_damaged_zip_refused
+## examples/games/icy-tower/macos/release.py
+<<<<
+    sums = check_sums(os.path.abspath(args.out))
+====
+    sums = {ZIP: work.last("package")["zip_sha256"]}
+>>>>
+
+@@ publish-before-final-launch publication does not wait for the downloaded artifact's launch
+!! test_release.Stages.test_final_artifact_must_be_launched
+## examples/games/icy-tower/macos/release.py
+<<<<
+                "notarize", "staple", "verify-signature:stapled", "gatekeeper", "tamper", "package", "record:final-artifact"],
+====
+                "notarize", "staple", "verify-signature:stapled", "gatekeeper", "tamper", "package"],
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if sums[ZIP] != digest or work.last("record:final-artifact").get("zip_sha256") != digest:
+====
+    if sums[ZIP] != digest:
+>>>>
+
+@@ acceptance-not-required notarization does not wait for the signed application's graphical acceptance
+!! test_release.Stages.test_failed_acceptance_blocks_notarization
+## examples/games/icy-tower/macos/release.py
+<<<<
+    work.require("verify-signature", "record:hardened-runtime", code="MACOS-NOTARIZE")
+====
+    work.require("verify-signature", code="MACOS-NOTARIZE")
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if cdhash != work.last("sign")["cdhash"] or cdhash != work.last("record:hardened-runtime").get("cdhash"):
+====
+    if cdhash != work.last("sign")["cdhash"]:
+>>>>
+
+@@ identity-may-change a release with another bundle identifier than an earlier release's goes on
+!! test_release.Stages.test_identity_never_changes
+## examples/games/icy-tower/macos/release.py
+<<<<
+        if other and other != mine:
+====
+        if False:
+>>>>
+
+@@ ambiguous-identity-chosen several identities in the keychain: the first is used
+!! test_release.Stages.test_keychain_refuses_ambiguous_identities
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if len(set(hashes)) != 1:
+====
+    hashes = hashes[:1]
+    if not hashes:
+>>>>
+
+@@ adhoc-publishable an ad hoc build is judged publishable
+!! test_release.Stages.test_adhoc_build_never_publishable test_release.Stages.test_dry_run_never_publishable
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if work.mode not in SEQUENCE:
+====
+    if work.mode not in SEQUENCE and False:
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+    seq = SEQUENCE[work.mode]
+====
+    seq = SEQUENCE.get(work.mode, [])
+>>>>
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if work.last("preflight")["anchors"] != "apple":
+        raise Failed("MACOS-PUBLISH", "the identity was not checked against Apple's certificate authorities")
+    cd = work.last("notarize")["cdhash"]
+    for name in ("sign", "verify-signature", "record:hardened-runtime", "staple", "tamper", "package"):
+        if work.last(name).get("cdhash") != cd:
+            raise Failed("MACOS-PUBLISH", "stage %s saw CDHash %s, not the notarized %s" % (name, work.last(name).get("cdhash"), cd))
+    sums = check_sums(os.path.abspath(args.out))
+    digest = work.last("package")["zip_sha256"]
+    if sums[ZIP] != digest or work.last("record:final-artifact").get("zip_sha256") != digest:
+        raise Failed("MACOS-PUBLISH", "the ZIP to publish is not the one packaged and launched")
+    if work.last("verify-signature")["authority"][0].startswith("Developer ID Application: ") is False:
+        raise Failed("MACOS-PUBLISH", "the signature is not a Developer ID one")
+====
+    if work.mode == "release":
+        if work.last("preflight")["anchors"] != "apple":
+            raise Failed("MACOS-PUBLISH", "the identity was not checked against Apple's certificate authorities")
+    sums = check_sums(os.path.abspath(args.out))
+>>>>
+
+# ---------------------------------------------------------------------------
+# The bundle's checks
+
+@@ worker-startup-accepted the bundle takes an executable without the main-thread startup's LC_MAIN stack
+!! test_release.BundleControls.test_worker_startup_executable test_release.BundleControls.test_package_script_keeps_previous_bundle
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+    if f["stack"] != MAIN_STACK:
+====
+    if False:
+>>>>
+
+@@ architecture-unchecked the bundle takes an x86-64 executable
+!! test_release.BundleControls.test_wrong_architecture
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+    if f["cpu"] != CPU_TYPE_ARM64:
+====
+    if False:
+>>>>
+
+@@ dynamic-sdl-accepted the bundle takes an executable that loads SDL3 from a library
+!! test_release.BundleControls.test_dynamic_sdl3
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+        if re.search(r"sdl", os.path.basename(lib), re.I) or re.search(r"/sdl[0-9]*\.framework/", lib, re.I):
+====
+        if False:
+>>>>
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+        if not (lib.startswith("/usr/lib/") or lib.startswith("/System/Library/")):
+====
+        if not (lib.startswith("/usr/lib/") or lib.startswith("/System/Library/") or lib.startswith("@rpath/")):
+>>>>
+
+@@ permissions-unchecked the bundle takes an executable without its execute permission
+!! test_release.BundleControls.test_executable_without_execute_permission
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+    if not mode & stat.S_IXUSR:
+====
+    if False:
+>>>>
+
+@@ executable-name-unchecked an Info.plist naming another executable is accepted
+!! test_release.BundleControls.test_wrong_executable_name
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+        "CFBundleExecutable": EXECUTABLE,
+        "CFBundleName": NAME,
+        "CFBundleDisplayName": NAME,
+        "CFBundleInfoDictionaryVersion": "6.0",
+====
+        "CFBundleName": NAME,
+        "CFBundleDisplayName": NAME,
+        "CFBundleInfoDictionaryVersion": "6.0",
+>>>>
+## examples/games/icy-tower/macos/bundle.py
+<<<<
+    exe = os.path.join(app, "Contents", "MacOS", d["CFBundleExecutable"])
+====
+    exe = os.path.join(app, "Contents", "MacOS", EXECUTABLE)
+>>>>
+
+@@ package-replaces-on-failure package-macos.sh removes the earlier bundle before checking the new one
+!! test_release.BundleControls.test_package_script_keeps_previous_bundle
+## examples/games/icy-tower/package-macos.sh
+<<<<
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+====
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+rm -rf "$out/Icy Tower.app"
+>>>>
+
+# ---------------------------------------------------------------------------
+# The workflow's trust boundary
+
+@@ release-on-pull-requests the release job runs for pull requests too: contributors' code with the signing credentials
+!! test_workflow.Workflow.test_release_job_is_protected
+## .github/workflows/icy-tower-macos.yml
+<<<<
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: macos-15
+====
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')
+    runs-on: macos-15
+>>>>
+
+@@ release-on-any-ref the release job runs for any branch, not only a release tag
+!! test_workflow.Workflow.test_release_job_is_protected
+## .github/workflows/icy-tower-macos.yml
+<<<<
+      always() && needs.game.result == 'success'
+      && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+====
+      always() && needs.game.result == 'success'
+>>>>
+
+@@ pull-request-target the workflow also runs on pull_request_target (the base repository's secrets, a contributor's code)
+!! test_workflow.Workflow.test_no_pull_request_target
+## .github/workflows/icy-tower-macos.yml
+<<<<
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+====
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request_target:
+  workflow_dispatch:
+>>>>
+
+@@ secret-in-game-job the ordinary game job is given a signing credential
+!! test_workflow.Workflow.test_only_the_release_job_sees_credentials
+## .github/workflows/icy-tower-macos.yml
+<<<<
+      - name: The release's input (the tested executable)
+        id: release-input
+        if: always() && steps.build.outcome == 'success'
+====
+      - name: The release's input (the tested executable)
+        id: release-input
+        if: always() && steps.build.outcome == 'success'
+        env:
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+>>>>
+
+@@ secret-in-script a secret expanded into the preflight's script instead of handed over in its env
+!! test_workflow.Workflow.test_secrets_only_in_step_env
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          started=$(date +%s)
+          "$PY" -I examples/games/icy-tower/macos/release.py preflight --work "$WORK" --mode release
+====
+          started=$(date +%s)
+          export MACOS_CERTIFICATE_PASSWORD="${{ secrets.MACOS_CERTIFICATE_PASSWORD }}"
+          "$PY" -I examples/games/icy-tower/macos/release.py preflight --work "$WORK" --mode release
+>>>>
+
+@@ trace-with-secrets the preflight's step traces its commands (set -x) while it holds every credential
+!! test_workflow.Workflow.test_no_tracing_or_printing_where_a_secret_is
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          started=$(date +%s)
+          "$PY" -I examples/games/icy-tower/macos/release.py preflight --work "$WORK" --mode release
+====
+          set -x
+          started=$(date +%s)
+          "$PY" -I examples/games/icy-tower/macos/release.py preflight --work "$WORK" --mode release
+>>>>
+
+@@ secret-files-uploaded the diagnostics upload takes the whole work directory, decoded credentials included
+!! test_workflow.Workflow.test_no_upload_of_the_credentials
+## .github/workflows/icy-tower-macos.yml
+<<<<
+            ${{ runner.temp }}/release/state.json
+====
+            ${{ runner.temp }}/release/
+>>>>
+
+@@ release-adhoc the release job signs ad hoc
+!! test_workflow.Workflow.test_release_never_ad_hoc_or_test_anchors
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          "$PY" -I examples/games/icy-tower/macos/release.py sign --work "$WORK" --app "$RAPP"
+====
+          "$PY" -I examples/games/icy-tower/macos/release.py sign --work "$WORK" --mode adhoc --app "$RAPP"
+>>>>
+
+@@ workflow-no-staple the release job never staples
+!! test_workflow.Workflow.test_stages_in_order
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          rel staple --work "$WORK" --app "$RAPP"
+====
+>>>>
+
+@@ workflow-no-notary-auth the release job signs without asking Apple to validate the notarization credentials
+!! test_workflow.Workflow.test_stages_in_order
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          "$PY" -I examples/games/icy-tower/macos/release.py notary-auth --work "$WORK"
+====
+          true
+>>>>
+
+@@ publish-before-release the publish job does not wait for the release job
+!! test_workflow.Workflow.test_publish_only_after_release
+## .github/workflows/icy-tower-macos.yml
+<<<<
+    needs: [game, release]
+    if: >-
+      always() && needs.release.result == 'success'
+====
+    needs: [game]
+    if: >-
+      always() && needs.game.result == 'success'
+>>>>
+
+@@ release-assets-unchecked the published ZIP is not compared with the release job's
+!! test_workflow.Workflow.test_publish_checks_the_release_jobs_zip
+## .github/workflows/icy-tower-macos.yml
+<<<<
+          [ "$got" = "$ZIP_SHA256" ] || { echo "::error::MACOS-PUBLISH: the ZIP is not the release job's ($got, not $ZIP_SHA256)"; exit 1; }
+====
+>>>>
+
+@@ upload-submission-zip the release's asset is the submission's ZIP (made before stapling), not the packaged one
+!! test_workflow.Workflow.test_release_assets_are_the_packaged_files
+## .github/workflows/icy-tower-macos.yml
+<<<<
+            ${{ runner.temp }}/dist/icy-tower-macos-aarch64.zip
+====
+            ${{ runner.temp }}/release/submission.zip
+>>>>
+
+@@ release-writes the release job, which holds the credentials, may write the repository
+!! test_workflow.Workflow.test_release_job_cannot_write test_workflow.Workflow.test_only_publish_writes
+## .github/workflows/icy-tower-macos.yml
+<<<<
+    environment: macos-release
+    permissions:
+      contents: read
+====
+    environment: macos-release
+    permissions:
+      contents: write
+>>>>

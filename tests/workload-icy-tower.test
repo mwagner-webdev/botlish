@@ -309,6 +309,76 @@ test workload-icy-tower-baseline-warnings {the original Icy Tower boundary (audi
     }]
 } -result {{sdl::Polled R4 main} {sdl::Video R4 render} {sdl::clear R2 render} {sdl::close R2 main} {sdl::color R2 render} {sdl::fill R2 render} {sdl::line R2 render} {sdl::open R2 main} {sdl::poll R2 main} {sdl::present R2 render} {sdl::scale R2 render} {sdl::text R2 render}}
 
+# The macOS entry's HIR (ICY-TOWER-MACOS-APP-MILESTONE-1.md): main-macos.bot,
+# macos_app.bot (the application's IO context and its alert) and
+# macos_link.bot staged with the committed linux-aarch64 binding standing in
+# for the macos-aarch64 one no Linux job has (a front-end check: the
+# binding's surface is the target's but for its 64-bit scalars' spelling),
+# compiled under -warnings error for macos-aarch64.
+proc icyStagedMacosHir {} {
+    if {[info exists ::icyStagedMacosHir]} {
+        return $::icyStagedMacosHir
+    }
+    set stage [file join [tcltest::temporaryDirectory] icy-tower-macos-stage]
+    file delete -force $stage
+    exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] stage sdl3 -target linux-aarch64 -app $::gameDir -into $stage -package 1
+    try {
+        set ::icyStagedMacosHir [surface::readProgramFile [file join $stage main-macos.bot] -warnings error -warning-channel "" -target macos-aarch64]
+    } finally {
+        file delete -force $stage
+    }
+    return $::icyStagedMacosHir
+}
+
+test workload-icy-tower-app-module {the macOS entry with the application's IO context (macos_app.bot: std::io::IO over std::darwin::write, and CoreFoundation's alert of a LaunchServices launch's first diagnostic) compiles for macos-aarch64 under -warnings error, and macos_app.bot is mediated by its own App context like sdl.bot by Sdl: no game module, macos_link.bot or the entry is direct, and the CoreFoundation and libSystem calls are all macos_app.bot's, none of SDL's} -body {
+    set hir [icyStagedMacosHir]
+    set statuses {}
+    foreach line [split [hir::direct::summary $hir] \n] {
+        if {[regexp {^module (tower|hud|options|sdl|render|game|macos_app|macos_link): (\S+)} $line -> module status]
+                || [regexp {^(entry program): (\S+)} $line -> module status]} {
+            lappend statuses $module $status
+        }
+    }
+    set calls {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call"} continue
+        set native [hir::affine::NativeName $hir $e]
+        if {[string match extern#macos_app::* $native]} { lappend calls [string range $native 7 end] }
+    }
+    list [lsort -stride 2 $statuses] [lsort -unique $calls]
+} -result {{{entry program} ordinary game ordinary hud ordinary macos_app contextualized macos_link ordinary options ordinary render ordinary sdl contextualized tower ordinary} {macos_app::c_getenv macos_app::cf_alert macos_app::cf_release macos_app::cf_string}}
+
+test workload-icy-tower-app-module-shared-sources-untouched {the application's alert lives in the macOS-only modules: no shared module (tower, hud, options, render, sdl, game) names macos_app, CoreFoundation or the alert's variable, so the Linux and Windows executables are built from exactly the sources they were} -body {
+    set found {}
+    foreach f {tower.bot hud.bot options.bot render.bot sdl.bot game.bot main.bot main-windows.bot} {
+        set text [core::ReadFile [file join $::gameDir $f]]
+        foreach word {macos_app CoreFoundation CFUserNotification ICY_TOWER_ERROR_ALERTS} {
+            if {[string first $word $text] >= 0} { lappend found "$f: $word" }
+        }
+    }
+    set found
+} -result {}
+
+# The macOS release tooling's own tests (audit/macos-release/): the
+# credential preflight against synthetic credentials, the release's stages
+# against recording stand-ins of Apple's tools, the bundle's negative
+# controls and the workflow's trust boundary -- on any host with Python's
+# cryptography and PyYAML packages (audit/macos-release/requirements.txt).
+# BOTLISH_RELEASE_PYTHON names the interpreter of a private environment
+# holding them (CI's icy-tower workflows), else python3.
+set releasePython [if {[info exists ::env(BOTLISH_RELEASE_PYTHON)]} {set ::env(BOTLISH_RELEASE_PYTHON)} else {set python3 python3}]
+testConstraint releaseTooling [expr {[auto_execok $releasePython] ne "" &&
+    ![catch {exec $releasePython -I -c "import cryptography, yaml"}]}]
+
+test workload-icy-tower-release-tooling {the macOS release tooling's suites pass (audit/macos-release/tests: test_credentials, test_release, test_workflow): every malformed credential refused with its code and remedy and no secret printed, every stage refusing what an earlier one did not establish, the workflow's trust boundary} -constraints releaseTooling -body {
+    set results {}
+    foreach t {test_credentials test_release test_workflow} {
+        set status [catch {exec $::releasePython -I [file join $::projectRoot audit macos-release tests $t.py] 2>@1} output]
+        lappend results $t $status [lindex [split [string trim $output] \n] end]
+    }
+    set results
+} -result {test_credentials 0 OK test_release 0 OK test_workflow 0 OK}
+
 test workload-icy-tower-dt-tests-use-exact-steps {the golden suite's motion tests step by exact binary fractions, so its written Float64 expectations are exact results (a guard on the suite itself)} -body {
     set text [core::ReadFile [file join $gameDir golden.bot]]
     lsort -unique [regexp -all -inline {motion\([a-z]+\(\), [0-9.]+\)} $text]
@@ -599,6 +669,27 @@ test workload-icy-tower-macos-oracle {the macOS executable's headless summaries 
     set status [catch {exec python3 [file join $::projectRoot audit icy-tower oracle.py] compare [file join $::macosGame icy-tower]} output]
     list $status [lindex [split $output \n] end]
 } -result {0 {0 differences}}
+
+test workload-icy-tower-macos-app-bundle {package-macos.sh assembles Icy Tower.app from the built executable (byte for byte, its Mach-O checked by bundle.py and by lipo and otool), with an Info.plist plutil accepts -- the identifier, the versions, LSMinimumSystemVersion 11.0, the LSEnvironment that turns the alert on -- and the licenses; signed ad hoc with the hardened runtime (macos/release.py), it verifies strictly} -constraints icyTowerMacosExecutable -body {
+    set out [file join [tcltest::temporaryDirectory] icy-tower-macos-app]
+    file delete -force $out
+    set sdlsrc [lindex [split [string trim [exec [info nameofexecutable] [file join $::projectRoot tools c-bindgen.tcl] fetch sdl3]] \n] end]
+    exec bash [file join $gameDir package-macos.sh] [file join $::macosGame icy-tower] $out --bundle-id org.botlish.examples.icy-tower.test \
+        --version 1.2.3 --build 1.2.3 --sdl3-license [file join $sdlsrc LICENSE.txt] 2>@1
+    set app [file join $out "Icy Tower.app"]
+    set same [expr {[exec shasum -a 256 [file join $app Contents MacOS icy-tower]] eq [exec shasum -a 256 [file join $::macosGame icy-tower]] ? 1 : 0}]
+    set id [exec plutil -extract CFBundleIdentifier raw -o - [file join $app Contents Info.plist]]
+    set alerts [exec plutil -extract LSEnvironment.ICY_TOWER_ERROR_ALERTS raw -o - [file join $app Contents Info.plist]]
+    set minimum [exec plutil -extract LSMinimumSystemVersion raw -o - [file join $app Contents Info.plist]]
+    set rel [list python3 -I [file join $gameDir macos release.py]]
+    set work [file join $out work]
+    exec {*}$rel sign --work $work --mode adhoc --app $app
+    exec {*}$rel verify-signature --work $work --app $app
+    set verified [expr {[catch {exec codesign --verify --deep --strict $app 2>@1}] ? 0 : 1}]
+    set runtime [expr {[string match *runtime* [exec codesign -dvvv $app 2>@1]] ? 1 : 0}]
+    file delete -force $out
+    list $same $id $alerts $minimum $verified $runtime
+} -result {1 org.botlish.examples.icy-tower.test 1 11.0 1 1}
 
 test workload-icy-tower-macos-failed-build-keeps-old {a build that fails (here the link: an archive without SDL3 in it) leaves the executable of the last good build as it was} -constraints icyTowerMacosExecutable -body {
     set exe [file join $::macosGame icy-tower]

@@ -46,14 +46,17 @@ proc icymacos::run {cmd {env {}} {cwd ""}} {
     }
 }
 
-# A private tree for mutant NAME under WORK: examples/games/icy-tower and
-# tests/platform/sdl3-static-macos.sh copied (TEXTS, path -> text, replace
-# their files), the repository's tools/ and generated/ linked. Its root.
+# A private tree for mutant NAME under WORK: examples/games/icy-tower (the
+# application's bundle tooling, macos/, with it), tests/platform/sdl3-static-
+# macos.sh and LICENSE (a bundle's resource) copied (TEXTS, path -> text,
+# replace their files), the repository's tools/ and generated/ linked. Its
+# root.
 proc icymacos::tree {work name root texts} {
     set tree [file join $work t-$name]
     file mkdir [file join $tree examples games] [file join $tree tests platform]
     file copy [file join $root examples games icy-tower] [file join $tree examples games icy-tower]
     file copy [file join $root tests platform sdl3-static-macos.sh] [file join $tree tests platform sdl3-static-macos.sh]
+    file copy [file join $root LICENSE] [file join $tree LICENSE]
     foreach d {tools generated} {
         file link -symbolic [file join $tree $d] [file join $root $d]
     }
@@ -109,7 +112,26 @@ proc icymacos::detect {ctx name detector tree binding} {
             }
             return [expr {[llength $problems] ? [list fail [join $problems \n]] : [list pass ""]}]
         }
-        session:* {
+        session:* - app:* {
+            set results [file join $work session-$name]
+            if {[string match app:* $detector]} {
+                # The application bundle (ICY-TOWER-MACOS-APP-MILESTONE-1.md):
+                # the mutant's executable assembled by the tree's
+                # package-macos.sh, signed ad hoc by its release.py, and
+                # launched through LaunchServices.
+                set cases [split [string range $detector 4 end] ,]
+                set game [file join $tree examples games icy-tower]
+                set apps [file join $work app-$name]
+                lassign [run [list bash [file join $game package-macos.sh] $exe $apps --bundle-id org.botlish.examples.icy-tower.mutant \
+                    --version 0.0.0 --build 0.0.0 --sdl3-license [file join [dict get $ctx sdlsrc] LICENSE.txt]]] status output
+                if {$status} { return [list fail "package-macos.sh: [string range $output end-600 end]"] }
+                set app [file join $apps "Icy Tower.app"]
+                lassign [run [list python3 -I [file join $game macos release.py] sign --work [file join $work release-$name] \
+                    --mode adhoc --app $app]] status output
+                if {$status} { return [list fail "release.py sign: [string range $output end-600 end]"] }
+                run [list python3 -I [file join [dict get $ctx root] audit icy-tower tools macos-session.py] app --app $app \
+                    --helper [dict get $ctx helper] --out $results --only [join $cases ,]]
+            } else {
             set cases [split [string range $detector 8 end] ,]
             set probe $exe
             if {[llength [lsearch -all -inline -regexp $cases {^(cocoa|autopilot|trace-.*)$}]]} {
@@ -118,10 +140,10 @@ proc icymacos::detect {ctx name detector tree binding} {
                 if {$status} { return [list unbuilt [string range $output end-600 end]] }
                 set probe [file join $work p-$name icy-tower]
             }
-            set results [file join $work session-$name]
             run [list python3 -I [file join [dict get $ctx root] audit icy-tower tools macos-session.py] run --exe $exe \
                 --probe $probe --worker [dict get $ctx worker] --helper [dict get $ctx helper] \
                 --reference [file join [dict get $ctx root] audit icy-tower trace-reference.txt] --out $results --only [join $cases ,]]
+            }
             # Each case's class and its failing checks' texts, read as JSON.
             lassign [run [list python3 -I -c {
 import json, sys

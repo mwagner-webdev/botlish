@@ -12,6 +12,14 @@
 // (audit/icy-tower/tools/traced-archive.sh renames every function this file
 // wraps -- the prototypes below are that list -- and adds this object to the
 // archive). The lines it writes are the same.
+//
+// Fault injection, for the application bundle's failure alerts
+// (ICY-TOWER-MACOS-APP-MILESTONE-1.md, "Terminal-free error reporting"):
+// SDLTRACE_FAIL=SDL_CreateWindow makes the window's creation fail, and
+// SDLTRACE_FAIL=SDL_RenderPresent@N the Nth present (a frame that cannot be
+// drawn, after Cocoa and Metal started), each with SDL_SetError's text
+// "SDLTRACE_FAIL: NAME injected", as SDL reports its own failures. Without
+// the variable nothing changes.
 #ifndef SDLTRACE_LINKED
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -22,8 +30,20 @@
 #include <stdbool.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <string.h>
 
 typedef struct { float x, y, w, h; } FRect;
+bool SDL_SetError(const char *fmt, ...);
+// Whether the CALLth call of NAME is the one SDLTRACE_FAIL names (NAME, the
+// first call; NAME@N, the Nth); if so SDL's error is set.
+static int injected(const char *name, long call) {
+    const char *f = getenv("SDLTRACE_FAIL");
+    size_t n = strlen(name);
+    if (!f || strncmp(f, name, n) || (f[n] && f[n] != '@')) return 0;
+    if (call != (f[n] == '@' ? atol(f + n + 1) : 1)) return 0;
+    SDL_SetError("SDLTRACE_FAIL: %s injected", name);
+    return 1;
+}
 static FILE *out;
 static void open_out(void) {
     if (!out) { const char *p = getenv("SDLTRACE"); out = fopen(p ? p : "/dev/null", "w"); setvbuf(out, NULL, _IOFBF, 1 << 20); }
@@ -142,7 +162,8 @@ bool SDL_SetRenderScale(void *r, float x, float y) {
 bool SDL_RenderClear(void *r) { REAL(SDL_RenderClear); bool ok = real_SDL_RenderClear(r); fprintf(out, "clear %s -> %d\n", P(r), ok); return ok; }
 bool SDL_RenderPresent(void *r) {
     REAL(SDL_RenderPresent);
-    bool ok = real_SDL_RenderPresent(r);
+    static long presents_made;
+    bool ok = injected("SDL_RenderPresent", ++presents_made) ? false : real_SDL_RenderPresent(r);
     fprintf(out, "present %s -> %d\n", P(r), ok);
 #ifdef SDLTRACE_LINKED
     double t = now();
@@ -196,6 +217,11 @@ void SDL_Quit(void) {
 }
 void *SDL_CreateWindow(const char *t, int w, int h, uint64_t f) {
     REAL(SDL_CreateWindow);
+    static long windows_made;
+    if (injected("SDL_CreateWindow", ++windows_made)) {
+        fprintf(out, "createwindow \"%s\" %d %d %llu -> null (injected)\n", t, w, h, (unsigned long long)f);
+        return NULL;
+    }
 #ifdef SDLTRACE_LINKED
     double t0 = now();
     void *p = real_SDL_CreateWindow(t, w, h, f);
