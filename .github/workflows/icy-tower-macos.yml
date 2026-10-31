@@ -479,7 +479,8 @@ jobs:
           # every call is bounded, never left waiting.
           bounded() { perl -e '$t = shift; alarm $t; exec @ARGV or die "$ARGV[0]: $!\n"' 60 "$@"; }
           rule="$dry/trust-settings-admin.plist"
-          security authorizationdb read com.apple.trust-settings.admin >"$rule" 2>/dev/null
+          security authorizationdb read com.apple.trust-settings.admin >"$rule"
+          echo "com.apple.trust-settings.admin as it was:"; plutil -p "$rule"
           same_rule() {
             security authorizationdb read com.apple.trust-settings.admin 2>/dev/null | python3 -I -c '
           import plistlib, sys
@@ -488,12 +489,14 @@ jobs:
           }
           trusting() {
             local status=0
-            bounded sudo security authorizationdb write com.apple.trust-settings.admin allow >/dev/null 2>&1 || status=1
-            [ $status = 0 ] && { bounded "$@" || status=1; }
-            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" >/dev/null 2>&1 || status=1
+            echo "\$ sudo security authorizationdb write (the trust settings' rule) allow"
+            bounded sudo security authorizationdb write com.apple.trust-settings.admin allow || status=1
+            if [ $status = 0 ]; then echo "\$ $*"; bounded "$@" || status=1; fi
+            echo "\$ sudo security authorizationdb write (the trust settings' rule) < (the rule as it was)"
+            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" || status=1
             return $status
           }
-          untrust() { trusting sudo security remove-trusted-cert -d "$dry/anchors/root.cer" 2>/dev/null || true; }
+          untrust() { trusting sudo security remove-trusted-cert -d "$dry/anchors/root.cer" || true; }
           trap 'untrust; rel cleanup --work "$w"' EXIT
           started=$(date +%s)
           rel preflight --work "$w" --mode dry-run --trust-anchors "$dry/anchors"
@@ -501,9 +504,20 @@ jobs:
           started=$(date +%s)
           rel keychain --work "$w"
           echo "keychain: $(( $(date +%s) - started )) s"
+          # what codesign will build the chain from (public certificates only),
+          # and the chain itself with its root anchored explicitly (no trust
+          # setting): a chain refused here is the certificates' fault
+          kc="$w/secret/icy-tower-signing.keychain-db"
+          echo "the temporary keychain's certificates:"
+          security find-certificate -a -Z "$kc" | grep -E '^SHA-1|"labl"' || true
+          echo "the chain, its root anchored explicitly:"
+          bounded security verify-cert -c "$dry/leaf.cer" -c "$dry/anchors/devid.cer" -r "$dry/anchors/root.cer" -p codeSign -L || true
           trusting sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$w/secret/icy-tower-signing.keychain-db" "$dry/anchors/root.cer" \
-            || { echo "::error::the throwaway root could not be trusted for code signing"; exit 1; }
+            || { echo "::error::the throwaway root could not be trusted for code signing"
+                 same_rule || echo "::error::the trust settings' authorization rule was not put back"; exit 1; }
           same_rule || { echo "::error::the trust settings' authorization rule was not put back"; exit 1; }
+          echo "the chain from the keychains and the trust settings, as codesign will build it:"
+          bounded security verify-cert -c "$dry/leaf.cer" -p codeSign -k "$kc" || true
           bounded security find-identity -v -p codesigning "$w/secret/icy-tower-signing.keychain-db"
           started=$(date +%s)
           rel sign --work "$w" --app "$dry/app/Icy Tower.app"

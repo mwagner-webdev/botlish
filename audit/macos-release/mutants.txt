@@ -825,6 +825,6 @@ rm -rf "$out/Icy Tower.app"
 !! test_workflow.Workflow.test_dry_run_puts_the_trust_rule_back
 ## .github/workflows/icy-tower-macos.yml
 <<<<
-            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" >/dev/null 2>&1 || status=1
+            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" || status=1
 ====
 >>>>

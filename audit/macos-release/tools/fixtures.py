@@ -71,8 +71,9 @@ def name(cn, ou=None, o=None, uid=None):
 
 class Authority:
     """A test root and intermediate. The default intermediate carries the subject of Apple's G2 Developer ID
-    authority (the "named, but not signed by Apple" negative tests); CA_CN gives it its own, which macOS's chain
-    building needs (the dry run: with Apple's name it would find Apple's real intermediate and fail)."""
+    authority (the "named, but not signed by Apple" negative tests); CA_CN gives it its own (the dry run, a
+    precaution: macOS's chain building then cannot take Apple's real intermediate, which the system holds under
+    that name, for the leaf's issuer)."""
 
     def __init__(self, ca_cn=None):
         self.root_key = rsa_key("root")
@@ -229,6 +230,10 @@ def dry_run(directory):
     with open(os.path.join(directory, "env"), "w") as f:
         for k, v in env.items():
             f.write("%s=%s\n" % (k, v))
+    # the leaf's certificate alone (public), beside the anchors and never among them: the dry run's diagnostics
+    # verify its chain with security verify-cert
+    with open(os.path.join(directory, "leaf.cer"), "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.DER))
     print("dry-run identity: %s (a throwaway test certificate, never Apple's); %s/env, %s/anchors"
           % ("Developer ID Application: Icy Tower Dry Run (DRYRUN0000)", directory, directory))
 
