@@ -1086,6 +1086,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # A C export (hir/exports.tcl): its foreign ABI.
                 SetField hir $e exported [dict get $node exported]
             }
+            if {[dict exists $node callback]} {
+                # A C callback (hir/callbacks.tcl): its foreign ABI.
+                SetField hir $e callback [dict get $node callback]
+            }
             set params {}
             set paramTypes [if {[dict exists $node paramTypes]} {dict get $node paramTypes} else {lrepeat [llength [dict get $node params]] {}}]
             set declaredParamTypes {}

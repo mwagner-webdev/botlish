@@ -1545,7 +1545,8 @@ proc native::lower::Program {hirProgram args} {
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
         -exact-callable-opt [dict get $options -exact-callable-opt] \
         -exact-callable-limit [dict get $options -exact-callable-limit] \
-        -exports [lmap export [dict get $options -exports] {dict get $export block}]]
+        -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
+            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
@@ -1634,6 +1635,20 @@ proc native::lower::Program {hirProgram args} {
     foreach export [dict get $options -exports] {
         lappend exportLines "export [Quote [dict get $export symbol]] func=[GenericRef [dict get $export block]] params=[Quote [join [dict get $export params] { }]] result=[dict get $export result]"
     }
+    # The callback roots (C-CALLBACK-MILESTONE-1.md): each `callback c fn`'s
+    # generic instance, which hir::specialize made a used, open instance (as
+    # an export's: C may call it with any value of its declared C types).
+    # Its C entry point -- a trampoline in the target's C calling
+    # convention, codegen's -- calls that instance's generic entry, whether
+    # or not any Botlish code calls the function; `cbaddr N` is its address.
+    variable callbackIndex
+    set callbackIndex [dict create]
+    set callbackLines {}
+    foreach callback [hir::callbacks::of $hirProgram] {
+        set n [dict size $callbackIndex]
+        dict set callbackIndex [dict get $callback block] $n
+        lappend callbackLines "callback $n func=[GenericRef [dict get $callback block]] params=[Quote [join [dict get $callback params] { }]] result=[dict get $callback result] name=[Quote [dict get $callback name]]"
+    }
     while {$pending ne ""} {
         set pending [lassign $pending item]
         lassign $item id mode
@@ -1688,6 +1703,7 @@ proc native::lower::Program {hirProgram args} {
     set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}]"]
     lappend header {*}[ContextHeader]
     lappend header {*}[lmap line $exportLines {string map $map $line}]
+    lappend header {*}[lmap line $callbackLines {string map $map $line}]
     if {[llength $exportLines]} {
         # A library's error table (NATIVE-LIBRARY-MILESTONE-1.md, "Errors"):
         # the canonical identity of every declared error a call can end in,
@@ -1757,7 +1773,12 @@ proc native::lower::Program {hirProgram args} {
     foreach key $foreignList {
         set record [dict get $declarations $key]
         set alias [core::cabi::AliasIndex [dict get $record contract]]
-        lappend header "foreign [ForeignIndex $key] [Quote [dict get $record symbol]] params=[Quote [join [dict get $record abi params] { }]] result=[dict get $record abi result][expr {$alias >= 0 ? " alias=$alias" : ""}][expr {[dict getdef $record abi variadic 0] ? " variadic=1" : ""}] name=[Quote $key]"
+        # A C function whose contract lets it call back (a function pointer
+        # parameter it does not keep, C-CALLBACK-MILESTONE-1.md): every call
+        # of it is a foreign transition the runtime records, during which C
+        # may run a callback in this execution environment.
+        set callbacks [expr {[hir::foreign::CallsBack [dict get $record contract]] ? " callbacks=1" : ""}]
+        lappend header "foreign [ForeignIndex $key] [Quote [dict get $record symbol]] params=[Quote [join [dict get $record abi params] { }]] result=[dict get $record abi result][expr {$alias >= 0 ? " alias=$alias" : ""}][expr {[dict getdef $record abi variadic 0] ? " variadic=1" : ""}]$callbacks name=[Quote $key]"
     }
     # The target the program was built for (core/cabi.tcl's name and
     # triple), when its HIR depends on one (hir::cabi::targetOf): the driver
@@ -2131,6 +2152,19 @@ proc native::lower::Placeholder {id {mode canonical}} {
 }
 
 # FunctionRef of the generic instance of block E.
+# The C function pointer of the callback call E (NODE) names: `cbaddr N`, N
+# the callback's index among the program's (the header's `callback` lines).
+proc native::lower::CallbackAddress {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable callbackIndex
+    set block [hir::callbacks::Referenced $hir [lindex [dict get $node args] 0]]
+    if {$block eq "" || ![dict exists $callbackIndex $block]} {
+        throw {NATIVE BUG} "native lowering: std::ffi::c::callback of no valid callback c fn ($e)"
+    }
+    return [Assign fn "cbaddr [dict get $callbackIndex $block]" $e]
+}
+
 proc native::lower::GenericRef {e} {
     variable baseHir
     variable spec
@@ -8332,6 +8366,13 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
         if {$static ne ""} {
             return $static
         }
+    }
+    if {$targetKind eq "native" && [hir::callbacks::IsPointerNative [dict get [hir::symbol $hir $target] name]]} {
+        # std::ffi::c::callback(NAME) (C-CALLBACK-MILESTONE-1.md): the
+        # address of NAME's C entry point, a C address word; the reference
+        # itself is no value made (the function is called by its entry, never
+        # through a closure).
+        return [list [CallbackAddress fn $e $node] tagged]
     }
     if {$targetKind eq "native"
             && [hir::layouts::RoleOf [hir::layouts::Role [dict get [hir::symbol $hir $target] name]] op] ne ""} {

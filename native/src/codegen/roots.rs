@@ -224,6 +224,7 @@ pub(crate) fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         | Inst::Unit { dst }
         | Inst::Native { dst, .. }
         | Inst::FnValue { dst, .. }
+        | Inst::CallbackAddress { dst, .. }
         | Inst::SelfClosure { dst }
         | Inst::Capture { dst, .. } => (vec![*dst], vec![]),
         Inst::StaticGet { dst, .. } => (vec![*dst], vec![]),

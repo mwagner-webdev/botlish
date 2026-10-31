@@ -3369,6 +3369,39 @@ p = std::ffi::c::null[std::ffi::c::Void]()
 @caption Observing does not move the pointer
 @end
 
+@topic stdlib.std::ffi::c::callback
+title: -
+summary: The C function pointer of a `callback c fn`, by name: a std::ffi::c::FnPtr of its declared C signature, whose calls run the function in the Botlish execution environment waiting in a foreign call.
+index: stdlib
+keywords: function pointer; C callback; FnPtr of a function; callback address
+related: concept.c-callbacks error.callback-reference stdlib.std::ffi::c::null?
+
+== NOTES
+The argument is the name of a top-level `callback c fn` (CALLBACK-REFERENCE
+otherwise), and the operation is only called, never a value. The pointer is
+affine, like every C pointer: bind it, then pass it to a C function whose
+FnPtr parameter is declared noescape -- C may call it only while such a
+call runs (NATIVE CALLBACK otherwise). Native backends only: the Tcl
+backends refuse it at run time (NATIVE-ONLY).
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+
+callback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    0
+
+fn pointer():
+    cb = std::ffi::c::callback(decide)
+    cb.null?()
+
+decide(4)
+@value 1
+@caption The pointer is made where it is passed to C
+@end
+
 @topic stdlib.std::ffi::c::clone
 title: -
 summary: A second alias of a C pointer (the same address, the same type), written p.clone(): the one way to have two pointers.

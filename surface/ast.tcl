@@ -108,7 +108,9 @@
 #              validator), body (suite),
 #              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan,
 #              exported (the foreign ABI of `exported c fn NAME(...)`: c;
-#              "" for an ordinary function), exportedSpan
+#              "" for an ordinary function), exportedSpan, callback (the
+#              foreign ABI of `callback c fn NAME(...)`: c; ""),
+#              callbackSpan
 #              (the modifier word's span, or "") -- a property of the one
 #              declaration: its author's declaration that it is never the
 #              callee of method syntax (WARNINGS-METHOD-ELIGIBLE.md),
@@ -1203,6 +1205,9 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             set modifier [expr {[dict exists $node nomethod] && [dict get $node nomethod] ? "nomethod " : ""}]
             if {[dict getdef $node exported ""] ne ""} {
                 append modifier "exported [dict get $node exported] "
+            }
+            if {[dict getdef $node callback ""] ne ""} {
+                append modifier "callback [dict get $node callback] "
             }
             set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
             if {[dict exists $node resultType] && [dict get $node resultType] ne ""} {

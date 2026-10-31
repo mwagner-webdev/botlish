@@ -1,0 +1,497 @@
+# c-callbacks.test -- synchronous C callbacks into the active Botlish
+# execution environment (C-CALLBACK-MILESTONE-1.md).
+#
+# `callback c fn NAME(...) -> T:` declares a function C may call back, and
+# std::ffi::c::callback(NAME) is its C function pointer (hir/callbacks.tcl).
+# C may call it during a call of a C function whose function pointer
+# parameter is declared noescape -- a foreign transition (codegen::callback's
+# shim, runtime::callback) -- and it then runs nested in the Botlish
+# execution environment waiting in that call, with every waiting Botlish
+# frame's values rooted across C's frames (framewalk::walk_segmented).
+#
+# The C side is tests/cffi/callback-fixture.c, compiled here with the host's
+# C toolchain into a private static library and bound by tests/cffi/cbx.bot.
+# It checks the callbacks' answers itself, with its own arithmetic and its
+# own reading of the bits it passed, and calls the nesting callbacks with
+# its frame-pointer register holding no frame (what C compiled without frame
+# pointers may leave there), so a runtime that read C's frames would fail
+# here. The system C library's qsort is the real-library acceptance.
+#
+# Static checks run everywhere; running a callback needs the native backend,
+# C calls (nativeCCalls) and callbacks (nativeCCallbacks: Linux x86-64 and
+# AArch64, macOS AArch64).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+set ::cbCounter 0
+
+# The fixture library, built once in a private directory.
+set ::cbFixtureDir ""
+if {[testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstraint nativeCCallbacks]} {
+    set ::cbFixtureDir [makeDirectory cbx-fixture-[pid]]
+    if {[catch {
+        ctool::staticLibrary $::cbFixtureDir botlish_callback_fixture [file join $::projectRoot tests cffi callback-fixture.c]
+    } message]} {
+        puts stderr "c-callbacks.test: the fixture library did not build: $message"
+        set ::cbFixtureDir ""
+    }
+}
+testConstraint cbFixture [expr {$::cbFixtureDir ne "" && [testConstraint nativeBuilt] && [testConstraint cLinker]}]
+testConstraint cbNative [expr {[testConstraint nativeBuilt] && [testConstraint nativeCCalls] && [testConstraint nativeCCallbacks] && [testConstraint cLinker]}]
+
+set ::cbxModule [core::ReadFile [file join $::projectRoot tests cffi cbx.bot]]
+
+# A fresh application directory holding FILES ({RELATIVE TEXT ...}).
+proc cbApp {files} {
+    set dir [makeDirectory cb-app-[pid]-[incr ::cbCounter]]
+    foreach {relative text} $files {
+        set channel [open [file join $dir $relative] w]
+        fconfigure $channel -encoding utf-8 -translation lf
+        puts -nonewline $channel $text
+        close $channel
+    }
+    return $dir
+}
+
+# An application of the fixture's binding and MAIN.
+proc cbxApp {main} {
+    return [cbApp [list main.bot $main cbx.bot $::cbxModule]]
+}
+
+proc removeCbApps {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] cb-app-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc cbHir {dir {strict 1}} {
+    return [surface::readProgramFile [file join $dir main.bot] -warnings off -cache "" -strict $strict]
+}
+
+# "KIND: MESSAGE" of the first diagnostic of program TEXT (an entry program
+# beside the fixture's binding), with the directory spelled away, or
+# "accepted".
+proc cbRejection {text} {
+    set dir [cbxApp $text]
+    if {[catch {cbHir $dir} message options]} {
+        set first [lindex [dict getdef $options -diagnostics {}] 0]
+        if {$first ne "" && [lrange [dict get $first errorcode] 0 1] eq {SURFACE SYNTAX}} {
+            # A syntax error: its location and message.
+            set where [lindex [dict get $first errorcode] end]
+            return "SYNTAX: [dict get $where line]:[dict get $where column]: [dict get $where message]"
+        }
+        if {$first ne ""} {
+            set message [string map [list $dir/ ""] [dict get $first message]]
+            regsub {^main\.bot:\d+:\d+: } $message "" message
+            return "[lindex [dict get $first errorcode] end]: $message"
+        }
+        return "[lindex [dict get $options -errorcode] end]: [string map [list $dir/ ""] $message]"
+    }
+    return accepted
+}
+
+# The diagnostic kinds of program TEXT, or "accepted".
+proc cbKinds {text} {
+    set dir [cbxApp $text]
+    if {[catch {cbHir $dir} message options]} {
+        set diagnostics [dict getdef $options -diagnostics {}]
+        if {$diagnostics eq ""} {
+            return [lindex [dict get $options -errorcode] end]
+        }
+        return [lmap d $diagnostics {lindex [dict get $d errorcode] end}]
+    }
+    return accepted
+}
+
+# The value of program TEXT on each of BACKENDS, the fixture's library
+# directory on the linker's path, under GC stress when STRESS: the value, or
+# {CODE-TAIL MESSAGE} for an error (CODE-TAIL the code's last two words).
+proc cbValues {text backends {stress 0}} {
+    set dir [cbxApp $text]
+    set hir [cbHir $dir]
+    set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    if {$stress} {
+        set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    }
+    try {
+        native::withLinkDirs [list $::cbFixtureDir] {
+            lmap backend $backends {
+                lassign [outcomeUnderHir $backend $hir] tag value message
+                expr {$tag eq "value" ? $value : [list [lrange $value end-1 end] [string map [list $dir/ ""] $message]]}
+            }
+        }
+    } finally {
+        if {$saved eq ""} { unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
+    }
+}
+
+# cbValues on both native backends, normally and under GC stress: "same:
+# VALUE" when the four agree, else all four.
+proc cbAgree {text} {
+    set outcomes [concat [cbValues $text {cranelift cranelift-generic}] [cbValues $text {cranelift cranelift-generic} 1]]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return "same: [lindex $outcomes 0]"
+    }
+    return $outcomes
+}
+
+# ---------------------------------------------------------------------------
+# Programs
+
+# The central test (the milestone's section 10): main holds heap values A
+# only it references, calls C's outer with callback level1, which allocates
+# (and, under GC stress, collects at every allocation) and calls C's inner
+# with level2, which allocates and returns; level1 returns a value built
+# from inner's; main allocates again and returns A with the result. C calls
+# both callbacks with its frame-pointer register holding no frame.
+set ::cbNested {import std::ffi::c
+import std::int
+import std::list
+import std::str
+import cbx
+
+fn churn(n: int) -> int:
+    xs = loop i from 0 to n:
+        std::str::concat("item", std::int::to_string(i))
+    std::list::length(xs)
+
+callback c fn level2(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    k = churn(50)
+    if x > 1000 or x < -1000 or k > 1000 or k < 0:
+        return 0
+    x + k
+
+callback c fn level1(x: std::ffi::c::Int) -> std::ffi::c::Int:
+    k = churn(20)
+    cb = std::ffi::c::callback(level2)
+    r = cbx::inner(cb, x)
+    if r > 100000 or r < -100000 or k > 1000 or k < 0:
+        return 0
+    r + k
+
+fn main() -> List[str]:
+    a = [std::str::concat("keep", std::int::to_string(1)), std::str::concat("keep", std::int::to_string(2))]
+    cb = std::ffi::c::callback(level1)
+    r = cbx::outer(cb, 10)
+    k = churn(30)
+    std::list::append(a, std::int::to_string(r + k))
+
+main()
+}
+
+# ---------------------------------------------------------------------------
+# Declaration and HIR (every host)
+
+test cb-declaration-hir {`callback c fn` is a function modifier naming its foreign ABI; the block carries `callback c` in HIR, printed by hir::format and read back by hir::read; the pointer operation is a call of std::ffi::c::callback typed FnPtr of the declaration's C signature} -body {
+    set dir [cbxApp "import std::ffi::c\n\ncallback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:\n    value\n\nfn pointer():\n    p = std::ffi::c::callback(decide)\n    p.null?()\n\ndecide(3)\n"]
+    set hir [cbHir $dir]
+    set text [hir::format $hir]
+    set read [hir::parse $text]
+    list [regexp {block s\d+ \(b\d+ value:std::ffi::c::Int\) captures \(\) callback c declares std::ffi::c::Int} $text] \
+        [regexp {call native\(std::ffi::c::callback\) : std::ffi::c::FnPtr\[Fn\{args: \[std::ffi::c::Int\], return: std::ffi::c::Int\}\]} $text] \
+        [expr {[hir::format $read] eq $text}] [llength [hir::callbacks::of $hir]]
+} -cleanup removeCbApps -result {1 1 1 1}
+
+test cb-modifier-grammar {`callback` names its ABI (c, the only one), modifies only a function, and a function is a C export or a C callback, never both; `callback` stays an ordinary name elsewhere} -body {
+    list [cbRejection "callback fn f() -> unit:\n    unit\n0\n"] \
+        [cbRejection "exported c callback c fn f(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n0\n"] \
+        [cbRejection "callback c struct S:\n    x: int\n0\n"] \
+        [cbRejection "callback = 3\ncallback + 1\n"]
+} -cleanup removeCbApps -result [list \
+    {SYNTAX: 1:10: a callback names its foreign ABI: write "callback c fn NAME(...) -> T:" (the only foreign ABI is c), found "fn"} \
+    {SYNTAX: 1:12: a function is either a C export of a native library (exported c fn) or a C callback (callback c fn), never both: the two have different C ABIs} \
+    {SYNTAX: 1:10: expected end of line, found name "c"} \
+    accepted]
+
+test cb-signature-total-conversions {a callback's parameters and result are C types whose conversions are total -- the C integer scalars, Bool, RawFloat, RawDouble, Ptr, FnPtr, and for the result Float64 (C double) and unit; a plain int, a Float64 parameter (C double admitted), a C float, a declared error, flags, contexts, a variadic parameter or a resume clause are CALLBACK-SIGNATURE} -body {
+    set ok "import std::ffi::c\n\ncallback c fn f(a: std::ffi::c::SChar, b: std::ffi::c::ULongLong, c: std::ffi::c::Bool, d: std::ffi::c::RawFloat, e: std::ffi::c::RawDouble, p: std::ffi::c::Ptr\[std::ffi::c::Void\], q: std::ffi::c::FnPtr\[Fn\{args: \[\], return: unit\}\]) -> std::ffi::c::UInt:\n    0\n\ncallback c fn g() -> Float64:\n    0.5\n\ncallback c fn h() -> unit:\n    unit\n\n0\n"
+    list [cbRejection $ok] \
+        [cbRejection "import std::ffi::c\n\ncallback c fn f(x: int) -> std::ffi::c::Int:\n    0\n0\n"] \
+        [cbRejection "import std::ffi::c\n\ncallback c fn f(x: std::ffi::c::Double) -> std::ffi::c::Int:\n    0\n0\n"] \
+        [cbRejection "import std::ffi::c\n\ncallback c fn f(x: std::ffi::c::Int):\n    x\n0\n"] \
+        [cbRejection "import std::ffi::c\n\ncallback c fn f(x) -> std::ffi::c::Int:\n    0\n0\n"] \
+        [cbRejection "import std::ffi::c\n\nerror Bad\n\ncallback c fn f(x: std::ffi::c::Int) -> std::ffi::c::Int errors Bad:\n    if x > 0:\n        fail Bad\n    0\n0\n"] \
+        [cbKinds "import std::ffi::c\n\ncallback c fn f(x: std::ffi::c::Int) -> std::ffi::c::Float:\n    0.5\n0\n"]
+} -cleanup removeCbApps -result [list accepted \
+    {CALLBACK-SIGNATURE: callback c fn "f": parameter "x" is declared int: int has no total C form (a callback's C types are the C integer scalars, std::ffi::c::Bool, std::ffi::c::RawFloat, std::ffi::c::RawDouble, std::ffi::c::Ptr[...], std::ffi::c::FnPtr[...], and for the result also Float64 as C's double, or unit)} \
+    {CALLBACK-SIGNATURE: callback c fn "f": parameter "x" is declared Float64: a Float64 parameter would be C's double admitted as a finite number, and C may pass a NaN or an infinity, which has no Float64 -- the callback would fail before its body runs, with no error channel to C; declare std::ffi::c::RawDouble (every double, its bits) and admit it explicitly (std::ffi::c::raw)} \
+    {CALLBACK-SIGNATURE: callback c fn "f" declares no result type; a C callback declares its result's C type (-> unit for void), since its C ABI is read from the declaration alone} \
+    {CALLBACK-SIGNATURE: callback c fn "f": parameter "x" has no declared type; a C callback declares every parameter's C type, since its C ABI is read from the declaration alone} \
+    {CALLBACK-SIGNATURE: callback c fn "f" declares errors (Bad); a C callback has no error channel to its C caller -- handle every error in the body} \
+    TYPE]
+
+test cb-signature-sections {flags, context parameters and a variadic parameter are no part of a C signature; a resume clause makes no callback either (CALLBACK-SIGNATURE)} -body {
+    list [cbKinds "import std::ffi::c\n\ncallback c fn f(x: std::ffi::c::Int, flags :loud) -> std::ffi::c::Int:\n    0\n0\n"] \
+        [cbKinds "import std::ffi::c\n\ncallback c fn f(x: std::ffi::c::Int, variadic xs: List\[int\]) -> std::ffi::c::Int:\n    0\n0\n"] \
+        [cbKinds "import std::ffi::c\n\ncontext struct Env:\n    n: int\n\ncallback c fn f(x: std::ffi::c::Int, context env: Env) -> std::ffi::c::Int:\n    0\n0\n"]
+} -cleanup removeCbApps -result {CALLBACK-SIGNATURE {CALLBACK-SIGNATURE CALLBACK-SIGNATURE} {CALLBACK-SIGNATURE CALLBACK-ENVIRONMENT}}
+
+test cb-placement-environment {a callback is a top-level, environment-free function: nested (CALLBACK-PLACEMENT), capturing a value, requiring a context or yielding (CALLBACK-ENVIRONMENT) is refused; calling other top-level functions and reading a module static is fine} -body {
+    list [cbRejection "import std::ffi::c\n\nfn outer() -> std::ffi::c::Int:\n    callback c fn inner(n: std::ffi::c::Int) -> std::ffi::c::Int:\n        n\n    inner(2)\n\nouter()\n"] \
+        [cbRejection "import std::ffi::c\n\nlimit = 3\n\ncallback c fn capped(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    if n > limit:\n        return 3\n    n\n\ncapped(5)\n"] \
+        [cbRejection "import std::ffi::c\n\nfn gen() -> int:\n    yield 1\n    2\n\ncallback c fn f(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    gen()\n    0\n0\n"] \
+        [cbRejection "import std::ffi::c\n\nfn helper(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    n\n\ncallback c fn f(n: std::ffi::c::Int) -> std::ffi::c::Int:\n    helper(n)\n\nf(4)\n"]
+} -cleanup removeCbApps -result [list \
+    {CALLBACK-PLACEMENT: "inner" is not a top-level function of a program or module: a C callback is a top-level declaration, whose entry point C calls with no enclosing function} \
+    {CALLBACK-ENVIRONMENT: callback c fn "capped" captures limit; a C callback is environment-free: C calls it through a bare machine address, which carries no closure (a top-level value it reads belongs in a module, where it is a module static)} \
+    {CALLBACK-ENVIRONMENT: callback c fn "f" may suspend (it yields, or calls a function that does); a C callback runs to completion: no suspension crosses a C frame} \
+    accepted]
+
+test cb-context-requirement {a callback that requires a context -- through a function it calls -- is refused: a function pointer is no authority to install one, and C installs none (CALLBACK-ENVIRONMENT)} -body {
+    cbRejection "import std::ffi::c\n\ncontext struct Env:\n    n: int\n\nfn read(context env: Env) -> int:\n    env.n\n\ncallback c fn f(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    read()\n    0\n\nwith context Env {n: 1}\n0\n"
+} -cleanup removeCbApps -result {CALLBACK-ENVIRONMENT: callback c fn "f" requires the context Env; a C call gives a callback no context, and a function pointer is no authority to install one}
+
+test cb-reference {std::ffi::c::callback takes a callback c fn by name: an ordinary function, a parameter holding a function value, or the operation taken as a value is CALLBACK-REFERENCE, and nothing converts a Botlish Fn into a FnPtr implicitly (TYPE)} -body {
+    list [cbRejection "import std::ffi::c\n\nfn twice(n: std::ffi::c::Int) -> int:\n    n * 2\n\np = std::ffi::c::callback(twice)\n0\n"] \
+        [cbRejection "import std::ffi::c\n\nfn make(f: Fn\{args: \[std::ffi::c::Int\], return: std::ffi::c::Int\}):\n    p = std::ffi::c::callback(f)\n    0\n0\n"] \
+        [cbRejection "import std::ffi::c\n\ng = std::ffi::c::callback\n0\n"] \
+        [cbKinds "import std::ffi::c\nimport cbx\n\ncallback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\nf = d\ncbx::apply(f, 1)\n"]
+} -cleanup removeCbApps -result [list \
+    {CALLBACK-REFERENCE: std::ffi::c::callback: "twice" is not a callback c fn named directly; a C function pointer is made only of a top-level function declared "callback c fn NAME(...) -> T:", by its name, whose C signature its declaration states (a Botlish function value, a closure or a parameter is no C function)} \
+    {CALLBACK-REFERENCE: std::ffi::c::callback: "f" is not a callback c fn named directly; a C function pointer is made only of a top-level function declared "callback c fn NAME(...) -> T:", by its name, whose C signature its declaration states (a Botlish function value, a closure or a parameter is no C function)} \
+    {CALLBACK-REFERENCE: std::ffi::c::callback can only be called directly, with a callback c fn by name: a function value of it would make a C function pointer of whatever it is given at run time, which nothing could check is a callback} \
+    {TYPE TYPE}]
+
+test cb-pointer-type {the pointer's type is exactly the declaration's C signature: passed where another signature is expected -- another integer type, a raw double where a finite double is, or the other way -- it is TYPE; the pointer is affine like every C pointer (bound, then passed)} -body {
+    list [cbKinds "import std::ffi::c\nimport cbx\n\ncallback c fn d(x: std::ffi::c::UInt) -> std::ffi::c::Int:\n    0\n\ncb = std::ffi::c::callback(d)\ncbx::apply(cb, 1)\n"] \
+        [cbKinds "import std::ffi::c\nimport cbx\n\ncallback c fn d(x: std::ffi::c::RawDouble) -> std::ffi::c::Int:\n    0\n\ncb = std::ffi::c::callback(d)\ncbx::bits_doubles(cb)\n"] \
+        [cbKinds "import std::ffi::c\nimport cbx\n\ncallback c fn d(x: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble:\n    x\n\ncb = std::ffi::c::callback(d)\ncbx::admit_doubles(cb)\n"] \
+        [cbKinds "import std::ffi::c\nimport cbx\n\ncallback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\ncbx::apply(std::ffi::c::callback(d), 1)\n"] \
+        [cbKinds "import std::ffi::c\nimport cbx\n\ncallback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\ncb = std::ffi::c::callback(d)\ncb2 = cb\ncbx::apply(cb, 1)\n"] \
+        [cbKinds "import std::ffi::c\nimport cbx\n\ncallback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\ncb = std::ffi::c::callback(d)\nc2 = cb.clone()\ncbx::apply(cb, 1) + cbx::apply(c2, 2)\n"]
+} -cleanup removeCbApps -result {TYPE TYPE TYPE AFFINE-TEMPORARY-UNSUPPORTED USE-AFTER-MOVE accepted}
+
+test cb-retention-is-authority {non-retention is the contract's: a callback pointer passed to a parameter that may keep it (captures, or nothing stated) is a retaining C call, a direct edge -- DIRECT outside a direct module, accepted in one (whose later call of the kept pointer the runtime refuses); a noescape parameter is an ordinary call} -body {
+    set unknown "extern c fn keep2 named \"cbx_store\"(f: std::ffi::c::FnPtr\[Fn\{args: \[std::ffi::c::Int\], return: std::ffi::c::Int\}\]) -> unit\n"
+    set body "callback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\ncb = std::ffi::c::callback(d)\n"
+    list [cbKinds "import std::ffi::c\nimport cbx\n\n${body}cbx::store(cb)\n0\n"] \
+        [cbKinds "import std::ffi::c\n\n${unknown}\n${body}keep2(cb)\n0\n"] \
+        [cbKinds "direct module\nimport std::ffi::c\nimport cbx\n\n${body}cbx::store(cb)\n0\n"] \
+        [cbKinds "import std::ffi::c\nimport cbx\n\n${body}cbx::apply(cb, 1)\n"]
+} -cleanup removeCbApps -result {DIRECT DIRECT accepted accepted}
+
+test cb-direct-authority-in-body {a callback's own body is held to the direct-module rules: a retaining C call in it, with no context of its module to mediate it (a callback has none), makes the module direct, so an ordinary module is DIRECT} -body {
+    cbKinds "import std::ffi::c\n\nextern c fn keep3 named \"cbx_store\"(f: std::ffi::c::FnPtr\[Fn\{args: \[std::ffi::c::Int\], return: std::ffi::c::Int\}\] captures) -> unit\n\ncallback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\ncallback c fn sneaky(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    cb = std::ffi::c::callback(d)\n    keep3(cb)\n    x\n0\n"
+} -cleanup removeCbApps -result DIRECT
+
+test cb-error-propagation {no Botlish error crosses a C frame: an error a callback's body may raise and does not handle is the ordinary unhandled-error diagnostic (its errors are none), through an erased callable too} -body {
+    list [cbKinds "import std::ffi::c\nimport std::list\n\ncallback c fn f(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    std::list::at(\[1, 2\], x)\n    0\n0\n"] \
+        [cbKinds "import std::ffi::c\n\nerror Bad\n\nfn risky(n: int) -> int errors Bad:\n    if n > 0:\n        fail Bad\n    n\n\ncallback c fn f(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    risky(x)\n    0\n0\n"]
+} -cleanup removeCbApps -result {UNHANDLED-ERROR UNHANDLED-ERROR}
+
+test cb-tcl-backends {the Tcl backends describe callbacks -- a program that declares them and calls them as ordinary functions runs on all four backends -- and refuse making the C function pointer at run time (NATIVE-ONLY)} -constraints nativeBuilt -body {
+    set describe [cbApp [list main.bot "import std::ffi::c\n\ncallback c fn sign(value: std::ffi::c::Int) -> std::ffi::c::Int:\n    if value > 0:\n        return 1\n    if value < 0:\n        return -1\n    0\n\n\[sign(5), sign(-3), sign(0)\]\n"]]
+    set make [cbApp [list main.bot "import std::ffi::c\n\ncallback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\ncb = std::ffi::c::callback(d)\ncb.null?()\n"]]
+    list [lmap backend {interp compile cranelift cranelift-generic} {lindex [outcomeUnderHir $backend [cbHir $describe]] 1}] \
+        [lmap backend {interp compile} {lrange [lindex [outcomeUnderHir $backend [cbHir $make]] 1] end end}] \
+        [lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend [cbHir $make]] 1}]
+} -cleanup removeCbApps -result {{{[1, -1, 0]} {[1, -1, 0]} {[1, -1, 0]} {[1, -1, 0]}} {NATIVE-ONLY NATIVE-ONLY} {false false}}
+
+test cb-interchange {HIR interchange carries a callback: the text a process writes is read back as the same HIR (its `callback c` block and its pointer's type), and runs there} -constraints nativeBuilt -body {
+    set dir [cbApp [list main.bot "import std::ffi::c\n\ncallback c fn d(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\nfn p():\n    cb = std::ffi::c::callback(d)\n    cb.null?()\n\nd(7)\n"]]
+    set hir [cbHir $dir]
+    set back [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [expr {[hir::format $back] eq [hir::format $hir]}] [llength [hir::callbacks::of $back]] [lindex [outcomeUnderHir cranelift $back] 1]
+} -cleanup removeCbApps -result {1 1 7}
+
+# ---------------------------------------------------------------------------
+# NIR and machine code (no C runs)
+
+test cb-nir {natively the pointer is `cbaddr N` of the program's `callback N` declaration (its function's generic instance, the C ABI classes of its signature), and a C function whose FnPtr parameter is noescape is a transition (`callbacks=1`); one whose pointer is captured, unknown, or a data pointer's noescape is not} -constraints nativeBuilt -body {
+    set dir [cbxApp "direct module\nimport std::ffi::c\nimport std::abi::bytes\nimport cbx\n\ncallback c fn d(x: std::ffi::c::LongLong) -> std::ffi::c::LongLong:\n    x\n\ncallback c fn e(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    x\n\ncb = std::ffi::c::callback(d)\nce = std::ffi::c::callback(e)\ncbx::store(ce)\ncbx::record_bits(0, 1)\ncbx::bytes_around(std::abi::bytes::from_list(\[\]), 0, cb, 1)\n"]
+    set nir [native::nir [cbHir $dir]]
+    set lines [split $nir \n]
+    list [lsearch -all -inline -regexp $lines {^callback }] \
+        [lmap line [lsearch -all -inline -regexp $lines {^foreign }] {regexp {callbacks=1} $line}] \
+        [llength [lsearch -all -regexp $lines {= cbaddr [01]}]]
+} -cleanup removeCbApps -result [list {{callback 0 func=1 params="i64" result=i64 name="d"} {callback 1 func=2 params="i32" result=i32 name="e"}} {0 0 1} 2]
+
+test cb-clif {the C side is machine code of the program, in the host target's C convention: a transition shim brackets the C call with rt_ffi_open and rt_ffi_close (the Vm first), the Botlish caller calls the shim at the call's safepoint, and the callback's entry point stores its C arguments as words (a raw double's bits by bitcast) and calls rt_callback_call -- no libffi, no run-time code} -constraints nativeBuilt -body {
+    set dir [cbxApp "import std::ffi::c\nimport cbx\n\ncallback c fn same(x: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble:\n    x\n\ncb = std::ffi::c::callback(same)\ncbx::roundtrip_doubles(cb)\n"]
+    set clif [native::clif [cbHir $dir]]
+    set convention [dict get [native::targetFacts [dict get [core::cabi::target [core::cabi::hostTarget]] triple]] c-call-conv]
+    list [regexp "; transition shim botlish_transition_0_0 \\(C cbx::roundtrip_doubles\\)\nfunction u0:\\d+\\(i64, i64\\) -> i32 $convention" $clif] \
+        [regexp "; callback entry point botlish_callback_0 \\(callback same\\)\nfunction u0:\\d+\\(f64\\) -> f64 $convention" $clif] \
+        [regexp {v1 = bitcast.i64 v0} $clif] [regexp {= bitcast.f64 v\d+} $clif] \
+        [regexp {; u0:\d+ = rt_ffi_open} $clif] [regexp {; u0:\d+ = rt_ffi_close} $clif] [regexp {; u0:\d+ = rt_callback_call} $clif]
+} -cleanup removeCbApps -result {1 1 1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Running callbacks (the fixture's C)
+
+test cb-fixture-built {the callback fixture builds with the host's C toolchain wherever callbacks run} -constraints {cToolchain nativeCCalls nativeCCallbacks} -body {
+    expr {$::cbFixtureDir ne "" && [file isfile [file join $::cbFixtureDir [ctool::staticName botlish_callback_fixture]]]}
+} -result 1
+
+test cb-round-trip {Botlish -> C -> Botlish: C calls the callback during the call and uses its answer; repeated calls, before and after an unrelated C call, on both native backends and under GC stress} -constraints cbFixture -body {
+    cbAgree "import std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000000 or x < -1000000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\nfirst = cbx::apply(cb, 21)\nunrelated = cbx::add(2, 3)\nsecond = cbx::apply(cb, 22)\n\[first, unrelated, second, cbx::apply(cb, -7)\]\n"
+} -cleanup removeCbApps -result {same: [42, 5, 44, -14]}
+
+test cb-decisions {synchronous decisions C acts on at once, checked by C's own arithmetic: parity answers (0 wrong), a filter whose sum C computes, a void callback of no arguments, and a tight loop of 1000 calls} -constraints cbFixture -body {
+    cbAgree "import std::ffi::c\nimport cbx\n\ncallback c fn is_even(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if mod(x, 2) == 0:\n        return 1\n    0\n\ncallback c fn keep_small(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x < 10:\n        return 1\n    0\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000000 or x < -1000000:\n        return 0\n    x * 2\n\ncallback c fn bump() -> unit:\n    cbx::plain(1)\n    unit\n\ne = std::ffi::c::callback(is_even)\nk = std::ffi::c::callback(keep_small)\nt = std::ffi::c::callback(twice)\nb = std::ffi::c::callback(bump)\n\[cbx::check_parity(e, 50), cbx::filter_sum(k, 100), cbx::tick(b, 7), cbx::sum(t, 1000)\]\n"
+} -cleanup removeCbApps -result {same: [0, 45, 7, 999000]}
+
+test cb-nested-gc {the central test: Botlish main holds heap values, C outer calls callback 1, which allocates (collecting at every allocation under GC stress) and calls C inner, whose callback 2 allocates and returns; main's values survive and the results are C's -- with C's frame-pointer register holding no frame at both calls} -constraints cbFixture -body {
+    cbAgree $::cbNested
+} -cleanup removeCbApps -result {same: ["keep1", "keep2", "205"]}
+
+test cb-recursion {re-entry 300 levels deep: each callback calls C, which calls the callback again (no frame chain), and C checks every level's answer; repeated entry and exit leave no activation behind} -constraints cbFixture -body {
+    cbAgree "import std::ffi::c\nimport std::int\nimport std::str\nimport cbx\n\ncallback c fn rec(depth: std::ffi::c::Int) -> std::ffi::c::Int:\n    if depth <= 0:\n        return 0\n    s = std::str::concat(\"level\", std::int::to_string(depth))\n    self = std::ffi::c::callback(rec)\n    r = cbx::recurse(self, depth - 1)\n    if r < 0 or r > 100000 or std::str::length(s) < 6:\n        return -1\n    r + 1\n\nr = std::ffi::c::callback(rec)\n\[cbx::recurse(r, 300), cbx::recurse(r, 10), cbx::recursion_errors()\]\n"
+} -cleanup removeCbApps -result {same: [300, 10, 0]}
+
+test cb-scalars {every C integer class and _Bool and a pointer, at their limits, in and out of a callback (C counts the answers that are not what it passed: 0 each), the 64-bit ones beyond the small-Int range} -constraints cbFixture -body {
+    set callbacks ""
+    set calls {}
+    foreach {name type} {schar SChar uchar UChar short Short ushort UShort int Int uint UInt longlong LongLong ulonglong ULongLong bool Bool} {
+        append callbacks "callback c fn e_$name\(x: std::ffi::c::$type) -> std::ffi::c::$type:\n    x\n\n"
+        lappend calls "cbx::echo_$name\(std::ffi::c::callback(e_$name))"
+    }
+    append callbacks "callback c fn e_pointer(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Ptr\[std::ffi::c::Void\]:\n    p\n\n"
+    set binds [join [lmap call [concat $calls [list "cbx::echo_pointer(std::ffi::c::callback(e_pointer))"]] {
+        regexp {callback\((\w+)\)} $call -> f
+        string cat "    $f = std::ffi::c::callback($f)\n"
+    }] ""]
+    set uses [join [lmap call [concat $calls [list "cbx::echo_pointer(std::ffi::c::callback(e_pointer))"]] {
+        regexp {^(\S+)\(std::ffi::c::callback\((\w+)\)\)$} $call -> fn f
+        string cat "$fn\($f)"
+    }] ", "]
+    cbAgree "import std::ffi::c\nimport cbx\n\n${callbacks}fn run():\n$binds    \[$uses\]\n\nrun()\n"
+} -cleanup removeCbApps -result {same: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}
+
+test cb-raw-floats {raw floating values cross exactly: every bit pattern -- signaling NaNs with payloads, negative NaN, both infinities, negative zero, subnormals -- comes back unchanged through RawDouble and RawFloat callbacks, its bits inspected in Botlish are C's, its classification is C's, and an explicit admission returns the finite ones as C doubles (C counts the wrong answers: 0 each)} -constraints cbFixture -body {
+    cbAgree "import std::ffi::c\nimport std::ffi::c::raw\nimport cbx\n\ncallback c fn same_double(x: std::ffi::c::RawDouble) -> std::ffi::c::RawDouble:\n    x\n\ncallback c fn same_float(x: std::ffi::c::RawFloat) -> std::ffi::c::RawFloat:\n    x\n\ncallback c fn double_bits(x: std::ffi::c::RawDouble) -> std::ffi::c::ULongLong:\n    std::ffi::c::raw::double_to_bits(x)\n\ncallback c fn float_bits(x: std::ffi::c::RawFloat) -> std::ffi::c::UInt:\n    std::ffi::c::raw::float_to_bits(x)\n\ncallback c fn classify(x: std::ffi::c::RawDouble) -> std::ffi::c::Int:\n    if std::ffi::c::raw::double_nan?(x):\n        return 1\n    if std::ffi::c::raw::double_infinite?(x):\n        return 2\n    0\n\ncallback c fn admit(x: std::ffi::c::RawDouble) -> Float64:\n    std::ffi::c::raw::double_to_float64(x):\n        on NonFiniteFloat:\n            return -1.0\n\nfn run():\n    a = std::ffi::c::callback(same_double)\n    b = std::ffi::c::callback(same_float)\n    c = std::ffi::c::callback(double_bits)\n    d = std::ffi::c::callback(float_bits)\n    e = std::ffi::c::callback(classify)\n    f = std::ffi::c::callback(admit)\n    \[cbx::double_patterns(), cbx::roundtrip_doubles(a), cbx::roundtrip_floats(b), cbx::bits_doubles(c), cbx::bits_floats(d), cbx::classify_doubles(e), cbx::admit_doubles(f)\]\n\nrun()\n"
+} -cleanup removeCbApps -result {same: [13, 0, 0, 0, 0, 0, 0]}
+
+test cb-mixed-abi {a callback of 23 mixed parameters -- every integer width, raw floats and doubles, a _Bool, a pointer -- past every convention's argument registers, so some arrive on the stack: each argument handed back to C equals what C passed, and C checks the int sum the callback returns (0 wrong)} -constraints cbFixture -body {
+    set records {}
+    set index 0
+    foreach {name kind} {a0 int d0 double a1 int f0 float a2 int d1 double a3 int f1 float a4 int d2 double a5 int d3 double a6 int d4 double a7 bits d5 double a8 int d6 double d7 double d8 double a9 int b0 bool p0 pointer} {
+        switch -- $kind {
+            int { append records "    cbx::record_int($index, $name)\n" }
+            bits { append records "    cbx::record_bits($index, $name)\n" }
+            double { append records "    cbx::record_bits($index, std::ffi::c::raw::double_to_bits($name))\n" }
+            float { append records "    cbx::record_bits($index, std::ffi::c::raw::float_to_bits($name))\n" }
+            bool { append records "    if $name:\n        cbx::record_int($index, 1)\n    else:\n        cbx::record_int($index, 0)\n" }
+            pointer { append records "    cbx::record_pointer($index, $name)\n" }
+        }
+        incr index
+    }
+    set params "a0: std::ffi::c::SChar, d0: std::ffi::c::RawDouble, a1: std::ffi::c::UShort, f0: std::ffi::c::RawFloat, a2: std::ffi::c::Int, d1: std::ffi::c::RawDouble, a3: std::ffi::c::LongLong, f1: std::ffi::c::RawFloat, a4: std::ffi::c::UChar, d2: std::ffi::c::RawDouble, a5: std::ffi::c::Short, d3: std::ffi::c::RawDouble, a6: std::ffi::c::UInt, d4: std::ffi::c::RawDouble, a7: std::ffi::c::ULongLong, d5: std::ffi::c::RawDouble, a8: std::ffi::c::Int, d6: std::ffi::c::RawDouble, d7: std::ffi::c::RawDouble, d8: std::ffi::c::RawDouble, a9: std::ffi::c::Int, b0: std::ffi::c::Bool, p0: std::ffi::c::Ptr\[std::ffi::c::Void\]"
+    cbAgree "import std::ffi::c\nimport std::ffi::c::raw\nimport cbx\n\ncallback c fn mixed($params) -> std::ffi::c::LongLong:\n${records}    a0 + a1 + a2 + a4 + a5 + a8 + a9\n\nm = std::ffi::c::callback(mixed)\ncbx::mixed(m)\n"
+} -cleanup removeCbApps -result {same: 0}
+
+test cb-exposure-survives {a byte exposure of the outer call stays valid and unchanged across a callback that allocates (and collects): C reads the exposed bytes before and after the callback (0: unchanged, and the callback's answer right)} -constraints cbFixture -body {
+    cbAgree "import std::ffi::c\nimport std::abi\nimport std::abi::bytes\nimport std::list\nimport std::str\nimport std::int\nimport cbx\n\nfn churn(n: int) -> int:\n    xs = loop i from 0 to n:\n        std::str::concat(\"x\", std::int::to_string(i))\n    std::list::length(xs)\n\ncallback c fn triple(x: std::ffi::c::LongLong) -> std::ffi::c::LongLong:\n    k = churn(64)\n    if x > 1000 or x < -1000 or k != 64:\n        return 0\n    x * 3\n\ndata = std::abi::bytes::from_list(std::str::encode_utf8(\"an exposed storage the callback must not disturb\"))\ncb = std::ffi::c::callback(triple)\nn = std::abi::bytes::length(data).value\nif n > 1000:\n    0\nelse:\n    cbx::bytes_around(data, n, cb, 14)\n"
+} -cleanup removeCbApps -result {same: 0}
+
+test cb-coroutines {a callback runs a coroutine to completion within its call (its yields stay inside the callback), and a coroutine's body calls C that calls back: on its own stack, nested in the same execution environment} -constraints cbFixture -body {
+    set program "import std::ffi::c\nimport cbx\n\nfn counter(start: std::ffi::c::Int) -> int:\n    loop i from 0 to 3:\n        yield start + i\n    start + 3\n\ncallback c fn steps(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    coroutine {step, first} = counter(x)\n    second = step()\n    if first > 1000 or second > 1000 or first < -1000 or second < -1000:\n        return 0\n    first + second\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\nfn producer() -> int:\n    cb = std::ffi::c::callback(twice)\n    loop i from 0 to 3:\n        yield cbx::apply(cb, i + 5)\n    100\n\nfn main():\n    s = std::ffi::c::callback(steps)\n    r1 = cbx::apply(s, 10)\n    coroutine {step, first} = producer()\n    second = step()\n    \[r1, first, second\]\n\nmain()\n"
+    list [cbAgree $program] [withoutCoroutineFusion {cbAgree $program}]
+} -cleanup removeCbApps -result {{same: [21, 10, 12]} {same: [21, 10, 12]}}
+
+test cb-qsort {a real C library calls back: the system C library's qsort sorts byte storage it writes (a write noescape exposure) with a Botlish comparator that reads the elements through native views, synchronously, during the call} -constraints cbNative -body {
+    set program {direct module
+import std::ffi::c
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+
+extern c fn qsort(base: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, count: std::ffi::c::ULong, size: std::ffi::c::ULong, compare: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}] noescape) -> unit
+
+layout Byte:
+    size 1
+    align 1
+    field v: std::binary::U8 at 0
+
+callback c fn compare(a: std::ffi::c::Ptr[std::ffi::c::Void], b: std::ffi::c::Ptr[std::ffi::c::Void]) -> std::ffi::c::Int:
+    x = std::binary::native::view(Byte, a):
+        on NativeViewNull:
+            return 0
+    y = std::binary::native::view(Byte, b):
+        on NativeViewNull:
+            return 0
+    if x.v < y.v:
+        return -1
+    if x.v > y.v:
+        return 1
+    0
+
+fn byte(n: int) -> std::byte::Byte:
+    if n >= 0 and n <= 255:
+        return n
+    0
+
+fn bytes(values: List[int]) -> std::abi::bytes::Bytes:
+    bs = loop n in values:
+        byte(n)
+    std::abi::bytes::from_list(bs)
+
+data = std::abi::bytes::from_bytes(bytes([9, 3, 7, 1, 8, 2, 200, 0]))
+cmp = std::ffi::c::callback(compare)
+sorted = qsort(data, 8, 1, cmp)
+[std::abi::bytes::freeze(sorted.base) == bytes([0, 1, 2, 3, 7, 8, 9, 200]), std::abi::bytes::freeze(data) == bytes([9, 3, 7, 1, 8, 2, 200, 0])]
+}
+    if {[core::cabi::hostTarget] eq "linux-aarch64" || [core::cabi::hostTarget] eq "linux-x86_64" || [core::cabi::hostTarget] eq "macos-aarch64"} {
+        set dir [cbApp [list main.bot $program]]
+        set hir [cbHir $dir]
+        set saved [expr {[info exists ::env(BOTLISH_NATIVE_GC_STRESS)] ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+        set outcomes {}
+        foreach stress {0 1} {
+            if {$stress} { set ::env(BOTLISH_NATIVE_GC_STRESS) 1 }
+            foreach backend {cranelift cranelift-generic} {
+                lappend outcomes [lindex [outcomeUnderHir $backend $hir] 1]
+            }
+        }
+        if {$saved eq ""} { unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
+        lsort -unique $outcomes
+    }
+} -cleanup removeCbApps -result {{[true, true]}}
+
+test cb-executable {a standalone executable runs the nested callbacks with no Tcl, no JIT and no source -- moved out of its build directory, run with an empty environment -- and under GC stress} -constraints cbFixture -body {
+    set dir [cbxApp $::cbNested]
+    set exe [native::withLinkDirs [list $::cbFixtureDir] {native::executable [cbHir $dir] [file join $dir program]}]
+    set elsewhere [makeDirectory cb-moved-[pid]]
+    set moved [file join $elsewhere [file tail $exe]]
+    file rename $exe $moved
+    file delete -force $dir
+    list [string trim [runBare $moved]] [string trim [exec env -i BOTLISH_NATIVE_GC_STRESS=1 $moved]]
+} -cleanup {removeCbApps; file delete -force [file join [temporaryDirectory] cb-moved-[pid]]} -result {{["keep1", "keep2", "205"]} {["keep1", "keep2", "205"]}}
+
+# ---------------------------------------------------------------------------
+# What the runtime refuses: each ends the (linked) program's process, fail-
+# closed, before any Botlish code of the callback runs
+
+test cb-refused-thread {C calling a callback on another thread -- a real C thread, while the Botlish thread waits in the call -- is refused: NATIVE CALLBACK THREAD, nothing ran} -constraints cbFixture -body {
+    cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\ncbx::call_on_thread(cb, 5)\n" {cranelift cranelift-generic}
+} -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK THREAD} {callback twice was called on a thread with no Botlish execution environment waiting in a foreign call: a callback runs only synchronously, on the thread of the foreign call that may call it back, never on another thread; nothing ran}}]
+
+test cb-refused-retained {a callback kept past the call that gave it (a captures parameter, in a direct module) and called during a later call that may not call back is refused: NATIVE CALLBACK INACTIVE -- after the same pointer ran during a noescape call, so the activation closed when that call returned} -constraints cbFixture -body {
+    cbValues "direct module\nimport std::ffi::c\nimport cbx\n\ncallback c fn twice(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    x * 2\n\ncb = std::ffi::c::callback(twice)\nfirst = cbx::apply(cb, 4)\ncbx::store(cb)\n\[first, cbx::call_stored(5)\]\n" {cranelift cranelift-generic}
+} -cleanup removeCbApps -result [lrepeat 2 {{CALLBACK INACTIVE} {callback twice was called outside every foreign call that may call it back: C may call a callback only during a call whose contract lets it (a std::ffi::c::FnPtr parameter declared noescape), never after the call returned or during another; nothing ran}}]
+
+test cb-refused-arguments {a C argument that is no value of the parameter's C type -- a _Bool byte other than 0 or 1, an address no C address word holds -- is refused before the body runs: NATIVE CALLBACK ARGUMENT} -constraints cbFixture -body {
+    list [cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn takes(b: std::ffi::c::Bool) -> std::ffi::c::Int:\n    if b:\n        return 1\n    0\n\ncb = std::ffi::c::callback(takes)\ncbx::bad_bool(cb)\n" {cranelift}] \
+        [cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn takes(p: std::ffi::c::Ptr\[std::ffi::c::Void\]) -> std::ffi::c::Int:\n    0\n\ncb = std::ffi::c::callback(takes)\ncbx::bad_pointer(cb)\n" {cranelift}]
+} -cleanup removeCbApps -result {{{{CALLBACK ARGUMENT} {callback takes: argument 1: the C _Bool byte 2 is neither 0 nor 1 (NATIVE BOOL); nothing ran}}} {{{CALLBACK ARGUMENT} {callback takes: argument 1: the address 0x800000000001000 is no C address word can hold (NATIVE ADDRESS); nothing ran}}}}
+
+test cb-failure-is-fatal {a run-time failure of a callback's body -- one no declared error stands for: a division by zero, an address no C pointer holds -- has no error channel to C: the process ends with NATIVE CALLBACK FAILED and the failure's own code, after the earlier, successful calls} -constraints cbFixture -body {
+    list [cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn divide(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    mod(7, x)\n\ncb = std::ffi::c::callback(divide)\n\[cbx::apply(cb, 5), cbx::apply(cb, 0)\]\n" {cranelift cranelift-generic}] \
+        [cbValues "import std::ffi::c\nimport cbx\n\ncallback c fn grab(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    p = cbx::unholdable_address()\n    0\n\ncb = std::ffi::c::callback(grab)\ncbx::apply(cb, 1)\n" {cranelift}]
+} -cleanup removeCbApps -result [list [lrepeat 2 {{CALLBACK FAILED} {callback divide failed, and a C callback has no error channel to its C caller: mod: division by zero (CORE SEMANTIC ARITHMETIC)}}] {{{CALLBACK FAILED} {callback grab failed, and a C callback has no error channel to its C caller: the C function cbx::unholdable_address returned the address 0x800000000001000, which a Botlish C pointer cannot hold (its word keeps a sign-extended 60-bit address: a top-byte-tagged pointer is not one); the pointer is never truncated or masked (NATIVE ADDRESS)}}}]
+
+test cb-stack-exhaustion {a callback that exhausts the stack ends the run with the stack guard's NATIVE LIMIT STACK, as any native code does: no unwinding into C} -constraints cbFixture -body {
+    cbValues "import std::ffi::c\nimport cbx\n\nfn deep(n: int) -> int:\n    deep(n + 1) + 1\n\ncallback c fn dive(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    r = deep(x)\n    if r > 1000 or r < -1000:\n        return 0\n    r\n\ncb = std::ffi::c::callback(dive)\ncbx::apply(cb, 1)\n" {cranelift}
+} -cleanup removeCbApps -result {{{LIMIT STACK} {native stack exhausted: too many nested calls}}}
+
+test cb-executable-failure {a standalone executable's callback failure is its message on standard error and exit status 1} -constraints cbFixture -body {
+    set dir [cbxApp "import std::ffi::c\nimport cbx\n\ncallback c fn divide(x: std::ffi::c::Int) -> std::ffi::c::Int:\n    if x > 1000 or x < -1000:\n        return 0\n    mod(7, x)\n\ncb = std::ffi::c::callback(divide)\ncbx::apply(cb, 0)\n"]
+    set exe [native::withLinkDirs [list $::cbFixtureDir] {native::executable [cbHir $dir] [file join $dir program]}]
+    set status [catch {exec $exe 2>@1} output options]
+    list $status [lindex [dict get $options -errorcode] end] [string trim [string map {"child process exited abnormally" ""} $output]]
+} -cleanup removeCbApps -result {1 1 {callback divide failed, and a C callback has no error channel to its C caller: mod: division by zero (CORE SEMANTIC ARITHMETIC) (NATIVE CALLBACK FAILED)}}
+
+cleanupTests

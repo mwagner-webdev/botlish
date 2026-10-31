@@ -278,6 +278,17 @@ pub struct Vm {
     /// walked (NATIVE-LIBRARY-MILESTONE-1.md, "The collector at the
     /// boundary"). Executables and the driver leave it 0.
     pub stack_ceiling: usize,
+    /// The foreign transitions in progress (C-CALLBACK-MILESTONE-1.md,
+    /// runtime::callback): per open call of a C function that may call back,
+    /// innermost last, the frame record of the transition shim the Botlish
+    /// frame called it through (codegen::callback). Balanced by the shim
+    /// itself (rt_ffi_open, rt_ffi_close).
+    pub foreign_open: Vec<usize>,
+    /// The callbacks running in this execution environment, innermost last:
+    /// (the callback entry's own frame record, the transition it entered
+    /// through). The collector's walk jumps from the one to the other
+    /// (framewalk::walk_segmented): C's frames between them are never read.
+    pub callback_segments: Vec<(usize, usize)>,
     /// The innermost running coroutine (COROUTINES.md, runtime/coroutine.rs),
     /// null while the main stack runs. With each running coroutine's own
     /// `resumer` link it is the chain of running coroutines: every one a GC
@@ -343,6 +354,8 @@ impl Vm {
             framemap: Rc::new(ProgramMap::new()),
             native_stack,
             stack_ceiling: 0,
+            foreign_open: Vec::new(),
+            callback_segments: Vec::new(),
             co_current: std::ptr::null_mut(),
         })
     }
@@ -367,6 +380,19 @@ impl Vm {
         }
         #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
         let _ = stack;
+    }
+
+    /// The native stack running now: the innermost running coroutine's, or
+    /// the thread's own (None on a host without stack discovery). Where a
+    /// callback must run (runtime::callback: on the stack its transition
+    /// left).
+    pub fn running_stack(&self) -> Option<NativeStack> {
+        if self.co_current.is_null() {
+            self.native_stack
+        } else {
+            // SAFETY: a running coroutine is alive while it runs.
+            unsafe { (*self.co_current).stack.as_ref().map(|s| s.bounds()) }
+        }
     }
 
     /// The stack of the thread that made this Vm, as `NativeStack::current`
@@ -597,13 +623,17 @@ impl Vm {
             stack
         });
         let current = stack_of(self.co_current, main_stack);
-        super::framewalk::walk(&self.framemap, current.as_ref(), |addr| native_frame_roots.push(unsafe { *addr }));
+        // Across the foreign transitions of callbacks in progress
+        // (C-CALLBACK-MILESTONE-1.md): C's frames between two Botlish
+        // activations are skipped, never read (framewalk::walk_segmented).
+        let jumps = &self.callback_segments;
+        super::framewalk::walk_segmented(&self.framemap, current.as_ref(), jumps, |addr| native_frame_roots.push(unsafe { *addr }));
         let mut running = self.co_current;
         while !running.is_null() {
             native_frame_roots.push(running as Value);
             let (resumer, resumer_sp) = unsafe { ((*running).resumer, (*running).resumer_sp) };
             let bounds = stack_of(resumer, main_stack);
-            super::framewalk::walk_from(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), |addr| {
+            super::framewalk::walk_from_segmented(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), jumps, |addr| {
                 native_frame_roots.push(unsafe { *addr })
             });
             running = resumer;

@@ -971,6 +971,14 @@ proc core::native::ValidShape {shape count} {
         # outward value of its segment, the resume message of a yield.
         return 1
     }
+    if {[lindex $shape 0] eq {callback-pointer}} {
+        # {callback-pointer I}: the result is the C function pointer of the
+        # `callback c fn` argument I names, a std::ffi::c::FnPtr of its
+        # declared C signature (std::ffi::c::callback,
+        # C-CALLBACK-MILESTONE-1.md), resolved by hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
+    }
     if {$shape eq {never}} {
         # {never}: the native never completes normally
         # (context#unreachable, core/contexts.tcl).

@@ -142,6 +142,9 @@
 #   functionModifier = "nomethod"   -- WARNINGS-METHOD-ELIGIBLE.md; contextual
 #                    | "exported" "c" -- NATIVE-LIBRARY-MILESTONE-1.md: a C
 #                                    export of a native library; contextual
+#                    | "callback" "c" -- C-CALLBACK-MILESTONE-1.md: a
+#                                    function C may call back synchronously
+#                                    through a std::ffi::c::FnPtr; contextual
 #                  (below): the function's author declares that it is never
 #                  called with method syntax
 #   paramList    = [ param { "," param } ] [ "," flagSection ]
@@ -445,8 +448,10 @@ namespace eval surface::parser {
     # (see the grammar above). Each names one property of the `function`
     # node: `nomethod` -> `nomethod 0|1`, `nomethodSpan`; `exported`, always
     # followed by its foreign ABI (the one is `c`: `exported c fn`,
-    # NATIVE-LIBRARY-MILESTONE-1.md) -> `exported c`, `exportedSpan`.
-    variable functionModifiers {nomethod exported}
+    # NATIVE-LIBRARY-MILESTONE-1.md) -> `exported c`, `exportedSpan`;
+    # `callback`, always followed by its foreign ABI (`callback c fn`,
+    # C-CALLBACK-MILESTONE-1.md) -> `callback c`, `callbackSpan`.
+    variable functionModifiers {nomethod exported callback}
     # The contextual words that may precede `type` in a type declaration
     # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
     variable typeModifiers {refined}
@@ -1896,8 +1901,9 @@ proc surface::parser::AtFunctionDecl {pVar} {
     upvar 1 $pVar p
     set i 0
     while {[Kind p $i] eq "IDENT" && [dict get [Peek p $i] text] in $functionModifiers} {
-        if {[dict get [Peek p $i] text] eq "exported" && [Kind p [expr {$i + 1}]] eq "IDENT"} {
-            # `exported` names its foreign ABI (`exported c fn`).
+        if {[dict get [Peek p $i] text] in {exported callback} && [Kind p [expr {$i + 1}]] eq "IDENT"} {
+            # `exported` and `callback` name their foreign ABI
+            # (`exported c fn`, `callback c fn`).
             incr i
         }
         incr i
@@ -3281,6 +3287,7 @@ proc surface::parser::Function {pVar} {
     set start [dict get [Peek p] span]
     set modifiers [dict create]
     set abi ""
+    set callbackAbi ""
     while {[Kind p] eq "IDENT"} {
         set word [Advance p]
         set text [dict get $word text]
@@ -3302,7 +3309,21 @@ proc surface::parser::Function {pVar} {
             set abi c
             set span [SpanFrom p $span]
         }
+        if {$text eq "callback"} {
+            # A C callback (C-CALLBACK-MILESTONE-1.md): the modifier names
+            # the foreign ABI C calls the function with.
+            set what [Peek p]
+            if {[dict get $what kind] ne "IDENT" || [dict get $what text] ne "c"} {
+                Fail $what "a callback names its foreign ABI: write \"callback c fn NAME(...) -> T:\" (the only foreign ABI is c), found [Describe $what]"
+            }
+            Advance p
+            set callbackAbi c
+            set span [SpanFrom p $span]
+        }
         dict set modifiers $text $span
+    }
+    if {$abi ne "" && $callbackAbi ne ""} {
+        Fail [dict create span [dict get $modifiers callback]] "a function is either a C export of a native library (exported c fn) or a C callback (callback c fn), never both: the two have different C ABIs"
     }
     Advance p
     set name [Expect p IDENT "a function name after \"fn\""]
@@ -3317,6 +3338,7 @@ proc surface::parser::Function {pVar} {
         errors [dict get $body errors] proves [dict get $body proves] body $body \
         nomethod $nomethod nomethodSpan [if {$nomethod} {dict get $modifiers nomethod} else {string cat ""}] \
         exported $abi exportedSpan [if {$abi ne ""} {dict get $modifiers exported} else {string cat ""}] \
+        callback $callbackAbi callbackSpan [if {$callbackAbi ne ""} {dict get $modifiers callback} else {string cat ""}] \
         resume $resume variadic $variadic]
 }
 

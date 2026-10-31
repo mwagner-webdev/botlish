@@ -21,7 +21,7 @@ pub mod windows;
 mod guard;
 
 #[cfg(unix)]
-pub use guard::{published_stack, set_active_stack, set_result_file, OverflowGuard};
+pub use guard::{published_stack, report_fatal, set_active_stack, set_result_file, OverflowGuard};
 #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub use linux::{current_stack, thread_token};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]

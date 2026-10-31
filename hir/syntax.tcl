@@ -322,6 +322,15 @@ proc hir::syntax::withExported {block abi} {
     return $block
 }
 
+# BLOCK (a `block` node) declared `callback ABI fn` (ABI: c): a function C
+# may call back synchronously through the C function pointer
+# std::ffi::c::callback makes of it (C-CALLBACK-MILESTONE-1.md;
+# hir/callbacks.tcl).
+proc hir::syntax::withCallback {block abi} {
+    dict set block callback $abi
+    return $block
+}
+
 # BLOCK (a `block` node) declaring a variadic section at ORIGIN
 # (VARIADICS-VERTICAL-SLICE-1.md): its last ordinary parameter is the
 # variadic one, bound at each call to the List of the call's trailing

@@ -86,6 +86,7 @@
 
 use super::construct::{rt_construct, rt_plan_materialize};
 use super::affine::rt_affine_drop;
+use super::callback::{rt_callback_call, rt_ffi_close, rt_ffi_open};
 use super::mutvec::{
     rt_mv_at, rt_mv_clear, rt_mv_clear_drop, rt_mv_empty, rt_mv_from_list, rt_mv_len, rt_mv_pop, rt_mv_push, rt_mv_share,
     rt_mv_swap, rt_mv_swap_drop, rt_mv_take, rt_mv_take_front, rt_mv_to_list,
@@ -3793,6 +3794,9 @@ macro_rules! runtime_helpers {
 
 runtime_helpers! {
     (rt_type_error, 4),
+    (rt_ffi_open, 1),
+    (rt_ffi_close, 2),
+    (rt_callback_call, 5),
     (rt_float_new, 3),
     (rt_decimal_cmp, 4),
     (rt_decimal_to_f64, 3),

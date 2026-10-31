@@ -1,0 +1,129 @@
+# c-callbacks.bot -- synchronous C callbacks (C-CALLBACK-MILESTONE-1.md):
+# the source-level specification of
+#
+#   * a `callback c fn` as Botlish code sees it: an ordinary function of its
+#     declared C types, callable on every backend, which may call other
+#     top-level functions;
+#   * the declaration's placement: a callback is top-level only, so one
+#     nested in a function (a static compile block's) is CallbackPlacement;
+#   * std::ffi::c::callback(NAME): its argument names a callback c fn --
+#     an ordinary function, a function-value parameter or the operation
+#     taken as a value is CallbackReference -- and its type is exactly the
+#     declaration's C signature, a std::ffi::c::FnPtr no other signature
+#     admits.
+#
+# Ported from tests/c-callbacks.test, which stays authoritative
+# (audit/golden/migration/fragments/c-callbacks.tsv maps every test; what
+# only Tcl observes -- C calling back (its C fixture and the system C
+# library), the run-time refusals and failures that end a process, the
+# declaration-time rejections of a top-level callback (a static compile
+# block cannot hold one: nested, it is CallbackPlacement), HIR, NIR and
+# generated code, interchange, executables and GC stress -- stays there).
+# Making a pointer is NATIVE-ONLY on the Tcl backends (a run-time failure,
+# which would abort the suite), so a body here types one, never makes one.
+#
+# Imports: compiler and test (the framework); std::ffi::c (the programs).
+import std::compiler
+import std::ffi::c
+import std::test
+
+# The callbacks the tests use: a callback c fn is top-level only.
+callback c fn sign(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    if value < 0:
+        return -1
+    0
+
+fn helper(n: std::ffi::c::Int) -> std::ffi::c::Int:
+    n
+
+callback c fn calls_helper(n: std::ffi::c::Int) -> std::ffi::c::Int:
+    helper(n)
+
+fn take_int_callback(p: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}]) -> bool:
+    p.null?()
+
+fn take_uint_callback(p: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt], return: std::ffi::c::Int}]) -> bool:
+    p.null?()
+
+fn register_c_callbacks_tests():
+    # cb-tcl-backends: the callbacks a program declares, called as ordinary
+    # functions, on every backend.
+    fn describe() errors std::compiler::CompilerError:
+        static compile:
+            [sign(5), sign(-3), sign(0)]
+    std::test::value("cb-tcl-backends/describe", [1, -1, 0], describe)
+
+    # cb-placement-environment: calling other top-level functions is no
+    # capture.
+    fn calls_other_functions() errors std::compiler::CompilerError:
+        static compile:
+            calls_helper(4)
+    std::test::value("cb-placement-environment/calls-other-functions", 4, calls_other_functions)
+
+    # cb-placement-environment: a callback nested in a function.
+    fn nested() errors std::compiler::CompilerError:
+        static compile:
+            callback c fn inner(n: std::ffi::c::Int) -> std::ffi::c::Int:
+                n
+            inner(2)
+    std::test::rejects("cb-placement-environment/nested", std::compiler::DiagnosticCode::CallbackPlacement, nested)
+
+    # cb-reference: an ordinary function has no C entry point.
+    fn ordinary_function() errors std::compiler::CompilerError:
+        static compile:
+            fn twice(n: std::ffi::c::Int) -> int:
+                n * 2
+            fn make():
+                p = std::ffi::c::callback(twice)
+                p.null?()
+            0
+    std::test::rejects("cb-reference/ordinary-function", std::compiler::DiagnosticCode::CallbackReference, ordinary_function)
+
+    # cb-reference: a parameter holding a function value names no callback.
+    fn parameter() errors std::compiler::CompilerError:
+        static compile:
+            fn make(f: Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}):
+                p = std::ffi::c::callback(f)
+                p.null?()
+            0
+    std::test::rejects("cb-reference/parameter", std::compiler::DiagnosticCode::CallbackReference, parameter)
+
+    # cb-reference: the operation taken as a value.
+    fn as_value() errors std::compiler::CompilerError:
+        static compile:
+            g = std::ffi::c::callback
+            0
+    std::test::rejects("cb-reference/as-value", std::compiler::DiagnosticCode::CallbackReference, as_value)
+
+    # cb-pointer-type: the pointer is a FnPtr of exactly the declaration's
+    # C signature (typed here, made nowhere: the function is never called).
+    fn exact_signature() errors std::compiler::CompilerError:
+        static compile:
+            fn make() -> bool:
+                cb = std::ffi::c::callback(sign)
+                take_int_callback(cb)
+            0
+    std::test::value("cb-pointer-type/exact-signature", 0, exact_signature)
+
+    # cb-pointer-type: another signature admits it nowhere.
+    fn other_signature() errors std::compiler::CompilerError:
+        static compile:
+            fn make() -> bool:
+                cb = std::ffi::c::callback(sign)
+                take_uint_callback(cb)
+            0
+    std::test::rejects("cb-pointer-type/other-signature", std::compiler::DiagnosticCode::Type, other_signature)
+
+    # cb-reference: a Botlish function value is no C function pointer.
+    fn function_value() errors std::compiler::CompilerError:
+        static compile:
+            fn make() -> bool:
+                take_int_callback(sign)
+            0
+    std::test::rejects("cb-reference/function-value", std::compiler::DiagnosticCode::Type, function_value)
+
+with context std::test::suite()
+register_c_callbacks_tests()
+std::test::report()

@@ -119,6 +119,24 @@ proc hir::foreign::AbiClass {type} {
     return [expr {[dict get $info signed] ? "i" : "u"}][dict get $info bits]
 }
 
+# 1 if the foreign call contract CONTRACT lets its C function call back into
+# the calling Botlish execution environment during the call
+# (C-CALLBACK-MILESTONE-1.md): it has a C function pointer parameter whose
+# escape is noescape (declared or proven) -- C may call the pointer while
+# the call runs and keeps it no longer. A data pointer's noescape says
+# nothing of callbacks, and an unknown or capturing function pointer
+# parameter is no permission: the runtime refuses a callback outside a
+# call of such a function.
+proc hir::foreign::CallsBack {contract} {
+    foreach param [dict get $contract params] {
+        if {[hir::types::IsCFnPtr [dict get $param type]] && [dict exists $param escape]
+                && [core::cabi::isNoescape [dict get $param escape]]} {
+            return 1
+        }
+    }
+    return 0
+}
+
 # Registers DECLS (surface/lower.tcl's ExternDeclOf dicts, across every unit
 # the program loads) as this compilation's extern natives, and LINKDECLS
 # (LinkDeclOf dicts) as its link plan. An invalid declaration is a located

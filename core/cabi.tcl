@@ -800,6 +800,22 @@ core::native::register std::ffi::c::retype -arity 1 -impl core::cabi::sameImpl \
     -param-types {cptr} -result-type cptr -ownership {move} \
     -imprint {vars {T} params {{cptr void}} result {cptr {imprint T}}}
 
+# std::ffi::c::callback(NAME) (C-CALLBACK-MILESTONE-1.md): the C function
+# pointer of the `callback c fn` NAME, typed by its declaration's C
+# signature (hir::types::ShapeResult's `callback-pointer`; hir/callbacks.tcl
+# checks that its argument names one). Natively the address of the
+# callback's C entry point (native/lower.tcl's `cbaddr`); the Tcl backends
+# have no machine for C to call back into, so making one is NATIVE-ONLY
+# there (a program that declares callbacks and calls them as ordinary
+# functions runs on every backend).
+core::native::register std::ffi::c::callback -arity 1 -impl core::cabi::callbackImpl \
+    -param-types {any} -result-type cptr -result-shape {callback-pointer 0} -ownership {observe}
+
+proc core::cabi::callbackImpl {f} {
+    core::semanticError NATIVE-ONLY \
+        "std::ffi::c::callback makes a C function pointer C calls back into the running program, which only the native backends (cranelift, cranelift-generic, a native executable) have: the Tcl backends have no machine for C to call"
+}
+
 # The private C pointer test fixture (C-ABI-TYPES.md, "Testing"). This
 # milestone has no source of a non-null pointer: no C call, no exported
 # function. Tests that must see one call this from Tcl, in their own process,

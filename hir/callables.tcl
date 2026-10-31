@@ -659,6 +659,17 @@ proc hir::callables::ArgContexts {hir e} {
     set result [hir::typeOf $hir $e]
     set elem [hir::types::elementOf $result]
     switch -- [lindex $shape 0] {
+        callback-pointer {
+            # std::ffi::c::callback(NAME) (C-CALLBACK-MILESTONE-1.md): the
+            # callback leaves as a C function pointer whose every call
+            # converts C's values into exactly its declared parameter types
+            # (hir/callbacks.tcl: only total conversions), so its contract
+            # is kept by construction.
+            lassign $shape _ f
+            set contexts $none
+            lset contexts $f [hir::typeOf $hir [lindex $args $f]]
+            return $contexts
+        }
         elements {
             if {$elem ne ""} {
                 return [lrepeat [llength $args] $elem]

@@ -261,7 +261,7 @@ test ca-namespace-members {the namespace's operations are its intrinsic members;
     list [core::native::qualifiedMembers std::ffi::c] \
         [caError "import std::ffi::c\nopaque struct A:\n    t: unit\n\np = std::ffi::c::Ptr\[A\](1234)\n1\n"] \
         [lindex [caError "import std::ffi::c\np = std::ffi::c::from_int(1234)\n1\n"] 0]
-} -result {{clone erase null null? retype} {UNKNOWN-SYMBOL {std::ffi::c::Ptr is a type, not a value or a function: no pointer is made from an Int or constructed from fields (pointers come from std::ffi::c::null[T](), and later from C itself)}} UNKNOWN-SYMBOL}
+} -result {{callback clone erase null null? retype} {UNKNOWN-SYMBOL {std::ffi::c::Ptr is a type, not a value or a function: no pointer is made from an Int or constructed from fields (pointers come from std::ffi::c::null[T](), and later from C itself)}} UNKNOWN-SYMBOL}
 
 # ---------------------------------------------------------------------------
 # std::ffi::c::Void

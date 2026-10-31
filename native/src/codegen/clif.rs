@@ -153,6 +153,17 @@ pub struct Symbols {
     /// their positions' integer registers: (foreign index, what the stub
     /// does) -> the stub's local function.
     pub va_stubs: HashMap<(u32, VaStub), ModuleFuncId>,
+    /// The transition shims of the program's calls of C functions that may
+    /// call back (C-CALLBACK-MILESTONE-1.md, codegen::callback): (foreign
+    /// index, the call's trailing arguments) -> the shim and its signature
+    /// (the call's C signature with the Vm first).
+    pub shims: HashMap<(u32, Vec<nir::VarArg>), (ModuleFuncId, Signature)>,
+    /// Per callback (nir::Program::callbacks): its C entry point, a local
+    /// function in the target's C calling convention (codegen::callback).
+    pub callbacks: Vec<ModuleFuncId>,
+    /// The CLIF of each transition shim and callback entry point, for
+    /// listings (`--clif`): what codegen::callback compiled.
+    pub callback_clif: Vec<String>,
 }
 
 /// How many machine words F's direct function returns. Ordinarily
@@ -213,7 +224,7 @@ fn signature_n<M: Module>(module: &M, params: usize, results: usize) -> Signatur
 /// The Cranelift type of C ABI class C (a pointer is a 64-bit word, a C
 /// float and a C double the floating-point classes' F32 and F64: the C
 /// type's own width, never its Float64 carrier's, C-FLOAT-FFI-MILESTONE-1.md).
-fn c_type(c: nir::CAbi) -> ir::Type {
+pub(super) fn c_type(c: nir::CAbi) -> ir::Type {
     // (A raw float or double is its finite counterpart's machine type:
     // RAW-C-FLOAT-FFI-MILESTONE-1.md.)
     let c = c.machine_floating();
@@ -307,7 +318,7 @@ fn c_signature<M: Module>(module: &M, decl: &nir::ForeignDecl) -> Signature {
 ///     an I64 (its value extended to 64 bits by its promoted class) or an
 ///     F64, whose natural slot is 8 bytes at 8-byte alignment: the slot
 ///     Apple's convention gives it, after any fixed stack argument.
-fn c_call_signature<M: Module>(
+pub(super) fn c_call_signature<M: Module>(
     module: &M,
     decl: &nir::ForeignDecl,
     varargs: &[nir::VarArg],
@@ -414,7 +425,7 @@ impl std::fmt::Display for VaStub {
 /// always (%al), on Win64 when a float or a double is among the first four
 /// arguments (none there: nothing to copy, the call is direct); never under
 /// the AArch64 conventions, whose signatures state everything.
-fn va_stub_for<M: Module>(module: &M, sig: &Signature) -> Option<VaStub> {
+pub(super) fn va_stub_for<M: Module>(module: &M, sig: &Signature) -> Option<VaStub> {
     if module.isa().name() != "x64" {
         return None;
     }
@@ -485,7 +496,7 @@ fn va_stub_code(kind: VaStub, pic: bool) -> (Vec<u8>, u32, cranelift_codegen::bi
     }
 }
 
-fn module_error(e: cranelift_module::ModuleError) -> BackendError {
+pub(super) fn module_error(e: cranelift_module::ModuleError) -> BackendError {
     BackendError::Codegen(format!("{e:?}"))
 }
 
@@ -507,6 +518,9 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, 
         context_pc_relative: export,
         foreigns: vec![],
         va_stubs: HashMap::new(),
+        shims: HashMap::new(),
+        callbacks: vec![],
+        callback_clif: vec![],
     };
     if program.context_bytes > 0 {
         // The context area (CONTEXTS.md): every context slot, at the offsets
@@ -586,6 +600,10 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool, 
         symbols.names.insert(id.as_u32(), name);
         symbols.entry.push(id);
     }
+    // The C side of callbacks (C-CALLBACK-MILESTONE-1.md): a transition shim
+    // per call shape of a C function that may call back, an entry point per
+    // callback -- local functions, defined here.
+    super::callback::define(module, program, &mut symbols)?;
     Ok(symbols)
 }
 
@@ -1406,7 +1424,29 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             words.push(word);
             values.push(if class.bits() < 64 { self.b.ins().ireduce(c_type(class), word) } else { word });
         }
-        let r = if decl.variadic {
+        let r = if decl.callbacks {
+            // A C function that may call back (C-CALLBACK-MILESTONE-1.md):
+            // called through this call shape's transition shim
+            // (codegen::callback), the Vm first -- the shim records the
+            // transition the runtime runs callbacks in, and whose frame
+            // record the collector's walk of a callback jumps to: its
+            // return address is this call, a safepoint.
+            let (shim, shim_signature) = self.symbols.shims.get(&(foreign, varargs.to_vec())).cloned().ok_or_else(|| {
+                BackendError::Bug(format!("no transition shim for the call of {}", decl.name))
+            })?;
+            values.insert(0, self.vm);
+            let sig_ref = self.b.func.import_signature(shim_signature);
+            let user = self
+                .b
+                .func
+                .declare_imported_user_function(ir::UserExternalName { namespace: 0, index: shim.as_u32() });
+            self.b.func.import_function(ir::ExtFuncData {
+                name: ir::ExternalName::user(user),
+                signature: sig_ref,
+                colocated: true,
+                patchable: false,
+            })
+        } else if decl.variadic {
             // This call's own signature, the callee the C function itself --
             // or, on x86-64, its stub (`va_stub_for`: System V's %al, Win64's
             // copies of the first four positions' floating-point arguments).
@@ -2093,6 +2133,19 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             Inst::FnValue { dst, func } => {
                 let v = self.constant(Const::FnValue(*func));
+                self.def(*dst, v);
+            }
+            Inst::CallbackAddress { dst, callback } => {
+                // The callback's C entry point (codegen::callback), as a C
+                // address word: its address, tagged (runtime::value's
+                // make_cptr). Code addresses fit the word's 60 bits.
+                let id = *self.symbols.callbacks.get(*callback as usize).ok_or_else(|| {
+                    BackendError::Bug(format!("cbaddr of undeclared callback {callback}"))
+                })?;
+                let fref = self.func_ref(id);
+                let address = self.b.ins().func_addr(I64, fref);
+                let shifted = self.b.ins().ishl_imm_u(address, 4);
+                let v = self.b.ins().bor_imm_u(shifted, crate::runtime::value::CPTR_TAG as i64);
                 self.def(*dst, v);
             }
             Inst::SelfClosure { dst } => {
@@ -3786,6 +3839,7 @@ fn call_disassembly(
         result,
         alias: None,
         variadic: false,
+        callbacks: false,
     };
     let callee = module.declare_function("callee", Linkage::Import, &signature(&module, &decl)).unwrap();
     let mut sig = module.make_signature();
@@ -3931,6 +3985,7 @@ mod apple_tests {
             result: nir::CAbi::I32,
             alias: None,
             variadic: true,
+            callbacks: false,
         };
         let (signature, padding) = c_call_signature(&module, &decl, varargs).unwrap();
         let mut sig = module.make_signature();
@@ -4025,6 +4080,7 @@ mod apple_tests {
             result: nir::CAbi::Void,
             alias: None,
             variadic: true,
+            callbacks: false,
         };
         let (_, doubles) = c_call_signature(&module, &decl, &[DOUBLE, DOUBLE]).unwrap();
         let (_, ints) = c_call_signature(&module, &decl, &[INT]).unwrap();
@@ -4058,6 +4114,7 @@ mod apple_tests {
             result: nir::CAbi::Bool,
             alias: None,
             variadic: true,
+            callbacks: false,
         };
         let (_, padding) = c_call_signature(&module, &decl, &[INT, DOUBLE]).unwrap();
         let mut expected = vec![I64; 6];
@@ -4089,6 +4146,7 @@ mod apple_tests {
             result: nir::CAbi::I32,
             alias: None,
             variadic: true,
+            callbacks: false,
         };
         let error = c_call_signature(&module, &decl, &[DOUBLE]).unwrap_err();
         assert!(matches!(&error, BackendError::Codegen(m) if m.contains("windows_fastcall")), "{error:?}");
@@ -4146,6 +4204,7 @@ mod x86_64_variadic_tests {
             result: nir::CAbi::I32,
             alias: None,
             variadic: true,
+            callbacks: false,
         };
         let int = nir::VarArg { class: nir::CAbi::U8, promoted: nir::CAbi::I32 };
         let double = nir::VarArg { class: nir::CAbi::F64, promoted: nir::CAbi::F64 };
@@ -4174,6 +4233,7 @@ mod x86_64_variadic_tests {
             result: nir::CAbi::Bool,
             alias: None,
             variadic: true,
+            callbacks: false,
         };
         let double = nir::VarArg { class: nir::CAbi::F64, promoted: nir::CAbi::F64 };
         let (sig, _) = c_call_signature(&module, &decl, &[]).unwrap();
@@ -4253,6 +4313,7 @@ mod win64_variadic_tests {
             result: nir::CAbi::I32,
             alias: None,
             variadic: true,
+            callbacks: false,
         }
     }
 

@@ -12,6 +12,7 @@
 //! program means.
 
 pub mod aot;
+pub mod callback;
 pub mod clif;
 pub mod fusion;
 pub mod library;
@@ -254,7 +255,16 @@ impl CraneliftJit {
         let symbols = clif::declare(&mut module, program, false, false)?;
         let mut pool = ConstPool::default();
         let mut sites = Vec::new();
-        let mut listing = options.clif.then(|| clif::legend(&symbols));
+        let mut listing = options.clif.then(|| {
+            // The legend, then the C side of callbacks (codegen::callback):
+            // each transition shim and callback entry point, as compiled.
+            let mut text = clif::legend(&symbols);
+            for shown in &symbols.callback_clif {
+                text.push('\n');
+                text.push_str(shown);
+            }
+            text
+        });
         let mut code_sizes = Vec::with_capacity(program.functions.len());
         let mut defines = Vec::with_capacity(program.functions.len());
         for f in &program.functions {

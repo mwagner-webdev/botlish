@@ -1,0 +1,62 @@
+# cbx.bot -- the binding of tests/cffi/callback-fixture.c (tests/c-callbacks.test,
+# bench/c-callbacks.tcl; C-CALLBACK-MILESTONE-1.md). A test copies it beside
+# its program as the application module `cbx`.
+#
+# Every function pointer parameter C calls during the call and keeps no
+# longer is declared noescape: those are the calls during which C may call
+# back (every call of one is a foreign transition). `store` keeps its
+# pointer (`captures`): a retaining C call, which only a direct module may
+# make (hir/direct.tcl), and whose pointer C may call later only to have
+# the runtime refuse it.
+import std::ffi::c
+
+extern c library "botlish_callback_fixture"
+
+extern c fn apply named "cbx_apply"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn add named "cbx_add"(a: std::ffi::c::Int, b: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn check_parity named "cbx_check_parity"(is_even: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, n: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn filter_sum named "cbx_filter_sum"(keep: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, n: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn tick named "cbx_tick"(f: std::ffi::c::FnPtr[Fn{args: [], return: unit}] noescape, n: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn sum named "cbx_sum"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, n: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn plain named "cbx_plain"(x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn outer named "cbx_outer"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn inner named "cbx_inner"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn recurse named "cbx_recurse"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, depth: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn recursion_errors named "cbx_recursion_errors"() -> std::ffi::c::Int
+
+extern c fn echo_schar named "cbx_echo_limits_schar"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::SChar], return: std::ffi::c::SChar}] noescape) -> std::ffi::c::Int
+extern c fn echo_uchar named "cbx_echo_limits_uchar"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UChar], return: std::ffi::c::UChar}] noescape) -> std::ffi::c::Int
+extern c fn echo_short named "cbx_echo_limits_short"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Short], return: std::ffi::c::Short}] noescape) -> std::ffi::c::Int
+extern c fn echo_ushort named "cbx_echo_limits_ushort"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UShort], return: std::ffi::c::UShort}] noescape) -> std::ffi::c::Int
+extern c fn echo_int named "cbx_echo_limits_int"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape) -> std::ffi::c::Int
+extern c fn echo_uint named "cbx_echo_limits_uint"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt], return: std::ffi::c::UInt}] noescape) -> std::ffi::c::Int
+extern c fn echo_longlong named "cbx_echo_limits_longlong"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::LongLong], return: std::ffi::c::LongLong}] noescape) -> std::ffi::c::Int
+extern c fn echo_ulonglong named "cbx_echo_limits_ulonglong"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::ULongLong], return: std::ffi::c::ULongLong}] noescape) -> std::ffi::c::Int
+extern c fn echo_bool named "cbx_echo_bool"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Bool], return: std::ffi::c::Bool}] noescape) -> std::ffi::c::Int
+extern c fn echo_pointer named "cbx_echo_pointer"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Ptr[std::ffi::c::Void]}] noescape) -> std::ffi::c::Int
+
+extern c fn double_patterns named "cbx_double_patterns"() -> std::ffi::c::Int
+extern c fn roundtrip_doubles named "cbx_roundtrip_doubles"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawDouble], return: std::ffi::c::RawDouble}] noescape) -> std::ffi::c::Int
+extern c fn roundtrip_floats named "cbx_roundtrip_floats"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawFloat], return: std::ffi::c::RawFloat}] noescape) -> std::ffi::c::Int
+extern c fn bits_doubles named "cbx_bits_doubles"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawDouble], return: std::ffi::c::ULongLong}] noescape) -> std::ffi::c::Int
+extern c fn bits_floats named "cbx_bits_floats"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawFloat], return: std::ffi::c::UInt}] noescape) -> std::ffi::c::Int
+extern c fn classify_doubles named "cbx_classify_doubles"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawDouble], return: std::ffi::c::Int}] noescape) -> std::ffi::c::Int
+extern c fn admit_doubles named "cbx_admit_doubles"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawDouble], return: std::ffi::c::Double}] noescape) -> std::ffi::c::Int
+extern c fn bench_doubles named "cbx_bench_doubles"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawDouble], return: std::ffi::c::RawDouble}] noescape, n: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn bench_floats named "cbx_bench_floats"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawFloat], return: std::ffi::c::RawFloat}] noescape, n: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn bench_double_in named "cbx_bench_double_in"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawDouble], return: std::ffi::c::Int}] noescape, n: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn bench_float_in named "cbx_bench_float_in"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::RawFloat], return: std::ffi::c::Int}] noescape, n: std::ffi::c::Int) -> std::ffi::c::LongLong
+
+extern c fn mixed named "cbx_mixed"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::SChar, std::ffi::c::RawDouble, std::ffi::c::UShort, std::ffi::c::RawFloat, std::ffi::c::Int, std::ffi::c::RawDouble, std::ffi::c::LongLong, std::ffi::c::RawFloat, std::ffi::c::UChar, std::ffi::c::RawDouble, std::ffi::c::Short, std::ffi::c::RawDouble, std::ffi::c::UInt, std::ffi::c::RawDouble, std::ffi::c::ULongLong, std::ffi::c::RawDouble, std::ffi::c::Int, std::ffi::c::RawDouble, std::ffi::c::RawDouble, std::ffi::c::RawDouble, std::ffi::c::Int, std::ffi::c::Bool, std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::LongLong}] noescape) -> std::ffi::c::Int
+extern c fn record_int named "cbx_record_int"(index: std::ffi::c::Int, value: std::ffi::c::LongLong) -> unit
+extern c fn record_bits named "cbx_record_bits"(index: std::ffi::c::Int, bits: std::ffi::c::ULongLong) -> unit
+extern c fn record_pointer named "cbx_record_pointer"(index: std::ffi::c::Int, p: std::ffi::c::Ptr[std::ffi::c::Void] noescape) -> unit
+
+extern c fn bytes_around named "cbx_bytes_around"(data: std::ffi::c::Ptr[std::ffi::c::UChar] read noescape, len: std::ffi::c::ULong, f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::LongLong], return: std::ffi::c::LongLong}] noescape, x: std::ffi::c::LongLong) -> std::ffi::c::Int
+
+extern c fn call_on_thread named "cbx_call_on_thread"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn store named "cbx_store"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] captures) -> unit
+extern c fn call_stored named "cbx_call_stored"(x: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn bad_bool named "cbx_bad_bool"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Bool], return: std::ffi::c::Int}] noescape) -> std::ffi::c::Int
+extern c fn bad_pointer named "cbx_bad_pointer"(f: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}] noescape) -> std::ffi::c::Int
+extern c fn unholdable_address named "cbx_unholdable_address"() -> std::ffi::c::Ptr[std::ffi::c::Void]

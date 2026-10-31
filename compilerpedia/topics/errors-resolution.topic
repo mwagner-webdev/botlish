@@ -3856,6 +3856,151 @@ fn sum(a: DecimalRounded{minDecimalsPreserved: 2}, b: DecimalRounded{minDecimals
 @value 0.75
 @end
 
+@topic error.callback-signature
+title: CALLBACK-SIGNATURE: a callback c fn's signature has no total C form
+summary: A `callback c fn` declares C types whose conversion from or to C cannot fail, and no errors, flags, contexts, variadic parameter or resume clause.
+index: errors
+alias: callback c fn parameter type; callback signature; C callback type
+keywords: callback c fn, callback, std::ffi::c::FnPtr, RawDouble, RawFloat, Float64, Double, errors, error channel
+related: concept.c-callbacks error.callback-environment error.callback-placement error.callback-reference error.export-signature
+docs: C-CALLBACK-MILESTONE-1.md C-FFI.md
+code: CORE SEMANTIC CALLBACK-SIGNATURE
+
+== MEANING
+C calls a callback with its own values and receives one back, through no
+error channel: a conversion that could fail -- a C double admitted as a
+finite Float64, a Float64 narrowed to a C float -- would fail before the
+body runs or after it returns, with nowhere to report it. So a callback's
+parameters are the C types every C value of which is a Botlish value: the
+C integer scalars, std::ffi::c::Bool, the raw floating values
+std::ffi::c::RawFloat and std::ffi::c::RawDouble (every bit pattern), and
+pointers; its result one of those, a Float64 (every Float64 is a C double)
+or unit. Declared errors are refused too: C has no handler for them.
+
+== WHAT TO DO
+Declare C types (`-> unit` for void). For a double parameter declare
+std::ffi::c::RawDouble and admit it explicitly with
+std::ffi::c::raw::double_to_float64, handling NonFiniteFloat in the body;
+handle every error in the body.
+
+@example reject
+import std::ffi::c
+
+callback c fn f(x: int) -> std::ffi::c::Int:
+    0
+@caption A plain int is no C type
+@error CORE SEMANTIC CALLBACK-SIGNATURE
+@at 3:16
+@end
+
+@example accept
+import std::ffi::c
+
+callback c fn clamp(n: std::ffi::c::Int) -> std::ffi::c::Int:
+    if n > 100 or n < -100:
+        return 0
+    n
+
+[clamp(21), clamp(500)]
+@caption C types, and an ordinary function to Botlish callers
+@value [21, 0]
+@end
+
+@topic error.callback-placement
+title: CALLBACK-PLACEMENT: a C callback is a top-level function
+summary: A `callback c fn` is declared at the top level of a program or a module, never inside another function: C calls it with no enclosing call.
+index: errors
+alias: nested callback c fn; callback inside a function
+keywords: callback c fn, top level, nested function
+related: concept.c-callbacks error.callback-signature
+docs: C-CALLBACK-MILESTONE-1.md
+code: CORE SEMANTIC CALLBACK-PLACEMENT
+
+== WHAT TO DO
+Move the function to the top level of its file.
+
+@example reject
+import std::ffi::c
+
+fn outer() -> std::ffi::c::Int:
+    callback c fn inner(n: std::ffi::c::Int) -> std::ffi::c::Int:
+        n
+    inner(2)
+
+outer()
+@caption Declared inside another function
+@error CORE SEMANTIC CALLBACK-PLACEMENT
+@at 4:24
+@end
+
+@topic error.callback-environment
+title: CALLBACK-ENVIRONMENT: a C callback is environment-free
+summary: A `callback c fn` captures no value, requires no context and never suspends: C calls it through a bare machine address, which carries no closure, no context and no coroutine.
+index: errors
+alias: callback c fn captures; callback requires a context; callback yields
+keywords: callback c fn, capture, closure, context, yield, coroutine, module static, authority
+related: concept.c-callbacks error.callback-signature concept.contexts
+docs: C-CALLBACK-MILESTONE-1.md
+code: CORE SEMANTIC CALLBACK-ENVIRONMENT
+
+== MEANING
+Calling other top-level functions is fine; reading a top-level value of
+the entry program is capturing it. A context requirement is refused
+because a function pointer is no authority to install one, and a yield
+because no suspension crosses a C frame.
+
+== WHAT TO DO
+Move the value into an imported module (a module static), or into the
+function.
+
+@example reject
+import std::ffi::c
+
+limit = 3
+
+callback c fn capped(n: std::ffi::c::Int) -> std::ffi::c::Int:
+    if n > limit:
+        return 3
+    n
+
+capped(5)
+@caption Captures the entry program's `limit`
+@error CORE SEMANTIC CALLBACK-ENVIRONMENT
+@at 5:21
+@end
+
+@topic error.callback-reference
+title: CALLBACK-REFERENCE: std::ffi::c::callback takes a callback c fn by name
+summary: std::ffi::c::callback(NAME) makes the C function pointer of the `callback c fn` NAME; any other argument, and the operation taken as a value, are refused.
+index: errors
+alias: callback of an ordinary function; Fn to FnPtr; closure as C callback
+keywords: std::ffi::c::callback, FnPtr, Fn, closure, function value, callback c fn
+related: concept.c-callbacks stdlib.std::ffi::c::callback error.callback-signature
+docs: C-CALLBACK-MILESTONE-1.md C-ABI-TYPES.md
+code: CORE SEMANTIC CALLBACK-REFERENCE
+
+== MEANING
+A C function pointer has a C signature and a C entry point; a Botlish
+function value has neither. Nothing converts one into the other: only a
+function declared `callback c fn` has an entry point, and only its name
+says statically which one.
+
+== WHAT TO DO
+Declare the function `callback c fn` with C types, and pass its name.
+
+@example reject
+import std::ffi::c
+
+fn twice(n: std::ffi::c::Int) -> int:
+    n * 2
+
+p = std::ffi::c::callback(twice)
+0
+@caption An ordinary function has no C entry point
+@error CORE SEMANTIC CALLBACK-REFERENCE
+@at 6:5
+@end
+
 @topic error.export-signature
 title: EXPORT-SIGNATURE: an exported c fn's signature has no C form
 summary: An `exported c fn` declares every parameter as int, bool, Float64 or str and its result as one of those or unit; no flags, context parameters, variadic parameter or resume clause.

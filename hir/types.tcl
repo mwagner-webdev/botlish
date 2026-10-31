@@ -3231,6 +3231,18 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             return $result
         }
+        callback-pointer {
+            # std::ffi::c::callback(NAME) (core/cabi.tcl,
+            # C-CALLBACK-MILESTONE-1.md): the C function pointer of the
+            # `callback c fn` NAME names, of its declared C signature
+            # (hir/callbacks.tcl). Any other argument is CALLBACK-REFERENCE,
+            # and the call poison (hir::types::Call).
+            set block [hir::callbacks::Referenced $hir [lindex $argExprs [lindex $shape 1]]]
+            if {$block ne "" && [hir::callbacks::Typed $hir $block]} {
+                return [hir::callbacks::PointerType $hir $block]
+            }
+            return $result
+        }
         layout-struct {
             # std::binary::parse(L, data) (core/binary.tcl, BINARY-LAYOUT.md): a
             # LayoutStruct[L], L the layout argument I's descriptor
@@ -4619,14 +4631,17 @@ proc hir::types::Call {hirVar ctxVar e} {
                             || ($shapeKind eq "native-element" && [hir::layouts::OfArrayType [lindex $argTypes 0]] eq "")
                             || ($shapeKind eq "layout-struct" && [hir::layouts::RoleOf [dict get $meta layout] op] eq "parse"
                                 && [LayoutParseRefused $hir $argExprs [dict get $meta resultShape]])
-                            || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]]))} {
+                            || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]])
+                            || ($shapeKind eq "callback-pointer" && ![IsCFnPtr $result]))} {
                     # std::binary::load of a value not statically a NativeView[L]
                     # (BINARY-OPERAND), or std::binary::parse of a native-only
                     # layout (LAYOUT-NATIVE-ONLY: hir::layouts::verify): no
                     # LayoutStruct is ever produced (NATIVE-LAYOUT-VIEWS.md).
                     # Nor of a union, or of anything holding one by value
                     # (LAYOUT-UNION), and std::binary::read never makes a pointer
-                    # or a union (LAYOUT-UNIONS.md).
+                    # or a union (LAYOUT-UNIONS.md). std::ffi::c::callback of
+                    # anything but a callback c fn makes no pointer
+                    # (CALLBACK-REFERENCE, hir/callbacks.tcl).
                     set result [Poison hir $e]
                 }
                 if {!$spec} {

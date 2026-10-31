@@ -5,6 +5,7 @@ pub mod aot;
 pub mod aotimage;
 pub mod affine;
 pub mod bytesobj;
+pub mod callback;
 pub mod constants;
 pub mod construct;
 pub mod coroutine;
