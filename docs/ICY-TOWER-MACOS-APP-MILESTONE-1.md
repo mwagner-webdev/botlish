@@ -845,7 +845,49 @@ keychain and Apple's credential check (mutants `adhoc-fallback`,
 `remote-auth-skipped`), and verification refuses an ad hoc signature
 (`adhoc-signature-accepted`).
 
-SIGN-EVIDENCE-PLACEHOLDER
+**Executed, ad hoc** (run 41212691891 and every acceptance run): `codesign
+--force --sign - --options runtime --timestamp=none`, then `verify-signature:
+valid (codesign --verify --deep --strict); ad hoc; team not set; identifier
+org.botlish.examples.icy-tower.ci; flags adhoc,runtime; no timestamp`, CDHash
+`1f23171577e9eff6a828260316426784dfd7e825`, `codesign -dvvv`: `Format=app
+bundle with Mach-O thin (arm64)`, `Signature=adhoc`, `TeamIdentifier=not
+set`. This is the bundle every LaunchServices case plays.
+
+**Executed, the dry run's identity up to codesign** (runs 41201527696,
+41212691891, 41217612371): the preflight under the throwaway anchors
+(`preflight: Developer ID Application: Icy Tower Dry Run (DRYRUN0000), SHA-1
+..., issued by Icy Tower Dry Run Certification Authority, team DRYRUN0000`),
+the temporary keychain (created with a generated password, the identity
+imported with `-T /usr/bin/codesign -T /usr/bin/security`, the authority's
+two certificates beside it, the partition list set, the search list
+extended), exactly that identity found by its SHA-1, its chain verified with
+the root anchored explicitly (`security verify-cert ... -r root.cer -p
+codeSign -L`: `...certificate verification successful.`) and, through the
+keychains alone, `Cert Verify Result: CSSMERR_TP_NOT_TRUSTED`; then the
+cleanup (the keychain deleted, the search list restored as it was, the
+decoded files removed, each checked).
+
+**Environment-blocked, the dry run's signature.** codesign refused the
+throwaway identity (run 41201527696):
+
+    MACOS-SIGN: codesign could not sign the bundle: .../Icy Tower.app: replacing existing signature
+    Warning: unable to build chain to self-signed root for signer "Developer ID Application: Icy Tower Dry Run (DRYRUN0000)"
+    .../Icy Tower.app: errSecInternalComponent
+
+codesign signs only with an identity whose chain reaches a root the system
+trusts, and on a GitHub-hosted runner no root can be made trusted without a
+person: `security add-trusted-cert -d` waits for SecurityAgent's
+authorization dialog (the step hung until cancelled, run 41205557290), and
+the admin trust settings' authorization rule ("entitled" or
+"authenticate-admin") cannot be lifted by root (`security authorizationdb
+write`: `NO (-60005)`, run 41210576736, the rule unchanged). No job now
+attempts either (test_workflow's `test_no_job_changes_a_trust_setting`).
+The dry run classifies exactly that codesign refusal as ENVIRONMENT-BLOCKED
+and any other failure as a failure. A release meets neither limit:
+Apple's root is the system's.
+
+**Credential-blocked, the Developer ID signature**: `--timestamp`, the
+authority chain, the team, the secure timestamp (section 44).
 
 ## 26. Signature inspection and entitlements
 
