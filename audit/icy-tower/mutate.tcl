@@ -16,12 +16,28 @@
 # Prints one line per mutant: killed (the failing tests), SURVIVED or NOT
 # APPLIED. Exit status 1 if any survived, did not apply, or the baseline
 # failed. Scratch state lives in a `file tempdir` directory (AGENTS.md).
+#
+#   tclsh9.0 audit/icy-tower/mutate.tcl -macos 1 -app BOTLISH.APP -binding DIR
+#       -prefix SDL3_PREFIX -helper MACOS_INPUT ?NAME ...?
+#
+# The macOS integration's mutants (audit/icy-tower/macos-mutants.txt;
+# ICY-TOWER-MACOS-MILESTONE-1.md, "Mutation testing"), on an Apple Silicon
+# Mac: for every mutant, a private tree -- a copy of examples/games/icy-tower
+# and tests/platform/sdl3-static-macos.sh, the rest of the repository linked
+# -- one or more of its files mutated (a file of the generated binding DIR,
+# for an @binding/ edit: a private copy, given as ICY_TOWER_BINDING_FROM),
+# built by its build-macos.sh with BOTLISH.APP and the static SDL3 in
+# SDL3_PREFIX, then the one detector its `??` line names, which must fail
+# for the reason its pattern states. The unmutated tree must pass every
+# detector the mutants use. One at a time: the graphical detectors play the
+# game in a window.
 
 set here [file dirname [file normalize [info script]]]
 set root [file dirname [file dirname $here]]
 source [file join $root audit golden tools tree.tcl]
 
-set options [dict create -backends compile -jobs [exec nproc] -timeout 900]
+set options [dict create -backends compile -jobs [expr {[catch {exec nproc} n] ? 4 : $n}] -timeout 900 \
+    -macos 0 -app "" -binding "" -prefix "" -helper ""]
 set names {}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
@@ -34,6 +50,10 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
 }
 
 set game examples/games/icy-tower
+if {[dict get $options -macos]} {
+    source [file join $here macos-mutate.tcl]
+    exit [icymacos::main $root $here $options $names]
+}
 set modules {tower.bot hud.bot options.bot golden.bot}
 set originals [dict create]
 foreach module $modules {

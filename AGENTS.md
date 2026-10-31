@@ -3377,6 +3377,59 @@ you change the code it mutates, keeping it a mutant of the same rule) and
 host, or under qemu-user from an `aarch64-unknown-linux-gnu` build); for the
 generator's float and double, its checks (the C binding generator, below).
 
+## Raw C floating values (std::ffi::c::RawFloat, std::ffi::c::RawDouble)
+
+`std::ffi::c::RawFloat` and `std::ffi::c::RawDouble` (RAW-C-FLOAT-FFI-
+MILESTONE-1.md) are C's float and double carried exactly: every binary32 or
+binary64 bit pattern -- NaN payloads, signaling NaNs, the infinities,
+negative zero, subnormals -- with their finite counterparts' C facts
+(core/cabi.tcl's `floatings`: `representation Float`/`Double`, `raw 1`).
+Their canonical type is the runtime kind `rawfloat32`/`rawfloat64` in every
+position (a C type and a type of values at once); the explicit operations
+are `std::ffi::c::raw`'s (stdlib/ffi/c/raw.bot, over the internal
+intrinsics `std::rawfloat::*`). Keep it so:
+
+* Carrying is not admitting: a raw argument, result, field, element or
+  alternative crosses as its bits (`bitcast`, integer loads and stores; NIR
+  `rf32`/`rf64`, layout descriptor `{r W E}`, encoding bit 128) -- never
+  an `fdemote`, `fpromote`, finiteness test, `+ 0.0` or NonFiniteFloat. A
+  raw position never changes the C signature: the same F32/F64 class and
+  registers as the finite type's (`raw_c_float_signature_is_the_finite_one`).
+* Admission and narrowing are the finite types' own rules, called
+  explicitly (`core::cabi::AdmitBits`/`Narrow`, `admit_c_float`/
+  `narrow_c_float`): never a second implementation, never implicit. Never
+  let a raw value be admitted where a Float64 is expected, a Float64 or an
+  Int become a raw value, or RawFloat and RawDouble convert, and never
+  make a raw type an alternative of a finite one anywhere (resolution,
+  conversion, admission).
+* A raw value is no number: no arithmetic, ordering, equality or hash
+  (statically `hir::cabi::VerifyCallKinds`; at run time its own kind, in
+  core/value.tcl's `incomparable` and core/hashing.tcl's `unhashable`, and
+  ops.rs's refusals). Never represent one as an Int, never add a bitwise
+  `==`, and never let a raw value be a trailing variadic argument.
+* `std::ffi::c` stays free of compiled functions: the raw operations live
+  in `std::ffi::c::raw`, imported by the programs that use them.
+* The finite types' behavior is a compatibility contract: Float and Double
+  admit, narrow and charge NonFiniteFloat exactly as before.
+* The binding generator's `representations` choose raw per function and
+  position (finite is the default); a stale or invalid rule is an error;
+  every choice is in the manifest. Never special-case a library in the
+  generator.
+
+If you change any of that (the report's section 10 lists the files), run
+`tests/raw-c-float-ffi.test` (its fixture needs `cc`), `tclsh9.0
+tests/local.tcl tests/golden/raw-c-float-ffi.bot`, `tests/c-float-ffi.test`,
+`tests/c-ffi.test`, `tests/c-abi-types.test`, `tests/hashable.test`, the
+layout test files, `cargo test --release --manifest-path native/Cargo.toml
+--lib c_float` and `--bin botlish-native raw_c_float`,
+`audit/c-float-ffi/tools/fuzz.tcl` (several seeds, once with `-gc-stress
+1`; it draws raw positions by default) and
+`audit/c-float-ffi/tools/mutate.tcl` (every mutant must still apply and be
+killed: update a mutant's text when you change the code it mutates,
+keeping it a mutant of the same rule; the raw ones are `raw-*`); for the
+generator or a profile's representations the C binding generator's checks
+with the pinned toolchain, and for Raven's `tests/raven.test`.
+
 ## Variadics
 
 Variadic parameters and variadic C calls (VARIADICS-VERTICAL-SLICE-1.md) are
@@ -3836,8 +3889,9 @@ ask it. Keep it so:
   core IR text.
 * A check that says more about an argument keeps it: foreign calls, imprinted
   intrinsics, layout operations, floating-point operators and `/`, a
-  mutation receiver the place check rejects, byte owners, C addresses and
-  native views or edits, DecimalRounded parameters (the report, section 7).
+  mutation receiver the place check rejects, byte owners, C addresses,
+  native views or edits and raw C floating values, DecimalRounded
+  parameters (the report, section 7).
   A new such check takes its argument over the same way, never by reporting
   beside it.
 
@@ -3947,8 +4001,9 @@ empty vector, List length facts, ...): they are its evidence
 ## Workloads (examples/games/icy-tower)
 
 `examples/games/icy-tower/` is the real-time workload (ICY-TOWER-VERTICAL-
-SLICE-1.md): a playable Icy Tower-style game on Linux x86-64 and Windows
-x86-64 (ICY-TOWER-WINDOWS.md) over the generated SDL3 binding. Keep its
+SLICE-1.md): a playable Icy Tower-style game on Linux x86-64, Windows
+x86-64 (ICY-TOWER-WINDOWS.md) and macOS AArch64
+(ICY-TOWER-MACOS-MILESTONE-1.md) over the generated SDL3 binding. Keep its
 layering:
 
 * `tower.bot` (the rules: a frame is `step(world, input, dt)`), `hud.bot`
@@ -3958,9 +4013,10 @@ layering:
 * `game.bot` is the program (the frame loop, play, failure reports,
   `main`), one source for every platform; an entry program only installs
   the contexts -- `main.bot` std::linux::io's, `main-windows.bot`
-  std::windows::io's, both `sdl::create()` -- and runs `game::main`. Keep
-  everything else out of the entries, and every platform name out of the
-  other modules.
+  std::windows::io's, `main-macos.bot` std::darwin::io's (and imports
+  `macos_link`, the macOS executable's link plan), each `sdl::create()` --
+  and runs `game::main`. Keep everything else out of the entries, and every
+  platform name out of the other modules.
 * `sdl.bot` is the one module with raw authority: every function of it
   that makes a retaining C call or a native view or edit requires its own
   `Sdl` context, so `render.bot`, `game.bot` and the entries stay ordinary modules
@@ -4047,6 +4103,48 @@ in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
 release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
 build's signing dry run must keep passing: the executable must run with a
 signature appended.
+
+The macOS executable (`build-macos.sh`, ICY-TOWER-MACOS-MILESTONE-1.md: a
+Cocoa application on macOS AArch64, the pinned SDL3 linked into it as a
+static archive) is built and played only by the `icy-tower (macos arm64)`
+workflow (`.github/workflows/icy-tower-macos.yml`, every push to any
+branch): Botlish.app from the commit, the archive from
+`tests/platform/sdl3-static-macos.sh` (the recipe
+`tests/platform/link-plan-sdl3.sh` shares), the macos-aarch64 binding
+generated on the runner (none is committed), the tests' macOS section, the
+oracle and the graphical acceptance. Keep it so:
+
+* `main-macos.bot` installs `std::darwin::io`'s context and `sdl::Sdl` and
+  imports `macos_link` -- nothing else; the startup policy is the build's
+  (`-native-startup main-thread` in build-macos.sh), never the source's.
+* `macos_link.bot` declares the staged archive (`static at
+  "native/macos/libSDL3.a"`, relative to the application root) and exactly
+  the frameworks and libraries SDL3's sdl3.pc names, in its order:
+  build-macos.sh refuses any other list. When SDL3's metadata changes, take
+  its list (`sdl3-static-macos.sh link-interface PREFIX`); never add, drop or
+  weaken an entry by hand, and never edit the generated binding to make it
+  static.
+* The graphical acceptance (`audit/icy-tower/tools/macos-session.py` with
+  `macos-input.m`) reads the game from outside: the window system's
+  windows, captures checked against the oracle's geometry, keys through
+  Quartz's event taps, the close button through Accessibility (else
+  Command-W). Never push SDL events, hook the game or add an option to it
+  for a test, and never count an ENVIRONMENT-BLOCKED case as passed.
+* The SDL call trace of a static SDL3 is a link-time wrapper
+  (`audit/icy-tower/tools/traced-archive.sh`, sdltrace.c's
+  `SDLTRACE_LINKED`), compared with the Linux executable's reference,
+  `audit/icy-tower/trace-reference.txt`: rewrite it
+  (`audit/icy-tower/tools/trace-reference.sh EXE write`, on Linux) in the
+  same change as anything that changes what the game draws or calls
+  (`workload-icy-tower-trace-reference` fails otherwise).
+
+If you change the game, an entry, `macos_link.bot`, `build-macos.sh`, the
+SDL3 profile, `sdl3-static-macos.sh` or the macOS harness, push and read
+the workflow; for the port's mutants push with `[ci-icy-tower-mutants]` in
+the head commit's message (`audit/icy-tower/mutate.tcl -macos 1`: every
+mutant in `audit/icy-tower/macos-mutants.txt` must still apply and be killed
+by the detector its `??` line names; update a mutant's text when you change
+the code it mutates, keeping it a mutant of the same rule).
 
 ## Application modules, native program output, the recursion limit
 

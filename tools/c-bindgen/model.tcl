@@ -658,6 +658,79 @@ proc ::cbind::model::ManualContracts {functions {declared {}}} {
     return [list $out $problems $unused]
 }
 
+# The representation rules of the profile (RAW-C-FLOAT-FFI-MILESTONE-1.md)
+# applied to ENTRIES (the resolved APIs; DECLARED: name -> C parameter
+# names of every declared function): {ENTRIES PROBLEMS}. Each named
+# position of each named bound function -- a parameter's C name, or
+# result -- whose type is C float or double becomes std::ffi::c::RawFloat
+# or RawDouble, and the entry records it (`representations`: POSITION ->
+# {raw SOURCE}, the manifest's rows); the C ABI is the declaration's either
+# way. A rule naming a function the headers do not declare, a parameter it
+# does not have, a position that is no C float or double, or a position
+# another rule already chose, is a stale policy (a problem). A declared
+# function this target cannot bind is checked against its declaration and
+# left alone.
+proc ::cbind::model::Representations {entries declared} {
+    variable profile
+    set wanted [dict create]
+    set problems {}
+    set r 0
+    foreach rule [dict get $profile representations] {
+        incr r
+        set label [expr {[dict exists $rule name] ? "representation [dict get $rule name]" : "representation $r"}]
+        foreach fn [dict get $rule functions] {
+            if {![dict exists $declared $fn]} {
+                lappend problems "$label names $fn, which this target's headers do not declare as a function"
+                continue
+            }
+            foreach position [dict get $rule raw] {
+                if {$position ne "result" && $position ni [dict get $declared $fn]} {
+                    lappend problems "$label: $fn has no parameter \"$position\" (its parameters: [join [dict get $declared $fn] {, }])"
+                    continue
+                }
+                if {[dict exists $wanted $fn $position]} {
+                    lappend problems "$label: $fn's \"$position\" is already chosen by [dict get $wanted $fn $position]"
+                    continue
+                }
+                dict set wanted $fn $position $label
+            }
+        }
+    }
+    set raw {std::ffi::c::Float std::ffi::c::RawFloat std::ffi::c::Double std::ffi::c::RawDouble}
+    set out {}
+    foreach entry $entries {
+        set name [dict get $entry name]
+        if {![dict exists $wanted $name] || [dict get $entry kind] ni {direct alias thunk}} {
+            lappend out $entry
+            continue
+        }
+        set chosen [dict create]
+        dict for {position label} [dict get $wanted $name] {
+            if {$position eq "result"} {
+                set type [dict get $entry result type]
+            } else {
+                set i [lsearch -exact [lmap q [dict get $entry params] {dict get $q cname}] $position]
+                set type [dict get [lindex [dict get $entry params] $i] type]
+            }
+            if {![dict exists $raw $type]} {
+                lappend problems "$label: $name's \"$position\" is [Spell [expr {$position eq "result" ? [dict get $entry result ctype] : [dict get [lindex [dict get $entry params] $i] ctype]}]] ($type), no C float or double: only a C floating position has a raw representation"
+                continue
+            }
+            if {$position eq "result"} {
+                dict set entry result type [dict get $raw $type]
+            } else {
+                set q [lindex [dict get $entry params] $i]
+                dict set q type [dict get $raw $type]
+                dict set entry params [lreplace [dict get $entry params] $i $i $q]
+            }
+            dict set chosen $position [list raw $label]
+        }
+        dict set entry representations $chosen
+        lappend out $entry
+    }
+    return [list $out $problems]
+}
+
 # The compiler evidence of a thunk's parameter attribute list ATTRS (probe
 # evidence): facts {access A escape E returned 0|1}.
 proc ::cbind::model::EvidenceFacts {attrs} {
@@ -1116,6 +1189,8 @@ proc ::cbind::model::resolve {model theFacts} {
         lappend entries $entry
     }
     lassign [ManualContracts $manualParams $declaredParams] manual problems unused
+    lassign [Representations $entries $declaredParams] entries representationProblems
+    lappend problems {*}$representationProblems
     if {$problems ne ""} {
         error "c-bindgen: profile [dict get $profile name] (target $target): stale or invalid contract policy:\n  [join $problems "\n  "]"
     }

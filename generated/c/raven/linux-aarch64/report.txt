@@ -37,6 +37,15 @@ Pointer contracts (bound APIs)
     alias of a parameter                                                       0     0.0%
     unknown                                                                   85   100.0%
 
+C floating representations (bound APIs)
+  positions bound raw (std::ffi::c::RawFloat, RawDouble; the profile)          6
+  Rslider_set_value value
+  Rslider_get_value result
+  Rspin_box_set_range minimum
+  Rspin_box_set_range maximum
+  Rspin_box_set_value value
+  Rspin_box_get_value result
+
 Capability pressure (API names a missing FFI capability blocks or limits)
   C _Bool in the signature (blocked without std::ffi::c::Bool)                 0     0.0%
     of them bound now, bool their only blocker                                 0     0.0%

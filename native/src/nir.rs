@@ -209,6 +209,22 @@ pub enum OpCode {
     /// exactly P fraction digits (std::decimal_rounded::to_string,
     /// runtime::decimal's rt_decimal_to_str; never fails).
     D64ToStr,
+    /// Raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md; core/cabi.tcl's
+    /// std::rawfloat intrinsics): `rawfrombits32`/`64` the raw value of
+    /// an Int bit pattern (proven in range; RANGE otherwise), `rawbits32`/
+    /// `64` a raw value's bit pattern as an Int, `rawadmit32`/`64` the
+    /// Float64 it admits to (NonFiniteFloat for NaN or an infinity, -0 as
+    /// 0.0, a binary32 widened exactly), `rawnarrow32`/`64` the raw value of
+    /// a Float64 (binary32: rounded to nearest, ties to even, an overflow
+    /// NonFiniteFloat; binary64 exact). runtime::ffi's rt_raw_* helpers.
+    RawFromBits32,
+    RawFromBits64,
+    RawBits32,
+    RawBits64,
+    RawAdmit32,
+    RawAdmit64,
+    RawNarrow32,
+    RawNarrow64,
     MkOk,
     MkError,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
@@ -941,6 +957,14 @@ op_spellings! {
     "coresume0" => CoResume0,
     "coyield" => CoYield,
     "codone" => CoDone,
+    "rawfrombits32" => RawFromBits32,
+    "rawfrombits64" => RawFromBits64,
+    "rawbits32" => RawBits32,
+    "rawbits64" => RawBits64,
+    "rawadmit32" => RawAdmit32,
+    "rawadmit64" => RawAdmit64,
+    "rawnarrow32" => RawNarrow32,
+    "rawnarrow64" => RawNarrow64,
     "cptrnull" => CPtrNull,
     "cptrisnull" => CPtrIsNull,
     "cptrsame" => CPtrSame,
@@ -1095,6 +1119,7 @@ impl OpCode {
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharIsTclAlpha | CharIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
+            | RawFromBits32 | RawFromBits64 | RawBits32 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
             | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
@@ -1723,6 +1748,12 @@ pub enum CAbi {
     F32,
     /// C double, an IEEE 754 binary64 (FLOAT64-MILESTONE-1.md).
     F64,
+    /// A raw C float or double (RAW-C-FLOAT-FFI-MILESTONE-1.md: `rf32`,
+    /// `rf64`): the same C types in the same floating-point registers, whose
+    /// Botlish values are raw C floating values -- passed as, and made of,
+    /// exactly their bits (no narrowing, no admission, nothing raised).
+    RawF32,
+    RawF64,
     Ptr,
     Void,
 }
@@ -1750,9 +1781,11 @@ impl VarArg {
         let (class, promoted) = text.split_once(':')?;
         let class = CAbi::parse(class)?;
         let promoted = CAbi::parse(promoted)?;
-        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::RawF32 | CAbi::RawF64 | CAbi::Ptr | CAbi::Void);
         let valid = match class {
-            CAbi::Void | CAbi::F32 => false,
+            // (No trailing argument is a raw C floating value:
+            // hir::cabi::VariadicArgument refuses one.)
+            CAbi::Void | CAbi::F32 | CAbi::RawF32 | CAbi::RawF64 => false,
             CAbi::F64 | CAbi::Ptr => promoted == class,
             CAbi::Bool => integer(promoted) && promoted.bits() >= 32,
             _ => {
@@ -1780,6 +1813,8 @@ impl CAbi {
             "bool" => CAbi::Bool,
             "f32" => CAbi::F32,
             "f64" => CAbi::F64,
+            "rf32" => CAbi::RawF32,
+            "rf64" => CAbi::RawF64,
             "ptr" => CAbi::Ptr,
             "void" => CAbi::Void,
             _ => return None,
@@ -1791,8 +1826,8 @@ impl CAbi {
         match self {
             CAbi::I8 | CAbi::U8 | CAbi::Bool => 8,
             CAbi::I16 | CAbi::U16 => 16,
-            CAbi::I32 | CAbi::U32 | CAbi::F32 => 32,
-            CAbi::I64 | CAbi::U64 | CAbi::Ptr | CAbi::F64 => 64,
+            CAbi::I32 | CAbi::U32 | CAbi::F32 | CAbi::RawF32 => 32,
+            CAbi::I64 | CAbi::U64 | CAbi::Ptr | CAbi::F64 | CAbi::RawF64 => 64,
             CAbi::Void => 0,
         }
     }
@@ -1801,10 +1836,26 @@ impl CAbi {
         matches!(self, CAbi::I8 | CAbi::I16 | CAbi::I32 | CAbi::I64)
     }
 
-    /// 1 for a floating-point class (F32, F64): it travels in the
-    /// floating-point registers, never extended.
+    /// 1 for a floating-point class (F32, F64, and their raw forms): it
+    /// travels in the floating-point registers, never extended.
     pub fn floating(self) -> bool {
-        matches!(self, CAbi::F32 | CAbi::F64)
+        matches!(self, CAbi::F32 | CAbi::F64 | CAbi::RawF32 | CAbi::RawF64)
+    }
+
+    /// 1 for a raw floating-point class (RawF32, RawF64): its Botlish value
+    /// is a raw C floating value, crossing as its bits.
+    pub fn raw_floating(self) -> bool {
+        matches!(self, CAbi::RawF32 | CAbi::RawF64)
+    }
+
+    /// The machine floating-point class of a floating class: a raw one's
+    /// finite counterpart (the same register class and width).
+    pub fn machine_floating(self) -> CAbi {
+        match self {
+            CAbi::RawF32 => CAbi::F32,
+            CAbi::RawF64 => CAbi::F64,
+            c => c,
+        }
     }
 }
 
@@ -3940,6 +3991,29 @@ fn def_of(inst: &Inst) -> Option<Reg> {
         | Inst::ForeignCall { dst, .. }
         | Inst::DeclaredErrorEq { dst, .. } | Inst::DeclaredPayload { dst, .. } | Inst::Construct { dst, .. } => Some(*dst),
         _ => None,
+    }
+}
+
+/// Raw C floating classes (RAW-C-FLOAT-FFI-MILESTONE-1.md): `rf32` and
+/// `rf64` are their finite counterparts' widths and floating-point register
+/// class, marked raw, and never a variadic call's trailing class.
+#[cfg(test)]
+mod raw_float_class_tests {
+    use super::*;
+
+    #[test]
+    fn raw_float_classes() {
+        assert_eq!(CAbi::parse("rf32"), Some(CAbi::RawF32));
+        assert_eq!(CAbi::parse("rf64"), Some(CAbi::RawF64));
+        for (raw, finite) in [(CAbi::RawF32, CAbi::F32), (CAbi::RawF64, CAbi::F64)] {
+            assert_eq!(raw.bits(), finite.bits());
+            assert!(raw.floating() && raw.raw_floating() && !finite.raw_floating());
+            assert_eq!(raw.machine_floating(), finite);
+            assert!(!raw.signed());
+        }
+        for text in ["rf32:rf32", "rf64:rf64", "rf32:f64", "rf64:f64", "i32:rf64"] {
+            assert!(VarArg::parse(text).is_none(), "{text} is no trailing argument");
+        }
     }
 }
 

@@ -39,6 +39,16 @@
 #                author's foreign contracts (C-FFI.md, "Contracts")
 #   groups       {{functions {F ...} facts {PARAM FACTS ...}} ...}: one
 #                contract stated for an explicit list of functions
+#   representations
+#                {{functions {F ...} raw {POSITION ...}} ...}: the C float
+#                and double positions (a parameter's C name, or result) of
+#                an explicit list of functions that the binding writes raw,
+#                std::ffi::c::RawFloat and std::ffi::c::RawDouble, instead of
+#                the default std::ffi::c::Float and std::ffi::c::Double
+#                (RAW-C-FLOAT-FFI-MILESTONE-1.md): the same C ABI, which the
+#                headers alone decide, with every bit pattern carried and
+#                none admitted. A function, parameter or position that is no
+#                C float or double is a stale policy (an error)
 #   thunks       {NAME {C PROTOTYPE}}: the signature of a function-like
 #                macro API the binding thunks (a macro has none)
 #   stubs        thunk | unsupported: what a table-redirected API name
@@ -51,7 +61,7 @@
 namespace eval ::cbind::profile {
     variable dir [file join [file dirname [file normalize [info script]]] profiles]
     variable keys {name description headers targets modules libraries exclude contracts
-        groups thunks stubs evidence output}
+        groups representations thunks stubs evidence output}
     variable headerKeys {library source includeDirs defines undefines flags public private bundled
         internal entry description targetDefines}
 }
@@ -88,7 +98,7 @@ proc ::cbind::profile::Validate {p} {
         }
     }
     set defaults [dict create description "" modules {stripPrefix ""} libraries {} exclude {} \
-        contracts {} groups {} thunks {} stubs thunk evidence none]
+        contracts {} groups {} representations {} thunks {} stubs thunk evidence none]
     set p [dict merge $defaults $p]
     if {![dict exists $p output]} { dict set p output generated/c/[dict get $p name] }
     if {![regexp {^[a-z][a-z0-9_]*$} [dict get $p name]]} {
@@ -146,6 +156,17 @@ proc ::cbind::profile::Validate {p} {
             if {$k ni {name functions facts}} {
                 error "c-bindgen: profile [dict get $p name]: a contract group has an unknown key \"$k\""
             }
+        }
+    }
+    foreach rule [dict get $p representations] {
+        foreach k [dict keys $rule] {
+            if {$k ni {name functions raw}} {
+                error "c-bindgen: profile [dict get $p name]: a representation rule has an unknown key \"$k\" (known: name, functions, raw)"
+            }
+        }
+        if {![dict exists $rule functions] || ![dict exists $rule raw] || ![llength [dict get $rule functions]]
+                || ![llength [dict get $rule raw]]} {
+            error "c-bindgen: profile [dict get $p name]: a representation rule names its functions and the positions they write raw"
         }
     }
     return $p

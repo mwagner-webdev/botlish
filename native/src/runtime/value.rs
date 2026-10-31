@@ -155,6 +155,12 @@ pub const KIND_FLOAT: u8 = 17;
 /// is never taken for a Float64 (a kind guard, equality, display). Its
 /// guaranteed precision is static only: nothing here records it.
 pub const KIND_DECIMAL: u8 = 18;
+/// A raw C float (RAW-C-FLOAT-FFI-MILESTONE-1.md): a FloatObj whose `bits`
+/// hold any binary32 bit pattern (the low 32 bits) -- NaN, an infinity,
+/// negative zero included. No number: no arithmetic, equality or hash.
+pub const KIND_RAWF32: u8 = 19;
+/// A raw C double: a FloatObj holding any binary64 bit pattern.
+pub const KIND_RAWF64: u8 = 20;
 
 #[repr(C)]
 pub struct Header {
@@ -575,6 +581,34 @@ pub fn float_bits(v: Value) -> u64 {
     unsafe { as_ref::<FloatObj>(v) }.bits
 }
 
+/// The heap kind of a raw C floating value of FORMAT
+/// (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+pub fn raw_heap_kind(format: CFloatFormat) -> u8 {
+    match format {
+        CFloatFormat::Binary32 => KIND_RAWF32,
+        CFloatFormat::Binary64 => KIND_RAWF64,
+    }
+}
+
+/// The format of the raw C floating value V, or None when V is no raw value.
+pub fn raw_format_of(v: Value) -> Option<CFloatFormat> {
+    if is_small(v) || v & 7 != 0 || v == NO_VALUE {
+        return None;
+    }
+    match heap_kind(v) {
+        KIND_RAWF32 => Some(CFloatFormat::Binary32),
+        KIND_RAWF64 => Some(CFloatFormat::Binary64),
+        _ => None,
+    }
+}
+
+/// The bit pattern of the raw C floating value V (zero-extended for a
+/// binary32).
+pub fn raw_bits(v: Value) -> u64 {
+    debug_assert!(matches!(heap_kind(v), KIND_RAWF32 | KIND_RAWF64));
+    unsafe { as_ref::<FloatObj>(v) }.bits
+}
+
 // ---------------------------------------------------------------------------
 // The C floating boundary (C-FLOAT-FFI-MILESTONE-1.md; core/cabi.tcl's
 // "The C floating types" is the reference): a C float or double is a
@@ -979,6 +1013,12 @@ pub enum Kind {
     /// of kind KIND_DECIMAL. No equality and no hash a type-blind operation
     /// may use: its precision is its static type's.
     DecimalRounded,
+    /// A raw C float (RAW-C-FLOAT-FFI-MILESTONE-1.md): a FloatObj of kind
+    /// KIND_RAWF32. No equality and no hash. Named as core/value.tcl's
+    /// `rawfloat32` kind.
+    RawFloat32,
+    /// A raw C double: KIND_RAWF64, core/value.tcl's `rawfloat64`.
+    RawFloat64,
 }
 
 impl Kind {
@@ -1004,6 +1044,8 @@ impl Kind {
             "cptr" => Kind::CPtr,
             "Float64" => Kind::Float64,
             "DecimalRounded" => Kind::DecimalRounded,
+            "rawfloat32" => Kind::RawFloat32,
+            "rawfloat64" => Kind::RawFloat64,
             _ => return None,
         })
     }
@@ -1030,6 +1072,8 @@ impl Kind {
             Kind::CPtr => "cptr",
             Kind::Float64 => "Float64",
             Kind::DecimalRounded => "DecimalRounded",
+            Kind::RawFloat32 => "rawfloat32",
+            Kind::RawFloat64 => "rawfloat64",
         }
     }
 
@@ -1042,6 +1086,7 @@ impl Kind {
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
             Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct, Kind::ByteStore, Kind::MutByteStore,
             Kind::Coroutine, Kind::MutVec, Kind::Enum, Kind::CPtr, Kind::Float64, Kind::DecimalRounded,
+            Kind::RawFloat32, Kind::RawFloat64,
         ][code as usize]
     }
 }
@@ -1080,6 +1125,8 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_COROUTINE => Kind::Coroutine,
         KIND_MUTVEC => Kind::MutVec,
         KIND_FLOAT | KIND_DECIMAL => float_type_of(v).kind(),
+        KIND_RAWF32 => Kind::RawFloat32,
+        KIND_RAWF64 => Kind::RawFloat64,
         _ => panic!("not a program value: {v:#x}"),
     }
 }

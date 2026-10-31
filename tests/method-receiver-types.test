@@ -374,6 +374,15 @@ test mrt-c-call-method-eligible {METHOD-ELIGIBLE is unchanged for a C function: 
     list [lmap w [hir::warnings::of $ordinary] {dict get $w code}] [lmap w [hir::warnings::of $method] {dict get $w code}]
 } -result {METHOD-ELIGIBLE {}}
 
+test mrt-raw-float-operand {a raw C floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md) where a native requires another kind is reported once per argument, by the check that says what it is (hir::cabi::VerifyCallKinds: a bit pattern, not a number), never restated by the kind check; its method-style call is held the same way as its ordinary call} -body {
+    set head "import std::ffi::c\nimport std::ffi::c::raw\nimport std::float64\n\nfn f(x: std::ffi::c::RawDouble) -> Float64:\n    "
+    lmap body {"x < x" "std::float64::truncate(x)" "x.truncate()"} {
+        lmap d [mrtReported "$head$body\n\n1\n"] {
+            list {*}[lrange $d 0 1] [regexp {^argument \d of \S+ is std::ffi::c::RawDouble, a raw C floating value, where} [lindex $d 2]]
+        }
+    }
+} -result {{{TYPE 6:5 1} {TYPE 6:9 1}} {{TYPE 6:28 1}} {{TYPE 6:5 1}}}
+
 test mrt-operators {an operator is a call of a native: an operand statically of another kind is the same TYPE diagnostic, named as an operand; an `any` operand is checked when it runs} -body {
     list [mrtReported "fn f(xs: List\[int\]) -> int:\n    xs + 1\n\nf(\[1\])\n"] \
         [mrtReported "fn f(s: str) -> int:\n    1 - s\n\nf(\"a\")\n"] \

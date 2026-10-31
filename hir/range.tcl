@@ -2090,17 +2090,19 @@ proc hir::range::VerifyNativeKinds {hirVar e node name} {
         if {($i == 0 && [hir::mutvec::RejectsReceiver $hir $e $arg])
                 || ([lindex $mismatch 1] eq "cptr" && [hir::borrow::IsOwner $argType])
                 || [hir::types::IsCAddress $argType] || [hir::types::IsNativeMemory $argType]
+                || [hir::cabi::IsRawFloating $argType]
                 || [lindex $mismatch 1] eq "DecimalRounded"} {
             # (Reported by a check that says what the argument is: a mutating
             # collection operation's receiver the place check rejects, by
             # it, MUTABLE-PLACE-RECEIVER (hir::mutvec::RejectsReceiver); a byte
             # owner where a C address is required by the pointer check,
             # hir::borrow::VerifyPointerKinds, byte storage is never a
-            # pointer; a C address, a native view or edit where another kind
-            # is required by hir::cabi::VerifyCallKinds, an address is no
-            # Int or any other value; another value where a DecimalRounded
-            # is required by hir::decimal::verify, nothing converts one
-            # implicitly.)
+            # pointer; a C address, a native view or edit, or a raw C
+            # floating value where another kind is required by
+            # hir::cabi::VerifyCallKinds, an address is no Int or any other
+            # value and a raw value no number; another value where a
+            # DecimalRounded is required by hir::decimal::verify, nothing
+            # converts one implicitly.)
             continue
         }
         lassign $mismatch kind wanted
@@ -2278,6 +2280,10 @@ proc hir::range::FactsClause {type declared r} {
 # is a nominal type, so equal field layouts (std::abi::I64 and std::abi::Isize, both
 # one Int field over the same domain) never make one the other.
 proc hir::range::MismatchClause {argType declared} {
+    set raw [hir::cabi::RawMismatchClause $argType $declared]
+    if {$raw ne ""} {
+        return $raw
+    }
     if {[hir::types::IsTrait $argType] && ![hir::types::IsTrait $declared] && $declared ne "any"} {
         return [format {; the value is a %s trait view: only the operations %s declares are available on it, and its concrete type is never recovered (there is no cast, type test or downcast from a trait)} \
             [hir::types::show $argType] [hir::types::show $argType]]

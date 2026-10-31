@@ -105,7 +105,7 @@ namespace eval core::hashing {
     # and the compiler's Hashable witnesses (hir::types::HashClass) read this
     # very list beside core::value's `incomparable`. Exactly == 's domain
     # today; native/src/runtime/ops.rs's walk refuses the same kinds.
-    variable unhashable {block native mutarray coroutine mutvec cptr DecimalRounded}
+    variable unhashable {block native mutarray coroutine mutvec cptr DecimalRounded rawfloat32 rawfloat64}
     # The private table hash's key, {K0 K1} (two 64-bit words), drawn once per
     # process the first time it is needed (TableKey); "" until then. Runtime
     # state: no Botlish value holds it, no operation returns it.
@@ -163,6 +163,12 @@ proc core::hashing::Encode {mode v} {
             # DECIMAL-ROUNDED-MILESTONE-1.md).
             core::semanticError EQUALITY \
                 "hash of a DecimalRounded value needs the precision of its type, which a hash does not know"
+        }
+        if {$kind in {rawfloat32 rawfloat64}} {
+            # Hashing agrees with equality, which a raw C floating value has
+            # not (core::value::equal; RAW-C-FLOAT-FFI-MILESTONE-1.md).
+            core::semanticError EQUALITY \
+                "hash is not defined for a raw C floating value ([core::value::show $v]): hash its bits"
         }
         core::semanticError EQUALITY \
             "hash is not defined for callables: [core::value::show $v]"

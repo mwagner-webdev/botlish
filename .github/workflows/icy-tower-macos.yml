@@ -1,0 +1,397 @@
+name: icy-tower (macos arm64)
+
+# The Icy Tower vertical slice on macOS AArch64 (ICY-TOWER-MACOS-MILESTONE-1.md):
+# the game, unchanged, as a Cocoa application on GitHub's Apple Silicon
+# runner (macos-15, which has a real Aqua session: a WindowServer, a display
+# and screen capture).
+#
+#   1. Botlish.app, built from this commit (single/macos/build.sh) and
+#      extracted outside the checkout into a path with a space and
+#      non-ASCII letters -- the distributed compiler.
+#   2. The game: examples/games/icy-tower/build-macos.sh -- the pinned SDL3
+#      3.4.18 as a static archive (tests/platform/sdl3-static-macos.sh,
+#      cached by its pin), its macos-aarch64 binding generated from the
+#      same headers with Apple clang and the macOS SDK (none is committed),
+#      the application staged with the binding as its package sdl3 and the
+#      archive inside it, compiled by Botlish.app with -native-startup
+#      main-thread and linked by Apple's ld with the link plan.
+#   3. The binding against the C compiler (audit/icy-tower/tools/
+#      abi-check.py: every SDL function, constant and layout the game uses;
+#      the binding's own layouts-check.c), the Mach-O (LC_MAIN's 512 MiB, no
+#      SDL3 among its libraries), the build again with only Botlish.app (the
+#      checkout and Rust moved away) from a moved application root.
+#   4. The executable's tests (tests/workload-icy-tower.test's macOS
+#      section: headless, dummy driver, GC stress, failures, usage, the
+#      oracle) and the independent oracle's grid.
+#   5. The graphical acceptance (audit/icy-tower/tools/macos-session.py
+#      --strict): Cocoa and Metal, captures checked against the oracle's
+#      geometry, keys through Quartz's event taps (Right/Left, D/A, R after
+#      a game over, Escape), the close button, a focus change, the SDL call
+#      trace against Linux's, GC stress in a window, the worker's refusal,
+#      the detector's positive controls -- each case EXECUTED, FAILED or
+#      ENVIRONMENT-BLOCKED, never a blocked one counted as passed.
+#   6. The executable alone: moved, with SDL3, the application, Botlish.app
+#      and every cache moved away (and dyld's own account of what it
+#      loads); the measurements.
+#
+# The executable, the probe and worker builds, the generated binding, every
+# log and every capture are the run's icy-tower-macos-aarch64 artifact. No
+# release is published, and no signing credential is used (the executable
+# is linker-signed ad hoc, as every arm64 Mach-O Apple's ld makes).
+#
+# Pushes to any branch run it, as the Windows game's workflow does; a pull
+# request from this repository's own branches skips (its push already ran),
+# one from a fork runs. Documentation-only pushes skip. A newer push to the
+# same branch cancels a running one, except on main.
+
+on:
+  push:
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+    inputs:
+      mutants:
+        description: "Also run the macOS integration's mutants (audit/icy-tower/macos-mutants.txt)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: icy-tower-macos-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  game:
+    name: icy-tower (Botlish.app, static SDL3, Cocoa; macOS arm64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Host
+        run: |
+          sw_vers
+          uname -a
+          echo "CPUs: $(sysctl -n hw.ncpu), memory: $(sysctl -n hw.memsize) bytes"
+          echo "Xcode: $(xcode-select -p), SDK $(xcrun --show-sdk-version), $(clang --version | head -n 1)"
+          echo "console user: $(stat -f %Su /dev/console), this user: $(id -un)"
+          pgrep -lx WindowServer || echo "no WindowServer process"
+          system_profiler SPDisplaysDataType 2>/dev/null | sed -n '/Displays:/,$p' | head -n 20 || true
+          if [[ $(uname -s) != Darwin || $(uname -m) != arm64 ]]; then
+            echo "::error::not a native arm64 macOS runner: $(uname -s) $(uname -m)"
+            exit 1
+          fi
+          mkdir -p out/logs
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust)
+        uses: ./.github/actions/setup-macos
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the Tcl.framework build
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/botlish-app
+          key: app-tcl-framework-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('single/macos/tcl-framework.sh', 'single/build.sh') }}
+
+      - name: Build Botlish.app, and place it outside the checkout
+        id: app
+        run: |
+          single/macos/build.sh -o dist 2>&1 | tee out/logs/botlish-app.log
+          place="$RUNNER_TEMP/Prögram Fïles"
+          mkdir -p "$place"
+          (cd "$place" && unzip -q "$GITHUB_WORKSPACE/dist/botlish-macos-aarch64.zip")
+          codesign --verify --deep --strict --verbose=2 "$place/Botlish.app"
+          "$place/Botlish.app/Contents/MacOS/botlish" -version
+          echo "APP=$place/Botlish.app" >>"$GITHUB_ENV"
+
+      - name: Cache the static SDL3 build and the pinned SDL3 source
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/botlish-sdl3-static
+            ~/.cache/botlish/c-header-src/sdl3
+          key: icy-tower-macos-sdl3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/c-bindgen/profiles/sdl3.tcl', 'tests/platform/sdl3-static-macos.sh') }}
+
+      # build-macos.sh: SDL3 static (built unless cached), macos_link.bot
+      # against SDL3's sdl3.pc, the macos-aarch64 binding generated (kept in
+      # out/sdl3-binding), the application staged (kept: the next steps
+      # move it and build it again) and compiled by Botlish.app.
+      - name: Build the game (build-macos.sh with Botlish.app)
+        id: build
+        run: |
+          export ICY_TOWER_BOTLISH="$APP"
+          export ICY_TOWER_BINDING="$PWD/out/sdl3-binding"
+          export ICY_TOWER_STAGE="$RUNNER_TEMP/Stäged Gämes/icy tower"
+          examples/games/icy-tower/build-macos.sh out/icy-tower-macos-aarch64 2>&1 | tee out/logs/build.log
+          echo "STAGE=$ICY_TOWER_STAGE" >>"$GITHUB_ENV"
+          echo "EXE=$PWD/out/icy-tower-macos-aarch64/icy-tower" >>"$GITHUB_ENV"
+          echo "PREFIX=$HOME/Library/Caches/botlish-sdl3-static" >>"$GITHUB_ENV"
+          echo "SDLSRC=$(tclsh9.0 tools/c-bindgen.tcl fetch sdl3 | tail -n 1)" >>"$GITHUB_ENV"
+
+      - name: The generated binding
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          b=out/sdl3-binding/macos-aarch64
+          grep -E '^(target|source|command|toolchain_|evidence|preprocessed_tokens|user_label_prefix) ' "$b/manifest.txt"
+          sed -n '/^Bound/,/^Pointer contracts/p' "$b/report.txt"
+          grep -E '^extern c fn (SDL_Init|SDL_malloc|SDL_strlcpy|SDL_RenderLine|SDL_GetTicksNS|SDL_DelayNS)\b' -A6 "$b"/sdl3/*.bot
+          grep -E '^SDL_(SCANCODE_LEFT|SCANCODE_RIGHT|EVENT_QUIT|WINDOW_RESIZABLE|INIT_VIDEO) ' "$b"/sdl3/*.bot
+          echo "== macos-aarch64 against linux-x86_64 (tools/c-bindgen.tcl diff)"
+          mkdir -p "$RUNNER_TEMP/both"
+          cp -R generated/c/sdl3/linux-x86_64 "$RUNNER_TEMP/both/"
+          cp -R "$b" "$RUNNER_TEMP/both/"
+          tclsh9.0 tools/c-bindgen.tcl diff sdl3 -targets linux-x86_64,macos-aarch64 -dir "$RUNNER_TEMP/both" >out/logs/binding-diff.txt
+          head -n 60 out/logs/binding-diff.txt
+
+      - name: The binding's ABI against Apple clang and SDL3's headers
+        id: abi
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          python3 -I audit/icy-tower/tools/abi-check.py out/sdl3-binding/macos-aarch64 "$SDLSRC/include" "$RUNNER_TEMP/abi" 2>&1 | tee out/logs/abi-check.log
+          echo "== the package the game was compiled against ($STAGE/.bot_modules/sdl3)"
+          python3 -I audit/icy-tower/tools/abi-check.py "$STAGE/.bot_modules/sdl3" "$SDLSRC/include" "$RUNNER_TEMP/abi-staged" | tail -n 1
+          clang -fsyntax-only --target=arm64-apple-macos11 -I "$SDLSRC/include" out/sdl3-binding/macos-aarch64/layouts-check.c
+          echo "layouts-check.c: every generated layout compiles against Apple clang ($(grep -c _Static_assert out/sdl3-binding/macos-aarch64/layouts-check.c) static assertions)"
+
+      - name: The executable (Mach-O, LC_MAIN, dynamic libraries, size)
+        id: macho
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          set -x
+          file "$EXE"
+          lipo -archs "$EXE"
+          otool -L "$EXE"
+          otool -l "$EXE" | grep -A4 -E 'cmd (LC_MAIN|LC_BUILD_VERSION)'
+          codesign -dvv "$EXE" 2>&1
+          codesign --verify --strict "$EXE"
+          ls -l "$EXE"
+          cp "$EXE" "$RUNNER_TEMP/stripped"
+          strip "$RUNNER_TEMP/stripped" 2>&1 || true
+          codesign -s - -f "$RUNNER_TEMP/stripped"
+          "$RUNNER_TEMP/stripped" --headless --frames 60 --seed 7
+          echo "size: $(wc -c <"$EXE" | tr -d ' ') bytes as linked, $(wc -c <"$RUNNER_TEMP/stripped" | tr -d ' ') stripped" | tee out/logs/size.txt
+          nm "$EXE" | grep -c ' T _SDL_' | sed 's/^/SDL functions defined in the executable: /'
+          # The runtime's own account of the startup: the policy word the
+          # program record holds, the thread, the stack and its guard.
+          BOTLISH_NATIVE_STARTUP_REPORT="$RUNNER_TEMP/startup-report" "$EXE" --headless --frames 1 --seed 7
+          tail -n 3 "$RUNNER_TEMP/startup-report" | tee out/logs/startup-report.txt
+          grep -qx 'startup main-thread' out/logs/startup-report.txt
+          grep -qx 'process-main-thread 1' out/logs/startup-report.txt
+          grep -q '^stack 536870912 [1-9]' out/logs/startup-report.txt
+
+      # The application compilation with nothing but Botlish.app: the
+      # checkout, Cargo and rustup moved away (and put back however it
+      # ends), the staged application moved to another root, compiled from
+      # yet another directory -- the archive found at its new root.
+      - name: The staged application moved and built again by Botlish.app alone
+        id: relocated
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          moved="$RUNNER_TEMP/Möved Äpp/Ícy Tower"
+          mkdir -p "$(dirname "$moved")" "$RUNNER_TEMP/elsewhere"
+          mv "$STAGE" "$moved"
+          echo "MOVED=$moved" >>"$GITHUB_ENV"
+          rm -f "$moved/main-macos"
+          workspace="$GITHUB_WORKSPACE"
+          restore() {
+            cd /
+            if [ -d "$workspace.hidden" ]; then mv "$workspace.hidden" "$workspace"; fi
+            if [ -d ~/.cargo.hidden ]; then mv ~/.cargo.hidden ~/.cargo; fi
+            if [ -d ~/.rustup.hidden ]; then mv ~/.rustup.hidden ~/.rustup; fi
+          }
+          trap restore EXIT
+          mv "$workspace" "$workspace.hidden"
+          mv ~/.cargo ~/.cargo.hidden
+          mv ~/.rustup ~/.rustup.hidden
+          PATH=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
+            if [ -n "$d" ] && [ ! -e "$d/cargo" ] && [ ! -e "$d/rustc" ] && [ ! -e "$d/rustup" ]; then printf '%s:' "$d"; fi
+          done)
+          export PATH="${PATH%:}"
+          for t in cargo rustc rustup; do if command -v $t; then echo "::error::$t is still on PATH"; exit 1; fi; done
+          cd "$RUNNER_TEMP/elsewhere"
+          started=$(date +%s)
+          BOTLISH_NATIVE_LINK_LOG="$RUNNER_TEMP/relocated-link.log" "$APP/Contents/MacOS/botlish" -warnings error \
+            -native-startup main-thread -emit-native-executable "$moved/main-macos.bot"
+          echo "compiled and linked in $(( $(date +%s) - started )) s"
+          grep '^link plan: static SDL3' "$RUNNER_TEMP/relocated-link.log" | tee "$RUNNER_TEMP/relocated-plan.txt"
+          grep -q "Möved Äpp/Ícy Tower/native/macos/libSDL3.a (declared at \"native/macos/libSDL3.a\")" "$RUNNER_TEMP/relocated-plan.txt"
+          [ "$(otool -l "$moved/main-macos" | grep -A4 'cmd LC_MAIN' | grep -c 'stacksize 536870912')" = 1 ]
+          a=$("$moved/main-macos" --headless --frames 600 --seed 7)
+          b=$("$workspace.hidden/out/icy-tower-macos-aarch64/icy-tower" --headless --frames 600 --seed 7)
+          echo "relocated: $a"
+          [ "$a" = "$b" ]
+          codesign --verify --deep --strict "$APP"
+
+      - name: The executable's tests (tests/workload-icy-tower.test, macOS section)
+        id: tests
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          export ICY_TOWER_BOTLISH="$APP" ICY_TOWER_BINDING_FROM="$PWD/out/sdl3-binding"
+          tmp=$(mktemp -d)
+          tclsh9.0 tests/workload-icy-tower.test -tmpdir "$tmp" -match 'workload-icy-tower-macos-*' 2>&1 | tee out/logs/workload-tests.log
+          # Every macOS test ran and passed (with -match, the others count as skipped).
+          grep -qE 'Passed[[:space:]]+11[[:space:]]' out/logs/workload-tests.log
+          grep -qE 'Failed[[:space:]]+0$' out/logs/workload-tests.log
+
+      - name: The independent oracle (audit/icy-tower/oracle.py compare)
+        id: oracle
+        if: always() && steps.build.outcome == 'success'
+        run: python3 audit/icy-tower/oracle.py compare "$EXE" 2>&1 | tee out/logs/oracle.log
+
+      # The probe build: the same staged game linked against SDL3's archive
+      # with the call trace's link-time wrappers (traced-archive.sh), and
+      # the worker build (the positive control: the default startup).
+      - name: The probe and the worker builds
+        id: probes
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          # llvm-objcopy renames the archive's symbols: Homebrew's LLVM when the
+          # image has it, else the Rust toolchain's llvm-tools.
+          rustup component add llvm-tools 2>&1 | tail -n 1 || true
+          bash audit/icy-tower/tools/traced-archive.sh "$PREFIX/lib/libSDL3.a" "$RUNNER_TEMP/traced/libSDL3.a" 2>&1 | tee out/logs/traced-archive.log
+          ICY_TOWER_BOTLISH="$APP" ICY_TOWER_BINDING_FROM="$PWD/out/sdl3-binding" ICY_TOWER_SDL3_ARCHIVE="$RUNNER_TEMP/traced/libSDL3.a" \
+            examples/games/icy-tower/build-macos.sh out/probe 2>&1 | tee out/logs/probe-build.log
+          echo "PROBE=$PWD/out/probe/icy-tower" >>"$GITHUB_ENV"
+          rm -f "$MOVED/main-macos"
+          (cd "$RUNNER_TEMP" && "$APP/Contents/MacOS/botlish" -warnings error -emit-native-executable "$MOVED/main-macos.bot")
+          otool -l "$MOVED/main-macos" | grep -A4 'cmd LC_MAIN'
+          mkdir -p out/worker
+          mv "$MOVED/main-macos" out/worker/icy-tower-worker
+          echo "WORKER=$PWD/out/worker/icy-tower-worker" >>"$GITHUB_ENV"
+
+      - name: The graphical acceptance (macos-session.py --strict)
+        id: session
+        if: always() && steps.probes.outcome == 'success'
+        run: |
+          clang -fobjc-arc -framework AppKit -framework ApplicationServices -o "$RUNNER_TEMP/macos-input" audit/icy-tower/tools/macos-input.m
+          "$RUNNER_TEMP/macos-input" preflight
+          python3 -I audit/icy-tower/tools/macos-session.py run --exe "$EXE" --probe "$PROBE" --worker "$WORKER" \
+            --helper "$RUNNER_TEMP/macos-input" --reference audit/icy-tower/trace-reference.txt --out out/session --strict \
+            2>&1 | tee out/logs/session.log
+
+      # The executable copied elsewhere and run with everything that made it
+      # moved away: SDL3's prefix, its source, the application, Botlish.app,
+      # the caches (and put back however the step ends). dyld lists every
+      # image it loads: none is SDL3's.
+      - name: The executable without its build
+        id: alone
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          alone="$RUNNER_TEMP/Ëlsewhere/icy tower"
+          mkdir -p "$alone"
+          cp "$EXE" "$alone/icy-tower"
+          hide=("$PREFIX" "$HOME/.cache/botlish" "$MOVED" "$APP" "$GITHUB_WORKSPACE/out/probe" "$GITHUB_WORKSPACE/dist")
+          restore() { for d in "${hide[@]}"; do if [ -e "$d.hidden" ]; then mv "$d.hidden" "$d"; fi; done; }
+          trap restore EXIT
+          for d in "${hide[@]}"; do if [ -e "$d" ]; then mv "$d" "$d.hidden"; fi; done
+          cd "$alone"
+          env -i HOME="$HOME" ./icy-tower --headless --frames 600 --seed 7
+          env -i HOME="$HOME" SDL_VIDEO_DRIVER=dummy ./icy-tower --autopilot --fixed-step --frames 600 --seed 7
+          env -i HOME="$HOME" DYLD_PRINT_LIBRARIES=1 ./icy-tower --autopilot --fixed-step --frames 120 --seed 7 2>"$RUNNER_TEMP/dyld.txt"
+          echo "$(grep -c 'dyld' "$RUNNER_TEMP/dyld.txt") images loaded, in a Cocoa window, none SDL3's:"
+          # libSDL3.dylib, libSDL3.0.dylib or SDL3.framework, anywhere (not a
+          # system framework whose name merely contains the letters).
+          if grep -iE '/(lib)?sdl[0-9]*(\.[0-9]+)*\.dylib|/sdl[0-9]*\.framework/' "$RUNNER_TEMP/dyld.txt"; then echo "::error::an SDL image was loaded"; exit 1; fi
+          # (into a file first: `sort | head` would end sort with SIGPIPE,
+          # which pipefail makes the step's failure)
+          grep -o '/[^ ]*' "$RUNNER_TEMP/dyld.txt" | sed 's#^#   #' | sort -u >"$RUNNER_TEMP/images.txt"
+          head -n 40 "$RUNNER_TEMP/images.txt"
+
+      # The macOS integration's mutants (opt-in: "[ci-icy-tower-mutants]"
+      # in the pushed head commit's message, or a manual run's mutants):
+      # each built in a private tree and met by its detector (the build's
+      # checks, the ABI check, the output, a graphical case, the relocation,
+      # the failed build). About a minute each.
+      - name: The macOS integration's mutants (audit/icy-tower/mutate.tcl -macos 1)
+        id: mutants
+        if: >-
+          always() && steps.probes.outcome == 'success'
+          && (contains(github.event.head_commit.message, '[ci-icy-tower-mutants]') || inputs.mutants)
+        run: |
+          tclsh9.0 audit/icy-tower/mutate.tcl -macos 1 -app "$APP" -binding out/sdl3-binding -prefix "$PREFIX" \
+            -helper "$RUNNER_TEMP/macos-input" 2>&1 | tee out/logs/mutants.log
+
+      - name: Measurements
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          {
+            echo "== build (build-macos.sh's phases)"
+            grep -E '^== |time: ' out/logs/build.log
+            echo "== link (the system linker, timed by a wrapper around cc)"
+            printf '#!/bin/sh\nstart=$(python3 -c "import time; print(time.time())")\ncc "$@"; s=$?\npython3 -c "import sys,time; print(\\"link: %%.2f s\\" %% (time.time()-float(sys.argv[1])))" "$start" >>"%s"\nexit $s\n' "$RUNNER_TEMP/link-time.txt" >"$RUNNER_TEMP/timed-cc"
+            chmod +x "$RUNNER_TEMP/timed-cc"
+            rm -f "$MOVED/main-macos"
+            (cd "$RUNNER_TEMP" && BOTLISH_NATIVE_SYSTEM_LINKER="$RUNNER_TEMP/timed-cc" /usr/bin/time -p "$APP/Contents/MacOS/botlish" -warnings off -native-startup main-thread -emit-native-executable "$MOVED/main-macos.bot" 2>&1 | tail -n 3)
+            cat "$RUNNER_TEMP/link-time.txt"
+            cat out/logs/size.txt
+            echo "== startup and the headless simulation (5 runs each)"
+            for i in 1 2 3 4 5; do /usr/bin/time -p "$EXE" --help 2>&1 >/dev/null | head -n 1; done
+            for i in 1 2 3 4 5; do /usr/bin/time -p "$EXE" --headless --frames 3600 --seed 7 2>&1 >/dev/null | head -n 1; done
+            for i in 1 2 3; do SDL_VIDEO_DRIVER=dummy /usr/bin/time -p "$EXE" --autopilot --fixed-step --frames 3600 --seed 7 2>&1 >/dev/null | head -n 1; done
+            echo "== GC stress (dummy driver, 120 frames)"
+            SDL_VIDEO_DRIVER=dummy BOTLISH_NATIVE_GC_STRESS=1 /usr/bin/time -p "$EXE" --autopilot --fixed-step --frames 120 --seed 11 2>&1 | tail -n 4
+            echo "== the Cocoa sessions (SDLTRACE_INFO)"
+            for f in out/session/*.info; do echo "-- $(basename "$f")"; cat "$f"; done
+          } 2>&1 | tee out/logs/measurements.txt
+
+      - name: Classify and summarize
+        if: always()
+        env:
+          APP_OUTCOME: ${{ steps.app.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          ABI: ${{ steps.abi.outcome }}
+          MACHO: ${{ steps.macho.outcome }}
+          RELOCATED: ${{ steps.relocated.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          ORACLE: ${{ steps.oracle.outcome }}
+          PROBES: ${{ steps.probes.outcome }}
+          SESSION: ${{ steps.session.outcome }}
+          ALONE: ${{ steps.alone.outcome }}
+          MUTANTS: ${{ steps.mutants.outcome }}
+        run: |
+          classify_build() {
+            local log=out/logs/build.log stage
+            stage=$(grep -E '^== ' "$log" 2>/dev/null | tail -n 1)
+            case $stage in
+              "== SDL3 binding"*) echo "binding-generation failure" ;;
+              "== Compile and link"*) if grep -q 'NATIVE LINK' "$log"; then echo "native-link failure"; else echo "build failure"; fi ;;
+              *) echo "build failure ($stage)" ;;
+            esac
+          }
+          {
+            echo "## Icy Tower on macOS arm64"
+            echo
+            echo "| step | outcome | classification |"
+            echo "|---|---|---|"
+            echo "| Botlish.app | $APP_OUTCOME | $([ "$APP_OUTCOME" = success ] || echo 'build failure') |"
+            echo "| build-macos.sh | $BUILD | $([ "$BUILD" = success ] || classify_build) |"
+            echo "| ABI checks | $ABI | $([ "$ABI" = failure ] && echo 'binding-generation failure (the ABI)') |"
+            echo "| Mach-O | $MACHO | $([ "$MACHO" = failure ] && echo 'native-link failure') |"
+            echo "| relocated build, Botlish.app alone | $RELOCATED | $([ "$RELOCATED" = failure ] && echo 'build failure') |"
+            echo "| executable tests | $TESTS | $([ "$TESTS" = failure ] && echo 'headless simulation mismatch or runtime safety failure (the log)') |"
+            echo "| oracle | $ORACLE | $([ "$ORACLE" = failure ] && echo 'headless simulation mismatch') |"
+            echo "| probe and worker builds | $PROBES | $([ "$PROBES" = failure ] && echo 'test-harness failure') |"
+            echo "| graphical acceptance | $SESSION | (the cases below) |"
+            echo "| without its build | $ALONE | $([ "$ALONE" = failure ] && echo 'native-link failure (a dependency)') |"
+            echo "| macOS mutants | ${MUTANTS:-not run} | $(tail -n 1 out/logs/mutants.log 2>/dev/null) |"
+            echo
+            cat out/session/summary.md 2>/dev/null || echo "the graphical session did not run"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: icy-tower-macos-aarch64
+          path: |
+            out/
+          if-no-files-found: warn

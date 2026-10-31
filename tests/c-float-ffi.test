@@ -255,7 +255,7 @@ test cfl-type-facts {each C floating type's facts are its own on every target --
     }
     list [lsort -unique $out] [core::cabi::floatingNames] [core::cabi::isFloating LongDouble] \
         [cflReject "import std::ffi::c\nextern c fn f(x: std::ffi::c::LongDouble) -> unit\n"]
-} -result {{{{float binary32 4 4 f32 Float64} {double binary64 8 8 f64 Float64}}} {Float Double} 0 {UNKNOWN-SYMBOL: namespace "std::ffi::c" has no type "LongDouble" (it declares: Char, Int, Long, LongLong, SChar, Short, UChar, UInt, ULong, ULongLong, UShort)}}
+} -result {{{{float binary32 4 4 f32 Float64} {double binary64 8 8 f64 Float64}}} {Float Double RawFloat RawDouble} 0 {UNKNOWN-SYMBOL: namespace "std::ffi::c" has no type "LongDouble" (it declares: Char, Int, Long, LongLong, SChar, Short, UChar, UInt, ULong, ULongLong, UShort)}}
 
 test cfl-value-positions {where a type of Botlish values is written, std::ffi::c::Double is Float64 (its values' type) and std::ffi::c::Float is a TYPE error: no Botlish value is a binary32; Float64 is never a C type (an extern parameter, a pointee), nor is a DecimalRounded type} -body {
     list [cflReject "import std::ffi::c\nfn f(x: std::ffi::c::Float) -> Float64:\n    x\n"] \

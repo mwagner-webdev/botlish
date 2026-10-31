@@ -171,9 +171,9 @@
 @@ width-native-lower native lowering encodes an 8-byte field as a 4-byte one
 ## native/lower.tcl
 <<<<
-    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
+    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)
 ====
-    return [expr {min($width, 4) + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
+    return [expr {min($width, 4) + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)
 >>>>
 
 @@ width-rust the native load reads one byte of a 2-byte field

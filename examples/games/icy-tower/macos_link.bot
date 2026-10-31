@@ -1,0 +1,38 @@
+# macos_link.bot -- the native dependencies of the macOS executable
+# (ICY-TOWER-MACOS-MILESTONE-1.md; the link plan: NATIVE-LINK-PLAN-
+# MILESTONE-1.md). main-macos.bot imports it; nothing else does.
+#
+# SDL3 is the pinned release (tools/c-bindgen/profiles/sdl3.tcl) as a
+# static archive the build stages inside the application,
+# native/macos/libSDL3.a, a path relative to the application root wherever
+# the application is (never the working directory). The generated binding
+# says `extern c library "SDL3"`; the strictest requirement of the two is
+# the plan's, so the binding is never edited.
+#
+# A static archive brings no dependencies of its own: these are SDL3's,
+# exactly the frameworks and libraries its build's sdl3.pc Libs.private
+# names, in its order (tests/platform/sdl3-static-macos.sh link-interface).
+# build-macos.sh checks this file against that list and refuses to build
+# when they differ: the list is SDL3's, never maintained by hand. SDL3 links
+# UniformTypeIdentifiers and CoreHaptics weakly; Botlish has no weak
+# framework form, so they are strong here, and the executable needs a macOS
+# that has both (every macOS 11 does).
+extern c library "SDL3" static at "native/macos/libSDL3.a"
+
+extern c framework "CoreMedia"
+extern c framework "CoreVideo"
+extern c framework "Cocoa"
+extern c framework "UniformTypeIdentifiers"
+extern c framework "IOKit"
+extern c framework "ForceFeedback"
+extern c framework "Carbon"
+extern c framework "CoreAudio"
+extern c framework "AudioToolbox"
+extern c framework "AVFoundation"
+extern c framework "Foundation"
+extern c framework "GameController"
+extern c framework "Metal"
+extern c framework "QuartzCore"
+extern c framework "CoreHaptics"
+extern c library "pthread"
+extern c library "m"

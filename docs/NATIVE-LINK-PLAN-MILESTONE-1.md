@@ -1088,8 +1088,13 @@ batched, 69 rounds and 205 builds sequentially (32 s and 1,177 s).
 
 ## 39. Prerequisites for macOS graphical Icy Tower
 
-Static SDL3 now links through the distributed compiler with the frameworks
-it needs. Still missing, each a separate experiment:
+**Done since: ICY-TOWER-MACOS-MILESTONE-1.md**: the game links this
+section's static SDL3 (its build is now `tests/platform/sdl3-static-macos.sh`,
+shared by link-plan-sdl3.sh and the game's build-macos.sh) through
+`examples/games/icy-tower/macos_link.bot`, whose frameworks build-macos.sh
+checks against sdl3.pc. Static SDL3 linked through the distributed compiler
+with the frameworks it needs; what was still missing then, each a separate
+experiment:
 
 * the macOS SDL3 binding generated for macos-aarch64 (the C binding
   generator's profile on a Mac or with the SDK), replacing the minimal

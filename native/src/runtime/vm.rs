@@ -960,6 +960,16 @@ impl Vm {
         self.alloc(FloatObj { hdr: Header::new(ty.heap_kind(), false), bits }, 0)
     }
 
+    /// A raw C floating value of FORMAT whose bits are BITS (its low 32 for
+    /// a binary32), exactly (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+    pub fn new_raw_float(&mut self, format: CFloatFormat, bits: u64) -> Value {
+        let bits = match format {
+            CFloatFormat::Binary32 => bits & 0xffff_ffff,
+            CFloatFormat::Binary64 => bits,
+        };
+        self.alloc(FloatObj { hdr: Header::new(raw_heap_kind(format), false), bits }, 0)
+    }
+
     pub fn new_result(&mut self, ok: bool, payload: Value) -> Value {
         self.alloc(ResultObj { hdr: Header::new(KIND_RESULT, false), ok, payload }, 0)
     }

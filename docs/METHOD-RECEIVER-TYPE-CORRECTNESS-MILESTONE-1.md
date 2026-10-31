@@ -364,10 +364,13 @@ Production files:
     struct`);
   - a byte owner where a C address is required
     (`hir::borrow::VerifyPointerKinds`), a C address, native view or edit
+    -- or a raw C floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md, which
+    landed on main beside this milestone: `mrt-raw-float-operand`) --
     where another kind is (`hir::cabi::VerifyCallKinds`), another value
     where a DecimalRounded is (`hir::decimal::verify`).
-  Each says more than "another kind" (why an address is no Int, why nothing
-  converts to a DecimalRounded), and each keeps its established diagnostic.
+  Each says more than "another kind" (why an address is no Int, why a raw
+  value is no number, why nothing converts to a DecimalRounded), and each
+  keeps its established diagnostic.
 * **hir/methods.tcl** -- `CallProblems` no longer adds a native's kind
   mismatch itself (the call's own diagnostic carries it); `NativeMismatch`,
   which the kind proofs (`Excluded`) rule candidates out by, asks
@@ -383,7 +386,7 @@ HIR, Core IR, NIR or any backend.
 
 Tests, tools and documents:
 
-* `tests/method-receiver-types.test` (36 tests, census rows in
+* `tests/method-receiver-types.test` (37 tests, census rows in
   `audit/golden/migration/census/method-receiver-types.tsv`).
 * `audit/method-receiver-types/tools/mutate.tcl` and `mutants.txt` (section
   10).
@@ -468,10 +471,11 @@ other test, is reported as not killed for its reason.
 | `diagnostic-suppressed` | the call is still poison but its diagnostic is never reported | `mrt-reproducer-rejected`, `-strict`, `-every-backend`, `-compiler-service` |
 | `subject-lost` | the diagnostic is reported but is no call's own (no subject): the decision cannot read it | `mrt-reproducer-rejected`, `mrt-ordinary-call-equivalent`, `mrt-several-candidates-none-applicable`, `mrt-mutation-receiver-struct` |
 | `operators-exempt` | a special case: operators left to the run-time check | `mrt-operators` |
+| `raw-float-restated` | a raw C floating argument no longer left to the check that says what it is: reported twice | `mrt-raw-float-operand` |
 | `reachable-only` | dead code, and a call a resolution failure leaves unreachable, unjudged | `mrt-dead-code-checked` |
 | `mutation-receivers-all-deferred` | every mutation receiver left to the place check, which cannot judge a struct | `mrt-mutation-receiver-struct` |
 | `any-rejected-through-instances` | the rule applied in a semantic instance's view: `any` judged by one caller's type | `mrt-any-receiver-dynamic` |
-| `imprint-variable-deferred` | an unconstrained imprint variable treated as `any` (checked against instantiations) | `mrt-generic-imprint-unconstrained`, `mrt-rule-cases` |
+| `imprint-variable-deferred` | an unconstrained imprint variable treated as `any` (checked against instantiations) | `mrt-generic-imprint-unconstrained`, `mrt-generic-imprint-inherited`, `mrt-rule-cases` |
 | `poison-dropped` | the rejected call keeps its result type: its uses cascade | `mrt-recovery-no-cascade` |
 | `equal-kinds-rejected` | the required kind itself reported as a mismatch | `mrt-valid-receiver`, `mrt-generic-untyped-satisfied`, `mrt-rule-cases` |
 | `fallback-to-every-namespace` | SFINAE: a method name also looked up among every standard namespace's natives | `mrt-reproducer-rejected`, `mrt-no-fallback-single-candidate` |
@@ -502,7 +506,7 @@ native driver built from this tree). The machine's speed and the session's
 
 | check | command | outcome |
 |---|---|---|
-| the regression file | `tclsh9.0 tests/method-receiver-types.test` | 36 passed, 0 failed |
+| the regression file | `tclsh9.0 tests/method-receiver-types.test` | 37 passed, 0 failed |
 | against the base | the same file on `6572767` | 18 failed (every test of the defect), 17 passed (the invariants: `any`, generic contracts, decisions, obligations, affine moves, C calls, METHOD-ELIGIBLE, the place check) |
 | Tcl tests, part 1 (the 52 files a first, interrupted run had not reached, and every file this milestone edits) | `tclsh9.0 tests/local.tcl -parts tcl FILES` | interp 1807 passed, compile 1803 passed, 0 failed (warning-gate.test among them: the shipped stdlib, libraries, examples and benchmarks compile as before) |
 | golden suites, all 111, four backends | `tclsh9.0 tests/local.tcl -parts golden` | 109 suites passed; 2 failed (below) |
@@ -511,7 +515,7 @@ native driver built from this tree). The machine's speed and the session's
 | the golden duplicates local.tcl skips (FROZEN-DUPLICATE-ORACLE: CI runs them) | each file `-match` its manifest names, interp and compile | 266 runs, 4,700 test executions, 0 failed |
 | the golden manifest | `tclsh9.0 audit/golden/migration/merge.tcl -names audit/golden/migration/tcl-names.txt -check 1` | no problem (12,021 rows) |
 | Compilerpedia | `tclsh9.0 tools/compilerpedia.tcl check` | 1105 topics, 676 examples, 0 problems |
-| this milestone's mutants | `tclsh9.0 audit/method-receiver-types/tools/mutate.tcl` | all 14 apply exactly once and are killed by a test their `!!` line names (exit 0) |
+| this milestone's mutants | `tclsh9.0 audit/method-receiver-types/tools/mutate.tcl` | all 15 apply exactly once and are killed by a test their `!!` line names (exit 0) |
 | the method decision's mutants this milestone's change moved | `tclsh9.0 audit/method-filter/tools/mutate.tcl 2 'native-*'`; `tclsh9.0 audit/method-resolution/tools/mutate.tcl -only nested-call-problems-charged` | `native-equal-kinds-excluded`, `native-type-problem-lost`, `nested-call-problems-charged`: each applies and is killed by the unit tests |
 | the method decision's independent oracle | `tclsh9.0 audit/method-resolution/tools/oracle.tcl 200 1` and with `-contexts 1` | 200 programs, 1128 calls, 0 disagreements; 200 programs, 1202 calls (18 rejected by an obligation), 0 disagreements |
 | the kind proofs' fuzzer (decisions under the reference audit) | `tclsh9.0 audit/method-filter/tools/fuzz.tcl 8 1` | 8 programs, 654 audited builds, 0 disagreements |

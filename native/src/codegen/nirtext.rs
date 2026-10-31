@@ -44,6 +44,8 @@ fn cabi(c: CAbi) -> &'static str {
         CAbi::Bool => "bool",
         CAbi::F32 => "f32",
         CAbi::F64 => "f64",
+        CAbi::RawF32 => "rf32",
+        CAbi::RawF64 => "rf64",
         CAbi::Ptr => "ptr",
         CAbi::Void => "void",
     }

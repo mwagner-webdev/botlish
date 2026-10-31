@@ -497,7 +497,10 @@ cfl-layout-declarations).
   doubles and integers (up to fourteen parameters, a result whose bits the
   call names: NaN payloads, infinities, -0, subnormals) compiled as real C
   and called on both native backends, and random float layouts over bytes
-  on all four backends, each against its own integer model. The C binding
+  on all four backends, each against its own integer model (since
+  RAW-C-FLOAT-FFI-MILESTONE-1.md it also draws raw parameters, results and
+  fields by default; `-raw 0` draws exactly this milestone's programs, the
+  seeds of section 16 among them). The C binding
   generator's fuzzers model floats now too: audit/c-bindgen/tools/fuzz.tcl
   draws float and double parameters, results and typedef chains (C reports
   their bits), layout-fuzz.tcl float and double fields, arrays and union
@@ -520,6 +523,11 @@ cfl-layout-declarations).
 Results are in section 16.
 
 ## 15. Remaining C floating limitations
+
+(RAW-C-FLOAT-FFI-MILESTONE-1.md adds `std::ffi::c::RawFloat` and
+`std::ffi::c::RawDouble` beside these types: the same C facts, every bit
+pattern carried, admission into Float64 an explicit step. Nothing below
+changed for `std::ffi::c::Float` and `std::ffi::c::Double`.)
 
 * No `long double` (any target), no `_Float16`/`__float128`/`_Complex`, no
   floating macro constants in bindings.

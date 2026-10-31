@@ -84,6 +84,15 @@
         if {($i == 0 && [hir::mutvec::OpKind $hir $e] eq "mutate")
 >>>>
 
+@@ raw-float-restated a raw C floating argument is no longer left to the check that says what it is: each one is reported twice, by hir::cabi::VerifyCallKinds and again by the kind check
+!! mrt-raw-float-operand
+## hir/range.tcl
+<<<<
+                || [hir::cabi::IsRawFloating $argType]
+====
+                || 0
+>>>>
+
 # ---------------------------------------------------------------------------
 # The rule and its boundaries
 
