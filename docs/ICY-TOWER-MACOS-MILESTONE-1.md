@@ -848,7 +848,8 @@ test's doubles (0.5, -1.25, 6.0, ...): the module's tests share one
 branch changes nothing in `native/` (its diff from the merge base has no
 file there), and the same job passes on main (run 41134581250): a race in
 that test module, recorded here and left to its owner, not fixed in this
-milestone. The failed job was run again: PENDING.
+milestone. The failed job, run again on the same commit (the run's attempt
+2), passed: run 41164897164, success.
 
 ## 35. Mutation testing
 
@@ -990,8 +991,9 @@ tier, the Linux control, the system linker (also under GC stress), the
 application without developer tools, `static SDL3 through Botlish.app`
 (link-plan-sdl3.sh on the shared recipe) and `main-thread startup` (its
 static SDL3 through the application, the graphical census `--strict`, the
-policy's tests plainly and under GC stress) passed; the acceptance tier's
-two shards: PENDING. `tests (windows x86-64)` run 41164897164: section 34.
+policy's tests plainly and under GC stress) passed, and so did the
+acceptance tier's two shards: the run, success. `tests (windows x86-64)`
+run 41164897164: success (section 34).
 
 ## 39. Generated artifacts and their provenance
 
