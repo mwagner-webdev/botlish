@@ -864,7 +864,19 @@ signature's, whatever happened to the files since: `seal-unchecked`).
 
 ## 27. Hardened-runtime graphical acceptance
 
-HARDENED-PLACEHOLDER
+Every LaunchServices case plays the bundle signed with `--options
+runtime` (`flags adhoc,runtime`, verified before the session): the game,
+its window, Metal, the keyboard, GC stress, every alert and the Gatekeeper
+refusal ran under the hardened runtime (**Executed**, run RUN_A; section 34).
+In a release the same cases run once more on the Developer ID-signed
+bundle before it is submitted (`app-bundle`, `app-launch`,
+`app-keyboard`, `app-relaunch`, `app-gc-stress`, `app-alert-renderer`,
+`app-terminal-failure`), and `record
+hardened-runtime` ties their result to the CDHash notarization checks
+(`test_failed_acceptance_blocks_notarization`; mutant
+`acceptance-not-required`). That run is **Credential-blocked**. SIP is
+disabled on the runner (section 46): the runtime's enforcement there is not
+proven equal to a user's Mac.
 
 ## 28. Notarization
 
@@ -895,7 +907,10 @@ commit, downloads the bundle it signed (`icy-tower-macos-signed`),
 submission; the ticket's CDHash ties the two
 (`test_notarization_timeout_then_resume`, `test_resume_adopts_the_signed_bundle`).
 
-NOTARIZE-EVIDENCE-PLACEHOLDER
+**Executed** against the stand-ins only (test_release.py: accepted,
+Invalid, Rejected, another artifact's ticket, the log's issues, a timeout
+then a resume, an adopted bundle); **Credential-blocked** against Apple's
+service: no submission ID exists yet (section 44).
 
 ## 29. Stapling
 
@@ -918,7 +933,16 @@ For the ad hoc bundle the same assessment must be a rejection (a control
 that Gatekeeper decides on the runner). The runner's `spctl --status` is
 recorded, and never changed (no `--master-disable`).
 
-GATEKEEPER-EVIDENCE-PLACEHOLDER
+**Executed** (run RUN_A): the runner's `spctl --status` is `assessments enabled` (and
+`csrutil status` `System Integrity Protection status: disabled.`,
+recorded, not changed), and the ad hoc bundle's assessment is a rejection:
+
+    $ spctl --assess --type execute --verbose=4 '.../out/app/Icy Tower.app'
+    .../out/app/Icy Tower.app: rejected
+
+So Gatekeeper decides on the runner, and a bundle that is merely signed is
+refused. The notarized bundle's `accepted`, `source=Notarized Developer ID`
+is **Credential-blocked** (section 44).
 
 ## 31. Quarantine and the downloaded artifact
 
@@ -937,7 +961,21 @@ the player, Escape quits. For the ad hoc bundle of ordinary CI the dialog
 must refuse it and offer no Open, the harness presses Done, and the game
 must never start. Quarantine is never removed to make a case pass.
 
-QUARANTINE-EVIDENCE-PLACEHOLDER
+**Executed** for the ad hoc download (run RUN_A, `app-gatekeeper`, 6 of 6):
+
+    PASS the extracted bundle carries a quarantine attribute (0083;6ae5f8db;Safari;FAB63311-8D7D-4359-8659-DB55D32BD095)
+    PASS Gatekeeper's assessments are enabled (assessments enabled)
+    PASS spctl refuses it (not notarized): .../out/app-session/downloaded/Icy Tower.app: rejected
+    PASS Gatekeeper's dialog refuses it: “Icy Tower” Not Opened / Apple could not verify “Icy Tower” is free of malware that may harm your Mac or compromise your privacy.
+    PASS and offers no Open: ['Done', 'Move to Trash']
+    PASS the game never started
+
+That is the negative control: the quarantined first launch is
+Gatekeeper's real decision on this runner, and it refuses an application
+that is not notarized. The positive case -- the notarized release's dialog
+offering Open, the game played after it (the same case with `--gatekeeper
+notarized`, in the release job, App Translocation followed) -- is
+**Credential-blocked**.
 
 ## 32. The ZIP: packaging and extraction
 
@@ -952,7 +990,19 @@ original file for file (path, mode, SHA-256), the executable keep mode
 never a release asset (`test_unstapled_submission_zip_never_published`;
 the workflow's upload lists exactly the three packaged files).
 
-ZIP-EVIDENCE-PLACEHOLDER
+**Executed** for the ad hoc bundle (run RUN_A): `ditto -c -k --keepParent`, `unzip
+-tq`, `ditto -x -k` into a fresh directory, the tree compared file for file
+(path, mode, SHA-256), the executable 0755, the signature verified strictly
+there -- `package: .../icy-tower-macos-aarch64.zip (1483514 bytes)`. The
+ad hoc ZIP is a test input only (the `app-gatekeeper` case's download):
+`publishable` refused it at once, `MACOS-PUBLISH: an ad hoc build is never
+published: only a release (Developer ID, notarized, stapled)`. The bundle's
+CDHash is the same in every run built from the same executable
+(`1f23171577e9eff6a828260316426784dfd7e825` in runs 41201527696 and RUN_A),
+while the ZIP's SHA-256 differs run to run (ditto records the files' times):
+the release claims a traceable artifact, never a byte-identical one. The
+release's ZIP of the stapled, notarized bundle and its `stapler validate`
+after extraction are **Credential-blocked**.
 
 ## 33. Tamper control
 
@@ -962,11 +1012,44 @@ resource changed; `codesign --verify --deep --strict` must refuse both, the
 copies are removed, and the original must still verify with its CDHash
 unchanged. The released copy is never touched.
 
-TAMPER-EVIDENCE-PLACEHOLDER
+**Executed** on the ad hoc bundle (run RUN_A, as in every acceptance run):
+
+    tamper: one byte of the copy's executable changed: codesign refuses it (In architecture: arm64)
+    tamper: one byte of the copy's resource changed: codesign refuses it (.../resource/Icy Tower.app: a sealed resource is missing or invalid)
+
+and the original still verified with its CDHash, `1f23171577e9eff6a828260316426784dfd7e825`.
+For the Developer ID-signed bundle the same stage runs in the release job
+(**Credential-blocked**).
 
 ## 34. The game: graphical and keyboard regression
 
-GAME-REGRESSION-PLACEHOLDER
+The milestone keeps the earlier acceptance whole and adds the bundle's.
+**Executed** (run RUN_A, macos-15):
+
+* the original graphical acceptance (`macos-session.py --strict`, the
+  executable run directly): env 2/2, cocoa 20/20, keyboard 14/14, restart
+  9/9, close 3/3, focus 5/5, autopilot 6/6, trace-dummy 5/5, trace-cocoa
+  7/7, gc-stress 3/3, worker 3/3, controls 4/4 -- "not EXECUTED: none";
+* the bundle through LaunchServices (`macos-session.py app --strict`): env
+  2/2, app-bundle 8/8, app-launch 15/15, app-keyboard 4/4 (Right +90 units,
+  Left -104 units, Escape quits), app-relaunch 5/5 (closed by its close
+  button), app-gc-stress 3/3 (the oracle's summary under GC stress), the
+  five alerts 8/8 or 9/9, app-terminal-failure 4/4, app-gatekeeper 6/6 --
+  "not EXECUTED: none";
+* `tests/workload-icy-tower.test`'s macOS section (12 tests, the bundle's
+  among them), the independent oracle (`oracle.py compare`), the SDL3
+  binding's ABI (123 checks) and macos_app.bot's (26 checks, 0 failed), the
+  staged application moved and rebuilt by Botlish.app alone.
+
+One acceptance run of the original session (41205557290, commit c0f3165)
+failed its graphical step; its log was lost when that run, hung in another
+step, was cancelled, so the case is not known. The same session passed in
+every other run of this milestone (41197431104, 41201527696, RUN_A), and an
+earlier run's one failure was the `restart` case's centring in round 2
+(the player not yet centred), which is the earlier milestone's case and
+passed when run again. It is recorded here as an intermittent failure of
+unknown cause, not as passed. The Developer ID-signed application played
+under the hardened runtime (section 27) is **Credential-blocked**.
 
 ## 35. Clean-environment independence
 
@@ -1012,7 +1095,12 @@ stapler, spctl) -- no notarization action.
 
 ## 37. Release publication
 
-PUBLICATION-PLACEHOLDER
+The publish job (section 36) is **Inspected** (test_workflow.py's
+publish tests, the mutants `publish-before-release`,
+`release-assets-unchecked`, `release-writes`) and has never run: no
+release tag exists. **Credential-blocked**: no release, release URL or
+published SHA-256 exists yet; the first release tag's run publishes
+"Icy Tower X.Y.Z for macOS (Apple Silicon)" with the three assets.
 
 ## 38. SHA-256 and provenance
 
@@ -1076,7 +1164,31 @@ download refused (section 31).
 
 ## 41. Linux and Windows regressions
 
-LINUX-WINDOWS-PLACEHOLDER
+No shared source changed: against main, the game's changed files are
+main-macos.bot, macos_app.bot (new), macos/ (new) and package-macos.sh
+(new); tower, hud, options, render, sdl, game, main and main-windows, the
+committed Linux executable (`audit/icy-tower/artifacts/icy-tower`) and the
+SDL call trace reference are as they were
+(`workload-icy-tower-app-module-shared-sources-untouched` checks that no
+shared module names macos_app, CoreFoundation or the alert variable).
+**Executed**:
+
+* Linux, `icy-tower` (run 41205692581, commit c0f3165, ubuntu-latest):
+  `tests/workload-icy-tower.test` Total 43, Passed 26, Skipped 17 (the 11
+  macOS and 6 Windows executable tests), Failed 0 -- the release tooling's
+  tests among them (`workload-icy-tower-release-tooling`); build.sh; the
+  oracle (every seed and length PASS); the rules' mutants, 26 of 26
+  killed; the Xvfb session (keys, the autopilot at about 60 frames a
+  second, the close request).
+* Windows, `icy-tower (windows x86-64)` (runs 41205557419 at c0f3165 and
+  41207619531 at e0231c4, windows-2025, MSVC): the MSVC binding generated,
+  the game compiled and linked, the Windows executable's tests, headless
+  and dummy-driver play, the signing dry run and its signed copies.
+
+The repository's general `tests (macos arm64)` and `tests (windows
+x86-64)` workflows started for each push and were cancelled by the next
+push of this branch (each push supersedes the last); section 43 lists what
+ran to completion.
 
 ## 42. Timing and sizes
 

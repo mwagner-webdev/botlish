@@ -439,6 +439,14 @@ jobs:
         run: |
           "$RUNNER_TEMP/macos-input" app-info "$APPDIR" || true
           spctl --status || true
+          # nothing the build made but the bundles is where it was: the static
+          # SDL3, the compiler's caches, Botlish.app (both copies), its
+          # archive -- the application needs none of them
+          hide=("$PREFIX" "$HOME/.cache/botlish" "$MOVED" "$APP" "$GITHUB_WORKSPACE/dist")
+          restore() { for d in "${hide[@]}"; do if [ -e "$d.hidden" ]; then mv "$d.hidden" "$d"; fi; done; }
+          trap restore EXIT
+          for d in "${hide[@]}"; do if [ -e "$d" ]; then mv "$d" "$d.hidden"; fi; done
+          echo "hidden while the application runs: ${hide[*]}"
           python3 -I audit/icy-tower/tools/macos-session.py app --app "$APPDIR" --probe-app "$PWD/out/probe-app/Icy Tower.app" \
             --zip "$PWD/out/app-dist/icy-tower-macos-aarch64.zip" --gatekeeper refused \
             --helper "$RUNNER_TEMP/macos-input" --out out/app-session --strict 2>&1 | tee out/logs/app-session.log
