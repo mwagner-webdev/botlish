@@ -3,6 +3,7 @@
 #
 #   tclsh9.0 bench/utf16-bytes.tcl ?-root DIR | -baseline-rev REV? ?-runs N?
 #       ?-scale F? ?-lengths LIST? ?-alphabets LIST? ?-groups LIST?
+#       ?-measure time|alloc?
 #
 # Every row is a program that runs one operation in a loop of N iterations,
 # timed as bench/filesystem.tcl times its rows: best of RUNS runs inside one
@@ -49,6 +50,10 @@
 # DIR has its own build (BOTLISH_NATIVE_BIN overrides both): the driver runs
 # any older program, its operations being a superset. A row whose operation
 # DIR does not have (the codec before this milestone) prints "n/a".
+# -measure alloc counts instead of timing: each row's heap allocations and
+# allocated bytes per operation (the driver's `--alloc summary` of 100
+# iterations, minus the empty loop's), the temporary representations an
+# operation builds.
 # -baseline-rev REV measures REV (in a temporary worktree,
 # bench/baseline-tree.tcl) and then this tree, on the same machine, and ends
 # with a table of both and their ratio (how CI compares: the tier item
@@ -57,7 +62,7 @@
 set here [file dirname [file normalize [info script]]]
 set root [file dirname $here]
 set options [dict create -root $root -runs 5 -scale 1.0 -lengths {8 40 256 4096} \
-    -alphabets {ascii mixed} -groups "" -baseline-rev ""]
+    -alphabets {ascii mixed} -groups "" -baseline-rev "" -measure time]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -78,7 +83,7 @@ if {[dict get $options -baseline-rev] ne ""} {
         set rows [dict create]
         foreach line [split $text \n] {
             set fields [lmap f [lrange [split $line |] 1 end-1] {string trim $f}]
-            if {[llength $fields] == 5 && [lindex $fields 0] in {codec windows}} {
+            if {[llength $fields] >= 5 && [lindex $fields 0] in {codec windows}} {
                 dict set rows [lrange $fields 0 3] [lindex $fields 4]
             }
         }
@@ -109,6 +114,7 @@ source [file join $treeRoot surface surface.tcl]
 source [file join $treeRoot native native.tcl]
 
 set runs [dict get $options -runs]
+set measure [dict get $options -measure]
 set scale [dict get $options -scale]
 set host [core::cabi::hostTarget]
 set hasCodec [expr {![catch {core::native::metadata std::byte_store::encode_utf16le}]}]
@@ -287,13 +293,11 @@ proc build {text target} {
 }
 set programs 0
 
-# The best time (microseconds) of one run of program TEXT; WINDOWS: it
-# imports std::windows (compiled for windows-x86_64).
-proc best {windows text} {
+# The NIR file of program TEXT; WINDOWS: it imports std::windows (compiled
+# for windows-x86_64).
+proc nirFile {windows text} {
     set target [expr {$windows ? "windows-x86_64" : $::host}]
     set hir [build $text $target]
-    set resultPath [file join $::scratch result]
-    file delete $resultPath
     set nir [native::nir $hir]
     if {$windows} {
         # No foreign declaration may be left (the program would call
@@ -315,6 +319,31 @@ proc best {windows text} {
     fconfigure $channel -encoding utf-8 -translation lf
     puts -nonewline $channel $nir
     close $channel
+    return $nirPath
+}
+
+# {ALLOCATIONS BYTES} of one run of program TEXT (the driver's allocation
+# report).
+proc allocations {windows text} {
+    set nirPath [nirFile $windows $text]
+    set resultPath [file join $::scratch result]
+    file delete $resultPath
+    exec [native::binary] run $nirPath --alloc summary --result $resultPath
+    set lines [split [core::ReadFile $resultPath] \n]
+    set report [lsearch -inline $lines {alloc *}]
+    if {$report eq ""} {
+        error "no allocation report:\n[join $lines \n]"
+    }
+    set total [dict get [lrange $report 1 end] total]
+    return [list [dict get $total allocations] [dict get $total allocatedBytes]]
+}
+
+# The best time (microseconds) of one run of program TEXT; WINDOWS: it
+# imports std::windows (compiled for windows-x86_64).
+proc best {windows text} {
+    set nirPath [nirFile $windows $text]
+    set resultPath [file join $::scratch result]
+    file delete $resultPath
     exec [native::binary] bench $::runs $nirPath --result $resultPath
     set lines [split [core::ReadFile $resultPath] \n]
     set times [lsearch -inline $lines {times *}]
@@ -339,6 +368,15 @@ proc row {group label length alphabet setup body {needsCodec 0}} {
         puts [format "| %-7s | %-34s | %5d | %-5s | %12s |" $group $label $length $alphabet n/a]
         return
     }
+    if {$::measure eq "alloc"} {
+        set n 100
+        lassign [allocations $windows [program $windows $setup "" $n]] a0 b0
+        lassign [allocations $windows [program $windows $setup $body $n]] a1 b1
+        puts [format "| %-7s | %-34s | %5d | %-5s | %12.1f | %12.1f |" $group $label $length $alphabet \
+            [expr {($a1 - $a0) / double($n)}] [expr {($b1 - $b0) / double($n)}]]
+        flush stdout
+        return
+    }
     set n [iterations $length]
     set empty [expr {1000.0 * [best $windows [program $windows $setup "" $n]] / $n}]
     set t [expr {1000.0 * [best $windows [program $windows $setup $body $n]] / $n}]
@@ -349,13 +387,18 @@ proc row {group label length alphabet setup body {needsCodec 0}} {
 
 set revision ""
 catch {set revision [string range [exec git -C $treeRoot rev-parse HEAD] 0 9]}
-puts "bench/utf16-bytes.tcl: $host, tree $treeRoot ($revision), best of $runs runs, ns per operation"
+puts "bench/utf16-bytes.tcl: $host, tree $treeRoot ($revision), [expr {$measure eq "alloc" ? "heap allocations per operation" : "best of $runs runs, ns per operation"}]"
 if {"windows" in $groups && $windowsMode eq "swap"} {
     set targetLine [hostTargetLine]
     puts "windows rows: compiled for windows-x86_64, run on this $host CPU (local experiment)"
 }
-puts "| group   | operation                          | chars | alpha | ns/op        |"
-puts "|---------|------------------------------------|------:|-------|-------------:|"
+if {$measure eq "alloc"} {
+    puts "| group   | operation                          | chars | alpha | allocs/op    | bytes/op     |"
+    puts "|---------|------------------------------------|------:|-------|-------------:|-------------:|"
+} else {
+    puts "| group   | operation                          | chars | alpha | ns/op        |"
+    puts "|---------|------------------------------------|------:|-------|-------------:|"
+}
 
 foreach length [dict get $options -lengths] {
     foreach alphabet [dict get $options -alphabets] {

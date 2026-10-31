@@ -236,6 +236,35 @@ private fn byte_vector() -> MutableVector[Byte]:
 private fn units_of(path: NativePath) -> List[int]:
     std::abi::bytes::utf16le_units(path.data)
 
+# The byte count of DATA's first four units, or of all of them when it holds
+# fewer.
+private fn head_end(n: int) -> int:
+    if n < 8:
+        return n
+    8
+
+# The first (at most four) units of a path's bytes DATA: all `kind_of` reads
+# of a path -- its units 0..3, and whether it has exactly three -- read
+# without bridging the rest (the kind of a path is the kind of these).
+private fn head_units(data: std::abi::bytes::Bytes) -> List[int]:
+    head = data.slice(0, head_end(std::abi::bytes::length(data).value)):
+        on LowerUnderrun:
+            return []
+        on UpperOverrun:
+            return []
+    std::abi::bytes::utf16le_units(head)
+
+# The last unit of a path's bytes DATA, as a List of one -- what
+# `ends_separated?` reads -- or none for no bytes.
+private fn last_units(data: std::abi::bytes::Bytes) -> List[int]:
+    n = std::abi::bytes::length(data).value
+    tail = data.slice(n - 2, n):
+        on LowerUnderrun:
+            return []
+        on UpperOverrun:
+            return []
+    std::abi::bytes::utf16le_units(tail)
+
 # Appends the UTF-8 encoding of the scalar C (below U+110000) to OUT.
 private fn push_utf8(place out: MutableVector[Byte], c: int) -> unit:
     if c < 128:
@@ -427,7 +456,7 @@ private fn kind_of(us: List[int]) -> PathKind:
 # PATH's syntactic kind (the module comment). Syntax only: nothing is asked
 # of the filesystem or the process.
 fn kind(path: NativePath) -> PathKind:
-    path.units_of().kind_of()
+    path.data.head_units().kind_of()
 
 # The components of US: the runs between separators (VERBATIM: "\" only).
 private fn segments(us: List[int], verbatim: bool) -> List[List[int]]:
@@ -495,24 +524,25 @@ private fn joinable?(base: PathKind, name: List[int]) -> bool:
 private fn ends_separated?(us: List[int], verbatim: bool) -> bool:
     us.unit_at(us.length() - 1).separator?(verbatim)
 
-# The bytes of the path BASE (whose units are BU) joined with the bytes NAME
-# by Win32's syntax: one "\" between them unless BASE ends with a separator
-# or is a bare drive designator ("C:" and "a" are "C:a", drive C's current
-# directory: never "C:\a"). The syntax reads BASE's units; the result is the
-# bytes joined, no unit decoded or re-encoded.
-private fn joined_data(base: std::abi::bytes::Bytes, bu: List[int], name: std::abi::bytes::Bytes) -> std::abi::bytes::Bytes:
-    k = bu.kind_of()
-    if bu.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and bu.length() == 2):
+# The bytes of the path BASE joined with the bytes NAME by Win32's syntax:
+# one "\" between them unless BASE ends with a separator or is a bare drive
+# designator ("C:" and "a" are "C:a", drive C's current directory: never
+# "C:\a"). The syntax reads BASE's kind (its first units), its last unit and
+# its unit count; the result is the bytes joined, no unit decoded or
+# re-encoded.
+private fn joined_data(base: std::abi::bytes::Bytes, name: std::abi::bytes::Bytes) -> std::abi::bytes::Bytes:
+    k = base.head_units().kind_of()
+    count = std::abi::bytes::length(base).value.shift_right(1)
+    if base.last_units().ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and count == 2):
         return std::abi::bytes::join([base, name])
     std::abi::bytes::join([base, backslash_unit(), name])
 
 # PATH joined with the relative native name whose bytes are NAME and units
 # NU, by `join`'s rule.
 private fn join_parts(path: NativePath, name: std::abi::bytes::Bytes, nu: List[int]) -> NativePath errors std::io::path::NotAPath:
-    bu = path.units_of()
-    if not bu.kind_of().joinable?(nu):
+    if not path.data.head_units().kind_of().joinable?(nu):
         fail std::io::path::NotAPath
-    NativePath {data: path.data.joined_data(bu, name)}
+    NativePath {data: path.data.joined_data(name)}
 
 # PATH joined with the relative native NAME, by Win32's syntax
 # (`joined_data`); std::io::path::NotAPath when NAME is no relative path,
@@ -899,7 +929,7 @@ private fn rest(find: std::ffi::c::Ptr[std::ffi::c::Void], place out: MutableVec
 # entries: ERROR_FILE_NOT_FOUND) is empty; a name that is no directory is
 # NotADirectory (ERROR_DIRECTORY, W9).
 fn entries(dir: NativePath, context fs: WindowsFS) -> List[Entry] errors std::io::fs::FileError:
-    pattern = dir.data.joined_data(dir.units_of(), star_unit())
+    pattern = dir.data.joined_data(star_unit())
     r = wide_of(pattern).c_find_first(find_data())
     failure = c_get_last_error()
     {result: find, data} = r

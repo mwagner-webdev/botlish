@@ -18,8 +18,9 @@
 #
 # A mutant with a `%% TARGET ...` line runs only on those hosts
 # (core::cabi::hostTarget) and is SKIPPED elsewhere. Output: one line per
-# mutant -- killed by what, SURVIVED, SKIPPED or that its text does not apply
-# exactly once. Exits 1 unless every mutant this host runs applies and is
+# mutant -- killed by what, SURVIVED, SKIPPED, DOES NOT COMPILE (the mutated
+# library is rejected: no detector saw the rule broken) or that its text does
+# not apply exactly once. Exits 1 unless every mutant this host runs applies and is
 # killed. The real checkout is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
@@ -185,7 +186,11 @@ try {
             set status SURVIVED
             lassign [run $timeout $tclsh [file join $tree audit filesystem tools fuzz.tcl] -n [dict get $options -fuzz-n]] code output
             set summary [lindex [split [string trim $output] \n] end]
-            if {$code != 0 || ![regexp {disagreements 0$} $summary]} {
+            if {[regexp {case program: expected compiles} $output]} {
+                # The mutated library does not compile: no detector saw
+                # the rule broken (fix the mutant's text).
+                set status "DOES NOT COMPILE"
+            } elseif {$code != 0 || ![regexp {disagreements 0$} $summary]} {
                 set first [lindex [split [string trim $output] \n] 0]
                 set status "killed by the fuzzer ([string range $first 0 100])"
             } else {
@@ -198,7 +203,7 @@ try {
                     set status "killed by filesystem.test ([join [lrange $names 0 3] {, }][expr {[llength $names] > 4 ? ", ..." : ""}])"
                 }
             }
-            if {$status eq "SURVIVED"} {
+            if {$status in {SURVIVED {DOES NOT COMPILE}}} {
                 incr failures
             }
             puts "[format %-36s $name] $status"

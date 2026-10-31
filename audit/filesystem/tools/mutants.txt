@@ -21,9 +21,9 @@
 @@ win-drive-relative-as-absolute a bare drive designator is joined with a separator: "C:" and "a" become "C:\a" (the drive's root) instead of "C:a" (the drive's current directory)
 ## stdlib/windows/fs.bot
 <<<<
-    if bu.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and bu.length() == 2):
+    if base.last_units().ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and count == 2):
 ====
-    if bu.ends_separated?(k == PathKind::Verbatim):
+    if base.last_units().ends_separated?(k == PathKind::Verbatim):
 >>>>
 
 @@ win-always-separator a separator is inserted even after one: "C:\x\" and "a" become "C:\x\\a"
@@ -116,12 +116,12 @@
     NativePath {data: wide_of(data)}
 >>>>
 
-@@ win-open-through-lossy-text the Win32 call is given the bytes of the path's display, not its own units: a name holding an unpaired surrogate opens the file whose name holds U+FFFD
+@@ win-open-through-lossy-text the Win32 call is given the bytes of the path's lossy spelling (display's), not its own units: a name holding an unpaired surrogate opens the file whose name holds U+FFFD
 ## stdlib/windows/fs.bot
 <<<<
     wide_of(path.data)
 ====
-    wide_of(std::abi::bytes::encode_utf16le(path.display()))
+    wide_of(std::abi::bytes::encode_utf16le(path.units_of().lossy()))
 >>>>
 
 @@ win-text-normalized a native path's text is normalized (lowercased): "C:a" reads back as "c:a", another spelling than the path's
@@ -144,7 +144,7 @@ fn units(path: NativePath) -> List[int]:
     path.units_of()
 ====
 fn units(path: NativePath) -> List[int]:
-    std::abi::bytes::utf16le_units(std::abi::bytes::encode_utf16le(path.display()))
+    std::abi::bytes::utf16le_units(std::abi::bytes::encode_utf16le(path.units_of().lossy()))
 >>>>
 
 @@ win-context-bypassed create_directory needs no filesystem context: a path is authority
