@@ -636,7 +636,16 @@ private key"), `ENCRYPTED PRIVATE KEY`, `CERTIFICATE`; a body that is not
 valid Base64. The DER must be one PrivateKeyInfo covering the body exactly
 (version, algorithm, key), read by the cryptography package as an EC
 private key on P-256 (secp256r1: App Store Connect's ES256); RSA, Ed25519
-("wrong key algorithm") and P-384 ("wrong curve") are refused. The decoded
+("wrong key algorithm") and P-384 ("wrong curve") are refused. And its
+layout must be App Store Connect's: a .p8 downloaded from App Store Connect
+carries the curve inside its ECPrivateKey as well (the `[0]` parameters;
+150 bytes, Base64 `MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg`), and a
+key re-encoded without it (`openssl pkcs8 -topk8`, a crypto library's
+PKCS#8: 138 bytes, `MIGHAgEA...`) -- the same key -- is refused: "is a P-256
+key re-encoded without the curve inside its ECPrivateKey ... notarytool
+fails without a message on a key that does not". That rule comes from the
+runner (section 20): notarytool 1.0.0 (38) traps on such a key while it
+makes its token, printing nothing. The decoded
 file is written owner-only and normalized (its own lines, LF); no key
 material is ever printed or written elsewhere.
 
@@ -681,7 +690,44 @@ A rejection after the key passed every local check is never reported as a
 key-format problem (`test_notary_service_unreachable` checks the reverse
 too: an outage is not MACOS-NOTARY-AUTH or MACOS-NOTARY-KEY-FORMAT).
 
-NOTARY-AUTH-EVIDENCE-PLACEHOLDER
+`store-credentials` names no reason when Apple refuses: on the runner it
+printed only "Validating your credentials... Credential validation failed.
+Please verify your inputs." So when that is all it says, notary-auth asks
+Apple once more with a read request, `notarytool history` with the same
+key, and classifies that answer (a 401 is MACOS-NOTARY-AUTH, an outage
+MACOS-NOTARY-SERVICE: `test_notary_unspecific_validation_failure_asks_apple_why`,
+`..._offline`, mutant `unspecific-auth-unexplained`). A notarytool that
+prints nothing is reported with its exit status.
+
+**Executed against Apple's service, with a key Apple never issued** (the
+dry run in ordinary CI). The runs established, in this order:
+
+1. With the throwaway key in the cryptography package's PKCS#8 layout,
+   notarytool 1.0.0 (38) trapped before sending anything: `store-credentials`
+   exited -5 (SIGTRAP), printing nothing, and `notarytool history --verbose`
+   ended at `Debug [JWT] Generating new JWT for key ID: DRYRUN0000.` with
+   "Trace/BPT trap: 5" (status 133), whether standard input was /dev/null
+   or the step's (runs 41217612371, 41219310772). No notarytool crash
+   report was found in either DiagnosticReports directory 10 s later.
+2. With the same kind of key laid out as App Store Connect's .p8 files are
+   (the curve inside the ECPrivateKey; the only difference), notarytool
+   made its token, sent the request, and Apple answered (run 41220843007):
+
+       Debug [JWT] Generating new JWT for key ID: DRYRUN0000.
+       Info [JWT] Caching newly generated JWT. key ID: DRYRUN0000, JWT: private<String>
+       Debug [API] Received response status code: 401, message: unauthorized, URL: https://appstoreconnect.apple.com/notary/v2/submissions?, Correlation Key: 7EFCWTLGIQIYHNZYFV5RMORIKM
+       Error: HTTP status code: 401. Unauthenticated. Ensure that all authentication arguments are correct.
+
+   So Apple's service is reachable from the runner and refuses an unknown
+   key as authentication, which the preflight cannot know (section 19).
+   The fixtures now make App Store Connect's layout, and the preflight
+   refuses the other (section 18): a real .p8 re-encoded by a tool would
+   otherwise reach notarytool and fail with no message at all.
+3. NOTARY-AUTH-RUN
+
+**Credential-blocked**: Apple's acceptance of the release's real key
+(`notary-auth: Apple validated the Key ID, the Issuer ID and the key
+together`).
 
 ## 21. Synthetic credential fixtures
 
@@ -710,7 +756,7 @@ root without a person: the dry run's signature is Environment-blocked
 
 ## 22. Credential negative tests
 
-`audit/macos-release/tests/test_credentials.py` (61 tests) runs
+`audit/macos-release/tests/test_credentials.py` (63 tests) runs
 credentials.py as the release runs it -- a process, the values in its
 environment -- once per mistake. Each negative case asserts the exit status
 1, the expected code, the offending variable's name after it, a remedy, no
@@ -760,6 +806,7 @@ could go on with).
 | Ed25519 key | MACOS-NOTARY-KEY-FORMAT "wrong key algorithm" |
 | P-384 key | MACOS-NOTARY-KEY-FORMAT "wrong curve" |
 | SEC1 container | MACOS-NOTARY-KEY-FORMAT "not the expected PKCS#8 PEM .p8 format" |
+| the same key re-encoded as PKCS#8 without the curve in its ECPrivateKey | MACOS-NOTARY-KEY-FORMAT "re-encoded without the curve inside its ECPrivateKey" |
 | encrypted key | MACOS-NOTARY-KEY-FORMAT "encrypted private key" |
 | extra PEM block | MACOS-NOTARY-KEY-FORMAT "2 PEM blocks" |
 | extra text | MACOS-NOTARY-KEY-FORMAT "unexpected text" |
@@ -781,7 +828,7 @@ after a failed preflight, every later stage refuses and the stand-ins
 record no call of security, codesign, spctl or xcrun
 (`test_failed_preflight_stops_everything`).
 
-**Executed** on Linux (61 tests, OK) and on macOS (section 43).
+**Executed** on Linux (63 tests, OK) and on macOS (section 43).
 
 ## 23. Secret protection and the temporary keychain
 
@@ -1181,15 +1228,15 @@ the release job compiles nothing; the executable is the game job's.
 Two mutant sets, both in the repository's mutant format, each killed only
 by the check that states the rule it breaks.
 
-**The release pipeline** (`audit/macos-release/mutants.txt`, 68 mutants,
+**The release pipeline** (`audit/macos-release/mutants.txt`, 70 mutants,
 `audit/macos-release/tools/mutate.py`: each applied to a private copy of
 macos/, package-macos.sh, the workflow and the tests, the tests its `!!`
 line names run there):
 
 | group | mutants |
 |---|---|
-| the credential preflight (13) | base64-permissive, base64-padding-unchecked, p8-double-encoding-accepted, p12-accepts-pem, no-private-key-accepted, certificate-type-unchecked, team-unchecked, apple-chain-unchecked, validity-unchecked, p8-algorithm-unchecked, p8-curve-unchecked, pkcs8-unchecked, issuer-uuid-unchecked |
-| the release's stages (32) | preflight-prints-a-secret, continue-after-failed-preflight, test-anchors-in-release, remote-auth-skipped, continue-after-auth-failure, auth-misclassified, secrets-printed, secret-files-kept, adhoc-fallback, adhoc-signature-accepted, no-hardened-runtime, runtime-unchecked, no-timestamp, timestamp-unchecked, entitlements-unchecked, seal-unchecked, notarization-ignored, rejected-as-accepted, ticket-unchecked, timeout-as-failure, staple-retries-everything, stapling-omitted, gatekeeper-ignored, tamper-not-tampered, zip-modes-unchecked, sums-unchecked, publish-before-final-launch, acceptance-not-required, identity-may-change, ambiguous-identity-chosen, adhoc-publishable, sign-remedy-misleads |
+| the credential preflight (14) | base64-permissive, base64-padding-unchecked, p8-double-encoding-accepted, p12-accepts-pem, no-private-key-accepted, certificate-type-unchecked, team-unchecked, apple-chain-unchecked, validity-unchecked, p8-algorithm-unchecked, p8-curve-unchecked, pkcs8-unchecked, p8-layout-unchecked, issuer-uuid-unchecked |
+| the release's stages (33) | preflight-prints-a-secret, continue-after-failed-preflight, test-anchors-in-release, remote-auth-skipped, continue-after-auth-failure, unspecific-auth-unexplained, auth-misclassified, secrets-printed, secret-files-kept, adhoc-fallback, adhoc-signature-accepted, no-hardened-runtime, runtime-unchecked, no-timestamp, timestamp-unchecked, entitlements-unchecked, seal-unchecked, notarization-ignored, rejected-as-accepted, ticket-unchecked, timeout-as-failure, staple-retries-everything, stapling-omitted, gatekeeper-ignored, tamper-not-tampered, zip-modes-unchecked, sums-unchecked, publish-before-final-launch, acceptance-not-required, identity-may-change, ambiguous-identity-chosen, adhoc-publishable, sign-remedy-misleads |
 | the bundle's checks (6) | worker-startup-accepted, architecture-unchecked, dynamic-sdl-accepted, permissions-unchecked, executable-name-unchecked, package-replaces-on-failure |
 | the workflow's trust boundary (17) | release-on-pull-requests, release-on-any-ref, pull-request-target, secret-in-game-job, secret-in-script, trace-with-secrets, secret-files-uploaded, release-adhoc, workflow-no-staple, workflow-no-notary-auth, publish-before-release, release-assets-unchecked, upload-submission-zip, release-writes, release-trusts-a-root, dry-run-trusts-its-root, dry-run-blocked-as-passed |
 
@@ -1498,7 +1545,7 @@ Added:
 | `examples/games/icy-tower/macos/apple-ca/` | Apple Root CA and the Developer ID Certification Authorities G1 and G2 (public, pinned) |
 | `audit/macos-release/tests/test_credentials.py`, `test_release.py`, `test_workflow.py` | the preflight's negative tests, the stages against stand-ins and the bundle's controls, the workflow's trust boundary |
 | `audit/macos-release/tools/fixtures.py`, `machofake.py`, `stub-tool.py` | synthetic credentials, synthetic Mach-O files, recording stand-ins of Apple's tools |
-| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 68 mutants and their harness |
+| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 70 mutants and their harness |
 | `audit/macos-release/requirements.txt` | the tests' environment (PyYAML beside the release's) |
 | `audit/icy-tower/tools/app-abi-check.py` | macos_app.bot's C declarations against the SDK |
 | `docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md` | this report |
