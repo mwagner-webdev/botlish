@@ -1380,13 +1380,17 @@ class AppGame(Game):
         self.launch_info = None
         self.find(wait)
 
-    def find(self, wait):
-        """The launched process: a new instance of the bundle, its executable this bundle's (WAIT seconds)."""
+    def find(self, wait, translocated=False):
+        """The launched process: a new instance of the bundle, its executable this bundle's (WAIT seconds).
+        TRANSLOCATED also takes the bundle's copy App Translocation runs a quarantined download from (a
+        randomized read-only path: .../AppTranslocation/.../Icy Tower.app)."""
         until = time.time() + wait
         exe = os.path.join(os.path.realpath(self.app), "Contents", "MacOS", "icy-tower")
+        tail = os.path.join(os.path.basename(self.app.rstrip("/")), "Contents", "MacOS", "icy-tower")
         while self.p.pid is None:
             for p_, a in app_pids(self.s, self.bundle_id).items():
-                if p_ not in self.before and os.path.realpath(a.get("executable", "")) == exe:
+                path = os.path.realpath(a.get("executable", ""))
+                if p_ not in self.before and (path == exe or (translocated and "AppTranslocation" in path and path.endswith(tail))):
                     self.p, self.launch_info = Launched(p_), a
             if self.p.pid is not None or time.time() > until:
                 break
@@ -1650,8 +1654,11 @@ def case_app_gatekeeper(s):
             s.tool("ax-press", pid, "Open")
         else:
             checks.append((True, "no first-launch dialog was shown (the assessment let it start)"))
-        win = g.window(25.0) if g.find(25.0) else None
-        checks.append((win is not None, "the downloaded application opens its window"))
+        win = g.window(25.0) if g.find(25.0, translocated=True) else None
+        facts["executable"] = (g.launch_info or {}).get("executable")
+        facts["translocated"] = "AppTranslocation" in (facts["executable"] or "")
+        checks.append((win is not None, "the downloaded application opens its window (%s)"
+                       % ("run by App Translocation from %s" % facts["executable"] if facts["translocated"] else facts["executable"])))
         if win is not None:
             time.sleep(max(0.0, 3.5 - (time.time() - g.window_at)))
             focus = g.focus()
@@ -1672,7 +1679,7 @@ def case_app_gatekeeper(s):
                 if b in buttons:
                     s.tool("ax-press", pid, b)
                     break
-        started = g.find(3.0)
+        started = g.find(3.0, translocated=True)
         checks.append((started is None, "the game never started"))
         if started:
             g.p.kill()

@@ -677,7 +677,7 @@ test workload-icy-tower-macos-app-bundle {package-macos.sh assembles Icy Tower.a
     exec bash [file join $gameDir package-macos.sh] [file join $::macosGame icy-tower] $out --bundle-id org.botlish.examples.icy-tower.test \
         --version 1.2.3 --build 1.2.3 --sdl3-license [file join $sdlsrc LICENSE.txt] 2>@1
     set app [file join $out "Icy Tower.app"]
-    set same [expr {[exec shasum -a 256 [file join $app Contents MacOS icy-tower]] eq [exec shasum -a 256 [file join $::macosGame icy-tower]] ? 1 : 0}]
+    set same [expr {[lindex [exec shasum -a 256 [file join $app Contents MacOS icy-tower]] 0] eq [lindex [exec shasum -a 256 [file join $::macosGame icy-tower]] 0] ? 1 : 0}]
     set id [exec plutil -extract CFBundleIdentifier raw -o - [file join $app Contents Info.plist]]
     set alerts [exec plutil -extract LSEnvironment.ICY_TOWER_ERROR_ALERTS raw -o - [file join $app Contents Info.plist]]
     set minimum [exec plutil -extract LSMinimumSystemVersion raw -o - [file join $app Contents Info.plist]]

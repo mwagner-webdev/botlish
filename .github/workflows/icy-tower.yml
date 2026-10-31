@@ -73,8 +73,13 @@ jobs:
       # The macOS release tooling's tests (audit/macos-release/; the
       # workload test file's workload-icy-tower-release-tooling) need the
       # cryptography and PyYAML packages: pinned, hash-checked, private.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: The macOS release tooling's Python (pinned, hash-checked)
         run: |
+          python3 --version
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r audit/macos-release/requirements.txt
           echo "BOTLISH_RELEASE_PYTHON=$RUNNER_TEMP/venv/bin/python" >>"$GITHUB_ENV"

@@ -349,10 +349,18 @@ jobs:
       # The release tooling's Python: the cryptography package (PKCS#12,
       # X.509, PKCS#8) and PyYAML (the workflow's own trust checks), pinned by
       # version and wheel hash, in a private environment.
+      # (an interpreter the pinned wheels exist for: the image's python3
+      # can be a release newer than PyYAML's wheels)
+      - uses: actions/setup-python@v5
+        if: always() && steps.build.outcome == 'success'
+        with:
+          python-version: "3.13"
+
       - name: The release tooling's Python (pinned, hash-checked)
         id: python
         if: always() && steps.build.outcome == 'success'
         run: |
+          python3 --version
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r audit/macos-release/requirements.txt
           "$RUNNER_TEMP/venv/bin/python" -c 'import cryptography, yaml; print("cryptography", cryptography.__version__, "PyYAML", yaml.__version__)'
@@ -669,10 +677,15 @@ jobs:
           echo "DIST=$RUNNER_TEMP/dist" >>"$GITHUB_ENV"
           echo "release $tag: version $version, commit $GITHUB_SHA"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       # Nothing is compiled here but the session's input helper: no Tcl,
       # Rust or Botlish.app (the executable is the game job's).
       - name: The release tooling's Python (pinned, hash-checked)
         run: |
+          python3 --version
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install -q --require-hashes --only-binary :all: -r examples/games/icy-tower/macos/requirements.txt
           echo "PY=$RUNNER_TEMP/venv/bin/python" >>"$GITHUB_ENV"
