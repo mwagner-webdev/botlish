@@ -762,7 +762,17 @@ limits, raw float and double patterns among them signaling NaNs, pointers,
 constant; sometimes allocating, sometimes nesting a second callback through
 C; a C driver per callback, generated as real C, calling it a random number
 of times and checking every argument (handed back) and the result by bits.
-FUZZ_RESULTS
+
+On the final tree, each program on cranelift-generic and cranelift:
+
+| seeds | programs | callbacks | C calls of them | disagreements |
+|---|---:|---:|---:|---:|
+| 101-106 (`-n 6 -callbacks 4`) | 36 | 144 | 520 | 0 |
+| 107-108 under GC stress (`-n 4 -gc-stress 1`) | 8 | 32 | 114 | 0 |
+
+Development runs before it (other seeds, and under GC stress) found no
+disagreement either once the fuzzer's own C was right; what the fuzzer
+does catch is shown by the mutants it kills (next section).
 
 ### Mutation (audit/c-callbacks/tools/mutate.tcl)
 
@@ -812,8 +822,9 @@ Run on the final tree, Linux x86-64, the release driver (each file directly,
 
 and the warning gate (`audit/refactor/tools/gate.tcl`: 84 corpus programs,
 38 library loaders, the observed warnings exactly the manifest), the golden
-suite on all four backends, and the Rust tests (`cargo test --release
---manifest-path native/Cargo.toml`). GOLDEN_LOCAL_RESULTS
+suite (`tclsh9.0 tests/local.tcl tests/golden/c-callbacks.bot`: 9/9 on
+interp, compile, cranelift-generic and cranelift) and the Rust tests
+(`cargo test --release --manifest-path native/Cargo.toml`: RUST_RESULTS).
 
 Two mutants of other audits mutate code this milestone changed, and their
 texts were updated to it (keeping each a mutant of the same rule):
