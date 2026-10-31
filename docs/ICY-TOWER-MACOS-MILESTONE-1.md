@@ -197,11 +197,59 @@ uploads it as part of the run's artifact. A kept binding is reused by
 must hold a macos-aarch64 manifest whose revision is the pinned commit, and
 the staged package must equal it file for file.
 
-PENDING (run results: counts, timings, the diff against linux-x86_64).
+**Executed** on macos-15 (run 41140375636, commit bcacf3c8; the runner image
+macos-15-arm64 20261028.0489, macOS 15.8.2, Xcode 16.4, SDK 15.5):
+
+    sdl3 macos-aarch64: 1213 direct, 3 alias, 15 thunk, 158 unsupported, 1655 constants (2358 ms)
+
+-- 1231 of the 1389 API names bound (88.6 %), the same proportion as the
+committed linux-x86_64 binding; the unsupported ones by blocker:
+macro-needs-signature 100, unsupported-macro 43, by-value-aggregate 8,
+va-list 7. Generation took 4.8 s with the fetch (the pinned source cached).
+
+`tools/c-bindgen.tcl diff sdl3 -targets linux-x86_64,macos-aarch64`: 123
+differences, every one a fact of the targets, none of SDL's API:
+
+* **64-bit integers.** Apple's `int64_t`/`uint64_t` are `long long`, glibc's
+  x86-64 ones `long`: Sint64, Uint64, SDL_Time, SDL_ThreadID,
+  SDL_WindowFlags, SDL_TouchID and SDL_FingerID (and two callback types
+  over them) are `std::ffi::c::LongLong`/`ULongLong` on macOS and
+  `Long`/`ULong` on Linux (9 typedefs), and so are the 51 functions and the
+  constants (SDL_WINDOW_* among them) that use them. The game's code is
+  unchanged by it: a C integer scalar is an integer domain whose values are
+  Ints (C-ABI-TYPES.md), and both are 64 bits wide on both targets, so
+  `SDL_GetTicksNS()`'s result, `SDL_DelayNS(ns)`'s argument and
+  `SDL_WINDOW_RESIZABLE` mean the same in the one sdl.bot.
+* **Platform macros.** Linux-only API (SDL_SetLinuxThreadPriority and
+  SDL_SetLinuxThreadPriorityAndPolicy) and the ELF dlopen-note macros exist
+  only on Linux; SDL_PLATFORM_APPLE and SDL_PLATFORM_MACOS only on macOS;
+  SDL_zero and its siblings expand through another callee there (all three
+  unsupported either way); SDL_LINE is a line number.
+
+The binding is uploaded with the run's artifact (`sdl3-binding/`), with its
+manifest, report and `layouts-check.c`.
 
 ## 6. SDL3 target and SDK evidence
 
-PENDING (the manifest's toolchain lines and the runner's SDK).
+The manifest of the binding the game was built with (run 41140375636):
+
+    target macos-aarch64
+    source {url https://github.com/libsdl-org/SDL tag release-3.4.18 commit 829a65d769d935c4852f8159e964312c0957260a}
+    revision 829a65d769d935c4852f8159e964312c0957260a
+    command {clang -E -x c --target=arm64-apple-macos11 -I$SRC/include $TU/entry.c}
+    toolchain_version {Apple clang version 17.0.0 (clang-1700.0.13.5)}
+    toolchain_target arm64-apple-macos11
+    toolchain_sysroot none
+    user_label_prefix _
+    preprocessed_tokens 44817
+
+`toolchain_sysroot none`: Apple clang found the SDK itself (Xcode 16.4's
+MacOSX15.5.sdk); the generator's own check refuses an Apple target off a Mac
+without a sysroot, so no Linux header could have been read as the SDK's.
+`user_label_prefix _`: Mach-O's symbol prefix, probed. The ABI check
+printed the target's scalar facts from Apple clang: `bool` 1 byte, `int` 4,
+`long` 8, `long long` 8, `size_t` 8, pointers 8, `float` 4, `double` 8,
+`char` signed, Uint64 `unsigned long long`.
 
 ## 7. Generated ABI and layout checks
 
@@ -226,12 +274,21 @@ Two independent checks against the target's C compiler:
   compiled with Apple clang for arm64-apple-macos11.
 
 On macOS both run against the generated binding and against the package
-the game was compiled with (the staged `.bot_modules/sdl3`). PENDING (run
-results).
+the game was compiled with (the staged `.bot_modules/sdl3`). **Executed**
+(run 41140375636): 38 SDL names used by the game, 123 checks, 0 failed, for
+the binding and for the staged package alike -- among them
+`SDL_CreateWindow parameter 4 (flags): std::ffi::c::ULongLong`,
+`SDL_DelayNS parameter 1 (ns): std::ffi::c::ULongLong`,
+`SDL_RenderLine parameter 2 (x1): std::ffi::c::Float`,
+`SDL_WINDOW_RESIZABLE is a unsigned long long (sdl3::ctypes::c_ulong_long)`,
+`sizeof(SDL_Event) = 128, alignof = 8, offsetof(type) = 0` and SDL_FRect's
+four floats at 0, 4, 8 and 12; `layouts-check.c` (19 static assertions)
+compiles with Apple clang for arm64-apple-macos11.
 
 ## 8. Binding-generator defects
 
-PENDING (none expected to need a generator change; the run says).
+None. The generator ran unchanged on the Mac with Apple clang; no profile
+change, no manual fact, no hand edit of the output.
 
 ## 9. Package staging
 
@@ -275,7 +332,9 @@ build-macos.sh), never the source's (MAIN-THREAD-STARTUP-MILESTONE-1.md,
 section 4). **Inspected** on Linux: main-macos.bot compiles for
 `-target macos-aarch64` under `-warnings error` with the linux-aarch64
 binding standing in (a front-end check; `-direct` reports every game module
-ordinary, std::darwin::io contextualized). **Executed** on macOS: PENDING.
+ordinary, std::darwin::io contextualized). **Executed** on macOS (run 41140375636):
+Botlish.app compiles it under `-warnings error`, and the executable writes
+its summary line through std::darwin::io's context (sections 18 to 22).
 
 ## 11. Static SDL3 archive provenance
 
@@ -291,7 +350,13 @@ installed into a prefix cached by the pin; it prints the macOS and SDK
 versions, the archive's `lipo -info`, size and SHA-256. build-macos.sh
 requires the staged archive to be arm64 (`lipo -archs`) and an `ar`
 archive (`file`), and the driver checks every member (Mach-O arm64,
-NATIVE-LINK-PLAN-MILESTONE-1.md section 7). PENDING (the run's checksum).
+NATIVE-LINK-PLAN-MILESTONE-1.md section 7). **Executed** (run 41140375636):
+
+    SDL3 3.4.18 (829a65d769d935c4852f8159e964312c0957260a)
+    macOS 15.8.2, SDK 15.5, Apple clang version 17.0.0 (clang-1700.0.13.5)
+    archive: Non-fat file: .../lib/libSDL3.a is architecture: arm64
+    archive: 4651024 bytes, sha256 59d82e5e2103bfffb39f3d2ec694aaa59f9c20ebc3ca6ba90b453f6e79460a52
+    built in 88 s
 
 ## 12. Apple framework dependencies
 
@@ -317,43 +382,129 @@ section 40, not a reason for new syntax.
 
 ## 13. Native link-plan evidence
 
-PENDING (the run's `link plan:` lines).
+`BOTLISH_NATIVE_LINK_LOG`, as Botlish.app's driver resolved the plan (run 41140375636):
+
+    link plan: static SDL3: /Users/runner/work/_temp/Stäged Gämes/icy tower/native/macos/libSDL3.a (declared at "native/macos/libSDL3.a")
+    link plan: framework CoreMedia: -framework CoreMedia
+    ... (the 15 frameworks, in sdl3.pc's order)
+    link plan: framework CoreHaptics: -framework CoreHaptics
+    link plan: library pthread: -lpthread
+    link plan: library m: -lm
+
+The archive's path is the application root's (a path with spaces and
+non-ASCII letters), joined by the driver at the link; build-macos.sh checks
+the line names the staged archive and the declaration that asked for it.
+`build-macos.sh` printed `15 frameworks, 2 libraries: as SDL3's sdl3.pc`
+(the declarations against `link-interface`).
 
 ## 14. Main-thread startup and LC_MAIN evidence
 
-PENDING.
+**Executed** (run 41140375636), on the executable build-macos.sh produced:
+
+    cmd LC_MAIN
+    cmdsize 24
+    entryoff 1819044
+    stacksize 536870912
+
+and the runtime's own account (`BOTLISH_NATIVE_STARTUP_REPORT`, its last
+three lines):
+
+    startup main-thread
+    process-main-thread 1
+    stack 536870912 16384
+
+-- the program record's policy word, the program on the process's main
+thread, its 512 MiB stack and a 16 KiB guard. The probe's account agrees
+from SDL's side: every SDL call of every Cocoa session on the main thread
+(`pthread_main_np()`; 0 of 35,091 calls off it in the `cocoa` case, 0 of
+118,075 in `autopilot`). `LC_BUILD_VERSION`: platform 1 (macOS), minos
+11.0, sdk 15.5.
 
 ## 15. Standalone Mach-O dependencies
 
-PENDING.
+**Executed** (run 41140375636). `file`: `Mach-O 64-bit executable arm64`;
+`lipo -archs`: arm64. `otool -L`: 22 libraries, every one the system's --
+libSystem.B, libiconv.2 and libobjc.A from /usr/lib; CoreMedia, CoreVideo,
+Cocoa, UniformTypeIdentifiers, IOKit, ForceFeedback, Carbon, CoreAudio,
+AudioToolbox, AVFoundation, Foundation, GameController, Metal, QuartzCore,
+CoreHaptics, AppKit, CoreFoundation, CoreGraphics and CoreServices from
+/System/Library/Frameworks -- and no SDL3. 1,830 `_SDL_*` functions are
+defined in the executable itself (`nm`). Signature: ad hoc, linker-signed
+(`codesign --verify --strict` passes). Then the executable, copied alone
+to another directory, with SDL3's prefix, the pinned SDL3 source, the
+staged application, Botlish.app, the probe and the archive moved away, run
+with `env -i HOME=...`: the headless and dummy-driver runs print seed 7's
+oracle summary, and a Cocoa run under `DYLD_PRINT_LIBRARIES=1` loads
+system images only (1,386 of them, none SDL3's).
 
 ## 16. Compilation with distributed Botlish.app
 
-PENDING.
+**Executed** (run 41140375636). The workflow builds Botlish.app from the
+commit (`single/macos/build.sh`, verified: layout, dependencies, the ad hoc
+signature, the archive's 201 files) and moves it out of the checkout to
+`$RUNNER_TEMP/Prögram Fïles/Botlish.app`; `botlish --version`: source
+revision bcacf3c, packaged; Tcl 9.0.1; native backend packaged. build-macos.sh
+compiles with that application's `Contents/MacOS/botlish` (no `tclsh9.0
+main.tcl`, no checkout path): 45.8 s to compile and link under
+`-warnings error`, `codesign --verify --deep --strict` of the application
+passing afterwards (nothing written into it).
 
 ## 17. Application-root relocation
 
-PENDING.
+**Executed** (run 41140375636). The staged application root is moved to
+`$RUNNER_TEMP/Möved Äpp/Ícy Tower`, its executable deleted, and -- with the
+checkout, `~/.cargo` and `~/.rustup` moved away and no cargo, rustc or
+rustup on PATH, from an unrelated working directory -- Botlish.app compiles
+`main-macos.bot` there again (63 s). The link plan names the moved root's
+archive (`.../Möved Äpp/Ícy Tower/native/macos/libSDL3.a (declared at
+"native/macos/libSDL3.a")`), LC_MAIN's stack is 512 MiB, and the new
+executable's 600-frame headless summary equals the first build's.
 
 ## 18. Headless simulation
 
-PENDING.
+**Executed** (run 41140375636): `icy-tower --headless --frames 600 --seed 7`
+prints `"frames=600 round=1 floor=26 score=260 best=29.1 time=10.0 over=no
+x=263 y=2947 camera=2551 platforms=11 rng=3699965314"`, the Linux
+executable's and the oracle's (`workload-icy-tower-macos-headless`).
 
 ## 19. Independent oracle results
 
-PENDING.
+**Executed** (run 41140375636): `python3 audit/icy-tower/oracle.py compare
+EXE` -- seeds 0, 1, 2, 3, 7, 42, 4294967295 and 123456789 at 1, 60, 600
+and 3600 frames, 32 summaries -- 0 differences
+(`workload-icy-tower-macos-oracle` too).
 
 ## 20. SDL dummy-driver results
 
-PENDING.
+**Executed** (run 41140375636): `SDL_VIDEO_DRIVER=dummy icy-tower --autopilot
+--fixed-step --frames 600 --seed 7` -- the real SDL loop on the process's
+main thread: SDL_Init, a window, the software renderer, events, the
+keyboard state, 600 frames drawn and presented, everything released --
+prints the headless summary (`workload-icy-tower-macos-dummy-driver`), and
+the probe's trace of it is the Linux executable's, frame for frame
+(section 28).
 
 ## 21. Cocoa window creation
 
-PENDING.
+**Executed** (run 41140375636; the `cocoa` case, the probe with
+`SDL_VIDEO_DRIVER=cocoa SDL_RENDER_DRIVER=metal`). SDL's account
+(SDLTRACE_INFO): `init ok=1 driver=cocoa main=1`, `window ok=1
+size=480x653 pixels=480x653 main=1` (480 x 656 in the later sessions). The
+WindowServer lists the window (CGWindowList: layer 0, on screen, 480 x 684
+points with its title bar in `trace-cocoa`), titled "Icy Tower - Botlish". The runner's one display is 1024 x 768 at
+scale 1, so the window manager fits the 720-unit-tall window under the
+menu bar: SDL's letterbox draws the 480 x 720 view at 0.91 (the walls give
+the scale, section 23). The window opened 0.15 s after the process started
+(`first-present since_start=0.146`) on a warm run, 1.0 s on the first.
 
 ## 22. Metal rendering
 
-PENDING.
+**Executed** (run 41140375636): `renderer ok=1 name=metal main=1` in every Cocoa
+session (`cocoa`, `trace-cocoa`, `autopilot`), the frames presented
+(`presents=389` in `cocoa`'s 6.6 s of play, 1,359 in `autopilot`'s 22 s),
+and in real time with vertical sync a frame every 16.8 ms on average
+(median 16.7, 90th percentile 19.0, 99th 27.1 ms: `autopilot`). What
+Metal drew is checked in the captures (section 23).
 
 ## 23. Screenshot verification
 
@@ -388,7 +539,19 @@ worlds pass; a blank capture, a frame without the player, platforms shifted
 by 60 units, the game-over banner where the start banner should be, two
 identical captures where the tower must have moved, and a player that did
 not move are each rejected. **Executed** on Linux (10 checks, 0 failed;
-`workload-icy-tower-macos-session-selftest`). On macOS: PENDING.
+`workload-icy-tower-macos-session-selftest`). On macOS (run 41140375636):
+the `controls` case passed -- the selftest, a real capture with the player
+painted out rejected, a blank window rejected, a dummy-driver run never
+taken for a Cocoa window -- and the start frame of seed 7 in a Cocoa window
+passed every check (walls 100 %, 13 mortar lines, the player 26 x 36 at x
+228 against the oracle's 227, the start banner, the oracle's platforms 6 of
+6). One check failed on the frame after the banner: the HUD panel, 90 % of
+its samples the panel's or the text's colors. The renderer scales the
+8-pixel debug font to the letterbox with filtering, so a glyph's edge is a
+blend of the two; the check now counts a pixel well inside the segment
+between the panel's color and the text's as the panel's (never the sky's,
+a few units from the panel's end), and that run's 83 captures, read again,
+measure 95 to 97 %. PENDING (the next run).
 
 ## 24. Keyboard input: left and right
 
@@ -406,14 +569,29 @@ within 1.7 s of the press: running against the right wall, the player
 bounces up the platforms that reach it, the camera follows and starts
 rising, and the next fall ends the game. After the game-over banner, Right
 is released and R pressed; the new game is checked twice against the
-generator's rules: the run's final summary (round 2, floor 0, its rng and
-platform count) must be `new_world(S, 2)` for an S the old game's generator
-reached (the oracle walks the generator from seed 254), and the platforms
-in the capture after R must be that tower's. PENDING (the run).
+generator's rules: the run's final summary (round 2, its rng and platform
+count) must be `new_world(S, 2)` for an S the old game's generator reached
+(the oracle walks the generator from seed 254), and the platforms in the
+capture after R must be that tower's. Round 2 is then played with no key
+down, so the oracle also predicts its player: the capture's player must be
+centred and its feet on a view row the oracle's no-input run of that tower
+draws them on between the moment R was posted and the moment of the
+capture (both timed; the camera included), and the summary's floor the
+oracle's at the summary's time (with no key down the player bounces from
+the ground onto floor 1 within a second, onto floor 2 by 1.5 s: the first
+run's expectation of floor 0 was wrong, not the game). PENDING (the run).
 
 ## 26. Window-close behavior
 
-PENDING.
+The close is the window's own: Accessibility presses the close button of
+the game's window (`AXUIElementPerformAction` on its `AXCloseButton`, what
+a click does), else the Window menu's Close through Command-W, else a click
+at the button's place. SDL turns the close request into
+SDL_EVENT_WINDOW_CLOSE_REQUESTED and, for the last window, SDL_EVENT_QUIT;
+the game's poll sees the quit and ends the loop through the ordinary
+release path. **Executed** (run 41140375636): `closing the window ends the run:
+status 0 (exited, by Accessibility: the close button pressed)`, the summary
+printed (`frames=143 ... over=no`), the game drawn before the close.
 
 ## 27. Event pumping and focus handling
 
@@ -461,7 +639,18 @@ every waiting event and acts on none but a quit, which would end the run),
 and each frame's final empty poll stays. Nothing else -- a missing call, a
 wrong rectangle, a wrong color, a wrong float -- is normalized away. The
 macOS probe build's trace is compared on the dummy driver and in a Cocoa
-window with Metal (fixed steps, the autopilot): PENDING (the run).
+window with Metal (fixed steps, the autopilot). **Executed** (run 41140375636):
+
+    trace-dummy: 52313 normalized calls, 600 frames; reference: 52313 calls, 600 frames
+                 identical: every call, argument and result of every frame, and the teardown
+    trace-cocoa: 52313 normalized calls, 600 frames: identical
+
+with SDL's video driver `dummy` and `cocoa` respectively (52,330 and
+52,321 calls as made: 17 and 8 polls that returned a window-system event
+dropped), every call on the main thread, and each run's summary the
+oracle's. The Cocoa run is the
+same program under the same fixed steps; the only calls that differ are
+the window system's events, which the game drains and ignores.
 
 The probe also writes `SDLTRACE_INFO`: SDL's video driver and renderer,
 `pthread_main_np()` at each SDL call (counted: every call off the main
@@ -473,7 +662,10 @@ Unchanged: `sdl::Sdl` owns the session (CONTEXT-OWNED-AFFINE-STATE-
 MILESTONE-1.md); open pushes it, close pops and releases it -- scratch
 memory, renderer, window, then SDL_Quit -- and every failure path releases
 what it made. On macOS every one of those calls is on the main thread (the
-probe's account) and in Linux's order (the trace's teardown). PENDING.
+probe's account) and in Linux's order (the trace's teardown). **Executed**
+(run 41140375636): every Cocoa session's SDLTRACE_INFO ends with `shutdown ... main=1`
+(the renderer, the window and SDL_Quit reached, 0.03 s), and both traces'
+teardowns are the Linux reference's, call for call.
 
 ## 30. Error and exit behavior
 
@@ -481,19 +673,43 @@ PENDING (the macOS section of tests/workload-icy-tower.test).
 
 ## 31. GC-stress execution
 
-PENDING.
+**Executed** (run 41140375636), `BOTLISH_NATIVE_GC_STRESS=1` (a collection at
+every allocation, the main thread's 512 MiB stack walked): the dummy-driver
+run of 120 frames, seed 11, prints the same summary as without
+(`workload-icy-tower-macos-gc-stress`), in 0.07 s; and in a real Cocoa
+window with Metal (the session's `gc-stress` case) the same summary,
+`"frames=120 round=1 floor=5 score=50 best=5.7 time=2.0 over=no x=132
+y=614 camera=218 platforms=13 rng=3691588132"`, the oracle's.
 
 ## 32. Native stack/coroutine safety
 
-PENDING.
+The game uses no coroutine and recurses nowhere deep; what this milestone
+adds is the main thread as the program's thread. The runtime reports the
+stack it recorded and its confirmed guard, `stack 536870912 16384`
+(run 41140375636): the guard is installed on the main thread's stack (the
+system linker's C `main`, MACOS-AARCH64-MILESTONE-4.md), so an overflow
+there would end in `NATIVE LIMIT STACK`, as MAIN-THREAD-STARTUP-
+MILESTONE-1.md's own tests show for this policy (its `main-thread-startup`
+job). No overflow is provoked in the game.
 
 ## 33. Linux regressions
 
-PENDING.
+The Linux workflow, `icy-tower.yml`, dispatched on the branch: run
+41139588760 (commit a33ca6ac), success -- the golden suite, the
+executable, xvfb-session.py, the oracle, the trace (with the new
+normalization) and every Linux test of tests/workload-icy-tower.test, the
+two new ones included (`workload-icy-tower-trace-reference`,
+`workload-icy-tower-abi-check`). Locally: tests/workload-icy-tower.test
+39 tests, 23 passed, 16 skipped (the 10 macOS and 6 Windows executable
+tests), 0 failed; `audit/icy-tower/mutate.tcl`: 26 of 26 killed.
+PENDING (the final commit).
 
 ## 34. Windows regressions
 
-PENDING.
+`icy-tower (windows x86-64)` on the branch: run 41140375585 (commit
+bcacf3c8), success -- the Windows executable built from the same shared
+modules and tested, the tests file's new Linux and macOS tests skipped
+there by their constraints. PENDING (the final commit).
 
 ## 35. Mutation testing
 
@@ -506,13 +722,35 @@ golden suite's, unchanged, and the macOS-specific risk -- the binding's C
 ABI -- is covered by the exact ABI check (section 7) and the call trace
 (section 28) rather than by random inputs. The input cases the milestone
 lists are cases of the session: both keys held (`keyboard`), release after
-sustained movement and reversal (Right then Left, D then A), game over
-then R (`restart`), Escape during play (`keyboard`, `restart`), the window
-closed during play (`close`).
+sustained movement (`focus`: Right held, released in another application)
+and reversal (Right then Left, D then A), game over then R (`restart`, and
+`keyboard`'s own restarts), Escape during play (`keyboard`, `restart`),
+the window closed during play (`close`).
 
 ## 37. Performance and size
 
-PENDING.
+On the macos-15 runner (3 CPUs, 7 GiB; run 41140375636):
+
+| | |
+|---|---|
+| static SDL3 build (CMake, once per pin; cached) | 88 s |
+| binding generation (fetch cached) | 4.8 s |
+| compile and link with Botlish.app, `-warnings error` | 45.8 s (33 s with `-warnings off`) |
+| of which the system linker (`cc`, timed by a wrapper) | 0.52 s |
+| executable, as linked | 3,843,256 bytes |
+| stripped (and signed again ad hoc) | 3,309,568 bytes; runs |
+| startup to exit (`--help`), 5 runs | 0.01 to 0.03 s |
+| headless, 3600 frames, 5 runs | 0.05 to 0.06 s |
+| dummy driver, autopilot, 3600 fixed steps, 3 runs | 0.33 to 0.35 s |
+| GC stress, dummy driver, 120 frames | 0.07 s |
+| first frame presented in a Cocoa window | 0.15 s (1.0 s cold) |
+| SDL_Init (Cocoa), window, renderer (Metal) | 0.08-0.73 s, 0.03-0.13 s, 0.004-0.11 s |
+| real-time frame interval, Metal with vertical sync | mean 16.8 ms, median 16.7, p99 27.1, max 104 |
+| time in SDL_PollEvent | 0.23 s of 22 s (1,372 polls) |
+
+The trace probe adds a logging call per SDL call; the frame times above
+come from it, and the unprobed executable's headless and dummy-driver
+times from `/usr/bin/time`.
 
 ## 38. macOS CI results
 
