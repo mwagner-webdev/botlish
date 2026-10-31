@@ -437,7 +437,50 @@ as "Icy Tower X.Y.Z for macOS (Apple Silicon)", with
 `icy-tower-macos-aarch64.zip`, `SHA256SUMS` and `provenance.json`; a release
 of the tag that exists already is never replaced (tag a new version).
 
-RELEASE-STEPS-PLACEHOLDER
+What the release job does, in order (each step a `release.py` stage
+unless named otherwise; the first failure stops the job, and the cleanup runs
+whatever happened):
+
+1. **The revision**: the tag is `icy-tower-macos-vX.Y.Z`, names the run's
+   commit, and that commit is in main's history.
+2. **The tested executable**: the game job's `icy-tower-macos-release-input`
+   artifact, whose SHA-256 must be the game job's `exe_sha256` output (the
+   release job compiles nothing).
+3. **The bundle**: package-macos.sh with MACOS_BUNDLE_ID and the tag's
+   version (section 3).
+4. `preflight` (section 13): the seven values, locally, before any Apple
+   tool.
+5. `identity` (section 9): the bundle identifier of every earlier
+   `icy-tower-macos-v*` release's provenance.
+6. `keychain` (sections 23, 24): the temporary keychain, the identity
+   imported, exactly that identity valid for code signing.
+7. `notary-auth` (section 20): Apple authenticates the team API key.
+8. `sign` (section 25), or for a resumed notarization `adopt` of the
+   earlier run's signed bundle (section 28).
+9. `verify-signature` (section 26); the signed bundle is uploaded
+   (`icy-tower-macos-signed`, for a resume).
+10. **Hardened-runtime acceptance** (section 27): the Developer ID-signed
+    application launched through LaunchServices and played; `record
+    hardened-runtime`.
+11. `notarize` (section 28).
+12. `staple`, `verify-signature --label stapled`, `gatekeeper --expect
+    notarized`, `tamper` (sections 29, 30, 33).
+13. `package` (section 32): the release ZIP, `provenance.json`,
+    `SHA256SUMS`.
+14. **The downloaded release launched** (section 31): the ZIP extracted,
+    quarantined, opened through Gatekeeper's first-launch dialog and
+    played; `record final-artifact`.
+15. `publishable`: every stage of the sequence passed, in order, on one
+    CDHash and one ZIP digest; only then are the three release assets
+    uploaded (`icy-tower-macos-release`).
+16. `cleanup` (`if: always()`): the keychain deleted, the search list
+    restored, the decoded files removed, each verified.
+
+The **publish** job (Ubuntu, no secret, the only `contents: write`)
+downloads the three assets, checks `SHA256SUMS` and the ZIP against the
+release job's `zip_sha256` output and the provenance's version and mode,
+refuses a tag whose release exists, and creates the release
+(`gh release create --verify-tag`).
 
 ## 13. Credential preflight
 
