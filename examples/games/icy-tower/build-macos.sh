@@ -88,6 +88,8 @@ echo "   staged archive: $archive"
 
 # --- 2. the dependencies: macos_link.bot against SDL3's own metadata --------------
 echo "== Native dependencies (macos_link.bot against sdl3.pc)"
+grep -qx 'extern c library "SDL3" static at "native/macos/libSDL3.a"' "$here/macos_link.bot" \
+    || fail "macos_link.bot does not declare the staged archive native/macos/libSDL3.a"
 bash "$root/tests/platform/sdl3-static-macos.sh" link-interface "$prefix" >"$work/interface.txt" \
     || fail "SDL3's link interface"
 sed -n 's/^extern c framework "\([^"]*\)".*/framework \1/p; s/^extern c library "\([^"]*\)"$/library \1/p' \
@@ -96,8 +98,6 @@ if ! diff -u "$work/interface.txt" "$work/declared.txt" >"$work/interface.diff";
     cat "$work/interface.diff" >&2
     fail "macos_link.bot does not declare exactly the frameworks and libraries SDL3's sdl3.pc names (the diff above: - is SDL3's, + the file's)"
 fi
-grep -qx 'extern c library "SDL3" static at "native/macos/libSDL3.a"' "$here/macos_link.bot" \
-    || fail "macos_link.bot does not declare the staged archive native/macos/libSDL3.a"
 echo "   $(grep -c '^framework' "$work/interface.txt") frameworks, $(grep -c '^library' "$work/interface.txt") libraries: as SDL3's sdl3.pc"
 
 # --- 3. the macos-aarch64 SDL3 binding --------------------------------------------

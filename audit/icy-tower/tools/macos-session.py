@@ -597,11 +597,14 @@ class Game:
         return self.win
 
     def focus(self):
-        """Gives the game's window the keyboard focus the way a person would; the method that did, or None."""
+        """Gives the game's window the keyboard focus the way a person would; the method that did, or None.
+        After a change, a moment for SDL's event pump to take the window becoming key (SDL's Cocoa driver
+        gives a key event only to the window with the keyboard focus)."""
         if self.frontmost():
             return "already active"
         self.s.tool("activate", self.p.pid)
         if self.frontmost():
+            time.sleep(0.3)
             return "NSRunningApplication activate"
         if self.refresh():
             # A click on the window's content: the WindowServer activates the application and makes the window key.
@@ -611,8 +614,30 @@ class Game:
                 return "a click on the window"
         self.s.tool("ax-raise", self.p.pid)
         if self.frontmost():
+            time.sleep(0.3)
             return "Accessibility (frontmost, raise)"
         return None
+
+    def press(self, key, sign, label):
+        """KEY down and left down, confirmed by the player's move in direction SIGN: a press the window
+        system delivered before SDL gave the window the keyboard focus is not the game's, so an
+        unconfirmed one is released, the focus taken again and the key pressed again (three times at
+        most). (moved, text, before, after)."""
+        last = (False, "no attempt", None, None)
+        for attempt in range(3):
+            before, _ = self.frame(label + "-before", retries=2)
+            self.key(key, "down")
+            time.sleep(0.35)
+            after, _ = self.frame(label, retries=2)
+            pb, pa = (before.player() if before else None), (after.player() if after else None)
+            ok, t = moved_check(pb, pa, 20, sign)
+            last = (ok, t if attempt == 0 else "%s (press %d)" % (t, attempt + 1), pb, pa)
+            if ok:
+                return last
+            self.key(key, "up")
+            self.focus()
+            time.sleep(0.5)
+        return last
 
     def key(self, name, action, mode=None):
         mode = mode or self.s.key_mode
@@ -635,7 +660,7 @@ class Game:
             f, problem = self.frame(label, retries=4)
             if f is not None and f.banner() is None:
                 return f
-            img, _ = self.shot(label + "-over?")
+            img, _ = self.shot(label + "-ended")
             try:
                 b = Frame(img).banner() if img is not None else None
             except NotTheGame:
@@ -739,7 +764,13 @@ def case_cocoa(s):
     if win is None:
         code, how, out, err = g.finish(5)
         facts.update({"status": code, "stderr": err[-400:]})
-        blocked = "cocoa-unavailable" if "video device" in err or "not available" in err else None
+        # The environment's only where the session has no window server or
+        # display (the env case's facts); with both, a Cocoa that SDL calls
+        # unavailable is the executable's failure (a worker startup's, as the
+        # worker case shows).
+        env = getattr(s, "env", {})
+        session = env.get("windowserver") and env.get("preflight", {}).get("screens", 0) >= 1
+        blocked = "cocoa-unavailable" if not session and ("video device" in err or "not available" in err) else None
         return s.verdict("cocoa", [(False, "a Cocoa window appears (status %s: %s)" % (code, err[-200:]))], facts, "graphical-correctness", blocked)
     time.sleep(0.8)
     start, problem = g.frame("start")
@@ -937,7 +968,8 @@ def case_restart(s):
         g.finish(0.5)
         return s.verdict("restart", [(False, "the window could take the keyboard focus")], facts, "keyboard-correctness",
                          keyboard_blocked(s, g, focus))
-    g.key("right", "down")
+    held, held_text, _, _ = g.press("right", 1, "press")
+    facts["press"] = held_text
     over = None
     until = time.time() + 8.0
     while time.time() < until:
@@ -1077,9 +1109,7 @@ def case_focus(s):
         time.sleep(0.35)
         before = g.ready("before", restarts)
     # Right goes down and stays down: the game runs the player right.
-    g.key("right", "down")
-    time.sleep(0.3)
-    held, _ = g.frame("held", retries=2)
+    ok_held, t_held, pb, ph = g.press("right", 1, "held")
     # Another application takes the focus while Right is down; the key is released there.
     thief = subprocess.Popen([s.helper, "steal-focus", "3"], stdout=subprocess.PIPE, text=True)
     ready = json.loads(thief.stdout.readline() or "{}")
@@ -1099,10 +1129,8 @@ def case_focus(s):
     # both-held check), and the player would not move.
     ok, t, settled, left = measure_key(g, "left", -1, "left", restarts)
     code, how, out, err = g.escape()
-    pb, ph = [f.player() if f else None for f in (before, held)]
     facts.update({"focus_lost_to": who, "refocused": back, "before": pb, "held": ph, "back": settled, "after_left": left,
                   "restarts": restarts[0], "status": code, "ended": how, "summary": out})
-    ok_held, t_held = moved_check(pb, ph, 20, 1)
     checks.append((ok_held, "Right held runs the player right: " + t_held))
     checks.append((lost, "another application took the keyboard focus (frontmost: %s)" % who.get("name")))
     checks.append((back is not None, "the game's window took the focus back (%s)" % back))
