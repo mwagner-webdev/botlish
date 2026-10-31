@@ -509,11 +509,39 @@ jobs:
           if ! grep -qE '^MACOS-NOTARY-(AUTH|SERVICE):' "$dry/notary-auth.txt"; then
             # not Apple's refusal: what notarytool does, asked directly
             # (a read request with the same throwaway key; no secret printed)
+            # (the throwaway key's, never a release's: verbose output and
+            # the crash report, with standard input /dev/null as release.py
+            # gives it and as the step has it)
             xcrun notarytool --version || true
-            status=0
-            bounded xcrun notarytool history --key "$w/secret/notary-key.p8" --key-id "$APPLE_NOTARY_KEY_ID" \
-              --issuer "$APPLE_NOTARY_ISSUER_ID" --output-format json </dev/null || status=$?
-            echo "(notarytool history exited $status)"
+            for input in devnull step; do
+              status=0
+              if [ $input = devnull ]; then
+                bounded xcrun notarytool history --verbose --key "$w/secret/notary-key.p8" --key-id "$APPLE_NOTARY_KEY_ID" \
+                  --issuer "$APPLE_NOTARY_ISSUER_ID" --output-format json </dev/null || status=$?
+              else
+                bounded xcrun notarytool history --verbose --key "$w/secret/notary-key.p8" --key-id "$APPLE_NOTARY_KEY_ID" \
+                  --issuer "$APPLE_NOTARY_ISSUER_ID" --output-format json || status=$?
+              fi
+              echo "(notarytool history, standard input $input: exited $status)"
+            done
+            sleep 10   # ReportCrash writes the report after the process ends
+            crash=$(ls -t "$HOME"/Library/Logs/DiagnosticReports/notarytool* /Library/Logs/DiagnosticReports/notarytool* 2>/dev/null | head -n 1 || true)
+            if [ -n "$crash" ]; then
+              echo "the crash report $crash:"
+              python3 -I -c '
+          import json, sys
+          text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          head, _, body = text.partition("\n")
+          b = json.loads(body)
+          for k in ("exception", "termination", "asi", "ktriageinfo"):
+              if k in b:
+                  print(k, json.dumps(b[k])[:600])
+          images = b.get("usedImages", [])
+          t = b["threads"][b.get("faultingThread", 0)]
+          for f in t.get("frames", [])[:20]:
+              img = images[f["imageIndex"]].get("name", "?") if f.get("imageIndex") is not None and f["imageIndex"] < len(images) else "?"
+              print("  %-28s %s" % (img, f.get("symbol", "0x%x" % f.get("imageOffset", 0))))' "$crash" || head -c 4000 "$crash"
+            fi
             echo "::error::Apple's answer to a key it never issued was not classified as authentication or service"; exit 1
           fi
           started=$(date +%s)
