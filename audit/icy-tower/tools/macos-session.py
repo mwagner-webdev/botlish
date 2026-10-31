@@ -1346,6 +1346,11 @@ class Launched:
         self.send_signal(signal.SIGKILL)
 
 
+def yes(v):
+    """A JSON boolean of the helper's (true, or an Objective-C comparison's boxed 1)."""
+    return v is True or v == 1
+
+
 def app_pids(s, bundle_id):
     _, d = s.tool("apps", bundle_id)
     return {a["pid"]: a for a in d.get("apps", [])}
@@ -1355,7 +1360,7 @@ class AppGame(Game):
     """One LaunchServices launch of the bundle APP: `open -n` (a new instance), the game's standard
     output and error caught by open's --stdout and --stderr, ENV given with --env, ARGS with --args."""
 
-    def __init__(self, session, name, app, args=(), env=None, wait=20.0):
+    def __init__(self, session, name, app, args=(), env=None, wait=20.0, open_wait=60.0):
         self.s, self.name, self.app = session, name, app
         self.log_out = os.path.join(session.out, name + ".stdout")
         self.log_err = os.path.join(session.out, name + ".stderr")
@@ -1371,8 +1376,15 @@ class AppGame(Game):
         if args:
             cmd += ["--args"] + list(args)
         self.started = time.time()
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        self.open_result = {"status": r.returncode, "output": (r.stdout + r.stderr).strip()[-300:]}
+        # open returns once LaunchServices has launched the application -- or, for a quarantined one,
+        # once the person answered Gatekeeper's dialog: it runs beside the case, never waited on longer
+        # than OPEN_WAIT seconds.
+        self.opener = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        try:
+            out, _ = self.opener.communicate(timeout=open_wait)
+            self.open_result = {"status": self.opener.returncode, "output": (out or "").strip()[-300:]}
+        except subprocess.TimeoutExpired:
+            self.open_result = {"status": None, "output": "open is still waiting (after %.0f s)" % open_wait}
         self.before = before
         self.win = None
         self.shots = 0
@@ -1423,6 +1435,9 @@ class AppGame(Game):
                 how = "killed"
         if self.p.pid is None:
             how = "never started"
+        if self.opener.poll() is None:
+            self.opener.kill()
+            self.opener.wait()
         self.wall = time.time() - self.started
         out = open(self.log_out).read().strip()
         err = open(self.log_err).read().strip()
@@ -1453,9 +1468,9 @@ def case_app_bundle(s):
     rc, d = s.tool("app-info", s.args.app)
     want = s.bundle_id(s.args.app)
     real = os.path.realpath(s.args.app)
-    checks = [(d.get("bundle") is True, "NSBundle reads it as a bundle"),
-              (d.get("application_bundle") is True, "its content type, %s, is an application bundle" % d.get("type")),
-              (d.get("package") is True, "the Finder shows it as one item (a package)"),
+    checks = [(yes(d.get("bundle")), "NSBundle reads it as a bundle"),
+              (yes(d.get("application_bundle")), "its content type, %s, is an application bundle" % d.get("type")),
+              (yes(d.get("package")), "the Finder shows it as one item (a package)"),
               (d.get("register_status") == 0, "LaunchServices registers it (LSRegisterURL: %s)" % d.get("register_status")),
               (d.get("identifier") == want, "its identifier: %s" % d.get("identifier")),
               (os.path.realpath(d.get("executable", "")) == os.path.join(real, "Contents", "MacOS", "icy-tower"),
@@ -1481,7 +1496,7 @@ def case_app_launch(s):
                or pf.get("args") == os.path.join(s.args.app, "Contents", "MacOS", "icy-tower"),
                "its arguments: the executable alone (%r): LaunchServices passed none (no -psn_)" % pf.get("args")),
               (pf.get("cwd") not in (None, os.getcwd()), "its working directory is LaunchServices' (%s), not the harness's" % pf.get("cwd")),
-              ((g.launch_info or {}).get("regular") is True, "a regular (foreground) application, not an agent: policy %s"
+              (yes((g.launch_info or {}).get("regular")), "a regular (foreground) application, not an agent: policy %s"
                % (g.launch_info or {}).get("policy")),
               (win is not None, "its window appears")]
     if win is None:
@@ -1490,7 +1505,7 @@ def case_app_launch(s):
         return s.verdict("app-launch", checks, facts, "launch")
     _, d = s.tool("apps", g.bundle_id)
     active = [a for a in d.get("apps", []) if a["pid"] == g.p.pid]
-    facts["activated_by_launch"] = bool(active and active[0]["active"])
+    facts["activated_by_launch"] = bool(active and yes(active[0]["active"]))
     checks.append((facts["activated_by_launch"] or g.frontmost(), "LaunchServices made it the active application "
                    "(frontmost: %s)" % d.get("frontmost")))
     time.sleep(max(0.0, 3.6 - (time.time() - g.window_at)))
@@ -1644,7 +1659,7 @@ def case_app_gatekeeper(s):
                        "spctl accepts it as a notarized Developer ID application: %s" % facts["assessment"]))
     else:
         checks.append((assess.returncode != 0, "spctl refuses it (not notarized): %s" % facts["assessment"]))
-    g = AppGame(s, "app-gatekeeper", app, ["--seed", "7"], wait=0.0)
+    g = AppGame(s, "app-gatekeeper", app, ["--seed", "7"], wait=0.0, open_wait=3.0)
     pid, w = dialog(s, "CoreServicesUIAgent", "Icy Tower", 25.0)
     facts["dialog"] = w
     buttons = (w or {}).get("buttons", [])
@@ -1683,6 +1698,7 @@ def case_app_gatekeeper(s):
         checks.append((started is None, "the game never started"))
         if started:
             g.p.kill()
+        g.finish(2.0)
     facts["key_mode"] = s.key_mode
     return s.verdict("app-gatekeeper", checks, facts, "gatekeeper")
 

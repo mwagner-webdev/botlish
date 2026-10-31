@@ -1022,8 +1022,96 @@ LIMITATIONS-PLACEHOLDER
 
 ## 47. Reproduction commands
 
-REPRO-PLACEHOLDER
+On an Apple Silicon Mac with Apple's developer tools, CMake, git, Tcl
+9.0.1 (`tests/platform/setup-macos.sh`) and this checkout, after building
+the game as ICY-TOWER-MACOS-MILESTONE-1.md, section 42, shows
+(`out/icy-tower-macos-aarch64/icy-tower`, the probe `out/probe/icy-tower`):
+
+```sh
+python3 -m venv "$TMPDIR/venv" && "$TMPDIR/venv/bin/pip" install --require-hashes --only-binary :all: \
+    -r audit/macos-release/requirements.txt
+PY="$TMPDIR/venv/bin/python"
+SDLSRC=$(tclsh9.0 tools/c-bindgen.tcl fetch sdl3 | tail -n 1)
+# the bundle, signed ad hoc with the hardened runtime, checked, tampered with, refused by Gatekeeper, packaged
+examples/games/icy-tower/package-macos.sh out/icy-tower-macos-aarch64/icy-tower out/app \
+    --bundle-id org.botlish.examples.icy-tower.ci --version 0.0.0 --build 0.0.0 --sdl3-license "$SDLSRC/LICENSE.txt"
+examples/games/icy-tower/package-macos.sh out/probe/icy-tower out/probe-app \
+    --bundle-id org.botlish.examples.icy-tower.ci.probe --version 0.0.0 --build 0.0.0 --sdl3-license "$SDLSRC/LICENSE.txt"
+rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
+rel sign --work out/w --mode adhoc --app "out/app/Icy Tower.app"
+rel verify-signature --work out/w --app "out/app/Icy Tower.app"
+rel tamper --work out/w --app "out/app/Icy Tower.app"
+rel gatekeeper --work out/w --app "out/app/Icy Tower.app" --expect refused
+rel package --work out/w --app "out/app/Icy Tower.app" --out out/app-dist
+rel sign --work out/wp --mode adhoc --app "out/probe-app/Icy Tower.app"
+python3 -I audit/icy-tower/tools/app-abi-check.py "$TMPDIR/app-abi"
+# LaunchServices: the launch, keys, relaunch, close, GC stress, every alert, the quarantined download
+clang -fobjc-arc -framework AppKit -framework ApplicationServices -framework CoreServices \
+    -o "$TMPDIR/macos-input" audit/icy-tower/tools/macos-input.m
+python3 -I audit/icy-tower/tools/macos-session.py app --app "$PWD/out/app/Icy Tower.app" \
+    --probe-app "$PWD/out/probe-app/Icy Tower.app" --zip "$PWD/out/app-dist/icy-tower-macos-aarch64.zip" \
+    --gatekeeper refused --helper "$TMPDIR/macos-input" --out out/app-session --strict
+# the release path rehearsed with a throwaway identity
+"$PY" -I audit/macos-release/tools/fixtures.py dry-run "$TMPDIR/dry"
+( set -a; . "$TMPDIR/dry/env"; set +a; ditto "out/app/Icy Tower.app" "$TMPDIR/dry/app/Icy Tower.app"
+  rel preflight --work "$TMPDIR/dry/w" --mode dry-run --trust-anchors "$TMPDIR/dry/anchors"
+  rel keychain --work "$TMPDIR/dry/w"
+  rel sign --work "$TMPDIR/dry/w" --app "$TMPDIR/dry/app/Icy Tower.app"
+  rel verify-signature --work "$TMPDIR/dry/w" --app "$TMPDIR/dry/app/Icy Tower.app"
+  rel notary-auth --work "$TMPDIR/dry/w"          # Apple refuses the key it never issued: MACOS-NOTARY-AUTH
+  rel cleanup --work "$TMPDIR/dry/w" )
+```
+
+On any host (Linux included), the release tooling's tests and mutants, and
+the front-end check of the macOS entry:
+
+```sh
+python3 -m venv /tmp/venv && /tmp/venv/bin/pip install --require-hashes --only-binary :all: -r audit/macos-release/requirements.txt
+/tmp/venv/bin/python -I audit/macos-release/tests/test_credentials.py
+/tmp/venv/bin/python -I audit/macos-release/tests/test_release.py
+/tmp/venv/bin/python -I audit/macos-release/tests/test_workflow.py
+/tmp/venv/bin/python -I audit/macos-release/tools/mutate.py
+BOTLISH_RELEASE_PYTHON=/tmp/venv/bin/python tclsh9.0 tests/workload-icy-tower.test -tmpdir "$(mktemp -d)" \
+    -match 'workload-icy-tower-app-module* workload-icy-tower-release-tooling'
+```
+
+A release: sections 10 to 12 (the configuration once, then a tag).
 
 ## 48. Exact files changed
 
-FILES-PLACEHOLDER
+Added:
+
+| File | What |
+|---|---|
+| `examples/games/icy-tower/macos_app.bot` | the macOS application's IO context: std::io::IO over std::darwin::write, the alert of a LaunchServices launch's first diagnostic |
+| `examples/games/icy-tower/package-macos.sh` | Icy Tower.app from build-macos.sh's executable |
+| `examples/games/icy-tower/macos/bundle.py` | the Info.plist (plistlib), the Mach-O and bundle checks |
+| `examples/games/icy-tower/macos/credentials.py` | the credential preflight |
+| `examples/games/icy-tower/macos/release.py` | the trust path's stages (keychain, notary-auth, sign, verify, record, notarize and resume, staple, gatekeeper, tamper, package, publishable, identity, adopt, cleanup) |
+| `examples/games/icy-tower/macos/requirements.txt` | cryptography, cffi, pycparser, pinned by wheel hashes |
+| `examples/games/icy-tower/macos/apple-ca/` | Apple Root CA and the Developer ID Certification Authorities G1 and G2 (public, pinned) |
+| `audit/macos-release/tests/test_credentials.py`, `test_release.py`, `test_workflow.py` | the preflight's negative tests, the stages against stand-ins and the bundle's controls, the workflow's trust boundary |
+| `audit/macos-release/tools/fixtures.py`, `machofake.py`, `stub-tool.py` | synthetic credentials, synthetic Mach-O files, recording stand-ins of Apple's tools |
+| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 64 mutants and their harness |
+| `audit/macos-release/requirements.txt` | the tests' environment (PyYAML beside the release's) |
+| `audit/icy-tower/tools/app-abi-check.py` | macos_app.bot's C declarations against the SDK |
+| `docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md` | this report |
+
+Changed:
+
+| File | What |
+|---|---|
+| `examples/games/icy-tower/main-macos.bot` | installs `macos_app::create()` instead of `std::darwin::io::create()` |
+| `audit/icy-tower/tools/macos-session.py` | the `app` mode (LaunchServices launches, the alert and Gatekeeper cases, App Translocation), SIP and Gatekeeper recorded |
+| `audit/icy-tower/tools/macos-input.m` | `app-info`, `apps`, `ax-texts`, `ax-press` |
+| `audit/icy-tower/context-refactor/tools/sdltrace.c` | `SDLTRACE_FAIL` fault injection (window creation, the Nth present); without it nothing changes |
+| `audit/icy-tower/macos-mutate.tcl`, `audit/icy-tower/macos-mutants.txt` | the `app:CASES` detector (the mutant's executable bundled, signed ad hoc, launched through LaunchServices); `darwin-io-silent` renamed `app-io-silent` for the new entry; six bundle mutants |
+| `tests/workload-icy-tower.test` | `workload-icy-tower-app-module`, `-app-module-shared-sources-untouched`, `-release-tooling`, `-macos-app-bundle` |
+| `.github/workflows/icy-tower-macos.yml` | the game job's bundle, LaunchServices, dry-run, tooling and ABI steps; the tag trigger; the release and publish jobs |
+| `.github/workflows/icy-tower.yml` | the release tooling's pinned Python for its tests |
+| `AGENTS.md`, `docs/INDEX.md`, `docs/ICY-TOWER-MACOS-MILESTONE-1.md`, `docs/ICY-TOWER-VERTICAL-SLICE-1.md`, `docs/MAIN-THREAD-STARTUP-MILESTONE-1.md`, `docs/MACOS-AARCH64-MILESTONE-9.md`, `docs/MACOS-AARCH64-PORT-AUDIT.md` | cross-references and the rules |
+
+No file of `core/`, `hir/`, `surface/`, `compiler/`, `native/`, `stdlib/`,
+`tools/` or the game's shared modules (tower, hud, options, render, sdl,
+game, main, main-windows) changed: no compiler, runtime, FFI or standard
+library change was needed.

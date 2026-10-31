@@ -70,7 +70,11 @@ def name(cn, ou=None, o=None, uid=None):
 
 
 class Authority:
-    def __init__(self):
+    """A test root and intermediate. The default intermediate carries the subject of Apple's G2 Developer ID
+    authority (the "named, but not signed by Apple" negative tests); CA_CN gives it its own, which macOS's chain
+    building needs (the dry run: with Apple's name it would find Apple's real intermediate and fail)."""
+
+    def __init__(self, ca_cn=None):
         self.root_key = rsa_key("root")
         self.root = (x509.CertificateBuilder().subject_name(name("Icy Tower Test Root CA", "Test Certification Authority"))
                      .issuer_name(name("Icy Tower Test Root CA", "Test Certification Authority"))
@@ -78,17 +82,23 @@ class Authority:
                      .not_valid_before(NOW - datetime.timedelta(days=3650)).not_valid_after(NOW + datetime.timedelta(days=3650))
                      .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
                      .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+                     .add_extension(x509.SubjectKeyIdentifier.from_public_key(self.root_key.public_key()), critical=False)
                      .sign(self.root_key, hashes.SHA256()))
         self.ca_key = rsa_key("ca")
         self.ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Developer ID Certification Authority"),
                                   x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "G2"),
                                   x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Apple Inc."),
-                                  x509.NameAttribute(NameOID.COUNTRY_NAME, "US")])
+                                  x509.NameAttribute(NameOID.COUNTRY_NAME, "US")]) if ca_cn is None else \
+            x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, ca_cn),
+                       x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Icy Tower Test"),
+                       x509.NameAttribute(NameOID.COUNTRY_NAME, "US")])
         self.ca = (x509.CertificateBuilder().subject_name(self.ca_name).issuer_name(self.root.subject)
                    .public_key(self.ca_key.public_key()).serial_number(2)
                    .not_valid_before(NOW - datetime.timedelta(days=3000)).not_valid_after(NOW + datetime.timedelta(days=3000))
                    .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
                    .add_extension(x509.KeyUsage(False, False, False, False, False, True, True, False, False), critical=True)
+                   .add_extension(x509.SubjectKeyIdentifier.from_public_key(self.ca_key.public_key()), critical=False)
+                   .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(self.root_key.public_key()), critical=False)
                    .sign(self.root_key, hashes.SHA256()))
 
     def write(self, directory):
@@ -105,7 +115,10 @@ class Authority:
         b = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject if self_signed else self.ca_name)
              .public_key(key.public_key()).serial_number(serial).not_valid_before(before).not_valid_after(after)
              .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-             .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True))
+             .add_extension(x509.KeyUsage(True, False, False, False, False, False, False, False, False), critical=True)
+             .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+             .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                 key.public_key() if self_signed else self.ca_key.public_key()), critical=False))
         if codesign:
             b = b.add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CODE_SIGNING]), critical=True)
         if marker:
@@ -199,7 +212,7 @@ def damaged_inside(data, password):
 
 
 def dry_run(directory):
-    a = Authority()
+    a = Authority(ca_cn="Icy Tower Dry Run Certification Authority")
     a.write(os.path.join(directory, "anchors"))
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     cert = a.leaf("Developer ID Application: Icy Tower Dry Run (DRYRUN0000)", team="DRYRUN0000", key=key)

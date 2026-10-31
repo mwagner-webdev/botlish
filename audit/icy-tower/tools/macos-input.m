@@ -353,7 +353,7 @@ int main(int argc, char **argv) {
                 NSURL *one = [[NSWorkspace sharedWorkspace] URLForApplicationWithBundleIdentifier:b.bundleIdentifier];
                 if (one && ![registered containsObject:one.path]) [registered addObject:one.path];
             }
-            json(@{@"bundle": @(b != nil), @"identifier": b.bundleIdentifier ?: @"", @"executable": b.executablePath ?: @"",
+            json(@{@"bundle": @(b != nil ? YES : NO), @"identifier": b.bundleIdentifier ?: @"", @"executable": b.executablePath ?: @"",
                    @"name": [b objectForInfoDictionaryKey:@"CFBundleName"] ?: @"",
                    @"version": [b objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"",
                    @"build": [b objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"",
@@ -369,7 +369,7 @@ int main(int argc, char **argv) {
                 [out addObject:@{@"pid": @(a.processIdentifier), @"executable": a.executableURL.path ?: @"",
                                  @"bundle": a.bundleURL.path ?: @"", @"active": @(a.active),
                                  @"finished": @(a.finishedLaunching), @"terminated": @(a.terminated),
-                                 @"regular": @(a.activationPolicy == NSApplicationActivationPolicyRegular),
+                                 @"regular": @(a.activationPolicy == NSApplicationActivationPolicyRegular ? YES : NO),
                                  @"policy": @(a.activationPolicy)}];
             }
             json(@{@"apps": out, @"frontmost": frontmost()});
