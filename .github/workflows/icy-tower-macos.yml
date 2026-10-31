@@ -472,86 +472,68 @@ jobs:
           mkdir -p "$dry/app"
           ditto "$APPDIR" "$dry/app/Icy Tower.app"
           rel() { "$PY" -I examples/games/icy-tower/macos/release.py "$@"; }
+          bounded() { perl -e '$t = shift; alarm $t; exec @ARGV or die "$ARGV[0]: $!\n"' 120 "$@"; }
           w="$dry/work"
+          kc="$w/secret/icy-tower-signing.keychain-db"
           before=$(security list-keychains -d user)
-          # codesign signs only with an identity whose chain ends at a trusted
-          # root ("unable to build chain to self-signed root",
-          # errSecInternalComponent): the throwaway root is trusted for code
-          # signing, in the admin trust domain, for this step alone -- removed
-          # however it ends. A release never does this: Apple's root is the
-          # system's. Changing the admin trust settings asks a person to
-          # authorize it (SecurityAgent's dialog: nobody answers one on a
-          # runner, and the step waited for it), so the authorization rule
-          # com.apple.trust-settings.admin is lifted for each of the two
-          # changes alone and put back exactly as it was read (checked below);
-          # every call is bounded, never left waiting.
-          bounded() { perl -e '$t = shift; alarm $t; exec @ARGV or die "$ARGV[0]: $!\n"' 60 "$@"; }
-          rule="$dry/trust-settings-admin.plist"
-          security authorizationdb read com.apple.trust-settings.admin >"$rule"
-          echo "com.apple.trust-settings.admin as it was:"; plutil -p "$rule"
-          same_rule() {
-            security authorizationdb read com.apple.trust-settings.admin 2>/dev/null | python3 -I -c '
-          import plistlib, sys
-          drop = lambda d: {k: v for k, v in d.items() if k not in ("created", "modified", "version")}
-          sys.exit(drop(plistlib.load(sys.stdin.buffer)) != drop(plistlib.load(open(sys.argv[1], "rb"))))' "$rule"
-          }
-          trusting() {
-            local status=0
-            echo "\$ sudo security authorizationdb write (the trust settings' rule) allow"
-            bounded sudo security authorizationdb write com.apple.trust-settings.admin allow || status=1
-            if [ $status = 0 ]; then echo "\$ $*"; bounded "$@" || status=1; fi
-            echo "\$ sudo security authorizationdb write (the trust settings' rule) < (the rule as it was)"
-            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" || status=1
-            return $status
-          }
-          untrust() { trusting sudo security remove-trusted-cert -d "$dry/anchors/root.cer" || true; }
-          trap 'untrust; rel cleanup --work "$w"' EXIT
+          trap 'rel cleanup --work "$w"' EXIT
           started=$(date +%s)
           rel preflight --work "$w" --mode dry-run --trust-anchors "$dry/anchors"
           echo "preflight: $(( $(date +%s) - started )) s"
           started=$(date +%s)
           rel keychain --work "$w"
           echo "keychain: $(( $(date +%s) - started )) s"
-          # what codesign will build the chain from (public certificates only),
-          # and the chain itself with its root anchored explicitly (no trust
-          # setting): a chain refused here is the certificates' fault
-          kc="$w/secret/icy-tower-signing.keychain-db"
+          # The chain is sound: verified with its root anchored explicitly
+          # (public certificates only). Through the keychains alone its root
+          # is untrusted, and codesign signs only with an identity whose
+          # chain reaches a root the system trusts. A runner cannot make the
+          # throwaway root trusted without a person (SecurityAgent's
+          # authorization dialog; the admin trust settings' authorization
+          # rule, "entitled" or "authenticate-admin", cannot be lifted by
+          # root either: NO (-60005); nothing is attempted): that refusal of
+          # the signature is ENVIRONMENT-BLOCKED, never passed. A release
+          # never meets it: Apple's root is trusted.
           echo "the temporary keychain's certificates:"
           security find-certificate -a -Z "$kc" | grep -E '^SHA-1|"labl"' || true
           echo "the chain, its root anchored explicitly:"
-          bounded security verify-cert -c "$dry/leaf.cer" -c "$dry/anchors/devid.cer" -r "$dry/anchors/root.cer" -p codeSign -L || true
-          trusting sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$w/secret/icy-tower-signing.keychain-db" "$dry/anchors/root.cer" \
-            || { echo "::error::the throwaway root could not be trusted for code signing"
-                 same_rule || echo "::error::the trust settings' authorization rule was not put back"; exit 1; }
-          same_rule || { echo "::error::the trust settings' authorization rule was not put back"; exit 1; }
-          echo "the chain from the keychains and the trust settings, as codesign will build it:"
+          bounded security verify-cert -c "$dry/leaf.cer" -c "$dry/anchors/devid.cer" -r "$dry/anchors/root.cer" -p codeSign -L
+          echo "the chain through the keychains, no root trusted:"
           bounded security verify-cert -c "$dry/leaf.cer" -p codeSign -k "$kc" || true
-          bounded security find-identity -v -p codesigning "$w/secret/icy-tower-signing.keychain-db"
-          started=$(date +%s)
-          rel sign --work "$w" --app "$dry/app/Icy Tower.app"
-          echo "sign: $(( $(date +%s) - started )) s"
-          rel verify-signature --work "$w" --app "$dry/app/Icy Tower.app"
+          # Apple's own check, in the release's order (before the signature):
+          # a key Apple never issued must be refused as authentication (or
+          # the service unreachable), never as a key-format problem
           if rel notary-auth --work "$w" >"$dry/notary-auth.txt" 2>&1; then
             cat "$dry/notary-auth.txt"; echo "::error::Apple validated a key it never issued"; exit 1
           fi
           cat "$dry/notary-auth.txt"
           grep -qE '^MACOS-NOTARY-(AUTH|SERVICE):' "$dry/notary-auth.txt"
+          started=$(date +%s)
+          if rel sign --work "$w" --app "$dry/app/Icy Tower.app" >"$dry/sign.txt" 2>&1; then
+            cat "$dry/sign.txt"
+            echo "sign: $(( $(date +%s) - started )) s"
+            rel verify-signature --work "$w" --app "$dry/app/Icy Tower.app"
+            python3 -I audit/icy-tower/tools/macos-session.py app --app "$dry/app/Icy Tower.app" --helper "$RUNNER_TEMP/macos-input" \
+              --out out/dry-run-session --only app-launch --strict
+            echo "EXECUTED: signed with the throwaway identity, verified and launched" >"$dry/sign-class.txt"
+          else
+            cat "$dry/sign.txt"
+            if grep -q "unable to build chain to self-signed root" "$dry/sign.txt" && grep -q "^MACOS-SIGN:" "$dry/sign.txt"; then
+              echo "ENVIRONMENT-BLOCKED: codesign refuses the throwaway identity, whose root the runner cannot trust without a person" | tee "$dry/sign-class.txt"
+              echo "::warning::the dry run's signature is ENVIRONMENT-BLOCKED (an untrusted throwaway root): not passed"
+            else
+              echo "::error::codesign failed with the throwaway identity for another reason"; exit 1
+            fi
+          fi
           if rel publishable --work "$w" --out "$dry"; then echo "::error::a dry run was judged publishable"; exit 1; fi
-          python3 -I audit/icy-tower/tools/macos-session.py app --app "$dry/app/Icy Tower.app" --helper "$RUNNER_TEMP/macos-input" \
-            --out out/dry-run-session --only app-launch --strict
-          untrust
           rel cleanup --work "$w"
           trap - EXIT
-          if security dump-trust-settings -d 2>/dev/null | grep -q "Icy Tower Test Root CA"; then
-            echo "::error::the throwaway root is still trusted"; exit 1
-          fi
-          same_rule || { echo "::error::the trust settings' authorization rule was not put back"; exit 1; }
-          echo "the throwaway root's trust removed; com.apple.trust-settings.admin as it was"
           after=$(security list-keychains -d user)
           [ "$before" = "$after" ] || { echo "::error::the keychain search list was not restored"; exit 1; }
           [ ! -e "$w/secret" ] || { echo "::error::the decoded credentials were left behind"; exit 1; }
+          [ ! -e "$kc" ] || { echo "::error::the temporary keychain was left behind"; exit 1; }
           cp "$w/state.json" out/logs/dry-run-state.json
           cp "$dry/notary-auth.txt" out/logs/dry-run-notary-auth.txt
+          cp "$dry/sign-class.txt" out/logs/dry-run-sign.txt
 
       # What a release job (below) builds its bundle from: the executable
       # this job built and tested, byte for byte, its SHA-256 a job output
@@ -672,7 +654,7 @@ jobs:
             echo "| release tooling tests and mutants | $RELEASE_TESTS | $(tail -n 1 out/logs/release-mutants.log 2>/dev/null) |"
             echo "| Icy Tower.app, ad hoc | $BUNDLE | $([ "$BUNDLE" = failure ] && echo 'bundle or signature failure (the log)') |"
             echo "| LaunchServices acceptance | $APP_SESSION | (the app cases below) |"
-            echo "| release dry run | $DRY_RUN | $(grep -hE '^MACOS-' out/logs/dry-run-notary-auth.txt 2>/dev/null | head -n 1) |"
+            echo "| release dry run | $DRY_RUN | Apple: $(grep -hE '^MACOS-' out/logs/dry-run-notary-auth.txt 2>/dev/null | head -n 1 | cut -c1-120); signature: $(head -n 1 out/logs/dry-run-sign.txt 2>/dev/null | cut -d: -f1) |"
             echo
             cat out/session/summary.md 2>/dev/null || echo "the graphical session did not run"
             echo

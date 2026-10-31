@@ -811,8 +811,8 @@ rm -rf "$out/Icy Tower.app"
       contents: write
 >>>>
 
-@@ release-trusts-a-root the release job trusts a certificate of its own for code signing (as the dry run does its throwaway root): Apple's root is no longer the only anchor
-!! test_workflow.Workflow.test_release_changes_no_trust_setting
+@@ release-trusts-a-root the release job trusts a certificate of its own for code signing: Apple's root is no longer the only anchor
+!! test_workflow.Workflow.test_no_job_changes_a_trust_setting
 ## .github/workflows/icy-tower-macos.yml
 <<<<
           "$PY" -I examples/games/icy-tower/macos/release.py keychain --work "$WORK"
@@ -821,10 +821,31 @@ rm -rf "$out/Icy Tower.app"
           sudo security add-trusted-cert -d -r trustRoot -p codeSign "$WORK/secret/identity.cer"
 >>>>
 
-@@ trust-rule-not-restored the dry run lifts the trust settings' authorization rule and never puts it back
-!! test_workflow.Workflow.test_dry_run_puts_the_trust_rule_back
+@@ dry-run-trusts-its-root the dry run makes its throwaway root trusted (by lifting the trust settings' authorization) to make its signature pass
+!! test_workflow.Workflow.test_no_job_changes_a_trust_setting
 ## .github/workflows/icy-tower-macos.yml
 <<<<
-            bounded sudo security authorizationdb write com.apple.trust-settings.admin <"$rule" || status=1
+          rel keychain --work "$w"
 ====
+          rel keychain --work "$w"
+          sudo security authorizationdb write com.apple.trust-settings.admin allow
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k "$kc" "$dry/anchors/root.cer"
+>>>>
+
+@@ dry-run-blocked-as-passed any refusal of the dry run's signature counted as the environment's, a broken signing step hidden
+!! test_workflow.Workflow.test_dry_run_blocked_signature_is_never_passed
+## .github/workflows/icy-tower-macos.yml
+<<<<
+              echo "::error::codesign failed with the throwaway identity for another reason"; exit 1
+====
+              echo "ENVIRONMENT-BLOCKED: codesign failed" >"$dry/sign-class.txt"
+>>>>
+
+@@ sign-remedy-misleads every codesign failure reported as a locked keychain, a chain that reaches no trusted root among them
+!! test_release.Stages.test_sign_failures_explained
+## examples/games/icy-tower/macos/release.py
+<<<<
+    if "unable to build chain to self-signed root" in text:
+====
+    if False:
 >>>>

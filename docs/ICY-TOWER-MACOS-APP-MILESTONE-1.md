@@ -702,9 +702,11 @@ under an authority named as its own ("Icy Tower Dry Run Certification
 Authority", with subject and authority key identifiers), a precaution so
 that macOS's chain building cannot take Apple's real Developer ID
 intermediate, which the system holds under the Apple-shaped name, for the
-leaf's issuer. codesign signs only with an identity whose chain ends at a
-trusted root, so the dry run trusts its throwaway root for code signing,
-for that step alone (section 25).
+leaf's issuer. The chain is sound (`security verify-cert` with its root
+anchored explicitly), but codesign signs only with an identity whose chain
+reaches a root the system trusts, and a runner cannot trust a throwaway
+root without a person: the dry run's signature is Environment-blocked
+(section 25).
 
 ## 22. Credential negative tests
 
@@ -835,7 +837,7 @@ same construction in every mode, so ordinary CI tests what a release signs:
 | mode | identity | flags | where |
 |---|---|---|---|
 | adhoc | `-` | `--options runtime --timestamp=none` | ordinary CI: the bundle every LaunchServices case plays |
-| dry-run | a throwaway test identity in the temporary keychain, its root trusted for code signing for the step alone | `--options runtime --timestamp=none` (no throwaway signature is sent to Apple's timestamp service) | ordinary CI: the release's keychain, selection, signing and cleanup, rehearsed |
+| dry-run | a throwaway test identity in the temporary keychain | `--options runtime --timestamp=none` (no throwaway signature is sent to Apple's timestamp service) | ordinary CI: the release's preflight, keychain, identity selection, Apple's credential check and cleanup, rehearsed; the signature itself is Environment-blocked (below) |
 | release | the Developer ID Application identity | `--options runtime --timestamp` | the release job |
 
 A release never falls back: its sign stage refuses to run without the
@@ -1348,9 +1350,9 @@ python3 -I audit/icy-tower/tools/macos-session.py app --app "$PWD/out/app/Icy To
 ( set -a; . "$TMPDIR/dry/env"; set +a; ditto "out/app/Icy Tower.app" "$TMPDIR/dry/app/Icy Tower.app"
   rel preflight --work "$TMPDIR/dry/w" --mode dry-run --trust-anchors "$TMPDIR/dry/anchors"
   rel keychain --work "$TMPDIR/dry/w"
-  rel sign --work "$TMPDIR/dry/w" --app "$TMPDIR/dry/app/Icy Tower.app"
-  rel verify-signature --work "$TMPDIR/dry/w" --app "$TMPDIR/dry/app/Icy Tower.app"
-  rel notary-auth --work "$TMPDIR/dry/w"          # Apple refuses the key it never issued: MACOS-NOTARY-AUTH
+  security verify-cert -c "$TMPDIR/dry/leaf.cer" -c "$TMPDIR/dry/anchors/devid.cer" -r "$TMPDIR/dry/anchors/root.cer" -p codeSign -L
+  rel notary-auth --work "$TMPDIR/dry/w"          # Apple refuses a key it never issued
+  rel sign --work "$TMPDIR/dry/w" --app "$TMPDIR/dry/app/Icy Tower.app"   # MACOS-SIGN: no trusted root
   rel cleanup --work "$TMPDIR/dry/w" )
 ```
 
@@ -1384,7 +1386,7 @@ Added:
 | `examples/games/icy-tower/macos/apple-ca/` | Apple Root CA and the Developer ID Certification Authorities G1 and G2 (public, pinned) |
 | `audit/macos-release/tests/test_credentials.py`, `test_release.py`, `test_workflow.py` | the preflight's negative tests, the stages against stand-ins and the bundle's controls, the workflow's trust boundary |
 | `audit/macos-release/tools/fixtures.py`, `machofake.py`, `stub-tool.py` | synthetic credentials, synthetic Mach-O files, recording stand-ins of Apple's tools |
-| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 66 mutants and their harness |
+| `audit/macos-release/tools/mutate.py`, `audit/macos-release/mutants.txt` | the release pipeline's 68 mutants and their harness |
 | `audit/macos-release/requirements.txt` | the tests' environment (PyYAML beside the release's) |
 | `audit/icy-tower/tools/app-abi-check.py` | macos_app.bot's C declarations against the SDK |
 | `docs/ICY-TOWER-MACOS-APP-MILESTONE-1.md` | this report |

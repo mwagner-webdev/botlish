@@ -269,6 +269,21 @@ class Stages(unittest.TestCase):
         self.refused("sign", "has not passed", "--app", self.app)
         self.assertFalse([c for c in self.calls() if c[0] == "codesign"])
 
+    def test_sign_failures_explained(self):
+        # codesign's two errSecInternalComponent failures name different
+        # causes: a chain that reaches no trusted root, and a key codesign
+        # cannot use
+        self.fake_apple_preflight()
+        self.ok("keychain")
+        self.ok("notary-auth")
+        self.configure(sign_chain_fails=True)
+        out = self.refused("sign", "MACOS-SIGN", "--app", self.app)
+        self.assertIn("does not reach a root the system trusts", out)
+        self.assertNotIn("keychain is locked", out)
+        self.configure(sign_fails=True)
+        out = self.refused("sign", "MACOS-SIGN", "--app", self.app)
+        self.assertIn("keychain is locked", out)
+
     def test_release_refuses_an_ad_hoc_signature(self):
         self.fake_apple_preflight()
         self.ok("keychain")

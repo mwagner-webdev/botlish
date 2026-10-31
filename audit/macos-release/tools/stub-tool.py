@@ -115,6 +115,9 @@ def codesign():
         app = ARGS[-1]
         if CFG.get("sign_fails"):
             die("%s: errSecInternalComponent" % app)
+        if CFG.get("sign_chain_fails"):
+            die("Warning: unable to build chain to self-signed root for signer \"%s\"\n%s: errSecInternalComponent"
+                % (opt("--sign"), app))
         ident = opt("--sign")
         identities = load("identities", {})
         if ident != "-":

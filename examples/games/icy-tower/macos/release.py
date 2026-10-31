@@ -414,6 +414,19 @@ def entitlements(app):
         raise Failed("MACOS-SIGN", "the signature's entitlements do not parse")
 
 
+def sign_remedy(text):
+    """What codesign's failure TEXT asks of the person releasing."""
+    if "unable to build chain to self-signed root" in text:
+        return ("the signing certificate's chain does not reach a root the system trusts: codesign signs only then. "
+                "For a Developer ID identity Apple's intermediate must be beside it (the keychain stage imports "
+                "the committed one) and Apple Root CA trusted by the system; export the identity again if its "
+                "certificate is not Apple's")
+    if "timestamp" in text.lower():
+        return "Apple's timestamp service was unreachable or refused the request: retry the release"
+    return ("errSecInternalComponent alone: the keychain is locked or codesign has no access to the key "
+            "(the keychain stage unlocks it and sets the key's partition list)")
+
+
 def stage_sign(work, args):
     app = os.path.abspath(args.app)
     bundle.check_bundle(app)
@@ -424,8 +437,8 @@ def stage_sign(work, args):
         work.require("preflight", "keychain")
         k = work.last("keychain")
         identity, keychain_args = k["identity"], ["--keychain", k["keychain"]]
-        # Apple's timestamp service stamps only signatures that chain to Apple:
-        # the dry run's throwaway identity has none.
+        # a secure timestamp is Apple's service's: the dry run's throwaway
+        # identity asks it for nothing
         timestamp = "--timestamp" if mode == "release" else "--timestamp=none"
         if mode == "release":
             work.require("notary-auth")
@@ -433,9 +446,7 @@ def stage_sign(work, args):
     try:
         run(["codesign", "--force", "--sign", identity] + keychain_args + ["--options", "runtime", timestamp, app], timeout=600)
     except ToolFailed as t:
-        raise Failed("MACOS-SIGN", "codesign could not sign the bundle: %s" % t.text(),
-                     "errSecInternalComponent: the keychain is locked or codesign has no access to the key; "
-                     "a timestamp failure: Apple's timestamp service was unreachable (retry)")
+        raise Failed("MACOS-SIGN", "codesign could not sign the bundle: %s" % t.text(), sign_remedy(t.text()))
     f = signature_facts(app)
     work.add("sign", True, {"mode": mode, "cdhash": f["CDHash"], "identity": identity})
     print("sign (%s): %s, CDHash %s" % (mode, f["authority"][0] if f["authority"] else "ad hoc", f["CDHash"]))

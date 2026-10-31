@@ -140,29 +140,32 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("--trust-anchors", body)
         self.assertIn("preflight --work \"$WORK\" --mode release", body)
 
-    def test_release_changes_no_trust_setting(self):
-        # Apple's root is the system's: a release trusts no certificate and
-        # lifts no authorization rule (only the game job's dry run does, for
-        # its throwaway root, and puts the rule back)
-        body = "\n".join(runs(self.release) + runs(self.publish))
-        for word in ("add-trusted-cert", "remove-trusted-cert", "authorizationdb", "trust-settings"):
-            self.assertNotIn(word, body)
+    def test_no_job_changes_a_trust_setting(self):
+        # Apple's root is the system's: no job trusts a certificate or
+        # touches an authorization rule -- not the release, and not the dry
+        # run, whose signature with an untrusted throwaway root is
+        # ENVIRONMENT-BLOCKED rather than made to pass
+        for name, job in self.jobs.items():
+            body = "\n".join(runs(job))
+            for word in ("add-trusted-cert", "remove-trusted-cert", "authorizationdb write", "trust-settings-import",
+                         "spctl --master-disable", "spctl --global-disable", "--add --label"):
+                self.assertNotIn(word, body, "job %s: %s" % (name, word))
 
-    def test_dry_run_puts_the_trust_rule_back(self):
+    def test_dry_run_blocked_signature_is_never_passed(self):
         game = self.jobs["game"]
         i = step_index(game, "The release path's dry run")
         self.assertIsNotNone(i)
         st = game["steps"][i]
         body = st["run"]
         self.assertLessEqual(int(st.get("timeout-minutes", 10 ** 6)), 30)
-        lifted = body.count("authorizationdb write com.apple.trust-settings.admin allow")
-        self.assertEqual(lifted, 1, "the rule is lifted in one place, trusting()")
-        self.assertIn('authorizationdb write com.apple.trust-settings.admin <"$rule"', body)
-        self.assertIn("same_rule ||", body)
-        self.assertIn("trap 'untrust;", body)
-        for line in body.splitlines():
-            if "add-trusted-cert" in line or "remove-trusted-cert" in line:
-                self.assertIn("trusting ", line, "a trust change outside trusting(): %r" % line.strip())
+        # only codesign's chain refusal is ENVIRONMENT-BLOCKED; any other
+        # failure of the signature fails the step
+        self.assertIn('grep -q "unable to build chain to self-signed root"', body)
+        self.assertIn('echo "::error::codesign failed with the throwaway identity for another reason"; exit 1', body)
+        self.assertIn("ENVIRONMENT-BLOCKED", body)
+        self.assertNotIn("PASSED", body.replace("ENVIRONMENT-BLOCKED", ""))
+        # Apple's check precedes the signature, as in a release
+        self.assertLess(body.index("rel notary-auth"), body.index("rel sign"))
 
     # --- the order of the release -----------------------------------------------------
 
