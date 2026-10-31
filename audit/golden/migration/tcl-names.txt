@@ -6997,6 +6997,7 @@ tests/str-append-char.test str-append-char-representations pass
 tests/str-append-char.test str-append-char-type-char-for-string pass
 tests/str-append-char.test str-append-char-type-dynamic pass
 tests/str-append-char.test str-append-char-type-int-for-char pass
+tests/str-append-char.test str-append-char-type-through-a-value pass
 tests/str-append-char.test str-append-char-type-string-for-char pass
 tests/str-append-char.test str-append-char-values pass
 tests/str-char-at.test str-char-at-agrees-with-substring pass

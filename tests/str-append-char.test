@@ -164,16 +164,26 @@ r
 # character where the String goes -- the TYPE error on every backend, called
 # directly or through an untyped callable.
 
+# An argument statically of another kind is the call's compile-time TYPE
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md), also through a List
+# element the compiler knows is the native; one the compiler types `any` (a
+# function's declared `-> any` result) is the native's run-time TYPE on
+# every backend.
 foreach {name call} {
     string-for-char {std::str::append_char("a", "b")}
     int-for-char    {std::str::append_char("a", 98)}
     char-for-string {std::str::append_char('a', 'b')}
-    dynamic         {std::list::at([std::str::append_char], 0)("a", std::list::at(["b"], 0))}
+    through-a-value {std::list::at([std::str::append_char], 0)("a", std::list::at(["b"], 0))}
 } {
-    test str-append-char-type-$name "$call is the TYPE error on every backend" -body {
-        outcomeCodes "import std::list\nimport std::str\n$call\n"
-    } -result [lrepeat 4 {error {CORE SEMANTIC TYPE}}]
+    test str-append-char-type-$name "$call is a compile-time TYPE" -body {
+        catch {surface::compile "import std::list\nimport std::str\n$call\n" -warnings off} message options
+        dict get $options -errorcode
+    } -result {CORE SEMANTIC TYPE}
 }
+
+test str-append-char-type-dynamic {std::list::at([std::str::append_char], 0)("a", erased("b")), its argument typed `any` (erased declares `-> any`), is the TYPE error on every backend} -body {
+    outcomeCodes "import std::list\nimport std::str\nfn erased(x: any) -> any:\n    x\nstd::list::at(\[std::str::append_char\], 0)(\"a\", erased(\"b\"))\n"
+} -result [lrepeat 4 {error {CORE SEMANTIC TYPE}}]
 
 # ---------------------------------------------------------------------------
 # Registration and method syntax.
