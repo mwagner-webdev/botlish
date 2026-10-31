@@ -176,7 +176,7 @@ and build the release asked for, no forbidden key. A property list that
 does not parse, a missing one, a wrong CFBundleExecutable or a missing,
 non-executable or wrong-architecture executable are refused (section 40).
 
-**Executed** (run 41197431104 and the acceptance run RUN_A, macos-15): from
+**Executed** (run 41197431104 and the acceptance run 41212691891, macos-15): from
 build-macos.sh's executable (3,846,184 bytes), package-macos.sh printed
 `executable: Mach-O arm64, LC_MAIN stack 536870912, macOS 11.0.0 (SDK
 15.5.0), 22 system libraries, none SDL3's`, `lipo: arm64; otool: LC_MAIN
@@ -203,7 +203,7 @@ identifier (`URLsForApplicationsWithBundleIdentifier:`). **Executed** (run
 "registered":[".../out/app/Icy Tower.app"], ...}`; every check held but one
 that read the helper's `bundle` field, an Objective-C comparison boxed as
 the number 1, as anything but `true` (a harness bug, fixed; the acceptance
-run RUN_A: 8 of 8).
+run 41212691891: 8 of 8).
 
 ## 6. Finder-style startup
 
@@ -229,7 +229,7 @@ argument) -- and reads the process LaunchServices started from outside.
 
 (the check of NSRunningApplication's activation policy, 0 --
 NSApplicationActivationPolicyRegular -- read the helper's boxed 1 as
-false, the same harness bug: fixed, and the acceptance run RUN_A holds
+false, the same harness bug: fixed, and the acceptance run 41212691891 holds
 it.) **Launch arguments**: macOS 15 passes a LaunchServices launch no
 argument at all -- no `-psn_` -- so options.bot needs no accommodation and
 none was added; the game's own `--fly` through `open --args` is still a
@@ -869,7 +869,7 @@ signature's, whatever happened to the files since: `seal-unchecked`).
 Every LaunchServices case plays the bundle signed with `--options
 runtime` (`flags adhoc,runtime`, verified before the session): the game,
 its window, Metal, the keyboard, GC stress, every alert and the Gatekeeper
-refusal ran under the hardened runtime (**Executed**, run RUN_A; section 34).
+refusal ran under the hardened runtime (**Executed**, run 41212691891; section 34).
 In a release the same cases run once more on the Developer ID-signed
 bundle before it is submitted (`app-bundle`, `app-launch`,
 `app-keyboard`, `app-relaunch`, `app-gc-stress`, `app-alert-renderer`,
@@ -935,7 +935,7 @@ For the ad hoc bundle the same assessment must be a rejection (a control
 that Gatekeeper decides on the runner). The runner's `spctl --status` is
 recorded, and never changed (no `--master-disable`).
 
-**Executed** (run RUN_A): the runner's `spctl --status` is `assessments enabled` (and
+**Executed** (run 41212691891): the runner's `spctl --status` is `assessments enabled` (and
 `csrutil status` `System Integrity Protection status: disabled.`,
 recorded, not changed), and the ad hoc bundle's assessment is a rejection:
 
@@ -963,9 +963,9 @@ the player, Escape quits. For the ad hoc bundle of ordinary CI the dialog
 must refuse it and offer no Open, the harness presses Done, and the game
 must never start. Quarantine is never removed to make a case pass.
 
-**Executed** for the ad hoc download (run RUN_A, `app-gatekeeper`, 6 of 6):
+**Executed** for the ad hoc download (run 41212691891, `app-gatekeeper`, 6 of 6):
 
-    PASS the extracted bundle carries a quarantine attribute (0083;6ae5f8db;Safari;FAB63311-8D7D-4359-8659-DB55D32BD095)
+    PASS the extracted bundle carries a quarantine attribute (0083;6ae60e63;Safari;25BD0CC8-161F-4C3E-A554-AD5E93C0155D)
     PASS Gatekeeper's assessments are enabled (assessments enabled)
     PASS spctl refuses it (not notarized): .../out/app-session/downloaded/Icy Tower.app: rejected
     PASS Gatekeeper's dialog refuses it: “Icy Tower” Not Opened / Apple could not verify “Icy Tower” is free of malware that may harm your Mac or compromise your privacy.
@@ -992,7 +992,7 @@ original file for file (path, mode, SHA-256), the executable keep mode
 never a release asset (`test_unstapled_submission_zip_never_published`;
 the workflow's upload lists exactly the three packaged files).
 
-**Executed** for the ad hoc bundle (run RUN_A): `ditto -c -k --keepParent`, `unzip
+**Executed** for the ad hoc bundle (run 41212691891): `ditto -c -k --keepParent`, `unzip
 -tq`, `ditto -x -k` into a fresh directory, the tree compared file for file
 (path, mode, SHA-256), the executable 0755, the signature verified strictly
 there -- `package: .../icy-tower-macos-aarch64.zip (1483514 bytes)`. The
@@ -1000,7 +1000,7 @@ ad hoc ZIP is a test input only (the `app-gatekeeper` case's download):
 `publishable` refused it at once, `MACOS-PUBLISH: an ad hoc build is never
 published: only a release (Developer ID, notarized, stapled)`. The bundle's
 CDHash is the same in every run built from the same executable
-(`1f23171577e9eff6a828260316426784dfd7e825` in runs 41201527696 and RUN_A),
+(`1f23171577e9eff6a828260316426784dfd7e825` in runs 41201527696 and 41212691891),
 while the ZIP's SHA-256 differs run to run (ditto records the files' times):
 the release claims a traceable artifact, never a byte-identical one. The
 release's ZIP of the stapled, notarized bundle and its `stapler validate`
@@ -1014,7 +1014,7 @@ resource changed; `codesign --verify --deep --strict` must refuse both, the
 copies are removed, and the original must still verify with its CDHash
 unchanged. The released copy is never touched.
 
-**Executed** on the ad hoc bundle (run RUN_A, as in every acceptance run):
+**Executed** on the ad hoc bundle (run 41212691891, as in every acceptance run):
 
     tamper: one byte of the copy's executable changed: codesign refuses it (In architecture: arm64)
     tamper: one byte of the copy's resource changed: codesign refuses it (.../resource/Icy Tower.app: a sealed resource is missing or invalid)
@@ -1026,15 +1026,15 @@ For the Developer ID-signed bundle the same stage runs in the release job
 ## 34. The game: graphical and keyboard regression
 
 The milestone keeps the earlier acceptance whole and adds the bundle's.
-**Executed** (run RUN_A, macos-15):
+**Executed** (run 41212691891, macos-15):
 
 * the original graphical acceptance (`macos-session.py --strict`, the
   executable run directly): env 2/2, cocoa 20/20, keyboard 14/14, restart
   9/9, close 3/3, focus 5/5, autopilot 6/6, trace-dummy 5/5, trace-cocoa
   7/7, gc-stress 3/3, worker 3/3, controls 4/4 -- "not EXECUTED: none";
 * the bundle through LaunchServices (`macos-session.py app --strict`): env
-  2/2, app-bundle 8/8, app-launch 15/15, app-keyboard 4/4 (Right +90 units,
-  Left -104 units, Escape quits), app-relaunch 5/5 (closed by its close
+  2/2, app-bundle 8/8, app-launch 15/15, app-keyboard 4/4 (Right +106 units,
+  Left -98 units, Escape quits), app-relaunch 5/5 (closed by its close
   button), app-gc-stress 3/3 (the oracle's summary under GC stress), the
   five alerts 8/8 or 9/9, app-terminal-failure 4/4, app-gatekeeper 6/6 --
   "not EXECUTED: none";
@@ -1043,19 +1043,35 @@ The milestone keeps the earlier acceptance whole and adds the bundle's.
   binding's ABI (123 checks) and macos_app.bot's (26 checks, 0 failed), the
   staged application moved and rebuilt by Botlish.app alone.
 
-One acceptance run of the original session (41205557290, commit c0f3165)
-failed its graphical step; its log was lost when that run, hung in another
-step, was cancelled, so the case is not known. The same session passed in
-every other run of this milestone (41197431104, 41201527696, RUN_A), and an
-earlier run's one failure was the `restart` case's centring in round 2
-(the player not yet centred), which is the earlier milestone's case and
-passed when run again. It is recorded here as an intermittent failure of
-unknown cause, not as passed. The Developer ID-signed application played
-under the hardened runtime (section 27) is **Credential-blocked**.
+The original session failed twice in this milestone's runs, both times
+intermittently: once in an early run its `restart` case (the player not yet
+centred in round 2; the earlier milestone's case, which passed when run
+again), and once in run 41205557290 (commit c0f3165), whose log was lost
+when that run, hung in another step, was cancelled, so the failing case is
+not known. It passed in runs 41197431104, 41201527696, 41207619549,
+41210576736 and 41212691891. It is recorded as an intermittent failure
+whose second occurrence has no known cause, not as passed. The Developer
+ID-signed application played under the hardened runtime (section 27) is
+**Credential-blocked**.
 
 ## 35. Clean-environment independence
 
-CLEAN-PLACEHOLDER
+The application needs nothing the build left on the runner. **Executed**
+(run 41212691891, and as part of every later acceptance run): while every
+LaunchServices case of section 34 ran, the static SDL3 prefix, Botlish's
+caches, Botlish.app (both copies) and its archive were moved away --
+
+    hidden while the application runs: /Users/runner/Library/Caches/botlish-sdl3-static /Users/runner/.cache/botlish
+    /Users/runner/work/_temp/Möved Äpp/Ícy Tower /Users/runner/work/_temp/Prögram Fïles/Botlish.app /Users/runner/work/botlish/botlish/dist
+
+-- and LaunchServices started the process from launchd (parent pid 1,
+working directory `/`, launchd's environment, not the job's shell), so no
+DYLD variable, PATH entry, Tcl, Rust or Botlish of the job's reached it.
+The bundle's executable is byte for byte the executable the earlier
+milestone's "without its build" step runs under `env -i` with the same
+directories hidden, which loads no SDL image (`DYLD_PRINT_LIBRARIES`), and
+`otool -L` lists 22 system libraries (section 2). What this does not show:
+a different Mac -- another user, no Xcode, macOS 11 to 14 (section 46).
 
 ## 36. GitHub Actions trust boundaries
 
@@ -1137,7 +1153,7 @@ line names run there):
 
 **Executed**: 68 of 68 killed on Linux (this checkout, 153 s); on macOS in
 every acceptance run, as the game job's step (run 41207619549: 66 of 66,
-the set before its last three; run RUN_A: MUTANTS-RELEASE-MACOS). Every
+the set before its last three; run 41212691891: 68 of 68, 180 s). Every
 named test passes on the unmutated tree first (the harness's baseline), so
 no mutant is killed by a test that fails anyway.
 
@@ -1223,7 +1239,32 @@ ran to completion.
 
 ## 42. Timing and sizes
 
-TIMING-PLACEHOLDER
+**Executed** (run 41212691891, macos-15, the game job's steps by their
+start and end times, and the job's own measurements):
+
+| what | time |
+|---|---:|
+| the whole game job (queued 37 min before it started) | 15 min 18 s |
+| build-macos.sh (SDL3 cached; the binding generated 2.6 s; compile and link 56.5 s; the link itself 0.78 s) | 60 s |
+| the macOS test section (12 tests) | 130 s |
+| the original graphical acceptance (12 cases) | 84 s |
+| the release tooling's Python environment (pinned wheels, hash-checked) | 5 s |
+| the release tooling's tests (61 + 60 + 23) and 68 mutants | 4 min 37 s (mutants 180 s) |
+| Icy Tower.app: assembled, signed ad hoc, verified, tampered, assessed, packaged, the probe's bundle too | 3 s (assembly 1 s) |
+| LaunchServices acceptance (13 cases, the build hidden) | 35 s |
+| the dry run's preflight and keychain | under 1 s each |
+
+| size | |
+|---|---:|
+| the executable as linked (in the bundle) | 3,846,184 bytes |
+| stripped (for comparison; the bundle keeps the linked one) | 3,309,952 bytes |
+| Icy Tower.app | 3,772 KiB |
+| icy-tower-macos-aarch64.zip (ditto) | 1,483,514 bytes |
+
+The release-only stages (the Developer ID signature with its timestamp,
+notarization, stapling, the notarized download played) have no timing:
+**Credential-blocked**. Each records its time in the release job's
+`timings.txt` (a diagnostics artifact) when it runs.
 
 ## 43. macOS CI runs
 
