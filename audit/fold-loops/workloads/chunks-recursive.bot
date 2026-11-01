@@ -1,0 +1,49 @@
+# chunks-recursive.bot -- chunks-fold.bot's chunking written without a fold:
+# a self tail call carrying the chunks done and the chunk being built as
+# parameters, every addition an immutable List append, exactly as the fold's.
+#
+# expect: [56, 117, 5556]
+
+import std::list
+
+fn token(i: int) -> int:
+    if i.mod(5) == 4:
+        return 0
+    if i.mod(7) == 6:
+        return -i
+    i
+
+fn chunks_from(tokens: List[int], i: int, done: List[List[int]], current: List[int]) -> List[List[int]]:
+    if i < 0 or i >= tokens.length():
+        if current == []:
+            return done
+        return done.append(current)
+    t = tokens.at(i)
+    if t == 0:
+        if current == []:
+            return tokens.chunks_from(i + 1, done, current)
+        return tokens.chunks_from(i + 1, done.append(current), [])
+    if t < 0:
+        return tokens.chunks_from(i + 1, done.append([t]).append([-t]), current)
+    tokens.chunks_from(i + 1, done, current.append(t))
+
+fn size_from(cs: List[List[int]], i: int, n: int) -> int:
+    if i < 0 or i >= cs.length():
+        return n
+    cs.size_from(i + 1, n + cs.at(i).length())
+
+fn sum_from(xs: List[int], i: int, s: int) -> int:
+    if i < 0 or i >= xs.length():
+        return s
+    xs.sum_from(i + 1, s + xs.at(i))
+
+fn total_from(cs: List[List[int]], i: int, s: int) -> int:
+    if i < 0 or i >= cs.length():
+        return s
+    cs.total_from(i + 1, s + cs.at(i).sum_from(0, 0))
+
+n = 128
+tokens = loop i from 0 to n:
+    token(i)
+cs = tokens.chunks_from(0, [], [])
+[cs.length(), cs.size_from(0, 0), cs.total_from(0, 0)]

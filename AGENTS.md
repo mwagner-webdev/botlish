@@ -822,6 +822,58 @@ you change the code it mutates, keeping it a mutant of the same rule).
 `bench/branch-form-boolean.tcl` regenerates the performance report
 (`-root DIR` measures another checkout; `-programs FILES` real programs).
 
+## Folding loops
+
+`fold CLAUSES with intermediate acc INITIAL:` (FOLD-LOOPS-MILESTONE-1.md)
+is a loop that carries one value instead of collecting: a fold is a loop
+node of any of the four kinds (`loop`, `listloop`, `countloop`,
+`lockloop`) carrying `foldBinding` (the intermediate, a parameter of its
+body scope) and `foldInitial` (`hir::isFold`, `hir::FoldInitials`). Its
+operands are evaluated first, then the initial value once; a normal
+completion of the body replaces the intermediate, `continue` keeps it, a
+bare `break` and exhaustion yield it. Keep it so:
+
+* One representation: never a fold node kind of its own, a second
+  iteration machinery or a fold-specific lowering of a domain. Every
+  analysis or backend that knows loop kinds handles the two fields where a
+  loop's result or operands matter (the initial value is an operand after
+  the loop's own; the body's value is the next intermediate, never
+  discarded and never collected); core IR is `(fold INIT LOOP)`, the loop's
+  block binding the intermediate last.
+* Never build a List, a plan, a MutableArray or any object for the fold
+  itself: natively the intermediate is one loop-carried register
+  (`LoopResultStart`, `LoopResultAdd`, `LoopResultFinish`, the `fold`
+  mode of a `loops` entry). A fold is never credited with its domain's
+  cardinality (hir/cardinality.tcl) and never retained as a module
+  binding's List.
+* The intermediate's type is the join of the initial value's and every
+  normal completion's, found by `hir::types::FoldBody`'s bounded fixpoint;
+  a join only `any` covers is FOLD-INTERMEDIATE-TYPE (hir/fold.tcl), and
+  the walk that finds it makes the intermediate and the fold poison so
+  nothing restates it. Every walk of a fold re-decides its own poison and
+  conflict (an enclosing recursive block walks it more than once). Never
+  give the fold a default value on a `continue` or `break` path, a typed
+  annotation of its own, or an implicit conversion.
+* No mutable binding: the intermediate is immutable in its iteration (a
+  DUPLICATE), and an affine one is AFFINE-FOLD-UNSUPPORTED (hir/affine.tcl)
+  until its ownership protocol is designed.
+* `fold` is contextual (`surface::parser::AtFold`: directly before a
+  name); `with` and `intermediate` are words of its header only.
+
+If you change any of that (the parser's `Fold`/`AtFold`, hir/fold.tcl,
+`FoldBody`/`FoldResult`, the fold cases of the analyses, core IR's `fold`,
+the evaluator's `Results`, the Tcl compiler's `FoldStart`/`ResultLine`,
+native lowering's `LoopResult*`), run `tests/fold-loops.test`, its golden
+suite (`tclsh9.0 tests/local.tcl tests/golden/fold-loops.bot`; it is
+generated with its fragment by `audit/fold-loops/tools/golden-port.py`),
+the loop test files (`loop-collecting`, `loop-counted`, `loop-in`, `loops`,
+`native-listloop`) and `audit/fold-loops/tools/mutate.tcl` (every mutant
+in its `mutants.txt` must still apply and be killed: update a mutant's text
+when you change the code it mutates, keeping it a mutant of the same rule),
+plus `tests/fold-loops.test` under `BOTLISH_NATIVE_GC_STRESS=1` for a change
+to native lowering. `audit/fold-loops/tools/measure.sh` and
+`economics.tcl` regenerate the report's measurements.
+
 ## Traits
 
 Traits (TRAITS.md) are eager, one-way, entirely static views: a trait-typed

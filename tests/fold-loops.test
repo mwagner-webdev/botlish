@@ -481,6 +481,10 @@ test fold-loops-result-type-checked {the fold's value is checked where it is use
     flKinds "fn needs_str(s: str) -> str:\n    s\n\nfn f(xs: List\[int\]) -> str:\n    t = fold x in xs with intermediate acc 0:\n        acc + x\n    needs_str(t)\n\nf(\[1\])\n"
 } -result TYPE
 
+test fold-loops-cardinality-not-domain {a fold's List is no collecting loop's: it is never credited with its domain's element count (a lockstep loop over it and the domain is unproven, not accepted)} -body {
+    flKinds "import std::list\n\nfn f(xs: List\[int\]) -> List\[int\]:\n    r = fold x in xs with intermediate out \[\]:\n        out.append(x).append(x)\n    loop a in r and i from 0 to std::list::length(xs):\n        a + i\n\nf(\[1, 2\])\n"
+} -result LOCKSTEP-UNPROVEN
+
 test fold-loops-affine-rejected {a fold cannot carry an affine intermediate: AFFINE-FOLD-UNSUPPORTED where the value enters it} -body {
     flDiagnostics "import std::coroutine\n\nfn gen() -> int:\n    yield 1\n    2\n\nfn f(n: int) -> int:\n    coroutine {step: h} = gen()\n    c = fold i from 0 to n with intermediate c h:\n        c\n    0\n\nf(2)\n"
 } -result {{AFFINE-FOLD-UNSUPPORTED 9:48 {`h` is an affine Coroutine{args: [], return: int, errors: []}, which would become the intermediate of a fold: a fold cannot carry an affine value from one iteration to the next yet (carry an unrestricted value, or move the affine one with a loop of its own)}} {AFFINE-FOLD-UNSUPPORTED 10:9 {`c` is an affine Coroutine{args: [], return: int, errors: []}, which would become the intermediate of a fold: a fold cannot carry an affine value from one iteration to the next yet (carry an unrestricted value, or move the affine one with a loop of its own)}}}
@@ -625,5 +629,62 @@ test fold-loops-nir-bool-and-break {a Bool fold with a break: the break moves th
 test fold-loops-discarded-fold-still-runs {a fold in statement position (its value unread) still carries its intermediate for its body} -constraints nativeBuilt -body {
     fl "import std::list\n$::flLog\nfn f() -> List\[int\]:\n    log = std::mutable_vector::from_list(\[0\])\n    fold x in \[1, 2, 3\] with intermediate s 100:\n        note(log, s)\n        s + x\n    entries(log)\n\nf()\n"
 } -result {[0, 100, 101, 103]}
+
+# ---------------------------------------------------------------------------
+# Standalone executables (tests/loop-collecting.test's aotParity shape): the
+# program compiled to an executable and run, plain and under GC stress (a
+# collection at every allocation: the carried register holds the only
+# reference to its List or struct), agrees with every in-process backend.
+
+proc flAotParity {text} {
+    set dir [makeDirectory {fold loops executable test}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path -warnings off]
+        set values {}
+        foreach backend $::flBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend values [lindex $outcome 1]
+        }
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+        lappend values [runStandalone [file rootname $path]]
+        lappend values [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        if {[llength [lsort -unique $values]] != 1} { error "values disagree: $values" }
+        return [lindex $values 0]
+    } finally {
+        removeDirectory {fold loops executable test}
+    }
+}
+
+test fold-loops-executable {folds carrying an Int past i64, a List of Lists over lockstep domains with continue, and a struct holding a List until a break, in a standalone executable, plain and under GC stress} -constraints executableAot -body {
+    flAotParity "import std::list
+
+struct St:
+    pos: int
+    seen: List\[int\]
+
+fn f(xs: List\[int\]) -> List\[List\[int\]\]:
+    a = fold x in xs with intermediate s 0:
+        s + x
+    b = fold i down from 70 through 1 with intermediate p 1:
+        p * 2
+    c = fold x in xs and i from 0 to std::list::length(xs) with intermediate out \[\]:
+        if i == 1:
+            continue
+        out.append(\[x, i\])
+    d = fold with intermediate st St {pos: 0, seen: \[\]}:
+        if st.pos >= 4:
+            break
+        St {pos: st.pos + 1, seen: st.seen.append(st.pos * st.pos)}
+    \[\[a, b, std::list::length(c)\], d.seen\]
+
+f(\[3, 4, 5\])
+"
+} -result {[[12, 1180591620717411303424, 2], [0, 1, 4, 9]]}
 
 cleanupTests

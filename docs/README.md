@@ -421,6 +421,27 @@ branch. Each iteration runs in a fresh child environment.
 | `return(v)`          | propagates to the enclosing callable |
 | `propagate-error(e)` | propagates                          |
 
+### `(fold INIT-EXPR LOOP)`
+
+A folding loop (FOLD-LOOPS-MILESTONE-1.md). `LOOP` is any of the loop forms
+-- `(loop ...)`, `(listloop ...)`, `(countloop ...)`, `(lockloop ...)` --
+whose block binds one more parameter than its own form does, last: the
+intermediate. `LOOP`'s operands are evaluated and checked as that loop's
+are, then `INIT-EXPR`, once; each iteration binds the intermediate to the
+current value, which starts as `INIT-EXPR`'s.
+
+| Body completion      | Effect                                        |
+|----------------------|-----------------------------------------------|
+| `value(v)`           | `v` is the next intermediate; next iteration |
+| `continue`           | the intermediate is kept; next iteration      |
+| `break`              | the fold evaluates to the current intermediate |
+| `return(v)`          | propagates to the enclosing callable          |
+| `propagate-error(e)` | propagates                                    |
+
+Exhausting the domain evaluates to the current intermediate (`INIT-EXPR`'s
+value for an empty domain); a plain `(loop ...)` ends only by a `break`.
+Nothing is collected.
+
 ### `(return EXPR)`
 
 Completes with `return(v)`. The current invocation stops, and nothing after
@@ -1747,6 +1768,47 @@ add10(32)          # 42 (add captures x)
   the counts provably differ); there is no shortest-wins rule and no runtime
   length check. See COLLECTING-LOOPS.md. A bare `loop:` (no clause) is
   unchanged.
+* **Folding loops.** `fold` takes a loop's clauses (any of the forms above,
+  lockstep included, or none) and carries one value, the *intermediate*,
+  instead of collecting:
+
+  ```
+  total = fold x in xs with intermediate sum 0:
+      sum + x
+  ```
+
+  A collecting loop produces the List of its iterations' values; a fold
+  produces its final intermediate. The rules (FOLD-LOOPS-MILESTONE-1.md):
+
+  - The loop's operands are evaluated (and checked) first, in written order,
+    then the initial value, exactly once, in the enclosing scope; then the
+    iterations run as the loop's would.
+  - In each iteration `sum` is a fresh immutable binding of the body, bound
+    to the value the previous iteration produced (the initial value for the
+    first). A normal completion of the body is the next intermediate;
+    `continue` keeps the current one; a bare `break` ends the fold with the
+    current one; exhaustion yields the last one, and an empty domain the
+    initial value. `return` and errors leave the fold as they leave any loop.
+    `fold with intermediate s INITIAL:` (no clause) repeats until a `break`.
+  - The intermediate is in scope in the body only: not in the initial value,
+    not in the operands, not after the fold. Binding its name again in the
+    body's own scope is a DUPLICATE; a nested scope may shadow it.
+  - The fold's type is the intermediate's: the join of the initial value's
+    type and the type of every normal completion of the body (inferred by a
+    local fixpoint, widening to the dynamic type when the join keeps
+    growing). A join of two known types that only the dynamic type covers
+    (an Int and a String, two different named structs, a value and the
+    `unit` of an `if` without `else`) is `FOLD-INTERMEDIATE-TYPE`, reported
+    at the completion that causes it. An affine intermediate is
+    `AFFINE-FOLD-UNSUPPORTED`.
+  - Like a loop or an `if`, a fold is a statement value: the right side of
+    `=`, after `return`, a body's last expression, never an operand or an
+    argument. `fold` is contextual: it begins a fold only directly before a
+    name, and stays an ordinary name everywhere else (`fold = 1`).
+
+  Iteration, aggregation and construction are distinct operations: a fold
+  aggregates without building anything it does not compute (natively, one
+  loop-carried register: no List, no plan, no MutableArray).
 * An `if` can also be the value of a binding or of `return`
   (`sign = if n < 0:` followed by its blocks). It can't be an operand or an
   argument.
