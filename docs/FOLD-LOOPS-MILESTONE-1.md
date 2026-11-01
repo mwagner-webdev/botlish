@@ -26,7 +26,8 @@ as `loop CLAUSES:` does, but carries one immutable value -- the intermediate
   its own. Struct- and List-valued intermediates work; what they cost is the
   values the program constructs (measured below).
 * Existing loops are unchanged: the collecting-loop test files pass
-  unchanged, and the full local suite passes (Verification).
+  unchanged, and so does the full local suite, except two tests that pin
+  the number of DiagnosticCode cases, now 120 (Verification).
 * Two new diagnostics: FOLD-INTERMEDIATE-TYPE and AFFINE-FOLD-UNSUPPORTED.
 
 | lex-strategy variant (this container) | time | instructions per run |
@@ -628,7 +629,55 @@ and construction fusion are future directions; neither exists yet.
 
 ## Verification
 
-PENDING
+On this container (Linux x86-64, 4 cores), on the final tree unless said
+otherwise:
+
+* **tests/fold-loops.test**: 104 of 104 (every behavioral test on all four
+  backends). The 102 tests before the last two also passed under
+  `BOTLISH_NATIVE_GC_STRESS=1`; the last two are front-end diagnostics only.
+* **tests/golden/fold-loops.bot**: 79 of 79 on interp, compile,
+  cranelift-generic and cranelift (`tests/local.tcl`, front-end cache).
+  `audit/golden/tools/perturb.tcl -mode both`: 79 of 79 inverted and 79 of
+  79 altered tests fail as required. `merge.tcl -check 1`: the manifest is
+  the census's and the fragments'.
+* **The full local suite** (`tests/local.tcl`: 252 Tcl files on interp and
+  compile, 114 golden suites on four backends): 614 passed, and two files
+  failed on both passes, each pinning the number of
+  `std::compiler::DiagnosticCode` cases this milestone grew from 118 to 120
+  (`static-compile.test`'s `sc-codes-one-to-one`, `golden-framework.test`'s
+  `gf-code-name-complete`, which also needs `std::test::code_name` to spell
+  the two new cases). Both are fixed. Rerun on the final tree, with
+  fold-loops.bot, which the full run had not picked up, they pass:
+  `static-compile.test` 83 of 83 and `golden-framework.test` 42 of 42 on
+  both passes, and `golden.test`. Because stdlib/test.bot changed:
+  `audit/golden/tools/fuzz.tcl` seeds 1 and 2 and one run under GC stress,
+  0 disagreements, and the warning gate passes.
+* **Mutation testing** (`audit/fold-loops/tools/mutate.tcl`): 22 mutants,
+  22 killed. The first run left one alive,
+  `coroutines-fold-body-discarded`: no test had a fold whose own value is
+  discarded and whose body ends in a yield or an affine value.
+  `fold-loops-affine-rejected-discarded` and `fold-loops-yield-body-used`
+  now kill it.
+* **The repository's other mutants**: every mutant file in `audit/` applies
+  exactly as on the tree before this milestone. One mutant text moved with
+  the code it mutates (bounds-proofs' `relations-outlive-loops`). The four
+  mutants whose replaced text lies within three lines of a line this
+  milestone changed are killed: `relations-outlive-loops`,
+  collection-reorder's `loop-exit-optimistic`, mutable-vector's
+  `loop-aliases-element` and `unmarked-loop-drains`. The other roughly 800
+  mutants of files this milestone touched were not rerun.
+* **HIR interchange and the front-end cache**:
+  `audit/hir-interchange/tools/roundtrip.tcl` over fold-loops.bot,
+  loop-collecting.bot and loops.bot: 27 artifacts and outcomes identical
+  `-via interchange`, 30 `-via cache`.
+* **Compilerpedia**: `tools/compilerpedia.tcl check`: 1,149 topics, 701
+  examples run, 0 problems. `audit/stdlib-census/after.tsv` regenerated:
+  the two new cases.
+* **CI**, pending when this was written: the branch's
+  `static-decisions` run (fold-loops.bot, loop-collecting.bot and
+  loops.bot under the batched and the sequential scheduler, which is never
+  run locally) and its `tests` run, and the macOS and Windows workflows
+  its pushes start.
 
 ## Reproducing
 
