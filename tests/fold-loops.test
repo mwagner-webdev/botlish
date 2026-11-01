@@ -489,6 +489,20 @@ test fold-loops-affine-rejected {a fold cannot carry an affine intermediate: AFF
     flDiagnostics "import std::coroutine\n\nfn gen() -> int:\n    yield 1\n    2\n\nfn f(n: int) -> int:\n    coroutine {step: h} = gen()\n    c = fold i from 0 to n with intermediate c h:\n        c\n    0\n\nf(2)\n"
 } -result {{AFFINE-FOLD-UNSUPPORTED 9:48 {`h` is an affine Coroutine{args: [], return: int, errors: []}, which would become the intermediate of a fold: a fold cannot carry an affine value from one iteration to the next yet (carry an unrestricted value, or move the affine one with a loop of its own)}} {AFFINE-FOLD-UNSUPPORTED 10:9 {`c` is an affine Coroutine{args: [], return: int, errors: []}, which would become the intermediate of a fold: a fold cannot carry an affine value from one iteration to the next yet (carry an unrestricted value, or move the affine one with a loop of its own)}}}
 
+test fold-loops-affine-rejected-discarded {a fold whose own value is discarded -- a statement, or the bare form -- still makes its body's value the next intermediate: the affine body value is rejected as in a bound fold, never taken for discarded} -body {
+    lmap header {{i from 0 to n} {}} {
+        lmap d [flDiagnostics "import std::coroutine\n\nfn gen() -> int:\n    yield 1\n    2\n\nfn f(n: int) -> int:\n    coroutine {step: h} = gen()\n    fold [expr {$header eq "" ? "" : "$header "}]with intermediate c h:\n        c\n    0\n\nf(2)\n"] {
+            lrange $d 0 1
+        }
+    }
+} -result {{{AFFINE-FOLD-UNSUPPORTED 9:44} {AFFINE-FOLD-UNSUPPORTED 10:9}} {{AFFINE-FOLD-UNSUPPORTED 9:30} {AFFINE-FOLD-UNSUPPORTED 10:9}}}
+
+test fold-loops-yield-body-used {a yield completing a fold's body is a use of its value (the next intermediate) whether the fold's own value is bound or discarded: the helper's protocol defaults to the zero-message one in both, conflicting with its caller's declared one} -body {
+    lmap fold {"    fold" "    m = fold"} {
+        flKinds "import std::coroutine\n\nstruct Msg:\n    v: int\n\nfn helper(n: int) -> int:\n$fold i from 0 to n with intermediate m Msg {v: 0}:\n        yield m.v\n    0\n\nfn gen(resume Msg) -> int:\n    helper(2)\n\ncoroutine {step: s} = gen()\n0\n"
+    }
+} -result {{COROUTINE-RESUME-CONFLICT FOLD-INTERMEDIATE-TYPE} {COROUTINE-RESUME-CONFLICT FOLD-INTERMEDIATE-TYPE}}
+
 test fold-loops-break-outside {a break in a closure inside a fold's body targets no loop of the closure: BREAK-OUTSIDE-LOOP} -body {
     flKinds "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        fn g() -> int:\n            break\n        acc + x\n\nf(\[1\])\n"
 } -result BREAK-OUTSIDE-LOOP

@@ -17,7 +17,7 @@ as `loop CLAUSES:` does, but carries one immutable value -- the intermediate
 * Every iteration form of `loop` composes with `with intermediate`: a List,
   the four numeric forms, lockstep, a MutableMap or MutableSet through the
   loop protocol, and no clause at all (a fold ended by `break`).
-* The semantics below are enforced alike everywhere: 102 Tcl tests on all
+* The semantics below are enforced alike everywhere: 104 Tcl tests on all
   four backends (one also as a standalone executable, plain and under GC
   stress), a 79-test golden suite on all four backends, and a mutation
   harness of 22 mutants (all killed).
@@ -526,7 +526,7 @@ branch builds the six-field struct.
 
 ## Tests
 
-* **tests/fold-loops.test** (102 tests). The behavioral tests run on
+* **tests/fold-loops.test** (104 tests). The behavioral tests run on
   interp, compile, cranelift-generic and cranelift and fail unless all four
   agree. They cover:
   - every iteration form and empty domains, singleton and multi-element
@@ -550,6 +550,10 @@ branch builds the six-field struct.
     contexts, coroutines;
   - the diagnostics, with locations, messages and related locations; no
     cascade; the lenient run; the cardinality guard;
+  - a fold whose own value is discarded (a statement, the bare form) still
+    uses its body's value: an affine body value is rejected and a yield
+    completing the body is a used yield (its helper's protocol defaults to
+    the zero-message one), exactly as in a bound fold;
   - the parser: every form, contextual words, every missing part;
   - the HIR fields, the HIR text round trip run on two backends, core IR
     lowering and hand-written core IR text on all four backends, and NIR
@@ -563,8 +567,10 @@ branch builds the six-field struct.
   `audit/fold-loops/tools/golden-port.py`. The census
   (`audit/golden/migration/census/fold-loops.tsv`) and the manifest record
   every Tcl test: 77 ported (two of them split into two golden tests), 17
-  KEEP-INTERNAL, 7 KEEP-PARSER, and the standalone-executable test
-  KEEP-MULTI-PROGRAM.
+  KEEP-INTERNAL, 7 KEEP-PARSER, the standalone-executable test
+  KEEP-MULTI-PROGRAM, and 2 KEEP-NOT-EXPRESSIBLE (they observe a rejected
+  program's second diagnostic, which a static compile block does not
+  reify).
 * **The mutation harness** (`audit/fold-loops/tools/mutate.tcl`, 22
   mutants, Verification).
 * **The workloads** (`audit/fold-loops/workloads/`) agree with independent

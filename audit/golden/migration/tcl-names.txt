@@ -10513,6 +10513,8 @@ tests/fold-loops.test fold-loops-unhandled-initial pass
 tests/fold-loops.test fold-loops-result-type-checked pass
 tests/fold-loops.test fold-loops-cardinality-not-domain pass
 tests/fold-loops.test fold-loops-affine-rejected pass
+tests/fold-loops.test fold-loops-affine-rejected-discarded pass
+tests/fold-loops.test fold-loops-yield-body-used pass
 tests/fold-loops.test fold-loops-break-outside pass
 tests/fold-loops.test fold-loops-break-value-core-ir pass
 tests/fold-loops.test fold-loops-parse-forms pass
