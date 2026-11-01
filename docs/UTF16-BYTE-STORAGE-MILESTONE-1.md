@@ -1235,6 +1235,13 @@ above among the killed (`win-entry-dot-high-byte-first` also by
   `effecc7` does (run 41307355435, the same three tests and messages):
   the package manager (PM-1) came from main in that merge and this addendum
   does not touch it. Icy Tower on Windows (run 41310489596): passed.
+* macOS AArch64 (run 41310489571, the push of `9721c9a`): smoke,
+  acceptance shard 2, Botlish.app, static SDL3 through it and the
+  application without developer tools passed; acceptance shard 1 and the
+  system linker job failed on the same `contexts-native-nir-hello`
+  expression id (fixed in `fef351d`) and on `main-thread-startup.test`,
+  which predates this work (section 12), as the main-thread startup job
+  does.
 * After the fix, locally: the whole `tests/local.tcl` (every Tcl test file
   on interp and compile, 8,017 and 8,012 passed, 0 failed, 177 and 182
   skipped by host constraints, 2,370 golden duplicates; the 114 golden
