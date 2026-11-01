@@ -310,6 +310,114 @@
     let items: Vec<Value> = utf16le_units_of(data).map(|u| make_small(u.swap_bytes() as i64)).collect();
 >>>>
 
+# ---------------------------------------------------------------------------
+# The NUL-unit measure (std::byte_store::utf16le_units_before_nul: how
+# std::windows::fs measures a listed name). Swapping the bytes of a pair is
+# no mutant of it -- a unit is 0 exactly when both its bytes are, in either
+# order -- so the byte-order mutants are of what the order does decide: the
+# pairing (a single 00 byte, or 00 00 across two units, is no terminator).
+
+@@ rust-nul-single-byte the native measure stops at a unit whose low byte is 0 (a single 00 byte): U+0100 or U+2E00 ends a name
+!! u16-units-before-nul rust:utf16le_units_before_nul_counts_whole_units
+## native/src/runtime/ops.rs
+<<<<
+    utf16le_units_of(data).position(|unit| unit == 0).unwrap_or(data.len() / 2)
+====
+    utf16le_units_of(data).position(|unit| unit & 0xff == 0).unwrap_or(data.len() / 2)
+>>>>
+
+@@ rust-nul-high-byte-only the native measure reads only each unit's high byte: every unit below U+0100 (any ASCII name) ends at once
+!! u16-units-before-nul rust:utf16le_units_before_nul_counts_whole_units
+## native/src/runtime/ops.rs
+<<<<
+    utf16le_units_of(data).position(|unit| unit == 0).unwrap_or(data.len() / 2)
+====
+    utf16le_units_of(data).position(|unit| unit >> 8 == 0).unwrap_or(data.len() / 2)
+>>>>
+
+@@ rust-nul-odd-distance the native measure finds 00 00 at any byte offset, not only within one unit: U+0041 U+4100 (41 00 00 41) ends after nothing
+!! u16-units-before-nul rust:utf16le_units_before_nul_counts_whole_units
+## native/src/runtime/ops.rs
+<<<<
+    utf16le_units_of(data).position(|unit| unit == 0).unwrap_or(data.len() / 2)
+====
+    data.windows(2).position(|pair| pair == [0, 0]).map(|at| at / 2).unwrap_or(data.len() / 2)
+>>>>
+
+@@ rust-nul-absent-is-empty with no NUL unit in the range the native measure reports none, not every unit: a 260-unit name is empty
+!! u16-units-before-nul rust:utf16le_units_before_nul_counts_whole_units
+## native/src/runtime/ops.rs
+<<<<
+    utf16le_units_of(data).position(|unit| unit == 0).unwrap_or(data.len() / 2)
+====
+    utf16le_units_of(data).position(|unit| unit == 0).unwrap_or(0)
+>>>>
+
+@@ rust-nul-bounds-unchecked the native measure skips the slice rule and indexes the payload by the raw bounds: an invalid range is an unchecked Rust panic (or a wrapped index), never LowerUnderrun or UpperOverrun
+!! u16-units-before-nul rust:utf16le_units_before_nul_counts_whole_units
+## native/src/runtime/ops.rs
+<<<<
+    let (from, to) = match check_slice(p, bound_of(start), SliceEnd::End(bound_of(end)), data.len()) {
+        Ok(bounds) => bounds,
+        Err(failed) => return failed,
+    };
+    if (to - from) % 2 != 0 {
+====
+    let (from, to) = (int_small(start).unwrap_or(0) as usize, int_small(end).unwrap_or(0) as usize);
+    if (to.wrapping_sub(from)) % 2 != 0 {
+>>>>
+
+@@ rust-nul-odd-range-accepted the native measure accepts an odd range, dropping its last byte: a caller's wrong bounds give a count, not RANGE
+!! u16-units-before-nul rust:utf16le_units_before_nul_counts_whole_units
+## native/src/runtime/ops.rs
+<<<<
+    if (to - from) % 2 != 0 {
+        let message = format!(
+            "std::byte_store::utf16le_units_before_nul: the bytes {from}..{} are no whole number of 16-bit units",
+====
+    if (to - from) % 2 != 0 && false {
+        let message = format!(
+            "std::byte_store::utf16le_units_before_nul: the bytes {from}..{} are no whole number of 16-bit units",
+>>>>
+
+@@ tcl-nul-single-byte the Tcl backends' measure stops at a unit whose low byte is 0 (a single 00 byte)
+!! u16-units-before-nul
+## core/utf16text.tcl
+<<<<
+    set count [lsearch -exact -integer $values 0]
+====
+    set count [lsearch -exact -integer [lmap u $values {expr {$u % 256}}] 0]
+>>>>
+
+@@ tcl-nul-odd-distance the Tcl backends' measure finds 00 00 anywhere in the range's bytes, not only within one unit
+!! u16-units-before-nul
+## core/utf16text.tcl
+<<<<
+    set count [lsearch -exact -integer $values 0]
+    if {$count < 0} {
+        set count [llength $values]
+    }
+====
+    set count [llength $values]
+    set at [string first "\x00\x00" $raw]
+    if {$at >= 0} {
+        set count [expr {$at / 2}]
+    }
+>>>>
+
+@@ tcl-nul-odd-range-accepted the Tcl backends' measure accepts an odd range, dropping its last byte
+!! u16-units-before-nul
+## core/utf16text.tcl
+<<<<
+    if {($to - $from) % 2 != 0} {
+        core::semanticError RANGE \
+            "$name: the bytes $from..[expr {$to - 1}] are no whole number of 16-bit units"
+====
+    if {($to - $from) % 2 != 0 && 0} {
+        core::semanticError RANGE \
+            "$name: the bytes $from..[expr {$to - 1}] are no whole number of 16-bit units"
+>>>>
+
 @@ rust-gc-roots-lost the conversions are classified as never allocating: values live across one are not rooted, and a collection inside it frees them
 !! u16-gc-stress
 ## native/src/runtime/ops.rs
