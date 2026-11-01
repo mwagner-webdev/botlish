@@ -1965,18 +1965,24 @@ proc native::lower::SkipAfter {fnVar e} {
                 set bodies [list [dict get $node thenBody] [dict get $node elseBody]]
             }
             listloop {
-                set operands [list [dict get $node iterable]]
+                set operands [concat [list [dict get $node iterable]] [hir::FoldInitials $node]]
                 set bodies [list [dict get $node body]]
             }
             countloop {
-                set operands [list [dict get $node start] [dict get $node end]]
+                set operands [concat [list [dict get $node start] [dict get $node end]] [hir::FoldInitials $node]]
                 set bodies [list [dict get $node body]]
             }
             lockloop {
-                set operands [hir::loopOperands $node]
+                set operands [concat [hir::loopOperands $node] [hir::FoldInitials $node]]
                 set bodies [list [dict get $node body]]
             }
-            block - loop { set bodies [list [dict get $node body]] }
+            loop {
+                # (A fold's initial value runs before its body:
+                # FOLD-LOOPS-MILESTONE-1.md.)
+                set operands [hir::FoldInitials $node]
+                set bodies [list [dict get $node body]]
+            }
+            block { set bodies [list [dict get $node body]] }
             handle       { set bodies [dict get $node handlerBodies] }
             default      { set operands [hir::children $hir $parent] }
         }
@@ -3935,8 +3941,15 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         break {
             lassign [hir::affine::releasesOnExit $hir $e] before after
             ReleaseHandles fn $before $e
-            lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg
-            if {$accReg ne ""} {
+            lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg mode
+            if {$mode eq "fold"} {
+                # A fold (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it
+                # with its current intermediate, the register it carries.
+                Emit fn "$resultReg = move $accReg" $e
+                Emit fn "jump $exit" $e
+                dict set fn broken [dict get $node target] 1
+                set result never
+            } elseif {$accReg ne ""} {
                 # A returning iterable loop (listloop, RETURNING-ITERABLE-
                 # LOOPS.md): a bare break ends the loop and returns the
                 # List collected so far. break VALUE is rejected earlier,
@@ -11749,6 +11762,93 @@ proc native::lower::CollectFinish {fnVar e accReg} {
     return $accReg
 }
 
+# A loop's result accumulator, by MODE:
+#
+#   collect  a retained collecting loop's List plan (CollectStart)
+#   discard  a collecting loop whose List nothing reads: none
+#   fold     a fold's intermediate (FOLD-LOOPS-MILESTONE-1.md): one ordinary
+#            loop-carried register, set from the initial value before the
+#            first iteration (after the loop's operands are evaluated and
+#            guarded), bound as the intermediate for the body, replaced at
+#            the end of every ordinary completion of the body by a `move`
+#            (the If join's multi-definition register pattern, fed back to
+#            the loop head), kept by `continue` (whose jump skips the move)
+#            and moved into the result at exhaustion and at a bare break.
+#            Nothing is collected or allocated for it: no List, no plan, no
+#            MutableArray -- what it holds is whatever the body computes.
+#
+# {MODE ACCREG} for loop E (node NODE), or never when a fold's initial value
+# never completes.
+proc native::lower::LoopResultStart {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable context
+    if {[hir::IsFoldNode $node]} {
+        set initial [Expr fn [dict get $node foldInitial]]
+        if {$initial eq "never"} {
+            return never
+        }
+        set accReg [NewReg fn]
+        Emit fn "$accReg = move $initial" $e
+        JoinKeepAddr fn $accReg $initial
+        return [list fold $accReg]
+    }
+    if {![dict exists $context discarded $e]} {
+        return [list collect [CollectStart fn $e]]
+    }
+    return [list discard ""]
+}
+
+# The `loops` entry of a loop whose continue target is CONTINUELABEL, exit
+# EXIT, result register RESULTREG, accumulator MODE ACCREG
+# (LoopResultStart): what the shared break and continue lowering read.
+proc native::lower::LoopEntry {continueLabel exit resultReg mode accReg} {
+    switch -- $mode {
+        collect { return [list $continueLabel $exit $resultReg $accReg] }
+        discard { return [list $continueLabel $exit $resultReg discard] }
+        fold    { return [list $continueLabel $exit $resultReg $accReg fold] }
+    }
+    error "native::lower::LoopEntry: bad mode $mode"
+}
+
+# Binds a fold NODE's intermediate to its register ACCREG for the body.
+proc native::lower::LoopResultBind {fnVar node mode accReg} {
+    upvar 1 $fnVar fn
+    if {$mode eq "fold"} {
+        dict set fn locals [dict get $node foldBinding] [list reg $accReg]
+    }
+}
+
+# Accounts for an ordinary completion of loop E's body with VALUE.
+proc native::lower::LoopResultAdd {fnVar e mode accReg value} {
+    upvar 1 $fnVar fn
+    switch -- $mode {
+        collect {
+            CollectAppend fn $e $accReg $value
+        }
+        fold {
+            Emit fn "$accReg = move $value" $e
+            JoinKeepAddr fn $accReg $value
+        }
+    }
+}
+
+# Moves what loop E completes with at exhaustion into RESULTREG.
+proc native::lower::LoopResultFinish {fnVar e mode accReg resultReg} {
+    upvar 1 $fnVar fn
+    switch -- $mode {
+        collect {
+            Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
+        }
+        fold {
+            Emit fn "$resultReg = move $accReg" $e
+        }
+        discard {
+            set unitConst [Assign fn unit $e]
+            Emit fn "$resultReg = move $unitConst" $e
+        }
+    }
+}
+
 # (listloop LIST-EXPR (block (ELEM) BODY...)): the returning iterable loop
 # (RETURNING-ITERABLE-LOOPS.md). Lowers directly to the shape item 50 of
 # BYTE-SET.md describes -- evaluate the list once, an index/accumulator
@@ -11810,12 +11910,11 @@ proc native::lower::ListLoop {fnVar e node} {
         Emit fn "$idxReg = move $idx0" $e
     }
     set resultReg [NewReg fn]
-    set retained [expr {![dict exists $context discarded $e]}]
-    if {$retained} {
-        set accReg [CollectStart fn $e]
-    } else {
-        set accReg ""
+    set accumulator [LoopResultStart fn $e $node]
+    if {$accumulator eq "never"} {
+        return never
     }
+    lassign $accumulator mode accReg
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances the index
@@ -11844,8 +11943,8 @@ proc native::lower::ListLoop {fnVar e node} {
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg \
-        [if {$retained} {set accReg} else {string cat "discard"}]]
+    dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
+    LoopResultBind fn $node $mode $accReg
     if {$consuming} {
         set elemReg [Assign fn "op ${drain}takefront $iterReg" $e]
     } else {
@@ -11855,9 +11954,7 @@ proc native::lower::ListLoop {fnVar e node} {
     set bodyValue [IterationBody fn $e [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
-        if {$retained} {
-            CollectAppend fn $e $accReg $bodyValue
-        }
+        LoopResultAdd fn $e $mode $accReg $bodyValue
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -11873,12 +11970,7 @@ proc native::lower::ListLoop {fnVar e node} {
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    if {$retained} {
-        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
-    } else {
-        set unitConst [Assign fn unit $e]
-        Emit fn "$resultReg = move $unitConst" $e
-    }
+    LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg
@@ -12027,12 +12119,11 @@ proc native::lower::CountLoop {fnVar e node} {
         set advanceOp r$advanceOp
     }
     Emit fn "$idxReg = move $startReg" $e
-    set retained [expr {![dict exists $context discarded $e]}]
-    if {$retained} {
-        set accReg [CollectStart fn $e]
-    } else {
-        set accReg ""
+    set accumulator [LoopResultStart fn $e $node]
+    if {$accumulator eq "never"} {
+        return never
     }
+    lassign $accumulator mode accReg
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances I and loops
@@ -12054,15 +12145,13 @@ proc native::lower::CountLoop {fnVar e node} {
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg \
-        [if {$retained} {set accReg} else {string cat "discard"}]]
+    dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
+    LoopResultBind fn $node $mode $accReg
     dict set fn locals [dict get $node countBinding] [list [expr {$raw ? "rawreg" : "reg"}] $idxReg]
     set bodyValue [Sequence fn [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
-        if {$retained} {
-            CollectAppend fn $e $accReg $bodyValue
-        }
+        LoopResultAdd fn $e $mode $accReg $bodyValue
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -12081,12 +12170,7 @@ proc native::lower::CountLoop {fnVar e node} {
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    if {$retained} {
-        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
-    } else {
-        set unitConst [Assign fn unit $e]
-        Emit fn "$resultReg = move $unitConst" $e
-    }
+    LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg
@@ -12201,12 +12285,11 @@ proc native::lower::LockLoop {fnVar e node} {
         set firstLen [Assign fn "op listlen [dict get $first list]" $e]
     }
     set resultReg [NewReg fn]
-    set retained [expr {![dict exists $context discarded $e]}]
-    if {$retained} {
-        set accReg [CollectStart fn $e]
-    } else {
-        set accReg ""
+    set accumulator [LoopResultStart fn $e $node]
+    if {$accumulator eq "never"} {
+        return never
     }
+    lassign $accumulator mode accReg
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     set continueLabel [NewLabel fn]
@@ -12229,8 +12312,8 @@ proc native::lower::LockLoop {fnVar e node} {
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg \
-        [if {$retained} {set accReg} else {string cat "discard"}]]
+    dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
+    LoopResultBind fn $node $mode $accReg
     foreach domain $domains state $states {
         if {[dict get $state kind] eq "list"} {
             set elemReg [Assign fn "op listget [dict get $state list] $posReg" $e]
@@ -12243,9 +12326,7 @@ proc native::lower::LockLoop {fnVar e node} {
     set bodyValue [IterationBody fn $e [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
-        if {$retained} {
-            CollectAppend fn $e $accReg $bodyValue
-        }
+        LoopResultAdd fn $e $mode $accReg $bodyValue
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -12273,12 +12354,7 @@ proc native::lower::LockLoop {fnVar e node} {
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    if {$retained} {
-        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
-    } else {
-        set unitConst [Assign fn unit $e]
-        Emit fn "$resultReg = move $unitConst" $e
-    }
+    LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg
@@ -12475,9 +12551,21 @@ proc native::lower::Handle {fnVar e node} {
 
 proc native::lower::Loop {fnVar e node} {
     upvar 1 $fnVar fn
+    variable hir
     set head [NewLabel fn]
     set exit [NewLabel fn]
     set result [NewReg fn]
+    set mode ""
+    set accReg ""
+    if {[hir::IsFoldNode $node]} {
+        # A fold with no domain (FOLD-LOOPS-MILESTONE-1.md): only a break
+        # ends it, with its intermediate.
+        set accumulator [LoopResultStart fn $e $node]
+        if {$accumulator eq "never"} {
+            return never
+        }
+        lassign $accumulator mode accReg
+    }
     # What the body needs built of a deferred value bound outside it,
     # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
     HoistDeferredUses fn [dict get $node body] $e
@@ -12485,9 +12573,17 @@ proc native::lower::Loop {fnVar e node} {
     EmitLabel fn $head
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $head $exit $result]
+    if {$mode eq "fold"} {
+        dict set fn loops $e [LoopEntry $head $exit $result $mode $accReg]
+        LoopResultBind fn $node $mode $accReg
+    } else {
+        dict set fn loops $e [list $head $exit $result]
+    }
     set value [Sequence fn [dict get $node body]]
     if {$value ne "never"} {
+        if {$mode eq "fold"} {
+            LoopResultAdd fn $e $mode $accReg $value
+        }
         Emit fn "jump $head" $e
     }
     set used [dict exists $fn broken $e]

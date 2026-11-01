@@ -443,6 +443,27 @@ proc hir::callables::CheckTrailing {hirVar body finalType contextText} {
     CheckPreserved hir [lindex $body end] $finalType $contextText
 }
 
+# The rest of a fold NODE's walk, after its loop's operands (WalkExpr): its
+# initial value and its body's trailing value become its intermediate
+# (FOLD-LOOPS-MILESTONE-1.md), a join like an if's, of the intermediate's
+# one type. 1 when NODE is a fold (walked), 0 otherwise.
+proc hir::callables::WalkFold {hirVar node} {
+    upvar 1 $hirVar hir
+    if {![hir::IsFoldNode $node]} {
+        return 0
+    }
+    set intermediate [hir::bindingType $hir [dict get $node foldBinding]]
+    WalkExpr hir [dict get $node foldInitial]
+    CheckPreserved hir [dict get $node foldInitial] $intermediate \
+        {as a fold's initial intermediate, whose type differs}
+    foreach child [dict get $node body] {
+        WalkExpr hir $child
+    }
+    CheckTrailing hir [dict get $node body] $intermediate \
+        {as a fold's next intermediate, whose type differs}
+    return 1
+}
+
 # Walks E (and its children, generically, via hir::children) checking
 # every position that could erase a typed callable's exact type: a call's
 # own arguments (never its callee -- a direct/exact invocation is exactly
@@ -494,12 +515,18 @@ proc hir::callables::WalkExpr {hirVar e} {
                 {in an "if" branch whose joined type differs from the other branch}
         }
         loop {
+            if {[WalkFold hir $node]} {
+                return
+            }
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
         }
         listloop {
             WalkExpr hir [dict get $node iterable]
+            if {[WalkFold hir $node]} {
+                return
+            }
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
@@ -515,6 +542,9 @@ proc hir::callables::WalkExpr {hirVar e} {
         countloop {
             WalkExpr hir [dict get $node start]
             WalkExpr hir [dict get $node end]
+            if {[WalkFold hir $node]} {
+                return
+            }
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
@@ -525,6 +555,9 @@ proc hir::callables::WalkExpr {hirVar e} {
         lockloop {
             foreach operand [hir::loopOperands $node] {
                 WalkExpr hir $operand
+            }
+            if {[WalkFold hir $node]} {
+                return
             }
             foreach child [dict get $node body] {
                 WalkExpr hir $child

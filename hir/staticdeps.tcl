@@ -342,7 +342,7 @@ namespace eval hir::staticdeps {
         AFFINE-ERASURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED
         AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE
         AFFINE-TEMPORARY-UNSUPPORTED AFFINE-DUPLICATION-UNSUPPORTED
-        AFFINE-ELEMENT-COPY-OUT AFFINE-CONTEXT-COPY-OUT
+        AFFINE-ELEMENT-COPY-OUT AFFINE-CONTEXT-COPY-OUT AFFINE-FOLD-UNSUPPORTED
     }
     # The kinds of the diagnostics the trait monomorphization's plan reports
     # (hir::traits::Plan), which it computes only for a program with no other
@@ -837,6 +837,13 @@ proc hir::staticdeps::Prepare {hir sites decisions} {
                     }
                 }
             }
+        }
+        if {[hir::IsFoldNode $node]} {
+            # A fold's intermediate (FOLD-LOOPS-MILESTONE-1.md): a parameter
+            # of the loop, defined by its initial value and its body.
+            dict set state paramOwner [dict get $node foldBinding] [list loop $e]
+        }
+        switch -- [dict get $node kind] {
             handle {
                 foreach payload [dict get $node handlerPayloads] {
                     foreach b $payload {
@@ -2532,9 +2539,15 @@ proc hir::staticdeps::BindingSuccessors {hir stateVar b succVar} {
             }
         }
     } elseif {[lindex $owner 0] eq "loop"} {
-        foreach operand [hir::children $hir [lindex $owner 1]] {
+        # A loop variable is defined by the loop's operands; a fold's
+        # intermediate (FOLD-LOOPS-MILESTONE-1.md) by its initial value and
+        # every completion of its body: the whole loop.
+        set loop [lindex $owner 1]
+        set intermediate [expr {[hir::isFold $hir $loop] && [dict get $hir exprs $loop foldBinding] eq $b}]
+        foreach operand [hir::children $hir $loop] {
             if {[dict get $hir exprs $operand kind] eq "block"} continue
-            if {$operand in [LoopBody $hir [lindex $owner 1]]} continue
+            if {!$intermediate && ($operand in [LoopBody $hir $loop]
+                    || $operand in [hir::FoldInitials [dict get $hir exprs $loop]])} continue
             AddSubtree $hir state $operand succ definition
         }
     } elseif {[lindex $owner 0] eq "handle"} {
@@ -2623,20 +2636,20 @@ proc hir::staticdeps::ControlOperands {hir parent child} {
         }
         listloop {
             set iterable [dict get $node iterable]
-            if {$child eq $iterable} {
+            if {$child eq $iterable || $child in [hir::FoldInitials $node]} {
                 return {}
             }
             return [list $iterable]
         }
         countloop {
-            if {$child in [list [dict get $node start] [dict get $node end]]} {
+            if {$child in [concat [list [dict get $node start] [dict get $node end]] [hir::FoldInitials $node]]} {
                 return {}
             }
             return [list [dict get $node start] [dict get $node end]]
         }
         lockloop {
             set operands [hir::loopOperands $node]
-            if {$child in $operands} {
+            if {$child in [concat $operands [hir::FoldInitials $node]]} {
                 return {}
             }
             return $operands

@@ -16,6 +16,8 @@
 #   (countloop START-EXPR END-EXPR ELEMENT-BLOCK)
 #   (countloop START-EXPR END-EXPR ELEMENT-BLOCK DIRECTION ENDKIND)
 #   (lockloop (DOMAIN...) ELEMENTS-BLOCK)   (lockloop ... REJECTED-MESSAGE)
+#   (fold INIT-EXPR LOOP)       LOOP: any of the four loop forms above, its
+#                               block binding the intermediate last
 #   (return EXPR)
 #   (break)                     (break EXPR)
 #                               PAYLOAD-FREE-BREAK.md: no valid Botlish
@@ -156,6 +158,19 @@
 # a loop whose obligation HIR rejected (only a -strict 0 lowering produces it):
 # evaluating it raises that diagnostic unconditionally, before anything runs.
 #
+# (fold INIT-EXPR LOOP): a folding loop (FOLD-LOOPS-MILESTONE-1.md). LOOP is
+# a (loop ...), (listloop ...), (countloop ...) or (lockloop ...) node whose
+# block has one parameter more than that form's own, the last: ACC, the
+# intermediate. LOOP's operands are evaluated (and checked) exactly as that
+# loop's are, then INIT-EXPR, once, in the enclosing scope; then LOOP
+# iterates exactly as it would, each iteration binding ACC (fresh,
+# immutable) to the current intermediate, which starts as INIT-EXPR's
+# value. An iteration whose body completes with an ordinary value makes
+# that value the intermediate; `continue` keeps it; a bare `break` ends the
+# fold with it, and so does exhaustion (an empty domain: INIT-EXPR's
+# value). A plain (loop ...) has no domain: only a `break` ends it. Nothing
+# is collected. `return`/an error propagate as from any loop.
+#
 # This file knows syntax only; it does not evaluate anything.
 
 namespace eval core::ir {}
@@ -233,6 +248,38 @@ proc core::ir::CheckElementBlock {blockNode owner role} {
     if {[llength [blockParams $blockNode]] != 1} {
         core::malformed "$role of [lindex $owner 0] must be a block with exactly one parameter" $owner
     }
+}
+
+# The index of the block of loop node NODE (loop, listloop, countloop,
+# lockloop).
+proc core::ir::loopBlockIndex {node} {
+    switch -- [op $node] {
+        loop      { return 1 }
+        listloop  { return 2 }
+        countloop { return 3 }
+        lockloop  { return 2 }
+    }
+    core::malformed "the LOOP of (fold INIT-EXPR LOOP) must be a loop, listloop, countloop or lockloop node" $node
+}
+
+# The loop of (fold INIT-EXPR LOOP) node NODE without its intermediate: LOOP
+# with its block's last parameter removed, an ordinary loop node.
+proc core::ir::foldLoop {node} {
+    set loop [lindex $node 2]
+    set index [loopBlockIndex $loop]
+    set block [lindex $loop $index]
+    if {[catch {llength $block} n] || $n < 2 || [lindex $block 0] ne "block"
+            || [catch {llength [lindex $block 1]} params] || $params < 1} {
+        core::malformed "the block of a fold's LOOP must bind the intermediate as its last parameter" $node
+    }
+    lset loop $index 1 [lrange [lindex $block 1] 0 end-1]
+    return $loop
+}
+
+# The intermediate's name of (fold INIT-EXPR LOOP) node NODE.
+proc core::ir::foldIntermediate {node} {
+    set loop [lindex $node 2]
+    return [lindex [blockParams [lindex $loop [loopBlockIndex $loop]]] end]
 }
 
 # {DIRECTION ENDKIND} of a (countloop ...) node -- "up exclusive" unless the
@@ -347,6 +394,13 @@ proc core::ir::CheckShape {node} {
             }
             CheckElementBlock [lindex $node 3] $node "body"
             countOptions $node
+        }
+        fold {
+            ExpectLength $node 3 3 "(fold INIT-EXPR LOOP)"
+            set loop [foldLoop $node]
+            CheckShape $loop
+            set params [blockParams [lindex [lindex $node 2] [loopBlockIndex $loop]]]
+            CheckParams $params $node
         }
         lockloop {
             ExpectLength $node 3 4 "(lockloop (DOMAIN...) ELEMENTS-BLOCK ?REJECTED?)"
@@ -572,6 +626,10 @@ proc core::ir::CollectBindNames {node namesVar} {
                 }
             }
         }
+        fold {
+            CollectBindNames [foldLoop $node] names
+            CollectBindNames [lindex $node 1] names
+        }
         return - ok - error-value {
             CollectBindNames [lindex $node 1] names
         }
@@ -627,6 +685,11 @@ proc core::ir::containsBlock {exprs} {
                     }
                 }
                 if {[containsBlock [blockBody [lindex $expr 2]]]} {
+                    return 1
+                }
+            }
+            fold {
+                if {[containsBlock [list [lindex $expr 1] [foldLoop $expr]]]} {
                     return 1
                 }
             }
@@ -758,6 +821,10 @@ proc core::ir::check {node {context {callable 0 loop 0}}} {
             foreach expr [blockBody [lindex $node 2]] {
                 check $expr $inner
             }
+        }
+        fold {
+            check [lindex $node 1] $context
+            check [foldLoop $node] $context
         }
         fail {
             if {[llength $node] == 3} {

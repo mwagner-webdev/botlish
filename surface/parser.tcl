@@ -74,7 +74,7 @@
 #                  contextual (directly followed by a name or `fn`), and so
 #                  is every word after it, so each stays an ordinary name
 #                  everywhere else
-#   statement    = simple NEWLINE | valued | function | if | loop
+#   statement    = simple NEWLINE | valued | function | if | loop | fold
 #                | withDecl NEWLINE
 #   withDecl     = "with" "context" expression    -- CONTEXTS.md: installs
 #                  the expression's value as the context of its (inferred,
@@ -109,8 +109,8 @@
 #   coField      = ( "step" | "first" ) [ ":" IDENT ]
 #                  -- step the affine coroutine handle, first the first
 #                  outward result; any other name is COROUTINE-BINDING-FIELD
-#   valued       = IDENT "=" (if|loop|staticIntrinsic|handledExpr)
-#                | "return" (if|loop|staticIntrinsic|handledExpr)
+#   valued       = IDENT "=" (if|loop|fold|staticIntrinsic|handledExpr)
+#                | "return" (if|loop|fold|staticIntrinsic|handledExpr)
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { handler } DEDENT
@@ -188,6 +188,14 @@
 #   clause       = IDENT "in" operand
 #                | IDENT [ "down" ] "from" operand ( "to" | "through" ) operand
 #                -- operand is an expression without a top-level "and"
+#   fold         = "fold" [ clause { "and" clause } ]
+#                  "with" "intermediate" IDENT expression ":" suite
+#                  -- FOLD-LOOPS-MILESTONE-1.md: a loop that carries one
+#                  value, the intermediate, from each iteration to the
+#                  next, and is that value. "fold" is contextual: a fold
+#                  only when directly followed by a name (AtFold), so
+#                  `fold` is an ordinary name everywhere else; "with" and
+#                  "intermediate" are contextual words of this header only
 #   suite        = NEWLINE INDENT { NEWLINE | statement } DEDENT
 #   binding      = IDENT "=" expression
 #   destructure  = "{" destructureField { "," destructureField } [ "," ] "}"
@@ -2497,6 +2505,9 @@ proc surface::parser::Statement {pVar} {
     if {[AtPrivate p]} {
         return [PrivateDecl p]
     }
+    if {[AtFold p]} {
+        return [Fold p]
+    }
     switch -- [dict get $token kind] {
         fn     { return [Function p] }
         if     { return [If p] }
@@ -2742,7 +2753,7 @@ proc surface::parser::Simple {pVar} {
 # statement falls out of this same shared path with no extra grammar).
 proc surface::parser::ValueOrHandled {pVar} {
     upvar 1 $pVar p
-    if {[Kind p] in {if loop}} {
+    if {[Kind p] in {if loop} || [AtFold p]} {
         return [Value p]
     }
     if {[AtStatic p]} {
@@ -2931,6 +2942,9 @@ proc surface::parser::Value {pVar} {
     }
     if {[Kind p] eq "loop"} {
         return [Loop p]
+    }
+    if {[AtFold p]} {
+        return [Fold p]
     }
     return [Expression p]
 }
@@ -3957,20 +3971,38 @@ proc surface::parser::Loop {pVar} {
     set start [dict get [Advance p] span]
     set clauses {}
     if {[Kind p] eq "IDENT"} {
-        lappend clauses [LoopClause p]
-        while {[Kind p] eq "and"} {
-            Advance p
-            if {[Kind p] ne "IDENT"} {
-                Fail [Peek p] "expected a loop variable after \"and\", found [Describe [Peek p]]"
-            }
-            lappend clauses [LoopClause p]
-        }
-        set afterToken [Peek p]
-        if {[dict get $afterToken kind] eq "IDENT" && [dict get $afterToken value] eq "by"} {
-            Fail $afterToken "\"by\" (an explicit step) is reserved for a future counted-loop\
-                form; a counted loop always steps by 1"
-        }
+        set clauses [LoopClauses p]
     }
+    set body [Suite p "\"loop\""]
+    return [LoopNode p $start $clauses $body ""]
+}
+
+# One or more iteration clauses joined by "and", positioned at the first
+# clause's variable (Loop, Fold).
+proc surface::parser::LoopClauses {pVar} {
+    upvar 1 $pVar p
+    set clauses [list [LoopClause p]]
+    while {[Kind p] eq "and"} {
+        Advance p
+        if {[Kind p] ne "IDENT"} {
+            Fail [Peek p] "expected a loop variable after \"and\", found [Describe [Peek p]]"
+        }
+        lappend clauses [LoopClause p]
+    }
+    set afterToken [Peek p]
+    if {[dict get $afterToken kind] eq "IDENT" && [dict get $afterToken value] eq "by"} {
+        Fail $afterToken "\"by\" (an explicit step) is reserved for a future counted-loop\
+            form; a counted loop always steps by 1"
+    }
+    return $clauses
+}
+
+# The `loop` node of iteration CLAUSES and BODY starting at START, FOLD ""
+# for a collecting loop, or a fold's {name nameSpan initial}
+# (FOLD-LOOPS-MILESTONE-1.md). For a one-clause loop the per-form fields
+# mirror the clause (see the comment above Loop).
+proc surface::parser::LoopNode {pVar start clauses body fold} {
+    upvar 1 $pVar p
     set elementName ""
     set elementNameSpan ""
     set iterable ""
@@ -3995,12 +4027,77 @@ proc surface::parser::Loop {pVar} {
             set endKind [dict get $clause endKind]
         }
     }
-    set body [Suite p "\"loop\""]
     return [surface::ast::node loop [SpanFrom p $start] \
         elementName $elementName elementNameSpan $elementNameSpan iterable $iterable \
         countName $countName countNameSpan $countNameSpan countStart $countStart countEnd $countEnd \
         direction $direction endKind $endKind clauses $clauses \
-        body $body]
+        body $body fold $fold]
+}
+
+# 1 if the next tokens start a fold (FOLD-LOOPS-MILESTONE-1.md): the word
+# "fold" directly followed by a name -- two adjacent names, which no other
+# construct allows (AtStatic's argument) -- so "fold" stays an ordinary
+# name everywhere else (`fold = 1`, `fold(xs)`, `x.fold`).
+proc surface::parser::AtFold {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "fold"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# 1 if the token at OFFSET is the contextual word WORD.
+proc surface::parser::IsWord {pVar offset word} {
+    upvar 1 $pVar p
+    set token [Peek p $offset]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token value] eq $word}]
+}
+
+# A folding loop (FOLD-LOOPS-MILESTONE-1.md):
+#
+#   fold x in EXPR with intermediate acc INITIAL:         over a List
+#   fold i from A to B with intermediate acc INITIAL:     the numeric forms
+#   fold x in xs and i from 0 to n with intermediate ...  lockstep
+#   fold with intermediate acc INITIAL:                   no domain: until break
+#
+# The iteration clauses are a loop's (LoopClauses: the same forms, the same
+# contextual words); "with" and "intermediate" are contextual too, read only
+# here, after the clauses. The intermediate's name and its initial value are
+# both required; the initial value is a full expression, ended by the ":"
+# of the suite. It is a `loop` node whose `fold` field holds the
+# intermediate: a fold is a loop that carries one value instead of
+# collecting its iterations' values.
+proc surface::parser::Fold {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set clauses {}
+    if {!([IsWord p 0 with] && [IsWord p 1 intermediate])} {
+        set clauses [LoopClauses p]
+    }
+    if {![IsWord p 0 with]} {
+        Fail [Peek p] "expected \"with intermediate NAME INITIAL\" after the fold's iteration\
+            clauses, found [Describe [Peek p]]: a fold carries one value, its intermediate,\
+            from each iteration to the next"
+    }
+    Advance p
+    if {![IsWord p 0 intermediate]} {
+        Fail [Peek p] "expected \"intermediate\" after a fold's \"with\", found [Describe [Peek p]]"
+    }
+    Advance p
+    set nameToken [Peek p]
+    if {[dict get $nameToken kind] ne "IDENT"} {
+        Fail $nameToken "expected the name of the fold's intermediate binding after\
+            \"intermediate\", found [Describe $nameToken]"
+    }
+    Advance p
+    if {[Kind p] in {: NEWLINE}} {
+        Fail [Peek p] "a fold's intermediate needs an initial value: write \"with intermediate\
+            [dict get $nameToken value] INITIAL:\", the value the first iteration (or an empty\
+            fold) sees"
+    }
+    set initial [Expression p]
+    set body [Suite p "\"fold\""]
+    return [LoopNode p $start $clauses $body [dict create name [dict get $nameToken value] \
+        nameSpan [dict get $nameToken span] initial $initial]]
 }
 
 # One iteration clause, positioned at its variable's IDENT.
@@ -4749,7 +4846,7 @@ proc surface::parser::CoroutineBind {pVar} {
         }
     }
     Expect p = "\"=\""
-    if {[Kind p] in {if loop}} {
+    if {[Kind p] in {if loop} || [AtFold p]} {
         Fail [Peek p] "the right side of a coroutine binding is the call that starts the coroutine, found [Describe [Peek p]]"
     }
     set value [ValueOrHandled p]

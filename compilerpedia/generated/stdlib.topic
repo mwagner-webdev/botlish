@@ -5011,6 +5011,7 @@ related: stdlib.module.std::compiler
         AffineEqualityUnsupported,
         AffineErasureUnsupported,
         AffineFieldMoveRequiresDestructure,
+        AffineFoldUnsupported,
         AffineGenericNestedUnsupported,
         AffineInstanceBudget,
         AffineListOperationUnsupported,
@@ -5025,7 +5026,6 @@ related: stdlib.module.std::compiler
         BreakOutsideLoop,
         CallbackEnvironment,
         CallbackPlacement,
-        CallbackReference,
 
 == MODULE
 stdlib/compiler.bot: import std::compiler, then write

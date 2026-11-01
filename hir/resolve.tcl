@@ -207,6 +207,38 @@ proc hir::resolve::NewBinding {hirVar name kind scope origin} {
     return $b
 }
 
+# A folding loop's initial value (FOLD-LOOPS-MILESTONE-1.md), resolved in
+# the enclosing scope CTX after the loop's own operands -- the order they
+# are written and evaluated in -- into loop E's `foldInitial`. Nothing for
+# a collecting loop NODE.
+proc hir::resolve::ResolveFoldInitial {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    set fold [hir::syntax::foldOf $node]
+    if {$fold eq ""} {
+        return
+    }
+    SetField hir $e foldInitial [Expr hir [dict get $fold initial] $ctx]
+}
+
+# A folding loop's intermediate: a fresh immutable parameter of its
+# iteration scope ITERATION (each iteration binds it anew, to the value the
+# previous one carried), recorded as loop E's `foldBinding`, after the
+# loop's own variables NAMES. Its name is one of those a
+# DUPLICATE-LOOP-VARIABLE, as two lockstep clauses' are.
+proc hir::resolve::BindFold {hirVar e node iteration names} {
+    upvar 1 $hirVar hir
+    set fold [hir::syntax::foldOf $node]
+    if {$fold eq ""} {
+        return
+    }
+    set name [dict get $fold name]
+    if {$name in $names} {
+        hir::Diagnose hir DUPLICATE-LOOP-VARIABLE \
+            "the fold's intermediate \"$name\" has the name of its own loop variable: name the value it carries something else" $e
+    }
+    SetField hir $e foldBinding [NewBinding hir $name param $iteration [dict get $fold origin]]
+}
+
 # Records, for the diagnostic index only (LaterNames), the syntax NODES that
 # make up the body of scope S. Resolution never reads it.
 proc hir::resolve::NoteBody {hirVar s nodes} {
@@ -1520,20 +1552,24 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e refinements [dict create 1 {} 0 {}]
         }
         loop {
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
+            BindFold hir $e $node $iteration {}
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
         }
         listloop {
             SetField hir $e iterable [Expr hir [dict get $node iterable] $ctx]
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
             set elementBinding [NewBinding hir [dict get $node elementName] param \
                 $iteration [dict get $node elementOrigin]]
+            BindFold hir $e $node $iteration [list [dict get $node elementName]]
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e elementBinding $elementBinding
@@ -1546,11 +1582,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # in the body, exactly like listloop's own element binding.
             SetField hir $e start [Expr hir [dict get $node start] $ctx]
             SetField hir $e end [Expr hir [dict get $node end] $ctx]
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
             set countBinding [NewBinding hir [dict get $node countName] param \
                 $iteration [dict get $node countOrigin]]
+            BindFold hir $e $node $iteration [list [dict get $node countName]]
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e countBinding $countBinding
@@ -1574,6 +1612,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 }
                 lappend domains $domain
             }
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
@@ -1591,6 +1630,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 dict unset domain origin
                 lappend resolved $domain
             }
+            BindFold hir $e $node $iteration $seen
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e domains $resolved
@@ -1613,6 +1653,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e target $loop
             if {$loop eq ""} {
                 hir::Diagnose hir BREAK-OUTSIDE-LOOP "break outside lexical loop" $e
+            } elseif {$value ne "" && [hir::isFold $hir $loop]} {
+                # A folding loop's every exit carries its intermediate
+                # (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it with
+                # the current one. Only raw core IR can write a payload.
+                hir::Diagnose hir LISTLOOP-BREAK-VALUE \
+                    "break with a value is not valid inside a fold: a bare break ends the fold with its current intermediate value" $e
             } elseif {$value ne "" && [dict get $hir exprs $loop kind] in {listloop countloop lockloop}} {
                 # RETURNING-ITERABLE-LOOPS.md: a returning iterable loop
                 # (`loop x in xs:`) has exactly one stable result type, the

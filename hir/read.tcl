@@ -671,6 +671,29 @@ proc hir::read::NewBinding {hirVar b name kind s origin number} {
     dict set hir scopes $s bindings [concat [dict get $hir scopes $s bindings] [list $b]]
 }
 
+# A folding loop's intermediate (FOLD-LOOPS-MILESTONE-1.md), printed as
+# " fold (B NAME)": binding B, a parameter of the loop's body scope S, the
+# last of loop E's block parameters (the block at INDEX of its form, the
+# parameter at POSITION). Nothing when B is "" (a collecting loop).
+proc hir::read::ReadFoldBinding {hirVar e b name s path index position number} {
+    upvar 1 $hirVar hir
+    if {$b eq ""} {
+        return
+    }
+    NewBinding hir $b $name param $s [list ir [concat $path $index 1 $position]] $number
+    dict set hir exprs $e foldBinding $b
+}
+
+# A folding loop E's initial value: the child after the loop's operands, at
+# LEVEL in the enclosing scope S. Nothing for a collecting loop (FOLDID "").
+proc hir::read::ReadFoldInitial {hirVar e foldId level s path block} {
+    upvar 1 $hirVar hir
+    if {$foldId eq ""} {
+        return
+    }
+    dict set hir exprs $e foldInitial [Expr hir $level $s [concat $path 0] $block]
+}
+
 proc hir::read::Declare {hirVar s text kind number} {
     upvar 1 $hirVar hir
     foreach {b name} [BindingList $text $number] {
@@ -1369,12 +1392,14 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e refinements $refinements
         }
         loop {
-            if {![regexp {^(s[0-9]+)(?: binds (.*))?$} $head -> body binds]} {
-                Fail $number "expected \"loop SCOPE ?binds ...?\""
+            if {![regexp {^(s[0-9]+)(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} $head -> body foldId foldName binds]} {
+                Fail $number "expected \"loop SCOPE ?fold (BINDING NAME)? ?binds ...?\""
             }
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 1]] $number
+            ReadFoldBinding hir $e $foldId $foldName $body $path 1 0 $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
@@ -1384,16 +1409,18 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         listloop {
-            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: binds (.*))?$} \
-                    $head -> body elemId elemName binds]} {
-                Fail $number "expected \"listloop SCOPE (ELEMBINDING NAME) ?binds ...?\""
+            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} \
+                    $head -> body elemId elemName foldId foldName binds]} {
+                Fail $number "expected \"listloop SCOPE (ELEMBINDING NAME) ?fold (BINDING NAME)? ?binds ...?\""
             }
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 2]] $number
             NewBinding hir $elemId $elemName param $body [list ir [concat $path 2 1 0]] $number
+            ReadFoldBinding hir $e $foldId $foldName $body $path 2 1 $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
             SetField hir $e elementBinding $elemId
             SetField hir $e iterable [Expr hir $inner $s [concat $path 1] $block]
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
@@ -1403,19 +1430,21 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         countloop {
-            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: (up|down) (exclusive|inclusive))?(?: binds (.*))?$} \
-                    $head -> body countId countName direction endKind binds]} {
-                Fail $number "expected \"countloop SCOPE (COUNTBINDING NAME) ?DIRECTION ENDKIND? ?binds ...?\""
+            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: (up|down) (exclusive|inclusive))?(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} \
+                    $head -> body countId countName direction endKind foldId foldName binds]} {
+                Fail $number "expected \"countloop SCOPE (COUNTBINDING NAME) ?DIRECTION ENDKIND? ?fold (BINDING NAME)? ?binds ...?\""
             }
             SetField hir $e direction [if {$direction eq ""} {string cat "up"} else {set direction}]
             SetField hir $e endKind [if {$endKind eq ""} {string cat "exclusive"} else {set endKind}]
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 3]] $number
             NewBinding hir $countId $countName param $body [list ir [concat $path 3 1 0]] $number
+            ReadFoldBinding hir $e $foldId $foldName $body $path 3 1 $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
             SetField hir $e countBinding $countId
             SetField hir $e start [Expr hir $inner $s [concat $path 1] $block]
             SetField hir $e end [Expr hir $inner $s [concat $path 2] $block]
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
@@ -1425,9 +1454,9 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         lockloop {
-            if {![regexp {^(s[0-9]+)((?: \(b[0-9]+ \S+ (?:list|count (?:up|down) (?:exclusive|inclusive))\))+)(?: binds (.*))?$} \
-                    $head -> body groups binds]} {
-                Fail $number "expected \"lockloop SCOPE (BINDING NAME list|count DIR KIND)... ?binds ...?\""
+            if {![regexp {^(s[0-9]+)((?: \(b[0-9]+ \S+ (?:list|count (?:up|down) (?:exclusive|inclusive))\))+)(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} \
+                    $head -> body groups foldId foldName binds]} {
+                Fail $number "expected \"lockloop SCOPE (BINDING NAME list|count DIR KIND)... ?fold (BINDING NAME)? ?binds ...?\""
             }
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 2]] $number
             set domains {}
@@ -1443,6 +1472,7 @@ proc hir::read::Expr {hirVar level s path block} {
                 }
                 incr index
             }
+            ReadFoldBinding hir $e $foldId $foldName $body $path 2 $index $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
             set index 0
@@ -1459,6 +1489,7 @@ proc hir::read::Expr {hirVar level s path block} {
                 incr index
             }
             SetField hir $e domains $resolved
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {

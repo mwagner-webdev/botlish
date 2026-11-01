@@ -48,6 +48,11 @@
 #                                        domain; children: each domain's
 #                                        operands in order (one for list,
 #                                        start then end for count), the body
+#   ... fold (B NAME)                    any loop's header, after its own
+#                                        groups: a folding loop and its
+#                                        intermediate (FOLD-LOOPS-MILESTONE-
+#                                        1.md); its initial value is the
+#                                        child after the loop's operands
 #   eN return -> eN / break -> eN / continue -> eN
 #   eN ok / eN error
 #   eN struct (anon|ID) (FIELD, ...)     a struct value/construction; one
@@ -345,6 +350,24 @@ proc hir::format::BindingLabel {hir b} {
 
 proc hir::format::BindingList {hir bindings} {
     return [join [lmap b $bindings {BindingLabel $hir $b}] {, }]
+}
+
+# " fold (BINDING NAME)" for a folding loop NODE (FOLD-LOOPS-MILESTONE-1.md),
+# "" for any other loop.
+proc hir::format::FoldHeader {hir node} {
+    if {![hir::IsFoldNode $node]} {
+        return ""
+    }
+    return " fold ([ParamList $hir [list [dict get $node foldBinding]] {{}}])"
+}
+
+# The line(s) of a folding loop NODE's initial value, a child after the
+# loop's operands; none for any other loop.
+proc hir::format::FoldInitial {hir node indent origins linesVar} {
+    upvar 1 $linesVar lines
+    if {[hir::IsFoldNode $node]} {
+        Expr $hir [dict get $node foldInitial] $indent $origins lines
+    }
 }
 
 # Like BindingList, but for a block's own PARAMS: appends ":TYPE" (hir::
@@ -669,25 +692,27 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
         }
         loop {
-            set text "loop [dict get $node bodyScope]"
+            set text "loop [dict get $node bodyScope][FoldHeader $hir $node]"
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
             }
             Line $hir $e $text $indent $origins lines
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }
         }
         listloop {
             set text "listloop [dict get $node bodyScope]\
-                ([ParamList $hir [list [dict get $node elementBinding]] {{}}])"
+                ([ParamList $hir [list [dict get $node elementBinding]] {{}}])[FoldHeader $hir $node]"
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
             }
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node iterable] $inner $origins lines
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }
@@ -698,6 +723,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict get $node direction] ne "up" || [dict get $node endKind] ne "exclusive"} {
                 append text " [dict get $node direction] [dict get $node endKind]"
             }
+            append text [FoldHeader $hir $node]
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
@@ -705,6 +731,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node start] $inner $origins lines
             Expr $hir [dict get $node end] $inner $origins lines
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }
@@ -719,6 +746,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                     append text " ($label count [dict get $domain direction] [dict get $domain endKind])"
                 }
             }
+            append text [FoldHeader $hir $node]
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
@@ -727,6 +755,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             foreach operand [hir::loopOperands $node] {
                 Expr $hir $operand $inner $origins lines
             }
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }

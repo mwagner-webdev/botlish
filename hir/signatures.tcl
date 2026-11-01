@@ -593,15 +593,27 @@ proc hir::signatures::Value {hir AVar e sink ctx} {
             Seq $hir A [dict get $node elseBody] $sink $ctx
         }
         loop {
-            Seq $hir A [dict get $node body] drop $ctx
+            # A fold's initial value and trailing body value become its
+            # intermediate (FOLD-LOOPS-MILESTONE-1.md), which this pass does
+            # not model: they flow.
+            foreach initial [hir::FoldInitials $node] {
+                Value $hir A $initial flow $ctx
+            }
+            Seq $hir A [dict get $node body] [if {[hir::IsFoldNode $node]} {string cat flow} else {string cat drop}] $ctx
         }
         listloop {
             Value $hir A [dict get $node iterable] {type list checked "the iterable of a loop"} $ctx
+            foreach initial [hir::FoldInitials $node] {
+                Value $hir A $initial flow $ctx
+            }
             Seq $hir A [dict get $node body] flow $ctx
         }
         countloop {
             Value $hir A [dict get $node start] {type int checked "the start of a counted loop"} $ctx
             Value $hir A [dict get $node end] {type int checked "the end of a counted loop"} $ctx
+            foreach initial [hir::FoldInitials $node] {
+                Value $hir A $initial flow $ctx
+            }
             Seq $hir A [dict get $node body] flow $ctx
         }
         lockloop {
@@ -612,6 +624,9 @@ proc hir::signatures::Value {hir AVar e sink ctx} {
                     Value $hir A [dict get $domain start] {type int checked "the start of a counted loop"} $ctx
                     Value $hir A [dict get $domain end] {type int checked "the end of a counted loop"} $ctx
                 }
+            }
+            foreach initial [hir::FoldInitials $node] {
+                Value $hir A $initial flow $ctx
             }
             Seq $hir A [dict get $node body] flow $ctx
         }

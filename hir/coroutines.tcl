@@ -1431,6 +1431,12 @@ proc hir::coroutines::Discarded {hir parent e} {
         if {$role ne "seq 1" || $p eq ""} {
             return 0
         }
+        if {[hir::isFold $hir $p]} {
+            # A fold's body value is its next intermediate, which the next
+            # iteration reads (FOLD-LOOPS-MILESTONE-1.md): never discarded,
+            # whatever becomes of the fold's own value.
+            return 0
+        }
         switch -- [dict get $hir exprs $p kind] {
             if - handle - listloop - countloop - lockloop { set e $p }
             loop { return 1 }

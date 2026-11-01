@@ -1372,7 +1372,9 @@ proc hir::traits::verify {hirVar} {
                 }
             }
         }
-        if {$kind in {if handle loop}} {
+        if {$kind in {if handle loop} || [hir::IsFoldNode $node]} {
+            # (A fold's type joins its initial value's with its body's:
+            # FOLD-LOOPS-MILESTONE-1.md.)
             set t [hir::typeOf $hir $e]
             if {[hir::types::IsView $t] && [hir::types::IsJoinWitness [hir::types::ViewWitness $t]]} {
                 JoinDiagnostic hir $e $t
@@ -1863,6 +1865,17 @@ proc hir::traits::Stamp {nodes modules} {
     return [list $nodes $modules $index]
 }
 
+# Stamps the initial value of a folding loop syntax NODE (StampNode's order:
+# after the loop's operands, before its body; FOLD-LOOPS-MILESTONE-1.md).
+proc hir::traits::StampFold {nodeVar counterVar indexVar} {
+    upvar 1 $nodeVar node $counterVar counter $indexVar index
+    set fold [hir::syntax::foldOf $node]
+    if {$fold ne ""} {
+        dict set fold initial [StampNode [dict get $fold initial] counter index]
+        dict set node fold $fold
+    }
+}
+
 proc hir::traits::StampNode {node counterVar indexVar} {
     upvar 1 $counterVar counter $indexVar index
     dict set node sid [incr counter]
@@ -1878,7 +1891,11 @@ proc hir::traits::StampNode {node counterVar indexVar} {
                 dict set node value [StampNode [dict get $node value] counter index]
             }
         }
-        block - loop {
+        block {
+            dict set node body [lmap c [dict get $node body] {StampNode $c counter index}]
+        }
+        loop {
+            StampFold node counter index
             dict set node body [lmap c [dict get $node body] {StampNode $c counter index}]
         }
         call {
@@ -1892,11 +1909,13 @@ proc hir::traits::StampNode {node counterVar indexVar} {
         }
         listloop {
             dict set node iterable [StampNode [dict get $node iterable] counter index]
+            StampFold node counter index
             dict set node body [lmap c [dict get $node body] {StampNode $c counter index}]
         }
         countloop {
             dict set node start [StampNode [dict get $node start] counter index]
             dict set node end [StampNode [dict get $node end] counter index]
+            StampFold node counter index
             dict set node body [lmap c [dict get $node body] {StampNode $c counter index}]
         }
         lockloop {
@@ -1908,6 +1927,7 @@ proc hir::traits::StampNode {node counterVar indexVar} {
                 }
                 set d
             }]
+            StampFold node counter index
             dict set node body [lmap c [dict get $node body] {StampNode $c counter index}]
         }
         struct {

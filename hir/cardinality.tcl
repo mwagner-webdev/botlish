@@ -44,7 +44,9 @@ namespace eval hir::cardinality {}
 proc hir::cardinality::analyze {hir} {
     set result [dict create]
     dict for {id node} [dict get $hir exprs] {
-        if {[dict get $node kind] in {listloop countloop lockloop}} {
+        # (A fold collects nothing: its value is its intermediate,
+        # FOLD-LOOPS-MILESTONE-1.md.)
+        if {[dict get $node kind] in {listloop countloop lockloop} && ![hir::IsFoldNode $node]} {
             dict set result $id exact
         }
     }
@@ -62,7 +64,7 @@ proc hir::cardinality::analyze {hir} {
 # exact | max for one collecting loop E (listloop, countloop or lockloop: all
 # three build their result List the same way).
 proc hir::cardinality::of {hir e} {
-    if {[dict get $hir exprs $e kind] ni {listloop countloop lockloop}} {
+    if {[dict get $hir exprs $e kind] ni {listloop countloop lockloop} || [hir::isFold $hir $e]} {
         error "hir::cardinality::of: $e is not a collecting loop"
     }
     return [dict get [analyze $hir] $e]
@@ -477,7 +479,10 @@ proc hir::cardinality::ListLength {hir e stepsVar} {
     set node [dict get $hir exprs $id]
     switch -- [dict get $node kind] {
         listloop - countloop - lockloop {
-            if {[of_loop $hir $id] eq "exact"} {
+            # A collecting loop's List has one element per iteration; a
+            # fold's value is its intermediate (FOLD-LOOPS-MILESTONE-1.md),
+            # whose length its type alone states (DefinedLength).
+            if {![hir::IsFoldNode $node] && [of_loop $hir $id] eq "exact"} {
                 set domains [domains $hir $id]
                 return [of_domain $hir [lindex $domains 0] steps]
             }
@@ -507,6 +512,12 @@ proc hir::cardinality::DefinedLength {hir kind id} {
         return ""
     }
     set node [dict get $hir exprs $owner]
+    if {[hir::IsFoldNode $node] && [dict get $node foldBinding] eq $id} {
+        # A fold's intermediate (FOLD-LOOPS-MILESTONE-1.md): every value it
+        # is bound to -- the initial value and every completion of the body
+        # -- is of the intermediate's one type (hir::types::FoldBody).
+        return [hir::types::LengthOf [hir::bindingType $hir $id]]
+    }
     switch -- [dict get $node kind] {
         block {
             set index [lsearch -exact [dict get $node params] $id]
@@ -1158,16 +1169,25 @@ proc hir::cardinality::LayoutNode {hir layoutVar nVar e path} {
             LayoutBody $hir layout n [list $e else] [dict get $node elseBody] $path
         }
         loop {
+            foreach initial [hir::FoldInitials $node] {
+                LayoutNode $hir layout n $initial $path
+            }
             LayoutBody $hir layout n [list $e body] [dict get $node body] $path
         }
         listloop {
             dict lappend layout iterables [dict get $node iterable]
             LayoutNode $hir layout n [dict get $node iterable] $path
+            foreach initial [hir::FoldInitials $node] {
+                LayoutNode $hir layout n $initial $path
+            }
             LayoutBody $hir layout n [list $e body] [dict get $node body] $path
         }
         countloop {
             LayoutNode $hir layout n [dict get $node start] $path
             LayoutNode $hir layout n [dict get $node end] $path
+            foreach initial [hir::FoldInitials $node] {
+                LayoutNode $hir layout n $initial $path
+            }
             LayoutBody $hir layout n [list $e body] [dict get $node body] $path
         }
         lockloop {
@@ -1176,7 +1196,7 @@ proc hir::cardinality::LayoutNode {hir layoutVar nVar e path} {
                     dict lappend layout iterables [dict get $domain iterable]
                 }
             }
-            foreach operand [hir::loopOperands $node] {
+            foreach operand [concat [hir::loopOperands $node] [hir::FoldInitials $node]] {
                 LayoutNode $hir layout n $operand $path
             }
             LayoutBody $hir layout n [list $e body] [dict get $node body] $path
@@ -1424,7 +1444,9 @@ proc hir::cardinality::ShowExpr {hir e} {
             return "${name}(...)"
         }
         const { return [lindex [dict get $node literal] end] }
-        listloop - countloop - lockloop { return "(loop result)" }
+        listloop - countloop - lockloop {
+            return [expr {[hir::IsFoldNode $node] ? "(fold result)" : "(loop result)"}]
+        }
     }
     return "(expression)"
 }

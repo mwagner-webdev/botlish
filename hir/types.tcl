@@ -3008,8 +3008,10 @@ proc hir::types::infer {hirVar} {
 proc hir::types::Walk {hirVar} {
     upvar 1 $hirVar hir
     # Poison is a fact of one walk (a later round of the signature fixpoint
-    # may type a receiver differently): every walk starts without any.
+    # may type a receiver differently): every walk starts without any; so
+    # are a fold's conflicts (FoldBody).
     dict unset hir poisoned
+    dict unset hir foldConflicts
     if {![hir::semantic::Enabled]} {
         set ctx [NewContext]
         Sequence hir ctx [dict get $hir roots]
@@ -3766,12 +3768,26 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [If hir ctx $e]]
         }
         loop {
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             dict set ctx breakTypes $e never
-            Sequence hir ctx [dict get $node body]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                Sequence hir ctx [dict get $node body]
+            }
             set type [dict get $ctx breakTypes $e]
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
+            if {$fold ne ""} {
+                # A fold with no domain completes only by a break, with its
+                # intermediate (FOLD-LOOPS-MILESTONE-1.md); without one it
+                # never completes, as a plain `loop:` without one.
+                if {$type eq "never"} {
+                    return [SetType hir $e never]
+                }
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
+            }
             return [SetType hir $e $type]
         }
         listloop {
@@ -3786,6 +3802,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             } elseif {$elemType eq ""} {
                 set elemType any
             }
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             dict set ctx facts [dict get $node elementBinding] $elemType
             # breakTypes is seeded (and later unset) only so the shared
@@ -3818,12 +3835,19 @@ proc hir::types::Expr {hirVar ctxVar e} {
                 # on ...: 0` an Int, so `[b]` a List[int], not a List[Byte]).
                 dict set ctx reachable 0
             }
-            set bodyType [Sequence hir ctx [dict get $node body]]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                set bodyType [Sequence hir ctx [dict get $node body]]
+            }
             dict set ctx reachable $entry
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
             if {$poison} {
                 return [SetType hir $e [Poison hir $e]]
+            }
+            if {$fold ne ""} {
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
             }
             return [SetType hir $e [LoopResult $hir $ctx $e [MakeList [if {$elemType eq "never"} {string cat "never"} else {set bodyType}]] \
                 [list [list list [hir::typeOf $hir [dict get $node iterable]]]]]]
@@ -3831,6 +3855,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
         countloop {
             Expr hir ctx [dict get $node start]
             Expr hir ctx [dict get $node end]
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             # Unlike listloop's element binding (typed from the iterable's
             # own, possibly-unknown element type), a countloop's induction
@@ -3849,9 +3874,16 @@ proc hir::types::Expr {hirVar ctxVar e} {
             # is only seeded for the shared `break` case and why the result
             # is always List[R] for the body's own type R.
             dict set ctx breakTypes $e never
-            set bodyType [Sequence hir ctx [dict get $node body]]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                set bodyType [Sequence hir ctx [dict get $node body]]
+            }
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
+            if {$fold ne ""} {
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
+            }
             return [SetType hir $e [LoopResult $hir $ctx $e [MakeList $bodyType] \
                 [list [list count [lindex [hir::cardinality::domains $hir $e] 0]]]]]
         }
@@ -3885,6 +3917,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
                     lappend facts [dict get $domain binding] int
                 }
             }
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             foreach {binding type} $facts {
                 dict set ctx facts $binding $type
@@ -3894,12 +3927,19 @@ proc hir::types::Expr {hirVar ctxVar e} {
             if {$empty} {
                 dict set ctx reachable 0
             }
-            set bodyType [Sequence hir ctx [dict get $node body]]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                set bodyType [Sequence hir ctx [dict get $node body]]
+            }
             dict set ctx reachable $entry
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
             if {$poison} {
                 return [SetType hir $e [Poison hir $e]]
+            }
+            if {$fold ne ""} {
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
             }
             set clauses {}
             foreach domain [dict get $node domains] {
@@ -3956,6 +3996,154 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [Handle hir ctx $e]]
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Folding loops (FOLD-LOOPS-MILESTONE-1.md)
+#
+# A fold's intermediate has one type, T: the join (lub) of its initial
+# value's type and the type of every normal completion of its body, typed
+# with the intermediate binding at T itself. T is found the way a recursive
+# block's result is (Block): the body is walked under an assumed T -- first
+# the initial value's type -- and again under the join of that and the
+# body's type until the join reproduces the assumption, the last of
+# foldAttempts walks under `any` (so a fold whose join keeps growing, a List
+# nested one level deeper each time, ends at the dynamic type, sound).
+# `continue` and `break` are no completions: they carry the intermediate
+# unchanged. The fold itself is T (its exhaustion, an empty domain's
+# included, and a bare break both yield an intermediate); a fold whose
+# initial value never completes is never, and one whose initial value is
+# poison is poison, its intermediate too (a poisoned iterable's case).
+# Whether T is a conflict -- two known kinds joined only by `any` -- is
+# hir::fold::verify's, on the final types.
+namespace eval hir::types {
+    variable foldAttempts 4
+}
+
+# The type of a fold NODE's initial value, typed in CTX -- the enclosing
+# scope's, after the loop's own operands -- or "" for a collecting loop.
+proc hir::types::FoldInitial {hirVar ctxVar node} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    if {![hir::IsFoldNode $node]} {
+        return ""
+    }
+    return [Expr hir ctx [dict get $node foldInitial]]
+}
+
+# Walks the body of fold E (node NODE) in CTX (the loop's own bindings
+# already in its facts, its reachability set) as the fixpoint above
+# describes, leaving CTX as the last walk left it; returns T. INITIAL is the
+# initial value's type (FoldInitial).
+#
+# A join that collapses to `any` at a completion of a known type
+# (hir::fold::Conflict) is the program's FOLD-INTERMEDIATE-TYPE: the walk
+# records it (HIR's `foldConflicts`, reported by hir::fold::verify) and, where
+# the walk makes poison (MakesPoison; never in a region's walk, and in a
+# semantic instance's only for a fold the generic walk found in conflict:
+# an instance refines, it never rejects), makes the intermediate poison and walks
+# the body once more under it, so that no check of the body restates the
+# conflict as a mismatch of its own (DIAGNOSTIC-RECOVERY.md); the fold itself
+# is then poison too (FoldResult). Elsewhere T is `any`, the sound dynamic
+# type.
+proc hir::types::FoldBody {hirVar ctxVar e node initial} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    variable foldAttempts
+    set b [dict get $node foldBinding]
+    set body [dict get $node body]
+    set initialExpr [dict get $node foldInitial]
+    if {[Poisoned $hir $initialExpr]} {
+        # A poisoned initial value: so is the intermediate, and the body is
+        # walked as reachable code (it may still run).
+        Poison hir $b
+        dict set ctx facts $b never
+        Sequence hir ctx $body
+        return never
+    }
+    set halted [Halts $hir $initialExpr $initial]
+    set entry $ctx
+    set hadPoison [dict exists $hir poisoned]
+    set entryPoison [dict getdef $hir poisoned {}]
+    # What an earlier walk of this same fold made poison or found in
+    # conflict (an enclosing recursive block's earlier attempt, Block) is
+    # this walk's to decide again: the fold's value, its intermediate and
+    # everything in its body.
+    foreach x [concat [list $e $b] [hir::fold::Subtree $hir $body]] {
+        dict unset entryPoison $x
+    }
+    if {![dict exists $ctx inst] && ![dict exists $ctx spec] && [dict exists $hir foldConflicts $e]} {
+        dict unset hir foldConflicts $e
+    }
+    set assumed $initial
+    for {set attempt 1} {$attempt <= $foldAttempts} {incr attempt} {
+        if {$attempt == $foldAttempts && $attempt > 1} {
+            set assumed any
+        }
+        # Every walk starts where the first did: what an earlier walk under
+        # a narrower assumption recorded (a return's type, a break, poison)
+        # is the later walk's to record again.
+        set ctx $entry
+        if {$hadPoison} {
+            dict set hir poisoned $entryPoison
+        } else {
+            dict unset hir poisoned
+        }
+        if {$halted} {
+            dict set ctx reachable 0
+        }
+        set live [dict get $ctx reachable]
+        dict set ctx facts $b $assumed
+        set bodyType [Sequence hir ctx $body]
+        if {!$live} {
+            # The body never runs (an empty domain, an initial value that
+            # never completes): it widens nothing.
+            break
+        }
+        set joined [lub $assumed $bodyType]
+        if {$joined eq "any" && $assumed ne "any" && ![dict exists $ctx spec]} {
+            set conflict [hir::fold::Conflict $hir $initialExpr [lindex $body end]]
+            # The generic walk records the conflict; a semantic instance's
+            # walk of the same body treats the fold as the generic walk did
+            # (an instance only refines what the generic walk proved).
+            set generic [expr {![dict exists $ctx inst]}]
+            if {$conflict ne "" && $generic} {
+                dict set hir foldConflicts $e $conflict
+            }
+            if {$conflict ne "" && [dict exists $hir foldConflicts $e]} {
+                if {[MakesPoison $hir $ctx]} {
+                    set ctx $entry
+                    Poison hir $b
+                    dict set ctx facts $b never
+                    Sequence hir ctx $body
+                    set assumed never
+                    break
+                }
+            }
+        }
+        if {$joined eq $assumed || $assumed eq "any"} {
+            break
+        }
+        set assumed $joined
+    }
+    # The intermediate's one type, for the analyses that read a binding's
+    # (hir::bindingType): what the body was last walked under.
+    dict set hir bindings $b type [intern hir $assumed]
+    return $assumed
+}
+
+# The type of fold E (node NODE) whose intermediate is of type INTERMEDIATE
+# (FoldBody): poison when its initial value is, never when that never
+# completes.
+proc hir::types::FoldResult {hirVar e node intermediate} {
+    upvar 1 $hirVar hir
+    set initialExpr [dict get $node foldInitial]
+    if {[Poisoned $hir $initialExpr] || [Poisoned $hir [dict get $node foldBinding]]} {
+        # (Its intermediate is poison: a conflict, FoldBody.)
+        return [Poison hir $e]
+    }
+    if {[Halts $hir $initialExpr [hir::typeOf $hir $initialExpr]]} {
+        return never
+    }
+    return $intermediate
 }
 
 # RESULT, the List a collecting loop E (listloop, countloop, lockloop)

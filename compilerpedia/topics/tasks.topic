@@ -24,7 +24,8 @@ mean something else:
     else if                        elif
     x = x + 1, x += 1              a new name; or recurse, passing x + 1
     total = total + x  in a loop   compiles; binds a new total in the loop
-                                   body, and the outer total never changes
+                                   body, and the outer total never changes:
+                                   fold x in xs with intermediate total 0:
     r = ... in each if branch,     UNBOUND after the if (a branch's names
     then r after the if            end with it): write r = if c:
     f(x, y)  your own function     x.f(y), or declare it nomethod fn
@@ -45,9 +46,8 @@ total
 @value 0
 @end
 
-Pass the running value on instead (or count with a collecting loop, or
-keep it in a mutable collection: task.accumulate), and bind an `if`'s
-value instead of binding a name in each branch:
+Carry the running value through a fold, or pass it on (task.accumulate),
+and bind an `if`'s value instead of binding a name in each branch:
 
 @example accept
 import std::list
@@ -116,11 +116,11 @@ label("first", first)
 
 @topic task.accumulate
 title: Running totals: summing, counting, keeping a maximum
-summary: Botlish has no assignment, so a running total is no name updated in a loop: pass it on as a parameter, count with a collecting loop, or keep it in a MutableArray.
+summary: Botlish has no assignment, so a running total is no name updated in a loop: carry it through a fold, pass it on as a parameter, or count with a collecting loop.
 index: concepts
 alias: running total; accumulator; accumulate; sum a list; sum of a list; count matches; maximum of a list; loop accumulator
 keywords: sum, total, count, maximum, minimum, accumulate, accumulator, running, aggregate
-related: rule.immutable-bindings capability.assignment capability.map-filter concept.loops concept.mutable-array task.first-program task.iterate-with-index
+related: concept.folds rule.immutable-bindings capability.assignment capability.map-filter concept.loops concept.mutable-array task.first-program task.iterate-with-index
 
 == THE TRAP
     total = 0
@@ -132,16 +132,33 @@ lasts for one iteration (rule.immutable-bindings). The program compiles,
 and the outer `total` is still 0 after the loop.
 
 == HOW
+  * Carry it through a fold (concept.folds): `fold x in xs with
+    intermediate total 0:` binds `total` to the previous iteration's value
+    in every iteration, and the body's value is the next one. A sum, a
+    count, a maximum, a state struct: the fold is the final value.
   * Pass the running value on: a function takes it as a parameter and
-    calls itself with the next one. This is the general form (a sum, a
-    maximum, a value built step by step), and the compiler proves the
-    index in range.
+    calls itself with the next one, when the steps are not one per element
+    of a domain (or use a fold with no domain, ended by a break).
   * Count with a collecting loop: `continue` leaves out the elements that
     do not count, and the length of the List it builds is the count.
   * When the total is state a loop updates, keep it in a mutable
     collection: a one-element MutableArray changes in place through its
     own operations (concept.mutable-array).
-There is no fold or reduce function (capability.map-filter).
+There is no reduce function taking a callback (capability.map-filter):
+the fold is the construct.
+
+@example accept
+fn largest(xs: List[int]) -> int:
+    fold x in xs with intermediate best 0:
+        if x > best:
+            x
+        else:
+            best
+
+largest([4, 9, 2])
+@caption A maximum carried through a fold
+@value 9
+@end
 
 @example accept
 import std::list

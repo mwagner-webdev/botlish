@@ -145,7 +145,11 @@
 #              START >= i >= END (START is always the value iteration
 #              begins at: core/ir.tcl's `countloop`, R2A3-COUNTED-LOOPS-
 #              FINAL-SOURCE.md, COLLECTING-LOOPS.md); plain "loop:" (no
-#              clause) repeats until break
+#              clause) repeats until break. `fold` is "" for a collecting
+#              loop and, for a fold (FOLD-LOOPS-MILESTONE-1.md: "fold
+#              CLAUSES with intermediate NAME INITIAL:"), a dict {name
+#              nameSpan initial}: the intermediate binding's name and the
+#              expression of its initial value
 #   return     value (an expression, an if, a loop, or "")
 #   break      value (an expression, an if, or "")
 #   continue
@@ -527,6 +531,11 @@ proc surface::ast::Ids {node id} {
                 }
                 dict set node clauses [list $clause]
             }
+            set fold [dict getdef $node fold ""]
+            if {$fold ne ""} {
+                dict set fold initial [Ids [dict get $fold initial] $id/initial]
+                dict set node fold $fold
+            }
             dict set node body [Suite [dict get $node body] $id]
         }
         handledcall {
@@ -608,8 +617,10 @@ proc surface::ast::Children {node} {
         with - yield       { return [list [dict get $node value]] }
         function - static  { return [list [dict get $node body]] }
         loop {
+            # The clauses' operands in written order, then a fold's initial
+            # value (FOLD-LOOPS-MILESTONE-1.md), then the body.
+            set children {}
             if {[llength [dict get $node clauses]] > 1} {
-                set children {}
                 foreach clause [dict get $node clauses] {
                     foreach field {iterable start end} {
                         if {[dict get $clause $field] ne ""} {
@@ -617,15 +628,16 @@ proc surface::ast::Children {node} {
                         }
                     }
                 }
-                return [concat $children [list [dict get $node body]]]
+            } elseif {[dict get $node iterable] ne ""} {
+                lappend children [dict get $node iterable]
+            } elseif {[dict get $node countStart] ne ""} {
+                lappend children [dict get $node countStart] [dict get $node countEnd]
             }
-            if {[dict get $node iterable] ne ""} {
-                return [list [dict get $node iterable] [dict get $node body]]
+            set fold [dict getdef $node fold ""]
+            if {$fold ne ""} {
+                lappend children [dict get $fold initial]
             }
-            if {[dict get $node countStart] ne ""} {
-                return [list [dict get $node countStart] [dict get $node countEnd] [dict get $node body]]
-            }
-            return [list [dict get $node body]]
+            return [concat $children [list [dict get $node body]]]
         }
         if {
             set children [list [dict get $node condition] [dict get $node then]]
@@ -711,6 +723,11 @@ proc surface::ast::MapChildren {node cmd} {
             } elseif {[dict get $node countStart] ne ""} {
                 dict set node countStart [{*}$cmd [dict get $node countStart]]
                 dict set node countEnd [{*}$cmd [dict get $node countEnd]]
+            }
+            set fold [dict getdef $node fold ""]
+            if {$fold ne ""} {
+                dict set fold initial [{*}$cmd [dict get $fold initial]]
+                dict set node fold $fold
             }
             dict set node body [{*}$cmd [dict get $node body]]
         }
@@ -1353,9 +1370,13 @@ proc surface::ast::PatternText {pattern show} {
 proc surface::ast::Loop {node prefix indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
-    set header loop
+    set fold [dict getdef $node fold ""]
+    set header [expr {$fold eq "" ? "loop" : "fold"}]
     if {[llength [dict get $node clauses]] > 0} {
         append header " [join [lmap clause [dict get $node clauses] {Clause $clause $show}] { and }]"
+    }
+    if {$fold ne ""} {
+        append header " with intermediate [dict get $fold name] [Expr [dict get $fold initial] $show]"
     }
     lappend lines "$pad$prefix$header[At $node $show]"
     Body [dict get $node body] [expr {$indent + 1}] $show lines

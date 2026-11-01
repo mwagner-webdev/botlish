@@ -341,17 +341,18 @@ fn has_big?(xs: List[int], limit: int) -> bool:
 
 @topic capability.map-filter
 title: map, filter and reduce: use loops
-summary: There are no map/filter/reduce functions: a collecting loop is the transformation (`loop x in xs: f(x)`), `continue` filters, and std::list::any?, all?, none? and find cover search.
+summary: No map/filter/reduce functions: a collecting loop transforms (`loop x in xs: f(x)`), `continue` filters, a fold reduces, and std::list::any?, all?, none? and find search.
 index: concepts stdlib
-alias: map; filter; reduce; fold; comprehension; list comprehension
+alias: map; filter; comprehension; list comprehension
 keywords: map, filter, reduce, fold, transform, collect
-related: concept.loops stdlib.module.std::list capability.assignment
+related: concept.loops concept.folds stdlib.module.std::list capability.assignment
 docs: RETURNING-ITERABLE-LOOPS.md COLLECTING-LOOPS.md
 
 == STATUS
 stdlib/list.bot deliberately has no map or filter: the collecting loop
-subsumes them. There is no fold either; carry an accumulator through
-recursion, or use a MutableVector.
+subsumes them. Reducing is the language's `fold` (concept.folds): `fold x
+in xs with intermediate acc INITIAL:` carries one value through the
+iterations; there is no reduce function taking a callback.
 
 @example accept
 evens = loop x in [1, 2, 3, 4]:
