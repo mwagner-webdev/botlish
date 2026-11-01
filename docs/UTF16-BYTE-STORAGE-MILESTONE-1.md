@@ -772,11 +772,11 @@ suites (443 tests on the Tcl backends, 452 on the native ones);
 * run 41266378398 (final, `tier: full`, items `utf16-bench filesystem-fuzz
   filesystem-mutants`): @@WINFINAL@@;
 * Icy Tower on Windows (run 41254335025 on `43c0795`; run 41266348143 on
-  the final code): @@ICYWIN@@.
+  the final code): both passed.
 
 **Linux x86-64 and arm64**
 
-* tests.yml run 41254352482 (`43c0795`): @@LINUX1@@;
+* tests.yml run 41254352482 (`43c0795`): every job passed -- the Tcl suite on interp and compile, its cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the native Rust unit tests, the stub- and system-linked executables (the latter also under GC stress), the warning gate and the method-call decision's oracle (its GC-stress job runs on pushes to main only, and was skipped);
 * tests.yml run 41266528009 (final): @@LINUX2@@;
 * tests-arm64.yml run 41254354267 (`43c0795`): @@ARM1@@;
 * tests-arm64.yml run 41266529720 (final): @@ARM2@@;
@@ -808,7 +808,7 @@ suites (443 tests on the Tcl backends, 452 on the native ones);
   (where the new game's player stood 0.6 to 1.0 s after R) while the same
   run's SDL call traces were identical to the Linux reference under both
   drivers and the oracle agreed; the rerun passed every case. Run
-  41266348174 on the final code: @@ICYMAC@@.
+  41266348174 on the final code: every case passed on the first attempt.
 
 **Unchanged code on Linux and macOS.** std::linux::*, std::darwin::* and
 std::io::* have no diff on this branch. A program using `validate`,
