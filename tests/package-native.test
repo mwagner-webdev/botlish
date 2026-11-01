@@ -763,14 +763,15 @@ test pn-sha256-backends-agree {the host system's SHA-256 tool and the Tcl implem
 cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0}} [expr {[lindex [pm::sha256::backend] 0] eq "tool" ? {tool {ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0}} : {}}]]
 
-test pn-sha256-ignores-path {the tool is the system's, at its fixed path: a program named sha256sum first on PATH, which lies, is never run} -constraints {unixFiles} -body {
+test pn-sha256-ignores-path {the tool is the system's, at its fixed path: a program named sha256sum first on PATH, which lies, is never run (the known-answer probe would refuse it too, but it must not even start)} -constraints {unixFiles} -body {
     set dir [fresh path]
-    writeText [file join $dir sha256sum] "#!/bin/sh\necho 0000000000000000000000000000000000000000000000000000000000000000  -\n"
+    writeText [file join $dir sha256sum] "#!/bin/sh\ntouch [file join $dir ran]\necho 0000000000000000000000000000000000000000000000000000000000000000  -\n"
     file attributes [file join $dir sha256sum] -permissions 0755
-    withEnvironment [list PATH $dir:$::env(PATH)] {
+    set digest [withEnvironment [list PATH $dir:$::env(PATH)] {
         exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; puts \[pm::sha256::hex \[string repeat a 1000000\]\]"
-    }
-} -cleanup cleanup -result cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0
+    }]
+    list $digest [file exists [file join $dir ran]]
+} -cleanup cleanup -result {cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0 0}
 
 test pn-sha256-forced-tool-missing {BOTLISH_PM_SHA256=tool where there is no tool is an error, never a silent fallback} -body {
     set r [withEnvironment [list BOTLISH_PM_SHA256 tool] {

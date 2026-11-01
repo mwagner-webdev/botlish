@@ -99,7 +99,7 @@ step, both measured in section H.
 | A relocatable bundled-shared-library application | **Executed** with real SDL3 (`pw-sdlkit-deploy-relocates`): libSDL3.so.0 deployed in DIR/lib, the executable's RUNPATH `$ORIGIN/lib`, DIR moved, the packages deleted, the program runs and prints `[[true, true, true, true, true, true], true]` |
 | Public headers for consumers' C | **Executed** (`pw-event-loop-runs`: the ticker compiled with `native plan -include`'s directory) |
 | Transactions over views and deployments, with fault injection and crash recovery | **Executed** (`pn-view-fault-rollback`, `pn-view-crash-recovery`, `pn-deploy-ownership-and-faults`) |
-| SHA-256 through the system's tool | **Executed**: about 1 GB/s on large inputs here against 0.83 MiB/s (section H); the Tcl fallback kept and checked against it |
+| SHA-256 through the system's tool | **Executed**: about 340 MiB/s on large inputs here (under load) against PM-1's 0.83 MiB/s (section H); the Tcl fallback kept and checked against it |
 | Installation with no C compiler or linker on PATH | **Executed** (`pw-raven-installs-without-a-compiler`, PM-1's `pw-pure-botlish-package`) |
 
 ### Targets
@@ -531,13 +531,13 @@ Every command with `LANG=C.utf8 LC_ALL=C.utf8` and a private `-tmpdir`.
 
 | command | result |
 |---|---|
-| `tclsh9.0 tests/package-native.test` | @@PN@@ |
+| `tclsh9.0 tests/package-native.test` | 39 tests, 39 passed (clang, lld, llvm-lipo and MinGW-w64 present: no test skipped) |
 | `tclsh9.0 tests/package-workloads.test` | 14 tests, 14 passed |
 | `tclsh9.0 tests/package-manager.test` | 74 tests, 74 passed (two expectations updated: schema 2 is now read; the no-program-run rule now admits the system's SHA-256 tool, in two procedures only) |
-| regression files for the compiler change | @@REG@@ |
+| regression files for the compiler change | all passed: `bot-modules.test` 56/56 (`bm-service-sources` expects the new `.targets` probe), `imports.test` 104/104, `application-modules.test` 21/21, `std-namespace.test` 36/36, `surface-modules.test` 37/37, `hir-cache.test` 19/19, `hir-interchange.test` 11/11, `compiler-service.test` 55/55, `lsp.test` 71/71, `main-cli.test` 64/64 (after shortening the new option's usage line, which its 80-column test caught), `compilation-isolation.test` 19/19, `native-link-plan.test` 34 passed and 3 skipped (macOS, Windows), `system-linker.test` 15/15, `compilerpedia.test` 42/42, `raven.test` 10 passed and 1 skipped (`ravenDesktop`), `event-loop-linux.test` 25/25 |
 | `cargo test --release --manifest-path native/Cargo.toml --bin botlish-native -- runtime_paths link_plan system_link` | 17 passed (the new `runtime_paths_lower_per_linker` among them) |
-| `tclsh9.0 audit/package-manager/tools/mutate.tcl` | @@MUT@@ |
-| `tclsh9.0 tools/compilerpedia.tcl check` | @@CP@@ |
+| `tclsh9.0 audit/package-manager/tools/mutate.tcl` | 52 mutants (27 PM-1, 25 PM-2), 52 killed, after one survivor was closed (below) |
+| `tclsh9.0 tools/compilerpedia.tcl check` | 1149 topics, 701 examples run, 0 problems |
 | `tclsh9.0 audit/golden/migration/merge.tcl -names audit/golden/migration/tcl-names.txt -check 1` | exit 0 (census rows for the new and renamed tests, KEEP-INTERNAL) |
 
 ### The adversarial and regression list, case by case
@@ -585,7 +585,16 @@ derivation and reuse, rollback, native classification (machine, import
 libraries, identity, needs, musl), closure conflicts, system evidence and
 versions, the source cross-check, packing, deployment ownership and
 rollback, the compiler's tree rule, the runtime path and the hashing tool's
-location, beside PM-1's 27 (one updated for schema 2's key list): @@MUTDETAIL@@
+location, beside PM-1's 27 (one updated for schema 2's key list): the full run killed 51. The survivor,
+`sha256-tool-from-path` (the tool looked up on PATH), was caught by the
+design but not by the test: the known-answer probe refused the lying
+`sha256sum` the test put first on PATH, so the digest stayed right. The
+test now also asserts that the program never started; rerun alone, the
+mutant is killed. The mutants of other harnesses whose text this milestone
+changed were updated, keeping each a mutant of the same rule
+(`audit/native-aot` `api-replaces-main-with-worker`,
+`audit/single-executable` `package-commands-install-native`);
+@@OTHERMUT@@
 
 ### Security boundaries
 
@@ -608,7 +617,39 @@ location, beside PM-1's 27 (one updated for schema 2's key list): @@MUTDETAIL@@
 `tclsh9.0 bench/package-manager.tcl` (medians; commands as child
 processes, each including Tcl's start-up):
 
-@@BENCH@@
+Measured while other test processes ran on the 4-core container (the
+times are upper bounds; the ratios are what matter):
+
+| measurement | time |
+|---|---|
+| read and validate a botlish.json (in process) | 0.18 ms |
+| SHA-256 backend for large inputs | tool: /usr/bin/sha256sum |
+| SHA-256 of 4 KiB: Tcl / tool | 4.4 ms / 2.5 ms |
+| SHA-256 of 1 MiB: Tcl / tool | 1347.5 ms (0.7 MiB/s) / 5.2 ms (192 MiB/s, one process start included) |
+| SHA-256 of 16 MiB / 64 MiB, tool | 47.4 ms (338 MiB/s) / 184.6 ms (347 MiB/s) |
+| the SDL3 release (two targets, bundled libSDL3) | 1.5 MiB packed, 4.3 MiB unpacked |
+| SHA-256 of that artifact (in process) | 4.1 ms (PM-1's Tcl hashing: about 1.9 s) |
+| `package inspect` of it (full archive and target-layout validation) | 124.8 ms |
+| `add sdlkit` (2 instances, the host's view derived and verified; fresh project) | 597.4 ms |
+| `install`, unchanged tree and view (reused) | 104.1 ms |
+| `install -target linux-aarch64` (a second view derived) | 201.3 ms |
+| the same again (both views reused) | 103.2 ms |
+| `verify` (record and views) | 97.4 ms |
+| `verify -target linux-x86_64` (the native plan verified again) | 292.4 ms |
+| `native plan` | 255.0 ms |
+| `install` into a fresh copy of the project (offline) | 574.5 ms |
+| `add` a pure-Botlish package (fresh project) | 26.4 ms |
+| `install`, unchanged pure-Botlish tree | 18.1 ms |
+| main.tcl with no arguments (no package command) | 7.5 ms |
+| main.tcl -version (loads the compiler) | 129.7 ms |
+
+PM-1 measured 21 ms for an unchanged `install` and 146 ms for `add sdlkit`
+of one target's binding with no native file. A target-aware project's
+unchanged `install` now costs about 100 ms: deciding that a view can be
+reused reads every file of it (its CRC-32s) and the record's digest; a
+pure-Botlish project's is unchanged (18 ms: no view exists). A fresh `add`
+of the SDL3 release spends most of its 0.6 s copying the 3.4 MB bundled
+library into the store, the view and `.lib`, and inspecting it.
 
 * **Hashing.** PM-1 hashed in Tcl at 0.83 MiB/s (1.2 s per MiB); a
   native-sized package (SDL3's 1.5 MiB artifact) cost about 2 s to hash.

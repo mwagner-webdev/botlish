@@ -532,9 +532,9 @@ if {$nativeStartup eq ""} {
 @@ api-replaces-main-with-worker native::executable hands the driver the worker's policy whatever -startup says
 ## native/native.tcl
 <<<<
-    set lines [Driver executable $text [file normalize $path] --startup $startup]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup}]
 ====
-    set lines [Driver executable $text [file normalize $path] --startup worker]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup worker}]
 >>>>
 
 @@ api-default-main-thread native::executable's default policy is the main thread's
