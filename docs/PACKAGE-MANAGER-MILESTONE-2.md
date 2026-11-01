@@ -537,6 +537,10 @@ Every command with `LANG=C.utf8 LC_ALL=C.utf8` and a private `-tmpdir`.
 | regression files for the compiler change | all passed: `bot-modules.test` 56/56 (`bm-service-sources` expects the new `.targets` probe), `imports.test` 104/104, `application-modules.test` 21/21, `std-namespace.test` 36/36, `surface-modules.test` 37/37, `hir-cache.test` 19/19, `hir-interchange.test` 11/11, `compiler-service.test` 55/55, `lsp.test` 71/71, `main-cli.test` 64/64 (after shortening the new option's usage line, which its 80-column test caught), `compilation-isolation.test` 19/19, `native-link-plan.test` 34 passed and 3 skipped (macOS, Windows), `system-linker.test` 15/15, `compilerpedia.test` 42/42, `raven.test` 10 passed and 1 skipped (`ravenDesktop`), `event-loop-linux.test` 25/25 |
 | `cargo test --release --manifest-path native/Cargo.toml --bin botlish-native -- runtime_paths link_plan system_link` | 17 passed (the new `runtime_paths_lower_per_linker` among them) |
 | `tclsh9.0 audit/package-manager/tools/mutate.tcl` | 52 mutants (27 PM-1, 25 PM-2), 52 killed, after one survivor was closed (below) |
+| `tclsh9.0 tests/local.tcl tests/package-manager.test tests/package-native.test tests/package-workloads.test tests/bot-modules.test tests/main-cli.test tests/imports.test tests/hir-cache.test` (each file on interp and compile, and the golden suites holding replaced tests on all four backends) | Tcl tests 327 passed on each of interp and compile, 0 failed; golden suites 7 run, 168/168 on each backend |
+| `tclsh9.0 audit/hir-interchange/tools/roundtrip.tcl -via interchange`, then `-via cache` (the HIR gained `nativeDirs`; the front end reads `.targets`) | 12 suites, 108 artifacts and outcomes compared, 0 differ; 12 suites, 120 compared, 0 differ |
+| `single/build.sh`, then `single/smoke-test.sh` and `single/ffi-smoke-test.sh` | built (14.5 MB); both passed, the smoke test's new PM-2 check included ("a two-target release, its views and native inspect, with no native backend installed": `-target linux-x86_64` and `-target linux-aarch64` compile each from its own view) |
+| `cargo test --release --manifest-path native/Cargo.toml --bin botlish-native aot::` | 29 passed |
 | `tclsh9.0 tools/compilerpedia.tcl check` | 1149 topics, 701 examples run, 0 problems |
 | `tclsh9.0 audit/golden/migration/merge.tcl -names audit/golden/migration/tcl-names.txt -check 1` | exit 0 (census rows for the new and renamed tests, KEEP-INTERNAL) |
 
@@ -573,7 +577,7 @@ Every command with `LANG=C.utf8 LC_ALL=C.utf8` and a private `-tmpdir`.
 | 27 | recovery after failed deployment | `pn-deploy-ownership-and-faults` |
 | 28 | manual and editable packages | `pn-manual-and-editable-in-views`, `pn-hand-made-targets-refused` |
 | 29 | cache and interchange | `pn-cache-and-interchange`, `bm-service-sources` |
-| 30 | single-file compiler without the native backend | **Not executed in this milestone**: `pm/` is packed whole by `single/package.tcl` (unchanged list: `pm/`), `native` dispatches like the other package commands in `single/main.tcl`, and the package manager loads no compiler or backend; `single/build.sh` and its smoke tests were not rebuilt here |
+| 30 | single-file compiler without the native backend | `single/smoke-test.sh`'s new check (a two-target release packed, added with two views, verified, a native file inspected, both targets compiled; the native backend never installed); the mutant `package-commands-install-native` killed |
 | 31 | pure-Botlish packages unaffected | `pn-pure-packages-no-views`, `pw-pure-botlish-*` |
 | 32 | hashing backends | `pn-sha256-backends-agree`, `pn-sha256-ignores-path`, `pn-sha256-forced-tool-missing`, PM-1's FIPS vectors |
 
@@ -594,7 +598,13 @@ mutant is killed. The mutants of other harnesses whose text this milestone
 changed were updated, keeping each a mutant of the same rule
 (`audit/native-aot` `api-replaces-main-with-worker`,
 `audit/single-executable` `package-commands-install-native`);
-@@OTHERMUT@@
+each killed when run alone (`audit/native-aot/tools/mutate.tcl -only
+api-replaces-main-with-worker`: by main-thread-startup.test, aot-facts.tcl
+and native-status.tcl; `audit/single-executable/tools/mutate.tcl -only
+package-commands-install-native`: by the smoke test). The harnesses of the
+code the compiler change touches were run whole: `audit/bot-modules/tools/
+mutate.tcl` 20 mutants, 20 killed; `audit/hir-interchange/tools/mutate.tcl`
+28 mutants, 28 killed.
 
 ### Security boundaries
 
@@ -670,8 +680,6 @@ library into the store, the view and `.lib`, and inspecting it.
   AArch64's by compiling the front end for it; nothing ran there.
   Whatever the repository's CI reports for those hosts after this change is
   pushed is not part of this report's evidence.
-* **The single-file compiler was not rebuilt** (`single/build.sh`), so its
-  package commands' smoke test did not run with PM-2's code.
 * **No repository package carries a macOS or Windows target**: there is no
   committed macOS or MSVC SDL3 or Raven binding (generating one needs that
   host's SDK), so "SDL3 for a second target" is linux-aarch64.
