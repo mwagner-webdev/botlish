@@ -576,7 +576,14 @@ otherwise:
   the files this change touches or that pin what it changes), the warning
   gate (no corpus program changed; `audit/list-flat/workloads/` is not
   corpus), the batched-against-sequential static-decision comparison
-  (AGENTS.md: CI only) and the macOS and Windows hosts. CI: CI-RESULTS
+  (AGENTS.md: CI only) and the macOS and Windows hosts.
+* **CI on the branch** (`claude/upbeat-hypatia-34hk1w`, commit 24921d9):
+  `tests` was dispatched (run 41346012641) and `static-decisions` over
+  list-flat.bot, stdlib-namespaces.bot, loop-collecting.bot and
+  fold-loops.bot (run 41346014910); the push started `tests (macos arm64)`,
+  `tests (windows x86-64)` and both Icy Tower workflows. All six were still
+  queued -- no runner had started them -- about 35 minutes later, when this
+  report was written: no CI result is claimed here.
 
 ## What remains, and the next milestone
 
