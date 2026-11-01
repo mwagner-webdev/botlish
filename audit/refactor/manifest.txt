@@ -155,6 +155,7 @@ fails stdlib/mutable_map.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal impor
 fails stdlib/mutable_set.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/mutable_map.bot (verified through `import std::mutable_set`)
 program stdlib/ordered_table.bot
 fails stdlib/test.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (report) requires a context (the test suite), so it cannot be a value (verified through `import std::test`)
+fails stdlib/tree.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: tree.bot reads a tree's child field through the standard library's internal std::tree::children, which an entry program may not name (verified through `import std::tree`)
 program stdlib/web.bot
   ONE-CHAR-STRING-LITERAL 219:15 none -- char->text: hex_digits is the table of hexadecimal digits as text, concatenated into %XX escapes (hex_pair); a "0123456789ABCDEF" slice would keep each digit a one-character String
   ONE-CHAR-STRING-LITERAL 219:20 none -- char->text: the digit "1", as above

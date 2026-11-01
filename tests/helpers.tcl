@@ -255,6 +255,12 @@ testConstraint nativeCCalls [native::hostSupports cCalls]
 # machine code, or runs one, carries this beside nativeCCalls.
 testConstraint nativeCVariadics [native::hostSupports cVariadics]
 
+# Synchronous C callbacks (C-CALLBACK-MILESTONE-1.md): where the collector's
+# frame-pointer walk crosses a foreign transition (Linux x86-64 and AArch64,
+# macOS AArch64). A test that runs a callback C calls carries this beside
+# nativeCCalls; Windows refuses one (NATIVE CALLBACK UNSUPPORTED).
+testConstraint nativeCCallbacks [native::hostSupports cCallbacks]
+
 # The host's own C toolchain, the one C fixtures are built with
 # (tests/ctoolchain.tcl): cc and ar on Linux and macOS, MSVC's cl, ml64 and
 # lib on Windows (found through vswhere, used in vcvars64's environment for

@@ -138,7 +138,11 @@ guarded against such a cycle (`mv-recursive-struct-*`, `af-recursive-*`). An
 affine struct that holds its own type in a List, MutableVector or
 MutableArray is AFFINE-CONTAINER-UNSUPPORTED at its declaration (its values
 nest to any depth; an affine value is released by a static, finite walk of
-its type: AFFINE-VALUES.md, item 34); an unrestricted one may. Duplicate
+its type: AFFINE-VALUES.md, item 34); an unrestricted one may. A `tree
+struct` (TREE-STRUCT-MILESTONE-1.md) is the designated form of the one
+recursive shape whose values the language promises to compare, hash, print
+and traverse at any depth: exactly one field of type `List[Self]` and no
+other recursion. Duplicate
 fields, unknown field types, a repeated name, and a name that shadows a
 built-in or declared type are diagnosed at the declaration
 (`struct-error-declaration`). Declarations carry source spans for the

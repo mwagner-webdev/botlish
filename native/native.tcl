@@ -167,6 +167,11 @@ namespace eval native {
 #                x86-64 and AArch64, for Apple AArch64 and, since
 #                WINDOWS-X86-64-MILESTONE-6.md, for Win64; on another C
 #                convention a variadic call is a codegen error)
+#   cCallbacks   synchronous C callbacks (`callback c fn`,
+#                C-CALLBACK-MILESTONE-1.md: runtime/callback.rs's SUPPORTED):
+#                where the collector walks frames by frame pointer across a
+#                foreign transition; Windows (its unwinder) refuses one at
+#                run time (NATIVE CALLBACK UNSUPPORTED)
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs;
 #                on Windows a fiber per coroutine stack,
 #                runtime/coroutine/windows.rs)
@@ -207,6 +212,7 @@ namespace eval native {
         executables {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cCalls {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        cCallbacks {linux-x86_64 linux-aarch64 macos-aarch64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \

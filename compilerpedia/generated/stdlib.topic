@@ -4887,9 +4887,9 @@ related: stdlib.module.std::compiler
         Arity,
         BinaryOperand,
         BreakOutsideLoop,
-        ContextBindingCollision,
-        ContextFunctionValue,
-        ContextInstallationUnsupported,
+        CallbackEnvironment,
+        CallbackPlacement,
+        CallbackReference,
 
 == MODULE
 stdlib/compiler.bot: import std::compiler, then write
@@ -8586,6 +8586,51 @@ std::event_loop::deterministic).
 Each member is a topic: -help NAME (e.g. -help
 std::event_loop::deterministic::Deterministic).
 
+@topic stdlib.std::ffi::c::callback
+title: std::ffi::c::callback -- intrinsic of namespace std::ffi::c
+summary: The C function pointer of a `callback c fn`, by name: a std::ffi::c::FnPtr of its declared C signature, whose calls run the function in the Botlish execution environment waiting in a foreign call.
+index: stdlib
+symbol: std::ffi::c::callback
+keywords: function pointer; C callback; FnPtr of a function; callback address
+related: stdlib.module.std::ffi::c concept.c-callbacks error.callback-reference stdlib.std::ffi::c::null?
+
+== SIGNATURE
+    std::ffi::c::callback(any) -> cptr
+
+== USE
+An intrinsic of namespace std::ffi::c: import std::ffi::c, then write
+std::ffi::c::callback. Method syntax: receiver.callback(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The argument is the name of a top-level `callback c fn` (CALLBACK-REFERENCE
+otherwise), and the operation is only called, never a value. The pointer is
+affine, like every C pointer: bind it, then pass it to a C function whose
+FnPtr parameter is declared noescape -- C may call it only while such a
+call runs (NATIVE CALLBACK otherwise). Native backends only: the Tcl
+backends refuse it at run time (NATIVE-ONLY).
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+
+callback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    0
+
+fn pointer():
+    cb = std::ffi::c::callback(decide)
+    cb.null?()
+
+decide(4)
+@caption The pointer is made where it is passed to C
+@value 1
+@end
+
 @topic stdlib.std::ffi::c::clone
 title: std::ffi::c::clone -- intrinsic of namespace std::ffi::c
 summary: A second alias of a C pointer (the same address, the same type), written p.clone(): the one way to have two pointers.
@@ -8773,9 +8818,9 @@ related: concept.c-ffi concept.affine
 
 == DESCRIPTION
 These are the values a C boundary carries, modeled as C's ABI sees them, not
-as C's source language spells them. Nothing here calls C yet: there is no
-`extern c fn`, no linking and no callback (C-ABI-TYPES.md, "What is not
-here").
+as C's source language spells them. Nothing here calls C: C calls are
+`extern c fn` declarations (C-FFI.md), and C calling Botlish back is a
+`callback c fn` (C-CALLBACK-MILESTONE-1.md, below).
 
 C integer scalars (intrinsic types of this namespace):
 
@@ -8853,6 +8898,21 @@ Pointers (intrinsic types and operations of this namespace):
   std::ffi::c::clone(p)          p's type    a second alias of p (p.clone())
   std::ffi::c::erase(p)          Ptr[Void]   the same address as void *
   std::ffi::c::retype[T](p)      Ptr[T]      the same address of a Ptr[Void]
+  std::ffi::c::callback(NAME)    FnPtr[...]  the C function pointer of the
+                                             `callback c fn` NAME, of its
+                                             declared C signature
+
+Callbacks (C-CALLBACK-MILESTONE-1.md). A top-level, environment-free
+function declared `callback c fn NAME(...) -> T:` with C types whose
+conversions are total (the C integer scalars, Bool, RawFloat, RawDouble,
+Ptr, FnPtr; for the result also Float64, C's double, and unit) and no errors
+has a C entry point; std::ffi::c::callback(NAME) is its address. C may call
+it during a call of a C function whose FnPtr parameter is declared noescape,
+synchronously, on that call's thread: it then runs in the Botlish execution
+environment waiting in the call. Anywhere else -- another thread, after the
+call returned, during a call whose contract does not let C call back -- the
+runtime refuses it before any Botlish code runs, and ends the process
+(NATIVE CALLBACK). Native backends only.
 
 A pointer is affine: binding, passing, returning or storing it moves it, and
 `p.clone()` is the one way to have two aliases. Affinity is not ownership: a
@@ -8887,13 +8947,14 @@ parameter metadata (a native's, and later an `extern c fn` declaration's).
 stdlib/ffi/c.bot (import std::ffi::c).
 
 == MEMBERS
+    std::ffi::c::callback          intrinsic -- The C function pointer of a...
     std::ffi::c::clone             intrinsic -- A second alias of a C point...
     std::ffi::c::erase             intrinsic -- The same address as a Ptr[s...
     std::ffi::c::null              intrinsic -- The null C pointer of point...
     std::ffi::c::null?             intrinsic -- Whether a C pointer (data o...
     std::ffi::c::retype            intrinsic -- The same address of a Ptr[s...
 
-Each member is a topic: -help NAME (e.g. -help std::ffi::c::clone).
+Each member is a topic: -help NAME (e.g. -help std::ffi::c::callback).
 
 == NOTES
 `import std::ffi::c` declares the C integer scalars (std::ffi::c::Char ...
@@ -16379,6 +16440,98 @@ stdlib/test.bot (import std::test).
     std::test::value               function (nomethod) -- BODY's value must...
 
 Each member is a topic: -help NAME (e.g. -help std::test::Erased).
+
+@topic stdlib.std::tree::Order
+title: std::tree::Order -- Enum of module std::tree
+summary: How a traversal orders a tree's nodes (std::tree::Order::DepthFirst, std::tree::Order::BreadthFirst).
+index: stdlib
+symbol: std::tree::Order
+related: stdlib.module.std::tree
+
+== DECLARATION
+    enum Order:
+        DepthFirst,
+        BreadthFirst,
+
+== MODULE
+stdlib/tree.bot: import std::tree, then write std::tree::Order.
+
+== DESCRIPTION
+How a traversal orders a tree's nodes (std::tree::Order::DepthFirst,
+std::tree::Order::BreadthFirst).
+
+@topic stdlib.std::tree::walk
+title: std::tree::walk -- Function (nomethod) of module std::tree
+summary: The nodes of ROOT, a tree struct's value, in ORDER
+index: stdlib
+symbol: std::tree::walk
+related: stdlib.module.std::tree
+
+== DECLARATION
+    nomethod fn walk(root, order: Order):
+
+== MODULE
+stdlib/tree.bot: import std::tree, then write std::tree::walk.
+
+== DESCRIPTION
+The nodes of ROOT, a tree struct's value, in ORDER: a coroutine handing over
+each node (each subtree, root included, once per occurrence) in turn, the
+last one its result. Start it with `coroutine {step, first} =
+std::tree::walk(root, order)`.
+
+@topic stdlib.module.std::tree
+title: std::tree -- standard namespace
+summary: Order and walk, the depth-first (preorder) and breadth-first traversal of tree struct values (TREE-STRUCT-MILESTONE-1.md).
+index: stdlib
+symbol: std::tree
+
+== DESCRIPTION
+A `tree struct` is a finite recursive value: an ordinary immutable struct
+whose one recursive field, its child field, is a List of values of its own
+type. `walk` traverses any tree struct's value by that field -- the
+declaration says which field it is, so no children callback is passed -- and
+is an ordinary coroutine whose every segment hands over one node: the
+subtree value itself, of the tree's own type, never a handle, a cursor or a
+reference into the tree.
+
+    coroutine {step, first} = std::tree::walk(root, std::tree::Order::BreadthFirst)
+    visit(first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        visit(step())
+
+A tree has at least one node, its root: the first segment hands over the
+first node, each resume the next, and the last node is the coroutine's
+result (std::coroutine::done? is true once it is handed over).
+
+  DepthFirst    preorder: a node, then each of its children's subtrees,
+                first child to last. A
+                                               ├─ B
+                                               │  ├─ D
+                                               │  └─ E
+                                               └─ C          is A B D E C.
+  BreadthFirst  every node at depth N before any at depth N + 1, and the
+                children of each node in their order: A B C D E.
+
+Neither recursion nor the host's stack bounds a tree: the depth-first walk
+keeps the nodes still to visit on an explicit stack (at most the depth times
+the widest node's child count), the breadth-first walk a queue of the
+frontier, whose visited prefix is dropped as it grows (at most about twice
+the widest level). A tree is a tree by construction, so neither walk keeps a
+visited set: two equal subtrees are two occurrences, visited twice.
+
+The child field is read by the internal std::tree::children (core/tree.tcl),
+which the compiler resolves to the field of the walked tree's own type.
+
+== SOURCE
+stdlib/tree.bot (import std::tree).
+
+== MEMBERS
+    std::tree::Order               enum -- How a traversal orders a tree's ...
+    std::tree::walk                function (nomethod) -- The nodes of ROOT...
+
+Each member is a topic: -help NAME (e.g. -help std::tree::Order).
 
 @topic stdlib.std::web::Emailish
 title: std::web::Emailish -- Type of module std::web

@@ -971,10 +971,26 @@ proc core::native::ValidShape {shape count} {
         # outward value of its segment, the resume message of a yield.
         return 1
     }
+    if {[lindex $shape 0] eq {callback-pointer}} {
+        # {callback-pointer I}: the result is the C function pointer of the
+        # `callback c fn` argument I names, a std::ffi::c::FnPtr of its
+        # declared C signature (std::ffi::c::callback,
+        # C-CALLBACK-MILESTONE-1.md), resolved by hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
+    }
     if {$shape eq {never}} {
         # {never}: the native never completes normally
         # (context#unreachable, core/contexts.tcl).
         return 1
+    }
+    if {[lindex $shape 0] eq {tree-children}} {
+        # {tree-children I}: the result is the child List of argument I, a
+        # tree struct's value -- its declaration's child field type for its
+        # application (std::tree::children, core/tree.tcl;
+        # TREE-STRUCT-MILESTONE-1.md), resolved by hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
     }
     if {[lindex $shape 0] eq {layout-struct}} {
         # {layout-struct I}: the result is a LayoutStruct[L] whose layout L

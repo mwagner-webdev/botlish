@@ -2155,9 +2155,10 @@ proc surface::modules::CheckInternal {state own ns span {member ""}} {
     if {$member ne "" && [core::native::isInternalMember "${ns}::$member"]
             && ($own eq "" || [dict exists $state application $own])} {
         # A standard library module's representation access for another
-        # standard library module (core::native::declareInternalMember).
+        # standard library module (core::native::declareInternalMember: a
+        # collection's table, a tree's child field).
         Error INTERNAL-NAMESPACE $span \
-            "\"${ns}::$member\" is internal to the standard library: it gives another standard library module the representation of a collection of \"$ns\", which only those modules may see ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one)"
+            "\"${ns}::$member\" is internal to the standard library: it gives the standard library's own modules a representation of \"$ns\" that only they may see ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one)"
     }
     if {![core::native::isInternalNamespace $ns]} {
         return

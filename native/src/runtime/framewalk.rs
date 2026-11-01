@@ -238,6 +238,29 @@ pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, visit: impl FnMut(*mu
     walk_from(map, current_fp(), stack, visit)
 }
 
+/// `walk` across the foreign transitions JUMPS (C-CALLBACK-MILESTONE-1.md,
+/// runtime::callback): a stack whose chain passes through C frames between
+/// two Botlish activations of the same execution environment -- a Botlish
+/// frame that called C, C that called a callback's entry point, the
+/// callback's Botlish frames. C's frames need not keep the frame-pointer
+/// chain (a C compiler omits frame pointers at will, and its frame-pointer
+/// register then holds any value), so the walk never reads one: each pair
+/// (ENTRY, TRANSITION) says that the frame record ENTRY -- the callback
+/// entry's own Rust frame, runtime::callback's `run` -- is followed not by
+/// its saved frame pointer but by TRANSITION, the frame record of the
+/// transition shim the Botlish caller called C through (codegen::callback).
+/// The shim is an ordinary callee of that Botlish frame, so its record's
+/// return address is the Botlish caller's call site, a safepoint whose
+/// roots the walk then finds exactly as for any other callee. Every frame
+/// between ENTRY and TRANSITION -- the callback's entry point, C's frames,
+/// the shim's call of C -- is skipped, never read. Pairs nest (a callback
+/// that calls C that calls back): each ENTRY is distinct, and each
+/// TRANSITION is above its ENTRY on the same stack.
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(windows)))]
+pub fn walk_segmented(map: &ProgramMap, stack: Option<&NativeStack>, jumps: &[(usize, usize)], visit: impl FnMut(*mut Value)) {
+    walk_from_segmented(map, current_fp(), stack, jumps, visit)
+}
+
 /// `walk`, starting at the frame record START instead of the current frame:
 /// a stack that is not running now -- a suspended coroutine's, or a running
 /// coroutine's resumer's (COROUTINES.md, runtime/coroutine.rs) -- whose chain
@@ -248,7 +271,13 @@ pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, visit: impl FnMut(*mu
 /// Without `NATIVE_FRAME_ROOTS` it walks nothing: no frame of this host is
 /// walkable, and none holds a root (the fallback plan).
 #[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(windows)))]
-pub fn walk_from(map: &ProgramMap, start: usize, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
+pub fn walk_from(map: &ProgramMap, start: usize, stack: Option<&NativeStack>, visit: impl FnMut(*mut Value)) {
+    walk_from_segmented(map, start, stack, &[], visit)
+}
+
+/// `walk_from` across the foreign transitions JUMPS (`walk_segmented`).
+#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(windows)))]
+pub fn walk_from_segmented(map: &ProgramMap, start: usize, stack: Option<&NativeStack>, jumps: &[(usize, usize)], mut visit: impl FnMut(*mut Value)) {
     if !NATIVE_FRAME_ROOTS {
         return;
     }
@@ -276,10 +305,16 @@ pub fn walk_from(map: &ProgramMap, start: usize, stack: Option<&NativeStack>, mu
             visit(root_addr as *mut Value);
         }
 
-        if saved_fp <= record {
+        // A callback's entry frame: the next Botlish frame is the one that
+        // called C, through its transition shim's record (walk_segmented).
+        let next = match jumps.iter().find(|&&(entry, _)| entry == record) {
+            Some(&(_, transition)) => transition,
+            None => saved_fp,
+        };
+        if next <= record {
             break;
         }
-        record = saved_fp;
+        record = next;
     }
 }
 
@@ -347,6 +382,18 @@ pub fn walk_from(map: &ProgramMap, start: windows::Frame, stack: Option<&NativeS
     }
     let mut context = windows::Context::at(start);
     windows::walk_context(map, &mut context, stack, windows::unwind_check(), &mut visit);
+}
+
+/// Windows makes no foreign transitions (C callbacks are refused there,
+/// runtime::callback's `SUPPORTED`): JUMPS is always empty.
+#[cfg(all(target_arch = "x86_64", windows))]
+pub fn walk_segmented(map: &ProgramMap, stack: Option<&NativeStack>, _jumps: &[(usize, usize)], visit: impl FnMut(*mut Value)) {
+    walk(map, stack, visit)
+}
+
+#[cfg(all(target_arch = "x86_64", windows))]
+pub fn walk_from_segmented(map: &ProgramMap, start: windows::Frame, stack: Option<&NativeStack>, _jumps: &[(usize, usize)], visit: impl FnMut(*mut Value)) {
+    walk_from(map, start, stack, visit)
 }
 
 #[cfg(all(target_arch = "x86_64", windows))]
@@ -603,6 +650,12 @@ pub mod windows {
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub fn walk_from(_map: &ProgramMap, _start: usize, _stack: Option<&NativeStack>, _visit: impl FnMut(*mut Value)) {}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn walk_from_segmented(_map: &ProgramMap, _start: usize, _stack: Option<&NativeStack>, _jumps: &[(usize, usize)], _visit: impl FnMut(*mut Value)) {}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn walk_segmented(_map: &ProgramMap, _stack: Option<&NativeStack>, _jumps: &[(usize, usize)], _visit: impl FnMut(*mut Value)) {}
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub fn walk(_map: &ProgramMap, _stack: Option<&NativeStack>, _visit: impl FnMut(*mut Value)) {

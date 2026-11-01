@@ -2668,6 +2668,67 @@ mutable-map, collection-reorder and trait harnesses (above) for a change to
 code they share, and the warning gate. `bench/value-identity.tcl`
 regenerates the performance report.
 
+## Tree structs and std::tree::walk
+
+A `tree struct NAME[SLOTS]:` (TREE-STRUCT-MILESTONE-1.md) is an ordinary
+immutable struct with exactly one recursive field, its *child field*, of
+type `List[Self]` (Self the declaration applied to its own slots in order):
+a finite rooted ordered tree value. The registry records the child field
+(`hir::structs::treeField`, the sourceTypes entry's and HIR text's `tree
+FIELD`), and everything that treats a tree specially reads that, never a
+field that happens to be recursive. Keep it so:
+
+* One shape: no second recursive field, no field of Self, no Self nested
+  deeper or inside another container, map, set, function type or another
+  application of the declaration, no mutual recursion (TREE-STRUCT-SHAPE);
+  never opaque, a context or an identity struct (TREE-STRUCT-COMBINATION);
+  never affine, also through an application (`Node[Coroutine...]`:
+  AFFINE-CONTAINER-UNSUPPORTED). A general recursive type stays an ordinary
+  `struct`'s (STRUCTS.md); never widen the tree shape to make one fit.
+* A tree is a value: no reference, node handle, node id, parent link,
+  pointer equality, mutation through a subtree or cycle, and nothing a
+  program does may observe how the runtimes hold the recursion (today a
+  struct object whose child List holds its children's objects: no arena).
+  Never let equality, a hash or a walk read an address, an allocation order
+  or a construction history.
+* ==, the public hash, the keyed table hash and the printer of a tree mean
+  exactly what they mean for any struct (the same comparisons in the same
+  order, the canonical input byte for byte, the same text) and walk the
+  topology with work stacks, never the host's recursion: core/value.tcl's
+  TreeEqual and TreeShow, core/hashing.tcl's TreeEncode, ops.rs's
+  `tree_equal` and `tree_walk` (the sinks' `open_nested`/`close_nested`),
+  show.rs's `tree_show`. The runtimes learn the child slot from the
+  registry (core::value's tree test) and the shape (NIR `tree=`,
+  `ShapeInfo::tree`, the program descriptor, format 3): never by a type's
+  name. Totality skips exactly the child field (hir::types::Totality).
+* std::tree::walk (stdlib/tree.bot) is ordinary Botlish: one function whose
+  every yield is its own, a preorder stack and a compacting breadth-first
+  queue, no visited set. It reads the child field through the internal
+  `std::tree::children` (core/tree.tcl: `-result-shape tree-children`,
+  declareInternalMember; a static `structget` natively, `treechildren` only
+  where no static type names the shape). Its nodes are typed as the tree's
+  own type because a coroutine construction takes its outward type from the
+  root call's semantic instance (hir::coroutines::InstanceOutward,
+  hir::semantic::ConstructionOutward): never give the walk a callback, a
+  cursor, a handle type or a trait view.
+
+If you change any of that (the grammar's `tree` modifier, hir/structs.tcl's
+tree section, `TreeChildrenProblem` or GenericLive's thunks, the tree cases
+of hir/types.tcl, HIR text, the runtimes' tree walks, core/tree.tcl,
+stdlib/tree.bot, the shape's `tree=`, the descriptor, or how a construction's
+outward type is computed), run `tests/tree-struct.test`, its golden suite
+(`tclsh9.0 tests/local.tcl tests/golden/tree-struct.bot`), `python3 -I
+audit/tree-struct/tools/oracle.py selftest`, `audit/tree-struct/tools/fuzz.tcl`
+(several seeds, once with `-gc-stress 1`), `audit/tree-struct/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule) and `cargo test --release --manifest-path native/Cargo.toml
+--lib -- tree deep_trees program`, plus `tests/coroutines.test`,
+`tests/semantic-instances.test` and `tests/structs.test` for a change to
+construction typing or generic liveness, and the Hashable and value-identity
+harnesses for a change to the hash walks. `bench/tree-struct.tcl` regenerates
+the performance report.
+
 ## Fixed binary layouts
 
 A `layout` (BINARY-LAYOUT.md) is a compile-time schema of a fixed number of
@@ -3239,6 +3300,71 @@ the shared startup. `audit/compiler-service/probes/export/run.sh` (the Tcl
 extension) and `audit/react-native/tools/host-spike.tcl` (Hermes) are the
 foreign-host probes; `audit/react-native/tools/libmode.tcl` is history and
 no longer runs.
+
+## C callbacks (callback c fn)
+
+`callback c fn NAME(PARAMS) -> T:` and `std::ffi::c::callback(NAME)`
+(C-CALLBACK-MILESTONE-1.md) are synchronous C callbacks: a top-level,
+environment-free function whose C signature's conversions are total,
+declaring no errors and never suspending (hir/callbacks.tcl), and its C
+function pointer -- the address of a C entry point the native backend emits
+for it (native/src/codegen/callback.rs). C may call it only during a call of
+a C function whose `FnPtr` parameter is noescape (`hir::foreign::CallsBack`,
+NIR's `callbacks=1`): every such call goes through a transition shim that
+records the waiting Botlish frame (`rt_ffi_open`, `rt_ffi_close`), and the
+callback runs nested in that execution environment
+(native/src/runtime/callback.rs). Keep it so:
+
+* The pointer selects no execution environment and grants no authority:
+  never create a Vm, actor, context or heap on callback entry, never run a
+  callback on a thread, stack or moment no open transition of the calling
+  thread permits (THREAD, INACTIVE, STACK are refused before any Botlish
+  code), and never treat retention as permission: a captures or unknown
+  `FnPtr` parameter is a retaining call (DIRECT) and no transition.
+  Retained registrations, context-bearing callbacks and worker-thread entry
+  are later milestones: never fake one with a transition.
+* Never read a C frame: the collector's walk jumps from the callback's
+  entry frame (`run`'s record) to the transition shim's
+  (`framewalk::walk_segmented`, `Vm::callback_segments`), whose return
+  address is the waiting Botlish frame's safepoint. Keep `ForeignCall` a
+  safepoint, `run` and the shim real frames (never inlined, always
+  calling), and the segment stack balanced (`rt_ffi_close` refuses a
+  stale one). The tests' C fixture calls the nesting callbacks with its
+  frame-pointer register holding no frame; keep it adversarial.
+* No Botlish error, panic or suspension crosses C, and no answer is made
+  up: a failure the front end cannot exclude ends the process after its
+  report (`Fatal::terminate`, `platform::report_fatal`), never returns a
+  value to C. Never add a fallback value, a host error channel or
+  unwinding through C.
+* Conversions are total by construction: a callback's parameters are C
+  integer scalars, Bool, RawFloat, RawDouble, Ptr, FnPtr (never a finite
+  Float or Double: CALLBACK-SIGNATURE), its result one of those, Float64 (C
+  double) or unit; raw values cross as their bits (bitcasts, never a
+  conversion instruction). No libffi, executable-memory trampoline or
+  run-time code generation: every entry point is a static function of the
+  program.
+* A callback's function is a root: its generic instance (open, its
+  declared contract) through specialization's `-exports`, kept by fusion's
+  dead-code elimination. Never let a caller's facts reach it.
+* Windows (its unwinder walk) and the fallback root plan refuse a callback
+  at run time (NATIVE CALLBACK UNSUPPORTED, `runtime::callback::SUPPORTED`);
+  never enable one there without a walk that crosses a transition.
+
+If you change any of that (hir/callbacks.tcl, `hir::foreign::CallsBack`,
+the callback-pointer shape, NIR's `callback`/`cbaddr`/`callbacks=1`,
+codegen/callback.rs, the shim's call in clif.rs's `foreign_call`,
+runtime/callback.rs, `walk_segmented`, `Vm::foreign_open` or
+`callback_segments`), run `tests/c-callbacks.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/c-callbacks.bot`), `cargo test --release --manifest-path
+native/Cargo.toml callback`, `audit/c-callbacks/tools/fuzz.tcl` (several
+seeds, once with `-gc-stress 1`) and `audit/c-callbacks/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus `tests/c-ffi.test`, `tests/native-library.test`,
+`tests/coroutines.test` and `tests/raw-c-float-ffi.test` for a change to
+code they share. `bench/c-callbacks.tcl` regenerates the performance table;
+`audit/c-callbacks/tools/raven-census.tcl` the Raven census.
 
 ## C FFI error capture
 

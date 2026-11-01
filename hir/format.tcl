@@ -21,7 +21,7 @@
 #   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
 #                                        staticRefs (hir::isModuleBinding)
 #                                        omitted when empty; then ?nomethod?,
-#                                        ?exported c?,
+#                                        ?exported c?, ?callback c?,
 #                                        ?variadic N?, ?places (N ...)?
 #                                        (PLACE-PARAMETERS.md),
 #                                        ?declares TYPE?, ?proves BINDING
@@ -260,6 +260,11 @@ proc hir::format::TypeDecl {entry} {
             # IDENTITY.md): "identity FORM(F1,F2) ", printed only for one.
             set identity [dict get $entry identity]
             append opaque "identity [dict get $identity form]([join [dict get $identity fields] ,]) "
+        }
+        if {[dict exists $entry tree]} {
+            # A tree struct (TREE-STRUCT-MILESTONE-1.md): "tree FIELD ", its
+            # child field, printed only for one.
+            append opaque "tree [dict get $entry tree] "
         }
         return "struct [dict get $entry id] name [dict get $entry name] ns [if {$ns eq ""} {string cat "-"} else {set ns}] ${opaque}fields [join $fields {, }]"
     }
@@ -532,6 +537,10 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict exists $node exported]} {
                 # A C export (NATIVE-LIBRARY-MILESTONE-1.md): its foreign ABI.
                 append text " exported [dict get $node exported]"
+            }
+            if {[dict exists $node callback]} {
+                # A C callback (C-CALLBACK-MILESTONE-1.md): its foreign ABI.
+                append text " callback [dict get $node callback]"
             }
             if {[dict exists $node variadic]} {
                 # A variadic function (VARIADICS-VERTICAL-SLICE-1.md): its

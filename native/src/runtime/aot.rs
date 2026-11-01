@@ -418,6 +418,14 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
         super::platform::OverflowGuard::install(&stack).expect("the stack-overflow guard")
     };
     let runs = std::env::var("BOTLISH_NATIVE_RUNS").ok().and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0);
+    // The allocation summary of a linked run (`botlish-native run --alloc
+    // summary` of a program that calls C: main.rs's run_linked): the
+    // runtime's own counters (runtime::metrics), on for this run only; the
+    // per-site attribution needs code of its own and is the JIT's alone.
+    let alloc = std::env::var_os("BOTLISH_NATIVE_ALLOC").is_some_and(|mode| mode == "summary");
+    if alloc {
+        vm.metrics = super::metrics::Metrics::new(AllocMode::Summary);
+    }
     let mut lines = Vec::new();
     let mut result = NO_VALUE;
     let mut nanos = Vec::new();
@@ -439,6 +447,9 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
         let compile = std::env::var("BOTLISH_NATIVE_COMPILE_US").unwrap_or_else(|_| "0".to_string());
         lines.push(format!("times {}", nanos.join(" ")));
         lines.push(format!("timing {compile} {best} {runs} {}", vm.heap.collections));
+    }
+    if alloc {
+        lines.push(format!("alloc {}", vm.metrics.to_tcl("")));
     }
     if result == NO_VALUE {
         let error = vm

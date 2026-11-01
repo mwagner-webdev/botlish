@@ -584,7 +584,7 @@ test sc-codes-one-to-one {items 20, 22: every DiagnosticCode case is the code of
             if {$case eq [join [lmap word [split $kind -] {string totitle $word}] ""]} continue
             list $kind $case
         }] [llength $cases]
-} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 114}
+} -cleanup {unset -nocomplain codes cases kinds values} -result {1 1 1 {} 118}
 
 # The census (STATIC-COMPILE.md, "Diagnostic-code census"): every diagnostic
 # kind the compiler's front end (hir/*.tcl, surface/modules.tcl, and the
@@ -605,7 +605,8 @@ set scCensus {
         DFA-ALPHABET DFA-AMBIGUOUS-TRANSITION DFA-BYTE-CHARACTER DFA-CALL-ALPHABET DFA-CALL-LOOKAHEAD
         DFA-DEAD-TRANSITION DFA-DUPLICATE DFA-EMPTY-RANGE DFA-END-CONSUMED DFA-MISSING-END DFA-NO-ACCEPT
         DFA-RECURSIVE-CALL DFA-UNKNOWN-CLASS DFA-UNKNOWN-DFA DFA-UNKNOWN-STATE DFA-UNREACHABLE-STATE
-        DFA-UNREAD-BEYOND-INPUT PRIVATE-TYPE-ESCAPE LINK-CONFLICT}
+        DFA-UNREAD-BEYOND-INPUT PRIVATE-TYPE-ESCAPE LINK-CONFLICT TREE-STRUCT-SHAPE TREE-STRUCT-COMBINATION}
+    stdlib-internal {TREE-OPERAND}
     top-level-install {CONTEXT-TYPE-NOT-EXACT DUPLICATE-CONTEXT}
     not-from-source {LISTLOOP-BREAK-VALUE}
     header {CYCLE DUPLICATE-IMPORT DUPLICATE-NATIVE INVALID-TOPLEVEL MODULE-COLLISION NOT-A-TYPE SELF-IMPORT RESERVED-NAMESPACE

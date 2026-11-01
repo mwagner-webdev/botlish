@@ -1,0 +1,329 @@
+# Mutants of synchronous C callbacks (audit/c-callbacks/tools/mutate.tcl;
+# C-CALLBACK-MILESTONE-1.md): each a deliberate bug in the front end's
+# checks (hir/callbacks.tcl, hir/foreign.tcl), native lowering, the C side
+# (native/src/codegen/callback.rs, clif.rs, fusion.rs) or the runtime
+# (native/src/runtime/callback.rs, vm.rs). The brief's mutants first
+# (section 13: root retention, convention, raw bits, activation, thread,
+# actor, rooting of suspended frames, result conversion, non-retention,
+# re-entry depth, error and yield propagation), then further ones.
+#
+#   @@ NAME DESCRIPTION
+#   %% TARGET ...            (optional: the hosts the mutant runs on)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# --- callback root retention during compilation ------------------------------
+
+@@ root-not-specialized a callback's function is no root of specialization: its generic instance is not made an open, used instance (it is whatever Botlish callers specialized, or nothing)
+## native/lower.tcl
+<<<<
+        -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
+            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]]]
+====
+        -exports [lmap export [dict get $options -exports] {dict get $export block}]]
+>>>>
+
+@@ root-dropped-by-fusion dead-code elimination after coroutine fusion keeps only what the program function and the exports reach: a callback's function, which only its entry point calls, is dropped
+## native/src/codegen/fusion.rs
+<<<<
+    work.extend(program.callbacks.iter().map(|c| c.func as usize));
+====
+>>>>
+
+# --- C calling-convention selection ------------------------------------------
+
+@@ entry-system-v-convention a callback's entry point takes System V's calling convention on every target, not the target triple's C convention (Win64 on Windows x86-64; Cranelift's default for a triple is its C convention, so dropping the selection alone changes nothing)
+## native/src/codegen/callback.rs
+<<<<
+    let mut sig = module.make_signature();
+    sig.call_conv = super::target::c_call_conv(module.isa().triple());
+    sig.params.extend(callback.params.iter().map(|&c| AbiParam::new(c_type(c))));
+====
+    let mut sig = module.make_signature();
+    sig.call_conv = cranelift_codegen::isa::CallConv::SystemV;
+    sig.params.extend(callback.params.iter().map(|&c| AbiParam::new(c_type(c))));
+>>>>
+
+@@ signed-char-argument-unsigned a signed char argument is read as unsigned (its low byte zero-extended): C's -128 reaches the callback as 128 (the entry point's own extension of a narrow argument is no mutant: the runtime reads only the argument's own bits)
+## native/src/runtime/callback.rs
+<<<<
+        CAbi::I8 => vm.new_int(word as u8 as i8 as i64),
+====
+        CAbi::I8 => vm.new_int(word as u8 as i64),
+>>>>
+
+# --- raw argument and result bit preservation --------------------------------
+
+@@ raw-float-argument-promoted a raw C float argument is widened to a double (fpromote) before its bits are stored: the bits a callback sees are a binary64's, a signaling NaN quieted
+## native/src/codegen/callback.rs
+<<<<
+                CAbi::F32 => {
+                    let bits = b.ins().bitcast(I32, MemFlagsData::new(), v);
+                    b.ins().uextend(I64, bits)
+                }
+====
+                CAbi::F32 => {
+                    let wide = b.ins().fpromote(F64, v);
+                    b.ins().bitcast(I64, MemFlagsData::new(), wide)
+                }
+>>>>
+
+@@ raw-result-through-double a raw C float result goes through a double (its bits read as a binary64, then narrowed): NaN payloads and signaling NaNs are not returned as they were
+## native/src/codegen/callback.rs
+<<<<
+                CAbi::F32 => {
+                    let bits = b.ins().ireduce(I32, word);
+                    b.ins().bitcast(F32, MemFlagsData::new(), bits)
+                }
+====
+                CAbi::F32 => {
+                    let wide = b.ins().bitcast(F64, MemFlagsData::new(), word);
+                    b.ins().fdemote(F32, wide)
+                }
+>>>>
+
+@@ raw-nan-canonicalized the runtime canonicalizes a raw double argument's NaN (every NaN becomes the default quiet NaN) before the callback sees it
+## native/src/runtime/callback.rs
+<<<<
+        CAbi::RawF64 => vm.new_raw_float(CFloatFormat::Binary64, word),
+====
+        CAbi::RawF64 => vm.new_raw_float(CFloatFormat::Binary64, if f64::from_bits(word).is_nan() { 0x7ff8000000000000 } else { word }),
+>>>>
+
+# --- execution activation restoration ----------------------------------------
+
+@@ activation-kept-after-call a foreign call that returned leaves its execution environment active: C may call a pointer it kept after the call
+## native/src/runtime/callback.rs
+<<<<
+    ACTIVE.with(|a| a.set(previous as *mut Vm));
+    // Every callback that entered through this transition has returned:
+====
+    let _ = previous;
+    // Every callback that entered through this transition has returned:
+>>>>
+
+@@ activation-lost-after-callback a callback's return leaves its transition inactive: a second callback during the same foreign call is refused
+## native/src/runtime/callback.rs
+<<<<
+    vm.callback_segments.pop();
+    ACTIVE.with(|a| a.set(p));
+====
+    vm.callback_segments.pop();
+>>>>
+
+@@ activation-kept-during-callback the execution environment stays active while the callback runs: a C call the callback makes that may not call back is no longer refused one
+## native/src/runtime/callback.rs
+<<<<
+    ACTIVE.with(|a| a.set(std::ptr::null_mut()));
+    vm.callback_segments.push((record, transition));
+====
+    vm.callback_segments.push((record, transition));
+>>>>
+
+# --- active-thread and active-actor verification -----------------------------
+
+@@ thread-unchecked a callback on a thread with no active execution environment runs in the environment that opened a transition last, on any thread
+## native/src/runtime/callback.rs
+<<<<
+static LAST_THREAD: AtomicUsize = AtomicUsize::new(0);
+====
+static LAST_THREAD: AtomicUsize = AtomicUsize::new(0);
+static ANY: std::sync::atomic::AtomicPtr<Vm> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+>>>>
+## native/src/runtime/callback.rs
+<<<<
+    let vm = unsafe { &mut *p };
+    vm.foreign_open.push(caller);
+====
+    let vm = unsafe { &mut *p };
+    vm.foreign_open.push(caller);
+    ANY.store(p, Ordering::Relaxed);
+>>>>
+## native/src/runtime/callback.rs
+<<<<
+    let p = ACTIVE.with(|a| a.get());
+    if !SUPPORTED {
+====
+    let p = ACTIVE.with(|a| a.get());
+    let p = if p.is_null() { ANY.load(Ordering::Relaxed) } else { p };
+    if !SUPPORTED {
+>>>>
+
+@@ actor-outermost-transition a callback enters through the outermost open transition of its execution environment, not the innermost: the collector's walk of a nested callback jumps past the frames of the callback that called C
+## native/src/runtime/callback.rs
+<<<<
+    let Some(&transition) = vm.foreign_open.last() else {
+====
+    let Some(&transition) = vm.foreign_open.first() else {
+>>>>
+
+@@ stack-unchecked a callback on another stack than its transition's runs: the collector's walk from its frames never reaches the waiting ones
+## native/src/runtime/callback.rs
+<<<<
+    if !on_stack {
+====
+    if !on_stack && false {
+>>>>
+
+# --- GC rooting of suspended Botlish frames ----------------------------------
+
+@@ walk-reads-c-frames the collector's walk of a callback follows the frame-pointer chain into C's frames instead of jumping to the transition's record
+## native/src/runtime/vm.rs
+<<<<
+        let jumps = &self.callback_segments;
+====
+        let jumps: &Vec<(usize, usize)> = &Vec::new();
+>>>>
+
+@@ foreign-call-not-safepoint a call of C is no safepoint: the waiting Botlish frame's values are in no stack map while a callback collects
+## native/src/codegen/clif.rs
+<<<<
+        let call = self.b.ins().call(r, &values);
+        self.mark_safepoint(call);
+        let returned = (decl.result != nir::CAbi::Void).then(|| self.b.inst_results(call)[0]);
+====
+        let call = self.b.ins().call(r, &values);
+        let returned = (decl.result != nir::CAbi::Void).then(|| self.b.inst_results(call)[0]);
+>>>>
+
+# --- callback argument and result conversion ---------------------------------
+
+@@ u64-argument-wrapped an unsigned 64-bit C argument above INT64_MAX is read as a negative Int (wrapped, not boxed)
+## native/src/runtime/callback.rs
+<<<<
+            if word <= i64::MAX as u64 {
+                vm.new_int(word as i64)
+====
+            if word <= u64::MAX {
+                vm.new_int(word as i64)
+>>>>
+
+@@ pointer-result-tagged a pointer result is returned as the Botlish C address word itself, tag and all, not the address it holds
+## native/src/runtime/callback.rs
+<<<<
+            Ok(cptr_address(v) as u64)
+====
+            Ok(v)
+>>>>
+
+@@ failure-returns-zero a callback that fails returns 0 to C instead of ending the process: a made-up answer C acts on
+## native/src/runtime/callback.rs
+<<<<
+        Ok(Err(fatal)) => fatal.terminate(),
+====
+        Ok(Err(_)) => {
+            // SAFETY: the caller's contract.
+            unsafe { *(out as *mut u64) = 0 };
+            0
+        }
+>>>>
+
+# --- non-retention enforcement -----------------------------------------------
+
+@@ no-transition-recorded no C call is a foreign transition (hir::foreign::CallsBack is never true): every callback is refused
+## hir/foreign.tcl
+<<<<
+        if {[hir::types::IsCFnPtr [dict get $param type]] && [dict exists $param escape]
+                && [core::cabi::isNoescape [dict get $param escape]]} {
+====
+        if {0 && [hir::types::IsCFnPtr [dict get $param type]] && [dict exists $param escape]
+                && [core::cabi::isNoescape [dict get $param escape]]} {
+>>>>
+
+@@ retention-is-transition a C function that may keep its function pointer (captures, unknown) is a transition too: retention is taken for permission to call back
+## hir/foreign.tcl
+<<<<
+        if {[hir::types::IsCFnPtr [dict get $param type]] && [dict exists $param escape]
+                && [core::cabi::isNoescape [dict get $param escape]]} {
+====
+        if {[hir::types::IsCFnPtr [dict get $param type]] && [dict exists $param escape]} {
+>>>>
+
+# --- re-entry depth handling -------------------------------------------------
+
+@@ segment-not-popped a callback's segment stays after the callback returns (the collector keeps a jump into frames that no longer exist)
+## native/src/runtime/callback.rs
+<<<<
+    vm.callback_segments.pop();
+    ACTIVE.with(|a| a.set(p));
+====
+    ACTIVE.with(|a| a.set(p));
+>>>>
+
+@@ transition-not-popped a foreign call's transition stays open after the call returns: a later callback enters through a frame record that no longer exists
+## native/src/runtime/callback.rs
+<<<<
+    let closed = vm.foreign_open.pop();
+====
+    let closed = vm.foreign_open.last().copied();
+>>>>
+
+# --- no error or suspension across C -----------------------------------------
+
+@@ declared-errors-admitted a callback may declare errors: one it raises would have to cross C
+## hir/callbacks.tcl
+<<<<
+    if {[dict getdef $node declaredErrors {}] ne {}} {
+====
+    if {0 && [dict getdef $node declaredErrors {}] ne {}} {
+>>>>
+
+@@ yield-admitted a callback may suspend: a yield would cross C
+## hir/callbacks.tcl
+<<<<
+    if {[hir::coroutines::MayYield $hir $e]} {
+        lappend problems [list CALLBACK-ENVIRONMENT "$what may suspend
+====
+    if {0 && [hir::coroutines::MayYield $hir $e]} {
+        lappend problems [list CALLBACK-ENVIRONMENT "$what may suspend
+>>>>
+
+# --- further front-end rules -------------------------------------------------
+
+@@ fallible-double-parameter a Float64 parameter (C double admitted as a finite number) is a callback parameter: C's NaN would fail before the body runs
+## hir/callbacks.tcl
+<<<<
+    if {$declared eq "Float64"} {
+        if {$position eq "result"} {
+====
+    if {$declared eq "Float64"} {
+        if {1} {
+>>>>
+
+@@ reference-unchecked std::ffi::c::callback of anything but a callback c fn is not diagnosed
+## hir/callbacks.tcl
+<<<<
+proc hir::callbacks::ReferenceProblem {hir arg} {
+    if {[Referenced $hir $arg] ne ""} {
+====
+proc hir::callbacks::ReferenceProblem {hir arg} {
+    if {1 || [Referenced $hir $arg] ne ""} {
+>>>>
+
+@@ context-admitted a callback may require a context: C would run it with none installed
+## hir/callbacks.tcl
+<<<<
+    set required [hir::contexts::required $hir $e]
+    if {$required ne {}} {
+        lappend problems [list CALLBACK-ENVIRONMENT
+====
+    set required [hir::contexts::required $hir $e]
+    if {0 && $required ne {}} {
+        lappend problems [list CALLBACK-ENVIRONMENT
+>>>>
+
+@@ capture-admitted a callback may capture a value: its entry point has no closure to give it
+## hir/callbacks.tcl
+<<<<
+    if {$values ne {}} {
+        lappend problems [list CALLBACK-ENVIRONMENT "$what captures
+====
+    if {0 && $values ne {}} {
+        lappend problems [list CALLBACK-ENVIRONMENT "$what captures
+>>>>

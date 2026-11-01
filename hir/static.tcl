@@ -227,6 +227,10 @@ namespace eval hir::static {
         ARITY                                    Arity
         BINARY-OPERAND                           BinaryOperand
         BREAK-OUTSIDE-LOOP                       BreakOutsideLoop
+        CALLBACK-ENVIRONMENT                     CallbackEnvironment
+        CALLBACK-PLACEMENT                       CallbackPlacement
+        CALLBACK-REFERENCE                       CallbackReference
+        CALLBACK-SIGNATURE                       CallbackSignature
         CONTEXT-BINDING-COLLISION                ContextBindingCollision
         CONTEXT-FUNCTION-VALUE                   ContextFunctionValue
         CONTEXT-INSTALLATION-UNSUPPORTED         ContextInstallationUnsupported

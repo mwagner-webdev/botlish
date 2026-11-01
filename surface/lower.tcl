@@ -65,6 +65,9 @@
 #   exported c fn f(a: T):  the same block marked `exported c`: a C export
 #                         of a native library (NATIVE-LIBRARY-MILESTONE-1.md;
 #                         hir/exports.tcl checks and lists them)
+#   callback c fn f(a: T):  the same block marked `callback c`: a function C
+#                         may call back through std::ffi::c::callback(f)
+#                         (C-CALLBACK-MILESTONE-1.md; hir/callbacks.tcl)
 #   nomethod fn f(a, b):  the same block marked `nomethod 1`: its author
 #                         declares that it is never the callee of method
 #                         syntax (WARNINGS-METHOD-ELIGIBLE.md)
@@ -314,6 +317,12 @@ proc surface::lower::StructDeclOf {node namespace} {
     if {[dict exists $node identity]} {
         # Its semantic identity, as written: hir/structs.tcl validates it.
         dict set decl identity [dict get $node identity]
+    }
+    if {[dict exists $node tree]} {
+        # A tree struct (TREE-STRUCT-MILESTONE-1.md): hir/structs.tcl finds
+        # and checks its one recursive field.
+        dict set decl tree 1
+        dict set decl treeSpan [dict get $node treeSpan]
     }
     return $decl
 }
@@ -909,6 +918,9 @@ proc surface::lower::Node {node} {
             }
             if {[dict getdef $node exported ""] ne ""} {
                 set block [hir::syntax::withExported $block [dict get $node exported]]
+            }
+            if {[dict getdef $node callback ""] ne ""} {
+                set block [hir::syntax::withCallback $block [dict get $node callback]]
             }
             if {$variadic ne ""} {
                 set block [hir::syntax::withVariadic $block \

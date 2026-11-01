@@ -772,6 +772,38 @@ stops with "hir::specialize: the fixpoint did not converge".
 Run the program with -backend cranelift-generic, which does not
 specialize, or on interp or compile. Report the program.
 
+@topic error.native-callback
+title: NATIVE CALLBACK: a C callback could not run, or failed
+summary: NATIVE CALLBACK ends the process when C calls a callback where nothing permits it (another thread, after the call), with an invalid value, or when the callback fails.
+index: errors backends
+alias: callback on another thread; callback after the call returned; callback failed; retained callback
+keywords: callback c fn, std::ffi::c::callback, FnPtr, noescape, thread, retained, fail-closed, C callback
+related: concept.c-callbacks error.native-address error.native-bool error.native-limit-stack
+docs: C-CALLBACK-MILESTONE-1.md
+code: NATIVE CALLBACK
+
+== MEANING
+Run time, native backends only. A callback runs only synchronously: in the
+Botlish execution environment that is waiting in a foreign call whose
+contract lets C call back (a std::ffi::c::FnPtr parameter declared
+noescape), on that call's thread and stack. Otherwise nothing runs and the
+process ends: NATIVE CALLBACK THREAD (another thread), NATIVE CALLBACK
+INACTIVE (no such call is in progress: C kept the pointer and called it
+later, or calls it during a call whose contract does not let it), NATIVE
+CALLBACK STACK (another stack). NATIVE CALLBACK ARGUMENT is a C value no
+Botlish value of the parameter's type is (a _Bool byte other than 0 or 1,
+an address a C pointer word cannot hold). NATIVE CALLBACK FAILED is a run-
+time failure of the callback's body (its own error code in the message):
+since C has no error channel, the failure is never turned into a value C
+receives. The report is the driver's result line, or the message on
+standard error of a standalone executable (exit status 1).
+
+== WHAT TO DO
+Declare a callback parameter noescape only for a C function that calls it
+during the call and keeps it no longer; a library that keeps a callback
+past the call is a retained registration, which this milestone does not
+provide. Handle failures inside the callback's body.
+
 @topic error.native-address
 title: NATIVE ADDRESS: a C function returned an address Botlish cannot hold
 summary: NATIVE ADDRESS stops a run when a C function's pointer result does not fit Botlish's C pointer word (a sign-extended 60-bit address): the pointer is never truncated or masked.

@@ -674,10 +674,10 @@ fn run_linked(
     snapshot: Option<Vec<Vec<u8>>>,
     link_dirs: &codegen::aot::LinkSearch,
 ) -> i32 {
-    if command == "batch" || alloc_mode.enabled() {
+    if command == "batch" || alloc_mode.sites() {
         emit_error(
             &["NATIVE", "UNSUPPORTED", "foreign"],
-            "a program that calls C runs as a linked executable: batch timing and allocation reports (--alloc) measure in-process JIT runs only",
+            "a program that calls C runs as a linked executable: batch timing and per-site allocation reports (--alloc sites) measure in-process JIT runs only (--alloc summary reports a linked run's counters)",
         );
         return 0;
     }
@@ -723,6 +723,7 @@ fn run_linked(
         ("BOTLISH_NATIVE_RESULT", Some(result.clone().into_os_string())),
         ("BOTLISH_NATIVE_COMPILE_US", Some(started.elapsed().as_micros().to_string().into())),
         ("BOTLISH_NATIVE_RUNS", (command == "bench").then(|| runs.to_string().into())),
+        ("BOTLISH_NATIVE_ALLOC", alloc_mode.enabled().then(|| "summary".into())),
     ];
     let status = match run_linked_executable(&executable, &argv, &environment) {
         Ok(status) => status,

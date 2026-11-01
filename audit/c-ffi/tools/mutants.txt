@@ -912,10 +912,10 @@ pub fn c_call_conv(triple: &Triple) -> CallConv {
 >>>>
 ## native/src/codegen/clif.rs
 <<<<
-        let r = if decl.variadic {
+        } else if decl.variadic {
             // This call's own signature, the callee the C function itself --
 ====
-        let r = if decl.variadic || va_stub_for(&*self.module, &signature).is_some() {
+        } else if decl.variadic || va_stub_for(&*self.module, &signature).is_some() {
             // This call's own signature, the callee the C function itself --
 >>>>
 

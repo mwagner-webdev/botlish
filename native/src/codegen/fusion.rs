@@ -217,11 +217,14 @@ pub fn fuse(program: &mut Program) -> Vec<SiteReport> {
 fn drop_unreferenced(program: &mut Program) {
     let n = program.functions.len();
     let mut reached = vec![false; n];
-    // The program function, and a native library's exports: the C host
-    // calls those through the library's export table, which no instruction
-    // refers to (NATIVE-LIBRARY-MILESTONE-1.md).
+    // The program function, a native library's exports and the program's
+    // callbacks: C calls those through entry points no instruction refers
+    // to (NATIVE-LIBRARY-MILESTONE-1.md, C-CALLBACK-MILESTONE-1.md).
     let mut work = vec![0usize];
     work.extend(program.exports.iter().map(|e| e.func as usize));
+    // A callback's function: C calls it through the callback's entry point
+    // (C-CALLBACK-MILESTONE-1.md), which no instruction calls either.
+    work.extend(program.callbacks.iter().map(|c| c.func as usize));
     for &i in &work {
         reached[i] = true;
     }
@@ -1013,6 +1016,7 @@ fn rename(inst: &Inst, reg: &dyn Fn(Reg) -> Reg, label: &dyn Fn(Label) -> Label)
         Inst::Unit { dst } => Inst::Unit { dst: reg(*dst) },
         Inst::Native { dst, native } => Inst::Native { dst: reg(*dst), native: *native },
         Inst::FnValue { dst, func } => Inst::FnValue { dst: reg(*dst), func: *func },
+        Inst::CallbackAddress { dst, callback } => Inst::CallbackAddress { dst: reg(*dst), callback: *callback },
         Inst::SelfClosure { dst } => Inst::SelfClosure { dst: reg(*dst) },
         Inst::Capture { dst, index } => Inst::Capture { dst: reg(*dst), index: *index },
         Inst::StaticGet { dst, index } => Inst::StaticGet { dst: reg(*dst), index: *index },

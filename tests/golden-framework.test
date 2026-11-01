@@ -819,7 +819,7 @@ test gf-code-name-complete {std::test::code_name spells every std::compiler::Dia
     set shown [gfValue "import std::compiler\nimport std::test\n\[$calls\]\n"]
     set expected "\[[join [lmap c $cases {format {"%s"} $c}] {, }]\]"
     list [llength $cases] [expr {$shown eq $expected}]
-} -result {114 1}
+} -result {118 1}
 
 # ---------------------------------------------------------------------------
 # GC stress and warnings

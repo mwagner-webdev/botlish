@@ -2503,7 +2503,16 @@ proc hir::types::Totality {operation type {seen {}}} {
                     }
                     return [Components $operation $parts [concat $seen [list $type]]]
                 }
+                set child [hir::structs::treeField $id]
                 foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+                    if {$name eq $child} {
+                        # A tree struct's child field (TREE-STRUCT-
+                        # MILESTONE-1.md) is a List of values of this very
+                        # application: it adds no requirement of its own,
+                        # so the tree is total exactly when its other
+                        # fields are (every tree is finite).
+                        continue
+                    }
                     lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
                 }
                 return [Components $operation $parts [concat $seen [list $type]]]
@@ -3231,6 +3240,18 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             return $result
         }
+        callback-pointer {
+            # std::ffi::c::callback(NAME) (core/cabi.tcl,
+            # C-CALLBACK-MILESTONE-1.md): the C function pointer of the
+            # `callback c fn` NAME names, of its declared C signature
+            # (hir/callbacks.tcl). Any other argument is CALLBACK-REFERENCE,
+            # and the call poison (hir::types::Call).
+            set block [hir::callbacks::Referenced $hir [lindex $argExprs [lindex $shape 1]]]
+            if {$block ne "" && [hir::callbacks::Typed $hir $block]} {
+                return [hir::callbacks::PointerType $hir $block]
+            }
+            return $result
+        }
         layout-struct {
             # std::binary::parse(L, data) (core/binary.tcl, BINARY-LAYOUT.md): a
             # LayoutStruct[L], L the layout argument I's descriptor
@@ -3486,6 +3507,28 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             # (An element read of MutableVector[never]: see
             # IterationElementOf.)
+            return $result
+        }
+        tree-children {
+            # std::tree::children(t) (core/tree.tcl, TREE-STRUCT-
+            # MILESTONE-1.md): the child List of a tree struct's value, the
+            # type of its declaration's child field for this application
+            # (List[Self]).
+            lassign $shape _ t
+            set tree [Unrefined [lindex $argTypes $t]]
+            if {[IsNamedStruct $tree]} {
+                set field [hir::structs::treeField [lindex $tree 1]]
+                if {$field ne ""} {
+                    return [hir::structs::AppliedFieldType $tree $field]
+                }
+            }
+            if {$tree eq "never" || [kindOf $tree] ni {"" struct}
+                    || ([IsNamedStruct $tree] && [hir::structs::declared [lindex $tree 1]])} {
+                # No value, or a value of a known type that is no tree
+                # struct's: the call never completes (TREE-OPERAND is its
+                # diagnostic, hir/structs.tcl's TreeChildrenProblem).
+                return never
+            }
             return $result
         }
         mutvec-to-list {
@@ -4060,15 +4103,18 @@ proc hir::types::Struct {hirVar ctxVar e} {
                     return [Poison hir $e]
                 }
             }
-            set problem [hir::structs::ApplicationProblem $type]
-            if {$problem ne ""} {
+            set issue [hir::structs::ApplicationIssue $type]
+            if {$issue ne ""} {
+                lassign $issue kind problem
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
                     dict set hir exprs $e structApplicationProblem $problem
+                    dict set hir exprs $e structApplicationKind $kind
                 }
                 return [Poison hir $e]
             }
             if {[dict exists $hir exprs $e structApplicationProblem]} {
                 dict unset hir exprs $e structApplicationProblem
+                dict unset hir exprs $e structApplicationKind
             }
             return $type
         }
@@ -4619,14 +4665,17 @@ proc hir::types::Call {hirVar ctxVar e} {
                             || ($shapeKind eq "native-element" && [hir::layouts::OfArrayType [lindex $argTypes 0]] eq "")
                             || ($shapeKind eq "layout-struct" && [hir::layouts::RoleOf [dict get $meta layout] op] eq "parse"
                                 && [LayoutParseRefused $hir $argExprs [dict get $meta resultShape]])
-                            || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]]))} {
+                            || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]])
+                            || ($shapeKind eq "callback-pointer" && ![IsCFnPtr $result]))} {
                     # std::binary::load of a value not statically a NativeView[L]
                     # (BINARY-OPERAND), or std::binary::parse of a native-only
                     # layout (LAYOUT-NATIVE-ONLY: hir::layouts::verify): no
                     # LayoutStruct is ever produced (NATIVE-LAYOUT-VIEWS.md).
                     # Nor of a union, or of anything holding one by value
                     # (LAYOUT-UNION), and std::binary::read never makes a pointer
-                    # or a union (LAYOUT-UNIONS.md).
+                    # or a union (LAYOUT-UNIONS.md). std::ffi::c::callback of
+                    # anything but a callback c fn makes no pointer
+                    # (CALLBACK-REFERENCE, hir/callbacks.tcl).
                     set result [Poison hir $e]
                 }
                 if {!$spec} {

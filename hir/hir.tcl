@@ -139,7 +139,11 @@
 #             exported (c, only on an `exported c fn`: a C export of a native
 #             library, NATIVE-LIBRARY-MILESTONE-1.md; printed by hir::format
 #             as `exported c`, read back by hir::parse; hir/exports.tcl
-#             checks and lists the exports)
+#             checks and lists the exports), callback (c, only on a
+#             `callback c fn`: a function C may call back synchronously
+#             through the function pointer std::ffi::c::callback makes of
+#             it, C-CALLBACK-MILESTONE-1.md; printed as `callback c`, read
+#             back by hir::parse; hir/callbacks.tcl checks and lists them)
 #   call      callee, args (ExprIds), target ("" | {native SymbolId} |
 #             {block ExprId}), known ("" | 1 | 0: result decided statically).
 #             A call written `receiver.name(args)` with a function `name`
@@ -1049,6 +1053,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::layouts::verify hir
     hir::semantic::verify hir
     hir::exports::verify hir
+    hir::callbacks::verify hir
     # {FROM TO}: the diagnostics at indices FROM to TO - 1 were reported
     # before the completion walk -- by resolution and the checks above --
     # and so are no contract-boundary report (hir::completions::Subsume),
@@ -1387,7 +1392,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methods declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

@@ -304,10 +304,11 @@ proc cpt::DeclarationKind {node} {
 # the members of an internal namespace (core::native::
 # declareInternalNamespace: the private table hash), which only the standard
 # library's own modules may call and which no reference documents as an API
-# (HASHABLE-AND-KEYED-HASH.md).
+# (HASHABLE-AND-KEYED-HASH.md), nor an internal member (core::native::
+# declareInternalMember: std::tree::children, TREE-STRUCT-MILESTONE-1.md).
 proc cpt::PublicNative {name} {
     return [expr {[string first # $name] < 0 && ![regexp {[a-z]-[a-z]} $name]
-        && ![core::native::isInternal $name]}]
+        && ![core::native::isInternal $name] && ![core::native::isInternalMember $name]}]
 }
 
 # The notes: compilerpedia/notes/stdlib.notes, in the topic format, by ID.
