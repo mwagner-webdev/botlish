@@ -478,14 +478,18 @@ value on all four backends.
 | bench/experimental/lex-strategy-fold.bot | 284,792 (-24.9%) | 59,525 |
 
 The other canonical benchmarks with an accumulator recursion were measured
-the same way, rewritten with a fold, and left out because the fold does
-not help them:
+the same way, rewritten with a fold:
 
 | program | canonical | fold version | |
 |---|---:|---:|---|
 | loop-count | 14,750 | 16,136 (+9.4%) | the count loop costs 3 more machine instructions per iteration than the self tail call: a separate latch block and a move per carried register, count-loop lowering rather than anything of the fold's |
 | refined-checks | 2,435,769 | 2,432,571 (-0.1%) | the harness is negligible next to the checks |
 | uri-steady | 25,839,741 | 25,835,738 (0.0%) | the harness is negligible next to the escaping |
+
+`bench/experimental/loop-count-fold.bot` is in the bench set too, as a
+variant that tracks the loop-count gap until the lowering closes it.
+refined-checks and uri-steady are left out: the fold makes no difference
+to them.
 
 `sum-refined` was not rewritten: its subject is the accumulator recursion
 itself (an `integer?(acc)` refinement and a closure over `n`).
@@ -731,6 +735,8 @@ bash audit/bench-bimodality/tools/profile.sh $V/lex-strategy-chars-folded/lex-st
 W=audit/fold-loops/workloads
 bash audit/fold-loops/tools/measure.sh -runs 60 -sizes "128 1024" $W/scanner-*.bot $W/chunks-*.bot
 tclsh9.0 audit/fold-loops/tools/economics.tcl $V/lex-strategy-chars-*/lex-strategy.bot $W/*.bot
-tclsh9.0 bench/bench.tcl bench/lex-strategy.bot bench/experimental/lex-strategy-fold.bot
+tclsh9.0 bench/bench.tcl bench/lex-strategy.bot bench/experimental/lex-strategy-fold.bot \
+    bench/loop-count.bot bench/experimental/loop-count-fold.bot
 bash audit/bench-bimodality/tools/profile.sh bench/experimental/lex-strategy-fold.bot 4 24
+bash audit/bench-bimodality/tools/profile.sh bench/experimental/loop-count-fold.bot 4 24
 ```

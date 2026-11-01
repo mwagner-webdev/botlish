@@ -1,0 +1,38 @@
+# loop-count-fold.bot -- EXPERIMENTAL: bench/loop-count.bot with its outer
+# recursion written as a fold (FOLD-LOOPS-MILESTONE-1.md).
+#
+# bench-variant-of: loop-count.bot
+#
+# The canonical program drives work(i) for i = 500 down to 1 by an outer
+# tail recursion carrying the total ("the language has no mutation"); here
+# the total is a fold's intermediate, over the same i in the same order.
+# work, the loop the benchmark is about, is unchanged.
+#
+# Kept to track a gap, not because the fold is faster: natively it runs
+# about 9% more instructions than the canonical program (16,136 against
+# 14,750 per run when it was added), about 3 machine instructions per
+# iteration. The work is the same in both (the range analysis decides
+# work's result in both); the counted loop's shape costs more than the self
+# tail call -- a latch block of its own and a move per carried register --
+# which is how counted loops lower, not anything of the fold's
+# (FOLD-LOOPS-MILESTONE-1.md, "In the bench set").
+#
+# Its reference programs are the canonical program's (bench/bench.tcl,
+# "Variants"), and its value is the canonical program's.
+#
+# expect: 3500
+
+fn work(i):
+    loop:
+        a = i * 3
+        b = a + 7
+        if b >= 0:
+            return b - a
+        else:
+            continue
+
+fn drive(n):
+    fold i down from n to 0 with intermediate total 0:
+        total + work(i)
+
+500.drive()

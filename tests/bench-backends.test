@@ -158,7 +158,7 @@ test bench-backends-7 {a variant names a canonical benchmark, has nothing of its
         }
     }
     list $variants $problems
-} -result {1 {}}
+} -result {2 {}}
 
 # A variant computes its canonical program's value: on the Tcl compiler
 # (bench.tcl runs every backend; the interpreter would make this test take a
