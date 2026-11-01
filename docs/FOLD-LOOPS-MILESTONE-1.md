@@ -458,6 +458,38 @@ at n=128: `[56, 117, 5556]`.
   extended could carry a plan, exactly as `CollectStart` does for a
   collecting loop and as plan parameters do for recursion.
 
+### In the bench set: `bench/experimental/lex-strategy-fold.bot`
+
+The fold version of the canonical benchmark is in the bench set as an
+experimental *variant* (`bench/bench.tcl`, "Variants"), not yet a
+canonical program. It is `bench/lex-strategy.bot` with its aggregations as
+folds: `valid_chars` carries the count through a token's characters,
+calling the classifier chosen at the `if`/`else` join for each one, in
+place of `classify`'s `List[bool]` and the `count_true` recursion, and
+`total_valid` carries the sum through the tokens. Everything else is the
+canonical program's, `chars_of`'s recursive construction included (a fold
+carrying that List would copy it on every append). Its reference columns
+run the canonical program's Python, Rust and Go, and it has the same
+value on all four backends.
+
+| program | instructions per run | `rt_construct` |
+|---|---:|---:|
+| bench/lex-strategy.bot | 378,986 | 98,861 |
+| bench/experimental/lex-strategy-fold.bot | 284,792 (-24.9%) | 59,525 |
+
+The other canonical benchmarks with an accumulator recursion were measured
+the same way, rewritten with a fold, and left out because the fold does
+not help them:
+
+| program | canonical | fold version | |
+|---|---:|---:|---|
+| loop-count | 14,750 | 16,136 (+9.4%) | the count loop costs 3 more machine instructions per iteration than the self tail call: a separate latch block and a move per carried register, count-loop lowering rather than anything of the fold's |
+| refined-checks | 2,435,769 | 2,432,571 (-0.1%) | the harness is negligible next to the checks |
+| uri-steady | 25,839,741 | 25,835,738 (0.0%) | the harness is negligible next to the escaping |
+
+`sum-refined` was not rewritten: its subject is the accumulator recursion
+itself (an `integer?(acc)` refinement and a closure over `n`).
+
 ### The acceptance criterion
 
 Scalar folding introduces no intermediate List construction, no
@@ -699,4 +731,6 @@ bash audit/bench-bimodality/tools/profile.sh $V/lex-strategy-chars-folded/lex-st
 W=audit/fold-loops/workloads
 bash audit/fold-loops/tools/measure.sh -runs 60 -sizes "128 1024" $W/scanner-*.bot $W/chunks-*.bot
 tclsh9.0 audit/fold-loops/tools/economics.tcl $V/lex-strategy-chars-*/lex-strategy.bot $W/*.bot
+tclsh9.0 bench/bench.tcl bench/lex-strategy.bot bench/experimental/lex-strategy-fold.bot
+bash audit/bench-bimodality/tools/profile.sh bench/experimental/lex-strategy-fold.bot 4 24
 ```

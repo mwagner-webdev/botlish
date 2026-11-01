@@ -386,7 +386,14 @@ lives beside its own modules elsewhere in the repository -- is
 naming those modules, which `bench/bench.tcl` stages beside it in a private
 directory; its reference programs are under `bench/experimental/
 equivalents/`, and it is reported in a table of its own that never fails
-the run (`bench/bench.tcl`'s header has the rules).
+the run (`bench/bench.tcl`'s header has the rules). An experimental
+program may instead be a *variant* of a canonical one -- the same
+computation written another way, kept beside it until it graduates
+(`bench/experimental/lex-strategy-fold.bot`, FOLD-LOOPS-MILESTONE-1.md):
+its `# bench-variant-of: NAME.bot` header names the canonical program, it
+has no modules and no reference programs of its own (its reference
+columns run the canonical program's), and it expects the canonical
+program's value (`tests/bench-backends.test`).
 
 ## Fresh structural baselines
 
