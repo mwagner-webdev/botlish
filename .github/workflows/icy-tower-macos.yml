@@ -80,6 +80,10 @@ on:
         description: "Also run the macOS integration's mutants (audit/icy-tower/macos-mutants.txt)"
         type: boolean
         default: false
+      mutants_only:
+        description: "With mutants: only these mutants (names, separated by spaces), and only their detectors' baselines"
+        type: string
+        default: ""
       resume_run:
         description: "Release only (a run on an icy-tower-macos-v* tag): the run whose notarization timed out"
         type: string
@@ -626,9 +630,13 @@ jobs:
         if: >-
           always() && steps.probes.outcome == 'success'
           && (contains(github.event.head_commit.message, '[ci-icy-tower-mutants]') || inputs.mutants)
+        env:
+          MUTANTS_ONLY: ${{ inputs.mutants_only }}
         run: |
+          if ! [[ ${MUTANTS_ONLY:-} =~ ^[a-z0-9\ -]*$ ]]; then echo "::error::mutants_only takes mutant names only"; exit 1; fi
+          read -r -a only <<<"${MUTANTS_ONLY:-}"
           tclsh9.0 audit/icy-tower/mutate.tcl -macos 1 -app "$APP" -binding out/sdl3-binding -prefix "$PREFIX" \
-            -helper "$RUNNER_TEMP/macos-input" 2>&1 | tee out/logs/mutants.log
+            -helper "$RUNNER_TEMP/macos-input" "${only[@]}" 2>&1 | tee out/logs/mutants.log
 
       - name: Measurements
         if: always() && steps.build.outcome == 'success'

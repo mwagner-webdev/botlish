@@ -121,7 +121,8 @@ proc icymacos::detect {ctx name detector tree binding} {
                 # launched through LaunchServices.
                 set cases [split [string range $detector 4 end] ,]
                 set game [file join $tree examples games icy-tower]
-                set apps [file join $work app-$name]
+                # (under the apps root, outside the temporary directory: see main)
+                set apps [file join [dict get $ctx apps] app-$name]
                 lassign [run [list bash [file join $game package-macos.sh] $exe $apps --bundle-id org.botlish.examples.icy-tower.mutant \
                     --version 0.0.0 --build 0.0.0 --sdl3-license [file join [dict get $ctx sdlsrc] LICENSE.txt]]] status output
                 if {$status} { return [list fail "package-macos.sh: [string range $output end-600 end]"] }
@@ -205,7 +206,14 @@ proc icymacos::main {root here options names} {
         if {[dict get $options $k] eq ""} { error "mutate.tcl -macos 1 needs $k" }
     }
     set work [file tempdir botlish-icy-tower-macos-mutate]
-    set ctx [dict create root $root work $work app [file normalize [dict get $options -app]] \
+    # The app detectors' bundles live under the home directory, not the
+    # temporary one: LaunchServices' lookup by identifier found no bundle
+    # registered under /var/folders (app-bundle's baseline, run
+    # 41245041656), while it finds the session's in the workspace every run.
+    # A private name ([pid]), removed with the work directory.
+    set apps [file join [file normalize ~] botlish-icy-tower-mutant-apps-[pid]]
+    file mkdir $apps
+    set ctx [dict create root $root work $work apps $apps app [file normalize [dict get $options -app]] \
         binding [file normalize [dict get $options -binding]] prefix [file normalize [dict get $options -prefix]] \
         helper [file normalize [dict get $options -helper]]]
     set fetched [exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] fetch sdl3]
@@ -229,8 +237,12 @@ proc icymacos::main {root here options names} {
         exec [file join [dict get $ctx app] Contents MacOS botlish] -warnings error -emit-native-executable [file join $wstage main-macos.bot]
         file rename [file join $wstage main-macos] $worker
         dict set ctx worker $worker
-        # The baseline: every detector the mutants use holds for the unmutated game.
-        set used [lsort -unique [lmap {n d} $detectors {lindex $d 0}]]
+        # The baseline: every detector the mutants use (the NAMEs', when
+        # some are given) holds for the unmutated game.
+        set used [lsort -unique [lmap {n d} $detectors {
+            if {$names ne {} && $n ni $names} continue
+            lindex $d 0
+        }]]
         foreach detector $used {
             lassign [detect $ctx baseline-[string map {: - , -} $detector] $detector $baseline [dict get $ctx binding]] verdict text
             puts [format "%-28s %s" "baseline $detector" $verdict]
@@ -304,7 +316,7 @@ proc icymacos::main {root here options names} {
         }
         puts "$killed of $total mutants killed"
     } finally {
-        file delete -force $work
+        file delete -force $work $apps
     }
     return $exit
 }
