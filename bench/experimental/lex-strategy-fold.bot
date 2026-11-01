@@ -1,0 +1,76 @@
+# lex-strategy-fold.bot -- EXPERIMENTAL: bench/lex-strategy.bot with its
+# aggregations written as folds (FOLD-LOOPS-MILESTONE-1.md), everything else
+# unchanged.
+#
+# bench-variant-of: lex-strategy.bot
+#
+# The canonical program counts a token's accepted characters by building a
+# List[bool] (classify's collecting loop) and counting it with a
+# hand-written tail recursion (count_true), and sums the tokens' counts with
+# another (total_valid). Here both are folds: valid_chars carries the count
+# through the token's characters, calling the classifier chosen at the
+# if/else join for each one (no List[bool]), and total_valid carries the sum
+# through the tokens. Neither indexes a List any more, so neither declares
+# IndexNotFound.
+#
+# Unchanged, so the comparison is about the aggregation alone: the callable
+# chosen between a root native and an ordinary function at a control-flow
+# join (choose_classifier, the canonical program's subject), chars_of's
+# recursive construction of a token's one-character Strings (construction,
+# not aggregation: a fold would carry the List and copy it on every append,
+# FOLD-LOOPS-MILESTONE-1.md's "What remains inefficient"), fully_alnum?'s
+# std::list::all? and the collecting loop of alnum_only_tokens, which builds
+# a List the program reads.
+#
+# Its reference programs are the canonical program's (bench/bench.tcl,
+# "Variants"), and its value is the canonical program's.
+#
+# expect: [58, 65, 1, "café"]
+
+import std::list
+import std::str
+
+fn lenient_ident_char?(c):
+    std::str::is_tcl_alnum(c) or c == "_" or c == "-"
+
+fn choose_classifier(strict_mode):
+    if strict_mode:
+        std::str::is_tcl_alnum
+    else:
+        lenient_ident_char?
+
+fn chars_of(s, i, acc):
+    if i < 0 or i >= std::str::length(s):
+        return acc
+    s.chars_of(i + 1, acc.append(s.substring(i, i + 1)))
+
+fn valid_chars(token, strict_mode):
+    classifier = choose_classifier(strict_mode)
+    fold c in token.chars_of(0, []) with intermediate n 0:
+        if classifier(c):
+            n + 1
+        else:
+            n
+
+fn fully_alnum?(token):
+    token.chars_of(0, []).all?(std::str::is_tcl_alnum)
+
+tokens = ["emailish?", "scan_while", "local-part", "tld-check", "x_1", "9bad-name", "café", "is_tcl_alpha"]
+
+fn total_valid(tokens, strict_mode):
+    fold token in tokens with intermediate total 0:
+        total + token.valid_chars(strict_mode)
+
+strict_total = tokens.total_valid(true)
+relaxed_total = tokens.total_valid(false)
+
+alnum_only_tokens = loop token in tokens:
+    if not fully_alnum?(token):
+        continue
+    token
+
+first_alnum = alnum_only_tokens.at(0):
+    on IndexNotFound:
+        ""
+
+[strict_total, relaxed_total, std::list::length(alnum_only_tokens), first_alnum]

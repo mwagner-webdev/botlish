@@ -9,6 +9,7 @@
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot bench backends.tcl]
+source [file join $::projectRoot surface surface.tcl]
 
 test bench-backends-1 {Tcl compile is labeled distinctly from Cranelift, and neither label says "native" or "compile" bare} -body {
     set compile [bench::backends::displayName compile]
@@ -35,14 +36,51 @@ test bench-backends-4 {the manifest names and describes every requested backend,
         [string match -nocase "*JIT compile time excluded*" $manifest]
 } -result {1 1 1}
 
+# The trimmed "# ..." header lines of the benchmark at PATH.
+proc benchHeader {path} {
+    set header {}
+    foreach line [split [core::ReadFile $path] \n] {
+        if {![string match "#*" $line]} {
+            break
+        }
+        lappend header [string trim [string range $line 1 end]]
+    }
+    return $header
+}
+
+# The value a benchmark's header documents ("expect: V"), or "".
+proc benchExpect {header} {
+    foreach line $header {
+        if {[regexp {^expect:\s*(.*)$} $line -> value]} {
+            return [string trim $value]
+        }
+    }
+    return ""
+}
+
+# The canonical program a benchmark's header names ("bench-variant-of:
+# NAME.bot"), or "".
+proc benchVariantOf {header} {
+    foreach line $header {
+        if {[regexp {^bench-variant-of:\s*(\S+)\s*$} $line -> name]} {
+            return $name
+        }
+    }
+    return ""
+}
+
 # Every benchmark, canonical (bench/*.bot) and experimental
 # (bench/experimental/*.bot), has a reference program in each of Python,
 # Rust and Go beside it (bench/bench.tcl's reference columns), so no
-# benchmark is Botlish-only.
+# benchmark is Botlish-only. A variant's are its canonical program's
+# (bench-backends-7).
 test bench-backends-5 {every benchmark has a Python, a Rust and a Go reference program} -body {
     set missing {}
     foreach {programs equivalents} {bench {bench equivalents} {bench experimental} {bench experimental equivalents}} {
         foreach path [lsort [glob -directory [file join $::projectRoot {*}$programs] *.bot]] {
+            if {[benchVariantOf [benchHeader $path]] ne ""} {
+                continue
+            }
             set base [string map {- _} [file rootname [file tail $path]]]
             foreach {language extension} {python py rust rs go go} {
                 if {![file exists [file join $::projectRoot {*}$equivalents $language $base.$extension]]} {
@@ -57,17 +95,12 @@ test bench-backends-5 {every benchmark has a Python, a Rust and a Go reference p
 # Every experimental benchmark documents its value ("# expect:"), the value
 # its reference programs are ported to produce and bench.tcl checks every
 # column against, and every module it is staged beside ("# bench-modules:")
-# exists outside bench/.
+# exists outside bench/. One that is not a variant (bench-backends-7) has
+# modules.
 test bench-backends-6 {every experimental benchmark has an expectation and every module it is staged beside exists} -body {
     set problems {}
     foreach path [lsort [glob -directory [file join $::projectRoot bench experimental] *.bot]] {
-        set header {}
-        foreach line [split [core::ReadFile $path] \n] {
-            if {![string match "#*" $line]} {
-                break
-            }
-            lappend header [string trim [string range $line 1 end]]
-        }
+        set header [benchHeader $path]
         if {![llength [lsearch -all -glob $header "expect: *"]]} {
             lappend problems "[file tail $path]: no expect"
         }
@@ -75,13 +108,80 @@ test bench-backends-6 {every experimental benchmark has an expectation and every
         foreach line [lsearch -all -inline -glob $header "bench-modules:*"] {
             lappend modules {*}[lrange $line 1 end]
         }
-        if {![llength $modules]} {
+        if {![llength $modules] && [benchVariantOf $header] eq ""} {
             lappend problems "[file tail $path]: no bench-modules"
         }
         foreach module $modules {
             if {![file isfile [file join $::projectRoot $module]] || [string match bench/* $module]} {
                 lappend problems "[file tail $path]: $module"
             }
+        }
+    }
+    set problems
+} -result {}
+
+# A variant (bench/bench.tcl, "Variants") is an experimental program that
+# computes what a canonical one computes, another way: it names an existing
+# canonical program, has no modules and no reference programs of its own
+# (its reference columns run the canonical program's, which
+# bench-backends-5 requires), and documents the canonical program's value.
+# A canonical program without an "# expect:" is held to its variant's by
+# running both (bench-backends-8).
+test bench-backends-7 {a variant names a canonical benchmark, has nothing of its own to stage or compare with, and expects the canonical value} -body {
+    set problems {}
+    set variants 0
+    foreach path [lsort [glob -directory [file join $::projectRoot bench experimental] *.bot]] {
+        set header [benchHeader $path]
+        set canonical [benchVariantOf $header]
+        if {$canonical eq ""} {
+            continue
+        }
+        incr variants
+        set name [file tail $path]
+        set canonicalPath [file join $::projectRoot bench $canonical]
+        if {[file extension $canonical] ne ".bot" || [file dirname $canonical] ne "." || ![file isfile $canonicalPath]} {
+            lappend problems "$name: no canonical benchmark bench/$canonical"
+            continue
+        }
+        if {[llength [lsearch -all -glob $header "bench-modules:*"]]} {
+            lappend problems "$name: a variant with bench-modules"
+        }
+        set base [string map {- _} [file rootname $name]]
+        foreach {language extension} {python py rust rs go go} {
+            if {[file exists [file join $::projectRoot bench experimental equivalents $language $base.$extension]]} {
+                lappend problems "$name: a $language reference program of its own"
+            }
+        }
+        set expected [benchExpect [benchHeader $canonicalPath]]
+        if {$expected ne "" && [benchExpect $header] ne $expected} {
+            lappend problems "$name: expects [benchExpect $header], $canonical $expected"
+        }
+    }
+    list $variants $problems
+} -result {1 {}}
+
+# A variant computes its canonical program's value: on the Tcl compiler
+# (bench.tcl runs every backend; the interpreter would make this test take a
+# minute and a half), the two programs' values are equal and are the
+# variant's expectation (which also holds a canonical program that documents
+# none to its value).
+test bench-backends-8 {every variant's value is its canonical benchmark's} -body {
+    core::useProgramRecursionLimit
+    set problems {}
+    foreach path [lsort [glob -directory [file join $::projectRoot bench experimental] *.bot]] {
+        set header [benchHeader $path]
+        set canonical [benchVariantOf $header]
+        if {$canonical eq ""} {
+            continue
+        }
+        set values {}
+        foreach program [list [file join $::projectRoot bench $canonical] $path] {
+            set hir [surface::readProgramFile $program -warnings off]
+            lappend values [core::value::show [core::compiler::evalHir $hir] 1]
+        }
+        lassign $values canonicalValue variantValue
+        if {$variantValue ne $canonicalValue || $variantValue ne [benchExpect $header]} {
+            lappend problems "[file tail $path]: $variantValue, $canonical $canonicalValue, expected [benchExpect $header]"
         }
     }
     set problems

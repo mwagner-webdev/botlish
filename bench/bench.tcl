@@ -66,6 +66,18 @@
 # so the modules stay the originals. -experimental 0 leaves them out, only
 # runs nothing else.
 #
+# Variants
+# --------
+# An experimental program may instead be a variant of a canonical one: the
+# same computation written another way, kept beside the canonical program
+# until it graduates (a new construct's version, say: FOLD-LOOPS-
+# MILESTONE-1.md's folds). A "# bench-variant-of: NAME.bot" line names the
+# canonical program (bench/NAME.bot). A variant has no modules and no
+# reference programs of its own: its reference columns run the canonical
+# program's (bench/equivalents/LANGUAGE/BASE of NAME), and its "# expect:"
+# is the canonical program's value (tests/bench-backends.test checks both),
+# so a variant's row compares with its canonical row and with the same Go.
+#
 # Cells and the exit status
 # -------------------------
 # A cell is a time, or says why it is not:
@@ -195,6 +207,17 @@ proc benchModules {path} {
         }
     }
     return $modules
+}
+
+# The canonical program (a file name in bench/) the program at PATH is a
+# variant of ("# bench-variant-of: NAME.bot"), or "".
+proc variantOf {path} {
+    foreach line [headerLines $path] {
+        if {[regexp {^bench-variant-of:\s*(\S+)\s*$} $line -> name]} {
+            return $name
+        }
+    }
+    return ""
 }
 
 # VALUE shortened for a table cell.
@@ -621,6 +644,14 @@ foreach path [discover] {
     set equivalents [expr {$isExperimental
         ? [file join $root bench experimental equivalents]
         : [file join $root bench equivalents]}]
+    set equivalentsTag [expr {$isExperimental ? "experimental" : "canonical"}]
+    set variant [variantOf $path]
+    if {$isExperimental && $variant ne ""} {
+        # A variant's reference programs are its canonical program's.
+        set base [string map {- _} [file rootname $variant]]
+        set equivalents [file join $root bench equivalents]
+        set equivalentsTag canonical
+    }
     puts stderr "bench: $name"
 
     set results [dict create]
@@ -635,7 +666,7 @@ foreach path [discover] {
     }
     foreach column $foreignColumns {
         if {$column in $columns} {
-            dict set results $column [runEquivalent $column $equivalents [expr {$isExperimental ? "experimental" : "canonical"}] $base]
+            dict set results $column [runEquivalent $column $equivalents $equivalentsTag $base]
         }
     }
 
