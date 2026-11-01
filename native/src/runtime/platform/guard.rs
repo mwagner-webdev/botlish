@@ -160,6 +160,33 @@ fn report_overflow() -> ! {
     unsafe { libc::_exit(if executable { 1 } else { 0 }) }
 }
 
+/// Writes the fatal report of a run that cannot go on and ends the process
+/// (C-CALLBACK-MILESTONE-1.md: a callback C called that failed, or that ran
+/// where no execution environment permits it): RESULT, the driver's result
+/// line, to the result file with exit status 0 while the driver's guard is
+/// installed (its result, as the overflow line is); else LINE on standard
+/// error with exit status 1 (a standalone executable, a native library's
+/// host). Only write(2) and _exit(2): it runs inside C's frames, whose
+/// locks atexit handlers or stdio might need, and never returns to them.
+pub fn report_fatal(result: &[u8], line: &[u8]) -> ! {
+    let guarded = !matches!(GUARDED.load(Ordering::Relaxed), UNGUARDED | BUSY);
+    let driver = guarded && !EXECUTABLE.load(Ordering::Relaxed);
+    let (fd, mut rest) = if driver { (RESULT_FD.load(Ordering::Relaxed), result) } else { (libc::STDERR_FILENO, line) };
+    while !rest.is_empty() {
+        // SAFETY: write(2) of a live buffer.
+        let written = unsafe { libc::write(fd, rest.as_ptr().cast(), rest.len()) };
+        if written > 0 {
+            rest = &rest[written as usize..];
+        } else if written < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+            continue;
+        } else {
+            break;
+        }
+    }
+    // SAFETY: _exit(2) has no preconditions.
+    unsafe { libc::_exit(if driver { 0 } else { 1 }) }
+}
+
 /// The si_code values of a fault an instruction raised, which POSIX names
 /// and Linux (asm-generic/siginfo.h) and Darwin (sys/signal.h) number alike.
 const SEGV_MAPERR: libc::c_int = 1;

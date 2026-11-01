@@ -4887,9 +4887,9 @@ related: stdlib.module.std::compiler
         Arity,
         BinaryOperand,
         BreakOutsideLoop,
-        ContextBindingCollision,
-        ContextFunctionValue,
-        ContextInstallationUnsupported,
+        CallbackEnvironment,
+        CallbackPlacement,
+        CallbackReference,
 
 == MODULE
 stdlib/compiler.bot: import std::compiler, then write
@@ -8586,6 +8586,51 @@ std::event_loop::deterministic).
 Each member is a topic: -help NAME (e.g. -help
 std::event_loop::deterministic::Deterministic).
 
+@topic stdlib.std::ffi::c::callback
+title: std::ffi::c::callback -- intrinsic of namespace std::ffi::c
+summary: The C function pointer of a `callback c fn`, by name: a std::ffi::c::FnPtr of its declared C signature, whose calls run the function in the Botlish execution environment waiting in a foreign call.
+index: stdlib
+symbol: std::ffi::c::callback
+keywords: function pointer; C callback; FnPtr of a function; callback address
+related: stdlib.module.std::ffi::c concept.c-callbacks error.callback-reference stdlib.std::ffi::c::null?
+
+== SIGNATURE
+    std::ffi::c::callback(any) -> cptr
+
+== USE
+An intrinsic of namespace std::ffi::c: import std::ffi::c, then write
+std::ffi::c::callback. Method syntax: receiver.callback(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The argument is the name of a top-level `callback c fn` (CALLBACK-REFERENCE
+otherwise), and the operation is only called, never a value. The pointer is
+affine, like every C pointer: bind it, then pass it to a C function whose
+FnPtr parameter is declared noescape -- C may call it only while such a
+call runs (NATIVE CALLBACK otherwise). Native backends only: the Tcl
+backends refuse it at run time (NATIVE-ONLY).
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+
+callback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    0
+
+fn pointer():
+    cb = std::ffi::c::callback(decide)
+    cb.null?()
+
+decide(4)
+@caption The pointer is made where it is passed to C
+@value 1
+@end
+
 @topic stdlib.std::ffi::c::clone
 title: std::ffi::c::clone -- intrinsic of namespace std::ffi::c
 summary: A second alias of a C pointer (the same address, the same type), written p.clone(): the one way to have two pointers.
@@ -8773,9 +8818,9 @@ related: concept.c-ffi concept.affine
 
 == DESCRIPTION
 These are the values a C boundary carries, modeled as C's ABI sees them, not
-as C's source language spells them. Nothing here calls C yet: there is no
-`extern c fn`, no linking and no callback (C-ABI-TYPES.md, "What is not
-here").
+as C's source language spells them. Nothing here calls C: C calls are
+`extern c fn` declarations (C-FFI.md), and C calling Botlish back is a
+`callback c fn` (C-CALLBACK-MILESTONE-1.md, below).
 
 C integer scalars (intrinsic types of this namespace):
 
@@ -8853,6 +8898,21 @@ Pointers (intrinsic types and operations of this namespace):
   std::ffi::c::clone(p)          p's type    a second alias of p (p.clone())
   std::ffi::c::erase(p)          Ptr[Void]   the same address as void *
   std::ffi::c::retype[T](p)      Ptr[T]      the same address of a Ptr[Void]
+  std::ffi::c::callback(NAME)    FnPtr[...]  the C function pointer of the
+                                             `callback c fn` NAME, of its
+                                             declared C signature
+
+Callbacks (C-CALLBACK-MILESTONE-1.md). A top-level, environment-free
+function declared `callback c fn NAME(...) -> T:` with C types whose
+conversions are total (the C integer scalars, Bool, RawFloat, RawDouble,
+Ptr, FnPtr; for the result also Float64, C's double, and unit) and no errors
+has a C entry point; std::ffi::c::callback(NAME) is its address. C may call
+it during a call of a C function whose FnPtr parameter is declared noescape,
+synchronously, on that call's thread: it then runs in the Botlish execution
+environment waiting in the call. Anywhere else -- another thread, after the
+call returned, during a call whose contract does not let C call back -- the
+runtime refuses it before any Botlish code runs, and ends the process
+(NATIVE CALLBACK). Native backends only.
 
 A pointer is affine: binding, passing, returning or storing it moves it, and
 `p.clone()` is the one way to have two aliases. Affinity is not ownership: a
@@ -8887,13 +8947,14 @@ parameter metadata (a native's, and later an `extern c fn` declaration's).
 stdlib/ffi/c.bot (import std::ffi::c).
 
 == MEMBERS
+    std::ffi::c::callback          intrinsic -- The C function pointer of a...
     std::ffi::c::clone             intrinsic -- A second alias of a C point...
     std::ffi::c::erase             intrinsic -- The same address as a Ptr[s...
     std::ffi::c::null              intrinsic -- The null C pointer of point...
     std::ffi::c::null?             intrinsic -- Whether a C pointer (data o...
     std::ffi::c::retype            intrinsic -- The same address of a Ptr[s...
 
-Each member is a topic: -help NAME (e.g. -help std::ffi::c::clone).
+Each member is a topic: -help NAME (e.g. -help std::ffi::c::callback).
 
 == NOTES
 `import std::ffi::c` declares the C integer scalars (std::ffi::c::Char ...

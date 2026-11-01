@@ -4737,6 +4737,63 @@ fn say(text: str) -> int:
 DIRECT-MODULES.md; `botlish -direct FILE` prints each module's
 directness.
 
+@topic concept.c-callbacks
+title: C callbacks: `callback c fn` and std::ffi::c::callback
+summary: A `callback c fn` is a Botlish function C may call back synchronously, through std::ffi::c::callback(NAME), during a foreign call whose FnPtr parameter is noescape.
+index: concepts
+alias: C callback; callback c fn; function pointer from Botlish; C calls back into Botlish; qsort comparator
+keywords: callback, FnPtr, std::ffi::c::callback, noescape, synchronous, re-entry, RawDouble, RawFloat, thread, retained
+related: concept.c-ffi stdlib.std::ffi::c::callback error.callback-signature error.callback-environment error.callback-placement error.callback-reference error.native-callback concept.raw-c-floats
+docs: C-CALLBACK-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md
+
+== WHAT IT IS
+    import std::ffi::c
+    extern c fn count named "count_accepted"(decide: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, n: std::ffi::c::Int) -> std::ffi::c::Int
+
+    callback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:
+        if value > 0:
+            return 1
+        0
+
+    cb = std::ffi::c::callback(decide)
+    count(cb, 10)
+
+The declaration states the callback's C signature (C types only, each
+converting totally: no NaN admission, no narrowing), and no errors; the
+function is environment-free and never suspends. To Botlish callers it is
+an ordinary function. std::ffi::c::callback(decide) is the address of its
+C entry point, a std::ffi::c::FnPtr of exactly that signature -- affine,
+like every C pointer (bind it, then pass it).
+
+C may call it only during a call of a C function whose FnPtr parameter is
+declared noescape (C calls it during the call and keeps it no longer). The
+callback then runs nested in the Botlish execution environment waiting in
+that call -- the same heap and context -- and may allocate, call C and be
+called back again; the collector keeps every waiting Botlish frame's values.
+Anything else is refused at run time before Botlish code runs (NATIVE
+CALLBACK: another thread, after the call, another stack), and a failure of
+the body ends the process (a C callback has no error channel). Passing the
+pointer to a parameter that may keep it is a direct edge (DIRECT): a
+retained registration is not provided yet.
+
+Native backends only: on the Tcl backends std::ffi::c::callback is
+NATIVE-ONLY, and a callback c fn is an ordinary function.
+
+@example accept
+import std::ffi::c
+
+callback c fn sign(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    if value < 0:
+        return -1
+    0
+
+[sign(5), sign(-3), sign(0)]
+@caption An ordinary function to Botlish callers
+@value [1, -1, 0]
+@end
+
 @topic concept.c-ffi
 title: Calling C: `extern c fn` and `extern c library`
 summary: `extern c fn` declares a C function by its ABI signature and pointer contracts, `extern c library` a library to link; C calls run only on the native backends.
