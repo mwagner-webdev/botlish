@@ -46,6 +46,7 @@ The work was developed on Linux, on the branch `ccr-3b394343-oobbuq`.
 12. Regression coverage
 13. Remaining limitations
 14. Files changed and commands to rerun
+15. Listing without a List (an addendum)
 
 ## 1. Result
 
@@ -92,9 +93,9 @@ What got slower, measured and kept (sections 7 and 13): `kind` (0.01-0.08
 to 0.17-0.32 us) and `units` (a field read to a bridge) because both now
 read units out of bytes, `display` of a name without text (a failed strict
 decode first), and listing a directory (7 to 9% per name: each listed name
-is also sliced into its bytes). Linux and macOS file operations are the
-same code as before (identical NIR) and measured the same within runner
-noise.
+is also sliced into its bytes; repaired after the milestone, section 15).
+Linux and macOS file operations are the same code as before (identical
+NIR) and measured the same within runner noise.
 
 ## 2. Starting implementation
 
@@ -965,14 +966,15 @@ Only measured or demonstrated ones:
   does. Holding both representations would double every path's memory and
   make every constructor build a List again, which is what the milestone
   removed.
-* **Listing a directory is 7 to 9% slower per name on Windows** (two runs,
-  section 11.3: 7.55 to 8.20 us). A listed name is sliced out of the find
-  record as its bytes, and milestone 7's scan of the record for the name's
-  end still reads the 260-unit name field as a List and builds the name's
-  units, which `take` needs for its "." and ".." check and its length.
-  Botlish has no operation that finds two zero bytes in a Bytes; with one,
-  the name's length and its bytes would need no List at all. Listing and
-  then opening every entry is 16% faster than before.
+* **Listing a directory was 7 to 9% slower per name on Windows** (two
+  runs, section 11.3: 7.55 to 8.20 us): a listed name was sliced out of the
+  find record as its bytes on top of milestone 7's scan, which read the
+  260-unit name field as a List and built the name's units. Repaired after
+  the milestone (section 15): one internal primitive measures the name in
+  the record and the name is sliced once, with no List built. On the
+  windows-2025 runner (run 41310552501) a listed entry costs 2.17 us
+  against 5.85 us for milestone 7 on the same runner (0.37), and listing
+  and then opening every entry 36.8 against 44.2 us (0.83).
 * **The 64-unit threshold** of section 6 is the crossover measured on this
   container's x86-64 CPU (bridging 64 units costs about what slicing four
   and one does); it was not tuned per platform. Either side gives the same
@@ -1042,3 +1044,221 @@ tclsh9.0 bench/filesystem.tcl -baseline-rev REV
 and on another host the tier items (`tests/platform/tier.tcl utf16-fuzz
 utf16-mutants utf16-bench filesystem-mutants`; a Windows or macOS workflow
 run with `tier: full` and `tests:` those items).
+
+## 15. Listing without a List
+
+An addendum after the milestone, on the one regression section 11.3
+measured and kept: listing a directory was 7 to 9% slower per name on
+windows-2025 (`entries (100)`: 7.55 to 8.20 us per entry in run
+41266378398, 1.07 times in run 41254346872). Code: `9721c9a` on this
+branch, and `fef351d` (a pinned expression id in tests/contexts.test).
+
+**Cause** (code inspection). `take`, which turns one FindFirstFileW /
+FindNextFileW record into an Entry, still did milestone 7's work:
+`std::binary::read(record, FindData.name)` built a List of the name field's
+260 units, a loop built a second List of the name's units up to the
+terminator -- read for `valid_units?`, the "." and ".." check and the
+length -- and the milestone added a slice of the name's bytes after it,
+since a NativePath is bytes. Measured alone (local experiment, below), that
+work was almost all of a `take`.
+
+**Change.** One internal primitive measures the name where it lies, in the
+record:
+
+```botlish
+nomethod fn utf16le_units_before_nul(data: Bytes, start: int, end: int) -> int errors LowerUnderrun, UpperOverrun
+```
+
+`std::abi::bytes::utf16le_units_before_nul`, over
+`std::byte_store::utf16le_units_before_nul`: both internal members of the
+standard library, like `utf16le_units` (a program naming either is
+INTERNAL-NAMESPACE). It is the number of whole UTF-16 units of DATA's bytes
+START..END-1 -- byte pairs from START, low byte first -- before the first
+unit 0, or all (END - START) / 2 of them when none is 0. A unit is 0 only
+when both bytes of its own pair are: a single 00 byte (U+0100 is 00 01,
+U+2E00 is 00 2E) and 00 00 across two units (U+0041 U+4100 is 41 00 00 41)
+end nothing. Its bounds are the one slice rule (the declared LowerUnderrun
+and UpperOverrun), an odd range is RANGE (no caller passes one), and it
+reads the payload in place: no allocation, no List, no `unsafe`. The Tcl
+backends' implementation is core/utf16text.tcl's (`binary scan su*` of the
+range, `lsearch` for 0), the native one ops.rs's
+`rt_bytes_utf16le_units_before_nul` (the codec's own pair reader
+`utf16le_units_of`, then `position`), NIR `op bytesutf16lenul`, a plain
+helper call that allocates nothing (codegen::clif's table, beside
+`byteslen`). Swapping a pair's bytes cannot change what it finds (a pair
+is 0 either way); what matters is the pairing -- whole pairs from START --
+which its tests and mutants pin.
+
+`take` now freezes the record (as before), measures the name in
+FindData.name's 260 units (bytes 44..564), skips an empty one, slices its
+bytes once, skips "." and ".." by comparing those bytes with the constant
+Bytes 2E 00 and 2E 00 2E 00 (only a name of one or two units is compared),
+and reads the attributes and the reparse tag (as before). Every unit before
+the NUL is 1..65535, so `valid_units?` had nothing left to check but
+emptiness. The FindData layout still describes the record; its `name`
+field is no longer read as a List.
+
+The semantics are milestone 7's, exactly: a listed name is the record's
+units before the first NUL unit, all 260 when there is none (the bytes
+after the field never read), an unpaired surrogate kept as itself; ".",
+".." and the empty name are skipped.
+
+**Measured, real platform.** `bench/filesystem.tcl -baseline-rev f9e0ed0`
+on the windows-2025 runner, run 41310552501 (job "full (Windows x86-64,
+shard 1/4)", tier item `utf16-bench`; `9721c9a`), per operation, NTFS:
+
+| row | before (`f9e0ed0`) | after (`9721c9a`) | after/before |
+|---|---:|---:|---:|
+| entries (100), per entry | 5.85 us | 2.17 us | 0.37 |
+| reopen (100), per file | 44.2 us | 36.8 us | 0.83 |
+
+The same job's `filesystem-bench` (the current tree alone, run again
+after) gave 2.19 us and 36.5 us. For comparison, the milestone's own code
+(`36f8dd7`, merged as `effecc7`) measured 1.09 and 1.07 times its baseline
+in runs 41266378398 and 41254346872 (7.55 to 8.20 us, section 11.3);
+runners differ in absolute speed (this one listed milestone 7's entries in
+5.85 us, that one in 7.55), which is why each figure is taken against the
+baseline measured on the same runner. Every other row of the table is code
+this addendum does not touch and stayed near section 11.3's ratios (here
+open + close 0.68, text 0.022, concat 0.33, the 1 MiB transfers 0.97).
+
+**Measured, local experiment** (the Windows module's code on this
+container's Linux driver, as in section 11.5): `take` alone, through a
+probe appended to a private copy of each tree's standard library (the probe
+of `fs-windows-entry-names`, in a loop), a 592-byte record built in the
+program and handed to `take` N times, minus the same loop copying the
+record without `take`; best of 5 and of 7 runs, two runs per tree (the
+spread below), and allocations counted by the driver (`--alloc summary`):
+
+| name in the record | `f9e0ed0` | `effecc7` (the milestone) | `9721c9a` |
+|---|---:|---:|---:|
+| 8 units | 5.4-6.4 us | 6.3-7.2 us | 0.79-0.97 us |
+| 20 units | 7.4-7.9 us | 7.3-7.5 us | 0.72-1.07 us |
+| 64 units | 9.1-10.5 us | 9.3-9.7 us | 0.84-1.02 us |
+| "." (skipped) | 3.3-3.4 us | 3.5-3.8 us | 0.24-0.34 us |
+| allocations per take (8 units) | 9 | 11 | 5 |
+| bytes allocated per take (8 units) | about 3,050 | about 3,120 | about 760 |
+
+What remains in a `take` is the record's freeze (one 592-byte copy, as in
+milestone 7), the name's slice and its Bytes, the Entry and the push. The
+script was an ad hoc local experiment (not committed); the Windows figures
+above are the report's evidence.
+
+**Tests.**
+
+* tests/utf16-bytes.test `u16-units-before-nul` (every backend, which must
+  agree; through a probe appended to a private copy of the standard
+  library, since the measure is internal): the terminator first, in the
+  middle, past END (unseen), absent; a lone surrogate before it; U+0100 and
+  U+2E00 (a single 00 byte) and 41 00 00 41 (00 00 at an odd distance)
+  ending nothing; units counted from an odd START; the slice rule's
+  LowerUnderrun and UpperOverrun; RANGE for an odd range. The registration,
+  surface and internal-member tests (`u16-natives-registered`,
+  `u16-public-surface`, `u16-internal-bridge`) and the native inventories
+  (tests/abi-bytes.test, tests/abi-mutable-bytes.test,
+  tests/stdlib-namespaces.test, tests/linux-syscall.test) include it.
+* the Rust test `utf16le_units_before_nul_counts_whole_units` (ops.rs):
+  the same cases on the runtime directly, the declared errors' ids, RANGE.
+* tests/filesystem.test `fs-windows-entry-names` (every host): records
+  built in the program and given to std::windows::fs's private `take`
+  through a probe -- "a", ".", "..", the empty name, "...", ".a", a lone
+  D800, a name with bytes after its NUL, "." with bytes after its NUL,
+  U+2E00, U+0100 U+2E00 a, U+0041 U+4100 U+0042, a surrogate pair (a
+  symbolic link by its reparse tag) and 260 units with no NUL (0xFF bytes
+  after the field) -- each listed entry's bytes, units and kind, on interp
+  and compile and, on Linux, both native backends, normally and under
+  `BOTLISH_NATIVE_GC_STRESS=1`. It passes on milestone 7's `take` too
+  (checked by running it against the old stdlib/windows/fs.bot): the
+  semantics did not move. On NTFS, `fs-windows-entries`,
+  `fs-windows-native-roundtrip` (a name holding D800 lists and reopens its
+  own file) and `fs-windows-astral-names` run the real listing.
+
+**Mutants.** The codec harness (audit/abi-bytes/tools/utf16-mutants.txt)
+gains nine mutants of the measure, each killed by its named detectors
+(`u16-units-before-nul`, and for the native ones also the Rust test):
+`rust-nul-single-byte`, `tcl-nul-single-byte` (stops at a unit whose low
+byte is 0), `rust-nul-high-byte-only` (reads only each unit's high byte),
+`rust-nul-odd-distance`, `tcl-nul-odd-distance` (00 00 at any byte
+offset), `rust-nul-absent-is-empty` (no NUL counted as none, not all),
+`rust-nul-bounds-unchecked` (the slice rule dropped: an unchecked index),
+`rust-nul-odd-range-accepted`, `tcl-nul-odd-range-accepted`. Swapping a
+pair's bytes is no mutant of the measure (a pair is 0 either way), so the
+byte-order rule it carries is the pairing, which these pin. The filesystem
+harness (audit/filesystem/tools/mutants.txt) gains three mutants of `take`
+-- `win-entry-name-overruns-field` (measured to the record's end, not the
+name field's), `win-entry-dot-high-byte-first` ("." and ".." compared as
+00 2E), `win-entry-empty-name-listed` -- and rewrites
+`win-enumeration-loses-native-name` for the new code (the listed name's
+units through its lossy text, the same rule); since `fs-windows-entry-names`
+runs everywhere, that mutant no longer carries a Windows-only host line.
+
+Runs: locally (Linux x86-64) the nine codec mutants, 9 of 9 killed by
+their named detectors (`utf16-mutate.tcl -only ...`), and the four
+filesystem mutants, 4 of 4 killed by `fs-windows-entry-names`
+(`mutate.tcl -only ...`); every mutant of both files still applies exactly
+once to the final code. On Windows (run 41310552501, tier item
+`filesystem-mutants`, the whole file on NTFS): 26 killed, none surviving,
+the ten Linux and macOS mutants skipped by their host lines -- the four
+above among the killed (`win-entry-dot-high-byte-first` also by
+`fs-windows-entries`, `fs-windows-astral-names` and
+`fs-windows-executable`; `win-enumeration-loses-native-name` also by
+`fs-windows-native-roundtrip`).
+
+**Regression coverage.**
+
+* Local (Linux x86-64): `tests/local.tcl` narrowed to utf16-bytes,
+  filesystem, abi-bytes, abi-mutable-bytes, linux-syscall and
+  stdlib-namespaces (231 tests on interp and on compile, 19 skipped by host
+  constraints, 88 golden duplicates; the 9 golden suites holding their
+  duplicates on all four backends): every test passed. `tests/utf16-bytes.test`
+  also under `BOTLISH_NATIVE_GC_STRESS=1`; `cargo test --release --lib`
+  (321 passed) and `--bin botlish-native` (117 passed); the warning gate
+  (it found the wrapper's call to the native eligible for method syntax,
+  answered in the code); `tools/compilerpedia.tcl check` (0 problems);
+  `audit/filesystem/tools/fuzz.tcl -seed 1` (2,800 cases, no
+  disagreement).
+* Windows (run 41310552501, `tier: full`, items `utf16-bench
+  filesystem-bench filesystem-fuzz filesystem-mutants`): smoke (the
+  Windows-relevant test files on interp and compile, filesystem.test and
+  utf16-bytes.test among them, and "Filesystem under GC stress": 19
+  passed, 0 failed), root plans, the system linker, the full shard (the
+  benchmarks, `filesystem-fuzz` seeds 1 and 2 with 1,600 cases each and no
+  disagreement, the mutants) and acceptance shards 1 and 4 passed.
+  Acceptance shard 3 failed one test of this change: tests/contexts.test's
+  `contexts-native-nir-hello` pins the HIR expression id of
+  std::linux::io::write in the Hello World's NIR (`@e801`), which the new
+  wrapper in stdlib/abi/bytes.bot, loaded before it, shifts to `@e809`
+  (the milestone's own new functions shifted it the same way, section 14);
+  the narrowed local run had left contexts.test out. Fixed in `fef351d`.
+  Acceptance shard 2 failed tests/package-manager.test's `pm-remove`,
+  `pm-crash-recovery` and `pm-lock-busy`, exactly as main's own run of
+  `effecc7` does (run 41307355435, the same three tests and messages):
+  the package manager (PM-1) came from main in that merge and this addendum
+  does not touch it. Icy Tower on Windows (run 41310489596): passed.
+* After the fix, locally: the whole `tests/local.tcl` (every Tcl test file
+  on interp and compile, 8,017 and 8,012 passed, 0 failed, 177 and 182
+  skipped by host constraints, 2,370 golden duplicates; the 114 golden
+  suites on all four backends, 0 failed).
+
+**Files.**
+
+| file | what |
+|---|---|
+| core/utf16text.tcl | `std::byte_store::utf16le_units_before_nul` (the Tcl backends'), internal |
+| stdlib/abi/bytes.bot | the internal wrapper `utf16le_units_before_nul` |
+| native/src/runtime/ops.rs | `utf16le_units_before_nul`, `rt_bytes_utf16le_units_before_nul`, its classification, dispatch and helper entry, the Rust test |
+| native/src/nir.rs, native/src/codegen/clif.rs, native/lower.tcl | NIR `op bytesutf16lenul` |
+| stdlib/windows/fs.bot | `take` measures the name in place; `name_end`, `dot_unit`, `dot_dot_units` |
+| tests/utf16-bytes.test, tests/filesystem.test | `u16-units-before-nul`, `fs-windows-entry-names`; the registration pins |
+| tests/abi-bytes.test, tests/abi-mutable-bytes.test, tests/stdlib-namespaces.test, tests/linux-syscall.test, tests/contexts.test | inventories, and one HIR expression id the wrapper shifts |
+| audit/abi-bytes/tools/utf16-mutants.txt, audit/filesystem/tools/mutants.txt | the mutants above |
+| audit/golden/migration/census/utf16-bytes.tsv, filesystem.tsv, tcl-names.txt, tests/golden/manifest.tsv | the new tests' rows |
+| audit/stdlib-census/after.tsv | regenerated |
+| AGENTS.md | the measure in "UTF-16LE on byte storage" |
+
+**What to run when changing this**: section 14's list, plus
+`tclsh9.0 audit/abi-bytes/tools/utf16-mutate.tcl -only
+rust-nul-single-byte,...` for the measure's mutants and
+`tclsh9.0 audit/filesystem/tools/mutate.tcl -only
+win-entry-name-overruns-field,...` for `take`'s; on Windows the tier items
+`utf16-bench` (the table above) and `filesystem-mutants`.
