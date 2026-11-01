@@ -4598,11 +4598,13 @@ c-bindgen.tcl stage -package 1`); `tests/workload-icy-tower.test` and the
 
 ## The package manager (pm/, botlish.json, .botpkg)
 
-`pm/` (PACKAGE-MANAGER-MILESTONE-1.md) is the package manager: `main.tcl
-add|install|update|remove|verify|package` (`botlish add ...` in the single
-executable), over local `.botpkg` artifacts (BOTPKG-FORMAT.md) and
-`botlish.json` (BOTLISH-JSON.md). It builds the `.bot_modules` trees the
-compiler already reads (previous section) and nothing else. Keep it so:
+`pm/` (PACKAGE-MANAGER-MILESTONE-1.md, PACKAGE-MANAGER-MILESTONE-2.md) is
+the package manager: `main.tcl add|install|update|remove|verify|package|native`
+(`botlish add ...` in the single executable), over local `.botpkg`
+artifacts (BOTPKG-FORMAT.md) and `botlish.json` (BOTLISH-JSON.md, schemas 1
+and 2). It builds the `.bot_modules` trees the compiler already reads
+(previous section) -- and, for target-aware packages, their target views --
+and nothing else. Keep it so:
 
 * The compiler never reads `botlish.json`, a version, a lock, an artifact
   or `.bot_modules/.botlish`, and never loads `pm/`: main.tcl sources
@@ -4639,18 +4641,68 @@ compiler already reads (previous section) and nothing else. Keep it so:
 * Integrity is not authenticity: a digest checks bytes against a record;
   never describe a local artifact as signed, verified or authenticated
   publisher content.
+* One release is one artifact for every target it names (schema 2's
+  `targets`): never several archives claiming one name and version for
+  different targets, never a target suffix in a version, never a target
+  file fetched apart from its artifact. The package's own metadata decides
+  the targets it supports: never assume a package portable to a target it
+  does not name (`UNSUPPORTED`), and never take common files alone for one.
+* Target views (pm/view.tcl) are derived, never edited: the store
+  (`.bot_modules/NAME`, PM-1's tree) is the installation; each view
+  `.bot_modules/.targets/T` is a function of the store's record, the target,
+  the consumer's origins and the manual packages it links, rebuilt in the
+  same transaction as any change to them, and reused when its digest and
+  files are unchanged. Preparing one target never touches another's view.
+  The compiler knows only the directory's name (surface/modules.tcl's
+  `ApplicationTree`: never a version, a record or native metadata), and an
+  empty `.targets` is never left (it would hide every package). A
+  `.targets` the manager did not make is the user's (MANUAL).
+* Native files are inspected, never run (pm/binary.tcl: ELF, ar, Mach-O,
+  PE/COFF read as bytes); a bundled library's every declared fact (format,
+  architecture, kind, loader identity, loader dependencies, symbols) is
+  checked against its file at packing and at every view, the driver's
+  archive check still judging a link. A system library is verified only on
+  its own target's host and only by the distribution's metadata (dpkg's
+  database, a pkg-config record under /usr): never by a file merely present
+  (/usr/local is no system metadata), never claimed for another target.
+  The native closure is the application's, one loader namespace: a
+  conflict (two bundles of one name, bundled against system, one loader
+  identity for two libraries, a duplicate static symbol, static against
+  shared, a source declaration against the metadata) is refused, never
+  resolved by a choice the consumer did not make (`origins`).
+* Metadata never injects a linker flag: link inputs reach the compiler as
+  files of a view's `.lib` (searched like -L) and the source's own link
+  declarations; a runtime search path is the application builder's
+  `-runtime-path`, a structured driver option (`--runtime-path`), never
+  package metadata. Deployment (`native deploy`, pm/deploy.tcl) places only
+  files it records, as a transaction, and signs nothing.
+* SHA-256 is the system's own tool at its fixed path (pm/sha256.tcl:
+  `/usr/bin/sha256sum`, `/usr/bin/shasum`, `%SystemRoot%\System32\certutil.exe`),
+  given the exact bytes, after a known-answer probe, else the Tcl
+  implementation: never a tool found on PATH, never OpenSSL's command line,
+  and never the native backend.
 
 If you change `pm/`, the formats, `tools/package-repository.tcl`,
 `packages/*/botlish.json` or main.tcl's dispatch, run
-`tests/package-manager.test`, `tests/package-workloads.test` (its native
-runs need the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
+`tests/package-manager.test`, `tests/package-native.test` (its foreign
+formats need clang and MinGW-w64; its linked runs the native backend),
+`tests/package-workloads.test` (its packages are packed for linux-x86_64 and
+linux-aarch64: it needs the AArch64 GNU cross compiler, clang, cmake and
+ninja, and the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
 `tests/cffi/raven.tcl`), `tests/main-cli.test`, `tests/bot-modules.test`
 and `audit/package-manager/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when
-you change the code it mutates, keeping it a mutant of the same rule).
+you change the code it mutates, keeping it a mutant of the same rule; a
+mutant's `%%` line names the test files that kill it).
 `bench/package-manager.tcl` measures its costs. A change to the single
 executable's dispatch (`single/main.tcl`'s package commands) also runs the
-single-executable checks above.
+single-executable checks above. A change to the compiler's target package
+trees (`ApplicationTree`, `nativeDirs`) also runs the package-scoped-module
+checks of the previous section and `tests/hir-cache.test`,
+`tests/hir-interchange.test`, `tests/compiler-service.test` and
+`tests/lsp.test`; one to `--runtime-path` the native-AOT checks
+(`cargo test ... --bin botlish-native aot::`, `tests/native-link-plan.test`,
+`tests/system-linker.test`).
 
 ## Diagnostic recovery
 

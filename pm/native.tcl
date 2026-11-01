@@ -280,9 +280,13 @@ proc pm::native::LinuxDirs {target} {
     return [list /usr/lib/$triplet /lib/$triplet /usr/lib /lib /usr/lib64 /usr/local/lib /usr/local/lib/$triplet]
 }
 
+# The distribution's pkg-config directories of a Linux TARGET. /usr/local's
+# are left out on purpose: a record there was written by whatever installed
+# a library by hand, not by the system's package management, and is no
+# evidence that the library is system-managed.
 proc pm::native::PkgConfigDirs {target} {
     set triplet [dict get {x86_64 x86_64-linux-gnu aarch64 aarch64-linux-gnu} [dict get [pm::target::facts $target] arch]]
-    return [list /usr/lib/$triplet/pkgconfig /usr/lib/pkgconfig /usr/share/pkgconfig /usr/local/lib/$triplet/pkgconfig /usr/local/lib/pkgconfig /usr/local/share/pkgconfig]
+    return [list /usr/lib/$triplet/pkgconfig /usr/lib/pkgconfig /usr/share/pkgconfig]
 }
 
 # The variables and fields of the pkg-config file PATH: {Version V Libs L

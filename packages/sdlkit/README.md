@@ -20,7 +20,9 @@ it (PACKAGE-MANAGER-MILESTONE-1.md):
     botlish add sdlkit -project APP -repository REPO    # APP/.bot_modules/sdlkit,
                                                         # .../sdlkit/.bot_modules/sdl3
 
-Running a program needs the SDL3 shared library (`tests/cffi/sdl3.tcl`
-builds the pinned release) by `-L` and `LD_LIBRARY_PATH`: native
-deployment is PM-2's, and the package manager neither builds nor installs
-it. Native backends only.
+sdlkit itself is target-independent (schema 1): its sdl3 dependency is the
+target-aware package, and the package manager derives the target view of
+both (PACKAGE-MANAGER-MILESTONE-2.md). A program runs natively with the
+SDL3 sdl3 bundles, with no -L or LD_LIBRARY_PATH; `botlish native deploy
+-target linux-x86_64 -out DIR` places libSDL3.so.0 in DIR/lib for an
+executable linked with `-runtime-path '$ORIGIN/lib'`. Native backends only.

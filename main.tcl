@@ -234,7 +234,7 @@ set cliOptions {
     -target NAME run {the C ABI target (default: the host's)}
     -L DIR run {a library directory, for a program that calls C}
     -F DIR run {a framework directory (macOS), for a program linking one}
-    -runtime-path PATH build {where an executable finds its shared libraries ($ORIGIN/lib)}
+    -runtime-path PATH build {where an executable loads shared libraries from}
     -argv TEXT argv {append the argument TEXT to argv()}
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}

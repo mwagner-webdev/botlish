@@ -16,7 +16,9 @@ selection, locks, a registry) is future work and is not implemented; the
 compiler is indifferent to it, and its resolution rules will not need to
 change when it arrives (section G). (It arrived as
 PACKAGE-MANAGER-MILESTONE-1.md, beside the compiler, with these rules
-unchanged; the sdlkit package below is now `packages/sdlkit`.)
+unchanged; the sdlkit package below is now `packages/sdlkit`. PM-2,
+PACKAGE-MANAGER-MILESTONE-2.md, added one rule beside them: "Target package
+trees", below.)
 
 Contents:
 
@@ -197,6 +199,24 @@ duplicate-import and cycle rules hold per module identity
 is never a standard-library module: it may not import or name an internal
 namespace of the standard library (`INTERNAL-NAMESPACE`,
 `bm-package-is-not-std`).
+
+### Target package trees (PACKAGE-MANAGER-MILESTONE-2.md)
+
+When the application root's `.bot_modules` holds a directory `.targets`,
+the application's packages are the tree of the compilation's target,
+`ROOT/.bot_modules/.targets/TARGET/` -- an ordinary package tree in every
+respect described above (its packages, their own `.bot_modules`, downward
+resolution, instance identities), one per target -- instead of
+`ROOT/.bot_modules` itself. A `.targets` without the target's tree gives the
+application no packages for that target (UNKNOWN-NAMESPACE says so); the
+store beside it is never read. The rule applies to the application's own
+scope only (a tree is complete: its packages' scopes are inside it). The
+loader probes `.targets` and the tree through the source seam (front-end
+cache dependencies), a HIR compiled from a tree records its target
+(`targetRead`), and a tree's `.lib` directory is recorded as the HIR's
+`nativeDirs`, which the native backends search when the program links. The
+compiler knows the directory's name and nothing of how it was made: the
+package manager derives the trees, and a hand-made one compiles the same.
 
 ## C. Semantic identity
 

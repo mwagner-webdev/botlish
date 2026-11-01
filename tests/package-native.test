@@ -600,6 +600,17 @@ test pn-system-library-verified {a system library is verified by the system's ow
         [dict get $bad status] [regexp {is version \S+ \(.*\), which the request "9" does not accept} [dict get $bad err]]
 } -cleanup cleanup -result {0 1 1 1}
 
+testConstraint unmanagedLocalLibrary [expr {[testConstraint linuxX86Host] && [file exists /usr/local/lib/libpython3.so]
+    && ![file exists /usr/lib/x86_64-linux-gnu/libpython3.so] && [pm::native::DpkgOwner /usr/local/lib/libpython3.so] eq ""}]
+
+test pn-system-library-needs-system-metadata {a library file in a library directory is not a system installation: one only /usr/local has (installed by hand, with a pkg-config record of /usr/local's own, which is no system metadata) is refused as system-managed, naming the file} -constraints {unmanagedLocalLibrary} -body {
+    set pkg [nativePackage [fresh src] pyuse 1.0.0 [list {{"name": "python3", "origin": "system", "linkage": "shared", "identity": "libpython3.so", "pkg-config": "python3"}}] {} "fn n() -> int:\n    1\n"]
+    set repo [fresh repo]
+    pack $pkg $repo
+    set r [pm add pyuse -project [application "1\n"] -repository $repo]
+    list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
+} -cleanup cleanup -result {1 {  system library python3: /usr/local/lib/libpython3.so is installed, but no system metadata (the dpkg database, or a pkg-config file of the system's) records it: a file in a library directory is not a system-managed installation (PM NATIVE)}}
+
 test pn-system-library-other-target {a system library of another target than the host's cannot be verified here: the view is made and the plan says so, never claiming it} -body {
     set src [fresh src]
     set repo [fresh repo]
@@ -691,6 +702,45 @@ test pn-runtime-path-option {-runtime-path is one directory: a comma, colon or e
         list [dict get $r status] [lindex [split [dict get $r err] \n] 0]
     }
 } -cleanup cleanup -match glob -result {{2 *-runtime-path needs one path*} {2 *-runtime-path needs one path*} {2 *-runtime-path needs one path*}}
+
+testConstraint machoTools [expr {[auto_execok clang] ne "" && [auto_execok ld64.lld] ne "" || ([auto_execok clang] ne "" && [auto_execok lld] ne "")}]
+set lipo [lindex [concat [auto_execok llvm-lipo] [auto_execok llvm-lipo-18]] 0]
+testConstraint lipo [expr {$lipo ne ""}]
+
+# A Mach-O dynamic library for ARCH (arm64, x86_64) with install name NAME,
+# made by clang and lld's Mach-O linker; SIGN 0 leaves out the ad hoc
+# signature lld makes by default.
+proc dylib {dir file arch name {sign 1}} {
+    set source [file join $dir mac.c]
+    writeText $source "int mac_value(void) { return 9; }\n"
+    set flags [list --target=$arch-apple-macos11 -shared -nostdlib -fuse-ld=lld -Wl,-install_name,$name]
+    if {!$sign} { lappend flags -Wl,-no_adhoc_codesign }
+    exec clang {*}$flags -o [file join $dir $file] $source
+    return [file join $dir $file]
+}
+
+test pn-macos-deployment-requirements {a macOS target's bundled dylib (a real Mach-O, made by clang and lld) is verified from Linux -- install name, architecture, signature -- and its view's plan states what deployment still needs: an install name that is not @rpath-relative is not relocatable, an unsigned dylib must be signed with the application; deploy places it in DIR/lib and says to sign it; a universal file is read at the target's slice} -constraints {machoTools lipo} -body {
+    set dir [fresh bin]
+    set signed [dylib $dir libmac.1.dylib arm64 @rpath/libmac.1.dylib]
+    set unsigned [dylib [file mkdir [file join $dir u]][file join $dir u] libmac.1.dylib arm64 /usr/local/lib/libmac.1.dylib 0]
+    set intel [dylib [file mkdir [file join $dir x]][file join $dir x] libmac.1.dylib x86_64 @rpath/libmac.1.dylib]
+    exec $::lipo -create $intel $signed -output [file join $dir libfat.dylib]
+    set src [fresh src]
+    set repo [fresh repo]
+    foreach {name file identity} [list macgood $signed @rpath/libmac.1.dylib macbad $unsigned /usr/local/lib/libmac.1.dylib macfat [file join $dir libfat.dylib] @rpath/libmac.1.dylib] {
+        pack [packageDir $src $name 1.0.0 "{\"schema\": 2, \"name\": \"$name\", \"version\": \"1.0.0\", \"targets\": {\"macos-aarch64\": {\"files\": \"t\", \"libraries\": \[{\"name\": \"mac\", \"origin\": \"bundled\", \"linkage\": \"shared\", \"file\": \"native/libmac.1.dylib\", \"identity\": \"$identity\", \"needs\": \[\], \"symbols\": \[\"mac_value\"\]}\]}}}" [list $name.bot "fn n() -> int:\n    1\n" t/native/libmac.1.dylib [list @file $file]]] $repo
+    }
+    set out {}
+    foreach name {macgood macbad macfat} {
+        set app [application "1\n"]
+        set r [pm add $name -project $app -repository $repo -target macos-aarch64]
+        lappend out [list $name [dict get $r status] [lsearch -all -inline [split [dict get $r out] \n] note:*]]
+    }
+    set d [pm native deploy -project $app -target macos-aarch64 -out [file join [fresh dist] out]]
+    lappend out [dict get $d status] [lrange [split [dict get $d out] \n] 0 0] [lindex [split [dict get $d out] \n] end]
+    set wrong [dict create name mac origin bundled linkage shared file native/libmac.1.dylib identity @rpath/libmac.1.dylib needs {} symbols {}]
+    lappend out [catch {pm::native::CheckBundled macos-aarch64 $wrong [readBytes $intel] intel} message] $message
+} -cleanup cleanup -result {{macgood 0 {}} {macbad 0 {{note: macos-aarch64: mac: its install name /usr/local/lib/libmac.1.dylib is not @rpath-relative: an executable linked with it loads it from that absolute path, wherever the application is deployed} {note: macos-aarch64: mac: libmac.1.dylib carries no code signature: macOS on arm64 loads only signed code, so sign it when the application is signed (codesign; the package manager signs nothing)}}} {macfat 0 {}} 0 {{deployed lib/libmac.1.dylib}} {note: sign the deployed libraries with the application (codesign): macOS arm64 loads only signed code, and the package manager signs nothing} 1 {intel is Mach-O x86_64 dynamic library, and macos-aarch64's libraries are macho aarch64}}
 
 # ---------------------------------------------------------------------------
 # 7. SHA-256 backends
