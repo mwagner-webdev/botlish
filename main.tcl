@@ -4,6 +4,13 @@
 #   tclsh9.0 main.tcl -help [QUERY...]
 #   tclsh9.0 main.tcl -version
 #   tclsh9.0 main.tcl                     (no arguments: the usage summary)
+#   tclsh9.0 main.tcl add|install|update|remove|verify|package ...
+#                                         the package manager (pm/pm.tcl,
+#                                         PACKAGE-MANAGER-MILESTONE-1.md):
+#                                         a first argument naming one of
+#                                         its commands runs it, without the
+#                                         compiler (no other invocation
+#                                         loads it or reads a botlish.json)
 #
 # The options, one table (cliOptions below) that the parser, the usage
 # summary and Compilerpedia's cli.options topic (tests/main-cli.test checks
@@ -259,12 +266,23 @@ proc cliInvocation {} {
 }
 set cliInvocation [cliInvocation]
 
+# The package manager's commands (pm/pm.tcl, PACKAGE-MANAGER-MILESTONE-1.md):
+# a first argument naming one runs the package manager, and nothing of the
+# compiler is loaded. No other invocation loads the package manager or reads
+# a botlish.json: compiling reads .bot_modules as it is.
+set pmCommands {add install update remove verify package}
+if {[lindex $argv 0] in $pmCommands} {
+    source [file join $root pm pm.tcl]
+    exit [pm::cli::main $argv $cliInvocation]
+}
+
 proc usage {} {
     global cliOptions cliInvocation
     set me $cliInvocation
     set lines [list "usage: $me \[OPTION...\] FILE..." \
         "       $me -help \[QUERY...\]" \
-        "       $me -version" "" \
+        "       $me -version" \
+        "       $me add|install|update|remove|verify|package ..." "" \
         "Compiles and runs Botlish programs: FILE.bot (source), FILE.hir (HIR text)," \
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
         "Each program's output is printed, then its value." "" \
@@ -288,7 +306,8 @@ proc usage {} {
         "  $me -help                     the indices of Compilerpedia" \
         "  $me -help cli.options         every option in detail" \
         "  $me -help KNOWN-ERROR         a diagnostic or warning code" \
-        "  $me -help \"bounds proof\"      a search"
+        "  $me -help \"bounds proof\"      a search" \
+        "  $me -help cli.packages        the package manager"
     return [join $lines \n]
 }
 

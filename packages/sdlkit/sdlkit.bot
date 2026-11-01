@@ -1,0 +1,51 @@
+# sdlkit -- a reusable SDL3 airlock over the generated SDL3 binding, its own
+# dependency sdl3 (botlish.json; the package manager installs it in
+# sdlkit's own .bot_modules): SDL's objects stay behind the Kit context.
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::ffi::c
+import std::list
+import std::str
+import sdl3::events
+import sdl3::init
+import sdl3::render
+import sdl3::timer
+import sdl3::version
+import sdl3::video
+
+opaque context struct Kit:
+    started: bool
+
+# SDL initialized for video: the context every operation requires.
+fn open() -> Kit:
+    Kit {started: sdl3::init::SDL_Init(sdl3::init::SDL_INIT_VIDEO)}
+
+fn nul() -> std::byte::Byte:
+    0
+
+fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))
+
+# One frame in a window: what each step reported.
+fn frame(context kit: Kit) -> List[bool]:
+    window = cstring("Botlish package over generated SDL3").SDL_CreateWindow(320, 240, sdl3::video::SDL_WINDOW_RESIZABLE)
+    no_name = std::ffi::c::null[std::ffi::c::Char]()
+    renderer = window.SDL_CreateRenderer(no_name)
+    colored = renderer.SDL_SetRenderDrawColor(32, 96, 160, 255)
+    cleared = sdl3::render::SDL_RenderClear(renderer)
+    presented = sdl3::render::SDL_RenderPresent(renderer)
+    before = sdl3::timer::SDL_GetTicks()
+    sdl3::timer::SDL_Delay(20)
+    after = sdl3::timer::SDL_GetTicks()
+    sdl3::events::SDL_PumpEvents()
+    id = sdl3::video::SDL_GetWindowID(window)
+    sdl3::render::SDL_DestroyRenderer(renderer)
+    sdl3::video::SDL_DestroyWindow(window)
+    [kit.started, colored, cleared, presented, after - before >= 20, id > 0]
+
+fn version_matches(context kit: Kit) -> bool:
+    sdl3::version::SDL_GetVersion() == sdl3::version::SDL_VERSION
+
+fn close(context kit: Kit) -> unit:
+    sdl3::init::SDL_Quit()

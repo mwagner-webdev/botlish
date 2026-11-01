@@ -14,7 +14,9 @@ real libSDL3 with no compiler privilege of any kind.
 This is a compiler milestone. The package manager (`botlish.json`, version
 selection, locks, a registry) is future work and is not implemented; the
 compiler is indifferent to it, and its resolution rules will not need to
-change when it arrives (section G).
+change when it arrives (section G). (It arrived as
+PACKAGE-MANAGER-MILESTONE-1.md, beside the compiler, with these rules
+unchanged; the sdlkit package below is now `packages/sdlkit`.)
 
 Contents:
 

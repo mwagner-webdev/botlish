@@ -628,7 +628,7 @@ summary: botlish [OPTION...] FILE... compiles and runs each file; with no argume
 index: backends
 alias: usage; how to run; run a program; command line; cli
 keywords: main.tcl, botlish, invoke, file, .bot, .hir, .hirx, .ir
-related: cli.options cli.output cli.exit-status backend.overview task.choose-backend backend.single-executable
+related: cli.options cli.output cli.exit-status cli.packages backend.overview task.choose-backend backend.single-executable
 docs: README.md SINGLE-EXECUTABLE.md
 
 == FORMS
@@ -640,6 +640,8 @@ docs: README.md SINGLE-EXECUTABLE.md
     botlish -help [QUERY...]        Compilerpedia
     botlish -version                the build identity
     botlish                         the usage summary (exit 0)
+    botlish add|install|update|remove|verify|package ...
+                                    the package manager (cli.packages)
 In a repository checkout the compiler is `tclsh9.0 main.tcl` with the same
 arguments. Running it with no arguments only prints usage: it runs no
 program. The usage summary names the primer first (`-help primer`,
@@ -652,7 +654,8 @@ task.first-program), and `-help` alone opens with the primer's table.
     FILE.hirx   HIR interchange (backend.hir-interchange)
     FILE.ir     core IR text: interp and compile only
 Several files are run one after another, each with its own "== FILE"
-header.
+header. A first argument that is a package command's word (add, install,
+update, remove, verify, package) is that command, never an input file.
 
 @topic cli.options
 title: Every command-line option
@@ -826,7 +829,7 @@ summary: botlish exits 0 when every input compiled and ran, 1 when any failed, 2
 index: backends
 alias: exit code; exit codes; compiler exit status
 keywords: exit, status, 0, 1, 2, failure
-related: cli.usage capability.process-exit-status backend.native-executable
+related: cli.usage cli.packages capability.process-exit-status backend.native-executable
 
 == THE COMPILER
     0   every input compiled and ran (or was built, or checked without an
@@ -836,12 +839,71 @@ related: cli.usage capability.process-exit-status backend.native-executable
     2   a malformed invocation (stderr says what)
 With -lsp: 0 when the editor ended the session in order (shutdown, then
 exit), 1 otherwise (exit without shutdown, the end of its input, input that
-cannot be read as protocol messages).
+cannot be read as protocol messages). The package commands (cli.packages):
+0 on success, 1 when the operation failed (an "error:" line on stderr) or
+verify found a problem, 2 for a malformed invocation.
 
 == A STANDALONE EXECUTABLE
 0 after printing the program's value; nonzero after a run-time error (on
 stderr). The program cannot choose its own exit status
 (capability.process-exit-status).
+
+@topic cli.packages
+title: The package manager: botlish.json, .botpkg artifacts, add and install
+summary: botlish add, install, update, remove and verify manage a project's packages from local .botpkg artifacts and botlish.json; package pack makes an artifact. Nothing is downloaded or run.
+index: backends
+alias: package manager; botlish.json; .botpkg; botlish add; botlish install; package artifact; lock file; dependency versions
+keywords: add, install, update, remove, verify, pack, inspect, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules
+related: rule.package-modules concept.modules cli.usage cli.exit-status
+docs: PACKAGE-MANAGER-MILESTONE-1.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOT-MODULES-MILESTONE-1.md
+
+== THE COMMANDS
+    botlish add NAME|FILE.botpkg|DIR [-request R] [-replace]
+    botlish install
+    botlish update [NAME...]
+    botlish remove NAME...
+    botlish verify
+    botlish package pack [DIR] [-out DIR] [-force]
+    botlish package inspect FILE.botpkg
+(tclsh9.0 main.tcl add ... in a checkout.) add, install, update, remove
+and verify take -project DIR (the project: the directory of its
+botlish.json; default the current directory) and -repository DIR (a local
+repository of NAME-VERSION.botpkg files; any number, never searched
+implicitly); the first four also -force (replace installed packages that
+were changed) and -recover (roll back an interrupted operation).
+
+== WHAT THEY DO
+  * add NAME installs the newest version a repository holds (or the newest
+    -request accepts), writes the request (MAJOR.MINOR by default) and the
+    exact lock to botlish.json, and installs the package's own locked
+    dependencies in its own .bot_modules. add FILE.botpkg records the
+    archive and its SHA-256 as the dependency's source; add DIR (a path
+    with "/") links an editable directory, which has no lock.
+  * install recreates exactly what botlish.json locks, from the
+    repositories; it never changes a lock. update moves locks to the newest
+    version their requests accept (1.2 never becomes 1.3); remove deletes a
+    dependency and its installed tree.
+  * verify compares installed files with the installation record and,
+    where a repository holds them, with the artifacts' bytes.
+  * package pack makes a deterministic NAME-VERSION.botpkg from a package
+    directory whose botlish.json has a name, a version and a lock for
+    every dependency.
+
+== WHAT THEY NEVER DO
+Download anything, run anything a package holds (no install scripts,
+hooks or builds), touch a .bot_modules entry they did not install, replace
+a changed installed package without -force, or claim more than integrity:
+local artifacts carry no publisher signature. Every operation is one
+transaction: a failure, or an interruption the next command recovers,
+leaves the previous installation as it was.
+
+== THE COMPILER
+The compiler reads the .bot_modules trees the package manager builds
+exactly as hand-made ones (rule.package-modules), and never reads
+botlish.json, a version, a lock or an artifact. A package's dependencies
+are in its own .bot_modules, so the application cannot import them;
+two packages may lock different versions of one dependency, and each
+gets its own instance.
 
 @topic cli.lsp
 title: The language server (editor integration)

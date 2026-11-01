@@ -83,7 +83,7 @@ set only [split [dict get $options -only] ,]
 set tree [file tempdir botlish-single-mutants]
 try {
     # What single/package.tcl packs, and what the smoke tests read.
-    foreach item {main.tcl LICENSE core compiler hir surface service lsp stdlib single examples} {
+    foreach item {main.tcl LICENSE core compiler hir surface service lsp pm stdlib single examples} {
         file copy [file join $root $item] [file join $tree $item]
     }
     file mkdir [file join $tree native] [file join $tree compilerpedia] [file join $tree tests cffi]

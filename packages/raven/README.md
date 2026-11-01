@@ -31,4 +31,13 @@ Programs link Raven itself by `-L` (the directory `tests/cffi/raven.tcl`
 prints) and find `libraven.so` at run time by `LD_LIBRARY_PATH`. Native
 backends only: the Tcl backends refuse a C call.
 
-Tests: `tests/raven.test`. Example: `examples/raven/`.
+With the package manager (PACKAGE-MANAGER-MILESTONE-1.md) the same tree is
+an artifact: `tools/package-repository.tcl REPO` stages it as above -- the
+bridge's archive built there, on the author's side -- and packs it with its
+botlish.json as `REPO/raven-0.1.0.botpkg`, and an application installs it
+with `botlish add raven -repository REPO`: no build runs on the consumer's
+side. Such an artifact is one target's (its binding and its archive); Raven
+itself is still built and deployed separately (PM-2).
+
+Tests: `tests/raven.test`, `tests/package-workloads.test`. Example:
+`examples/raven/`.

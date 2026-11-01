@@ -1,0 +1,281 @@
+# package-workloads.test -- the package manager's acceptance workloads
+# (PACKAGE-MANAGER-MILESTONE-1.md, "Workload results"): real packages of
+# this repository, packed into a local repository and installed by the
+# ordinary commands into applications made fresh in the temporary
+# directory, compiled by the unchanged compiler and, where the host has the
+# native libraries, run.
+#
+#   A  a pure-Botlish package: the 2048 engine (examples/games/2048), packed
+#      as `game2048` -- no native file, no toolchain on either side;
+#   B  nested packages: sdlkit, which locks the generated SDL3 binding sdl3,
+#      installed in sdlkit's own .bot_modules;
+#   D  SDL3: sdlkit's frame through the package-owned libSDL3 (headless);
+#   E  Raven: the wrapper with its generated binding and the bridge archive
+#      built on the author's side, installed with no build on the consumer's;
+#   F  the Linux event loop's driver, likewise.
+#
+# (C, two versions of one package on separate branches, is
+# tests/package-manager.test's pm-two-versions-two-branches.) The packages
+# are packed by tools/package-repository.tcl, the author's side; everything
+# on the consumer's side is `main.tcl add`/`install`/`verify`.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot pm pm.tcl]
+source [file join $::projectRoot tests cffi sdl3.tcl]
+source [file join $::projectRoot tests cffi raven.tcl]
+source [file join $::projectRoot tools raven-package.tcl]
+
+interp recursionlimit {} 100000
+
+set mainScript [file join $::projectRoot main.tcl]
+set repositoryTool [file join $::projectRoot tools package-repository.tcl]
+set ::counter 0
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+set linuxHost [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+testConstraint linuxHost $linuxHost
+testConstraint cToolchain [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
+testConstraint sdl3Run [expr {[core::cabi::hostTarget] eq "linux-x86_64" && [testConstraint nativeCCalls]
+    && [testConstraint cLinker] && [cffi::sdl3Dir] ne ""}]
+# Raven's package is assembled where its binding exists for the host and the
+# pinned headers are fetched (the bridge is compiled against them).
+proc ravenAssemblable {} {
+    if {!$::linuxHost || [auto_execok cc] eq "" || [catch {ravenPackage::hostTarget} target]} { return 0 }
+    set headers [expr {[info exists ::env(BOTLISH_C_HEADER_SOURCES)] && $::env(BOTLISH_C_HEADER_SOURCES) ne ""
+        ? $::env(BOTLISH_C_HEADER_SOURCES) : [file join [cffi::RavenCacheDir] c-header-src]}]
+    return [expr {[file isdirectory [file join $::projectRoot generated c raven $target raven]]
+        && [file exists [file join $headers raven include Raven.h]]}]
+}
+testConstraint ravenPackage [ravenAssemblable]
+testConstraint ravenRun [expr {[testConstraint ravenPackage] && [testConstraint nativeCCalls]
+    && [testConstraint cLinker] && [cffi::ravenDir] ne ""}]
+testConstraint eventLoopRun [expr {$linuxHost && [testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+
+proc fresh {tag} {
+    return [makeDirectory pw-[pid]-$tag-[incr ::counter]]
+}
+
+proc cleanup {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] pw-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc writeText {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+# main.tcl ARGS in a child process: {status out err}; ENVIRONMENT pairs set
+# for it.
+proc pm {args} {
+    set environment {}
+    if {[lindex $args 0] eq "-env"} {
+        set environment [lindex $args 1]
+        set args [lrange $args 2 end]
+    }
+    set status 0
+    withEnvironment $environment {
+        if {[catch {exec [info nameofexecutable] $::mainScript {*}$args 2>@1} out options]} {
+            set status [lindex [dict get $options -errorcode] end]
+        }
+    }
+    return [dict create status $status out $out]
+}
+
+# A repository of the packages NAMES this checkout packs for the host
+# (tools/package-repository.tcl), made once per name set.
+proc repository {names} {
+    set key [join $names +]
+    if {[info exists ::repositories($key)]} {
+        return $::repositories($key)
+    }
+    set repo [makeDirectory pw-repo-[pid]-[incr ::counter]]
+    exec [info nameofexecutable] $::repositoryTool $repo {*}$names
+    set ::repositories($key) $repo
+    return $repo
+}
+
+proc hirOf {path args} {
+    return [surface::readProgramFile $path -warnings off -cache "" {*}$args]
+}
+
+proc valueOf {path backend args} {
+    lassign [outcomeUnderHir $backend [hirOf $path {*}$args]] tag value
+    if {$tag eq "value"} { return $value }
+    return "$tag: $value"
+}
+
+# ---------------------------------------------------------------------------
+# A. A pure-Botlish package: the 2048 engine
+
+set gameDir [file join $::projectRoot examples games 2048]
+
+# The 2048 engine as a package directory: game2048.bot, as it is, with a
+# descriptor and nothing else.
+proc enginePackage {} {
+    set dir [file join [fresh src] game2048]
+    file mkdir $dir
+    file copy [file join $::gameDir game2048.bot] $dir
+    writeText [file join $dir botlish.json] "{\"schema\": 1, \"name\": \"game2048\", \"version\": \"1.0.0\"}\n"
+    return $dir
+}
+
+# bench.bot making MOVES moves, written into DIR.
+proc benchInto {dir moves} {
+    regsub -line {^benchmark\(\d+, (.*)\)$} [core::ReadFile [file join $::gameDir bench.bot]] "benchmark($moves, \\1)" text
+    writeText [file join $dir bench.bot] $text
+    return [file join $dir bench.bot]
+}
+
+test pw-pure-botlish-package {the 2048 engine, packed as the package game2048 and installed from a repository into an application of its own, computes the benchmark's checksum the engine computes as the example's application module, on every backend here; packing and installing ran with no C compiler, linker or Rust on PATH} -body {
+    set repo [fresh repo]
+    set empty [fresh empty-path]
+    set noTools [list PATH $empty]
+    set packed [pm -env $noTools package pack [enginePackage] -out $repo]
+    set app [fresh app]
+    set bench [benchInto $app 60]
+    set added [pm -env $noTools add game2048 -project $app -repository $repo]
+    set reference [benchInto [fresh ref] 60]
+    file copy [file join $::gameDir game2048.bot] [file dirname $reference]
+    set backends {interp compile}
+    if {[testConstraint nativeBuilt]} { lappend backends cranelift }
+    set artifact [pm::archive::read [file join $repo game2048-1.0.0.botpkg]]
+    list [dict get $packed status] [dict get $added status] [dict keys [dict get $artifact files]] \
+        [expr {[lmap b $backends {valueOf $bench $b}] eq [lmap b $backends {valueOf $reference $b}]}] \
+        [lsort [glob -tails -directory [file join $app .bot_modules game2048] *]]
+} -cleanup cleanup -result {0 0 {botlish.json game2048.bot} 1 {botlish.json game2048.bot}}
+
+test pw-pure-botlish-same-hir {an installed package's program compiles to the HIR of the same program with the package's module as an application module, except for where the module was read from: the package manager adds nothing the compiler sees} -body {
+    set repo [fresh repo]
+    pm package pack [enginePackage] -out $repo
+    set app [fresh app]
+    pm add game2048 -project $app -repository $repo
+    set bench [benchInto $app 5]
+    set reference [benchInto [fresh ref] 5]
+    file copy [file join $::gameDir game2048.bot] [file dirname $reference]
+    set a [string map [list [file join $app .bot_modules game2048] ROOT [file dirname $bench] ROOT] [hir::format [hirOf $bench]]]
+    set b [string map [list [file dirname $reference] ROOT] [hir::format [hirOf $reference]]]
+    expr {$a eq $b}
+} -cleanup cleanup -result 1
+
+# ---------------------------------------------------------------------------
+# B. Nested packages: sdlkit and its SDL3 binding
+
+set sdlkitMain "import sdlkit\n\nwith context sdlkit::open()\n\nshown = sdlkit::frame()\nsame = sdlkit::version_matches()\nsdlkit::close()\n\[shown, same\]\n"
+
+test pw-sdlkit-installs-its-binding {sdlkit and the generated SDL3 binding, packed for the host, install with one add: sdlkit in the application's .bot_modules, sdl3 in sdlkit's own; the compiler reads them as the instances sdlkit and sdlkit/sdl3, the binding ordinary and sdlkit contextualized, and the application cannot import the binding} -constraints {linuxHost} -body {
+    set repo [repository {sdlkit sdl3}]
+    set app [fresh app]
+    writeText [file join $app main.bot] $::sdlkitMain
+    set r [pm add sdlkit -project $app -repository $repo]
+    set hir [hirOf [file join $app main.bot] -target [core::cabi::hostTarget]]
+    set statuses [dict create]
+    dict for {ns unit} [dict get $hir direct units] {
+        if {[string match sdlkit* $ns]} { dict set statuses $ns [dict get $unit status] }
+    }
+    set sneaky [fresh app]
+    writeText [file join $sneaky main.bot] "import sdl3::init\n\n1\n"
+    file copy -force [file join $app botlish.json] $sneaky
+    pm install -project $sneaky -repository $repo
+    list [dict get $r status] [lrange [split [dict get $r out] \n] 0 1] \
+        [file isfile [file join $app .bot_modules sdlkit .bot_modules sdl3 sdl3 video.bot]] \
+        [dict get $statuses sdlkit] [lsort -unique [lmap {ns status} $statuses {expr {[string match sdlkit/sdl3::* $ns] ? $status : [continue]}}]] \
+        [catch {hirOf [file join $sneaky main.bot] -target [core::cabi::hostTarget]} m o] [lindex [dict get $o -errorcode] end]
+} -cleanup cleanup -match glob -result {0 {{sdlkit 0.1.0 (sha256 *): installed} {  sdl3 0.1.0 (sha256 *): installed}} 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
+
+test pw-sdlkit-verify-and-reinstall {verify checks both instances against their artifacts; a fresh copy of the application reinstalls the same tree from botlish.json and the repository} -constraints {linuxHost} -body {
+    set repo [repository {sdlkit sdl3}]
+    set app [fresh app]
+    writeText [file join $app main.bot] $::sdlkitMain
+    pm add sdlkit -project $app -repository $repo
+    set v [pm verify -project $app -repository $repo]
+    set clone [fresh clone]
+    file copy [file join $app botlish.json] [file join $app main.bot] $clone
+    set i [pm install -project $clone -repository $repo]
+    set same 1
+    foreach path [glob -directory [file join $app .bot_modules sdlkit .bot_modules sdl3 sdl3] *.bot] {
+        if {[core::ReadFile $path] ne [core::ReadFile [file join $clone .bot_modules sdlkit .bot_modules sdl3 sdl3 [file tail $path]]]} { set same 0 }
+    }
+    list [dict get $v status] [lindex [split [dict get $v out] \n] end-1] [dict get $i status] $same
+} -cleanup cleanup -match glob -result {0 {verify: 2 package instance(s) in *: as installed} 0 1}
+
+# ---------------------------------------------------------------------------
+# D. SDL3 running through the installed packages
+
+test pw-sdlkit-runs {the application over the installed sdlkit runs natively, headless, against the package-owned libSDL3: every step of the frame and the version check true (the library itself is linked by -L and found by LD_LIBRARY_PATH: deployment is not the package manager's yet)} -constraints {sdl3Run} -body {
+    set repo [repository {sdlkit sdl3}]
+    set app [fresh app]
+    writeText [file join $app main.bot] $::sdlkitMain
+    pm add sdlkit -project $app -repository $repo
+    set lib [cffi::sdl3Dir]
+    set hir [hirOf [file join $app main.bot]]
+    withEnvironment [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH $lib] {
+        native::withLinkDirs [list $lib] {
+            lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}
+        }
+    }
+} -cleanup cleanup -result {{[[true, true, true, true, true, true], true]} {[[true, true, true, true, true, true], true]}}
+
+# ---------------------------------------------------------------------------
+# E. Raven
+
+test pw-raven-replaces-helper {the Raven package the package manager installs is file for file the tree tools/raven-package.tcl installs, plus its botlish.json: the bridge archive was built on the author's side, and nothing is compiled on the consumer's} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set app [fresh app]
+    set empty [fresh empty-path]
+    set r [pm -env [list PATH $empty] add raven -project $app -repository $repo]
+    set helper [fresh helper]
+    ravenPackage::install $helper
+    set files {}
+    foreach root [list [file join $app .bot_modules raven] [file join $helper .bot_modules raven]] {
+        set list {}
+        foreach path [lsort [exec find $root -type f]] {
+            lappend list [string range $path [string length $root/] end]
+        }
+        lappend files $list
+    }
+    lassign $files managed helped
+    list [dict get $r status] [lsearch -all -inline -not -exact $managed botlish.json] [expr {[lsearch -all -inline -not -exact $managed botlish.json] eq $helped}] \
+        [expr {[lsearch -exact $managed native/libraven_bridge.a] >= 0}]
+} -cleanup cleanup -result [list 0 [lsort [concat {README.md native/libraven_bridge.a native/raven_bridge.c raven.bot} [lmap f [glob -tails -directory [file join $::projectRoot generated c raven linux-x86_64 raven] *.bot] {string cat raven/ $f}]]] 1 1]
+
+test pw-raven-runs {examples/raven's headless program over the installed raven package runs natively against the package-owned libraven: three clicks counted, Quit honored} -constraints {ravenRun} -body {
+    set repo [repository {raven}]
+    set app [fresh app]
+    foreach file {headless.bot counter.bot} {
+        file copy [file join $::projectRoot examples raven $file] $app
+    }
+    pm add raven -project $app -repository $repo
+    set lib [cffi::ravenDir]
+    set hir [hirOf [file join $app headless.bot]]
+    withEnvironment [list LD_LIBRARY_PATH $lib] {
+        native::withLinkDirs [list $lib] {lindex [outcomeUnderHir cranelift $hir] 1}
+    }
+} -cleanup cleanup -result {["3", "3 clicks", "false", "0"]}
+
+# ---------------------------------------------------------------------------
+# F. The Linux event loop's driver
+
+test pw-event-loop-runs {examples/event-loop/native over the installed event_loop_linux package: the driver's archive came in the artifact, the application builds only its own ticker (against the header the package installed), and the program's five ticks are handled} -constraints {eventLoopRun} -body {
+    set repo [repository {event_loop_linux}]
+    set app [fresh app]
+    foreach file {main.bot ticker.bot ticks.bot ticker.c} {
+        file copy [file join $::projectRoot examples event-loop native $file] $app
+    }
+    set r [pm add event_loop_linux -project $app -repository $repo]
+    exec cc -O2 -Wall -Wextra -Werror -fPIC -pthread -I[file join $app .bot_modules event_loop_linux native] \
+        -c [file join $app ticker.c] -o [file join $app ticker.o]
+    exec ar rcs [file join $app libticker.a] [file join $app ticker.o]
+    set value [lindex [outcomeUnderHir cranelift [hirOf [file join $app main.bot]]] 1]
+    list [dict get $r status] [file isfile [file join $app .bot_modules event_loop_linux native libevent_loop_linux.a]] $value
+} -cleanup cleanup -result {0 1 {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
+
+foreach dir [glob -nocomplain -directory [temporaryDirectory] pw-repo-[pid]-*] {
+    file delete -force $dir
+}
+cleanupTests

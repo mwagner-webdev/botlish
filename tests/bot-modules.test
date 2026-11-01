@@ -694,10 +694,11 @@ proc sdlApp {{program ""}} {
     return $dir
 }
 
-# The SDL3 wrapper package sdlkit: an ordinary module that installs the
-# generated binding as its own package and keeps SDL's objects behind its
-# context Kit (the airlock), the application's only view of SDL.
-set sdlkit "# sdlkit -- a reusable SDL3 airlock over the generated binding it installs\n# itself (.bot_modules/sdl3): SDL's objects stay behind the Kit context.\nimport std::abi\nimport std::abi::bytes\nimport std::byte\nimport std::ffi::c\nimport std::list\nimport std::str\nimport sdl3::events\nimport sdl3::init\nimport sdl3::render\nimport sdl3::timer\nimport sdl3::version\nimport sdl3::video\n\nopaque context struct Kit:\n    started: bool\n\n# SDL initialized for video: the context every operation requires.\nfn open() -> Kit:\n    Kit {started: sdl3::init::SDL_Init(sdl3::init::SDL_INIT_VIDEO)}\n\nfn nul() -> std::byte::Byte:\n    0\n\nfn cstring(text: str) -> std::abi::bytes::Bytes:\n    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))\n\n# One frame in a window: what each step reported.\nfn frame(context kit: Kit) -> List\[bool\]:\n    window = cstring(\"Botlish package over generated SDL3\").SDL_CreateWindow(320, 240, sdl3::video::SDL_WINDOW_RESIZABLE)\n    no_name = std::ffi::c::null\[std::ffi::c::Char\]()\n    renderer = window.SDL_CreateRenderer(no_name)\n    colored = renderer.SDL_SetRenderDrawColor(32, 96, 160, 255)\n    cleared = sdl3::render::SDL_RenderClear(renderer)\n    presented = sdl3::render::SDL_RenderPresent(renderer)\n    before = sdl3::timer::SDL_GetTicks()\n    sdl3::timer::SDL_Delay(20)\n    after = sdl3::timer::SDL_GetTicks()\n    sdl3::events::SDL_PumpEvents()\n    id = sdl3::video::SDL_GetWindowID(window)\n    sdl3::render::SDL_DestroyRenderer(renderer)\n    sdl3::video::SDL_DestroyWindow(window)\n    \[kit.started, colored, cleared, presented, after - before >= 20, id > 0\]\n\nfn version_matches(context kit: Kit) -> bool:\n    sdl3::version::SDL_GetVersion() == sdl3::version::SDL_VERSION\n\nfn close(context kit: Kit) -> unit:\n    sdl3::init::SDL_Quit()\n"
+# The SDL3 wrapper package sdlkit (packages/sdlkit, the repository's own
+# package: PACKAGE-MANAGER-MILESTONE-1.md): an ordinary module that installs
+# the generated binding as its own package and keeps SDL's objects behind
+# its context Kit (the airlock), the application's only view of SDL.
+set sdlkit [core::ReadFile [file join $::projectRoot packages sdlkit sdlkit.bot]]
 set sdlkitMain "import sdlkit\n\nwith context sdlkit::open()\n\nshown = sdlkit::frame()\nsame = sdlkit::version_matches()\nsdlkit::close()\n\[shown, same\]\n"
 
 proc sdlkitApp {} {

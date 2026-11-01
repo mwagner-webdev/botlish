@@ -2261,8 +2261,8 @@ summary: A package is a module tree in its owner's .bot_modules/NAME, claiming t
 index: rules
 alias: package; packages; .bot_modules; install a library; third-party module; dependency; vendored library; node_modules
 keywords: package, .bot_modules, installed, dependency, scope, owner, instance, root namespace, identity, downward, consumer, sibling, collision, std
-related: rule.application-modules concept.modules concept.imports error.module-collision error.unknown-namespace error.reserved-namespace
-docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md
+related: rule.application-modules concept.modules concept.imports error.module-collision error.unknown-namespace error.reserved-namespace cli.packages
+docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md PACKAGE-MANAGER-MILESTONE-1.md
 
 == THE RULE
 A package is an ordinary module tree installed under the immediate
@@ -2270,6 +2270,9 @@ A package is an ordinary module tree installed under the immediate
 ROOT/.bot_modules/NAME/ (ROOT the entry file's directory), and that
 package's own package D is ROOT/.bot_modules/NAME/.bot_modules/D/. The
 directories are the whole of it: no manifest, version or registry is read.
+The package manager (cli.packages) builds such trees from botlish.json
+and .botpkg artifacts; the compiler reads only the directories, and a
+hand-assembled tree compiles the same.
 
     game/main.bot                      import sdl3::video
     game/.bot_modules/sdl3/sdl3/video.bot

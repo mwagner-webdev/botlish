@@ -38,8 +38,10 @@
 #      the single executable must first install them: the kernel cannot run
 #      the native executables from inside the archive, nor can the host's
 #      linker read the runtime archive there. Unless the invocation is only
-#      the usage summary (no arguments), -help, -version or the language
-#      server (-lsp, -lsp-worker: they analyze and never reach a backend), it
+#      the usage summary (no arguments), -help, -version, the language
+#      server (-lsp, -lsp-worker: they analyze and never reach a backend) or
+#      a package command (add, install, update, remove, verify, package:
+#      PACKAGE-MANAGER-MILESTONE-1.md, which never compile anything), it
 #      copies the executables into a per-build cache directory (once per
 #      build: later runs find them there), and the runtime archive too for a
 #      run that may link a native executable (-emit-native-executable, a
@@ -195,12 +197,14 @@ if {[info exists ::single::bundle]} {
     # runtime_archive), and there is no stub: `auto` is the system linker.
     set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
 } elseif {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
+        && [lindex $::argv 0] ni {add install update remove verify package}
         && "-lsp" ni $::argv && "-lsp-worker" ni $::argv} {
     # The usage summary, -help and -version run no program: they install
-    # nothing (main.tcl answers them before it loads the compiler). Nor does
-    # the language server or its worker (which starts as this executable,
-    # with -lsp-worker, whenever it is replaced), which never reach a
-    # backend.
+    # nothing (main.tcl answers them before it loads the compiler). Nor do
+    # the package commands (main.tcl runs the package manager without the
+    # compiler), or the language server or its worker (which starts as this
+    # executable, with -lsp-worker, whenever it is replaced), which never
+    # reach a backend.
     if {[catch {::single::NativeDir [::single::MayLink $::argv]} ::single::nativeDir]} {
         puts stderr "botlish: cannot install the native backend: $::single::nativeDir"
         exit 2
