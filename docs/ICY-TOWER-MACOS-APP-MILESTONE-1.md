@@ -117,11 +117,11 @@ far as a runner allows, run on macOS:
   why with one read request (section 20).
 * **Not this milestone's, recorded**: the earlier milestone's `restart`
   case failed intermittently (section 34); the macOS integration's
-  mutants: 31 of 31 killed in their last run (41245041656), after two
-  harness defects the earlier runs exposed were fixed (a stale alert
-  across cases; a launch check SDL3's own activation makes a race), with
-  that run's harness exit 1 for the baseline's LaunchServices lookup in
-  a temporary directory (section 39).
+  mutants: 31 of 31 killed (41245041656) once the harness defects the
+  earlier runs exposed were fixed (a stale alert across cases; a launch
+  check SDL3's own activation makes a race; bundles in a temporary
+  directory LaunchServices did not find, whose baseline then held in an
+  isolated run, 41297189955) (section 39).
 
 Linux and Windows are unchanged (section 41): no shared module changed, and
 their workflows pass.
@@ -1391,12 +1391,27 @@ org.botlish.examples.icy-tower.mutant (0 registered)". The harness builds
 its bundles in the runner's temporary directory (`/var/folders/...`), and
 LaunchServices' lookup by identifier found none there, while the same case
 on the session's bundle in the workspace finds it every run (section 5).
-The likely cause is that LaunchServices does not index that location; it
-is not established, and it is no property the agent mutant's check reads
-(the Info.plist). Not fixed in this milestone: the remedy is to build the
-harness's bundles outside the temporary directory, and its proof is
-another hour's run. The `session:restart` baseline held in that run; the
-session's own `restart` failed (section 34).
+It is no property the agent mutant's check reads (the Info.plist). Fixed:
+the harness now builds its bundles under the home directory (a
+`[pid]`-named directory removed with its work directory), and `mutate.tcl
+-macos 1 NAME ...` checks only the named mutants' detectors' baselines
+(the workflow's manual run passes them: `mutants_only`). **Executed** (run
+41297189955, `mutants_only: agent-application`, every step of the job
+green):
+
+    baseline app:app-bundle      pass
+    agent-application            killed by app:app-bundle (48 s): a regular application as macOS reads its Info.plist: no LSUIElement, LSBackgroundOnly, NSUIElement or NSBGOnly (['LSUIElement'])
+    1 of 1 mutants killed
+
+The same check that found no registration under `/var/folders` passed with
+the bundle under the home directory, which agrees with LaunchServices not
+indexing the temporary directory; one run each way shows the fix works,
+not why. So every one of the 31 mutants was killed by its own detector
+(41245041656), every baseline those detectors need held there except
+`app-bundle`'s, and that one held with the fix (41297189955). No single
+run since the fix has run all 31 with all their baselines. The
+`session:restart` baseline held in 41245041656; the session's own
+`restart` failed (section 34).
 
 ## 40. Negative artifact controls
 
@@ -1520,6 +1535,7 @@ run was superseded by the next push unless said otherwise.
 | 41235898277 | 223a0e2 | failure | the alert fix: `launch-environment-dropped` killed; `agent-application` failed the launch for another check (SDL3 sets the regular policy itself); the session's `restart` failed |
 | 41240614881 | 0e90386 | failure | `agent-application` survived the launch checks (LaunchServices activated the agent); the `restart` baseline failed |
 | 41245041656 | bf73c0d | failure | the Info.plist check: 31 of 31 mutants killed; the harness's `app-bundle` baseline failed its LaunchServices lookup in a temporary directory; the session's `restart` failed (section 39) |
+| **41297189955** | **2bc2c92** | **success** | `mutants: true`, `mutants_only: agent-application` (manual): the harness's bundles under the home directory; `baseline app:app-bundle pass`, the agent mutant killed; every step of the job green, the original session's 12 cases and the 13 LaunchServices cases among them |
 
 The general workflows started by the same pushes: `icy-tower (windows
 x86-64)` passed at c0f3165 (41205557419), e0231c4 (41207619531), ba18cda
@@ -1706,6 +1722,16 @@ python3 -I audit/icy-tower/tools/macos-session.py app --app "$PWD/out/app/Icy To
   rel cleanup --work "$TMPDIR/dry/w" )
 ```
 
+The macOS integration's mutants, all or some (`mutate.tcl -macos 1 ... NAME
+...` checks only the named mutants' detectors' baselines; in CI a manual run
+of icy-tower (macos arm64) with `mutants` and `mutants_only`, or a push
+whose message holds `[ci-icy-tower-mutants]` for all of them):
+
+```sh
+tclsh9.0 audit/icy-tower/mutate.tcl -macos 1 -app "$APP" -binding out/sdl3-binding -prefix "$PREFIX" \
+    -helper "$TMPDIR/macos-input" agent-application
+```
+
 On any host (Linux included), the release tooling's tests and mutants, and
 the front-end check of the macOS entry:
 
@@ -1749,7 +1775,7 @@ Changed:
 | `audit/icy-tower/tools/macos-session.py` | the `app` mode (LaunchServices launches, the alert and Gatekeeper cases, App Translocation), SIP and Gatekeeper recorded |
 | `audit/icy-tower/tools/macos-input.m` | `app-info` (with the agent and background-only keys NSBundle reads), `apps`, `ax-texts`, `ax-press` |
 | `audit/icy-tower/context-refactor/tools/sdltrace.c` | `SDLTRACE_FAIL` fault injection (window creation, the Nth present); without it nothing changes |
-| `audit/icy-tower/macos-mutate.tcl`, `audit/icy-tower/macos-mutants.txt` | the `app:CASES` detector (the mutant's executable bundled, signed ad hoc, launched through LaunchServices); `darwin-io-silent` renamed `app-io-silent` for the new entry; six bundle mutants |
+| `audit/icy-tower/macos-mutate.tcl`, `audit/icy-tower/macos-mutants.txt` | the `app:CASES` detector (the mutant's executable bundled under the home directory, signed ad hoc, launched through LaunchServices); named mutants with only their detectors' baselines; `darwin-io-silent` renamed `app-io-silent` for the new entry; six bundle mutants |
 | `tests/workload-icy-tower.test` | `workload-icy-tower-app-module`, `-app-module-shared-sources-untouched`, `-release-tooling`, `-macos-app-bundle` |
 | `.github/workflows/icy-tower-macos.yml` | the game job's bundle, LaunchServices, dry-run, tooling and ABI steps; the tag trigger; the release and publish jobs |
 | `.github/workflows/icy-tower.yml` | the release tooling's pinned Python for its tests |

@@ -4161,7 +4161,11 @@ the workflow; for the port's mutants push with `[ci-icy-tower-mutants]` in
 the head commit's message (`audit/icy-tower/mutate.tcl -macos 1`: every
 mutant in `audit/icy-tower/macos-mutants.txt` must still apply and be killed
 by the detector its `??` line names; update a mutant's text when you change
-the code it mutates, keeping it a mutant of the same rule).
+the code it mutates, keeping it a mutant of the same rule). To recheck a few
+mutants, run them by name (`mutate.tcl -macos 1 ... NAME ...`, or a manual
+run with `mutants` and `mutants_only`): only their detectors' baselines run.
+The harness's application bundles live under the home directory, never the
+temporary one, whose bundles LaunchServices' lookup did not find.
 
 ### Icy Tower.app and its release (Developer ID, notarization)
 
