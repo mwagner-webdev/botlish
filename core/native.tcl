@@ -12,6 +12,18 @@
 #   paramTypes      types (type.tcl) the implementation *requires* of each
 #                   argument (any = no requirement); a call that returns
 #                   proves its arguments had these types. "" = unknown.
+#   elementKinds    "" or one entry per parameter: "" (no requirement) or
+#                   the kind (a primitive type) every element of that List
+#                   argument must have -- std::list::flat's {list}: the
+#                   argument is a List of Lists (LIST-FLAT-MILESTONE-1.md).
+#                   Like paramTypes it is a run-time kind contract (the
+#                   implementation raises TYPE for an element of another
+#                   kind), held statically by the one native-kind rule
+#                   (hir::types::NativeKindMismatch): an argument whose
+#                   static element type is of a known other kind is the
+#                   call's compile-time TYPE error; an element of no fixed
+#                   kind (`any`) is checked when the call runs. Read by
+#                   registration, never by name.
 #   resultType      type of every result, or any
 #   testsType       "" or a type T: the native is a *type test*, a pure
 #                   one-argument predicate returning exactly whether its
@@ -74,6 +86,13 @@
 #                     list K          the length of List argument K
 #                     list K D        the length of List argument K plus D
 #                                     (std::list::append: one more)
+#                     flat K          the exact length N of List argument K
+#                                     times the exact length M every one of
+#                                     its elements has, when its static type
+#                                     states both (List[List[T]{length: M}]
+#                                     {length: N}: std::list::flat makes N*M
+#                                     elements, LIST-FLAT-MILESTONE-1.md);
+#                                     nothing otherwise
 #                     extent K        the extent N of argument K's static
 #                                     type when it is a live fixed array,
 #                                     NativeView[array N of E] or
@@ -190,6 +209,9 @@
 #                                     index given by Int argument I
 #                     append L V      a list of list argument L's elements
 #                                     followed by argument V
+#                     flat L          a list of the elements of list
+#                                     argument L's Lists, in order: a
+#                                     List[List[T]] makes a List[T]
 #                     immutable-set L an ImmutableSet of list argument L's
 #                                     element type (MINIMAL-IMMUTABLE-SET.md)
 #                     mutarray-element A  argument A is a MutableArray[T]:
@@ -572,7 +594,7 @@ proc core::native::register {name args} {
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
         -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
         -result-length {} -keeps-length 0 -drop-form {} -layout {} -imprint {} -foreign {} -extern {} \
-        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0]
+        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0 -element-kinds {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -654,6 +676,18 @@ proc core::native::register {name args} {
     if {$arity ne "*" && $paramTypes ne "" && [llength $paramTypes] != $arity} {
         error "core::native::register: -param-types of \"$name\" must list $arity type(s)"
     }
+    set elementKinds {}
+    if {[dict get $options -element-kinds] ne ""} {
+        if {$arity eq "*" || [llength [dict get $options -element-kinds]] != $arity} {
+            error "core::native::register: -element-kinds of \"$name\" must list $arity kind(s)"
+        }
+        foreach kind [dict get $options -element-kinds] param $paramTypes {
+            if {$kind ne "" && ($param ne "list" || [llength [CanonicalType $name -element-kinds $kind]] != 1)} {
+                error "core::native::register: -element-kinds of \"$name\": \"$kind\" must be a primitive kind of a List parameter's elements"
+            }
+            lappend elementKinds $kind
+        }
+    }
     variable runtimeTags
     foreach tag [dict get $options -runtime] {
         if {$tag ni $runtimeTags} {
@@ -704,7 +738,7 @@ proc core::native::register {name args} {
         error "core::native::register: bad -measures \"$measures\" for \"$name\" (FAMILY PARAM K, an Int result)"
     }
     set length [dict get $options -result-length]
-    if {$length ne "" && $length ne "args" && ([llength $length] ni {2 3} || [lindex $length 0] ni {int list extent path}
+    if {$length ne "" && $length ne "args" && ([llength $length] ni {2 3} || [lindex $length 0] ni {int list flat extent path}
             || ![string is digit -strict [lindex $length 1]] || $arity eq "*" || [lindex $length 1] >= $arity
             || ([llength $length] == 3 && ([lindex $length 0] ne "list" || ![string is digit -strict [lindex $length 2]])))} {
         error "core::native::register: bad -result-length \"$length\" for \"$name\""
@@ -771,7 +805,7 @@ proc core::native::register {name args} {
         keepsLength [dict get $options -keeps-length] dropForm $dropForm \
         layout $layout imprint $imprint foreign $foreign extern [dict get $options -extern] \
         mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
-        measures $measures hashing $hashing elementPlace $elementPlace]
+        measures $measures hashing $hashing elementPlace $elementPlace elementKinds $elementKinds]
     return [core::value::native $name]
 }
 
@@ -1079,6 +1113,11 @@ proc core::native::ValidShape {shape count} {
         ""       { return [expr {$length == 0}] }
         elements { return [expr {$length == 1}] }
         element - append { return [expr {$length == 3 && $count ne ""}] }
+        flat {
+            # {flat L}: argument L is a List of Lists, List[List[T]]: the
+            # result is a List[T] (std::list::flat, LIST-FLAT-MILESTONE-1.md).
+            return [expr {$length == 2 && $count ne ""}]
+        }
         immutable-set { return [expr {$length == 2}] }
         mutarray-element - mutarray-freeze - mutarray-create - mutarray-from-list - mutarray-generate {
             return [expr {$length == 2 && $count ne ""}]

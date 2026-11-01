@@ -2128,8 +2128,24 @@ proc hir::range::VerifyNativeKinds {hirVar e node name} {
             # converts one implicitly.)
             continue
         }
-        lassign $mismatch kind wanted
+        lassign $mismatch kind wanted level
         set wanted [hir::types::show $wanted]
+        if {$level eq "elements"} {
+            # (An element kind, core/native.tcl's -element-kinds: the
+            # argument is a List, but its elements are not of the kind every
+            # one must have -- std::list::flat of a List that holds no Lists.)
+            set elem [hir::types::elementOf $argType]
+            if {$kind eq "imprint"} {
+                set why [format {the function is checked once, for every %s, and not every %s is %s} \
+                    [hir::types::show $elem] [hir::types::show $elem] $wanted]
+            } else {
+                set why "the call could only fail when it runs"
+            }
+            hir::Diagnose hir TYPE [format {argument %d of native %s requires a List whose every element is %s, but %s has type %s, whose elements are %s: %s} \
+                $index $name $wanted [NativeArgumentNoun $node $i] [hir::semantic::ShowType $hir $argType] \
+                [hir::semantic::ShowType $hir $elem] $why] $arg
+            continue
+        }
         if {$kind eq "imprint"} {
             set why [format {the function is checked once, for every %s, and not every %s is %s} \
                 [hir::types::show $argType] [hir::types::show $argType] $wanted]

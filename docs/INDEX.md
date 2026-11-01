@@ -48,6 +48,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 
 - [COLLECTING-LOOPS.md](COLLECTING-LOOPS.md) -- the numeric loop forms (`to`, `through`, `down from`) and lockstep iteration with a proven common cardinality
 - [FOLD-LOOPS-MILESTONE-1.md](FOLD-LOOPS-MILESTONE-1.md) -- folding loops: `fold ... with intermediate acc INITIAL:` carries one value through a loop's iterations (one loop-carried register natively; no List, plan or MutableArray)
+- [LIST-FLAT-MILESTONE-1.md](LIST-FLAT-MILESTONE-1.md) -- `std::list::flat[T](lists: List[List[T]]) -> List[T]`: exactly one level of nesting removed, eager and order-preserving, on every backend in O(m + n) (one runtime operation, one allocation of the result, each inner List copied once); typed by a result shape, a List of non-Lists a compile-time TYPE (`-element-kinds`), the length N*M kept; collecting loops and folds compose with it unfused; measured scaling, idioms, chunk fold and a uri-steady probe (completion report)
 - [RETURNING-ITERABLE-LOOPS.md](RETURNING-ITERABLE-LOOPS.md) -- `loop x in xs:` as an expression that returns a List
 - [PAYLOAD-FREE-BREAK.md](PAYLOAD-FREE-BREAK.md) -- `break` never carries a value
 - [LISTLOOP-BREAK-TYPE-SOUNDNESS.md](LISTLOOP-BREAK-TYPE-SOUNDNESS.md) -- the earlier `break VALUE` design (superseded)

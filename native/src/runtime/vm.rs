@@ -985,7 +985,7 @@ impl Vm {
     /// normal). Every String/List constructor routes through this, so
     /// `str::length`/`list::length`'s `-result-range collection-length` metadata
     /// (core/native.tcl) is an actual checked invariant, not an assumption.
-    fn reject_oversized_collection(&mut self, len: usize) -> Option<Value> {
+    pub(crate) fn reject_oversized_collection(&mut self, len: usize) -> Option<Value> {
         if len <= MAX_COLLECTION_LENGTH {
             return None;
         }

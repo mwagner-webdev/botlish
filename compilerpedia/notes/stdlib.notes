@@ -626,24 +626,26 @@ args.length() >= 1
 
 @topic stdlib.module.std::list
 title: -
-summary: Immutable List operations: length, indexed access (at, get), append, and the search helpers any?, all?, none? and find.
+summary: Immutable List operations: length, indexed access (at, get), append, flat (one level of nesting removed), and the search helpers any?, all?, none? and find.
 index: stdlib
 keywords: list functions; array functions; sequence operations
-related: concept.lists concept.list-length task.list-element capability.map-filter
+related: concept.lists concept.list-length task.list-element capability.map-filter stdlib.std::list::flat
 
-== NOTES Four intrinsics (std::list::length, std::list::at,
-std::list::append and the length validator std::list::with_length) and the
-ordinary Botlish functions of stdlib/list.bot built on them. `import
-std::list` makes both callable, qualified (std::list::at(xs, 0)) or as
-methods (xs.at(0)). A List is immutable: append returns a new List and
-nothing changes one in place (a MutableVector is the growable mutable
-alternative).
+== NOTES Five intrinsics (std::list::length, std::list::at,
+std::list::append, std::list::flat and the length validator
+std::list::with_length) and the ordinary Botlish functions of
+stdlib/list.bot built on them. `import std::list` makes both callable,
+qualified (std::list::at(xs, 0)) or as methods (xs.at(0)). A List is
+immutable: append and flat return a new List and nothing changes one in
+place (a MutableVector is the growable mutable alternative).
 
 There is deliberately no map, filter, reduce, sum, reverse, sort, slice,
-concatenation of two Lists or index-of: a collecting loop
-(`loop x in xs: f(x)`, with `continue` to skip) is the transformation
-(capability.map-filter), and std::list::any?, all?, none? and find cover
-search.
+flat_map or index-of: a collecting loop (`loop x in xs: f(x)`, with
+`continue` to skip) is the transformation (capability.map-filter), a fold
+reduces (concept.folds), std::list::flat joins Lists (flat([xs, ys]) is
+their concatenation, and a collecting loop whose body makes a List, then
+flat, is what other languages call flat_map), and std::list::any?, all?,
+none? and find cover search.
 
 @topic stdlib.std::list::length
 title: -
@@ -713,14 +715,16 @@ title: -
 summary: A new List of the elements of xs followed by one value, written xs.append(v); xs itself is unchanged.
 index: stdlib
 keywords: add element; push; append item; insert at end; extend
-related: concept.lists stdlib.list stdlib.module.std::mutable_vector stdlib.std::str::append_char
+related: concept.lists stdlib.list stdlib.module.std::mutable_vector stdlib.std::str::append_char stdlib.std::list::flat
 
 == NOTES
 Lists are immutable values, so append builds a new List one element
 longer and every other holder of xs still sees the old one. It appends
 exactly one value: appending a List adds it as a single, nested element.
-There is no operation that joins two Lists; build the combined List with
-a collecting loop, or use a MutableVector (std::mutable_vector::push) when
+Each append copies the List it extends, so a List built by appending in a
+fold costs time quadratic in its length: join Lists with std::list::flat
+(flat([xs, ys]) is their concatenation, in linear time), build with a
+collecting loop, or use a MutableVector (std::mutable_vector::push) when
 many elements are added one by one.
 
 == EXAMPLES
@@ -731,6 +735,72 @@ xs = [1, 2]
 ys = xs.append(3)
 [xs, ys, xs.append([4])]
 @value [[1, 2], [1, 2, 3], [1, 2, [4]]]
+@end
+
+@topic stdlib.std::list::flat
+title: -
+summary: A new List of the elements of every List in lists, in order -- exactly one level of nesting removed -- written lists.flat(); lists itself is unchanged.
+index: stdlib
+alias: flatten; flatten a list; concat lists; concatenate lists; join lists; flat_map; flatmap; concat_map
+keywords: flatten; concatenate; join lists; combine lists; merge lists; nested list; list of lists; flat map
+related: concept.lists capability.map-filter concept.folds stdlib.std::list::append stdlib.module.std::list concept.list-length
+
+== NOTES
+std::list::flat[T](lists: List[List[T]]) -> List[T]: the elements of the
+first List, then of the second, and so on. It removes exactly one level:
+flat([[[1, 2]], [[3]]]) is [[1, 2], [3]], never [1, 2, 3]; empty Lists
+contribute nothing, duplicates stay, and the elements are neither compared,
+converted nor copied deeply. flat([xs, ys]) is the concatenation of two
+Lists. It is eager and linear: one pass over lists, one new List of exactly
+the total length, each inner List copied into place once -- never a prefix
+copied again, as appending in a loop would.
+
+The argument must be a List of Lists: flat([1, 2]) is a TYPE error at
+compile time, and an element that is no List is the run-time TYPE error
+`std::list::flat element I: expected list, got V` where the compiler cannot
+see the element type (`any`). The result's type is List[T] for a
+List[List[T]]; when the inner Lists all have one proven length M and the
+outer one N, the result is List[T]{length: N*M} (concept.list-length).
+
+flat_map is not a separate function: write the collecting loop, bound to a
+name (a loop is never a call argument: rule.loop-placement), then flatten
+it. Only flat itself is linear; the loop still builds its List and each
+inner List (no fusion), and a fold that grows a List by appending still
+copies it on every append. Runs on every backend.
+
+== EXAMPLES
+@example accept
+import std::list
+
+[std::list::flat([[1, 2], [], [3, 4]]), std::list::flat([[], []]), std::list::flat([[[1, 2]], [[3]]])]
+@value [[1, 2, 3, 4], [], [[1, 2], [3]]]
+@caption One level removed, in order; empty Lists contribute nothing
+@end
+
+@example accept
+import std::list
+
+fn expand(x: int) -> List[int]:
+    if x > 2:
+        [x, x * 10]
+    else:
+        []
+
+xs = [1, 2, 3, 4]
+chunks = loop x in xs:
+    expand(x)
+chunks.flat()
+@value [3, 30, 4, 40]
+@caption flat_map: a collecting loop, then flat
+@end
+
+@example reject
+import std::list
+
+std::list::flat([1, 2])
+@caption Not a List of Lists
+@error CORE SEMANTIC TYPE
+@at 3:17
 @end
 
 @topic stdlib.std::list::with_length

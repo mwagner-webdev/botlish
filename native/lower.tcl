@@ -148,6 +148,7 @@ namespace eval native::lower {
         std::tree::children {op treechildren} \
         std::list::at     {op listget} \
         std::list::append {op listappend} \
+        std::list::flat   {op listflat} \
         list#with_length {op listwithlen} \
         std::immutable_set::from_list {equality-list} \
         std::immutable_set::contains  {equality-set} \

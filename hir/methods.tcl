@@ -3,7 +3,7 @@
 #
 #   hir::methods::Decide NODES OPTIONS GIVEN HIR SEEDS   => the decided HIR
 #   hir::methods::Problems HIR KEY                       => a call's own problems
-#   hir::methods::NativeMismatch NATIVE RECEIVERTYPE     => {} | {KIND WANTED}
+#   hir::methods::NativeMismatch NATIVE RECEIVERTYPE     => {} | {KIND WANTED} | {KIND WANTED elements}
 #   hir::methods::Excluded HIR CANDIDATE RECEIVERTYPE    => 0 | 1
 #
 # `receiver.name(args)` is the ordinary call `name(receiver, args)` of the one

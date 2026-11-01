@@ -1,0 +1,51 @@
+# tclsh9.0 audit/list-flat/tools/measure.tcl -parts "idioms loop chunks" -sizes "128 1024 4096" -time 0
+== idioms: building the same List of n elements from k = 8 per inner List (per construction; R = 2, profiles of 1 and 3 runs)
+
+idiom | n | instr/construction | instr/element | Lists | copies | us | value
+----- | - | ------------------ | ------------- | ----- | ------ | -- | -----
+flat | 128 | 1,373 | 10.7 | 1 | 128 | - | -
+append-fold | 128 | 94,045 | 734.7 | 129 | 8128 | - | -
+flat-pair-fold | 128 | 24,107 | 188.3 | 33 | 1120 | - | -
+vector-push | 128 | 154,073 | 1203.7 | 36 | 445 | - | -
+tail-recursion | 128 | 124,762 | 974.7 | 146 | 252 | - | -
+flat | 1024 | 7,520 | 7.3 | 1 | 1024 | - | -
+append-fold | 1024 | 2,119,467 | 2069.8 | 1025 | 523776 | - | -
+flat-pair-fold | 1024 | 468,894 | 457.9 | 257 | 66304 | - | -
+vector-push | 1024 | 1,242,412 | 1213.3 | 260 | 3581 | - | -
+tail-recursion | 1024 | 1,159,880 | 1132.7 | 1154 | 2044 | - | -
+flat | 4096 | 114,515 | 28.0 | 1 | 4096 | - | -
+append-fold | 4096 | 80,194,264 | 19578.7 | 4097 | 8386560 | - | -
+flat-pair-fold | 4096 | 10,848,841 | 2648.6 | 1025 | 1051648 | - | -
+vector-push | 4096 | 5,182,596 | 1265.3 | 1028 | 14333 | - | -
+tail-recursion | 4096 | 4,758,507 | 1161.7 | 4610 | 8188 | - | -
+
+== loop: chunks = loop x in xs: expand(x) (k = 8 elements each), then flat
+
+variant | n | instr/run | rt_list_flat | Lists | copies | listflat-allocs | us | value
+------- | - | --------- | ------------ | ----- | ------ | --------------- | -- | -----
+outer-scalar | 128 | 19,912 | 0 | 4 | 56 | 0 | - | -
+outer-and-inner | 128 | 104,520 | 0 | 36 | 248 | 0 | - | -
+outer-inner-flat | 128 | 105,824 | 629 | 37 | 376 | 1 | - | -
+single-loop | 128 | 60,104 | 0 | 4 | 280 | 0 | - | -
+outer-scalar | 1024 | 107,250 | 0 | 4 | 504 | 0 | - | -
+outer-and-inner | 1024 | 821,074 | 0 | 260 | 2040 | 0 | - | -
+outer-inner-flat | 1024 | 827,973 | 4,549 | 261 | 3064 | 1 | - | -
+single-loop | 1024 | 416,635 | 0 | 4 | 2296 | 0 | - | -
+outer-scalar | 4096 | 398,070 | 0 | 4 | 2040 | 0 | - | -
+outer-and-inner | 4096 | 3,483,977 | 0 | 1028 | 8184 | 0 | - | -
+outer-inner-flat | 4096 | 3,507,764 | 17,989 | 1029 | 12280 | 1 | - | -
+single-loop | 4096 | 1,664,513 | 0 | 4 | 9208 | 0 | - | -
+
+== chunks: FOLD-LOOPS-MILESTONE-1.md's chunk workloads, the chunks then flat
+
+workload | variant | n | instr/run | rt_list_flat | Lists | copies | listflat-allocs | us | value
+-------- | ------- | - | --------- | ------------ | ----- | ------ | --------------- | -- | -----
+chunks-fold | chunks-only | 128 | 308,660 | 0 | 214 | 1513 | 0 | - | -
+chunks-fold | chunks-then-flat | 128 | 317,850 | 0 | 215 | 1630 | 1 | - | -
+chunks-fold | chunks-only | 1024 | 3,428,227 | 0 | 1672 | 73686 | 0 | - | -
+chunks-fold | chunks-then-flat | 1024 | 3,450,932 | 0 | 1673 | 74622 | 1 | - | -
+chunks-recursive | chunks-only | 128 | 215,504 | 0 | 174 | 502 | 0 | - | -
+chunks-recursive | chunks-then-flat | 128 | 212,384 | 2,029 | 175 | 619 | 1 | - | -
+chunks-recursive | chunks-only | 1024 | 1,864,006 | 0 | 1351 | 4099 | 0 | - | -
+chunks-recursive | chunks-then-flat | 1024 | 1,885,421 | 15,434 | 1352 | 5035 | 1 | - | -
+

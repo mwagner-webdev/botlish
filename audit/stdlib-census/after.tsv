@@ -1051,11 +1051,12 @@ std::list	namespace		api	source+intrinsic	stdlib/list.bot
 std::list::NotFound	error	std::list	api	source	stdlib/list.bot:74			
 std::list::all?	function	std::list	api	source	stdlib/list.bot:88			
 std::list::any?	function	std::list	api	source	stdlib/list.bot:82			
-std::list::append	intrinsic	std::list	api	intrinsic	core/lists.tcl:63			
-std::list::at	intrinsic	std::list	api	intrinsic	core/lists.tcl:60			
+std::list::append	intrinsic	std::list	api	intrinsic	core/lists.tcl:84			
+std::list::at	intrinsic	std::list	api	intrinsic	core/lists.tcl:81			
 std::list::find	function	std::list	api	source	stdlib/list.bot:100			
+std::list::flat	intrinsic	std::list	api	intrinsic	core/lists.tcl:99			
 std::list::get	function	std::list	api	source	stdlib/list.bot:76			
-std::list::length	intrinsic	std::list	api	intrinsic	core/lists.tcl:57			
+std::list::length	intrinsic	std::list	api	intrinsic	core/lists.tcl:78			
 std::list::none?	function	std::list	api	source	stdlib/list.bot:94			
 std::list::with_length	intrinsic	std::list	api	intrinsic	core/listlength.tcl:45			
 std::mathish	namespace		demo	source	stdlib/mathish.bot			

@@ -454,6 +454,24 @@ proc hir::modulebinding::ImmutableNative {hir symbol proofs} {
             }
             return [list ok [list list [concat [lindex $sourceProof 1] [lindex $proofs 1]]]]
         }
+        std::list::flat {
+            # (LIST-FLAT-MILESTONE-1.md) The same structural pattern: a
+            # structurally known List of structurally known Lists makes the
+            # List of their item proofs, in order; any other source (an
+            # inner List this pass cannot see through) proves nothing.
+            set sourceProof [lindex $proofs 0]
+            if {[lindex $sourceProof 0] ne "list"} {
+                return {bad unknown "std::list::flat source List is not structurally known"}
+            }
+            set items {}
+            foreach inner [lindex $sourceProof 1] {
+                if {[lindex $inner 0] ne "list"} {
+                    return {bad unknown "std::list::flat source List holds an element that is not a structurally known List"}
+                }
+                lappend items {*}[lindex $inner 1]
+            }
+            return [list ok [list list $items]]
+        }
         std::immutable_set::from_list {
             # MINIMAL-IMMUTABLE-SET.md item 36: the same structural-proof
             # pattern std::list::append uses above -- std::immutable_set::from_list's

@@ -609,6 +609,7 @@ Standard intrinsics (qualified root natives):
 | `std::list::length` | list → int |
 | `std::list::at` | list, int → any, errors `IndexNotFound`: the element at `0 <= i < length`; any other Int index fails with `IndexNotFound` |
 | `std::list::append` | list, any → list (a new list; the argument is unchanged) |
+| `std::list::flat` | list of lists → list: `flat[T](lists: List[List[T]]) -> List[T]`, the elements of the first List, then of the second, and so on -- exactly one level of nesting removed, eager, linear (LIST-FLAT-MILESTONE-1.md); the arguments are unchanged. An element that is not a List is `TYPE` (statically where its kind is known) |
 | `std::str::length` | str → int (Unicode scalar values) |
 | `std::str::substring` | str, int, int → str, errors `LowerUnderrun` `UpperOverrun`: the characters `start <= i < end` of a valid slice (below) |
 | `std::str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
@@ -1809,6 +1810,31 @@ add10(32)          # 42 (add captures x)
   Iteration, aggregation and construction are distinct operations: a fold
   aggregates without building anything it does not compute (natively, one
   loop-carried register: no List, no plan, no MutableArray).
+* **Flattening.** `std::list::flat(xss)` removes exactly one level of
+  nesting from a List of Lists: the elements of the first List, then of the
+  second, and so on, in order (LIST-FLAT-MILESTONE-1.md). Collecting,
+  folding and flattening are three operations:
+
+  ```
+  squares = loop x in xs:              # collecting: one value per iteration
+      x * x
+  total = fold x in xs with intermediate s 0:    # folding: one value carried
+      s + x
+  joined = std::list::flat(nested)     # flattening: one level removed
+  chunks = loop x in xs:               # composed: what other languages call
+      expand(x)                        # flat_map -- a collecting loop whose
+  pieces = std::list::flat(chunks)     # body makes a List, then flat
+  ```
+
+  `flat` is eager, generic over the element type, order-preserving and
+  linear in the number of inner Lists plus the number of elements: one new
+  List of exactly the total length, each inner List copied into it once
+  (never a prefix copied again). `flat([xs, ys])` is the concatenation of two
+  Lists. A loop is never a call argument (rule.loop-placement), so the
+  composition binds the loop's List first. Only `flat` itself is linear: the
+  collecting loop still builds its outer List and every inner List, and a
+  fold that grows a List by appending still copies it on every append --
+  nothing fuses construction across these operations yet.
 * An `if` can also be the value of a binding or of `return`
   (`sign = if n < 0:` followed by its blocks). It can't be an operand or an
   argument.
@@ -3134,6 +3160,12 @@ unchanged):
 * `std::list::append(xs, x)` is `list<lub(ELEM, type of x)>`: `list<int>` stays
   `list<int>` with an Int, and becomes plain `list` with a String. Appending
   drops a shape.
+* `std::list::flat(xss)` is `list<E>` for `list<list<E>>` (`list<never>` for
+  an empty List or a List of empty Lists, plain `list` when the elements'
+  element type is not known), and `List[E]{length: N*M}` when `xss` is
+  `List[List[E]{length: M}]{length: N}`. A List whose element type is of a
+  known other kind (`flat([1, 2])`) is a compile-time `TYPE`: the native's
+  `-element-kinds` contract, held by the one native-kind rule.
 * lub joins element types and, for equal lengths, positions; plain `list`
   is `list<any>`.
 * **Bounds:** list forms nest at most three deep (deeper lists are plain
