@@ -2117,6 +2117,7 @@ tests/filesystem.test fs-darwin-directory-failures skip
 tests/filesystem.test fs-darwin-portable skip
 tests/filesystem.test fs-darwin-executable skip
 tests/filesystem.test fs-windows-call-buffer pass
+tests/filesystem.test fs-windows-entry-names pass
 tests/filesystem.test fs-windows-native-runtime pass
 tests/filesystem.test fs-windows-astral-names skip
 tests/fixed-arity-list-return.test fa-alias-beside-literal-other-arity pass
@@ -8638,6 +8639,7 @@ tests/utf16-bytes.test u16-no-order-detection pass
 tests/utf16-bytes.test u16-platform-free pass
 tests/utf16-bytes.test u16-public-surface pass
 tests/utf16-bytes.test u16-roundtrip pass
+tests/utf16-bytes.test u16-units-before-nul pass
 tests/value-display.test value-display-carriage-return pass
 tests/value-display.test value-display-controls pass
 tests/value-display.test value-display-executable pass
