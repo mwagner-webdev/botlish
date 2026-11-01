@@ -2075,6 +2075,7 @@ tests/filesystem.test fs-linux-native-paths pass
 tests/filesystem.test fs-linux-path-native pass
 tests/filesystem.test fs-windows-concat pass
 tests/filesystem.test fs-windows-kinds pass
+tests/filesystem.test fs-windows-long-syntax pass
 tests/filesystem.test fs-windows-native-paths pass
 tests/filesystem.test fs-windows-join-one-rule pass
 tests/filesystem.test fs-tcl-backends pass

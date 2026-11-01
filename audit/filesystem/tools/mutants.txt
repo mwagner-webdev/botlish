@@ -21,9 +21,27 @@
 @@ win-drive-relative-as-absolute a bare drive designator is joined with a separator: "C:" and "a" become "C:\a" (the drive's root) instead of "C:a" (the drive's current directory)
 ## stdlib/windows/fs.bot
 <<<<
-    if base.last_units().ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and count == 2):
+    if base.end_units(head).ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and count == 2):
 ====
-    if base.last_units().ends_separated?(k == PathKind::Verbatim):
+    if base.end_units(head).ends_separated?(k == PathKind::Verbatim):
+>>>>
+
+@@ win-long-end-from-head a long path's end is read from its first units: a path past 64 units ending with "\" (its fourth unit no separator) is joined with a second "\"
+## stdlib/windows/fs.bot
+<<<<
+    if std::abi::bytes::length(data).value <= whole_bridge_bytes():
+        return head
+    data.last_units()
+====
+    head
+>>>>
+
+@@ win-long-head-truncated a long path's kind is read from its first three units only: a UNC path past 64 units whose server name starts with "." ("\\.x\...") is taken for a device path
+## stdlib/windows/fs.bot
+<<<<
+    head = data.slice(0, 8):
+====
+    head = data.slice(0, 6):
 >>>>
 
 @@ win-always-separator a separator is inserted even after one: "C:\x\" and "a" become "C:\x\\a"
@@ -173,7 +191,9 @@ extern c fn c_get_last_error
         on InvalidUtf8:
             fail std::io::path::NotText
 ====
-    bytes.display()
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)):
+        on InvalidUtf8:
+            return "".append_char('�')
 >>>>
 
 @@ bytes-absolute-joined a native name starting with "/" is joined to its directory (it would replace the directory)

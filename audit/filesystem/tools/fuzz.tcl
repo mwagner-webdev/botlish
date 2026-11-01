@@ -201,12 +201,18 @@ proc winConcat {base comp} {
 
 # Segments joined by random separators: "." and ".." whole segments, empty
 # ones (a doubled separator), trailing periods and spaces, ":" past a
-# drive, non-ASCII and astral characters.
+# drive, non-ASCII and astral characters, and long ones (60 to 79
+# characters: a path past the 64 units std::windows::fs bridges whole, whose
+# kind and end it reads from slices: UTF16-BYTE-STORAGE-MILESTONE-1.md).
 proc randomWinSegments {count} {
     set out ""
     for {set i 0} {$i < $count} {incr i} {
         if {$i > 0} { append out [pick [list \\ \\ /]] }
-        append out [pick [list a b . .. x. "y " é 𝄞 ab:c "" a.b]]
+        set segment [pick [list a b . .. x. "y " é 𝄞 ab:c "" a.b LONG]]
+        if {$segment eq "LONG"} {
+            set segment [string repeat [pick [list x é 𝄞]] [expr {60 + [rand 20]}]]
+        }
+        append out $segment
     }
     return $out
 }

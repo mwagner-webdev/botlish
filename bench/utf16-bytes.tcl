@@ -78,27 +78,45 @@ if {[dict get $options -baseline-rev] ne ""} {
         baselineTree::remove $root $tree
     }
     # The rows of a run's table: KEY (group, operation, chars, alphabet) ->
-    # its ns per operation.
+    # its measurements (ns per operation; or allocations and bytes per
+    # operation).
     proc rowsOf {text} {
         set rows [dict create]
         foreach line [split $text \n] {
             set fields [lmap f [lrange [split $line |] 1 end-1] {string trim $f}]
             if {[llength $fields] >= 5 && [lindex $fields 0] in {codec windows}} {
-                dict set rows [lrange $fields 0 3] [lindex $fields 4]
+                dict set rows [lrange $fields 0 3] [lrange $fields 4 end]
             }
         }
         return $rows
     }
     set b [rowsOf $before]
     set a [rowsOf $after]
+    if {[dict get $options -measure] eq "alloc"} {
+        set units {allocs bytes}
+    } else {
+        set units {ns}
+    }
     puts "\nbefore: [dict get $options -baseline-rev]; after: this tree"
-    puts "| group   | operation                          | chars | alpha | before ns    | after ns     | after/before |"
-    puts "|---------|------------------------------------|------:|-------|-------------:|-------------:|-------------:|"
-    dict for {key value} $a {
+    set header "| group   | operation                          | chars | alpha |"
+    set rule "|---------|------------------------------------|------:|-------|"
+    foreach unit $units {
+        append header [format " %-12s | %-12s | %-12s |" "before $unit" "after $unit" after/before]
+        append rule "-------------:|-------------:|-------------:|"
+    }
+    puts $header
+    puts $rule
+    dict for {key values} $a {
         lassign $key group operation chars alphabet
-        set was [dict getdef $b $key n/a]
-        puts [format "| %-7s | %-34s | %5s | %-5s | %12s | %12s | %12s |" $group $operation $chars $alphabet \
-            $was $value [baselineTree::ratio $was $value]]
+        set line [format "| %-7s | %-34s | %5s | %-5s |" $group $operation $chars $alphabet]
+        set olds [dict getdef $b $key {}]
+        foreach unit $units value $values was $olds {
+            if {$unit eq ""} { continue }
+            if {$was eq ""} { set was n/a }
+            if {$value eq ""} { set value n/a }
+            append line [format " %12s | %12s | %12s |" $was $value [baselineTree::ratio $was $value]]
+        }
+        puts $line
     }
     exit 0
 }
