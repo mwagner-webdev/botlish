@@ -78,7 +78,23 @@ Everything milestone 7 established holds -- lossless native names (unpaired
 surrogates included), NotText for a name without text, a lossy `display`
 that is never a path, `C:` + `file` = `C:file` -- and is tested again.
 
-What improved (section 11 has the tables): @@RESULT-PERF@@
+What improved (section 11 has the tables): on the windows-2025 runner (run 41266378398,
+the JIT, per operation): native path to text 2.7-6.8 us to 0.09-0.12 us for
+8 to 40 ASCII characters (31 to 59 times), 780 us to 32 us at 4,096 mixed
+ones; validate + native 2.8-3.5 us to 0.62-0.77 us, and 20 ms to 74 us at
+4,096 mixed characters (the quadratic walks are gone); concat 12-20 us to
+5.0-5.6 us; join 4.2-5.7 us to 4.1 us; a Win32 call's LPCWSTR 1.8-4.8 us
+to 0.87-0.91 us (375 us to 3.2 us at 4,096 units). Through real Win32 calls
+on NTFS (bench/filesystem.tcl, the same job): text 11.9 to 0.23 us,
+validate + native 3.6 to 0.94 us, concat 22.1 to 6.6 us, open + close 24.5
+to 16.2 us, listing and reopening each of 100 files 64 to 54 us per file.
+What got slower, measured and kept (sections 7 and 13): `kind` (0.01-0.08
+to 0.17-0.32 us) and `units` (a field read to a bridge) because both now
+read units out of bytes, `display` of a name without text (a failed strict
+decode first), and listing a directory (7 to 9% per name: each listed name
+is also sliced into its bytes). Linux and macOS file operations are the
+same code as before (identical NIR) and measured the same within runner
+noise.
 
 ## 2. Starting implementation
 
@@ -437,7 +453,7 @@ section 6, so both branches of `head_units` are drawn. Runs: locally seeds
 parts, the windows part on interp, compile and both native backends), and
 on `43c0795` the files part under GC stress (seed 9); on Windows the tier item `filesystem-fuzz`
 (seeds 1 and 2, 1,600 cases each; run 41254346872, and run 41266378398 on
-the final code: @@WINFSFUZZ@@). No disagreement in any completed run.
+the final code: 1,600 cases each, no disagreement). No disagreement in any completed run.
 
 **Mutants.** audit/abi-bytes/tools/utf16-mutate.tcl applies each of the 21
 mutants of utf16-mutants.txt to a private tree (the native ones rebuild a
@@ -462,6 +478,17 @@ mutates, so method syntax cannot reach it there -- and so had never tested
 its rule. Rewritten to mutate
 what it describes (a strict decoding replaced by a lossy one), it is killed
 by the fuzzer.
+
+Runs: the codec's 21 mutants, each killed by its named detector, locally
+(Linux x86-64, audit/abi-bytes/utf16-mutate-result.txt) and on macOS
+AArch64 (run 41254348599). The filesystem's 33 on the final code: on Linux
+x86-64 every one that runs there killed and none surviving
+(audit/filesystem/results/mutate-linux.txt: 30 killed, the two Windows
+mutants and the macOS one skipped), and on Windows (run 41266378398) every
+mutant of Windows code killed on NTFS, the two only Windows runs among them
+(section 12). That Windows run also showed milestone 7's nine `linux-*`
+mutants without a host line -- applied on Windows, they had nothing to kill
+them -- and they now carry `%% linux-x86_64 linux-aarch64`.
 
 The milestone's list, and the mutant that breaks each:
 
@@ -527,51 +554,95 @@ instead (the driver's `--alloc summary`; counts are the code's, not the
 machine's). A difference below a few nanoseconds is the timer's
 resolution: two loops subtracted (shown "~0").
 
-Every figure below compares `f9e0ed0` (before) with `43c0795` (after: the
-code this report describes).
+Every figure below compares `f9e0ed0` (before) with `36f8dd7` (after: the
+code this report describes) unless it names another revision.
 
 ### 11.2 Windows, real platform
 
-`windows-2025` runner, run 41254346872 (job "full (Windows x86-64, shard
-1/4)", tier item `utf16-bench`), per operation:
+`windows-2025` runner, run 41266378398 (job "full (Windows x86-64, shard
+1/4)", tier item `utf16-bench`, the final code), per operation:
 
-@@WINTABLE@@
+ascii:
+
+| operation | 8 before | 8 after | 40 before | 40 after | 256 before | 256 after | 4096 before | 4096 after |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| encode_utf16le | n/a | 207 ns | n/a | 189 ns | n/a | 334 ns | n/a | 2.21 us |
+| decode_utf16le | n/a | 84 ns | n/a | 122 ns | n/a | 444 ns | n/a | 5.54 us |
+| decode_utf8 (reference) | 74 ns | 86 ns | 82 ns | 82 ns | 207 ns | 174 ns | 1.32 us | 1.32 us |
+| validate + native | 2.84 us | 617 ns | 3.51 us | 767 ns | 14.1 us | 2.19 us | 216.6 us | 26.2 us |
+| from_text | 2.20 us | 580 ns | 3.49 us | 849 ns | 14.3 us | 2.61 us | 222.7 us | 34.0 us |
+| text | 2.66 us | 85 ns | 6.83 us | 116 ns | 28.2 us | 454 ns | 438.8 us | 5.64 us |
+| display | 2.50 us | 86 ns | 6.57 us | 130 ns | 26.4 us | 442 ns | 425.0 us | 5.42 us |
+| display (lossy: + D800) | 2.96 us | 3.41 us | 7.27 us | 7.38 us | 26.4 us | 27.4 us | 416.1 us | 455.7 us |
+| units | ~0 | 142 ns | ~0 | 278 ns | ~0 | 919 ns | ~0 | 16.6 us |
+| kind | 29 ns | 174 ns | 12 ns | 302 ns | 76 ns | 301 ns | ~0 | 47 ns |
+| concat (text) | 12.3 us | 5.04 us | 19.6 us | 5.59 us | 59.5 us | 8.05 us | 838.5 us | 35.1 us |
+| join (native) | 4.19 us | 4.06 us | 5.71 us | 4.13 us | 13.1 us | 4.67 us | 178.6 us | 6.04 us |
+| syntax: kind_of (path units) | 19 ns | 19 ns | 26 ns | 18 ns | 16 ns | 16 ns | 52 ns | 57 ns |
+| syntax: joinable? (component) | 2.33 us | 2.30 us | 2.36 us | 2.26 us | 1.96 us | 1.90 us | 1.64 us | 1.64 us |
+| Win32 buffer from List[int] (M7) | 1.79 us | 1.81 us | 4.75 us | 4.71 us | 22.8 us | 22.5 us | 384.8 us | 375.0 us |
+| Win32 buffer from Bytes (this) | n/a | 870 ns | n/a | 908 ns | n/a | 1.08 us | n/a | 3.18 us |
+
+mixed:
+
+| operation | 8 before | 8 after | 40 before | 40 after | 256 before | 256 after | 4096 before | 4096 after |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| encode_utf16le | n/a | 241 ns | n/a | 382 ns | n/a | 1.21 us | n/a | 16.2 us |
+| decode_utf16le | n/a | 136 ns | n/a | 399 ns | n/a | 2.05 us | n/a | 32.2 us |
+| decode_utf8 (reference) | 97 ns | 92 ns | 172 ns | 170 ns | 648 ns | 644 ns | 9.22 us | 9.48 us |
+| validate + native | 1.84 us | 664 ns | 6.02 us | 1.29 us | 96.4 us | 4.72 us | 20.0 ms | 74.0 us |
+| from_text | 1.82 us | 610 ns | 5.12 us | 1.12 us | 58.2 us | 4.05 us | 10.1 ms | 55.6 us |
+| text | 3.69 us | 142 ns | 10.0 us | 411 ns | 43.6 us | 2.06 us | 779.5 us | 32.5 us |
+| display | 3.59 us | 146 ns | 9.67 us | 436 ns | 42.0 us | 2.04 us | 756.7 us | 32.1 us |
+| display (lossy: + D800) | 3.85 us | 4.34 us | 9.97 us | 10.6 us | 41.8 us | 49.5 us | 763.1 us | 803.8 us |
+| units | ~0 | 156 ns | 5 ns | 296 ns | ~0 | 1.13 us | ~0 | 20.5 us |
+| kind | 80 ns | 176 ns | 26 ns | 320 ns | 24 ns | 293 ns | ~0 | 38 ns |
+| concat (text) | 13.4 us | 5.25 us | 25.0 us | 6.36 us | 144.2 us | 11.7 us | 16.5 ms | 101.9 us |
+| join (native) | 4.30 us | 4.01 us | 5.90 us | 4.25 us | 15.0 us | 4.57 us | 202.5 us | 7.19 us |
+| syntax: kind_of (path units) | 18 ns | 15 ns | 19 ns | 16 ns | 31 ns | 19 ns | 63 ns | 60 ns |
+| syntax: joinable? (component) | 2.31 us | 2.30 us | 2.66 us | 2.43 us | 1.96 us | 1.95 us | 1.68 us | 1.64 us |
+| Win32 buffer from List[int] (M7) | 1.97 us | 1.96 us | 5.67 us | 5.41 us | 27.6 us | 27.5 us | 458.6 us | 479.2 us |
+| Win32 buffer from Bytes (this) | n/a | 869 ns | n/a | 888 ns | n/a | 1.12 us | n/a | 3.18 us |
 
 Where the time goes now (the same run):
 
-* **codec**: encoding 0.2 to 0.4 us for 8 to 40 characters, 2.6 us for
-  4,096 ASCII ones and 15.8 us for 4,096 mixed ones (5,120 units);
-  decoding 0.08 to 0.41 us short, 10.4 and 32.3 us at 4,096 characters.
-  Mixed text decodes at about 6 ns per unit (section 13), ASCII at 2.5.
-* **the bridge** (the `units` row: one List of the units): 0.15 us at 8
-  units, 0.94 us at 256, 16.6 us at 4,096 -- about 4 ns per unit, one
+* **codec**: encoding 0.19 to 0.38 us for 8 to 40 characters, 2.2 us for
+  4,096 ASCII ones and 16.2 us for 4,096 mixed ones (5,120 units);
+  decoding 0.08 to 0.40 us short, 5.5 and 32.2 us at 4,096 characters.
+  Mixed text decodes at about 6 ns per unit (section 13), ASCII at about
+  1.4.
+* **the bridge** (the `units` row: one List of the units): 0.14 us at 8
+  units, 0.92 us at 256, 16.6 us at 4,096 -- about 4 ns per unit, one
   boxed Int each.
 * **the syntax**: `kind_of` 0.02 to 0.06 us; `joinable?` of a 13-character
-  component 1.6 to 2.5 us whatever the path's length -- about half of a
-  join of short paths, and the largest single cost left in one.
+  component 1.6 to 2.4 us whatever the path's length -- about half of a
+  join, and the largest single cost left in one.
 * **the Win32 buffer**: 0.87 us at 8 characters to 3.2 us at 4,096, where
-  milestone 7's formulation took 1.8 us to 480 us (the same tree, row for
+  milestone 7's formulation took 1.8 us to 479 us (the same tree, row for
   row).
 * **the operating system**: next section.
 
+`join` is faster than before at every length (4.19 to 4.06 us at 8 ASCII
+characters, 179 us to 6.0 us at 4,096) and `concat` 2.4 to 160 times. The
+slices-only version (`43c0795`, run 41254346872) had made a join of 8
+characters slower, 4.96 us, and `kind` 0.3 to 0.4 us; reading a short path
+whole fixed both (section 6; section 11.5 has every version locally).
+
 What became slower, and why it was kept:
 
-* **`kind`**, 0.02 us to 0.1-0.4 us. A NativePath no longer holds its
-  units, so `kind` slices its first 8 bytes (at most four units: all
-  `kind_of` reads), bridges them and runs `kind_of`: three allocations,
-  120 bytes, a constant cost (its spread across lengths is the timer's).
-  The first version of this milestone bridged every unit (0.95 us at 256
-  units, 16 us at 4,096 locally); reading the head only is the fix.
-* **`units`**, from a field read to a bridge (0.15 us at 8 units, 4 ns per
+* **`kind`**, 0.01-0.08 us to 0.17-0.32 us (the 4,096-character rows,
+  0.04 and 0.05 us, are within the timer's spread there, where the empty
+  loop's setup is largest). A NativePath no longer holds
+  its units, so `kind` bridges a short path's units (one List) or slices a
+  long path's head (three small allocations) and runs `kind_of`. On this
+  runner a bridge of 40 units costs about what the slice does, so the two
+  sides of the threshold measure alike here.
+* **`units`**, from a field read to a bridge (0.14 us at 8 units, 4 ns per
   unit). `units` returns a List by milestone 7's contract; a caller that
-  wants the units pays for building them once.
-* **`join` of short paths**, 4.2 us to 5.0 us at 8 characters. A join now
-  bridges the base's head, its last unit and the component, then joins
-  storages; milestone 7 read units it already had. From 40 characters on
-  the bytes win (5.7 to 5.0 us at 40, 179 us to 6.1 us at 4,096: the
-  milestone 7 join copied every unit).
-* **`display` of a name without text**, 5 to 15% slower: the strict decode
+  wants the units pays for building them.
+* **`display` of a name without text**, 1 to 18% slower: the strict decode
   fails first, then milestone 7's lossy decoding runs (section 13).
+* **`entries`**, 7 to 9% per listed name (next section).
 
 ### 11.3 Through Win32, real platform
 
@@ -580,34 +651,34 @@ path (66 characters on the runner), per operation:
 
 | row | before | after | after/before |
 |---|---:|---:|---:|
-| validate + native | 3.52 us | 0.91 us | 0.26 |
-| concat (text) | 22.0 us | 6.86 us | 0.31 |
-| join (native) | 6.85 us | 5.12 us | 0.75 |
-| text (native) | 12.0 us | 0.24 us | 0.020 |
-| display (native) | 11.2 us | 0.23 us | 0.021 |
-| validate + native, 256 mixed characters | 99.7 us | 5.60 us | 0.056 |
-| text, 256 mixed characters | 48.5 us | 2.49 us | 0.051 |
-| concat, 256 mixed characters | 200.5 us | 15.1 us | 0.076 |
+| validate + native | 3.56 us | 0.94 us | 0.26 |
+| concat (text) | 22.1 us | 6.62 us | 0.30 |
+| join (native) | 6.78 us | 4.64 us | 0.68 |
+| text (native) | 11.9 us | 0.23 us | 0.019 |
+| display (native) | 11.1 us | 0.23 us | 0.021 |
+| validate + native, 256 mixed characters | 99.7 us | 5.56 us | 0.056 |
+| text, 256 mixed characters | 49.3 us | 2.57 us | 0.052 |
+| concat, 256 mixed characters | 200.7 us | 14.8 us | 0.074 |
 | encode_utf16le, 40 characters | -- | 0.23 us | -- |
-| decode_utf16le, 40 characters | -- | 0.15 us | -- |
-| open + close | 25.1 us | 16.7 us | 0.67 |
-| write_file 64 B | 196.2 us | 182.9 us | 0.93 |
-| read_file 64 B | 53.8 us | 44.8 us | 0.83 |
-| portable write 64 B | 205.3 us | 188.2 us | 0.92 |
-| write_file 1 MiB | 434 us | 431 us | 0.99 |
-| read_file 1 MiB | 2.37 ms | 2.31 ms | 0.98 |
-| entries (100), per entry | 7.69 us | 8.24 us | 1.07 |
-| reopen (100), per file | 65.8 us | 55.4 us | 0.84 |
+| decode_utf16le, 40 characters | -- | 0.16 us | -- |
+| open + close | 24.5 us | 16.2 us | 0.66 |
+| write_file 64 B | 189.5 us | 180.6 us | 0.95 |
+| read_file 64 B | 51.7 us | 44.0 us | 0.85 |
+| portable write 64 B | 198.5 us | 188.9 us | 0.95 |
+| write_file 1 MiB | 430 us | 432 us | 1.01 |
+| read_file 1 MiB | 2.36 ms | 2.30 ms | 0.97 |
+| entries (100), per entry | 7.55 us | 8.20 us | 1.09 |
+| reopen (100), per file | 64.2 us | 54.1 us | 0.84 |
 
 Every file operation builds its path's LPCWSTR, which is where the small
 operations gain: at 66 characters milestone 7's buffer took about 7 us
-(table above), this milestone's about 0.9 us. The large transfers are the
-operating system's (0.98, 0.99). `entries` is the one row a little slower
-in this single run; per entry it now slices the name out of the find
-record instead of copying it unit by unit, and still scans the record's
-260-unit name field for the terminator in Botlish as before, so the
-difference is not attributed to the change (a single run on a shared
-runner).
+(table above), this milestone's about 0.95 us. The large transfers are the
+operating system's (0.97, 1.01). `entries` is slower in this run and in
+run 41254346872 (1.07): each listed name is now also sliced out of the
+find record as its bytes, on top of milestone 7's scan of the record's
+260-unit name field for its terminator, which still reads the field as a
+List and builds the name's units (section 13). Listing and then opening
+every entry (`reopen`) is 16% faster.
 
 ### 11.4 Allocations
 
@@ -717,7 +788,8 @@ before and after (section 12). Measured anyway, `bench/filesystem.tcl
 * **Linux x86-64** (local experiment): every row within 0.96 to 1.12 of
   before (path operations 0.96 to 1.07; the 64-byte and 1 MiB writes,
   which are the disk's, 1.01 to 1.12).
-* **macOS AArch64** (real platform, run 41254348599, full shard 1): path
+* **macOS AArch64** (real platform, run 41254348599 on `43c0795`, full
+  shard 1; the Darwin code is the same in the final commit): path
   operations 0.92 to 1.07, except `text (native)` at 1.41 (180 to 255 ns);
   file operations 0.81 to 1.15, except `write_file 1 MiB` at 2.32 (493 to
   1,145 us). Identical code in both trees, so these are the shared runner:
@@ -770,16 +842,44 @@ suites (443 tests on the Tcl backends, 452 on the native ones);
   11; shards 2 to 4: the GC-stress tier), the four acceptance shards and the
   system linker;
 * run 41266378398 (final, `tier: full`, items `utf16-bench filesystem-fuzz
-  filesystem-mutants`): @@WINFINAL@@;
+  filesystem-mutants`): smoke (the Windows-relevant test files on interp and compile,
+  filesystem.test and utf16-bytes.test among them, and "Filesystem under GC
+  stress"), root plans, the four acceptance shards and the system linker
+  passed; full shard 1 ran `utf16-bench` (section 11), `filesystem-fuzz`
+  (no disagreement) and `filesystem-mutants`, every mutant of Windows code
+  killed on NTFS -- among them the two only Windows runs,
+  `win-enumeration-loses-native-name` (by `fs-windows-native-roundtrip`)
+  and `win-last-error-read-late` (by `fs-windows-directory-failures`,
+  `-long-path`, `-modes`, `-sharing`), and the two long-path mutants. The
+  job failed on the nine `linux-*` mutants of milestone 7, which mutate
+  std::linux::fs and carried no host line, so this full run applied them on
+  Windows, where no detector runs that code, and reported them SURVIVED
+  (milestone 7 had run its Windows mutants on Windows by name). They now
+  carry `%% linux-x86_64 linux-aarch64`, the file's rule for a mutant of
+  code only some hosts run, and are killed on Linux (the local record);
 * Icy Tower on Windows (run 41254335025 on `43c0795`; run 41266348143 on
   the final code): both passed.
 
 **Linux x86-64 and arm64**
 
 * tests.yml run 41254352482 (`43c0795`): every job passed -- the Tcl suite on interp and compile, its cranelift and cranelift-generic coverage, the four golden shards beside their Tcl originals, the native Rust unit tests, the stub- and system-linked executables (the latter also under GC stress), the warning gate and the method-call decision's oracle (its GC-stress job runs on pushes to main only, and was skipped);
-* tests.yml run 41266528009 (final): @@LINUX2@@;
-* tests-arm64.yml run 41254354267 (`43c0795`): @@ARM1@@;
-* tests-arm64.yml run 41266529720 (final): @@ARM2@@;
+* tests.yml run 41266528009 (final): every job passed (its GC-stress job runs on pushes to main only);
+* tests-arm64.yml run 41254354267 (`43c0795`): every job passed -- the Tcl suite on interp and compile, its
+  cranelift and cranelift-generic coverage, the four golden shards, the
+  native Rust unit tests (also under GC stress) and the system-linked
+  executables (also under GC stress) -- but the GC-stress run of the whole
+  Tcl suite, which GitHub cancelled at its six-hour limit inside
+  `tests/tree-struct.test` (reached after 1 h 56 min; every file
+  before it, `filesystem.test` among them, passed under the stress). That
+  file's size tests build trees of up to a million nodes, quadratic under a
+  collection at every allocation; main fixed it after this branch started
+  (`b74c877`, "Tree structs: size tests without the suite's GC stress"),
+  and main's tree-struct merge `c745ed4` was cancelled the same way (run
+  41198052933). It is not this milestone's: `utf16-bytes.test` sorts after
+  `tree-struct.test`, so the suite-wide stress never reached it, but its
+  own `u16-gc-stress` runs both native backends under the stress in every
+  run, the interp job's included;
+* tests-arm64.yml run 41266529720 (final): the same: every job passed but the suite-wide GC-stress run, cancelled at six hours in `tests/tree-struct.test` (reached after 1 h 44 min) for the reason above;
 * static-decisions.yml run 41247717983 (`7315303`, dispatched): success.
   The commits after it change std::windows::fs and audit and benchmark
   files only, and no golden suite imports std::windows, so no static
@@ -860,11 +960,19 @@ Only measured or demonstrated ones:
 * **`kind` and `units` are no longer field reads.** A NativePath holds
   bytes, so `units` builds its List at every call (about 4 ns per unit) and
   `kind` bridges a short path's units or slices a long path's head (0.1 to
-  0.2 us, against 0.02 us when the units were stored). A caller that asks
+  0.3 us, against 0.01 to 0.08 us when the units were stored). A caller that asks
   for both, or asks again, pays again; nothing in the standard library
   does. Holding both representations would double every path's memory and
   make every constructor build a List again, which is what the milestone
   removed.
+* **Listing a directory is 7 to 9% slower per name on Windows** (two runs,
+  section 11.3: 7.55 to 8.20 us). A listed name is sliced out of the find
+  record as its bytes, and milestone 7's scan of the record for the name's
+  end still reads the 260-unit name field as a List and builds the name's
+  units, which `take` needs for its "." and ".." check and its length.
+  Botlish has no operation that finds two zero bytes in a Bytes; with one,
+  the name's length and its bytes would need no List at all. Listing and
+  then opening every entry is 16% faster than before.
 * **The 64-unit threshold** of section 6 is the crossover measured on this
   container's x86-64 CPU (bridging 64 units costs about what slicing four
   and one does); it was not tuned per platform. Either side gives the same
@@ -903,7 +1011,7 @@ Only measured or demonstrated ones:
 | tests/abi-bytes.test, tests/abi-mutable-bytes.test, tests/stdlib-namespaces.test, tests/linux-syscall.test, tests/contexts.test | inventories (the natives, the module surface, the builtin errors) and one HIR expression id the new functions shift |
 | audit/filesystem/tools/fuzz.tcl | the windows part checks `units`, draws long segments and runs on the native backends on Linux |
 | audit/filesystem/tools/mutate.tcl | a mutant whose library does not compile is DOES NOT COMPILE, never killed |
-| audit/filesystem/tools/mutants.txt | seven new mutants, six rewritten for the new code |
+| audit/filesystem/tools/mutants.txt | seven new mutants, six rewritten for the new code; milestone 7's nine `linux-*` mutants given their hosts (`%% linux-x86_64 linux-aarch64`) |
 | bench/filesystem.tcl | `-root`, `-baseline-rev`, rows for display, 256-character mixed text and the codec |
 | tests/platform/tier.tcl | tier items `utf16-fuzz`, `utf16-mutants`, `utf16-bench` |
 | .github/workflows/windows-x86_64.yml | utf16-bytes.test in the smoke step and under GC stress |

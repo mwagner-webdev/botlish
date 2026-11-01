@@ -216,6 +216,7 @@ extern c fn c_get_last_error
 # Linux enumeration
 
 @@ linux-enumeration-loses-native-name a listed name is kept as the UTF-8 of its lossy display, not its bytes: a name that is not UTF-8 reopens another file or none
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         out.push(Entry {name: NativePath {bytes: name}, kind: kind_of(block.at(pos + 18))})
@@ -224,6 +225,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-dot-entries-listed "." and ".." are listed as entries
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if std::io::bytepath::valid?(name) and not std::io::bytepath::dot_or_dot_dot?(name):
@@ -232,6 +234,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-dtype-swapped d_type's regular file and directory are swapped
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if d_type == 8:
@@ -246,6 +249,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-enumeration-leaks a failed getdents64 fails entries without closing the directory's descriptor
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         r = fd.getdents64(std::abi::bytes::zeroed(std::abi::usize(4096)))
@@ -269,6 +273,7 @@ extern c fn c_get_last_error
 # Linux files: completion, failure paths, reasons, ownership
 
 @@ linux-short-read-is-eof a read shorter than asked ends read_all and read_file: a pipe's or a FIFO's data after a pause is lost
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         data = fd.read_some(chunk_size(std::mutable_vector::length(parts)))
@@ -284,6 +289,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-short-write-is-complete a short write is taken as complete: write_all returns with the rest unwritten
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if n < total:
@@ -294,6 +300,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-short-write-rewrites-all after a short write the whole buffer is written again, not its rest: the bytes the kernel took are written twice
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         return fd.write_rest(rest)
@@ -302,6 +309,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-failed-read-leaks a failed read fails without closing the File's descriptor
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if r.result < 0:
@@ -315,6 +323,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-reason-exists-lost EEXIST is reported as Other, not AlreadyExists
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if errno == 17:
