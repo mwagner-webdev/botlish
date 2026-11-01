@@ -359,6 +359,24 @@ proc surface::modules::NamespaceFile {dir name} {
 # shell's working directory, an environment variable or a parent directory,
 # and nothing searches: each path has one candidate file.
 #
+# Target package trees (PACKAGE-MANAGER-MILESTONE-2.md, "Target views").
+# When the application root's .bot_modules holds a directory .targets, the
+# application's packages are not ROOT/.bot_modules but the tree of the
+# compilation's target, ROOT/.bot_modules/.targets/TARGET: an ordinary
+# package tree in every other respect (its packages, their own .bot_modules,
+# downward-only resolution, instance identities: all as above), one per
+# target, so that packages whose bindings or native files differ by target
+# are compiled from the right ones, and compiling for one target never sees
+# another's. A .targets without the target's tree is no tree at all: the
+# application then has no package for that target (UNKNOWN-NAMESPACE says
+# so), never the store beside it. The compiler knows the directory's name
+# and nothing of who made it (the package manager derives each tree from
+# the packages it installed; a tree assembled by hand is read the same way),
+# and nothing of versions or metadata. A HIR compiled from such a tree is
+# its target's (targetRead), and when the tree holds a directory .lib, its
+# native libraries are searched there when the program links
+# (`nativeDirs`: native/native.tcl).
+#
 # Identity (BOT-MODULES-MILESTONE-1.md, "Semantic identity"). A module's
 # canonical identity -- the one every later stage keys it by (its section,
 # its types, structs, enums, errors, traits, layouts and contexts, its
@@ -463,9 +481,38 @@ proc surface::modules::Probe {kind path} {
     return [surface::source::exists $path]
 }
 
-# The directory of the package NAME installed in SCOPE (DIR/.bot_modules/NAME).
+# The directory of the package NAME installed in SCOPE (DIR/.bot_modules/NAME,
+# or for the application, its packages directory: ApplicationTree).
 proc surface::modules::PackageDir {state scope name} {
+    if {$scope eq "" && [dict exists $state appPackages]} {
+        return [file join [dict get $state appPackages] $name]
+    }
     return [file join [ScopeDir $state $scope] .bot_modules $name]
+}
+
+# Decides STATE's application packages directory (header, "Target package
+# trees"): `appPackages`, and `appTreeMissing` when .targets holds no tree
+# for the target; `nativeDirs` the tree's .lib when it has one.
+proc surface::modules::ApplicationTree {stateVar} {
+    upvar 1 $stateVar state
+    set modules [file join [dict get $state root] .bot_modules]
+    dict set state appPackages $modules
+    set targets [file join $modules .targets]
+    if {![Probe directory $targets]} {
+        return
+    }
+    set target [dict get $state target]
+    dict set state targetRead 1
+    set tree [file join $targets $target]
+    dict set state appPackages $tree
+    if {![Probe directory $tree]} {
+        dict set state appTreeMissing $tree
+        return
+    }
+    set lib [file join $tree .lib]
+    if {[Probe directory $lib]} {
+        dict set state nativeDirs [list [file normalize $lib]]
+    }
 }
 
 # 1 if a package NAME is installed in SCOPE (one with a module tree): its
@@ -679,6 +726,9 @@ proc surface::modules::NoSuchNamespace {stateVar key ns} {
         if {[Installed $state $scope $head]} {
             set instance [Instance state $scope $head]
             return "the package \"$head\" installed at [ScopeDir $state $instance] has no module \"$ns\" (no such module file [NamespaceFile [ScopeDir $state $instance] $ns])$hint"
+        }
+        if {$scope eq "" && [dict exists $state appTreeMissing]} {
+            set hint "; [file dirname [dict get $state appTreeMissing]] holds the application's packages by target, and none for [dict get $state target] (no directory [dict get $state appTreeMissing]): its packages are not prepared for that target$hint"
         }
         set path [NamespaceFile [ScopeDir $state $scope] $ns]
         if {[surface::source::exists $path] && [InStandardLibrary $path]} {
@@ -2602,6 +2652,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     if {$root ne ""} {
         dict set state root [file normalize $root]
         dict set state entry [file normalize [dict get $ast span file]]
+        ApplicationTree state
     }
     dict set state recover $recover
     if {$recover && [dict get $ast diagnostics] ne ""} {
@@ -2654,6 +2705,11 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     # service (surface/dfa.tcl's Fact): read by no backend or analysis.
     if {[dict get $state dfaNames] ne {}} {
         dict set hir dfaNames [dict get $state dfaNames]
+    }
+    # The target package tree's native library directory (header, "Target
+    # package trees"), for the native backends' links.
+    if {[dict exists $state nativeDirs]} {
+        dict set hir nativeDirs [dict get $state nativeDirs]
     }
     return $hir
 }

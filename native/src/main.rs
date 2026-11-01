@@ -365,7 +365,7 @@ fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, codegen::aot::Link
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--link-dir" || args[i] == "--framework-dir" {
+        if args[i] == "--link-dir" || args[i] == "--framework-dir" || args[i] == "--runtime-path" {
             let option = args[i].as_str();
             let dir = args.get(i + 1).ok_or_else(|| format!("{option} needs a directory"))?;
             if dir.is_empty() {
@@ -373,8 +373,13 @@ fn extract_link_dirs(args: &[String]) -> Result<(Vec<String>, codegen::aot::Link
             }
             if option == "--link-dir" {
                 search.libraries.push(dir.clone());
-            } else {
+            } else if option == "--framework-dir" {
                 search.frameworks.push(dir.clone());
+            } else {
+                if let Some(problem) = codegen::aot::runtime_path_problem(dir) {
+                    return Err(format!("--runtime-path: {problem}"));
+                }
+                search.runtime.push(dir.clone());
             }
             i += 2;
             continue;

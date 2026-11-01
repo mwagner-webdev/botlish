@@ -197,7 +197,7 @@ if {[info exists ::single::bundle]} {
     # runtime_archive), and there is no stub: `auto` is the system linker.
     set ::env(BOTLISH_NATIVE_BIN) [file join $::single::bundle MacOS botlish-native]
 } elseif {$::argv ne "" && [lindex $::argv 0] ni {-help --help -h -version --version}
-        && [lindex $::argv 0] ni {add install update remove verify package}
+        && [lindex $::argv 0] ni {add install update remove verify package native}
         && "-lsp" ni $::argv && "-lsp-worker" ni $::argv} {
     # The usage summary, -help and -version run no program: they install
     # nothing (main.tcl answers them before it loads the compiler). Nor do

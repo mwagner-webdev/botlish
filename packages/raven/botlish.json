@@ -1,5 +1,54 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "raven",
-  "version": "0.1.0"
+  "version": "0.2.0",
+  "dependencies": {},
+  "targets": {
+    "linux-aarch64": {
+      "files": "targets/linux-aarch64",
+      "libraries": [
+        {
+          "name": "raven_bridge",
+          "origin": "bundled",
+          "linkage": "static",
+          "file": "native/libraven_bridge.a"
+        },
+        {
+          "name": "raven",
+          "origin": "bundled",
+          "linkage": "shared",
+          "file": "native/libraven.so.0",
+          "identity": "libraven.so.0",
+          "needs": [
+            "libm.so.6",
+            "libc.so.6",
+            "ld-linux-aarch64.so.1"
+          ]
+        }
+      ]
+    },
+    "linux-x86_64": {
+      "files": "targets/linux-x86_64",
+      "libraries": [
+        {
+          "name": "raven_bridge",
+          "origin": "bundled",
+          "linkage": "static",
+          "file": "native/libraven_bridge.a"
+        },
+        {
+          "name": "raven",
+          "origin": "bundled",
+          "linkage": "shared",
+          "file": "native/libraven.so.0",
+          "identity": "libraven.so.0",
+          "needs": [
+            "libm.so.6",
+            "libc.so.6",
+            "ld-linux-x86-64.so.2"
+          ]
+        }
+      ]
+    }
+  }
 }

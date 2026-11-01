@@ -318,11 +318,12 @@ test pm-descriptor-artifact-identity {a package artifact and a package being pac
         [descriptorError {{"schema": 1, "version": "1.0.0"}} project]
 } -result {{{  no "name": a package artifact has a name and an exact version} {  no "version": a package artifact has a name and an exact version}} {{  no "version": a package being packed has a name and an exact version}} {{  the package version "1.2" is malformed: an exact version is three numbers, MAJOR.MINOR.PATCH (1.2.3)}} {{  a "version" without a "name": the version of what?}}}
 
-test pm-descriptor-schema {schema 1 is required and the only one read; an unknown key is an error, never ignored} -body {
-    list [descriptorError {{"name": "x"}} project] [descriptorError {{"schema": 2}} project] \
+test pm-descriptor-schema {a schema is required, and only schemas 1 and 2 are read (PM-2 added 2); an unknown key is an error, never ignored, and a schema 2 key in a schema 1 file says so} -body {
+    list [descriptorError {{"name": "x"}} project] [descriptorError {{"schema": 3}} project] \
         [descriptorError {{"schema": "1"}} project] [descriptorError {{"schema": 1, "scripts": {"postinstall": "rm -rf /"}}} project] \
-        [descriptorError {[1]} project]
-} -result {{{  no "schema": a botlish.json starts with "schema": 1}} {{  unsupported schema 2: this package manager reads schema 1 only (a newer one needs a newer Botlish)}} {{  "schema" must be the number 1}} {{  unknown key "scripts" (schema 1 has schema, name, version, dependencies, lock, sources): a key a later schema adds is never silently ignored}} {{  the file is not a JSON object}}}
+        [descriptorError {[1]} project] [descriptorError {{"schema": 2}} project] \
+        [descriptorError {{"schema": 1, "targets": {}}} project]
+} -result {{{  no "schema": a botlish.json starts with "schema": 1 (or 2)}} {{  unsupported schema 3: this package manager reads schemas 1 and 2 (a newer one needs a newer Botlish)}} {{  "schema" must be the number 1 or 2}} {{  unknown key "scripts" (schema 1 has schema, name, version, dependencies, lock, sources): a key a later schema adds is never silently ignored}} {{  the file is not a JSON object}} ok {{  "targets" is a schema 2 key: a botlish.json using it says "schema": 2 (schema 1 has schema, name, version, dependencies, lock, sources)}}}
 
 test pm-descriptor-names {a package name is a lowercase identifier: never std, never a keyword the parser reserves, never a spelling that differs only in case on another file system} -body {
     lmap name {web sdl3 event_loop_linux std fn if yield Web my-pkg 3d _x {} a234567890123456789012345678901234567890123456789012345678901234 a2345678901234567890123456789012345678901234567890123456789012345} {
@@ -1067,14 +1068,18 @@ test pm-no-scripts {nothing a package holds is executed: an artifact with instal
         [kindOf [dict get $refused err]]
 } -cleanup cleanup -result {0 0 0 1 DESCRIPTOR}
 
-test pm-no-network-in-sources {the package manager has no way to reach a network or run a program: its sources open no socket, load no http or tls package and run no command but `kill -0` (a lock holder's liveness)} -body {
+test pm-no-network-in-sources {the package manager has no way to reach a network or run a package's program: its sources open no socket, load no http or tls package, and run no command but `kill -0` (a lock holder's liveness) and, in pm/sha256.tcl's ToolHex and ToolFile only, the host system's SHA-256 tool at its fixed path (PM-2)} -body {
     set found {}
     foreach path [lsort [glob [file join $::projectRoot pm *.tcl]]] {
         set n 0
+        set proc ""
         foreach line [split [readBytes $path] \n] {
             incr n
+            regexp {^proc (\S+)} $line -> proc
             if {[regexp {^\s*#} $line]} continue
             if {[regexp {\msocket\M|package require (http|tls)|\mexec\M|open \|} $line] && ![string match {*exec kill -0*} $line]} {
+                if {[file tail $path] eq "sha256.tcl" && $proc in {pm::sha256::ToolHex pm::sha256::ToolFile}
+                        && [regexp {exec \$tool |open \|\[concat \$command} $line]} continue
                 lappend found "[file tail $path]:$n"
             }
         }

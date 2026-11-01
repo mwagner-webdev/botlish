@@ -297,18 +297,39 @@ fn linker_named(name: Option<&str>, program: &Program, stub: bool) -> Result<Lin
 /// for a framework (-FDIR), in order; and where the driver looks for a
 /// static archive declared without a path (`resolve_link_plan`). The two
 /// lists are kept apart: a framework directory is never a library one.
+///
+/// `runtime` (`--runtime-path`; main.tcl's -runtime-path, and a native
+/// backend's run of a program compiled from a target package tree:
+/// PACKAGE-MANAGER-MILESTONE-2.md, "Native deployment") are directories the
+/// executable's loader searches for its shared libraries, recorded in it by
+/// the GNU and Apple linkers (`-Wl,-rpath,DIR`: an ELF RUNPATH, a Mach-O
+/// LC_RPATH) after every other argument of the plan. Windows' loader has
+/// none (it searches the executable's own directory): `emit_executable`
+/// refuses them there. A program that calls no C links no shared library,
+/// and its link is given none of them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LinkSearch {
     pub libraries: Vec<String>,
     pub frameworks: Vec<String>,
+    pub runtime: Vec<String>,
 }
 
 #[cfg(test)]
 impl LinkSearch {
     /// Library directories DIRS and no framework directory.
     pub fn libraries(dirs: &[String]) -> LinkSearch {
-        LinkSearch { libraries: dirs.to_vec(), frameworks: Vec::new() }
+        LinkSearch { libraries: dirs.to_vec(), ..LinkSearch::default() }
     }
+}
+
+/// "" when PATH can be one runtime search path argument (`-Wl,-rpath,PATH`,
+/// which GNU's and Apple's compiler drivers split at commas, and a loader's
+/// path list at colons), else why not.
+pub fn runtime_path_problem(path: &str) -> Option<String> {
+    if path.is_empty() || path.contains([',', ':', ';', '\0', '\n']) {
+        return Some(format!("a runtime path is one directory with no comma, colon, semicolon or newline (found {path:?})"));
+    }
+    None
 }
 
 /// Links PROGRAM as a standalone executable at `executable_path(DESTINATION)`,
@@ -329,6 +350,19 @@ pub fn emit_executable(program: &Program, destination: &Path, search: &LinkSearc
             describe_link_plan(program)
         )
         .into());
+    }
+    if calls_c(program) && !search.runtime.is_empty() {
+        if LINKER == LinkerFlavor::Msvc {
+            return Err(LinkError {
+                detail: Some("RUNTIME-PATH"),
+                message: "a runtime path (-runtime-path) is an ELF RUNPATH or a Mach-O LC_RPATH: Windows has none, and its loader finds a program's DLLs in the executable's own directory (deploy them there)".to_string(),
+            });
+        }
+        for path in &search.runtime {
+            if let Some(problem) = runtime_path_problem(path) {
+                return Err(LinkError { detail: Some("RUNTIME-PATH"), message: problem });
+            }
+        }
     }
     let destination = std::path::absolute(executable_path(destination)).map_err(|e| e.to_string())?;
     match chosen_linker(program)? {
@@ -703,6 +737,9 @@ fn link_plan_args_for(flavor: LinkerFlavor, program: &Program, inputs: &[LinkInp
             arg("-framework".to_string());
             arg(name.clone());
         }
+    }
+    for dir in &search.runtime {
+        arg(format!("-Wl,-rpath,{dir}"));
     }
     args
 }
@@ -2319,6 +2356,25 @@ mod tests {
         assert_eq!(texts(&plain).len(), texts(&args).len() - 5);
     }
 
+    /// A runtime path (--runtime-path) is the last argument of the plan,
+    /// -Wl,-rpath,DIR, for GNU's and Apple's linkers; a program that calls
+    /// no C gets none; a path a driver would split is refused.
+    #[test]
+    fn runtime_paths_lower_per_linker() {
+        let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let search = LinkSearch { runtime: vec!["$ORIGIN/lib".into()], ..LinkSearch::default() };
+        for flavor in [LinkerFlavor::Gnu, LinkerFlavor::Apple] {
+            let args = link_plan_args_for(flavor, &ffi, &resolved(flavor, &ffi), &search);
+            assert_eq!(args.last().map(String::as_str), Some("link-arg=-Wl,-rpath,$ORIGIN/lib"), "{flavor:?}: {args:?}");
+        }
+        let plain = link_plan_args_for(LinkerFlavor::Gnu, &plain_program(), &[], &search);
+        assert!(plain.is_empty(), "a program that calls no C gets no runtime path: {plain:?}");
+        assert!(runtime_path_problem("$ORIGIN/lib").is_none());
+        for bad in ["", "a,b", "a:b", "a;b", "a\nb"] {
+            assert!(runtime_path_problem(bad).is_some(), "{bad:?}");
+        }
+    }
+
     /// Apple's: arm64 and the deployment target, -dead_strip, no GNU flag.
     #[test]
     fn system_link_args_apple_has_no_gnu_flags() {
@@ -2721,7 +2777,7 @@ mod tests {
             LinkInput::Framework("Cocoa".into()),
         ];
         let program = with_links("link \"m\"\nlink \"fx\" static\nframework \"Cocoa\"\n");
-        let search = LinkSearch { libraries: vec!["/opt/lib".into()], frameworks: vec!["/opt/My Frameworks".into()] };
+        let search = LinkSearch { libraries: vec!["/opt/lib".into()], frameworks: vec!["/opt/My Frameworks".into()], ..LinkSearch::default() };
         let shown = |args: Vec<String>| args.into_iter().filter(|a| a != "-C").collect::<Vec<_>>();
         let fx = format!("link-arg={}", path.display());
         assert_eq!(
