@@ -34,6 +34,18 @@
 # one file, W4), Win32 rewrites some (below), and nothing here asks the
 # filesystem.
 #
+# A NativePath holds its units as their UTF-16LE bytes, two per unit, low
+# byte first (UTF16-BYTE-STORAGE-MILESTONE-1.md): exactly what a wide
+# function reads, without the terminator. Text and native paths convert by
+# std::abi::bytes's UTF-16LE codec -- encode_utf16le (total), decode_utf16le
+# (strict: an unpaired surrogate is NotText) -- one runtime operation each,
+# on contiguous storage; a Win32 call's LPCWSTR is the bytes and one NUL unit
+# joined for that call (`wide`), the NUL never part of the path; and the
+# path syntax below reads the units, unvalidated, through
+# std::abi::bytes::utf16le_units (internal to the standard library). The
+# units a path holds are exactly the units it was made of, an unpaired
+# surrogate included: the bytes are a representation, never a decoding.
+#
 # Path syntax (`kind`, `join`) is Win32's, not Unix's with backslashes:
 #
 #   Relative       a\b         relative to the current directory
@@ -161,9 +173,12 @@ private extern c fn c_remove_directory named "RemoveDirectoryW"(name: std::ffi::
 # DWORD GetLastError(void)
 private extern c fn c_get_last_error named "GetLastError"() -> std::ffi::c::ULong
 
-# A Windows name or path: its UTF-16 code units (each 1..65535), non-empty.
+# A Windows name or path: its UTF-16 code units (each 1..65535), non-empty,
+# held as their UTF-16LE bytes (the module comment): DATA's byte pairs, low
+# byte first, are the units, exactly -- unpaired surrogates included, no
+# terminator.
 opaque struct NativePath:
-    units: List[int]
+    data: std::abi::bytes::Bytes
 
 # The filesystem context: the share mode every open asks for.
 opaque context struct WindowsFS:
@@ -207,27 +222,57 @@ fn create() -> WindowsFS:
 
 # ---------------------------------------------------------------------------
 # UTF-16
-
-private fn ints() -> MutableVector[int]:
-    std::mutable_vector::from_list([])
+#
+# Text becomes a native path's bytes with std::abi::bytes::encode_utf16le and
+# the bytes become text with decode_utf16le (UTF16-BYTE-STORAGE-MILESTONE-
+# 1.md); what follows is the rest: the units the path syntax reads, the bytes
+# of a List of units (from_units), the LPCWSTR of one call, and the lossy
+# decoding `display` shows a name without text by.
 
 private fn byte_vector() -> MutableVector[Byte]:
     std::mutable_vector::from_list([])
 
-# The UTF-16 code units of TEXT (a scalar above U+FFFF as its surrogate
-# pair).
-private fn utf16(text: str) -> List[int]:
-    out = ints()
-    loop i from 0 to text.length():
-        c = text.char_at(i).scalar_value()
-        if c < 65536:
-            out.push(c)
-        else:
-            v = c - 65536
-            out.push(55296 + v.shift_right(10))
-            out.push(56320 + v.mod(1024))
-    loop u in out:
-        u
+# PATH's code units, exactly (unpaired surrogates included).
+private fn units_of(path: NativePath) -> List[int]:
+    std::abi::bytes::utf16le_units(path.data)
+
+# The longest path's bytes (64 units) the syntax bridges whole: bridging a
+# path this short costs less than slicing out the few units the syntax reads
+# (UTF16-BYTE-STORAGE-MILESTONE-1.md, section 11: `kind` and `join`).
+private fn whole_bridge_bytes() -> int:
+    128
+
+# The units of a path's bytes DATA that `kind_of` reads -- its units 0..3,
+# and whether it has exactly three: every unit of a path of at most
+# whole_bridge_bytes(), the first four of a longer one, without bridging the
+# rest (the kind of a path is the kind of these).
+private fn head_units(data: std::abi::bytes::Bytes) -> List[int]:
+    if std::abi::bytes::length(data).value <= whole_bridge_bytes():
+        return std::abi::bytes::utf16le_units(data)
+    head = data.slice(0, 8):
+        on LowerUnderrun:
+            return []
+        on UpperOverrun:
+            return []
+    std::abi::bytes::utf16le_units(head)
+
+# The last unit of a path's bytes DATA, as a List of one, or none for no
+# bytes.
+private fn last_units(data: std::abi::bytes::Bytes) -> List[int]:
+    n = std::abi::bytes::length(data).value
+    tail = data.slice(n - 2, n):
+        on LowerUnderrun:
+            return []
+        on UpperOverrun:
+            return []
+    std::abi::bytes::utf16le_units(tail)
+
+# The units of DATA that `ends_separated?` reads -- its last unit: HEAD, its
+# head_units, when that holds every unit, else the last one alone.
+private fn end_units(data: std::abi::bytes::Bytes, head: List[int]) -> List[int]:
+    if std::abi::bytes::length(data).value <= whole_bridge_bytes():
+        return head
+    data.last_units()
 
 # Appends the UTF-8 encoding of the scalar C (below U+110000) to OUT.
 private fn push_utf8(place out: MutableVector[Byte], c: int) -> unit:
@@ -291,6 +336,12 @@ private fn decoded(bytes: List[Byte]) -> str:
         on InvalidUtf8:
             ""
 
+# US's text for people, every unpaired surrogate shown as U+FFFD: `display`'s
+# decoding of a name that has no text (strict decoding refused it). LOSSY:
+# never a path, and nothing but `display` calls it.
+private fn lossy(us: List[int]) -> str:
+    decoded(us.scalars().utf8_of())
+
 # The low and the high byte of the unit U.
 private fn low_byte(u: int) -> Byte:
     u.mod(256)
@@ -298,15 +349,38 @@ private fn low_byte(u: int) -> Byte:
 private fn high_byte(u: int) -> Byte:
     u.shift_right(8).mod(256)
 
-# UNITS' little-endian bytes and a two-byte NUL: an LPCWSTR for one call.
-private fn wide(units: List[int]) -> std::abi::bytes::Bytes:
-    bytes = loop i from 0 to 2 * units.length() + 2:
+# UNITS' UTF-16LE bytes, two per unit, low byte first (from_units: a List the
+# caller made).
+private fn data_of_units(units: List[int]) -> std::abi::bytes::Bytes:
+    bytes = loop i from 0 to 2 * units.length():
         u = units.unit_at(i.shift_right(1))
         if i.mod(2) == 0:
             u.low_byte()
         else:
             u.high_byte()
     std::abi::bytes::from_list(bytes)
+
+# One UTF-16LE unit's bytes (constants: native lowering makes each a static
+# storage): the terminating NUL, "\" and "*".
+private fn nul_unit() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([std::byte::from_int(0), std::byte::from_int(0)])
+
+private fn backslash_unit() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([std::byte::from_int(92), std::byte::from_int(0)])
+
+private fn star_unit() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([std::byte::from_int(42), std::byte::from_int(0)])
+
+# DATA, a path's UTF-16LE bytes, and one NUL unit after them: the LPCWSTR of
+# one Win32 call, built for that call. The terminator is added here, at the
+# call boundary, exactly once, after the last whole unit (a surrogate pair
+# stays whole before it); no NativePath ever holds it.
+private fn wide_of(data: std::abi::bytes::Bytes) -> std::abi::bytes::Bytes:
+    std::abi::bytes::join([data, nul_unit()])
+
+# PATH's LPCWSTR for one call (wide_of).
+private fn wide(path: NativePath) -> std::abi::bytes::Bytes:
+    wide_of(path.data)
 
 # ---------------------------------------------------------------------------
 # Native paths
@@ -325,44 +399,43 @@ private fn valid_units?(units: List[int]) -> bool:
 fn from_units(units: List[int]) -> NativePath errors std::io::path::NotAPath:
     if not units.valid_units?():
         fail std::io::path::NotAPath
-    NativePath {units: units}
+    NativePath {data: data_of_units(units)}
 
-# The native path of TEXT: its UTF-16 code units; std::io::path::NotAPath
-# when TEXT is empty or holds U+0000. (A std::windows::path::WindowsPath
-# converts with std::windows::path::native, which cannot fail.)
+# The native path of TEXT: its UTF-16 code units (encode_utf16le);
+# std::io::path::NotAPath when TEXT is empty or holds U+0000 (the unit 0).
+# (A std::windows::path::WindowsPath converts with
+# std::windows::path::native, which cannot fail.)
 fn from_text(text: str) -> NativePath errors std::io::path::NotAPath:
-    from_units(utf16(text))
+    data = std::abi::bytes::encode_utf16le(text)
+    if not std::abi::bytes::utf16le_units(data).valid_units?():
+        fail std::io::path::NotAPath
+    NativePath {data: data}
 
 # The native path of TEXT, already proven a valid path by the caller
-# (std::windows::path::native's WindowsPath): an internal member of the
-# standard library (core/native.tcl), never API.
+# (std::windows::path::native's WindowsPath: non-empty, no U+0000, so no
+# unit 0): an internal member of the standard library (core/native.tcl),
+# never API.
 nomethod fn of_valid_text(text: str) -> NativePath:
-    NativePath {units: utf16(text)}
+    NativePath {data: std::abi::bytes::encode_utf16le(text)}
 
 # PATH's UTF-16 code units, exactly.
 fn units(path: NativePath) -> List[int]:
-    path.units
+    path.units_of()
 
-# PATH's String; std::io::path::NotText when PATH holds an unpaired
-# surrogate (never a replacement character).
+# PATH's String (strict decode_utf16le); std::io::path::NotText when PATH
+# holds an unpaired surrogate (never a replacement character).
 fn text(path: NativePath) -> str errors std::io::path::NotText:
-    cs = path.units.scalars()
-    unpaired = loop c in cs:
-        if c < 0:
-            c
-        else:
-            continue
-    if unpaired.length() > 0:
-        fail std::io::path::NotText
-    decoded(cs.utf8_of())
+    std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            fail std::io::path::NotText
 
-# PATH as text for people: every unpaired surrogate shown as U+FFFD. LOSSY:
-# never a path (the experiment's lossy name opened another file).
+# PATH as text for people: its String when it has one, else every unpaired
+# surrogate shown as U+FFFD (`lossy`). LOSSY: never a path (the experiment's
+# lossy name opened another file); the path itself is unchanged.
 fn display(path: NativePath) -> str:
-    decoded(path.units.scalars().utf8_of())
-
-private fn backslash() -> int:
-    92
+    text(path):
+        on std::io::path::NotText:
+            return path.units_of().lossy()
 
 # true when U separates components: "\", and "/" unless VERBATIM.
 private fn separator?(u: int, verbatim: bool) -> bool:
@@ -392,7 +465,7 @@ private fn kind_of(us: List[int]) -> PathKind:
 # PATH's syntactic kind (the module comment). Syntax only: nothing is asked
 # of the filesystem or the process.
 fn kind(path: NativePath) -> PathKind:
-    path.units.kind_of()
+    path.data.head_units().kind_of()
 
 # The components of US: the runs between separators (VERBATIM: "\" only).
 private fn segments(us: List[int], verbatim: bool) -> List[List[int]]:
@@ -460,25 +533,29 @@ private fn joinable?(base: PathKind, name: List[int]) -> bool:
 private fn ends_separated?(us: List[int], verbatim: bool) -> bool:
     us.unit_at(us.length() - 1).separator?(verbatim)
 
-# The units of A followed by those of B.
-private fn joined(a: List[int], b: List[int]) -> List[int]:
-    loop i from 0 to a.length() + b.length():
-        if i < a.length():
-            a.unit_at(i)
-        else:
-            b.unit_at(i - a.length())
+# The bytes of the path BASE joined with the bytes NAME by Win32's syntax:
+# one "\" between them unless BASE ends with a separator or is a bare drive
+# designator ("C:" and "a" are "C:a", drive C's current directory: never
+# "C:\a"). The syntax reads BASE's kind (HEAD, its head_units), its last
+# unit and its unit count; the result is the bytes joined, no unit decoded or
+# re-encoded.
+private fn joined_data(base: std::abi::bytes::Bytes, head: List[int], name: std::abi::bytes::Bytes) -> std::abi::bytes::Bytes:
+    k = head.kind_of()
+    count = std::abi::bytes::length(base).value.shift_right(1)
+    if base.end_units(head).ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and count == 2):
+        return std::abi::bytes::join([base, name])
+    std::abi::bytes::join([base, backslash_unit(), name])
 
-# The joined units of BASE and NAME by Win32's syntax: one "\" between them
-# unless BASE ends with a separator or is a bare drive designator ("C:" and
-# "a" are "C:a", drive C's current directory: never "C:\a").
-private fn joined_units(base: List[int], name: List[int]) -> List[int]:
-    k = base.kind_of()
-    if base.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and base.length() == 2):
-        return base.joined(name)
-    base.append(backslash()).joined(name)
+# PATH joined with the relative native name whose bytes are NAME and units
+# NU, by `join`'s rule.
+private fn join_parts(path: NativePath, name: std::abi::bytes::Bytes, nu: List[int]) -> NativePath errors std::io::path::NotAPath:
+    head = path.data.head_units()
+    if not head.kind_of().joinable?(nu):
+        fail std::io::path::NotAPath
+    NativePath {data: path.data.joined_data(head, name)}
 
 # PATH joined with the relative native NAME, by Win32's syntax
-# (`joined_units`); std::io::path::NotAPath when NAME is no relative path,
+# (`joined_data`); std::io::path::NotAPath when NAME is no relative path,
 # when PATH is verbatim and NAME holds "/", "." or ".." or an empty
 # component, and when PATH is not verbatim and a component of NAME ends with
 # a period or a space -- which Win32 would drop, so the result would name
@@ -486,14 +563,17 @@ private fn joined_units(base: List[int], name: List[int]) -> List[int]:
 # joined to that verbatim directory). Nothing is normalized, no unit decoded
 # and no filesystem observed.
 fn join(path: NativePath, name: NativePath) -> NativePath errors std::io::path::NotAPath:
-    if not path.units.kind_of().joinable?(name.units):
-        fail std::io::path::NotAPath
-    NativePath {units: path.units.joined_units(name.units)}
+    path.join_parts(name.data, name.units_of())
 
-# PATH joined with the textual relative COMPONENT (its UTF-16 units), by
+# PATH joined with the textual relative COMPONENT (its UTF-16 units, as
+# from_text makes them: NotAPath when it is empty or holds U+0000), by
 # `join`'s rule.
 fn concat(path: NativePath, component: str) -> NativePath errors std::io::path::NotAPath:
-    path.join(from_text(component))
+    name = std::abi::bytes::encode_utf16le(component)
+    nu = std::abi::bytes::utf16le_units(name)
+    if not nu.valid_units?():
+        fail std::io::path::NotAPath
+    path.join_parts(name, nu)
 
 # ---------------------------------------------------------------------------
 # Failures
@@ -526,7 +606,7 @@ private fn last_error() -> int:
 # FILE_ATTRIBUTE_DIRECTORY of PATH's attributes, false when there are none
 # (GetFileAttributesW failed). Asked only after a failure's code was read.
 private fn directory?(path: NativePath) -> bool:
-    attributes = c_get_attributes(wide(path.units))
+    attributes = c_get_attributes(wide(path))
     attributes != 4294967295 and attributes.shift_right(4).mod(2) == 1
 
 # The reason of CODE, a failure of an operation on PATH: ERROR_ACCESS_DENIED
@@ -606,7 +686,7 @@ private fn disposition(mode: std::io::fs::OpenMode) -> std::ffi::c::ULong:
 fn open(path: NativePath, mode: std::io::fs::OpenMode, context fs: WindowsFS) -> File errors std::io::fs::FileError:
     security = std::ffi::c::null[std::ffi::c::Void]()
     template = std::ffi::c::null[std::ffi::c::Void]()
-    handle = wide(path.units).c_create_file(access(mode), fs.share, security, disposition(mode), 128, template)
+    handle = wide(path).c_create_file(access(mode), fs.share, security, disposition(mode), 128, template)
     failure = c_get_last_error()
     if handle.clone().invalid?():
         fail std::io::fs::FileError {reason: path.reason_at(failure), code: failure}
@@ -789,6 +869,11 @@ private layout FindData:
     field reparse_tag: std::binary::U32 at 36
     field name: array 260 of std::binary::U16 at 44
 
+# FindData.name's offset: a listed name's UTF-16LE bytes are the record's
+# bytes from here, two per unit.
+private fn name_offset() -> int:
+    44
+
 private fn find_data() -> std::abi::bytes::MutableBytes:
     std::abi::bytes::zeroed(std::abi::usize(592))
 
@@ -825,7 +910,14 @@ private fn take(data: std::abi::bytes::MutableBytes, place out: MutableVector[En
     tag = std::binary::read(record, FindData.reparse_tag):
         on LayoutLengthMismatch:
             return unit
-    out.push(Entry {name: NativePath {units: name}, kind: attributes.kind_of_entry(tag)})
+    # The name's own bytes, its units as FindFirstFileW / FindNextFileW wrote
+    # them: never decoded.
+    named = record.slice(name_offset(), name_offset() + 2 * name.length()):
+        on LowerUnderrun:
+            return unit
+        on UpperOverrun:
+            return unit
+    out.push(Entry {name: NativePath {data: named}, kind: attributes.kind_of_entry(tag)})
 
 # Every further entry of the enumeration FIND into OUT, until FindNextFileW
 # reports ERROR_NO_MORE_FILES (18): 0, or another error's code.
@@ -847,8 +939,8 @@ private fn rest(find: std::ffi::c::Ptr[std::ffi::c::Void], place out: MutableVec
 # entries: ERROR_FILE_NOT_FOUND) is empty; a name that is no directory is
 # NotADirectory (ERROR_DIRECTORY, W9).
 fn entries(dir: NativePath, context fs: WindowsFS) -> List[Entry] errors std::io::fs::FileError:
-    pattern = dir.units.joined_units([42])
-    r = wide(pattern).c_find_first(find_data())
+    pattern = dir.data.joined_data(dir.data.head_units(), star_unit())
+    r = wide_of(pattern).c_find_first(find_data())
     failure = c_get_last_error()
     {result: find, data} = r
     if find.clone().invalid?():
@@ -868,14 +960,14 @@ fn entries(dir: NativePath, context fs: WindowsFS) -> List[Entry] errors std::io
 # name exists.
 fn create_directory(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
     security = std::ffi::c::null[std::ffi::c::Void]()
-    if wide(path.units).c_create_directory(security) == 0:
+    if wide(path).c_create_directory(security) == 0:
         failure = c_get_last_error()
         fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
     unit
 
 # Removes the file PATH (DeleteFileW); IsADirectory for a directory.
 fn remove_file(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
-    if c_delete_file(wide(path.units)) == 0:
+    if c_delete_file(wide(path)) == 0:
         failure = c_get_last_error()
         fail std::io::fs::FileError {reason: path.reason_at(failure), code: failure}
     unit
@@ -883,7 +975,7 @@ fn remove_file(path: NativePath, context fs: WindowsFS) -> unit errors std::io::
 # Removes the empty directory PATH (RemoveDirectoryW); NotEmpty when it has
 # entries, NotADirectory when it is a file.
 fn remove_directory(path: NativePath, context fs: WindowsFS) -> unit errors std::io::fs::FileError:
-    if c_remove_directory(wide(path.units)) == 0:
+    if c_remove_directory(wide(path)) == 0:
         failure = c_get_last_error()
         fail std::io::fs::FileError {reason: reason_of(failure), code: failure}
     unit

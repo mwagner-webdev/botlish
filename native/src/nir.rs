@@ -343,6 +343,19 @@ pub enum OpCode {
     /// whose UTF-8 encoding is a storage's bytes, or the declared builtin
     /// error InvalidUtf8 (routed like a `fail`). One operand, the storage.
     BytesDecodeUtf8,
+    /// `byte_store::encode_utf16le` (UTF16-BYTE-STORAGE-MILESTONE-1.md): a
+    /// String's UTF-16LE bytes, two per code unit, low byte first (one
+    /// allocation, or the shared static empty storage). One operand, the
+    /// String.
+    StrEncodeUtf16Le,
+    /// `byte_store::decode_utf16le`: the String whose UTF-16LE encoding is a
+    /// storage's bytes, or the declared builtin error InvalidUtf16 (routed
+    /// like a `fail`). One operand, the storage.
+    BytesDecodeUtf16Le,
+    /// `byte_store::utf16le_units` (internal to the standard library): a
+    /// storage's byte pairs, low byte first, as a List of small Ints. One
+    /// operand, the storage.
+    BytesUtf16LeUnits,
     /// `byte_store::slice` (WINDOWS-X86-64-MILESTONE-7.md): a storage's bytes
     /// START..END-1 in a new storage, or the declared LowerUnderrun /
     /// UpperOverrun. Three operands: the storage, START, END.
@@ -949,6 +962,9 @@ op_spellings! {
     "bytesfromlist" => BytesFromList,
     "bytesjoin" => BytesJoin,
     "bytesdecodeutf8" => BytesDecodeUtf8,
+    "strencodeutf16le" => StrEncodeUtf16Le,
+    "bytesdecodeutf16le" => BytesDecodeUtf16Le,
+    "bytesutf16leunits" => BytesUtf16LeUnits,
     "bytesslice" => BytesSlice,
     "byteslen" => BytesLen,
     "bytesaddr" => BytesAddr,
@@ -1126,7 +1142,7 @@ impl OpCode {
             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
             | RawFromBits32 | RawFromBits64 | RawBits32 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
-            | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
+            | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
             | CoRelease | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),

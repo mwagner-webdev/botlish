@@ -151,6 +151,9 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
             | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice
+            // UTF-16LE (UTF16-BYTE-STORAGE-MILESTONE-1.md): a storage, a
+            // String, a List of units -- one allocation each.
+            | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits
             // The writable storage family (MUTABLE-BYTES.md): each of these
             // but length/address makes a fresh object (a collection may run
             // first, with the operands rooted).
@@ -247,6 +250,10 @@ pub fn op_may_error(op: OpCode) -> bool {
         // program cannot produce any of them: lib/abi/bytes.bot's creator takes
         // a List[Byte] and its storage field only ever holds a storage.
         | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice | BytesLen | BytesAddr
+        // UTF-16LE: the declared InvalidUtf16 (decode), an encoding past the
+        // ceiling (RANGE), an odd byte count or an operand of the wrong kind
+        // for the internal units bridge (RANGE, TYPE: no checked program).
+        | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits
         // The writable family: a length that is not 0..the ceiling (RANGE), an
         // operand of the wrong kind (TYPE: the readable and writable storages
         // are never interchanged), an index/count outside the payload (RANGE),
@@ -1781,6 +1788,193 @@ pub extern "C" fn rt_bytes_decode_utf8(p: *mut Vm, v: Value) -> Value {
         Ok(text) => vm(p).new_str(text),
         Err(_) => fail_builtin(p, super::error::ERR_INVALID_UTF8, "InvalidUtf8"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// UTF-16LE (core/utf16text.tcl, UTF16-BYTE-STORAGE-MILESTONE-1.md): a
+// String's UTF-16LE bytes and back, on the byte storage, with no
+// intermediate List or Rust String. The byte order is the format's, written
+// and read explicitly (`to_le_bytes`, `from_le_bytes` of each byte pair):
+// never the host's, and the payload is never reinterpreted as a `[u16]`
+// (it need not be 2-byte aligned, and the host may be big-endian).
+
+/// The byte length of the UTF-16LE encoding of UNITS code units, or None
+/// when it would overflow the machine word or exceed the collection-length
+/// ceiling a Bytes has: `rt_str_encode_utf16le`'s one length computation,
+/// made before anything is allocated.
+pub fn utf16le_encoded_len(units: usize) -> Option<usize> {
+    units.checked_mul(2).filter(|&n| n <= MAX_COLLECTION_LENGTH)
+}
+
+/// The UTF-16 code units of DATA's byte pairs, each read low byte first (a
+/// trailing odd byte is no unit: the callers check the length).
+fn utf16le_units_of(data: &[u8]) -> impl Iterator<Item = u16> + '_ {
+    data.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+}
+
+/// The UTF-8 byte length and the character count of the String whose
+/// UTF-16LE encoding is DATA, or None when DATA is no such encoding: an odd
+/// byte count, or units that are no well-formed UTF-16. The rule, unit by
+/// unit: below U+0080 one UTF-8 byte, below U+0800 two, a high surrogate
+/// (D800..DBFF) followed at once by a low one (DC00..DFFF) one scalar of
+/// four bytes, a high surrogate followed by anything else or by nothing --
+/// and a low surrogate not consumed by a high one -- an error, any other
+/// unit three bytes. (`char::decode_utf16`'s rule, counted directly: half
+/// its cost, and `rt_bytes_decode_utf16le` decodes with
+/// `char::decode_utf16` itself, whose every item this has proven a scalar.)
+/// Reads DATA only.
+pub fn utf16le_measure(data: &[u8]) -> Option<(usize, usize)> {
+    if data.len() % 2 != 0 {
+        return None;
+    }
+    let mut byte_len = 0usize;
+    let mut chars = 0usize;
+    let mut units = utf16le_units_of(data);
+    while let Some(unit) = units.next() {
+        byte_len += match unit {
+            0..=0x7F => 1,
+            0x80..=0x7FF => 2,
+            0xD800..=0xDBFF => match units.next() {
+                Some(0xDC00..=0xDFFF) => 4,
+                _ => return None,
+            },
+            0xDC00..=0xDFFF => return None,
+            _ => 3,
+        };
+        chars += 1;
+    }
+    Some((byte_len, chars))
+}
+
+/// `byte_store::encode_utf16le`: String S's UTF-16LE encoding, one new
+/// storage of exactly two bytes per code unit (a scalar above U+FFFF is a
+/// surrogate pair, high unit first), each unit low byte first. No byte-order
+/// mark, no terminator; U+0000 is 00 00. The length is computed first
+/// (`utf16le_encoded_len`: RANGE, before any allocation, past the ceiling),
+/// then the units are written straight into the one allocation (the shared
+/// static empty storage for ""). S stays reachable as the allocating
+/// instruction's operand while the storage is made (the collector never
+/// moves an object), so reading its text inside the fill is sound.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_str_encode_utf16le(p: *mut Vm, s: Value) -> Value {
+    let obj = str_of(s);
+    let text = obj.as_str();
+    // One unit per scalar, and a second for each scalar above U+FFFF: the
+    // four-byte UTF-8 sequences, whose lead byte is F0..F4.
+    let units = if obj.ascii { text.len() } else { obj.chars + text.bytes().filter(|&b| b >= 0xF0).count() };
+    let Some(len) = utf16le_encoded_len(units) else {
+        let message = format!(
+            "std::abi::bytes::encode_utf16le: the encoding of {units} code units exceeds the {MAX_COLLECTION_LENGTH}-byte ceiling of a Bytes"
+        );
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    };
+    let r = vm(p).new_bytes_with(len, |init| {
+        // Units are written through a small stack buffer: one bounds-checked
+        // copy into the storage per 64 units, never one per unit.
+        let mut buffer = [0u8; 128];
+        if obj.ascii {
+            // An ASCII String's units are its bytes, each widened.
+            for chunk in text.as_bytes().chunks(64) {
+                for (i, &b) in chunk.iter().enumerate() {
+                    buffer[2 * i] = b;
+                    buffer[2 * i + 1] = 0;
+                }
+                init.push_slice(&buffer[..2 * chunk.len()]);
+            }
+        } else {
+            let mut n = 0;
+            for unit in text.encode_utf16() {
+                if n == buffer.len() {
+                    init.push_slice(&buffer);
+                    n = 0;
+                }
+                buffer[n..n + 2].copy_from_slice(&unit.to_le_bytes());
+                n += 2;
+            }
+            init.push_slice(&buffer[..n]);
+        }
+    });
+    vm(p).metrics.record_list_copy(len);
+    r
+}
+
+/// `byte_store::decode_utf16le`: the String whose UTF-16LE encoding is
+/// storage V's bytes, or the declared builtin error InvalidUtf16 (an odd
+/// byte count, an unpaired surrogate). Strict, never a replacement
+/// character; FF FE is U+FEFF, never a byte-order mark. Two passes over the
+/// payload and no intermediate buffer: `utf16le_measure` validates and sizes
+/// the result, then the scalars are encoded straight into the one String
+/// allocation (none for ""). V stays reachable as the allocating
+/// instruction's operand while the String is made.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_decode_utf16le(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::decode_utf16le") {
+        return failed;
+    }
+    let data = bytes_of(v);
+    let Some((byte_len, chars)) = utf16le_measure(data) else {
+        return fail_builtin(p, super::error::ERR_INVALID_UTF16, "InvalidUtf16");
+    };
+    vm(p).new_str_with(byte_len, chars, |init| {
+        // Validated above: every item is a scalar (StrInit's own `finish`
+        // would refuse a text shorter than measured). The UTF-8 is written
+        // through a small stack buffer, one piece into the String per
+        // buffer's worth (its `from_utf8` check is of text this loop just
+        // encoded: it cannot fail, and a failure would leave the String short,
+        // which `finish` refuses).
+        let mut buffer = [0u8; 256];
+        if byte_len == chars {
+            // Every unit is below U+0080 (each one UTF-8 byte): the text is
+            // the units' low bytes.
+            for chunk in data.chunks(2 * buffer.len()) {
+                let n = chunk.len() / 2;
+                for (i, pair) in chunk.chunks_exact(2).enumerate() {
+                    buffer[i] = pair[0];
+                }
+                if let Ok(piece) = std::str::from_utf8(&buffer[..n]) {
+                    init.push_str(piece);
+                }
+            }
+            return;
+        }
+        let mut n = 0;
+        for c in char::decode_utf16(utf16le_units_of(data)).flatten() {
+            if n + 4 > buffer.len() {
+                if let Ok(piece) = std::str::from_utf8(&buffer[..n]) {
+                    init.push_str(piece);
+                }
+                n = 0;
+            }
+            n += c.encode_utf8(&mut buffer[n..]).len();
+        }
+        if let Ok(piece) = std::str::from_utf8(&buffer[..n]) {
+            init.push_str(piece);
+        }
+    })
+}
+
+/// `byte_store::utf16le_units` (internal to the standard library: the
+/// bridge std::windows::fs's path syntax reads a native path's units
+/// through): storage V's byte pairs as a List of small Ints, each pair read
+/// low byte first, unvalidated (a surrogate is a unit like any other). RANGE
+/// for an odd byte count, TYPE for an operand that is no byte storage (no
+/// checked program passes either). One List allocation; V stays reachable
+/// as the allocating instruction's operand.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_utf16le_units(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::utf16le_units") {
+        return failed;
+    }
+    let data = bytes_of(v);
+    if data.len() % 2 != 0 {
+        let message = format!("std::byte_store::utf16le_units: {} bytes are no whole number of 16-bit units", data.len());
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    }
+    let items: Vec<Value> = utf16le_units_of(data).map(|u| make_small(u as i64)).collect();
+    let n = items.len();
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_list_copy(n);
+    r
 }
 
 /// The storage V, or a TYPE error naming CONTEXT (the same text as
@@ -3924,6 +4118,9 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         BytesFromList => rt_bytes_from_list(p, a[0]),
         BytesJoin => rt_bytes_join(p, a[0]),
         BytesDecodeUtf8 => rt_bytes_decode_utf8(p, a[0]),
+        StrEncodeUtf16Le => rt_str_encode_utf16le(p, a[0]),
+        BytesDecodeUtf16Le => rt_bytes_decode_utf16le(p, a[0]),
+        BytesUtf16LeUnits => rt_bytes_utf16le_units(p, a[0]),
         BytesSlice => rt_bytes_slice(p, a[0], a[1], a[2]),
         BytesLen => rt_bytes_len(p, a[0]),
         MBytesNew => rt_mbytes_new(p, a[0]),
@@ -4088,6 +4285,9 @@ runtime_helpers! {
     (rt_bytes_from_list, 2),
     (rt_bytes_join, 2),
     (rt_bytes_decode_utf8, 2),
+    (rt_str_encode_utf16le, 2),
+    (rt_bytes_decode_utf16le, 2),
+    (rt_bytes_utf16le_units, 2),
     (rt_bytes_slice, 4),
     (rt_bytes_len, 2),
     (rt_bytes_addr, 2),
@@ -6056,6 +6256,114 @@ mod tests {
             assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_UTF8, "{bad:?}");
             assert!(vm.error.take().is_some());
         }
+    }
+
+    // UTF16-BYTE-STORAGE-MILESTONE-1.md: exact vectors (written here, never
+    // computed by the code under test), strictness, the units bridge and the
+    // length ceiling.
+    #[test]
+    fn utf16le_encodes_exact_bytes() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let ascii64 = "a".repeat(64);
+        let ascii65 = "a".repeat(65);
+        let vectors: &[(&str, &[u8])] = &[
+            ("", &[]),
+            ("A", &[0x41, 0x00]),
+            ("\0", &[0x00, 0x00]),
+            ("\u{e9}", &[0xe9, 0x00]),
+            ("\u{20ac}", &[0xac, 0x20]),
+            ("\u{1f600}", &[0x3d, 0xd8, 0x00, 0xde]),
+            ("\u{fffd}", &[0xfd, 0xff]),
+            ("\u{feff}", &[0xff, 0xfe]),
+            ("\u{10ffff}", &[0xff, 0xdb, 0xff, 0xdf]),
+            ("\u{10000}", &[0x00, 0xd8, 0x00, 0xdc]),
+            ("a\u{e9}\u{1f600}z", &[0x61, 0x00, 0xe9, 0x00, 0x3d, 0xd8, 0x00, 0xde, 0x7a, 0x00]),
+        ];
+        for (text, want) in vectors {
+            let s = rooted!(vm, vm.new_str(text));
+            let b = rt_str_encode_utf16le(p, s);
+            assert_eq!(bytes_of(b), *want, "{text:?}");
+        }
+        // The ASCII path's 64-character chunks: every unit, in order.
+        for text in [ascii64.as_str(), ascii65.as_str()] {
+            let s = rooted!(vm, vm.new_str(text));
+            let b = rt_str_encode_utf16le(p, s);
+            let want: Vec<u8> = text.bytes().flat_map(|c| [c, 0]).collect();
+            assert_eq!(bytes_of(b), &want[..]);
+        }
+    }
+
+    #[test]
+    fn utf16le_decodes_strictly() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let accepted: &[(&[u8], &str)] = &[
+            (&[], ""),
+            (&[0x41, 0x00], "A"),
+            (&[0x00, 0x00], "\0"),
+            (&[0x3d, 0xd8, 0x00, 0xde], "\u{1f600}"),
+            (&[0xff, 0xfe, 0x41, 0x00], "\u{feff}A"),
+            (&[0x41, 0x00, 0xff, 0xfe, 0x42, 0x00], "A\u{feff}B"),
+            (&[0xfd, 0xff], "\u{fffd}"),
+            (&[0xff, 0xff, 0xfe, 0xff], "\u{ffff}\u{fffe}"),
+            // Big-endian "AB" is two other characters: no order is detected.
+            (&[0x00, 0x41, 0x00, 0x42], "\u{4100}\u{4200}"),
+        ];
+        for (bytes, want) in accepted {
+            let v = rooted!(vm, vm.new_bytes(bytes));
+            let s = rt_bytes_decode_utf16le(p, v);
+            assert_eq!(str_of(s).as_str(), *want, "{bytes:?}");
+            assert_eq!(str_of(s).chars, want.chars().count(), "{bytes:?}");
+        }
+        let rejected: &[&[u8]] = &[
+            &[0x41],
+            &[0x41, 0x00, 0x42],
+            &[0x00, 0xd8],
+            &[0x00, 0xdc],
+            &[0x00, 0xd8, 0x41, 0x00],
+            &[0x41, 0x00, 0x00, 0xd8],
+            &[0x00, 0xdc, 0x00, 0xd8],
+            &[0x00, 0xd8, 0x00, 0xd8],
+            &[0x00, 0xdc, 0x00, 0xdc],
+            &[0x00, 0xd8, 0x00, 0xd8, 0x00, 0xdc],
+            &[0xfd, 0xff, 0x00, 0xdc],
+        ];
+        for bad in rejected {
+            let v = rooted!(vm, vm.new_bytes(bad));
+            assert_eq!(rt_bytes_decode_utf16le(p, v), NO_VALUE, "{bad:?}");
+            assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_UTF16, "{bad:?}");
+            assert!(vm.error.take().is_some());
+        }
+    }
+
+    #[test]
+    fn utf16le_units_bridge_reads_low_byte_first() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let v = rooted!(vm, vm.new_bytes(&[0x75, 0x00, 0x00, 0xd8, 0xfd, 0xff]));
+        let l = rt_bytes_utf16le_units(p, v);
+        let units: Vec<i64> = list_of(l).items().iter().map(|&u| int_small(u).expect("small")).collect();
+        assert_eq!(units, vec![0x75, 0xd800, 0xfffd]);
+        let odd = rooted!(vm, vm.new_bytes(&[0x41, 0x00, 0x42]));
+        assert_eq!(rt_bytes_utf16le_units(p, odd), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn utf16le_length_never_overflows_or_passes_the_ceiling() {
+        // The largest unit count whose encoding fits the ceiling, and the
+        // first that does not; a count whose doubling overflows the word.
+        let fits = MAX_COLLECTION_LENGTH / 2;
+        assert_eq!(utf16le_encoded_len(fits), Some(2 * fits));
+        assert_eq!(utf16le_encoded_len(fits + 1), None);
+        assert_eq!(utf16le_encoded_len(usize::MAX / 2 + 1), None);
+        assert_eq!(utf16le_encoded_len(usize::MAX), None);
+        assert_eq!(utf16le_encoded_len(0), Some(0));
+        // The measurement of a decoding never overflows either: it counts
+        // what it reads.
+        assert_eq!(utf16le_measure(&[0x3d, 0xd8, 0x00, 0xde, 0x41, 0x00]), Some((5, 2)));
+        assert_eq!(utf16le_measure(&[0x3d, 0xd8]), None);
     }
 
     #[test]

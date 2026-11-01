@@ -21,19 +21,37 @@
 @@ win-drive-relative-as-absolute a bare drive designator is joined with a separator: "C:" and "a" become "C:\a" (the drive's root) instead of "C:a" (the drive's current directory)
 ## stdlib/windows/fs.bot
 <<<<
-    if base.ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and base.length() == 2):
+    if base.end_units(head).ends_separated?(k == PathKind::Verbatim) or (k == PathKind::DriveRelative and count == 2):
 ====
-    if base.ends_separated?(k == PathKind::Verbatim):
+    if base.end_units(head).ends_separated?(k == PathKind::Verbatim):
+>>>>
+
+@@ win-long-end-from-head a long path's end is read from its first units: a path past 64 units ending with "\" (its fourth unit no separator) is joined with a second "\"
+## stdlib/windows/fs.bot
+<<<<
+    if std::abi::bytes::length(data).value <= whole_bridge_bytes():
+        return head
+    data.last_units()
+====
+    head
+>>>>
+
+@@ win-long-head-truncated a long path's kind is read from its first three units only: a UNC path past 64 units whose server name starts with "." ("\\.x\...") is taken for a device path
+## stdlib/windows/fs.bot
+<<<<
+    head = data.slice(0, 8):
+====
+    head = data.slice(0, 6):
 >>>>
 
 @@ win-always-separator a separator is inserted even after one: "C:\x\" and "a" become "C:\x\\a"
 ## stdlib/windows/fs.bot
 <<<<
-        return base.joined(name)
-    base.append(backslash()).joined(name)
+        return std::abi::bytes::join([base, name])
+    std::abi::bytes::join([base, backslash_unit(), name])
 ====
-        return base.append(backslash()).joined(name)
-    base.append(backslash()).joined(name)
+        return std::abi::bytes::join([base, backslash_unit(), name])
+    std::abi::bytes::join([base, backslash_unit(), name])
 >>>>
 
 @@ win-verbatim-dot-dot ".." is accepted under a verbatim path, where Win32 does not resolve it (NTFS refuses it: a name that opens nothing, or another entry)
@@ -63,20 +81,22 @@
 @@ win-lossy-surrogate-text a native name holding an unpaired surrogate gets a text (U+FFFD in its place) instead of NotText: the text names another file
 ## stdlib/windows/fs.bot
 <<<<
-    if unpaired.length() > 0:
-        fail std::io::path::NotText
-    decoded(cs.utf8_of())
+    std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            fail std::io::path::NotText
 ====
-    decoded(cs.utf8_of())
+    std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            return path.units_of().lossy()
 >>>>
 
 @@ win-enumeration-loses-native-name a listed name is kept as the units of its lossy display, not its own units: an unpaired surrogate becomes U+FFFD, and the name reopens another file or none
 %% windows-x86_64
 ## stdlib/windows/fs.bot
 <<<<
-    out.push(Entry {name: NativePath {units: name}, kind: attributes.kind_of_entry(tag)})
+    out.push(Entry {name: NativePath {data: named}, kind: attributes.kind_of_entry(tag)})
 ====
-    out.push(Entry {name: NativePath {units: decoded(name.scalars().utf8_of()).utf16()}, kind: attributes.kind_of_entry(tag)})
+    out.push(Entry {name: NativePath {data: std::abi::bytes::encode_utf16le(name.lossy())}, kind: attributes.kind_of_entry(tag)})
 >>>>
 
 @@ win-last-error-read-late another Win32 call (GetFileAttributesW of an invalid name, ERROR_INVALID_NAME) runs between a failed CreateFileW and the read of its last-error code
@@ -86,9 +106,63 @@
     failure = c_get_last_error()
     if handle.clone().invalid?():
 ====
-    stray = c_get_attributes(wide([60]))
+    stray = c_get_attributes(wide_of(std::abi::bytes::from_list([std::byte::from_int(60), std::byte::from_int(0)])))
     failure = c_get_last_error()
     if handle.clone().invalid?():
+>>>>
+
+# ---------------------------------------------------------------------------
+# Windows native paths on byte storage (UTF16-BYTE-STORAGE-MILESTONE-1.md)
+
+@@ win-call-buffer-unterminated the Win32 call boundary passes a path's bytes without the NUL unit an LPCWSTR ends with: the function reads past the name
+## stdlib/windows/fs.bot
+<<<<
+    std::abi::bytes::join([data, nul_unit()])
+====
+    data
+>>>>
+
+@@ win-terminator-in-native-path the NUL unit is stored in the native path from text, not added at the call boundary: the path's units end with 0
+## stdlib/windows/fs.bot
+<<<<
+    if not std::abi::bytes::utf16le_units(data).valid_units?():
+        fail std::io::path::NotAPath
+    NativePath {data: data}
+====
+    if not std::abi::bytes::utf16le_units(data).valid_units?():
+        fail std::io::path::NotAPath
+    NativePath {data: wide_of(data)}
+>>>>
+
+@@ win-open-through-lossy-text the Win32 call is given the bytes of the path's lossy spelling (display's), not its own units: a name holding an unpaired surrogate opens the file whose name holds U+FFFD
+## stdlib/windows/fs.bot
+<<<<
+    wide_of(path.data)
+====
+    wide_of(std::abi::bytes::encode_utf16le(path.units_of().lossy()))
+>>>>
+
+@@ win-text-normalized a native path's text is normalized (lowercased): "C:a" reads back as "c:a", another spelling than the path's
+## stdlib/windows/fs.bot
+<<<<
+    std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            fail std::io::path::NotText
+====
+    t = std::abi::bytes::decode_utf16le(path.data):
+        on InvalidUtf16:
+            fail std::io::path::NotText
+    std::str::lowercase(t)
+>>>>
+
+@@ win-units-reencoded a native path's units are read back through its lossy text, not its bytes: an unpaired surrogate reads back as U+FFFD
+## stdlib/windows/fs.bot
+<<<<
+fn units(path: NativePath) -> List[int]:
+    path.units_of()
+====
+fn units(path: NativePath) -> List[int]:
+    std::abi::bytes::utf16le_units(std::abi::bytes::encode_utf16le(path.units_of().lossy()))
 >>>>
 
 @@ win-context-bypassed create_directory needs no filesystem context: a path is authority
@@ -117,7 +191,9 @@ extern c fn c_get_last_error
         on InvalidUtf8:
             fail std::io::path::NotText
 ====
-    bytes.display()
+    std::abi::bytes::decode_utf8(std::abi::bytes::from_list(bytes)):
+        on InvalidUtf8:
+            return "".append_char('�')
 >>>>
 
 @@ bytes-absolute-joined a native name starting with "/" is joined to its directory (it would replace the directory)
@@ -140,6 +216,7 @@ extern c fn c_get_last_error
 # Linux enumeration
 
 @@ linux-enumeration-loses-native-name a listed name is kept as the UTF-8 of its lossy display, not its bytes: a name that is not UTF-8 reopens another file or none
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         out.push(Entry {name: NativePath {bytes: name}, kind: kind_of(block.at(pos + 18))})
@@ -148,6 +225,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-dot-entries-listed "." and ".." are listed as entries
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if std::io::bytepath::valid?(name) and not std::io::bytepath::dot_or_dot_dot?(name):
@@ -156,6 +234,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-dtype-swapped d_type's regular file and directory are swapped
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if d_type == 8:
@@ -170,6 +249,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-enumeration-leaks a failed getdents64 fails entries without closing the directory's descriptor
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         r = fd.getdents64(std::abi::bytes::zeroed(std::abi::usize(4096)))
@@ -193,6 +273,7 @@ extern c fn c_get_last_error
 # Linux files: completion, failure paths, reasons, ownership
 
 @@ linux-short-read-is-eof a read shorter than asked ends read_all and read_file: a pipe's or a FIFO's data after a pause is lost
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         data = fd.read_some(chunk_size(std::mutable_vector::length(parts)))
@@ -208,6 +289,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-short-write-is-complete a short write is taken as complete: write_all returns with the rest unwritten
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if n < total:
@@ -218,6 +300,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-short-write-rewrites-all after a short write the whole buffer is written again, not its rest: the bytes the kernel took are written twice
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
         return fd.write_rest(rest)
@@ -226,6 +309,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-failed-read-leaks a failed read fails without closing the File's descriptor
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if r.result < 0:
@@ -239,6 +323,7 @@ extern c fn c_get_last_error
 >>>>
 
 @@ linux-reason-exists-lost EEXIST is reported as Other, not AlreadyExists
+%% linux-x86_64 linux-aarch64
 ## stdlib/linux/fs.bot
 <<<<
     if errno == 17:

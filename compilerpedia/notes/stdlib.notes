@@ -2343,15 +2343,17 @@ keywords: byte storage; raw bytes; byte buffer
 related: stdlib.module.std::abi::bytes stdlib.module.std::mutable_byte_store
 
 == NOTES
-Two intrinsics, no module file. A byte storage is a runtime value kind of
-its own: an immutable, finite sequence of bytes with an exact length, no
+Intrinsics, no module file. A byte storage is a runtime value kind of its
+own: an immutable, finite sequence of bytes with an exact length, no
 terminator, compared and hashed by its bytes. No source type spells it (its
 static type is any); std::abi::bytes::Bytes is the opaque struct whose one
 field holds one, and only module std::abi::bytes can construct or open a
-Bytes. So programs use std::abi::bytes::from_list and
-std::abi::bytes::length; these intrinsics are what that module is written
-in. There is deliberately no operation that reads, slices or iterates the
-bytes.
+Bytes. So programs use std::abi::bytes::from_list, std::abi::bytes::length
+and the rest of that module; these intrinsics are what it is written in.
+There is deliberately no operation that indexes or iterates the bytes: they
+are combined and cut whole (join, slice) and converted to and from text
+(decode_utf8; encode_utf16le and decode_utf16le,
+UTF16-BYTE-STORAGE-MILESTONE-1.md).
 
 @topic stdlib.std::byte_store::from_list
 title: -
@@ -2476,6 +2478,57 @@ import std::str
 
 std::byte_store::from_list("hé".encode_utf8()).decode_utf8():
     on InvalidUtf8:
+        "not text"
+@value "hé"
+@end
+
+@topic stdlib.std::byte_store::encode_utf16le
+title: -
+summary: A String's UTF-16LE encoding as a new byte storage: two bytes per code unit, low byte first, no byte-order mark and no terminator.
+index: stdlib
+keywords: encode utf-16; utf16le; string to utf-16 bytes; wide string; utf-16 little endian
+related: stdlib.std::abi::bytes::encode_utf16le stdlib.std::byte_store::decode_utf16le stdlib.module.std::byte_store
+
+== NOTES
+The substrate of std::abi::bytes::encode_utf16le, which is what programs
+call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is one
+UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair, high unit
+first; each unit is stored low byte first whatever the host's byte order.
+U+0000 is the bytes 00 00; nothing is added (no byte-order mark, no NUL
+terminator) and nothing normalized. Total.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").byte_count()
+@value 4
+@end
+
+@topic stdlib.std::byte_store::decode_utf16le
+title: -
+summary: The String whose UTF-16LE encoding is a byte storage's bytes, or the declared error InvalidUtf16.
+index: stdlib
+keywords: decode utf-16; utf16le; utf-16 bytes to string; wide string; InvalidUtf16
+related: stdlib.std::abi::bytes::decode_utf16le stdlib.std::byte_store::encode_utf16le stdlib.module.std::byte_store
+
+== NOTES
+The substrate of std::abi::bytes::decode_utf16le, which is what programs
+call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or code
+units that are not well-formed UTF-16 -- an unpaired high or low surrogate,
+in any position -- is the declared error InvalidUtf16, never a replacement
+character. FF FE is the character U+FEFF, never a byte-order mark: the byte
+order is always little-endian, never detected. A UTF-16 code unit is not a
+character: a surrogate pair is one scalar.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").decode_utf16le():
+    on InvalidUtf16:
         "not text"
 @value "hé"
 @end

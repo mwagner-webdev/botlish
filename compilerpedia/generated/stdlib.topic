@@ -2189,6 +2189,55 @@ error InvalidUtf8, never a replacement character -- so
 decode_utf8(from_list(s.encode_utf8())) == s for every String s. A 0 byte is
 the character U+0000. No byte-order mark is skipped, nothing normalized.
 
+@topic stdlib.std::abi::bytes::encode_utf16le
+title: std::abi::bytes::encode_utf16le -- Function of module std::abi::bytes
+summary: TEXT's UTF-16LE encoding (UTF16-BYTE-STORAGE-MILESTONE-1.md)
+index: stdlib
+symbol: std::abi::bytes::encode_utf16le
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn encode_utf16le(text: str) -> Bytes:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::encode_utf16le or, as a method,
+receiver.encode_utf16le(...).
+
+== DESCRIPTION
+TEXT's UTF-16LE encoding (UTF16-BYTE-STORAGE-MILESTONE-1.md): each Unicode
+scalar value of TEXT as UTF-16 code units -- one unit, or for a scalar above
+U+FFFF its surrogate pair, high unit first -- and each unit as two bytes,
+low byte first, whatever the host's byte order: exactly two bytes per unit,
+in one contiguous Bytes. No byte-order mark is added, no terminator (a Win32
+call adds its own NUL unit: std::windows::fs), nothing normalized; U+0000 is
+the bytes 00 00, an ordinary character. Total.
+
+@topic stdlib.std::abi::bytes::decode_utf16le
+title: std::abi::bytes::decode_utf16le -- Function of module std::abi::bytes
+summary: The String whose UTF-16LE encoding is DATA
+index: stdlib
+symbol: std::abi::bytes::decode_utf16le
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn decode_utf16le(data: Bytes) -> str errors InvalidUtf16:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::decode_utf16le or, as a method,
+receiver.decode_utf16le(...).
+
+== DESCRIPTION
+The String whose UTF-16LE encoding is DATA: encode_utf16le's inverse. Strict
+-- an odd byte count, or code units (byte pairs read low byte first) that
+are no well-formed UTF-16 (a high surrogate D800..DBFF not followed at once
+by a low one DC00..DFFF, a low surrogate not preceded at once by a high one)
+is the declared error InvalidUtf16, never a replacement character -- so
+decode_utf16le(encode_utf16le(s)) == s for every String s. FF FE is the
+character U+FEFF, never a byte-order mark: no order is detected or skipped.
+Nothing normalized.
+
 @topic stdlib.std::abi::bytes::length
 title: std::abi::bytes::length -- Function of module std::abi::bytes
 summary: The exact byte count of DATA, as the ABI size domain.
@@ -2439,8 +2488,10 @@ stdlib/abi/bytes.bot (import std::abi::bytes).
 == MEMBERS
     std::abi::bytes::Bytes         opaque struct
     std::abi::bytes::MutableBytes  opaque struct
+    std::abi::bytes::decode_utf16le function -- The String whose UTF-16LE e...
     std::abi::bytes::decode_utf8   function -- The String whose UTF-8 encod...
     std::abi::bytes::detach        function -- DATA itself, as a value (a l...
+    std::abi::bytes::encode_utf16le function -- TEXT's UTF-16LE encoding (U...
     std::abi::bytes::freeze        function -- An immutable snapshot of all...
     std::abi::bytes::freeze_prefix function -- An immutable snapshot of the...
     std::abi::bytes::from_bytes    function -- An independent writable copy...
@@ -4514,6 +4565,51 @@ std::byte_store::from_list([]).byte_count()
 @value 0
 @end
 
+@topic stdlib.std::byte_store::decode_utf16le
+title: std::byte_store::decode_utf16le -- intrinsic of namespace std::byte_store
+summary: The String whose UTF-16LE encoding is a byte storage's bytes, or the declared error InvalidUtf16.
+index: stdlib
+symbol: std::byte_store::decode_utf16le
+keywords: decode utf-16; utf16le; utf-16 bytes to string; wide string; InvalidUtf16
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::decode_utf16le stdlib.std::byte_store::encode_utf16le
+
+== SIGNATURE
+    std::byte_store::decode_utf16le(any) -> str
+
+== ERRORS
+    InvalidUtf16
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::decode_utf16le. Method syntax:
+receiver.decode_utf16le(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::decode_utf16le, which is what programs
+call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or code
+units that are not well-formed UTF-16 -- an unpaired high or low surrogate,
+in any position -- is the declared error InvalidUtf16, never a replacement
+character. FF FE is the character U+FEFF, never a byte-order mark: the byte
+order is always little-endian, never detected. A UTF-16 code unit is not a
+character: a surrogate pair is one scalar.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").decode_utf16le():
+    on InvalidUtf16:
+        "not text"
+@value "hé"
+@end
+
 @topic stdlib.std::byte_store::decode_utf8
 title: std::byte_store::decode_utf8 -- intrinsic of namespace std::byte_store
 summary: The String whose UTF-8 encoding is a byte storage's bytes, or the declared error InvalidUtf8.
@@ -4556,6 +4652,42 @@ std::byte_store::from_list("hé".encode_utf8()).decode_utf8():
     on InvalidUtf8:
         "not text"
 @value "hé"
+@end
+
+@topic stdlib.std::byte_store::encode_utf16le
+title: std::byte_store::encode_utf16le -- intrinsic of namespace std::byte_store
+summary: A String's UTF-16LE encoding as a new byte storage: two bytes per code unit, low byte first, no byte-order mark and no terminator.
+index: stdlib
+symbol: std::byte_store::encode_utf16le
+keywords: encode utf-16; utf16le; string to utf-16 bytes; wide string; utf-16 little endian
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::encode_utf16le stdlib.std::byte_store::decode_utf16le
+
+== SIGNATURE
+    std::byte_store::encode_utf16le(str) -> any
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::encode_utf16le. Method syntax:
+receiver.encode_utf16le(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::encode_utf16le, which is what programs
+call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is one
+UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair, high unit
+first; each unit is stored low byte first whatever the host's byte order.
+U+0000 is the bytes 00 00; nothing is added (no byte-order mark, no NUL
+terminator) and nothing normalized. Total.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").byte_count()
+@value 4
 @end
 
 @topic stdlib.std::byte_store::from_list
@@ -4694,7 +4826,9 @@ Compiler intrinsics only, no module file (import std::byte_store).
 
 == MEMBERS
     std::byte_store::byte_count    intrinsic -- The exact number of bytes o...
+    std::byte_store::decode_utf16le intrinsic -- The String whose UTF-16LE ...
     std::byte_store::decode_utf8   intrinsic -- The String whose UTF-8 enco...
+    std::byte_store::encode_utf16le intrinsic -- A String's UTF-16LE encodi...
     std::byte_store::from_list     intrinsic -- A new immutable byte storag...
     std::byte_store::join          intrinsic -- One new immutable byte stor...
     std::byte_store::slice         intrinsic -- The byte storage of a stora...
@@ -4703,15 +4837,17 @@ Each member is a topic: -help NAME (e.g. -help
 std::byte_store::byte_count).
 
 == NOTES
-Two intrinsics, no module file. A byte storage is a runtime value kind of
-its own: an immutable, finite sequence of bytes with an exact length, no
+Intrinsics, no module file. A byte storage is a runtime value kind of its
+own: an immutable, finite sequence of bytes with an exact length, no
 terminator, compared and hashed by its bytes. No source type spells it (its
 static type is any); std::abi::bytes::Bytes is the opaque struct whose one
 field holds one, and only module std::abi::bytes can construct or open a
-Bytes. So programs use std::abi::bytes::from_list and
-std::abi::bytes::length; these intrinsics are what that module is written
-in. There is deliberately no operation that reads, slices or iterates the
-bytes.
+Bytes. So programs use std::abi::bytes::from_list, std::abi::bytes::length
+and the rest of that module; these intrinsics are what it is written in.
+There is deliberately no operation that indexes or iterates the bytes: they
+are combined and cut whole (join, slice) and converted to and from text
+(decode_utf8; encode_utf16le and decode_utf16le,
+UTF16-BYTE-STORAGE-MILESTONE-1.md).
 
 @topic stdlib.std::char::is_tcl_alnum
 title: std::char::is_tcl_alnum -- intrinsic of namespace std::char
@@ -17109,14 +17245,17 @@ related: stdlib.module.std::windows::fs
 
 == DECLARATION
     opaque struct NativePath:
-        units: List[int]
+        data: std::abi::bytes::Bytes
 
 == MODULE
 stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::NativePath.
 
 == DESCRIPTION
-A Windows name or path: its UTF-16 code units (each 1..65535), non-empty.
+A Windows name or path: its UTF-16 code units (each 1..65535), non-empty,
+held as their UTF-16LE bytes (the module comment): DATA's byte pairs, low
+byte first, are the units, exactly -- unpaired surrogates included, no
+terminator.
 
 @topic stdlib.std::windows::fs::WindowsFS
 title: std::windows::fs::WindowsFS -- Opaque context struct
@@ -17288,9 +17427,10 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::from_text or, as a method, receiver.from_text(...).
 
 == DESCRIPTION
-The native path of TEXT: its UTF-16 code units; std::io::path::NotAPath when
-TEXT is empty or holds U+0000. (A std::windows::path::WindowsPath converts
-with std::windows::path::native, which cannot fail.)
+The native path of TEXT: its UTF-16 code units (encode_utf16le);
+std::io::path::NotAPath when TEXT is empty or holds U+0000 (the unit 0). (A
+std::windows::path::WindowsPath converts with std::windows::path::native,
+which cannot fail.)
 
 @topic stdlib.std::windows::fs::units
 title: std::windows::fs::units -- Function of module std::windows::fs
@@ -17311,7 +17451,7 @@ PATH's UTF-16 code units, exactly.
 
 @topic stdlib.std::windows::fs::text
 title: std::windows::fs::text -- Function of module std::windows::fs
-summary: PATH's String
+summary: PATH's String (strict decode_utf16le)
 index: stdlib
 symbol: std::windows::fs::text
 related: stdlib.module.std::windows::fs
@@ -17324,8 +17464,8 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::text or, as a method, receiver.text(...).
 
 == DESCRIPTION
-PATH's String; std::io::path::NotText when PATH holds an unpaired surrogate
-(never a replacement character).
+PATH's String (strict decode_utf16le); std::io::path::NotText when PATH
+holds an unpaired surrogate (never a replacement character).
 
 @topic stdlib.std::windows::fs::display
 title: std::windows::fs::display -- Function of module std::windows::fs
@@ -17342,8 +17482,9 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::display or, as a method, receiver.display(...).
 
 == DESCRIPTION
-PATH as text for people: every unpaired surrogate shown as U+FFFD. LOSSY:
-never a path (the experiment's lossy name opened another file).
+PATH as text for people: its String when it has one, else every unpaired
+surrogate shown as U+FFFD (`lossy`). LOSSY: never a path (the experiment's
+lossy name opened another file); the path itself is unchanged.
 
 @topic stdlib.std::windows::fs::kind
 title: std::windows::fs::kind -- Function of module std::windows::fs
@@ -17365,7 +17506,7 @@ the filesystem or the process.
 
 @topic stdlib.std::windows::fs::join
 title: std::windows::fs::join -- Function of module std::windows::fs
-summary: PATH joined with the relative native NAME, by Win32's syntax (`joined_units`)
+summary: PATH joined with the relative native NAME, by Win32's syntax (`joined_data`)
 index: stdlib
 symbol: std::windows::fs::join
 related: stdlib.module.std::windows::fs
@@ -17379,17 +17520,17 @@ std::windows::fs::join or, as a method, receiver.join(...).
 
 == DESCRIPTION
 PATH joined with the relative native NAME, by Win32's syntax
-(`joined_units`); std::io::path::NotAPath when NAME is no relative path,
-when PATH is verbatim and NAME holds "/", "." or ".." or an empty component,
-and when PATH is not verbatim and a component of NAME ends with a period or
-a space -- which Win32 would drop, so the result would name another entry (a
+(`joined_data`); std::io::path::NotAPath when NAME is no relative path, when
+PATH is verbatim and NAME holds "/", "." or ".." or an empty component, and
+when PATH is not verbatim and a component of NAME ends with a period or a
+space -- which Win32 would drop, so the result would name another entry (a
 name listed under a verbatim directory, "verb.", is joined to that verbatim
 directory). Nothing is normalized, no unit decoded and no filesystem
 observed.
 
 @topic stdlib.std::windows::fs::concat
 title: std::windows::fs::concat -- Function of module std::windows::fs
-summary: PATH joined with the textual relative COMPONENT (its UTF-16 units), by `join`'s rule.
+summary: PATH joined with the textual relative COMPONENT (its UTF-16 units, as from_text makes them
 index: stdlib
 symbol: std::windows::fs::concat
 related: stdlib.module.std::windows::fs
@@ -17402,7 +17543,8 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::concat or, as a method, receiver.concat(...).
 
 == DESCRIPTION
-PATH joined with the textual relative COMPONENT (its UTF-16 units), by
+PATH joined with the textual relative COMPONENT (its UTF-16 units, as
+from_text makes them: NotAPath when it is empty or holds U+0000), by
 `join`'s rule.
 
 @topic stdlib.std::windows::fs::open
@@ -17684,6 +17826,18 @@ identity: NTFS compares names without case ("Case.txt" and "CASE.TXT" are
 one file, W4), Win32 rewrites some (below), and nothing here asks the
 filesystem.
 
+A NativePath holds its units as their UTF-16LE bytes, two per unit, low byte
+first (UTF16-BYTE-STORAGE-MILESTONE-1.md): exactly what a wide function
+reads, without the terminator. Text and native paths convert by
+std::abi::bytes's UTF-16LE codec -- encode_utf16le (total), decode_utf16le
+(strict: an unpaired surrogate is NotText) -- one runtime operation each, on
+contiguous storage; a Win32 call's LPCWSTR is the bytes and one NUL unit
+joined for that call (`wide`), the NUL never part of the path; and the path
+syntax below reads the units, unvalidated, through
+std::abi::bytes::utf16le_units (internal to the standard library). The units
+a path holds are exactly the units it was made of, an unpaired surrogate
+included: the bytes are a representation, never a decoding.
+
 Path syntax (`kind`, `join`) is Win32's, not Unix's with backslashes:
 
   Relative       a\b         relative to the current directory
@@ -17784,7 +17938,7 @@ stdlib/windows/fs.bot (import std::windows::fs).
     std::windows::fs::read_file    function -- Every byte of the file PATH.
     std::windows::fs::remove_directory function -- Removes the empty direct...
     std::windows::fs::remove_file  function -- Removes the file PATH (Delet...
-    std::windows::fs::text         function -- PATH's String
+    std::windows::fs::text         function -- PATH's String (strict decode...
     std::windows::fs::units        function -- PATH's UTF-16 code units, ex...
     std::windows::fs::write        function -- One WriteFile of DATA
     std::windows::fs::write_all    function -- Writes all of DATA to FILE (...
@@ -18053,7 +18207,7 @@ std::windows::path::WindowsPath.
 
 @topic stdlib.std::windows::path::nul_free?
 title: std::windows::path::nul_free? -- Function of module std::windows::path
-summary: true when no character of VALUE is U+0000.
+summary: true when no character of VALUE is U+0000
 index: stdlib
 symbol: std::windows::path::nul_free?
 related: stdlib.module.std::windows::path
@@ -18066,7 +18220,12 @@ stdlib/windows/path.bot: import std::windows::path, then write
 std::windows::path::nul_free? or, as a method, receiver.nul_free?(...).
 
 == DESCRIPTION
-true when no character of VALUE is U+0000.
+true when no character of VALUE is U+0000: when no byte of its UTF-8
+encoding is 0 (U+0000 is the one character whose encoding holds one). One
+pass over the bytes (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Performance"): a
+loop over std::str::char_at locates every non-ASCII character from the start
+of the String again, so it was quadratic in the path's length -- 9.0 ms for
+4096 mixed characters -- where this is linear (36 us).
 
 @topic stdlib.std::windows::path::valid?
 title: std::windows::path::valid? -- Function of module std::windows::path
