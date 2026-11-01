@@ -63,6 +63,14 @@
 #             name origin start end direction endKind}, each binding its own
 #             per-iteration name; the operand expressions are evaluated once,
 #             in the enclosing scope, before the first iteration
+#
+#   Any of the four loop kinds may carry `fold`: a dict {name origin
+#   initial} making it a folding loop (FOLD-LOOPS-MILESTONE-1.md) -- the
+#   intermediate binding's name and origin and its initial value's node.
+#   The initial value is evaluated once, in the *enclosing* scope, after
+#   the loop's own operands; the name is a per-iteration immutable binding
+#   of the body, bound to the value carried from the previous iteration
+#   (withFold, foldOf).
 #   struct    type, fields -- STRUCTS.md. TYPE is "" for an anonymous struct
 #             value { x: a, y: b }, or for a named construction `Name { ... }`
 #             a dict {name NAME namespace NS origin ORIGIN} (an as-written,
@@ -462,6 +470,44 @@ proc hir::syntax::lockLoopNode {origin domains bodyOrigin body} {
     return [Node lockloop $origin domains $domains bodyOrigin $bodyOrigin body $body]
 }
 
+# Makes loop syntax node LOOP (loop, listloop, countloop or lockloop) a
+# folding loop (FOLD-LOOPS-MILESTONE-1.md) whose intermediate binding NAME
+# (written at ORIGIN) starts as the value of INITIAL.
+proc hir::syntax::withFold {loop name origin initial} {
+    if {[dict get $loop kind] ni {loop listloop countloop lockloop}} {
+        error "hir::syntax::withFold: not a loop: [dict get $loop kind]"
+    }
+    dict set loop fold [dict create name $name origin $origin initial $initial]
+    return $loop
+}
+
+# The `fold` dict of syntax node NODE, or "" when it is no folding loop.
+proc hir::syntax::foldOf {node} {
+    return [dict getdef $node fold ""]
+}
+
+# {INITIAL} for a folding loop syntax NODE, {} for any other node: the child
+# its fold adds after the loop's own operands and before its body.
+proc hir::syntax::foldChildren {node} {
+    set fold [foldOf $node]
+    if {$fold eq ""} {
+        return {}
+    }
+    return [list [dict get $fold initial]]
+}
+
+# NODE with a fold's initial value replaced by the result of CMD applied to
+# it (CMD's last argument); NODE itself when it is no folding loop.
+proc hir::syntax::mapFold {node cmd} {
+    set fold [foldOf $node]
+    if {$fold eq ""} {
+        return $node
+    }
+    dict set fold initial [{*}$cmd [dict get $fold initial]]
+    dict set node fold $fold
+    return $node
+}
+
 proc hir::syntax::returnNode {origin value} {
     return [Node return $origin value $value]
 }
@@ -598,6 +644,16 @@ proc hir::syntax::fromIR {node path} {
             return [Node lockloop $origin domains $domains \
                 bodyOrigin [list ir [concat $path 2]] \
                 body [Sequence [core::ir::blockBody [lindex $node 2]] [concat $path 2] 2]]
+        }
+        fold {
+            # (fold INIT LOOP): LOOP is a loop form whose block binds the
+            # intermediate as its last parameter (core/ir.tcl).
+            set loop [lindex $node 2]
+            set blockIndex [core::ir::loopBlockIndex $loop]
+            set last [expr {[llength [core::ir::blockParams [lindex $loop $blockIndex]]] - 1}]
+            return [withFold [fromIR [core::ir::foldLoop $node] [concat $path 2]] \
+                [core::ir::foldIntermediate $node] [list ir [concat $path 2 $blockIndex 1 $last]] \
+                [fromIR [lindex $node 1] [concat $path 1]]]
         }
         struct {
             # (struct HEAD NAME EXPR ...): HEAD is {} (anonymous) or {ID
@@ -742,5 +798,10 @@ proc hir::syntax::CollectBindNames {node namesVar} {
         handle {
             CollectBindNames [dict get $node call] names
         }
+    }
+    if {[foldOf $node] ne ""} {
+        # A folding loop's initial value is evaluated in the enclosing
+        # scope, like the loop's own operands.
+        CollectBindNames [dict get [foldOf $node] initial] names
     }
 }

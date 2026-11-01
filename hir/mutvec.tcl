@@ -2094,8 +2094,14 @@ proc hir::mutvec::EntryRename {hirVar b d} {
     }
     set node [dict get $hir exprs $e]
     set kind [dict get $node kind]
+    # A fold's intermediate (FOLD-LOOPS-MILESTONE-1.md) is a parameter of its
+    # loop's body whatever the loop's kind.
+    set fold [expr {[dict exists $node foldBinding] && [dict get $node foldBinding] eq $b}]
+    if {$fold} {
+        set kind fold
+    }
     switch -- $kind {
-        block - listloop - lockloop {
+        block - listloop - lockloop - fold {
             set body [dict get $node body]
             set reachable 1
         }
@@ -2136,6 +2142,9 @@ proc hir::mutvec::EntryRename {hirVar b d} {
         }
         listloop {
             dict set hir exprs $e elementBinding $p
+        }
+        fold {
+            dict set hir exprs $e foldBinding $p
         }
         lockloop {
             dict set hir exprs $e domains [lmap dom [dict get $node domains] {

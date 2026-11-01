@@ -18,8 +18,8 @@
 #   whole function; loops nest (results nest), and a closure made in an
 #   iteration captures that iteration's own variable.
 # * `through`, `down`, `from`, `to`, `by` and `in` are contextual: ordinary
-#   names everywhere else, a loop variable included; so are `fold`,
-#   `reduce`, `sum` and `accumulate` (there is no reducing loop syntax).
+#   names everywhere else, a loop variable included; so are `fold` (a fold
+#   begins only before a name), `reduce`, `sum` and `accumulate`.
 # * Lockstep: `loop x in xs and i from 0 to n:` advances every clause
 #   together -- one body run per common position, not a Cartesian product.
 #   The compiler must PROVE the clauses' iteration counts equal (a length,
@@ -751,8 +751,8 @@ fn register_contextual_keyword_tests():
             f()
     std::test::value("loop-collecting-parse-names-as-variables", [1, 2, 3], names_as_variables)
 
-    # fold/reduce/sum/accumulate are ordinary names: there is no reducing
-    # loop syntax.
+    # fold/reduce/sum/accumulate are ordinary names: a loop has no
+    # reducing clause, and `fold` begins a fold only before a name.
     fn no_reducing_syntax() errors std::compiler::CompilerError:
         static compile:
             fold = 1

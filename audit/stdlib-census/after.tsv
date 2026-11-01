@@ -244,7 +244,7 @@ std::char::is_tcl_alnum	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:150
 std::char::is_tcl_alpha	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:148			
 std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:29			
 std::compiler	namespace		api	source	stdlib/compiler.bot			
-std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:171			
+std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:173			
 std::compiler::DiagnosticCode	enum	std::compiler	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineCaptureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineContainerUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -254,6 +254,7 @@ std::compiler::DiagnosticCode::AffineElementCopyOut	enum-case	std::compiler::Dia
 std::compiler::DiagnosticCode::AffineEqualityUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineErasureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineFieldMoveRequiresDestructure	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::AffineFoldUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineGenericNestedUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineInstanceBudget	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineListOperationUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -301,6 +302,7 @@ std::compiler::DiagnosticCode::ExportSignature	enum-case	std::compiler::Diagnost
 std::compiler::DiagnosticCode::FlagBindingCollision	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::FlagCalleeUnknown	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::FlagFunctionValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::FoldIntermediateType	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ForeignBorrow	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::Imprint	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::InternalIntrinsicValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -364,7 +366,7 @@ std::compiler::DiagnosticCode::UnprovenField	enum-case	std::compiler::Diagnostic
 std::compiler::DiagnosticCode::UnwrappedYield	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::UseAfterMove	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::YieldOutsideFunction	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
-std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:165			
+std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:167			
 std::coroutine	namespace		api	intrinsic				
 std::coroutine::done?	intrinsic	std::coroutine	api	intrinsic	core/coroutines.tcl:332			
 std::darwin	namespace		api	source	stdlib/darwin.bot	macos		1
@@ -1209,35 +1211,35 @@ std::test::code_name	function	std::test	api	source	stdlib/test.bot:300
 std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:256			
 std::test::count	function	std::test	api	source	stdlib/test.bot:152			
 std::test::describe	function	std::test	api	source	stdlib/test.bot:282			
-std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:584			
-std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:551			
-std::test::equal	function	std::test	api	source	stdlib/test.bot:568			
+std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:588			
+std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:555			
+std::test::equal	function	std::test	api	source	stdlib/test.bot:572			
 std::test::escape_of	function	std::test	api	source	stdlib/test.bot:189			
 std::test::escaped	function	std::test	api	source	stdlib/test.bot:205			
 std::test::glyph	function	std::test	api	source	stdlib/test.bot:160			
-std::test::holds	function	std::test	api	source	stdlib/test.bot:608			
+std::test::holds	function	std::test	api	source	stdlib/test.bot:612			
 std::test::joined	function	std::test	api	source	stdlib/test.bot:173			
-std::test::mismatch	function	std::test	api	source	stdlib/test.bot:564			
-std::test::no_results	function	std::test	api	source	stdlib/test.bot:689			
+std::test::mismatch	function	std::test	api	source	stdlib/test.bot:568			
+std::test::no_results	function	std::test	api	source	stdlib/test.bot:693			
 std::test::no_texts	function	std::test	api	source	stdlib/test.bot:168			
-std::test::passed	function	std::test	api	source	stdlib/test.bot:558			
+std::test::passed	function	std::test	api	source	stdlib/test.bot:562			
 std::test::quoted	function	std::test	api	source	stdlib/test.bot:223			
 std::test::registered	function	std::test	api	source	stdlib/test.bot:147			
-std::test::rejects	function	std::test	api	source	stdlib/test.bot:617			
-std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:639			
-std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:627			
-std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:665			
-std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:652			
-std::test::report	function	std::test	api	source	stdlib/test.bot:750			
-std::test::result_lines	function	std::test	api	source	stdlib/test.bot:718			
-std::test::results	function	std::test	api	source	stdlib/test.bot:693			
-std::test::run	function	std::test	api	source	stdlib/test.bot:683			
-std::test::satisfies	function	std::test	api	source	stdlib/test.bot:576			
+std::test::rejects	function	std::test	api	source	stdlib/test.bot:621			
+std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:643			
+std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:631			
+std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:669			
+std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:656			
+std::test::report	function	std::test	api	source	stdlib/test.bot:754			
+std::test::result_lines	function	std::test	api	source	stdlib/test.bot:722			
+std::test::results	function	std::test	api	source	stdlib/test.bot:697			
+std::test::run	function	std::test	api	source	stdlib/test.bot:687			
+std::test::satisfies	function	std::test	api	source	stdlib/test.bot:580			
 std::test::suite	function	std::test	api	source	stdlib/test.bot:136			
-std::test::summarize	function	std::test	api	source	stdlib/test.bot:708			
-std::test::summary_line	function	std::test	api	source	stdlib/test.bot:741			
+std::test::summarize	function	std::test	api	source	stdlib/test.bot:712			
+std::test::summary_line	function	std::test	api	source	stdlib/test.bot:745			
 std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
-std::test::value	function	std::test	api	source	stdlib/test.bot:599			
+std::test::value	function	std::test	api	source	stdlib/test.bot:603			
 std::tree	namespace		api	source+intrinsic	stdlib/tree.bot			
 std::tree::Order	enum	std::tree	api	source	stdlib/tree.bot:47			
 std::tree::Order::BreadthFirst	enum-case	std::tree::Order	api	source	stdlib/tree.bot:47			

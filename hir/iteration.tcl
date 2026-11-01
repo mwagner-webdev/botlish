@@ -308,6 +308,15 @@ proc hir::iteration::Rewrite {hirVar parent e protocol type} {
     set loop [dict create id $e kind countloop origin $origin scope $scope type [dict get $node type] \
         reachable $reachable start $start end $end bodyScope $bodyScope countBinding $position \
         direction up endKind exclusive body [concat [list $test $bindElement] $body]]
+    foreach field {foldBinding foldInitial} {
+        # A fold over the collection (FOLD-LOOPS-MILESTONE-1.md) stays one:
+        # a position the protocol skips is a `continue`, which keeps the
+        # intermediate; the initial value still runs after the domain (the
+        # protocol's end operation between them has no effect).
+        if {[dict exists $node $field]} {
+            dict set loop $field [dict get $node $field]
+        }
+    }
     dict set hir exprs $e $loop
     # The enclosing functions reach the operations as module-static
     # references (hir::resolve::Capture's rule for a module binding).

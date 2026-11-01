@@ -654,6 +654,18 @@ proc native::rawabi::WalkInstance {id} {
     Seq [hir::get $h $block body] $W(result) return
 }
 
+# Walks a fold NODE's initial value (FOLD-LOOPS-MILESTONE-1.md), after its
+# loop's operands: it starts the intermediate, a tagged register, as every
+# completion of the body replaces it. 1 for a fold, 0 (nothing walked) for
+# any other loop.
+proc native::rawabi::FoldInitial {node} {
+    if {![hir::IsFoldNode $node]} {
+        return 0
+    }
+    Walk [dict get $node foldInitial] "" "fold intermediate"
+    return 1
+}
+
 # The statements of a body: every value but the last is discarded.
 proc native::rawabi::Seq {exprs sink why} {
     set n [llength $exprs]
@@ -710,20 +722,24 @@ proc native::rawabi::Walk {e sink why} {
         if { If $e $node $sink $why }
         loop {
             dict set W(loops) $e $sink
-            Seq [dict get $node body] "" discarded
-            # A loop body's value is discarded (every iteration).
+            if {[FoldInitial $node]} {
+                Seq [dict get $node body] "" "fold intermediate"
+            } else {
+                Seq [dict get $node body] "" discarded
+                # A loop body's value is discarded (every iteration).
+            }
         }
         listloop {
             Walk [dict get $node iterable] "" "list loop source"
             dict set W(loops) $e ""
-            Seq [dict get $node body] "" "list loop result element"
+            Seq [dict get $node body] "" [if {[FoldInitial $node]} {string cat "fold intermediate"} else {string cat "list loop result element"}]
         }
         countloop {
             CountBounds $e [dict get $node start] [dict get $node end]
             dict set W(loops) $e ""
             # A collecting loop (COLLECTING-LOOPS.md): the body's value is a
             # result-List element, exactly like listloop's.
-            Seq [dict get $node body] "" "list loop result element"
+            Seq [dict get $node body] "" [if {[FoldInitial $node]} {string cat "fold intermediate"} else {string cat "list loop result element"}]
         }
         lockloop {
             foreach domain [dict get $node domains] {
@@ -734,7 +750,7 @@ proc native::rawabi::Walk {e sink why} {
                 }
             }
             dict set W(loops) $e ""
-            Seq [dict get $node body] "" "list loop result element"
+            Seq [dict get $node body] "" [if {[FoldInitial $node]} {string cat "fold intermediate"} else {string cat "list loop result element"}]
         }
         struct {
             foreach f [dict get $node fields] {

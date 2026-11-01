@@ -215,6 +215,7 @@ namespace eval hir::static {
         AFFINE-EQUALITY-UNSUPPORTED              AffineEqualityUnsupported
         AFFINE-ERASURE-UNSUPPORTED               AffineErasureUnsupported
         AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE   AffineFieldMoveRequiresDestructure
+        AFFINE-FOLD-UNSUPPORTED                  AffineFoldUnsupported
         AFFINE-GENERIC-NESTED-UNSUPPORTED        AffineGenericNestedUnsupported
         AFFINE-INSTANCE-BUDGET                   AffineInstanceBudget
         AFFINE-LIST-OPERATION-UNSUPPORTED        AffineListOperationUnsupported
@@ -262,6 +263,7 @@ namespace eval hir::static {
         FLAG-BINDING-COLLISION                   FlagBindingCollision
         FLAG-CALLEE-UNKNOWN                      FlagCalleeUnknown
         FLAG-FUNCTION-VALUE                      FlagFunctionValue
+        FOLD-INTERMEDIATE-TYPE                   FoldIntermediateType
         FOREIGN-BORROW                           ForeignBorrow
         IMPRINT                                  Imprint
         INTERNAL-INTRINSIC-VALUE                 InternalIntrinsicValue
@@ -420,8 +422,11 @@ proc hir::static::Children {node} {
             }
             return [list $value]
         }
-        block - loop - static {
+        block - static {
             return [dict get $node body]
+        }
+        loop {
+            return [concat [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         call {
             return [concat [list [dict get $node callee]] [dict get $node args]]
@@ -430,10 +435,11 @@ proc hir::static::Children {node} {
             return [concat [list [dict get $node condition]] [dict get $node thenBody] [dict get $node elseBody]]
         }
         listloop {
-            return [concat [list [dict get $node iterable]] [dict get $node body]]
+            return [concat [list [dict get $node iterable]] [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         countloop {
-            return [concat [list [dict get $node start] [dict get $node end]] [dict get $node body]]
+            return [concat [list [dict get $node start] [dict get $node end]] \
+                [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         lockloop {
             set children {}
@@ -444,7 +450,7 @@ proc hir::static::Children {node} {
                     }
                 }
             }
-            return [concat $children [dict get $node body]]
+            return [concat $children [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         handle {
             set children [list [dict get $node call]]
@@ -537,6 +543,11 @@ proc hir::static::Value {node decisions} {
     return [Node $node $decisions]
 }
 
+# Value with its arguments the other way round, for hir::syntax::mapFold.
+proc hir::static::Value_ {decisions node} {
+    return [Value $node $decisions]
+}
+
 # NODE (not itself static) with every static node below it expanded.
 proc hir::static::Node {node decisions} {
     switch -- [dict get $node kind] {
@@ -546,7 +557,11 @@ proc hir::static::Node {node decisions} {
         return - break - fail {
             dict set node value [Value [dict get $node value] $decisions]
         }
-        block - loop {
+        block {
+            dict set node body [Sequence [dict get $node body] $decisions]
+        }
+        loop {
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         call {
@@ -560,11 +575,13 @@ proc hir::static::Node {node decisions} {
         }
         listloop {
             dict set node iterable [Value [dict get $node iterable] $decisions]
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         countloop {
             dict set node start [Value [dict get $node start] $decisions]
             dict set node end [Value [dict get $node end] $decisions]
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         lockloop {
@@ -576,6 +593,7 @@ proc hir::static::Node {node decisions} {
                 }
                 set domain
             }]
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         handle {

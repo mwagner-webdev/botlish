@@ -925,6 +925,18 @@ proc hir::range::InductionSeed {startR endR direction endKind} {
     return [dict create min $min max $max]
 }
 
+# Visits a fold NODE's initial value (FOLD-LOOPS-MILESTONE-1.md), after the
+# loop's own operands, in the enclosing scope; nothing for any other loop.
+# Its Range seeds nothing: the intermediate it starts is unseeded (`unknown`
+# for every iteration but the first, which no single walk of the body
+# separates from the others).
+proc hir::range::FoldInitial {hirVar ctxVar node} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    if {[hir::IsFoldNode $node]} {
+        Expr hir ctx [dict get $node foldInitial]
+    }
+}
+
 # The Range a numeric loop domain's induction binding holds throughout the
 # loop body: InductionSeed's interval intersected with the binding's static
 # Int type fact. This is the one counted-loop theorem, shared by this
@@ -1061,6 +1073,11 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return [If hir ctx $e $node]
         }
         loop {
+            # A fold's initial value (FOLD-LOOPS-MILESTONE-1.md) is visited
+            # first, in the enclosing scope; its intermediate stays unseeded
+            # (whatever an iteration made of it: `unknown`), and so does the
+            # fold's own value, which a break yields as well.
+            FoldInitial hir ctx $node
             set saved [dict get $ctx bindings]
             dict set ctx breakRanges $e never
             foreach child [dict get $node body] {
@@ -1069,6 +1086,9 @@ proc hir::range::Expr {hirVar ctxVar e} {
             set result [dict get $ctx breakRanges $e]
             dict unset ctx breakRanges $e
             dict set ctx bindings $saved
+            if {[hir::IsFoldNode $node]} {
+                return [unknown]
+            }
             return $result
         }
         listloop {
@@ -1082,6 +1102,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
             # not-provably-int element would get anyway.
             set saved [dict get $ctx bindings]
             Expr hir ctx [dict get $node iterable]
+            FoldInitial hir ctx $node
             foreach child [dict get $node body] {
                 Expr hir ctx $child
             }
@@ -1105,6 +1126,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
             set saved [dict get $ctx bindings]
             set startR [Expr hir ctx [dict get $node start]]
             set endR [Expr hir ctx [dict get $node end]]
+            FoldInitial hir ctx $node
             set seed [InductionBinding $startR $endR [dict get $node direction] [dict get $node endKind]]
             set bindings [dict get $ctx bindings]
             dict set bindings [dict get $node countBinding] $seed
@@ -1131,6 +1153,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
                         [dict get $domain direction] [dict get $domain endKind]]
                 }
             }
+            FoldInitial hir ctx $node
             set bindings [dict get $ctx bindings]
             foreach {binding seed} $seeds {
                 dict set bindings $binding $seed

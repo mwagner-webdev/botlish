@@ -641,6 +641,8 @@ proc hir::relations::Loop {hirVar contracts stateVar e node} {
         lockloop { set operands [hir::loopOperands $node] }
         default { set operands {} }
     }
+    # A fold's initial value runs after them (FOLD-LOOPS-MILESTONE-1.md).
+    lappend operands {*}[hir::FoldInitials $node]
     foreach operand $operands {
         if {[Eval hir $contracts state $operand] eq "never"} {
             return never
@@ -654,6 +656,15 @@ proc hir::relations::Loop {hirVar contracts stateVar e node} {
     KillWritten hir $contracts state $body
     set values [dict getdef $breaks $e {}]
     dict unset breaks $e
+    if {[hir::IsFoldNode $node]} {
+        # A fold's value is its intermediate, which no fact follows from one
+        # iteration to the next; one with no domain completes only by a
+        # break.
+        if {[dict get $node kind] eq "loop" && $values eq {}} {
+            return never
+        }
+        return [dict create]
+    }
     if {[dict get $node kind] ne "loop"} {
         # (A collecting loop's value is a List.)
         return [dict create]

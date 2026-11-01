@@ -186,6 +186,12 @@
 #             itself is visited -- explicit semantic fields, never an
 #             `end + 1` / `start - 1` rewrite (hir::cardinality::Numeric
 #             spells the exact element count of each combination).
+#             Any of the four loop kinds may also be a folding loop
+#             (FOLD-LOOPS-MILESTONE-1.md): foldBinding (the intermediate, a
+#             parameter of bodyScope) and foldInitial (its first value,
+#             evaluated in the enclosing scope after the loop's operands);
+#             hir::isFold. A fold's value is its last intermediate, never a
+#             List.
 #   lockloop  domains, bodyScope, body -- the lockstep collecting loop (`loop
 #             x in xs and i from 0 to n:`): one loop whose iteration domains
 #             all advance together. domains is a list of dicts in written
@@ -1038,6 +1044,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::listlength::verify hir
     hir::callables::verify hir
     hir::lockstep::verify hir
+    hir::fold::verify hir
     hir::structs::verify hir
     hir::contexts::verify hir
     hir::direct::verify hir
@@ -1221,15 +1228,16 @@ proc hir::children {hir e} {
             return [concat [list [dict get $node condition]] \
                 [dict get $node thenBody] [dict get $node elseBody]]
         }
-        loop  { return [dict get $node body] }
+        loop  { return [concat [hir::FoldInitials $node] [dict get $node body]] }
         listloop {
-            return [concat [list [dict get $node iterable]] [dict get $node body]]
+            return [concat [list [dict get $node iterable]] [hir::FoldInitials $node] [dict get $node body]]
         }
         countloop {
-            return [concat [list [dict get $node start] [dict get $node end]] [dict get $node body]]
+            return [concat [list [dict get $node start] [dict get $node end]] \
+                [hir::FoldInitials $node] [dict get $node body]]
         }
         lockloop {
-            return [concat [hir::loopOperands $node] [dict get $node body]]
+            return [concat [hir::loopOperands $node] [hir::FoldInitials $node] [dict get $node body]]
         }
         struct  { return [dict get $node fields] }
         project { return [list [dict get $node receiver]] }
@@ -1247,6 +1255,35 @@ proc hir::children {hir e} {
             return $result
         }
     }
+}
+
+# Folding loops (FOLD-LOOPS-MILESTONE-1.md). A loop node of any of the four
+# kinds is a fold when it carries `foldBinding` (the intermediate: an
+# immutable parameter of its bodyScope, bound each iteration to the value
+# the previous one carried) and `foldInitial` (the ExprId of the value the
+# first iteration sees, evaluated once in the enclosing scope after the
+# loop's own operands). A fold is the value it carries: its normal
+# exhaustion and a bare break yield the current intermediate, a normal
+# completion of the body replaces it, `continue` keeps it. Its iteration
+# (domains, cardinality, lockstep proofs, induction) is its loop's own.
+
+# 1 if loop ExprId E of HIR is a fold.
+proc hir::isFold {hir e} {
+    return [dict exists $hir exprs $e foldBinding]
+}
+
+# 1 if loop node NODE is a fold.
+proc hir::IsFoldNode {node} {
+    return [dict exists $node foldBinding]
+}
+
+# {foldInitial} of a fold NODE, {} of any other node: the child it adds to
+# its loop's, after the loop's own operands.
+proc hir::FoldInitials {node} {
+    if {[dict exists $node foldInitial]} {
+        return [list [dict get $node foldInitial]]
+    }
+    return {}
 }
 
 # The operand ExprIds of lockloop NODE's domains, in written order (a list
@@ -1392,7 +1429,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methods declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

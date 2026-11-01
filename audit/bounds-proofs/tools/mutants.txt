@@ -543,6 +543,7 @@
 <<<<
     SubsumeCollected hir ctx $diagnose $guard $e $node [Seq hir ctx $diagnose $enclosing $guard [dict get $node body]]
     dict set ctx bindings $saved
+    dict set ctx exact $savedExact
     dict set ctx indexBounds $savedBounds
     RestoreRelations ctx $relations
     return [hir::range::unknown]
@@ -552,6 +553,7 @@
 ====
     SubsumeCollected hir ctx $diagnose $guard $e $node [Seq hir ctx $diagnose $enclosing $guard [dict get $node body]]
     dict set ctx bindings $saved
+    dict set ctx exact $savedExact
     dict set ctx indexBounds $savedBounds
     return [hir::range::unknown]
 }

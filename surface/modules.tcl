@@ -1401,6 +1401,16 @@ proc surface::modules::RemapFile {node fileId} {
             dict set node bodyOrigin [RemapOrigin [dict get $node bodyOrigin] $fileId]
             dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
         }
+    }
+    set fold [hir::syntax::foldOf $node]
+    if {$fold ne ""} {
+        # A folding loop's intermediate and initial value (FOLD-LOOPS-
+        # MILESTONE-1.md).
+        dict set fold origin [RemapOrigin [dict get $fold origin] $fileId]
+        dict set fold initial [RemapFile [dict get $fold initial] $fileId]
+        dict set node fold $fold
+    }
+    switch -- [dict get $node kind] {
         handle {
             dict set node call [RemapFile [dict get $node call] $fileId]
             set handlers {}

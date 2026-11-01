@@ -95,12 +95,21 @@ proc hir::modulebinding::ContextExpr {hir e stateVar} {
             return {ok}
         }
         loop {
+            # (A fold's initial value runs first: FOLD-LOOPS-MILESTONE-1.md.)
+            foreach initial [hir::FoldInitials $node] {
+                set result [ContextExpr $hir $initial state]
+                if {[lindex $result 0] ne "ok"} {
+                    return $result
+                }
+            }
             return [ContextSequence $hir [dict get $node body] state]
         }
         listloop {
-            set result [ContextExpr $hir [dict get $node iterable] state]
-            if {[lindex $result 0] ne "ok"} {
-                return $result
+            foreach operand [concat [list [dict get $node iterable]] [hir::FoldInitials $node]] {
+                set result [ContextExpr $hir $operand state]
+                if {[lindex $result 0] ne "ok"} {
+                    return $result
+                }
             }
             return [ContextSequence $hir [dict get $node body] state]
         }
@@ -295,6 +304,12 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
             return {bad unknown "control-flow result cannot be proven immutable"}
         }
         listloop {
+            if {[hir::IsFoldNode $node]} {
+                # A fold's value is its last intermediate
+                # (FOLD-LOOPS-MILESTONE-1.md), not the List of its body's
+                # values the proof below follows.
+                return {bad unknown "a fold's result cannot be proven immutable"}
+            }
             # Unlike a bare `loop` (whose result is whatever an arbitrary,
             # data-dependent `break` supplies, never proven here), a
             # listloop's own result is exactly the List of every iteration's

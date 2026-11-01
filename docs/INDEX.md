@@ -47,6 +47,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 ### Loops
 
 - [COLLECTING-LOOPS.md](COLLECTING-LOOPS.md) -- the numeric loop forms (`to`, `through`, `down from`) and lockstep iteration with a proven common cardinality
+- [FOLD-LOOPS-MILESTONE-1.md](FOLD-LOOPS-MILESTONE-1.md) -- folding loops: `fold ... with intermediate acc INITIAL:` carries one value through a loop's iterations (one loop-carried register natively; no List, plan or MutableArray)
 - [RETURNING-ITERABLE-LOOPS.md](RETURNING-ITERABLE-LOOPS.md) -- `loop x in xs:` as an expression that returns a List
 - [PAYLOAD-FREE-BREAK.md](PAYLOAD-FREE-BREAK.md) -- `break` never carries a value
 - [LISTLOOP-BREAK-TYPE-SOUNDNESS.md](LISTLOOP-BREAK-TYPE-SOUNDNESS.md) -- the earlier `break VALUE` design (superseded)

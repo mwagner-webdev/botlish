@@ -38,6 +38,7 @@ namespace eval core::interp {
         listloop    core::forms::op-listloop \
         countloop   core::forms::op-countloop \
         lockloop    core::forms::op-lockloop \
+        fold        core::forms::op-fold \
         return      core::forms::op-return \
         break       core::forms::op-break \
         continue    core::forms::op-continue \
@@ -148,8 +149,37 @@ proc core::forms::op-if {node env} {
     }
 }
 
-proc core::forms::op-loop {node env} {
-    set body [core::ir::blockBody [lindex $node 1]]
+proc core::forms::op-loop {node env {fold ""}} {
+    set block [lindex $node 1]
+    set body [core::ir::blockBody $block]
+    if {$fold ne ""} {
+        # A fold with no domain (op-fold): it carries its intermediate from
+        # each iteration to the next until a break ends it.
+        set result [Results $fold $env]
+        while 1 {
+            set iterationEnv [core::env::child $env]
+            ResultBind $result $iterationEnv $block
+            core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
+            try {
+                set completion [core::interp::evalSequence $body $iterationEnv]
+            } finally {
+                core::env::release $iterationEnv
+            }
+            switch -- [core::completion::kind $completion] {
+                value {
+                    ResultAdd result [core::completion::payload $completion]
+                }
+                continue {
+                }
+                break {
+                    return [core::completion::normal [ResultValue $result]]
+                }
+                return - propagate-error {
+                    return $completion
+                }
+            }
+        }
+    }
     while 1 {
         # Each iteration is a fresh scope.
         set iterationEnv [core::interp::enterScope $env $body]
@@ -170,6 +200,63 @@ proc core::forms::op-loop {node env} {
             }
         }
     }
+}
+
+# (fold INIT-EXPR LOOP): a folding loop (FOLD-LOOPS-MILESTONE-1.md, core/
+# ir.tcl). LOOP runs as its own form does, carrying the intermediate
+# instead of collecting: the loop's operands are evaluated first, then
+# INIT-EXPR (Results), and the block binds the intermediate as its last
+# parameter.
+proc core::forms::op-fold {node env} {
+    set loop [lindex $node 2]
+    return [op-[core::ir::op $loop] $loop $env [lindex $node 1]]
+}
+
+# The result state of a loop (a collecting loop's List so far, or a fold's
+# intermediate), made in ENV once the loop's operands are evaluated: FOLD
+# is "" for a collecting loop, else the fold's INIT-EXPR, evaluated here,
+# once, in the enclosing scope. A dict {fold 0|1 value V}. Called directly by
+# a loop's op proc: when INIT-EXPR completes abruptly (an error, a return),
+# that op returns its completion, as core::interp::valueOf makes an op
+# return an operand's.
+proc core::forms::Results {fold env} {
+    if {$fold eq ""} {
+        return [dict create fold 0 value {}]
+    }
+    set completion [core::interp::evalIn $fold $env]
+    if {![core::completion::isNormal $completion]} {
+        return -level 2 $completion
+    }
+    return [dict create fold 1 value [core::completion::payload $completion]]
+}
+
+# Binds a fold's intermediate (the last parameter of loop block BLOCK) in
+# iteration scope ENV to the current one in RESULT; nothing for a collecting
+# loop.
+proc core::forms::ResultBind {result env block} {
+    if {[dict get $result fold]} {
+        core::env::define $env [lindex [core::ir::blockParams $block] end] [dict get $result value]
+    }
+}
+
+# An iteration's ordinary completion with VALUE: collected, or the fold's
+# next intermediate.
+proc core::forms::ResultAdd {resultVar value} {
+    upvar 1 $resultVar result
+    if {[dict get $result fold]} {
+        dict set result value $value
+    } else {
+        dict lappend result value $value
+    }
+}
+
+# What a loop with RESULT completes with, at exhaustion or a bare break: the
+# List collected, or the fold's intermediate.
+proc core::forms::ResultValue {result} {
+    if {[dict get $result fold]} {
+        return [dict get $result value]
+    }
+    return [core::value::listOf [dict get $result value]]
 }
 
 # (listloop LIST-EXPR (block (ELEM) BODY...)): the returning iterable loop
@@ -200,20 +287,21 @@ proc core::forms::op-loop {node env} {
 # LIST-EXPR must be a List, like the Tcl compiler's and the native backend's
 # unmarked loop: a vector reaching one (a value of no collection type that
 # holds one) is a TYPE error, never drained.
-proc core::forms::op-listloop {node env} {
+proc core::forms::op-listloop {node env {fold ""}} {
     set listExpr [lindex $node 1]
     set elementBlock [lindex $node 2]
     set param [lindex [core::ir::blockParams $elementBlock] 0]
     set body [core::ir::blockBody $elementBlock]
     set listValue [core::interp::valueOf [core::interp::evalIn $listExpr $env]]
     if {[ConsumeMarked $listExpr]} {
-        return [ConsumeVector $listValue $param $body $env]
+        return [ConsumeVector $listValue $elementBlock $env [Results $fold $env]]
     }
     set items [core::value::items [core::value::expect list $listValue "loop iterable"]]
-    set results {}
+    set result [Results $fold $env]
     foreach item $items {
         set iterationEnv [core::env::child $env]
         core::env::define $iterationEnv $param $item
+        ResultBind $result $iterationEnv $elementBlock
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
         try {
             set completion [core::interp::evalSequence $body $iterationEnv]
@@ -222,20 +310,20 @@ proc core::forms::op-listloop {node env} {
         }
         switch -- [core::completion::kind $completion] {
             value {
-                lappend results [core::completion::payload $completion]
+                ResultAdd result [core::completion::payload $completion]
             }
             continue {
                 # contributes nothing; next iteration
             }
             break {
-                return [core::completion::normal [core::value::listOf $results]]
+                return [core::completion::normal [ResultValue $result]]
             }
             return - propagate-error {
                 return $completion
             }
         }
     }
-    return [core::completion::normal [core::value::listOf $results]]
+    return [core::completion::normal [ResultValue $result]]
 }
 
 # 1 if Core IR expression EXPR is a call of the consume mark of a loop that
@@ -247,12 +335,15 @@ proc core::forms::ConsumeMarked {expr} {
 
 # The consuming iteration of op-listloop over VECTOR (a MutableVector, or a
 # MutableArray: MUTABLE-ARRAY.md).
-proc core::forms::ConsumeVector {vector param body env} {
-    set results {}
+# RESULT is the loop's result state (Results), BLOCK its element block.
+proc core::forms::ConsumeVector {vector block env result} {
+    set param [lindex [core::ir::blockParams $block] 0]
+    set body [core::ir::blockBody $block]
     while {[core::mutvec::remaining $vector] > 0} {
         set item [core::mutvec::drainFront $vector]
         set iterationEnv [core::env::child $env]
         core::env::define $iterationEnv $param $item
+        ResultBind $result $iterationEnv $block
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
         try {
             set completion [core::interp::evalSequence $body $iterationEnv]
@@ -261,19 +352,19 @@ proc core::forms::ConsumeVector {vector param body env} {
         }
         switch -- [core::completion::kind $completion] {
             value {
-                lappend results [core::completion::payload $completion]
+                ResultAdd result [core::completion::payload $completion]
             }
             continue {
             }
             break {
-                return [core::completion::normal [core::value::listOf $results]]
+                return [core::completion::normal [ResultValue $result]]
             }
             return - propagate-error {
                 return $completion
             }
         }
     }
-    return [core::completion::normal [core::value::listOf $results]]
+    return [core::completion::normal [ResultValue $result]]
 }
 
 # (countloop START-EXPR END-EXPR (block (I) BODY...) ?DIRECTION ENDKIND?):
@@ -300,7 +391,7 @@ proc core::forms::ConsumeVector {vector param body env} {
 # bignum, so this loop -- which must remain correct for a Botlish Int of any
 # magnitude -- follows core/primitives.tcl's own arbitrary-precision
 # `expr`-only idiom throughout.
-proc core::forms::op-countloop {node env} {
+proc core::forms::op-countloop {node env {fold ""}} {
     set startExpr [lindex $node 1]
     set endExpr [lindex $node 2]
     set elementBlock [lindex $node 3]
@@ -313,10 +404,11 @@ proc core::forms::op-countloop {node env} {
     lassign [core::ir::countOptions $node] direction endKind
     set holds [core::forms::CountTest $direction $endKind]
     set step [expr {$direction eq "up" ? 1 : -1}]
-    set results {}
+    set result [Results $fold $env]
     while {[$holds $i $end]} {
         set iterationEnv [core::env::child $env]
         core::env::define $iterationEnv $param [core::value::intFromNumber $i]
+        ResultBind $result $iterationEnv $elementBlock
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
         try {
             set completion [core::interp::evalSequence $body $iterationEnv]
@@ -325,13 +417,13 @@ proc core::forms::op-countloop {node env} {
         }
         switch -- [core::completion::kind $completion] {
             value {
-                lappend results [core::completion::payload $completion]
+                ResultAdd result [core::completion::payload $completion]
             }
             continue {
                 # contributes nothing; advance to the next iteration
             }
             break {
-                return [core::completion::normal [core::value::listOf $results]]
+                return [core::completion::normal [ResultValue $result]]
             }
             return - propagate-error {
                 return $completion
@@ -339,7 +431,7 @@ proc core::forms::op-countloop {node env} {
         }
         set i [expr {$i + $step}]
     }
-    return [core::completion::normal [core::value::listOf $results]]
+    return [core::completion::normal [ResultValue $result]]
 }
 
 # The command that tests "is I still inside the domain" for a numeric loop of
@@ -385,7 +477,7 @@ proc core::forms::CountSize {direction endKind start end} {
 # does cross-check the proof it was handed -- a mismatch is a bug in the
 # compiler's proof, reported as an internal error, which is what makes the
 # differential fuzzers catch an unsound cardinality rule.
-proc core::forms::op-lockloop {node env} {
+proc core::forms::op-lockloop {node env {fold ""}} {
     if {[llength $node] == 4} {
         regexp {^(\S+): (.*)$} [lindex $node 3] -> kind message
         core::semanticError $kind $message
@@ -409,6 +501,7 @@ proc core::forms::op-lockloop {node env} {
                 [core::forms::CountSize $direction $endKind $start $end]]
         }
     }
+    set result [Results $fold $env]
     set total [lindex $domains 0 end]
     foreach domain $domains {
         if {[lindex $domain end] != $total} {
@@ -416,10 +509,9 @@ proc core::forms::op-lockloop {node env} {
                 the compiler's equal-cardinality proof was wrong"
         }
     }
-    set results {}
     for {set k 0} {$k < $total} {incr k} {
         set iterationEnv [core::env::child $env]
-        foreach param $params domain $domains {
+        foreach param [lrange $params 0 [llength $domains]-1] domain $domains {
             if {[lindex $domain 0] eq "list"} {
                 core::env::define $iterationEnv $param [lindex [lindex $domain 1] $k]
             } else {
@@ -427,6 +519,7 @@ proc core::forms::op-lockloop {node env} {
                     [core::value::intFromNumber [expr {[lindex $domain 1] + $k * [lindex $domain 2]}]]
             }
         }
+        ResultBind $result $iterationEnv [lindex $node 2]
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
         try {
             set completion [core::interp::evalSequence $body $iterationEnv]
@@ -435,20 +528,20 @@ proc core::forms::op-lockloop {node env} {
         }
         switch -- [core::completion::kind $completion] {
             value {
-                lappend results [core::completion::payload $completion]
+                ResultAdd result [core::completion::payload $completion]
             }
             continue {
                 # contributes nothing; every domain advances together
             }
             break {
-                return [core::completion::normal [core::value::listOf $results]]
+                return [core::completion::normal [ResultValue $result]]
             }
             return - propagate-error {
                 return $completion
             }
         }
     }
-    return [core::completion::normal [core::value::listOf $results]]
+    return [core::completion::normal [ResultValue $result]]
 }
 
 # (struct HEAD NAME EXPR ...): evaluates every EXPR strictly in written
