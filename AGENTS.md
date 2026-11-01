@@ -4414,6 +4414,62 @@ seam. Icy Tower's builds stage the SDL3 binding as a package (`tools/
 c-bindgen.tcl stage -package 1`); `tests/workload-icy-tower.test` and the
 `icy-tower` workflows cover them.
 
+## The package manager (pm/, botlish.json, .botpkg)
+
+`pm/` (PACKAGE-MANAGER-MILESTONE-1.md) is the package manager: `main.tcl
+add|install|update|remove|verify|package` (`botlish add ...` in the single
+executable), over local `.botpkg` artifacts (BOTPKG-FORMAT.md) and
+`botlish.json` (BOTLISH-JSON.md). It builds the `.bot_modules` trees the
+compiler already reads (previous section) and nothing else. Keep it so:
+
+* The compiler never reads `botlish.json`, a version, a lock, an artifact
+  or `.bot_modules/.botlish`, and never loads `pm/`: main.tcl sources
+  `pm/pm.tcl` only when its first argument is a package command, before the
+  compiler is loaded. Never make compilation restore, update or check
+  packages, and never add a version, an import alias or new syntax for
+  packages. A hand-assembled `.bot_modules` compiles exactly as before.
+* Nothing a package holds is executed -- at packing, inspection,
+  verification or installation: no hook, script, build step, binary or
+  compilation, no `exec` but `kill -0` (a lock holder's liveness), no
+  socket, no network (`pm-no-network-in-sources`). Native archives travel
+  as opaque files built on the author's side (`tools/package-repository.tcl`).
+* Each package owns its direct requests and exact locks; a package's
+  dependencies go in its own `.bot_modules`, never its consumer's. Never
+  write a transitive lock into an application, deduplicate instances by
+  name, or let a lock change without `add`/`update` (install never moves
+  one). A request's precision is its components (`1`, `1.2`, `1.2.3`): no
+  operators, prereleases or ranges.
+* Artifacts are immutable and validated whole before anything is written:
+  the restricted ZIP profile, the path rules, the limits, streamed capped
+  decompression, every CRC, and the descriptor in the artifact context
+  (complete compatible locks, no sources). Never relax the reader to accept
+  an archive another tool made, follow a link, write outside the staging
+  directory, or choose between two artifacts claiming one release (no
+  precedence among repositories). Repositories are named on the command
+  line only: never search a parent, the working directory, a global
+  directory or the environment.
+* Every operation is one transaction (`pm/install.tcl`): stage, journal,
+  rename, record, descriptor, commit marker; a failure rolls back and an
+  interrupted one is rolled back (or finished, once committed) by the next
+  command. A `.bot_modules` entry the record does not name is the user's:
+  never modified, replaced or deleted; a managed package that changed is
+  replaced only with `-force`.
+* Integrity is not authenticity: a digest checks bytes against a record;
+  never describe a local artifact as signed, verified or authenticated
+  publisher content.
+
+If you change `pm/`, the formats, `tools/package-repository.tcl`,
+`packages/*/botlish.json` or main.tcl's dispatch, run
+`tests/package-manager.test`, `tests/package-workloads.test` (its native
+runs need the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
+`tests/cffi/raven.tcl`), `tests/main-cli.test`, `tests/bot-modules.test`
+and `audit/package-manager/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule).
+`bench/package-manager.tcl` measures its costs. A change to the single
+executable's dispatch (`single/main.tcl`'s package commands) also runs the
+single-executable checks above.
+
 ## Diagnostic recovery
 
 A rejected compilation reports every independent diagnostic it finds and

@@ -20,4 +20,11 @@ module links it by a path relative to the package instance
 * `native/botlish_event_loop.h` -- the integration ABI a native library
   posts through (`botlish_event_post`, `botlish_event_wake`, pumps).
 
-Tests: `tests/event-loop-linux.test`.
+With the package manager (PACKAGE-MANAGER-MILESTONE-1.md),
+`tools/package-repository.tcl REPO` stages the package the same way -- the
+archive built on the author's side -- and packs it with its botlish.json as
+`REPO/event_loop_linux-0.1.0.botpkg`; an application installs it with
+`botlish add event_loop_linux -repository REPO`, and nothing is compiled on
+the consumer's side. The artifact is one target's (its archive).
+
+Tests: `tests/event-loop-linux.test`, `tests/package-workloads.test`.
