@@ -802,7 +802,11 @@ suites (443 tests on the Tcl backends, 452 on the native ones);
   on `f9e0ed0`), and main's own macOS runs fail the same jobs (runs
   41244352962 and 41198055666): it predates this milestone and is not
   touched by it;
-* run 41266348148 (final, push): @@MACFINAL@@;
+* run 41266348148 (final, push): smoke, acceptance shard 1, Botlish.app, the static SDL3 link
+  plan and the application without developer tools passed; acceptance
+  shard 2 (5,252 tests, one failed), the system linker job (3,850 tests,
+  one failed) and the main-thread startup job failed on the same one test,
+  `mts-main-process-semantics`, as above;
 * Icy Tower on macOS (run 41254335004 on `43c0795`): the graphical
   acceptance's `restart` case failed one timing check on the first attempt
   (where the new game's player stood 0.6 to 1.0 s after R) while the same
