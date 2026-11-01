@@ -615,16 +615,33 @@ Counted by the driver (`bench/utf16-bytes.tcl -measure alloc`, local
 experiment: the Windows module's code on the Linux driver; the counts
 depend on the code, not the machine), allocations / bytes per operation:
 
-@@ALLOC@@
+| operation | 8 ASCII before | 8 ASCII after | 40 mixed before | 40 mixed after | 256 mixed before | 256 mixed after |
+|---|---:|---:|---:|---:|---:|---:|
+| encode_utf16le | -- | 2 / 72 B | -- | 2 / 156 B | -- | 2 / 696 B |
+| decode_utf16le | -- | 1 / 33 B | -- | 1 / 115 B | -- | 1 / 601 B |
+| validate + native | 23 / 880 B | 5 / 233 B | 7 / 1024 B | 4 / 940 B | 7 / 5344 B | 4 / 5368 B |
+| from_text | 15 / 616 B | 4 / 200 B | 7 / 1024 B | 4 / 620 B | 7 / 5344 B | 4 / 3320 B |
+| text | 12 / 577 B | 1 / 33 B | 12 / 2309 B | 1 / 115 B | 12 / 12785 B | 1 / 601 B |
+| display | 11 / 553 B | 1 / 33 B | 11 / 2285 B | 1 / 115 B | 11 / 12761 B | 1 / 601 B |
+| display (lossy: + D800) | 11 / 615 B | 12 / 711 B | 11 / 2347 B | 12 / 2779 B | 11 / 12823 B | 12 / 15415 B |
+| units | 0 / 0 B | 1 / 88 B | 0 / 0 B | 1 / 424 B | 0 / 0 B | 1 / 2584 B |
+| kind | 0 / 0 B | 1 / 88 B | 0 / 0 B | 1 / 384 B | 0 / 0 B | 3 / 120 B |
+| concat (text) | 40 / 2610 B | 27 / 1525 B | 40 / 5241 B | 27 / 2563 B | 40 / 22035 B | 32 / 7006 B |
+| join (native) | 17 / 1008 B | 22 / 1164 B | 17 / 1600 B | 22 / 1534 B | 17 / 5488 B | 27 / 1846 B |
+| Win32 buffer from List[int] (M7) | 5 / 338 B | 5 / 338 B | 5 / 1094 B | 5 / 1094 B | 5 / 5954 B | 5 / 5954 B |
+| Win32 buffer from Bytes (this) | -- | 7 / 290 B | -- | 7 / 374 B | -- | 7 / 914 B |
 
 Text to native path and back are one allocation each now (the decoded
 String; the encoded storage and its Bytes). The Win32 buffer is seven
 small allocations whatever the length -- the NUL's Bytes wrapper (its
 storage is a static constant), the two-element List, `join`'s List of
 storages, the result's storage and Bytes -- against milestone 7's five
-whose bytes grow with the path. `join` makes more and smaller allocations
-(the bridged head, last unit and component, the slices), fewer bytes from
-40 characters on. `concat`'s remaining 35 are mostly `joinable?`'s
+whose bytes grow with the path. `kind` is one List for a short path (its
+units) and three small allocations for a long one (the head's slice and
+List). `join` makes more and smaller allocations than milestone 7's (the
+base's units, the component's, the joined storage), fewer bytes from 40
+characters on; the slices-only version made 30 at every length, this one
+22 for a short base. `concat`'s remaining 27 are mostly `joinable?`'s
 segment Lists.
 
 ### 11.5 Local experiment: the versions of `kind` and `join`
@@ -725,7 +742,9 @@ and fuzzer that pin them.
   (utf16-bytes, filesystem, abi-bytes, abi-mutable-bytes,
   stdlib-namespaces, linux-syscall, contexts, windows-io, portable-io,
   linux-path, darwin-io, context-traits) and their golden suites, on
-  interp and compile, golden suites on all four backends: @@LOCALRUN@@;
+  interp and compile, golden suites on all four backends: on the final code, every test passed -- 397 on interp and 397 on compile
+(49 skipped by host constraints, 117 golden duplicates), and the 11 golden
+suites (443 tests on the Tcl backends, 452 on the native ones);
 * `tests/filesystem.test`'s Windows path tests on the final code,
   `fs-windows-native-runtime` included (both native backends, normally and
   under `BOTLISH_NATIVE_GC_STRESS=1`): pass;
