@@ -673,11 +673,15 @@ otherwise:
 * **Compilerpedia**: `tools/compilerpedia.tcl check`: 1,149 topics, 701
   examples run, 0 problems. `audit/stdlib-census/after.tsv` regenerated:
   the two new cases.
-* **CI**, pending when this was written: the branch's
-  `static-decisions` run (fold-loops.bot, loop-collecting.bot and
-  loops.bot under the batched and the sequential scheduler, which is never
-  run locally) and its `tests` run, and the macOS and Windows workflows
-  its pushes start.
+* **CI on the branch.**
+  - `static-decisions` (the batched scheduler against the sequential
+    reference, which never runs locally) agrees on all three suites:
+    fold-loops.bot in 3 rounds and 5 builds batched against 11 rounds and
+    22 builds sequential, loop-collecting.bot 3/3 against 8/8, loops.bot
+    2/2 against 2/2.
+  - The Icy Tower workflows (Windows x86-64, macOS arm64) pass.
+  - `tests`, `tests (macos arm64)` and `tests (windows x86-64)` were still
+    queued or running when this was written.
 
 ## Reproducing
 
