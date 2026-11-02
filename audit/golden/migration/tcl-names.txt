@@ -197,6 +197,7 @@ tests/actor.test actor-agree-authority pass
 tests/actor.test actor-agree-coexist pass
 tests/actor.test actor-agree-identity pass
 tests/actor.test actor-agree-lifecycle pass
+tests/actor.test actor-agree-replay pass
 tests/actor.test actor-agree-room pass
 tests/actor.test actor-agree-shutdown pass
 tests/actor.test actor-agree-values pass
@@ -234,6 +235,7 @@ tests/actor.test actor-probe-a-fairness pass
 tests/actor.test actor-probe-a-identity pass
 tests/actor.test actor-probe-a-request-reply pass
 tests/actor.test actor-probe-a-suspended-handler pass
+tests/actor.test actor-replay pass
 tests/actor.test actor-room-close pass
 tests/actor.test actor-room-events pass
 tests/actor.test actor-room-fifo pass

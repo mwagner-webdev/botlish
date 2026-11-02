@@ -1,0 +1,60 @@
+# replay.bot -- SAME-THREAD-ACTORS-MILESTONE-1.md, "Affine receive
+# ownership": a mailbox is bound once. An actor's first value is its first
+# request (here its listen), an ordinary copyable value: a supervisor can
+# hand X's first request to Y's start, and to X's. Y's host then binds X's
+# mailbox to Y; X's own bind of it is refused (X's listen answers Closed),
+# and Y, whose own listen was never performed, receives nothing through its
+# Receiver (Closed); X's mailbox, bound to Y, closes when Y ends -- no
+# mailbox moves between actors, and nobody reads another's messages.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+
+struct Msg:
+    n: int
+
+struct Line:
+    text: str
+
+fn listener(name: str, inbox: std::actor::Inbox[Msg], log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            log.send(Line {text: name.concat(": listen answered Closed")})
+            return std::actor::exit(-1)
+    m = rx.receive():
+        on std::actor::Closed:
+            log.send(Line {text: name.concat(": receive answered Closed")})
+            return std::actor::exit(-2)
+    log.send(Line {text: name.concat(": received ").concat(std::int::to_string(m.n))})
+    std::actor::exit(m.n)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: log, inbox: log_in} = std::actor::open[Line](8)
+    {to: mx, inbox: mx_in} = std::actor::open[Msg](4)
+    {to: my, inbox: my_in} = std::actor::open[Msg](4)
+    std::actor::post(mx, Msg {n: 1})
+    std::actor::post(my, Msg {n: 2})
+    coroutine {step: x, first: xf} = listener("xx", mx_in, log)
+    coroutine {step: y, first: yf} = listener("yy", my_in, log)
+    # Y is started with X's first request; X with its own.
+    std::actor::spawned(y, xf).start()
+    std::actor::spawned(x, xf).start()
+    std::event_loop::run()
+    loop l in std::actor::drain(log_in):
+        std::event_loop::log(l.text)
+    std::event_loop::log("queued for X: ".concat(std::int::to_string(std::actor::queued(mx))))
+    std::event_loop::log("queued for Y: ".concat(std::int::to_string(std::actor::queued(my))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(16)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

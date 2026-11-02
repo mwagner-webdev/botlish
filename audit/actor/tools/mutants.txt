@@ -45,7 +45,7 @@ right: Right {marker: 0}}
 >>>>
 
 @@ rebind-allowed listen binds a mailbox another actor already listened to
-!! actor-identity
+!! actor-replay
 ## stdlib/actor.bot
 <<<<
     if not open?(slot, gen) or mget(slot, m_owner) != -1 or not running?(me, mg):
