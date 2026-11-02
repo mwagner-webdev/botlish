@@ -87,7 +87,7 @@ do so.
   message -- to perform the one privileged operation it cannot
   (`tests/actor/authority.bot`). Every forbidden operation, put into the
   same program with every context still installed, is CONTEXT-NOT-INJECTED
-  at the inject boundary (18 variants), and laundering a privileged
+  at the inject boundary (17 variants), and laundering a privileged
   coroutine into an actor is CONTEXT-RETAINED-AUTHORITY (section 10).
 * **Ownership and identity.** The receive right is affine; `listen`
   consumes it and binds the mailbox to the actor's task for good. Addresses
@@ -103,7 +103,7 @@ do so.
   for room woken with Closed) and ends its task with the actor's outcome;
   `reap` closes what a shutdown abandoned. Nobody has to read a diagnostics
   list for a mailbox to close (section 9).
-* **All four backends**, one trace each, for eight scenario programs, also
+* **All four backends**, one trace each, for nine scenario programs, also
   under `BOTLISH_NATIVE_GC_STRESS=1` (section 12, 13).
 
 **One compiler-side addition**, and why it is the smallest sound one
@@ -323,8 +323,23 @@ construction), and the top level receives with `drain`.
 * `listen` binds the mailbox to the actor's task for good; a host serves a
   receive only for its own actor's bound mailboxes, so a `Receiver` copied
   into another actor receives nothing there (Closed) while the owner gets
-  everything (`actor-identity`; mutants `receiver-not-bound`,
-  `rebind-allowed`).
+  everything (`actor-identity`; mutant `receiver-not-bound`).
+* **A replayed listen.** An actor's first value (its first request) is an
+  ordinary copyable value, so a supervisor can start actor Y with X's first
+  request, a `listen` of X's mailbox. Y's host then binds X's mailbox to Y;
+  X's own listen of it is refused (Closed), Y receives nothing through its
+  own Receiver (Closed: its own listen was never performed), and X's
+  mailbox closes with Y. A mailbox is bound once, and nobody reads another's
+  messages (`actor-replay`; mutant `rebind-allowed`). More generally,
+  `spawned` does not check that its two arguments belong together: a
+  mismatched pair makes the host perform the other actor's first request.
+  A listen binds once (above), a receive is served only from the host's own
+  actor's bound mailboxes, and a send or deliver sends that request's
+  message to that request's address again -- a duplicate the code holding
+  both values could cause, since it holds the Actors that `start` requires,
+  never a read of the message (an `Exit` is opaque) or a send to an
+  address nobody gave it: a first request precedes every receive, so its
+  address came from the actor's construction.
 * **Dropping** an Inbox runs nothing (an affine release runs no code). A
   mailbox whose Inbox was dropped before any actor listened -- e.g. moved
   into a construction that failed -- stays open until the administration
