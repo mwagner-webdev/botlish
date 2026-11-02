@@ -376,7 +376,42 @@ harness now runs `tests/static-compile-expected-diagnostics.test` beside
 | `statement-keeps-intended` | a rejected statement still counts as an intended completion |
 | `reified-any-position` | the rule applied to the last expression of a body too |
 
-**Results pending**: the harness run over the new mutants is in progress; this section is completed with its verdicts in the next commit.
+**All 38 mutants apply and are killed.** The 17 new ones by
+`tests/static-compile-expected-diagnostics.test` alone (`-tests` it,
+`-fuzz-count 0`):
+
+| mutant | killed by |
+|---|---|
+| `known-error-escapes` | 12 tests (the suites stop compiling) |
+| `known-error-wrong-code` | `sced-known-error-forms`, `-assertion-distinguishes`, `-exact-mod` |
+| `attribute-ignores-file` | `sced-other-file` |
+| `attribute-past-end` | `sced-ordinary-known-error-rejects`, `-independent-diagnostic-visible`, `sced-service` |
+| `matcher-any-code`, `matcher-any-location` | `sced-assertion-distinguishes` |
+| `resolution-round-final` | `sced-resolution-first`, `-assertion-distinguishes`, `-following-sequence-siblings` |
+| `stale-decision-kept` | `sced-callee-dependency` |
+| `cache-key-ignores-source` | `sced-cache` |
+| `statement-dead-types` | `sced-following-code-checked`, `-range-facts`, `-emission` |
+| `statement-dead-completions` | `sced-following-code-checked`, `-sequence-siblings`, `sced-service-following-code` |
+| `statement-keeps-intended` | `sced-following-code-checked`, `sced-service-following-code` |
+| `statement-dead-affine`, `-relations` | `sced-following-code-checked` |
+| `statement-dead-range` | `sced-following-code-checked`, `-range-facts` |
+| `statement-dead-emission` | `sced-following-emission` |
+| `reified-any-position` | `sced-value-position-diverges` |
+
+The first run found two survivors, both gaps of the tests, not of the
+compiler: `attribute-ignores-file` survived a `sced-other-file` whose
+module diagnostic overlapped the block by line and column but not by
+character offset (attribution compares offsets): the test now places it
+inside by both and asserts that it does. `reified-any-position` -- the rule
+applied to a body's last expression too, which makes a function whose whole
+body was rejected return poison instead of diverging -- had no test of the
+value positions' divergence: `sced-value-position-diverges` pins that the
+decided program holds no poison. Both were then killed.
+
+The 21 mutants the harness had before are killed by its original detectors
+(`tests/static-compile.test` and the fuzzer, 12 programs): every one by
+failing tests, 14 of them by fuzz disagreements as well -- none weakened by
+this change.
 
 ## 12. Regression results
 
