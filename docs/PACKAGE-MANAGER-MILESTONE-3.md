@@ -111,12 +111,16 @@ builds in the pinned image; recorded in `packages/RELEASES.tsv`):
 | `raven-0.3.2.botpkg` | `9d94f18733ce2e0b8019abaa2b7810f5e2351699469ca27b2b7af7e38af6007b` | 3 | linux-aarch64, linux-x86_64 |
 | `event_loop_linux-0.3.0.botpkg` | `3746cece124b660fa03bf018271e4d5bc6d25f2bf684da84bc9fd621a2bc453c` | 2 | linux-aarch64, linux-x86_64 |
 
-Their provenance records: `sdl3-0.2.1.provenance.json` sha256 `634b2ae4b0cb...`,
-`raven-0.3.2.provenance.json` `0b3ff0b99cfd...`,
-`event_loop_linux-0.3.0.provenance.json` `fc44cc57d07c...` (identical in
-both builds; a record names the commit it was made from, bb99687, through
-the generators' version, so a later commit's record of the same artifact
-differs there).
+Their provenance records, from the final pair of builds (commit d80d5d6):
+`sdl3-0.2.1.provenance.json` sha256 `ff4e7b882f41...`,
+`raven-0.3.2.provenance.json` `500dd14764b1...`,
+`event_loop_linux-0.3.0.provenance.json` `a6aff034158d...` (identical in
+both builds). A record names the environment and the commit it was made
+from: the records of the earlier pair (commit bb99687: `634b2ae4...`,
+`0b3ff0b9...`, `fc44cc57...`) differ from these in exactly three fields --
+the image line (the Dockerfile changed between them), the generators'
+`version` (the commit) and `producer.sources-sha256` (the package
+manager's sources) -- and in nothing about the artifacts.
 
 ## B. Previous authoring architecture
 
@@ -554,8 +558,9 @@ BOTPKG-PROVENANCE.md is normative. The complete record of
 }
 ```
 
-(Shown in a shortened layout: the file itself is canonical, one key per
-line; two items are elided as `"..."`.) Raven's record adds two sources --
+(Commit bb99687's build. Shown in a shortened layout: the file itself is
+canonical, one key per line; two items are elided as `"..."`. The final
+build's record differs in the image line and the producer only: there are no generators.) Raven's record adds two sources --
 Raven at `cd228d8e` (tag `v0.1.3`, tag object `ad936b9f`, tree `bf29e6fc`)
 and the Vulkan headers at `b379292b` (tree `60d1dc3e`) -- whose trees it
 **confirmed** by recomputing them from the source files used (452 and 79
@@ -724,6 +729,7 @@ empty cache, at the same commit:
 | the host (outside the image) | identical | identical | identical | identical | (producer differs only) |
 | commit bb99687, build A | `d4c2d1df` (0.2.1) | `2492c596` | `9d94f187` | `3746cece` | -- |
 | commit bb99687, build B | identical | identical | identical | identical | all 3 identical |
+| commit d80d5d6 (the fixed image), builds A and B with `-release` | the recorded release | the recorded release | the recorded release | the recorded release | all 3 identical between A and B |
 
 Both builds of each pair are byte for byte identical, artifacts and
 provenance records alike; the pinned image's outputs equal this host's
@@ -734,9 +740,17 @@ itself and every package with `-release` against the recorded digests,
 compared file for file -- which was pushed with this milestone; its result
 is the "CI" line below.
 
-**CI**: `package reproducibility` run 41527433764 (commit bb99687, before
-the digests were recorded) and the run of the final commit:
-RESULT-PENDING.
+**CI**: the workflow's first run (41527433764, commit bb99687) found a
+defect of the image, not of the packages: on a runner, with no proxy, the
+image's first `apt-get update` went over HTTPS before `ca-certificates`
+was installed, so every package was "not available" (exit 100). The
+image now always receives a CA bundle as a build secret -- the building
+host's own (`/etc/ssl/certs/ca-certificates.crt` on a runner) or a
+proxy's -- used during the build and removed (commit d80d5d6); TLS is
+verified everywhere. The two images built here before and after the fix
+hold the same 224 packages, and the builds of the fixed image reproduce
+every recorded release (the table above, `-release`). The two-runner
+result of the fixed workflow: RESULT-PENDING.
 
 ### Release immutability
 
@@ -814,7 +828,7 @@ Every command with `LANG=C.utf8 LC_ALL=C.utf8` and a private `-tmpdir`.
 
 | command | result |
 |---|---|
-| `tclsh9.0 tests/local.tcl -jobs 3 tests/package-manager.test tests/package-native.test tests/package-authoring.test tests/package-workloads.test tests/bot-modules.test tests/main-cli.test tests/raven.test tests/event-loop-linux.test tests/native-link-plan.test tests/system-linker.test tests/compilerpedia.test` | LOCAL-RESULT |
+| `tclsh9.0 tests/local.tcl -jobs 3 tests/package-manager.test tests/package-native.test tests/package-authoring.test tests/package-workloads.test tests/bot-modules.test tests/main-cli.test tests/raven.test tests/event-loop-linux.test tests/native-link-plan.test tests/system-linker.test tests/compilerpedia.test` | interp: 420 passed, 0 failed, 3 skipped; compile: 419 passed, 0 failed, 4 skipped (the skips: `native-link-plan.test`'s two macOS and one Windows test, and on compile `compilerpedia.test`'s `cp-examples`, which runs on the interp pass only); 690 s wall, 3 jobs. Per file (both passes): package-manager 74, package-native 39, package-authoring 28, package-workloads 24, bot-modules 56, main-cli 64, raven 19, event-loop-linux 25, native-link-plan 34, system-linker 15, compilerpedia 42 |
 | `tclsh9.0 tests/package-authoring.test` | 28 tests, 28 passed (clang, lld, MinGW-w64 and git present: nothing skipped) |
 | `single/build.sh`, then `single/smoke-test.sh single/out/botlish` | passed, the new PM-3 check included: `native add`, `native audit`, `pack -evidence`, `inspect -provenance` with no C compiler and no native backend installed |
 | `audit/raven-cleanroom/tools/cleanroom.sh run ...` | 33/33 (section I) |
