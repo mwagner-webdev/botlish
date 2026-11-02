@@ -200,6 +200,7 @@ tests/affine-applications.test aa-native-nested-drop pass
 tests/affine-applications.test aa-classification pass
 tests/affine-applications.test aa-not-any-argument pass
 tests/affine-applications.test aa-summary-per-declaration pass
+tests/affine-applications.test aa-fixpoint-order pass
 tests/affine-applications.test aa-deep-application-kept pass
 tests/affine-applications.test aa-recursion-white-box pass
 tests/affine-applications.test aa-recursive-application-rejected pass
@@ -209,6 +210,7 @@ tests/affine-applications.test aa-ownership-consequences pass
 tests/affine-applications.test aa-ownership-moves-agree pass
 tests/affine-applications.test aa-diagnostic-says-why pass
 tests/affine-applications.test aa-isolation pass
+tests/affine-applications.test aa-isolation-descriptors pass
 tests/affine-applications.test aa-hir-text-and-interchange pass
 tests/affine.test af-aggregate-branch pass
 tests/affine.test af-aggregate-destructure pass

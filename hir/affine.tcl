@@ -126,14 +126,18 @@ namespace eval hir::affine {
     # The named struct types (applications with their arguments) Descriptor
     # is inside of, outermost first.
     variable descriptorVisiting {}
-    # While verify elaborates releases (1): {TYPE EXCLUDE} -> the descriptor
-    # of a top-level Descriptor call, which Releases and ExitReleases ask for
-    # every binding, so a deep type's descriptor is walked once per run, not
-    # once per binding. Only calls outside any struct walk are kept (an inner
-    # one's answer depends on the struct types being walked), and the table
-    # dies with the run.
-    variable memoizing 0
+    # {TYPE EXCLUDE} -> its descriptor, for the declarations in force: a
+    # type is walked once, not once per binding that owns one (the
+    # ownership analysis and every backend's release lowering ask for each)
+    # and not once per path through it (an application holding the next
+    # level of itself twice has 2^depth paths through a few dozen types).
+    # Only an answer whose walk met no struct type it was already inside of
+    # is kept: that one depends on the walk it is part of (descriptorCut).
+    # hir::structs::ForgetAffinity empties it with the affinity facts it is
+    # derived from, at every change of the declarations.
     variable descriptorMemo {}
+    # 1 once the current walk met a struct type it is inside of.
+    variable descriptorCut 0
 }
 
 # ---------------------------------------------------------------------------
@@ -873,17 +877,8 @@ proc hir::affine::verify {hirVar} {
     }
     variable consumed
     dict set hir affine consumed $consumed
-    variable memoizing
-    variable descriptorMemo
-    set memoizing 1
-    set descriptorMemo {}
-    try {
-        dict set hir affine releases [Releases hir $parentMap $scopes $accepted]
-        lassign [ExitReleases $hir $parentMap $scopes] exits errorExits
-    } finally {
-        set memoizing 0
-        set descriptorMemo {}
-    }
+    dict set hir affine releases [Releases hir $parentMap $scopes $accepted]
+    lassign [ExitReleases $hir $parentMap $scopes] exits errorExits
     variable pathExits
     dict for {x items} $pathExits {
         foreach item $items {
@@ -2258,17 +2253,24 @@ proc hir::affine::temporaries {hir} {
 # Releases are unobservable, so the order changes no value; it is fixed so
 # runtime behavior is reproducible (AFFINE-VALUES.md, "Drop glue").
 proc hir::affine::Descriptor {hir type {exclude {}}} {
-    variable memoizing
     variable descriptorMemo
-    variable descriptorVisiting
-    if {!$memoizing || $descriptorVisiting ne {}} {
-        return [DescriptorOf $hir $type $exclude]
-    }
+    variable descriptorCut
     set key [list $type $exclude]
-    if {![dict exists $descriptorMemo $key]} {
-        dict set descriptorMemo $key [DescriptorOf $hir $type $exclude]
+    if {[dict exists $descriptorMemo $key]} {
+        return [dict get $descriptorMemo $key]
     }
-    return [dict get $descriptorMemo $key]
+    set outer $descriptorCut
+    set descriptorCut 0
+    try {
+        set d [DescriptorOf $hir $type $exclude]
+    } finally {
+        set cut $descriptorCut
+        set descriptorCut [expr {$outer || $cut}]
+    }
+    if {!$cut} {
+        dict set descriptorMemo $key $d
+    }
+    return $d
 }
 
 # Descriptor's walk.
@@ -2332,6 +2334,8 @@ proc hir::affine::DescriptorOf {hir type exclude} {
         }
         if {$key ne ""} {
             if {$key in $descriptorVisiting} {
+                variable descriptorCut
+                set descriptorCut 1
                 if {[hir::structs::OwnedRecursion $type] ne ""} {
                     error "internal compiler error: the affine struct type [hir::types::show $type] holds an affine application of its declaration in a container: it has no finite drop descriptor (hir::structs::apply rejects such a declaration, hir::structs::ApplicationIssue such an application)"
                 }

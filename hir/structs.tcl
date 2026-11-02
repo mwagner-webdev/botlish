@@ -126,13 +126,16 @@ proc hir::structs::Reset {} {
     ForgetAffinity
 }
 
-# Forgets every affinity fact of the registry (the summaries and the
-# applications' answers): whenever the declarations change.
+# Forgets every affinity fact of the registry -- the summaries, the
+# applications' answers and the drop descriptors derived from them
+# (hir::affine::Descriptor's table) -- whenever the declarations change.
 proc hir::structs::ForgetAffinity {} {
     variable affinity
     variable applications
     set affinity [dict create]
     set applications [dict create]
+    namespace eval ::hir::affine {}
+    set ::hir::affine::descriptorMemo [dict create]
 }
 
 # Affinity of a named struct type (hir::types::Affinity, AFFINE-VALUES.md;

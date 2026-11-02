@@ -232,9 +232,27 @@ proc hir::structs::AffinityOf {id} {
 <<<<
     set affinity [dict create]
     set applications [dict create]
-}
+    namespace eval ::hir::affine {}
 ====
-}
+    namespace eval ::hir::affine {}
+>>>>
+
+@@ app-descriptor-memo-ignores-exclude a drop descriptor is remembered by its type alone: a destructured temporary's descriptor without its moved-out fields and the whole type's are taken for one another
+## hir/affine.tcl
+<<<<
+    variable descriptorCut
+    set key [list $type $exclude]
+====
+    variable descriptorCut
+    set key [list $type]
+>>>>
+
+@@ app-descriptor-memo-outlives-declarations a remembered drop descriptor survives a change of the declarations: another compilation's Box (its slot at another field) is dropped by this one's descriptor
+## hir/structs.tcl
+<<<<
+    namespace eval ::hir::affine {}
+    set ::hir::affine::descriptorMemo [dict create]
+====
 >>>>
 
 @@ app-deep-application-cut an affine application nested past the applied-type depth has its arguments cut to any (the handle it owns erased)

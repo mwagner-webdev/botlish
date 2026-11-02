@@ -289,6 +289,15 @@ test aa-summary-per-declaration {what is kept is the declaration's summary -- it
         [hir::structs::AffinitySummary Holder] [hir::structs::AffinitySummary Phantom] [hir::structs::AffinitySummary W]
 } -cleanup {unset -nocomplain answers} -result {{0 1 0 1 0 1} {0 0} {0 {0 1}} {0 0} {1 {}} {0 {}} {0 {}}}
 
+test aa-fixpoint-order {the classification does not depend on which declaration is summarized first: with every fact forgotten, Outer[Coroutine{...}] asked first (its Inner summarized inside the same fixpoint, Inner's own answer provisional until it ends) is affine, and so is a chain three declarations deep asked from its top} -body {
+    aaHir "${aaTypeImports}${aaTypeDecls}struct Deep\[T\]:\n    outer: Outer\[T\]\n    n: int\n\n"
+    hir::structs::ForgetAffinity
+    set first [hir::types::IsAffine [aaApp Outer $aaC]]
+    hir::structs::ForgetAffinity
+    set deep [hir::types::IsAffine [aaApp Deep $aaC]]
+    list $first $deep [hir::types::IsAffine [aaApp Inner $aaC]] [hir::types::IsAffine [aaApp Deep int]]
+} -cleanup {unset -nocomplain first deep} -result {1 1 1 0}
+
 test aa-deep-application-kept {an affine application nested past the applied-type depth keeps its arguments (cutting them to any would erase the handle it owns, as an affine List element is never cut); an unrestricted one is still cut} -body {
     aaHir "${aaTypeImports}${aaTypeDecls}"
     set deep $aaC
@@ -383,6 +392,17 @@ test aa-isolation {one declaration name, two compilations: Box[T] holding its T 
     list $before $afterB $inA $inB $inA2 [aaCode [string map {"{value} = b\n    e = value(Message {value: 6})" "c = b\n    d = b\n    e = Event {value: 6}"} $a]] \
         [aaCode $b] [expr {[hir::format $hA] eq [hir::format $hA2]}]
 } -cleanup {unset -nocomplain a b hA hB hA2 hB2 before afterB inA inB inA2 C} -result {{value 6 {}} {{value 6 {}} {value 6 {}} {value 2 {}}} 1 0 1 USE-AFTER-MOVE ok 1}
+
+test aa-isolation-descriptors {two compilations declaring Box[T] with its slot at different field positions each drop a Box of a handle by their own descriptor, interleaved and after the other was compiled: a drop descriptor is a fact of the declarations in force, forgotten with them (hir::structs::ForgetAffinity)} -body {
+    set a "${aaDecls}fn row(i: int) -> int:\n    b = Box {value: make(i)}\n    1\nxs = loop i from 0 to 5:\n    row(i)\nstd::list::length(xs) * 10 + test_aa_live()\n"
+    set b [string map [list "struct Box\[T\]:\n    value: T\n" "struct Box\[T\]:\n    tag: int\n    value: T\n" "Box {value: make(i)}" "Box {tag: i, value: make(i)}"] $a]
+    set hA [surface::compile $a -warnings off]
+    set hB [surface::compile $b -warnings off]
+    set hA2 [surface::compile $a -warnings off]
+    lmap {h} [list $hA $hB $hA2 $hB] {
+        list [lrange [outcomeUnderHir interp $h] 0 1] [lrange [outcomeUnderHir compile $h] 0 1]
+    }
+} -cleanup {unset -nocomplain a b hA hB hA2} -result {{{value 50} {value 50}} {{value 50} {value 50}} {{value 50} {value 50}} {{value 50} {value 50}}}
 
 test aa-hir-text-and-interchange {a program holding handles through applications reads back from HIR text and from HIR interchange with the same text, the same releases and the same outcome on every backend} -body {
     set text "${aaPlainDecls}fn main() -> int:\n    b = Box {value: make(5)}\n    n = Box {value: Box {value: make(2)}}\n    i = Box {value: 3}\n    j = i\n    {value} = b\n    e = value(Message {value: 6})\n    e.value + j.value + i.value\nmain()\n"
