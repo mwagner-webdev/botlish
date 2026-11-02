@@ -874,6 +874,54 @@ plus `tests/fold-loops.test` under `BOTLISH_NATIVE_GC_STRESS=1` for a change
 to native lowering. `audit/fold-loops/tools/measure.sh` and
 `economics.tcl` regenerate the report's measurements.
 
+## Virtual construction across folds
+
+A fold whose String or List intermediate the body only extends carries it
+as a construction plan (FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md):
+hir/construction.tcl's *plan fold*, a fourth carrier beside its plan
+locals, parameters and results, lowered by native/lower.tcl's
+`LoopResultStart`, `LoopResultBind`, `LoopBody` and `FoldValue`. Keep it
+so:
+
+* One construction mechanism: M8.a's pieces, `construct`, plan registers
+  and nir.rs's `validate_plans` (M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md).
+  Never a fold-specific builder, NIR instruction, runtime object or helper,
+  and never a rule keyed on how the body is spelled (`acc.append`): the
+  decision reads value flow only (`FoldLinear`, `Context`, `Source`).
+* Linearity is per iteration, and a `continue` or bare `break` targeting
+  the fold is a reference to its intermediate (the "fold" marker `Uses`
+  reads in LOOPS): it passes the current intermediate on. Never drop that,
+  or an append computed before a break or continue is extended in place and
+  becomes visible. A captured intermediate, or one another representation
+  analysis claims, is never a plan; a fold is a plan only when some
+  reference continues the construction and the body's trailing value is
+  plan-producing.
+* The fold's own value stays flat: materialized once at exhaustion and at
+  a break (`FoldValue`). A fold as a plan source, a struct intermediate's
+  List fields and fusion with collecting loops or `std::list::flat` are
+  later milestones' (the report's follow-up), never a special case here.
+* Declining is never an error: the eager lowering stays, its reason in
+  the analysis' `foldWhy`. HIR, types, specialization keys, the Tcl
+  backends and `-virtual-construction-opt 0` are unchanged.
+* A plan-position sequence (`SequenceTo`) releases the affine values dead
+  after each statement exactly as `Sequence` does.
+
+If you change any of that, or what hir/construction.tcl or the loop
+lowering's result handling does, run `tests/fold-virtual-construction.test`
+(also under `BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0
+tests/local.tcl tests/golden/fold-virtual-construction.bot`; generated with
+its fragment and census by `tclsh9.0
+audit/fold-virtual-construction/tools/golden-port.tcl` from the Tcl tests'
+own programs), `tests/virtual-construction.test`, `tests/fold-loops.test`,
+`audit/fold-virtual-construction/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`: values against an independent model, decisions against an
+independent model of the rule) and `audit/fold-virtual-construction/tools/
+mutate.tcl` (every mutant in its `mutants.txt` must still apply and be
+killed: update a mutant's text when you change the code it mutates, keeping
+it a mutant of the same rule; its native mutant rebuilds a private copy).
+`audit/fold-virtual-construction/tools/measure.tcl` regenerates the
+report's tables (`-root DIR` measures another checkout).
+
 ## Flattening Lists (std::list::flat)
 
 `std::list::flat[T](lists: List[List[T]]) -> List[T]`

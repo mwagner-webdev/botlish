@@ -1809,7 +1809,14 @@ add10(32)          # 42 (add captures x)
 
   Iteration, aggregation and construction are distinct operations: a fold
   aggregates without building anything it does not compute (natively, one
-  loop-carried register: no List, no plan, no MutableArray).
+  loop-carried register: no List, no plan, no MutableArray). A String or
+  List intermediate that the body only extends -- used at most once on each
+  path of an iteration, a `continue` or `break` counting as a use, and never
+  captured -- is carried natively as a construction plan, extended in place
+  and built once when the fold yields it, exactly as the same List carried
+  by a self tail call is (FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md);
+  any other List intermediate copies the List so far at each append. The
+  values are the same either way.
 * **Flattening.** `std::list::flat(xss)` removes exactly one level of
   nesting from a List of Lists: the elements of the first List, then of the
   second, and so on, in order (LIST-FLAT-MILESTONE-1.md). Collecting,

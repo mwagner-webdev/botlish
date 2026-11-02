@@ -9,6 +9,7 @@
 #   hir::construction::paramFamily  $analysis $id $k   -> "" | str | list
 #   hir::construction::localFamily  $analysis $id $b   -> "" | str | list
 #   hir::construction::resultFamily $analysis $id      -> "" | str | list
+#   hir::construction::foldFamily   $analysis $id $e   -> "" | str | list
 #   hir::construction::explain / audit                 -> provenance, barriers
 #
 # Like hir/escape.tcl and hir/stringregion.tcl, this is a *representation*
@@ -24,9 +25,10 @@
 # runtime plan objects).
 #
 # There is no loop or accumulator recognizer here. The analysis only answers
-# three general, per-binding/per-instance questions, and a runtime-variable
-# recurrence (a self-tail call carrying `std::str::concat(acc, piece)`) benefits purely
-# because its parameter happens to satisfy the same rule as any other
+# general, per-binding/per-instance questions, and a runtime-variable
+# recurrence (a self-tail call carrying `std::str::concat(acc, piece)`, or a
+# fold whose body extends its intermediate) benefits purely because its
+# parameter (or intermediate) happens to satisfy the same rule as any other
 # binding:
 #
 #   * plan local   a local binding (never captured, never a cell/duplicate,
@@ -45,6 +47,22 @@
 #                  an ordinary flat value from anyone else (an open caller,
 #                  the generic entry) -- so, unlike a plan result, it needs
 #                  no closedness proof at all.
+#   * plan fold    the intermediate of a fold (FOLD-LOOPS-MILESTONE-1.md;
+#                  FOLD-VIRTUAL-LIST-CONSTRUCTION-MILESTONE-1.md): a loop-
+#                  carried binding, the same kind of carrier as a plan
+#                  parameter is for a self-tail back edge. Its binding is
+#                  statically String/List-typed at every reference, never
+#                  captured or claimed by another representation analysis,
+#                  and linear *per iteration* -- a `continue` or bare `break`
+#                  that targets the fold counts as a reference, because each
+#                  passes the current intermediate on (to the next iteration,
+#                  or out as the fold's value) -- and the construction
+#                  continues through it: some reference is in a plan
+#                  position and the body's trailing value (the next
+#                  intermediate) is plan-producing. Its initial value and the
+#                  body's trailing value are then plan positions; the fold's
+#                  own value stays flat (materialized at exhaustion and at a
+#                  break).
 #   * plan result  a *closed* instance (hir::specialize::InstanceClosed, the
 #                  M7.c proof that every runtime route into it is a direct
 #                  call this compilation lowers) with a String/List result,
@@ -67,12 +85,13 @@
 # value may stay virtual instead of being materialized: a `std::str::concat` operand, a
 # `std::list::append` first operand, a plan local's value, the argument at a plan
 # parameter, an exit of a plan-result instance, and a branch value of an
-# `if` that is itself in a plan position. Every other consumer is a
+# `if` that is itself in a plan position, and a plan fold's initial value
+# and body trailing value. Every other consumer is a
 # materialization barrier (Barrier names why: flat-only native, storage
 # into an aggregate, open/dynamic call, fork, return to an unknown caller,
 # final observable result, ...).
 #
-# All four sets grow monotonically (more plan bindings can only make more
+# All five sets grow monotonically (more plan bindings can only make more
 # expressions plan-producing and more positions plan positions), so the
 # fixpoint in `analyze` terminates.
 
@@ -166,6 +185,12 @@ proc hir::construction::RegionInfo {hir spec id} {
 # A loop body (or listloop body) that references B, when B is bound outside
 # that loop, may run it any number of times: 2. A nested block capturing B
 # aliases it: 2 (captured bindings are also excluded outright).
+#
+# For a fold's intermediate (FoldLinear) LOOPS maps the fold itself to
+# "fold": a `continue` or bare `break` targeting it reads the binding -- it
+# carries the current intermediate into the next iteration, or out as the
+# fold's value -- so each counts as one reference. A path that extended the
+# intermediate and then continues or breaks has two, and is not linear.
 
 proc hir::construction::Add {x y} {
     if {$x < 0 || $y < 0} {
@@ -202,7 +227,12 @@ proc hir::construction::Uses {view b loops e} {
         ref {
             return [list [expr {[hir::get $view $e binding] eq $b ? 1 : 0}] -1]
         }
-        continue { return {-1 0} }
+        continue {
+            if {[dict getdef $loops [hir::get $view $e target] ""] eq "fold"} {
+                return {-1 1}
+            }
+            return {-1 0}
+        }
         fail {
             set v [hir::get $view $e value]
             if {$v eq ""} {
@@ -217,6 +247,10 @@ proc hir::construction::Uses {view b loops e} {
         return - break {
             set v [hir::get $view $e value]
             if {$v eq ""} {
+                if {[hir::kind $view $e] eq "break"
+                        && [dict getdef $loops [hir::get $view $e target] ""] eq "fold"} {
+                    return {-1 1}
+                }
                 return {-1 0}
             }
             lassign [Uses $view $b $loops $v] n a
@@ -346,6 +380,20 @@ proc hir::construction::Linear {info b} {
         }
     }
     lassign [SeqUses $view $b $loops [dict get $info topBody]] n a
+    return [expr {[Max $n $a] <= 1}]
+}
+
+# 1 if fold FOLD's intermediate B is referenced at most once along every
+# path of one iteration (see Uses), a continue or bare break targeting FOLD
+# counting as a reference. B is bound anew in each iteration and every
+# reference to it, and every continue or break that passes it on, is inside
+# FOLD's body, so walking that body is the whole question: the loops around
+# FOLD never multiply B's uses, and a loop inside the body still counts as
+# many (it is not in the walk's LOOPS). One walk of the body, not of the
+# function, per candidate.
+proc hir::construction::FoldLinear {info b fold} {
+    set view [dict get $info view]
+    lassign [SeqUses $view $b [dict create $fold fold] [hir::get $view $fold body]] n a
     return [expr {[Max $n $a] <= 1}]
 }
 
@@ -531,34 +579,53 @@ proc hir::construction::Context {s id e} {
             if {[hir::kind $view $p] eq "listloop" && $e eq [hir::get $view $p iterable]} {
                 return {0 "flat-only operation (listloop iterable)"}
             }
-            if {$e in [hir::FoldInitials [dict get $view exprs $p]]} {
-                return {0 "fold intermediate (initial value)"}
-            }
-            return {0 "loop body value (collected, carried or discarded)"}
+            return [FoldContext $s $id $p $e]
         }
         countloop {
             if {$e eq [hir::get $view $p start] || $e eq [hir::get $view $p end]} {
                 return {0 "flat-only operation (countloop bound)"}
             }
-            if {$e in [hir::FoldInitials [dict get $view exprs $p]]} {
-                return {0 "fold intermediate (initial value)"}
-            }
-            return {0 "loop body value (collected, carried or discarded)"}
+            return [FoldContext $s $id $p $e]
         }
         lockloop {
             if {$e in [hir::loopOperands [dict get $view exprs $p]]} {
                 return {0 "flat-only operation (lockloop domain operand)"}
             }
-            if {$e in [hir::FoldInitials [dict get $view exprs $p]]} {
-                return {0 "fold intermediate (initial value)"}
-            }
-            return {0 "loop body value (collected, carried or discarded)"}
+            return [FoldContext $s $id $p $e]
         }
         handle {
             return {0 "handled call result"}
         }
     }
     return [list 0 "other ([hir::kind $view $p])"]
+}
+
+# Context of E, a child of loop P that is not one of its domain operands: a
+# plan fold's initial value and its body's trailing value (the next
+# intermediate) are plan positions; anything else of a loop is not.
+proc hir::construction::FoldContext {s id p e} {
+    set view [dict get $s regions $id view]
+    set plan [dict exists $s folds $id $p]
+    if {$e in [hir::FoldInitials [dict get $view exprs $p]]} {
+        if {$plan} {
+            return {1 ""}
+        }
+        return [list 0 "fold intermediate (initial value: [FoldReason $s $id $p])"]
+    }
+    if {$plan && [lindex [hir::get $view $p body] end] eq $e} {
+        return {1 ""}
+    }
+    if {[hir::isFold $view $p] && [lindex [hir::get $view $p body] end] eq $e} {
+        return [list 0 "fold intermediate (next value: [FoldReason $s $id $p])"]
+    }
+    return {0 "loop body value (collected, carried or discarded)"}
+}
+
+proc hir::construction::FoldReason {s id fold} {
+    if {[dict exists $s foldWhy $id $fold]} {
+        return [dict get $s foldWhy $id $fold]
+    }
+    return "not a plan fold"
 }
 
 proc hir::construction::ReturnReason {s id} {
@@ -599,12 +666,14 @@ proc hir::construction::LocalReason {s id b} {
 #   bindings  InstanceId -> BindingId -> family (plan params and plan locals)
 #   locals    InstanceId -> BindingId -> family (plan locals only)
 #   results   InstanceId -> family (plan-result instances)
+#   folds     InstanceId -> FoldExprId -> family (plan folds)
 #   closed    set of closed instances (InstanceClosed)
 #   regions   InstanceId -> RegionInfo (for audit/explain)
-#   paramWhy/localWhy  why a String/List-typed candidate was declined
+#   paramWhy/localWhy/foldWhy  why a String/List-typed candidate was
+#             declined
 proc hir::construction::analyze {hir spec escape stringregion blockescape} {
-    set s [dict create params {} bindings {} locals {} results {} closed {} companioned {} \
-        regions {} paramWhy {} localWhy {}]
+    set s [dict create params {} bindings {} locals {} results {} folds {} closed {} companioned {} \
+        regions {} paramWhy {} localWhy {} foldWhy {}]
     set used [dict get $spec used]
     foreach id $used {
         dict set s regions $id [RegionInfo $hir $spec $id]
@@ -625,6 +694,7 @@ proc hir::construction::analyze {hir spec escape stringregion blockescape} {
     # uncaptured, linear bindings.
     set paramCandidates [dict create]
     set localCandidates [dict create]
+    set foldCandidates [dict create]
     foreach id $used {
         set info [dict get $s regions $id]
         set view [dict get $info view]
@@ -680,6 +750,34 @@ proc hir::construction::analyze {hir spec escape stringregion blockescape} {
                 continue
             }
             dict set localCandidates $id $b [list $e $family]
+        }
+        # Fold intermediates: the binding a fold carries from one iteration
+        # to the next.
+        foreach e [dict get $info exprs] {
+            if {[hir::kind $view $e] ni {loop listloop countloop lockloop} || ![hir::isFold $view $e]} {
+                continue
+            }
+            set b [hir::get $view $e foldBinding]
+            set family [RefFamily $info $b]
+            set why ""
+            if {$family eq ""} {
+                set why "not statically String/List-typed at every reference"
+            } elseif {[Family [hir::typeOf $view $e]] ne $family} {
+                set why "the fold's value is not of the intermediate's family"
+            } elseif {[dict exists $captured $b]} {
+                set why "captured by a nested block (fork/alias)"
+            } elseif {[hir::escape::virtualArity $escape $id $b] ne ""
+                    || [hir::stringregion::virtual $stringregion $id $b]
+                    || [hir::blockescape::virtual $blockescape $id $b] ne ""} {
+                set why "claimed by another representation analysis"
+            } elseif {![FoldLinear $info $b $e]} {
+                set why "fork: referenced more than once on some path of an iteration (continue and break included)"
+            }
+            if {$why ne ""} {
+                dict set s foldWhy $id $e $why
+                continue
+            }
+            dict set foldCandidates $id $e [list $b $family]
         }
     }
 
@@ -756,6 +854,41 @@ proc hir::construction::analyze {hir spec escape stringregion blockescape} {
                 }
             }
         }
+        # Plan folds: the construction continues through the intermediate
+        # -- some reference to it is in a plan position and the body's
+        # trailing value (the next intermediate) is plan-producing, both
+        # judged as if the fold already carried a plan. Otherwise every
+        # iteration would only build a plan object to materialize it, or
+        # carry a flat value in a plan register for nothing.
+        dict for {id candidates} $foldCandidates {
+            dict for {fold entry} $candidates {
+                lassign $entry b family
+                if {[dict exists $s folds $id $fold]} {
+                    continue
+                }
+                set view [dict get $s regions $id view]
+                set trial $s
+                dict set trial folds $id $fold $family
+                dict set trial bindings $id $b $family
+                set continues 0
+                foreach r [dict get $s regions $id refs $b] {
+                    if {[lindex [Context $trial $id $r] 0]} {
+                        set continues 1
+                        break
+                    }
+                }
+                set next [lindex [hir::get $view $fold body] end]
+                if {$continues && $next ne "" && [Source $trial $id $next] eq $family} {
+                    dict set s folds $id $fold $family
+                    dict set s bindings $id $b $family
+                    set changed 1
+                } elseif {!$continues} {
+                    dict set s foldWhy $id $fold "every use needs a flat value"
+                } else {
+                    dict set s foldWhy $id $fold "the next intermediate (the body's trailing value) is not a construction"
+                }
+            }
+        }
         # Plan results: closed, String/List-typed, some call consumed in a
         # plan position.
         foreach id $used {
@@ -795,6 +928,13 @@ proc hir::construction::analyze {hir spec escape stringregion blockescape} {
             }
         }
     }
+    foreach id [dict keys [dict get $s folds]] {
+        dict for {fold family} [dict get $s folds $id] {
+            if {[dict exists $s foldWhy $id $fold]} {
+                dict unset s foldWhy $id $fold
+            }
+        }
+    }
     return $s
 }
 
@@ -815,6 +955,15 @@ proc hir::construction::localFamily {analysis id b} {
 proc hir::construction::resultFamily {analysis id} {
     if {[dict exists $analysis results $id]} {
         return [dict get $analysis results $id]
+    }
+    return ""
+}
+
+# "" | str | list: whether fold FOLD of instance ID carries its
+# intermediate as a construction plan (a plan fold).
+proc hir::construction::foldFamily {analysis id fold} {
+    if {[dict exists $analysis folds $id $fold]} {
+        return [dict get $analysis folds $id $fold]
     }
     return ""
 }
@@ -887,6 +1036,12 @@ proc hir::construction::explain {hir spec analysis} {
         if {[dict exists $analysis locals $id]} {
             dict for {b family} [dict get $analysis locals $id] {
                 lappend entries "  local [dict get [hir::binding $view $b] name] ($b): a $family plan, one continuation"
+            }
+        }
+        if {[dict exists $analysis folds $id]} {
+            dict for {fold family} [dict get $analysis folds $id] {
+                set b [hir::get $view $fold foldBinding]
+                lappend entries "  fold intermediate [dict get [hir::binding $view $b] name] ($b of $fold): a $family plan carried across iterations"
             }
         }
         if {$entries ne ""} {
