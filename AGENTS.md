@@ -6,6 +6,26 @@ Push finished work directly to `main`. This project does not use a
 feature-branch-plus-pull-request review cycle: don't open a PR unless
 explicitly asked to.
 
+When you work on a branch instead (a session's own instructions can require
+one), check `main`'s CI at both ends of the work
+(MAIN-CI-FAILURES-2026-11.md, "Why they reached main and why they stayed"):
+
+* **Before you branch off,** read the latest run of every workflow on
+  `main` (the GitHub MCP server's `actions_list`, method
+  `list_workflow_runs`, branch `main`). A run that is queued or in progress
+  is acceptable. A red one is never branched off silently: tell the user
+  which workflows and tests fail on `main` before you build on it, and keep
+  that list, so your branch's failures are compared with it rather than
+  dismissed as "main's own".
+* **Before you merge a finished milestone into `main`,** check again:
+  `main`'s latest runs and your branch's own. `macos-arm64.yml` and
+  `windows-x86_64.yml` run on every branch push; `tests.yml` and
+  `tests-arm64.yml` run on a branch only when dispatched (`workflow_dispatch`
+  with the branch as the ref), so dispatch them. Don't merge onto a red
+  `main` without telling the user. A failure on your branch that `main`'s
+  latest run does not have is yours to fix before the merge. Pending runs
+  are acceptable: report them as pending, never as passed.
+
 ## Documentation layout
 
 The root `README.md` is the project overview. Everything else is in `docs/`:

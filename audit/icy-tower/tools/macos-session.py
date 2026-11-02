@@ -1020,6 +1020,10 @@ def case_restart(s):
                 pass
         time.sleep(0.15)
     g.key("right", "up")
+    # A press that never reached the game (Game.press's three attempts, each
+    # with the focus taken again) is said as such, not as a game that does
+    # not end (main, 2026-11-01: the summary's player never left the centre).
+    checks.append((held, "Right reaches the game: " + held_text))
     checks.append((over is not None, "Right held reaches game over (the oracle: within 1.7 s of the press)"))
     if over is not None:
         facts["game_over"] = {"banner": over.banner(), "png": os.path.basename(png)}
@@ -1718,9 +1722,24 @@ def case_app_gatekeeper(s):
                     s.tool("ax-press", pid, b)
                     break
         started = g.find(3.0, translocated=True)
-        checks.append((started is None, "the game never started"))
+        # Gatekeeper can register an instance of the refused bundle while its
+        # dialog is up and end it once Done is pressed, so find() may see a
+        # process that never ran the game (main, 2026-11-02: this check alone
+        # failed, every Gatekeeper check before it passing). The game started
+        # only if that process shows a window or is still running 5 s on: the
+        # game waits for its player and never ends by itself that soon.
         if started:
-            g.p.kill()
+            facts["refused_process"] = dict(g.process_facts(), pid=started)
+            shown = g.window(5.0) is not None
+            running = g.p.poll() is None
+            facts["refused_process"].update(window=shown, running_after_5s=running)
+            checks.append((not shown and not running, "the game never started (a process of the bundle appeared: %s)"
+                           % ("its window opened" if shown else "still running 5 s after Done" if running
+                              else "ended by the refusal without a window")))
+            if running:
+                g.p.kill()
+        else:
+            checks.append((True, "the game never started"))
         g.finish(2.0)
     facts["key_mode"] = s.key_mode
     return s.verdict("app-gatekeeper", checks, facts, "gatekeeper")

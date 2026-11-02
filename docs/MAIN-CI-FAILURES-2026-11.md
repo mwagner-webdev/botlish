@@ -242,32 +242,56 @@ ecc5fd69, 10-28).
   and tries again, up to three times. Neither side's corpus is the tip's
   in that situation, so taking either side would be wrong.
 
-### 3.6 Flaky tests (not fixed)
+### 3.6 Flaky tests (made diagnosable or tolerant, not reproduced)
 
 **`el-linux-inflight`** (`tests/event-loop-linux.test`), arm64 GC-stress,
 compile pass. Run 41298098392 (f70542b1), once.
 
 - **Symptom:** `stale records` was 0 where at least one was expected.
-- **Analysis:** the test depends on records still being in flight when the
-  revocation happens. Under GC stress the producer can finish first. It has
-  not recurred. A deterministic version would hold the producer until the
-  revocation is posted.
+- **What it requires:** a record of r1's old generation collected after the
+  revocation. The producer cannot run out first: it posts 2000 records
+  against backpressure, retrying `-EAGAIN`, and stops only when E1 closes.
+  The scheduler counts every later old-generation record as stale. A
+  revocation with a held record schedules its release (`revoke_checked`,
+  `schedule_release`), and `evl_release` puts E1 back into rotation.
+- **A normal run here** (x86-64): `e1 discarded at close 0`, `stale records
+  286`, 27 holds and 27 releases. So stale = 0 means that nothing E1's
+  producer posted after the revocation was collected before the close.
+  Either the release was lost (E1 left paused) or the producer was starved
+  for that whole window.
+- **Not reproduced:** 25 runs under `BOTLISH_NATIVE_GC_STRESS=1` on x86-64
+  passed.
+- **Changed here:** the program also reports the loop's holds and releases
+  and what the driver took. On a failure the test shows those lines and the
+  close count instead of a bare 0, which tells the two explanations apart.
 
 **icy-tower (macOS), graphical acceptance case `restart`**: runs
 41328556692 and 41395294950. Both look like synthetic Quartz key events
 lost or delayed on the hosted runner:
 
-- In the first run, the held Right key never reached the game. The summary
+- **First run:** the held Right key never reached the game. The summary
   shows round 1, the player still at the centre (`x=227`), not over.
-- In the second, the player's feet row (579) lay inside the oracle's range
+  `Game.press` confirms a press by the player's move, and on failure
+  releases the key, takes the focus again and retries, three times. The
+  case did not check that result, so it reported a game that does not end.
+- **Second run:** the player's feet row (579) lay inside the oracle's range
   (546 to 680). The failing part was the centring check, consistent with
   the Right key-up arriving late.
+- **Changed here:** the case reports "Right reaches the game" with the
+  press's own account. An unconfirmed press now fails as an input failure,
+  not as game behavior; it is still a FAILED case, never a pass.
 
 **icy-tower (macOS), LaunchServices case `app-gatekeeper`**: run
 41450398416, "the game never started" failed after every Gatekeeper check
 had passed. `macos-session.py` found a process of the bundle within 3 s of
-Done. That is most likely a transient process during the assessment, but
-the log has no process details to confirm it.
+Done. LaunchServices can register an instance of a refused bundle while
+Gatekeeper's dialog is up and end it after Done.
+
+- **Changed here:** a process found after Done counts as a started game
+  only if it shows a window or is still running 5 s later. The game opens
+  its window at once and waits for its player, so a started game does both.
+  The case records the process's facts (parent, arguments, whether it had a
+  window, whether it was still running), so a recurrence is explained.
 
 ### 3.7 Infrastructure (not fixed)
 
@@ -367,6 +391,8 @@ day.
 | macOS acceptance timeouts | three shards | YAML validated; CI decides |
 | scalar-asm-audit race | regenerate from the tip on a conflict | YAML validated; CI decides |
 | Windows unit-test crash | diagnostic rerun on one thread | YAML validated |
+| `el-linux-inflight` | the evidence on failure (holds, releases, driver counts, E1 at close) | 25 runs under GC stress pass; the new lines checked |
+| icy-tower (macOS) `restart`, `app-gatekeeper` | an unconfirmed press reported as such; a refused bundle's transient process told from a started game | `macos-session.py selftest`; runs on macOS only (icy-tower-macos.yml) |
 
 `tclsh9.0 tests/local.tcl tests/package-manager.test tests/package-native.test
 tests/workload-icy-tower.test` passes.
@@ -378,10 +404,11 @@ skips dot-entries), so the mutants they kill are unchanged.
 
 Left open:
 
-- `el-linux-inflight`;
-- the two icy-tower (macOS) graphical flakes;
-- the Windows access violation;
-- the two infrastructure failures.
+- **`el-linux-inflight`:** not reproduced, only made diagnosable;
+- **the `restart` case's late key-up:** a lost key event stays a failure,
+  by the harness's rule;
+- **the Windows access violation;**
+- **the two infrastructure failures.**
 
 ## 6. Root-cause mitigations
 
