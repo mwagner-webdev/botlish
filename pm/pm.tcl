@@ -3,9 +3,9 @@
 # artifacts (BOTPKG-FORMAT.md).
 #
 #   source pm/pm.tcl; pm::cli::main ARGV INVOCATION     the commands add,
-#       install, update, remove, verify, package pack|inspect and native
-#       inspect|plan|deploy; the exit status (0 success, 1 a failed
-#       operation, 2 a usage error)
+#       install, update, remove, verify, package pack|inspect|stage|compare
+#       and native inspect|plan|deploy|add|require|audit; the exit status
+#       (0 success, 1 a failed operation, 2 a usage error)
 #
 # main.tcl sources this file only when its first argument is one of those
 # command words, before it loads anything of the compiler: an ordinary
@@ -22,29 +22,35 @@
 #   version.tcl     versions, requests, their matching and order
 #   target.tcl      compilation targets (the compiler's table, read as data)
 #   binary.tcl      native file inspection (ELF, ar, Mach-O, PE/COFF), no execution
-#   targets.tcl     schema 2's targets: target files and native metadata
-#   descriptor.tcl  botlish.json, schemas 1 and 2
+#   targets.tcl     schema 2's and 3's targets: target files, native metadata,
+#                   run-time dependencies
+#   descriptor.tcl  botlish.json, schemas 1, 2 and 3
 #   archive.tcl     the .botpkg format: deterministic writer, validating reader
 #   catalog.tcl     where artifacts come from: archive sources, repositories
 #   state.tcl       the installation record: what the manager installed
 #   native.tcl      native verification, the native closure, the plan
 #   view.tcl        target views: one package tree per target
 #   deploy.tcl      placing a target's bundled shared libraries
+#   author.tcl      the author's side: native add/require, staging, the audit
+#   sha1.tcl        SHA-1, for Git object identities only (provenance checks)
+#   release.tcl     provenance records and the comparison of release candidates
 #   install.tcl     resolution, plans, staging and transactions
 #   commands.tcl    the commands and the command line
 #
 # Nothing here executes anything a package holds: no hook, no script, no
 # binary, no compilation. Installing a package is writing its files. The
-# only programs it ever starts are the host system's own SHA-256 tool, at a
-# fixed system path (pm/sha256.tcl), and `kill -0` (a lock holder's
-# liveness).
+# only programs it ever starts are the host system's own SHA-256 and SHA-1
+# tools, at fixed system paths (pm/sha256.tcl, pm/sha1.tcl), and `kill -0`
+# (a lock holder's liveness). The author's side (pm/author.tcl) reads the
+# native files an author built; whatever built them ran before, on the
+# author's side, by the author's choice.
 
 namespace eval pm {
     variable root [file dirname [file dirname [file normalize [info script]]]]
     variable here [file join $root pm]
 }
 
-foreach pm::file {json sha256 version target binary targets descriptor archive catalog state native view deploy install commands} {
+foreach pm::file {json sha256 sha1 version target binary targets descriptor archive catalog state native view deploy author release install commands} {
     source [file join $pm::here $pm::file.tcl]
 }
 unset pm::file

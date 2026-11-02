@@ -533,6 +533,21 @@ proc pm::native::NormalPath {path} {
     return [join [lmap part [split $path /] {if {$part in {"" .}} continue; set part}] /]
 }
 
+# The loader identities a library NAME of TARGET conventionally has when it
+# declares none (an ELF soname libNAME.so.N): used only to keep a failed
+# declaration from being reported a second time as a missing one.
+proc pm::native::ConventionalIdentities {target name} {
+    if {[dict get [pm::target::facts $target] os] ne "linux"} {
+        return {}
+    }
+    set out {}
+    foreach suffix {0 1 2 3 4 5 6 7 8 9} {
+        lappend out lib$name.so.$suffix
+    }
+    lappend out lib$name.so
+    return $out
+}
+
 # ---------------------------------------------------------------------------
 # The plan
 
@@ -597,6 +612,7 @@ proc pm::native::Plan {target instances origins} {
     # One process, one library of each name.
     set libraries {}
     set identities [dict create]
+    set failedProviders [dict create]
     dict for {name offerList} $offers {
         lassign [lindex $offerList 0] firstId firstInstance first
         set entry [dict create name $name origin [dict get $first origin] linkage [dict get $first linkage] \
@@ -676,7 +692,19 @@ proc pm::native::Plan {target instances origins} {
             # Every instance's request must be met by the one library.
             set requested $library
             if {[catch {System $target $requested} evidence]} {
-                lappend problems $evidence
+                lappend problems "$evidence (declared by [Or [lmap id [dict get $entry instances] {string cat "instance " $id}]])"
+                # The declaration stands: a loader dependency it was declared
+                # for is not undeclared, and is not reported again below
+                # (the failure above is the one diagnostic).
+                set claimed [dict get $entry identity]
+                if {$claimed eq ""} {
+                    set claimed [ConventionalIdentities $target $name]
+                }
+                foreach identity $claimed {
+                    if {$identity ne ""} {
+                        dict set failedProviders [string tolower $identity] $name
+                    }
+                }
                 continue
             }
             foreach request [dict get $entry requests] {
@@ -732,6 +760,7 @@ proc pm::native::Plan {target instances origins} {
             if {[pm::target::platformLibrary $target $need]} continue
             if {[dict exists $provided [string tolower $need]]} continue
             if {[string match @rpath/* $need] && [dict exists $provided [string tolower [file tail $need]]]} continue
+            if {[dict exists $failedProviders [string tolower $need]] || [dict exists $failedProviders [string tolower [file tail $need]]]} continue
             lappend problems "[dict get $entry name] needs $need, which is neither part of $target's platform nor a library of this application's packages (declare it, bundled or system, in the package that needs it)"
         }
     }
@@ -795,6 +824,29 @@ proc pm::native::Plan {target instances origins} {
     dict for {name ids} $frameworks {
         dict lappend plan frameworks [dict create name $name instances $ids]
     }
+    # Run-time dependencies (schema 3): reported, never part of the link or
+    # the loader's closure, never a problem -- a program that does not use
+    # a capability runs without it, and what a program opens at run time is
+    # its own business to report when it is missing.
+    set runtime {}
+    foreach instance $instances {
+        set descriptor [dict get $instance descriptor]
+        if {![pm::targets::Aware $descriptor]} continue
+        foreach dependency [dict getdef [dict get $descriptor targets $target] runtime {}] {
+            set candidate ""
+            if {$host eq $target && [dict get $dependency kind] eq "library"} {
+                set probe [dict create name [dict get $dependency name] linkage shared identity [dict get $dependency identity] \
+                    version "" pkg-config "" symbols {}]
+                if {[catch {System $target $probe} evidence]} {
+                    set candidate [dict create found 0 text $evidence]
+                } else {
+                    set candidate [dict create found 1 text "[dict get $evidence path] ([dict get $evidence evidence][expr {[dict get $evidence version] ne "" ? ", version [dict get $evidence version]" : ""}])"]
+                }
+            }
+            lappend runtime [dict merge $dependency [dict create instance [dict get $instance instance] candidate $candidate]]
+        }
+    }
+    dict set plan runtime $runtime
     dict set plan libraries $libraries
     dict set plan headers $headers
     dict set plan placed [dict values $placed]

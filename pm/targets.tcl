@@ -28,8 +28,14 @@
 # it is, for every target (a schema 1 package, a pure-Botlish one).
 
 namespace eval pm::targets {
+    # Schema 2's keys; schema 3 (PACKAGE-MANAGER-MILESTONE-3.md, BOTLISH-JSON.md
+    # section 13) adds a target's `runtime` and a library's `license` and
+    # `notices`, and nothing else.
     variable targetKeys {files libraries frameworks headers}
     variable libraryKeys {name origin linkage file import identity needs version pkg-config symbols}
+    variable targetKeys3 {files libraries frameworks headers runtime}
+    variable libraryKeys3 {name origin linkage file import identity needs version pkg-config symbols license notices}
+    variable runtimeKeys {name kind identity loaded-by requirement capability purpose}
 }
 
 # "" when NAME is a native library name (what `extern c library "NAME"`
@@ -62,10 +68,11 @@ proc pm::targets::Strings {value what problemsVar} {
     return $out
 }
 
-proc pm::targets::Parse {value problemsVar} {
+proc pm::targets::Parse {value problemsVar {schema 2}} {
     upvar 1 $problemsVar problems
     variable targetKeys
-    variable libraryKeys
+    variable targetKeys3
+    set allowed [expr {$schema >= 3 ? $targetKeys3 : $targetKeys}]
     set result [dict create]
     if {[pm::json::type $value] ne "obj"} {
         lappend problems "\"targets\" must be an object of target names"
@@ -86,9 +93,16 @@ proc pm::targets::Parse {value problemsVar} {
         }
         set members [pm::json::payload $spec]
         set entry [dict create files "" libraries {} frameworks {} headers {}]
+        if {$schema >= 3} {
+            dict set entry runtime {}
+        }
         foreach {key item} $members {
-            if {$key ni $targetKeys} {
-                lappend problems "$where: unknown key \"$key\" (a target has [join $targetKeys {, }])"
+            if {$key ni $allowed} {
+                if {$key in $targetKeys3} {
+                    lappend problems "$where: \"$key\" is a schema 3 key: a botlish.json using it says \"schema\": 3"
+                } else {
+                    lappend problems "$where: unknown key \"$key\" (a target has [join $allowed {, }])"
+                }
                 continue
             }
             switch -- $key {
@@ -131,7 +145,7 @@ proc pm::targets::Parse {value problemsVar} {
                     }
                     set libraries {}
                     foreach library [pm::json::payload $item] {
-                        set parsed [Library $target $library "$where: libraries" problems]
+                        set parsed [Library $target $library "$where: libraries" problems $schema]
                         if {$parsed ne ""} {
                             lappend libraries $parsed
                         }
@@ -148,6 +162,51 @@ proc pm::targets::Parse {value problemsVar} {
                     }
                     dict set entry libraries $libraries
                 }
+                runtime {
+                    if {[pm::json::type $item] ne "arr"} {
+                        lappend problems "$where: \"runtime\" must be an array of runtime dependency objects"
+                        continue
+                    }
+                    set runtime {}
+                    foreach dependency [pm::json::payload $item] {
+                        set parsed [Runtime $target $dependency "$where: runtime" problems]
+                        if {$parsed ne ""} {
+                            lappend runtime $parsed
+                        }
+                    }
+                    set seen [dict create]
+                    foreach dependency $runtime {
+                        if {[dict exists $seen [dict get $dependency name]]} {
+                            lappend problems "$where: runtime: \"[dict get $dependency name]\" is named twice"
+                        }
+                        dict set seen [dict get $dependency name] 1
+                    }
+                    dict set entry runtime $runtime
+                }
+            }
+        }
+        # Relations a single entry cannot check: a runtime dependency loaded
+        # by a library names one of this target's libraries, and is no
+        # library the loader loads (those are libraries, `needs`).
+        if {[dict exists $entry runtime]} {
+            set names [lmap library [dict get $entry libraries] {dict get $library name}]
+            set loaded {}
+            foreach library [dict get $entry libraries] {
+                foreach need [dict get $library needs] {
+                    lappend loaded [string tolower $need]
+                }
+                if {[dict get $library identity] ne ""} {
+                    lappend loaded [string tolower [dict get $library identity]]
+                }
+            }
+            foreach dependency [dict get $entry runtime] {
+                set by [dict get $dependency loaded-by]
+                if {$by ne "" && $by ni $names} {
+                    lappend problems "$where: runtime: \"[dict get $dependency name]\": \"loaded-by\" names $by, which is no library of $target"
+                }
+                if {[dict get $dependency identity] ne "" && [string tolower [dict get $dependency identity]] in $loaded} {
+                    lappend problems "$where: runtime: \"[dict get $dependency name]\": [dict get $dependency identity] is a library of $target's link (a declared library or a bundled library's loader dependency): a runtime dependency is one only the program loads"
+                }
             }
         }
         dict set result $target $entry
@@ -156,22 +215,32 @@ proc pm::targets::Parse {value problemsVar} {
 }
 
 # One library object of target TARGET, or "" with its problems appended.
-proc pm::targets::Library {target value where problemsVar} {
+proc pm::targets::Library {target value where problemsVar {schema 2}} {
     upvar 1 $problemsVar problems
     variable libraryKeys
+    variable libraryKeys3
+    set allowed [expr {$schema >= 3 ? $libraryKeys3 : $libraryKeys}]
     if {[pm::json::type $value] ne "obj"} {
         lappend problems "$where: an entry must be an object"
         return ""
     }
     set members [pm::json::payload $value]
     set library [dict create name "" origin "" linkage "" file "" import "" identity "" needs {} version "" pkg-config "" symbols {}]
+    if {$schema >= 3} {
+        dict set library license ""
+        dict set library notices {}
+    }
     set count [llength $problems]
     foreach {key item} $members {
-        if {$key ni $libraryKeys} {
-            lappend problems "$where: unknown key \"$key\" (a library has [join $libraryKeys {, }])"
+        if {$key ni $allowed} {
+            if {$key in $libraryKeys3} {
+                lappend problems "$where: \"$key\" is a schema 3 key: a botlish.json using it says \"schema\": 3"
+            } else {
+                lappend problems "$where: unknown key \"$key\" (a library has [join $allowed {, }])"
+            }
             continue
         }
-        if {$key in {needs symbols}} {
+        if {$key in {needs symbols notices}} {
             dict set library $key [Strings $item "$where: \"$key\"" problems]
             continue
         }
@@ -221,6 +290,22 @@ proc pm::targets::Library {target value where problemsVar} {
     if {[dict get $library pkg-config] ne "" && ![regexp {^[A-Za-z0-9_.+-]{1,128}$} [dict get $library pkg-config]]} {
         lappend problems "$where: \"pkg-config\" is not a pkg-config module name"
     }
+    if {[dict exists $library license]} {
+        if {[dict get $library license] ne "" && [set problem [LicenseProblem [dict get $library license]]] ne ""} {
+            lappend problems "$where: \"license\": $problem"
+        }
+        foreach path [dict get $library notices] {
+            if {[set problem [pm::archive::pathProblem $path]] ne ""} {
+                lappend problems "$where: \"notices\": $problem"
+            }
+        }
+        if {$origin eq "system" && ([dict get $library license] ne "" || [dict get $library notices] ne "")} {
+            lappend problems "$where: \"license\" and \"notices\" describe a bundled library (what a consumer redistributes); a system library is the target's own"
+        }
+        if {[dict get $library notices] ne "" && [dict get $library license] eq ""} {
+            lappend problems "$where: \"notices\" without a \"license\": state the license the notices belong to"
+        }
+    }
     if {$origin eq "bundled"} {
         if {[dict get $library file] eq ""} {
             lappend problems "$where: a bundled library names its \"file\" (a path in the target's view)"
@@ -263,9 +348,161 @@ proc pm::targets::Library {target value where problemsVar} {
     return $library
 }
 
+# "" when TEXT is a license expression: SPDX's syntax (license identifiers,
+# LicenseRef-..., AND, OR, WITH and parentheses), else why not. Its meaning
+# is the author's statement: nothing checks it against the library.
+proc pm::targets::LicenseProblem {text} {
+    if {[string length $text] > 256} {
+        return "a license expression longer than 256 characters"
+    }
+    set tokens [regexp -all -inline {\(|\)|[^\s()]+} $text]
+    if {$tokens eq "" || [join $tokens ""] ne [string map {" " ""} $text]} {
+        return "\"$text\" is not a license expression (SPDX: MIT, Apache-2.0 AND OFL-1.1, (MIT OR Unlicense), LicenseRef-NAME)"
+    }
+    set depth 0
+    set expect operand
+    foreach token $tokens {
+        switch -- $token {
+            ( {
+                if {$expect ne "operand"} { set expect bad; break }
+                incr depth
+            }
+            ) {
+                if {$expect ne "operator" || $depth == 0} { set expect bad; break }
+                incr depth -1
+            }
+            AND - OR - WITH {
+                if {$expect ne "operator"} { set expect bad; break }
+                set expect operand
+            }
+            default {
+                if {$expect ne "operand" || ![regexp {^[A-Za-z0-9][A-Za-z0-9.+-]*$} $token]} { set expect bad; break }
+                set expect operator
+            }
+        }
+    }
+    if {$expect ne "operator" || $depth != 0} {
+        return "\"$text\" is not a license expression (SPDX: MIT, Apache-2.0 AND OFL-1.1, (MIT OR Unlicense), LicenseRef-NAME)"
+    }
+    return ""
+}
+
+# One runtime dependency object of target TARGET (schema 3), or "" with its
+# problems appended: something a program of the package loads or uses at
+# run time that no loader dependency names -- a library opened by name
+# (dlopen, LoadLibrary), or a facility that is no file (a graphics driver,
+# a display server). REQUIREMENT says when it is needed:
+#
+#   always       whenever the package's native code runs
+#   capability   only for the named CAPABILITY (a program that does not use
+#                it runs without it)
+#   optional     used when present, never required
+#
+# A runtime dependency is never part of the link or the loader's closure,
+# and its absence never makes the package uninstallable.
+proc pm::targets::Runtime {target value where problemsVar} {
+    upvar 1 $problemsVar problems
+    variable runtimeKeys
+    if {[pm::json::type $value] ne "obj"} {
+        lappend problems "$where: an entry must be an object"
+        return ""
+    }
+    set dependency [dict create name "" kind "" identity "" loaded-by "" requirement "" capability "" purpose ""]
+    set count [llength $problems]
+    foreach {key item} [pm::json::payload $value] {
+        if {$key ni $runtimeKeys} {
+            lappend problems "$where: unknown key \"$key\" (a runtime dependency has [join $runtimeKeys {, }])"
+            continue
+        }
+        if {[pm::json::type $item] ne "str"} {
+            lappend problems "$where: \"$key\" must be a string"
+            continue
+        }
+        dict set dependency $key [pm::json::payload $item]
+    }
+    set name [dict get $dependency name]
+    if {$name eq ""} {
+        lappend problems "$where: an entry without a \"name\""
+        return ""
+    }
+    set where "$where: \"$name\""
+    if {[set problem [LibraryNameProblem $name]] ne ""} {
+        lappend problems "$where: [string map {"native library name" "runtime dependency name"} $problem]"
+    }
+    set kind [dict get $dependency kind]
+    if {$kind ni {library facility}} {
+        lappend problems "$where: \"kind\" must be \"library\" (a library opened by name at run time) or \"facility\" (something that is no file: a driver, a display)"
+    }
+    set identity [dict get $dependency identity]
+    if {$kind eq "library" && $identity eq ""} {
+        lappend problems "$where: a runtime library states the \"identity\" it is opened by (its soname, install name or DLL name)"
+    }
+    if {$kind eq "facility" && $identity ne ""} {
+        lappend problems "$where: a facility is no file: it has no \"identity\""
+    }
+    if {$identity ne "" && (![regexp {^[A-Za-z0-9_@/.+-]+$} $identity] || [string length $identity] > 1024)} {
+        lappend problems "$where: \"$identity\" is not a loader identity"
+    }
+    if {[dict get $dependency loaded-by] ne "" && [set problem [LibraryNameProblem [dict get $dependency loaded-by]]] ne ""} {
+        lappend problems "$where: \"loaded-by\": $problem"
+    }
+    set requirement [dict get $dependency requirement]
+    if {$requirement ni {always capability optional}} {
+        lappend problems "$where: \"requirement\" must be \"always\", \"capability\" (only for the named capability) or \"optional\" (used when present)"
+    }
+    set capability [dict get $dependency capability]
+    if {$requirement eq "capability" && ![regexp {^[a-z][a-z0-9-]{0,63}$} $capability]} {
+        lappend problems "$where: a capability requirement names its \"capability\" (lowercase letters, digits and -)"
+    }
+    if {$requirement ne "capability" && $capability ne ""} {
+        lappend problems "$where: \"capability\" belongs to a \"capability\" requirement"
+    }
+    set purpose [dict get $dependency purpose]
+    if {$purpose eq "" || [string length $purpose] > 300 || [regexp {[\x00-\x1f]} $purpose]} {
+        lappend problems "$where: \"purpose\" says what needs it, in one line of at most 300 characters"
+    }
+    if {[llength $problems] > $count} {
+        return ""
+    }
+    return $dependency
+}
+
+# The canonical JSON value of a runtime dependency DEPENDENCY.
+proc pm::targets::RuntimeValue {dependency} {
+    variable runtimeKeys
+    set fields {}
+    foreach key $runtimeKeys {
+        if {[dict get $dependency $key] ne ""} {
+            lappend fields $key [list str [dict get $dependency $key]]
+        }
+    }
+    return [list obj $fields]
+}
+
+# The canonical JSON value of one library LIBRARY.
+proc pm::targets::LibraryValue {library} {
+    variable libraryKeys
+    variable libraryKeys3
+    set fields {}
+    foreach key [expr {[dict exists $library license] ? $libraryKeys3 : $libraryKeys}] {
+        set v [dict get $library $key]
+        if {$key in {needs symbols notices}} {
+            if {$key eq "needs" && [dict get $library origin] eq "bundled" && [dict get $library linkage] eq "shared"} {
+                lappend fields $key [list arr [lmap x $v {list str $x}]]
+            } elseif {$v ne ""} {
+                lappend fields $key [list arr [lmap x $v {list str $x}]]
+            }
+        } elseif {$v ne ""} {
+            lappend fields $key [list str $v]
+        }
+    }
+    return [list obj $fields]
+}
+
 # The canonical JSON value of TARGETS.
 proc pm::targets::Value {targets} {
     variable libraryKeys
+    variable libraryKeys3
     set object {}
     foreach target [lsort [dict keys $targets]] {
         set entry [dict get $targets $target]
@@ -276,20 +513,7 @@ proc pm::targets::Value {targets} {
         if {[dict get $entry libraries] ne ""} {
             set libraries {}
             foreach library [dict get $entry libraries] {
-                set fields {}
-                foreach key $libraryKeys {
-                    set v [dict get $library $key]
-                    if {$key in {needs symbols}} {
-                        if {$key eq "needs" && [dict get $library origin] eq "bundled" && [dict get $library linkage] eq "shared"} {
-                            lappend fields $key [list arr [lmap x $v {list str $x}]]
-                        } elseif {$v ne ""} {
-                            lappend fields $key [list arr [lmap x $v {list str $x}]]
-                        }
-                    } elseif {$v ne ""} {
-                        lappend fields $key [list str $v]
-                    }
-                }
-                lappend libraries [list obj $fields]
+                lappend libraries [LibraryValue $library]
             }
             lappend members libraries [list arr $libraries]
         }
@@ -297,6 +521,9 @@ proc pm::targets::Value {targets} {
             if {[dict get $entry $key] ne ""} {
                 lappend members $key [list arr [lmap x [dict get $entry $key] {list str $x}]]
             }
+        }
+        if {[dict getdef $entry runtime {}] ne ""} {
+            lappend members runtime [list arr [lmap dependency [dict get $entry runtime] {RuntimeValue $dependency}]]
         }
         lappend object $target [list obj $members]
     }
@@ -389,6 +616,13 @@ proc pm::targets::Problems {descriptor paths} {
                 set path [dict get $library $key]
                 if {$path ne "" && ![dict exists $view $path]} {
                     lappend problems "targets: \"$target\": library \"[dict get $library name]\": its $key $path is no file of the target's view"
+                }
+            }
+        }
+        foreach library [dict get $entry libraries] {
+            foreach path [dict getdef $library notices {}] {
+                if {![dict exists $view $path]} {
+                    lappend problems "targets: \"$target\": library \"[dict get $library name]\": its notice $path is no file of the target's view"
                 }
             }
         }
