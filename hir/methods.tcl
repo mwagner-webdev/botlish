@@ -171,7 +171,11 @@ proc hir::methods::ObligationKinds {} {
     # DIRECT likewise: the selected function's module is direct, which the
     # calling function must mediate (DIRECT-MODULES.md) -- an obligation of
     # the call, never a reason another candidate fits better.
-    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT}
+    # CONTEXT-NOT-INJECTED and CONTEXT-RETAINED-AUTHORITY likewise: whether
+    # an inject block grants what the selected function (or the coroutine
+    # code it runs) needs is the environment's, exactly like an installation
+    # (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md).
+    return {UNHANDLED-ERROR KNOWN-ERROR UNDECLARED-ERROR AMBIGUOUS-METHOD-CALL MISSING-CONTEXT AMBIGUOUS-CONTEXT-IMPLEMENTATION DIRECT CONTEXT-NOT-INJECTED CONTEXT-RETAINED-AUTHORITY}
 }
 
 # The own problems (header) of method call KEY in HIR (a typed build), as

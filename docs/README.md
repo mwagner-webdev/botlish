@@ -1994,6 +1994,23 @@ add10(32)          # 42 (add captures x)
   std::io::IO`): the one installed context implementing it is selected statically,
   and portable code (`std::io::print_line`) compiles to direct calls of its
   implementation. See CONTEXT-TRAITS.md.
+* **Inject blocks.** `inject context Storage, std::io::IO:` (or `inject no
+  context:`) followed by an indented block runs the block with exactly the
+  listed contexts' authority, whatever its creator can use: installation
+  makes a context available, injection grants a computation permission to
+  use it. Every call of the block's code -- transitively, through imported,
+  method-style, generic and trait calls and coroutine constructions -- may
+  require only injected contexts (`CONTEXT-NOT-INJECTED`, with the chain); a
+  nested block injects a subset of the enclosing one; a function containing
+  a block requires what the block injects; the block may not read an
+  enclosing function's context parameter it does not inject; and it may not
+  resume a coroutine constructed with more authority than it injects, which
+  the compiler follows from construction through bindings, structs,
+  collections, arguments and results (`CONTEXT-RETAINED-AUTHORITY`). An
+  inject block is a statement or a value (`x = inject ...:`), installs and
+  selects nothing, and costs nothing at run time: it is the ordinary block
+  `if true:` on every backend. `inject` is a contextual word. See
+  RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md.
 * **Struct destructuring.** `{user, expires: expiry} = result` binds fields
   of a struct value by name: it evaluates `result` once, then binds `user` to
   `result.user` and `expiry` to `result.expires`, exactly as the explicit

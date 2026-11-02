@@ -82,7 +82,19 @@
 #                  "with" and "context" are contextual (below); no binding
 #                  name, no type annotation, no list, no block, no colon
 #   simple       = binding | destructure | coroutineBind | return | break
-#                | continue | fail | staticIntrinsic | expression
+#                | continue | fail | staticIntrinsic | injection | expression
+#   injection    = "inject" ( "no" "context" | "context" typeExpr
+#                  { "," typeExpr } ) ":" suite
+#                  -- RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md: the block
+#                  runs with exactly the listed contexts' authority (none for
+#                  "inject no context"), whatever its creator could use.
+#                  "inject" is contextual: the form only where a statement
+#                  or a statement's value starts, as "inject" directly
+#                  followed by a name (AtInject) -- two adjacent names, which
+#                  no expression allows -- so `inject = 1`, `inject(x)` and
+#                  `x.inject` are ordinary names. Like an if, it is a
+#                  statement or the value of a binding, return or
+#                  destructuring; what it means is HIR's (hir/injection.tcl)
 #   staticIntrinsic = "static" IDENT ":" suite
 #                  -- STATIC-COMPILE.md: a compiler-directed syntactic
 #                  operation on the captured block. The IDENT names the
@@ -109,8 +121,8 @@
 #   coField      = ( "step" | "first" ) [ ":" IDENT ]
 #                  -- step the affine coroutine handle, first the first
 #                  outward result; any other name is COROUTINE-BINDING-FIELD
-#   valued       = IDENT "=" (if|loop|fold|staticIntrinsic|handledExpr)
-#                | "return" (if|loop|fold|staticIntrinsic|handledExpr)
+#   valued       = IDENT "=" (if|loop|fold|staticIntrinsic|injection|handledExpr)
+#                | "return" (if|loop|fold|staticIntrinsic|injection|handledExpr)
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { handler } DEDENT
@@ -2665,13 +2677,14 @@ proc surface::parser::Statement {pVar} {
         # The handler suite(s) already ended the line.
         return $statement
     }
-    if {[dict get $statement kind] eq "static"} {
-        # The static intrinsic's suite already ended the line.
+    if {[dict get $statement kind] in {static inject}} {
+        # The static intrinsic's (or the inject block's) suite already ended
+        # the line.
         return $statement
     }
     if {[dict get $statement kind] in {bind return destructure coroutinebind}
             && [dict get $statement value] ne ""
-            && [dict get $statement value kind] in {if loop handledcall static}} {
+            && [dict get $statement value kind] in {if loop handledcall static inject}} {
         # The if's (or loop's, or the handler suite's) suite(s) already
         # ended the line. break is deliberately excluded here (unlike
         # bind/return): PAYLOAD-FREE-BREAK.md -- break never has a value, so
@@ -2794,6 +2807,9 @@ proc surface::parser::ValueOrHandled {pVar} {
     }
     if {[AtStatic p]} {
         return [StaticIntrinsic p]
+    }
+    if {[AtInject p]} {
+        return [Injection p]
     }
     if {[AtStaticWithoutOperation p]} {
         StaticWithoutOperationError p
@@ -2968,6 +2984,82 @@ proc surface::parser::StaticIntrinsic {pVar} {
     set body [Suite p "\"static $name\""]
     return [surface::ast::node static [SpanFrom p $start] operation $name \
         operationSpan [dict get $operation span] staticSpan $start body $body]
+}
+
+# 1 if the next tokens start an inject block
+# (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md): the contextual word
+# "inject" directly followed by a name -- two adjacent names, which no
+# expression allows, so an ordinary variable called `inject` is unaffected.
+proc surface::parser::AtInject {pVar} {
+    upvar 1 $pVar p
+    set token [Peek p]
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "inject"
+        && [Kind p 1] eq "IDENT"}]
+}
+
+# "inject" ( "no" "context" | "context" TypeExpr { "," TypeExpr } ) ":"
+# suite, at a token AtInject accepted (RESTRICTED-CONTEXT-INJECTION-
+# MILESTONE-1.md). Node: inject, injectSpan (the word "inject"), contexts
+# ({type TYPE typeSpan SPAN} dicts in written order, empty for "inject no
+# context"), none (1 for "inject no context"), body (a suite). The list
+# names context types -- context structs or context traits, resolved by HIR
+# -- and the block's code may use exactly those: injection grants
+# permission to use an installed context, it never installs, selects or
+# constructs one. Every other shape is a located syntax error.
+proc surface::parser::Injection {pVar} {
+    upvar 1 $pVar p
+    set injectToken [Advance p]
+    set start [dict get $injectToken span]
+    set word [Peek p]
+    set none 0
+    set contexts {}
+    switch -- [dict get $word text] {
+        no {
+            Advance p
+            set next [Peek p]
+            if {[dict get $next kind] ne "IDENT" || [dict get $next text] ne "context"} {
+                Fail $next "expected \"context\" after \"inject no\" (\"inject no context:\" runs its block with no context), found [Describe $next]"
+            }
+            Advance p
+            set none 1
+            if {[Kind p] eq "IDENT"} {
+                Fail [Peek p] "\"inject no context\" injects nothing, so it names no context: write \"inject no context:\", or \"inject context [dict get [Peek p] text]:\" to inject it"
+            }
+        }
+        context {
+            Advance p
+            if {[Kind p] eq ":"} {
+                Fail [Peek p] "an inject block names the contexts it injects: write \"inject context T1, T2:\", or \"inject no context:\" to run the block with none"
+            }
+            while 1 {
+                set typeStart [dict get [Peek p] span]
+                set type [TypeExpr p "a context type after \"inject context\""]
+                lappend contexts [dict create type $type typeSpan [SpanFrom p $typeStart]]
+                if {[Kind p] ne ","} {
+                    break
+                }
+                Advance p
+            }
+        }
+        default {
+            Fail $word "expected \"context\" or \"no context\" after \"inject\" (\"inject context T1, T2:\" or \"inject no context:\"), found [Describe $word]"
+        }
+    }
+    if {[Kind p] eq "="} {
+        Fail [Peek p] "an inject block grants contexts that are already installed and installs nothing: install a context with \"with context EXPR\" at the program's top level, then inject its type"
+    }
+    switch -- [Kind p] {
+        : {}
+        default {
+            Fail [Peek p] "expected \",\" or \":\" and an indented block after the injected contexts, found [Describe [Peek p]]"
+        }
+    }
+    if {[Kind p 1] ni {NEWLINE EOF}} {
+        Fail [Peek p 1] "an inject block's code is an indented block: start it on a new line after the \":\", found [Describe [Peek p 1]]"
+    }
+    set body [Suite p "the injected contexts"]
+    return [surface::ast::node inject [SpanFrom p $start] injectSpan $start \
+        contexts $contexts none $none body $body]
 }
 
 # A statement's value: an if, a loop, or an expression.

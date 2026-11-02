@@ -37,9 +37,13 @@
 #                                        "= true"/"= false" when decided;
 #                                        "installs ID" on a verified context
 #                                        installation (CONTEXTS.md)
-#   eN if                                followed by "then SCOPE ..." and
+#   eN if ?injects (IDS)?                followed by "then SCOPE ..." and
 #                                        "else SCOPE ..." lines with the
-#                                        refinements proven on entry
+#                                        refinements proven on entry;
+#                                        "injects" on an inject block, the
+#                                        contexts its code may use
+#                                        (RESTRICTED-CONTEXT-INJECTION-
+#                                        MILESTONE-1.md)
 #   eN loop SCOPE
 #   eN listloop SCOPE (ELEM)             children: the iterable, then the body
 #   eN countloop SCOPE (I) ?DIR KIND?    DIR up|down, KIND exclusive|inclusive,
@@ -686,7 +690,13 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
         }
         if {
-            Line $hir $e if $indent $origins lines
+            set text if
+            if {[dict exists $node injects]} {
+                # An inject block (RESTRICTED-CONTEXT-INJECTION-
+                # MILESTONE-1.md): the contexts its code may use.
+                append text " injects ([join [dict get $node injects] {, }])"
+            }
+            Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node condition] $inner $origins lines
             foreach {role outcome} {then 1 else 0} {
                 set s [dict get $node ${role}Scope]

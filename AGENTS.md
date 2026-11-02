@@ -1069,6 +1069,63 @@ text when you change the code it mutates, keeping it a mutant of the same
 rule). Changing `hir::traits::Plan` also means re-checking the trait mutants
 (`audit/traits/tools/mutants.txt`).
 
+## Restricted context injection (inject blocks)
+
+`inject context A, B:` and `inject no context:`
+(RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md) run a block with exactly the
+listed installed contexts' authority. Installation (entry top level),
+selection (one implementation per context trait per program) and injection
+(a computation's permission) are three things: an inject block never
+installs, selects, constructs or copies a context. Keep it so:
+
+* One representation: the block is the ordinary `if true:` (surface/
+  lower.tcl's `inject` case) carrying `injects` (resolved identities) on the
+  `if` expression; only hir/injection.tcl and hir/contexts.tcl read it, and
+  HIR text prints it (`if injects (IDS)`). Never add a HIR or core IR node, a
+  runtime operation, a permission table, a context copy, an actor-local
+  context area or a per-coroutine context table for it, and never compile a
+  function again per authority subset: the restriction is a proof, not code.
+* One requirement analysis: a block's calls are judged by
+  `hir::contexts::Requirements` (the transitive requirement over the same
+  edges, `Targets`); a block is a use of what it injects (its function's
+  grants), so nesting and callers are checked by the ordinary rule. Never
+  add a second reachability, never read a requirement from a name, and never
+  satisfy a missing injected context from the installed set.
+* A context trait injected grants its operations through the selected
+  implementation, never the implementing context's other functions; the
+  monomorphized build is judged as written (`hir::injection::Judged`).
+* Retained authority is followed, never assumed: every handle origin is a
+  construction (`{auth IDS C}`), a parameter (substituted at calls) or
+  foreign (installed context state, an affine payload); anything the
+  provenance analysis cannot follow rejects a resume in a block
+  (CONTEXT-RETAINED-AUTHORITY), never accepts it. Its soundness rests on the
+  channels COROUTINE-CONTRACT, AFFINE-CAPTURE-UNSUPPORTED and
+  AFFINE-ERASURE-UNSUPPORTED close: if one of those opens (an affine
+  message, a capture of a handle, an erased handle), extend the analysis in
+  the same change. Moving a handle without resuming it is no use of its
+  authority: never reject that.
+* CONTEXT-NOT-INJECTED and CONTEXT-RETAINED-AUTHORITY are obligations
+  (`hir::methods::ObligationKinds`): an injection never selects a method
+  candidate (SFIAE).
+* Values cross freely (data, a copy of a context value, a function value,
+  a mailbox address): passing a value is explicit delegation. Never extend
+  the restriction to values without a design of its own.
+
+If you change hir/injection.tcl, the grants or chain lines of
+hir/contexts.tcl, the inject grammar (surface/parser.tcl's `Injection`,
+surface/ast.tcl, surface/recover.tcl, surface/modules.tcl's `Walk`), its
+lowering, its HIR text (hir/format.tcl, hir/read.tcl), the coroutine
+contract rules above, or what a call's targets are, run
+`tests/restricted-injection.test`, `tests/contexts.test`,
+`tests/context-traits.test`, `tests/coroutines.test`,
+`tests/static-compile.test`, `tests/method-resolution.test` and
+`audit/restricted-injection/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule), plus `tools/compilerpedia.tcl check` for its
+topics (`concept.context-injection`, `error.context-not-injected`,
+`error.context-retained-authority`, `error.duplicate-injected-context`).
+
 ## Direct modules
 
 Raw, ambient authority is acknowledged at the module boundary

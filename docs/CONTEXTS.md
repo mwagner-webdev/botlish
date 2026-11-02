@@ -809,6 +809,10 @@ context area, no header line and no different instruction.
 
 * Installation only at the entry program's top level; no nested, function-
   local, dynamic or overriding installation, no test doubles by replacement.
+  (Since RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md a computation can be
+  given *less* than what is installed: `inject context A, B:` runs a block
+  with exactly those contexts' authority, statically checked. It installs
+  and selects nothing.)
 * Exact nominal identity; no traits, no substitutable contexts.
   (Since CONTEXT-TRAITS.md: a context parameter may have a context-trait
   type, satisfied structurally by the one installed context that implements

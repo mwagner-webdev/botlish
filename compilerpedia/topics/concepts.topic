@@ -3013,7 +3013,7 @@ summary: A `context struct` value installed with `with context EXPR` reaches eve
 index: concepts
 alias: context struct; with context; context parameter; dependency injection; environment value
 keywords: context, with, installed, requirement, MISSING-CONTEXT, DUPLICATE-CONTEXT, CONTEXT-FUNCTION-VALUE, global, singleton, LinuxIO, suite
-related: concept.context-traits concept.context-owned-state concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
+related: concept.context-traits concept.context-owned-state concept.context-injection concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
 docs: CONTEXTS.md CONTEXT-TRAITS.md CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md
 
 == WHAT IT IS
@@ -3092,6 +3092,103 @@ x
 
 == MORE
 CONTEXTS.md; concept.context-traits for contexts named by what they do.
+
+@topic concept.context-injection
+title: Inject blocks: a computation with only the contexts it is given
+summary: `inject context A, B:` runs its block with only the listed installed contexts (`inject no context:` with none), whatever its creator can use; checked statically, at no runtime cost.
+index: concepts
+alias: inject; inject context; inject no context; restricted context; restricted authority; context injection; capability restriction; sandbox; least privilege; request handler; actor authority
+keywords: inject, injection, authority, restricted, least privilege, actor, request handler, coroutine, CONTEXT-NOT-INJECTED, CONTEXT-RETAINED-AUTHORITY, installation, selection
+related: concept.contexts concept.context-traits concept.coroutines concept.direct-modules error.context-not-injected error.context-retained-authority error.duplicate-injected-context
+docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md CONTEXTS.md
+
+== WHAT IT IS
+    with context network::create()
+    with context storage::create()
+
+    report = inject context storage::Storage:
+        build_report(data)
+
+Three things stay apart: *installation* (`with context EXPR`, entry
+program, top level) makes an implementation available; *selection* picks
+the one implementation of a context trait, once per program; *injection*
+grants a computation permission to use some of what is installed. An
+inject block is a statement or a value (`x = inject ...:` is its last
+statement's value); its code may use exactly the contexts it lists -- a
+context struct or a context trait each -- and `inject no context:` none.
+
+== RULES
+  * Every call in the block -- direct, imported, method-style, a coroutine
+    construction, a trait operation -- requires only injected contexts,
+    transitively (CONTEXT-NOT-INJECTED, with the chain).
+  * The block may not read a context parameter of the function it is in,
+    nor call a nested function that does, unless it injects that context.
+  * A nested inject block injects a subset of the enclosing one: authority
+    never widens. A function containing an inject block requires what the
+    block injects, so its callers -- and their inject blocks -- must have
+    it too.
+  * At top level each injected context must be installed where the block
+    runs (a context trait: implemented by exactly one installed context).
+  * A coroutine resumed in the block must have been constructed within the
+    injected contexts (CONTEXT-RETAINED-AUTHORITY): a coroutine keeps its
+    creator's contexts.
+  * Values cross freely: data, a copy of a context value, a handle moved
+    through without being resumed, an address of a mailbox. Passing a
+    value is explicit delegation; what is restricted is direct use of
+    context authority.
+
+== WHY
+Availability is not authority. A request handler, a calculation task or a
+storage service can be given exactly the dependencies it needs, and the
+compiler proves it cannot reach the others through any call chain. There
+is no runtime cost: no permission table, no context copy, no second
+selection; the block compiles to its code.
+
+== EXAMPLES
+@example accept
+context struct Network:
+    id: int
+
+context struct Storage:
+    base: int
+
+fn store(n: int, context st: Storage) -> int:
+    n + st.base
+
+fn calculate(n: int) -> int:
+    n * 2
+
+with context Network {id: 7}
+with context Storage {base: 10}
+a = inject no context:
+    calculate(16)
+b = inject context Storage:
+    store(a)
+b
+@caption A contextless calculation and a Storage-only computation beside an installed Network
+@value 42
+@end
+
+@example reject
+context struct Network:
+    id: int
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn handler(n: int) -> int:
+    send(n)
+
+with context Network {id: 1}
+inject no context:
+    handler(1)
+@caption handler reaches Network through send; the block grants none
+@error CORE SEMANTIC CONTEXT-NOT-INJECTED
+@at 12:5
+@end
+
+== MORE
+RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md.
 
 @topic concept.context-owned-state
 title: Context-owned state: an installed context owns its affine members

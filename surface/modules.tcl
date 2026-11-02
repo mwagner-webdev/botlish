@@ -1195,6 +1195,13 @@ proc surface::modules::Walk {node} {
                 }]
             }]
         }
+        inject {
+            # The injected context types (RESTRICTED-CONTEXT-INJECTION-
+            # MILESTONE-1.md): qualified types like any annotation.
+            Put node contexts [lmap c [dict get $node contexts] {
+                dict set c type [TypeRefs [dict get $c type] [dict get $c typeSpan]]
+            }]
+        }
         classdecl - dfadecl {
             # A declared recognizer's qualified classes and callees
             # (DFA-COROUTINE-MILESTONE-2.md): surface/dfa.tcl checks and

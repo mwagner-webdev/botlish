@@ -235,6 +235,8 @@ namespace eval hir::static {
         CONTEXT-BINDING-COLLISION                ContextBindingCollision
         CONTEXT-FUNCTION-VALUE                   ContextFunctionValue
         CONTEXT-INSTALLATION-UNSUPPORTED         ContextInstallationUnsupported
+        CONTEXT-NOT-INJECTED                     ContextNotInjected
+        CONTEXT-RETAINED-AUTHORITY               ContextRetainedAuthority
         CONTEXT-TRAIT-MISUSE                     ContextTraitMisuse
         CONTEXT-TRAIT-POSITION                   ContextTraitPosition
         CONTINUE-OUTSIDE-LOOP                    ContinueOutsideLoop
@@ -255,6 +257,7 @@ namespace eval hir::static {
         DUPLICATE-FIELD                          DuplicateField
         DUPLICATE-FLAG                           DuplicateFlag
         DUPLICATE-FLAG-DECLARATION               DuplicateFlagDeclaration
+        DUPLICATE-INJECTED-CONTEXT               DuplicateInjectedContext
         DUPLICATE-LOOP-VARIABLE                  DuplicateLoopVariable
         EMIT-AFTER-TOKEN                         EmitAfterToken
         EMIT-BEYOND-TOKEN                        EmitBeyondToken

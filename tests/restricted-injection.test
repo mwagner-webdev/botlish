@@ -1,0 +1,885 @@
+# restricted-injection.test -- inject blocks: statically restricted context
+# authority (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
+#
+#   inject context Storage, Clock:      the block's code may use exactly
+#       BODY                            Storage and Clock
+#   inject no context:                  ... and no context
+#       BODY
+#
+# * grammar: the contextual `inject` form (statement and value), its
+#   located syntax errors, `inject` staying an ordinary name;
+# * resolution: context structs and context traits, TYPE, NOT-A-CONTEXT,
+#   DUPLICATE-INJECTED-CONTEXT;
+# * the restriction, transitively over the existing requirement analysis:
+#   direct, imported, method-style, generic and wrapped calls, several
+#   requirements, recursion, context traits, closures; nesting never widens;
+#   a function's inject block is a use of what it injects; top-level
+#   availability; context parameters and captures; direct-module mediation;
+# * retained coroutine authority: every construction, movement and resume
+#   path the milestone lists, the laundering counterexamples rejected, the
+#   legitimate ones accepted;
+# * the acceptance programs (contextless calculation, Storage-only service,
+#   nested restrictions, a framework-shaped request handler, two restricted
+#   actors on one event loop) on every backend;
+# * HIR text, HIR interchange, `static compile:`, the -contexts summary, the
+#   compiler service; zero runtime cost (NIR, native instances).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot service service.tcl]
+source [file join $::projectRoot audit static-decisions tools lib.tcl]
+
+interp recursionlimit {} 100000
+
+set allBackends {interp compile cranelift-generic cranelift}
+
+# Linux on x86-64 or AArch64: std::linux's syscall wrappers compile for the
+# host's own target.
+testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
+
+set scratch [makeDirectory restricted-injection-scratch]
+set programCounter 0
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+# The path of a fresh program file holding TEXT (in directory DIR, the
+# scratch directory by default).
+proc riFile {text {dir ""}} {
+    if {$dir eq ""} {
+        set dir $::scratch
+    }
+    set path [file join $dir p[incr ::programCounter].bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $text
+    close $channel
+    return $path
+}
+
+# The HIR of source TEXT compiled as a program file.
+proc riHir {text {strict 1}} {
+    return [surface::readProgramFile [riFile $text] -strict $strict -warnings off -target [linuxTarget]]
+}
+
+# {KIND LINE:COLUMN} of every diagnostic of TEXT, in the build's order.
+proc riErrors {text} {
+    if {![catch {riHir $text} message options]} {
+        return {}
+    }
+    if {![dict exists $options -diagnostics]} {
+        return [list SYNTAX $message]
+    }
+    return [lmap d [dict get $options -diagnostics] {
+        set kind [lindex [dict get $d errorcode] end]
+        set location [dict get $d location]
+        list $kind [dict get $location line]:[dict get $location column]
+    }]
+}
+
+# The message of the first diagnostic of TEXT.
+proc riMessage {text} {
+    if {![catch {riHir $text} message options]} {
+        return "no error"
+    }
+    if {[dict exists $options -diagnostics]} {
+        return [dict get [lindex [dict get $options -diagnostics] 0] message]
+    }
+    return $message
+}
+
+# The one value every backend in BACKENDS agrees on for TEXT, or a
+# description of the disagreement or error.
+proc riAgree {text {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::allBackends
+    }
+    set hir [riHir $text]
+    set outcomes [lmap backend $backends {outcomeUnderHir $backend $hir}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "DISAGREE: [join [lmap b $backends o $outcomes {list $b $o}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] ne "value"} {
+        return "ERROR: $outcome"
+    }
+    return [lindex $outcome 1]
+}
+
+# The prelude most programs share: three installable contexts (small Int
+# fields: they live in native context slots) and one function requiring
+# each.
+set prelude {type Id = Int in 0..1000
+
+context struct Network:
+    id: Id
+
+context struct Storage:
+    id: Id
+
+context struct Clock:
+    id: Id
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn store(n: int, context st: Storage) -> int:
+    n + st.id
+
+fn now(context clock: Clock) -> int:
+    clock.id
+
+fn calculate(n: int) -> int:
+    n * 2
+
+}
+
+set install {with context Network {id: 100}
+with context Storage {id: 10}
+with context Clock {id: 1}
+}
+
+# ---------------------------------------------------------------------------
+# Grammar
+
+test ri-parse-forms {the two forms, as a statement and as a value; the AST keeps the written types in order} -body {
+    set ast [surface::parse "inject context a::Storage, Clock:\n    1\nx = inject no context:\n    2\nreturn_value = inject context Network:\n    3\n"]
+    surface::formatAst $ast
+} -match glob -result {*inject context a::Storage, Clock*
+*bind return_value = inject context Network*}
+
+test ri-parse-contextual {inject stays an ordinary name: a binding, a call, a field, a parameter} -body {
+    riAgree {fn inject(x: int) -> int:
+    x + 1
+
+fn f(inject: int) -> int:
+    inject * 2
+
+inject_value = inject(1)
+y = f(inject_value)
+y
+}
+} -result 4
+
+test ri-parse-errors {every malformed shape is a located syntax error with its own message} -body {
+    set results {}
+    foreach text {
+        "inject context:\n    1\n"
+        "inject nothing:\n    1\n"
+        "inject no context Storage:\n    1\n"
+        "inject no:\n    1\n"
+        "inject context Storage\n    1\n"
+        "inject context Storage: 1\n"
+        "inject context s = Storage {id: 1}:\n    1\n"
+    } {
+        if {[catch {surface::parse $text} message]} {
+            regexp {:([0-9]+:[0-9]+): } $message -> at
+            lappend results $at
+        } else {
+            lappend results parsed
+        }
+    }
+    set results
+} -result {1:15 1:8 1:19 1:10 1:23 1:25 1:18}
+
+test ri-parse-error-messages {the messages say what to write} -body {
+    lmap text {
+        "inject context:\n    1\n"
+        "inject no context Storage:\n    1\n"
+        "inject context s = Storage {id: 1}:\n    1\n"
+    } {
+        catch {surface::parse $text} message
+        regsub {^[^ ]* } $message ""
+    }
+} -result {{an inject block names the contexts it injects: write "inject context T1, T2:", or "inject no context:" to run the block with none} {"inject no context" injects nothing, so it names no context: write "inject no context:", or "inject context Storage:" to inject it} {an inject block grants contexts that are already installed and installs nothing: install a context with "with context EXPR" at the program's top level, then inject its type}}
+
+# ---------------------------------------------------------------------------
+# Resolution
+
+test ri-resolve-diagnostics {an unknown type, a non-context and a duplicate, each at its entry} -body {
+    riErrors "${::prelude}struct Plain:\n    x: int\n\n${::install}inject context Missing:\n    1\ninject context Plain:\n    2\ninject context Storage, Storage:\n    3\n"
+} -result {{TYPE 30:16} {NOT-A-CONTEXT 32:16} {DUPLICATE-INJECTED-CONTEXT 34:25}}
+
+test ri-resolve-trait {a context trait and a context struct of a module, written qualified, resolve to their identities} -body {
+    set hir [riHir {import std::io
+import std::linux::io
+
+with context std::linux::io::create()
+inject context std::io::IO, std::linux::io::LinuxIO:
+    1
+}]
+    set source [dict getdef $hir traitSource $hir]
+    lmap r [hir::injection::Blocks $source] {hir::injection::injects $source $r}
+} -result {{std::io::IO std::linux::io::LinuxIO}}
+
+# ---------------------------------------------------------------------------
+# The restriction
+
+test ri-contextless-calculation {acceptance A: a contextless computation beside three installed contexts} -body {
+    riAgree "${::prelude}${::install}inject no context:\n    calculate(21)\n"
+} -result 42
+
+test ri-storage-only {acceptance B: Storage injected, used through several levels of ordinary calls} -body {
+    riAgree "${::prelude}fn b(n: int) -> int:\n    store(n)\n\nfn a(n: int) -> int:\n    b(n) + 1\n\n${::install}inject context Storage:\n    a(calculate(5))\n"
+} -result 21
+
+test ri-not-injected-transitive {a requirement two calls deep is reported at the call, with its chain} -body {
+    list [riErrors "${::prelude}fn prepare(n: int) -> int:\n    send(n)\n\n${::install}inject no context:\n    prepare(1)\n"] \
+        [riMessage "${::prelude}fn prepare(n: int) -> int:\n    send(n)\n\n${::install}inject no context:\n    prepare(1)\n"]
+} -match glob -result {{{CONTEXT-NOT-INJECTED 31:5}} {*:31:5: Network is required by this call, but the enclosing inject block (at *:30:1) injects no context: *
+    prepare
+     -> send
+        directly requires Network}}
+
+test ri-outside-unchanged {the same function stays callable by privileged code outside the block} -body {
+    riAgree "${::prelude}fn prepare(n: int) -> int:\n    send(n)\n\n${::install}a = inject no context:\n    calculate(1)\na + prepare(1)\n"
+} -result 103
+
+test ri-only-the-missing {a function requiring several contexts: only the ones not injected are reported, once each} -body {
+    riErrors "${::prelude}fn both(n: int) -> int:\n    send(n) + store(n) + now()\n\n${::install}inject context Storage:\n    both(1)\n    both(2)\n"
+} -result {{CONTEXT-NOT-INJECTED 31:5} {CONTEXT-NOT-INJECTED 31:5} {CONTEXT-NOT-INJECTED 32:5} {CONTEXT-NOT-INJECTED 32:5}}
+
+test ri-method-sugar {a method-style call is an ordinary call: its requirement is checked, never a reason to pick another candidate} -body {
+    riErrors "${::prelude}${::install}inject context Storage:\n    x = 1\n    x.send()\n"
+} -result {{CONTEXT-NOT-INJECTED 29:5}}
+
+test ri-generic {a generic (untyped) wrapper that names no context still carries its callee's requirement} -body {
+    riErrors "${::prelude}fn wrap(f, n):\n    f(n) + send(n)\n\nfn twice(n):\n    wrap(calculate, n)\n\n${::install}inject no context:\n    twice(1)\n"
+} -result {{CONTEXT-NOT-INJECTED 34:5}}
+
+test ri-recursion {mutually recursive functions: a requirement reached through the group is the group's} -body {
+    riErrors "${::prelude}fn even(n: int) -> int:\n    fn odd(m: int) -> int:\n        if m == 0:\n            return send(0)\n        even(m - 1)\n    if n == 0:\n        return 0\n    odd(n - 1)\n\n${::install}inject context Storage:\n    even(4)\n"
+} -result {{CONTEXT-NOT-INJECTED 37:5}}
+
+test ri-imported-module {a module's function requiring a module's context, called from the entry program's block} -body {
+    set dir [file join $::scratch app[incr ::programCounter]]
+    file mkdir $dir
+    set f [open [file join $dir net.bot] w]
+    puts $f "type Id = Int in 0..1000\n\ncontext struct Network:\n    id: Id\n\nfn create() -> Network:\n    Network {id: 5}\n\nfn send(n: int, context n2: Network) -> int:\n    n + n2.id\n\nfn relay(n: int) -> int:\n    send(n)"
+    close $f
+    set path [riFile "import net\n\nwith context net::create()\ninject context net::Network:\n    a = net::relay(1)\nb = inject no context:\n    net::relay(2)\nb\n" $dir]
+    catch {surface::readProgramFile $path -warnings off} message options
+    lmap d [dict getdef $options -diagnostics {}] {list [lindex [dict get $d errorcode] end] [dict get $d location line]}
+} -result {{CONTEXT-NOT-INJECTED 7}}
+
+test ri-context-trait {a context trait injected grants its operations through the selected implementation, not the implementing context's own functions, and the reverse} -body {
+    set program {import std::io
+
+type Id = Int in 0..1000
+
+context struct Console:
+    id: Id
+
+fn write_text(text: str, context c: Console) -> unit errors std::io::WriteFailed:
+    unit
+
+fn write_error_text(text: str, context c: Console) -> unit errors std::io::WriteFailed:
+    unit
+
+fn console_id(context c: Console) -> int:
+    c.id
+
+fn log(text: str) -> int:
+    std::io::print_line(text):
+        on std::io::WriteFailed:
+            unit
+    1
+
+with context Console {id: 7}
+}
+    list [riAgree "${program}a = inject context std::io::IO:\n    log(\"hello\")\nb = inject context Console, std::io::IO:\n    log(\"x\") + console_id()\n\[a, b\]\n"] \
+        [riErrors "${program}inject context std::io::IO:\n    console_id()\ninject context Console:\n    log(\"x\")\n"]
+} -result {{[1, 8]} {{CONTEXT-NOT-INJECTED 25:5} {CONTEXT-NOT-INJECTED 27:5}}}
+
+test ri-trait-in-function {a function's block injecting a context trait: the function requires the trait, its specialization calls the implementation directly} -body {
+    riAgree {import std::io
+
+type Id = Int in 0..1000
+
+context struct Console:
+    id: Id
+
+fn write_text(text: str, context c: Console) -> unit errors std::io::WriteFailed:
+    unit
+
+fn write_error_text(text: str, context c: Console) -> unit errors std::io::WriteFailed:
+    unit
+
+fn handler() -> int:
+    inject context std::io::IO:
+        std::io::print("hi"):
+            on std::io::WriteFailed:
+                unit
+        5
+
+with context Console {id: 7}
+handler()
+}
+} -result 5
+
+test ri-closure-in-block {a nested function defined in the block and called there is checked at its call; a context-free function value passed and called indirectly is no context use} -body {
+    set apply "fn apply(f: Fn{args: \[int\], return: int, errors: \[\]}, n: int) -> int:\n    f(n)\n\n"
+    list [riErrors "${::prelude}${::install}inject context Storage:\n    fn helper(n: int) -> int:\n        send(n)\n    helper(1)\n"] \
+        [riAgree "${::prelude}${apply}${::install}inject no context:\n    fn helper(n: int) -> int:\n        calculate(n)\n    g = helper\n    apply(helper, 2) + g(1)\n"]
+} -result {{{CONTEXT-NOT-INJECTED 30:5}} 6}
+
+test ri-unreachable {an inject block in code that never runs requires nothing, as unreachable consumers do} -body {
+    riAgree "${::prelude}fn never_called() -> int:\n    inject context Network:\n        send(1)\n\ninject no context:\n    calculate(4)\n"
+} -result 8
+
+test ri-sfiae {an injection is an obligation of the selected call, never a reason to select another candidate: beside a candidate that needs nothing the call stays ambiguous; alone, the candidate is selected and its call is CONTEXT-NOT-INJECTED} -body {
+    set dir [file join $::scratch sfiae[incr ::programCounter]]
+    file mkdir $dir
+    foreach {name text} {
+        cx.bot "type Id = Int in 0..1000\n\ncontext struct CX:\n    k: Id\n"
+        alpha.bot "import cx\n\nfn f(x: int, context c: cx::CX) -> int:\n    x + c.k\n"
+        beta.bot "fn f(x: int) -> int:\n    x + 1000\n"
+    } {
+        set f [open [file join $dir $name] w]
+        puts -nonewline $f $text
+        close $f
+    }
+    set results {}
+    foreach imports {{alpha beta} alpha} {
+        set head "import cx\n"
+        foreach m $imports {
+            append head "import $m\n"
+        }
+        set path [riFile "${head}\nwith context cx::CX {k: 5}\ninject no context:\n    7.f()\n" $dir]
+        catch {surface::readProgramFile $path -warnings off} message options
+        lappend results [lmap d [dict getdef $options -diagnostics {}] {lindex [dict get $d errorcode] end}]
+    }
+    set results
+} -result {AMBIGUOUS-METHOD-CALL CONTEXT-NOT-INJECTED}
+
+# ---------------------------------------------------------------------------
+# Nesting, grants and availability
+
+test ri-nested-narrowing {acceptance D: a Storage-only computation creates a contextless child; injecting Network inside it is rejected although Network is installed} -body {
+    list [riAgree "${::prelude}${::install}inject context Storage:\n    a = store(1)\n    inject no context:\n        calculate(a)\n"] \
+        [riErrors "${::prelude}${::install}inject context Storage:\n    inject context Network:\n        1\n"]
+} -result {22 {{CONTEXT-NOT-INJECTED 28:5}}}
+
+test ri-grant-is-a-use {a function containing an inject block requires what it injects: its callers' blocks must have it, its top-level call needs it installed} -body {
+    set fns "${::prelude}fn inner() -> int:\n    inject context Network:\n        send(1)\n\n"
+    list [riErrors "${fns}${::install}inject context Storage:\n    inner()\n"] \
+        [riMessage "${fns}inner()\n"] \
+        [riErrors "${fns}inner()\n"]
+} -match glob -result {{{CONTEXT-NOT-INJECTED 32:5}} {*:28:1: Network is required by this call but is not installed here *
+    inner
+        injects Network (the inject block at *:25:5)} {{MISSING-CONTEXT 28:1}}}
+
+test ri-top-level-availability {a top-level block injects only what is installed where it runs; a context trait needs exactly one implementation} -body {
+    list [riErrors "${::prelude}inject context Storage:\n    1\nwith context Storage {id: 1}\n"] \
+        [riErrors {import std::io
+
+type Id = Int in 0..1000
+
+context struct A:
+    id: Id
+
+context struct B:
+    id: Id
+
+fn write_text(text: str, context c: A) -> unit errors std::io::WriteFailed:
+    unit
+
+fn write_error_text(text: str, context c: A) -> unit errors std::io::WriteFailed:
+    unit
+
+with context A {id: 1}
+inject context std::io::IO:
+    0
+}]
+} -result {{{MISSING-CONTEXT 24:1}} {}}
+
+test ri-installation-inside {an inject block grants; it never installs} -body {
+    riMessage "${::prelude}inject no context:\n    with context Storage {id: 1}\n"
+} -match glob -result {*inside an inject block, which grants installed contexts and never installs one*}
+
+# ---------------------------------------------------------------------------
+# Context parameters, captures and value delegation
+
+test ri-context-parameters {a reference to the enclosing function's context parameter, directly or through a nested function defined in the block or outside it, needs the context injected; a copy made outside is a value} -body {
+    riErrors "${::prelude}fn use_value(n: Network) -> int:\n    n.id\n\nfn outer(context net: Network, st: Storage) -> int:\n    fn peek() -> int:\n        net.id\n    a = inject context Storage:\n        net.id\n    b = inject context Storage:\n        peek()\n    c = inject context Storage:\n        fn inner() -> int:\n            net.id\n        inner()\n    v = net\n    d = inject context Storage:\n        use_value(v)\n    e = inject context Network:\n        net.id + peek()\n    a + b + c + d + e\n\n${::install}outer()\n"
+} -result {{CONTEXT-NOT-INJECTED 31:9} {CONTEXT-NOT-INJECTED 33:9} {CONTEXT-NOT-INJECTED 36:13}}
+
+test ri-trait-binding {a context-trait binding of the enclosing function is a use of the trait inside the block} -body {
+    riErrors {import std::io
+
+type Id = Int in 0..1000
+
+context struct Console:
+    id: Id
+
+fn write_text(text: str, context c: Console) -> unit errors std::io::WriteFailed:
+    unit
+
+fn write_error_text(text: str, context c: Console) -> unit errors std::io::WriteFailed:
+    unit
+
+fn outer(context io: std::io::IO) -> int errors std::io::WriteFailed:
+    fn helper() errors std::io::WriteFailed:
+        io.write_text("hi")
+    inject no context:
+        helper()
+        io.write_text("there")
+    1
+
+with context Console {id: 7}
+outer():
+    on std::io::WriteFailed:
+        0
+}
+} -result {{CONTEXT-NOT-INJECTED 18:9} {CONTEXT-NOT-INJECTED 19:9}}
+
+test ri-web-framework {acceptance C: a framework runs a request handler with Database injected; the handler reaches Database-dependent services, a Network-dependent one fails statically; no actor, loop or thread} -body {
+    set program {type Id = Int in 0..1000
+
+context struct Database:
+    id: Id
+
+context struct Network:
+    id: Id
+
+context struct Logging:
+    id: Id
+
+struct Request:
+    user: int
+
+struct Response:
+    body: int
+
+fn lookup(user: int, context db: Database) -> int:
+    user + db.id
+
+fn notify(user: int, context net: Network) -> int:
+    user + net.id
+
+fn audit(user: int, context log: Logging) -> int:
+    log.id
+
+fn profile(r: Request) -> Response:
+    Response {body: lookup(r.user)}
+
+fn profile_and_notify(r: Request) -> Response:
+    Response {body: lookup(r.user) + notify(r.user)}
+
+fn serve(r: Request, context db: Database, net: Network, log: Logging) -> int:
+    a = audit(r.user)
+    response = inject context Database:
+        HANDLER(r)
+    response.body + a
+}
+    set wfInstall "\nwith context Database {id: 30}\nwith context Network {id: 100}\nwith context Logging {id: 2}\nserve(Request {user: 10})\n"
+    list [riAgree "[string map {HANDLER profile} $program]$wfInstall"] \
+        [riErrors "[string map {HANDLER profile_and_notify} $program]$wfInstall"]
+} -result {42 {{CONTEXT-NOT-INJECTED 36:9}}}
+
+# ---------------------------------------------------------------------------
+# Direct modules
+
+test ri-direct-mediation {inside an inject block a direct module's call is mediated only by an injected context of the calling module; a direct module's own raw authority is not context authority} -constraints nativeLinux -body {
+    set dir [file join $::scratch direct[incr ::programCounter]]
+    file mkdir $dir
+    set f [open [file join $dir out.bot] w]
+    puts $f {import std::abi
+import std::abi::bytes
+import std::linux
+import std::str
+
+type Id = Int in 0..1000
+
+context struct Out:
+    id: Id
+
+fn create() -> Out:
+    Out {id: 1}
+
+fn emit(text: str, context o: Out) -> int:
+    data = std::abi::bytes::from_list(std::str::encode_utf8(text))
+    inject no context:
+        std::linux::write(std::abi::i32(1), data)
+
+fn emit_granted(text: str, context o: Out) -> int:
+    data = std::abi::bytes::from_list(std::str::encode_utf8(text))
+    inject context Out:
+        std::linux::write(std::abi::i32(1), data)}
+    close $f
+    set f [open [file join $dir raw.bot] w]
+    puts $f {direct module
+import std::abi
+import std::abi::bytes
+import std::linux
+import std::str
+
+fn emit(text: str) -> int:
+    data = std::abi::bytes::from_list(std::str::encode_utf8(text))
+    inject no context:
+        std::linux::write(std::abi::i32(1), data)}
+    close $f
+    set results {}
+    set path [riFile "import out\n\nwith context out::create()\nout::emit_granted(\"x\")\n" $dir]
+    catch {surface::readProgramFile $path -warnings off -target [linuxTarget]} message options
+    lappend results [lmap d [dict getdef $options -diagnostics {}] {list [lindex [dict get $d errorcode] end] [dict get $d location line]}]
+    set path [riFile "direct module\nimport raw\n\nraw::emit(\"x\")\n" $dir]
+    lappend results [catch {surface::readProgramFile $path -warnings off -target [linuxTarget]}]
+} -result {{{CONTEXT-NOT-INJECTED 17}} 0}
+
+# ---------------------------------------------------------------------------
+# Retained coroutine authority
+
+set coroutinePrelude "${::prelude}fn net_task(n: int) -> int:
+    yield n
+    send(n)
+
+fn pure_task(n: int) -> int:
+    yield n
+    n * 2
+
+fn storage_task(n: int) -> int:
+    yield n
+    store(n)
+
+fn make_pure(n: int) -> Coroutine{args: \[\], return: int, errors: \[\]}:
+    coroutine {step: s} = pure_task(n)
+    s
+
+fn make_net(n: int) -> Coroutine{args: \[\], return: int, errors: \[\]}:
+    coroutine {step: s} = net_task(n)
+    s
+
+fn drive(h: Coroutine{args: \[\], return: int, errors: \[\]}) -> int:
+    h()
+
+fn generic_drive(h):
+    h()
+
+fn wrapper(h: Coroutine{args: \[\], return: int, errors: \[\]}) -> int:
+    yield 0
+    h()
+
+fn spawner(n: int) -> int:
+    coroutine {step: child} = pure_task(n)
+    yield 0
+    child()
+
+struct Box:
+    h: Coroutine{args: \[\], return: int, errors: \[\]}
+
+"
+
+test ri-coroutine-accepted {coroutines constructed within the injected contexts: in the block, through a helper, through a struct, through a resuming helper, with children, Storage-only; a contextless one constructed outside} -body {
+    riAgree "${::coroutinePrelude}${::install}coroutine {step: outside} = pure_task(2)
+coroutine {step: boxed_step} = pure_task(5)
+boxed = Box {h: boxed_step}
+r1 = inject no context:
+    coroutine {step: s} = pure_task(3)
+    s()
+r2 = inject no context:
+    outside()
+r3 = inject no context:
+    m = make_pure(4)
+    drive(m)
+r4 = inject no context:
+    {h} = boxed
+    generic_drive(h)
+r5 = inject no context:
+    coroutine {step: p} = spawner(6)
+    p()
+r6 = inject context Storage:
+    coroutine {step: st} = storage_task(7)
+    st()
+\[r1, r2, r3, r4, r5, r6\]
+"
+} -result {[6, 4, 8, 10, 12, 17]}
+
+test ri-coroutine-construction-checked {a coroutine requiring Network constructed in a contextless block: its construction is a call of its thunk} -body {
+    riErrors "${::coroutinePrelude}${::install}inject no context:\n    coroutine {step: s} = net_task(1)\n    s()\n"
+} -result {{CONTEXT-NOT-INJECTED 66:5}}
+
+test ri-coroutine-laundering {acceptance E: a privileged coroutine constructed outside cannot be resumed inside, directly, through a helper (typed or generic, method-style), a struct, a wrapper coroutine, a construction argument, a helper's result or a collection} -body {
+    riErrors "import std::mutable_vector\n${::coroutinePrelude}${::install}coroutine {step: p1} = net_task(1)
+coroutine {step: p2} = net_task(1)
+coroutine {step: p3} = net_task(1)
+coroutine {step: p4} = net_task(1)
+coroutine {step: p5} = net_task(1)
+coroutine {step: p6} = net_task(1)
+coroutine {step: wrapped} = wrapper(p5)
+boxed = Box {h: p4}
+helper_made = make_net(1)
+inject no context:
+    p1()
+inject no context:
+    drive(p2)
+inject no context:
+    p3.generic_drive()
+inject no context:
+    {h} = boxed
+    h()
+inject no context:
+    wrapped()
+inject no context:
+    coroutine {step: w} = wrapper(p6)
+    0
+inject no context:
+    helper_made()
+fn no_handles() -> MutableVector\[Coroutine{args: \[\], return: int, errors: \[\]}\]:
+    std::mutable_vector::from_list(\[\])
+
+fn launder_vector() -> int errors IndexNotFound:
+    coroutine {step: p} = net_task(1)
+    v = no_handles()
+    v.push(p)
+    inject no context:
+        h = v.pop()
+        h()
+
+launder_vector():
+    on IndexNotFound:
+        0
+"
+} -result {{CONTEXT-RETAINED-AUTHORITY 76:5} {CONTEXT-RETAINED-AUTHORITY 78:5} {CONTEXT-RETAINED-AUTHORITY 80:5} {CONTEXT-RETAINED-AUTHORITY 83:5} {CONTEXT-RETAINED-AUTHORITY 85:5} {CONTEXT-RETAINED-AUTHORITY 87:5} {CONTEXT-RETAINED-AUTHORITY 90:5} {CONTEXT-RETAINED-AUTHORITY 100:9}}
+
+test ri-coroutine-message {the message names what the coroutine retains} -body {
+    riMessage "${::coroutinePrelude}${::install}coroutine {step: p} = net_task(1)\ninject no context:\n    p()\n"
+} -match glob -result {*: this call runs coroutine code with authority the enclosing inject block (at *) does not grant (it injects no context): it may resume a coroutine that retains Network (the contexts its construction provided).*}
+
+test ri-coroutine-pass-through {moving a privileged handle through a block without resuming it uses none of its authority; privileged code resumes it after} -body {
+    riAgree "${::coroutinePrelude}${::install}coroutine {step: p} = net_task(1)
+q = inject no context:
+    moved = p
+    moved
+drive(q)
+"
+} -result 101
+
+test ri-coroutine-context-place {a handle moved out of an installed context's state is of unknown construction: resuming it in a block is rejected even with the context injected} -body {
+    set program {import std::mutable_vector
+
+type Id = Int in 0..1000
+
+context struct Network:
+    id: Id
+
+opaque context struct Pool:
+    tasks: MutableVector[Coroutine{args: [], return: int, errors: [IndexNotFound]}]
+
+fn create_pool() -> Pool:
+    Pool {tasks: std::mutable_vector::from_list([])}
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn net_task(n: int) -> int errors IndexNotFound:
+    yield n
+    send(n)
+
+fn give(h: Coroutine{args: [], return: int, errors: [IndexNotFound]}, context pool: Pool):
+    pool.tasks.push(h)
+
+fn run_one(context pool: Pool) -> int errors IndexNotFound:
+    h = pool.tasks.pop()
+    h()
+
+with context Network {id: 100}
+with context create_pool()
+
+coroutine {step: p} = net_task(1)
+give(p)
+inject context Pool, Network:
+    run_one():
+        on IndexNotFound:
+            0
+}
+    list [riErrors $program] [string match {*one moved out of the installed context Pool*} [riMessage $program]]
+} -result {{{CONTEXT-RETAINED-AUTHORITY 34:5}} 1}
+
+test ri-coroutine-parameter {inside a function, a block resuming the function's own coroutine parameter cannot know what its caller constructed} -body {
+    riErrors "${::coroutinePrelude}fn host(h: Coroutine{args: \[\], return: int, errors: \[\]}) -> int:\n    inject no context:\n        h()\n\n${::install}coroutine {step: p} = pure_task(1)\nhost(p)\n"
+} -result {{CONTEXT-RETAINED-AUTHORITY 64:9}}
+
+test ri-same-thread-actors {acceptance: two restricted coroutines with different injected sets on one ordinary event loop -- same VM, same installed implementations; neither can use the other's authority} -body {
+    set program {import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+
+type Id = Int in 0..1000
+
+context struct Storage:
+    id: Id
+
+context struct Network:
+    id: Id
+
+fn stored(n: int, context st: Storage) -> int:
+    n + st.id
+
+fn sent(n: int, context net: Network) -> int:
+    n + net.id
+
+fn calculator(ch: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(ch)
+    BODY
+
+fn storage_service(ch: std::event_loop::Reg, context ev: std::event_loop::Loop, st: Storage) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(ch)
+    stored(e.a)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, net: Network) -> List[int] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    ch1 = std::event_loop::channel(std::event_loop::Delivery::Reliable, 4)
+    ch2 = std::event_loop::channel(std::event_loop::Delivery::Reliable, 4)
+    inject context std::event_loop::Loop:
+        coroutine {step: a, first: fa} = calculator(ch1)
+        std::event_loop::adopt(a, fa)
+    inject context std::event_loop::Loop, Storage:
+        coroutine {step: b, first: fb} = storage_service(ch2)
+        std::event_loop::adopt(b, fb)
+    ch1.post(21, 0)
+    ch2.post(sent(1), 0)
+    std::event_loop::run()
+    loop o in std::event_loop::take_outcomes():
+        o.value
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context Storage {id: 10}
+with context Network {id: 100}
+main():
+    on std::event_loop::SchedulerFault:
+        [-1]
+    on std::event_loop::DriverFault:
+        [-2]
+    on std::event_loop::LoopReentered:
+        [-3]
+}
+    list [riAgree [string map {BODY {e.a * 2}} $program] {interp cranelift}] \
+        [riErrors [string map {BODY {sent(e.a)}} $program]]
+} -result {{[42, 111]} {{CONTEXT-NOT-INJECTED 32:9}}}
+
+# ---------------------------------------------------------------------------
+# Tooling and representation
+
+test ri-hir-text {HIR text prints each block's injected contexts and reads them back: the round trip is exact} -body {
+    set hir [riHir "${::prelude}${::install}a = inject no context:\n    calculate(1)\ninject context Storage, Clock:\n    store(now())\n"]
+    set text [hir::format $hir]
+    set again [hir::format [hir::parse $text]]
+    list [regexp -all {if injects \(\)} $text] [regexp -all {if injects \(Storage, Clock\)} $text] [expr {$text eq $again}]
+} -result {1 1 1}
+
+test ri-interchange {HIR interchange carries the blocks; the decoded program runs as built} -body {
+    set hir [riHir "${::prelude}${::install}inject context Storage:\n    store(calculate(1))\n"]
+    set decoded [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [lmap r [hir::injection::Blocks $decoded] {hir::injection::injects $decoded $r}] \
+        [lindex [outcomeUnderHir cranelift $decoded] 1]
+} -result {Storage 12}
+
+test ri-static-compile {a rejected inject block inside `static compile:` is the CompilerError ContextNotInjected; an accepted one compiles} -body {
+    riAgree "import std::compiler\n\n${::prelude}fn probe() -> int errors std::compiler::CompilerError:\n    static compile:\n        inject no context:\n            send(1)\n\nfn fine() -> int errors std::compiler::CompilerError:\n    static compile:\n        inject context Network:\n            send(1)\n\n${::install}r = probe():\n    on std::compiler::CompilerError {code, primary}:\n        if code == std::compiler::DiagnosticCode::ContextNotInjected:\n            primary.line\n        else:\n            0\ns = fine():\n    on std::compiler::CompilerError:\n        0\n\[r, s\]\n"
+} -result {[29, 101]}
+
+test ri-static-schedulers {a block's verdict that depends on another block's decision through a callee's handle summary: the batched scheduler decides exactly what the sequential order decides} -body {
+    set program {import std::compiler
+
+type Id = Int in 0..1000
+
+context struct Network:
+    id: Id
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn net_task(n: int) -> int:
+    yield n
+    send(n)
+
+fn pure_task(n: int) -> int:
+    yield n
+    n
+
+fn make(context net: Network) -> Coroutine{args: [], return: int, errors: []} errors std::compiler::CompilerError:
+    coroutine {step: p} = pure_task(1)
+    static compile:
+        GUARD
+        coroutine {step: q} = net_task(1)
+        return q
+    p
+
+fn use(context net: Network) -> int errors std::compiler::CompilerError:
+    h = make()
+    static compile:
+        inject no context:
+            h()
+
+with context Network {id: 3}
+use():
+    on std::compiler::CompilerError:
+        -1
+}
+    set results {}
+    foreach guard {missing_name 0} {
+        set source [string map [list GUARD $guard] $program]
+        set b [sdCompile batched $source <input> [linuxTarget]]
+        set q [sdCompile sequential $source <input> [linuxTarget]]
+        set sites [dict get $b sites]
+        set ordered [lsort -command {apply {{x y} {expr {[lindex [split $x :] end] - [lindex [split $y :] end]}}}} [dict keys $sites]]
+        lappend results [sdDiff $b $q] [lmap k $ordered {lrange [dict get $sites $k] 0 1}]
+    }
+    set results
+} -result {{} {{rejected UNBOUND} accepted} {} {accepted {rejected CONTEXT-RETAINED-AUTHORITY}}}
+
+test ri-contexts-summary {-contexts lists every block and the grants it makes} -body {
+    set hir [riHir "${::prelude}fn inner() -> int:\n    inject context Network:\n        send(1)\n\n${::install}inject no context:\n    calculate(1)\ninner()\n"]
+    set summary [hir::contexts::summary $hir]
+    list [regexp -all -line {^contextinject e[0-9]+ \((Network)?\)$} $summary] \
+        [regexp -line {^function inner e[0-9]+ direct-contexts \(Network\) required-contexts \(Network\)$} $summary]
+} -result {2 1}
+
+test ri-service {the compiler service reports the diagnostic at the call, as the compilation raises it} -body {
+    set path [riFile "${::prelude}${::install}inject no context:\n    send(1)\n"]
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set revision [service::analyze $ws $path]
+        lmap d [service::diagnostics $revision -severity error] {list [lindex [dict get $d code] end] [dict get $d line]:[dict get $d column]}
+    } finally {
+        service::closeWorkspace $ws
+    }
+} -result {{CONTEXT-NOT-INJECTED 28:5}}
+
+test ri-syntax-recovery {a malformed inject header is a syntax error the recovered analysis reports first, and the program's other errors are still found} -body {
+    set path [riFile "${::prelude}${::install}inject context:\n    1\nx = unknown_name\n"]
+    set ws [service::workspace -warnings off -cache ""]
+    try {
+        set revision [service::analyze $ws $path]
+        lmap d [service::diagnostics $revision -severity error] {list [lindex [dict get $d code] end] [dict get $d line]}
+    } finally {
+        service::closeWorkspace $ws
+    }
+} -result {{SYNTAX 27} {UNBOUND 29}}
+
+# ---------------------------------------------------------------------------
+# Zero cost
+
+test ri-zero-cost-nir {an inject block compiles to the code of its body: the NIR of a program with blocks equals the NIR of the same program written with `if true:`} -body {
+    set body "${::prelude}${::install}a = BLOCK\n    calculate(20)\nb = BLOCK2\n    store(a)\nb\n"
+    set restricted [native::nir [riHir [string map {BLOCK2 {inject context Storage:} BLOCK {inject no context:}} $body]]]
+    set plain [native::nir [riHir [string map {BLOCK2 {if true:} BLOCK {if true:}} $body]]]
+    list [expr {$restricted eq $plain}] [string match *inject* $restricted]
+} -result {1 0}
+
+test ri-zero-cost-instances {a function called from privileged and restricted code is one native instance, compiled once: the program has exactly the functions of the same program without the blocks} -body {
+    set fns "${::prelude}fn sum_to(n: int) -> int:\n    if n <= 0:\n        return 0\n    n + sum_to(n - 1)\n\n${::install}"
+    set restricted "${fns}a = sum_to(now())\nb = inject context Clock:\n    sum_to(now() + 1)\nc = inject context Clock, Storage:\n    sum_to(store(now()))\na + b + c\n"
+    set plain "${fns}a = sum_to(now())\nb = sum_to(now() + 1)\nc = sum_to(store(now()))\na + b + c\n"
+    set funcs {{nir} {lsort [lmap line [regexp -all -inline -line {^func [0-9]+ "[^"]*".*instance="[^"]*"} $nir] {
+        regsub {^func [0-9]+ } $line ""
+    }]}}
+    set a [apply $funcs [native::nir [riHir $restricted]]]
+    set b [apply $funcs [native::nir [riHir $plain]]]
+    list [llength [lsearch -all -glob $a {"sum_to"*}]] [expr {$a eq $b}] [riAgree $restricted]
+} -result {1 1 70}
+
+cleanupTests

@@ -1595,6 +1595,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e known ""
         }
         if {
+            if {[dict exists $node inject]} {
+                # An inject block (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
+                # the context types it injects, as canonical identities
+                # (hir/injection.tcl checks what its code uses against them).
+                SetField hir $e injects [hir::injection::Resolve hir $e [dict get $node inject] [CtxNamespace $ctx]]
+            }
             SetField hir $e condition [Expr hir [dict get $node condition] $ctx]
             foreach {role outcome} {then 1 else 0} {
                 set body [dict get $node ${role}Body]

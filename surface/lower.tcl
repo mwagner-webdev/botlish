@@ -1055,6 +1055,27 @@ proc surface::lower::Node {node} {
                 [Origin [dict get $body span] [dict get $body id]/body] \
                 [Sequence [dict get $body body]] $deferred]
         }
+        inject {
+            # An inject block (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
+            # its body is the ordinary block `if true:` (the form an
+            # accepted static block takes, hir/static.tcl's Accepted), which
+            # scopes what the body binds and in a value position is its last
+            # statement's value, so every analysis and backend reads it as
+            # what it is -- code that runs once, right there. The `inject`
+            # field is the restriction: the written context types, each
+            # with its origin, which resolution reads into the expression's
+            # `injects` and hir/injection.tcl checks. No runtime operation,
+            # no new node kind.
+            set body [dict get $node body]
+            set injected [lmap c [dict get $node contexts] {
+                list [dict get $c type] [Origin [dict get $c typeSpan] "[dict get $node id]/inject([dict get $c typeSpan start])"]
+            }]
+            set block [hir::syntax::ifNode $origin [hir::syntax::rootRef [OriginOf $node inject] true] \
+                [Origin [dict get $body span] [dict get $body id]/body] [Sequence [dict get $body body]] \
+                [OriginOf $node else] {}]
+            dict set block inject $injected
+            return $block
+        }
     }
     error "surface::lowerToHir: cannot lower a \"[dict get $node kind]\" node"
 }

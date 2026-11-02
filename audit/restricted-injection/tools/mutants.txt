@@ -1,0 +1,268 @@
+# Mutants of restricted context injection
+# (audit/restricted-injection/tools/mutate.tcl;
+# RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md, "Mutation testing"): each a
+# deliberate bug in the inject form's syntax or lowering (surface/), the
+# requirement grant (hir/contexts.tcl), the checks of hir/injection.tcl,
+# the coroutine provenance analysis, the obligation kinds (hir/methods.tcl)
+# or HIR text (hir/format.tcl).
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests of tests/restricted-injection.test meant
+#                      to detect it (one failing is a kill)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments.
+
+@@ ignore-injected-set the restricted set is ignored: a call's requirement is never compared with what the block injects
+!! ri-not-injected-transitive ri-only-the-missing ri-web-framework ri-storage-only
+## hir/injection.tcl
+<<<<
+            foreach id [dict get $required $t] {
+                if {$id in $ids || $id in $reported} continue
+====
+            foreach id [dict get $required $t] {
+                if {1 || $id in $ids || $id in $reported} continue
+>>>>
+
+@@ inherit-installed a block inherits every installed context: a top-level block's code may use whatever is installed where it runs
+!! ri-not-injected-transitive ri-only-the-missing ri-context-trait ri-method-sugar
+## hir/injection.tcl
+<<<<
+                if {$o eq "" && ![Provided $id $available]} {
+====
+                if {$o eq "" && [Provided $id $available]} {
+                    continue
+                }
+                if {$o eq "" && ![Provided $id $available]} {
+>>>>
+
+@@ direct-calls-only only the callee's own (direct) contexts are checked, not its transitive requirement
+!! ri-not-injected-transitive ri-generic ri-recursion ri-storage-only
+## hir/injection.tcl
+<<<<
+            if {![dict exists $required $t]} continue
+            foreach id [dict get $required $t] {
+====
+            if {![dict exists $required $t]} continue
+            foreach id [hir::contexts::direct $hir [lindex $t end]] {
+>>>>
+
+@@ wider-nesting an inner inject block may inject what its enclosing block does not
+!! ri-nested-narrowing
+## hir/injection.tcl
+<<<<
+            foreach id $ids {
+                if {$id ni [injects $hir $outer]} {
+====
+            foreach id $ids {
+                if {0 && $id ni [injects $hir $outer]} {
+>>>>
+
+@@ grant-not-a-use a function's inject block is no use of what it injects: the function requires nothing for it, so its callers' blocks and its top-level call are not checked for it
+!! ri-grant-is-a-use
+## hir/injection.tcl
+<<<<
+        set o [dict get $owner $r]
+        if {$o eq ""} continue
+        foreach id [injects $hir $r] {
+            if {![dict exists $grants $o $id]} {
+====
+        set o [dict get $owner $r]
+        if {1 || $o eq ""} continue
+        foreach id [injects $hir $r] {
+            if {![dict exists $grants $o $id]} {
+>>>>
+
+@@ construction-unchecked a coroutine construction in a block is no call of its thunk: its requirement is not checked against the block
+!! ri-coroutine-construction-checked
+## hir/injection.tcl
+<<<<
+    set reported {}
+    hir::CheckingCall $c {
+        foreach t $targets {
+====
+    set reported {}
+    if {[hir::coroutines::NativeOf $hir $c] eq [core::coroutines::createNative]} {
+        set targets {}
+    }
+    hir::CheckingCall $c {
+        foreach t $targets {
+>>>>
+
+@@ admit-retained a coroutine's retained authority is never compared with the block: a privileged coroutine constructed outside is resumed inside
+!! ri-coroutine-laundering ri-coroutine-message
+## hir/injection.tcl
+<<<<
+                    if {$id ni $ids && $id ni $missing && $id ni $dependent && $id ni $excess} {
+====
+                    if {0 && $id ni $ids && $id ni $missing && $id ni $dependent && $id ni $excess} {
+>>>>
+
+@@ resume-not-a-resume a resume of a handle binding (coroutine#resume) runs no coroutine code
+!! ri-coroutine-laundering ri-coroutine-message
+## hir/injection.tcl
+<<<<
+        # are unrestricted: COROUTINE-CONTRACT.)
+        set resumes $all
+====
+        # are unrestricted: COROUTINE-CONTRACT.)
+        set resumes {}
+>>>>
+
+@@ binding-erases moving a handle to another binding erases what it retains (bind records no origins)
+!! ri-coroutine-laundering ri-coroutine-context-place
+## hir/injection.tcl
+<<<<
+            set value [Tau state [dict get $node value]]
+            Grow state bind [dict get $node binding] $value
+====
+            set value [Tau state [dict get $node value]]
+>>>>
+
+@@ collection-erases moving a handle into a collection erases what it retains (a mutation does not reach its receiver's place)
+!! ri-coroutine-laundering
+## hir/injection.tcl
+<<<<
+        if {[hir::mutvec::OpKind $hir $e] eq "mutate" && $all ne {} && $args ne {}} {
+====
+        if {0 && [hir::mutvec::OpKind $hir $e] eq "mutate" && $all ne {} && $args ne {}} {
+>>>>
+
+@@ context-place-trusted a handle moved out of an installed context's state is trusted (no foreign origin)
+!! ri-coroutine-context-place
+## hir/injection.tcl
+<<<<
+        return [list [list foreign context [hir::contexts::loadId $hir $e]]]
+====
+        return {}
+>>>>
+
+@@ parameter-trusted a function parameter carries no origin: a helper that resumes what it is passed launders it
+!! ri-coroutine-laundering ri-coroutine-parameter
+## hir/injection.tcl
+<<<<
+                if {$index ne ""} {
+                    lappend result [list p {*}$index]
+                }
+====
+>>>>
+
+@@ fn-typed-handle-free a value typed by a structural Fn contract holds no handle: an untyped generic helper, specialized for a coroutine, launders it
+!! ri-coroutine-laundering
+## hir/injection.tcl
+<<<<
+    if {[hir::types::IsAffine $type] || [hir::types::IsTrait $type] || [hir::types::IsFn $type]} {
+        return 0
+    }
+    if {$type eq "never" || [hir::types::IsImprint $type]} {
+====
+    if {[hir::types::IsAffine $type] || [hir::types::IsTrait $type]} {
+        return 0
+    }
+    if {$type eq "never" || [hir::types::IsFn $type] || [hir::types::IsImprint $type]} {
+>>>>
+
+@@ wrapper-erases a coroutine's handle carries only its own requirement, not what its code resumes: a wrapper coroutine launders the handle it was given
+!! ri-coroutine-laundering
+## hir/injection.tcl
+<<<<
+            lappend result [list auth [dict getdef $state required $t {}] $e] {*}$inner
+====
+            lappend result [list auth [dict getdef $state required $t {}] $e]
+>>>>
+
+@@ trait-bypass a requirement of a context trait is never checked: an injected implementing context, or nothing, grants it
+!! ri-context-trait
+## hir/injection.tcl
+<<<<
+            foreach id [dict get $required $t] {
+                if {$id in $ids || $id in $reported} continue
+====
+            foreach id [dict get $required $t] {
+                if {$id in $ids || $id in $reported || [hir::contexts::isTrait $id]} continue
+>>>>
+
+@@ binding-unchecked a reference to the enclosing function's context parameter is not checked
+!! ri-context-parameters ri-trait-binding
+## hir/injection.tcl
+<<<<
+    if {[dict exists $inside $by] || $id in [injects $hir $r]} {
+        return
+    }
+====
+    return
+>>>>
+
+@@ captures-unchecked a nested function defined outside the block that reads its enclosing function's context parameter is called inside unchecked
+!! ri-context-parameters ri-trait-binding
+## hir/injection.tcl
+<<<<
+                if {$id in $ids || $id in $reported || [dict exists $inside $ref] || [dict exists $inside $by]} continue
+====
+                continue
+>>>>
+
+@@ availability-unchecked a top-level block may inject a context that is not installed where it runs
+!! ri-top-level-availability
+## hir/injection.tcl
+<<<<
+        if {![hir::contexts::isTrait $id]} {
+            if {$id ni $available} {
+====
+        if {![hir::contexts::isTrait $id]} {
+            if {0 && $id ni $available} {
+>>>>
+
+@@ direct-unmediated a direct module's call in a block is mediated by the enclosing function's context whether or not the block injects it
+!! ri-direct-mediation
+## hir/injection.tcl
+<<<<
+        if {$granted} continue
+====
+        continue
+>>>>
+
+@@ obligation-selects CONTEXT-NOT-INJECTED is a candidate's problem, not an obligation: a block's missing context selects another method candidate (SFIAE)
+!! ri-sfiae
+## hir/methods.tcl
+<<<<
+DIRECT CONTEXT-NOT-INJECTED CONTEXT-RETAINED-AUTHORITY}
+====
+DIRECT CONTEXT-RETAINED-AUTHORITY}
+>>>>
+
+@@ lowering-drops-restriction lowering forgets the injected contexts: an inject block is an unrestricted `if true:`
+!! ri-not-injected-transitive ri-resolve-diagnostics ri-hir-text
+## surface/lower.tcl
+<<<<
+            dict set block inject $injected
+====
+>>>>
+
+@@ hir-text-drops HIR text does not print an inject block's contexts: the round trip loses the restriction
+!! ri-hir-text
+## hir/format.tcl
+<<<<
+                append text " injects ([join [dict get $node injects] {, }])"
+====
+>>>>
+
+@@ no-context-means-all `inject no context:` is read as injecting every context (an empty list means no restriction)
+!! ri-not-injected-transitive ri-grant-is-a-use
+## hir/injection.tcl
+<<<<
+        set o [dict get $owner $r]
+        set ids [injects $hir $r]
+        set outer [dict get $enclosing $r]
+====
+        set o [dict get $owner $r]
+        set ids [injects $hir $r]
+        if {$ids eq {}} continue
+        set outer [dict get $enclosing $r]
+>>>>

@@ -1382,7 +1382,12 @@ proc hir::read::Expr {hirVar level s path block} {
         }
         if {
             if {$head ne ""} {
-                Fail $number "expected \"if : TYPE\""
+                # An inject block's contexts (RESTRICTED-CONTEXT-INJECTION-
+                # MILESTONE-1.md).
+                if {![regexp {^injects \((.*)\)$} $head -> ids]} {
+                    Fail $number "expected \"if ?injects (IDS)? : TYPE\""
+                }
+                SetField hir $e injects [if {$ids eq ""} {list} else {split [string map {", " ,} $ids] ,}]
             }
             SetField hir $e condition [Expr hir $inner $s [concat $path 1] $block]
             set refinements [dict create 1 {} 0 {}]

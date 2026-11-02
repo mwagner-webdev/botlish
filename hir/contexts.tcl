@@ -821,6 +821,23 @@ proc hir::contexts::Requirements {hir walk graph} {
             }
         }
     }
+    set loaded [dict create]
+    dict for {o ids} $direct {
+        foreach id $ids {
+            dict set loaded $o $id 1
+        }
+    }
+    # An inject block is a use of what it injects (RESTRICTED-CONTEXT-
+    # INJECTION-MILESTONE-1.md, hir/injection.tcl): the function whose code
+    # it is requires every context it injects -- its reason the block.
+    set grants [hir::injection::Grants $hir $owner]
+    dict for {o pairs} $grants {
+        dict for {id r} $pairs {
+            if {$id ni [dict get $direct $o]} {
+                dict lappend direct $o $id
+            }
+        }
+    }
     # Call edges per node.
     set edges [dict create]
     foreach n $nodes {
@@ -844,7 +861,12 @@ proc hir::contexts::Requirements {hir walk graph} {
         set ids [dict get $direct [lindex $n end]]
         dict set required $n [lsort $ids]
         foreach id $ids {
-            dict set reasons $n $id direct
+            if {[dict exists $grants [lindex $n end] $id]
+                    && ![dict exists $loaded [lindex $n end] $id]} {
+                dict set reasons $n $id [list inject [dict get $grants [lindex $n end] $id]]
+            } else {
+                dict set reasons $n $id direct
+            }
         }
     }
     set changed 1
@@ -1137,6 +1159,12 @@ proc hir::contexts::Where {hir c owner} {
     if {[hir::isModuleScope $hir $s]} {
         return "inside a module"
     }
+    for {set x $s} {$x ne "" && [dict get $hir scopes $x kind] ne "block"} {set x [dict get $hir scopes $x parent]} {
+        set by [dict getdef $hir scopes $x owner ""]
+        if {$by ne "" && [dict exists $hir exprs $by] && [hir::injection::isInject $hir $by]} {
+            return "inside an inject block, which grants installed contexts and never installs one"
+        }
+    }
     switch -- [dict get $hir scopes $s kind] {
         branch { return "inside an if branch or error handler" }
         loop   { return "inside a loop" }
@@ -1230,6 +1258,11 @@ proc hir::contexts::ChainLines {hir b id reasons {continued 0}} {
             lappend lines "        directly requires $id"
             break
         }
+        if {[lindex $reason 0] eq "inject"} {
+            # (An inject block uses what it injects: hir/injection.tcl.)
+            lappend lines "        injects $id (the inject block at [hir::originLocation $hir [dict get $hir exprs [lindex $reason 1] origin]])"
+            break
+        }
         set via [Via $hir $b [lindex $reason 1]]
         set b [lindex $reason 2]
     }
@@ -1321,6 +1354,7 @@ proc hir::contexts::summary {hir} {
         if {$ids eq {}} continue
         lappend lines "specialization [NodeName $source [list $k [lindex $k 0]]] required-contexts ([join $ids {, }])"
     }
+    lappend lines {*}[hir::injection::summary $hir]
     set traits [TraitSummary $hir]
     if {$traits ne ""} {
         lappend lines $traits

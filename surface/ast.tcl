@@ -249,6 +249,13 @@
 #              syntactic operation on the captured block. The body is parsed
 #              syntax, never text; it is a statement or the value of a
 #              binding, return or destructuring (like an if)
+#   inject     injectSpan (the word "inject"), contexts ({type typeSpan}
+#              dicts in written order), none (1 for "inject no context"),
+#              body (a suite) -- "inject context T1, T2:" / "inject no
+#              context:" followed by an indented block
+#              (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md): the block runs
+#              with exactly the listed contexts' authority. A statement or
+#              the value of a binding, return or destructuring (like an if)
 #   fail       name, nameSpan, payload -- "fail NAME": produces the named
 #              error's completion (EXPLICIT-ERROR-COMPLETIONS.md). PAYLOAD is
 #              "" or, for "fail NAME {field: value, ...}", the anonstruct
@@ -557,7 +564,7 @@ proc surface::ast::Ids {node id} {
                 dict set node payload [Ids [dict get $node payload] $id/payload]
             }
         }
-        static {
+        static - inject {
             dict set node body [Suite [dict get $node body] $id]
         }
     }
@@ -615,7 +622,7 @@ proc surface::ast::Children {node} {
             return [list [dict get $node value]]
         }
         with - yield       { return [list [dict get $node value]] }
-        function - static  { return [list [dict get $node body]] }
+        function - static - inject { return [list [dict get $node body]] }
         loop {
             # The clauses' operands in written order, then a fold's initial
             # value (FOLD-LOOPS-MILESTONE-1.md), then the body.
@@ -705,7 +712,7 @@ proc surface::ast::MapChildren {node cmd} {
         with - yield {
             dict set node value [{*}$cmd [dict get $node value]]
         }
-        function - static {
+        function - static - inject {
             dict set node body [{*}$cmd [dict get $node body]]
         }
         loop {
@@ -1263,6 +1270,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             StaticIntrinsic $node "" $indent $show lines
             return
         }
+        inject {
+            Injection $node "" $indent $show lines
+            return
+        }
         bind - return - break - destructure - coroutinebind {
             set value [dict get $node value]
             set prefix [switch -- [dict get $node kind] {
@@ -1285,6 +1296,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             }
             if {$value ne "" && [dict get $value kind] eq "static"} {
                 StaticIntrinsic $value $prefix $indent $show lines
+                return
+            }
+            if {$value ne "" && [dict get $value kind] eq "inject"} {
+                Injection $value $prefix $indent $show lines
                 return
             }
         }
@@ -1343,6 +1358,21 @@ proc surface::ast::StaticIntrinsic {node prefix indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
     lappend lines "$pad${prefix}static [dict get $node operation][At $node $show]"
+    Body [dict get $node body] [expr {$indent + 1}] $show lines
+}
+
+# Lines of the inject block NODE ("inject context T, ..." or "inject no
+# context", and its block; RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md), its
+# first line starting with PREFIX.
+proc surface::ast::Injection {node prefix indent show linesVar} {
+    upvar 1 $linesVar lines
+    set pad [string repeat {    } $indent]
+    if {[dict get $node none]} {
+        set what "no context"
+    } else {
+        set what "context [join [lmap c [dict get $node contexts] {showType [dict get $c type]}] {, }]"
+    }
+    lappend lines "$pad${prefix}inject $what[At $node $show]"
     Body [dict get $node body] [expr {$indent + 1}] $show lines
 }
 
