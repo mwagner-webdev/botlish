@@ -273,7 +273,7 @@ test actor-lifecycle-accounting {every message is received or counted undelivere
 
 test actor-room-fifo {senders waiting for room are served in the order they began to wait, one per freed place, and a send that did not wait may not overtake them (Full): the receiver gets p1 p2 AA BB CC DD} -body {
     acLines [acTrace room] {log: (receiver got p1|[A-D]{2} )}
-} -result {{t=15: log: DD send: Full} {t=15: log: AA delivered: Delivered} {t=15: log: BB delivered: Delivered} {t=15: log: CC delivered: Delivered} {t=15: log: DD delivered: Delivered} {t=15: log: receiver got p1 p2 AA BB CC DD }}
+} -result {{t=21: log: DD send: Full} {t=21: log: AA delivered: Delivered} {t=21: log: BB delivered: Delivered} {t=21: log: CC delivered: Delivered} {t=21: log: DD delivered: Delivered} {t=21: log: receiver got p1 p2 AA BB CC DD }}
 
 test actor-room-events {room waits are woken by events, never by polling: 4 waits, 4 wakes, no timer fires; receiving from a mailbox that was never full posts no wake} -body {
     set t [acTrace room]
@@ -282,7 +282,11 @@ test actor-room-events {room waits are woken by events, never by polling: 4 wait
 
 test actor-room-close {a close wakes every sender waiting for room with Closed (also when the slot is reused before they run); a sender holding the old address after the reuse is Stale, and the reused mailbox gets nothing} -body {
     acLines [acTrace room] {log: (EE|FF|GG)|reused mailbox|closed the full}
-} -result {{t=12: main: closed the full mailbox, undelivered 1} {t=13: main: the reused mailbox holds 0} {t=15: log: EE delivered: Closed} {t=15: log: FF delivered: Closed} {t=15: log: GG delivered: Stale}}
+} -result {{t=12: main: closed the full mailbox, undelivered 1} {t=13: main: the reused mailbox holds 0} {t=21: log: EE delivered: Closed} {t=21: log: FF delivered: Closed} {t=21: log: GG delivered: Stale}}
+
+test actor-room-reservation {a freed place is reserved for the sender it wakes: in the turn the receiver takes from a full mailbox (capacity 1), a send that did not wait is Full although the woken sender has not run yet; the receiver then gets t0 and the woken sender's message} -body {
+    acLines [acTrace room] {log: (SS send|WW|receiver got t0)}
+} -result {{t=21: log: SS send: Full} {t=21: log: WW delivered: Delivered} {t=21: log: receiver got t0 WW }}
 
 # --------------------------------------------------------------------------
 # Shutdown (shutdown.bot)

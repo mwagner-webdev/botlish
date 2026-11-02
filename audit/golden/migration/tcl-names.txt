@@ -239,6 +239,7 @@ tests/actor.test actor-replay pass
 tests/actor.test actor-room-close pass
 tests/actor.test actor-room-events pass
 tests/actor.test actor-room-fifo pass
+tests/actor.test actor-room-reservation pass
 tests/actor.test actor-shutdown pass
 tests/actor.test actor-source-ordinary pass
 tests/actor.test actor-source-recover pass

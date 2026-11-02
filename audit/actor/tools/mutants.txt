@@ -227,13 +227,15 @@ fn send(to: Address[M], m: M, context ac: Actors, resume Answer) -> Sent errors 
         count_up(c_room_wakes, 1)
 >>>>
 
-@@ room-overtaken a send that did not wait may take a place before the senders waiting for room
-!! actor-room-fifo
+@@ reservation-ignored a place reserved for a woken sender may be taken by a send that did not wait, before the woken sender runs
+!! actor-room-reservation
 ## stdlib/actor.bot
 <<<<
-    if mget(slot, m_rwait) > 0 or mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
-====
     if mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
+        count_up(c_full, 1)
+====
+    if mget(slot, m_count) >= mget(slot, m_cap):
+        count_up(c_full, 1)
 >>>>
 
 @@ room-storm every message taken wakes a sender, whether or not one waits or the mailbox was full
@@ -258,7 +260,7 @@ fn send(to: Address[M], m: M, context ac: Actors, resume Answer) -> Sent errors 
 >>>>
 
 @@ reused-channels a reused slot keeps the closed mailbox's (revoked) channels instead of new ones
-!! actor-identity actor-lifecycle-construction actor-room-close
+!! actor-room-reservation actor-identity actor-lifecycle-construction actor-room-close
 ## stdlib/actor.bot
 <<<<
         s = ac.box_free.pop()

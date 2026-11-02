@@ -10,6 +10,9 @@
 #     administration closes it, and both wake with Closed. Its slot is
 #     reused; G, holding the old address, is Stale at once.
 #   * Receiving from a mailbox that was never full wakes nobody.
+#   * A freed place is reserved for the sender it wakes: in the turn the
+#     receiver takes from a full mailbox of capacity 1 and wakes WW, SS's
+#     send (it did not wait) is Full; WW's message follows t0.
 #
 # No timer is involved: the loop's stats show none fired.
 import std::actor
@@ -127,6 +130,21 @@ fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::
     std::event_loop::run()
     st2 = std::actor::stats()
     say("main: room wakes after the roomy mailbox ", st2.room_wakes)
+
+    # The reservation: R2 and SS both act in turn 3, R2 first; WW, woken
+    # by R2's take, runs in turn 4.
+    {to: tight, inbox: tight_in} = std::actor::open[Msg](1)
+    std::actor::post(tight, Msg {tag: "t0"})
+    r2 = inject no context:
+        coroutine {step, first} = receiver(tight_in, 2, 2, log)
+        std::actor::spawned(step, first)
+    r2.start()
+    spawn_patient("WW", 0, tight, log)
+    ss = inject no context:
+        coroutine {step, first} = impatient("SS", 2, tight, log)
+        std::actor::spawned(step, first)
+    ss.start()
+    std::event_loop::run()
     say("main: timers fired ", std::event_loop::stats().timers_fired)
     loop l in std::actor::drain(log_in):
         std::event_loop::log("log: ".concat(l.text))

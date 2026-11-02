@@ -515,9 +515,11 @@ private nomethod fn put(slot: int, gen: int, payload: any, context ev: std::even
     if mget(slot, m_live) != 1:
         count_up(c_refused_closed, 1)
         return a_refused
-    # Senders waiting for room are served first; a woken one holds a
-    # reserved place (m_rres) until it sends.
-    if mget(slot, m_rwait) > 0 or mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
+    # Senders waiting for room are served first: a freed place becomes a
+    # waiting sender's reservation (m_rres) at once (grant_room), so while
+    # one waits the mailbox counts as full, and a woken one holds its place
+    # until it sends.
+    if mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
         count_up(c_full, 1)
         return a_full
     enqueue(slot, payload)
