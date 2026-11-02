@@ -5,9 +5,10 @@
 #   author.sh image
 #       build the image botlish-package-build from tools/package-build/
 #       Dockerfile (a base image by digest, Ubuntu's archive at one
-#       instant, Tcl 9 by SHA-256), through $HTTPS_PROXY and its CA
-#       ($BOTLISH_PROXY_CA) when set -- the CA as a build secret, never in
-#       the image
+#       instant, Tcl 9 by SHA-256): the build's CA bundle is a build secret,
+#       never in the image -- $BOTLISH_PROXY_CA (a proxy's, with
+#       $HTTPS_PROXY), else $SSL_CERT_FILE, else this host's own
+#       (/etc/ssl/certs/ca-certificates.crt)
 #   author.sh build OUT [-release] [NAME...]
 #       a fresh container from the image, the repository's committed tree
 #       (git archive HEAD) copied in at /src, an empty cache at /cache, and
@@ -41,11 +42,10 @@ spec() {
 case ${1:-} in
   image)
     args=(--network host -t "$image")
-    if [[ -n ${HTTPS_PROXY:-} ]]; then
-      args+=(--build-arg "HTTPS_PROXY=$HTTPS_PROXY")
-      ca=${BOTLISH_PROXY_CA:-${SSL_CERT_FILE:-}}
-      [[ -n $ca ]] && args+=(--secret "id=proxy-ca,src=$ca")
-    fi
+    [[ -n ${HTTPS_PROXY:-} ]] && args+=(--build-arg "HTTPS_PROXY=$HTTPS_PROXY")
+    ca=${BOTLISH_PROXY_CA:-${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}}
+    [[ -s $ca ]] || { echo "author.sh: no CA bundle at $ca (set BOTLISH_PROXY_CA or SSL_CERT_FILE)" >&2; exit 1; }
+    args+=(--secret "id=build-ca,src=$ca")
     docker build "${args[@]}" "$here"
     ;;
   spec)

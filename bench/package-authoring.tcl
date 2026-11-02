@@ -113,7 +113,7 @@ try {
     row "package stage of the same binding again (unchanged)" [measure $runs {
         run package stage $fresh -target linux-x86_64 -modules $binding
     }]
-    row "native audit of the release (2 targets, 4 bundled files, 943 C functions each)" [measure $runs {
+    row "native audit of the release (2 targets, 4 bundled files, 947 C functions each)" [measure $runs {
         run native audit $pkg
     }]
     set out [file join $work out]

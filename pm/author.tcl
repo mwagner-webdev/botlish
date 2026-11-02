@@ -879,9 +879,9 @@ proc pm::author::Stage {pkg options} {
     }
     set schema [Save $pkg $descriptor]
     if {$kind eq "headers"} {
-        lappend lines "  botlish.json: targets.[join $targets {, targets.}].headers holds $as (schema $schema)"
+        lappend lines "  botlish.json: the headers of [join $targets {, }] hold $as (schema $schema)"
     } elseif {$targets ne ""} {
-        lappend lines "  botlish.json: targets.[join $targets {, targets.}] (schema $schema)"
+        lappend lines "  botlish.json: the target directories of [join $targets {, }] (schema $schema)"
     }
     if {$skipped ne ""} {
         lappend lines "  skipped [llength $skipped] hidden entr[expr {[llength $skipped] == 1 ? "y" : "ies"}] ([join [lrange $skipped 0 2] {, }]): a package holds no hidden file"
@@ -1255,7 +1255,7 @@ proc pm::author::Audit {files descriptor {targets ""}} {
                 if {[dict get $report origin] eq "system" && [dict get $report status] ne "verified here"} { set unverified 1 }
             }
             if {$unverified || $target ne $host} {
-                lappend partial "[llength $unresolved] C function[expr {[llength $unresolved] == 1 ? "" : "s"}] the modules declare [expr {[llength $unresolved] == 1 ? "is" : "are"}] in no library readable here ([join $shown {, }][expr {[llength $unresolved] > 4 ? ", ..." : ""}]): expected from $target's [expr {$unverified ? "system libraries" : "platform"}], unverified"
+                lappend partial "[llength $unresolved] C function[expr {[llength $unresolved] == 1 ? "" : "s"}] the modules declare [expr {[llength $unresolved] == 1 ? "is" : "are"}] in no library readable here ([join $shown {, }][expr {[llength $unresolved] > 4 ? ", ..." : ""}]): expected from $target's platform[expr {$unverified ? " or its system libraries" : ""}], unverified"
             } else {
                 lappend problems "[llength $unresolved] C function[expr {[llength $unresolved] == 1 ? "" : "s"}] the modules declare [expr {[llength $unresolved] == 1 ? "is" : "are"}] exported by no library of $target -- bundled, system or platform ([join $shown {, }][expr {[llength $unresolved] > 4 ? ", ..." : ""}]): a consumer's link would fail"
             }

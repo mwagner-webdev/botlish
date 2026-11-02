@@ -24,17 +24,18 @@
 FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 ARG SNAPSHOT=20261101T000000Z
 ARG HTTPS_PROXY
-RUN --mount=type=secret,id=proxy-ca,required=false \
+# The snapshot service is HTTPS only, and the base image has no CA
+# certificates: the build is given a CA bundle as a secret (build-ca: the
+# building host's own, or its proxy's), used for the build and never left in
+# the image. apt verifies peers with it, and every package by the archive's
+# signed index, as always.
+RUN --mount=type=secret,id=build-ca,required=true \
     set -eu; \
     sed -i "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/$SNAPSHOT/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/$SNAPSHOT/|" /etc/apt/sources.list.d/ubuntu.sources; \
+    install -m 0644 /run/secrets/build-ca /tmp/build-ca.crt; \
+    echo 'Acquire::https::CaInfo "/tmp/build-ca.crt";' > /etc/apt/apt.conf.d/99build; \
     if [ -n "${HTTPS_PROXY:-}" ]; then \
-      echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" > /etc/apt/apt.conf.d/99build-proxy; \
-      if [ -s /run/secrets/proxy-ca ]; then \
-        install -m 0644 /run/secrets/proxy-ca /tmp/build-proxy-ca.crt; \
-        echo 'Acquire::https::CaInfo "/tmp/build-proxy-ca.crt";' >> /etc/apt/apt.conf.d/99build-proxy; \
-      fi; \
-    else \
-      echo 'Acquire::https::Verify-Peer "true";' > /etc/apt/apt.conf.d/99build-proxy; \
+      echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf.d/99build; \
     fi; \
     apt-get -o Acquire::Check-Valid-Until=false update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -46,12 +47,11 @@ RUN --mount=type=secret,id=proxy-ca,required=false \
                t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb:b694c292598bcb640050bc10cdbd9d970f215f0e24854d63d0fcc85a5c24efb4 \
                t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb:83cf61f5f2acf0353db448dd56d69f71bb5466c067b83ad8b5a0392c7ed1df31; do \
       path=${deb%%:*}; sha=${deb##*:}; \
-      if [ -s /tmp/build-proxy-ca.crt ]; then ca="--cacert /tmp/build-proxy-ca.crt"; else ca=""; fi; \
-      curl -fsSL $ca --retry 3 -o "$(basename "$path")" "https://snapshot.ubuntu.com/ubuntu/$SNAPSHOT/pool/universe/$path"; \
+      curl -fsSL --cacert /tmp/build-ca.crt --retry 3 -o "$(basename "$path")" "https://snapshot.ubuntu.com/ubuntu/$SNAPSHOT/pool/universe/$path"; \
       echo "$sha  $(basename "$path")" | sha256sum -c -; \
     done; \
     dpkg -i libtommath1_*.deb libtcl9.0_*.deb tcl9.0_*.deb; \
-    rm -f /tmp/*.deb /etc/apt/apt.conf.d/99build-proxy /tmp/build-proxy-ca.crt; \
+    rm -f /tmp/*.deb /etc/apt/apt.conf.d/99build /tmp/build-ca.crt; \
     rm -rf /var/lib/apt/lists/*; \
     dpkg-query -W -f '${Package} ${Version} ${Architecture}\n' | sort > /etc/botlish-author-packages; \
     echo "snapshot $SNAPSHOT" > /etc/botlish-author-environment
