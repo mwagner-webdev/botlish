@@ -540,7 +540,60 @@ keep the loop alive, and the library adds no scheduling rule.
 
 ## 14. Mutation testing
 
-<<MUTANTS>>
+`audit/actor/tools/mutate.tcl` (`audit/actor/tools/mutants.txt`): each
+mutant is a deliberate bug in one rule, applied to a private copy of the
+compiler, library and tests (the checkout is never modified), with a `!!`
+line naming the tests meant to detect it. A mutant is killed only when one
+of its named detectors fails.
+
+**Result: 23 mutants, 23 killed by a named detector**
+(`tclsh9.0 audit/actor/tools/mutate.tcl -detectors-only 1`, the interp pass:
+interp and cranelift; `audit/actor/results/mutants-interp.txt`).
+
+| rule | mutant | killed by |
+|---|---|---|
+| receive-right uniqueness | `inbox-copyable` (the token holds an Int) | `actor-static-copy-inbox`, `-listen-twice`, `-drain-twice` |
+| | `receiver-not-bound` (a receive served for any open mailbox) | `actor-identity` |
+| | `rebind-allowed` (listen binds a bound mailbox) | `actor-replay` |
+| recovery | `recover-unguarded` (no identity check before `recover`) | `actor-source-recover` |
+| context-free communication | `receive-needs-loop`, `send-needs-actors` | `actor-agree-authority`, `actor-authority-requirements`, `actor-authority-run` |
+| reaping | `failure-not-reaped`, `return-not-reaped` | `actor-lifecycle-failure-reaped`, `-accounting`, `actor-probe-a-accounting`, `actor-authority-run` |
+| | `failed-construction-returned` | `actor-lifecycle-construction` |
+| | `reap-skips-abandoned`, `owned-always` (stdlib/event_loop.bot) | `actor-shutdown` |
+| | `reaper-steals-outcomes` (retiring takes the loop's outcomes) | `actor-coexist-outcomes`, `actor-lifecycle-failure-reaped` |
+| identity | `generation-unchecked`, `generation-not-bumped`, `closed-accepts` | `actor-probe-a-identity`, `actor-identity`, `actor-lifecycle-construction` (`-failure-reaped`) |
+| | `reused-channels` (a reused slot keeps revoked channels) | `actor-room-close`, `actor-room-reservation` |
+| wakeups and room | `lost-wakeup` | `actor-probe-a-request-reply`, `actor-authority-run`, `actor-values-snapshot` |
+| | `no-room-wake` | `actor-room-fifo`, `actor-room-events`, `actor-probe-a-backpressure` |
+| | `reservation-ignored` (a woken sender's place can be taken) | `actor-room-reservation` |
+| | `room-storm` (every take wakes a sender) | `actor-room-events` |
+| | `close-keeps-room-waiters` | `actor-room-close`, `actor-lifecycle-failure-reaped` |
+| accounting | `undelivered-uncounted` | `actor-lifecycle-accounting`, `actor-probe-a-accounting`, `actor-shutdown` |
+| scheduling | `batch-per-dispatch` (every queued message in one dispatch) | `actor-probe-a-request-reply` |
+
+**What the mutants found.** Three mutants survived the first rounds, and
+each led to a change, not to a weaker mutant:
+
+* `rebind-allowed` survived because nothing started two actors on one
+  mailbox. A replayed first request does (section 6): `actor-replay`. Its
+  first version did not discriminate either -- the impostor ended, and its
+  retirement closed the mailbox, before the rightful actor's listen was
+  served -- so each listener now pauses a turn after its listen.
+* `room-overtaken` (a sender that did not wait may take a place before the
+  waiting senders) was equivalent: `put` refused a send while senders
+  waited (`m_rwait > 0`) *and* while the queue and the reservations filled
+  the mailbox, and the first condition implies the second -- a sender
+  waits only after a Full answer, and every freed place is granted to a
+  waiter at once (`grant_room`), so while one waits, `count + reserved`
+  is the capacity. The redundant condition was removed; its replacement,
+  `reservation-ignored`, drops the reservation from the second, and
+  `actor-room-reservation` (a send in the turn a waiter is woken, before it
+  runs: Full) kills it.
+* `reused-channels` survived because no test sent through a reused slot's
+  room channel; the reservation phase of `room.bot` does.
+
+The static mutants are judged by the front end alone and the run-time ones
+on interp and cranelift; `-backend all` runs the four.
 
 ## 15. Performance
 
