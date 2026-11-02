@@ -847,13 +847,13 @@ Every command with `LANG=C.utf8 LC_ALL=C.utf8` and a private `-tmpdir`.
 | `audit/raven-cleanroom/tools/cleanroom.sh run ...` | 33/33 (section I) |
 | `tools/package-build/author.sh build OUT -release` (twice, two commits) | section G |
 | `tclsh9.0 tools/compilerpedia.tcl check` | 1169 topics, 725 examples run, 0 problems |
-| `tclsh9.0 audit/package-manager/tools/mutate.tcl` | MUTANTS-PM |
+| `tclsh9.0 audit/package-manager/tools/mutate.tcl` | 82 mutants, 82 killed, 0 survived (the final run, after the three weak tests below were strengthened) |
 | `tclsh9.0 audit/raven-cleanroom/tools/mutate.tcl` | 15 mutants, 15 killed, 0 survived |
 
 ### Mutation testing
 
-`audit/package-manager/tools/mutants.txt` gains 28 mutants of PM-3's
-rules, each killed by `tests/package-authoring.test`: silent replacement of
+`audit/package-manager/tools/mutants.txt` gains 30 mutants of PM-3's
+rules, each killed by a test of `tests/package-authoring.test`: silent replacement of
 a file or a contradicting declaration; a destination from the built file's
 name; staging that follows links or keeps stale files; the audit ignoring
 RUNPATH, empty RUNPATH entries, bundled platform libraries, unresolved
@@ -863,12 +863,36 @@ made mandatory or allowed to be loader dependencies; schema 3 keys in
 schema 2; unchecked license expressions; the cascade restored; a Git tree,
 an artifact binding or host paths unchecked; local paths recorded;
 unknown evidence keys ignored; Git trees without text conversions or with
-Tcl 9's decimal `0100`; comparison by descriptor; the SHA-1 tool from PATH.
+Tcl 9's decimal `0100`; comparison by descriptor; the SHA-1 tool from PATH;
+the author's side loaded with every consumer command.
 `audit/raven-cleanroom/tools/mutants.txt`'s recipe and metadata mutants
 were rewritten for the generic recipe (a headless library with and without
 its required Vulkan symbol, the X11 declaration dropped, the version
 reused, `-force` always) and two added: the cross build's RUNPATH back, and
 Vulkan declared a system library.
+
+The first complete run killed 77 of 80 and found three survivors, each a
+weak test rather than a defect of the code, and each now strengthened:
+
+* `stage-replace-keeps-stale` (`-replace` keeping a module the new
+  source dropped): `pa-stage-modules` listed only the target directory's
+  top-level files, and the stale module was `sub/b.bot`. It now checks the
+  subdirectory is gone.
+* `audit-empty-runpath-entry-allowed` (an empty RUNPATH entry judged as
+  an absolute one): the entry was still refused, through the absolute
+  path's rule, and the test only counted refusals. It now checks the
+  empty entry's own message; the mutant was renamed `...-misjudged`, and a
+  new `...-allowed` lets the entry through.
+* `cascade-restored` (the PM-2 cascade back): the test's library was
+  linked with `--no-as-needed` after `-l:libzzghost.so.3`, so the
+  toolchain's default `--as-needed` dropped it and the library needed
+  nothing that could cascade. The flag now comes first, the test checks
+  the need is there, and it adds what its description promised: a package
+  another tool packed (no audit) needing an undeclared library beside the
+  failed one reports exactly the two problems.
+
+The harness also named no failing test for these (its pattern knew only
+`pm-` and `pn-` tests); it now names `pa-` and `pw-` tests too.
 
 One mutant-shaped defect was found by the tests rather than planted: Tcl
 9 reads `0100` as decimal 100, so `& 0100` tested the wrong bits and every
