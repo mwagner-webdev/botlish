@@ -1,0 +1,21 @@
+# A message of the wrong type: an Address[Work] takes Work only (TYPE).
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+struct Work:
+    n: int
+
+struct Other:
+    n: int
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Work](4)
+    std::actor::post(to, Other {n: 1})
+    0
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

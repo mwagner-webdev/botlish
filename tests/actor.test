@@ -1,0 +1,381 @@
+# actor.test -- std::actor: same-thread actors over std::event_loop, with
+# explicitly restricted authority (SAME-THREAD-ACTORS-MILESTONE-1.md).
+#
+# The scenario programs are tests/actor/*.bot (an application root). Each is
+# compiled once with -warnings error and run on this pass's backends, which
+# must agree on its whole outcome (the loop's trace, "t=TURN: TEXT" lines);
+# the claims are then checked on the trace. Also here: what the compiler
+# must reject (the authority each actor lacks although the application has
+# installed it, ownership, identity, opacity), and the library's own
+# invariants read from its source.
+#
+# Backends, as tests/event-loop.test's: the outer pass's own (CORE_BACKEND
+# interp or compile) plus cranelift in the interp pass and
+# cranelift-generic in the compile pass; all four when run directly.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+if {![info exists ::env(CORE_BACKEND)]} {
+    set acBackends {interp compile cranelift-generic cranelift}
+} elseif {$::env(CORE_BACKEND) eq "interp"} {
+    set acBackends {interp cranelift}
+} elseif {$::env(CORE_BACKEND) eq "compile"} {
+    set acBackends {compile cranelift-generic}
+} else {
+    set acBackends [list $::env(CORE_BACKEND)]
+}
+
+set acDir [file join $::projectRoot tests actor]
+
+# The strings of a Botlish List[str] as core::value::show prints it.
+proc acStrings {shown} {
+    set out {}
+    foreach {- s} [regexp -all -inline {"((?:[^"\\]|\\.)*)"} $shown] {
+        lappend out [subst -nocommands -novariables $s]
+    }
+    return $out
+}
+
+# Scenario NAME: compiled once (-warnings error), run on every backend of
+# the pass. Returns {agree TRACE}: whether every backend gave one outcome,
+# and the trace (empty on any failure).
+proc acRun {name} {
+    if {[info exists ::acRuns($name)]} {
+        return $::acRuns($name)
+    }
+    set hir [surface::readProgramFile [file join $::acDir $name.bot] -warnings error]
+    set outcomes [lsort -unique [lmap b $::acBackends {lrange [outcomeUnderHir $b $hir] 0 1}]]
+    set agree [expr {[llength $outcomes] == 1 && [lindex $outcomes 0 0] eq "value"}]
+    set trace [expr {$agree ? [acStrings [lindex $outcomes 0 1]] : {}}]
+    if {!$agree} {
+        puts stderr "$name: [string range $outcomes 0 3000]"
+    }
+    set ::acRuns($name) [list $agree $trace]
+    return $::acRuns($name)
+}
+
+proc acTrace {name} {
+    lindex [acRun $name] 1
+}
+
+# The lines of TRACE matching RE, without their "t=TURN: " prefix.
+proc acLines {trace re} {
+    set out {}
+    foreach line $trace {
+        if {[regexp -- $re $line]} {
+            lappend out $line
+        }
+    }
+    return $out
+}
+
+# The number NAME the trace's "main: NAME N" line states.
+proc acStat {trace name} {
+    foreach line $trace {
+        if {[regexp "^t=\\d+: main: $name (-?\\d+)$" $line -> n]} {
+            return $n
+        }
+    }
+    return ""
+}
+
+# --------------------------------------------------------------------------
+# Every scenario: one outcome on every backend.
+
+foreach name {actors authority values lifecycle room shutdown coexist identity} {
+    test actor-agree-$name "scenario $name compiles under -warnings error and gives one outcome on every backend of the pass (its trace)" -body {
+        lindex [acRun $name] 0
+    } -result 1
+}
+
+# --------------------------------------------------------------------------
+# Probe A on std::actor (actors.bot)
+
+test actor-probe-a-identity {a closed mailbox's address is Closed; once its slot is reused the old address is Stale and never reaches the replacement, which has nothing queued} -body {
+    acLines [acTrace actors] {main: (send to|same slot|queued in)}
+} -result {{t=0: main: send to a closed mailbox: Closed 0} {t=0: main: same slot reused: new generation 0} {t=0: main: send to the old address: Stale 0} {t=0: main: queued in the replacement 0}}
+
+test actor-probe-a-request-reply {two clients share one counter; each gets only its own reply (correlation id checked); the counter's private state ends at 1009 after 8 messages; the Add sent after Stop is undelivered and counted} -body {
+    set t [acTrace actors]
+    list [acLines $t {reply for my request|WRONG}] [acLines $t {c1 done}] [acStat $t undelivered]
+} -result {{{t=47: clientB: reply for my request, value 1009} {t=48: clientA: reply for my request, value 1009}} {{t=52: logger: c1 done total 1009 handled 8 #3}} 1}
+
+test actor-probe-a-suspended-handler {a handler that suspends (a 500 us sleep) suspends only its actor: ping and pong exchange their 40 messages and the quiet actor is served while c1's slow add is pending} -body {
+    set t [acTrace actors]
+    list [acLines $t {slow add (begins|ends)}] [acLines $t {exchanged|quiet:}]
+} -result {{{t=1: c1: slow add begins, total 0} {t=2: c2: slow add begins, total 0} {t=41: c1: slow add ends, total 1000} {t=42: c2: slow add ends, total 100}} {{t=4: quiet: handled its message in turn 4} {t=39: pong: exchanged 20} {t=40: ping: exchanged 20}}}
+
+test actor-probe-a-fairness {the quiet actor's message, sent in turn 3 beside a continuous ping-pong, is handled in the next turn} -body {
+    acLines [acTrace actors] {quiet(-sender)?:}
+} -result {{t=3: quiet-sender: sends in turn 3} {t=4: quiet: handled its message in turn 4}}
+
+test actor-probe-a-backpressure {a full mailbox answers Full and nothing is dropped; deliver waits for room and is woken when a place frees -- no polling: the only timers that fire are the two slow adds' (Probe A polled every 50 us)} -body {
+    set t [acTrace actors]
+    list [acLines $t {flooder}] [acLines $t {c2 done}] [acStat $t {timers fired}] [acStat $t {room waits}] [acStat $t {room wakes}]
+} -result {{{t=1: flooder: Full at message 3} {t=3: flooder: waited for room, then Delivered at turn 3} {t=3: flooder: Full at message 4} {t=43: flooder: waited for room, then Delivered at turn 43} {t=43: flooder: Full at message 5} {t=44: flooder: waited for room, then Delivered at turn 44}} {{t=49: logger: c2 done total 115 handled 6 #1}} 2 8 8}
+
+test actor-probe-a-accounting {every message is received or counted undelivered (64 delivered = 63 received + 1 undelivered); every actor ended Returned, with its value, under the task id start returned; shutdown abandons no actor (reap reaps none) and reap closes the one mailbox no actor listened to, whose channels the shutdown revoked: nothing is left open} -body {
+    set t [acTrace actors]
+    list [acStat $t delivered] [acStat $t received] [acStat $t undelivered] \
+        [llength [acLines $t {outcome task \d+ Returned}]] [acLines $t {outcome task 1 }] [acStat $t {c1 is task}] \
+        [acStat $t abandoned] [acStat $t reaped] [acStat $t {open mailboxes}] [acStat $t {running actors}]
+} -result {64 63 1 10 {{t=53: outcome task 1 Returned 1009}} 1 0 0 0 0}
+
+# --------------------------------------------------------------------------
+# Restricted authority (authority.bot): the principal acceptance
+
+test actor-authority-run {a privileged supervisor, a Storage-only archivist and a contextless calculator share one thread, VM, heap, event loop and installed contexts: the calculator answers its Square and Fib(20) itself and has its Upload transmitted by the supervisor through the request address it was delegated; the archivist stores; every actor ends and every mailbox closes} -body {
+    acTrace authority
+} -result {{t=0: main: started the supervisor, task 0} {t=1: supervisor: started the calculator, task 1} {t=1: supervisor: started the archivist, task 2} {t=5: supervisor: transmitted for calculation 3 at clock 101} {t=6: supervisor: result 1 by calculator = 49} {t=7: supervisor: result 4 by archivist = 1} {t=8: supervisor: result 2 by calculator = 6765} {t=9: supervisor: result 3 by supervisor = 1} {t=9: supervisor: closed the archivist's mailbox, undelivered 0} {t=10: main: task 0 ended with 1} {t=10: main: task 1 ended with 3} {t=10: main: task 2 ended with 1} {t=10: main: the network carried 42} {t=10: main: storage holds 5} {t=10: main: actors started 3} {t=10: main: actors ended 3} {t=10: main: actors running 0} {t=10: main: open mailboxes 0}}
+
+# The context requirements the compiler's own analysis computes
+# (hir::contexts::required, which MISSING-CONTEXT and CONTEXT-NOT-INJECTED
+# read) for the named functions of authority.bot.
+proc acRequirements {functions} {
+    set hir [surface::readProgramFile [file join $::acDir authority.bot] -warnings off]
+    hir::activate $hir
+    set out {}
+    foreach b [dict get $hir contexts blocks] {
+        set fn [hir::contexts::BlockName $hir $b]
+        if {$fn in $functions && ![dict exists $out $fn]} {
+            dict set out $fn [lsort [hir::contexts::required $hir $b]]
+        }
+    }
+    return [lsort -stride 2 $out]
+}
+
+test actor-authority-requirements {the compiler's context analysis: the calculator requires no context at all -- receiving, replying and asking for a privileged operation included -- the archivist only Storage, and the actor operations themselves none; the supervisor everything it uses} -body {
+    acRequirements {calculator archivist supervisor std::actor::listen std::actor::receive std::actor::try_receive std::actor::send std::actor::deliver std::actor::pause std::actor::exit std::actor::spawned}
+} -result {archivist Storage calculator {} std::actor::deliver {} std::actor::exit {} std::actor::listen {} std::actor::pause {} std::actor::receive {} std::actor::send {} std::actor::spawned {} std::actor::try_receive {} supervisor {Clock Network Storage std::actor::Actors std::event_loop::Loop}}
+
+# authority.bot with FROM replaced by TO (each exactly once): the
+# diagnostics' {kind SOURCE-LINE} pairs (the diagnosed line's text), or
+# "ok".
+proc acVariant {pairs} {
+    set text [core::ReadFile [file join $::acDir authority.bot]]
+    foreach {from to} $pairs {
+        if {[string first $from $text] < 0} {
+            return "NO SUCH TEXT: $from"
+        }
+        set text [string map [list $from $to] $text]
+    }
+    set dir [makeDirectory ac-variant]
+    set path [file join $dir authority.bot]
+    set f [open $path w]
+    puts -nonewline $f $text
+    close $f
+    if {[catch {surface::readProgramFile $path -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set lines [split $text \n]
+            return [lsort -unique [lmap d [dict get $options -diagnostics] {
+                set line [dict getdef [dict getdef $d location {}] line 0]
+                list [lindex [dict get $d errorcode] end] [string trim [lindex $lines [expr {$line - 1}]]]
+            }]]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+set acCalcProbe "fn calc_probe() -> int errors IndexNotFound, std::event_loop::SchedulerFault:\n    0"
+set acStorageProbe "fn storage_probe() -> int errors IndexNotFound, std::event_loop::SchedulerFault:\n    0"
+
+# Each forbidden operation, put in the calculator's probe: the calculation
+# actor is constructed inside `inject no context:` in a supervisor that has
+# every context, and every context is installed.
+foreach {name body} {
+    network        {transmit(1)}
+    storage        {store(1)}
+    clock          {read_clock()}
+    loop-time      {std::event_loop::now()}
+    loop-register  {std::event_loop::channel(std::event_loop::Delivery::Reliable, 1).revoke()\n    0}
+    loop-revoke    {std::event_loop::revoke(std::event_loop::after(5))\n    0}
+    loop-admin     {std::event_loop::stop()\n    0}
+    loop-outcomes  {std::event_loop::take_outcomes()\n    0}
+    loop-log       {std::event_loop::log("x")\n    0}
+    actor-sleep    {std::actor::sleep(1)\n    0}
+    actor-admin    {std::actor::stats().started}
+    actor-open     {std::actor::open[Result](1)\n    0}
+} {
+    test actor-authority-calc-$name "the contextless calculation actor cannot $name, although the application installed every context: CONTEXT-NOT-INJECTED at its construction inside the inject block" -body {
+        acVariant [list $::acCalcProbe "fn calc_probe() -> int errors IndexNotFound, std::event_loop::SchedulerFault:\n    [subst -nocommands -novariables $body]"]
+    } -cleanup {
+        removeDirectory ac-variant
+    } -result {{CONTEXT-NOT-INJECTED {coroutine {step, first} = calculator(calc_in)}}}
+}
+
+foreach {name body} {
+    network {transmit(1)}
+    clock   {read_clock()}
+    loop    {std::event_loop::now()}
+    actors  {std::actor::stats().started}
+} {
+    test actor-authority-storage-$name "the Storage-only actor cannot reach $name: CONTEXT-NOT-INJECTED at its construction inside `inject context Storage:`" -body {
+        acVariant [list $::acStorageProbe "fn storage_probe() -> int errors IndexNotFound, std::event_loop::SchedulerFault:\n    [subst -nocommands -novariables $body]"]
+    } -cleanup {
+        removeDirectory ac-variant
+    } -result {{CONTEXT-NOT-INJECTED {coroutine {step, first} = archivist(arch_in)}}}
+}
+
+test actor-authority-storage-own {the Storage-only actor's own Storage use is accepted (the unchanged program compiles)} -body {
+    acVariant {}
+} -cleanup {
+    removeDirectory ac-variant
+} -result ok
+
+test actor-authority-creator-parameter {code in the calculator's inject block cannot read the supervisor's context parameter: the creator's authority is not the block's} -body {
+    acVariant {{        marker = 0} {        marker = net.sent.length()}}
+} -cleanup {
+    removeDirectory ac-variant
+} -result {{CONTEXT-NOT-INJECTED {marker = net.sent.length()}}}
+
+test actor-authority-laundering {a privileged coroutine (it transmits) constructed by the supervisor and handed to an actor constructed inside `inject no context:` cannot be resumed by it: CONTEXT-RETAINED-AUTHORITY} -body {
+    acVariant {{        coroutine {step, first} = calculator(calc_in)} {        coroutine {step, first} = courier(calc_in, up)}
+               {    c = inject no context:} "    coroutine {step: up} = uploader(3)\n    c = inject no context:"}
+} -cleanup {
+    removeDirectory ac-variant
+} -result {{CONTEXT-RETAINED-AUTHORITY {coroutine {step, first} = courier(calc_in, up)}}}
+
+# --------------------------------------------------------------------------
+# Values (values.bot)
+
+test actor-values-snapshot {a message holding a MutableVector, a MutableArray and a MutableMap is a logical copy: the sender's later mutation does not reach the receiver, nor the receiver's the sender} -body {
+    acTrace values
+} -result {{sender changed its own after sending: parcel nums.length=4 grid[0]=70 table[k]=2} {receiver got: parcel nums.length=3 grid[0]=7 table[k]=1} {receiver changed its copy: parcel nums.length=4 grid[0]=1000 table[k]=1000} {sender got the reply: parcel nums.length=4 grid[0]=1000 table[k]=1000} {sender's own is unchanged by the receiver: parcel nums.length=4 grid[0]=70 table[k]=2}}
+
+# --------------------------------------------------------------------------
+# Lifecycle (lifecycle.bot)
+
+test actor-lifecycle-failure-reaped {an actor that fails (TaskFailed 7, or its own IndexNotFound) is reaped by its host at once: its outcome is Failed with its code, its queued messages are counted undelivered, a sender waiting for room wakes with Closed, later sends are Closed -- and a plain task beside it is unaffected} -body {
+    set t [acTrace lifecycle]
+    list [acLines $t {outcome task [0-3] }] [acLines $t {log: (fragile|waiter)}] [acLines $t {after the run}]
+} -result {{{t=4: main: outcome task 1 Failed 7} {t=4: main: outcome task 0 Returned 0} {t=4: main: outcome task 2 IndexNotFound 0} {t=4: main: outcome task 3 Returned 42}} {{t=4: log: fragile: failing with 7} {t=4: log: waiter: deliver answered Closed}} {{t=2: main: after the run, a send to fragile answers Closed: 1}}}
+
+test actor-lifecycle-stop {an actor stops itself on a Stop message (what follows it is undelivered); two actors stopped together by the administration closing their mailboxes see Closed after what was queued} -body {
+    acLines [acTrace lifecycle] {log: s[123]|closed s[12]}
+} -result {{t=2: main: closed s1, undelivered 0} {t=2: main: closed s2, undelivered 0} {t=4: log: s3: stop message after messages 1} {t=4: log: s1: mailbox closed after messages 1} {t=4: log: s2: mailbox closed after messages 0}}
+
+test actor-lifecycle-construction {a failure in an actor's first segment reaches its constructor (eager construction); its mailbox is closed by address (its one message undelivered); a failed construction started anyway is a Failed task, never Returned; the slot's reuse makes the old address Stale and the new mailbox gets nothing} -body {
+    set t [acTrace lifecycle]
+    list [acLines $t {construction|failed construction|after reuse|got nothing|then a send}] [acLines $t {outcome task 7 }]
+} -result {{{t=3: main: the construction failed; closed its mailbox by address, undelivered 1} {t=3: main: then a send answers Closed: 1} {t=3: main: started the failed construction anyway as task 7} {t=3: main: the old address after reuse is Stale: 1} {t=3: main: the new mailbox got nothing: 0}} {{t=4: main: outcome task 7 Failed 3}}}
+
+test actor-lifecycle-accounting {every message is received or counted undelivered (15 = 11 + 4); 7 actors started, 4 ended, 3 failed, none left running} -body {
+    set t [acTrace lifecycle]
+    lmap n {delivered received undelivered started ended failed running} {acStat $t $n}
+} -result {15 11 4 7 4 3 0}
+
+# --------------------------------------------------------------------------
+# Room (room.bot)
+
+test actor-room-fifo {senders waiting for room are served in the order they began to wait, one per freed place, and a send that did not wait may not overtake them (Full): the receiver gets p1 p2 AA BB CC DD} -body {
+    acLines [acTrace room] {log: (receiver got p1|[A-D]{2} )}
+} -result {{t=15: log: DD send: Full} {t=15: log: AA delivered: Delivered} {t=15: log: BB delivered: Delivered} {t=15: log: CC delivered: Delivered} {t=15: log: DD delivered: Delivered} {t=15: log: receiver got p1 p2 AA BB CC DD }}
+
+test actor-room-events {room waits are woken by events, never by polling: 4 waits, 4 wakes, no timer fires; receiving from a mailbox that was never full posts no wake} -body {
+    set t [acTrace room]
+    list [acStat $t {room waits}] [acStat $t {room wakes}] [acStat $t {room wakes after the roomy mailbox}] [acStat $t {timers fired}]
+} -result {4 4 4 0}
+
+test actor-room-close {a close wakes every sender waiting for room with Closed (also when the slot is reused before they run); a sender holding the old address after the reuse is Stale, and the reused mailbox gets nothing} -body {
+    acLines [acTrace room] {log: (EE|FF|GG)|reused mailbox|closed the full}
+} -result {{t=12: main: closed the full mailbox, undelivered 1} {t=13: main: the reused mailbox holds 0} {t=15: log: EE delivered: Closed} {t=15: log: FF delivered: Closed} {t=15: log: GG delivered: Stale}}
+
+# --------------------------------------------------------------------------
+# Shutdown (shutdown.bot)
+
+test actor-shutdown {std::event_loop::shutdown with actors registered: a receiving actor and a sender waiting for room wake with Closed and end within the rounds (their cleanup runs); the spinning actor is abandoned, and reap closes its mailbox, counting its 2 messages undelivered; nothing stays open or running} -body {
+    set t [acTrace shutdown]
+    list [acLines $t {outcome|log:}] [lmap n {abandoned {reaped actors} delivered received undelivered {open mailboxes} {running actors} reaped} {acStat $t $n}] \
+        [acLines $t {old address}]
+} -result {{{t=7: main: outcome task 0 Returned 5} {t=7: main: outcome task 2 Returned 0} {t=7: log: idle: closed, cleaning up} {t=7: log: blocked: deliver answered Closed}} {1 1 5 3 2 0 0 1} {{t=7: main: a send to the spinner's old address answers Closed: 1}}}
+
+# --------------------------------------------------------------------------
+# Coexistence (coexist.bot)
+
+test actor-coexist-timeliness {beside 60 turns of actor ping-pong, the ordinary tasks are served on time: the 10 us ticker's ticks, the driver source's records at t=12 and t=27, the quiet task's event in the next turn} -body {
+    acLines [acTrace coexist] {ticker:|reader:|quiet:|consumer:}
+} -result {{t=2: quiet: posts in turn 2} {t=3: consumer: took the event in turn 3} {t=10: ticker: tick at time 10} {t=12: reader: record at time 12} {t=20: ticker: tick at time 20} {t=27: reader: record at time 27} {t=30: ticker: tick at time 30} {t=40: ticker: tick at time 40} {t=50: ticker: tick at time 50}}
+
+test actor-coexist-outcomes {take_outcomes reports every task, actors and ordinary tasks alike, both failures included: std::actor consumes no outcome} -body {
+    set t [acTrace coexist]
+    list [lsort [acLines $t {outcome task}]] [acStat $t {actors failed}] [acStat $t {open mailboxes}]
+} -result {{{t=60: main: outcome task 0 Returned 30} {t=60: main: outcome task 1 Returned 30} {t=60: main: outcome task 2 Failed 4} {t=60: main: outcome task 3 Returned 5} {t=60: main: outcome task 4 Returned 300} {t=60: main: outcome task 5 Returned 7} {t=60: main: outcome task 6 Returned 0} {t=60: main: outcome task 7 Failed 9}} 1 0}
+
+# --------------------------------------------------------------------------
+# Identity (identity.bot)
+
+test actor-identity {three senders on one address: each one's messages arrive in its order; a copy of a Receiver receives nothing in another actor (Closed) while its owner gets every message; listening to a closed mailbox is Closed; after a slot's reuse the old address is Stale and the replacement gets only its own message} -body {
+    acLines [acTrace identity] {log:|Stale|differs}
+} -result {{t=11: main: Y's address differs from X's: 1} {t=11: main: a send to X's old address is Stale (Y reused its slot): 1} {t=12: log: thief: try_receive through a copied Receiver: Closed} {t=12: log: thief: receive through a copied Receiver: Closed} {t=12: log: owner got 10 and 20} {t=12: log: collector got sa1 sb1 sc1 sa2 sb2 sc2 sa3 sb3 sc3 } {t=12: log: latecomer: listen to a closed mailbox: Closed} {t=12: log: collector got xx1 } {t=12: log: collector got yy1 }}
+
+# --------------------------------------------------------------------------
+# What the compiler must reject
+
+proc acKinds {path} {
+    if {[catch {surface::readProgramFile $path -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lsort -unique [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+foreach {name kind} {
+    wrong-type          TYPE
+    forge-address       OPAQUE-CONSTRUCTION
+    forge-inbox         OPAQUE-CONSTRUCTION
+    forge-request       OPAQUE-CONSTRUCTION
+    forge-receiver      OPAQUE-CONSTRUCTION
+    read-address        OPAQUE-REPRESENTATION
+    copy-inbox          AFFINE-NOT-DEFINITELY-LIVE
+    listen-twice        USE-AFTER-MOVE
+    drain-twice         USE-AFTER-MOVE
+    resume-started      USE-AFTER-MOVE
+    inbox-from-address  IMPRINT
+    affine-message      {IMPRINT UNPROVEN-FIELD}
+    recover-internal    INTERNAL-NAMESPACE
+    loop-yield          {COROUTINE-RESULT-MISMATCH COROUTINE-RESUME-CONFLICT}
+    top-level-receive   UNWRAPPED-YIELD
+} {
+    test actor-static-$name "tests/actor/reject-$name.bot is rejected with $kind (its header says why)" -body {
+        acKinds [file join $::acDir reject-$name.bot]
+    } -result $kind
+}
+
+# --------------------------------------------------------------------------
+# The library's own invariants, read from its source
+
+test actor-source-recover {the recovery intrinsic is internal, is the identity on every backend, and has one caller: std::actor's recovered, after checking that the answer carries the receiving Receiver's own mailbox identity (slot and generation)} -body {
+    set text [core::ReadFile [file join $::projectRoot stdlib actor.bot]]
+    set calls [regexp -all -- {std::actor::recover\[} $text]
+    set guarded [regexp -- {private nomethod fn recovered\(rx: Receiver\[M\], a: Answer\) -> M errors Closed:\n    if a\.status != a_message or a\.slot != rx\.slot or a\.gen != rx\.gen:\n        fail Closed\n    std::actor::recover\[M\]\(a\.payload\)\n} $text]
+    list $calls $guarded [core::native::isInternalMember std::actor::recover] \
+        [dict get $::native::lower::natives std::actor::recover] [core::actor::recover {probe value}]
+} -result {1 1 1 same {probe value}}
+
+test actor-source-ordinary {std::actor is ordinary Botlish over std::event_loop: its one intrinsic is recover; no native runtime file, NIR operation or Tcl runtime of the compiler names actors, mailboxes or the library} -body {
+    set natives [lmap n [core::native::names] {expr {[string match std::actor::* $n] ? $n : [continue]}}]
+    set mentions {}
+    foreach path [concat [glob -directory [file join $::projectRoot native src] -types f *.rs] \
+            [glob -directory [file join $::projectRoot native src runtime] -types f *.rs] \
+            [glob -directory [file join $::projectRoot native src codegen] -types f *.rs]] {
+        if {[regexp -nocase -- {std::actor|mailbox|postbox} [core::ReadFile $path]]} {
+            lappend mentions [file tail $path]
+        }
+    }
+    foreach dir {hir compiler surface} {
+        foreach path [glob -directory [file join $::projectRoot $dir] -types f *.tcl] {
+            if {[regexp -- {std::actor} [core::ReadFile $path]]} {
+                lappend mentions $dir/[file tail $path]
+            }
+        }
+    }
+    list $natives $mentions
+} -result {std::actor::recover {}}
+
+cleanupTests

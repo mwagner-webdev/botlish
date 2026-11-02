@@ -1,0 +1,182 @@
+# identity.bot -- SAME-THREAD-ACTORS-MILESTONE-1.md, "Typed addresses and
+# message identity" and "Affine receive ownership":
+#
+#   * three senders share one address; the receiver gets each sender's
+#     messages in the order that sender sent them;
+#   * the owner of a mailbox gives a copy of its Receiver to another actor
+#     in a message: the copy receives nothing there (Closed), and the owner
+#     still gets every message;
+#   * listening to a closed mailbox is Closed;
+#   * no accidental delivery to a replacement: X's mailbox closes when X
+#     ends, Y's reuses its slot, and a send to X's old address is Stale --
+#     Y gets only what was sent to Y.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type std::actor::Sent
+
+struct Msg:
+    from: str
+    n: int
+
+struct Line:
+    text: str
+
+struct Gift:
+    rx: std::actor::Receiver[Msg]
+
+fn sent_name(s: Sent) -> str:
+    if s == Sent::Delivered:
+        "Delivered"
+    elif s == Sent::Full:
+        "Full"
+    elif s == Sent::Closed:
+        "Closed"
+    else:
+        "Stale"
+
+fn sender(name: str, to: std::actor::Address[Msg]) -> std::actor::Exit:
+    loop i from 1 through 3:
+        to.deliver(Msg {from: name, n: i})
+        std::actor::pause()
+    std::actor::exit(0)
+
+# Receives N messages and reports them in order.
+fn collector(inbox: std::actor::Inbox[Msg], n: int, log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    seen = fold i from 0 to n with intermediate s "":
+        m = rx.receive():
+            on std::actor::Closed:
+                break
+        s.concat(m.from).concat(std::int::to_string(m.n)).append_char(' ')
+    log.send(Line {text: "collector got ".concat(seen)})
+    std::actor::exit(n)
+
+# Listens, gives a copy of its Receiver away, then receives two messages.
+fn owner(inbox: std::actor::Inbox[Msg], thief: std::actor::Address[Gift], log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    thief.send(Gift {rx: rx})
+    a = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    b = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    log.send(Line {text: "owner got ".concat(std::int::to_string(a.n)).concat(" and ").concat(std::int::to_string(b.n))})
+    std::actor::exit(a.n + b.n)
+
+# Tries to receive through a Receiver it was given.
+fn thief(inbox: std::actor::Inbox[Gift], log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    g = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    stolen = g.rx.try_receive():
+        on std::actor::Closed:
+            log.send(Line {text: "thief: try_receive through a copied Receiver: Closed"})
+            []
+    taken = g.rx.receive():
+        on std::actor::Closed:
+            log.send(Line {text: "thief: receive through a copied Receiver: Closed"})
+            Msg {from: "none", n: -1}
+    std::actor::exit(taken.n)
+
+# Listens to a mailbox that may be closed already.
+fn latecomer(inbox: std::actor::Inbox[Msg], log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            log.send(Line {text: "latecomer: listen to a closed mailbox: Closed"})
+            return std::actor::exit(-1)
+    std::actor::exit(0)
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+nomethod fn start_sender(name: str, to: std::actor::Address[Msg], context ev: std::event_loop::Loop, ac: std::actor::Actors) errors std::event_loop::SchedulerFault:
+    s = inject no context:
+        coroutine {step, first} = sender(name, to)
+        std::actor::spawned(step, first)
+    s.start()
+
+nomethod fn if_new(b: bool) -> int:
+    if b:
+        1
+    else:
+        0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: log, inbox: log_in} = std::actor::open[Line](16)
+
+    # Several senders, one mailbox.
+    {to: c_to, inbox: c_in} = std::actor::open[Msg](2)
+    c = inject no context:
+        coroutine {step, first} = collector(c_in, 9, log)
+        std::actor::spawned(step, first)
+    c.start()
+    start_sender("sa", c_to)
+    start_sender("sb", c_to)
+    start_sender("sc", c_to)
+
+    # A copied Receiver receives nothing elsewhere.
+    {to: o_to, inbox: o_in} = std::actor::open[Msg](4)
+    {to: t_to, inbox: t_in} = std::actor::open[Gift](4)
+    o = inject no context:
+        coroutine {step, first} = owner(o_in, t_to, log)
+        std::actor::spawned(step, first)
+    o.start()
+    t = inject no context:
+        coroutine {step, first} = thief(t_in, log)
+        std::actor::spawned(step, first)
+    t.start()
+    std::actor::post(o_to, Msg {from: "main", n: 10})
+    std::actor::post(o_to, Msg {from: "main", n: 20})
+    std::event_loop::run()
+
+    # Listening to a closed mailbox.
+    {to: z_to, inbox: z_in} = std::actor::open[Msg](1)
+    std::actor::close(z_to)
+    z = inject no context:
+        coroutine {step, first} = latecomer(z_in, log)
+        std::actor::spawned(step, first)
+    z.start()
+
+    # No delivery to a replacement.
+    {to: x_to, inbox: x_in} = std::actor::open[Msg](4)
+    x = inject no context:
+        coroutine {step, first} = collector(x_in, 1, log)
+        std::actor::spawned(step, first)
+    x.start()
+    std::actor::post(x_to, Msg {from: "xx", n: 1})
+    std::event_loop::run()
+    {to: y_to, inbox: y_in} = std::actor::open[Msg](4)
+    say("main: Y's address differs from X's: ", if_new(y_to != x_to))
+    say("main: a send to X's old address is Stale (Y reused its slot): ", if_new(std::actor::post(x_to, Msg {from: "xx", n: 2}) == Sent::Stale))
+    y = inject no context:
+        coroutine {step, first} = collector(y_in, 1, log)
+        std::actor::spawned(step, first)
+    y.start()
+    std::actor::post(y_to, Msg {from: "yy", n: 1})
+    std::event_loop::run()
+    loop l in std::actor::drain(log_in):
+        std::event_loop::log("log: ".concat(l.text))
+    say("main: refused stale ", std::actor::stats().refused_stale)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

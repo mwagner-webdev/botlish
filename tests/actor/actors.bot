@@ -1,0 +1,297 @@
+# actors.bot -- Probe A of THREAD-ACTOR-ARCHITECTURE-CENSUS.md on
+# std::actor (SAME-THREAD-ACTORS-MILESTONE-1.md): several actors on ONE
+# std::event_loop under the deterministic driver -- counters with private
+# state, clients with request/reply and correlation ids, a handler that
+# suspends while the others progress, backpressure with an event-driven
+# wait for room (no polling: the only timers are the slow adds'), a quiet
+# actor beside a ping-pong pair, stale addresses, and a shutdown. The
+# actors that log hold the Loop (std::event_loop::log is the Loop's);
+# their mailbox traffic needs no context.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type std::actor::Sent
+import type std::event_loop::Ending
+
+enum Kind:
+    Add,
+    SlowAdd,
+    Get,
+    Stop,
+
+# A counter's message: what to do, a correlation id and where to reply.
+struct Op:
+    kind: Kind
+    amount: int
+    req: int
+    reply: std::actor::Address[Reply]
+
+struct Reply:
+    req: int
+    value: int
+
+struct Line:
+    text: str
+
+# A counter's private state (the fold's intermediate).
+struct Count:
+    total: int
+    handled: int
+
+
+nomethod fn say(who: str, text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(who.concat(": ").concat(text).concat(std::int::to_string(n)))
+
+fn sent_name(s: Sent) -> str:
+    if s == Sent::Delivered:
+        "Delivered"
+    elif s == Sent::Full:
+        "Full"
+    elif s == Sent::Closed:
+        "Closed"
+    else:
+        "Stale"
+
+nomethod fn op(kind: Kind, amount: int, req: int, reply: std::actor::Address[Reply]) -> Op:
+    Op {kind: kind, amount: amount, req: req, reply: reply}
+
+# A counter actor. A SlowAdd handler suspends (sleeps 500 us of the
+# loop's clock) in the middle of the message: the actor takes no other
+# message meanwhile -- its one coroutine is suspended -- while every other
+# actor goes on.
+fn counter(name: str, inbox: std::actor::Inbox[Op], log_to: std::actor::Address[Line], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    final = fold with intermediate st Count {total: 0, handled: 0}:
+        o = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        if o.kind == Kind::Stop:
+            break
+        if o.kind == Kind::Add:
+            Count {total: st.total + o.amount, handled: st.handled + 1}
+        elif o.kind == Kind::SlowAdd:
+            say(name, "slow add begins, total ", st.total)
+            std::actor::sleep(500)
+            say(name, "slow add ends, total ", st.total + o.amount)
+            Count {total: st.total + o.amount, handled: st.handled + 1}
+        else:
+            s = o.reply.send(Reply {req: o.req, value: st.total})
+            if s != Sent::Delivered:
+                say(name, "reply not delivered to req ", o.req)
+            Count {total: st.total, handled: st.handled + 1}
+    log_to.send(Line {text: name.concat(" done total ").concat(std::int::to_string(final.total)).concat(" handled ").concat(std::int::to_string(final.handled))})
+    std::actor::exit(final.total)
+
+# The logger actor: it writes each line to the loop's trace.
+fn logger(inbox: std::actor::Inbox[Line], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold with intermediate k 0:
+        line = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        say("logger", line.text.concat(" #"), k)
+        k + 1
+    say("logger", "closed after lines ", n)
+    std::actor::exit(n)
+
+# A client: N adds of 1..N to TO (each delivered, waiting for room when the
+# mailbox is full), then a Get; it waits for its reply on its own mailbox
+# and checks the correlation id. Two clients share one counter; each gets
+# only its own reply.
+fn client(name: str, n: int, base: int, to: std::actor::Address[Op], mine: std::actor::Inbox[Reply], me: std::actor::Address[Reply], log_to: std::actor::Address[Line], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = std::actor::listen(mine):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    loop i from 1 through n:
+        s = to.deliver(op(Kind::Add, i, 0, me))
+        if s != Sent::Delivered:
+            say(name, "add not delivered: ".concat(sent_name(s)).concat(" at "), i)
+        std::actor::pause()
+    req = base + n
+    to.deliver(op(Kind::Get, 0, req, me))
+    r = std::actor::receive(rx):
+        on std::actor::Closed:
+            Reply {req: -1, value: -1}
+    if r.req == req:
+        say(name, "reply for my request, value ", r.value)
+    else:
+        say(name, "WRONG reply, req ", r.req)
+    log_to.send(Line {text: name.concat(" finished")})
+    std::actor::exit(r.value)
+
+# Backpressure: five adds into a mailbox of capacity 3 whose receiver is
+# busy (a slow add): send answers Full -- nothing is dropped -- and deliver
+# then waits until a place frees (no polling).
+fn flooder(to: std::actor::Address[Op], me: std::actor::Address[Reply], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    to.send(op(Kind::SlowAdd, 100, 0, me))
+    fulls = fold k in [1, 2, 3, 4, 5] with intermediate fulls 0:
+        first = to.send(op(Kind::Add, k, 0, me))
+        if first == Sent::Full:
+            say("flooder", "Full at message ", k)
+            then = to.deliver(op(Kind::Add, k, 0, me))
+            say("flooder", "waited for room, then ".concat(sent_name(then)).concat(" at turn "), std::event_loop::turn_number())
+            fulls + 1
+        else:
+            fulls
+    to.deliver(op(Kind::Stop, 0, 0, me))
+    std::actor::exit(fulls)
+
+# Fairness: two actors exchange ROUNDS messages as fast as they can; a quiet
+# actor's one message, sent in the middle, is handled in the next turn.
+fn chatty(name: str, rounds: int, inbox: std::actor::Inbox[Op], peer: std::actor::Address[Op], me: std::actor::Address[Reply], serve: bool, context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    if serve:
+        peer.send(op(Kind::Add, 1, 0, me))
+    got = fold i from 0 to rounds with intermediate n 0:
+        o = std::actor::receive(rx):
+            on std::actor::Closed:
+                break
+        peer.send(op(Kind::Add, o.amount + 1, 0, me))
+        n + 1
+    say(name, "exchanged ", got)
+    std::actor::exit(got)
+
+fn quiet(inbox: std::actor::Inbox[Op], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = std::actor::listen(inbox):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    o = std::actor::receive(rx):
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    say("quiet", "handled its message in turn ", std::event_loop::turn_number())
+    std::actor::exit(o.amount)
+
+fn quiet_sender(to: std::actor::Address[Op], me: std::actor::Address[Reply], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    std::actor::pause()
+    std::actor::pause()
+    say("quiet-sender", "sends in turn ", std::event_loop::turn_number())
+    to.send(op(Kind::Add, 7, 0, me))
+    std::actor::exit(0)
+
+fn ending_name(e: Ending) -> str:
+    if e == Ending::Returned:
+        "Returned"
+    elif e == Ending::Failed:
+        "Failed"
+    else:
+        "Fault"
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: log, inbox: log_in} = std::actor::open[Line](8)
+    {to: nobody, inbox: nobody_in} = std::actor::open[Reply](1)
+    lg = inject context std::event_loop::Loop:
+        coroutine {step, first} = logger(log_in)
+        std::actor::spawned(step, first)
+    std::actor::start(lg)
+
+    # Stale addresses: a closed mailbox's address is Closed, and once its
+    # slot is reused, Stale -- it never reaches the replacement.
+    {to: old, inbox: old_in} = std::actor::open[Op](3)
+    std::actor::close(old)
+    say("main", "send to a closed mailbox: ".concat(sent_name(std::actor::post(old, op(Kind::Stop, 0, 0, nobody)))).append_char(' '), 0)
+    {to: shared, inbox: shared_in} = std::actor::open[Op](3)
+    reused = if shared == old:
+        "same address"
+    else:
+        "new generation"
+    say("main", "same slot reused: ".concat(reused).append_char(' '), 0)
+    say("main", "send to the old address: ".concat(sent_name(std::actor::post(old, op(Kind::Stop, 0, 0, nobody)))).append_char(' '), 0)
+    say("main", "queued in the replacement ", std::actor::queued(shared))
+
+    # Two clients share counter "c1"; a slow add suspends c1 mid-message.
+    c1 = inject context std::event_loop::Loop:
+        coroutine {step, first} = counter("c1", shared_in, log)
+        std::actor::spawned(step, first)
+    c1_id = std::actor::start(c1)
+    std::actor::post(shared, op(Kind::SlowAdd, 1000, 0, nobody))
+    {to: a_to, inbox: a_in} = std::actor::open[Reply](3)
+    {to: b_to, inbox: b_in} = std::actor::open[Reply](3)
+    ca = inject context std::event_loop::Loop:
+        coroutine {step, first} = client("clientA", 3, 100, shared, a_in, a_to, log)
+        std::actor::spawned(step, first)
+    std::actor::start(ca)
+    cb = inject context std::event_loop::Loop:
+        coroutine {step, first} = client("clientB", 2, 200, shared, b_in, b_to, log)
+        std::actor::spawned(step, first)
+    std::actor::start(cb)
+
+    # Backpressure on a small mailbox (capacity 3).
+    {to: busy, inbox: busy_in} = std::actor::open[Op](3)
+    c2 = inject context std::event_loop::Loop:
+        coroutine {step, first} = counter("c2", busy_in, log)
+        std::actor::spawned(step, first)
+    std::actor::start(c2)
+    fl = inject context std::event_loop::Loop:
+        coroutine {step, first} = flooder(busy, nobody)
+        std::actor::spawned(step, first)
+    std::actor::start(fl)
+
+    # Fairness: ping-pong beside a quiet actor.
+    {to: p, inbox: p_in} = std::actor::open[Op](3)
+    {to: q, inbox: q_in} = std::actor::open[Op](3)
+    pi = inject context std::event_loop::Loop:
+        coroutine {step, first} = chatty("ping", 20, p_in, q, nobody, true)
+        std::actor::spawned(step, first)
+    std::actor::start(pi)
+    po = inject context std::event_loop::Loop:
+        coroutine {step, first} = chatty("pong", 20, q_in, p, nobody, false)
+        std::actor::spawned(step, first)
+    std::actor::start(po)
+    {to: qq, inbox: qq_in} = std::actor::open[Op](3)
+    qu = inject context std::event_loop::Loop:
+        coroutine {step, first} = quiet(qq_in)
+        std::actor::spawned(step, first)
+    std::actor::start(qu)
+    qs = inject context std::event_loop::Loop:
+        coroutine {step, first} = quiet_sender(qq, nobody)
+        std::actor::spawned(step, first)
+    std::actor::start(qs)
+
+    # Stop c1 after everything its clients send (main sends Stop once the
+    # loop is quiet); an Add after the Stop stays undelivered.
+    std::event_loop::run()
+    say("main", "loop quiet in turn ", std::event_loop::turn_number())
+    std::actor::post(shared, op(Kind::Stop, 0, 0, nobody))
+    std::actor::post(shared, op(Kind::Add, 5, 0, nobody))
+    std::event_loop::run()
+    # The logger still waits: shutdown revokes every registration, so its
+    # receive answers Closed and it ends.
+    abandoned = std::event_loop::shutdown(4)
+    say("main", "abandoned ", abandoned)
+    say("main", "reaped ", std::actor::reap())
+    outcomes = std::event_loop::take_outcomes()
+    loop o in outcomes:
+        std::event_loop::log("outcome task ".concat(std::int::to_string(o.task)).append_char(' ').concat(ending_name(o.ending)).append_char(' ').concat(std::int::to_string(o.value)))
+    st = std::actor::stats()
+    say("main", "c1 is task ", c1_id)
+    say("main", "delivered ", st.delivered)
+    say("main", "received ", st.received)
+    say("main", "undelivered ", st.undelivered)
+    say("main", "full ", st.full)
+    say("main", "room waits ", st.room_waits)
+    say("main", "room wakes ", st.room_wakes)
+    say("main", "refused closed ", st.refused_closed)
+    say("main", "refused stale ", st.refused_stale)
+    say("main", "open mailboxes ", st.open)
+    say("main", "running actors ", st.running)
+    say("main", "timers fired ", std::event_loop::stats().timers_fired)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -2301,6 +2301,70 @@ still apply and be killed: update a mutant's text when you change the code
 it mutates, keeping it a mutant of the same rule). `bench/event-loop.tcl` is
 the performance report against the prototype.
 
+## Same-thread actors (std::actor)
+
+`std::actor` (stdlib/actor.bot; SAME-THREAD-ACTORS-MILESTONE-1.md) is
+ordinary Botlish over `std::event_loop`: an actor is one ordinary
+coroutine, hosted by a task the library adopts into the loop (`start`),
+with typed mailboxes in the application-installed context `Actors`.
+Communicating takes no context: `listen`, `receive`, `try_receive`, `send`,
+`deliver` and `pause` are requests the actor's coroutine yields to its host
+(protocol `resume Answer`, outward `Exit`), which performs them with the
+Loop and Actors and resumes it with the answer. So an actor constructed
+inside `inject no context:` receives and replies, and the compiler's own
+requirement analysis proves it needs nothing. Keep it so:
+
+* The actor-side operations require no context, ever (`actor-authority-
+  requirements` pins them): never give `receive`, `send` or `listen` a
+  context parameter, never make an actor hold the Loop or Actors to talk,
+  and never replace the protocol with a context trait. What needs the
+  scheduler's authority (open, start, post, close, drain, reap, stats,
+  `sleep`'s timer) requires it, and stays the supervisor's.
+* Restriction is construction's: an actor's authority is what its
+  construction's inject block (or its constructor) had. Never claim `start`
+  restricts anything, and never resume an actor inside an inject block (the
+  host resumes it outside every block).
+* Messages cross the non-generic mailbox table and protocol as `any` and are
+  recovered with the one internal intrinsic `std::actor::recover[M]`
+  (core/actor.tcl: the identity), called only by `recovered`, after
+  checking that the answer carries the identity (slot, generation) of the
+  receiver's own mailbox (`actor-source-recover`). Never call it anywhere
+  else, never make it public, never add a second unchecked conversion, and
+  never let an Answer carry a message of another mailbox.
+* `Inbox[M]` is affine (an opaque token holding a null C pointer, as
+  `std::io::fs::Owner`); `listen` consumes it and binds the mailbox to the
+  actor's task for good, and a host serves only its own actor's bound
+  mailboxes (a copied `Receiver` receives nothing elsewhere). `Address[M]`
+  is unrestricted and send-only. Identity is (slot, generation): a close
+  keeps the generation (Closed), a reuse bumps it (Stale), each mailbox
+  incarnation has its own wake and room channels.
+* Lifecycle: a host retires its actor (closes its mailboxes, counting what
+  was queued undelivered, waking its room waiters with Closed) when the
+  actor returns or fails, before its task ends with the actor's outcome;
+  `reap` closes what the loop abandoned (`std::event_loop::owned?`). The
+  library never consumes `take_outcomes`, keeps no scheduler of its own, and
+  takes at most one message per actor per dispatch.
+* Backpressure is event-driven: a full mailbox answers Full, `deliver`
+  waits on the mailbox's room channel, each freed place wakes one waiting
+  sender in FIFO order, a sender that did not wait cannot overtake one that
+  does, and nothing ever polls a timer. Never drop an actor message.
+* No native, NIR instruction, runtime object or Tcl runtime of actors:
+  `std::actor::recover` (`same` in native/lower.tcl) is the whole compiler
+  side (`actor-source-ordinary`). No OS threads, cross-thread transport,
+  sendability, actor-local installation or runtime permission check here.
+
+If you change stdlib/actor.bot, core/actor.tcl, the `same` lowering or
+`std::event_loop::owned?`, run `tests/actor.test` (on both passes,
+`CORE_BACKEND=interp` and `compile`; directly, all four backends; also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `tests/event-loop.test`,
+`tests/restricted-injection.test`, `tests/coroutines.test`,
+`tests/affine.test`, the warning gate, `tools/compilerpedia.tcl generate`
+and `check`, and `audit/actor/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule). `bench/actor.tcl` is the performance report
+against the census's Probe F.
+
 ## DecimalRounded and scalar refinements
 
 `DecimalRounded{minDecimalsPreserved: N}` (optionally `maxDecimalsPreserved:
