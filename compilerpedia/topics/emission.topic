@@ -1,0 +1,642 @@
+# emission.topic -- emission claims (`fn F(...) emits R:`), the guarantee
+# the compiler certifies, and the diagnostics of a claim it does not.
+
+@topic concept.emission-claims
+title: Emission claims: `emits R`
+summary: `fn F(...) emits R:` states that F yields one token of recognizer R; the compiler certifies it from F's declaration and code alone, for every permitted argument, or rejects it.
+index: concepts proofs
+alias: emits; emission claim; emitter; certified emitter; yield trace; output grammar; token emitter
+keywords: emits, emitter, yield, trace, recognizer, dfa, token, certificate, certified, prefix, boundary, guard, domain, json, lexical
+related: concept.recognizers concept.coroutines error.emit-rejected error.emit-boundary error.emit-unsupported
+docs: EMISSION-CLAIMS-MILESTONE-1.md MODULAR-EMISSION-PROOFS-MILESTONE-1.md EMITTER-COROUTINE-EXPLORATION.md DFA-COROUTINE-MILESTONE-2.md
+
+== WHAT IT IS
+A clause of a function declaration, after its `errors`:
+
+    fn json_string(text: str) -> unit errors IndexNotFound emits json_lex::json_string_strict:
+
+It names one or more declared recognizers (`dfa NAME over ALPHABET:`, an
+imported module's as `ns::NAME`). The compiler checks the claim when it
+compiles the function and either certifies it or reports why not; a
+function with a claim it cannot certify is a compile error. Nothing about
+the function changes: it is called, returns, fails and yields exactly as
+without the claim, the claim inserts no check at run time, needs no
+coroutine of its own and grants no authority to write anything.
+
+== THE GUARANTEE
+For every argument tuple the function's declared parameter types permit:
+
+  * every invocation that completes normally has yielded exactly one token
+    of R, with nothing unread; and
+  * every finite prefix of what an invocation yields -- before it
+    completes, when it fails, or when its consumer stops resuming it -- is a
+    viable prefix of R's language.
+
+It does not say the function terminates, that the token has the value you
+meant (a valid number of the wrong value is valid), or that a stream of
+tokens is a structurally valid document: `emits json_text` proves the
+lexical stream -- valid tokens with valid boundaries -- never that the
+brackets match (that language is not regular).
+
+== WHAT IS EMITTED
+The outward yield trace: the values the function yields, and those its
+ordinary calls yield (deep yields). A function's result is no symbol, and
+neither is a coroutine root's final value: a function claiming R whose
+declared result is an Int is a symbol source, and must complete with -1,
+the end (error.emit-terminal-value). A coroutine the function constructs is
+another execution: its yields are its own, and the values the function
+receives from it are ordinary values, of whatever the analysis knows of
+them.
+
+== CALLERS DO NOT MATTER
+A claim is certified from the function's declared parameter types alone
+-- an `int` is every Int, `type Digit = Int in 0..9` is 0..9 -- never from
+the values its callers pass. A function no program calls is certified (or
+rejected) exactly like one called everywhere, and the verdict is the same
+in every program that imports it. Two honest repairs exist for an emitter
+that is correct only for some values:
+
+  * a declared integer domain: every caller must then prove its argument
+    in the domain (a compile-time obligation of the call);
+  * a guard: a call of a recognizer that never suspends, whose normal
+    completion proves its argument is a symbol it takes -- the claim then
+    says "fails, or emits a valid token".
+
+== FAILURES AND HELPERS
+A failure may come after a valid prefix: the claim allows it, and a caller
+that handles the failure and goes on yielding is checked on its own
+complete trace, from the states where the failure can occur. A helper
+called from a claimed function needs no claim of its own; a helper that
+has one is composed through its certificate. Two individually certified
+token emitters called back to back do not make two tokens (`12` then `34`
+is `1234`): a helper's claimed token must be ended by the next symbol of
+its caller's grammar (error.emit-boundary).
+
+== WHEN IT IS NOT PROVED
+The compiler says "may": the facts it reasons with over-approximate what
+runs. A rejected claim names the yield, the recognizer state and the
+symbols; when the analysis lacks a fact (a value it cannot bound, a trait
+operation, a budget) it says so instead (error.emit-unknown-value,
+error.emit-unsupported, error.emit-budget). A concrete counterexample is a
+run, never a compiler pass: audit/emission-claims/tools/witness.tcl runs the
+function on candidate arguments and reports the first invalid trace it
+finds -- and finding none proves nothing.
+
+== RUNTIME COST
+None: a certified emitter compiles to exactly the code it would without
+its claim -- no recognizer runs, no table is loaded, no object or buffer is
+allocated for the claim. A guard is the run-time check the program asked
+for.
+
+@example accept
+import std::dfa
+import std::coroutine
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type DigitValue = Int in 0..9
+
+fn digit(d: DigitValue) -> unit emits digit_token:
+    yield 48 + d
+    unit
+
+fn source() -> int:
+    digit(7)
+    -1
+
+coroutine {step, first} = source()
+first
+@caption 48 + d is a digit for every d of the declared domain: certified, whoever calls it
+@value 55
+@end
+
+@topic error.emit-rejected
+title: EMIT-REJECTED: a yield the claimed recognizer may reject
+summary: The analysis found that a yield of a claimed function may send a symbol the recognizer does not take in the state it is in: the claim cannot be certified.
+index: errors proofs
+alias: emitter rejected; invalid symbol; emission rejected
+keywords: emits, emitter, yield, reject, recognizer, symbol, state, claim
+related: concept.emission-claims concept.recognizers
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-REJECTED
+
+== MEANING
+For some argument the declaration permits, the yield may send a symbol no
+transition of the recognizer's current state takes. The message names the
+symbols and the state; a note locates the state's declaration. The
+arguments are the declaration's: a program whose callers only pass safe
+values does not make the claim true.
+
+== WHAT TO DO
+Make the emitter correct for every permitted argument: narrow the
+parameter's declared type to an integer domain, branch on the value, or
+guard it with a recognizer of one symbol. The witness tool
+(audit/emission-claims/tools/witness.tcl) looks for a concrete argument
+that produces an invalid trace.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+type Nibble = Int in 0..15
+
+fn digit(d: Nibble) -> unit emits digit_token:
+    yield 48 + d
+    unit
+
+0
+@caption 48 + d is ':' for d = 10: the declaration permits every Nibble, whoever calls it
+@error CORE SEMANTIC EMIT-REJECTED
+@at 12:5
+@end
+
+@topic error.emit-beyond-token
+title: EMIT-BEYOND-TOKEN: a yield the token ends before
+summary: A claimed function may yield a symbol its recognizer completes before (`accept before`): the symbol would begin the next token, so the trace is more than one token.
+index: errors proofs
+alias: beyond the token; past the token
+keywords: emits, accept before, lookahead, token, boundary, unread
+related: concept.emission-claims error.emit-after-token
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-BEYOND-TOKEN
+
+== MEANING
+`accept before N` completes a token leaving the last N symbols unread. A
+claimed function yields exactly one token, so a symbol the token ends
+before is not part of it.
+
+== WHAT TO DO
+Do not yield the follower: the caller that writes the next token (and
+claims the larger grammar) yields it.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa number over ascii:
+    start:
+        digit -> integer
+    integer:
+        digit -> integer
+        ',' -> accept before
+        end -> accept
+
+fn one_and_comma() -> unit emits number:
+    yield 49
+    yield 44
+    unit
+
+0
+@caption a number ends before its ',': the ',' is the next token's
+@error CORE SEMANTIC EMIT-BEYOND-TOKEN
+@at 15:5
+@end
+
+@topic error.emit-after-token
+title: EMIT-AFTER-TOKEN: a yield after the token is complete
+summary: A claimed function may yield a symbol after its recognizer has completed the token on a symbol of its own.
+index: errors proofs
+alias: after the token
+keywords: emits, token, complete, accept, after
+related: concept.emission-claims error.emit-beyond-token
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-AFTER-TOKEN
+
+== MEANING
+The recognizer completed with nothing unread (an `accept` that takes the
+symbol), so the token is whole; anything yielded after it is outside the
+claimed language.
+
+== WHAT TO DO
+End the function after the token's last symbol, or claim a grammar of the
+longer stream.
+
+@example reject
+import std::dfa
+
+dfa quoted over ascii:
+    start:
+        '"' -> body
+    body:
+        'a'..'z' -> body
+        '"' -> accept
+
+fn quoted_then_space() -> unit emits quoted:
+    yield 34
+    yield 34
+    yield 32
+    unit
+
+0
+@caption the closing quotation mark completes the token: the space is after it
+@error CORE SEMANTIC EMIT-AFTER-TOKEN
+@at 13:5
+@end
+
+@topic error.emit-incomplete
+title: EMIT-INCOMPLETE: a claimed function may complete before its token does
+summary: A normal completion of a claimed function may leave its recognizer in a state that rejects the end of the input: what it yielded is a prefix of a token, not a token.
+index: errors proofs
+alias: incomplete token; early completion; empty token
+keywords: emits, end, complete, incomplete, return, prefix
+related: concept.emission-claims
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-INCOMPLETE
+
+== MEANING
+Every normal completion -- the end of the body, every `return` -- must have
+yielded a whole token: the recognizer must accept the end of the input
+there. A prefix is allowed only before a failure or while the function is
+still running.
+
+== WHAT TO DO
+Yield the rest of the token on every path that completes, or fail on the
+path that cannot.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa signed over ascii:
+    start:
+        '-' -> minus
+        digit -> integer
+    minus:
+        digit -> integer
+    integer:
+        digit -> integer
+        end -> accept
+
+fn minus_sign() -> unit emits signed:
+    yield 45
+    unit
+
+0
+@caption "-" alone is no number
+@error CORE SEMANTIC EMIT-INCOMPLETE
+@at 15:31
+@end
+
+@topic error.emit-end-symbol
+title: EMIT-END-SYMBOL: a yield that may send -1
+summary: A claimed function may yield -1, which the recognizer protocol reserves for the end of the input: it is never a symbol.
+index: errors proofs
+alias: minus one; end of input yielded
+keywords: emits, end, -1, symbol, protocol
+related: concept.emission-claims concept.recognizers
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-END-SYMBOL
+
+== MEANING
+In std::dfa's protocol -1 is the end of the input. An emitter that yields
+it would end its consumer's input in the middle of a stream.
+
+== WHAT TO DO
+Exclude -1 from the value: a branch, a domain, a guard.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn previous(n: int) -> unit emits digit_token:
+    if n >= 0 and n <= 10:
+        yield n - 1
+    else:
+        yield 48
+    unit
+
+0
+@caption n - 1 is -1 for n = 0
+@error CORE SEMANTIC EMIT-END-SYMBOL
+@at 11:9
+@end
+
+@topic error.emit-not-symbol
+title: EMIT-NOT-SYMBOL: a yield that sends no Int
+summary: A claimed function yields a value that is not an Int (a String, a struct): a recognizer's symbols are Ints.
+index: errors proofs
+alias: not a symbol; string yielded
+keywords: emits, yield, symbol, int, string, type
+related: concept.emission-claims
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-NOT-SYMBOL
+
+== MEANING
+An emitter's yields are its symbols: Unicode scalar values, ASCII codes
+or bytes, as Ints. A String is not a symbol (yield its characters'
+std::char::scalar_value one at a time).
+
+== WHAT TO DO
+Yield Ints.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn one() -> unit emits digit_token:
+    yield "1"
+    unit
+
+0
+@caption "1" is a String; 49 is the symbol
+@error CORE SEMANTIC EMIT-NOT-SYMBOL
+@at 10:5
+@end
+
+@topic error.emit-unknown-value
+title: EMIT-UNKNOWN-VALUE: a yield whose value the analysis cannot bound
+summary: The analysis does not know a yielded value to be an Int of any bounded set (its static type is `any`): the claim is not proved, which is no finding that it is false.
+index: errors proofs
+alias: unknown value; any yielded
+keywords: emits, yield, unknown, any, type, not proved
+related: concept.emission-claims error.emit-unsupported
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-UNKNOWN-VALUE
+
+== MEANING
+The yielded value's type says nothing about it -- an element of a bare
+`List`, a value of type `any` -- so no symbol set can be checked. This is
+a limit of the facts, not a demonstrated error.
+
+== WHAT TO DO
+Declare the type (`List[int]`, an integer domain) or check the value
+before yielding it.
+
+@example reject
+import std::dfa
+import std::list
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn first(xs: List[any]) -> unit errors IndexNotFound emits digit_token:
+    yield std::list::at(xs, 0)
+    unit
+
+0
+@caption an element of a bare List is of type any
+@error CORE SEMANTIC EMIT-UNKNOWN-VALUE
+@at 11:5
+@end
+
+@topic error.emit-byte-character
+title: EMIT-BYTE-CHARACTER: a character's scalar value yielded to a byte recognizer
+summary: A claimed function may yield a non-ASCII character's scalar value to a recognizer over bytes: a character is not a byte.
+index: errors proofs
+alias: character as byte; scalar value as byte
+keywords: emits, bytes, character, scalar value, utf8, encoding
+related: concept.emission-claims concept.recognizers
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-BYTE-CHARACTER
+
+== MEANING
+A recognizer over bytes reads encoded text one byte at a time; a scalar
+value above 127 is not one of its symbols, and yielding it is a mistake of
+encoding, not of grammar.
+
+== WHAT TO DO
+Encode the character and yield its bytes, or claim a recognizer over
+unicode.
+
+@example reject
+import std::dfa
+import std::char
+import std::str
+
+dfa byte_token over bytes:
+    start:
+        0..255 -> accept
+
+fn first_char(text: str) -> unit errors IndexNotFound emits byte_token:
+    yield std::char::scalar_value(text.char_at(0))
+    unit
+
+0
+@caption 'é' is the scalar value 233, which UTF-8 writes as two bytes
+@error CORE SEMANTIC EMIT-BYTE-CHARACTER
+@at 10:5
+@end
+
+@topic error.emit-terminal-value
+title: EMIT-TERMINAL-VALUE: a symbol source whose final value is not -1
+summary: A claimed function whose declared result is an Int is a symbol source -- a coroutine root a consumer may read past its end -- and must complete with -1, the end.
+index: errors proofs
+alias: terminal value; final value; symbol source result
+keywords: emits, result, coroutine, root, terminal, -1, source
+related: concept.emission-claims concept.coroutines
+docs: EMISSION-CLAIMS-MILESTONE-1.md COROUTINES.md
+code: CORE SEMANTIC EMIT-TERMINAL-VALUE
+
+== MEANING
+A completed coroutine's result is stable: every later resume answers it
+again. A consumer that reads values after the end would take any other
+Int for a symbol.
+
+== WHAT TO DO
+Complete with -1, or declare the result `unit` (not a symbol source).
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn digit_source() -> int emits digit_token:
+    yield 55
+    0
+
+0
+@caption 0 after the end would read as a symbol
+@error CORE SEMANTIC EMIT-TERMINAL-VALUE
+@at 9:32
+@end
+
+@topic error.emit-boundary
+title: EMIT-BOUNDARY: a symbol that would continue a helper's token
+summary: After a call of a helper that claims to emit one whole token of a recognizer, the caller may yield a symbol that recognizer's token would take: the helper's token would absorb it.
+index: errors proofs
+alias: token boundary; glued tokens; adjacent tokens; missing separator
+keywords: emits, boundary, token, helper, separator, adjacent, composition
+related: concept.emission-claims error.emit-beyond-token
+docs: EMISSION-CLAIMS-MILESTONE-1.md MODULAR-EMISSION-PROOFS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-BOUNDARY
+
+== MEANING
+Calling two certified number emitters back to back writes `12` and `34`,
+which is the one number `1234`. A helper's claim is a promise that what it
+yields is one token, so the symbol after it must end that token in the
+caller's grammar -- whitespace or a separator, or the end.
+
+== WHAT TO DO
+Yield a separator the grammar ends the token before.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa number over ascii:
+    start:
+        digit -> integer
+    integer:
+        digit -> integer
+        ' ' -> accept before
+        end -> accept
+
+dfa numbers over ascii:
+    between:
+        ' ' -> between
+        digit -> call number then between
+        end -> accept
+
+type DigitValue = Int in 0..9
+
+fn digit(d: DigitValue) -> unit emits number:
+    yield 48 + d
+    unit
+
+fn glued() -> unit emits numbers:
+    digit(1)
+    digit(2)
+    unit
+
+0
+@caption "12" is one number, not the two digit wrote
+@error CORE SEMANTIC EMIT-BOUNDARY
+@at 27:5
+@end
+
+@topic error.emit-unsupported
+title: EMIT-UNSUPPORTED: code the emission checker does not follow
+summary: A claimed function's trace depends on code the checker does not follow (a trait operation, a context-trait implementation, an unknown form): not proved, which is no finding that it is false.
+index: errors proofs
+alias: unsupported; not modelled; trait operation in an emitter
+keywords: emits, trait, unsupported, not proved, context trait, implementation
+related: concept.emission-claims error.emit-unknown-value error.emit-budget
+docs: EMISSION-CLAIMS-MILESTONE-1.md TRAITS.md
+code: CORE SEMANTIC EMIT-UNSUPPORTED
+
+== MEANING
+A trait operation's implementation is chosen for the program it is in, so
+a claim that read it would be a property of that program, not of the
+function. The checker refuses to certify what it does not follow -- never
+does it read an unknown operation as yielding nothing. This is a limit of
+the analysis, not a demonstrated error.
+
+== WHAT TO DO
+Call a concrete function instead (the trait operation's implementation, by
+name), or move the output into a helper that does not depend on the trait.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+trait Coded:
+    fn code(self: Coded) -> int
+
+struct Seven:
+    unused: int
+
+fn code(s: Seven) -> int:
+    55
+
+fn emit(c: Coded) -> unit emits digit_token:
+    yield c.code()
+    unit
+
+fn source() -> int:
+    emit(Seven {unused: 0})
+    -1
+
+coroutine {step, first} = source()
+first
+@caption c.code() is the witness's, chosen where emit is called
+@error CORE SEMANTIC EMIT-UNSUPPORTED
+@at 18:33
+@end
+
+@topic error.emit-budget
+title: EMIT-BUDGET: the emission analysis exhausted its budget
+summary: The analysis of a claim took more fixpoint rounds, summaries or recognizer products than its budget allows: not proved, never proved.
+index: errors proofs
+alias: budget; analysis limit
+keywords: emits, budget, fixpoint, rounds, recursion, limit, not proved
+related: concept.emission-claims error.emit-unsupported
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-BUDGET
+
+== MEANING
+Recursion and loops are analyzed to a fixpoint whose convergence is
+checked: 60 rounds, 40,000 summaries of helpers per compilation, 20,000
+states of a certificate's product with a caller's grammar. A claim whose
+analysis needs more is rejected as not proved, and nothing it reached is
+reused. This is a limit of the analysis, not a demonstrated error.
+
+== WHAT TO DO
+Split the emitter, or bound what changes between recursive calls (an
+argument whose facts grow every round is widened, but a long chain of
+distinct helpers is not).
+
+@topic error.emit-recognizer
+title: EMIT-RECOGNIZER: a claim that names no recognizer
+summary: An `emits` clause names something that is not a visible declared recognizer, or names one twice.
+index: errors proofs
+alias: emits names no recognizer; emits names a function; not a recognizer
+keywords: emits, recognizer, dfa, unknown, name, claim, import
+related: concept.emission-claims concept.recognizers
+docs: EMISSION-CLAIMS-MILESTONE-1.md
+code: CORE SEMANTIC EMIT-RECOGNIZER
+
+== MEANING
+A claim names a recognizer declared with `dfa NAME over ALPHABET:` before
+the function (an imported module's as `ns::NAME`, which needs its
+`import`, like any qualified name). An ordinary function is no recognizer,
+even one that yields.
+
+== WHAT TO DO
+Name the recognizer, import its module, or declare it before the function.
+
+@example reject
+import std::dfa
+
+fn digit() -> unit emits nothing_declared:
+    yield 49
+    unit
+
+0
+@caption no recognizer of that name is declared
+@error CORE SEMANTIC EMIT-RECOGNIZER
+@at 3:26
+@end

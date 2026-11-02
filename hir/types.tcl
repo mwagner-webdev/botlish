@@ -166,6 +166,13 @@
 #                                   type of a Botlish value: the values that
 #                                   cross the boundary are its carrier's,
 #                                   Float64 (hir::cabi::Carrier)
+#   rawfloat32, rawfloat64          a raw C float or double, std::ffi::c::
+#                                   RawFloat or std::ffi::c::RawDouble
+#                                   (RAW-C-FLOAT-FFI-MILESTONE-1.md): a C
+#                                   floating type that is also a type of
+#                                   values -- every bit pattern of binary32
+#                                   or binary64 -- of a runtime kind of its
+#                                   own; no number, never a Float64
 #   {nview L}                       a read-only native view NativeView[L]
 #                                   (NATIVE-LAYOUT-VIEWS.md): live native
 #                                   memory read through layout L, whose
@@ -398,6 +405,15 @@ proc hir::types::resolveNamed {name {ns ""}} {
     if {$name eq [hir::cabi::FloatName]} {
         # C float names a C type only: no Botlish value is a binary32.
         return -code error -errorcode {BOTLISH TYPE} [hir::cabi::FloatMessage]
+    }
+    if {$name in [list [hir::cabi::RawFloatName] [hir::cabi::RawDoubleName]]} {
+        # A raw C float or double (RAW-C-FLOAT-FFI-MILESTONE-1.md): a C type
+        # and a type of values at once, its runtime kind in every position.
+        return [hir::cabi::FloatingType [namespace tail $name]]
+    }
+    if {$name in {rawfloat32 rawfloat64}} {
+        # The raw kinds are spelled by their C type's name only.
+        return -code error -errorcode {BOTLISH TYPE} [hir::cabi::RawKindMessage $name]
     }
     if {$name eq [hir::cabi::VoidName]} {
         # The C void (C-ABI-TYPES.md): a pointee identity, never the type of
@@ -2430,9 +2446,9 @@ proc hir::types::Totality {operation type {seen {}}} {
                 return {total ""}
             }
         }
-        return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
+        return [list unknown "its type is the imprint variable [hir::imprint::Shown [lindex $type 1]], which no constraint holds to total equality and hashing"]
     }
-    if {[hir::cabi::IsFloating $type]} {
+    if {[hir::cabi::IsFiniteFloating $type]} {
         return [Totality $operation [hir::cabi::Carrier $type] $seen]
     }
     if {[hir::refinements::IsRefined $type] && [hir::refinements::IsApplied [hir::refinements::Family $type]]} {
@@ -2472,7 +2488,31 @@ proc hir::types::Totality {operation type {seen {}}} {
                 }
                 set parts {}
                 set shown [show $type]
+                set identity [hir::structs::identityOf $id]
+                if {$identity ne ""} {
+                    # A struct that declares its identity
+                    # (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md) is
+                    # compared and hashed by it alone: its identity fields'
+                    # elements are its components, named in the type's own
+                    # terms (its representation is its owner's), and every
+                    # other field takes no part.
+                    set fields [hir::structs::AppliedFieldTypes $type]
+                    foreach field [dict get $identity fields] label [hir::structs::IdentityLabels [dict get $identity form]] {
+                        set t [dict get $fields $field]
+                        lappend parts [list "the $label of $shown" [if {$t eq {}} {string cat any} else {elementOf $t}]]
+                    }
+                    return [Components $operation $parts [concat $seen [list $type]]]
+                }
+                set child [hir::structs::treeField $id]
                 foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+                    if {$name eq $child} {
+                        # A tree struct's child field (TREE-STRUCT-
+                        # MILESTONE-1.md) is a List of values of this very
+                        # application: it adds no requirement of its own,
+                        # so the tree is total exactly when its other
+                        # fields are (every tree is finite).
+                        continue
+                    }
                     lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
                 }
                 return [Components $operation $parts [concat $seen [list $type]]]
@@ -2535,6 +2575,9 @@ proc hir::types::NoTotality {operation kind} {
         DecimalRounded {
             return "a DecimalRounded value has no $op: it is equal to another only at its type's precision, which [expr {$operation eq "hash" ? "a hash" : "a type-blind equality"}] does not know"
         }
+        rawfloat32 - rawfloat64 {
+            return "a [core::cabi::rawName $kind] value has no $op: a raw C floating value is a bit pattern, whose bits or admitted Float64 are compared explicitly"
+        }
     }
     return "a value of kind $kind has no $op"
 }
@@ -2549,6 +2592,12 @@ proc hir::types::NoTotality {operation kind} {
 # component (the element of List[never]) it is vacuously total.
 proc hir::types::IsEqualityTotal {type} {
     return [expr {$type ne "never" && [lindex [Totality equality $type] 0] eq "total"}]
+}
+
+# {CLASS WHY}: TYPE against the intrinsic trait Equatable -- total equality
+# (Totality's equality column; REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+proc hir::types::EqualityClass {type} {
+    return [Totality equality $type]
 }
 
 # {CLASS WHY}: TYPE against the intrinsic trait Hashable -- total equality and
@@ -2571,9 +2620,101 @@ proc hir::types::IsHashable {type} {
     return [expr {[lindex [HashClass $type] 0] eq "total"}]
 }
 
+# {KIND WANTED} when an argument of static type TYPE at position INDEX of a
+# call of native NAME is of a statically known kind KIND other than the kind
+# WANTED the native's parameter requires (core/native.tcl's -param-types),
+# else {}: the call can only raise TYPE when it runs, whatever the value is.
+# The one statement of the rule: the call's own check reports it
+# (hir::range::VerifyNativeKinds), the call is poison in the generic walk and
+# dead in region inference (Call), and the method-call decision's kind proofs
+# rule a candidate out by it (hir::methods::Excluded)
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md). A type of no fixed kind
+# (`any`, a structural function type, `never`; an imprint variable, which
+# NativeArgumentMismatch judges) is no mismatch: the call checks it when it
+# runs.
+proc hir::types::NativeKindMismatch {name index type} {
+    set meta [core::native::metadata $name]
+    set paramType [lindex [dict get $meta paramTypes] $index]
+    if {$paramType in {"" any} || $type eq "never"} {
+        return {}
+    }
+    set kind [kindOf $type]
+    set wanted [core::type::base $paramType]
+    if {$kind eq "" || $wanted in {"" any}} {
+        return {}
+    }
+    if {$kind ne $wanted} {
+        return [list $kind $wanted]
+    }
+    if {[dict getdef $meta elementKinds {}] eq ""} {
+        # (No native but std::list::flat states element kinds.)
+        return {}
+    }
+    return [ElementKindMismatch $meta $index $type]
+}
+
+# {KIND WANTED elements} when the native of metadata META requires every
+# element of its List argument INDEX to be of kind WANTED (core/native.tcl's
+# -element-kinds: std::list::flat's List of Lists) and TYPE, that argument's
+# static type, is a List whose element type is of a statically known other
+# kind KIND, else {}: the call can only raise TYPE when it runs, as for a
+# mismatch of the argument's own kind -- one rule, one level deeper. An
+# element type of no fixed kind (`any`, never: an empty List) is checked when
+# the call runs.
+proc hir::types::ElementKindMismatch {meta index type} {
+    set wanted [lindex [dict getdef $meta elementKinds {}] $index]
+    if {$wanted eq ""} {
+        return {}
+    }
+    set elem [elementOf $type]
+    if {$elem in {"" never}} {
+        return {}
+    }
+    set kind [kindOf $elem]
+    if {$kind eq "" || $kind eq $wanted} {
+        return {}
+    }
+    return [list $kind $wanted elements]
+}
+
+# NativeKindMismatch, or {imprint WANTED} when TYPE is a rigid imprint
+# variable (hir/imprint.tcl) and the native's parameter INDEX requires the
+# kind WANTED: a body is checked once, for every T, and no kind admits every
+# T -- the call is valid only for the arguments some caller happens to give
+# it, which no check of the body may count on (its constraints are traits,
+# which name no kind). The call's own check reports both
+# (hir::range::VerifyNativeKinds); only the first is a call that can only
+# fail (region inference, whose types are concrete, never sees the second).
+proc hir::types::NativeArgumentMismatch {name index type} {
+    set mismatch [NativeKindMismatch $name $index $type]
+    if {$mismatch ne {}} {
+        return $mismatch
+    }
+    if {![IsImprint $type]} {
+        # (Likewise one level deeper: a List of a rigid variable where the
+        # elements must be of one kind, std::list::flat of a List[T].)
+        if {[IsImprint [elementOf $type]]} {
+            set wanted [lindex [dict getdef [core::native::metadata $name] elementKinds {}] $index]
+            if {$wanted ne ""} {
+                return [list imprint $wanted elements]
+            }
+        }
+        return {}
+    }
+    set paramType [lindex [dict get [core::native::metadata $name] paramTypes] $index]
+    if {$paramType in {"" any}} {
+        return {}
+    }
+    set wanted [core::type::base $paramType]
+    if {$wanted in {"" any}} {
+        return {}
+    }
+    return [list imprint $wanted]
+}
+
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc hir::types::kindOf {type} {
-    if {[hir::cabi::IsFloating $type]} {
+    if {[hir::cabi::IsFiniteFloating $type]} {
         # (Never an expression's type: the values a C floating type
         # describes are its carrier's, hir::cabi::Carrier.)
         return [kindOf [hir::cabi::Carrier $type]]
@@ -2606,7 +2747,7 @@ proc hir::types::kindOf {type} {
 
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
-    if {[hir::cabi::IsFloating $type]} {
+    if {[hir::cabi::IsFiniteFloating $type]} {
         return [semantic [hir::cabi::Carrier $type]]
     }
     if {[IsCFnPtr $type] || [IsNativeMemory $type]} {
@@ -2758,8 +2899,9 @@ proc hir::types::show {type} {
                 return "NativeEdit\[[hir::layouts::ShowNative [lindex $type 1]]\]"
             }
             imprint {
-                # An imprint variable, by its name (hir/imprint.tcl).
-                return [lindex $type 1]
+                # An imprint variable, by its name (hir/imprint.tcl; an
+                # inferred one as hir::imprint::Shown names it).
+                return [hir::imprint::Shown [lindex $type 1]]
             }
             srefined {
                 # A scalar refinement, by its source spelling
@@ -2909,8 +3051,10 @@ proc hir::types::infer {hirVar} {
 proc hir::types::Walk {hirVar} {
     upvar 1 $hirVar hir
     # Poison is a fact of one walk (a later round of the signature fixpoint
-    # may type a receiver differently): every walk starts without any.
+    # may type a receiver differently): every walk starts without any; so
+    # are a fold's conflicts (FoldBody).
     dict unset hir poisoned
+    dict unset hir foldConflicts
     if {![hir::semantic::Enabled]} {
         set ctx [NewContext]
         Sequence hir ctx [dict get $hir roots]
@@ -3141,6 +3285,18 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             return $result
         }
+        callback-pointer {
+            # std::ffi::c::callback(NAME) (core/cabi.tcl,
+            # C-CALLBACK-MILESTONE-1.md): the C function pointer of the
+            # `callback c fn` NAME names, of its declared C signature
+            # (hir/callbacks.tcl). Any other argument is CALLBACK-REFERENCE,
+            # and the call poison (hir::types::Call).
+            set block [hir::callbacks::Referenced $hir [lindex $argExprs [lindex $shape 1]]]
+            if {$block ne "" && [hir::callbacks::Typed $hir $block]} {
+                return [hir::callbacks::PointerType $hir $block]
+            }
+            return $result
+        }
         layout-struct {
             # std::binary::parse(L, data) (core/binary.tcl, BINARY-LAYOUT.md): a
             # LayoutStruct[L], L the layout argument I's descriptor
@@ -3311,6 +3467,33 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             return $result
         }
+        flat {
+            # List[List[T]] -> List[T] (std::list::flat,
+            # LIST-FLAT-MILESTONE-1.md): the element type of the argument's
+            # element type, refined or not (a refinement of the inner Lists
+            # states their length, which -result-length reads, never an
+            # element fact). An empty List (List[never], or a List of
+            # List[never]s) flattens to the empty List[never]; an element
+            # type that is no List's (`any`, the raw `list` kind, a rigid
+            # imprint variable) says nothing about the result's elements:
+            # the native's declared `list`.
+            lassign $shape _ l
+            set outer [Unrefined [lindex $argTypes $l]]
+            if {$outer eq "never"} {
+                return never
+            }
+            if {![IsList $outer]} {
+                return $result
+            }
+            set inner [Unrefined [lindex $outer 1]]
+            if {$inner eq "never"} {
+                return [MakeList never]
+            }
+            if {[IsList $inner]} {
+                return [MakeList [lindex $inner 1]]
+            }
+            return $result
+        }
         immutable-set {
             # List[T] -> ImmutableSet[T] (MINIMAL-IMMUTABLE-SET.md item 24):
             # std::immutable_set::from_list's own -result-shape. Generic over T
@@ -3396,6 +3579,28 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             }
             # (An element read of MutableVector[never]: see
             # IterationElementOf.)
+            return $result
+        }
+        tree-children {
+            # std::tree::children(t) (core/tree.tcl, TREE-STRUCT-
+            # MILESTONE-1.md): the child List of a tree struct's value, the
+            # type of its declaration's child field for this application
+            # (List[Self]).
+            lassign $shape _ t
+            set tree [Unrefined [lindex $argTypes $t]]
+            if {[IsNamedStruct $tree]} {
+                set field [hir::structs::treeField [lindex $tree 1]]
+                if {$field ne ""} {
+                    return [hir::structs::AppliedFieldType $tree $field]
+                }
+            }
+            if {$tree eq "never" || [kindOf $tree] ni {"" struct}
+                    || ([IsNamedStruct $tree] && [hir::structs::declared [lindex $tree 1]])} {
+                # No value, or a value of a known type that is no tree
+                # struct's: the call never completes (TREE-OPERAND is its
+                # diagnostic, hir/structs.tcl's TreeChildrenProblem).
+                return never
+            }
             return $result
         }
         mutvec-to-list {
@@ -3633,12 +3838,26 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [If hir ctx $e]]
         }
         loop {
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             dict set ctx breakTypes $e never
-            Sequence hir ctx [dict get $node body]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                Sequence hir ctx [dict get $node body]
+            }
             set type [dict get $ctx breakTypes $e]
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
+            if {$fold ne ""} {
+                # A fold with no domain completes only by a break, with its
+                # intermediate (FOLD-LOOPS-MILESTONE-1.md); without one it
+                # never completes, as a plain `loop:` without one.
+                if {$type eq "never"} {
+                    return [SetType hir $e never]
+                }
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
+            }
             return [SetType hir $e $type]
         }
         listloop {
@@ -3653,6 +3872,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             } elseif {$elemType eq ""} {
                 set elemType any
             }
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             dict set ctx facts [dict get $node elementBinding] $elemType
             # breakTypes is seeded (and later unset) only so the shared
@@ -3685,12 +3905,19 @@ proc hir::types::Expr {hirVar ctxVar e} {
                 # on ...: 0` an Int, so `[b]` a List[int], not a List[Byte]).
                 dict set ctx reachable 0
             }
-            set bodyType [Sequence hir ctx [dict get $node body]]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                set bodyType [Sequence hir ctx [dict get $node body]]
+            }
             dict set ctx reachable $entry
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
             if {$poison} {
                 return [SetType hir $e [Poison hir $e]]
+            }
+            if {$fold ne ""} {
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
             }
             return [SetType hir $e [LoopResult $hir $ctx $e [MakeList [if {$elemType eq "never"} {string cat "never"} else {set bodyType}]] \
                 [list [list list [hir::typeOf $hir [dict get $node iterable]]]]]]
@@ -3698,6 +3925,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
         countloop {
             Expr hir ctx [dict get $node start]
             Expr hir ctx [dict get $node end]
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             # Unlike listloop's element binding (typed from the iterable's
             # own, possibly-unknown element type), a countloop's induction
@@ -3716,9 +3944,16 @@ proc hir::types::Expr {hirVar ctxVar e} {
             # is only seeded for the shared `break` case and why the result
             # is always List[R] for the body's own type R.
             dict set ctx breakTypes $e never
-            set bodyType [Sequence hir ctx [dict get $node body]]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                set bodyType [Sequence hir ctx [dict get $node body]]
+            }
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
+            if {$fold ne ""} {
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
+            }
             return [SetType hir $e [LoopResult $hir $ctx $e [MakeList $bodyType] \
                 [list [list count [lindex [hir::cardinality::domains $hir $e] 0]]]]]
         }
@@ -3752,6 +3987,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
                     lappend facts [dict get $domain binding] int
                 }
             }
+            set fold [FoldInitial hir ctx $node]
             set saved [dict get $ctx facts]
             foreach {binding type} $facts {
                 dict set ctx facts $binding $type
@@ -3761,12 +3997,19 @@ proc hir::types::Expr {hirVar ctxVar e} {
             if {$empty} {
                 dict set ctx reachable 0
             }
-            set bodyType [Sequence hir ctx [dict get $node body]]
+            if {$fold ne ""} {
+                set intermediate [FoldBody hir ctx $e $node $fold]
+            } else {
+                set bodyType [Sequence hir ctx [dict get $node body]]
+            }
             dict set ctx reachable $entry
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
             if {$poison} {
                 return [SetType hir $e [Poison hir $e]]
+            }
+            if {$fold ne ""} {
+                return [SetType hir $e [FoldResult hir $e $node $intermediate]]
             }
             set clauses {}
             foreach domain [dict get $node domains] {
@@ -3823,6 +4066,154 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [Handle hir ctx $e]]
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Folding loops (FOLD-LOOPS-MILESTONE-1.md)
+#
+# A fold's intermediate has one type, T: the join (lub) of its initial
+# value's type and the type of every normal completion of its body, typed
+# with the intermediate binding at T itself. T is found the way a recursive
+# block's result is (Block): the body is walked under an assumed T -- first
+# the initial value's type -- and again under the join of that and the
+# body's type until the join reproduces the assumption, the last of
+# foldAttempts walks under `any` (so a fold whose join keeps growing, a List
+# nested one level deeper each time, ends at the dynamic type, sound).
+# `continue` and `break` are no completions: they carry the intermediate
+# unchanged. The fold itself is T (its exhaustion, an empty domain's
+# included, and a bare break both yield an intermediate); a fold whose
+# initial value never completes is never, and one whose initial value is
+# poison is poison, its intermediate too (a poisoned iterable's case).
+# Whether T is a conflict -- two known kinds joined only by `any` -- is
+# hir::fold::verify's, on the final types.
+namespace eval hir::types {
+    variable foldAttempts 4
+}
+
+# The type of a fold NODE's initial value, typed in CTX -- the enclosing
+# scope's, after the loop's own operands -- or "" for a collecting loop.
+proc hir::types::FoldInitial {hirVar ctxVar node} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    if {![hir::IsFoldNode $node]} {
+        return ""
+    }
+    return [Expr hir ctx [dict get $node foldInitial]]
+}
+
+# Walks the body of fold E (node NODE) in CTX (the loop's own bindings
+# already in its facts, its reachability set) as the fixpoint above
+# describes, leaving CTX as the last walk left it; returns T. INITIAL is the
+# initial value's type (FoldInitial).
+#
+# A join that collapses to `any` at a completion of a known type
+# (hir::fold::Conflict) is the program's FOLD-INTERMEDIATE-TYPE: the walk
+# records it (HIR's `foldConflicts`, reported by hir::fold::verify) and, where
+# the walk makes poison (MakesPoison; never in a region's walk, and in a
+# semantic instance's only for a fold the generic walk found in conflict:
+# an instance refines, it never rejects), makes the intermediate poison and walks
+# the body once more under it, so that no check of the body restates the
+# conflict as a mismatch of its own (DIAGNOSTIC-RECOVERY.md); the fold itself
+# is then poison too (FoldResult). Elsewhere T is `any`, the sound dynamic
+# type.
+proc hir::types::FoldBody {hirVar ctxVar e node initial} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    variable foldAttempts
+    set b [dict get $node foldBinding]
+    set body [dict get $node body]
+    set initialExpr [dict get $node foldInitial]
+    if {[Poisoned $hir $initialExpr]} {
+        # A poisoned initial value: so is the intermediate, and the body is
+        # walked as reachable code (it may still run).
+        Poison hir $b
+        dict set ctx facts $b never
+        Sequence hir ctx $body
+        return never
+    }
+    set halted [Halts $hir $initialExpr $initial]
+    set entry $ctx
+    set hadPoison [dict exists $hir poisoned]
+    set entryPoison [dict getdef $hir poisoned {}]
+    # What an earlier walk of this same fold made poison or found in
+    # conflict (an enclosing recursive block's earlier attempt, Block) is
+    # this walk's to decide again: the fold's value, its intermediate and
+    # everything in its body.
+    foreach x [concat [list $e $b] [hir::fold::Subtree $hir $body]] {
+        dict unset entryPoison $x
+    }
+    if {![dict exists $ctx inst] && ![dict exists $ctx spec] && [dict exists $hir foldConflicts $e]} {
+        dict unset hir foldConflicts $e
+    }
+    set assumed $initial
+    for {set attempt 1} {$attempt <= $foldAttempts} {incr attempt} {
+        if {$attempt == $foldAttempts && $attempt > 1} {
+            set assumed any
+        }
+        # Every walk starts where the first did: what an earlier walk under
+        # a narrower assumption recorded (a return's type, a break, poison)
+        # is the later walk's to record again.
+        set ctx $entry
+        if {$hadPoison} {
+            dict set hir poisoned $entryPoison
+        } else {
+            dict unset hir poisoned
+        }
+        if {$halted} {
+            dict set ctx reachable 0
+        }
+        set live [dict get $ctx reachable]
+        dict set ctx facts $b $assumed
+        set bodyType [Sequence hir ctx $body]
+        if {!$live} {
+            # The body never runs (an empty domain, an initial value that
+            # never completes): it widens nothing.
+            break
+        }
+        set joined [lub $assumed $bodyType]
+        if {$joined eq "any" && $assumed ne "any" && ![dict exists $ctx spec]} {
+            set conflict [hir::fold::Conflict $hir $initialExpr [lindex $body end]]
+            # The generic walk records the conflict; a semantic instance's
+            # walk of the same body treats the fold as the generic walk did
+            # (an instance only refines what the generic walk proved).
+            set generic [expr {![dict exists $ctx inst]}]
+            if {$conflict ne "" && $generic} {
+                dict set hir foldConflicts $e $conflict
+            }
+            if {$conflict ne "" && [dict exists $hir foldConflicts $e]} {
+                if {[MakesPoison $hir $ctx]} {
+                    set ctx $entry
+                    Poison hir $b
+                    dict set ctx facts $b never
+                    Sequence hir ctx $body
+                    set assumed never
+                    break
+                }
+            }
+        }
+        if {$joined eq $assumed || $assumed eq "any"} {
+            break
+        }
+        set assumed $joined
+    }
+    # The intermediate's one type, for the analyses that read a binding's
+    # (hir::bindingType): what the body was last walked under.
+    dict set hir bindings $b type [intern hir $assumed]
+    return $assumed
+}
+
+# The type of fold E (node NODE) whose intermediate is of type INTERMEDIATE
+# (FoldBody): poison when its initial value is, never when that never
+# completes.
+proc hir::types::FoldResult {hirVar e node intermediate} {
+    upvar 1 $hirVar hir
+    set initialExpr [dict get $node foldInitial]
+    if {[Poisoned $hir $initialExpr] || [Poisoned $hir [dict get $node foldBinding]]} {
+        # (Its intermediate is poison: a conflict, FoldBody.)
+        return [Poison hir $e]
+    }
+    if {[Halts $hir $initialExpr [hir::typeOf $hir $initialExpr]]} {
+        return never
+    }
+    return $intermediate
 }
 
 # RESULT, the List a collecting loop E (listloop, countloop, lockloop)
@@ -3970,15 +4361,18 @@ proc hir::types::Struct {hirVar ctxVar e} {
                     return [Poison hir $e]
                 }
             }
-            set problem [hir::structs::ApplicationProblem $type]
-            if {$problem ne ""} {
+            set issue [hir::structs::ApplicationIssue $type]
+            if {$issue ne ""} {
+                lassign $issue kind problem
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
                     dict set hir exprs $e structApplicationProblem $problem
+                    dict set hir exprs $e structApplicationKind $kind
                 }
                 return [Poison hir $e]
             }
             if {[dict exists $hir exprs $e structApplicationProblem]} {
                 dict unset hir exprs $e structApplicationProblem
+                dict unset hir exprs $e structApplicationKind
             }
             return $type
         }
@@ -4486,14 +4880,26 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # (DECIMAL-GUARANTEE-LOST, hir/decimal.tcl): no value.
                 set dead 1
             }
-            if {$spec && !$dead} {
-                foreach argType $argTypes paramType [dict get $meta paramTypes] {
-                    set kind [kindOf $argType]
-                    if {$paramType ni {"" any} && $kind ne "" && $kind ne [core::type::base $paramType]} {
+            if {!$dead && ($spec || ([MakesPoison $hir $ctx] && ![dict exists $ctx inst] && [dict get $ctx reachable]))} {
+                set index 0
+                foreach argType $argTypes {
+                    if {[if {$spec} {NativeKindMismatch $name $index $argType} else {NativeArgumentMismatch $name $index $argType}] ne {}} {
                         # The argument is statically of another kind: the call
-                        # always raises TYPE.
+                        # always raises TYPE (or, a rigid imprint variable in
+                        # the generic walk, is valid for no T). In the generic
+                        # walk it is the call's own TYPE diagnostic
+                        # (hir::range::VerifyNativeKinds; of a call the front
+                        # end synthesizes, its construct's: NOT-A-CONTEXT),
+                        # so it has no value: poison. (A semantic instance,
+                        # typed under one call's argument types, neither
+                        # reports nor poisons it: an argument of no fixed
+                        # kind in the program as written -- `any`, an untyped
+                        # parameter's value -- is checked when the call runs,
+                        # and a caller is held to the checked contract the use
+                        # imposes, hir/signatures.tcl.)
                         set dead 1
                     }
+                    incr index
                 }
             }
             if {!$dead && [dict get $meta resultShape] ne ""} {
@@ -4517,14 +4923,17 @@ proc hir::types::Call {hirVar ctxVar e} {
                             || ($shapeKind eq "native-element" && [hir::layouts::OfArrayType [lindex $argTypes 0]] eq "")
                             || ($shapeKind eq "layout-struct" && [hir::layouts::RoleOf [dict get $meta layout] op] eq "parse"
                                 && [LayoutParseRefused $hir $argExprs [dict get $meta resultShape]])
-                            || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]]))} {
+                            || ($shapeKind eq "layout-read" && [LayoutReadRefused $hir $argExprs [dict get $meta resultShape]])
+                            || ($shapeKind eq "callback-pointer" && ![IsCFnPtr $result]))} {
                     # std::binary::load of a value not statically a NativeView[L]
                     # (BINARY-OPERAND), or std::binary::parse of a native-only
                     # layout (LAYOUT-NATIVE-ONLY: hir::layouts::verify): no
                     # LayoutStruct is ever produced (NATIVE-LAYOUT-VIEWS.md).
                     # Nor of a union, or of anything holding one by value
                     # (LAYOUT-UNION), and std::binary::read never makes a pointer
-                    # or a union (LAYOUT-UNIONS.md).
+                    # or a union (LAYOUT-UNIONS.md). std::ffi::c::callback of
+                    # anything but a callback c fn makes no pointer
+                    # (CALLBACK-REFERENCE, hir/callbacks.tcl).
                     set result [Poison hir $e]
                 }
                 if {!$spec} {
@@ -4544,7 +4953,8 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # The exact length of a returned List, stated by the
                 # native's registration (core/native.tcl's -result-length):
                 # a List literal's argument count, std::list::append's one more
-                # than its List's, a live fixed array's copy -- minted as
+                # than its List's, a live fixed array's copy, the product of
+                # std::list::flat's outer and inner lengths -- minted as
                 # the refinement List[T]{length: N} (LIST-CARDINALITY-
                 # REFINEMENTS.md), the one representation of exact List
                 # cardinality. Region inference keeps its positional
@@ -4777,7 +5187,9 @@ proc hir::types::MintLength {hir length argExprs argTypes result} {
 
 # The exact length the registration LENGTH (-result-length) states for a
 # call on ARGEXPRS of types ARGTYPES, or "": `args` the argument count,
-# `list K D` the length argument K's type states plus D, `extent K` the
+# `list K D` the length argument K's type states plus D, `flat K` the
+# length argument K's type states times the length its element type states
+# (both, or nothing), `extent K` the
 # extent of argument K's live fixed array type, `path K` the extent of the
 # array designator constant argument K names. (`int K`, a MutableArray's
 # capacity, is no List length.)
@@ -4796,6 +5208,19 @@ proc hir::types::ResultLength {hir length argExprs argTypes} {
                 return ""
             }
             return [expr {$n + ($d eq "" ? 0 : $d)}]
+        }
+        flat {
+            # (std::list::flat: N Lists of exactly M elements each make N*M
+            # elements. The inner length must be every element's, which a
+            # type states only when it is uniform: a List of Lists of
+            # several lengths states none, and neither does its flat.)
+            set outer [lindex $argTypes $k]
+            set n [LengthOf $outer]
+            set m [LengthOf [elementOf $outer]]
+            if {$n eq "" || $m eq ""} {
+                return ""
+            }
+            return [expr {$n * $m}]
         }
         extent {
             set term [hir::layouts::OfArrayType [lindex $argTypes $k]]

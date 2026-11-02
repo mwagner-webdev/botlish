@@ -1,0 +1,4 @@
+# a generic comparison specialized for both a str and a UnicodeChar
+fn same?(a, b):
+    a == b
+[same?("-", '-'), same?('-', '-'), same?("-", "-")]

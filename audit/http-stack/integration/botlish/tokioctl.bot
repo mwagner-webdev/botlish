@@ -1,0 +1,51 @@
+# tokioctl.bot -- the accidental-Tokio control
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Testing"): with a unit built with the
+# tokio-control feature,
+# a bridge task calls tokio::spawn as a Tokio-hosted library would. There
+# is no Tokio runtime, so the call panics; the bridge contains it (the task
+# is dropped, Panics counts it) and the Botlish program carries on. Only
+# tools/check.tcl's tokioctl application has the fixture.
+import event_loop_linux
+import hs
+import hsfx
+import hsnet
+import probe
+import std::event_loop
+import std::ffi::c
+import std::str
+
+extern c fn hs_fx_tokio_spawn() -> std::ffi::c::LongLong
+
+nomethod fn all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    fx = hs_fx_tokio_spawn()
+    hs::nudge()
+    std::event_loop::sleep(5000)
+    probe::log("tokio::spawn without a runtime: fixture result ".concat(probe::n(hsfx::result(fx))).concat(" panics contained ").concat(probe::n(hs::rstat(17))).concat(" executor still runs ").concat(probe::n(hsfx::finish(hsfx::sleep(100)))))
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    coroutine {step: s, first: f} = all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_watchdog(1, 5000000)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

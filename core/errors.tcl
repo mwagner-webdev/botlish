@@ -78,6 +78,12 @@ proc core::semanticError {kind message} {
 #   record    the producer's own richer record, when it has one (a HIR
 #             diagnostic, a warning, a syntax diagnostic)
 proc core::raiseDiagnostics {diagnostics} {
+    if {$diagnostics eq {}} {
+        # (A rejection always has a diagnostic: hir::recovery::entries
+        # never reports none. An empty one is the compiler's error.)
+        return -code error -errorcode {CORE SEMANTIC COMPILER-INTERNAL} \
+            "internal compiler error: a compilation was rejected with no diagnostic"
+    }
     set first [lindex $diagnostics 0]
     set message [dict get $first message]
     foreach diagnostic [lrange $diagnostics 1 end] {

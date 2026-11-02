@@ -1,0 +1,6 @@
+# I7 DecimalRounded ==: the precision of the operands' static types decides; a Float64 operand is a TYPE error
+fn two(x: DecimalRounded{minDecimalsPreserved: 2}) -> DecimalRounded{minDecimalsPreserved: 2}:
+    x
+fn three() -> DecimalRounded{minDecimalsPreserved: 3}:
+    1.254
+[three() == 1.254, two(three()) == 1.25, two(three()) == three()]

@@ -1,0 +1,113 @@
+# h1.bot -- Probe A, first exchange: Hyper HTTP/1.1 over loopback TCP under
+# the production event loop and the Linux driver, no Tokio runtime. A
+# Botlish server coroutine answers with a streamed body; a Botlish client
+# coroutine reads it chunk by chunk; a bystander task ticks beside them.
+import event_loop_linux
+import hs
+import hsh
+import hsnet
+import std::event_loop
+import std::int
+import std::str
+import std::mutable_array
+
+fn log(s: str, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(s)
+
+fn n(x: int) -> str:
+    std::int::to_string(x)
+
+nomethod fn handler(x: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    log("server: ".concat(hsh::path(x)))
+    hsh::respond(x, 200, true)
+    loop i from 0 to chunks:
+        loop:
+            if hsh::send(x, "chunk ".concat(n(i)).concat(" ok\n")) > 0:
+                break
+            hs::await(x)
+    hsh::finish(x)
+    chunks
+
+nomethod fn server_loop(server: int, count: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    served = std::mutable_array::create(1, 0)
+    loop:
+        if served.at(0) == count:
+            break
+        x = hsh::next_request(server)
+        if x == 0:
+            hs::await(server)
+            continue
+        served.set(0, served.at(0) + 1)
+        coroutine {step, first} = handler(x, chunks)
+        std::event_loop::adopt(step, first)
+    count
+
+nomethod fn client_task(client: int, path: str, context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    log("client: connected ".concat(n(hsh::state(client))))
+    x = hsh::request(client, "GET", path, false)
+    loop:
+        if hsh::status(x) != 0:
+            break
+        hs::await(x)
+    log("client: status ".concat(n(hsh::status(x))))
+    got = std::mutable_array::create(3, 0)
+    loop:
+        c = hsh::recv(x)
+        if c.n > 0:
+            got.set(0, got.at(0) + c.n)
+            got.set(1, got.at(1) + 1)
+            if got.at(1) == 1:
+                log("client: first chunk ".concat(c.text))
+        elif c.n == 0:
+            hs::await(x)
+        else:
+            got.set(2, c.n)
+            break
+    log("client: body bytes ".concat(n(got.at(0))).concat(" reads ").concat(n(got.at(1))).concat(" end ").concat(n(got.at(2))))
+    hs::release(x)
+    hsnet::stop()
+    0
+
+nomethod fn bystander(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 20:
+        std::event_loop::sleep(500)
+    log("bystander: ticks ".concat(n(20)))
+    20
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    log("open ".concat(n(hs::counter("open"))))
+    hsnet::start()
+    lfd = hsh::listen_socket(0)
+    port = hsh::port_of(lfd)
+    server = hsh::server(1, 0)
+    hsh::serve(server, lfd)
+    client = hsh::client(hsh::connect_socket(port), 1, 0)
+    coroutine {step: s1, first: f1} = server_loop(server, 1, 5)
+    std::event_loop::adopt(s1, f1)
+    coroutine {step: s2, first: f2} = client_task(client, "/stream")
+    std::event_loop::adopt(s2, f2)
+    coroutine {step: s3, first: f3} = bystander()
+    std::event_loop::adopt(s3, f3)
+    std::event_loop::run()
+    log("rust polls ".concat(n(hs::rstat(2))).concat(" calls ").concat(n(hs::rstat(0))).concat(" runs ").concat(n(hs::counter("runs"))).concat(" io ").concat(n(hs::counter("io"))).concat(" tasks left ").concat(n(hs::tasks())))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(std::int::to_string(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

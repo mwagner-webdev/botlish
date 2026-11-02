@@ -1,0 +1,772 @@
+# Mutants of semantic value identity and std::immutable_map
+# (audit/value-identity/tools/mutate.tcl; REPRESENTATION-INDEPENDENT-VALUE-
+# IDENTITY.md, "Mutation testing"): the families the milestone brief names,
+# each a deliberate bug in the identity declaration's checks, its HIR text,
+# the runtimes' equality and hashing of an identity, the witness predicates,
+# the frozen table engine (stdlib/ordered_table.bot), std::immutable_map,
+# freezing (stdlib/mutable_map.bot) or the relational contracts of
+# `reordered`.
+#
+#   @@ NAME DESCRIPTION
+#   %% tests FILE ...      (optional) test files run first for this mutant
+#   ## FILE
+#   <<<<                   (or `<<<< all`: replace every occurrence, at
+#   text to replace         least one; plain `<<<<` must occur exactly once)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ or the
+# native crate's manifest is a native mutant: mutate.tcl rebuilds the native
+# backend for it. Lines starting with # outside an edit are comments.
+#
+# Brief mutants with no non-equivalent mutant in this representation:
+#
+#   * "equality trusts a bucket's hash" natively, and the native set
+#     construction deduplicating by hash alone: the native buckets are the
+#     keyed table hash's (SipHash-1-3, 64 bits, under the process key), so
+#     a wrong answer needs two unequal entries whose keyed hashes collide
+#     -- no test can arrange one without the key, and a test key would test
+#     only that key. The Tcl buckets are the public hash's, whose collision
+#     corpus (audit/hashable/data) gives the Tcl mutants below their
+#     detector (tcl-bucket-trusts-hash, tcl-set-dedup-trusts-hash); the
+#     native equality's bucket probe compares the entries (entry_equal) on
+#     the same rule, and native-bucket-ignores-value is its mutant.
+#   * "the Equatable witness is the hash predicate" (witness
+#     hir::types::HashClass for Equatable): core::value::incomparable and
+#     core::hashing::unhashable are the same list today, so a type is
+#     equality-total exactly when it is hash-total, and the two witnesses
+#     agree on every type. The mutant becomes non-equivalent, and must be
+#     added, the day a kind is comparable but not hashable.
+#   * "freeze aliases the mutable map": an ImmutableMap holds Lists, which
+#     are immutable values; no mutation of the source MutableMap can reach
+#     them (MutableVector's logical copies, MUTABLE-VECTOR.md), so there is
+#     no aliasing representation to mutate into. The declaration check that
+#     keeps an identity struct free of mutable components is
+#     identity-mutable-admitted's.
+
+# ---------------------------------------------------------------------------
+# The declaration (hir/structs.tcl) and its HIR text
+
+@@ identity-non-opaque-admitted an identity declared by a struct that is not opaque is accepted
+## hir/structs.tcl
+<<<<
+    if {!([dict exists $decl opaque] && [dict get $decl opaque])} {
+        Fail $span "struct \"$name\" declares an identity but is not opaque
+====
+    if {0} {
+        Fail $span "struct \"$name\" declares an identity but is not opaque
+>>>>
+
+@@ identity-context-admitted a context struct may declare an identity
+## hir/structs.tcl
+<<<<
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail $span "context struct \"$name\" cannot declare an identity
+====
+    if {0} {
+        Fail $span "context struct \"$name\" cannot declare an identity
+>>>>
+
+@@ identity-field-not-list-admitted an identity field need not be a List
+## hir/structs.tcl
+<<<<
+        if {!([hir::types::IsList $type] && [llength $type] == 2)} {
+            Fail $fieldSpan "identity $form of struct
+====
+        if {0} {
+            Fail $fieldSpan "identity $form of struct
+>>>>
+
+@@ identity-mutable-admitted a struct with an identity may hold a MutableVector, a MutableArray or an affine value
+## hir/structs.tcl
+<<<<
+        set why [MutableComponent $type]
+        if {$why ne ""} {
+====
+        set why [MutableComponent $type]
+        if {0} {
+>>>>
+
+@@ identity-lost-in-hir-text HIR text prints no identity clause
+## hir/format.tcl
+<<<<
+            append opaque "identity [dict get $identity form]([join [dict get $identity fields] ,]) "
+====
+            append opaque ""
+>>>>
+
+@@ identity-lost-in-read reading HIR text drops the identity clause
+## hir/read.tcl
+<<<<
+        dict set decl identity [dict create form $identityForm fields [split $identityFields ,]]
+====
+        set identityForm $identityForm
+>>>>
+
+@@ identity-lost-in-install installing a HIR's declarations (compilation isolation) drops the struct's identity
+## hir/structs.tcl
+<<<<
+            dict set registry [dict get $entry id] identity [dict get $entry identity]
+====
+            set unused [dict get $entry identity]
+>>>>
+
+@@ runtime-identity-positions-wrong the runtimes' identity test gives every identity field the first slot
+## hir/structs.tcl
+<<<<
+        lsearch -exact [dict get $entry names] $field
+====
+        expr {0}
+>>>>
+
+@@ native-lowering-drops-identity the NIR shape of a struct with an identity carries none
+## native/lower.tcl
+<<<<
+                append opaque " identity=[Quote [join [concat [list [dict get $identity form]] [dict get $identity fields]] { }]]"
+====
+                append opaque ""
+>>>>
+
+# ---------------------------------------------------------------------------
+# Equality: the reference runtime (core/value.tcl)
+
+@@ tcl-identity-ignored-in-equality == of two values of an identity struct compares every field (the representation)
+## core/value.tcl
+<<<<
+            set identity [identityOf [lindex $a 1 0]]
+====
+            set identity ""
+>>>>
+
+@@ tcl-equality-by-order == of two identity values compares the entries in order (no matching after the positional prefix)
+## core/value.tcl
+<<<<
+    if {$i == $n} {
+        return 1
+    }
+    if {$n - $i > $pairwiseLimit} {
+====
+    if {$i == $n} {
+        return 1
+    }
+    return 0
+    if {$n - $i > $pairwiseLimit} {
+>>>>
+
+@@ tcl-equality-ignores-length == of two identity values matches the first one's entries without comparing the counts
+## core/value.tcl
+<<<<
+    set n [llength $aKeys]
+    if {$n != [llength $bKeys]} {
+        return 0
+    }
+    # The positional prefix
+====
+    set n [llength $aKeys]
+    if {$n > [llength $bKeys]} {
+        return 0
+    }
+    # The positional prefix
+>>>>
+
+@@ tcl-equal-by-hash == of two members identities is the equality of their entries' public hashes (same length, same hashes)
+## core/value.tcl
+<<<<
+    if {$n != [llength $bKeys]} {
+        return 0
+    }
+    # The positional prefix
+====
+    if {$n != [llength $bKeys]} {
+        return 0
+    }
+    if {!$pairs} {
+        set ha [lmap x $aKeys {core::hashing::Fold public $x}]
+        set hb [lmap x $bKeys {core::hashing::Fold public $x}]
+        return [expr {[lsort $ha] eq [lsort $hb]}]
+    }
+    # The positional prefix
+>>>>
+
+@@ tcl-pair-value-ignored an association matches on its key alone (the value takes no part)
+## core/value.tcl
+<<<<
+    return [expr {!$pairs || [equal [lindex $aVals $x] [lindex $bVals $y]]}]
+====
+    return 1
+>>>>
+
+@@ tcl-pairwise-reuses-entry pairwise matching lets two entries match one entry (a set's equality, not the multiset's)
+## core/value.tcl
+<<<<
+        for {set y $i} {$y < $n} {incr y} {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+                dict set used $y 1
+====
+        for {set y $i} {$y < $n} {incr y} {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+>>>>
+
+@@ tcl-bucket-reuses-entry matching by hash buckets lets two entries match one entry
+## core/value.tcl
+<<<<
+        foreach y [dict getdef $buckets [lindex $aHashes $x-$from] {}] {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+                dict set used $y 1
+====
+        foreach y [dict getdef $buckets [lindex $aHashes $x-$from] {}] {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+>>>>
+
+@@ tcl-bucket-trusts-hash matching by hash buckets takes an entry of the same public hash as equal (identities and large sets)
+## core/value.tcl
+<<<<
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+                dict set used $y 1
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+====
+            if {![dict exists $used $y]} {
+                dict set used $y 1
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+>>>>
+
+@@ tcl-set-dedup-trusts-hash a large ImmutableSet's construction drops a member whose public hash equals a kept one's
+## core/immutableset.tcl
+<<<<
+                foreach existing [dict getdef $kept $h {}] {
+                    if {[core::value::equal $existing $item]} {
+====
+                foreach existing [dict getdef $kept $h {}] {
+                    if {1} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Hashing: the reference runtime (core/hashing.tcl)
+
+@@ tcl-hash-includes-representation the hash of an identity value also folds every field after its identity
+## core/hashing.tcl
+<<<<
+                Identity out $mode $identity [core::value::structValues $v]
+                return $out
+====
+                Identity out $mode $identity [core::value::structValues $v]
+>>>>
+
+@@ tcl-pair-hash-in-order an associations identity's entry hashes are combined in order (sum times 31)
+## core/hashing.tcl
+<<<<
+            set sum [expr {($sum + [FoldEntry $mode $key $value]) & $Mask64}]
+====
+            set sum [expr {($sum * 31 + [FoldEntry $mode $key $value]) & $Mask64}]
+>>>>
+
+@@ tcl-member-hash-in-order a members identity's member hashes are combined in order (sum times 31)
+## core/hashing.tcl
+<<<<
+            set sum [expr {($sum + [Fold $mode $key]) & $Mask64}]
+====
+            set sum [expr {($sum * 31 + [Fold $mode $key]) & $Mask64}]
+>>>>
+
+@@ tcl-members-xor a members identity's member hashes are XOR-combined (a repeated member cancels)
+## core/hashing.tcl
+<<<<
+            set sum [expr {($sum + [Fold $mode $key]) & $Mask64}]
+====
+            set sum [expr {($sum ^ [Fold $mode $key]) & $Mask64}]
+>>>>
+
+@@ tcl-hash-omits-value an association's hash leaves out its value
+## core/hashing.tcl
+<<<<
+    Child in $mode $key
+    Child in $mode $value
+====
+    Child in $mode $key
+>>>>
+
+@@ tcl-hash-omits-key an association's hash leaves out its key
+## core/hashing.tcl
+<<<<
+    Child in $mode $key
+    Child in $mode $value
+====
+    Child in $mode $value
+>>>>
+
+@@ tcl-pair-boundary-lost an association's hash is the sum of its key's and its value's (keys and values rearranged across pairs keep the sum)
+## core/hashing.tcl
+<<<<
+            set sum [expr {($sum + [FoldEntry $mode $key $value]) & $Mask64}]
+====
+            set sum [expr {($sum + [Fold $mode $key] + [Fold $mode $value]) & $Mask64}]
+>>>>
+
+@@ tcl-domain-tag-omitted the hash of an identity folds no form tag
+## core/hashing.tcl
+<<<<
+    lappend out [dict get $IdentityTag [lindex $identity 0]]
+====
+>>>>
+
+@@ tcl-count-omitted the hash of an identity folds no entry count
+## core/hashing.tcl
+<<<<
+    lappend out [dict get $IdentityTag [lindex $identity 0]]
+    lappend out {*}[LeBytes [llength $keys]]
+====
+    lappend out [dict get $IdentityTag [lindex $identity 0]]
+>>>>
+
+@@ tcl-keyed-post-mixes-public the table hash of an identity folds its entries' public hashes (a keyed mix of the unkeyed hash)
+## core/hashing.tcl
+<<<<
+            set sum [expr {($sum + [FoldEntry $mode $key $value]) & $Mask64}]
+        }
+    } else {
+        foreach key $keys {
+            set sum [expr {($sum + [Fold $mode $key]) & $Mask64}]
+====
+            set sum [expr {($sum + [FoldEntry public $key $value]) & $Mask64}]
+        }
+    } else {
+        foreach key $keys {
+            set sum [expr {($sum + [Fold public $key]) & $Mask64}]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The native runtime (native/src/runtime/ops.rs, program.rs)
+
+@@ native-identity-ignored-in-equality native == of two values of an identity shape compares every field
+## native/src/runtime/ops.rs
+<<<<
+            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity) {
+====
+            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity).filter(|_| false) {
+>>>>
+
+@@ native-equality-by-order native == of two identity values compares the entries in order
+## native/src/runtime/ops.rs
+<<<<
+    if i == n {
+        return Ok(true);
+    }
+    if n - i > PAIRWISE_LIMIT
+====
+    if i == n {
+        return Ok(true);
+    }
+    if i < n {
+        return Ok(false);
+    }
+    if n - i > PAIRWISE_LIMIT
+>>>>
+
+@@ native-pair-value-ignored a native association matches on its key alone
+## native/src/runtime/ops.rs
+<<<<
+        (Some(av), Some(bv)) => equal(p, av[x], bv[y]),
+====
+        (Some(_), Some(_)) => Ok(true),
+>>>>
+
+@@ native-bucket-ignores-value native matching by hash buckets compares an entry's key, never its value
+## native/src/runtime/ops.rs
+<<<<
+            if !used[j] && hashes[j] == h && entry_equal(p, a, x, b, from + j)? {
+====
+            if !used[j] && hashes[j] == h && equal(p, a.keys[x], b.keys[from + j])? {
+>>>>
+
+@@ native-pairwise-reuses-entry native pairwise matching lets two entries match one entry
+## native/src/runtime/ops.rs
+<<<<
+            if !used[y - i] && entry_equal(p, &a, x, &b, y)? {
+                used[y - i] = true;
+====
+            if !used[y - i] && entry_equal(p, &a, x, &b, y)? {
+>>>>
+
+@@ native-hash-includes-representation the native hash of an identity value also walks every field
+## native/src/runtime/ops.rs
+<<<<
+                    return identity_walk(p, sink, identity, obj.fields());
+====
+                    identity_walk(p, sink, identity, obj.fields())?;
+>>>>
+
+@@ native-pair-hash-in-order native association hashes are combined in order
+## native/src/runtime/ops.rs
+<<<<
+                sum = sum.wrapping_add(sink.entry(p, key, value)?);
+====
+                sum = sum.wrapping_mul(31).wrapping_add(sink.entry(p, key, value)?);
+>>>>
+
+@@ native-member-hash-in-order native member hashes are combined in order
+## native/src/runtime/ops.rs
+<<<<
+                sum = sum.wrapping_add(sink.member(p, key)?);
+====
+                sum = sum.wrapping_mul(31).wrapping_add(sink.member(p, key)?);
+>>>>
+
+@@ native-hash-omits-value a native association's hash (public and keyed) leaves out its value
+## native/src/runtime/ops.rs
+<<<<
+        sub.child(p, key)?;
+        sub.child(p, value)?;
+====
+        sub.child(p, key)?;
+>>>>
+<<<<
+        walk(p, &mut sub, key)?;
+        walk(p, &mut sub, value)?;
+====
+        walk(p, &mut sub, key)?;
+>>>>
+
+@@ native-domain-tag-omitted the native hash of an identity folds no form tag
+## native/src/runtime/ops.rs
+<<<<
+    sink.bytes(&[match identity {
+        Identity::Members(_) => IDENTITY_MEMBERS,
+        Identity::Associations(..) => IDENTITY_ASSOCIATIONS,
+    }]);
+====
+    let _ = (IDENTITY_MEMBERS, IDENTITY_ASSOCIATIONS);
+>>>>
+
+@@ native-descriptor-drops-identity a standalone executable's program descriptor loses every shape's identity
+## native/src/runtime/program.rs
+<<<<
+                1 => Some(Identity::Members(r.len()?)),
+                2 => Some(Identity::Associations(r.len()?, r.len()?)),
+====
+                1 => {
+                    r.len()?;
+                    None
+                }
+                2 => {
+                    r.len()?;
+                    r.len()?;
+                    None
+                }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The witness predicates and the trait relation (hir/types.tcl,
+# hir/traits.tcl), and DecimalRounded's equality guard (hir/decimal.tcl)
+
+@@ witness-reads-representation Totality walks every field of an identity struct (its representation), not its identity's elements
+## hir/types.tcl
+<<<<
+                set identity [hir::structs::identityOf $id]
+                if {$identity ne ""} {
+                    # A struct that declares its identity
+====
+                set identity [hir::structs::identityOf $id]
+                if {0} {
+                    # A struct that declares its identity
+>>>>
+
+@@ conditional-witness-always an identity's elements are taken to be total whatever their type (Bag[MutableVector[int]] is Equatable)
+## hir/types.tcl
+<<<<
+                        lappend parts [list "the $label of $shown" [if {$t eq {}} {string cat any} else {elementOf $t}]]
+====
+                        lappend parts [list "the $label of $shown" int]
+>>>>
+
+@@ refines-dropped Hashable no longer refines Equatable (a Hashable view is not Equatable)
+## hir/traits.tcl
+<<<<
+    foreach operation [dict get $intrinsics $b guarantees] {
+        if {$operation ni [dict get $intrinsics $a guarantees]} {
+====
+    return 0
+    foreach operation [dict get $intrinsics $b guarantees] {
+        if {$operation ni [dict get $intrinsics $a guarantees]} {
+>>>>
+
+@@ refines-reversed the refinement runs backwards (an Equatable view is accepted as Hashable)
+## hir/traits.tcl
+<<<<
+    foreach operation [dict get $intrinsics $b guarantees] {
+        if {$operation ni [dict get $intrinsics $a guarantees]} {
+====
+    foreach operation [dict get $intrinsics $a guarantees] {
+        if {$operation ni [dict get $intrinsics $b guarantees]} {
+>>>>
+
+@@ decimal-guard-reads-representation == of an identity struct is refused for a DecimalRounded field of its representation
+## hir/decimal.tcl
+<<<<
+        set identity [hir::structs::identityOf [lindex $type 1]]
+        if {$identity ne ""} {
+====
+        set identity [hir::structs::identityOf [lindex $type 1]]
+        if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# std::immutable_map (stdlib/immutable_map.bot)
+
+@@ identity-reads-stored-hashes the map's identity pairs its keys with its stored hashes, not its values
+## stdlib/immutable_map.bot
+<<<<
+    identity associations(keys, vals)
+====
+    identity associations(keys, hashes)
+>>>>
+
+@@ identity-reads-index the map's identity is the members of its index (the hidden placement)
+## stdlib/immutable_map.bot
+<<<<
+    identity associations(keys, vals)
+====
+    identity members(index)
+>>>>
+
+@@ identity-keys-only the map's identity is its keys alone (values take no part)
+## stdlib/immutable_map.bot
+<<<<
+    identity associations(keys, vals)
+====
+    identity members(keys)
+>>>>
+
+@@ k-constraint-dropped the map's key slot is unconstrained
+## stdlib/immutable_map.bot
+<<<<
+opaque struct ImmutableMap[K satisfies Hashable, V]:
+====
+opaque struct ImmutableMap[K, V]:
+>>>>
+
+@@ iteration-reversed iteration visits the associations last to first
+## stdlib/immutable_map.bot
+<<<<
+    ImmutableMapEntry[K, V] {key: std::list::at(m.keys, i.mod(std::list::length(m.keys))), value: std::list::at(m.vals, i.mod(std::list::length(m.vals)))}
+====
+    ImmutableMapEntry[K, V] {key: std::list::at(m.keys, (-1 - i).mod(std::list::length(m.keys))), value: std::list::at(m.vals, (-1 - i).mod(std::list::length(m.vals)))}
+>>>>
+
+@@ at-off-by-one `at` returns the value after the key's
+## stdlib/immutable_map.bot
+<<<<
+    if p < 0 or p >= std::list::length(m.vals):
+        fail KeyNotFound
+    std::list::at(m.vals, p)
+====
+    if p < 0 or p >= std::list::length(m.vals):
+        fail KeyNotFound
+    std::list::at(m.vals, (p + 1).mod(std::list::length(m.vals)))
+>>>>
+
+@@ reordered-not-permuted `reordered` returns the map in its own order
+## stdlib/immutable_map.bot
+<<<<
+    hashes = m.hashes.permuted(perm)
+    ImmutableMap[K, V] {keys: m.keys.permuted(perm), vals: m.vals.permuted(perm), hashes: hashes, index: hashes.frozen_index(std::list::length(m.index))}
+====
+    hashes = m.hashes
+    ImmutableMap[K, V] {keys: m.keys, vals: m.vals, hashes: hashes, index: hashes.frozen_index(std::list::length(m.index))}
+>>>>
+
+@@ reordered-drops-values `reordered` permutes the keys and their hashes but not the values
+## stdlib/immutable_map.bot
+<<<<
+    ImmutableMap[K, V] {keys: m.keys.permuted(perm), vals: m.vals.permuted(perm), hashes: hashes, index: hashes.frozen_index(std::list::length(m.index))}
+====
+    ImmutableMap[K, V] {keys: m.keys.permuted(perm), vals: m.vals, hashes: hashes, index: hashes.frozen_index(std::list::length(m.index))}
+>>>>
+
+@@ reordered-stale-index `reordered` keeps the source's index over the permuted hashes
+## stdlib/immutable_map.bot
+<<<<
+    ImmutableMap[K, V] {keys: m.keys.permuted(perm), vals: m.vals.permuted(perm), hashes: hashes, index: hashes.frozen_index(std::list::length(m.index))}
+====
+    ImmutableMap[K, V] {keys: m.keys.permuted(perm), vals: m.vals.permuted(perm), hashes: hashes, index: m.index}
+>>>>
+
+@@ validate-order-not-checked `validate_order` accepts any candidate
+## stdlib/immutable_map.bot
+<<<<
+    if not t.same_members?(std::mutable_set::table_of(candidate)):
+        fail OrderMismatch
+    candidate
+====
+    if t.length() < 0:
+        fail OrderMismatch
+    candidate
+>>>>
+
+# ---------------------------------------------------------------------------
+# The frozen table engine (stdlib/ordered_table.bot) and freezing
+# (stdlib/mutable_map.bot)
+
+@@ freeze-keeps-dead-keys freezing keeps the keys of removed entries
+## stdlib/ordered_table.bot
+<<<<
+fn live_keys(t: Table[K]) -> List[K]:
+    loop p from 0 to t.positions():
+        if not t.live_at?(p):
+            continue
+        t.key_at(p)
+====
+fn live_keys(t: Table[K]) -> List[K]:
+    loop p from 0 to t.positions():
+        t.key_at(p)
+>>>>
+
+@@ freeze-values-misaligned freezing keeps the values of removed entries (values shift against their keys)
+## stdlib/ordered_table.bot
+<<<<
+    loop p from 0 to std::mutable_vector::length(values):
+        if not t.live_at?(p):
+            continue
+        v = values.at(p):
+            on IndexNotFound:
+                continue
+        v
+====
+    loop p from 0 to std::mutable_vector::length(values):
+        v = values.at(p):
+            on IndexNotFound:
+                continue
+        v
+>>>>
+
+@@ freeze-keeps-dead-hashes freezing keeps the hashes of removed entries (the index points past them)
+## stdlib/ordered_table.bot
+<<<<
+fn live_hashes(t: Table[K]) -> List[int]:
+    loop p from 0 to std::mutable_vector::length(t.hashes):
+        h = t.hashes.at(p):
+            on IndexNotFound:
+                continue
+        if h < 0:
+            continue
+        h
+====
+fn live_hashes(t: Table[K]) -> List[int]:
+    loop p from 0 to std::mutable_vector::length(t.hashes):
+        h = t.hashes.at(p):
+            on IndexNotFound:
+                continue
+        h
+>>>>
+
+@@ freeze-empty-index freezing builds an index that places no entry
+## stdlib/mutable_map.bot
+<<<<
+    index = hashes.frozen_index(std::ordered_table::slots(m.table))
+====
+    index = std::ordered_table::frozen_index([], std::ordered_table::slots(m.table))
+>>>>
+
+@@ place-frozen-overwrites building the frozen index overwrites an occupied slot instead of probing on
+## stdlib/ordered_table.bot
+<<<<
+    if e >= 0:
+        return index.place_frozen(s + 1, p)
+    index.set(s, p):
+====
+    index.set(s, p):
+>>>>
+
+@@ frozen-probe-trusts-hash a frozen lookup takes an entry of the same keyed hash for the key
+## stdlib/ordered_table.bot
+<<<<
+    stored == h and keys.at(e.mod(std::list::length(keys))) == key
+====
+    stored == h
+>>>>
+
+@@ frozen-probe-stops-early a frozen lookup stops at the first occupied slot of another key
+## stdlib/ordered_table.bot
+<<<<
+    if e >= 0 and not hashes.frozen_holds?(keys, e, h, key):
+        return index.frozen_probe(hashes, keys, h, key, s + 1)
+    e
+====
+    if e >= 0 and not hashes.frozen_holds?(keys, e, h, key):
+        return -1
+    e
+>>>>
+
+@@ set-freeze-first-member-lost a frozen MutableSet loses its first member
+## stdlib/mutable_set.bot
+<<<<
+import std::immutable_set
+====
+import std::immutable_set
+import std::list
+>>>>
+<<<<
+    std::immutable_set::from_list(std::ordered_table::live_keys(s.table))
+====
+    keys = std::ordered_table::live_keys(s.table)
+    rest = loop i from 1 to std::list::length(keys):
+        keys.at(i)
+    std::immutable_set::from_list(rest)
+>>>>
+
+# ---------------------------------------------------------------------------
+# The relational contracts of `reordered` and the loop protocol
+# (hir/relations.tcl, hir/iteration.tcl)
+
+@@ reordered-contract-dropped `reordered` has no contract: an unproven order is accepted
+## hir/relations.tcl
+<<<<
+        std::immutable_map::reordered {requires {1 0} mints 0 members keys
+            snapshot order validator validate_order error std::immutable_map::OrderMismatch}
+====
+>>>>
+
+@@ order-not-minted `order` mints no fact: m.reordered(m.order()) is unproven
+## hir/relations.tcl
+<<<<
+        std::immutable_map::order {mints 0}
+====
+>>>>
+
+@@ reordered-value-receiver-unchecked a receiver that is no place (a call's result) is taken to hold the order's members
+## hir/relations.tcl
+<<<<
+            if {$given ne "" && $given eq $have} {
+====
+            if {$given ne "" && ($given eq $have || $path eq "")} {
+>>>>
+
+@@ immutable-map-not-iterable a loop over an ImmutableMap is no loop protocol's
+## hir/iteration.tcl
+<<<<
+    variable iterables {std::mutable_map::MutableMap std::mutable_set::MutableSet std::immutable_map::ImmutableMap}
+====
+    variable iterables {std::mutable_map::MutableMap std::mutable_set::MutableSet}
+>>>>

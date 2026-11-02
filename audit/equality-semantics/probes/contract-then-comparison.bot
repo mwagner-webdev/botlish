@@ -1,0 +1,6 @@
+# the contract inferred for an untyped parameter used with == and with a str native
+import std::str
+fn f(c):
+    n = std::str::length(c)
+    c == '-'
+f("-")

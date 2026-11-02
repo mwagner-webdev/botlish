@@ -968,6 +968,10 @@ finished, and both merges were clean:
 
 ## Future representation-independent equality/hash
 
+(Landed: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md gives an opaque
+struct a declared identity, and ImmutableMap's `reordered` uses the
+contracts below exactly as predicted. This section is kept as written.)
+
 This milestone deliberately comes before content identity. Explicit order
 had to be under the programmer's control first. With it, the
 three properties a value Map needs are separable:

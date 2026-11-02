@@ -1,0 +1,91 @@
+# probe.bot -- what the census's probe programs share: logging, numbers,
+# a bystander task (unrelated Botlish work beside the HTTP stack), payloads
+# and a watchdog (a stall becomes a report, never a hang).
+import std::event_loop
+import std::int
+import std::mutable_array
+import std::str
+
+fn n(x: int) -> str:
+    std::int::to_string(x)
+
+fn log(s: str, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(s)
+
+# A payload of 2^K * 16 bytes ("0123456789abcdef" doubled K times).
+fn payload(k: int) -> str:
+    s = std::mutable_array::from_list(["0123456789abcdef"])
+    loop i from 0 to k:
+        s.set(0, s.at(0).concat(s.at(0))):
+            on IndexNotFound:
+                unit
+    s.at(0):
+        on IndexNotFound:
+            ""
+
+# A task that sleeps PERIOD microseconds COUNT times and reports the worst
+# lateness it saw: unrelated work sharing the loop with the HTTP stack.
+nomethod fn bystander(count: int, period: int, context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    worst = std::mutable_array::create(1, 0)
+    loop i from 0 to count:
+        start = std::event_loop::now()
+        std::event_loop::sleep(period)
+        late = std::event_loop::now() - start - period
+        if late > worst.at(0):
+            worst.set(0, late)
+    log("bystander: ticks ".concat(n(count)).concat(" worst lateness us ").concat(n(worst.at(0))))
+    count
+
+fn spawn_bystander(count: int, period: int, context ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    coroutine {step: s, first: f} = bystander(count, period)
+    std::event_loop::adopt(s, f)
+
+# Shared state of a probe's coroutines. A MutableArray is a value -- each
+# coroutine given one holds its own copy -- so what coroutines coordinate
+# through lives in a context the entry program installs (the first h2
+# probe passed a "done" array to two consumers and waited forever).
+opaque context struct Board:
+    flags: MutableArray[int]
+
+fn board() -> Board:
+    Board {flags: std::mutable_array::create(32, 0)}
+
+nomethod fn flag(i: int, context b: Board) -> int errors IndexNotFound:
+    b.flags.at(i)
+
+nomethod fn set_flag(i: int, v: int, context b: Board) errors IndexNotFound:
+    b.flags.set(i, v)
+
+nomethod fn bump_flag(i: int, context b: Board) -> int errors IndexNotFound:
+    b.flags.set(i, b.flags.at(i) + 1)
+    b.flags.at(i)
+
+# A task that yields until flag SLOT is 1, counting its turns: how often
+# unrelated ready work runs while the bridge is busy.
+nomethod fn yielder(slot: int, context ev: std::event_loop::Loop, b: Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    turns = std::mutable_array::create(1, 0)
+    loop:
+        if flag(slot) == 1:
+            break
+        turns.set(0, turns.at(0) + 1)
+        std::event_loop::yield_now()
+    log("yielder: turns ".concat(n(turns.at(0))))
+    turns.at(0)
+
+# A watchdog: every 100 ms, until flag SLOT is 1; after LIMIT microseconds
+# without it, it reports a stall and stops the loop, so a stalled probe
+# returns its trace instead of hanging.
+nomethod fn watchdog(slot: int, limit: int, context ev: std::event_loop::Loop, b: Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    start = std::event_loop::now()
+    loop:
+        if flag(slot) == 1:
+            return 0
+        if std::event_loop::now() - start > limit:
+            log("watchdog: STALLED after us ".concat(n(std::event_loop::now() - start)))
+            std::event_loop::stop()
+            return 1
+        std::event_loop::sleep(100000)
+
+fn spawn_watchdog(slot: int, limit: int, context ev: std::event_loop::Loop, b: Board) errors IndexNotFound, std::event_loop::SchedulerFault:
+    coroutine {step: s, first: f} = watchdog(slot, limit)
+    std::event_loop::adopt(s, f)

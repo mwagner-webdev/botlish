@@ -1,0 +1,70 @@
+## 1. Sites by the operands' generic static types
+
+| class | stdlib | examples | bench | golden | all |
+|---|---:|---:|---:|---:|---:|
+| all sites | 334 | 300 | 6 | 1353 | 1993 |
+| both operands of fixed kind | 328 | 257 | 3 | 965 | 1553 |
+|   structural: compatible | 328 | 245 | 3 | 809 | 1385 |
+|   structural: incompatible, heads differ (kinds) | 0 | 0 | 0 | 22 | 22 |
+|   structural: incompatible, heads differ (declarations or shapes) | 0 | 1 | 0 | 20 | 21 |
+|   structural: incompatible, heads equal (a component) | 0 | 0 | 0 | 3 | 3 |
+|     of which some value pair is equal (overlap) | 0 | 0 | 0 | 1 | 1 |
+|   structural: refused (a top-level kind with no equality) | 0 | 0 | 0 | 0 | 0 |
+|   structural: unknown (a component of no fixed kind) | 0 | 11 | 0 | 111 | 122 |
+|   overlap: disjoint (always false or refused) | 0 | 1 | 0 | 45 | 46 |
+|   compatible structurally, never equal (integer domains, List lengths) | 0 | 0 | 0 | 1 | 1 |
+|   first census: empty-only | 0 | 0 | 0 | 2 | 2 |
+|   first census: disjoint | 0 | 1 | 0 | 43 | 44 |
+| an operand of no fixed kind | 6 | 43 | 3 | 388 | 440 |
+
+| definedness | stdlib | examples | bench | golden | all |
+|---|---:|---:|---:|---:|---:|
+| total | 329 | 246 | 3 | 855 | 1433 |
+| partial | 0 | 0 | 0 | 0 | 0 |
+| undefined | 0 | 0 | 0 | 0 | 0 |
+| unknown | 5 | 54 | 3 | 498 | 560 |
+
+## 2. Sites with an operand of no fixed kind, by origin
+
+| origin (other operand) | stdlib | examples | bench | golden | all |
+|---|---:|---:|---:|---:|---:|
+| computed (known) | 2 | 21 | 0 | 22 | 45 |
+| computed+computed (unknown) | 0 | 2 | 0 | 7 | 9 |
+| computed+untyped (unknown) | 0 | 4 | 0 | 1 | 5 |
+| contract (known) | 1 | 2 | 1 | 86 | 90 |
+| contract+contract (unknown) | 0 | 0 | 0 | 1 | 1 |
+| contract+untyped (unknown) | 0 | 2 | 0 | 2 | 4 |
+| declared-any+declared-any (unknown) | 0 | 0 | 0 | 1 | 1 |
+| imprint+imprint (unknown) | 1 | 0 | 0 | 1 | 2 |
+| untyped (known) | 1 | 12 | 2 | 256 | 271 |
+| untyped+untyped (unknown) | 1 | 0 | 0 | 11 | 12 |
+
+## 3. What each policy rejects
+
+| policy | stdlib | examples | bench | golden | all |
+|---|---:|---:|---:|---:|---:|
+| head rule (kinds, declarations, shapes), generic HIR | 0 | 1 | 0 | 42 | 43 |
+| overlap rule (no equal value pair), generic HIR | 0 | 1 | 0 | 45 | 46 |
+| structural rule (incompatible), generic HIR | 0 | 1 | 0 | 45 | 46 |
+| first census Level 1 (disjoint, empty-only), generic HIR | 0 | 1 | 0 | 45 | 46 |
+| refusal of a top-level kind with no equality | 0 | 0 | 0 | 0 | 0 |
+| structural rule, further sites only an instance shows | 0 | 0 | 0 | 4 | 4 |
+|   of which an operand is a declared any | 0 | 0 | 0 | 1 | 1 |
+|   of which an operand is an untyped parameter | 0 | 0 | 0 | 3 | 3 |
+| relational: two untyped parameters | 1 | 0 | 0 | 11 | 12 |
+|   of which an instance is incompatible | 0 | 0 | 0 | 0 | 0 |
+| restrictive: every operand of no fixed kind | 6 | 43 | 3 | 388 | 440 |
+|   less declared any | 6 | 43 | 3 | 387 | 439 |
+|   less declared any and imprint variables | 5 | 43 | 3 | 386 | 437 |
+
+## 4. Concrete contracts a concrete-inference policy would infer
+
+| parameters | stdlib | examples | bench | golden | all |
+|---|---:|---:|---:|---:|---:|
+| untyped parameters compared with an operand of fixed kind | 2 | 3 | 3 | 122 | 130 |
+|   no inferred contract today | 1 | 1 | 2 | 41 | 45 |
+|   an inferred contract today | 1 | 2 | 1 | 81 | 85 |
+|   compared with more than one kind (a conflict) | 0 | 0 | 0 | 2 | 2 |
+|   compared with a List, set or struct type (List invariance) | 0 | 0 | 0 | 0 | 0 |
+|   compared with an integer domain | 0 | 0 | 0 | 0 | 0 |
+|   the first parameter (a method receiver) | 1 | 1 | 3 | 98 | 103 |

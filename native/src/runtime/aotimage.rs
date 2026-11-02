@@ -78,12 +78,23 @@ pub struct Image {
 }
 
 /// A digest of the runtime ABI the generated code is compiled against: the
-/// Vm and object field offsets it addresses directly and the helpers it
-/// calls. The driver records its own in the image; the stub refuses an image
-/// recorded by a driver whose runtime differs from its own (a stub and a
-/// driver from different builds), since that code would address fields that
-/// are not there.
+/// Vm and object field offsets it addresses directly, the helpers it calls
+/// and the program record's layout (`abi_words`). The driver records its own
+/// in the image and in every program record; the stub and every startup
+/// refuse one recorded by a driver whose runtime differs from its own (a stub
+/// and a driver from different builds), since that code would address fields
+/// that are not there.
 pub fn abi_fingerprint() -> u64 {
+    // FNV-1a over the words' little-endian bytes.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in abi_words().iter().flat_map(|w| w.to_le_bytes()) {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// What `abi_fingerprint` digests, word by word.
+pub fn abi_words() -> Vec<u64> {
     use super::{bytesobj, strobj, value, vm};
     let mut words: Vec<u64> = vec![
         std::mem::size_of::<Vm>() as u64,
@@ -112,6 +123,11 @@ pub fn abi_fingerprint() -> u64 {
         // frame walk, or the shadow stack): a `fallback-roots` build's code
         // never runs on a runtime of the other plan.
         u64::from(super::framewalk::NATIVE_FRAME_ROOTS),
+        // The program record's layout (runtime::program's LinkedProgram):
+        // a runtime that reads the record's words elsewhere -- its startup
+        // policy among them -- refuses it here, before it reads them.
+        std::mem::size_of::<LinkedProgram>() as u64,
+        std::mem::offset_of!(LinkedProgram, startup) as u64,
     ];
     // The helpers' names and parameter counts, never their addresses: an
     // executable whose startup computes this (every executable's, through
@@ -122,12 +138,7 @@ pub fn abi_fingerprint() -> u64 {
         words.extend(name.bytes().map(u64::from));
         words.push(params as u64);
     }
-    // FNV-1a over the words' little-endian bytes.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in words.iter().flat_map(|w| w.to_le_bytes()) {
-        hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
+    words
 }
 
 // ---------------------------------------------------------------- encoding
@@ -358,6 +369,12 @@ fn map_near(anchor: usize, size: usize) -> Result<usize, String> {
 }
 
 impl Loaded {
+    /// The startup policy the program's record names (`program::linked_startup`).
+    pub fn startup(&self) -> Result<super::program::Startup, String> {
+        // SAFETY: as `instantiate`'s.
+        unsafe { super::program::linked_startup(&*((self.base + self.program) as *const LinkedProgram)) }
+    }
+
     /// The program's Vm and entry, built from its relocated record exactly as
     /// the `rustc` linker's startup builds them (`program::instantiate_linked`).
     /// Runs on the thread that runs the program.
@@ -380,7 +397,17 @@ pub fn main() -> i32 {
             return 1;
         }
     };
-    super::aot::run(argv, move || match loaded.instantiate() {
+    // The record's startup policy, as every executable's startup reads it
+    // (aot::start_linked): only the worker on this host, which `run`
+    // checks.
+    let startup = match loaded.startup() {
+        Ok(startup) => startup,
+        Err(error) => {
+            eprintln!("{error} (NATIVE STARTUP)");
+            return 1;
+        }
+    };
+    super::aot::run(startup, argv, move || match loaded.instantiate() {
         Ok(started) => started,
         Err(error) => {
             eprintln!("{error} (NATIVE STARTUP)");
@@ -416,6 +443,18 @@ mod tests {
         assert_eq!(decoded.fixups, image.fixups);
         assert_eq!(decoded.imports, image.imports);
         assert_eq!(decoded.program, image.program);
+    }
+
+    /// The fingerprint covers the program record's layout -- its size and
+    /// where its startup word is (MAIN-THREAD-STARTUP-MILESTONE-1.md) -- so
+    /// a runtime that reads a record of another layout refuses it at the
+    /// fingerprint, before it reads the startup policy.
+    #[test]
+    fn abi_fingerprint_covers_the_program_record() {
+        let words = abi_words();
+        let record = [std::mem::size_of::<LinkedProgram>() as u64, std::mem::offset_of!(LinkedProgram, startup) as u64];
+        assert!(words.windows(2).any(|w| w == record), "{record:?} not among the fingerprint's words");
+        assert_eq!(record, [56, 48]);
     }
 
     #[test]

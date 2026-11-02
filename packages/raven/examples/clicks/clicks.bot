@@ -1,0 +1,57 @@
+# clicks.bot -- the application of the clicks example: a window with a
+# label and two buttons, "Add one" and "Reset", and the count they change.
+# It names no configuration: main.bot runs it on the desktop, test.bot
+# headless with synthetic clicks. Copy the three files into your project
+# (beside its .bot_modules) to run them.
+import raven
+import std::int
+import std::str
+
+# The widgets the program reads and changes.
+struct Screen:
+    window: raven::Window
+    status: raven::Widget
+    add: raven::Widget
+    reset: raven::Widget
+
+# What COUNT clicks say.
+fn caption(count: int) -> str:
+    if count == 1:
+        return "1 click"
+    std::int::to_string(count).concat(" clicks")
+
+# The window and its widgets. Raven must be started (raven::start).
+fn build() -> Screen:
+    window = raven::window("Clicks", 320, 140)
+    status = raven::label(caption(0))
+    add_one = raven::button("Add one")
+    reset = raven::button("Reset")
+    buttons = raven::hbox().add(add_one).add(reset)
+    window.set_content(raven::vbox().add(status).add(buttons))
+    Screen {window: window, status: status, add: add_one, reset: reset}
+
+# COUNT after EVENT: a click of "Add one" adds one, a click of "Reset"
+# makes it 0, every other event changes nothing.
+fn next_count(screen: Screen, count: int, event: raven::Event) -> int:
+    clicked = event.kind == raven::EventKind::Clicked
+    if clicked and event.from?(screen.add):
+        return count + 1
+    if clicked and event.from?(screen.reset):
+        return 0
+    count
+
+# COUNT after every event waiting (raven::events(), oldest first); the
+# label shows the new count.
+fn step(screen: Screen, count: int) -> int errors NonFiniteFloat:
+    counted = fold event in raven::events() with intermediate total count:
+        screen.next_count(total, event)
+    screen.status.set_text(caption(counted))
+    counted
+
+# The frame loop: a frame whenever something happens (wait_frame sleeps
+# until then), its events handled after it, until the window closes (the
+# frame is false); the count.
+fn run(screen: Screen, count: int) -> int errors NonFiniteFloat:
+    if not raven::wait_frame(-1.0):
+        return count
+    screen.run(screen.step(count))

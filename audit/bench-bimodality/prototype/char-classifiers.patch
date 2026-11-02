@@ -1,0 +1,190 @@
+diff --git a/core/unicodechar.tcl b/core/unicodechar.tcl
+index 5578d7bb..53c9882c 100644
+--- a/core/unicodechar.tcl
++++ b/core/unicodechar.tcl
+@@ -26,5 +26,23 @@ proc core::unicodechar::scalar_value {c} {
+     return [core::value::int [core::value::charOf $c]]
+ }
+ 
++# PROTOTYPE (BENCHMARK-BIMODALITY.md): Tcl's [:alpha:]/[:alnum:] of a
++# UnicodeChar, exactly std::str::is_tcl_alpha/alnum of its one-scalar String,
++# but total: there is no operand of the wrong length.
++proc core::unicodechar::isTclAlpha {c} {
++    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
++    return [core::value::bool [string is alpha -strict [format %c [core::value::charOf $c]]]]
++}
++
++proc core::unicodechar::isTclAlnum {c} {
++    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alnum]
++    return [core::value::bool [string is alnum -strict [format %c [core::value::charOf $c]]]]
++}
++
++core::native::register std::char::is_tcl_alpha -arity 1 -impl core::unicodechar::isTclAlpha \
++    -param-types {UnicodeChar} -result-type bool -context-free 1
++core::native::register std::char::is_tcl_alnum -arity 1 -impl core::unicodechar::isTclAlnum \
++    -param-types {UnicodeChar} -result-type bool -context-free 1
++
+ core::native::register std::char::scalar_value -arity 1 -impl core::unicodechar::scalar_value \
+     -param-types {UnicodeChar} -result-type int -result-range {interval 0 0x10FFFF} -context-free 1
+diff --git a/native/lower.tcl b/native/lower.tcl
+index ba903e55..e507f7e4 100644
+--- a/native/lower.tcl
++++ b/native/lower.tcl
+@@ -141,6 +141,8 @@ namespace eval native::lower {
+         std::str::char_at      {op strcharat} \
+         std::str::is_tcl_alpha {op strtclalpha} \
+         std::str::is_tcl_alnum {op strtclalnum} \
++        std::char::is_tcl_alpha {op chartclalpha} \
++        std::char::is_tcl_alnum {op chartclalnum} \
+         argv         {op argv} \
+         std::list::length {op listlen} \
+         std::list::at     {op listget} \
+diff --git a/native/src/codegen/clif.rs b/native/src/codegen/clif.rs
+index f3866c6c..388fa5a9 100644
+--- a/native/src/codegen/clif.rs
++++ b/native/src/codegen/clif.rs
+@@ -2968,6 +2968,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
+                         // like RegionCheck -- see ops.rs's rt_is_tcl_alpha/alnum.
+                         StrIsTclAlpha => ("rt_is_tcl_alpha", None, true, None),
+                         StrIsTclAlnum => ("rt_is_tcl_alnum", None, true, None),
++                        // PROTOTYPE: total, never allocates.
++                        CharIsTclAlpha => ("rt_char_is_tcl_alpha", None, false, None),
++                        CharIsTclAlnum => ("rt_char_is_tcl_alnum", None, false, None),
+                         // Same contract as StrIsTclAlpha/StrIsTclAlnum, over
+                         // a validated StringRegion (base, start, end)
+                         // instead of a materialized one-character String --
+diff --git a/native/src/nir.rs b/native/src/nir.rs
+index c0dd556f..5397e1da 100644
+--- a/native/src/nir.rs
++++ b/native/src/nir.rs
+@@ -605,6 +605,9 @@ pub enum OpCode {
+     /// is per Unicode scalar, never per UTF-8 byte).
+     StrIsTclAlpha,
+     StrIsTclAlnum,
++    /// PROTOTYPE: StrIsTclAlpha/Alnum of a UnicodeChar operand; total.
++    CharIsTclAlpha,
++    CharIsTclAlnum,
+     /// `StrIsTclAlpha`/`StrIsTclAlnum`'s non-materializing counterpart for a
+     /// validated StringRegion operand (base, start, end -- exactly
+     /// `RegionCheck`'s three operands): classifies the region's one Unicode
+@@ -987,6 +990,8 @@ op_spellings! {
+     "mbytesaddr" => MBytesAddr,
+     "strtclalpha" => StrIsTclAlpha,
+     "strtclalnum" => StrIsTclAlnum,
++    "chartclalpha" => CharIsTclAlpha,
++    "chartclalnum" => CharIsTclAlnum,
+     "strregiontclalpha" => StrRegionIsTclAlpha,
+     "strregiontclalnum" => StrRegionIsTclAlnum,
+     "rbox" => RBox,
+@@ -1084,7 +1089,7 @@ impl OpCode {
+             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
+             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
+             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
+-            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
++            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharIsTclAlpha | CharIsTclAlnum | CharCodepoint | SetFromList
+             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
+             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
+             | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
+diff --git a/native/src/runtime/ops.rs b/native/src/runtime/ops.rs
+index 429d09e3..346c8c35 100644
+--- a/native/src/runtime/ops.rs
++++ b/native/src/runtime/ops.rs
+@@ -2228,6 +2228,18 @@ fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
+     Ok(obj.as_str().chars().next().expect("StrObj.chars == 1 but text has no scalar"))
+ }
+ 
++/// PROTOTYPE (BENCHMARK-BIMODALITY.md): `std::char::is_tcl_alpha(c)`.
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_char_is_tcl_alpha(_p: *mut Vm, c: Value) -> Value {
++    bool_value(char::from_u32(char_of(c)).is_some_and(tcl_alpha_char))
++}
++
++/// PROTOTYPE (BENCHMARK-BIMODALITY.md): `std::char::is_tcl_alnum(c)`.
++#[unsafe(no_mangle)]
++pub extern "C" fn rt_char_is_tcl_alnum(_p: *mut Vm, c: Value) -> Value {
++    bool_value(char::from_u32(char_of(c)).is_some_and(tcl_alnum_char))
++}
++
+ #[unsafe(no_mangle)]
+ pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
+     match one_scalar(p, s, "std::str::is_tcl_alpha") {
+@@ -3251,6 +3263,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
+         Argv => rt_argv(p),
+         StrIsTclAlpha => rt_is_tcl_alpha(p, a[0]),
+         StrIsTclAlnum => rt_is_tcl_alnum(p, a[0]),
++        CharIsTclAlpha => rt_char_is_tcl_alpha(p, a[0]),
++        CharIsTclAlnum => rt_char_is_tcl_alnum(p, a[0]),
+         ListLen => rt_list_len(p, a[0]),
+         ListGet => rt_list_get(p, a[0], a[1]),
+         ListAppend => rt_list_append(p, a[0], a[1]),
+@@ -3531,6 +3545,8 @@ runtime_helpers! {
+     (rt_cptr_fixture_bytes, 3),
+     (rt_is_tcl_alpha, 2),
+     (rt_is_tcl_alnum, 2),
++    (rt_char_is_tcl_alpha, 2),
++    (rt_char_is_tcl_alnum, 2),
+     (rt_str_region_is_tcl_alpha, 4),
+     (rt_str_region_is_tcl_alnum, 4),
+     (rt_list_new, 3),
+diff --git a/stdlib/web.bot b/stdlib/web.bot
+index 20d2529c..c535042a 100644
+--- a/stdlib/web.bot
++++ b/stdlib/web.bot
+@@ -102,7 +102,7 @@ refined type Emailish = str
+ # additional_unreserved_chars: constructed once at module initialization,
+ # never per emailish? call (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed the
+ # bridge-reachability defect that once forced building this per call).
+-local_extra_chars = std::immutable_set::from_list([".", "_", "%", "+", "-"])
++local_extra_chars = std::immutable_set::from_list(['.', '_', '%', '+', '-'])
+ 
+ fn emailish?(v: str) -> bool proves v: Emailish:
+ 
+@@ -114,8 +114,8 @@ fn emailish?(v: str) -> bool proves v: Emailish:
+     # inside 0..n-1.
+     fn char_at(i):
+         if i < 0 or i >= n:
+-            return ""
+-        v.substring(i, i + 1)
++            return ' '
++        v.char_at(i)
+ 
+     # true when position I holds the character C, false outside the String:
+     # the same guard as char_at's, which makes std::str::char_at provably valid.
+@@ -124,8 +124,8 @@ fn emailish?(v: str) -> bool proves v: Emailish:
+             return false
+         v.char_at(i) == c
+ 
+-    fn local_char?(c: str) -> bool:
+-        std::str::is_tcl_alnum(c) or local_extra_chars.contains(c)
++    fn local_char?(c: UnicodeChar) -> bool:
++        std::char::is_tcl_alnum(c) or local_extra_chars.contains(c)
+ 
+     # label_char?'s own extra character is a single "-": a one-element set
+     # would be less idiomatic than the direct equality already used
+@@ -133,7 +133,7 @@ fn emailish?(v: str) -> bool proves v: Emailish:
+     # uri_query_value?'s c == '%'), so it stays a plain "==" rather than a second
+     # membership set.
+     fn label_char?(c):
+-        std::str::is_tcl_alnum(c) or c == "-"
++        std::char::is_tcl_alnum(c) or c == '-'
+ 
+     # scan_while(start, predicate) is the one reusable operation the old
+     # scan_local/scan_label/scan_alpha triplet was really three copies of:
+@@ -157,7 +157,7 @@ fn emailish?(v: str) -> bool proves v: Emailish:
+     # one of those two exact targets, which is also what lets the compiler
+     # prove emailish? repeatable (hir/repeatable.tcl follows exact callables
+     # into the parameters they are passed for).
+-    fn scan_while(start, predicate: Fn{args: [str], return: bool}):
++    fn scan_while(start, predicate: Fn{args: [UnicodeChar], return: bool}):
+         loop i from start to n:
+             if predicate(char_at(i)):
+                 continue
+@@ -165,7 +165,7 @@ fn emailish?(v: str) -> bool proves v: Emailish:
+         n
+ 
+     fn tld?(i):
+-        e = i.scan_while(std::str::is_tcl_alpha)
++        e = i.scan_while(std::char::is_tcl_alpha)
+         if e == n:
+             e - i >= 2
+         else:

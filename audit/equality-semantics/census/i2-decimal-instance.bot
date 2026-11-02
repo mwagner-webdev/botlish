@@ -1,0 +1,6 @@
+# I2 DecimalRounded operands reaching == through an untyped function: the static rule is the generic body's only
+fn two() -> DecimalRounded{minDecimalsPreserved: 2}:
+    1.25
+fn same?(a, b):
+    a == b
+same?(two(), two())

@@ -1,0 +1,7 @@
+# I4 is a List[Small] admitted where a List[int] is declared? (a concrete List[int] contract from `xs == [1, 2]` would be held to this)
+type Small = Int in 0..9
+fn smalls(n: Small) -> List[Small]:
+    [n]
+fn ints(xs: List[int]) -> bool:
+    xs == [1, 2]
+ints(smalls(3))

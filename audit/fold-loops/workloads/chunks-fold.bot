@@ -1,0 +1,59 @@
+# chunks-fold.bot -- FOLD-LOOPS-MILESTONE-1.md's chunk-producing workload,
+# written with a fold: tokens become chunks, the fold carrying a struct of
+# the chunks done so far (a List[List[int]]) and the chunk being built (a
+# List[int]). An iteration adds no chunk (a separator after an empty chunk),
+# one (a separator closing a chunk), or two (a negative token: [t] and [-t])
+# -- every addition an immutable List append, so this is the shape whose
+# construction cost the report records, not one it optimizes.
+#
+# Siblings: chunks-recursive.bot (the same, as self tail calls) and
+# chunks-vector.bot (the chunks built in MutableVectors, the pre-fold
+# mutable idiom). audit/fold-loops/tools/measure.tcl rewrites `n = ...` to
+# measure other sizes.
+#
+# expect: [56, 117, 5556]
+
+import std::list
+
+struct Chunks:
+    done: List[List[int]]
+    current: List[int]
+
+fn token(i: int) -> int:
+    if i.mod(5) == 4:
+        return 0
+    if i.mod(7) == 6:
+        return -i
+    i
+
+fn chunks(tokens: List[int]) -> List[List[int]]:
+    c = fold t in tokens with intermediate st Chunks {done: [], current: []}:
+        if t == 0:
+            if st.current == []:
+                st
+            else:
+                Chunks {done: st.done.append(st.current), current: []}
+        elif t < 0:
+            Chunks {done: st.done.append([t]).append([-t]), current: st.current}
+        else:
+            Chunks {done: st.done, current: st.current.append(t)}
+    if c.current == []:
+        c.done
+    else:
+        c.done.append(c.current)
+
+fn size(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate n 0:
+        n + c.length()
+
+fn total(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate s 0:
+        inner = fold x in c with intermediate t 0:
+            t + x
+        s + inner
+
+n = 128
+tokens = loop i from 0 to n:
+    token(i)
+cs = chunks(tokens)
+[cs.length(), size(cs), total(cs)]

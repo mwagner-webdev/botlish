@@ -24,6 +24,11 @@ rng=3699965314`), as the Linux executable does. The shipped folder is
 `icy-tower.exe` (892 KB), `SDL3.dll` (4.3 MB), a README and the two
 licenses.
 
+The same game on macOS AArch64 -- a Cocoa application with SDL3 linked
+statically and its program on the main thread -- is
+ICY-TOWER-MACOS-MILESTONE-1.md, which follows this report's pattern: one
+game, an entry per platform, the binding generated where it can be checked.
+
 ## 1. What the port needed
 
 Five things stood between the Linux game and a Windows executable. The

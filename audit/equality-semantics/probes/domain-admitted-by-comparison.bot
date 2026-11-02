@@ -1,0 +1,11 @@
+# admitted by a comparison
+import std::list
+type Small = Int in 0..9
+fn f(x: Small) -> Small:
+    x
+fn g(n: int) -> int:
+    if n >= 0 and n <= 9:
+        f(n)
+    else:
+        0
+g(3)

@@ -1,0 +1,1167 @@
+# package-manager.test -- the package manager (PACKAGE-MANAGER-MILESTONE-1.md):
+# botlish.json schema 1 (BOTLISH-JSON.md), the .botpkg format version 1
+# (BOTPKG-FORMAT.md), and the commands add, install, update, remove, verify
+# and package pack|inspect.
+#
+# The formats' pieces are tested in this process (pm/pm.tcl sourced): the
+# strict JSON reader, SHA-256, versions and requests, the descriptor's
+# rules, the archive writer, and the archive reader against archives built
+# byte by byte to break one rule each. The commands run as main.tcl does,
+# in a child process (pm), on projects and repositories made fresh in the
+# tcltest temporary directory; programs a command installed are compiled by
+# surface::readProgramFile, the compiler's front end, which reads the
+# .bot_modules trees the manager builds and nothing else of it.
+#
+# The real repository packages (sdlkit and the SDL3 binding, Raven, the
+# Linux event loop) and the 2048 engine are tests/package-workloads.test.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot pm pm.tcl]
+
+interp recursionlimit {} 100000
+
+set mainScript [file join $::projectRoot main.tcl]
+set ::pmCounter 0
+testConstraint unixFiles [expr {$::tcl_platform(platform) eq "unix"}]
+testConstraint python3 [expr {[auto_execok python3] ne ""}]
+testConstraint mkfifo [expr {[auto_execok mkfifo] ne ""}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint singlePackage [expr {[info commands zipfs] ne "" && [testConstraint nativeBuilt]
+    && [file isfile [file join [file dirname [native::binary]] botlish-native]]
+    && [file isfile [file join [file dirname [native::binary]] botlish-aot-stub]]}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+# A fresh directory of the temporary directory: its absolute path.
+proc fresh {{tag d}} {
+    return [makeDirectory pm-[pid]-$tag-[incr ::pmCounter]]
+}
+
+proc cleanup {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] pm-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc writeText {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc writeBytes {path bytes} {
+    file mkdir [file dirname $path]
+    set channel [open $path wb]
+    puts -nonewline $channel $bytes
+    close $channel
+}
+
+proc readBytes {path} {
+    set channel [open $path rb]
+    set bytes [read $channel]
+    close $channel
+    return $bytes
+}
+
+# The botlish.json text of a package NAME VERSION whose dependencies are
+# DEPS (NAME REQUEST ...) locked to LOCKS (NAME VERSION ...).
+proc descriptorText {name version {deps {}} {locks {}}} {
+    set members [list schema {num 1}]
+    if {$name ne ""} { lappend members name [list str $name] }
+    if {$version ne ""} { lappend members version [list str $version] }
+    if {$deps ne ""} {
+        lappend members dependencies [list obj [concat {*}[lmap {d r} $deps {list $d [list str $r]}]]]
+    }
+    if {$locks ne ""} {
+        lappend members lock [list obj [concat {*}[lmap {d v} $locks {list $d [list str $v]}]]]
+    }
+    return [encoding convertfrom utf-8 [pm::json::encode [list obj $members]]]
+}
+
+# A package directory under ROOT for NAME VERSION: its botlish.json (DEPS,
+# LOCKS) and the module NAME.bot holding BODY; more FILES (PATH TEXT ...).
+proc package {root name version body {deps {}} {locks {}} {files {}}} {
+    set dir [file join $root $name-$version]
+    writeText [file join $dir botlish.json] [descriptorText $name $version $deps $locks]
+    writeText [file join $dir $name.bot] $body
+    foreach {path text} $files {
+        writeText [file join $dir {*}[split $path /]] $text
+    }
+    return $dir
+}
+
+# Runs main.tcl ARGS in a child process from the working directory CWD (the
+# temporary directory by default): {status STATUS out OUT err ERR}.
+proc pmIn {cwd args} {
+    set errFile [file join [temporaryDirectory] pm-err-[pid]]
+    set status 0
+    set here [pwd]
+    cd $cwd
+    try {
+        if {[catch {exec [info nameofexecutable] $::mainScript {*}$args 2>$errFile} out options]} {
+            set status [lindex [dict get $options -errorcode] end]
+            if {[lindex [dict get $options -errorcode] 0] ne "CHILDSTATUS"} {
+                set status 1
+            }
+        }
+    } finally {
+        cd $here
+    }
+    set err [readBytes $errFile]
+    file delete $errFile
+    return [dict create status $status out [string trimright $out] err [string trimright [encoding convertfrom utf-8 $err]]]
+}
+
+proc pm {args} {
+    return [pmIn [temporaryDirectory] {*}$args]
+}
+
+# The PM kind of an error report ERR ("" when none).
+proc kindOf {err} {
+    if {[regexp {\(PM ([A-Z]+)\)\s*$} $err -> kind]} {
+        return $kind
+    }
+    return ""
+}
+
+# Packs package directories DIRS into the repository REPO; returns REPO.
+proc packAll {repo dirs} {
+    foreach dir $dirs {
+        set r [pm package pack $dir -out $repo]
+        if {[dict get $r status] != 0} {
+            error "pack $dir: [dict get $r err]"
+        }
+    }
+    return $repo
+}
+
+# The value of APP/main.bot on BACKEND (interp by default), compiled by the
+# front end as main.tcl compiles it, or "TAG: VALUE".
+proc appValue {app {backend interp} {main main.bot}} {
+    set hir [surface::readProgramFile [file join $app $main] -warnings off -cache ""]
+    lassign [outcomeUnderHir $backend $hir] tag value
+    if {$tag eq "value"} {
+        return $value
+    }
+    return "$tag: $value"
+}
+
+# "KIND: MESSAGE" of the compilation of APP/main.bot, or accepted.
+proc appRejection {app} {
+    if {[catch {surface::readProgramFile [file join $app main.bot] -warnings off -cache ""} message options]} {
+        return "[lindex [dict get $options -errorcode] end]: [string map [list $app APP] $message]"
+    }
+    return accepted
+}
+
+# Every file and link under DIR as {RELATIVE TYPE CONTENT-OR-TARGET},
+# sorted: a tree's whole observable state (the lock file excluded).
+proc treeState {dir} {
+    set entries {}
+    Walk $dir "" entries
+    return [lsort -index 0 $entries]
+}
+
+proc Walk {dir relative entriesVar} {
+    upvar 1 $entriesVar entries
+    set here [file join $dir {*}[split $relative /]]
+    foreach path [concat [glob -nocomplain -directory $here *] [glob -nocomplain -directory $here -types hidden *]] {
+        set name [file tail $path]
+        if {$name in {. ..}} continue
+        set rel [string trimleft $relative/$name /]
+        set type [file type $path]
+        switch -- $type {
+            directory { lappend entries [list $rel directory ""]; Walk $dir $rel entries }
+            link { lappend entries [list $rel link [file readlink $path]] }
+            default { lappend entries [list $rel $type [readBytes $path]] }
+        }
+    }
+}
+
+# A two-package world: geometry 1.0.0, 1.0.3, 1.1.0, 2.0.0 and shapes 2.1.0
+# (geometry 1.0.0) and 2.1.4 (geometry 1.0.3), packed into a repository.
+# Returns {repo REPO src SRC}.
+set geometryBody "struct Point:\n    x: int\n    y: int\n\nfn point(x: int, y: int) -> Point:\n    Point {x: x, y: y}\n\nfn area(w: int, h: int) -> int:\n    w * h\n\nfn version() -> int:\n    @V\n"
+proc geometryWorld {} {
+    set src [fresh src]
+    set repo [fresh repo]
+    set dirs {}
+    foreach {version tag} {1.0.0 100 1.0.3 103 1.1.0 110 2.0.0 200} {
+        lappend dirs [package $src geometry $version [string map [list @V $tag] $::geometryBody]]
+    }
+    lappend dirs [package $src shapes 2.1.0 "import geometry\n\nfn square(s: int) -> int:\n    geometry::area(s, s) + geometry::version()\n" {geometry 1.0} {geometry 1.0.0}]
+    lappend dirs [package $src shapes 2.1.4 "import geometry\n\nfn square(s: int) -> int:\n    geometry::area(s, s) + geometry::version()\n" {geometry 1.0} {geometry 1.0.3}]
+    packAll $repo $dirs
+    return [dict create repo $repo src $src]
+}
+
+# A fresh application whose main.bot is TEXT.
+proc application {text} {
+    set app [fresh app]
+    writeText [file join $app main.bot] $text
+    return $app
+}
+
+# ---------------------------------------------------------------------------
+# 1. SHA-256
+
+test pm-sha256-vectors {SHA-256 matches FIPS 180-4's test vectors, including the two-block message} -body {
+    list [pm::sha256::hex ""] [pm::sha256::hex abc] \
+        [pm::sha256::hex abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq]
+} -result {e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad 248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1}
+
+test pm-sha256-padding-boundaries {every length around the padding boundaries (0..130 bytes) hashes the same in memory and from a file, and as sha256sum does where it exists} -body {
+    set dir [fresh sha]
+    set bad {}
+    for {set n 0} {$n <= 130} {incr n} {
+        set bytes [string range [string repeat "\x00\x01\xfeabc\xff" 30] 0 [expr {$n - 1}]]
+        set path [file join $dir f$n]
+        writeBytes $path $bytes
+        set a [pm::sha256::hex $bytes]
+        set b [pm::sha256::file $path]
+        if {$a ne $b} { lappend bad $n }
+        if {[auto_execok sha256sum] ne "" && $a ne [lindex [exec sha256sum $path] 0]} { lappend bad "sum $n" }
+    }
+    set bad
+} -cleanup cleanup -result {}
+
+test pm-sha256-large-file {a file larger than the read chunk hashes as its bytes do} -body {
+    set path [file join [fresh sha] big]
+    set bytes [string repeat "0123456789abcdef" [expr {(1048576 + 1000) / 16}]]
+    writeBytes $path $bytes
+    expr {[pm::sha256::file $path] eq [pm::sha256::hex $bytes]}
+} -cleanup cleanup -result 1
+
+# ---------------------------------------------------------------------------
+# 2. Strict JSON
+
+proc jsonError {text} {
+    if {[catch {pm::json::decode [encoding convertto utf-8 $text]} message options]} {
+        return [lrange [dict get $options -errorcode] 0 2]
+    }
+    return ok
+}
+
+test pm-json-duplicate-keys {an object may not repeat a key, at any depth: two readers would disagree about what the file says} -body {
+    list [jsonError {{"a": 1, "a": 1}}] [jsonError {{"a": {"b": 1, "b": 2}}}] \
+        [jsonError {{"a": [{"x": 1}, {"x": 1, "y": 2, "x": 3}]}}] [jsonError {{"a": 1, "A": 1}}]
+} -result {{PM JSON MALFORMED} {PM JSON MALFORMED} {PM JSON MALFORMED} ok}
+
+test pm-json-strict-text {malformed, non-UTF-8, BOM-prefixed, lone-surrogate and control-character text is refused; valid JSON is read with its types} -body {
+    list [jsonError {{"a": 1,}}] [jsonError {{"a": 01}}] [jsonError "{\"a\": \"x\ty\"}"] \
+        [jsonError {{"a": "\ud800"}}] [jsonError {{"a": "\udc00x"}}] [jsonError {{"a": 1} x}] \
+        [catch {pm::json::decode "\xef\xbb\xbf{}"} m o] [lrange [dict get $o -errorcode] 0 2] \
+        [catch {pm::json::decode "{\"a\": \"\xc3\x28\"}"} m o] [lrange [dict get $o -errorcode] 0 2] \
+        [pm::json::decode [encoding convertto utf-8 {{"s": "\u00e9\ud83d\ude00", "n": -1.5e3, "t": true, "z": null, "l": [1, "2"]}}]]
+} -result [list {PM JSON MALFORMED} {PM JSON MALFORMED} {PM JSON MALFORMED} {PM JSON MALFORMED} {PM JSON MALFORMED} {PM JSON MALFORMED} 1 {PM JSON ENCODING} 1 {PM JSON ENCODING} [list obj [list s [list str "\u00e9\U1f600"] n {num -1.5e3} t {bool 1} z {null {}} l {arr {{num 1} {str 2}}}]]]
+
+test pm-json-limits {nesting and size are bounded: a hostile descriptor cannot exhaust the reader} -body {
+    list [jsonError "[string repeat \[ 40][string repeat \] 40]"] [jsonError "[string repeat \[ 30][string repeat \] 30]"] \
+        [catch {pm::json::decode [string repeat " " 2000000]} m o] [lrange [dict get $o -errorcode] 0 2]
+} -result {{PM JSON MALFORMED} ok 1 {PM JSON LIMIT}}
+
+test pm-json-canonical-writing {the writer's text is canonical: two-space indentation, escapes, one trailing newline; reading it gives the value back} -body {
+    set value [list obj [list a {num 1} b [list str "q\"\\\n\x01\u00e9"] c {arr {}} d {obj {}} e {arr {{bool 0} {null {}}}}]]
+    set text [pm::json::encode $value]
+    list [encoding convertfrom utf-8 $text] [expr {[pm::json::decode $text] eq $value}]
+} -result [list "\{\n  \"a\": 1,\n  \"b\": \"q\\\"\\\\\\n\\u0001\u00e9\",\n  \"c\": \[\],\n  \"d\": \{\},\n  \"e\": \[\n    false,\n    null\n  \]\n\}\n" 1]
+
+# ---------------------------------------------------------------------------
+# 3. Versions and requests
+
+test pm-version-grammar {an exact version is three numbers without leading zeros or suffixes; a request one, two or three; everything else is refused with its reason} -body {
+    set out {}
+    foreach text {1.2.3 0.0.0 10.20.30 999999999.0.1 1.2 1 01.2.3 1.02.3 1.2.3-rc.1 1.2.3+linux ^1.2.3 ~1.2 >=1.0.0 1.x 1.2.* "" 1..2 1000000000.0.0 v1.2.3 " 1.2.3"} {
+        lappend out [list $text [pm::version::isVersion $text] [pm::version::isRequest $text]]
+    }
+    set out
+} -result {{1.2.3 1 1} {0.0.0 1 1} {10.20.30 1 1} {999999999.0.1 1 1} {1.2 0 1} {1 0 1} {01.2.3 0 0} {1.02.3 0 0} {1.2.3-rc.1 0 0} {1.2.3+linux 0 0} {^1.2.3 0 0} {~1.2 0 0} {>=1.0.0 0 0} {1.x 0 0} {1.2.* 0 0} {{} 0 0} {1..2 0 0} {1000000000.0.0 0 0} {v1.2.3 0 0} {{ 1.2.3} 0 0}}
+
+test pm-version-explanations {a refused version says why: a suffix, an operator, a leading zero} -body {
+    list [string match "*prerelease or build suffix*" [pm::version::Problem 1.2.3-rc.1]] \
+        [string match "*operator or range*" [pm::version::RequestProblem ^1.2]] \
+        [string match "*leading zero*" [pm::version::Problem 1.02.3]]
+} -result {1 1 1}
+
+test pm-version-order-and-matching {versions compare numerically; a request accepts exactly the versions that begin with its components; newest picks the highest accepted} -body {
+    set versions {1.9.7 1.10.0 1.2.10 1.2.9 2.0.0 1.2.3}
+    list [pm::version::sort $versions] [pm::version::compare 1.10.0 1.9.7] \
+        [lmap r {1 1.2 1.2.3 1.3 3} {pm::version::newest $versions $r}] \
+        [pm::version::satisfies 1.20.0 1.2] [pm::version::satisfies 1.2.0 1.2] [pm::version::satisfies 11.2.0 1] \
+        [pm::version::defaultRequest 3.4.18]
+} -result {{1.2.3 1.2.9 1.2.10 1.9.7 1.10.0 2.0.0} 1 {1.10.0 1.2.10 1.2.3 {} {}} 0 1 0 3.4}
+
+# ---------------------------------------------------------------------------
+# 4. botlish.json schema 1
+
+proc descriptorError {text context} {
+    if {[catch {pm::descriptor::fromBytes [encoding convertto utf-8 $text] $context X} message options]} {
+        return [lrange [split $message \n] 1 end]
+    }
+    return ok
+}
+
+test pm-descriptor-application {an application's botlish.json may omit its name and version, and its locks while it is being written} -body {
+    list [descriptorError {{"schema": 1}} project] \
+        [descriptorError {{"schema": 1, "dependencies": {"web": "0.4"}}} project] \
+        [descriptorError {{"schema": 1, "name": "myapp", "dependencies": {"web": "0.4"}, "lock": {"web": "0.4.2"}}} project] \
+        [pm::descriptor::fromBytes {{"schema": 1, "dependencies": {"web": "0.4"}, "lock": {"web": "0.4.2"}}} project X]
+} -result {ok ok ok {schema 1 name {} version {} dependencies {web 0.4} lock {web 0.4.2} sources {}}}
+
+test pm-descriptor-artifact-identity {a package artifact and a package being packed have a name and an exact version} -body {
+    list [descriptorError {{"schema": 1}} artifact] [descriptorError {{"schema": 1, "name": "x"}} pack] \
+        [descriptorError {{"schema": 1, "name": "x", "version": "1.2"}} artifact] \
+        [descriptorError {{"schema": 1, "version": "1.0.0"}} project]
+} -result {{{  no "name": a package artifact has a name and an exact version} {  no "version": a package artifact has a name and an exact version}} {{  no "version": a package being packed has a name and an exact version}} {{  the package version "1.2" is malformed: an exact version is three numbers, MAJOR.MINOR.PATCH (1.2.3)}} {{  a "version" without a "name": the version of what?}}}
+
+test pm-descriptor-schema {a schema is required, and only schemas 1 and 2 are read (PM-2 added 2); an unknown key is an error, never ignored, and a schema 2 key in a schema 1 file says so} -body {
+    list [descriptorError {{"name": "x"}} project] [descriptorError {{"schema": 3}} project] \
+        [descriptorError {{"schema": "1"}} project] [descriptorError {{"schema": 1, "scripts": {"postinstall": "rm -rf /"}}} project] \
+        [descriptorError {[1]} project] [descriptorError {{"schema": 2}} project] \
+        [descriptorError {{"schema": 1, "targets": {}}} project]
+} -result {{{  no "schema": a botlish.json starts with "schema": 1 (or 2)}} {{  unsupported schema 3: this package manager reads schemas 1 and 2 (a newer one needs a newer Botlish)}} {{  "schema" must be the number 1 or 2}} {{  unknown key "scripts" (schema 1 has schema, name, version, dependencies, lock, sources): a key a later schema adds is never silently ignored}} {{  the file is not a JSON object}} ok {{  "targets" is a schema 2 key: a botlish.json using it says "schema": 2 (schema 1 has schema, name, version, dependencies, lock, sources)}}}
+
+test pm-descriptor-names {a package name is a lowercase identifier: never std, never a keyword the parser reserves, never a spelling that differs only in case on another file system} -body {
+    lmap name {web sdl3 event_loop_linux std fn if yield Web my-pkg 3d _x {} a234567890123456789012345678901234567890123456789012345678901234 a2345678901234567890123456789012345678901234567890123456789012345} {
+        set problem [pm::descriptor::NameProblem $name]
+        if {$problem eq ""} { set problem ok } elseif {[string match *reserved* $problem]} { set problem reserved } elseif {[string match *keyword* $problem]} { set problem keyword } else { set problem invalid }
+        list $name $problem
+    }
+} -result {{web ok} {sdl3 ok} {event_loop_linux ok} {std reserved} {fn keyword} {if keyword} {yield keyword} {Web invalid} {my-pkg invalid} {3d invalid} {_x invalid} {{} invalid} {a234567890123456789012345678901234567890123456789012345678901234 ok} {a2345678901234567890123456789012345678901234567890123456789012345 invalid}}
+
+test pm-descriptor-reserved-matches-compiler {the reserved root and the keywords are the compiler's own: std is surface::modules' standard root, and the keywords are the lexer's} -body {
+    list [expr {$::surface::modules::standardRoot in $pm::descriptor::reserved}] \
+        [expr {[lsort [pm::descriptor::Keywords]] eq [lsort $::surface::lexer::keywords]}]
+} -result {1 1}
+
+test pm-descriptor-locks {a lock satisfies its request; a lock or source names a dependency; a package artifact locks every dependency; nothing depends on its own name} -body {
+    list [descriptorError {{"schema": 1, "dependencies": {"sdl3": "3.2"}, "lock": {"sdl3": "3.3.0"}}} project] \
+        [descriptorError {{"schema": 1, "dependencies": {}, "lock": {"sdl3": "3.3.0"}}} project] \
+        [descriptorError {{"schema": 1, "name": "a", "version": "1.0.0", "dependencies": {"b": "1"}}} artifact] \
+        [descriptorError {{"schema": 1, "name": "a", "version": "1.0.0", "dependencies": {"a": "1"}, "lock": {"a": "1.0.0"}}} artifact] \
+        [descriptorError {{"schema": 1, "dependencies": {"b": "1.2.3"}, "lock": {"b": "1.2.4"}}} project]
+} -result {{{  lock: "sdl3" is locked to 3.3.0, which the request "3.2" does not accept}} {{  lock: "sdl3" is no dependency (it is not in "dependencies")}} {{  lock: "b" has no lock: a package artifact locks every direct dependency to an exact release}} {{  the package a depends on its own name: its dependency would claim the namespace a inside it}} {{  lock: "b" is locked to 1.2.4, which the request "1.2.3" does not accept}}}
+
+test pm-descriptor-sources {sources: an archive with its digest, or an editable directory without a lock; relative paths with "/"; never in an artifact} -body {
+    set d [string repeat a 64]
+    list [descriptorError "{\"schema\": 1, \"dependencies\": {\"b\": \"1\"}, \"lock\": {\"b\": \"1.0.0\"}, \"sources\": {\"b\": {\"archive\": \"vendor/b-1.0.0.botpkg\", \"sha256\": \"$d\"}}}" project] \
+        [descriptorError {{"schema": 1, "dependencies": {"b": "1"}, "sources": {"b": {"directory": "../b"}}}} project] \
+        [descriptorError {{"schema": 1, "dependencies": {"b": "1"}, "lock": {"b": "1.0.0"}, "sources": {"b": {"directory": "../b"}}}} project] \
+        [descriptorError {{"schema": 1, "dependencies": {"b": "1"}, "lock": {"b": "1.0.0"}, "sources": {"b": {"archive": "b.botpkg"}}}} project] \
+        [descriptorError "{\"schema\": 1, \"dependencies\": {\"b\": \"1\"}, \"lock\": {\"b\": \"1.0.0\"}, \"sources\": {\"b\": {\"archive\": \"/abs/b.botpkg\", \"sha256\": \"$d\"}}}" project] \
+        [descriptorError "{\"schema\": 1, \"dependencies\": {\"b\": \"1\"}, \"lock\": {\"b\": \"1.0.0\"}, \"sources\": {\"b\": {\"archive\": \"C:/b.botpkg\", \"sha256\": \"$d\"}}}" project] \
+        [descriptorError "{\"schema\": 1, \"name\": \"a\", \"version\": \"1.0.0\", \"dependencies\": {\"b\": \"1\"}, \"lock\": {\"b\": \"1.0.0\"}, \"sources\": {\"b\": {\"archive\": \"b.botpkg\", \"sha256\": \"$d\"}}}" artifact] \
+        [descriptorError {{"schema": 1, "name": "a", "version": "1.0.0", "dependencies": {"b": "1"}, "sources": {"b": {"directory": "../b"}}}} pack]
+} -result {ok ok {{  lock: "b" is an editable directory dependency, which has no exact lock (its contents are whatever the directory holds)}} {{  sources: "b" must be {"archive": PATH, "sha256": DIGEST} (an immutable local artifact) or {"directory": PATH} (an editable local package), found the keys archive}} {{  sources: "b": the path "/abs/b.botpkg" must be relative to the project's directory, with "/" separators: an absolute or Windows-style path would tie the project to one machine}} {{  sources: "b": the path "C:/b.botpkg" must be relative to the project's directory, with "/" separators: an absolute or Windows-style path would tie the project to one machine}} {{  an artifact's botlish.json has no "sources": where a consumer finds a dependency is its own installation's business, never the published package's}} {{  dependencies: "b" is an editable directory dependency: a package being packed locks every direct dependency to an exact release}}}
+
+test pm-descriptor-canonical {the descriptor's canonical text: keys in schema order, maps sorted, read back to the same descriptor; an artifact's form leaves sources out} -body {
+    set d [pm::descriptor::fromBytes {{"lock": {"a": "2.0.0"}, "schema": 1, "dependencies": {"z": "1", "a": "2.0"}, "version": "0.1.0", "name": "app", "sources": {"z": {"directory": "../z"}}}} project X]
+    set text [pm::descriptor::encode $d]
+    list [encoding convertfrom utf-8 $text] [expr {[pm::descriptor::encode [pm::descriptor::fromBytes $text project X]] eq $text}] \
+        [string match *sources* [pm::descriptor::encode $d 0]]
+} -result [list "\{\n  \"schema\": 1,\n  \"name\": \"app\",\n  \"version\": \"0.1.0\",\n  \"dependencies\": \{\n    \"a\": \"2.0\",\n    \"z\": \"1\"\n  \},\n  \"lock\": \{\n    \"a\": \"2.0.0\"\n  \},\n  \"sources\": \{\n    \"z\": \{\n      \"directory\": \"../z\"\n    \}\n  \}\n\}\n" 1 0]
+
+# ---------------------------------------------------------------------------
+# 5. The archive: writer, profile, paths
+
+test pm-archive-deterministic-roundtrip {packing the same files twice gives the same bytes; reading them back gives every byte of every file, binary and empty files included} -body {
+    set binary [binary format c* [lmap i [lrange [lrepeat 300 0] 0 255] {expr {[incr ::k] % 256}}]]
+    set files [dict create botlish.json [encoding convertto utf-8 [descriptorText x 1.0.0]] x.bot "1\r\n" \
+        x/deep/a.bot [string repeat "fn f() -> int:\n    1\n" 500] data/bin $binary data/empty "" \
+        LICENSE "text"]
+    set a [pm::archive::bytes $files]
+    set reversed [dict create]
+    foreach key [lreverse [dict keys $files]] { dict set reversed $key [dict get $files $key] }
+    set b [pm::archive::bytes $reversed]
+    set read [pm::archive::fromBytes $a X]
+    list [expr {$a eq $b}] [expr {[dict get $read files] eq [lsort -stride 2 -index 0 $files]}] \
+        [dict keys [dict get $read files]]
+} -cleanup {unset -nocomplain ::k} -result {1 1 {LICENSE botlish.json data/bin data/empty x.bot x/deep/a.bot}}
+
+test pm-archive-standard-zip {a .botpkg is a standard ZIP file: Python's zipfile reads it, checks every CRC and finds the profile's fixed fields} -constraints python3 -body {
+    set dir [fresh zip]
+    set path [file join $dir a.botpkg]
+    writeBytes $path [pm::archive::bytes [dict create botlish.json [encoding convertto utf-8 [descriptorText x 1.0.0]] \
+        x.bot [string repeat "x = 1\n" 3000] x/y.bot "y\n"]]
+    exec python3 -I -c {
+import sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+assert z.testzip() is None
+print(" ".join("%s:%d:%d:%x:%s:%d" % (i.filename, i.compress_type, i.file_size, i.external_attr, "-".join(map(str, i.date_time)), i.create_system) for i in z.infolist()))
+} $path
+} -cleanup cleanup -result {botlish.json:8:55:81a40000:1980-1-1-0-0-0:3 x.bot:8:18000:81a40000:1980-1-1-0-0-0:3 x/y.bot:0:2:81a40000:1980-1-1-0-0-0:3}
+
+test pm-archive-paths {an archive path is portable: relative, "/"-separated components of A-Z a-z 0-9 _ . + -, no hidden, empty, "." or ".." component, no drive, backslash, space, trailing dot or Windows device name, and bounded} -body {
+    set out {}
+    foreach path [list ok.bot a/b/c.bot a+b-c_d.e x.tar.gz ../evil /etc/passwd a//b a/ ./a a/./b .hidden a/.git/x \
+            C:x a\\b "a b" café x. con CON.txt a/aux.bot nul.tar com1 lpt9.x conx.bot "" \
+            [string repeat a 256] [join [lrepeat 33 d] /]] {
+        set problem [pm::archive::pathProblem $path]
+        lappend out [expr {$problem eq "" ? "ok" : "no"}]
+    }
+    set out
+} -result {ok ok ok ok no no no no no no no no no no no no no no no no no no no ok no no no}
+
+test pm-archive-collisions {two paths that differ only in case, or a file that is also a directory of another path (also ignoring case), cannot be packed together} -body {
+    list [pm::archive::CollisionProblem {A.bot a.bot}] [pm::archive::CollisionProblem {a a/b}] \
+        [pm::archive::CollisionProblem {X a/b x/c}] [pm::archive::CollisionProblem {a/b a/c b}]
+} -result {{the paths "A.bot" and "a.bot" differ only in letter case: one file on a case-insensitive file system} {"a" is a file and also a directory of "a/b"} {"X" is a file and also a directory of "x/c"} {}}
+
+# ---------------------------------------------------------------------------
+# 6. Adversarial archives: each breaks one rule of the profile, and the
+# reader refuses it before anything could be written.
+
+# A ZIP file of ENTRIES, each a dict with name and data and any field to
+# override (method, flags, crc, csize, size, time, date, made, needed, attrs,
+# extra, comment, stored: the raw stored bytes, local: a dict of local
+# header overrides), with OPTIONS: prefix, trailing, comment (the archive
+# comment), gap (bytes inserted after the first entry's data), count (the
+# end record's entry counts).
+proc rawZip {entries args} {
+    set options [dict merge {prefix "" trailing "" comment "" gap "" count ""} $args]
+    set body [dict get $options prefix]
+    set central ""
+    set i 0
+    foreach entry $entries {
+        set data [dict get $entry data]
+        set method [dict getdef $entry method 0]
+        if {[dict exists $entry stored]} {
+            set stored [dict get $entry stored]
+        } elseif {$method == 8} {
+            set stored [zlib deflate $data]
+        } else {
+            set stored $data
+        }
+        set name [dict get $entry name]
+        set f [dict create needed 20 flags 0x0800 method $method time 0 date 0x21 \
+            crc [expr {[zlib crc32 $data] & 0xffffffff}] csize [string length $stored] size [string length $data] \
+            made 0x0314 attrs 0x81A40000 extra "" comment ""]
+        foreach key [dict keys $f] {
+            if {[dict exists $entry $key]} { dict set f $key [dict get $entry $key] }
+        }
+        set l [dict merge $f [dict getdef $entry local {}]]
+        set offset [string length $body]
+        append body [binary format "i s s s s s i i i s s" 0x04034b50 [dict get $l needed] [dict get $l flags] [dict get $l method] \
+            [dict get $l time] [dict get $l date] [dict get $l crc] [dict get $l csize] [dict get $l size] \
+            [string length [dict getdef $l name $name]] [string length [dict get $l extra]]] [dict getdef $l name $name] [dict get $l extra] $stored
+        if {$i == 0} { append body [dict get $options gap] }
+        append central [binary format "i s s s s s s i i i s s s s s i i" 0x02014b50 [dict get $f made] [dict get $f needed] \
+            [dict get $f flags] [dict get $f method] [dict get $f time] [dict get $f date] [dict get $f crc] \
+            [dict get $f csize] [dict get $f size] [string length $name] [string length [dict get $f extra]] \
+            [string length [dict get $f comment]] 0 0 [dict get $f attrs] $offset] $name [dict get $f extra] [dict get $f comment]
+        incr i
+    }
+    set count [dict get $options count]
+    if {$count eq ""} { set count [llength $entries] }
+    set comment [dict get $options comment]
+    return "$body$central[binary format "i s s s s i i s" 0x06054b50 0 0 $count $count [string length $central] [string length $body] [string length $comment]]$comment[dict get $options trailing]"
+}
+
+set validDescriptor [encoding convertto utf-8 [descriptorText x 1.0.0]]
+proc entry {name data args} {
+    return [dict merge [dict create name $name data $data] $args]
+}
+proc base {args} {
+    return [list [entry botlish.json $::validDescriptor] {*}$args]
+}
+
+# The reason the reader gives for the archive bytes DATA: {REASON MESSAGE}
+# (the message without its label), or ok.
+proc rejection {data {limits ""}} {
+    if {[catch {pm::archive::fromBytes $data X $limits} message options]} {
+        return [list [lindex [dict get $options -errorcode] 2] [string range $message 3 end]]
+    }
+    return ok
+}
+
+test pm-archive-reference-valid {the hand-built reference archive is valid: the adversarial cases below each change one thing} -body {
+    list [rejection [rawZip [base [entry x.bot "fn f() -> int:\n    1\n"]]]] \
+        [rejection [rawZip [base [entry x.bot [string repeat abc 100] method 8]]]]
+} -result {ok ok}
+
+test pm-archive-traversal-and-absolute {entries naming a path outside the package -- "..", an absolute path, a drive, a backslash, a hidden .bot_modules -- are refused} -body {
+    lmap name {../evil.bot x/../../evil.bot /etc/passwd C:/x.bot a\\b.bot .bot_modules/x/x.bot x/.bot_modules/y.bot} {
+        lindex [rejection [rawZip [base [entry $name "x"]]]] 0
+    }
+} -result {PATH PATH PATH PATH PATH PATH PATH}
+
+test pm-archive-entry-types {a symbolic link, a directory entry, an executable or special file is refused: an archive holds regular 0644 files only} -body {
+    list [rejection [rawZip [base [entry x.bot /etc/passwd attrs 0xA1FF0000]]]] \
+        [rejection [rawZip [base [entry x/ "" attrs 0x41ED0010]]]] \
+        [rejection [rawZip [base [entry x.sh "#!/bin/sh" attrs 0x81ED0000]]]] \
+        [rejection [rawZip [base [entry fifo "" attrs 0x11A40000]]]] \
+        [rejection [rawZip [base [entry x.bot "" made 0x0014 attrs 0x10]]]]
+} -result {{ENTRY {entry "x.bot" is a symbolic link}} {ENTRY {entry "x/" is a directory entry (directories are implied by paths)}} {ENTRY {entry "x.sh" has a file mode other than 0644 (no executable or special bits)}} {ENTRY {entry "fifo" is not a regular file (external attributes 0x11a40000)}} {FORMAT {entry "x.bot" has version fields 0x0014/20 (the profile's are 0x0314/20)}}}
+
+test pm-archive-duplicates-and-order {a repeated name, names out of order, names that collide ignoring case or as file and directory are refused} -body {
+    list [rejection [rawZip [base [entry x.bot a] [entry x.bot b]]]] \
+        [rejection [rawZip [list [entry x.bot a] [entry botlish.json $::validDescriptor]]]] \
+        [rejection [rawZip [list [entry X.bot a] [entry botlish.json $::validDescriptor] [entry x.bot b]]]] \
+        [rejection [rawZip [base [entry x a] [entry x/y.bot b]]]] \
+        [rejection [rawZip [list [entry X a] [entry botlish.json $::validDescriptor] [entry x/y.bot b]]]]
+} -result {{PATH {entry "x.bot" appears twice}} {FORMAT {entries are not in increasing order of their names (x.bot before botlish.json)}} {PATH {the paths "X.bot" and "x.bot" differ only in letter case: one file on a case-insensitive file system}} {PATH {"x" is a file and also a directory of "x/y.bot"}} {PATH {"X" is a file and also a directory of "x/y.bot"}}}
+
+test pm-archive-unsupported-features {encryption, data descriptors, other compression methods, extra fields, comments, time stamps, ZIP64 and multi-disk fields are refused, never half-read} -body {
+    list [rejection [rawZip [base [entry x.bot a flags 0x0801]]]] \
+        [rejection [rawZip [base [entry x.bot a flags 0x0808]]]] \
+        [rejection [rawZip [base [entry x.bot a flags 0x0000]]]] \
+        [rejection [rawZip [base [entry x.bot a method 12]]]] \
+        [rejection [rawZip [base [entry x.bot a extra "\x01\x00\x00\x00"]]]] \
+        [rejection [rawZip [base [entry x.bot a comment hi]]]] \
+        [rejection [rawZip [base [entry x.bot a time 0x6000 date 0x5821]]]] \
+        [rejection [rawZip [base [entry x.bot a]] comment "archive comment"]] \
+        [rejection [rawZip [base [entry x.bot a]] count 0xffff]]
+} -result {{FORMAT {entry "x.bot" is encrypted}} {FORMAT {entry "x.bot" uses a data descriptor, which the profile forbids}} {FORMAT {entry "x.bot" has general purpose flags 0x0000, the profile's are 0x0800}} {FORMAT {entry "x.bot" uses compression method 12 (the profile has 0, stored, and 8, deflate)}} {FORMAT {entry "x.bot" has an extra field or a comment, which the profile forbids}} {FORMAT {entry "x.bot" has an extra field or a comment, which the profile forbids}} {FORMAT {entry "x.bot" has a time stamp, which the profile fixes at 1980-01-01 00:00}} {FORMAT {the ZIP end record is not the archive's last 22 bytes (an archive comment or trailing data, which the profile forbids)}} {FORMAT {a ZIP64 archive}}}
+
+test pm-archive-hidden-data {data before the first entry, between entries, after the end record, or a local header that disagrees with the central directory is refused: no byte of the file is unaccounted for} -body {
+    list [lindex [rejection [rawZip [base [entry x.bot a]] prefix "MZ\x90\x00"]] 0] \
+        [lindex [rejection [rawZip [base [entry x.bot a]] gap "hidden"]] 0] \
+        [rejection [rawZip [base [entry x.bot a]] trailing "junk"]] \
+        [rejection [rawZip [base [entry x.bot a local {name y.bot}]]]] \
+        [rejection [rawZip [base [entry x.bot a local {crc 1}]]]] \
+        [rejection [rawZip [base [entry x.bot abc local {size 2 csize 2}]]]]
+} -result {FORMAT FORMAT {FORMAT {the ZIP end record is not the archive's last 22 bytes (an archive comment or trailing data, which the profile forbids)}} {FORMAT {entry "x.bot"'s local header differs from its central directory entry}} {FORMAT {entry "x.bot"'s local header differs from its central directory entry}} {FORMAT {entry "x.bot"'s local header differs from its central directory entry}}}
+
+test pm-archive-content-checks {a wrong CRC-32, a wrong size, truncated or invalid deflate data, or no botlish.json is refused} -body {
+    list [rejection [rawZip [base [entry x.bot abc crc 12345]]]] \
+        [rejection [rawZip [base [entry x.bot [string repeat abc 50] method 8 size 149]]]] \
+        [rejection [rawZip [base [entry x.bot [string repeat abc 50] method 8 stored [string range [zlib deflate [string repeat abc 50]] 0 3]]]]] \
+        [rejection [rawZip [base [entry x.bot abc method 8 stored "\xff\xff\xff\xff"]]]] \
+        [rejection [rawZip [list [entry x.bot a]]]] \
+        [rejection "this is not a zip archive at all"] [rejection ""]
+} -match glob -result {{CONTENT {entry "x.bot" fails its CRC-32 check (the archive is damaged or altered)}} {CONTENT {entry "x.bot" decompresses to more than its declared 149 bytes (decompression stopped after 150)}} {CONTENT {entry "x.bot"*}} {CONTENT {entry "x.bot" is not valid deflate data*}} {FORMAT {no botlish.json at the archive's root: every package artifact has one}} {FORMAT {not a .botpkg archive (no ZIP end record)}} {FORMAT {not a .botpkg archive (too short for a ZIP end record)}}}
+
+test pm-archive-bomb {a deflate stream that expands past its declared size is stopped within one 64 KiB step of that size (never inflated whole), and one that declares an expansion over 256 times its compressed size is refused before any decompression} -body {
+    set zeros [string repeat \x00 [expr {8 * 1024 * 1024}]]
+    set bomb [zlib deflate $zeros 9]
+    unset zeros
+    set stopped [rejection [rawZip [base [entry x.bot "" method 8 stored $bomb size 1000 crc 0]]]]
+    regexp {stopped after ([0-9]+)\)} [lindex $stopped 1] -> after
+    list [expr {[string length $bomb] < 10000}] [expr {$after <= 1000 + 65536}] \
+        [regsub { \(decompression stopped after [0-9]+\)} $stopped ""] \
+        [string map [list [string length $bomb] N] [rejection [rawZip [base [entry x.bot "" method 8 stored $bomb size [expr {8 * 1024 * 1024}] crc 0]]]]]
+} -result {1 1 {CONTENT {entry "x.bot" decompresses to more than its declared 1000 bytes}} {LIMIT {entry "x.bot" would expand N bytes to 8388608, more than 256 times}}}
+
+test pm-archive-limits {the entry count, an entry's size, the total size and the archive's size are bounded (here with lowered limits)} -body {
+    set three [rawZip [base [entry c.bot cccc] [entry d.bot dddd]]]
+    list [rejection $three {entries 2}] [rejection $three {entry 3}] [rejection $three {total 60}] \
+        [regexp {^the archive is [0-9]+ bytes, over the limit of 100$} [lindex [rejection $three {archive 100}] 1]] [rejection $three]
+} -result {{LIMIT {3 entries, over the limit of 2}} {LIMIT {entry "botlish.json" is 55 bytes, over the limit of 3}} {LIMIT {the files total more than 60 bytes}} 1 ok}
+
+test pm-archive-names-not-utf8 {an entry name that is not UTF-8 is refused (and shown in hexadecimal)} -body {
+    rejection [rawZip [base [entry "x\xff.bot" a]]]
+} -result {PATH {an entry name that is not UTF-8}}
+
+# ---------------------------------------------------------------------------
+# 7. package pack
+
+test pm-pack-deterministic {packing a package twice -- from two copies with other modification times, in another working directory -- gives byte-identical artifacts, named NAME-VERSION.botpkg, and the reader accepts them} -body {
+    set src [fresh src]
+    set dir [package $src lib 1.2.3 "fn f() -> int:\n    1\n" {} {} {lib/inner.bot "fn g() -> int:\n    2\n" README.md "lib\n"}]
+    set copy [file join [fresh src] lib]
+    file copy $dir $copy
+    file mtime [file join $copy lib.bot] 1000000000
+    set r1 [pm package pack $dir -out [set o1 [fresh out]]]
+    set r2 [pmIn $copy package pack -out [set o2 [fresh out]]]
+    set a [readBytes [file join $o1 lib-1.2.3.botpkg]]
+    set b [readBytes [file join $o2 lib-1.2.3.botpkg]]
+    list [dict get $r1 status] [dict get $r2 status] [expr {$a eq $b}] \
+        [dict keys [dict get [pm::archive::fromBytes $a X] files]] \
+        [regexp "sha256 [pm::sha256::hex $a]" [dict get $r1 out]]
+} -cleanup cleanup -result {0 0 1 {README.md botlish.json lib.bot lib/inner.bot} 1}
+
+test pm-pack-inclusion {pack takes every regular file but hidden entries (.git, .bot_modules, editors' files, at any depth) and *.botpkg files; botlish.json is written canonically and without sources} -body {
+    set dir [package [fresh src] lib 1.0.0 "fn f() -> int:\n    1\n"]
+    writeText [file join $dir botlish.json] "{\"version\": \"1.0.0\", \"schema\": 1,\n\n \"name\": \"lib\", \"lock\": {\"dep\": \"2.0.1\"}, \"sources\": {\"dep\": {\"archive\": \"../dep-2.0.1.botpkg\", \"sha256\": \"[string repeat 0 64]\"}}, \"dependencies\": {\"dep\": \"2.0\"}}"
+    foreach path {.git/config .bot_modules/dep/dep.bot .DS_Store lib/.swp.bot old-0.9.0.botpkg lib/x/y.bot native/libx.a} {
+        writeText [file join $dir {*}[split $path /]] x
+    }
+    pm package pack $dir -out [set out [fresh out]]
+    set archive [pm::archive::read [file join $out lib-1.0.0.botpkg]]
+    list [dict keys [dict get $archive files]] [encoding convertfrom utf-8 [dict get $archive descriptor]]
+} -cleanup cleanup -result [list {botlish.json lib.bot lib/x/y.bot native/libx.a} "\{\n  \"schema\": 1,\n  \"name\": \"lib\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": \{\n    \"dep\": \"2.0\"\n  \},\n  \"lock\": \{\n    \"dep\": \"2.0.1\"\n  \}\n\}\n"]
+
+test pm-pack-refuses-links-and-special-files {a symbolic link or a named pipe in the package directory, or a file name an archive cannot hold, makes pack fail: the artifact would not be what the directory holds} -constraints {unixFiles mkfifo} -body {
+    set a [package [fresh src] lib 1.0.0 "fn f() -> int:\n    1\n"]
+    file link -symbolic [file join $a leak.bot] /etc/passwd
+    set b [package [fresh src] lib 1.0.0 "fn f() -> int:\n    1\n"]
+    exec mkfifo [file join $b pipe]
+    set c [package [fresh src] lib 1.0.0 "fn f() -> int:\n    1\n" {} {} {"my notes.txt" x}]
+    lmap dir [list $a $b $c] {
+        set r [pm package pack $dir -out [fresh out]]
+        list [dict get $r status] [kindOf [dict get $r err]] [regsub { \(PM [A-Z]+\)$} [lindex [split [dict get $r err] \n] 1] ""]
+    }
+} -cleanup cleanup -result {{1 PACK {  leak.bot is a symbolic link: a package holds regular files only}} {1 PACK {  pipe is a fifo: a package holds regular files only}} {1 PACK {  my notes.txt: the path component "my notes.txt" is not portable (A-Z, a-z, 0-9 and _ . + -, not starting with . + or -)}}}
+
+test pm-pack-needs-complete-locks {a package is packed only with an exact, compatible lock for every direct dependency: an editable or unlocked dependency stays with the author} -body {
+    set src [fresh src]
+    set a [package $src a 1.0.0 "fn f() -> int:\n    1\n" {b 1.2}]
+    set b [package $src c 1.0.0 "fn f() -> int:\n    1\n" {b 1.2} {b 1.3.0}]
+    set c [package $src d 1.0.0 "fn f() -> int:\n    1\n"]
+    writeText [file join $c botlish.json] {{"schema": 1, "name": "d", "version": "1.0.0", "dependencies": {"b": "1"}, "sources": {"b": {"directory": "../b"}}}}
+    lmap dir [list $a $b $c] {
+        set r [pm package pack $dir -out [fresh out]]
+        list [dict get $r status] [regsub { \(PM [A-Z]+\)$} [lindex [split [dict get $r err] \n] 1] ""]
+    }
+} -cleanup cleanup -result {{1 {  lock: "b" has no lock: a package being packed locks every direct dependency to an exact release}} {1 {  lock: "b" is locked to 1.3.0, which the request "1.2" does not accept}} {1 {  dependencies: "b" is an editable directory dependency: a package being packed locks every direct dependency to an exact release}}}
+
+test pm-pack-immutable-output {pack never silently overwrites another artifact of the same name and version: the same bytes are "unchanged", different ones need -force (a local development override)} -body {
+    set dir [package [fresh src] lib 1.0.0 "fn f() -> int:\n    1\n"]
+    set out [fresh out]
+    pm package pack $dir -out $out
+    set again [pm package pack $dir -out $out]
+    writeText [file join $dir lib.bot] "fn f() -> int:\n    2\n"
+    set changed [pm package pack $dir -out $out]
+    set forced [pm package pack $dir -out $out -force]
+    list [string match "*(unchanged)*" [dict get $again out]] [dict get $changed status] [kindOf [dict get $changed err]] \
+        [dict get $forced status] [string match "*fn f() -> int:\n    2*" [dict get [pm::archive::read [file join $out lib-1.0.0.botpkg]] files]]
+} -cleanup cleanup -result {1 1 EXISTS 0 1}
+
+test pm-inspect {package inspect validates an artifact and shows its identity, digest, dependencies and files} -body {
+    set world [geometryWorld]
+    set r [pm package inspect [file join [dict get $world repo] shapes-2.1.0.botpkg]]
+    set bad [file join [fresh x] bad.botpkg]
+    writeBytes $bad [rawZip [base [entry ../x.bot x]]]
+    set rb [pm package inspect $bad]
+    list [dict get $r status] [lindex [split [dict get $r out] \n] 0] [string match "*dependency geometry \"1.0\", locked 1.0.0*" [dict get $r out]] \
+        [dict get $rb status] [kindOf [dict get $rb err]]
+} -cleanup cleanup -result {0 {shapes 2.1.0} 1 1 ARTIFACT}
+
+# ---------------------------------------------------------------------------
+# 8. add, install: a package and its locked dependencies
+
+test pm-add-from-repository {add NAME installs the newest version from the repository, writes a MAJOR.MINOR request and the exact lock, and installs the package's own locked dependency in its own .bot_modules; the compiler runs it} -body {
+    set world [geometryWorld]
+    set app [application "import shapes\n\nshapes::square(7)\n"]
+    set r [pm add shapes -project $app -repository [dict get $world repo]]
+    list [dict get $r status] [dict get $r out] [readBytes [file join $app botlish.json]] \
+        [file isfile [file join $app .bot_modules shapes .bot_modules geometry geometry.bot]] [appValue $app]
+} -cleanup cleanup -result [list 0 "shapes 2.1.4 (sha256 [string range [pm::sha256::file [file join [dict get [set ::w [geometryWorld]] repo] shapes-2.1.4.botpkg]] 0 11]): installed\n  geometry 1.0.3 (sha256 [string range [pm::sha256::file [file join [dict get $::w repo] geometry-1.0.3.botpkg]] 0 11]): installed\nadded shapes (request \"2.1\", lock 2.1.4)" "\{\n  \"schema\": 1,\n  \"dependencies\": \{\n    \"shapes\": \"2.1\"\n  \},\n  \"lock\": \{\n    \"shapes\": \"2.1.4\"\n  \}\n\}\n" 1 152]
+
+test pm-add-explicit-requests {-request keeps the precision written: 1 accepts 1.x.y, an exact request one release; an unsatisfiable request installs nothing} -body {
+    set world [geometryWorld]
+    set repo [dict get $world repo]
+    set out {}
+    foreach request {1 1.0 1.0.0 2 3} {
+        set app [application "import geometry\n\ngeometry::version()\n"]
+        set r [pm add geometry -request $request -project $app -repository $repo]
+        if {[dict get $r status]} {
+            lappend out [list $request [kindOf [dict get $r err]] [file exists [file join $app botlish.json]]]
+        } else {
+            set d [pm::descriptor::read [file join $app botlish.json] project]
+            lappend out [list $request [dict get $d dependencies geometry] [dict get $d lock geometry] [appValue $app]]
+        }
+    }
+    set out
+} -cleanup cleanup -result {{1 1 1.1.0 110} {1.0 1.0 1.0.3 103} {1.0.0 1.0.0 1.0.0 100} {2 2 2.0.0 200} {3 REQUEST 0}}
+
+test pm-add-existing-needs-replace {adding a package that is already a dependency changes nothing unless -replace says so} -body {
+    set world [geometryWorld]
+    set app [application "import geometry\n\ngeometry::version()\n"]
+    pm add geometry -request 1.0 -project $app -repository [dict get $world repo]
+    set again [pm add geometry -request 2 -project $app -repository [dict get $world repo]]
+    set before [appValue $app]
+    set replaced [pm add geometry -request 2 -replace -project $app -repository [dict get $world repo]]
+    list [dict get $again status] [kindOf [dict get $again err]] $before [dict get $replaced status] [appValue $app]
+} -cleanup cleanup -result {1 EXISTS 103 0 200}
+
+test pm-install-reconstructs-offline {a fresh copy of a project -- its botlish.json and sources only -- is reconstructed by install from the local repository alone, file for file the tree the first installation made} -body {
+    set world [geometryWorld]
+    set app [application "import shapes\n\nshapes::square(3)\n"]
+    pm add shapes -request 2.1 -project $app -repository [dict get $world repo]
+    set fresh [fresh clone]
+    file copy [file join $app main.bot] [file join $app botlish.json] $fresh
+    set r [pm install -project $fresh -repository [dict get $world repo]]
+    list [dict get $r status] [expr {[treeState [file join $app .bot_modules]] eq [treeState [file join $fresh .bot_modules]]}] \
+        [appValue $fresh]
+} -cleanup cleanup -result {0 1 112}
+
+test pm-install-idempotent {install on an installed project changes nothing and reads no artifact: it needs no repository} -body {
+    set world [geometryWorld]
+    set app [application "import shapes\n\nshapes::square(3)\n"]
+    pm add shapes -project $app -repository [dict get $world repo]
+    set before [treeState $app]
+    set r [pm install -project $app]
+    list [dict get $r status] [dict get $r out] [expr {[treeState $app] eq $before}]
+} -cleanup cleanup -result {0 {shapes 2.1.4: unchanged} 1}
+
+test pm-install-needs-locks {install installs exact releases only: a dependency without a lock is an error that names update, and nothing is installed} -body {
+    set world [geometryWorld]
+    set app [application "1\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}}}
+    set r [pm install -project $app -repository [dict get $world repo]]
+    list [dict get $r status] [kindOf [dict get $r err]] [string match "*Run update shapes*" [dict get $r err]] \
+        [file exists [file join $app .bot_modules shapes]]
+} -cleanup cleanup -result {1 LOCK 1 0}
+
+test pm-install-unavailable {an artifact no repository holds is an error naming the package, the version and the dependency path that needs it; nothing is installed} -body {
+    set world [geometryWorld]
+    set repo [fresh repo]
+    file copy [file join [dict get $world repo] shapes-2.1.0.botpkg] $repo
+    set app [application "1\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}, "lock": {"shapes": "2.1.0"}}}
+    set r [pm install -project $app -repository $repo]
+    set none [pm install -project $app]
+    list [dict get $r status] [string map [list $repo REPO] [dict get $r err]] [kindOf [dict get $none err]] \
+        [file exists [file join $app .bot_modules shapes]]
+} -cleanup cleanup -result {1 {error: the project -> shapes 2.1.0 needs geometry 1.0.0, which no repository holds (no version of geometry in REPO) (PM UNAVAILABLE)} UNAVAILABLE 0}
+
+test pm-two-artifacts-one-version {two different artifacts claiming one exact release are never chosen between: the lookup fails naming both; identical copies are one artifact} -body {
+    set world [geometryWorld]
+    set other [fresh repo]
+    package [set src [fresh src]] geometry 1.0.3 "fn version() -> int:\n    999\n"
+    pm package pack [file join $src geometry-1.0.3] -out $other
+    set same [fresh repo]
+    file copy [file join [dict get $world repo] geometry-1.0.3.botpkg] $same
+    set app [application "import geometry\n\ngeometry::version()\n"]
+    set r [pm add geometry -request 1.0.3 -project $app -repository [dict get $world repo] -repository $other]
+    set app2 [application "import geometry\n\ngeometry::version()\n"]
+    set r2 [pm add geometry -request 1.0.3 -project $app2 -repository [dict get $world repo] -repository $same]
+    list [dict get $r status] [kindOf [dict get $r err]] [file exists [file join $app botlish.json]] \
+        [dict get $r2 status] [appValue $app2]
+} -cleanup cleanup -result {1 CONFLICT 0 0 103}
+
+test pm-artifact-identity-checked {an artifact's embedded identity must be its file's name; an artifact whose botlish.json has an unlocked dependency or sources is refused at installation, whatever made it} -body {
+    set world [geometryWorld]
+    set repo [fresh repo]
+    file copy [file join [dict get $world repo] geometry-1.0.3.botpkg] [file join $repo geometry-1.0.4.botpkg]
+    set app [application "1\n"]
+    set r1 [pm add geometry -request 1.0.4 -project $app -repository $repo]
+    set bad [fresh repo]
+    writeBytes [file join $bad lib-1.0.0.botpkg] [pm::archive::bytes [dict create botlish.json \
+        [encoding convertto utf-8 {{"schema": 1, "name": "lib", "version": "1.0.0", "dependencies": {"geometry": "1"}}}] lib.bot x]]
+    writeBytes [file join $bad src-1.0.0.botpkg] [pm::archive::bytes [dict create botlish.json \
+        [encoding convertto utf-8 {{"schema": 1, "name": "src", "version": "1.0.0", "dependencies": {"geometry": "1"}, "lock": {"geometry": "1.0.0"}, "sources": {"geometry": {"directory": "/tmp"}}}}] src.bot x]]
+    set r2 [pm add lib -project $app -repository $bad]
+    set r3 [pm add src -project $app -repository $bad]
+    list [kindOf [dict get $r1 err]] [kindOf [dict get $r2 err]] [string match "*has no lock*" [dict get $r2 err]] \
+        [kindOf [dict get $r3 err]] [string match {*has no "sources"*} [dict get $r3 err]] [file exists [file join $app .bot_modules]]
+} -cleanup cleanup -result {IDENTITY ARTIFACT 1 ARTIFACT 1 0}
+
+test pm-dependency-cycle {a release that needs itself through its dependencies (a 1.0.0 -> b 1.0.0 -> a 1.0.0) is a cycle, refused with its path before anything is installed; a needing another version of itself further down is no cycle} -body {
+    set src [fresh src]
+    set repo [fresh repo]
+    packAll $repo [list [package $src a 1.0.0 "fn f() -> int:\n    1\n" {b 1.0} {b 1.0.0}] \
+        [package $src b 1.0.0 "fn g() -> int:\n    2\n" {a 1.0} {a 1.0.0}] \
+        [package $src c 1.0.0 "import d\n\nfn f() -> int:\n    d::g()\n" {d 1.0} {d 1.0.0}] \
+        [package $src d 1.0.0 "import c\n\nfn g() -> int:\n    c::f() + 1\n" {c 2} {c 2.0.0}] \
+        [package $src c 2.0.0 "fn f() -> int:\n    20\n"]]
+    set app [application "import c\n\nc::f()\n"]
+    set r [pm add a -project $app -repository $repo]
+    set r2 [pm add c -request 1 -project $app -repository $repo]
+    list [dict get $r status] [kindOf [dict get $r err]] [string match "*the project -> a 1.0.0 -> b 1.0.0 -> a 1.0.0*" [dict get $r err]] \
+        [dict get $r2 status] [appValue $app]
+} -cleanup cleanup -result {1 CYCLE 1 0 21}
+
+# ---------------------------------------------------------------------------
+# 9. Scopes: distinct versions on separate branches, no transitive access
+
+test pm-two-versions-two-branches {two packages that lock different versions of one dependency each get their own instance in their own .bot_modules; the compiler keeps the instances apart (values, nominal types)} -body {
+    set world [geometryWorld]
+    set src [dict get $world src]
+    set repo [dict get $world repo]
+    packAll $repo [list \
+        [package $src physics 1.0.0 "import geometry\n\nfn origin() -> geometry::Point:\n    geometry::point(0, 0)\n\nfn tag() -> int:\n    geometry::version()\n" {geometry 1.0} {geometry 1.0.0}] \
+        [package $src rendering 1.0.0 "import geometry\n\nfn draw(p: geometry::Point) -> int:\n    p.x + geometry::version()\n\nfn tag() -> int:\n    geometry::version()\n" {geometry 2} {geometry 2.0.0}]]
+    set app [application "import physics\nimport rendering\n\n\[physics::tag(), rendering::tag()\]\n"]
+    pm add physics -project $app -repository $repo
+    pm add rendering -project $app -repository $repo
+    set mixed [application "import physics\nimport rendering\n\nrendering::draw(physics::origin())\n"]
+    file copy -force [file join $app botlish.json] $mixed
+    pm install -project $mixed -repository $repo
+    list [appValue $app] [appValue $app compile] \
+        [file isdirectory [file join $app .bot_modules physics .bot_modules geometry]] \
+        [file isdirectory [file join $app .bot_modules rendering .bot_modules geometry]] \
+        [regexp {TYPE: .*physics/geometry::Point.*rendering/geometry::Point|TYPE: .*rendering/geometry::Point.*physics/geometry::Point} [appRejection $mixed]]
+} -cleanup cleanup -result {{[100, 200]} {[100, 200]} 1 1 1}
+
+test pm-no-transitive-access {the application cannot import a package its package installed: geometry is shapes', not the application's} -body {
+    set world [geometryWorld]
+    set app [application "import geometry\n\ngeometry::version()\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}, "lock": {"shapes": "2.1.0"}}}
+    pm install -project $app -repository [dict get $world repo]
+    lindex [split [appRejection $app] :] 0
+} -cleanup cleanup -result UNKNOWN-NAMESPACE
+
+# ---------------------------------------------------------------------------
+# 10. update, remove
+
+test pm-update-within-precision {update moves a lock to the newest version its request accepts, never past it, and never changes the request; one named dependency leaves the others as they are} -body {
+    set world [geometryWorld]
+    set repo [dict get $world repo]
+    set app [application "import geometry\nimport shapes\n\n\[geometry::version(), shapes::square(1)\]\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"geometry": "1.0", "shapes": "2"}, "lock": {"geometry": "1.0.0", "shapes": "2.1.0"}}}
+    pm install -project $app -repository $repo
+    set shapesBefore [treeState [file join $app .bot_modules shapes]]
+    set r [pm update geometry -project $app -repository $repo]
+    set d [pm::descriptor::read [file join $app botlish.json] project]
+    list [dict get $r status] [lindex [split [dict get $r out] \n] end] [dict get $d dependencies] [dict get $d lock] \
+        [expr {[treeState [file join $app .bot_modules shapes]] eq $shapesBefore}] [appValue $app]
+} -cleanup cleanup -result {0 {geometry: 1.0.0 -> 1.0.3} {geometry 1.0 shapes 2} {geometry 1.0.3 shapes 2.1.0} 1 {[103, 101]}}
+
+test pm-update-all-and-stale-files {update with no name updates every dependency; a replaced version's files are gone, the new version's present (no stale file survives)} -body {
+    set world [geometryWorld]
+    set src [dict get $world src]
+    set repo [dict get $world repo]
+    packAll $repo [list [package $src extra 1.0.0 "fn a() -> int:\n    1\n" {} {} {extra/old.bot "fn o() -> int:\n    1\n"}] \
+        [package $src extra 1.0.1 "fn a() -> int:\n    2\n" {} {} {extra/new.bot "fn n() -> int:\n    2\n"}]]
+    set app [application "import extra\n\nextra::a()\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"extra": "1.0", "geometry": "1"}, "lock": {"extra": "1.0.0", "geometry": "1.0.0"}}}
+    pm install -project $app -repository $repo
+    set r [pm update -project $app -repository $repo]
+    list [dict get $r status] [lsort [glob -tails -directory [file join $app .bot_modules extra extra] *]] \
+        [pm::descriptor::read [file join $app botlish.json] project] [appValue $app]
+} -cleanup cleanup -result {0 new.bot {schema 1 name {} version {} dependencies {extra 1.0 geometry 1} lock {extra 1.0.1 geometry 1.1.0} sources {}} 2}
+
+test pm-remove {remove deletes the dependency's request, lock and source and its installed tree (its own dependencies with it), and nothing else} -body {
+    set world [geometryWorld]
+    set app [application "import geometry\n\ngeometry::version()\n"]
+    pm add shapes -project $app -repository [dict get $world repo]
+    pm add geometry -request 2 -project $app -repository [dict get $world repo]
+    set r [pm remove shapes -project $app]
+    list [dict get $r status] [lsort [glob -tails -directory [file join $app .bot_modules] *]] \
+        [pm::descriptor::read [file join $app botlish.json] project] [appValue $app] \
+        [kindOf [dict get [pm remove shapes -project $app] err]]
+} -cleanup cleanup -result {0 geometry {schema 1 name {} version {} dependencies {geometry 2} lock {geometry 2.0.0} sources {}} 200 UNKNOWN}
+
+# ---------------------------------------------------------------------------
+# 11. What the manager owns
+
+test pm-manual-packages-preserved {a package installed by hand is never modified, replaced or deleted: install, update and remove leave it; adding a package of its name is refused} -body {
+    set world [geometryWorld]
+    set app [application "import handmade\nimport shapes\n\n\[handmade::x(), shapes::square(2)\]\n"]
+    writeText [file join $app .bot_modules handmade handmade.bot] "fn x() -> int:\n    42\n"
+    set manual [treeState [file join $app .bot_modules handmade]]
+    pm add shapes -project $app -repository [dict get $world repo]
+    pm update -project $app -repository [dict get $world repo]
+    set value [appValue $app]
+    pm remove shapes -project $app
+    set clash [application "1\n"]
+    writeText [file join $clash .bot_modules geometry geometry.bot] "fn version() -> int:\n    7\n"
+    set r [pm add geometry -project $clash -repository [dict get $world repo]]
+    list $value [expr {[treeState [file join $app .bot_modules handmade]] eq $manual}] \
+        [kindOf [dict get $r err]] [readBytes [file join $clash .bot_modules geometry geometry.bot]]
+} -cleanup cleanup -result [list {[42, 107]} 1 MANUAL "fn version() -> int:\n    7\n"]
+
+test pm-modified-packages-protected {an installed package changed since installation is replaced or removed only with -force; the refusal lists the changes} -body {
+    set world [geometryWorld]
+    set repo [dict get $world repo]
+    set app [application "import shapes\n\nshapes::square(2)\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}, "lock": {"shapes": "2.1.0"}}}
+    pm install -project $app -repository $repo
+    set file [file join $app .bot_modules shapes .bot_modules geometry geometry.bot]
+    set f [open $file a]; puts $f "# my fix"; close $f
+    writeText [file join $app .bot_modules shapes notes.txt] "mine\n"
+    set r1 [pm update -project $app -repository $repo]
+    set r2 [pm remove shapes -project $app]
+    set kept [string match "*# my fix*" [readBytes $file]]
+    set r3 [pm update -project $app -repository $repo -force]
+    list [kindOf [dict get $r1 err]] [kindOf [dict get $r2 err]] $kept \
+        [lsort [regexp -all -inline {\.bot_modules/\S+ (?:was changed|\(file\) is not part)} [dict get $r1 err]]] \
+        [dict get $r3 status] [appValue $app]
+} -cleanup cleanup -result {MODIFIED MODIFIED 1 {{.bot_modules/shapes/.bot_modules/geometry/geometry.bot was changed} {.bot_modules/shapes/notes.txt (file) is not part}} 0 107}
+
+test pm-install-restores-only-with-force {install over a package changed since installation -- a file edited, a nested file deleted -- refuses, naming the change; with -force it restores the artifact's files, and verify is clean again} -body {
+    set world [geometryWorld]
+    set app [application "import shapes\n\nshapes::square(2)\n"]
+    pm add shapes -project $app -repository [dict get $world repo]
+    set shapes [file join $app .bot_modules shapes shapes.bot]
+    set original [readBytes $shapes]
+    writeText $shapes "fn square(s: int) -> int:\n    0\n"
+    file delete [file join $app .bot_modules shapes .bot_modules geometry geometry.bot]
+    set refused [pm install -project $app -repository [dict get $world repo]]
+    set forced [pm install -project $app -repository [dict get $world repo] -force]
+    set verified [pm verify -project $app -repository [dict get $world repo]]
+    list [kindOf [dict get $refused err]] [string match "*shapes.bot was changed*" [dict get $refused err]] \
+        [dict get $forced status] [expr {[readBytes $shapes] eq $original}] [dict get $verified status] [appValue $app]
+} -cleanup cleanup -result {MODIFIED 1 0 1 0 107}
+
+test pm-editable-directory {a directory is an editable dependency: linked, never copied or locked; edits are visible without packing; it is reported as not authenticatable; removing it removes the link only} -constraints unixFiles -body {
+    set world [geometryWorld]
+    set dev [package [fresh dev] tool 0.3.0 "fn v() -> int:\n    1\n"]
+    set app [application "import tool\n\ntool::v()\n"]
+    set r [pm add $dev -project $app]
+    set first [appValue $app]
+    writeText [file join $dev tool.bot] "fn v() -> int:\n    2\n"
+    set second [appValue $app]
+    set d [pm::descriptor::read [file join $app botlish.json] project]
+    set v [pm verify -project $app]
+    set type [file type [file join $app .bot_modules tool]]
+    pm remove tool -project $app
+    list [dict get $r status] $type $first $second \
+        [dict get $d lock] [dict get $d sources tool kind] [string match "*editable*cannot be authenticated*" [dict get $v out]] \
+        [file exists [file join $app .bot_modules tool]] [file isfile [file join $dev tool.bot]]
+} -cleanup cleanup -result {0 link 1 2 {} directory 1 0 1}
+
+test pm-archive-source {an archive source records the archive's path, relative to the project, and its SHA-256; a different file at that path is refused at installation} -body {
+    set world [geometryWorld]
+    set app [application "import shapes\n\nshapes::square(1)\n"]
+    file mkdir [file join $app vendor]
+    file copy [file join [dict get $world repo] shapes-2.1.0.botpkg] [file join $app vendor]
+    set r [pm add [file join $app vendor shapes-2.1.0.botpkg] -project $app -repository [dict get $world repo]]
+    set d [pm::descriptor::read [file join $app botlish.json] project]
+    file copy -force [file join [dict get $world repo] shapes-2.1.4.botpkg] [file join $app vendor shapes-2.1.0.botpkg]
+    file delete -force [file join $app .bot_modules]
+    set r2 [pm install -project $app -repository [dict get $world repo]]
+    list [dict get $r status] [dict get $d sources shapes path] \
+        [expr {[dict get $d sources shapes sha256] eq [pm::sha256::file [file join [dict get $world repo] shapes-2.1.0.botpkg]]}] \
+        [kindOf [dict get $r2 err]] [file exists [file join $app .bot_modules shapes]]
+} -cleanup cleanup -result {0 vendor/shapes-2.1.0.botpkg 1 INTEGRITY 0}
+
+# ---------------------------------------------------------------------------
+# 12. verify
+
+test pm-verify-clean {verify of an unchanged installation compares every installed file with its artifact and exits 0, saying what it does not authenticate} -body {
+    set world [geometryWorld]
+    set app [application "1\n"]
+    pm add shapes -project $app -repository [dict get $world repo]
+    set r [pm verify -project $app -repository [dict get $world repo]]
+    list [dict get $r status] [dict get $r out]
+} -cleanup cleanup -match glob -result {0 {verify: 2 package instance(s) in *: as installed
+(integrity only: installed bytes against local artifacts and the installation record; no artifact carries a publisher signature to authenticate)}}
+
+test pm-verify-problems {verify reports altered, missing and extra files, a lock the installation does not match, an artifact in the repository that is not the one installed, and a missing package -- and exits 1} -body {
+    set world [geometryWorld]
+    set repo [dict get $world repo]
+    set app [application "1\n"]
+    pm add shapes -request 2.1 -project $app -repository $repo
+    set g [file join $app .bot_modules shapes .bot_modules geometry]
+    writeText [file join $g geometry.bot] "fn version() -> int:\n    666\n"
+    file delete [file join $app .bot_modules shapes README.md] [file join $app .bot_modules shapes shapes.bot]
+    writeText [file join $g extra.bot] "x"
+    set d [pm::descriptor::read [file join $app botlish.json] project]
+    dict set d dependencies other 1
+    dict set d lock other 1.0.0
+    dict set d lock shapes 2.1.0
+    writeBytes [file join $app botlish.json] [pm::descriptor::encode $d]
+    set tampered [fresh repo]
+    package [set src [fresh src]] geometry 1.0.3 "fn version() -> int:\n    1\n"
+    pm package pack [file join $src geometry-1.0.3] -out $tampered
+    file copy [file join $repo shapes-2.1.4.botpkg] $tampered
+    set r [pm verify -project $app -repository $tampered]
+    list [dict get $r status] [lsort [lmap line [split [dict get $r out] \n] {
+        if {![string match problem:* $line]} continue
+        regsub {sha256 [0-9a-f]+} $line {sha256 D} line
+        regsub -all {sha256 [0-9a-f]+} $line {sha256 D} line
+        regsub {\(size [0-9]+, installed [0-9]+\)} $line {(size)} line
+        string map [list $app APP $tampered REPO] $line
+    }]]
+} -cleanup cleanup -result {1 {{problem: geometry 1.0.3: .bot_modules/shapes/.bot_modules/geometry/extra.bot (file) is not part of the installation} {problem: geometry 1.0.3: .bot_modules/shapes/.bot_modules/geometry/geometry.bot was changed (size)} {problem: geometry 1.0.3: the artifact REPO/geometry-1.0.3.botpkg (sha256 D) is not the one installed (sha256 D)} {problem: other: not installed (run install)} {problem: shapes 2.1.4: .bot_modules/shapes/shapes.bot is missing} {problem: shapes: 2.1.4 is installed, and botlish.json locks 2.1.0 (run install)}}}
+
+test pm-verify-record-is-not-authority {a file changed together with the installation record passes the record's check, and only the comparison with the artifact (a -repository holding it) finds it: the record detects accidents, the artifact is the authority on contents} -body {
+    set world [geometryWorld]
+    set app [application "1\n"]
+    pm add shapes -project $app -repository [dict get $world repo]
+    set file [file join $app .bot_modules shapes shapes.bot]
+    set forged "fn square(s: int) -> int:\n    666\n"
+    writeText $file $forged
+    set meta [file join $app .bot_modules .botlish]
+    set state [pm::state::read $meta]
+    dict set state shapes files shapes.bot [list [string length $forged] [format %08x [expr {[zlib crc32 $forged] & 0xffffffff}]]]
+    writeBytes [pm::state::Path $meta] [pm::state::encode $state]
+    set recordOnly [pm verify -project $app]
+    set withArtifacts [pm verify -project $app -repository [dict get $world repo]]
+    list [dict get $recordOnly status] [dict get $withArtifacts status] \
+        [lsearch -inline -glob [split [dict get $withArtifacts out] \n] problem:*]
+} -cleanup cleanup -result {0 1 {problem: shapes 2.1.4: .bot_modules/shapes/shapes.bot differs from the artifact}}
+
+# ---------------------------------------------------------------------------
+# 13. Transactions: faults and interruptions
+
+proc faultWorld {} {
+    set world [geometryWorld]
+    set app [application "import shapes\n\nshapes::square(2)\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}, "lock": {"shapes": "2.1.0"}}}
+    pm install -project $app -repository [dict get $world repo]
+    return [list [dict get $world repo] $app]
+}
+
+test pm-fault-rollback {a failure at any step of an update -- staging, extraction, the journal, moving the old package out, the new one in, writing the record, writing botlish.json -- leaves the project exactly as it was, file for file} -body {
+    lassign [faultWorld] repo app
+    set before [treeState $app]
+    lmap point {stage extract journal commit-old commit-new state-written descriptor-written} {
+        set r [withEnvironment [list BOTLISH_PM_FAULT $point] {pm update -project $app -repository $repo}]
+        list $point [dict get $r status] [expr {[treeState $app] eq $before}]
+    }
+} -cleanup cleanup -result {{stage 1 1} {extract 1 1} {journal 1 1} {commit-old 1 1} {commit-new 1 1} {state-written 1 1} {descriptor-written 1 1}}
+
+test pm-crash-recovery {a process killed at any step of an update leaves a journal; the next command rolls the update back -- or, killed after it committed, finishes it -- and the project is exactly one of the two installations} -body {
+    lassign [faultWorld] repo app
+    set before [treeState $app]
+    set out {}
+    foreach point {journal commit-old commit-new state-written descriptor-written committed} {
+        set r [withEnvironment [list BOTLISH_PM_FAULT crash:$point] {pm update -project $app -repository $repo}]
+        set left [file exists [file join $app .bot_modules .botlish txn]]
+        set next [pm install -project $app -repository $repo]
+        set lock [dict get [pm::descriptor::read [file join $app botlish.json] project] lock shapes]
+        lappend out [list $point [dict get $r status] $left [lindex [split [dict get $next err] \n] 0] $lock \
+            [expr {$lock eq "2.1.0" ? [treeState $app] eq $before : [appValue $app] == 107}]]
+        if {$lock ne "2.1.0"} {
+            writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}, "lock": {"shapes": "2.1.0"}}}
+            pm install -project $app -repository $repo
+        }
+    }
+    set out
+} -cleanup cleanup -result {{journal 99 1 {note: rolled back a package operation that was interrupted: the previous installation is restored} 2.1.0 1} {commit-old 99 1 {note: rolled back a package operation that was interrupted: the previous installation is restored} 2.1.0 1} {commit-new 99 1 {note: rolled back a package operation that was interrupted: the previous installation is restored} 2.1.0 1} {state-written 99 1 {note: rolled back a package operation that was interrupted: the previous installation is restored} 2.1.0 1} {descriptor-written 99 1 {note: rolled back a package operation that was interrupted: the previous installation is restored} 2.1.0 1} {committed 99 1 {note: completed the cleanup of a package operation that was interrupted after it committed} 2.1.4 1}}
+
+test pm-lock-busy {an operation never runs beside another: a lock held by a running process is refused, and verify reports it} -body {
+    lassign [faultWorld] repo app
+    writeText [file join $app .bot_modules .botlish lock] "pid [pid]\n"
+    set r [pm install -project $app -repository $repo]
+    set v [pm verify -project $app]
+    file delete [file join $app .bot_modules .botlish lock]
+    list [kindOf [dict get $r err]] [dict get $v status] [string match "*running, or was interrupted*" [dict get $v out]]
+} -cleanup cleanup -result {BUSY 1 1}
+
+test pm-failed-add-writes-nothing {a failed add (an unavailable dependency) writes no botlish.json, no package and no record into a new project} -body {
+    set world [geometryWorld]
+    set repo [fresh repo]
+    file copy [file join [dict get $world repo] shapes-2.1.0.botpkg] $repo
+    set app [application "1\n"]
+    set r [pm add shapes -project $app -repository $repo]
+    list [dict get $r status] [kindOf [dict get $r err]] [lsort [glob -nocomplain -tails -directory $app *]] \
+        [glob -nocomplain -tails -directory [file join $app .bot_modules] *] \
+        [glob -nocomplain -tails -directory [file join $app .bot_modules .botlish] *]
+} -cleanup cleanup -result {1 UNAVAILABLE main.bot {} {}}
+
+test pm-extraction-never-escapes {a malicious artifact naming a path outside its package is refused before anything is written: the target outside the project does not appear, and the project is unchanged} -body {
+    set repo [fresh repo]
+    set victim [fresh victim]
+    set rel [pm::RelativePath [file join [temporaryDirectory] x] $victim]
+    writeBytes [file join $repo evil-1.0.0.botpkg] [rawZip [list [entry botlish.json [encoding convertto utf-8 [descriptorText evil 1.0.0]]] [entry evil.bot x] [entry $rel/pwned.txt owned]]]
+    set app [application "1\n"]
+    set before [treeState $app]
+    set r [pm add evil -project $app -repository $repo]
+    list [dict get $r status] [kindOf [dict get $r err]] [file exists [file join $victim pwned.txt]] [expr {[treeState $app] eq $before}]
+} -cleanup cleanup -result {1 ARTIFACT 0 1}
+
+# ---------------------------------------------------------------------------
+# 14. Boundaries: no scripts, no network, the compiler unaware
+
+test pm-stdlib-never-a-project {the compiler's standard library is never a project: every command refuses it before writing anything} -body {
+    set before [lsort [glob -nocomplain -directory [file join $::projectRoot stdlib] -types hidden *]]
+    set r [pm install -project [file join $::projectRoot stdlib]]
+    set r2 [pm add x -project [file join $::projectRoot stdlib abi] -repository [fresh repo]]
+    list [kindOf [dict get $r err]] [kindOf [dict get $r2 err]] \
+        [expr {[lsort [glob -nocomplain -directory [file join $::projectRoot stdlib] -types hidden *]] eq $before}] \
+        [file exists [file join $::projectRoot stdlib .bot_modules]]
+} -cleanup cleanup -result {PROJECT PROJECT 1 0}
+
+test pm-no-scripts {nothing a package holds is executed: an artifact with install and build scripts installs as plain files (no executable bit) and none of them runs; a descriptor key asking for a hook is refused} -constraints unixFiles -body {
+    set src [fresh src]
+    set marker [file join [fresh m] ran]
+    set dir [package $src hooky 1.0.0 "fn f() -> int:\n    1\n" {} {} [list install.sh "#!/bin/sh\ntouch $marker\n" \
+        postinstall.tcl "set f \[open $marker w\]; close \$f\n" Makefile "all:\n\ttouch $marker\n" build.rs "fn main() {}\n"]]
+    file attributes [file join $dir install.sh] -permissions 0755
+    set repo [fresh repo]
+    pm package pack $dir -out $repo
+    set app [application "import hooky\n\nhooky::f()\n"]
+    set r [pm add hooky -project $app -repository $repo]
+    set installed [file join $app .bot_modules hooky install.sh]
+    writeText [file join $dir botlish.json] {{"schema": 1, "name": "hooky", "version": "1.0.1", "scripts": {"install": "sh install.sh"}}}
+    set refused [pm package pack $dir -out $repo]
+    list [dict get $r status] [file exists $marker] [file executable $installed] [appValue $app] \
+        [kindOf [dict get $refused err]]
+} -cleanup cleanup -result {0 0 0 1 DESCRIPTOR}
+
+test pm-no-network-in-sources {the package manager has no way to reach a network or run a package's program: its sources open no socket, load no http or tls package, and run no command but `kill -0` (a lock holder's liveness) and, in pm/sha256.tcl's ToolHex and ToolFile only, the host system's SHA-256 tool at its fixed path (PM-2)} -body {
+    set found {}
+    foreach path [lsort [glob [file join $::projectRoot pm *.tcl]]] {
+        set n 0
+        set proc ""
+        foreach line [split [readBytes $path] \n] {
+            incr n
+            regexp {^proc (\S+)} $line -> proc
+            if {[regexp {^\s*#} $line]} continue
+            if {[regexp {\msocket\M|package require (http|tls)|\mexec\M|open \|} $line] && ![string match {*exec kill -0*} $line]} {
+                if {[file tail $path] eq "sha256.tcl" && $proc in {pm::sha256::ToolHex pm::sha256::ToolFile}
+                        && [regexp {exec \$tool |open \|\[concat \$command} $line]} continue
+                lappend found "[file tail $path]:$n"
+            }
+        }
+    }
+    set found
+} -result {}
+
+test pm-compiler-ignores-metadata {the compiler never reads botlish.json or the installation record: a project whose botlish.json is garbage compiles as before, to the same HIR, and the record is no namespace} -body {
+    set world [geometryWorld]
+    set app [application "import shapes\n\nshapes::square(3)\n"]
+    pm add shapes -project $app -repository [dict get $world repo]
+    set hir [hir::format [surface::readProgramFile [file join $app main.bot] -warnings off -cache ""]]
+    writeText [file join $app botlish.json] "this is not JSON"
+    writeText [file join $app .bot_modules .botlish state.json] "neither is this"
+    set again [hir::format [surface::readProgramFile [file join $app main.bot] -warnings off -cache ""]]
+    list [expr {$hir eq $again}] [appValue $app]
+} -cleanup cleanup -result {1 112}
+
+test pm-working-directory-independent {commands read the project from -project and paths in botlish.json from the project, whatever the working directory: the same command from two directories makes the same tree} -body {
+    set world [geometryWorld]
+    set a [application "1\n"]
+    set b [application "1\n"]
+    foreach app [list $a $b] {
+        file mkdir [file join $app vendor]
+        file copy [file join [dict get $world repo] shapes-2.1.0.botpkg] [file join $app vendor]
+    }
+    pmIn [temporaryDirectory] add [file join $a vendor shapes-2.1.0.botpkg] -project $a -repository [dict get $world repo]
+    pmIn [file join $b vendor] add shapes-2.1.0.botpkg -project .. -repository [dict get $world repo]
+    file delete -force [file join $a .bot_modules] [file join $b .bot_modules]
+    pmIn / install -project $a -repository [dict get $world repo]
+    pmIn [file join $b vendor] install -project $b -repository [dict get $world repo]
+    list [expr {[readBytes [file join $a botlish.json]] eq [readBytes [file join $b botlish.json]]}] \
+        [expr {[treeState [file join $a .bot_modules]] eq [treeState [file join $b .bot_modules]]}] \
+        [dict get [pm::descriptor::read [file join $a botlish.json] project] sources shapes path]
+} -cleanup cleanup -result {1 1 vendor/shapes-2.1.0.botpkg}
+
+# ---------------------------------------------------------------------------
+# 15. The command line
+
+test pm-usage-errors {an unknown option, a missing argument, an unknown package command or misplaced names are usage errors (status 2); -help prints the usage (status 0); no ordinary option is a package command} -body {
+    lmap args {{install -bogus} {add} {add -request} {package frob} {install shapes} {remove} {add x -request ^1} {install -help} {package}} {
+        set r [pm {*}$args]
+        list $args [dict get $r status]
+    }
+} -result {{{install -bogus} 2} {add 2} {{add -request} 2} {{package frob} 2} {{install shapes} 2} {remove 2} {{add x -request ^1} 2} {{install -help} 0} {package 0}}
+
+test pm-main-unchanged {main.tcl without a package command is the compiler as before: a .bot file runs, and the usage summary names the package commands' reference} -body {
+    set app [application "1 + 2\n"]
+    list [dict get [pm [file join $app main.bot]] out] [string match "*-help cli.packages*" [dict get [pm] out]]
+} -cleanup cleanup -result {{== main.bot (interp)
+   value: 3} 1}
+
+# ---------------------------------------------------------------------------
+# 16. The single-file compiler
+
+proc bundledCompiler {} {
+    if {[info exists ::bundled]} {
+        return $::bundled
+    }
+    set ::bundled [file join [makeDirectory pm-bundle-[pid]] botlish]
+    exec [info nameofexecutable] [file join $::projectRoot single package.tcl] $::bundled \
+        [file dirname [native::binary]]
+    return $::bundled
+}
+
+test pm-bundled-compiler {the single-file compiler runs the package commands, packs the same artifact bytes as the checkout, installs, verifies and compiles the result -- and installs no native backend for a package command} -constraints singlePackage -body {
+    set exe [bundledCompiler]
+    set world [geometryWorld]
+    set cache [fresh cache]
+    set dir [package [fresh src] lib 1.0.0 "fn f() -> int:\n    5\n"]
+    set out [fresh out]
+    set app [application "import shapes\n\nshapes::square(4)\n"]
+    withEnvironment [list BOTLISH_CACHE_DIR $cache] {
+        exec $exe package pack $dir -out $out
+        exec $exe add shapes -project $app -repository [dict get $world repo]
+        set verified [exec $exe verify -project $app -repository [dict get $world repo]]
+        set installed [glob -nocomplain -tails -directory $cache *]
+        set ran [exec $exe [file join $app main.bot] 2>@1]
+    }
+    pm package pack $dir -out [set out2 [fresh out]]
+    list [expr {[readBytes [file join $out lib-1.0.0.botpkg]] eq [readBytes [file join $out2 lib-1.0.0.botpkg]]}] \
+        [string match "*as installed*" $verified] $installed [string match "*value: 119*" $ran]
+} -cleanup {cleanup; file delete -force [file join [temporaryDirectory] pm-bundle-[pid]]} -result {1 1 {} 1}
+
+cleanupTests

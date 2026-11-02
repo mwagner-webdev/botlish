@@ -1,0 +1,6 @@
+# I7 a set of sets: set equality inside membership
+import std::immutable_set
+a = std::immutable_set::from_list([1, 2])
+b = std::immutable_set::from_list([2, 1])
+outer = std::immutable_set::from_list([a])
+[outer.contains(b), outer.contains(std::immutable_set::from_list(["1", "2"]))]

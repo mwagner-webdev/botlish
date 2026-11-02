@@ -43,6 +43,12 @@
 #                (Fn{args: [str]}), so it is a one-character String there;
 #                comparing it as a character means decoding that String
 #                again (std::str::length(c) == 1 and c.char_at(0) == '_').
+#                Since UNICODECHAR-CLASSIFIERS.md the classes of a
+#                UnicodeChar exist (std::char::is_tcl_alnum / is_tcl_alpha),
+#                which closed stdlib/web.bot's six entries; the ones left are
+#                the canonical benchmarks lex-strategy and source-checks,
+#                whose String classifiers are part of the measured workload
+#                (BENCHMARK-BIMODALITY.md measured their UnicodeChar ports).
 #   index-proof  the natural character spelling's std::str::char_at index is not
 #                proven in range by today's completion proof.
 #   test-datum   a test datum whose length 1 is the case's subject.
@@ -139,6 +145,7 @@ program stdlib/darwin.bot
 program stdlib/dfa.bot
 fails stdlib/event_loop.bot CORE SEMANTIC RESOURCE-DECLARATION -- entry-program resource: compiled as an entry program, its resource struct Owner would be the entry program's, and a resource is declared in a module (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md); past that, as for stdlib/io.bot, the last declaration (shutdown) requires contexts (verified through `import std::event_loop`)
 program stdlib/float64.bot
+fails stdlib/immutable_map.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/mutable_map.bot, immutable_map.bot imports std::table_hash and std::ordered_table (verified through `import std::immutable_map`, which also compiles std::ordered_table)
 fails stdlib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import std::io`)
 program stdlib/linux.bot
 fails stdlib/list.bot SURFACE MODULE MISSING-IMPORT -- own-namespace intrinsics: list.bot calls its namespace's intrinsic std::list::at, which needs no import as module `list` and may not be imported there (SELF-IMPORT), while an entry program needs `import std::list`; xs.at(i) compiles both ways but is a field projection when instantiated (verified through `import std::list`)
@@ -148,13 +155,8 @@ fails stdlib/mutable_map.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal impor
 fails stdlib/mutable_set.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/mutable_map.bot (verified through `import std::mutable_set`)
 program stdlib/ordered_table.bot
 fails stdlib/test.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (report) requires a context (the test suite), so it cannot be a value (verified through `import std::test`)
+fails stdlib/tree.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: tree.bot reads a tree's child field through the standard library's internal std::tree::children, which an entry program may not name (verified through `import std::tree`)
 program stdlib/web.bot
-  ONE-CHAR-STRING-LITERAL 105:72 none -- classifier: local_extra_chars is queried by local_char?(c: str), which also classifies c with std::str::is_tcl_alnum and is passed to scan_while beside std::str::is_tcl_alpha (Fn{args: [str]}): a set of characters would need c decoded again
-  ONE-CHAR-STRING-LITERAL 105:52 none -- classifier: the set's "_", as above
-  ONE-CHAR-STRING-LITERAL 105:57 none -- classifier: the set's "%", as above
-  ONE-CHAR-STRING-LITERAL 105:62 none -- classifier: the set's "+", as above
-  ONE-CHAR-STRING-LITERAL 105:67 none -- classifier: the set's "-", as above
-  ONE-CHAR-STRING-LITERAL 136:43 none -- classifier: label_char?(c) is std::str::is_tcl_alnum(c) or c == "-", over the one-character String the String classifier needs
   ONE-CHAR-STRING-LITERAL 219:15 none -- char->text: hex_digits is the table of hexadecimal digits as text, concatenated into %XX escapes (hex_pair); a "0123456789ABCDEF" slice would keep each digit a one-character String
   ONE-CHAR-STRING-LITERAL 219:20 none -- char->text: the digit "1", as above
   ONE-CHAR-STRING-LITERAL 219:25 none -- char->text: the digit "2", as above
@@ -174,7 +176,7 @@ program stdlib/web.bot
   ONE-CHAR-STRING-LITERAL 275:9 none -- char->text: pct's "%" begins every escape it writes as text
 program stdlib/windows.bot
 program stdlib/abi/aarch64.bot
-program stdlib/abi/bytes.bot
+fails stdlib/abi/bytes.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: bytes.bot's utf16le_units calls the standard library's internal std::byte_store::utf16le_units (std::windows::fs's units bridge, UTF16-BYTE-STORAGE-MILESTONE-1.md), which an entry program may not name (verified through `import std::abi::bytes`)
 program stdlib/abi/x86_64.bot
 fails stdlib/darwin/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::darwin::io`)
 fails stdlib/darwin/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: fs.bot imports the standard library's internal std::io::bytepath (the byte-path syntax it shares with std::linux::fs), which only standard-library modules may import, never an entry program (verified through `import std::darwin::fs`)
@@ -191,6 +193,6 @@ fails stdlib/linux/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member
   ONE-CHAR-STRING-LITERAL 103:49 none -- char->text: the "/" joining PATH and COMPONENT is a single character appended as text
 program stdlib/linux/sys.aarch64.bot
 program stdlib/linux/sys.x86_64.bot
-fails stdlib/windows/fs.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (remove_directory) requires a context (verified through `import std::windows::fs`)
+fails stdlib/windows/fs.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: fs.bot reads a native path's units through the standard library's internal std::abi::bytes::utf16le_units (UTF16-BYTE-STORAGE-MILESTONE-1.md), which an entry program may not name; compiled as a module its last declaration (remove_directory) would also require a context, as for stdlib/linux/io.bot (verified through `import std::windows::fs`)
 fails stdlib/windows/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/linux/io.bot, the last declaration (write_error_text) requires a context (verified through `import std::windows::io`)
 fails stdlib/windows/path.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: as for stdlib/darwin/path.bot, std::windows::fs::of_valid_text (verified through `import std::windows::path`)

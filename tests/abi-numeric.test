@@ -394,17 +394,16 @@ test abi-numeric-nominal-equality {the language's structural equality applies wi
 }
 } -result {[true, false, false, false, false, false, std::abi::U8 {value: 255}]}
 
-test abi-numeric-not-arithmetic {an ABI value has no arithmetic or ordering: +, *, < on it are the ordinary TYPE error any struct operand gets (never an implicit .value), identically on every backend} -body {
-    list [lrange [lindex [outcomesOf "import std::abi\nx = std::abi::u8(255)\nx + 1" {interp}] 0] 0 2] \
-        [lsort -unique [lmap o [outcomesOf "import std::abi\nx = std::abi::u8(255)\nx + 1" $::allBackends] {lrange $o 0 1}]] \
-        [lsort -unique [lmap o [outcomesOf "import std::abi\nx = std::abi::i32(2)\nx * 8" {interp compile cranelift}] {lrange $o 0 1}]] \
-        [lsort -unique [lmap o [outcomesOf "import std::abi\nx = std::abi::u32(2)\nx < std::abi::u32(3)" {interp compile cranelift}] {lrange $o 0 1}]]
-} -result {{error {CORE SEMANTIC TYPE} {+: expected int, got std::abi::U8 {value: 255}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}} {{error {CORE SEMANTIC TYPE}}}}
+test abi-numeric-not-arithmetic {an ABI value has no arithmetic or ordering: +, *, < on it are the ordinary TYPE error any struct operand gets (never an implicit .value), at compile time -- an operand statically of another kind than the operator requires (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md)} -body {
+    list [strictError "import std::abi\nx = std::abi::u8(255)\nx + 1"] \
+        [diagKinds "import std::abi\nx = std::abi::i32(2)\nx * 8"] \
+        [diagKinds "import std::abi\nx = std::abi::u32(2)\nx < std::abi::u32(3)"]
+} -result {{TYPE 3:1 {argument 1 of native + requires int, but this operand has type std::abi::U8: the call could only fail when it runs}} TYPE TYPE}
 
-test abi-numeric-collections-stay-int {collection lengths and indexes are ordinary Int, not Usize: std::list::length is an Int, and an ABI value is not an index} -body {
+test abi-numeric-collections-stay-int {collection lengths and indexes are ordinary Int, not Usize: std::list::length is an Int, and an ABI value is not an index (a compile-time TYPE, METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md)} -body {
     list [agree "import std::abi\nimport std::list\nn = std::list::length(\[1, 2, 3\])\n\[n + 0, std::abi::usize(n).value\]"] \
-        [lsort -unique [lmap o [outcomesOf "import std::abi\nimport std::list\nr = std::list::at(\[1, 2\], std::abi::usize(0)):\n    on IndexNotFound:\n        0\nr" {interp compile cranelift}] {lrange $o 0 1}]]
-} -result {{[3, 3]} {{error {CORE SEMANTIC TYPE}}}}
+        [diagKinds "import std::abi\nimport std::list\nr = std::list::at(\[1, 2\], std::abi::usize(0)):\n    on IndexNotFound:\n        0\nr"]
+} -result {{[3, 3]} TYPE}
 
 # ---------------------------------------------------------------------------
 # Register encoding (std::abi::x86_64::from_*): the exact x86-64 bit patterns

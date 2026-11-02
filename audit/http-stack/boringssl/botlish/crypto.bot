@@ -1,0 +1,110 @@
+# crypto.bot -- consumer A: general-purpose cryptography from the one
+# BoringSSL provider, with no HTTP, TLS or Rust in sight
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Botlish airlocks").
+#
+# The context Crypto is the authority: a library that requires it can hash,
+# MAC and sign with keys the airlock holds; nothing here opens a socket,
+# makes a TLS connection or names a BoringSSL type. A signing key is an
+# opaque slot; its private bytes never leave the C half (hscrypto.c) and
+# are wiped on release. Byte data crosses as Botlish Bytes, exposed to C
+# for one call (read noescape) or copied out of it (write noescape).
+import bssl
+import std::abi
+import std::abi::bytes
+import std::ffi::c
+import std::mutable_array
+import std::str
+
+extern c library "hscrypto" static at "native/libhscrypto.a"
+
+extern c fn hsc_api_version() -> std::ffi::c::LongLong
+extern c fn hsc_sha256(data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong, out: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hsc_hmac_sha256(key: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, klen: std::ffi::c::ULong, data: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong, out: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hsc_ed25519_new() -> std::ffi::c::LongLong
+extern c fn hsc_ed25519_public(slot: std::ffi::c::LongLong, out: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hsc_ed25519_sign(slot: std::ffi::c::LongLong, msg: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong, sig: std::ffi::c::Ptr[std::ffi::c::Void] write noescape, cap: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hsc_ed25519_verify(pub: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, publen: std::ffi::c::ULong, msg: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, len: std::ffi::c::ULong, sig: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, siglen: std::ffi::c::ULong) -> std::ffi::c::LongLong
+extern c fn hsc_release(slot: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hsc_provider_sha256_fn() -> std::ffi::c::LongLong
+extern c fn hsc_provider_evp_sha256() -> std::ffi::c::LongLong
+
+# The authority to use the airlock's operations (counters: operations).
+opaque context struct Crypto:
+    ops: MutableArray[int]
+
+# A signing key held by the airlock (its slot).
+opaque struct SigningKey:
+    slot: int
+
+private fn hs_cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+fn create() -> Crypto:
+    Crypto {ops: std::mutable_array::create(1, 0)}
+
+private nomethod fn count(context c: Crypto) errors IndexNotFound:
+    c.ops.set(0, c.ops.at(0) + 1)
+
+nomethod fn operations(context c: Crypto) -> int errors IndexNotFound:
+    c.ops.at(0)
+
+fn api_version() -> int:
+    hsc_api_version()
+
+private nomethod fn out(r: int, data: std::abi::bytes::MutableBytes) -> std::abi::bytes::Bytes:
+    if r <= 0:
+        return std::abi::bytes::from_list([])
+    count = std::abi::usize(r):
+        on std::abi::AbiIntegerAboveRange:
+            return std::abi::bytes::from_list([])
+        on std::abi::AbiIntegerBelowRange:
+            return std::abi::bytes::from_list([])
+    data.freeze_prefix(count):
+        on UpperOverrun:
+            std::abi::bytes::from_list([])
+
+nomethod fn sha256(data: std::abi::bytes::Bytes, context c: Crypto) -> std::abi::bytes::Bytes errors IndexNotFound:
+    count()
+    r = data.hsc_sha256(std::abi::bytes::length(data).value, std::abi::bytes::zeroed(std::abi::usize(32)), 32)
+    out(r.result, r.out)
+
+nomethod fn hmac_sha256(key: std::abi::bytes::Bytes, data: std::abi::bytes::Bytes, context c: Crypto) -> std::abi::bytes::Bytes errors IndexNotFound:
+    count()
+    r = key.hsc_hmac_sha256(std::abi::bytes::length(key).value, data, std::abi::bytes::length(data).value, std::abi::bytes::zeroed(std::abi::usize(32)), 32)
+    out(r.result, r.out)
+
+nomethod fn new_signing_key(context c: Crypto) -> SigningKey errors IndexNotFound:
+    count()
+    SigningKey {slot: hsc_ed25519_new()}
+
+nomethod fn public_key(k: SigningKey, context c: Crypto) -> std::abi::bytes::Bytes:
+    r = hs_cll(k.slot).hsc_ed25519_public(std::abi::bytes::zeroed(std::abi::usize(32)), 32)
+    out(r.result, r.out)
+
+nomethod fn sign(k: SigningKey, msg: std::abi::bytes::Bytes, context c: Crypto) -> std::abi::bytes::Bytes errors IndexNotFound:
+    count()
+    r = hs_cll(k.slot).hsc_ed25519_sign(msg, std::abi::bytes::length(msg).value, std::abi::bytes::zeroed(std::abi::usize(64)), 64)
+    out(r.result, r.sig)
+
+nomethod fn verify(public: std::abi::bytes::Bytes, msg: std::abi::bytes::Bytes, sig: std::abi::bytes::Bytes, context c: Crypto) -> bool errors IndexNotFound:
+    count()
+    public.hsc_ed25519_verify(std::abi::bytes::length(public).value, msg, std::abi::bytes::length(msg).value, sig, std::abi::bytes::length(sig).value) == 1
+
+# Release K: the airlock wipes its private key.
+nomethod fn release(k: SigningKey, context c: Crypto) -> int:
+    hs_cll(k.slot).hsc_release()
+
+# Provider identity as this airlock's C references resolved.
+fn provider_sha256_fn() -> int:
+    hsc_provider_sha256_fn()
+
+fn provider_evp_sha256() -> int:
+    hsc_provider_evp_sha256()
+
+fn text(s: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(s))

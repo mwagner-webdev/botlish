@@ -1178,6 +1178,11 @@ Deliberate omissions, and costs measured but not fixed:
 
 ## Future immutable Map
 
+(Landed by the ordinary route: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md
+-- declared identities, `std::immutable_map::ImmutableMap` over this
+engine's frozen layout, `freeze`. ImmutableSet stayed intrinsic, for the
+API reasons that report gives. This section is kept as written.)
+
 An immutable ordered value Map is the obvious next collection for JSON and
 value-tree workloads, and this milestone makes it buildable, but not as
 ordinary Botlish yet.

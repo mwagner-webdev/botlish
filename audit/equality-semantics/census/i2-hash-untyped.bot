@@ -1,0 +1,4 @@
+# I2 hash of an empty List of no static element type succeeds at run time
+fn h(a) -> int:
+    hash(a)
+h([]) == h([])

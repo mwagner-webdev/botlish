@@ -1,0 +1,704 @@
+# fold-loops.test -- folding loops (FOLD-LOOPS-MILESTONE-1.md):
+#
+#   fold x in xs with intermediate acc INITIAL:
+#       BODY
+#
+# A fold carries one value, its intermediate, from each iteration to the
+# next and is that value: the initial value is evaluated once, after the
+# loop's operands; an ordinary completion of the body replaces the
+# intermediate, `continue` keeps it, a bare `break` and exhaustion yield it.
+# Every behavioral test runs on the interpreter, the Tcl compiler and both
+# native backends (fl: all four must agree); the representation tests read
+# the HIR, the core IR and the NIR.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::flBackends {interp compile cranelift-generic cranelift}
+
+proc flHir {text {strict 0}} {
+    return [surface::compile $text t.bot -strict $strict -warnings off]
+}
+
+# The value of program TEXT, the same on every backend; else what differs.
+proc fl {text} {
+    set hir [flHir $text]
+    if {[hir::diagnostics $hir] ne ""} {
+        return "DIAGNOSTICS: [lmap d [hir::diagnostics $hir] {dict get $d kind}]"
+    }
+    set outcomes [lmap backend $::flBackends {outcomeUnderHir $backend $hir}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "BACKENDS DISAGREE: [join [lmap backend $::flBackends outcome $outcomes {list $backend $outcome}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return "ERROR [lindex $outcome 1]"
+}
+
+# {KIND LINE:COLUMN MESSAGE} of each diagnostic a strict compilation of TEXT
+# reports, in order; "accepted" when it reports none.
+proc flDiagnostics {text} {
+    if {![catch {surface::compile $text t.bot -warnings off} message options]} {
+        return accepted
+    }
+    set result {}
+    foreach d [dict get $options -diagnostics] {
+        set location [dict get $d location]
+        lappend result [list [lindex [dict get $d errorcode] 2] \
+            "[dict get $location line]:[dict get $location column]" [dict get $d summary]]
+    }
+    return $result
+}
+
+# The kinds alone (flDiagnostics).
+proc flKinds {text} {
+    set diagnostics [flDiagnostics $text]
+    if {$diagnostics eq "accepted"} {
+        return accepted
+    }
+    return [lmap d $diagnostics {lindex $d 0}]
+}
+
+proc flParseError {src} {
+    if {[catch {surface::parse $src t.bot} result options]} {
+        set d [lindex [dict get $options -errorcode] 2]
+        return "[dict get $d line]:[dict get $d column] [dict get $d message]"
+    }
+    return parsed
+}
+
+# The fold nodes (any loop kind carrying an intermediate) of program HIR
+# written in t.bot.
+proc flFolds {hir} {
+    set result {}
+    foreach e [hir::walk $hir] {
+        if {![hir::isFold $hir $e]} continue
+        set origin [hir::get $hir $e origin]
+        if {[lindex $origin 0] eq "file"
+                && [file tail [dict get [hir::sourceFile $hir [lindex $origin 1]] path]] eq "t.bot"} {
+            lappend result $e
+        }
+    }
+    return $result
+}
+
+# The NIR text of the function named NAME of program TEXT's native lowering.
+proc flNirFunction {text name} {
+    set nir [native::nir [flHir $text]]
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp "^func \\d+ \"[string map {? \\?} $name]\"" $line]} {
+            set inside 1
+        }
+        if {$inside} {
+            lappend lines $line
+            if {$line eq "end"} {
+                break
+            }
+        }
+    }
+    return [join $lines \n]
+}
+
+# 1 if NIR text contains an instruction naming OP (a word of the op
+# position: `op OP`, `construct ...`, an allocation).
+proc flHasOp {nir pattern} {
+    return [regexp -line $pattern $nir]
+}
+
+# A place-parameter log the evaluation-order tests write: note(log, n) pushes
+# n and returns it; entries(log) reads the log out as a List.
+set ::flLog {import std::mutable_vector
+
+fn note(place log: MutableVector[int], n: int) -> int:
+    log.push(n)
+    n
+
+fn entries(log: MutableVector[int]) -> List[int]:
+    loop v in log:
+        v
+}
+
+# ---------------------------------------------------------------------------
+# The basic semantics, on every iteration form
+
+test fold-loops-sum {fold over a List: the intermediate carries the running sum} -body {
+    fl "fn sum(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        acc + x\n\n\[sum(\[1, 2, 3, 4\]), sum(\[7\]), sum(\[\])\]\n"
+} -result {[10, 7, 0]}
+
+test fold-loops-empty-is-initial {an empty fold is its initial value, whatever its body is} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 42:\n        acc * 1000 + x\n\nf(\[\])\n"
+} -result 42
+
+test fold-loops-singleton {a singleton fold runs the body once, on the initial value} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 5:\n        acc * 10 + x\n\nf(\[3\])\n"
+} -result 53
+
+test fold-loops-order-of-iterations {iterations see the elements in order, each the previous iteration's value} -body {
+    fl "fn digits(xs: List\[int\]) -> int:\n    fold d in xs with intermediate n 0:\n        n * 10 + d\n\ndigits(\[1, 2, 3, 4\])\n"
+} -result 1234
+
+foreach {name header expected} {
+    up-to          {i from 1 to 5}            10
+    up-through     {i from 1 through 5}       15
+    down-to        {i down from 5 to 1}       14
+    down-through   {i down from 5 through 1}  15
+    up-to-empty    {i from 5 to 1}            0
+    down-empty     {i down from 1 to 5}       0
+} {
+    test fold-loops-count-$name "fold $header: the numeric forms carry the intermediate too" -body {
+        fl "fn f() -> int:\n    fold $header with intermediate s 0:\n        s + i\n\nf()\n"
+    } -result $expected
+}
+
+test fold-loops-count-order {a descending fold sees its values in order} -body {
+    fl "fn f() -> int:\n    fold i down from 4 through 1 with intermediate n 0:\n        n * 10 + i\n\nf()\n"
+} -result 4321
+
+test fold-loops-lockstep {a lockstep fold advances every clause together, carrying one value} -body {
+    fl "import std::list\n\nfn dot(xs: List\[int\]) -> int:\n    fold x in xs and i from 0 to std::list::length(xs) with intermediate t 0:\n        t + x * i\n\ndot(\[5, 6, 7\])\n"
+} -result 20
+
+test fold-loops-bare {a fold with no domain repeats until a break, which yields its intermediate} -body {
+    fl "fn collatz_steps(n: int) -> int:\n    s = fold with intermediate st {n: n, steps: 0}:\n        if st.n == 1:\n            break\n        if st.n.mod(2) == 0:\n            {n: st.n.shift_right(1), steps: st.steps + 1}\n        else:\n            {n: st.n * 3 + 1, steps: st.steps + 1}\n    s.steps\n\n\[collatz_steps(1), collatz_steps(6), collatz_steps(27)\]\n"
+} -result {[0, 8, 111]}
+
+test fold-loops-bare-return {a fold with no domain left only by return: the fold itself never completes} -body {
+    fl "fn first_square_over(n: int) -> int:\n    fold with intermediate i 1:\n        if i * i > n:\n            return i\n        i + 1\n\nfirst_square_over(50)\n"
+} -result 8
+
+test fold-loops-big-ints {the intermediate is an arbitrary-precision Int on every backend: past the tagged-small and the i64 range} -body {
+    fl "fn f() -> int:\n    fold i from 0 to 70 with intermediate p 1:\n        p * 2\n\nf()\n"
+} -result 1180591620717411303424
+
+# ---------------------------------------------------------------------------
+# continue and break
+
+test fold-loops-continue-first {a continue before anything else keeps the intermediate for that iteration} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        if x == 2:\n            continue\n        acc + x\n\nf(\[1, 2, 3\])\n"
+} -result 4
+
+test fold-loops-continue-after-work {a continue after the body computed something: the computed value is not the next intermediate} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        doubled = acc + x * 2\n        if doubled > 4:\n            continue\n        doubled\n\nf(\[1, 2, 3\])\n"
+} -result 2
+
+test fold-loops-continue-every-iteration {a fold whose every iteration continues is its initial value} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 9:\n        if x > 0:\n            continue\n        acc + x\n\nf(\[1, 2, 3\])\n"
+} -result 9
+
+test fold-loops-break-first {a break before any iteration completed: the initial value} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 7:\n        if x > 0:\n            break\n        acc + x\n\nf(\[1, 2, 3\])\n"
+} -result 7
+
+test fold-loops-break-later {a break after completed iterations: the intermediate those iterations made} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        if x > 2:\n            break\n        acc + x\n\nf(\[1, 2, 3, 4\])\n"
+} -result 3
+
+test fold-loops-break-discards-next {a break after the body computed the next value: the fold is the current intermediate, not that value} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        next = acc + x\n        if next > 5:\n            break\n        next\n\nf(\[1, 2, 3, 4\])\n"
+} -result 3
+
+test fold-loops-continue-and-break {continue and break in one body, each as its own path} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        if x < 0:\n            continue\n        if x == 0:\n            break\n        acc + x\n\nf(\[1, -5, 2, 0, 100\])\n"
+} -result 3
+
+test fold-loops-break-in-count {break and continue in a numeric fold} -body {
+    fl "fn f() -> int:\n    fold i from 0 to 100 with intermediate acc 0:\n        if i == 3:\n            continue\n        if i == 6:\n            break\n        acc + i\n\nf()\n"
+} -result 12
+
+# ---------------------------------------------------------------------------
+# Evaluation order: the operands, then the initial value, once; then the body
+
+test fold-loops-initial-once-ordered {operands first, in written order, then the initial value, once, then the body per iteration} -body {
+    fl "import std::list\n$::flLog\nfn f() -> List\[List\[int\]\]:\n    log = std::mutable_vector::from_list(\[0\])\n    r = fold x in \[note(log, 1), note(log, 2)\] with intermediate acc note(log, 3):\n        acc + x + note(log, 10)\n    \[\[r\], entries(log)\]\n\nf()\n"
+} -result {[[26], [0, 1, 2, 3, 10, 10]]}
+
+test fold-loops-initial-once-empty {an empty fold still evaluates its initial value once} -body {
+    fl "import std::list\n$::flLog\nfn f() -> List\[List\[int\]\]:\n    log = std::mutable_vector::from_list(\[0\])\n    r = fold x in \[\] with intermediate acc note(log, 5):\n        acc + note(log, 99)\n    \[\[r\], entries(log)\]\n\nf()\n"
+} -result {[[5], [0, 5]]}
+
+test fold-loops-initial-once-bare {a fold with no domain evaluates its initial value once, before the first iteration} -body {
+    fl "import std::list\n$::flLog\nfn f() -> List\[List\[int\]\]:\n    log = std::mutable_vector::from_list(\[0\])\n    r = fold with intermediate acc note(log, 1):\n        if acc > 3:\n            break\n        acc + note(log, 2) - 1\n    \[\[r\], entries(log)\]\n\nf()\n"
+} -result {[[4], [0, 1, 2, 2, 2]]}
+
+test fold-loops-count-bounds-before-initial {a numeric fold's bounds are evaluated, in order, before its initial value} -body {
+    fl "import std::list\n$::flLog\nfn f() -> List\[List\[int\]\]:\n    log = std::mutable_vector::from_list(\[0\])\n    r = fold i from note(log, 1) to note(log, 3) with intermediate acc note(log, 5):\n        acc + i\n    \[\[r\], entries(log)\]\n\nf()\n"
+} -result {[[8], [0, 1, 3, 5]]}
+
+# ---------------------------------------------------------------------------
+# Errors and other control transfers keep their meaning
+
+set ::flErrors {error Boom
+error Bang
+
+fn boom(n: int) -> int errors Boom:
+    if n.mod(2) == 1:
+        fail Boom
+    n
+
+fn bang(n: int) -> List[int] errors Bang:
+    if n > 0:
+        fail Bang
+    [n]
+}
+
+test fold-loops-initial-error {an error of the initial value propagates out of the fold, before the body} -body {
+    fl "$::flErrors\nfn f(xs: List\[int\], k: int) -> int errors Boom:\n    fold x in xs with intermediate acc boom(k):\n        acc + x\n\nfn run(k: int) -> int:\n    f(\[1\], k):\n        on Boom:\n            -1\n\n\[run(1), run(0)\]\n"
+} -result {[-1, 1]}
+
+test fold-loops-iterable-error-first {the iterable is evaluated before the initial value: its error is the one that propagates} -body {
+    fl "$::flErrors\nfn f(k: int) -> int errors Boom, Bang:\n    fold x in bang(k) with intermediate acc boom(k):\n        acc + x\n\nfn run(k: int) -> int:\n    f(k):\n        on Boom:\n            1\n        on Bang:\n            2\n\n\[run(1), run(0)\]\n"
+} -result {[2, 0]}
+
+test fold-loops-body-error {an error of the body propagates out of the fold; the iterations before it ran} -body {
+    fl "import std::list\n$::flLog\n$::flErrors\nfn g(place log: MutableVector\[int\], xs: List\[int\]) -> int errors Boom:\n    fold x in xs with intermediate acc 0:\n        if x > 2:\n            boom(x)\n        else:\n            note(log, x)\n            acc + x\n\nfn f(xs: List\[int\]) -> List\[int\]:\n    log = std::mutable_vector::from_list(\[0\])\n    r = g(log, xs):\n        on Boom:\n            -1\n    \[r, std::list::length(entries(log))\]\n\nf(\[1, 2, 3, 4\])\n"
+} -result {[-1, 3]}
+
+test fold-loops-return {return inside a fold leaves the function: no fold value} -body {
+    fl "fn find(xs: List\[int\], target: int) -> int:\n    total = fold x in xs with intermediate acc 0:\n        if x == target:\n            return acc\n        acc + x\n    -total\n\n\[find(\[1, 2, 3\], 3), find(\[1, 2, 3\], 9)\]\n"
+} -result {[3, -6]}
+
+test fold-loops-handled-in-body {a handled error inside the body is an ordinary completion} -body {
+    fl "$::flErrors\nfn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        v = boom(x - 1):\n            on Boom:\n                100\n        acc + v\n\nf(\[1, 2, 3\])\n"
+} -result 102
+
+# ---------------------------------------------------------------------------
+# Scope and immutability of the intermediate
+
+test fold-loops-scope-does-not-leak {the intermediate is bound in the body only: after the fold its name is unbound} -body {
+    flKinds "fn f(xs: List\[int\]) -> int:\n    t = fold x in xs with intermediate acc 0:\n        acc + x\n    acc\n\nf(\[1\])\n"
+} -result UNBOUND
+
+test fold-loops-not-in-scope-in-initial {the intermediate is not in scope in its own initial value, nor in the loop's operands} -body {
+    list [flKinds "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc acc:\n        acc + x\n\nf(\[1\])\n"] \
+        [flKinds "fn f() -> int:\n    fold i from 0 to acc with intermediate acc 0:\n        acc + i\n\nf()\n"]
+} -result {UNBOUND UNBOUND}
+
+test fold-loops-immutable {the intermediate is immutable within its iteration: binding its name again in the body is a duplicate} -body {
+    flDiagnostics "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        acc = acc + x\n        acc\n\nf(\[1\])\n"
+} -result {{DUPLICATE 3:9 {duplicate binding "acc" in the same lexical scope}}}
+
+test fold-loops-shadow-in-branch {a nested scope of the body may bind the intermediate's name, as any binding's: it shadows it there only} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        if x > 1:\n            acc = 100\n            acc + x\n        else:\n            acc + x\n\nf(\[1, 2, 3\])\n"
+} -result 103
+
+test fold-loops-shadows-outer {the intermediate shadows an outer binding of its name in the body; the outer one is unchanged after the fold} -body {
+    fl "fn f(xs: List\[int\]) -> List\[int\]:\n    acc = 1000\n    r = fold x in xs with intermediate acc 0:\n        acc + x\n    \[r, acc\]\n\nf(\[1, 2\])\n"
+} -result {[3, 1000]}
+
+test fold-loops-duplicate-name {the intermediate may not have the name of its loop variable} -body {
+    list [flKinds "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate x 0:\n        x\n\nf(\[1\])\n"] \
+        [flKinds "import std::list\n\nfn f(xs: List\[int\]) -> int:\n    fold x in xs and i from 0 to std::list::length(xs) with intermediate i 0:\n        x\n\nf(\[1\])\n"]
+} -result {DUPLICATE-LOOP-VARIABLE DUPLICATE-LOOP-VARIABLE}
+
+# ---------------------------------------------------------------------------
+# Nesting: every break and continue targets its nearest loop or fold
+
+test fold-loops-nested-folds {a fold in a fold's body: each carries its own intermediate} -body {
+    fl "fn f(rows: List\[List\[int\]\]) -> int:\n    fold row in rows with intermediate total 0:\n        row_sum = fold v in row with intermediate s 0:\n            s + v\n        total * 100 + row_sum\n\nf(\[\[1, 2\], \[3, 4\], \[5\]\])\n"
+} -result 30705
+
+test fold-loops-nested-break-targets-inner {a break in the inner fold ends the inner fold only} -body {
+    fl "fn f(rows: List\[List\[int\]\]) -> int:\n    fold row in rows with intermediate total 0:\n        capped = fold v in row with intermediate s 0:\n            if v > 9:\n                break\n            s + v\n        total + capped\n\nf(\[\[1, 20, 2\], \[3, 4\]\])\n"
+} -result 8
+
+test fold-loops-nested-continue-targets-inner {a continue in the inner fold skips an inner iteration only} -body {
+    fl "fn f(rows: List\[List\[int\]\]) -> int:\n    fold row in rows with intermediate total 0:\n        evens = fold v in row with intermediate s 0:\n            if v.mod(2) == 1:\n                continue\n            s + v\n        total + evens\n\nf(\[\[1, 2, 3, 4\], \[6, 7\]\])\n"
+} -result 12
+
+test fold-loops-loop-in-fold {a collecting loop in a fold's body: its break ends the loop, not the fold} -body {
+    fl "import std::list\n\nfn f(rows: List\[List\[int\]\]) -> int:\n    fold row in rows with intermediate n 0:\n        prefix = loop v in row:\n            if v < 0:\n                break\n            v\n        n + std::list::length(prefix)\n\nf(\[\[1, 2, -1, 4\], \[5\]\])\n"
+} -result 3
+
+test fold-loops-fold-in-loop {a fold in a collecting loop's body: each iteration's fold is an element} -body {
+    fl "fn f(rows: List\[List\[int\]\]) -> List\[int\]:\n    loop row in rows:\n        if row == \[\]:\n            continue\n        fold v in row with intermediate m 0:\n            if v > m:\n                v\n            else:\n                m\n\nf(\[\[3, 9, 2\], \[\], \[4\]\])\n"
+} -result {[9, 4]}
+
+test fold-loops-fold-break-in-loop-body {a break in a fold nested in a loop ends the fold; the loop goes on} -body {
+    fl "fn f(rows: List\[List\[int\]\]) -> List\[int\]:\n    loop row in rows:\n        fold v in row with intermediate s 0:\n            if v == 0:\n                break\n            s + v\n\nf(\[\[1, 0, 5\], \[2, 3\]\])\n"
+} -result {[1, 5]}
+
+# ---------------------------------------------------------------------------
+# A fold is a value where an if or a loop is
+
+test fold-loops-positions {a fold as a binding's value then an argument, after return, as a function's last expression and as an if branch's value} -body {
+    fl "fn twice(n: int) -> int:\n    n * 2\n\nfn a(xs: List\[int\]) -> int:\n    t = fold x in xs with intermediate s 0:\n        s + x\n    twice(t)\n\nfn b(xs: List\[int\]) -> int:\n    return fold x in xs with intermediate s 1:\n        s * x\n\nfn c(xs: List\[int\], flag: bool) -> int:\n    if flag:\n        fold x in xs with intermediate s 0:\n            s - x\n    else:\n        0\n\nxs = \[1, 2, 3\]\n\[a(xs), b(xs), c(xs, true), c(xs, false)\]\n"
+} -result {[12, 6, -6, 0]}
+
+test fold-loops-top-level {a fold as the program's own statement and result} -body {
+    fl "fold x in \[1, 2, 3\] with intermediate s 10:\n    s + x\n"
+} -result 16
+
+test fold-loops-statement-position {a fold in statement position runs for its effects; its value is discarded} -body {
+    fl "import std::list\n$::flLog\nfn f() -> List\[int\]:\n    log = std::mutable_vector::from_list(\[0\])\n    fold x in \[1, 2, 3\] with intermediate s 0:\n        note(log, s + x)\n    entries(log)\n\nf()\n"
+} -result {[0, 1, 3, 6]}
+
+# ---------------------------------------------------------------------------
+# Every kind of intermediate
+
+test fold-loops-bool {a Bool intermediate (an all-of)} -body {
+    fl "fn all_positive(xs: List\[int\]) -> bool:\n    fold x in xs with intermediate ok true:\n        ok and x > 0\n\n\[all_positive(\[1, 2\]), all_positive(\[1, -2\]), all_positive(\[\])\]\n"
+} -result {[true, false, true]}
+
+test fold-loops-string {a String intermediate} -body {
+    fl "import std::str\n\nfn join(xs: List\[str\]) -> str:\n    fold x in xs with intermediate out \"\":\n        if out == \"\":\n            x\n        else:\n            out.concat(\", \").concat(x)\n\njoin(\[\"a\", \"bc\", \"d\"\])\n"
+} -result {"a, bc, d"}
+
+test fold-loops-list {a List intermediate built from an empty List, element by element} -body {
+    fl "import std::list\n\nfn evens(xs: List\[int\]) -> List\[int\]:\n    fold x in xs with intermediate out \[\]:\n        if x.mod(2) == 0:\n            out.append(x)\n        else:\n            out\n\nevens(\[1, 2, 3, 4, 6\])\n"
+} -result {[2, 4, 6]}
+
+test fold-loops-struct {a struct intermediate: several values carried together} -body {
+    fl "fn stats(xs: List\[int\]) -> List\[int\]:\n    s = fold x in xs with intermediate st {n: 0, sum: 0, max: 0}:\n        m = if x > st.max:\n            x\n        else:\n            st.max\n        {n: st.n + 1, sum: st.sum + x, max: m}\n    \[s.n, s.sum, s.max\]\n\nstats(\[3, 9, 4\])\n"
+} -result {[3, 16, 9]}
+
+test fold-loops-named-struct {a named struct intermediate} -body {
+    fl "struct Range:\n    low: int\n    high: int\n\nfn bounds(xs: List\[int\]) -> Range:\n    fold x in xs with intermediate r Range {low: 1000, high: -1000}:\n        lo = if x < r.low:\n            x\n        else:\n            r.low\n        hi = if x > r.high:\n            x\n        else:\n            r.high\n        Range {low: lo, high: hi}\n\nb = bounds(\[4, -2, 7\])\n\[b.low, b.high\]\n"
+} -result {[-2, 7]}
+
+test fold-loops-nested-struct {a struct holding a struct and a List} -body {
+    fl "import std::list\n\nfn f(xs: List\[int\]) -> List\[int\]:\n    s = fold x in xs with intermediate st {pos: {line: 1, col: 0}, seen: \[\]}:\n        if x == 0:\n            {pos: {line: st.pos.line + 1, col: 0}, seen: st.seen}\n        else:\n            {pos: {line: st.pos.line, col: st.pos.col + 1}, seen: st.seen.append(x)}\n    \[s.pos.line, s.pos.col, std::list::length(s.seen)\]\n\nf(\[5, 6, 0, 7\])\n"
+} -result {[2, 1, 3]}
+
+test fold-loops-list-of-lists {chunks: a List of Lists, each iteration adding zero, one or several elements} -body {
+    fl "import std::list\n\nfn chunks(xs: List\[int\]) -> List\[List\[int\]\]:\n    fold x in xs with intermediate out \[\]:\n        if x == 0:\n            out\n        elif x == 1:\n            out.append(\[x\])\n        else:\n            out.append(\[x, x\]).append(\[-x\])\n\nchunks(\[1, 0, 2, 1\])\n"
+} -result {[[1], [2, 2], [-2], [1]]}
+
+test fold-loops-generic {an untyped generic function folding any values: its intermediate is dynamic} -body {
+    fl "import std::str\n\nfn reduce(xs, initial, step):\n    fold x in xs with intermediate acc initial:\n        step(acc, x)\n\nfn add(a, b):\n    a + b\n\nfn cat(a: str, b: str) -> str:\n    a.concat(b)\n\n\[reduce(\[1, 2, 3\], 0, add), reduce(\[\"x\", \"y\"\], \"<\", cat)\]\n"
+} -result {[6, "<xy"]}
+
+test fold-loops-refined {a refined intermediate keeps its refinement: the fold is a Percent where a Percent is required} -body {
+    fl "type Percent = Int in 0..100\n\nfn clamp(n: int) -> Percent:\n    if n < 0:\n        return 0\n    if n > 100:\n        return 100\n    n\n\nfn needs(p: Percent) -> int:\n    p + 1\n\nfn f(xs: List\[int\]) -> int:\n    p = fold x in xs with intermediate acc clamp(0):\n        clamp(acc + x)\n    needs(p)\n\n\[f(\[30, 50, 40\]), f(\[-5\])\]\n"
+} -result {[101, 1]}
+
+test fold-loops-refined-list-length {a List intermediate whose every value has one length keeps the length} -body {
+    set hir [flHir "import std::list\n\nfn f(xs: List\[int\]) -> List\[int\]:\n    fold x in xs with intermediate pair \[0, 0\]:\n        \[std::list::get(pair, 1, 0), x\]\n\nf(\[1, 2, 3\])\n"]
+    set e [lindex [flFolds $hir] 0]
+    list [hir::types::show [hir::typeOf $hir $e]] [lrange [outcomeUnderHir cranelift $hir] 0 1]
+} -result {{List[int]{length: 2}} {value {[2, 3]}}}
+
+test fold-loops-mutable-vector {a MutableVector intermediate mutated in the body is a value: the fold's vector is its own} -body {
+    fl "import std::mutable_vector\n\nfn f(xs: List\[int\]) -> List\[int\]:\n    v = std::mutable_vector::from_list(\[0\])\n    w = fold x in xs with intermediate acc v:\n        acc.push(x * 10)\n        acc\n    \[std::mutable_vector::length(w), std::mutable_vector::length(v)\]\n\nf(\[1, 2, 3\])\n"
+} -result {[4, 1]}
+
+test fold-loops-mutable-map {a fold over a MutableMap: its loop protocol skips removed entries, which keeps the intermediate} -body {
+    fl "import std::mutable_map\n\nfn total(m: std::mutable_map::MutableMap\[str, int\]) -> int:\n    fold e in m with intermediate t 0:\n        t + e.value\n\nfn build() -> std::mutable_map::MutableMap\[str, int\] errors std::mutable_map::KeyNotFound:\n    m = std::mutable_map::create\[str, int\]()\n    m.set(\"a\", 1)\n    m.set(\"b\", 20)\n    m.set(\"c\", 300)\n    m.remove(\"b\")\n    m\n\nm = build():\n    on std::mutable_map::KeyNotFound:\n        std::mutable_map::create\[str, int\]()\ntotal(m)\n"
+} -result 301
+
+# ---------------------------------------------------------------------------
+# Closures, callable values, contexts and coroutines
+
+test fold-loops-callable-step {the body calls a callable value: a higher-order fold} -body {
+    fl "fn fold_with(xs: List\[int\], f: Fn{args: \[int, int\], return: int}) -> int:\n    fold x in xs with intermediate acc 0:\n        f(acc, x)\n\nfn mul_add(a: int, b: int) -> int:\n    a * 2 + b\n\nfold_with(\[1, 0, 1, 1\], mul_add)\n"
+} -result 11
+
+test fold-loops-closure-in-body {a closure made in the body captures the iteration's intermediate} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 1:\n        fn add(n: int) -> int:\n            acc + n\n        add(x)\n\nf(\[2, 3\])\n"
+} -result 6
+
+test fold-loops-context {the body calls a function that requires a context the caller installed} -body {
+    fl "type Factor = Int in 0..100\n\ncontext struct Scale:\n    factor: Factor\n\nfn scaled(x: int, context s: Scale) -> int:\n    x * s.factor\n\nfn f(xs: List\[int\], context s: Scale) -> int:\n    fold x in xs with intermediate acc 0:\n        acc + scaled(x)\n\nwith context Scale {factor: 3}\nf(\[1, 2, 4\])\n"
+} -result 21
+
+test fold-loops-coroutine {a yield inside a fold's body suspends the coroutine; the intermediate survives the suspension} -body {
+    fl "import std::coroutine\n\nfn running(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        yield acc + x\n        acc + x\n\nfn drive() -> List\[int\]:\n    coroutine {step, first} = running(\[1, 2, 3\])\n    a = step()\n    b = step()\n    c = step()\n    \[first, a, b, c\]\n\ndrive()\n"
+} -result {[1, 3, 6, 6]}
+
+# ---------------------------------------------------------------------------
+# Typing and diagnostics
+
+test fold-loops-type-is-intermediate {a fold's type is its intermediate's: Int, not a List} -body {
+    set hir [flHir "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        acc + x\n\nf(\[1\])\n"]
+    set e [lindex [flFolds $hir] 0]
+    list [hir::get $hir $e kind] [hir::types::show [hir::typeOf $hir $e]] \
+        [hir::types::show [hir::bindingType $hir [hir::get $hir $e foldBinding]]]
+} -result {listloop int int}
+
+test fold-loops-type-joins-initial-and-body {an empty List initial value and a body that appends: the intermediate is the join, List[int]} -body {
+    set hir [flHir "import std::list\n\nfn f(xs: List\[int\]) -> List\[int\]:\n    fold x in xs with intermediate out \[\]:\n        out.append(x)\n\nf(\[1\])\n"]
+    set e [lindex [flFolds $hir] 0]
+    list [hir::types::show [hir::typeOf $hir $e]] [hir::diagnostics $hir]
+} -result {{List[int]} {}}
+
+test fold-loops-type-growing-join-widens {a join that grows without end (a List one level deeper each iteration) ends at the dynamic type, never a diagnostic} -body {
+    set hir [flHir "fn f(xs: List\[int\]) -> any:\n    fold x in xs with intermediate n \[\]:\n        \[n\]\n\nf(\[1, 2\])\n"]
+    set e [lindex [flFolds $hir] 0]
+    list [hir::types::show [hir::typeOf $hir $e]] [lmap d [hir::diagnostics $hir] {dict get $d kind}] \
+        [lrange [outcomeUnderHir cranelift $hir] 0 1]
+} -result {any {} {value {[[[]]]}}}
+
+test fold-loops-conflict-kinds {a body value of another kind than the intermediate: FOLD-INTERMEDIATE-TYPE at that value, naming the intermediate} -body {
+    flDiagnostics "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        \"no\"\n\nf(\[1\])\n"
+} -result {{FOLD-INTERMEDIATE-TYPE 3:9 {the intermediate "acc" of this fold is int (its initial value), but this completion of the body is str: a fold carries one value from each iteration to the next, and int and str have no common type (give every normal completion of the body the intermediate's type)}}}
+
+test fold-loops-conflict-missing-else {an if without else whose missing branch completes the body with unit} -body {
+    flDiagnostics "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        if x > 1:\n            acc + x\n\nf(\[1\])\n"
+} -result {{FOLD-INTERMEDIATE-TYPE 3:9 {the intermediate "acc" of this fold is int (its initial value), but this `if` has no `else`: when its condition is false it completes the body with unit: a fold carries one value from each iteration to the next, and int and unit have no common type (give every normal completion of the body the intermediate's type)}}}
+
+test fold-loops-conflict-branch {one branch of the body's if: the diagnostic names that branch's value, and nothing downstream restates it} -body {
+    flDiagnostics "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc {n: 0}:\n        if x > 2:\n            {n: acc.n + 1, extra: true}\n        else:\n            acc\n\nf(\[1, 5\])\n"
+} -result {{FOLD-INTERMEDIATE-TYPE 4:13 {the intermediate "acc" of this fold is struct{n: int} (its initial value), but this completion of the body is struct{extra: bool, n: int}: a fold carries one value from each iteration to the next, and struct{n: int} and struct{extra: bool, n: int} have no common type (give every normal completion of the body the intermediate's type)}}}
+
+test fold-loops-conflict-named-structs {two named structs have no common type} -body {
+    flKinds "struct A:\n    v: int\n\nstruct B:\n    v: int\n\nfn f(xs: List\[int\]) -> int:\n    r = fold x in xs with intermediate s A {v: 0}:\n        B {v: x}\n    0\n\nf(\[1\])\n"
+} -result FOLD-INTERMEDIATE-TYPE
+
+test fold-loops-conflict-incompatible-initial {an initial value of another kind than every body value} -body {
+    flKinds "fn f(xs: List\[int\]) -> int:\n    t = fold x in xs with intermediate acc \"\":\n        x + 1\n    t + 1\n\nf(\[1\])\n"
+} -result FOLD-INTERMEDIATE-TYPE
+
+test fold-loops-conflict-related {the diagnostic's related locations are the fold and its initial value} -body {
+    catch {surface::compile "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        \"no\"\n\nf(\[1\])\n" t.bot -warnings off} message options
+    set d [lindex [dict get $options -diagnostics] 0]
+    lmap r [dict get $d related] {string cat [dict get $r line]:[dict get $r column]}
+} -result {2:5 2:40}
+
+test fold-loops-no-conflict-dynamic {a value already of the dynamic type collapses nothing: no diagnostic} -body {
+    flKinds "fn f(xs: List\[int\], seed) -> any:\n    fold x in xs with intermediate acc seed:\n        x\n\nf(\[1\], 0)\n"
+} -result accepted
+
+test fold-loops-no-conflict-paths-that-leave {break, continue, return and fail are no completions: only the values are joined} -body {
+    flKinds "error E\n\nfn f(xs: List\[int\]) -> int errors E:\n    fold x in xs with intermediate acc 0:\n        if x == 1:\n            continue\n        if x == 2:\n            break\n        if x == 3:\n            return -1\n        if x == 4:\n            fail E\n        acc + x\n\nf(\[1\]):\n    on E:\n        0\n"
+} -result accepted
+
+test fold-loops-lenient-runs-dynamic {a program compiled despite a conflict (-strict 0) runs with a dynamic intermediate} -body {
+    set hir [flHir "fn f(xs: List\[int\]) -> any:\n    fold x in xs with intermediate acc 0:\n        if x > 1:\n            \"big\"\n        else:\n            acc + x\n\nf(\[1, 5\])\n"]
+    list [lmap d [hir::diagnostics $hir] {dict get $d kind}] [lrange [outcomeUnderHir interp $hir] 0 1]
+} -result {FOLD-INTERMEDIATE-TYPE {value {"big"}}}
+
+test fold-loops-unhandled-initial {an error of the initial value is charged where it is written} -body {
+    flKinds "error E\n\nfn boom(n: int) -> int errors E:\n    if n > 0:\n        fail E\n    n\n\nfn f(xs: List\[int\], k: int) -> int:\n    fold x in xs with intermediate acc boom(k):\n        acc + x\n\nf(\[1\], 0)\n"
+} -result UNHANDLED-ERROR
+
+test fold-loops-result-type-checked {the fold's value is checked where it is used, like any value} -body {
+    flKinds "fn needs_str(s: str) -> str:\n    s\n\nfn f(xs: List\[int\]) -> str:\n    t = fold x in xs with intermediate acc 0:\n        acc + x\n    needs_str(t)\n\nf(\[1\])\n"
+} -result TYPE
+
+test fold-loops-cardinality-not-domain {a fold's List is no collecting loop's: it is never credited with its domain's element count (a lockstep loop over it and the domain is unproven, not accepted)} -body {
+    flKinds "import std::list\n\nfn f(xs: List\[int\]) -> List\[int\]:\n    r = fold x in xs with intermediate out \[\]:\n        out.append(x).append(x)\n    loop a in r and i from 0 to std::list::length(xs):\n        a + i\n\nf(\[1, 2\])\n"
+} -result LOCKSTEP-UNPROVEN
+
+test fold-loops-affine-rejected {a fold cannot carry an affine intermediate: AFFINE-FOLD-UNSUPPORTED where the value enters it} -body {
+    flDiagnostics "import std::coroutine\n\nfn gen() -> int:\n    yield 1\n    2\n\nfn f(n: int) -> int:\n    coroutine {step: h} = gen()\n    c = fold i from 0 to n with intermediate c h:\n        c\n    0\n\nf(2)\n"
+} -result {{AFFINE-FOLD-UNSUPPORTED 9:48 {`h` is an affine Coroutine{args: [], return: int, errors: []}, which would become the intermediate of a fold: a fold cannot carry an affine value from one iteration to the next yet (carry an unrestricted value, or move the affine one with a loop of its own)}} {AFFINE-FOLD-UNSUPPORTED 10:9 {`c` is an affine Coroutine{args: [], return: int, errors: []}, which would become the intermediate of a fold: a fold cannot carry an affine value from one iteration to the next yet (carry an unrestricted value, or move the affine one with a loop of its own)}}}
+
+test fold-loops-affine-rejected-discarded {a fold whose own value is discarded -- a statement, or the bare form -- still makes its body's value the next intermediate: the affine body value is rejected as in a bound fold, never taken for discarded} -body {
+    lmap header {{i from 0 to n} {}} {
+        lmap d [flDiagnostics "import std::coroutine\n\nfn gen() -> int:\n    yield 1\n    2\n\nfn f(n: int) -> int:\n    coroutine {step: h} = gen()\n    fold [expr {$header eq "" ? "" : "$header "}]with intermediate c h:\n        c\n    0\n\nf(2)\n"] {
+            lrange $d 0 1
+        }
+    }
+} -result {{{AFFINE-FOLD-UNSUPPORTED 9:44} {AFFINE-FOLD-UNSUPPORTED 10:9}} {{AFFINE-FOLD-UNSUPPORTED 9:30} {AFFINE-FOLD-UNSUPPORTED 10:9}}}
+
+test fold-loops-yield-body-used {a yield completing a fold's body is a use of its value (the next intermediate) whether the fold's own value is bound or discarded: the helper's protocol defaults to the zero-message one in both, conflicting with its caller's declared one} -body {
+    lmap fold {"    fold" "    m = fold"} {
+        flKinds "import std::coroutine\n\nstruct Msg:\n    v: int\n\nfn helper(n: int) -> int:\n$fold i from 0 to n with intermediate m Msg {v: 0}:\n        yield m.v\n    0\n\nfn gen(resume Msg) -> int:\n    helper(2)\n\ncoroutine {step: s} = gen()\n0\n"
+    }
+} -result {{COROUTINE-RESUME-CONFLICT FOLD-INTERMEDIATE-TYPE} {COROUTINE-RESUME-CONFLICT FOLD-INTERMEDIATE-TYPE}}
+
+test fold-loops-break-outside {a break in a closure inside a fold's body targets no loop of the closure: BREAK-OUTSIDE-LOOP} -body {
+    flKinds "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        fn g() -> int:\n            break\n        acc + x\n\nf(\[1\])\n"
+} -result BREAK-OUTSIDE-LOOP
+
+test fold-loops-break-value-core-ir {a break with a value into a fold, which only core IR text can write, is LISTLOOP-BREAK-VALUE} -body {
+    set hir [hir::build {{fold {const 0} {listloop {const list {1 2}} {block {x acc} {break {const 5}}}}}} -strict 0]
+    lmap d [hir::diagnostics $hir] {dict get $d kind}
+} -result LISTLOOP-BREAK-VALUE
+
+# ---------------------------------------------------------------------------
+# Syntax
+
+test fold-loops-parse-forms {every iteration form of a loop composes with "with intermediate"} -body {
+    lmap header {
+        {x in xs}
+        {i from 0 to 3}
+        {i from 0 through 3}
+        {i down from 3 to 0}
+        {i down from 3 through 0}
+        {x in xs and i from 0 to n}
+        {}
+    } {
+        set space [expr {$header eq "" ? "" : " "}]
+        set ast [surface::parse "fold$space$header with intermediate acc 0:\n    acc\n" t.bot]
+        set node [lindex [dict get $ast body] 0]
+        list [dict get $node kind] [llength [dict get $node clauses]] [dict get $node fold name]
+    }
+} -result {{loop 1 acc} {loop 1 acc} {loop 1 acc} {loop 1 acc} {loop 1 acc} {loop 2 acc} {loop 0 acc}}
+
+test fold-loops-parse-fold-is-a-name {"fold" is contextual: an ordinary name everywhere but directly before a name} -body {
+    fl "fold = 3\nfn twice(fold: int) -> int:\n    fold * 2\n\ns = {fold: 4}\n\[fold, twice(fold), s.fold\]\n"
+} -result {[3, 6, 4]}
+
+test fold-loops-parse-with-is-a-variable {"with" and "intermediate" are contextual: a fold's variable may be named with} -body {
+    fl "fn f(xs: List\[int\]) -> int:\n    fold with in xs with intermediate intermediate 0:\n        intermediate + with\n\nf(\[2, 3\])\n"
+} -result 5
+
+test fold-loops-parse-missing-intermediate {a fold without "with intermediate"} -body {
+    flParseError "fold x in xs:\n    x\n"
+} -result {1:13 expected "with intermediate NAME INITIAL" after the fold's iteration clauses, found ":": a fold carries one value, its intermediate, from each iteration to the next}
+
+test fold-loops-parse-missing-name {a fold whose intermediate has no name} -body {
+    flParseError "fold x in xs with intermediate 0:\n    x\n"
+} -result {1:32 expected the name of the fold's intermediate binding after "intermediate", found integer 0}
+
+test fold-loops-parse-missing-initial {a fold whose intermediate has no initial value} -body {
+    flParseError "fold x in xs with intermediate acc:\n    x\n"
+} -result {1:35 a fold's intermediate needs an initial value: write "with intermediate acc INITIAL:", the value the first iteration (or an empty fold) sees}
+
+test fold-loops-parse-with-without-intermediate {"with" not followed by "intermediate"} -body {
+    flParseError "fold x in xs with acc 0:\n    x\n"
+} -result {1:19 expected "intermediate" after a fold's "with", found name "acc"}
+
+test fold-loops-parse-break-value {break never takes a value, in a fold too} -body {
+    flParseError "fold x in xs with intermediate acc 0:\n    break acc\n"
+} -result {2:11 "break" does not take a value, found name "acc"}
+
+test fold-loops-parse-not-an-operand {a fold is a statement value like a loop: never a call argument (there "fold" is an ordinary name)} -body {
+    flParseError "f(fold x in xs with intermediate a 0:\n    a)\n"
+} -result {1:8 expected "," or ")" in the argument list, found name "x"}
+
+test fold-loops-ast-format {the AST prints a fold back as written} -body {
+    set ast [surface::parse "t = fold x in xs and i from 0 to n with intermediate acc f(1):\n    acc + x\n" t.bot]
+    lindex [split [surface::formatAst $ast] \n] 0
+} -result {bind t = fold x in (name xs) and i from (int 0) to (name n) with intermediate acc (call (name f) (int 1))}
+
+# ---------------------------------------------------------------------------
+# Representation: HIR, core IR, NIR
+
+test fold-loops-hir-fields {a fold is its loop's node with the intermediate: a parameter of the body scope, and its initial value a child after the operands} -body {
+    set hir [flHir "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        acc + x\n\nf(\[1\])\n"]
+    set e [lindex [flFolds $hir] 0]
+    set b [hir::get $hir $e foldBinding]
+    set binding [dict get $hir bindings $b]
+    list [dict get $binding name] [dict get $binding kind] \
+        [expr {[dict get $binding scope] eq [hir::get $hir $e bodyScope]}] \
+        [expr {[lindex [hir::children $hir $e] 1] eq [hir::get $hir $e foldInitial]}]
+} -result {acc param 1 1}
+
+test fold-loops-hir-text-round-trip {HIR text prints a fold's intermediate and reads it back; both run alike} -body {
+    set hir [flHir "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        if x == 2:\n            continue\n        acc + x\n\nfn g() -> int:\n    fold with intermediate n 1:\n        if n > 50:\n            break\n        n * 3\n\n\[f(\[1, 2, 3\]), g()\]\n"]
+    set text [hir::format $hir]
+    set read [hir::parse $text]
+    set headers [lmap line [split $text \n] {
+        if {![string match "*fold (*" $line]} continue
+        regsub {^\s*e\d+ } $line {}
+    }]
+    list [expr {[hir::format $read] eq $text}] [regsub -all {[bs]\d+} $headers N] \
+        [lrange [outcomeUnderHir interp $read] 0 1] [lrange [outcomeUnderHir cranelift $read] 0 1]
+} -result {1 {{listloop N (N x) fold (N acc) : int} {loop N fold (N n) : int}} {value {[4, 81]}} {value {[4, 81]}}}
+
+test fold-loops-core-ir {HIR lowers a fold to (fold INITIAL LOOP), the loop's block binding the intermediate last} -body {
+    set hir [flHir "fn f(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        acc + x\n\nf(\[1\])\n"]
+    set e [lindex [flFolds $hir] 0]
+    set ir [hir::lower::expr $hir $e]
+    list [lindex $ir 0] [lindex $ir 1 0] [lindex $ir 2 0] [lindex $ir 2 2 1]
+} -result {fold const listloop {x acc}}
+
+test fold-loops-core-ir-text {core IR text with (fold ...) builds and runs on every backend} -body {
+    set ir {
+        {bind f {block {ys} {fold {const 10} {listloop {ref ys} {block {y acc} {if {call {ref ==} {ref y} {const 3}} {block {} {continue}} {block {} {call {ref +} {ref acc} {ref y}}}}}}}}}
+        {bind g {block {} {fold {const 0} {loop {block {n} {if {call {ref >=} {ref n} {const 5}} {block {} {break}} {block {} {call {ref +} {ref n} {const 1}}}}}}}}}
+        {call {ref list} {call {ref f} {const list {1 2 3 4}}} {call {ref g}} {fold {const 1} {countloop {const 1} {const 5} {block {i a} {call {ref *} {ref a} {ref i}}} up through}}}
+    }
+    lsort -unique [lmap backend $::flBackends {lrange [outcomeUnder $backend $ir] 0 1}]
+} -result {{value {[17, 5, 120]}}}
+
+test fold-loops-core-ir-malformed {a fold's loop must bind the intermediate} -body {
+    list [catch {core::ir::check {fold {const 0} {listloop {const list {}} {block {} {const 1}}}}} message] $message
+} -result {1 {malformed IR: the block of a fold's LOOP must bind the intermediate as its last parameter: fold {const 0} {listloop {const list {}} {block {} {const 1}}}}}
+
+set ::flSumFold "fn sum(xs: List\[int\]) -> int:\n    fold x in xs with intermediate acc 0:\n        acc + x\n\nsum(\[1, 2, 3\])\n"
+
+test fold-loops-nir-scalar {a scalar fold lowers to a loop-carried register: no List, no plan, no MutableArray, no allocation of its own} -constraints nativeBuilt -body {
+    set nir [flNirFunction $::flSumFold sum]
+    list [flHasOp $nir {listnew|listappend|construct|mutarray|structnew|alloc}] \
+        [regexp {(%\d+) = op iadd (%\d+) %\d+.*\n\s+\2 = move \1} $nir]
+} -result {0 1}
+
+test fold-loops-nir-collecting-contrast {the collecting loop of the same body builds a List plan; the fold does not} -constraints nativeBuilt -body {
+    set nir [flNirFunction "fn all(xs: List\[int\]) -> List\[int\]:\n    loop x in xs:\n        x + 1\n\nall(\[1\])\n" all]
+    flHasOp $nir {construct list}
+} -result 1
+
+test fold-loops-nir-count-raw {a numeric fold keeps its raw induction register; the intermediate is the one extra carried register} -constraints nativeBuilt -body {
+    set nir [flNirFunction "fn tri(n: int) -> int:\n    fold i from 0 to n with intermediate t 0:\n        t + i\n\ntri(10)\n" tri]
+    list [flHasOp $nir {listnew|listappend|construct|mutarray|structnew}] [regexp {rilt} $nir]
+} -result {0 1}
+
+test fold-loops-nir-bool-and-break {a Bool fold with a break: the break moves the carried register into the result} -constraints nativeBuilt -body {
+    set nir [flNirFunction "fn any_neg(xs: List\[int\]) -> bool:\n    fold x in xs with intermediate found false:\n        if found:\n            break\n        x < 0\n\nany_neg(\[1\])\n" any_neg?]
+    if {$nir eq ""} {
+        set nir [flNirFunction "fn any_neg(xs: List\[int\]) -> bool:\n    fold x in xs with intermediate found false:\n        if found:\n            break\n        x < 0\n\nany_neg(\[1\])\n" any_neg]
+    }
+    flHasOp $nir {listnew|listappend|construct|mutarray|structnew}
+} -result 0
+
+test fold-loops-discarded-fold-still-runs {a fold in statement position (its value unread) still carries its intermediate for its body} -constraints nativeBuilt -body {
+    fl "import std::list\n$::flLog\nfn f() -> List\[int\]:\n    log = std::mutable_vector::from_list(\[0\])\n    fold x in \[1, 2, 3\] with intermediate s 100:\n        note(log, s)\n        s + x\n    entries(log)\n\nf()\n"
+} -result {[0, 100, 101, 103]}
+
+# ---------------------------------------------------------------------------
+# Standalone executables (tests/loop-collecting.test's aotParity shape): the
+# program compiled to an executable and run, plain and under GC stress (a
+# collection at every allocation: the carried register holds the only
+# reference to its List or struct), agrees with every in-process backend.
+
+proc flAotParity {text} {
+    set dir [makeDirectory {fold loops executable test}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path -warnings off]
+        set values {}
+        foreach backend $::flBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend values [lindex $outcome 1]
+        }
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+        lappend values [runStandalone [file rootname $path]]
+        lappend values [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        if {[llength [lsort -unique $values]] != 1} { error "values disagree: $values" }
+        return [lindex $values 0]
+    } finally {
+        removeDirectory {fold loops executable test}
+    }
+}
+
+test fold-loops-executable {folds carrying an Int past i64, a List of Lists over lockstep domains with continue, and a struct holding a List until a break, in a standalone executable, plain and under GC stress} -constraints executableAot -body {
+    flAotParity "import std::list
+
+struct St:
+    pos: int
+    seen: List\[int\]
+
+fn f(xs: List\[int\]) -> List\[List\[int\]\]:
+    a = fold x in xs with intermediate s 0:
+        s + x
+    b = fold i down from 70 through 1 with intermediate p 1:
+        p * 2
+    c = fold x in xs and i from 0 to std::list::length(xs) with intermediate out \[\]:
+        if i == 1:
+            continue
+        out.append(\[x, i\])
+    d = fold with intermediate st St {pos: 0, seen: \[\]}:
+        if st.pos >= 4:
+            break
+        St {pos: st.pos + 1, seen: st.seen.append(st.pos * st.pos)}
+    \[\[a, b, std::list::length(c)\], d.seen\]
+
+f(\[3, 4, 5\])
+"
+} -result {[[12, 1180591620717411303424, 2], [0, 1, 4, 9]]}
+
+cleanupTests

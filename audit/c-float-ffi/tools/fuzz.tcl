@@ -4,7 +4,7 @@
 #   tclsh9.0 audit/c-float-ffi/tools/fuzz.tcl ?-n N? ?-seed S? ?-functions K?
 #                                             ?-layouts L? ?-gc-stress 0|1?
 #                                             ?-backends LIST? ?-keep 0|1?
-#                                             ?-verbose 0|1?
+#                                             ?-verbose 0|1? ?-raw 0|1?
 #
 # Each of N programs has two halves, each checked against this file's own
 # model -- IEEE 754 rounding written with integer arithmetic on the bits,
@@ -34,13 +34,23 @@
 #     default), the Float64s read out as the bytes of a double, so the
 #     comparison is of integers.
 #
+# With -raw 1 (the default) parameters, results and layout fields are
+# sometimes std::ffi::c::RawFloat or std::ffi::c::RawDouble
+# (RAW-C-FLOAT-FFI-MILESTONE-1.md): a raw argument is any bit pattern (NaN
+# payloads, signaling NaNs, the infinities, negative zero, subnormals) made
+# with std::ffi::c::raw's float_from_bits or double_from_bits, and the model
+# expects exactly those bits in C, exactly C's bits in a raw result (read with
+# float_to_bits or double_to_bits) and in a raw field, and never
+# NonFiniteFloat for a raw position. -raw 0 draws exactly the programs of
+# C-FLOAT-FFI-MILESTONE-1.md's generator.
+#
 # The last line is "programs N calls C layouts L disagreements X" (the exit
 # status is 1 on any); every disagreement is printed with its directory,
 # kept unless -keep is 0.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set options [dict create -n 6 -seed 1 -functions 8 -layouts 4 -gc-stress 0 \
-    -backends {interp compile cranelift-generic cranelift} -keep 1 -verbose 0]
+    -backends {interp compile cranelift-generic cranelift} -keep 1 -verbose 0 -raw 1]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -53,6 +63,14 @@ source [file join $root native native.tcl]
 proc pick {list} { return [lindex $list [expr {int(rand() * [llength $list])}]] }
 proc chance {p} { return [expr {rand() < $p}] }
 proc between {lo hi} { return [expr {$lo + int(rand() * ($hi - $lo + 1))}] }
+
+# A finite C floating spelling T (float, double, or their layout types) made
+# raw with probability 0.3 when -raw is on; without it no random number is
+# drawn, so -raw 0 keeps the milestone-1 generator's streams.
+proc maybeRaw {t} {
+    if {![dict get $::options -raw] || ![chance 0.3]} { return $t }
+    return [dict get {float rawfloat double rawdouble std::ffi::c::Float std::ffi::c::RawFloat std::ffi::c::Double std::ffi::c::RawDouble} $t]
+}
 
 # ---------------------------------------------------------------------------
 # The model
@@ -197,16 +215,21 @@ proc literal {x} {
 # The C functions
 
 # Draws program P's K functions: each {name params result rpos}, a
-# parameter a C spelling (float, double, int, long long), RPOS the position
+# parameter a C spelling (float, double, int, long long) or rawfloat or
+# rawdouble (a C float or double declared raw), RPOS the position
 # of the unsigned long long naming the result's bits.
 proc drawFunctions {k} {
     set out {}
     for {set i 0} {$i < $k} {incr i} {
         set params {}
         for {set j 0} {$j < [pick [list 0 1 2 3 [between 4 8] [between 9 14]]]} {incr j} {
-            lappend params [pick {float float double double int {long long}}]
+            set p [pick {float float double double int {long long}}]
+            if {$p in {float double}} { set p [maybeRaw $p] }
+            lappend params $p
         }
-        lappend out [dict create name ff_f$i params $params result [pick {float double int}] rpos [between 0 [llength $params]]]
+        set result [pick {float double int}]
+        if {$result ne "int"} { set result [maybeRaw $result] }
+        lappend out [dict create name ff_f$i params $params result $result rpos [between 0 [llength $params]]]
     }
     return $out
 }
@@ -223,10 +246,10 @@ proc cSource {functions} {
         set k 0
         foreach p [dict get $f params] {
             if {$k == [dict get $f rpos]} { lappend formals "unsigned long long rbits" }
-            lappend formals "$p a$j"
+            lappend formals "[cType $p] a$j"
             switch -- $p {
-                float { append body "    { uint32_t u; memcpy(&u, &a$j, 4); ff_seen\[$j\] = u; }\n" }
-                double { append body "    memcpy(&ff_seen\[$j\], &a$j, 8);\n" }
+                float - rawfloat { append body "    { uint32_t u; memcpy(&u, &a$j, 4); ff_seen\[$j\] = u; }\n" }
+                double - rawdouble { append body "    memcpy(&ff_seen\[$j\], &a$j, 8);\n" }
                 default { append body "    ff_seen\[$j\] = (unsigned long long)a$j;\n" }
             }
             incr j
@@ -234,24 +257,35 @@ proc cSource {functions} {
         }
         if {[dict get $f rpos] == [llength [dict get $f params]]} { lappend formals "unsigned long long rbits" }
         switch -- [dict get $f result] {
-            float { append body "    { uint32_t u = (uint32_t)rbits; float r; memcpy(&r, &u, 4); return r; }\n" }
-            double { append body "    { double r; memcpy(&r, &rbits, 8); return r; }\n" }
+            float - rawfloat { append body "    { uint32_t u = (uint32_t)rbits; float r; memcpy(&r, &u, 4); return r; }\n" }
+            double - rawdouble { append body "    { double r; memcpy(&r, &rbits, 8); return r; }\n" }
             int { append body "    return (int)(rbits % 100000);\n" }
         }
-        append c "[dict get $f result] [dict get $f name]([join $formals {, }]) {\n$body}\n"
+        append c "[cType [dict get $f result]] [dict get $f name]([join $formals {, }]) {\n$body}\n"
     }
     return $c
 }
 
+# The C spelling of a drawn type: a raw one is C's float or double.
+proc cType {t} {
+    return [dict getdef {rawfloat float rawdouble double} $t $t]
+}
+
+# The import of std::ffi::c::raw, when -raw is on.
+proc rawImport {} {
+    if {[dict get $::options -raw]} { return "import std::ffi::c::raw\n" }
+    return ""
+}
+
 # The Botlish spelling of a C parameter type.
 proc ffiType {c} {
-    return [dict get {float std::ffi::c::Float double std::ffi::c::Double int std::ffi::c::Int {long long} std::ffi::c::LongLong unsigned std::ffi::c::ULongLong} $c]
+    return [dict get {float std::ffi::c::Float double std::ffi::c::Double rawfloat std::ffi::c::RawFloat rawdouble std::ffi::c::RawDouble int std::ffi::c::Int {long long} std::ffi::c::LongLong unsigned std::ffi::c::ULongLong} $c]
 }
 
 # The program calling every function of FUNCTIONS once, and the model's
 # value of it.
 proc callProgram {functions} {
-    set text "import std::ffi::c\nextern c library \"botlish_cfloat_fuzz\"\n"
+    set text "import std::ffi::c\n[rawImport]extern c library \"botlish_cfloat_fuzz\"\n"
     append text "extern c fn seen_at named \"ff_seen_at\"(i: std::ffi::c::Int) -> std::ffi::c::ULongLong\n"
     append text "extern c fn count named \"ff_count\"() -> std::ffi::c::Int\n"
     append text "extern c fn dbits named \"ff_dbits\"(x: std::ffi::c::Double) -> std::ffi::c::ULongLong\n"
@@ -272,7 +306,7 @@ proc callProgram {functions} {
     set model {}
     set i 0
     foreach f $functions {
-        set width [dict get {float 32 double 64 int 0} [dict get $f result]]
+        set width [dict get {float 32 double 64 rawfloat 32 rawdouble 64 int 0} [dict get $f result]]
         set rbits [expr {$width ? [resultBits $width] : [between 0 1000000]}]
         set args {}
         set seen {}
@@ -302,6 +336,13 @@ proc callProgram {functions} {
                         lappend args [literal $x]
                     }
                 }
+                rawfloat - rawdouble {
+                    # Any bit pattern, received by C exactly.
+                    set w [expr {$p eq "rawfloat" ? 32 : 64}]
+                    set b [resultBits $w 0.4]
+                    lappend args "std::ffi::c::raw::[expr {$w == 32 ? "float" : "double"}]_from_bits($b)"
+                    lappend seen $b
+                }
                 int {
                     set v [between -2147483648 2147483647]
                     lappend args $v
@@ -316,7 +357,7 @@ proc callProgram {functions} {
             incr j
         }
         if {[dict get $f rpos] == [llength [dict get $f params]]} { lappend args $rbits }
-        set out [expr {[dict get $f result] eq "int" ? "r" : "dbits(r)"}]
+        set out [dict get {int r float dbits(r) double dbits(r) rawfloat std::ffi::c::raw::float_to_bits(r) rawdouble std::ffi::c::raw::double_to_bits(r)} [dict get $f result]]
         set reads [lmap k [lsearch -all [dict get $f params] *] {string cat "seen_at($k)"}]
         append text "fn call${i}() -> list:\n    before = count()\n"
         append text "    r = [dict get $f name]([join $args {, }]):\n        on NonFiniteFloat {result}:\n            return \[-kind(result), count() - before\]\n"
@@ -328,6 +369,9 @@ proc callProgram {functions} {
             if {$width == 0} {
                 set r [expr {$rbits % 100000}]
                 set admitted [list value $r]
+            } elseif {[dict get $f result] in {rawfloat rawdouble}} {
+                # A raw result is C's bits, never admitted.
+                set admitted [list value $rbits]
             } else {
                 set admitted [admit $width $rbits]
             }
@@ -354,7 +398,8 @@ proc drawLayout {} {
     set align 1
     for {set i 0} {$i < [between 1 6]} {incr i} {
         set type [pick {std::ffi::c::Float std::ffi::c::Float std::ffi::c::Double std::ffi::c::Double std::ffi::c::UChar std::ffi::c::Int}]
-        set width [dict get {std::ffi::c::Float 4 std::ffi::c::Double 8 std::ffi::c::UChar 1 std::ffi::c::Int 4} $type]
+        if {$type in {std::ffi::c::Float std::ffi::c::Double}} { set type [maybeRaw $type] }
+        set width [dict get {std::ffi::c::Float 4 std::ffi::c::Double 8 std::ffi::c::RawFloat 4 std::ffi::c::RawDouble 8 std::ffi::c::UChar 1 std::ffi::c::Int 4} $type]
         set at [expr {($at + [between 0 1] * $width + $width - 1) / $width * $width}]
         lappend fields [dict create name f$i type $type width $width offset $at]
         set at [expr {$at + $width}]
@@ -389,6 +434,11 @@ proc layoutProgram {l n} {
                 if {[lindex $admitted 0] eq "error" && $parseError eq ""} { set parseError [lindex $admitted 1] }
                 lappend parsed [lindex $admitted 1]
             }
+            std::ffi::c::RawFloat - std::ffi::c::RawDouble {
+                # Any bits, read back exactly.
+                set b [resultBits [expr {8 * $w}] 0.4]
+                lappend parsed $b
+            }
             std::ffi::c::UChar { set b [between 0 255]; lappend parsed $b }
             std::ffi::c::Int { set b [between -2147483648 2147483647]; lappend parsed $b; set b [expr {$b % (2 ** 32)}] }
         }
@@ -420,6 +470,12 @@ proc layoutProgram {l n} {
                 lappend written [list bytes [le [bits64 $x] 8]]
                 lappend values "hide([literal $x], [between 0 2])"
             }
+            std::ffi::c::RawFloat - std::ffi::c::RawDouble {
+                set w [dict get $f width]
+                set b [resultBits [expr {8 * $w}] 0.4]
+                lappend written [list bytes [le $b $w]]
+                lappend values "std::ffi::c::raw::[expr {$w == 4 ? "float" : "double"}]_from_bits($b)"
+            }
             std::ffi::c::UChar { set v [between 0 255]; lappend written [list bytes [le $v 1]]; lappend values $v }
             std::ffi::c::Int { set v [between -2147483648 2147483647]; lappend written [list bytes [le [expr {$v % (2 ** 32)}] 4]]; lappend values $v }
         }
@@ -428,7 +484,12 @@ proc layoutProgram {l n} {
     append text "layout RAW$n:\n    size $size\n    align 1\n    field bs: array $size of std::binary::U8 at 0\n"
     append text "fn parse${n}() -> list errors LayoutLengthMismatch:\n    s = std::binary::parse($name, bytes_of(\[[join $bytes {, }]\])):\n        on NonFiniteFloat {result}:\n            return \[-kind(result)\]\n"
     set reads [lmap f [dict get $l fields] {
-        expr {[dict get $f type] in {std::ffi::c::Float std::ffi::c::Double} ? "out(s.[dict get $f name])" : "s.[dict get $f name]"}
+        switch -- [dict get $f type] {
+            std::ffi::c::Float - std::ffi::c::Double { string cat "out(s." [dict get $f name] ")" }
+            std::ffi::c::RawFloat { string cat "std::ffi::c::raw::float_to_bits(s." [dict get $f name] ")" }
+            std::ffi::c::RawDouble { string cat "std::ffi::c::raw::double_to_bits(s." [dict get $f name] ")" }
+            default { string cat "s." [dict get $f name] }
+        }
     }]
     append text "    \[[join $reads {, }]\]\n"
     set model {}
@@ -470,7 +531,7 @@ proc layoutProgram {l n} {
 }
 
 proc layoutsProgram {count} {
-    set text "import std::abi\nimport std::abi::bytes\nimport std::binary\nimport std::byte\nimport std::ffi::c\n"
+    set text "import std::abi\nimport std::abi::bytes\nimport std::binary\nimport std::byte\nimport std::ffi::c\n[rawImport]"
     append text "layout D8:\n    size 8\n    align 1\n    field d: std::ffi::c::Double at 0\n"
     append text "layout B8:\n    size 8\n    align 1\n    field bs: array 8 of std::binary::U8 at 0\n"
     # A Float64 as the bytes of a double: what the model compares.

@@ -1,0 +1,126 @@
+# window.bot -- the clean room's desktop acceptance program
+# (RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md, "Real desktop execution"): an
+# ordinary application over the installed raven package, run on a real X11
+# window that Raven's Vulkan renderer draws, and driven from outside by the
+# X server (tools/xsession.py: clicks through XTest, a window manager's
+# close request) -- never by injected input.
+#
+# The window: a label, a checkbox "Shout" and the buttons "Add one" and
+# "Reset". The state: a count and whether to shout; the label shows both
+# ("2 clicks", "2 clicks!"). It reports on standard output, a line each:
+#
+#   widget NAME X Y WIDTH HEIGHT   where the first frame laid each control out
+#                                  (window coordinates), then "ready"
+#   state COUNT SHOUT LABEL CHANGED
+#                                  after each frame that changed the state:
+#                                  the label Raven holds, and whether the
+#                                  frame Raven reads back (Rwindow_capture)
+#                                  differs from the first one
+#   closed COUNT                   when the window was closed
+#
+# Its value is "closed" when the frame loop ended by the close.
+import raven
+import std::float64
+import std::int
+import std::io
+import std::linux::io
+import std::str
+
+with context std::linux::io::create()
+with context raven::create()
+
+struct Screen:
+    window: raven::Window
+    status: raven::Widget
+    shout: raven::Widget
+    add: raven::Widget
+    reset: raven::Widget
+    first: raven::Image
+
+struct State:
+    count: int
+    shout: bool
+
+fn caption(state: State) -> str:
+    text = std::int::to_string(state.count).concat(" clicks")
+    if state.shout:
+        return text.append_char('!')
+    text
+
+fn yes(value: bool) -> str:
+    if value:
+        return "true"
+    "false"
+
+fn rounded(x: Float64) -> str:
+    std::int::to_string(std::float64::round(x))
+
+# The line of TEXTS, separated by spaces.
+fn say(texts: List[str], context io: std::io::IO) errors std::io::WriteFailed:
+    line = fold text in texts with intermediate joined "":
+        if joined == "":
+            text
+        else:
+            joined.append_char(' ').concat(text)
+    std::io::print_line(line)
+
+fn report(widget: raven::Widget, name: str, context io: std::io::IO, ui: raven::Ui) errors std::io::WriteFailed, NonFiniteFloat:
+    r = raven::rect(widget)
+    say(["widget", name, rounded(r.x), rounded(r.y), rounded(r.width), rounded(r.height)])
+
+# STATE after EVENT.
+fn next(screen: Screen, state: State, event: raven::Event) -> State:
+    clicked = event.kind == raven::EventKind::Clicked
+    if clicked and event.from?(screen.add):
+        return State {count: state.count + 1, shout: state.shout}
+    if clicked and event.from?(screen.reset):
+        return State {count: 0, shout: state.shout}
+    if event.kind == raven::EventKind::Toggled and event.from?(screen.shout):
+        return State {count: state.count, shout: event.value == 1}
+    state
+
+fn step(screen: Screen, state: State, context io: std::io::IO, ui: raven::Ui) -> State errors std::io::WriteFailed, NonFiniteFloat:
+    after = fold event in raven::events() with intermediate s state:
+        screen.next(s, event)
+    if after != state:
+        screen.status.set_text(caption(after))
+        drawn = raven::draw_frame()
+        changed = raven::capture(screen.window).pixels != screen.first.pixels
+        say(["state", std::int::to_string(after.count), yes(after.shout), raven::label_text(screen.status), yes(changed)])
+    after
+
+fn run(screen: Screen, state: State, context io: std::io::IO, ui: raven::Ui) -> State errors std::io::WriteFailed, NonFiniteFloat:
+    if not raven::wait_frame(-1.0):
+        return state
+    screen.run(screen.step(state))
+
+fn main(context io: std::io::IO, ui: raven::Ui) -> str errors raven::RavenFailed, std::io::WriteFailed, NonFiniteFloat:
+    raven::start(raven::desktop())
+    window = raven::window("Raven clean room", 360, 180)
+    initial = State {count: 0, shout: false}
+    status = raven::label(caption(initial))
+    shout = raven::checkbox("Shout")
+    add_one = raven::button("Add one")
+    reset = raven::button("Reset")
+    window.set_content(raven::vbox().add(status).add(shout).add(raven::hbox().add(add_one).add(reset)))
+    laid_out = raven::draw_frame()
+    first = raven::capture(window)
+    screen = Screen {window: window, status: status, shout: shout, add: add_one, reset: reset, first: first}
+    shout.report("shout")
+    add_one.report("add")
+    reset.report("reset")
+    say(["frame", std::int::to_string(first.width), std::int::to_string(first.height)])
+    say(["ready"])
+    last = screen.run(initial)
+    raven::stop()
+    say(["closed", std::int::to_string(last.count)])
+    "closed"
+
+result = main():
+    on raven::RavenFailed failure:
+        "RavenFailed ".concat(failure.call).concat(": ").concat(failure.detail)
+    on std::io::WriteFailed:
+        "WriteFailed"
+    on NonFiniteFloat:
+        "NonFiniteFloat"
+result

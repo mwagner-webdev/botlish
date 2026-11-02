@@ -1,0 +1,28 @@
+# bash audit/bench-bimodality/tools/profile.sh FILE 2 6     (callgrind, instructions per run)
+# and native::allocationReport FILE summary                 (one run)
+
+bench/uri-steady.bot
+instructions per run: 25,839,607
+  runtime helpers   49.2%
+  allocator         25.3%
+  mem*              13.2%
+  generated code    10.7%
+  collector          1.5%
+  11,019,819  42.6%  rt_construct
+allocations: total 10509 List 6 String 2000 Bytes 0 StringPlan 8500 ListPlan 1
+copies: stringBytes 94500 listElements 42
+
+audit/list-flat/workloads/uri-flat.bot
+instructions per run: 32,827,072
+  allocator         50.2%
+  runtime helpers   31.7%
+  generated code     9.6%
+  mem*               4.9%
+  collector          3.6%
+   4,280,854  13.0%  rt_construct
+   1,405,692   4.3%  Vm::new_list
+   1,074,460   3.3%  rt_list_new
+     873,243   2.7%  rt_list_flat
+     621,240   1.9%  rt_bytes_from_list
+allocations: total 31594 List 25558 String 2008 Bytes 2004 StringPlan 17 ListPlan 2005
+copies: stringBytes 189 listElements 132809

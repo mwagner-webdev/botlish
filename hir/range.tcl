@@ -320,27 +320,76 @@ proc hir::range::collectionLength {} {
 # The Range native NAME's -result-range metadata (core/native.tcl) promises
 # for every Int it returns, unknown when it promises nothing. The one reading
 # of that metadata: this analysis and hir/completions.tcl both use it, so the
-# two never disagree about a native's result.
+# two never disagree about a native's result. An `intervals` registration
+# (a set with gaps, e.g. a Unicode scalar value: never a surrogate) is its
+# hull here: a Range cannot hold a gap, and RegisteredSet, which the
+# interval-set facts read (hir/intset.tcl), is the same registration's
+# components -- one fact read at two precisions, never two facts.
 proc hir::range::RegisteredRange {name} {
-    set range [dict get [core::native::metadata $name] resultRange]
-    switch -- [lindex $range 0] {
-        nonneg            { return [nonneg] }
-        collection-length { return [collectionLength] }
-        interval          { return [dict create min [lindex $range 1] max [lindex $range 2]] }
+    set sets [RegisteredSet $name]
+    if {[llength $sets] == 1} {
+        return [lindex $sets 0]
     }
-    return [unknown]
+    return [dict create min [dict get [lindex $sets 0] min] max [dict get [lindex $sets end] max]]
 }
 
-# The Range of `mod(x, d)` for X, D the operands' Ranges. mod is Euclidean
-# (core/primitives.tcl): every result r has 0 <= r < abs(d), so a divisor of
-# bounded magnitude M > 0 bounds the result to [0, M-1] (`mod(b, 16)` is
-# 0..15); otherwise the result is only nonnegative.
+# The Ranges whose union native NAME's -result-range metadata promises
+# contains every Int it returns, sorted and disjoint: one Range for every
+# registration but `intervals`, whose components it is ({unknown} when the
+# metadata promises nothing).
+proc hir::range::RegisteredSet {name} {
+    set range [dict get [core::native::metadata $name] resultRange]
+    switch -- [lindex $range 0] {
+        nonneg            { return [list [nonneg]] }
+        collection-length { return [list [collectionLength]] }
+        interval          { return [list [dict create min [lindex $range 1] max [lindex $range 2]]] }
+        intervals         {
+            return [lmap component [lrange $range 1 end] {
+                dict create min [lindex $component 0] max [lindex $component 1]
+            }]
+        }
+    }
+    return [list [unknown]]
+}
+
+# The Range of `mod(x, d)` for X, D the operands' Ranges: the hull of
+# ModParts.
 proc hir::range::Mod {x d} {
     if {$x eq "never" || $d eq "never"} {
         return never
     }
+    set parts [ModParts $x $d]
+    set r [lindex $parts 0]
+    foreach part [lrange $parts 1 end] {
+        set r [join $r $part]
+    }
+    return $r
+}
+
+# The Ranges whose union holds every `mod(x, d)` for X, D the operands'
+# Ranges (one or two). mod is Euclidean (core/primitives.tcl): every result
+# r of a divisor d != 0 has 0 <= r < abs(d) and r = x - k*abs(d) for an
+# integer k; d = 0 fails (ARITHMETIC), producing no value.
+#
+#   * a divisor of bounded magnitude M > 0 bounds the result to [0, M-1]
+#     (`mod(b, 16)` is 0..15); otherwise the result is only nonnegative;
+#   * an exact divisor m != 0 and an operand range of fewer than abs(m)
+#     values: the operands' residues, [lo mod m, hi mod m] when the range
+#     does not cross a multiple of m, else the two parts [lo mod m, abs(m)-1]
+#     and [0, hi mod m] (`97 + n.mod(3)` of n = 0 is 97);
+#   * an operand range inside [0, d_min - 1] of positive divisors: the
+#     operand itself (x < d);
+#   * exact operand and divisor sets within budget: their pairwise residues
+#     (CrossExact), a zero divisor contributing nothing.
+proc hir::range::ModParts {x d} {
+    if {$x eq "never" || $d eq "never"} {
+        return [list never]
+    }
+    set xmn [dict get $x min]
+    set xmx [dict get $x max]
     set dmn [dict get $d min]
     set dmx [dict get $d max]
+    set bound [nonneg]
     if {$dmn ne "-inf" && $dmx ne "+inf"} {
         # Not max(abs($dmn), abs($dmx)): Tcl 9.0.1's max() and min() abort
         # the process (an invalid free) when an argument is a BigInt the
@@ -353,10 +402,57 @@ proc hir::range::Mod {x d} {
             set m $hi
         }
         if {$m > 0} {
-            return [dict create min 0 max [expr {$m - 1}]]
+            set bound [dict create min 0 max [expr {$m - 1}]]
         }
     }
-    return [nonneg]
+    # Exact sets: every pair's residue.
+    set ex [ExactOf $x]
+    set ed [ExactOf $d]
+    if {$ex ne "" && $ed ne "" && [llength $ex] * [llength $ed] <= $::hir::range::maxExactValues} {
+        set values {}
+        foreach a $ex {
+            foreach b $ed {
+                if {$b == 0} continue
+                set r [expr {$a % abs($b)}]
+                lappend values $r
+            }
+        }
+        if {$values eq {}} {
+            # Only a zero divisor: the call never produces a value. Not
+            # `never`: a fact here never decides that a call fails (the
+            # failure stays the run's ARITHMETIC error, as before), so it
+            # keeps the divisor's bound.
+            return [list $bound]
+        }
+        set mn ""
+        set mx ""
+        foreach v $values {
+            if {$mn eq "" || $v < $mn} { set mn $v }
+            if {$mx eq "" || $v > $mx} { set mx $v }
+        }
+        return [list [Normalize [dict create min $mn max $mx] $values]]
+    }
+    if {$xmn eq "-inf" || $xmx eq "+inf"} {
+        return [list $bound]
+    }
+    # A finite operand range below every (positive) divisor: itself.
+    if {$dmn ne "-inf" && $dmn > 0 && $xmn >= 0 && $xmx < $dmn} {
+        return [list [dict create min $xmn max $xmx]]
+    }
+    # An exact divisor: the residues of the operand range.
+    if {$dmn ne "-inf" && $dmn eq $dmx && $dmn != 0} {
+        set m [expr {abs($dmn)}]
+        if {$xmx - $xmn + 1 >= $m} {
+            return [list $bound]
+        }
+        set rl [expr {$xmn % $m}]
+        set rh [expr {$xmx % $m}]
+        if {$rl <= $rh} {
+            return [list [dict create min $rl max $rh]]
+        }
+        return [list [dict create min 0 max $rh] [dict create min $rl max [expr {$m - 1}]]]
+    }
+    return [list $bound]
 }
 
 proc hir::range::isUnknown {r} {
@@ -925,6 +1021,18 @@ proc hir::range::InductionSeed {startR endR direction endKind} {
     return [dict create min $min max $max]
 }
 
+# Visits a fold NODE's initial value (FOLD-LOOPS-MILESTONE-1.md), after the
+# loop's own operands, in the enclosing scope; nothing for any other loop.
+# Its Range seeds nothing: the intermediate it starts is unseeded (`unknown`
+# for every iteration but the first, which no single walk of the body
+# separates from the others).
+proc hir::range::FoldInitial {hirVar ctxVar node} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    if {[hir::IsFoldNode $node]} {
+        Expr hir ctx [dict get $node foldInitial]
+    }
+}
+
 # The Range a numeric loop domain's induction binding holds throughout the
 # loop body: InductionSeed's interval intersected with the binding's static
 # Int type fact. This is the one counted-loop theorem, shared by this
@@ -1061,6 +1169,11 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return [If hir ctx $e $node]
         }
         loop {
+            # A fold's initial value (FOLD-LOOPS-MILESTONE-1.md) is visited
+            # first, in the enclosing scope; its intermediate stays unseeded
+            # (whatever an iteration made of it: `unknown`), and so does the
+            # fold's own value, which a break yields as well.
+            FoldInitial hir ctx $node
             set saved [dict get $ctx bindings]
             dict set ctx breakRanges $e never
             foreach child [dict get $node body] {
@@ -1069,6 +1182,9 @@ proc hir::range::Expr {hirVar ctxVar e} {
             set result [dict get $ctx breakRanges $e]
             dict unset ctx breakRanges $e
             dict set ctx bindings $saved
+            if {[hir::IsFoldNode $node]} {
+                return [unknown]
+            }
             return $result
         }
         listloop {
@@ -1082,6 +1198,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
             # not-provably-int element would get anyway.
             set saved [dict get $ctx bindings]
             Expr hir ctx [dict get $node iterable]
+            FoldInitial hir ctx $node
             foreach child [dict get $node body] {
                 Expr hir ctx $child
             }
@@ -1105,6 +1222,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
             set saved [dict get $ctx bindings]
             set startR [Expr hir ctx [dict get $node start]]
             set endR [Expr hir ctx [dict get $node end]]
+            FoldInitial hir ctx $node
             set seed [InductionBinding $startR $endR [dict get $node direction] [dict get $node endKind]]
             set bindings [dict get $ctx bindings]
             dict set bindings [dict get $node countBinding] $seed
@@ -1131,6 +1249,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
                         [dict get $domain direction] [dict get $domain endKind]]
                 }
             }
+            FoldInitial hir ctx $node
             set bindings [dict get $ctx bindings]
             foreach {binding seed} $seeds {
                 dict set bindings $binding $seed
@@ -1883,10 +2002,19 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
     }
     if {$targetKind eq {native}} {
         # A native's parameter types are run-time-checked kind requirements,
-        # but the natives that write a MutableArray also owe its static
+        # held statically to an argument of known kind (VerifyNativeKinds);
+        # the natives that write a MutableArray also owe its static
         # element contract (hir/containers.tcl), and an imprinted intrinsic
         # its imprinted parameter types (hir/imprint.tcl).
         set name [dict get [hir::symbol $hir $targetBlock] name]
+        if {[VerifyNativeKinds hir $e $node $name]} {
+            # An argument of another kind: the call can only fail, and every
+            # further check of it would restate that -- but for a byte owner
+            # where a C address is required, whose check says why
+            # (hir::borrow::VerifyPointerKinds).
+            hir::borrow::VerifyPointerKinds hir $e $node $name
+            return
+        }
         hir::containers::VerifyNative hir $ranges $e $node $name
         VerifyHashing hir $e $node $name
         if {[dict get [core::native::metadata $name] foreign] ne ""} {
@@ -2022,6 +2150,128 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
             [hir::semantic::ShowType $hir [ShownArgType $argType $checkedType]] [FactsClause $argType $checkedType $argRange] \
             [hir::signatures::because $hir $targetBlock $i]] $arg
     }
+}
+
+# Checks every argument of call E (NODE) of native NAME whose static type has
+# a known kind against the kind the native's parameter requires
+# (hir::types::NativeKindMismatch, the one statement of the rule): an
+# argument of another kind is a compile-time TYPE error of the call, never
+# the run-time TYPE error the native would raise
+# (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md), and so is a rigid
+# imprint variable, which no kind admits for every T
+# (hir::types::NativeArgumentMismatch). An argument of no fixed kind (`any`)
+# still reaches the native's own check when the call runs. Like every check
+# of a call against its callee it is the call's own (hir::CheckingCall: the
+# method-call decision reads it as a candidate's problem) and judges the
+# call as written, reachable or not. Returns 1 if an argument was rejected.
+# The call itself is poison where it is reached (hir::types::Call), so
+# nothing that uses its result restates it.
+proc hir::range::VerifyNativeKinds {hirVar e node name} {
+    upvar 1 $hirVar hir
+    set meta [core::native::metadata $name]
+    if {![dict exists $node written] || [dict exists $hir semanticContext]
+            || [dict get $meta foreign] ne "" || [dict get $meta imprint] ne "" || [dict get $meta layout] ne ""
+            || [dict exists $node resolvedOperator] || [dict getdef $node operator ""] eq "/"} {
+        # (The rule is the program's as written: a call it wrote (`written`,
+        # hir/syntax.tcl), never one a construct lowers to, whose operands
+        # that construct checks (`with context`'s NOT-A-CONTEXT), nor one of
+        # core IR text, past the source boundary; never in a semantic
+        # instance's view, which types a body under one call's argument
+        # types -- an argument of no fixed kind in the body as written,
+        # `any` or an untyped parameter's value, is checked when the call
+        # runs, and the call that needs the instance is held to the checked
+        # contract the use imposes, hir/signatures.tcl's "Trusted and
+        # checked requirements". Natives that state a stronger contract than
+        # the kinds hold every argument to it: a foreign call to its C
+        # signature, hir::borrow::VerifyCall, which also records the
+        # refusals an unchecked run replays; an imprinted intrinsic to its
+        # imprinted parameter types, VerifyImprintedNative; a binary layout
+        # operation (its -layout role) to its operands' roles, hir::layouts
+        # (BINARY-OPERAND); an operator a floating-point operand selected,
+        # and `/`, to their operands' kinds, hir::operators::verify, which
+        # says what the operator means.)
+        return 0
+    }
+    set rejected 0
+    set index 0
+    foreach arg [dict get $node args] {
+        set i $index
+        incr index
+        if {$arg eq "" || [dict exists $hir poisoned $arg]} {
+            continue
+        }
+        set argType [hir::typeOf $hir $arg]
+        set mismatch [hir::types::NativeArgumentMismatch $name $i $argType]
+        if {$mismatch eq {}} {
+            continue
+        }
+        set rejected 1
+        if {($i == 0 && [hir::mutvec::RejectsReceiver $hir $e $arg])
+                || ([lindex $mismatch 1] eq "cptr" && [hir::borrow::IsOwner $argType])
+                || [hir::types::IsCAddress $argType] || [hir::types::IsNativeMemory $argType]
+                || [hir::cabi::IsRawFloating $argType]
+                || [lindex $mismatch 1] eq "DecimalRounded"} {
+            # (Reported by a check that says what the argument is: a mutating
+            # collection operation's receiver the place check rejects, by
+            # it, MUTABLE-PLACE-RECEIVER (hir::mutvec::RejectsReceiver); a byte
+            # owner where a C address is required by the pointer check,
+            # hir::borrow::VerifyPointerKinds, byte storage is never a
+            # pointer; a C address, a native view or edit, or a raw C
+            # floating value where another kind is required by
+            # hir::cabi::VerifyCallKinds, an address is no Int or any other
+            # value and a raw value no number; another value where a
+            # DecimalRounded is required by hir::decimal::verify, nothing
+            # converts one implicitly.)
+            continue
+        }
+        lassign $mismatch kind wanted level
+        set wanted [hir::types::show $wanted]
+        if {$level eq "elements"} {
+            # (An element kind, core/native.tcl's -element-kinds: the
+            # argument is a List, but its elements are not of the kind every
+            # one must have -- std::list::flat of a List that holds no Lists.)
+            set elem [hir::types::elementOf $argType]
+            if {$kind eq "imprint"} {
+                set why [format {the function is checked once, for every %s, and not every %s is %s} \
+                    [hir::types::show $elem] [hir::types::show $elem] $wanted]
+            } else {
+                set why "the call could only fail when it runs"
+            }
+            hir::Diagnose hir TYPE [format {argument %d of native %s requires a List whose every element is %s, but %s has type %s, whose elements are %s: %s} \
+                $index $name $wanted [NativeArgumentNoun $node $i] [hir::semantic::ShowType $hir $argType] \
+                [hir::semantic::ShowType $hir $elem] $why] $arg
+            continue
+        }
+        if {$kind eq "imprint"} {
+            set why [format {the function is checked once, for every %s, and not every %s is %s} \
+                [hir::types::show $argType] [hir::types::show $argType] $wanted]
+        } else {
+            set why "the call could only fail when it runs"
+        }
+        hir::Diagnose hir TYPE [format {argument %d of native %s requires %s, but %s has type %s: %s} \
+            $index $name $wanted [NativeArgumentNoun $node $i] [hir::semantic::ShowType $hir $argType] $why] $arg
+    }
+    return $rejected
+}
+
+# How argument I (from 0) of call NODE is named in a diagnostic of it: the
+# receiver of a method-style call as the receiver, an operator's operand as
+# an operand (`written`, hir/syntax.tcl: a diagnostic's only reader).
+proc hir::range::NativeArgumentNoun {node i} {
+    set written [WrittenForm $node]
+    if {$written eq "method" && $i == 0} {
+        return "the receiver"
+    }
+    if {$written eq "operator"} {
+        return "this operand"
+    }
+    return "this argument"
+}
+
+# How call NODE was spelled (hir/syntax.tcl's `written`: function, method,
+# list or operator), "" for a call core IR wrote.
+proc hir::range::WrittenForm {node} {
+    return [dict getdef [dict getdef $node written {}] form ""]
 }
 
 # Checks call E of the imprinted intrinsic NAME (hir/imprint.tcl;
@@ -2165,6 +2415,10 @@ proc hir::range::FactsClause {type declared r} {
 # is a nominal type, so equal field layouts (std::abi::I64 and std::abi::Isize, both
 # one Int field over the same domain) never make one the other.
 proc hir::range::MismatchClause {argType declared} {
+    set raw [hir::cabi::RawMismatchClause $argType $declared]
+    if {$raw ne ""} {
+        return $raw
+    }
     if {[hir::types::IsTrait $argType] && ![hir::types::IsTrait $declared] && $declared ne "any"} {
         return [format {; the value is a %s trait view: only the operations %s declares are available on it, and its concrete type is never recovered (there is no cast, type test or downcast from a trait)} \
             [hir::types::show $argType] [hir::types::show $argType]]

@@ -1,0 +1,5 @@
+# I7 DecimalRounded compared with a computed Float64: no implicit conversion
+fn three() -> DecimalRounded{minDecimalsPreserved: 3}:
+    1.254
+x = 1.0 + 0.254
+three() == x

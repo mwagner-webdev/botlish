@@ -1,0 +1,110 @@
+KILLED tcl-reverse-inner-order -- the reference implementation takes the inner Lists last to first
+    tests:  killed (33 failed: list-flat-argument-once, list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+KILLED tcl-reverse-elements -- the reference implementation appends each inner List's elements last to first
+    tests:  killed (28 failed: list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, list-flat-element-kinds, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+KILLED tcl-empty-kept -- the reference implementation keeps an empty inner List as an element
+    tests:  killed (15 failed: list-flat-collecting-loop, list-flat-concatenation, list-flat-core-ir-text, list-flat-element-kinds, list-flat-empty-inners, list-flat-examples, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+KILLED tcl-too-deep -- the reference implementation also flattens an element that is itself a List
+    tests:  killed (9 failed: list-flat-collecting-loop, list-flat-core-ir-text, list-flat-examples, list-flat-heterogeneous-elements, list-flat-method-syntax, list-flat-one-level-only, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+KILLED tcl-drop-last -- the reference implementation drops each inner List's last element
+    tests:  killed (35 failed: list-flat-argument-once, list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+KILLED tcl-duplicate-first -- the reference implementation repeats each inner List's first element
+    tests:  killed (35 failed: list-flat-argument-once, list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+KILLED tcl-no-kind-check -- the reference implementation reads an element as a List without checking its kind
+    tests:  killed (3 failed: list-flat-dynamic-element, list-flat-dynamic-heterogeneous, list-flat-forwarder-contract)
+    golden: survived
+    fuzz:   survived
+KILLED lower-unmapped -- native lowering has no operation for std::list::flat
+    tests:  killed (41 failed: list-flat-argument-once, list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+KILLED shape-keeps-outer -- the result is typed as the argument (List[List[T]]), not List[T]
+    tests:  killed (21 failed: list-flat-element-kinds, list-flat-executable, list-flat-fold-of-flat, list-flat-hir-text, list-flat-in-every-position, list-flat-large, ...)
+    golden: killed (list-flat.bot                cranelift  30 passed, 15 failed (compile 6.65s, run 1.32s))
+    fuzz:   survived
+KILLED length-sum -- the result's length refinement is the outer length plus the inner one
+    tests:  killed (6 failed: list-flat-empty-inners, list-flat-examples, list-flat-random-differential, list-flat-type-join, list-flat-type-length-product, list-flat-type-never)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (4 of 20 programs disagree)
+KILLED length-outer -- the result's length refinement is the outer length
+    tests:  killed (5 failed: list-flat-empty-inners, list-flat-examples, list-flat-random-differential, list-flat-type-length-product, list-flat-type-never)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (4 of 20 programs disagree)
+KILLED element-check-off -- the element-kind rule never finds a mismatch: a List of no Lists compiles
+    tests:  killed (4 failed: list-flat-method-receiver, list-flat-not-lists, list-flat-poison-no-cascade, list-flat-strings-of-lists)
+    golden: killed (list-flat.bot                cranelift  ABORTED std::list::flat element 0: expected list, got 1 (CORE SEMANTIC TYPE) (com)
+    fuzz:   survived
+KILLED exact-outer-sources -- the exact value of a flat is the outer List's sources, not its Lists' elements
+    tests:  killed (1 failed: list-flat-exact-value)
+    golden: killed (list-flat.bot                cranelift  44 passed, 1 failed (compile 7.22s, run 1.95s))
+    fuzz:   survived
+KILLED callables-no-context -- the callable-contract analysis gives flat's argument no typed position
+    tests:  killed (1 failed: list-flat-element-kinds)
+    golden: killed (list-flat.bot                cranelift  44 passed, 1 failed (compile 7.18s, run 1.91s))
+    fuzz:   survived
+KILLED modulebinding-unknown -- a module binding of flat cannot be proven immutable
+    tests:  killed (1 failed: list-flat-module-binding)
+    golden: survived
+    fuzz:   survived
+KILLED ownership-move -- flat takes its argument as a move: a List of affine values is accepted, where the specified rule is AFFINE-LIST-OPERATION-UNSUPPORTED like every element-wise List operation
+    tests:  killed (2 failed: list-flat-affine, list-flat-registration)
+    golden: killed (list-flat.bot                cranelift  44 passed, 1 failed (compile 8.83s, run 1.93s))
+    fuzz:   survived
+KILLED rs-reverse-inner-order -- the native runtime copies the inner Lists last to first
+    tests:  killed (29 failed: list-flat-argument-once, list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+    rust:   killed (runtime::ops::tests::list_flat_survives_a_collection_at_its_allocation)
+KILLED rs-reverse-elements -- the native runtime copies each inner List's elements last to first
+    tests:  killed (27 failed: list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, list-flat-element-kinds, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+    rust:   killed (runtime::ops::tests::list_flat_removes_one_level_in_order, runtime::ops::tests::list_flat_survives_a_collection_at_its_allocation)
+KILLED rs-stop-at-empty -- the native runtime stops at the first empty inner List
+    tests:  killed (13 failed: list-flat-collecting-loop, list-flat-core-ir-text, list-flat-element-kinds, list-flat-empty-inners, list-flat-examples, list-flat-executable, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+    rust:   killed (runtime::ops::tests::list_flat_removes_one_level_in_order, runtime::ops::tests::list_flat_survives_a_collection_at_its_allocation)
+KILLED rs-too-deep -- the native runtime also flattens an element that is itself a List
+    tests:  killed (9 failed: list-flat-collecting-loop, list-flat-core-ir-text, list-flat-examples, list-flat-heterogeneous-elements, list-flat-method-syntax, list-flat-one-level-only, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+    rust:   killed (runtime::ops::tests::list_flat_removes_one_level_in_order)
+KILLED rs-drop-first -- the native runtime drops each inner List's first element
+    tests:  killed (35 failed: list-flat-argument-once, list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+    rust:   killed (runtime::ops::tests::list_flat_removes_one_level_in_order, runtime::ops::tests::list_flat_survives_a_collection_at_its_allocation)
+KILLED rs-duplicate-last -- the native runtime repeats each inner List's last element
+    tests:  killed (35 failed: list-flat-argument-once, list-flat-chunk-fold, list-flat-collecting-loop, list-flat-collecting-loop-continue, list-flat-concatenation, list-flat-core-ir-text, ...)
+    golden: killed (list-flat.bot: BACKENDS DISAGREE)
+    fuzz:   killed (20 of 20 programs disagree)
+    rust:   killed (runtime::ops::tests::list_flat_removes_one_level_in_order, runtime::ops::tests::list_flat_survives_a_collection_at_its_allocation)
+KILLED rs-wrong-total -- the native runtime counts one element too many per inner List
+    tests:  killed (1 failed: list-flat-linear-copies)
+    golden: survived
+    fuzz:   survived
+    rust:   killed (runtime::ops::tests::list_flat_removes_one_level_in_order)
+KILLED rs-quadratic -- the native runtime builds the result by copying the expanding prefix once per inner List (same output, O(n*m) copies)
+    tests:  killed (1 failed: list-flat-linear-copies)
+    golden: survived
+    fuzz:   survived
+    rust:   killed (runtime::ops::tests::list_flat_removes_one_level_in_order)
+KILLED rs-no-kind-check -- the native runtime reads an element as a List without checking its kind
+    tests:  killed (3 failed: list-flat-dynamic-element, list-flat-dynamic-heterogeneous, list-flat-forwarder-contract)
+    golden: survived
+    fuzz:   survived
+    rust:   killed (  process didn't exit successfully: `/tmp/botlish-list-flat-mutants_sbGjjl/native/target/release/deps/botlish_native-4022)
+25 mutants, 25 killed, 0 survived

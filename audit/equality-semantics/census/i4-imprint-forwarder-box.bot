@@ -1,0 +1,8 @@
+# I4 the same with a user's parameterized struct: an untyped forwarder of a Box[T] parameter
+struct Box[T]:
+    value: T
+fn unbox(b: Box[T]) -> T:
+    b.value
+fn forward(b):
+    unbox(b)
+forward(Box {value: 1})

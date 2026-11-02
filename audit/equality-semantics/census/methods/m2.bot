@@ -1,0 +1,3 @@
+import std::str
+fn mark?(s):
+    std::str::length(s) == 1

@@ -65,6 +65,9 @@
 #   exported c fn f(a: T):  the same block marked `exported c`: a C export
 #                         of a native library (NATIVE-LIBRARY-MILESTONE-1.md;
 #                         hir/exports.tcl checks and lists them)
+#   callback c fn f(a: T):  the same block marked `callback c`: a function C
+#                         may call back through std::ffi::c::callback(f)
+#                         (C-CALLBACK-MILESTONE-1.md; hir/callbacks.tcl)
 #   nomethod fn f(a, b):  the same block marked `nomethod 1`: its author
 #                         declares that it is never the callee of method
 #                         syntax (WARNINGS-METHOD-ELIGIBLE.md)
@@ -104,6 +107,9 @@
 #                         down from; core/ir.tcl's `countloop`)
 #   loop x in e and i from a to b: body   lockloop {domains} {body...}
 #                         (lockstep; core/ir.tcl's `lockloop`)
+#   fold ... with intermediate a e0: body   the same loop node with `fold`
+#                         {a origin e0} (FOLD-LOOPS-MILESTONE-1.md;
+#                         core/ir.tcl's `fold`)
 #   yield e               call ^coroutine#yield e      (COROUTINES.md: an
 #                         internal root native, typed by hir/coroutines.tcl)
 #   coroutine {step: s, first: f} = g(a, b)
@@ -316,6 +322,16 @@ proc surface::lower::StructDeclOf {node namespace} {
         # MILESTONE-1.md): hir/structs.tcl checks the declaration.
         dict set decl resource 1
         dict set decl resourceSpan [dict get $node resourceSpan]
+    }
+    if {[dict exists $node identity]} {
+        # Its semantic identity, as written: hir/structs.tcl validates it.
+        dict set decl identity [dict get $node identity]
+    }
+    if {[dict exists $node tree]} {
+        # A tree struct (TREE-STRUCT-MILESTONE-1.md): hir/structs.tcl finds
+        # and checks its one recursive field.
+        dict set decl tree 1
+        dict set decl treeSpan [dict get $node treeSpan]
     }
     return $decl
 }
@@ -915,6 +931,9 @@ proc surface::lower::Node {node} {
             if {[dict getdef $node exported ""] ne ""} {
                 set block [hir::syntax::withExported $block [dict get $node exported]]
             }
+            if {[dict getdef $node callback ""] ne ""} {
+                set block [hir::syntax::withCallback $block [dict get $node callback]]
+            }
             if {$variadic ne ""} {
                 set block [hir::syntax::withVariadic $block \
                     [Origin [dict get $variadic span] "[dict get $node id]/variadic"]]
@@ -939,6 +958,16 @@ proc surface::lower::Node {node} {
                         paramOrigin [Origin [dict get $clause paramSpan] "[dict get $node id]/proves($param)"] \
                         type [dict get $clause type] \
                         typeOrigin [Origin [dict get $clause typeSpan] "[dict get $node id]/proves($param)/type"]
+                }]]
+            }
+            if {[dict getdef $node emits {}] ne {}} {
+                # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each
+                # recognizer as written, resolved by hir/resolve.tcl.
+                set index 0
+                set block [hir::syntax::withEmits $block [lmap claim [dict get $node emits] {
+                    incr index
+                    dict create name [dict get $claim name] qualified [dict get $claim qualified] \
+                        origin [Origin [dict get $claim span] "[dict get $node id]/emits$index"]
                 }]]
             }
             if {[dict exists $node resume] && [dict get $node resume] ne ""} {
@@ -968,46 +997,17 @@ proc surface::lower::Node {node} {
                 [OriginOf $then] [Sequence [dict get $then body]] $elseOrigin $elseBody]
         }
         loop {
-            set body [dict get $node body]
-            if {[llength [dict get $node clauses]] > 1} {
-                set domains {}
-                foreach clause [dict get $node clauses] {
-                    set name [dict get $clause name]
-                    set nameOrigin [Origin [dict get $clause nameSpan] "[dict get $node id]/($name)"]
-                    if {[dict get $clause kind] eq "list"} {
-                        lappend domains [dict create kind list name $name origin $nameOrigin \
-                            iterable [Node [dict get $clause iterable]]]
-                    } else {
-                        lappend domains [dict create kind count name $name origin $nameOrigin \
-                            start [Node [dict get $clause start]] end [Node [dict get $clause end]] \
-                            direction [dict get $clause direction] endKind [dict get $clause endKind]]
-                    }
-                }
-                return [hir::syntax::lockLoopNode $origin $domains \
-                    [Origin [dict get $body span] [dict get $body id]/body] \
-                    [Sequence [dict get $body body]]]
+            set loop [LoopSyntax $node $origin]
+            set fold [dict getdef $node fold ""]
+            if {$fold eq ""} {
+                return $loop
             }
-            if {[dict get $node iterable] ne ""} {
-                return [hir::syntax::listLoopNode $origin \
-                    [Node [dict get $node iterable]] \
-                    [dict get $node elementName] \
-                    [Origin [dict get $node elementNameSpan] "[dict get $node id]/([dict get $node elementName])"] \
-                    [Origin [dict get $body span] [dict get $body id]/body] \
-                    [Sequence [dict get $body body]]]
-            }
-            if {[dict get $node countStart] ne ""} {
-                return [hir::syntax::countLoopNode $origin \
-                    [Node [dict get $node countStart]] \
-                    [Node [dict get $node countEnd]] \
-                    [dict get $node countName] \
-                    [Origin [dict get $node countNameSpan] "[dict get $node id]/([dict get $node countName])"] \
-                    [Origin [dict get $body span] [dict get $body id]/body] \
-                    [Sequence [dict get $body body]] \
-                    [dict get $node direction] [dict get $node endKind]]
-            }
-            return [hir::syntax::loopNode $origin \
-                [Origin [dict get $body span] [dict get $body id]/body] \
-                [Sequence [dict get $body body]]]
+            # A folding loop (FOLD-LOOPS-MILESTONE-1.md): the loop of its
+            # clauses, carrying the intermediate.
+            set name [dict get $fold name]
+            return [hir::syntax::withFold $loop $name \
+                [Origin [dict get $fold nameSpan] "[dict get $node id]/fold($name)"] \
+                [Node [dict get $fold initial]]]
         }
         return {
             if {[dict get $node value] eq ""} {
@@ -1064,6 +1064,73 @@ proc surface::lower::Node {node} {
                 [Origin [dict get $body span] [dict get $body id]/body] \
                 [Sequence [dict get $body body]] $deferred]
         }
+        inject {
+            # An inject block (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
+            # its body is the ordinary block `if true:` (the form an
+            # accepted static block takes, hir/static.tcl's Accepted), which
+            # scopes what the body binds and in a value position is its last
+            # statement's value, so every analysis and backend reads it as
+            # what it is -- code that runs once, right there. The `inject`
+            # field is the restriction: the written context types, each
+            # with its origin, which resolution reads into the expression's
+            # `injects` and hir/injection.tcl checks. No runtime operation,
+            # no new node kind.
+            set body [dict get $node body]
+            set injected [lmap c [dict get $node contexts] {
+                list [dict get $c type] [Origin [dict get $c typeSpan] "[dict get $node id]/inject([dict get $c typeSpan start])"]
+            }]
+            set block [hir::syntax::ifNode $origin [hir::syntax::rootRef [OriginOf $node inject] true] \
+                [Origin [dict get $body span] [dict get $body id]/body] [Sequence [dict get $body body]] \
+                [OriginOf $node else] {}]
+            dict set block inject $injected
+            return $block
+        }
     }
     error "surface::lowerToHir: cannot lower a \"[dict get $node kind]\" node"
+}
+
+# The HIR syntax of surface `loop` NODE's iteration (at ORIGIN): a lockloop,
+# listloop, countloop or plain loop by its clauses, whether it collects or
+# folds (Node's `loop` case adds a fold's intermediate).
+proc surface::lower::LoopSyntax {node origin} {
+    set body [dict get $node body]
+    if {[llength [dict get $node clauses]] > 1} {
+        set domains {}
+        foreach clause [dict get $node clauses] {
+            set name [dict get $clause name]
+            set nameOrigin [Origin [dict get $clause nameSpan] "[dict get $node id]/($name)"]
+            if {[dict get $clause kind] eq "list"} {
+                lappend domains [dict create kind list name $name origin $nameOrigin \
+                    iterable [Node [dict get $clause iterable]]]
+            } else {
+                lappend domains [dict create kind count name $name origin $nameOrigin \
+                    start [Node [dict get $clause start]] end [Node [dict get $clause end]] \
+                    direction [dict get $clause direction] endKind [dict get $clause endKind]]
+            }
+        }
+        return [hir::syntax::lockLoopNode $origin $domains \
+            [Origin [dict get $body span] [dict get $body id]/body] \
+            [Sequence [dict get $body body]]]
+    }
+    if {[dict get $node iterable] ne ""} {
+        return [hir::syntax::listLoopNode $origin \
+            [Node [dict get $node iterable]] \
+            [dict get $node elementName] \
+            [Origin [dict get $node elementNameSpan] "[dict get $node id]/([dict get $node elementName])"] \
+            [Origin [dict get $body span] [dict get $body id]/body] \
+            [Sequence [dict get $body body]]]
+    }
+    if {[dict get $node countStart] ne ""} {
+        return [hir::syntax::countLoopNode $origin \
+            [Node [dict get $node countStart]] \
+            [Node [dict get $node countEnd]] \
+            [dict get $node countName] \
+            [Origin [dict get $node countNameSpan] "[dict get $node id]/([dict get $node countName])"] \
+            [Origin [dict get $body span] [dict get $body id]/body] \
+            [Sequence [dict get $body body]] \
+            [dict get $node direction] [dict get $node endKind]]
+    }
+    return [hir::syntax::loopNode $origin \
+        [Origin [dict get $body span] [dict get $body id]/body] \
+        [Sequence [dict get $body body]]]
 }

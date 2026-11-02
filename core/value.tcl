@@ -167,7 +167,7 @@
 namespace eval core::value {
     # Every row of core/type.tcl's float family is a kind of its own here;
     # type.tcl checks that the two lists agree when it loads.
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec enum cptr Float64 DecimalRounded}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct bytestore mutbytes coroutine mutvec enum cptr Float64 DecimalRounded rawfloat32 rawfloat64}
     # The kinds whose values have no type-blind structural equality: `equal`
     # refuses them (EQUALITY), and the compiler's equality-totality proof
     # (hir::types::HashClass, HASHABLE-AND-KEYED-HASH.md) reads this very
@@ -176,9 +176,13 @@ namespace eval core::value {
     # MutableVector have none (their header's identity is never a value's); a
     # C pointer's or native view's address is never observable; a
     # DecimalRounded value is equal to another only at its static type's
-    # precision, which a type-blind comparison does not know. native/src/
-    # runtime/ops.rs's `equal` refuses the same kinds.
-    variable incomparable {block native mutarray coroutine mutvec cptr DecimalRounded}
+    # precision, which a type-blind comparison does not know; a raw C
+    # floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md) is a foreign bit
+    # pattern, neither a number nor equal to another by any rule a
+    # comparison could guess (its bits are compared explicitly,
+    # std::ffi::c::raw::double_to_bits). native/src/runtime/ops.rs's `equal`
+    # refuses the same kinds.
+    variable incomparable {block native mutarray coroutine mutvec cptr DecimalRounded rawfloat32 rawfloat64}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -446,38 +450,21 @@ proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
 proc core::value::coroutineId {v} { Require coroutine $v; return [lindex $v 1] }
 proc core::value::mutvecId {v}    { Require mutvec $v; return [lindex $v 1] }
 
-# 1 if V is a Block or contains one (in a list or Result).
+# 1 if V is a Block or contains one (in a list, set, struct, Result, vector or
+# array), at any depth: a work list of the values still to look into, never
+# the host's recursion (a tree struct's value nests as deep as a program
+# builds it: TREE-STRUCT-MILESTONE-1.md).
 proc core::value::containsBlock {v} {
-    switch -- [kind $v] {
-        block  { return 1 }
-        list - immutableSet {
-            foreach item [lindex $v 1] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
-        }
-        struct {
-            foreach item [lindex $v 2] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
-        }
-        result { return [containsBlock [lindex $v 2]] }
-        mutvec {
-            foreach item [core::mutvec::items $v] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
-        }
-        mutarray {
-            foreach item [core::mutarray::items $v] {
-                if {[containsBlock $item]} {
-                    return 1
-                }
-            }
+    set pending [list $v]
+    while {[llength $pending] > 0} {
+        set v [lpop pending]
+        switch -- [kind $v] {
+            block  { return 1 }
+            list - immutableSet { lappend pending {*}[lindex $v 1] }
+            struct { lappend pending {*}[lindex $v 2] }
+            result { lappend pending [lindex $v 2] }
+            mutvec { lappend pending {*}[core::mutvec::items $v] }
+            mutarray { lappend pending {*}[core::mutarray::items $v] }
         }
     }
     return 0
@@ -500,6 +487,15 @@ proc core::value::equal {a b} {
     # (MUTABLE-ARRAY.md, MUTABLE-VECTOR.md: none was added for either; a
     # header's identity is never a value's). The refused kinds are the
     # `incomparable` list above.
+    foreach k [list $ka $kb] v [list $a $b] {
+        if {$k in {rawfloat32 rawfloat64}} {
+            # A raw C floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md) has no
+            # type-blind equality: bit identity and numeric equality differ
+            # (two NaNs, two zeros), and neither is the comparison's to pick.
+            core::semanticError EQUALITY \
+                "== is not defined for a raw C floating value ([show $v]): compare its bits (std::ffi::c::raw::float_to_bits, std::ffi::c::raw::double_to_bits) or the Float64 it admits to"
+        }
+    }
     if {($ka in $incomparable && $ka ne "DecimalRounded") || ($kb in $incomparable && $kb ne "DecimalRounded")} {
         core::semanticError EQUALITY \
             "== is not defined for callables: [show $a] == [show $b]"
@@ -569,6 +565,27 @@ proc core::value::equal {a b} {
             if {[lindex $a 1] ne [lindex $b 1]} {
                 return 0
             }
+            set child [treeChildOf [lindex $a 1 0]]
+            if {$child ne ""} {
+                # A tree struct's value (TREE-STRUCT-MILESTONE-1.md): the
+                # same comparison, slot by slot and child by child, walked
+                # with a work stack instead of the host's recursion.
+                return [TreeEqual $a $b $child]
+            }
+            set identity [identityOf [lindex $a 1 0]]
+            if {$identity ne ""} {
+                # A struct that declares its identity (REPRESENTATION-
+                # INDEPENDENT-VALUE-IDENTITY.md) is equal to another of its
+                # declaration when their identities are: the representation's
+                # other fields take no part. Opaque, so a refusal inside it
+                # is the opaque values' (below).
+                try {
+                    return [IdentityEqual $identity [lindex $a 2] [lindex $b 2]]
+                } trap {CORE SEMANTIC EQUALITY} {} {
+                    core::semanticError EQUALITY \
+                        "== is not defined for callables: [show $a] == [show $b]"
+                }
+            }
             if {[isOpaqueStruct [lindex $a 1 0]]} {
                 # An opaque struct's equality is its representation's, which
                 # no message may show (OPAQUE-STRUCTS.md): a refusal inside
@@ -605,6 +622,15 @@ proc core::value::equal {a b} {
             if {[llength $xs] != [llength $ys]} {
                 return 0
             }
+            if {[llength $xs] > $::core::value::pairwiseLimit} {
+                # A larger set is matched by hash (BucketMatch, the matching
+                # identity equality uses): expected O(n). Where a member has
+                # no hash, the comparison below is the one that refuses it.
+                set matched [BucketMatch $xs {} $ys {} 0 0]
+                if {$matched ne ""} {
+                    return $matched
+                }
+            }
             foreach x $xs {
                 set found 0
                 foreach y $ys {
@@ -630,6 +656,315 @@ proc core::value::equal {a b} {
             }
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Tree values (TREE-STRUCT-MILESTONE-1.md)
+#
+# A tree struct's value is an ordinary struct value whose child field holds a
+# List of values of the same declaration: a finite rooted ordered tree, as
+# deep as a program builds it. Equality, both hashes (core/hashing.tcl) and
+# the display (show) of such a value mean exactly what they mean for any
+# struct -- the same comparisons in the same order, the same canonical input,
+# the same text -- but they walk the tree's topology with a work stack of
+# their own, so its depth is bounded by memory, never by the host's
+# recursion (a chain of a million nodes compares, hashes and prints). Which
+# struct identities are tree structs, and which slot is the child field, is
+# the compilation's struct registry's knowledge (hir/structs.tcl installs the
+# test below); nothing here reads an address, an allocation order or anything
+# else of the representation.
+
+namespace eval core::value {
+    # A command prefix taking a named-struct identity and returning the slot
+    # position of its child field if it is a tree struct, else "" (also when
+    # no registry is installed).
+    variable treeTest ""
+}
+
+# Installs the tree test (see above); "" removes it.
+proc core::value::setTreeTest {command} {
+    variable treeTest
+    set treeTest $command
+}
+
+# The child field's slot position of named struct ID if it is a tree struct,
+# else "".
+proc core::value::treeChildOf {id} {
+    variable treeTest
+    if {$id eq "" || $treeTest eq ""} {
+        return ""
+    }
+    return [{*}$treeTest $id]
+}
+
+# 1 if V is a node of the tree struct whose shape is SHAPE (an element of a
+# child List of such a node: a value of the same declaration).
+proc core::value::IsTreeNode {v shape} {
+    return [expr {[lindex $v 0] eq "struct" && [lindex $v 1] eq $shape}]
+}
+
+# equal's struct case for A and B, values of the tree struct whose child
+# field is slot CHILD (same shape: equal checked it). The recursive
+# comparison's exact order -- slot by slot, the child List's length before
+# its elements, each child completely before the next slot -- run from a work
+# stack of frames {fields XS YS I} (compare slots I.. of two nodes) and {kids
+# XS YS I} (compare child pairs I..). The first unequal pair answers 0; a
+# refusal (EQUALITY) propagates as the recursive comparison's would: as the
+# opaque values' own when the tree struct is opaque, else as the pair that
+# raised it.
+proc core::value::TreeEqual {a b child} {
+    set shape [lindex $a 1]
+    if {[isOpaqueStruct [lindex $shape 0]]} {
+        try {
+            return [TreeEqualWalk $a $b $shape $child]
+        } trap {CORE SEMANTIC EQUALITY} {} {
+            core::semanticError EQUALITY \
+                "== is not defined for callables: [show $a] == [show $b]"
+        }
+    }
+    return [TreeEqualWalk $a $b $shape $child]
+}
+
+proc core::value::TreeEqualWalk {a b shape child} {
+    set stack [list [list fields [lindex $a 2] [lindex $b 2] 0]]
+    while {[llength $stack] > 0} {
+        lassign [lpop stack] what xs ys i
+        if {$what eq "kids"} {
+            if {$i >= [llength $xs]} {
+                continue
+            }
+            set x [lindex $xs $i]
+            set y [lindex $ys $i]
+            lappend stack [list kids $xs $ys [expr {$i + 1}]]
+            if {[IsTreeNode $x $shape] && [IsTreeNode $y $shape]} {
+                lappend stack [list fields [lindex $x 2] [lindex $y 2] 0]
+            } elseif {![equal $x $y]} {
+                return 0
+            }
+            continue
+        }
+        set n [llength $xs]
+        for {} {$i < $n} {incr i} {
+            set x [lindex $xs $i]
+            set y [lindex $ys $i]
+            if {$i == $child && [kind $x] eq "list" && [kind $y] eq "list"} {
+                set kx [lindex $x 1]
+                set ky [lindex $y 1]
+                if {[llength $kx] != [llength $ky]} {
+                    return 0
+                }
+                lappend stack [list fields $xs $ys [expr {$i + 1}]] [list kids $kx $ky 0]
+                break
+            }
+            if {![equal $x $y]} {
+                return 0
+            }
+        }
+    }
+    return 1
+}
+
+# show's text for V, a value of the tree struct of shape SHAPE whose child
+# field is slot CHILD (DEBUG and REVEAL as show takes them): the recursive
+# rendering's exact text, produced from a work stack of pieces -- literal
+# text, or a node still to render.
+proc core::value::TreeShow {v shape child debug reveal} {
+    set name [lindex $shape 0]
+    set fields [lrange $shape 1 end]
+    set out ""
+    set stack [list [list node $v]]
+    while {[llength $stack] > 0} {
+        lassign [lpop stack] what piece
+        if {$what eq "text"} {
+            append out $piece
+            continue
+        }
+        if {![IsTreeNode $piece $shape]} {
+            append out [show $piece $debug $reveal]
+            continue
+        }
+        # The node's pieces, last first.
+        set pieces {}
+        set slot 0
+        foreach field $fields item [lindex $piece 2] {
+            if {$slot == 0} {
+                lappend pieces [list text "$name \{$field: "]
+            } else {
+                lappend pieces [list text ", $field: "]
+            }
+            if {$slot == $child && [kind $item] eq "list"} {
+                lappend pieces [list text "\["]
+                set first 1
+                foreach kid [lindex $item 1] {
+                    if {!$first} {
+                        lappend pieces [list text ", "]
+                    }
+                    set first 0
+                    lappend pieces [list node $kid]
+                }
+                lappend pieces [list text "\]"]
+            } else {
+                lappend pieces [list text [show $item $debug $reveal]]
+            }
+            incr slot
+        }
+        lappend pieces [list text "\}"]
+        lappend stack {*}[lreverse $pieces]
+    }
+    return $out
+}
+
+# ---------------------------------------------------------------------------
+# Semantic identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md)
+#
+# A struct may declare its identity apart from its representation: the
+# elements of one List field in no order (`members`), or the pairs of two in
+# no order (`associations`). Which structs do, and which fields, is the
+# compilation's struct registry's knowledge (hir/structs.tcl installs the
+# test below, as it installs the opaque-struct test); a struct of no declared
+# identity is compared field by field, as always.
+#
+# Both forms are multiset equality, of the elements or of the pairs (a pair
+# matches a pair whose key and value are both equal): equal exactly when a
+# one-to-one matching of equal entries exists. That is set or map equality
+# for the distinct members or keys an owner keeps, and an equivalence
+# relation coherent with the hashes' commutative combination whatever the
+# representation holds (core/hashing.tcl). Matching is greedy, which is exact
+# for an equivalence: a positional prefix first (two values built alike match
+# in order with no hashing), then the rest by hash buckets (expected O(n)),
+# or pairwise where an entry has no hash (its comparison refuses it) or the
+# rest is small.
+
+namespace eval core::value {
+    # A command prefix taking a named-struct identity and returning its
+    # identity, {FORM {POSITION ...}} (the identity fields' slot positions),
+    # or "" (no identity, or no registry installed).
+    variable identityTest ""
+    # Up to this many entries are matched pairwise, never hashed.
+    variable pairwiseLimit 8
+}
+
+# Installs the identity test (see above); "" removes it.
+proc core::value::setIdentityTest {command} {
+    variable identityTest
+    set identityTest $command
+}
+
+# The identity {FORM {POSITION ...}} of named struct ID, or "".
+proc core::value::identityOf {id} {
+    variable identityTest
+    if {$id eq "" || $identityTest eq ""} {
+        return ""
+    }
+    return [{*}$identityTest $id]
+}
+
+# The entries of a struct value's identity, from its field values VALUES:
+# {KEYS VALUES PAIRS} -- the members (PAIRS 0, VALUES {}) or the keys and
+# values, as many as both Lists hold (PAIRS 1).
+proc core::value::IdentityEntries {identity values} {
+    lassign $identity form positions
+    switch -- $form {
+        members {
+            return [list [items [lindex $values [lindex $positions 0]]] {} 0]
+        }
+        associations {
+            set keys [items [lindex $values [lindex $positions 0]]]
+            set vals [items [lindex $values [lindex $positions 1]]]
+            set n [expr {min([llength $keys], [llength $vals])}]
+            return [list [lrange $keys 0 $n-1] [lrange $vals 0 $n-1] 1]
+        }
+    }
+    error "core::value: unknown identity form $form"
+}
+
+# 1/0: whether two struct values of one declaration whose identity is
+# IDENTITY, with field values AVALUES and BVALUES, are equal.
+proc core::value::IdentityEqual {identity avalues bvalues} {
+    variable pairwiseLimit
+    lassign [IdentityEntries $identity $avalues] aKeys aVals pairs
+    lassign [IdentityEntries $identity $bvalues] bKeys bVals
+    set n [llength $aKeys]
+    if {$n != [llength $bKeys]} {
+        return 0
+    }
+    # The positional prefix: entries equal in place are matched in place.
+    set i 0
+    while {$i < $n && [EntryEqual $aKeys $aVals $i $bKeys $bVals $i $pairs]} {
+        incr i
+    }
+    if {$i == $n} {
+        return 1
+    }
+    if {$n - $i > $pairwiseLimit} {
+        set matched [BucketMatch $aKeys $aVals $bKeys $bVals $pairs $i]
+        if {$matched ne ""} {
+            return $matched
+        }
+    }
+    # Pairwise from I on: each entry of A matched to an unused equal entry of
+    # B.
+    set used [dict create]
+    for {set x $i} {$x < $n} {incr x} {
+        set found 0
+        for {set y $i} {$y < $n} {incr y} {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+                dict set used $y 1
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# 1/0: whether entry X of A equals entry Y of B (its key and, for pairs, its
+# value).
+proc core::value::EntryEqual {aKeys aVals x bKeys bVals y pairs} {
+    if {![equal [lindex $aKeys $x] [lindex $bKeys $y]]} {
+        return 0
+    }
+    return [expr {!$pairs || [equal [lindex $aVals $x] [lindex $bVals $y]]}]
+}
+
+# Matches A's entries from position FROM on against B's by hash: 1 when
+# every one has an unused equal entry of B, 0 when one has none, or "" when
+# an entry's key has no hash (the caller then compares pairwise, which is
+# where such an entry is refused). Equal keys hash equally (the hashes'
+# coherence), so only a bucket's entries are compared. The buckets are the
+# public hash's: collisions cost time here, never a wrong answer.
+proc core::value::BucketMatch {aKeys aVals bKeys bVals pairs from} {
+    set n [llength $aKeys]
+    set buckets [dict create]
+    set aHashes {}
+    try {
+        for {set y $from} {$y < $n} {incr y} {
+            dict lappend buckets [core::hashing::Fold public [lindex $bKeys $y]] $y
+        }
+        for {set x $from} {$x < $n} {incr x} {
+            lappend aHashes [core::hashing::Fold public [lindex $aKeys $x]]
+        }
+    } trap {CORE SEMANTIC EQUALITY} {} {
+        return ""
+    }
+    set used [dict create]
+    for {set x $from} {$x < $n} {incr x} {
+        set found 0
+        foreach y [dict getdef $buckets [lindex $aHashes $x-$from] {}] {
+            if {![dict exists $used $y] && [EntryEqual $aKeys $aVals $x $bKeys $bVals $y $pairs]} {
+                dict set used $y 1
+                set found 1
+                break
+            }
+        }
+        if {!$found} {
+            return 0
+        }
+    }
+    return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -707,6 +1042,12 @@ proc core::value::show {v {debug 0} {reveal 0}} {
             if {!$reveal && [isOpaqueStruct [lindex $v 1 0]]} {
                 return "<opaque [lindex $v 1 0]>"
             }
+            set child [treeChildOf [lindex $v 1 0]]
+            if {$child ne ""} {
+                # A tree struct's value: the same text, rendered without
+                # the host's recursion (Tree values, above).
+                return [TreeShow $v [lindex $v 1] $child $debug $reveal]
+            }
             set parts {}
             foreach field [lrange [lindex $v 1] 1 end] item [lindex $v 2] {
                 lappend parts "$field: [show $item $debug $reveal]"
@@ -754,6 +1095,7 @@ proc core::value::show {v {debug 0} {reveal 0}} {
         }
         coroutine { return "<coroutine>" }
         cptr { return [core::cabi::show $v] }
+        rawfloat32 - rawfloat64 { return [core::cabi::showRaw $v] }
         mutvec {
             # The current elements (a value's contents, never its header).
             set parts {}

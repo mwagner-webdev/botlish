@@ -1,0 +1,4 @@
+# I4 method applicability: a UnicodeChar receiver; m2's checked str contract excludes it
+import m1
+import m2
+'-'.mark?()

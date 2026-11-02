@@ -1,0 +1,252 @@
+# macos_app.bot -- the macOS application's process environment
+# (ICY-TOWER-MACOS-APP-MILESTONE-1.md): the std::io::IO context main-macos.bot
+# installs. main-macos.bot imports it; nothing else does.
+#
+# Launched from a terminal, Icy Tower writes its summary line and its
+# diagnostics to the terminal; launched by LaunchServices (the Finder, the
+# Dock, `open`), it has no terminal: its standard output and error go
+# nowhere a person sees. So the application's IO context does what
+# std::darwin::io's does -- all of a text written to descriptor 1 or 2, by
+# libSystem's write(2), with std::io::IO's completion policy (std::darwin::io,
+# std::linux::io: a short write completed, a failed one or one without
+# progress std::io::WriteFailed, no retry) -- and one thing more: when the
+# bundle asked for it, the first text written to standard error is also
+# shown to the person, in an alert, before the write returns.
+#
+# The bundle asks for it in its Info.plist: LSEnvironment, which
+# LaunchServices adds to the environment of a process it launches, holds
+# ICY_TOWER_ERROR_ALERTS=1 (package-macos.sh writes it). The Mach-O run from
+# a terminal has no such variable and is the executable it always was: its
+# usage, --help, headless output and diagnostics unchanged, no dialog.
+#
+# Why standard error: the game's own failure path (game.bot) writes one line,
+# "Icy Tower: WHAT failed: SDL's error", and ends the process with C's
+# exit(1); a usage error writes its line, then the usage. The first text of a
+# run on standard error is therefore its diagnostic, whichever it is -- SDL
+# that cannot start its video, a window or a renderer that cannot be made, a
+# frame that cannot be drawn, an unknown option -- and the alert shows that
+# text, unchanged. Nothing in game.bot, sdl.bot or any shared module changes,
+# and no other platform's executable is touched.
+#
+# The alert is CoreFoundation's CFUserNotificationDisplayAlert: a C function
+# that needs no NSApplication, no SDL, no video driver and no window of the
+# process's own (the alert is the system's user-notification agent's), so it
+# works however far SDL got -- before SDL_Init, after SDL_Quit -- and
+# whatever SDL_VIDEO_DRIVER says. It returns when the person dismisses it;
+# then the write returns and the game exits as it always does. One alert per
+# process: later writes to standard error (the usage after a usage error's
+# first line) go to standard error only.
+#
+# Authority (DIRECT-MODULES.md). write(2) is std::darwin's (a designated
+# direct module); getenv(3), the CoreFoundation calls and the native view of
+# the variable's value are C calls and a view of native memory. Every
+# function here that makes one requires App, the context this module
+# declares, so the module is mediated by its own context, never direct, and
+# the authority reaches the program only as that capability. The C
+# declarations and every helper that takes or returns a C pointer or a view
+# are private (MODULE-PRIVACY-AND-CONTEXT-ESCAPE-MILESTONE-1.md); what an
+# importer sees is App, create() and std::io::IO's two operations.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::darwin
+import std::ffi::c
+import std::io
+import std::list
+import std::mutable_vector
+import std::str
+import type std::byte::Byte
+
+extern c framework "CoreFoundation"
+
+# char *getenv(const char *name)
+# (the result points into the environment, never into NAME: independent)
+private extern c fn c_getenv named "getenv"(name: std::ffi::c::Ptr[std::ffi::c::Char] read noescape) -> std::ffi::c::Ptr[std::ffi::c::Char] independent
+
+# CFStringRef CFStringCreateWithCString(CFAllocatorRef alloc, const char *cStr,
+# CFStringEncoding encoding): a new string, copied from cStr (NULL when the
+# bytes are not text in the encoding). CFAllocatorRef NULL is the default
+# allocator; CFStringEncoding is a UInt32.
+private extern c fn cf_string named "CFStringCreateWithCString"(alloc: std::ffi::c::Ptr[std::ffi::c::Void], text: std::ffi::c::Ptr[std::ffi::c::Char] read noescape, encoding: std::ffi::c::UInt) -> std::ffi::c::Ptr[std::ffi::c::Void] independent
+
+# void CFRelease(CFTypeRef cf): never with NULL.
+private extern c fn cf_release named "CFRelease"(cf: std::ffi::c::Ptr[std::ffi::c::Void]) -> unit
+
+# SInt32 CFUserNotificationDisplayAlert(CFTimeInterval timeout, CFOptionFlags
+# flags, CFURLRef iconURL, CFURLRef soundURL, CFURLRef localizationURL,
+# CFStringRef alertHeader, CFStringRef alertMessage, CFStringRef
+# defaultButtonTitle, CFStringRef alternateButtonTitle, CFStringRef
+# otherButtonTitle, CFOptionFlags *responseFlags): CFTimeInterval is a
+# double (0: no timeout), CFOptionFlags an unsigned long; NULL URLs and
+# button titles are the defaults (one button, "OK"), and a NULL
+# responseFlags asks for no response.
+private extern c fn cf_alert named "CFUserNotificationDisplayAlert"(timeout: std::ffi::c::Double, flags: std::ffi::c::ULong, icon: std::ffi::c::Ptr[std::ffi::c::Void], sound: std::ffi::c::Ptr[std::ffi::c::Void], localization: std::ffi::c::Ptr[std::ffi::c::Void], header: std::ffi::c::Ptr[std::ffi::c::Void], message: std::ffi::c::Ptr[std::ffi::c::Void], default_button: std::ffi::c::Ptr[std::ffi::c::Void], alternate_button: std::ffi::c::Ptr[std::ffi::c::Void], other_button: std::ffi::c::Ptr[std::ffi::c::Void], response: std::ffi::c::Ptr[std::ffi::c::ULong]) -> std::ffi::c::Int
+
+# kCFStringEncodingUTF8 (<CoreFoundation/CFString.h>).
+private fn utf8() -> std::ffi::c::UInt:
+    134217984
+
+# kCFUserNotificationStopAlertLevel (<CoreFoundation/CFUserNotification.h>).
+private fn stop_alert() -> std::ffi::c::ULong:
+    0
+
+# The first two bytes of a C string: enough to tell "1" (49, then the NUL)
+# from anything else. The second is read only when the first is no NUL, so
+# no byte past the string's end is ever read.
+private layout Flag:
+    size 2
+    align 1
+    field chars: array 2 of std::ffi::c::UChar at 0
+
+# The alert's header.
+private fn alert_header() -> str:
+    "Icy Tower stopped"
+
+# The environment variable the bundle's LSEnvironment sets.
+private fn alerts_variable() -> str:
+    "ICY_TOWER_ERROR_ALERTS"
+
+# The process's environment of a macOS application: the standard output and
+# error descriptors, and whether the alert of this run was shown. Opaque:
+# only this module makes one or looks inside.
+opaque context struct App:
+    alerted: MutableVector[bool]
+
+# The application's environment, no alert shown yet. Makes no call:
+# `with context macos_app::create()` installs it (main-macos.bot).
+fn create() -> App:
+    App {alerted: std::mutable_vector::from_list([])}
+
+private fn nul() -> Byte:
+    0
+
+# TEXT's UTF-8 bytes and the NUL a C string ends with.
+private fn cstring(text: str) -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list(std::str::encode_utf8(text).append(nul()))
+
+# ---------------------------------------------------------------------------
+# The alert
+
+# Whether TEXT's last character (of N) is a newline.
+private fn newline_last?(text: str, n: int) -> bool:
+    last = text.char_at(n - 1):
+        on IndexNotFound:
+            return false
+    last == '\n'
+
+# TEXT without its final newline (write_error_line's).
+private fn without_newline(text: str) -> str:
+    n = std::str::length(text)
+    if n == 0 or not text.newline_last?(n):
+        return text
+    cut = text.substring(0, n - 1):
+        on LowerUnderrun:
+            text
+        on UpperOverrun:
+            text
+    cut
+
+# Whether the C string at VALUE is exactly "1".
+private fn one?(value: std::ffi::c::Ptr[std::ffi::c::Char], context app: App) -> bool errors NativeViewNull, IndexNotFound:
+    v = std::binary::native::view(Flag, value)
+    if std::binary::element(v.chars, 0) != 49:
+        return false
+    std::binary::element(v.chars, 1) == 0
+
+# Whether ICY_TOWER_ERROR_ALERTS is "1" in the process's environment: set
+# by LaunchServices from the bundle's LSEnvironment.
+private fn alerts_requested?(context app: App) -> bool:
+    value = cstring(alerts_variable()).c_getenv()
+    if value.null?():
+        return false
+    one = value.one?():
+        on NativeViewNull:
+            return false
+        on IndexNotFound:
+            return false
+    one
+
+# A CoreFoundation string of TEXT (NULL when CoreFoundation refuses it).
+private fn cf_text(text: str, context app: App) -> std::ffi::c::Ptr[std::ffi::c::Void]:
+    no_allocator = std::ffi::c::null[std::ffi::c::Void]()
+    no_allocator.cf_string(cstring(text), utf8())
+
+private fn release(cf: std::ffi::c::Ptr[std::ffi::c::Void], context app: App):
+    if not cf.null?():
+        cf.cf_release()
+
+# Shows MESSAGE under the header "Icy Tower stopped", one OK button, until
+# the person dismisses it; whether the alert was shown (false when
+# CoreFoundation could not make the strings or show it).
+private fn show_alert(message: str, context app: App) -> bool:
+    header = alert_header().cf_text()
+    body = message.cf_text()
+    if header.null?() or body.null?():
+        header.release()
+        body.release()
+        return false
+    icon = std::ffi::c::null[std::ffi::c::Void]()
+    sound = std::ffi::c::null[std::ffi::c::Void]()
+    localization = std::ffi::c::null[std::ffi::c::Void]()
+    default_button = std::ffi::c::null[std::ffi::c::Void]()
+    alternate_button = std::ffi::c::null[std::ffi::c::Void]()
+    other_button = std::ffi::c::null[std::ffi::c::Void]()
+    no_response = std::ffi::c::null[std::ffi::c::ULong]()
+    no_timeout = 0.0
+    status = no_timeout.cf_alert(stop_alert(), icon, sound, localization, header, body, default_button, alternate_button, other_button, no_response)
+    header.release()
+    body.release()
+    status == 0
+
+# ---------------------------------------------------------------------------
+# std::io::IO
+
+# The standard output and error descriptors.
+private fn standard_output() -> std::ffi::c::Int:
+    1
+
+private fn standard_error() -> std::ffi::c::Int:
+    2
+
+# Every byte of BYTES on descriptor FD: one write(2) in the common case, a
+# short write completed by writing the rest, a failed write and one without
+# progress std::io::WriteFailed (std::darwin::io's policy, exactly).
+private fn write_all(fd: std::ffi::c::Int, bytes: List[Byte], context app: App) -> unit errors std::io::WriteFailed:
+    n = std::list::length(bytes)
+    if n == 0:
+        return unit
+    written = fd.write(std::abi::bytes::from_list(bytes)).count
+    if written <= 0:
+        fail std::io::WriteFailed
+    if written < n:
+        remaining = loop i from written to n:
+            bytes.at(i)
+        return fd.write_all(remaining)
+    unit
+
+# Whether every byte of BYTES reached descriptor FD.
+private fn wrote?(fd: std::ffi::c::Int, bytes: List[Byte], context app: App) -> bool:
+    done = fd.write_all(bytes):
+        on std::io::WriteFailed:
+            return false
+    true
+
+# All of TEXT, UTF-8 encoded, on standard output.
+fn write_text(text: str, context app: App) -> unit errors std::io::WriteFailed:
+    standard_output().write_all(std::str::encode_utf8(text))
+
+# All of TEXT, UTF-8 encoded, on standard error; and, the first time in a
+# run that LaunchServices launched (ICY_TOWER_ERROR_ALERTS=1), the same text
+# in an alert, before this returns. The alert is shown whether or not the
+# write succeeded (standard error may lead nowhere); a failed write is then
+# std::io::WriteFailed, as std::darwin::io's.
+fn write_error_text(text: str, context app: App) -> unit errors std::io::WriteFailed:
+    ok = standard_error().wrote?(std::str::encode_utf8(text))
+    if app.alerted.empty?() and alerts_requested?():
+        app.alerted.push(true)
+        shown = text.without_newline().show_alert()
+    if not ok:
+        fail std::io::WriteFailed
+    unit

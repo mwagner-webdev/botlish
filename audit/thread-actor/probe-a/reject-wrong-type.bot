@@ -1,0 +1,21 @@
+# reject-wrong-type.bot -- must be REJECTED (Probe A): an Address[int] is the
+# right to send an int; sending a str through it is a static IMPRINT error.
+import actor
+import std::event_loop
+
+context struct Mail:
+    nums: actor::Postbox[int]
+    lines: actor::Postbox[str]
+
+fn main(context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    box = actor::open(mail.nums)
+    actor::send(mail.lines, box.to, "not an int")
+    0
+
+with context std::event_loop::create(8)
+with context Mail {nums: actor::postbox[int](1, 4), lines: actor::postbox[str](2, 4)}
+main():
+    on IndexNotFound:
+        0
+    on std::event_loop::SchedulerFault:
+        0

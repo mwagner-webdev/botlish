@@ -1,0 +1,127 @@
+# hsnet.bot -- the bridge's executor on the Linux driver (event_loop_linux):
+# Botlish watches every descriptor the bridge's Rust code waits on. One
+# watch per descriptor, delivering readiness records (bits, descriptor) to
+# the executor's source. A watch's interest is fixed when it is made
+# (event_loop_linux::watch): arming another interest unwatches and watches
+# again (counted: the census's finding on the package's watch API).
+import event_loop_linux
+import hs
+import std::event_loop
+import std::mutable_array
+import std::mutable_vector
+
+opaque context struct Net:
+    fds: MutableVector[int]
+    interests: MutableVector[int]
+    watches: MutableVector[event_loop_linux::Watch]
+    counts: MutableArray[int]
+
+fn create() -> Net:
+    Net {fds: std::mutable_vector::from_list([]), interests: std::mutable_vector::from_list([]), watches: std::mutable_vector::from_list([]), counts: std::mutable_array::create(4, 0)}
+
+private fn interest_of(i: int) -> event_loop_linux::Interest:
+    if i == 1:
+        event_loop_linux::Interest::Readable
+    elif i == 2:
+        event_loop_linux::Interest::Writable
+    else:
+        event_loop_linux::Interest::Both
+
+private nomethod fn find(fd: int, context n: Net) -> int errors IndexNotFound:
+    count = n.fds.length()
+    loop i from 0 to count:
+        if n.fds.at(i) == fd:
+            return i
+    -1
+
+# Counters: 0 watches made, 1 rearms, 2 interest changes (unwatch and
+# watch again), 3 descriptors retired.
+nomethod fn count(i: int, context n: Net) -> int errors IndexNotFound:
+    n.counts.at(i)
+
+private nomethod fn bump(i: int, context n: Net) errors IndexNotFound:
+    n.counts.set(i, n.counts.at(i) + 1)
+
+private nomethod fn arm(fd: int, interest: int, context n: Net, ev: std::event_loop::Loop, nat: event_loop_linux::Native, h: hs::Hs) errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    i = find(fd)
+    if i < 0:
+        w = event_loop_linux::watch(fd, interest_of(interest), hs::rx())
+        bump(0)
+        n.fds.push(fd)
+        n.interests.push(interest)
+        n.watches.push(w)
+        return unit
+    if n.interests.at(i) == interest:
+        bump(1)
+        event_loop_linux::rearm(n.watches.at(i))
+        return unit
+    bump(2)
+    event_loop_linux::unwatch(n.watches.at(i))
+    w = event_loop_linux::watch(fd, interest_of(interest), hs::rx())
+    n.interests.swap(i, interest)
+    n.watches.swap(i, w)
+
+# Unwatch FD, then close it (the package's order: a closed descriptor's
+# number may name another file at once).
+private nomethod fn retire(fd: int, context n: Net, nat: event_loop_linux::Native) errors IndexNotFound:
+    i = find(fd)
+    bump(3)
+    if i >= 0:
+        event_loop_linux::unwatch(n.watches.at(i))
+        n.fds.swap(i, -1)
+    hs::close_fd(fd)
+
+private nomethod fn settle(context n: Net, ev: std::event_loop::Loop, nat: event_loop_linux::Native, h: hs::Hs) errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        fd = hs::next_interest()
+        if fd < 0:
+            break
+        interest = hs::interest()
+        if interest == 4:
+            retire(fd)
+        else:
+            arm(fd, interest)
+
+private fn executor(context n: Net, ev: std::event_loop::Loop, nat: event_loop_linux::Native, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    loop:
+        if hs::stopped?():
+            break
+        left = hs::step()
+        settle()
+        if hs::stopped?():
+            break
+        if left > 0:
+            hs::busy()
+        elif not hs::idle():
+            break
+    0
+
+# Start the bridge on the Linux driver: its registrations, the timekeeper
+# and this executor. Foreign-thread wakes post to an endpoint of the
+# driver.
+fn start(context n: Net, ev: std::event_loop::Loop, nat: event_loop_linux::Native, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    ep = event_loop_linux::endpoint(64)
+    hs::start(event_loop_linux::endpoint_id(ep))
+    coroutine {step: s, first: f} = executor()
+    std::event_loop::adopt(s, f)
+
+# Stop the bridge (hs::stop), then unwatch and close every descriptor the
+# released Rust objects held. How many Rust tasks were still live.
+fn stop(context n: Net, ev: std::event_loop::Loop, nat: event_loop_linux::Native, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    left = hs::stop()
+    loop:
+        fd = hs::next_interest()
+        if fd < 0:
+            break
+        if hs::interest() == 4:
+            retire(fd)
+    left
+
+# Descriptors still watched (0 after stop).
+nomethod fn watched(context n: Net) -> int errors IndexNotFound:
+    count = n.fds.length()
+    live = std::mutable_array::create(1, 0)
+    loop i from 0 to count:
+        if n.fds.at(i) >= 0:
+            live.set(0, live.at(0) + 1)
+    live.at(0)

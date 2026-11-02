@@ -1,0 +1,20 @@
+# The HTTP stack census's one BoringSSL provider (HTTP-STACK-INTEGRATION-CENSUS.md,
+# "BoringSSL provider"). A Tcl dict, read by tools/provider.tcl.
+#
+# The revision is the one boring-sys 5.4.0 vendors (its deps/boringssl
+# submodule at cloudflare/boring 309bf35b, checked by the census), which is
+# upstream's release tag 0.20261020.0. The provider is built from upstream
+# WITHOUT boring-sys's boring-pq.patch: neither boring 5.4.0 nor quiche
+# 0.30.0 calls a symbol that patch adds (the census greps for them).
+#
+# The tag is an annotated tag object, not a signed one: its id and its
+# commit are both pinned here, independently of the server that serves
+# them, and the fetch checks both.
+library boringssl
+url https://boringssl.googlesource.com/boringssl
+tag 0.20261020.0
+tagObject 6b482f540b02a913d3dbec6fd5c4d598d523cf48
+commit d3bf4795ad5b79d646cddf2fec687da5b9b502db
+bindings {boring 5.4.0 boring-sys 5.4.0 quiche 0.30.0}
+cmake {-DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON}
+targets {crypto ssl}

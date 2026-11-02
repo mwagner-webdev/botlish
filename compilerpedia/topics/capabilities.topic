@@ -225,7 +225,7 @@ separator).
 title: Assignment and mutable variables: absent
 summary: Bindings are immutable and a name is bound once per scope: `x = x + 1` is a duplicate binding; compute a new name, recurse, collect with a loop, or grow a MutableVector.
 index: concepts
-alias: assignment; mutable variable; reassign; variable update; counter variable; x = x + 1
+alias: assignment; mutable variable; reassign; variable update; counter variable; x = x + 1; +=; x += 1; -=; compound assignment
 keywords: assign, mutate, variable, counter, accumulate, update
 related: concept.bindings rule.immutable-bindings principle.immutability concept.loops concept.mutable-vector
 
@@ -341,17 +341,21 @@ fn has_big?(xs: List[int], limit: int) -> bool:
 
 @topic capability.map-filter
 title: map, filter and reduce: use loops
-summary: There are no map/filter/reduce functions: a collecting loop is the transformation (`loop x in xs: f(x)`), `continue` filters, and std::list::any?, all?, none? and find cover search.
+summary: No map/filter/reduce functions: a collecting loop transforms (`loop x in xs: f(x)`), `continue` filters, a fold reduces, std::list::flat flattens, and std::list::any?, all?, none? and find search.
 index: concepts stdlib
-alias: map; filter; reduce; fold; comprehension; list comprehension
-keywords: map, filter, reduce, fold, transform, collect
-related: concept.loops stdlib.module.std::list capability.assignment
-docs: RETURNING-ITERABLE-LOOPS.md COLLECTING-LOOPS.md
+alias: map; filter; comprehension; list comprehension
+keywords: map, filter, reduce, fold, transform, collect, flat_map, flatten
+related: concept.loops concept.folds stdlib.module.std::list stdlib.std::list::flat capability.assignment
+docs: RETURNING-ITERABLE-LOOPS.md COLLECTING-LOOPS.md LIST-FLAT-MILESTONE-1.md
 
 == STATUS
 stdlib/list.bot deliberately has no map or filter: the collecting loop
-subsumes them. There is no fold either; carry an accumulator through
-recursion, or use a MutableVector.
+subsumes them. Reducing is the language's `fold` (concept.folds): `fold x
+in xs with intermediate acc INITIAL:` carries one value through the
+iterations; there is no reduce function taking a callback. Nor is there a
+flat_map: a collecting loop whose body makes a List, bound to a name, then
+std::list::flat of it (stdlib.std::list::flat) -- iteration, aggregation
+and flattening stay three operations.
 
 @example accept
 evens = loop x in [1, 2, 3, 4]:

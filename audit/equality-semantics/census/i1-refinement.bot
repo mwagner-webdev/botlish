@@ -1,0 +1,18 @@
+# I1 a refinement value against its carrier and against another refinement
+import std::str
+refined type Word = str
+refined type Tag = str
+fn word?(s: str) -> bool proves s: Word:
+    std::str::length(s) > 0
+fn tag?(s: str) -> bool proves s: Tag:
+    std::str::length(s) > 0
+fn same(a: Word, b: Tag) -> bool:
+    a == b
+fn carrier(a: Word, b: str) -> bool:
+    a == b
+x = "ab"
+y = "ab"
+if word?(x) and tag?(y):
+    [same(x, y), carrier(x, "ab")]
+else:
+    []

@@ -1,0 +1,5 @@
+# I7 MutableMap[str, int] lookup with a character key: a static TYPE error at the key
+import std::mutable_map
+m = std::mutable_map::create[str, int]()
+m.set("-", 1)
+m.contains('-')

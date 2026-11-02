@@ -1,0 +1,5 @@
+# I2 an empty List of affine values: rejected by type though [] == [] would hold
+import std::ffi::c
+fn ptrs(a: List[std::ffi::c::Ptr[std::ffi::c::Int]]) -> bool:
+    a == []
+ptrs([])

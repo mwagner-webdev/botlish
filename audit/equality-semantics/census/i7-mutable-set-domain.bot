@@ -1,0 +1,6 @@
+# I7 MutableSet[Small].contains with an Int outside the domain and with an unproven Int
+import std::mutable_set
+type Small = Int in 0..9
+s = std::mutable_set::create[Small]()
+s.add(3)
+s.contains(12)

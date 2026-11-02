@@ -1,0 +1,11 @@
+# authority.bot -- the generated binding's raw authority (tests/raven.test,
+# raven-authority): Rinit_ex takes a pointer its contract says nothing about
+# (it may keep it), so calling it is a direct edge of this program, which
+# does not say `direct module`: DIRECT. The raven package's start makes the
+# same call under its own context, so a program using it is ordinary.
+import raven::core
+import std::ffi::c
+import raven::ctypes
+
+desc = std::ffi::c::null[raven::ctypes::RInitDesc]()
+raven::core::Rinit_ex(desc)

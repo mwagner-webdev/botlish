@@ -1,0 +1,5 @@
+# I7 MutableSet[List[int]].contains([]): the empty List is admitted as a List[int]
+import std::mutable_set
+s = std::mutable_set::create[List[int]]()
+s.add([])
+[s.contains([]), s.contains([1])]

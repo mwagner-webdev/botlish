@@ -572,6 +572,15 @@ proc hir::affine::Consumer {hir parent e} {
             return [list move error $p]
         }
         loop - listloop - countloop - lockloop {
+            if {[hir::IsFoldNode $node] && ($e eq [dict get $node foldInitial] || $role ne "operand")} {
+                # A fold's initial value or body value: its next
+                # intermediate (FOLD-LOOPS-MILESTONE-1.md). Carrying an affine
+                # one would move it from each iteration's binding into the
+                # next and release it on every exit -- an ownership protocol
+                # of its own, not implemented.
+                return [list reject AFFINE-FOLD-UNSUPPORTED \
+                    "[Named $hir $e] is an affine [TypeText $hir $e], which would become the intermediate of a fold: a fold cannot carry an affine value from one iteration to the next yet (carry an unrestricted value, or move the affine one with a loop of its own)"]
+            }
             if {$role eq "operand" && [dict get $node kind] eq "listloop" && [hir::mutvec::Kind $type] ne ""} {
                 # A consuming loop over an affine MutableVector or MutableArray
                 # (MUTABLE-VECTOR.md, MUTABLE-ARRAY.md): the collection moves

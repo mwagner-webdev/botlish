@@ -1,0 +1,511 @@
+# Mutants of the package manager (audit/package-manager/tools/mutate.tcl,
+# PACKAGE-MANAGER-MILESTONE-1.md, PACKAGE-MANAGER-MILESTONE-2.md).
+#
+#   @@ NAME DESCRIPTION
+#   %% TESTFILE...      (optional: the test files that must kill it;
+#                        tests/package-manager.test by default)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# botlish.json
+
+@@ json-duplicate-keys-kept an object's repeated key keeps its last value, as a lenient JSON reader does
+## pm/json.tcl
+<<<<
+        if {[dict exists $seen $key]} {
+====
+        if {0} {
+>>>>
+
+@@ descriptor-unknown-keys-ignored a key the file's schema does not know (a hook, a later schema's) is ignored instead of refused
+## pm/descriptor.tcl
+<<<<
+        if {$key ni $allowed} {
+====
+        if {0} {
+>>>>
+
+@@ descriptor-lock-outside-request a lock the request does not accept is taken as it is
+## pm/descriptor.tcl
+<<<<
+            } elseif {![pm::version::satisfies $locked $request]} {
+====
+            } elseif {0} {
+>>>>
+
+@@ descriptor-artifact-sources-allowed an artifact's botlish.json may carry sources (an author's machine-specific acquisition)
+## pm/descriptor.tcl
+<<<<
+        if {$context eq "artifact"} {
+            lappend problems "an artifact's botlish.json has no \"sources\": where a consumer finds a dependency is its own installation's business, never the published package's"
+        } elseif {[pm::json::type $item] ne "obj"} {
+====
+        if {[pm::json::type $item] ne "obj"} {
+>>>>
+
+@@ version-prefix-by-text a request matches by text prefix, so 1.2 accepts 1.20.0
+## pm/version.tcl
+<<<<
+    return [expr {[lrange $have 0 [expr {[llength $want] - 1}]] eq $want}]
+====
+    return [string match $request* $version]
+>>>>
+
+@@ version-compare-as-text versions compare as text, so 1.9.7 sorts after 1.10.0
+## pm/version.tcl
+<<<<
+proc pm::version::compare {a b} {
+====
+proc pm::version::compare {a b} {
+    return [string compare $a $b]
+>>>>
+
+# ---------------------------------------------------------------------------
+# The .botpkg reader
+
+@@ archive-dot-dot-allowed a ".." path component passes the path rules (extraction would leave the staging directory)
+## pm/archive.tcl
+<<<<
+            if {$component in {. ..}} {
+                return "a \"$component\" path component"
+            }
+====
+            if {$component in {. ..}} {
+                continue
+            }
+>>>>
+
+@@ archive-entry-type-unchecked an entry's external attributes are not checked: a symbolic link or an executable passes
+## pm/archive.tcl
+<<<<
+        if {$attributes != $external} {
+====
+        if {0} {
+>>>>
+
+@@ archive-order-unchecked entries need not be sorted, so a repeated name passes
+## pm/archive.tcl
+<<<<
+        if {$i > 0 && [string compare $previous $path] >= 0} {
+====
+        if {0} {
+>>>>
+
+@@ archive-gaps-allowed a local header need not start where the previous entry ends: hidden data between entries passes
+## pm/archive.tcl
+<<<<
+        if {$offset != $expected} {
+====
+        if {0} {
+>>>>
+
+@@ archive-crc-unchecked a file's CRC-32 is not checked
+## pm/archive.tcl
+<<<<
+    if {([zlib crc32 $out] & 0xffffffff) != [dict get $entry crc]} {
+====
+    if {0} {
+>>>>
+
+@@ archive-inflate-unbounded decompression does not stop at the declared size (a deflate bomb expands in memory)
+## pm/archive.tcl
+<<<<
+                    if {[string length $out] > $size} break
+====
+                    if {[string length $out] > 1 << 30} break
+>>>>
+
+# ---------------------------------------------------------------------------
+# Acquisition
+
+@@ catalog-conflict-first-wins of two different artifacts claiming one release, the first repository's is taken
+## pm/catalog.tcl
+<<<<
+        if {[dict get $artifact digest] ne [dict get $first digest]} {
+====
+        if {0} {
+>>>>
+
+@@ catalog-identity-unchecked a repository file's embedded identity is not compared with its name
+## pm/catalog.tcl
+<<<<
+    if {[dict get $first name] ne $name || [dict get $first version] ne $version} {
+====
+    if {0} {
+>>>>
+
+@@ catalog-archive-digest-unchecked an archive source's recorded SHA-256 is not compared with the file's
+## pm/catalog.tcl
+<<<<
+    if {[dict get $artifact digest] ne [dict get $source sha256]} {
+====
+    if {0} {
+>>>>
+
+@@ update-ignores-request update takes the newest version in the repository, whatever the request accepts
+## pm/commands.tcl
+<<<<
+            set newest [pm::version::newest $versions $request]
+====
+            set newest [lindex $versions end]
+>>>>
+
+# ---------------------------------------------------------------------------
+# Transactions and ownership
+
+@@ install-replaces-manual a package installed by hand is replaced like a managed one
+## pm/install.tcl
+<<<<
+            if {[pm::Exists $active]} {
+                pm::Fail MANUAL
+====
+            if {0} {
+                pm::Fail MANUAL
+>>>>
+
+@@ install-replaces-modified a managed package that changed since its installation is replaced without -force
+## pm/install.tcl
+<<<<
+        CheckUnchanged $ctx $name [dict get $state $name] $force
+        lappend operations [list $name [pm::Exists $active] 1]
+====
+        lappend operations [list $name [pm::Exists $active] 1]
+>>>>
+
+@@ install-reuse-ignores-changes an installed package of the locked version is reused as it is, its files unchecked
+## pm/install.tcl
+<<<<
+    return [expr {[pm::state::Changes $installed $record x] eq ""}]
+====
+    return 1
+>>>>
+
+@@ commit-no-rollback a failure during the commit leaves the renames it made
+## pm/install.tcl
+<<<<
+        if {[catch {Rollback $ctx} rollbackError]} {
+====
+        if {0} {
+>>>>
+
+@@ recover-discards-journal an interrupted operation's journal is discarded instead of rolled back
+## pm/install.tcl
+<<<<
+    if {[pm::Exists [file join $txn journal.json]]} {
+        Rollback $ctx
+====
+    if {[pm::Exists [file join $txn journal.json]]} {
+        pm::RemoveTree $txn
+>>>>
+
+@@ lock-ignores-holder another running operation's lock is taken over as an interrupted one's
+## pm/install.tcl
+<<<<
+        if {$alive eq "1"} {
+====
+        if {0} {
+>>>>
+
+@@ cycle-unchecked a package that depends, through others, on its own release recurses until a limit
+## pm/install.tcl
+<<<<
+            if {$ancestor eq $dep && $ancestorVersion eq $version} {
+====
+            if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# Packing and verification
+
+@@ pack-follows-links a symbolic link in a package directory is packed as the file it points to
+## pm/commands.tcl
+<<<<
+            link { lappend problems "$path is a symbolic link: a package holds regular files only" }
+====
+            link { dict set files $path [pm::ReadBytes $full] }
+>>>>
+
+@@ pack-includes-hidden hidden entries (.git, .bot_modules) are packed
+## pm/commands.tcl
+<<<<
+        if {[string index $name 0] eq "."} continue
+====
+>>>>
+
+@@ pack-keeps-sources the artifact's botlish.json keeps the author's sources
+## pm/commands.tcl
+<<<<
+    dict set files botlish.json [pm::descriptor::encode $descriptor 0]
+====
+    dict set files botlish.json [pm::descriptor::encode $descriptor 1]
+>>>>
+
+@@ verify-ignores-artifact-bytes verify does not compare installed files with the artifact's bytes
+## pm/commands.tcl
+<<<<
+                if {[file isfile $file] && [file type $file] eq "file" && [pm::ReadBytes $file] ne $bytes} {
+====
+                if {0} {
+>>>>
+
+# ---------------------------------------------------------------------------
+# PM-2: targets, views, native verification, deployment, hashing
+
+@@ targets-map-other-target a target's view takes another target's files too
+%% package-native.test
+## pm/targets.tcl
+<<<<
+        } elseif {$own ne "" && [string first $own/ $path] == 0} {
+            lappend out [string range $path [string length $own/] end] $path
+        }
+====
+        } else {
+            set cut [string first / [string range $path [string length targets/] end]]
+            lappend out [string range $path [expr {[string length targets/] + $cut + 1}] end] $path
+        }
+>>>>
+
+@@ targets-view-collisions-unchecked a target file replacing a common one, or a case collision in a view, is not a layout problem
+%% package-native.test
+## pm/targets.tcl
+<<<<
+        set problem [pm::archive::CollisionProblem [lsort -unique $viewPaths]]
+====
+        set problem ""
+>>>>
+
+@@ view-reuse-ignores-changes a view whose inputs are unchanged is reused without looking at its files
+%% package-native.test
+## pm/install.tcl
+<<<<
+            if {$changes eq ""} {
+====
+            if {1} {
+>>>>
+
+@@ view-derived-ignores-store a view's digest leaves out the store: an update keeps the old views
+%% package-native.test
+## pm/view.tcl
+<<<<
+    append text [pm::state::encode $state]
+====
+    append text [dict keys $state]
+>>>>
+
+@@ view-unsupported-target-projected a package that does not name the target is projected anyway, with its common files
+%% package-native.test
+## pm/view.tcl
+<<<<
+    if {$supported ne "*" && $target ni $supported} {
+====
+    if {0} {
+>>>>
+
+@@ view-rollback-ignores-kind rollback treats a view's operation as a package's
+%% package-native.test
+## pm/install.tcl
+<<<<
+        set kind package
+        if {[dict exists $op kind]} {
+            set kind [pm::json::payload [dict get $op kind]]
+        }
+====
+        set kind package
+>>>>
+
+@@ view-empty-targets-left an emptied .targets is left behind, so the compiler finds a target tree directory with no target
+%% package-native.test
+## pm/install.tcl
+<<<<
+    if {[pm::Exists $root] && [file type $root] eq "directory" && [pm::state::Entries $root] eq ""} {
+====
+    if {0} {
+>>>>
+
+@@ view-hand-made-targets-taken a .targets the manager did not make is taken over
+%% package-native.test
+## pm/install.tcl
+<<<<
+    if {[dict size $oldViews] == 0 && [pm::Exists $root]} {
+====
+    if {0} {
+>>>>
+
+@@ compiler-ignores-target-tree the compiler reads .bot_modules for every target, never the target's tree
+%% package-native.test
+## surface/modules.tcl
+<<<<
+    set targets [file join $modules .targets]
+    if {![Probe directory $targets]} {
+====
+    set targets [file join $modules .targets]
+    if {1} {
+>>>>
+
+@@ native-machine-unchecked an ELF of any machine is taken for the target's
+%% package-native.test
+## pm/native.tcl
+<<<<
+                && [dict get $facts endian] eq "le" && [dict get $facts machine] == [dict get $t machine]}]
+====
+                && [dict get $facts endian] eq "le"}]
+>>>>
+
+@@ native-import-library-as-static an import library declared a static archive is accepted
+%% package-native.test
+## pm/native.tcl
+<<<<
+        if {[dict get $archive imports] ne ""} {
+            Fail "$label is an import library
+====
+        if {0} {
+            Fail "$label is an import library
+>>>>
+
+@@ native-identity-unchecked a shared library's loader identity is not compared with its metadata
+%% package-native.test
+## pm/native.tcl
+<<<<
+            || ([dict get $t format] ne "pe" && $actual ne $identity)} {
+====
+            || 0} {
+>>>>
+
+@@ native-needs-unchecked a shared library's loader dependencies are not compared with its metadata
+%% package-native.test
+## pm/native.tcl
+<<<<
+    if {[lsort -unique $fold $needed] ne [lsort -unique $fold $declared]} {
+====
+    if {0} {
+>>>>
+
+@@ native-musl-accepted a library built against musl is taken for the GNU C library's target
+%% package-native.test
+## pm/native.tcl
+<<<<
+                if {[string match libc.musl-* $need] || [string match ld-musl-* $need]} {
+====
+                if {0} {
+>>>>
+
+@@ native-different-bundles-merged two instances bundling different libraries of one name: the first is taken
+%% package-native.test
+## pm/native.tcl
+<<<<
+                } elseif {$sha ne $digest} {
+====
+                } elseif {0} {
+>>>>
+
+@@ native-origins-merged a bundled and a system library of one name are both accepted
+%% package-native.test
+## pm/native.tcl
+<<<<
+                if {[dict get $library $key] ne [dict get $entry $key]} {
+====
+                if {0} {
+>>>>
+
+@@ native-duplicate-symbols-ignored two static archives defining one symbol are linked together
+%% package-native.test
+## pm/native.tcl
+<<<<
+            if {[dict exists $definers $symbol] && [dict get $definers $symbol] ne [dict get $entry name]} {
+====
+            if {0} {
+>>>>
+
+@@ native-system-bare-file a library file in a library directory counts as a system installation
+%% package-native.test
+## pm/native.tcl
+<<<<
+    if {$path eq ""} {
+        if {$found eq ""} {
+====
+    if {$path eq "" && $found ne ""} {
+        set path [lindex $found 0]
+        set evidence "a file"
+    }
+    if {$path eq ""} {
+        if {$found eq ""} {
+>>>>
+
+@@ native-system-version-unchecked a system library's version is not compared with the request
+%% package-native.test
+## pm/native.tcl
+<<<<
+        if {$numbers eq "" || ![Satisfies $numbers [dict get $library version]]} {
+====
+        if {0} {
+>>>>
+
+@@ native-source-crosscheck-off the packages' link declarations are not compared with their metadata
+%% package-native.test
+## pm/native.tcl
+<<<<
+        foreach declaration [dict getdef $instance links {}] {
+====
+        foreach declaration {} {
+>>>>
+
+@@ pack-skips-native pack checks no target's native files
+%% package-native.test
+## pm/commands.tcl
+<<<<
+    if {![pm::targets::Aware $descriptor]} {
+        return {}
+    }
+    set problems [pm::targets::Problems $descriptor [dict keys $files]]
+====
+    if {1} {
+        return {}
+    }
+    set problems [pm::targets::Problems $descriptor [dict keys $files]]
+>>>>
+
+@@ deploy-replaces-manual-files a deployment replaces a file it did not place
+%% package-native.test
+## pm/deploy.tcl
+<<<<
+        if {![dict exists $old $relative]} {
+            if {!$force} {
+====
+        if {![dict exists $old $relative]} {
+            if {0} {
+>>>>
+
+@@ deploy-no-rollback a failed deployment is not rolled back
+%% package-native.test
+## pm/deploy.tcl
+<<<<
+        if {[catch {Rollback $out} rollbackError]} {
+====
+        if {[catch {} rollbackError]} {
+>>>>
+
+@@ runs-without-runtime-path a native backend's run of a program from a target tree gets no runtime search path
+%% package-native.test
+## native/native.tcl
+<<<<
+    foreach dir $runtimePaths {
+        lappend args --runtime-path $dir
+    }
+====
+>>>>
+
+@@ sha256-tool-from-path the SHA-256 tool is looked up on PATH
+%% package-native.test
+## pm/sha256.tcl
+<<<<
+    return [list {sha256sum /usr/bin/sha256sum} {sha256sum /bin/sha256sum} {shasum /usr/bin/shasum}]
+====
+    return [list [list sha256sum [lindex [auto_execok sha256sum] 0]]]
+>>>>

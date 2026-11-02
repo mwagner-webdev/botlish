@@ -627,7 +627,7 @@ test mr-diag-decision-reads-every-check {what diagnostic recovery leaves unrepor
     set results
 } -result {{} std::list::length UNBOUND std::list::length}
 
-test mr-diag-candidate-explanations {NO-APPLICABLE-METHOD names each candidate with its own reason and says which operand it rejects -- the receiver, or an argument by its position -- and a note locates each candidate declared in source; an intrinsic's reason is its first parameter's kind, and it has no note} -body {
+test mr-diag-candidate-explanations {NO-APPLICABLE-METHOD names each candidate with its own reason and says which operand it rejects -- the receiver, or an argument by its position -- and a note locates each candidate declared in source; an intrinsic's reason is its call's own TYPE diagnostic (the receiver's type against its first parameter's kind), and it has no note} -body {
     set p "fn g(a: int, b: str) -> int:\n    0\n"
     set q "\nfn g(a: str, b: int) -> int:\n    1\n"
     set r [mrCompile [dict create p.bot $p q.bot $q main.bot "import p\nimport q\n\n(1).g(2)\n"]]
@@ -635,7 +635,7 @@ test mr-diag-candidate-explanations {NO-APPLICABLE-METHOD names each candidate w
     set native [mrCompile [dict create main.bot "import std::list\nimport std::str\n\n5.length()\n"]]
     set n [lindex [mrReportedOf $native NO-APPLICABLE-METHOD] 0]
     list [dict get $d message] [mrNotes $r $d] [dict get $n message] [mrNotes $native $n]
-} -result {{method-style call "g": none of the visible functions of that name accepts the call (p::g rejects argument 1: argument for parameter "b" cannot be proven to satisfy str (argument type: int); q::g rejects the receiver: argument for parameter "a" cannot be proven to satisfy str (argument type: int))} {{p.bot:1:1 {p::g is declared here}} {q.bot:2:1 {q::g is declared here}}} {method-style call "length": none of the visible functions of that name accepts the call (std::list::length rejects the receiver: the receiver is a int, but argument 1 of native std::list::length requires list; std::str::length rejects the receiver: the receiver is a int, but argument 1 of native std::str::length requires str)} {}}
+} -result {{method-style call "g": none of the visible functions of that name accepts the call (p::g rejects argument 1: argument for parameter "b" cannot be proven to satisfy str (argument type: int); q::g rejects the receiver: argument for parameter "a" cannot be proven to satisfy str (argument type: int))} {{p.bot:1:1 {p::g is declared here}} {q.bot:2:1 {q::g is declared here}}} {method-style call "length": none of the visible functions of that name accepts the call (std::list::length rejects the receiver: argument 1 of native std::list::length requires list, but the receiver has type int: the call could only fail when it runs; std::str::length rejects the receiver: argument 1 of native std::str::length requires str, but the receiver has type int: the call could only fail when it runs)} {}}
 
 test mr-diag-ambiguity-explanation {AMBIGUOUS-METHOD-CALL names the applicable candidates, says no precedence exists between them -- by namespace, result type, the result's use or met context requirements -- suggests the explicit call, and notes where each applicable candidate is declared; an inapplicable candidate is in neither} -body {
     set f "fn f(x: int) -> int:\n    x\n"

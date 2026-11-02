@@ -30,6 +30,7 @@ Float64#neg	intrinsic		internal	intrinsic
 IndexNotFound	builtin-error		builtin	intrinsic	core/native.tcl			
 InvalidArgumentEncoding	builtin-error		builtin	intrinsic	core/native.tcl			
 InvalidIntegerText	builtin-error		builtin	intrinsic	core/native.tcl			
+InvalidUtf16	builtin-error		builtin	intrinsic	core/native.tcl			
 InvalidUtf8	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutExtentMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
 LayoutLengthMismatch	builtin-error		builtin	intrinsic	core/native.tcl			
@@ -44,12 +45,12 @@ UnrepresentableDecimal	builtin-error		builtin	intrinsic	core/native.tcl
 UpperOverrun	builtin-error		builtin	intrinsic	core/native.tcl			
 affine#drop	intrinsic		internal	intrinsic	core/affine.tcl:124			
 argv	intrinsic		primitive	intrinsic	core/process.tcl:115			
-binary#element	intrinsic		internal	intrinsic	core/binary.tcl:805			
-binary#emit	intrinsic		internal	intrinsic	core/binary.tcl:756			
-binary#load	intrinsic		internal	intrinsic	core/binary.tcl:778			
-binary#load_array	intrinsic		internal	intrinsic	core/binary.tcl:815			
-binary#store_element	intrinsic		internal	intrinsic	core/binary.tcl:812			
-binary#view_field	intrinsic		internal	intrinsic	core/binary.tcl:781			
+binary#element	intrinsic		internal	intrinsic	core/binary.tcl:859			
+binary#emit	intrinsic		internal	intrinsic	core/binary.tcl:810			
+binary#load	intrinsic		internal	intrinsic	core/binary.tcl:832			
+binary#load_array	intrinsic		internal	intrinsic	core/binary.tcl:869			
+binary#store_element	intrinsic		internal	intrinsic	core/binary.tcl:866			
+binary#view_field	intrinsic		internal	intrinsic	core/binary.tcl:835			
 bit_and	intrinsic		primitive	intrinsic				
 bit_or	intrinsic		primitive	intrinsic				
 bit_xor	intrinsic		primitive	intrinsic				
@@ -72,7 +73,7 @@ decimal_rounded#to_string	intrinsic		internal	intrinsic	core/decimal.tcl:830
 dfa#transition	intrinsic		internal	intrinsic	core/dfa.tcl:64			
 error?	intrinsic		primitive	intrinsic	core/predicates.tcl:55			
 foreign#refused	intrinsic		internal	intrinsic				
-hash	intrinsic		primitive	intrinsic	core/hashing.tcl:444			
+hash	intrinsic		primitive	intrinsic	core/hashing.tcl:641			
 integer?	intrinsic		primitive	intrinsic				
 list	intrinsic		primitive	intrinsic	core/primitives.tcl:102			
 list#with_length	intrinsic		internal	intrinsic	core/listlength.tcl:49			
@@ -141,18 +142,22 @@ std::abi::aarch64::to_int	function	std::abi::aarch64	api	source	stdlib/abi/aarch
 std::abi::bytes	namespace		api	source	stdlib/abi/bytes.bot			
 std::abi::bytes::Bytes	opaque-struct	std::abi::bytes	api	source	stdlib/abi/bytes.bot:97			
 std::abi::bytes::MutableBytes	opaque-struct	std::abi::bytes	api	source	stdlib/abi/bytes.bot:100			
+std::abi::bytes::decode_utf16le	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:155			
 std::abi::bytes::decode_utf8	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:134			
-std::abi::bytes::detach	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:178			
-std::abi::bytes::freeze	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:183			
-std::abi::bytes::freeze_prefix	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:189			
-std::abi::bytes::from_bytes	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:154			
+std::abi::bytes::detach	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:219			
+std::abi::bytes::encode_utf16le	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:144			
+std::abi::bytes::freeze	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:224			
+std::abi::bytes::freeze_prefix	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:230			
+std::abi::bytes::from_bytes	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:195			
 std::abi::bytes::from_list	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:108			
 std::abi::bytes::join	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:115			
-std::abi::bytes::length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:140			
-std::abi::bytes::mutable_length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:159			
-std::abi::bytes::replace	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:165			
+std::abi::bytes::length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:181			
+std::abi::bytes::mutable_length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:200			
+std::abi::bytes::replace	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:206			
 std::abi::bytes::slice	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:124			
-std::abi::bytes::zeroed	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:149			
+std::abi::bytes::utf16le_units	function	std::abi::bytes	std-internal	source	stdlib/abi/bytes.bot:163			
+std::abi::bytes::utf16le_units_before_nul	function	std::abi::bytes	std-internal	source	stdlib/abi/bytes.bot:175			
+std::abi::bytes::zeroed	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:190			
 std::abi::i16	function	std::abi	api	source	stdlib/abi.bot:201			
 std::abi::i32	function	std::abi	api	source	stdlib/abi.bot:209			
 std::abi::i64	function	std::abi	api	source	stdlib/abi.bot:217			
@@ -197,20 +202,20 @@ std::binary::U16	type	std::binary	api	source	stdlib/binary.bot:56
 std::binary::U32	type	std::binary	api	source	stdlib/binary.bot:57			
 std::binary::U64	type	std::binary	api	source	stdlib/binary.bot:58			
 std::binary::U8	type	std::binary	api	source	stdlib/binary.bot:55			
-std::binary::element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:802			
-std::binary::emit	intrinsic	std::binary	api	intrinsic	core/binary.tcl:753			
-std::binary::layout_alignment	intrinsic	std::binary	api	intrinsic	core/binary.tcl:770			
-std::binary::layout_length	intrinsic	std::binary	api	intrinsic	core/binary.tcl:768			
-std::binary::load	intrinsic	std::binary	api	intrinsic	core/binary.tcl:775			
+std::binary::element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:856			
+std::binary::emit	intrinsic	std::binary	api	intrinsic	core/binary.tcl:807			
+std::binary::layout_alignment	intrinsic	std::binary	api	intrinsic	core/binary.tcl:824			
+std::binary::layout_length	intrinsic	std::binary	api	intrinsic	core/binary.tcl:822			
+std::binary::load	intrinsic	std::binary	api	intrinsic	core/binary.tcl:829			
 std::binary::native	namespace		api	intrinsic				1
-std::binary::native::edit	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:784			
-std::binary::native::view	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:772			
-std::binary::parse	intrinsic	std::binary	api	intrinsic	core/binary.tcl:750			
-std::binary::read	intrinsic	std::binary	api	intrinsic	core/binary.tcl:765			
-std::binary::store	intrinsic	std::binary	api	intrinsic	core/binary.tcl:787			
-std::binary::store_element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:808			
-std::binary::write	intrinsic	std::binary	api	intrinsic	core/binary.tcl:790			
-std::binary::write_foreign	intrinsic	std::binary	api	intrinsic	core/binary.tcl:794			
+std::binary::native::edit	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:838			
+std::binary::native::view	intrinsic	std::binary::native	api	intrinsic	core/binary.tcl:826			
+std::binary::parse	intrinsic	std::binary	api	intrinsic	core/binary.tcl:804			
+std::binary::read	intrinsic	std::binary	api	intrinsic	core/binary.tcl:819			
+std::binary::store	intrinsic	std::binary	api	intrinsic	core/binary.tcl:841			
+std::binary::store_element	intrinsic	std::binary	api	intrinsic	core/binary.tcl:862			
+std::binary::write	intrinsic	std::binary	api	intrinsic	core/binary.tcl:844			
+std::binary::write_foreign	intrinsic	std::binary	api	intrinsic	core/binary.tcl:848			
 std::byte	namespace		api	source	stdlib/byte.bot			
 std::byte::AboveRange	error	std::byte	api	source	stdlib/byte.bot:75			
 std::byte::BelowRange	error	std::byte	api	source	stdlib/byte.bot:74			
@@ -228,14 +233,20 @@ std::byte::position_low	function	std::byte	api	source	stdlib/byte.bot:125
 std::byte::set	function	std::byte	api	source	stdlib/byte.bot:174			
 std::byte_store	namespace		api	intrinsic				
 std::byte_store::byte_count	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:242			
+std::byte_store::decode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:129			
 std::byte_store::decode_utf8	intrinsic	std::byte_store	api	intrinsic	core/utf8text.tcl:51			
+std::byte_store::encode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:127			
 std::byte_store::from_list	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:235			
 std::byte_store::join	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:237			
 std::byte_store::slice	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:239			
+std::byte_store::utf16le_units	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:132			
+std::byte_store::utf16le_units_before_nul	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:135			
 std::char	namespace		api	intrinsic				
-std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:29			
+std::char::is_tcl_alnum	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:150			
+std::char::is_tcl_alpha	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:148			
+std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:38			
 std::compiler	namespace		api	source	stdlib/compiler.bot			
-std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:167			
+std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:189			
 std::compiler::DiagnosticCode	enum	std::compiler	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineCaptureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineContainerUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -245,6 +256,7 @@ std::compiler::DiagnosticCode::AffineElementCopyOut	enum-case	std::compiler::Dia
 std::compiler::DiagnosticCode::AffineEqualityUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineErasureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineFieldMoveRequiresDestructure	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::AffineFoldUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineGenericNestedUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineInstanceBudget	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineListOperationUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -257,9 +269,15 @@ std::compiler::DiagnosticCode::AmbiguousQualifier	enum-case	std::compiler::Diagn
 std::compiler::DiagnosticCode::Arity	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::BinaryOperand	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::BreakOutsideLoop	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::CallbackEnvironment	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::CallbackPlacement	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::CallbackReference	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::CallbackSignature	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ContextBindingCollision	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ContextFunctionValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ContextInstallationUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ContextNotInjected	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::ContextRetainedAuthority	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ContextTraitMisuse	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ContextTraitPosition	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ContinueOutsideLoop	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -280,7 +298,21 @@ std::compiler::DiagnosticCode::DuplicateContextParameter	enum-case	std::compiler
 std::compiler::DiagnosticCode::DuplicateField	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::DuplicateFlag	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::DuplicateFlagDeclaration	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::DuplicateInjectedContext	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::DuplicateLoopVariable	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitAfterToken	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitBeyondToken	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitBoundary	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitBudget	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitByteCharacter	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitEndSymbol	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitIncomplete	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitNotSymbol	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitRecognizer	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitRejected	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitTerminalValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitUnknownValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::EmitUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ExportEnvironment	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ExportName	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ExportPlacement	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -288,6 +320,7 @@ std::compiler::DiagnosticCode::ExportSignature	enum-case	std::compiler::Diagnost
 std::compiler::DiagnosticCode::FlagBindingCollision	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::FlagCalleeUnknown	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::FlagFunctionValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
+std::compiler::DiagnosticCode::FoldIntermediateType	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ForeignBorrow	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::Imprint	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::InternalIntrinsicValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -351,7 +384,7 @@ std::compiler::DiagnosticCode::UnprovenField	enum-case	std::compiler::Diagnostic
 std::compiler::DiagnosticCode::UnwrappedYield	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::UseAfterMove	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::YieldOutsideFunction	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
-std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:161			
+std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:183			
 std::coroutine	namespace		api	intrinsic				
 std::coroutine::done?	intrinsic	std::coroutine	api	intrinsic	core/coroutines.tcl:332			
 std::darwin	namespace		api	source	stdlib/darwin.bot	macos		1
@@ -807,6 +840,8 @@ std::ffi::c::Int	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl
 std::ffi::c::Long	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::LongLong	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::Ptr	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
+std::ffi::c::RawDouble	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
+std::ffi::c::RawFloat	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
 std::ffi::c::SChar	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::Short	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::UChar	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
@@ -815,11 +850,33 @@ std::ffi::c::ULong	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl
 std::ffi::c::ULongLong	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::UShort	c-scalar-type	std::ffi::c	api	intrinsic	core/cabi.tcl			
 std::ffi::c::Void	intrinsic-type	std::ffi::c	api	intrinsic	hir/cabi.tcl			
-std::ffi::c::clone	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:596			
-std::ffi::c::erase	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:598			
-std::ffi::c::null	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:592			
-std::ffi::c::null?	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:594			
-std::ffi::c::retype	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:601			
+std::ffi::c::callback	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:811			
+std::ffi::c::clone	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:794			
+std::ffi::c::erase	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:796			
+std::ffi::c::null	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:790			
+std::ffi::c::null?	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:792			
+std::ffi::c::raw	namespace		api	source	stdlib/ffi/c/raw.bot			
+std::ffi::c::raw::DoubleBits	type	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:59			
+std::ffi::c::raw::FloatBits	type	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:58			
+std::ffi::c::raw::double_finite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:101			
+std::ffi::c::raw::double_from_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:73			
+std::ffi::c::raw::double_from_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:82			
+std::ffi::c::raw::double_infinite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:108			
+std::ffi::c::raw::double_nan?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:104			
+std::ffi::c::raw::double_negative?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:114			
+std::ffi::c::raw::double_to_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:76			
+std::ffi::c::raw::double_to_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:79			
+std::ffi::c::raw::double_zero?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:111			
+std::ffi::c::raw::float_finite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:85			
+std::ffi::c::raw::float_from_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:61			
+std::ffi::c::raw::float_from_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:70			
+std::ffi::c::raw::float_infinite?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:92			
+std::ffi::c::raw::float_nan?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:88			
+std::ffi::c::raw::float_negative?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:98			
+std::ffi::c::raw::float_to_bits	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:64			
+std::ffi::c::raw::float_to_float64	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:67			
+std::ffi::c::raw::float_zero?	function	std::ffi::c::raw	api	source	stdlib/ffi/c/raw.bot:95			
+std::ffi::c::retype	intrinsic	std::ffi::c	api	intrinsic	core/cabi.tcl:799			
 std::float64	namespace		api	source+intrinsic	stdlib/float64.bot			
 std::float64::abs	function	std::float64	api	source	stdlib/float64.bot:38			
 std::float64::clamp	function	std::float64	api	source	stdlib/float64.bot:44			
@@ -829,9 +886,26 @@ std::float64::max	function	std::float64	api	source	stdlib/float64.bot:32
 std::float64::min	function	std::float64	api	source	stdlib/float64.bot:26			
 std::float64::round	intrinsic	std::float64	api	intrinsic				
 std::float64::truncate	intrinsic	std::float64	api	intrinsic				
+std::immutable_map	namespace		api	source	stdlib/immutable_map.bot			
+std::immutable_map::ImmutableMap	opaque-struct	std::immutable_map	api	source	stdlib/immutable_map.bot:52			
+std::immutable_map::ImmutableMapEntry	struct	std::immutable_map	api	source	stdlib/immutable_map.bot:60			
+std::immutable_map::KeyNotFound	error	std::immutable_map	api	source	stdlib/immutable_map.bot:65			
+std::immutable_map::OrderMismatch	error	std::immutable_map	api	source	stdlib/immutable_map.bot:68			
+std::immutable_map::at	function	std::immutable_map	api	source	stdlib/immutable_map.bot:82			
+std::immutable_map::contains	function	std::immutable_map	api	source	stdlib/immutable_map.bot:79			
+std::immutable_map::empty	function	std::immutable_map	api	source	stdlib/immutable_map.bot:70			
+std::immutable_map::empty?	function	std::immutable_map	api	source	stdlib/immutable_map.bot:76			
+std::immutable_map::iteration_at	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:135			
+std::immutable_map::iteration_end	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:129			
+std::immutable_map::iteration_live?	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:132			
+std::immutable_map::length	function	std::immutable_map	api	source	stdlib/immutable_map.bot:73			
+std::immutable_map::of_parts	function	std::immutable_map	std-internal	source	stdlib/immutable_map.bot:123			
+std::immutable_map::order	function	std::immutable_map	api	source	stdlib/immutable_map.bot:95			
+std::immutable_map::reordered	function	std::immutable_map	api	source	stdlib/immutable_map.bot:112			
+std::immutable_map::validate_order	function	std::immutable_map	api	source	stdlib/immutable_map.bot:101			
 std::immutable_set	namespace		api	intrinsic				
-std::immutable_set::contains	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:78			
-std::immutable_set::from_list	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:75			
+std::immutable_set::contains	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:117			
+std::immutable_set::from_list	intrinsic	std::immutable_set	api	intrinsic	core/immutableset.tcl:114			
 std::int	namespace		api	intrinsic				
 std::int::from_string	intrinsic	std::int	api	intrinsic	core/inttext.tcl:80			
 std::int::to_string	intrinsic	std::int	api	intrinsic	core/inttext.tcl:77			
@@ -995,11 +1069,12 @@ std::list	namespace		api	source+intrinsic	stdlib/list.bot
 std::list::NotFound	error	std::list	api	source	stdlib/list.bot:74			
 std::list::all?	function	std::list	api	source	stdlib/list.bot:88			
 std::list::any?	function	std::list	api	source	stdlib/list.bot:82			
-std::list::append	intrinsic	std::list	api	intrinsic	core/lists.tcl:63			
-std::list::at	intrinsic	std::list	api	intrinsic	core/lists.tcl:60			
+std::list::append	intrinsic	std::list	api	intrinsic	core/lists.tcl:84			
+std::list::at	intrinsic	std::list	api	intrinsic	core/lists.tcl:81			
 std::list::find	function	std::list	api	source	stdlib/list.bot:100			
+std::list::flat	intrinsic	std::list	api	intrinsic	core/lists.tcl:99			
 std::list::get	function	std::list	api	source	stdlib/list.bot:76			
-std::list::length	intrinsic	std::list	api	intrinsic	core/lists.tcl:57			
+std::list::length	intrinsic	std::list	api	intrinsic	core/lists.tcl:78			
 std::list::none?	function	std::list	api	source	stdlib/list.bot:94			
 std::list::with_length	intrinsic	std::list	api	intrinsic	core/listlength.tcl:45			
 std::mathish	namespace		demo	source	stdlib/mathish.bot			
@@ -1026,44 +1101,46 @@ std::mutable_byte_store::from_storage	intrinsic	std::mutable_byte_store	api	intr
 std::mutable_byte_store::replace	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:337			
 std::mutable_byte_store::zeroed	intrinsic	std::mutable_byte_store	api	intrinsic	core/bytestore.tcl:331			
 std::mutable_map	namespace		api	source	stdlib/mutable_map.bot			
-std::mutable_map::KeyNotFound	error	std::mutable_map	api	source	stdlib/mutable_map.bot:73			
-std::mutable_map::MutableMap	opaque-struct	std::mutable_map	api	source	stdlib/mutable_map.bot:63			
-std::mutable_map::MutableMapEntry	struct	std::mutable_map	api	source	stdlib/mutable_map.bot:68			
-std::mutable_map::OrderMismatch	error	std::mutable_map	api	source	stdlib/mutable_map.bot:76			
-std::mutable_map::at	function	std::mutable_map	api	source	stdlib/mutable_map.bot:93			
-std::mutable_map::clear	function	std::mutable_map	api	source	stdlib/mutable_map.bot:123			
-std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_map.bot:90			
-std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:78			
-std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:87			
-std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:163			
-std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:157			
-std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:160			
-std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:84			
-std::mutable_map::order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:134			
-std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:113			
-std::mutable_map::reorder	function	std::mutable_map	api	source	stdlib/mutable_map.bot:149			
-std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:100			
-std::mutable_map::validate_order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:140			
-std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:81			
+std::mutable_map::KeyNotFound	error	std::mutable_map	api	source	stdlib/mutable_map.bot:81			
+std::mutable_map::MutableMap	opaque-struct	std::mutable_map	api	source	stdlib/mutable_map.bot:71			
+std::mutable_map::MutableMapEntry	struct	std::mutable_map	api	source	stdlib/mutable_map.bot:76			
+std::mutable_map::OrderMismatch	error	std::mutable_map	api	source	stdlib/mutable_map.bot:84			
+std::mutable_map::at	function	std::mutable_map	api	source	stdlib/mutable_map.bot:101			
+std::mutable_map::clear	function	std::mutable_map	api	source	stdlib/mutable_map.bot:131			
+std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_map.bot:98			
+std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:86			
+std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:95			
+std::mutable_map::freeze	function	std::mutable_map	api	source	stdlib/mutable_map.bot:170			
+std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:184			
+std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:178			
+std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:181			
+std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:92			
+std::mutable_map::order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:142			
+std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:121			
+std::mutable_map::reorder	function	std::mutable_map	api	source	stdlib/mutable_map.bot:157			
+std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:108			
+std::mutable_map::validate_order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:148			
+std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:89			
 std::mutable_set	namespace		api	source	stdlib/mutable_set.bot			
-std::mutable_set::MutableSet	opaque-struct	std::mutable_set	api	source	stdlib/mutable_set.bot:52			
-std::mutable_set::OrderMismatch	error	std::mutable_set	api	source	stdlib/mutable_set.bot:56			
-std::mutable_set::add	function	std::mutable_set	api	source	stdlib/mutable_set.bot:73			
-std::mutable_set::clear	function	std::mutable_set	api	source	stdlib/mutable_set.bot:91			
-std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_set.bot:70			
-std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:58			
-std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:67			
-std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:139			
-std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:133			
-std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:136			
-std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:64			
-std::mutable_set::of_table	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:127			
-std::mutable_set::order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:101			
-std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:82			
-std::mutable_set::reorder	function	std::mutable_set	api	source	stdlib/mutable_set.bot:116			
-std::mutable_set::table_of	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:124			
-std::mutable_set::validate_order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:107			
-std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:61			
+std::mutable_set::MutableSet	opaque-struct	std::mutable_set	api	source	stdlib/mutable_set.bot:58			
+std::mutable_set::OrderMismatch	error	std::mutable_set	api	source	stdlib/mutable_set.bot:62			
+std::mutable_set::add	function	std::mutable_set	api	source	stdlib/mutable_set.bot:79			
+std::mutable_set::clear	function	std::mutable_set	api	source	stdlib/mutable_set.bot:97			
+std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_set.bot:76			
+std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:64			
+std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:73			
+std::mutable_set::freeze	function	std::mutable_set	api	source	stdlib/mutable_set.bot:134			
+std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:156			
+std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:150			
+std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:153			
+std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:70			
+std::mutable_set::of_table	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:144			
+std::mutable_set::order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:107			
+std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:88			
+std::mutable_set::reorder	function	std::mutable_set	api	source	stdlib/mutable_set.bot:122			
+std::mutable_set::table_of	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:141			
+std::mutable_set::validate_order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:113			
+std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:67			
 std::mutable_vector	namespace		api	intrinsic				
 std::mutable_vector::at	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:345			
 std::mutable_vector::clear	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:365			
@@ -1076,51 +1153,71 @@ std::mutable_vector::push	intrinsic	std::mutable_vector	api	intrinsic	core/mutve
 std::mutable_vector::swap	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:361			
 std::mutable_vector::take	intrinsic	std::mutable_vector	api	intrinsic	core/mutvec.tcl:358			
 std::ordered_table	namespace		std-internal	source	stdlib/ordered_table.bot			
-std::ordered_table::Table	opaque-struct	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:57			
-std::ordered_table::add_live	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:164			
-std::ordered_table::append	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:192			
-std::ordered_table::arrangement	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:422			
-std::ordered_table::between?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:204			
-std::ordered_table::clear	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:338			
-std::ordered_table::compact_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:262			
-std::ordered_table::complete	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:387			
-std::ordered_table::count_shared	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:360			
-std::ordered_table::empty_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:171			
-std::ordered_table::fresh	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:84			
-std::ordered_table::full?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:155			
-std::ordered_table::garbage?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:159			
-std::ordered_table::holds?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:120			
-std::ordered_table::key_at	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:111			
-std::ordered_table::length	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:91			
-std::ordered_table::live_at?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:102			
-std::ordered_table::min_slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:66			
-std::ordered_table::permute	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:454			
-std::ordered_table::permute_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:478			
-std::ordered_table::place_entry	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:181			
-std::ordered_table::position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:146			
-std::ordered_table::positions	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:98			
-std::ordered_table::probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:128			
-std::ordered_table::rebuild	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:301			
-std::ordered_table::rebuild_with	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:333			
-std::ordered_table::reindex	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:287			
-std::ordered_table::remove_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:238			
-std::ordered_table::same_members?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:382			
-std::ordered_table::shift	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:212			
-std::ordered_table::slot_of	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:142			
-std::ordered_table::slots_for	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:71			
-std::ordered_table::truncate	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:252			
+std::ordered_table::Table	opaque-struct	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:58			
+std::ordered_table::add_live	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:165			
+std::ordered_table::append	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:193			
+std::ordered_table::arrangement	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:423			
+std::ordered_table::between?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:205			
+std::ordered_table::clear	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:339			
+std::ordered_table::compact_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:263			
+std::ordered_table::complete	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:388			
+std::ordered_table::count_shared	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:361			
+std::ordered_table::empty_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:172			
+std::ordered_table::fresh	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:85			
+std::ordered_table::frozen_holds?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:564			
+std::ordered_table::frozen_index	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:555			
+std::ordered_table::frozen_position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:586			
+std::ordered_table::frozen_probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:573			
+std::ordered_table::full?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:156			
+std::ordered_table::garbage?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:160			
+std::ordered_table::holds?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:121			
+std::ordered_table::key_at	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:112			
+std::ordered_table::length	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:92			
+std::ordered_table::live_at?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:103			
+std::ordered_table::live_hashes	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:519			
+std::ordered_table::live_keys	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:512			
+std::ordered_table::live_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:530			
+std::ordered_table::min_slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:67			
+std::ordered_table::of_frozen	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:591			
+std::ordered_table::permute	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:455			
+std::ordered_table::permute_values	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:479			
+std::ordered_table::permuted	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:596			
+std::ordered_table::place_entry	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:182			
+std::ordered_table::place_frozen	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:541			
+std::ordered_table::position	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:147			
+std::ordered_table::positions	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:99			
+std::ordered_table::probe	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:129			
+std::ordered_table::rebuild	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:302			
+std::ordered_table::rebuild_with	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:334			
+std::ordered_table::reindex	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:288			
+std::ordered_table::remove_slot	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:239			
+std::ordered_table::same_members?	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:383			
+std::ordered_table::shift	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:213			
+std::ordered_table::slot_of	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:143			
+std::ordered_table::slots	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:508			
+std::ordered_table::slots_for	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:72			
+std::ordered_table::truncate	function	std::ordered_table	std-internal	source	stdlib/ordered_table.bot:253			
+std::rawfloat	namespace		std-internal	intrinsic				
+std::rawfloat::admit32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::admit64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::bits32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::bits64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::from_bits32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::from_bits64	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::narrow32	intrinsic	std::rawfloat	std-internal	intrinsic				
+std::rawfloat::narrow64	intrinsic	std::rawfloat	std-internal	intrinsic				
 std::str	namespace		api	intrinsic				
 std::str::append_char	intrinsic	std::str	api	intrinsic	core/strings.tcl:124			
 std::str::char_at	intrinsic	std::str	api	intrinsic	core/strings.tcl:129			
 std::str::concat	intrinsic	std::str	api	intrinsic	core/strings.tcl:122			
 std::str::encode_utf8	intrinsic	std::str	api	intrinsic	core/strings.tcl:126			
-std::str::is_tcl_alnum	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:118			
-std::str::is_tcl_alpha	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:116			
+std::str::is_tcl_alnum	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:146			
+std::str::is_tcl_alpha	intrinsic	std::str	api	intrinsic	core/tclcompat.tcl:144			
 std::str::length	intrinsic	std::str	api	intrinsic	core/strings.tcl:114			
 std::str::lowercase	intrinsic	std::str	api	intrinsic	core/strings.tcl:120			
 std::str::substring	intrinsic	std::str	api	intrinsic	core/strings.tcl:116			
 std::table_hash	namespace		std-internal	intrinsic				
-std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:452			
+std::table_hash::of	intrinsic	std::table_hash	std-internal	intrinsic	core/hashing.tcl:649			
 std::test	namespace		api	source	stdlib/test.bot			
 std::test::Erased	struct	std::test	api	source	stdlib/test.bot:270			
 std::test::Match	struct	std::test	api	source	stdlib/test.bot:95			
@@ -1133,35 +1230,41 @@ std::test::code_name	function	std::test	api	source	stdlib/test.bot:300
 std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:256			
 std::test::count	function	std::test	api	source	stdlib/test.bot:152			
 std::test::describe	function	std::test	api	source	stdlib/test.bot:282			
-std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:576			
-std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:543			
-std::test::equal	function	std::test	api	source	stdlib/test.bot:560			
+std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:620			
+std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:587			
+std::test::equal	function	std::test	api	source	stdlib/test.bot:604			
 std::test::escape_of	function	std::test	api	source	stdlib/test.bot:189			
 std::test::escaped	function	std::test	api	source	stdlib/test.bot:205			
 std::test::glyph	function	std::test	api	source	stdlib/test.bot:160			
-std::test::holds	function	std::test	api	source	stdlib/test.bot:600			
+std::test::holds	function	std::test	api	source	stdlib/test.bot:644			
 std::test::joined	function	std::test	api	source	stdlib/test.bot:173			
-std::test::mismatch	function	std::test	api	source	stdlib/test.bot:556			
-std::test::no_results	function	std::test	api	source	stdlib/test.bot:681			
+std::test::mismatch	function	std::test	api	source	stdlib/test.bot:600			
+std::test::no_results	function	std::test	api	source	stdlib/test.bot:725			
 std::test::no_texts	function	std::test	api	source	stdlib/test.bot:168			
-std::test::passed	function	std::test	api	source	stdlib/test.bot:550			
+std::test::passed	function	std::test	api	source	stdlib/test.bot:594			
 std::test::quoted	function	std::test	api	source	stdlib/test.bot:223			
 std::test::registered	function	std::test	api	source	stdlib/test.bot:147			
-std::test::rejects	function	std::test	api	source	stdlib/test.bot:609			
-std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:631			
-std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:619			
-std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:657			
-std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:644			
-std::test::report	function	std::test	api	source	stdlib/test.bot:742			
-std::test::result_lines	function	std::test	api	source	stdlib/test.bot:710			
-std::test::results	function	std::test	api	source	stdlib/test.bot:685			
-std::test::run	function	std::test	api	source	stdlib/test.bot:675			
-std::test::satisfies	function	std::test	api	source	stdlib/test.bot:568			
+std::test::rejects	function	std::test	api	source	stdlib/test.bot:653			
+std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:675			
+std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:663			
+std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:701			
+std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:688			
+std::test::report	function	std::test	api	source	stdlib/test.bot:786			
+std::test::result_lines	function	std::test	api	source	stdlib/test.bot:754			
+std::test::results	function	std::test	api	source	stdlib/test.bot:729			
+std::test::run	function	std::test	api	source	stdlib/test.bot:719			
+std::test::satisfies	function	std::test	api	source	stdlib/test.bot:612			
 std::test::suite	function	std::test	api	source	stdlib/test.bot:136			
-std::test::summarize	function	std::test	api	source	stdlib/test.bot:700			
-std::test::summary_line	function	std::test	api	source	stdlib/test.bot:733			
+std::test::summarize	function	std::test	api	source	stdlib/test.bot:744			
+std::test::summary_line	function	std::test	api	source	stdlib/test.bot:777			
 std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
-std::test::value	function	std::test	api	source	stdlib/test.bot:591			
+std::test::value	function	std::test	api	source	stdlib/test.bot:635			
+std::tree	namespace		api	source+intrinsic	stdlib/tree.bot			
+std::tree::Order	enum	std::tree	api	source	stdlib/tree.bot:47			
+std::tree::Order::BreadthFirst	enum-case	std::tree::Order	api	source	stdlib/tree.bot:47			
+std::tree::Order::DepthFirst	enum-case	std::tree::Order	api	source	stdlib/tree.bot:47			
+std::tree::children	intrinsic	std::tree	api	intrinsic	core/tree.tcl:30			
+std::tree::walk	function	std::tree	api	source	stdlib/tree.bot:55			
 std::web	namespace		api	source	stdlib/web.bot			
 std::web::Emailish	refined-type	std::web	api	source	stdlib/web.bot:71			
 std::web::UriQueryValue	refined-type	std::web	api	source	stdlib/web.bot:226			
@@ -1183,108 +1286,120 @@ std::windows::c_get_last_error	extern-fn	std::windows	api	source	stdlib/windows.
 std::windows::c_get_std_handle	extern-fn	std::windows	api	source	stdlib/windows.bot:69	windows		
 std::windows::c_write_file	extern-fn	std::windows	api	source	stdlib/windows.bot:78	windows		
 std::windows::fs	namespace		api	source	stdlib/windows/fs.bot	windows		
-std::windows::fs::Dword	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:568	windows		
-std::windows::fs::Entry	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:188	windows		
-std::windows::fs::File	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:173	windows		
-std::windows::fs::FindData	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:785	windows		
-std::windows::fs::HandleBits	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:548	windows		
-std::windows::fs::HandleWord	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:543	windows		
-std::windows::fs::NativePath	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:165	windows		
-std::windows::fs::PathKind	enum	std::windows::fs	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Device	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::DriveAbsolute	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::DriveRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Relative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::RootRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Unc	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::PathKind::Verbatim	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:193	windows		
-std::windows::fs::Read	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:178	windows		
-std::windows::fs::WindowsFS	context-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:169	windows		
-std::windows::fs::Written	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:183	windows		
-std::windows::fs::access	function	std::windows::fs	private	source	stdlib/windows/fs.bot:585	windows		
-std::windows::fs::backslash	function	std::windows::fs	private	source	stdlib/windows/fs.bot:364	windows		
-std::windows::fs::byte_vector	function	std::windows::fs	private	source	stdlib/windows/fs.bot:214	windows		
-std::windows::fs::c_close_handle	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:138	windows		
-std::windows::fs::c_create_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:153	windows		
-std::windows::fs::c_create_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:127	windows		
-std::windows::fs::c_delete_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:156	windows		
-std::windows::fs::c_find_close	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:147	windows		
-std::windows::fs::c_find_first	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:141	windows		
-std::windows::fs::c_find_next	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:144	windows		
-std::windows::fs::c_get_attributes	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:150	windows		
-std::windows::fs::c_get_last_error	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:162	windows		
-std::windows::fs::c_read_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:131	windows		
-std::windows::fs::c_remove_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:159	windows		
-std::windows::fs::c_write_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:135	windows		
-std::windows::fs::chunk_size	function	std::windows::fs	private	source	stdlib/windows/fs.bot:654	windows		
-std::windows::fs::chunks	function	std::windows::fs	private	source	stdlib/windows/fs.bot:646	windows		
-std::windows::fs::close	function	std::windows::fs	api	source	stdlib/windows/fs.bot:751	windows		
-std::windows::fs::concat	function	std::windows::fs	api	source	stdlib/windows/fs.bot:495	windows		
-std::windows::fs::create	function	std::windows::fs	api	source	stdlib/windows/fs.bot:205	windows		
-std::windows::fs::create_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:869	windows		
-std::windows::fs::create_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:777	windows		
-std::windows::fs::decoded	function	std::windows::fs	private	source	stdlib/windows/fs.bot:289	windows		
-std::windows::fs::directory?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:528	windows		
-std::windows::fs::display	function	std::windows::fs	api	source	stdlib/windows/fs.bot:361	windows		
-std::windows::fs::disposition	function	std::windows::fs	private	source	stdlib/windows/fs.bot:594	windows		
-std::windows::fs::dword	function	std::windows::fs	private	source	stdlib/windows/fs.bot:573	windows		
-std::windows::fs::dword_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:577	windows		
-std::windows::fs::ends_separated?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:460	windows		
-std::windows::fs::entries	function	std::windows::fs	api	source	stdlib/windows/fs.bot:849	windows		
-std::windows::fs::find_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:792	windows		
-std::windows::fs::found	function	std::windows::fs	private	source	stdlib/windows/fs.bot:795	windows		
-std::windows::fs::from_text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:333	windows		
-std::windows::fs::from_units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:325	windows		
-std::windows::fs::high_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:298	windows		
-std::windows::fs::high_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:249	windows		
-std::windows::fs::holds_slash?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:421	windows		
-std::windows::fs::ints	function	std::windows::fs	private	source	stdlib/windows/fs.bot:211	windows		
-std::windows::fs::invalid?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:555	windows		
-std::windows::fs::join	function	std::windows::fs	api	source	stdlib/windows/fs.bot:488	windows		
-std::windows::fs::joinable?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:452	windows		
-std::windows::fs::joined	function	std::windows::fs	private	source	stdlib/windows/fs.bot:464	windows		
-std::windows::fs::joined_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:474	windows		
-std::windows::fs::kind	function	std::windows::fs	api	source	stdlib/windows/fs.bot:394	windows		
-std::windows::fs::kind_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:373	windows		
-std::windows::fs::kind_of_entry	function	std::windows::fs	private	source	stdlib/windows/fs.bot:802	windows		
-std::windows::fs::last_error	function	std::windows::fs	private	source	stdlib/windows/fs.bot:523	windows		
-std::windows::fs::low_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:295	windows		
-std::windows::fs::low_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:252	windows		
-std::windows::fs::of_valid_text	function	std::windows::fs	std-internal	source	stdlib/windows/fs.bot:339	windows		
-std::windows::fs::open	function	std::windows::fs	api	source	stdlib/windows/fs.bot:606	windows		
-std::windows::fs::push_utf8	function	std::windows::fs	private	source	stdlib/windows/fs.bot:233	windows		
-std::windows::fs::read	function	std::windows::fs	api	source	stdlib/windows/fs.bot:641	windows		
-std::windows::fs::read_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:689	windows		
-std::windows::fs::read_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:759	windows		
-std::windows::fs::read_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:676	windows		
-std::windows::fs::read_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:624	windows		
-std::windows::fs::reason_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:534	windows		
-std::windows::fs::reason_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:502	windows		
-std::windows::fs::release	function	std::windows::fs	private	source	stdlib/windows/fs.bot:617	windows		
-std::windows::fs::remove_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:885	windows		
-std::windows::fs::remove_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:877	windows		
-std::windows::fs::request	function	std::windows::fs	private	source	stdlib/windows/fs.bot:696	windows		
-std::windows::fs::rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:832	windows		
-std::windows::fs::rewritten?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:413	windows		
-std::windows::fs::scalars	function	std::windows::fs	private	source	stdlib/windows/fs.bot:263	windows		
-std::windows::fs::segments	function	std::windows::fs	private	source	stdlib/windows/fs.bot:398	windows		
-std::windows::fs::separator?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:368	windows		
-std::windows::fs::take	function	std::windows::fs	private	source	stdlib/windows/fs.bot:811	windows		
-std::windows::fs::text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:348	windows		
-std::windows::fs::unit_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:256	windows		
-std::windows::fs::units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:343	windows		
-std::windows::fs::utf16	function	std::windows::fs	private	source	stdlib/windows/fs.bot:219	windows		
-std::windows::fs::utf8_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:277	windows		
-std::windows::fs::valid_units?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:315	windows		
-std::windows::fs::verbatim_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:430	windows		
-std::windows::fs::wide	function	std::windows::fs	private	source	stdlib/windows/fs.bot:302	windows		
-std::windows::fs::win32_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:440	windows		
-std::windows::fs::write	function	std::windows::fs	api	source	stdlib/windows/fs.bot:716	windows		
-std::windows::fs::write_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:745	windows		
-std::windows::fs::write_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:772	windows		
-std::windows::fs::write_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:724	windows		
-std::windows::fs::write_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:704	windows		
-std::windows::fs::write_with	function	std::windows::fs	private	source	stdlib/windows/fs.bot:766	windows		
+std::windows::fs::Dword	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:648	windows		
+std::windows::fs::Entry	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:203	windows		
+std::windows::fs::File	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:188	windows		
+std::windows::fs::FindData	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:865	windows		
+std::windows::fs::HandleBits	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:628	windows		
+std::windows::fs::HandleWord	layout	std::windows::fs	private	source	stdlib/windows/fs.bot:623	windows		
+std::windows::fs::NativePath	opaque-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:180	windows		
+std::windows::fs::PathKind	enum	std::windows::fs	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Device	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::DriveAbsolute	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::DriveRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Relative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::RootRelative	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Unc	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::PathKind::Verbatim	enum-case	std::windows::fs::PathKind	api	source	stdlib/windows/fs.bot:208	windows		
+std::windows::fs::Read	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:193	windows		
+std::windows::fs::WindowsFS	context-struct	std::windows::fs	api	source	stdlib/windows/fs.bot:184	windows		
+std::windows::fs::Written	struct	std::windows::fs	api	source	stdlib/windows/fs.bot:198	windows		
+std::windows::fs::access	function	std::windows::fs	private	source	stdlib/windows/fs.bot:665	windows		
+std::windows::fs::backslash_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:368	windows		
+std::windows::fs::byte_vector	function	std::windows::fs	private	source	stdlib/windows/fs.bot:232	windows		
+std::windows::fs::c_close_handle	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:150	windows		
+std::windows::fs::c_create_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:165	windows		
+std::windows::fs::c_create_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:139	windows		
+std::windows::fs::c_delete_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:168	windows		
+std::windows::fs::c_find_close	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:159	windows		
+std::windows::fs::c_find_first	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:153	windows		
+std::windows::fs::c_find_next	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:156	windows		
+std::windows::fs::c_get_attributes	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:162	windows		
+std::windows::fs::c_get_last_error	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:174	windows		
+std::windows::fs::c_read_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:143	windows		
+std::windows::fs::c_remove_directory	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:171	windows		
+std::windows::fs::c_write_file	extern-fn	std::windows::fs	private	source	stdlib/windows/fs.bot:147	windows		
+std::windows::fs::chunk_size	function	std::windows::fs	private	source	stdlib/windows/fs.bot:734	windows		
+std::windows::fs::chunks	function	std::windows::fs	private	source	stdlib/windows/fs.bot:726	windows		
+std::windows::fs::close	function	std::windows::fs	api	source	stdlib/windows/fs.bot:831	windows		
+std::windows::fs::concat	function	std::windows::fs	api	source	stdlib/windows/fs.bot:571	windows		
+std::windows::fs::create	function	std::windows::fs	api	source	stdlib/windows/fs.bot:220	windows		
+std::windows::fs::create_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:976	windows		
+std::windows::fs::create_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:857	windows		
+std::windows::fs::data_of_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:354	windows		
+std::windows::fs::decoded	function	std::windows::fs	private	source	stdlib/windows/fs.bot:334	windows		
+std::windows::fs::directory?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:608	windows		
+std::windows::fs::display	function	std::windows::fs	api	source	stdlib/windows/fs.bot:435	windows		
+std::windows::fs::disposition	function	std::windows::fs	private	source	stdlib/windows/fs.bot:674	windows		
+std::windows::fs::dot_dot_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:885	windows		
+std::windows::fs::dot_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:882	windows		
+std::windows::fs::dword	function	std::windows::fs	private	source	stdlib/windows/fs.bot:653	windows		
+std::windows::fs::dword_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:657	windows		
+std::windows::fs::end_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:272	windows		
+std::windows::fs::ends_separated?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:533	windows		
+std::windows::fs::entries	function	std::windows::fs	api	source	stdlib/windows/fs.bot:956	windows		
+std::windows::fs::find_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:888	windows		
+std::windows::fs::found	function	std::windows::fs	private	source	stdlib/windows/fs.bot:891	windows		
+std::windows::fs::from_text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:408	windows		
+std::windows::fs::from_units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:399	windows		
+std::windows::fs::head_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:249	windows		
+std::windows::fs::high_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:349	windows		
+std::windows::fs::high_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:294	windows		
+std::windows::fs::holds_slash?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:494	windows		
+std::windows::fs::invalid?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:635	windows		
+std::windows::fs::join	function	std::windows::fs	api	source	stdlib/windows/fs.bot:565	windows		
+std::windows::fs::join_parts	function	std::windows::fs	private	source	stdlib/windows/fs.bot:551	windows		
+std::windows::fs::joinable?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:525	windows		
+std::windows::fs::joined_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:542	windows		
+std::windows::fs::kind	function	std::windows::fs	api	source	stdlib/windows/fs.bot:467	windows		
+std::windows::fs::kind_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:446	windows		
+std::windows::fs::kind_of_entry	function	std::windows::fs	private	source	stdlib/windows/fs.bot:898	windows		
+std::windows::fs::last_error	function	std::windows::fs	private	source	stdlib/windows/fs.bot:603	windows		
+std::windows::fs::last_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:261	windows		
+std::windows::fs::lossy	function	std::windows::fs	private	source	stdlib/windows/fs.bot:342	windows		
+std::windows::fs::low_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:346	windows		
+std::windows::fs::low_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:297	windows		
+std::windows::fs::name_end	function	std::windows::fs	private	source	stdlib/windows/fs.bot:877	windows		
+std::windows::fs::name_offset	function	std::windows::fs	private	source	stdlib/windows/fs.bot:874	windows		
+std::windows::fs::nul_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:365	windows		
+std::windows::fs::of_valid_text	function	std::windows::fs	std-internal	source	stdlib/windows/fs.bot:418	windows		
+std::windows::fs::open	function	std::windows::fs	api	source	stdlib/windows/fs.bot:686	windows		
+std::windows::fs::push_utf8	function	std::windows::fs	private	source	stdlib/windows/fs.bot:278	windows		
+std::windows::fs::read	function	std::windows::fs	api	source	stdlib/windows/fs.bot:721	windows		
+std::windows::fs::read_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:769	windows		
+std::windows::fs::read_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:839	windows		
+std::windows::fs::read_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:756	windows		
+std::windows::fs::read_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:704	windows		
+std::windows::fs::reason_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:614	windows		
+std::windows::fs::reason_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:582	windows		
+std::windows::fs::release	function	std::windows::fs	private	source	stdlib/windows/fs.bot:697	windows		
+std::windows::fs::remove_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:992	windows		
+std::windows::fs::remove_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:984	windows		
+std::windows::fs::request	function	std::windows::fs	private	source	stdlib/windows/fs.bot:776	windows		
+std::windows::fs::rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:939	windows		
+std::windows::fs::rewritten?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:486	windows		
+std::windows::fs::scalars	function	std::windows::fs	private	source	stdlib/windows/fs.bot:308	windows		
+std::windows::fs::segments	function	std::windows::fs	private	source	stdlib/windows/fs.bot:471	windows		
+std::windows::fs::separator?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:441	windows		
+std::windows::fs::star_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:371	windows		
+std::windows::fs::take	function	std::windows::fs	private	source	stdlib/windows/fs.bot:913	windows		
+std::windows::fs::text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:427	windows		
+std::windows::fs::unit_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:301	windows		
+std::windows::fs::units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:422	windows		
+std::windows::fs::units_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:236	windows		
+std::windows::fs::utf8_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:322	windows		
+std::windows::fs::valid_units?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:389	windows		
+std::windows::fs::verbatim_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:503	windows		
+std::windows::fs::whole_bridge_bytes	function	std::windows::fs	private	source	stdlib/windows/fs.bot:242	windows		
+std::windows::fs::wide	function	std::windows::fs	private	source	stdlib/windows/fs.bot:382	windows		
+std::windows::fs::wide_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:378	windows		
+std::windows::fs::win32_name?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:513	windows		
+std::windows::fs::write	function	std::windows::fs	api	source	stdlib/windows/fs.bot:796	windows		
+std::windows::fs::write_all	function	std::windows::fs	api	source	stdlib/windows/fs.bot:825	windows		
+std::windows::fs::write_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:852	windows		
+std::windows::fs::write_rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:804	windows		
+std::windows::fs::write_some	function	std::windows::fs	private	source	stdlib/windows/fs.bot:784	windows		
+std::windows::fs::write_with	function	std::windows::fs	private	source	stdlib/windows/fs.bot:846	windows		
 std::windows::io	namespace		api	source	stdlib/windows/io.bot	windows		
 std::windows::io::WindowsIO	context-struct	std::windows::io	api	source	stdlib/windows/io.bot:66	windows		
 std::windows::io::create	function	std::windows::io	api	source	stdlib/windows/io.bot:72	windows		
@@ -1298,20 +1413,20 @@ std::windows::io::write_text	function	std::windows::io	api	source	stdlib/windows
 std::windows::last_error	function	std::windows	api	source	stdlib/windows.bot:122	windows		
 std::windows::path	namespace		api	source	stdlib/windows/path.bot	windows		
 std::windows::path::WindowsPath	refined-type	std::windows::path	api	source	stdlib/windows/path.bot:60	windows		
-std::windows::path::concat	function	std::windows::path	api	source	stdlib/windows/path.bot:100	windows		
-std::windows::path::create_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:132	windows		
-std::windows::path::create_file	function	std::windows::path	api	source	stdlib/windows/path.bot:120	windows		
-std::windows::path::entries	function	std::windows::path	api	source	stdlib/windows/path.bot:126	windows		
-std::windows::path::kind	function	std::windows::path	api	source	stdlib/windows/path.bot:93	windows		
-std::windows::path::native	function	std::windows::path	api	source	stdlib/windows/path.bot:89	windows		
-std::windows::path::nul_free?	function	std::windows::path	api	source	stdlib/windows/path.bot:63	windows		
-std::windows::path::read_file	function	std::windows::path	api	source	stdlib/windows/path.bot:112	windows		
-std::windows::path::remove_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:140	windows		
-std::windows::path::remove_file	function	std::windows::path	api	source	stdlib/windows/path.bot:136	windows		
-std::windows::path::text	function	std::windows::path	api	source	stdlib/windows/path.bot:85	windows		
-std::windows::path::valid?	function	std::windows::path	api	source	stdlib/windows/path.bot:71	windows		
-std::windows::path::validate	function	std::windows::path	api	source	stdlib/windows/path.bot:77	windows		
-std::windows::path::write_file	function	std::windows::path	api	source	stdlib/windows/path.bot:116	windows		
+std::windows::path::concat	function	std::windows::path	api	source	stdlib/windows/path.bot:105	windows		
+std::windows::path::create_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:137	windows		
+std::windows::path::create_file	function	std::windows::path	api	source	stdlib/windows/path.bot:125	windows		
+std::windows::path::entries	function	std::windows::path	api	source	stdlib/windows/path.bot:131	windows		
+std::windows::path::kind	function	std::windows::path	api	source	stdlib/windows/path.bot:98	windows		
+std::windows::path::native	function	std::windows::path	api	source	stdlib/windows/path.bot:94	windows		
+std::windows::path::nul_free?	function	std::windows::path	api	source	stdlib/windows/path.bot:68	windows		
+std::windows::path::read_file	function	std::windows::path	api	source	stdlib/windows/path.bot:117	windows		
+std::windows::path::remove_directory	function	std::windows::path	api	source	stdlib/windows/path.bot:145	windows		
+std::windows::path::remove_file	function	std::windows::path	api	source	stdlib/windows/path.bot:141	windows		
+std::windows::path::text	function	std::windows::path	api	source	stdlib/windows/path.bot:90	windows		
+std::windows::path::valid?	function	std::windows::path	api	source	stdlib/windows/path.bot:76	windows		
+std::windows::path::validate	function	std::windows::path	api	source	stdlib/windows/path.bot:82	windows		
+std::windows::path::write_file	function	std::windows::path	api	source	stdlib/windows/path.bot:121	windows		
 std::windows::request	function	std::windows	api	source	stdlib/windows.bot:127	windows		
 std::windows::selector	function	std::windows	api	source	stdlib/windows.bot:106	windows		
 std::windows::standard_handle	function	std::windows	api	source	stdlib/windows.bot:117	windows		

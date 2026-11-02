@@ -215,6 +215,7 @@ namespace eval hir::static {
         AFFINE-EQUALITY-UNSUPPORTED              AffineEqualityUnsupported
         AFFINE-ERASURE-UNSUPPORTED               AffineErasureUnsupported
         AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE   AffineFieldMoveRequiresDestructure
+        AFFINE-FOLD-UNSUPPORTED                  AffineFoldUnsupported
         AFFINE-GENERIC-NESTED-UNSUPPORTED        AffineGenericNestedUnsupported
         AFFINE-INSTANCE-BUDGET                   AffineInstanceBudget
         AFFINE-LIST-OPERATION-UNSUPPORTED        AffineListOperationUnsupported
@@ -227,9 +228,15 @@ namespace eval hir::static {
         ARITY                                    Arity
         BINARY-OPERAND                           BinaryOperand
         BREAK-OUTSIDE-LOOP                       BreakOutsideLoop
+        CALLBACK-ENVIRONMENT                     CallbackEnvironment
+        CALLBACK-PLACEMENT                       CallbackPlacement
+        CALLBACK-REFERENCE                       CallbackReference
+        CALLBACK-SIGNATURE                       CallbackSignature
         CONTEXT-BINDING-COLLISION                ContextBindingCollision
         CONTEXT-FUNCTION-VALUE                   ContextFunctionValue
         CONTEXT-INSTALLATION-UNSUPPORTED         ContextInstallationUnsupported
+        CONTEXT-NOT-INJECTED                     ContextNotInjected
+        CONTEXT-RETAINED-AUTHORITY               ContextRetainedAuthority
         CONTEXT-TRAIT-MISUSE                     ContextTraitMisuse
         CONTEXT-TRAIT-POSITION                   ContextTraitPosition
         CONTINUE-OUTSIDE-LOOP                    ContinueOutsideLoop
@@ -250,7 +257,21 @@ namespace eval hir::static {
         DUPLICATE-FIELD                          DuplicateField
         DUPLICATE-FLAG                           DuplicateFlag
         DUPLICATE-FLAG-DECLARATION               DuplicateFlagDeclaration
+        DUPLICATE-INJECTED-CONTEXT               DuplicateInjectedContext
         DUPLICATE-LOOP-VARIABLE                  DuplicateLoopVariable
+        EMIT-AFTER-TOKEN                         EmitAfterToken
+        EMIT-BEYOND-TOKEN                        EmitBeyondToken
+        EMIT-BOUNDARY                            EmitBoundary
+        EMIT-BUDGET                              EmitBudget
+        EMIT-BYTE-CHARACTER                      EmitByteCharacter
+        EMIT-END-SYMBOL                          EmitEndSymbol
+        EMIT-INCOMPLETE                          EmitIncomplete
+        EMIT-NOT-SYMBOL                          EmitNotSymbol
+        EMIT-RECOGNIZER                          EmitRecognizer
+        EMIT-REJECTED                            EmitRejected
+        EMIT-TERMINAL-VALUE                      EmitTerminalValue
+        EMIT-UNKNOWN-VALUE                       EmitUnknownValue
+        EMIT-UNSUPPORTED                         EmitUnsupported
         EXPORT-ENVIRONMENT                       ExportEnvironment
         EXPORT-NAME                              ExportName
         EXPORT-PLACEMENT                         ExportPlacement
@@ -258,6 +279,7 @@ namespace eval hir::static {
         FLAG-BINDING-COLLISION                   FlagBindingCollision
         FLAG-CALLEE-UNKNOWN                      FlagCalleeUnknown
         FLAG-FUNCTION-VALUE                      FlagFunctionValue
+        FOLD-INTERMEDIATE-TYPE                   FoldIntermediateType
         FOREIGN-BORROW                           ForeignBorrow
         IMPRINT                                  Imprint
         INTERNAL-INTRINSIC-VALUE                 InternalIntrinsicValue
@@ -417,8 +439,11 @@ proc hir::static::Children {node} {
             }
             return [list $value]
         }
-        block - loop - static {
+        block - static {
             return [dict get $node body]
+        }
+        loop {
+            return [concat [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         call {
             return [concat [list [dict get $node callee]] [dict get $node args]]
@@ -427,10 +452,11 @@ proc hir::static::Children {node} {
             return [concat [list [dict get $node condition]] [dict get $node thenBody] [dict get $node elseBody]]
         }
         listloop {
-            return [concat [list [dict get $node iterable]] [dict get $node body]]
+            return [concat [list [dict get $node iterable]] [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         countloop {
-            return [concat [list [dict get $node start] [dict get $node end]] [dict get $node body]]
+            return [concat [list [dict get $node start] [dict get $node end]] \
+                [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         lockloop {
             set children {}
@@ -441,7 +467,7 @@ proc hir::static::Children {node} {
                     }
                 }
             }
-            return [concat $children [dict get $node body]]
+            return [concat $children [hir::syntax::foldChildren $node] [dict get $node body]]
         }
         handle {
             set children [list [dict get $node call]]
@@ -534,6 +560,11 @@ proc hir::static::Value {node decisions} {
     return [Node $node $decisions]
 }
 
+# Value with its arguments the other way round, for hir::syntax::mapFold.
+proc hir::static::Value_ {decisions node} {
+    return [Value $node $decisions]
+}
+
 # NODE (not itself static) with every static node below it expanded.
 proc hir::static::Node {node decisions} {
     switch -- [dict get $node kind] {
@@ -543,7 +574,11 @@ proc hir::static::Node {node decisions} {
         return - break - fail {
             dict set node value [Value [dict get $node value] $decisions]
         }
-        block - loop {
+        block {
+            dict set node body [Sequence [dict get $node body] $decisions]
+        }
+        loop {
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         call {
@@ -557,11 +592,13 @@ proc hir::static::Node {node decisions} {
         }
         listloop {
             dict set node iterable [Value [dict get $node iterable] $decisions]
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         countloop {
             dict set node start [Value [dict get $node start] $decisions]
             dict set node end [Value [dict get $node end] $decisions]
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         lockloop {
@@ -573,6 +610,7 @@ proc hir::static::Node {node decisions} {
                 }
                 set domain
             }]
+            set node [hir::syntax::mapFold $node [list hir::static::Value_ $decisions]]
             dict set node body [Sequence [dict get $node body] $decisions]
         }
         handle {
@@ -1467,9 +1505,11 @@ proc hir::static::Independent {hir units y z} {
 # The units of HIR (Independent): {roots {UNIT {FILE START END} ...} reach
 # {UNIT {UNIT ...} ...}}, UNIT a root ExprId (a top-level function
 # definition) or code:SCOPE (the rest of the top level of that section's
-# scope), REACH the units each unit's code transitively refers to.
+# scope), REACH the units each unit's code transitively refers to -- a
+# trait operation to its selected implementations'.
 proc hir::static::Units {hir} {
     set unitOfBinding [dict create]
+    set unitOfBlock [dict create]
     set rootsOf [dict create]
     set spans {}
     foreach r [dict get $hir roots] {
@@ -1477,6 +1517,7 @@ proc hir::static::Units {hir} {
         set unit "code:[dict get $node scope]"
         if {[dict get $node kind] eq "bind" && [dict get $hir exprs [dict get $node value] kind] eq "block"} {
             set unit $r
+            dict set unitOfBlock [dict get $node value] $r
         }
         if {[dict get $node kind] eq "bind" && [dict get $node binding] ne ""} {
             dict set unitOfBinding [dict get $node binding] $unit
@@ -1487,6 +1528,9 @@ proc hir::static::Units {hir} {
             lappend spans [list $unit [dict get $origin file] [dict get $origin start] [dict get $origin end]]
         }
     }
+    # (A trait operation refers to no function, but calls the implementation
+    # the program selects for it: hir::coroutines::ImplementationTargets.)
+    set implTargets [hir::coroutines::ImplementationTargets $hir]
     set uses [dict create]
     dict for {unit roots} $rootsOf {
         set used [dict create]
@@ -1498,6 +1542,11 @@ proc hir::static::Units {hir} {
             if {[dict get $node kind] eq "ref" && [dict get $node binding] ne ""
                     && [dict exists $unitOfBinding [dict get $node binding]]} {
                 dict set used [dict get $unitOfBinding [dict get $node binding]] 1
+            }
+            foreach b [dict getdef $implTargets $e {}] {
+                if {[dict exists $unitOfBlock $b]} {
+                    dict set used [dict get $unitOfBlock $b] 1
+                }
             }
             lappend stack {*}[hir::children $hir $e]
         }

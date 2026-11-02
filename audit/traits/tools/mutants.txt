@@ -554,3 +554,178 @@ proc hir::traits::VerifyFunctionValues {hirVar parents} {
                 return 1
             }
 >>>>
+
+# Implementation context requirements (TRAIT-IMPLEMENTATION-CONTEXT-
+# REQUIREMENTS-MILESTONE-1.md): a trait operation's selected implementation
+# contributes its context requirement to the specialization that binds it,
+# and the plan calls a replaced implementation's clone.
+
+@@ context-requirement-from-function-as-written the context analysis computes a call's requirement from the trait-polymorphic function as written: a call of a specialization requires its function's own requirement, never its implementations'
+## hir/contexts.tcl
+<<<<
+    if {[dict exists $graph spec $key]} {
+        return [dict get $graph spec $key]
+    }
+    set t [Callee $hir $c]
+====
+    set t [Callee $hir $c]
+>>>>
+
+@@ context-requirement-every-witness an operation's requirement is the union of every witness's implementation's: a specialization acquires the contexts of implementations it does not invoke
+## hir/contexts.tcl
+<<<<
+        return [lsort -unique [lmap t [dict get $graph impl $key] {lindex $t 0}]]
+====
+        set all {}
+        dict for {k targets} [dict get $graph impl] {
+            if {[lindex $k 1] eq $c} {
+                lappend all {*}[lmap t $targets {lindex $t 0}]
+            }
+        }
+        return [lsort -unique $all]
+>>>>
+
+@@ specialization-selection-shared one specialization's context selection is every specialization's of the same function: the clone key takes the requirement of whichever specialization of the function the context analysis lists first
+## hir/traits.tcl
+<<<<
+    set key [list $h $params [if {[dict get $fn imprint]} {set binding} else {dict create}]]
+    if {![dict exists $hir contexts specialized $key]} {
+        return $traits
+    }
+====
+    set key ""
+    foreach k [dict keys [dict getdef $hir contexts specialized {}]] {
+        if {[lindex $k 0] eq $h} {
+            set key $k
+            break
+        }
+    }
+    if {$key eq ""} {
+        return $traits
+    }
+>>>>
+
+@@ trait-redirect-dropped an ordinary trait operation whose implementation the plan replaces still calls the implementation's original declaration, which the plan drops (the original defect): the plan's invariant reports it
+## hir/traits.tcl
+<<<<
+                            CallImplementationClone trait $operation $impl 1
+====
+                            SetAction actions diagnostics $ckey $sid [list trait $operation] $e
+>>>>
+
+@@ implementation-clone-not-queued the operation is redirected to the replaced implementation's clone, but the clone is never made (no queue entry, no placement)
+## hir/traits.tcl
+<<<<
+    SetAction actions diagnostics $ckey $sid [list $kind $operation $k] $e
+    uplevel 1 [list hir::traits::CallsClone $k [list contextfn $implBlock]]
+====
+    SetAction actions diagnostics $ckey $sid [list $kind $operation $k] $e
+>>>>
+
+@@ clone-edge-omitted a call of a clone records no placement edge (from live code, no position; from a clone, no edge): the clone is not placed before the code that calls it
+## hir/traits.tcl
+<<<<
+    if {$ckey eq "live"} {
+        set top [TopIndex $parents $rootIndex $e]
+        if {![dict exists $livePos $k] || $top < [dict get $livePos $k]} {
+            dict set livePos $k $top
+        }
+    } else {
+        dict set edges $ckey $k 1
+    }
+    if {![dict exists $seen $j]} {
+        dict set seen $j 1
+        lappend queue $j
+    }
+}
+====
+    if {![dict exists $seen $j]} {
+        dict set seen $j 1
+        lappend queue $j
+    }
+}
+>>>>
+
+@@ dangling-unchecked the plan never checks that its actions name only declarations and clones build 2 has: a plan naming a dropped declaration fails as malformed IR instead of TRAIT-INTERNAL
+## hir/traits.tcl
+<<<<
+    if {[dict size $drop] == 0 && [dict size $actions] == 0} {
+        return {}
+    }
+====
+    if {1} {
+        return {}
+    }
+>>>>
+
+@@ context-requirement-lost-when-yielding an implementation that yields contributes its yield and loses its context requirement: the context analysis ignores an operation's edge into a yield-capable implementation
+## hir/contexts.tcl
+<<<<
+        return [lsort -unique [lmap t [dict get $graph impl $key] {lindex $t 0}]]
+====
+        return [lsort -unique [lmap t [dict get $graph impl $key] {
+            if {[dict exists $hir coroutines blocks [lindex $t 0]]} continue
+            lindex $t 0
+        }]]
+>>>>
+
+@@ context-edges-unkept the selected implementation graph keeps only the edges the coroutine analysis needs: an operation whose implementation needs a context but does not yield is no edge, and its requirement never reaches the specialization
+## hir/coroutines.tcl
+<<<<
+                } elseif {[dict getdef $required $n {}] ne {}
+====
+                } elseif {0 && [dict getdef $required $n {}] ne {}
+>>>>
+
+@@ context-plan-gate-closed the trait plan is never asked for the edges of an operation whose implementation needs a context: the gate (MayBind) reads only yields
+## hir/coroutines.tcl
+<<<<
+    if {[ImplementationsRequire $hir $operations]} {
+        return 1
+    }
+====
+>>>>
+
+@@ context-plan-gate-every-trait the gate asks the plan whenever any declared trait has an implementation that needs a context, also when the program performs no operation of that trait
+## hir/coroutines.tcl
+<<<<
+    foreach id [dict keys $traits] {
+        if {![hir::traits::declared $id]} continue
+====
+    foreach id [hir::traits::declaredIds] {
+        if {[hir::traits::isContext $id]} continue
+>>>>
+
+@@ replaced-implementation-unindexed the monomorphized program's implementation index never lists a replaced implementation's clone under the function it replaces: a constrained slot's application, checked again there, finds no implementation (TRAIT-NOT-SATISFIED in the monomorphized program)
+## hir/traits.tcl
+<<<<
+    if {[Planning]} {
+        # The monomorphized program (monomorphize): a function the plan
+====
+    if {0} {
+        # The monomorphized program (monomorphize): a function the plan
+>>>>
+
+@@ function-value-judged-as-written a function value is judged by its function as written only: a nested function of a trait-polymorphic function that needs a context only in one specialization (through the implementation its operation binds there) passes as a value, and the plan meets an implementation clone with no provider
+## hir/contexts.tcl
+<<<<
+        if {[llength $n] == 2 && $ids ne {}} {
+            dict lappend specialized [lindex $n 1] $n
+        }
+====
+        if {0} {
+            dict lappend specialized [lindex $n 1] $n
+        }
+>>>>
+
+@@ implementation-clone-reached-everywhere a call of a replaced implementation is redirected to its clone wherever it is, also in code no provider of its context traits reaches (a nested function its enclosing specialization never calls): the clone has no selection, and the plan fails (TRAIT-INTERNAL) instead of the placeholder of never-executed code
+## hir/traits.tcl
+<<<<
+    set reaches 1
+    if {$consult} {
+        set reaches [hir::get $hir $e reachable]
+====
+    set reaches 1
+    if {0} {
+        set reaches [hir::get $hir $e reachable]
+>>>>

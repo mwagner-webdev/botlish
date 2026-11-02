@@ -1,0 +1,124 @@
+# mem.bot -- the bridge under the deterministic driver
+# (std::event_loop::deterministic): Hyper HTTP/1.1 and HTTP/2 over bounded
+# in-memory pipes, Rust timers in virtual time, no descriptor anywhere. The
+# same scheduler, the same bridge, the same Botlish protocol modules as on
+# Linux; only the driver and the executor's readiness half (hsmem) differ.
+# Two runs must print the same trace (tools/check.tcl compares them).
+#
+# HS_CENSUS_FAULT=64 starts the bridge without its timekeeper (the
+# missing-timer control): the 5 s Rust sleep never completes, the driver
+# runs out of anything to wait for, and run returns with it pending.
+import hs
+import hsfx
+import hsh
+import hsmem
+import probe
+import std::event_loop
+import std::event_loop::deterministic
+import std::mutable_array
+import std::str
+
+nomethod fn serve_one(server: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        x = hsh::next_request(server)
+        if x == 0:
+            e = hs::await(server)
+            if e.reason != std::event_loop::Wake::Event:
+                return 0
+            continue
+        hsh::respond(x, 200, true)
+        loop i from 0 to chunks:
+            loop:
+                if hsh::send(x, "chunk ".concat(probe::n(i)).concat(" of a virtual-time body")) > 0:
+                    break
+                hs::await(x)
+        hsh::finish(x)
+        return chunks
+
+nomethod fn fetch(name: str, client: int, pause: int, context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    x = hsh::request(client, "GET", "/virtual", false)
+    loop:
+        if hsh::status(x) != 0:
+            break
+        hs::await(x)
+    got = std::mutable_array::create(2, 0)
+    loop:
+        c = hsh::recv(x)
+        if c.n > 0:
+            got.set(0, got.at(0) + c.n)
+            got.set(1, got.at(1) + 1)
+            std::event_loop::sleep(pause)
+        elif c.n == 0:
+            hs::await(x)
+        else:
+            break
+    probe::log(name.concat(": status ").concat(probe::n(hsh::status(x))).concat(" bytes ").concat(probe::n(got.at(0))).concat(" reads ").concat(probe::n(got.at(1))).concat(" at virtual us ").concat(probe::n(std::event_loop::now())))
+    hs::release(x)
+    probe::bump_flag(0)
+    0
+
+nomethod fn timers(context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    t0 = std::event_loop::now()
+    fx = hsfx::sleep(5000000)
+    r = hsfx::finish(fx)
+    probe::log("rust sleep of 5 s (virtual): woke at ".concat(probe::n(r - t0)).concat(" after start, loop now ").concat(probe::n(std::event_loop::now() - t0)))
+    probe::bump_flag(0)
+    0
+
+nomethod fn finish(context ev: std::event_loop::Loop, h: hs::Hs, m: hsmem::Mem, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    waited = std::mutable_array::create(1, 0)
+    loop:
+        if probe::flag(0) == 3:
+            break
+        if waited.at(0) == 20000:
+            probe::log("STALLED: parts finished ".concat(probe::n(probe::flag(0))).concat(" of 3 after 20 s of virtual time"))
+            break
+        waited.set(0, waited.at(0) + 1)
+        std::event_loop::sleep(1000)
+    probe::log("rust: polls ".concat(probe::n(hs::rstat(2))).concat(" timers fired ").concat(probe::n(hs::rstat(12))).concat(" readiness ").concat(probe::n(hs::rstat(15))).concat(" interest requests ").concat(probe::n(hsmem::stray())))
+    hsmem::stop()
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic, h: hs::Hs, m: hsmem::Mem, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsmem::start()
+    probe::log("fault ".concat(probe::n(hs::fault())))
+    hsh::configure(4096, 1000000)
+    s1 = hsh::server(1, 0)
+    c1 = hsh::mem_client(s1, 1, 2048)
+    s2 = hsh::server(2, 0)
+    c2 = hsh::mem_client(s2, 2, 2048)
+    coroutine {step: a, first: fa} = serve_one(s1, 40)
+    std::event_loop::adopt(a, fa)
+    coroutine {step: bb, first: fb} = serve_one(s2, 40)
+    std::event_loop::adopt(bb, fb)
+    coroutine {step: c, first: fc} = fetch("http/1.1", c1, 1000)
+    std::event_loop::adopt(c, fc)
+    coroutine {step: dd, first: fd} = fetch("http/2", c2, 2500)
+    std::event_loop::adopt(dd, fd)
+    coroutine {step: e, first: fe} = timers()
+    std::event_loop::adopt(e, fe)
+    coroutine {step: f, first: ff} = finish()
+    std::event_loop::adopt(f, ff)
+    std::event_loop::run()
+    probe::log("run returned at virtual us ".concat(probe::n(std::event_loop::now())).concat(" finished parts ").concat(probe::n(probe::flag(0))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context std::event_loop::deterministic::create()
+with context hs::create(16)
+with context hsmem::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

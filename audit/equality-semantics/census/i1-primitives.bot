@@ -1,0 +1,9 @@
+# I1 distinct primitive kinds: str, UnicodeChar, Int, Float64, Bool, Bytes, unit
+import std::abi::bytes
+import std::str
+b = std::abi::bytes::from_list(std::str::encode_utf8("-"))
+[
+    "-" == '-', '-' == 45, 45 == 45.0, 1 == true, true == "true",
+    b == "-", b == [45], b == std::abi::bytes::from_list(std::str::encode_utf8("-")),
+    0.0 == 0, "" == [], '-' == '-', 1.5 == 1.5
+]

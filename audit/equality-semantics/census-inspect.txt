@@ -1,0 +1,880 @@
+######## census/i1-lists.bot
+strict: accepted
+fn ints_strs (e2) result=bool
+    a declared=List[int] trusted=List[int] checked=-
+    b declared=List[str] trusted=List[str] checked=-
+fn ints_chars (e8) result=bool
+    a declared=List[int] trusted=List[int] checked=-
+    b declared=List[UnicodeChar] trusted=List[UnicodeChar] checked=-
+fn nested (e14) result=bool
+    a declared=List[List[int]] trusted=List[List[int]] checked=-
+    b declared=List[List[str]] trusted=List[List[str]] checked=-
+== 3:5 (e3) List[int] vs List[str] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: the empty List structural=incompatible kinded=empty-only related=unrelated defined=total: 
+== 5:5 (e9) List[int] vs List[UnicodeChar] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: the empty List structural=incompatible kinded=empty-only related=unrelated defined=total: 
+== 7:5 (e15) List[List[int]] vs List[List[str]] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: the empty List structural=incompatible kinded=empty-only related=meet defined=total: 
+== 8:124 (e69) List[never] vs List[never] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: the empty List structural=compatible kinded=compatible related=same defined=total: 
+== 8:134 (e75) List[int]{length: 1} vs List[Float64]{length: 1} reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=disjoint: elements: kinds int and Float64 structural=incompatible kinded=empty-only related=meet defined=total: 
+call 8:2 (e21) target=block e2 ints_strs callee=block(e2)/2 -> bool args=List[never], List[never] instance=s0
+call 8:21 (e27) target=block e2 ints_strs callee=block(e2)/2 -> bool args=List[int]{length: 1}, List[str]{length: 1} instance=-
+call 8:44 (e35) target=block e8 ints_chars callee=block(e8)/2 -> bool args=List[never], List[never] instance=s1
+call 8:64 (e41) target=block e14 nested callee=block(e14)/2 -> bool args=List[never], List[never] instance=s2
+call 8:80 (e47) target=block e14 nested callee=block(e14)/2 -> bool args=List[List[never]]{length: 1}, List[List[never]]{length: 1} instance=s3
+call 8:100 (e57) target=block e14 nested callee=block(e14)/2 -> bool args=List[List[int]{length: 1}]{length: 1}, List[List[str]{length: 1}]{length: 1} instance=-
+inst s0 ints_strs(a : List[never], b : List[never]) status=valid result=bool
+    == 3:5 List[never] vs List[never] op=veqtotal head=head-equal overlap=overlap: the empty List structural=compatible kinded=compatible related=same defined=total: 
+inst s1 ints_chars(a : List[never], b : List[never]) status=valid result=bool
+    == 5:5 List[never] vs List[never] op=veqtotal head=head-equal overlap=overlap: the empty List structural=compatible kinded=compatible related=same defined=total: 
+inst s2 nested(a : List[never], b : List[never]) status=valid result=bool
+    == 7:5 List[never] vs List[never] op=veqtotal head=head-equal overlap=overlap: the empty List structural=compatible kinded=compatible related=same defined=total: 
+inst s3 nested(a : List[List[never]], b : List[List[never]]) status=valid result=bool
+    == 7:5 List[List[never]] vs List[List[never]] op=veqtotal head=head-equal overlap=overlap: the empty List structural=compatible kinded=compatible related=same defined=total: 
+semantic: requests=6 instances=4 declined=
+
+######## census/i1-nested.bot
+strict: accepted
+fn anon (e2) result=bool
+    a declared=List[int] trusted=List[int] checked=-
+    b declared=List[str] trusted=List[str] checked=-
+fn named (e10) result=bool
+    a declared=Box trusted=Box checked=-
+    b declared=List[str] trusted=List[str] checked=-
+== 5:5 (e3) struct{items: List[int]} vs struct{items: List[str]} reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: {items: the empty List} structural=incompatible kinded=disjoint related=meet defined=total: 
+== 7:5 (e11) Box vs struct{items: List[str]} reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-disjoint overlap=disjoint: struct shapes {Box items} and {{} items} structural=incompatible kinded=disjoint related=unrelated defined=total: 
+call 8:2 (e18) target=block e2 anon callee=block(e2)/2 -> bool args=List[never], List[never] instance=s0
+call 8:16 (e24) target=block e2 anon callee=block(e2)/2 -> bool args=List[int]{length: 1}, List[str]{length: 1} instance=-
+call 8:34 (e32) target=block e10 named callee=block(e10)/2 -> bool args=Box, List[never] instance=s1
+inst s0 anon(a : List[never], b : List[never]) status=valid result=bool
+    == 5:5 struct{items: List[never]} vs struct{items: List[never]} op=veqtotal head=head-equal overlap=overlap: {items: the empty List} structural=compatible kinded=compatible related=same defined=total: 
+inst s1 named(a : Box, b : List[never]) status=valid result=bool
+    == 7:5 Box vs struct{items: List[never]} op=veqtotal head=head-disjoint overlap=disjoint: struct shapes {Box items} and {{} items} structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=3 instances=2 declined=
+
+######## census/i1-applied.bot
+strict: accepted
+fn boxes (e2) result=bool
+    a declared=Box[int] trusted=Box[int] checked=-
+    b declared=Box[str] trusted=Box[str] checked=-
+fn bags (e8) result=bool
+    a declared=Bag[int] trusted=Bag[int] checked=-
+    b declared=Bag[str] trusted=Bag[str] checked=-
+== 7:5 (e3) Box[int] vs Box[str] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=disjoint: field value: kinds int and str structural=incompatible kinded=disjoint related=unrelated defined=total: 
+== 9:5 (e9) Bag[int] vs Bag[str] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: {items: the empty List} structural=incompatible kinded=disjoint related=unrelated defined=total: 
+call 10:2 (e15) target=block e2 boxes callee=block(e2)/2 -> bool args=Box[int], Box[str] instance=-
+call 10:53 (e21) target=block e8 bags callee=block(e8)/2 -> bool args=Bag[int], Bag[str] instance=-
+call 10:103 (e29) target=block e8 bags callee=block(e8)/2 -> bool args=Bag[int], Bag[str] instance=-
+semantic: requests=3 instances=0 declined=
+
+######## census/i1-phantom.bot
+strict: accepted
+fn tags (e2) result=bool
+    a declared=Tag[int] trusted=Tag[int] checked=-
+    b declared=Tag[str] trusted=Tag[str] checked=-
+== 5:5 (e3) Tag[int] vs Tag[str] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=disjoint related=unrelated defined=total: 
+call 6:2 (e9) target=block e2 tags callee=block(e2)/2 -> bool args=Tag[int], Tag[str] instance=-
+call 6:42 (e15) target=block e2 tags callee=block(e2)/2 -> bool args=Tag[int], Tag[str] instance=-
+semantic: requests=2 instances=0 declined=
+
+######## census/i1-sets.bot
+strict: accepted
+fn ints_strs (e2) result=bool
+    a declared=ImmutableSet[int] trusted=ImmutableSet[int] checked=-
+    b declared=ImmutableSet[str] trusted=ImmutableSet[str] checked=-
+== 4:5 (e3) ImmutableSet[int] vs ImmutableSet[str] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: the empty set structural=incompatible kinded=empty-only related=unrelated defined=total: 
+== 9:5 (e37) ImmutableSet[int] vs ImmutableSet[int] reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=overlap: the empty set structural=compatible kinded=compatible related=same defined=total: 
+call 7:5 (e15) target=block e2 ints_strs callee=block(e2)/2 -> bool args=ImmutableSet[never], ImmutableSet[never] instance=-
+call 8:5 (e25) target=block e2 ints_strs callee=block(e2)/2 -> bool args=ImmutableSet[int], ImmutableSet[str] instance=-
+semantic: requests=2 instances=0 declined=
+
+######## census/i2-list-struct-callable.bot
+strict: accepted
+fn f (e2) result=any
+    x declared=- trusted=- checked=-
+== 7:2 (e6) List[block(e2)/1 -> any]{length: 1} vs List[never] reachable=1 known=
+    totality none/total op=veq
+    head=head-equal overlap=disjoint: elements: no value structural=compatible kinded=refused related=meet defined=total: no value
+== 7:13 (e13) R vs R reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-equal overlap=unknown: field h:  structural=unknown kinded=compatible related=same defined=unknown: n: total, h: unknown
+== 7:47 (e21) struct{a: int, h: block(e2)/1 -> any} vs struct{a: int, h: block(e2)/1 -> any} reachable=1 known=
+    totality none/none op=veq
+    head=head-equal overlap=disjoint: field h: a callable is equal to nothing (== raises EQUALITY) structural=compatible kinded=refused related=same defined=partial: a: total, h: partial
+semantic: requests=0 instances=0 declined=
+
+######## census/i2-decimal-instance.bot
+strict: accepted
+fn two (e2) result=DecimalRounded{minDecimalsPreserved: 2}
+fn same? (e5) result=bool
+    a declared=- trusted=- checked=-
+    b declared=- trusted=- checked=-
+== 5:5 (e6) any vs any reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 6:1 (e10) target=block e5 same? callee=block(e5)/2 -> bool args=DecimalRounded{minDecimalsPreserved: 2}, DecimalRounded{minDecimalsPreserved: 2} instance=s0
+call 6:7 (e12) target=block e2 two callee=block(e2)/0 -> DecimalRounded{minDecimalsPreserved: 2} args= instance=-
+call 6:14 (e14) target=block e2 two callee=block(e2)/0 -> DecimalRounded{minDecimalsPreserved: 2} args= instance=-
+inst s0 same?(a : DecimalRounded{minDecimalsPreserved: 2}, b : DecimalRounded{minDecimalsPreserved: 2}) status=valid result=bool
+    == 5:5 DecimalRounded{minDecimalsPreserved: 2} vs DecimalRounded{minDecimalsPreserved: 2} op=veq head=head-equal overlap=disjoint: a DecimalRounded is equal to nothing (== raises EQUALITY) structural=refused kinded=refused related=same defined=undefined: a top-level DecimalRounded{minDecimalsPreserved: 2} is refused before anything is compared
+semantic: requests=3 instances=1 declined=
+
+######## census/i3-untyped-char.bot
+strict: accepted
+fn char? (e2) result=bool
+    c declared=- trusted=- checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 4:2 (e9) target=block e2 char? callee=block(e2)/1 -> bool args=str instance=s0
+call 4:14 (e12) target=block e2 char? callee=block(e2)/1 -> bool args=UnicodeChar instance=s1
+call 4:26 (e15) target=block e2 char? callee=block(e2)/1 -> bool args=int instance=s2
+inst s0 char?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s1 char?(c : UnicodeChar) status=valid result=bool
+    == 3:5 UnicodeChar vs UnicodeChar op=chareq head=head-equal overlap=overlap: a UnicodeChar structural=compatible kinded=compatible related=same defined=total: 
+inst s2 char?(c : int) status=valid result=bool
+    == 3:5 int vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds int and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=3 instances=3 declined=
+
+######## census/i3-any-char.bot
+strict: accepted
+fn char? (e2) result=bool
+    c declared=any trusted=any checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 4:2 (e9) target=block e2 char? callee=block(e2)/1 -> bool args=str instance=s0
+call 4:14 (e12) target=block e2 char? callee=block(e2)/1 -> bool args=UnicodeChar instance=s1
+call 4:26 (e15) target=block e2 char? callee=block(e2)/1 -> bool args=int instance=s2
+inst s0 char?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s1 char?(c : UnicodeChar) status=valid result=bool
+    == 3:5 UnicodeChar vs UnicodeChar op=chareq head=head-equal overlap=overlap: a UnicodeChar structural=compatible kinded=compatible related=same defined=total: 
+inst s2 char?(c : int) status=valid result=bool
+    == 3:5 int vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds int and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=3 instances=3 declined=
+
+######## census/i3-untyped-same.bot
+strict: accepted
+fn same? (e2) result=bool
+    a declared=- trusted=- checked=-
+    b declared=- trusted=- checked=-
+== 3:5 (e3) any vs any reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 4:2 (e9) target=block e2 same? callee=block(e2)/2 -> bool args=str, UnicodeChar instance=s0
+call 4:19 (e13) target=block e2 same? callee=block(e2)/2 -> bool args=UnicodeChar, UnicodeChar instance=s1
+call 4:36 (e17) target=block e2 same? callee=block(e2)/2 -> bool args=int, Float64 instance=s2
+call 4:51 (e21) target=block e2 same? callee=block(e2)/2 -> bool args=List[never], List[never] instance=s3
+inst s0 same?(a : str, b : UnicodeChar) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s1 same?(a : UnicodeChar, b : UnicodeChar) status=valid result=bool
+    == 3:5 UnicodeChar vs UnicodeChar op=chareq head=head-equal overlap=overlap: a UnicodeChar structural=compatible kinded=compatible related=same defined=total: 
+inst s2 same?(a : int, b : Float64) status=valid result=bool
+    == 3:5 int vs Float64 op=veqtotal head=head-disjoint overlap=disjoint: kinds int and Float64 structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s3 same?(a : List[never], b : List[never]) status=valid result=bool
+    == 3:5 List[never] vs List[never] op=veqtotal head=head-equal overlap=overlap: the empty List structural=compatible kinded=compatible related=same defined=total: 
+semantic: requests=4 instances=4 declined=
+
+######## census/i3-any-same.bot
+strict: accepted
+fn same? (e2) result=bool
+    a declared=any trusted=any checked=-
+    b declared=any trusted=any checked=-
+== 3:5 (e3) any vs any reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 4:2 (e9) target=block e2 same? callee=block(e2)/2 -> bool args=str, UnicodeChar instance=s0
+call 4:19 (e13) target=block e2 same? callee=block(e2)/2 -> bool args=UnicodeChar, UnicodeChar instance=s1
+call 4:36 (e17) target=block e2 same? callee=block(e2)/2 -> bool args=int, Float64 instance=s2
+call 4:51 (e21) target=block e2 same? callee=block(e2)/2 -> bool args=List[never], List[never] instance=s3
+inst s0 same?(a : str, b : UnicodeChar) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s1 same?(a : UnicodeChar, b : UnicodeChar) status=valid result=bool
+    == 3:5 UnicodeChar vs UnicodeChar op=chareq head=head-equal overlap=overlap: a UnicodeChar structural=compatible kinded=compatible related=same defined=total: 
+inst s2 same?(a : int, b : Float64) status=valid result=bool
+    == 3:5 int vs Float64 op=veqtotal head=head-disjoint overlap=disjoint: kinds int and Float64 structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s3 same?(a : List[never], b : List[never]) status=valid result=bool
+    == 3:5 List[never] vs List[never] op=veqtotal head=head-equal overlap=overlap: the empty List structural=compatible kinded=compatible related=same defined=total: 
+semantic: requests=4 instances=4 declined=
+
+######## census/i3-checked-then-compared.bot
+strict: accepted
+fn f (e2) result=bool
+    c declared=- trusted=- checked=str <checked str: argument 1 of native std::str::length>
+== 5:5 (e7) str vs UnicodeChar reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+call 6:2 (e13) target=block e2 f callee=block(e2)/1 -> bool args=str instance=s0
+call 6:10 (e16) target=block e2 f callee=block(e2)/1 -> bool args=str instance=s0
+inst s0 f(c : str) status=valid result=bool
+    == 5:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=2 instances=1 declined=
+
+######## census/i3-imprint.bot
+strict: accepted
+fn same_box? (e2) result=bool
+    a declared=Box[T] trusted=Box[T] checked=-
+    b declared=Box[T] trusted=Box[T] checked=-
+fn cross? (e10) result=bool
+    a declared=Box[A] trusted=Box[A] checked=-
+    b declared=Box[B] trusted=Box[B] checked=-
+== 5:5 (e3) T vs T reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+== 7:5 (e11) A vs B reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 8:2 (e19) target=block e2 same_box? callee=block(e2)/2 -> bool args=Box[int], Box[int] instance=-
+call 8:45 (e25) target=block e10 cross? callee=block(e10)/2 -> bool args=Box[int], Box[str] instance=-
+semantic: requests=2 instances=0 declined=
+
+######## census/i3-equality-narrows.bot
+strict: REJECTED
+  diag ? file audit/equality-semantics/census/i3-equality-narrows.bot start 265 end 268 line 10 column 10 endLine 10 endColumn 13: audit/equality-semantics/census/i3-equality-narrows.bot:10:10: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+  diag ? file audit/equality-semantics/census/i3-equality-narrows.bot start 273 end 276 line 10 column 18 endLine 10 endColumn 21: audit/equality-semantics/census/i3-equality-narrows.bot:10:18: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: Float64); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+lenient build:
+  diag TYPE 10:10: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+  diag TYPE 10:18: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: Float64); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+fn f (e2) result=int[Small]
+    x declared=int[Small] trusted=int[Small] checked=-
+fn g (e5) result=int
+    v declared=- trusted=- checked=int[Small] <trusted int[Small]: argument 1 of f (declared int[Small])>
+== 6:8 (e7) any vs int reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 7:9 (e11) target=block e2 f callee=block(e2)/1 -> int[Small] args=any instance=-
+call 10:2 (e17) target=block e5 g callee=block(e5)/1 -> int args=int instance=s0
+call 10:8 (e20) target=block e5 g callee=block(e5)/1 -> int args=str instance=s1
+call 10:16 (e23) target=block e5 g callee=block(e5)/1 -> int args=Float64 instance=s2
+inst s0 g(v : int) status=valid result=int
+    == 6:8 int vs int op=ieq head=head-equal overlap=overlap: an Int both admit structural=compatible kinded=compatible related=same defined=total: 
+inst s1 g(v : str) status=valid result=int
+    == 6:8 str vs int op=veqtotal head=head-disjoint overlap=disjoint: kinds str and int structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s2 g(v : Float64) status=valid result=int
+    == 6:8 Float64 vs int op=veqtotal head=head-disjoint overlap=disjoint: kinds Float64 and int structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=8 instances=3 declined=
+
+######## census/i4-list-literal.bot
+strict: accepted
+fn same_list? (e2) result=bool
+    xs declared=- trusted=- checked=-
+== 3:5 (e3) any vs List[int]{length: 2} reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 4:2 (e12) target=block e2 same_list? callee=block(e2)/1 -> bool args=List[int]{length: 2} instance=s0
+call 4:22 (e18) target=block e2 same_list? callee=block(e2)/1 -> bool args=List[never] instance=s1
+call 4:38 (e22) target=block e2 same_list? callee=block(e2)/1 -> bool args=List[str]{length: 1} instance=s2
+call 4:57 (e27) target=block e2 same_list? callee=block(e2)/1 -> bool args=str instance=s3
+inst s0 same_list?(xs : List[int]) status=valid result=bool
+    == 3:5 List[int] vs List[int]{length: 2} op=veqtotal head=head-equal overlap=overlap: lists of an Int both admit structural=compatible kinded=compatible related=super defined=total: 
+inst s1 same_list?(xs : List[never]) status=valid result=bool
+    == 3:5 List[never] vs List[int]{length: 2} op=veqtotal head=head-equal overlap=disjoint: elements: no value structural=compatible kinded=compatible related=meet defined=total: 
+inst s2 same_list?(xs : List[str]) status=valid result=bool
+    == 3:5 List[str] vs List[int]{length: 2} op=veqtotal head=head-equal overlap=disjoint: elements: kinds str and int structural=incompatible kinded=empty-only related=unrelated defined=total: 
+inst s3 same_list?(xs : str) status=valid result=bool
+    == 3:5 str vs List[int]{length: 2} op=veqtotal head=head-disjoint overlap=disjoint: kinds str and list structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=4 instances=4 declined=
+
+######## census/i4-kind-tolerant.bot
+strict: accepted
+fn comma? (e2) result=bool
+    c declared=- trusted=- checked=-
+== 3:5 (e4) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+== 3:17 (e10) any vs str reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 4:2 (e18) target=block e2 comma? callee=block(e2)/1 -> bool args=str instance=s0
+call 4:15 (e21) target=block e2 comma? callee=block(e2)/1 -> bool args=UnicodeChar instance=s1
+call 4:28 (e24) target=block e2 comma? callee=block(e2)/1 -> bool args=int instance=s2
+inst s0 comma?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+    == 3:17 str vs str op=streq head=head-equal overlap=overlap: a str structural=compatible kinded=compatible related=same defined=total: 
+inst s1 comma?(c : UnicodeChar) status=valid result=bool
+    == 3:5 UnicodeChar vs UnicodeChar op=chareq head=head-equal overlap=overlap: a UnicodeChar structural=compatible kinded=compatible related=same defined=total: 
+    == 3:17 UnicodeChar vs str op=veqtotal head=head-disjoint overlap=disjoint: kinds UnicodeChar and str structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s2 comma?(c : int) status=valid result=bool
+    == 3:5 int vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds int and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+    == 3:17 int vs str op=veqtotal head=head-disjoint overlap=disjoint: kinds int and str structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=3 instances=3 declined=
+
+######## census/i4-cross-call.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+fn g (e8) result=bool
+    x declared=- trusted=- checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 5:5 (e9) target=block e2 hyphen? callee=block(e2)/1 -> bool args=any instance=-
+call 6:2 (e14) target=block e8 g callee=block(e8)/1 -> bool args=str instance=s0
+call 6:10 (e17) target=block e8 g callee=block(e8)/1 -> bool args=UnicodeChar instance=s2
+inst s0 g(x : str) status=valid result=bool
+inst s1 hyphen?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s2 g(x : UnicodeChar) status=valid result=bool
+inst s3 hyphen?(c : UnicodeChar) status=valid result=bool
+    == 3:5 UnicodeChar vs UnicodeChar op=chareq head=head-equal overlap=overlap: a UnicodeChar structural=compatible kinded=compatible related=same defined=total: 
+semantic: requests=6 instances=4 declined=
+
+######## census/i4-relational-forward.bot
+strict: accepted
+fn same? (e2) result=bool
+    a declared=- trusted=- checked=-
+    b declared=- trusted=- checked=-
+fn pair? (e8) result=bool
+    x declared=- trusted=- checked=-
+== 3:5 (e3) any vs any reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 5:5 (e9) target=block e2 same? callee=block(e2)/2 -> bool args=any, UnicodeChar instance=s0
+call 6:2 (e15) target=block e8 pair? callee=block(e8)/1 -> bool args=str instance=s1
+call 6:14 (e18) target=block e8 pair? callee=block(e8)/1 -> bool args=UnicodeChar instance=s3
+inst s0 same?(a : any, b : UnicodeChar) status=valid result=bool
+    == 3:5 any vs UnicodeChar op=veq head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+inst s1 pair?(x : str) status=valid result=bool
+inst s2 same?(a : str, b : UnicodeChar) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s3 pair?(x : UnicodeChar) status=valid result=bool
+inst s4 same?(a : UnicodeChar, b : UnicodeChar) status=valid result=bool
+    == 3:5 UnicodeChar vs UnicodeChar op=chareq head=head-equal overlap=overlap: a UnicodeChar structural=compatible kinded=compatible related=same defined=total: 
+semantic: requests=6 instances=5 declined=
+
+######## census/i4-same-list-generic.bot
+strict: accepted
+fn same? (e2) result=bool
+    a declared=- trusted=- checked=-
+    b declared=- trusted=- checked=-
+fn ints (e8) result=List[int]
+fn strs (e12) result=List[str]
+== 3:5 (e3) any vs any reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 8:2 (e17) target=block e2 same? callee=block(e2)/2 -> bool args=List[int], List[str] instance=s0
+call 8:8 (e19) target=block e8 ints callee=block(e8)/0 -> List[int] args= instance=-
+call 8:16 (e21) target=block e12 strs callee=block(e12)/0 -> List[str] args= instance=-
+call 8:25 (e23) target=block e2 same? callee=block(e2)/2 -> bool args=List[int]{length: 1}, List[str]{length: 1} instance=s0
+inst s0 same?(a : List[int], b : List[str]) status=valid result=bool
+    == 3:5 List[int] vs List[str] op=veqtotal head=head-equal overlap=overlap: the empty List structural=incompatible kinded=empty-only related=unrelated defined=total: 
+semantic: requests=4 instances=1 declined=
+
+######## census/i4-domain-contract.bot
+strict: REJECTED
+  diag ? file audit/equality-semantics/census/i4-domain-contract.bot start 182 end 184 line 7 column 3 endLine 7 endColumn 5: audit/equality-semantics/census/i4-domain-contract.bot:7:3: argument for parameter "n" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: int, facts: [12, 12] {12}); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 6:7)
+lenient build:
+  diag TYPE 7:3: argument for parameter "n" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: int, facts: [12, 12] {12}); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 6:7)
+fn f (e2) result=int[Small]
+    x declared=int[Small] trusted=int[Small] checked=-
+fn g (e5) result=int[Small]
+    n declared=- trusted=- checked=int[Small] <trusted int[Small]: argument 1 of f (declared int[Small])>
+call 6:5 (e6) target=block e2 f callee=block(e2)/1 -> int[Small] args=any instance=-
+call 7:1 (e9) target=block e5 g callee=block(e5)/1 -> int[Small] args=int instance=s0
+inst s0 g(n : int) status=invalid result=int[Small]
+    diag TYPE: argument for parameter "x" cannot be proven to satisfy int[Small] (argument type: int, facts: [-∞, +∞])
+semantic: requests=4 instances=1 declined=
+
+######## census/i4-imprint-forwarder-box.bot
+strict: REJECTED
+  diag ? file audit/equality-semantics/census/i4-imprint-forwarder-box.bot start 195 end 209 line 8 column 9 endLine 8 endColumn 23: audit/equality-semantics/census/i4-imprint-forwarder-box.bot:8:9: argument for parameter "b" cannot be proven to satisfy Box[T], the parameter type inferred from the function body (argument type: Box[int]); Box[int] and Box[T] are distinct applications of Box (T is int, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of unbox (declared Box[T]) requires Box[T] (at 7:11)
+lenient build:
+  diag TYPE 8:9: argument for parameter "b" cannot be proven to satisfy Box[T], the parameter type inferred from the function body (argument type: Box[int]); Box[int] and Box[T] are distinct applications of Box (T is int, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of unbox (declared Box[T]) requires Box[T] (at 7:11)
+fn unbox (e2) result=T
+    b declared=Box[T] trusted=Box[T] checked=-
+fn forward (e6) result=any
+    b declared=- trusted=- checked=Box[T] <trusted Box[T]: argument 1 of unbox (declared Box[T])>
+call 7:5 (e7) target=block e2 unbox callee=block(e2)/1 -> T args=any instance=-
+call 8:1 (e10) target=block e6 forward callee=block(e6)/1 -> any args=Box[int] instance=s0
+inst s0 forward(b : Box[int]) status=invalid result=int
+    diag TYPE: argument for parameter "b" cannot be proven to satisfy Box[any] (argument type: Box[int]); Box[int] and Box[any] are distinct applications of Box (T is int, not any): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed
+semantic: requests=4 instances=1 declined=
+
+######## census/i5-local.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 5:1 (e9) target=block e2 hyphen? callee=block(e2)/1 -> bool args=str instance=s0
+inst s0 hyphen?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=1 instances=1 declined=
+
+######## census/i5-param.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+fn apply (e8) result=any
+    g declared=- trusted=- checked=-
+    x declared=- trusted=- checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 6:1 (e12) target=block e8 apply callee=block(e8)/2 -> any args=block(e2)/1 -> bool, str instance=s0
+inst s0 apply(g : hyphen?/1 -> bool, x : str) status=valid result=bool
+inst s1 hyphen?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=2 instances=2 declined=
+
+######## census/i5-returned.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+fn pick (e8) result=block(e2)/1 -> bool
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 6:1 (e10) target=block e2 hyphen? callee=block(e2)/1 -> bool args=str instance=s0
+call 6:1 (e11) target=block e8 pick callee=block(e8)/0 -> block(e2)/1 -> bool args= instance=-
+inst s0 hyphen?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=2 instances=1 declined=
+
+######## census/i5-list.bot
+strict: accepted
+fn hyphen? (e59) result=bool
+    c declared=- trusted=- checked=-
+== 4:5 (e60) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 6:1 (e68) target=block e59 hyphen? callee=block(e59)/1 -> bool args=str instance=s0
+inst s0 hyphen?(c : str) status=valid result=bool
+    == 4:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=1 instances=1 declined=
+
+######## census/i5-struct.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 5:1 (e10) target=block e2 hyphen? callee=block(e2)/1 -> bool args=str instance=s0
+inst s0 hyphen?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=1 instances=1 declined=
+
+######## census/i5-declared-fn.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+fn apply (e8) result=bool
+    g declared=Fn{args: [str], return: bool, errors: []} trusted=Fn{args: [str], return: bool, errors: []} checked=-
+    x declared=str trusted=str checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 5:5 (e9) target=none  callee=Fn{args: [str], return: bool, errors: []} args=str instance=-
+call 6:1 (e12) target=block e8 apply callee=block(e8)/2 -> bool args=block(e2)/1 -> bool, str instance=s0
+inst s0 apply(g : hyphen?/1 -> bool, x : str) status=valid result=bool
+inst s1 hyphen?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=2 instances=2 declined=
+
+######## census/i5-any-erased.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+fn call (e8) result=any
+    h declared=Holder trusted=Holder checked=-
+    x declared=- trusted=- checked=-
+== 5:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 9:1 (e15) target=block e8 call callee=block(e8)/2 -> any args=Holder, str instance=s0
+inst s0 call(h : Holder, x : str) status=valid result=any
+semantic: requests=1 instances=1 declined=
+
+######## census/i5-untargeted.bot
+strict: accepted
+fn hyphen? (e59) result=bool
+    c declared=- trusted=- checked=-
+fn first_of (e65) result=any
+    fs declared=- trusted=- checked=list <checked list: argument 1 of native std::list::at>
+    x declared=- trusted=- checked=-
+== 4:5 (e60) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 7:1 (e72) target=block e65 first_of callee=block(e65)/2 -> any args=List[block(e59)/1 -> bool]{length: 1}, str instance=s0
+inst s0 first_of(fs : List[hyphen?/1 -> bool], x : str) status=valid result=bool
+inst s1 hyphen?(c : str) status=valid result=bool
+    == 4:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=2 instances=2 declined=
+
+######## census/i5-checked-erasure.bot
+strict: accepted
+fn len1? (e2) result=bool
+    s declared=- trusted=- checked=str <checked str: argument 1 of native std::str::length>
+== 6:5 (e3) int vs int reachable=1 known=
+    totality total/total op=ieq
+    head=head-equal overlap=overlap: an Int both admit structural=compatible kinded=compatible related=same defined=total: 
+call 8:1 (e12) target=none  callee=Fn{args: [int], return: bool, errors: []} args=int instance=-
+semantic: requests=0 instances=0 declined=
+
+######## census/i5-equality-erasure.bot
+strict: accepted
+fn hyphen? (e2) result=bool
+    c declared=- trusted=- checked=-
+== 5:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 7:1 (e10) target=none  callee=Fn{args: [str], return: bool, errors: []} args=str instance=-
+semantic: requests=0 instances=0 declined=
+
+######## census/i6-budget-equality-first.bot
+strict: accepted
+fn same? (e2) result=bool
+    a declared=- trusted=- checked=-
+    b declared=- trusted=- checked=-
+== 3:5 (e3) any vs any reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 36:7 (e8) target=block e2 same? callee=block(e2)/2 -> bool args=str, UnicodeChar instance=s0
+call 37:6 (e13) target=block e2 same? callee=block(e2)/2 -> bool args=S1, S1 instance=s1
+call 38:6 (e20) target=block e2 same? callee=block(e2)/2 -> bool args=S2, S2 instance=s2
+call 39:6 (e27) target=block e2 same? callee=block(e2)/2 -> bool args=S3, S3 instance=s3
+call 40:6 (e34) target=block e2 same? callee=block(e2)/2 -> bool args=S4, S4 instance=s4
+call 41:6 (e41) target=block e2 same? callee=block(e2)/2 -> bool args=S5, S5 instance=s5
+call 42:6 (e48) target=block e2 same? callee=block(e2)/2 -> bool args=S6, S6 instance=s6
+call 43:6 (e55) target=block e2 same? callee=block(e2)/2 -> bool args=S7, S7 instance=s7
+call 44:6 (e62) target=block e2 same? callee=block(e2)/2 -> bool args=S8, S8 instance=s8
+call 45:6 (e69) target=block e2 same? callee=block(e2)/2 -> bool args=S9, S9 instance=s9
+call 46:7 (e76) target=block e2 same? callee=block(e2)/2 -> bool args=S10, S10 instance=s10
+call 47:7 (e83) target=block e2 same? callee=block(e2)/2 -> bool args=S11, S11 instance=s11
+call 48:7 (e90) target=block e2 same? callee=block(e2)/2 -> bool args=S12, S12 instance=s12
+call 49:7 (e97) target=block e2 same? callee=block(e2)/2 -> bool args=S13, S13 instance=s13
+call 50:7 (e104) target=block e2 same? callee=block(e2)/2 -> bool args=S14, S14 instance=s14
+call 51:7 (e111) target=block e2 same? callee=block(e2)/2 -> bool args=S15, S15 instance=s15
+call 52:7 (e118) target=block e2 same? callee=block(e2)/2 -> bool args=S16, S16 instance=declined:budget-block
+inst s0 same?(a : str, b : UnicodeChar) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+inst s1 same?(a : S1, b : S1) status=valid result=bool
+    == 3:5 S1 vs S1 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s2 same?(a : S2, b : S2) status=valid result=bool
+    == 3:5 S2 vs S2 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s3 same?(a : S3, b : S3) status=valid result=bool
+    == 3:5 S3 vs S3 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s4 same?(a : S4, b : S4) status=valid result=bool
+    == 3:5 S4 vs S4 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s5 same?(a : S5, b : S5) status=valid result=bool
+    == 3:5 S5 vs S5 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s6 same?(a : S6, b : S6) status=valid result=bool
+    == 3:5 S6 vs S6 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s7 same?(a : S7, b : S7) status=valid result=bool
+    == 3:5 S7 vs S7 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s8 same?(a : S8, b : S8) status=valid result=bool
+    == 3:5 S8 vs S8 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s9 same?(a : S9, b : S9) status=valid result=bool
+    == 3:5 S9 vs S9 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s10 same?(a : S10, b : S10) status=valid result=bool
+    == 3:5 S10 vs S10 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s11 same?(a : S11, b : S11) status=valid result=bool
+    == 3:5 S11 vs S11 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s12 same?(a : S12, b : S12) status=valid result=bool
+    == 3:5 S12 vs S12 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s13 same?(a : S13, b : S13) status=valid result=bool
+    == 3:5 S13 vs S13 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s14 same?(a : S14, b : S14) status=valid result=bool
+    == 3:5 S14 vs S14 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s15 same?(a : S15, b : S15) status=valid result=bool
+    == 3:5 S15 vs S15 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+semantic: requests=17 instances=16 declined=budget-block 1
+
+######## census/i6-budget-equality-last.bot
+strict: accepted
+fn same? (e2) result=bool
+    a declared=- trusted=- checked=-
+    b declared=- trusted=- checked=-
+== 3:5 (e3) any vs any reachable=1 known=
+    totality unknown/unknown op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 36:6 (e8) target=block e2 same? callee=block(e2)/2 -> bool args=S1, S1 instance=s0
+call 37:6 (e15) target=block e2 same? callee=block(e2)/2 -> bool args=S2, S2 instance=s1
+call 38:6 (e22) target=block e2 same? callee=block(e2)/2 -> bool args=S3, S3 instance=s2
+call 39:6 (e29) target=block e2 same? callee=block(e2)/2 -> bool args=S4, S4 instance=s3
+call 40:6 (e36) target=block e2 same? callee=block(e2)/2 -> bool args=S5, S5 instance=s4
+call 41:6 (e43) target=block e2 same? callee=block(e2)/2 -> bool args=S6, S6 instance=s5
+call 42:6 (e50) target=block e2 same? callee=block(e2)/2 -> bool args=S7, S7 instance=s6
+call 43:6 (e57) target=block e2 same? callee=block(e2)/2 -> bool args=S8, S8 instance=s7
+call 44:6 (e64) target=block e2 same? callee=block(e2)/2 -> bool args=S9, S9 instance=s8
+call 45:7 (e71) target=block e2 same? callee=block(e2)/2 -> bool args=S10, S10 instance=s9
+call 46:7 (e78) target=block e2 same? callee=block(e2)/2 -> bool args=S11, S11 instance=s10
+call 47:7 (e85) target=block e2 same? callee=block(e2)/2 -> bool args=S12, S12 instance=s11
+call 48:7 (e92) target=block e2 same? callee=block(e2)/2 -> bool args=S13, S13 instance=s12
+call 49:7 (e99) target=block e2 same? callee=block(e2)/2 -> bool args=S14, S14 instance=s13
+call 50:7 (e106) target=block e2 same? callee=block(e2)/2 -> bool args=S15, S15 instance=s14
+call 51:7 (e113) target=block e2 same? callee=block(e2)/2 -> bool args=S16, S16 instance=s15
+call 52:7 (e120) target=block e2 same? callee=block(e2)/2 -> bool args=str, UnicodeChar instance=declined:budget-block
+inst s0 same?(a : S1, b : S1) status=valid result=bool
+    == 3:5 S1 vs S1 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s1 same?(a : S2, b : S2) status=valid result=bool
+    == 3:5 S2 vs S2 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s2 same?(a : S3, b : S3) status=valid result=bool
+    == 3:5 S3 vs S3 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s3 same?(a : S4, b : S4) status=valid result=bool
+    == 3:5 S4 vs S4 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s4 same?(a : S5, b : S5) status=valid result=bool
+    == 3:5 S5 vs S5 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s5 same?(a : S6, b : S6) status=valid result=bool
+    == 3:5 S6 vs S6 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s6 same?(a : S7, b : S7) status=valid result=bool
+    == 3:5 S7 vs S7 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s7 same?(a : S8, b : S8) status=valid result=bool
+    == 3:5 S8 vs S8 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s8 same?(a : S9, b : S9) status=valid result=bool
+    == 3:5 S9 vs S9 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s9 same?(a : S10, b : S10) status=valid result=bool
+    == 3:5 S10 vs S10 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s10 same?(a : S11, b : S11) status=valid result=bool
+    == 3:5 S11 vs S11 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s11 same?(a : S12, b : S12) status=valid result=bool
+    == 3:5 S12 vs S12 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s12 same?(a : S13, b : S13) status=valid result=bool
+    == 3:5 S13 vs S13 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s13 same?(a : S14, b : S14) status=valid result=bool
+    == 3:5 S14 vs S14 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s14 same?(a : S15, b : S15) status=valid result=bool
+    == 3:5 S15 vs S15 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+inst s15 same?(a : S16, b : S16) status=valid result=bool
+    == 3:5 S16 vs S16 op=veqtotal head=head-equal overlap=overlap: {n: an Int both admit} structural=compatible kinded=compatible related=same defined=total: 
+semantic: requests=17 instances=16 declined=budget-block 1
+
+######## census/i6-budget-checked-first.bot
+strict: REJECTED
+  diag ? file audit/equality-semantics/census/i6-budget-checked-first.bot start 427 end 442 line 38 column 7 endLine 38 endColumn 22: audit/equality-semantics/census/i6-budget-checked-first.bot:38:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+lenient build:
+  diag TYPE 38:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+fn big (e2) result=bool
+    n declared=- trusted=- checked=int <checked int: argument 1 of native >>
+fn apply (e8) result=any
+    g declared=- trusted=- checked=-
+    x declared=- trusted=- checked=-
+fn k1 (e13) result=any
+    n declared=- trusted=- checked=-
+fn k2 (e16) result=any
+    n declared=- trusted=- checked=-
+fn k3 (e19) result=any
+    n declared=- trusted=- checked=-
+fn k4 (e22) result=any
+    n declared=- trusted=- checked=-
+fn k5 (e25) result=any
+    n declared=- trusted=- checked=-
+fn k6 (e28) result=any
+    n declared=- trusted=- checked=-
+fn k7 (e31) result=any
+    n declared=- trusted=- checked=-
+fn k8 (e34) result=any
+    n declared=- trusted=- checked=-
+fn k9 (e37) result=any
+    n declared=- trusted=- checked=-
+fn k10 (e40) result=any
+    n declared=- trusted=- checked=-
+fn k11 (e43) result=any
+    n declared=- trusted=- checked=-
+fn k12 (e46) result=any
+    n declared=- trusted=- checked=-
+fn k13 (e49) result=any
+    n declared=- trusted=- checked=-
+fn k14 (e52) result=any
+    n declared=- trusted=- checked=-
+fn k15 (e55) result=any
+    n declared=- trusted=- checked=-
+fn k16 (e58) result=any
+    n declared=- trusted=- checked=-
+call 38:7 (e61) target=block e8 apply callee=block(e8)/2 -> any args=block(e2)/1 -> bool, str instance=s0
+call 39:6 (e66) target=block e8 apply callee=block(e8)/2 -> any args=block(e13)/1 -> any, int instance=s2
+call 40:6 (e71) target=block e8 apply callee=block(e8)/2 -> any args=block(e16)/1 -> any, int instance=s4
+call 41:6 (e76) target=block e8 apply callee=block(e8)/2 -> any args=block(e19)/1 -> any, int instance=s6
+call 42:6 (e81) target=block e8 apply callee=block(e8)/2 -> any args=block(e22)/1 -> any, int instance=s8
+call 43:6 (e86) target=block e8 apply callee=block(e8)/2 -> any args=block(e25)/1 -> any, int instance=s10
+call 44:6 (e91) target=block e8 apply callee=block(e8)/2 -> any args=block(e28)/1 -> any, int instance=s12
+call 45:6 (e96) target=block e8 apply callee=block(e8)/2 -> any args=block(e31)/1 -> any, int instance=s14
+call 46:6 (e101) target=block e8 apply callee=block(e8)/2 -> any args=block(e34)/1 -> any, int instance=s16
+call 47:6 (e106) target=block e8 apply callee=block(e8)/2 -> any args=block(e37)/1 -> any, int instance=s18
+call 48:7 (e111) target=block e8 apply callee=block(e8)/2 -> any args=block(e40)/1 -> any, int instance=s20
+call 49:7 (e116) target=block e8 apply callee=block(e8)/2 -> any args=block(e43)/1 -> any, int instance=s22
+call 50:7 (e121) target=block e8 apply callee=block(e8)/2 -> any args=block(e46)/1 -> any, int instance=s24
+call 51:7 (e126) target=block e8 apply callee=block(e8)/2 -> any args=block(e49)/1 -> any, int instance=s26
+call 52:7 (e131) target=block e8 apply callee=block(e8)/2 -> any args=block(e52)/1 -> any, int instance=s28
+call 53:7 (e136) target=block e8 apply callee=block(e8)/2 -> any args=block(e55)/1 -> any, int instance=s30
+call 54:7 (e141) target=block e8 apply callee=block(e8)/2 -> any args=block(e58)/1 -> any, int instance=declined:budget-block
+inst s0 apply(g : big/1 -> bool, x : str) status=invalid result=bool
+    diag TYPE: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5)
+inst s1 big(n : str) status=valid result=bool
+inst s2 apply(g : k1/1 -> any, x : int) status=valid result=int
+inst s3 k1(n : int) status=valid result=int
+inst s4 apply(g : k2/1 -> any, x : int) status=valid result=int
+inst s5 k2(n : int) status=valid result=int
+inst s6 apply(g : k3/1 -> any, x : int) status=valid result=int
+inst s7 k3(n : int) status=valid result=int
+inst s8 apply(g : k4/1 -> any, x : int) status=valid result=int
+inst s9 k4(n : int) status=valid result=int
+inst s10 apply(g : k5/1 -> any, x : int) status=valid result=int
+inst s11 k5(n : int) status=valid result=int
+inst s12 apply(g : k6/1 -> any, x : int) status=valid result=int
+inst s13 k6(n : int) status=valid result=int
+inst s14 apply(g : k7/1 -> any, x : int) status=valid result=int
+inst s15 k7(n : int) status=valid result=int
+inst s16 apply(g : k8/1 -> any, x : int) status=valid result=int
+inst s17 k8(n : int) status=valid result=int
+inst s18 apply(g : k9/1 -> any, x : int) status=valid result=int
+inst s19 k9(n : int) status=valid result=int
+inst s20 apply(g : k10/1 -> any, x : int) status=valid result=int
+inst s21 k10(n : int) status=valid result=int
+inst s22 apply(g : k11/1 -> any, x : int) status=valid result=int
+inst s23 k11(n : int) status=valid result=int
+inst s24 apply(g : k12/1 -> any, x : int) status=valid result=int
+inst s25 k12(n : int) status=valid result=int
+inst s26 apply(g : k13/1 -> any, x : int) status=valid result=int
+inst s27 k13(n : int) status=valid result=int
+inst s28 apply(g : k14/1 -> any, x : int) status=valid result=int
+inst s29 k14(n : int) status=valid result=int
+inst s30 apply(g : k15/1 -> any, x : int) status=valid result=int
+inst s31 k15(n : int) status=valid result=int
+semantic: requests=33 instances=32 declined=budget-block 1
+
+######## census/i6-budget-checked-last.bot
+strict: accepted
+fn big (e2) result=bool
+    n declared=- trusted=- checked=int <checked int: argument 1 of native >>
+fn apply (e8) result=any
+    g declared=- trusted=- checked=-
+    x declared=- trusted=- checked=-
+fn k1 (e13) result=any
+    n declared=- trusted=- checked=-
+fn k2 (e16) result=any
+    n declared=- trusted=- checked=-
+fn k3 (e19) result=any
+    n declared=- trusted=- checked=-
+fn k4 (e22) result=any
+    n declared=- trusted=- checked=-
+fn k5 (e25) result=any
+    n declared=- trusted=- checked=-
+fn k6 (e28) result=any
+    n declared=- trusted=- checked=-
+fn k7 (e31) result=any
+    n declared=- trusted=- checked=-
+fn k8 (e34) result=any
+    n declared=- trusted=- checked=-
+fn k9 (e37) result=any
+    n declared=- trusted=- checked=-
+fn k10 (e40) result=any
+    n declared=- trusted=- checked=-
+fn k11 (e43) result=any
+    n declared=- trusted=- checked=-
+fn k12 (e46) result=any
+    n declared=- trusted=- checked=-
+fn k13 (e49) result=any
+    n declared=- trusted=- checked=-
+fn k14 (e52) result=any
+    n declared=- trusted=- checked=-
+fn k15 (e55) result=any
+    n declared=- trusted=- checked=-
+fn k16 (e58) result=any
+    n declared=- trusted=- checked=-
+call 38:6 (e61) target=block e8 apply callee=block(e8)/2 -> any args=block(e13)/1 -> any, int instance=s0
+call 39:6 (e66) target=block e8 apply callee=block(e8)/2 -> any args=block(e16)/1 -> any, int instance=s2
+call 40:6 (e71) target=block e8 apply callee=block(e8)/2 -> any args=block(e19)/1 -> any, int instance=s4
+call 41:6 (e76) target=block e8 apply callee=block(e8)/2 -> any args=block(e22)/1 -> any, int instance=s6
+call 42:6 (e81) target=block e8 apply callee=block(e8)/2 -> any args=block(e25)/1 -> any, int instance=s8
+call 43:6 (e86) target=block e8 apply callee=block(e8)/2 -> any args=block(e28)/1 -> any, int instance=s10
+call 44:6 (e91) target=block e8 apply callee=block(e8)/2 -> any args=block(e31)/1 -> any, int instance=s12
+call 45:6 (e96) target=block e8 apply callee=block(e8)/2 -> any args=block(e34)/1 -> any, int instance=s14
+call 46:6 (e101) target=block e8 apply callee=block(e8)/2 -> any args=block(e37)/1 -> any, int instance=s16
+call 47:7 (e106) target=block e8 apply callee=block(e8)/2 -> any args=block(e40)/1 -> any, int instance=s18
+call 48:7 (e111) target=block e8 apply callee=block(e8)/2 -> any args=block(e43)/1 -> any, int instance=s20
+call 49:7 (e116) target=block e8 apply callee=block(e8)/2 -> any args=block(e46)/1 -> any, int instance=s22
+call 50:7 (e121) target=block e8 apply callee=block(e8)/2 -> any args=block(e49)/1 -> any, int instance=s24
+call 51:7 (e126) target=block e8 apply callee=block(e8)/2 -> any args=block(e52)/1 -> any, int instance=s26
+call 52:7 (e131) target=block e8 apply callee=block(e8)/2 -> any args=block(e55)/1 -> any, int instance=s28
+call 53:7 (e136) target=block e8 apply callee=block(e8)/2 -> any args=block(e58)/1 -> any, int instance=s30
+call 54:7 (e141) target=block e8 apply callee=block(e8)/2 -> any args=block(e2)/1 -> bool, str instance=declined:budget-block
+inst s0 apply(g : k1/1 -> any, x : int) status=valid result=int
+inst s1 k1(n : int) status=valid result=int
+inst s2 apply(g : k2/1 -> any, x : int) status=valid result=int
+inst s3 k2(n : int) status=valid result=int
+inst s4 apply(g : k3/1 -> any, x : int) status=valid result=int
+inst s5 k3(n : int) status=valid result=int
+inst s6 apply(g : k4/1 -> any, x : int) status=valid result=int
+inst s7 k4(n : int) status=valid result=int
+inst s8 apply(g : k5/1 -> any, x : int) status=valid result=int
+inst s9 k5(n : int) status=valid result=int
+inst s10 apply(g : k6/1 -> any, x : int) status=valid result=int
+inst s11 k6(n : int) status=valid result=int
+inst s12 apply(g : k7/1 -> any, x : int) status=valid result=int
+inst s13 k7(n : int) status=valid result=int
+inst s14 apply(g : k8/1 -> any, x : int) status=valid result=int
+inst s15 k8(n : int) status=valid result=int
+inst s16 apply(g : k9/1 -> any, x : int) status=valid result=int
+inst s17 k9(n : int) status=valid result=int
+inst s18 apply(g : k10/1 -> any, x : int) status=valid result=int
+inst s19 k10(n : int) status=valid result=int
+inst s20 apply(g : k11/1 -> any, x : int) status=valid result=int
+inst s21 k11(n : int) status=valid result=int
+inst s22 apply(g : k12/1 -> any, x : int) status=valid result=int
+inst s23 k12(n : int) status=valid result=int
+inst s24 apply(g : k13/1 -> any, x : int) status=valid result=int
+inst s25 k13(n : int) status=valid result=int
+inst s26 apply(g : k14/1 -> any, x : int) status=valid result=int
+inst s27 k14(n : int) status=valid result=int
+inst s28 apply(g : k15/1 -> any, x : int) status=valid result=int
+inst s29 k15(n : int) status=valid result=int
+inst s30 apply(g : k16/1 -> any, x : int) status=valid result=int
+inst s31 k16(n : int) status=valid result=int
+semantic: requests=33 instances=32 declined=budget-block 1
+
+######## census/i8-hazard-list.bot
+strict: accepted
+fn dash_only? (e2) result=bool
+    xs declared=List[str] trusted=List[str] checked=-
+== 3:5 (e3) List[str] vs List[UnicodeChar]{length: 1} reachable=1 known=
+    totality total/total op=veqtotal
+    head=head-equal overlap=disjoint: elements: kinds str and UnicodeChar structural=incompatible kinded=empty-only related=unrelated defined=total: 
+call 4:2 (e11) target=block e2 dash_only? callee=block(e2)/1 -> bool args=List[str]{length: 1} instance=-
+call 4:21 (e16) target=block e2 dash_only? callee=block(e2)/1 -> bool args=List[never] instance=s0
+inst s0 dash_only?(xs : List[never]) status=valid result=bool
+    == 3:5 List[never] vs List[UnicodeChar]{length: 1} op=veqtotal head=head-equal overlap=disjoint: elements: no value structural=compatible kinded=compatible related=meet defined=total: 
+semantic: requests=2 instances=1 declined=
+
+######## census/i8-hazard-untyped.bot
+strict: accepted
+fn dash? (e2) result=bool
+    c declared=- trusted=- checked=-
+== 3:5 (e3) any vs UnicodeChar reachable=1 known=
+    totality unknown/total op=veq
+    head=head-unknown overlap=unknown:  structural=unknown kinded=unknown related=unknown defined=unknown: an operand fixes no kind
+call 4:1 (e7) target=block e2 dash? callee=block(e2)/1 -> bool args=str instance=s0
+inst s0 dash?(c : str) status=valid result=bool
+    == 3:5 str vs UnicodeChar op=veqtotal head=head-disjoint overlap=disjoint: kinds str and UnicodeChar structural=incompatible kinded=disjoint related=unrelated defined=total: 
+semantic: requests=1 instances=1 declined=
+
+######## census/i6-budget-checked-last.bot with -max-per-block 64
+strict: REJECTED
+  diag ? file audit/equality-semantics/census/i6-budget-checked-last.bot start 726 end 741 line 54 column 7 endLine 54 endColumn 22: audit/equality-semantics/census/i6-budget-checked-last.bot:54:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+lenient build:
+  diag TYPE 54:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)

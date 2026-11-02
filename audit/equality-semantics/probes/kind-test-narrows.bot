@@ -1,0 +1,7 @@
+# a kind test narrows an untyped operand
+fn hyphen?(c):
+    if string?(c):
+        c == "-"
+    else:
+        false
+[hyphen?("-"), hyphen?('-')]

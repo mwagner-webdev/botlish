@@ -108,7 +108,9 @@
 #              validator), body (suite),
 #              nomethod (1 for `nomethod fn NAME(...)`, else 0), nomethodSpan,
 #              exported (the foreign ABI of `exported c fn NAME(...)`: c;
-#              "" for an ordinary function), exportedSpan
+#              "" for an ordinary function), exportedSpan, callback (the
+#              foreign ABI of `callback c fn NAME(...)`: c; ""),
+#              callbackSpan
 #              (the modifier word's span, or "") -- a property of the one
 #              declaration: its author's declaration that it is never the
 #              callee of method syntax (WARNINGS-METHOD-ELIGIBLE.md),
@@ -143,7 +145,11 @@
 #              START >= i >= END (START is always the value iteration
 #              begins at: core/ir.tcl's `countloop`, R2A3-COUNTED-LOOPS-
 #              FINAL-SOURCE.md, COLLECTING-LOOPS.md); plain "loop:" (no
-#              clause) repeats until break
+#              clause) repeats until break. `fold` is "" for a collecting
+#              loop and, for a fold (FOLD-LOOPS-MILESTONE-1.md: "fold
+#              CLAUSES with intermediate NAME INITIAL:"), a dict {name
+#              nameSpan initial}: the intermediate binding's name and the
+#              expression of its initial value
 #   return     value (an expression, an if, a loop, or "")
 #   break      value (an expression, an if, or "")
 #   continue
@@ -164,7 +170,11 @@
 #              NAME:`, else 0) and contextSpan likewise (CONTEXTS.md), and
 #              for a parameterized struct only, slots ({name nameSpan trait
 #              traitSpan} dicts in written order, TRAIT the spelled trait of
-#              `satisfies` or "": TRAIT-CONSTRAINED-IMPRINTED-TYPES.md)
+#              `satisfies` or "": TRAIT-CONSTRAINED-IMPRINTED-TYPES.md),
+#              and for a struct with an `identity` clause only, identity
+#              ({form formSpan fields fieldSpans span}: REPRESENTATION-
+#              INDEPENDENT-VALUE-IDENTITY.md), and for a tree struct only,
+#              tree (1) and treeSpan (TREE-STRUCT-MILESTONE-1.md)
 #              -- a top-level nominal struct declaration ("struct NAME:"
 #              followed by its indented "field: Type" lines; STRUCTS.md).
 #              A declaration like typedecl: no runtime meaning, no binding.
@@ -239,6 +249,13 @@
 #              syntactic operation on the captured block. The body is parsed
 #              syntax, never text; it is a statement or the value of a
 #              binding, return or destructuring (like an if)
+#   inject     injectSpan (the word "inject"), contexts ({type typeSpan}
+#              dicts in written order), none (1 for "inject no context"),
+#              body (a suite) -- "inject context T1, T2:" / "inject no
+#              context:" followed by an indented block
+#              (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md): the block runs
+#              with exactly the listed contexts' authority. A statement or
+#              the value of a binding, return or destructuring (like an if)
 #   fail       name, nameSpan, payload -- "fail NAME": produces the named
 #              error's completion (EXPLICIT-ERROR-COMPLETIONS.md). PAYLOAD is
 #              "" or, for "fail NAME {field: value, ...}", the anonstruct
@@ -521,6 +538,11 @@ proc surface::ast::Ids {node id} {
                 }
                 dict set node clauses [list $clause]
             }
+            set fold [dict getdef $node fold ""]
+            if {$fold ne ""} {
+                dict set fold initial [Ids [dict get $fold initial] $id/initial]
+                dict set node fold $fold
+            }
             dict set node body [Suite [dict get $node body] $id]
         }
         handledcall {
@@ -542,7 +564,7 @@ proc surface::ast::Ids {node id} {
                 dict set node payload [Ids [dict get $node payload] $id/payload]
             }
         }
-        static {
+        static - inject {
             dict set node body [Suite [dict get $node body] $id]
         }
     }
@@ -600,10 +622,12 @@ proc surface::ast::Children {node} {
             return [list [dict get $node value]]
         }
         with - yield       { return [list [dict get $node value]] }
-        function - static  { return [list [dict get $node body]] }
+        function - static - inject { return [list [dict get $node body]] }
         loop {
+            # The clauses' operands in written order, then a fold's initial
+            # value (FOLD-LOOPS-MILESTONE-1.md), then the body.
+            set children {}
             if {[llength [dict get $node clauses]] > 1} {
-                set children {}
                 foreach clause [dict get $node clauses] {
                     foreach field {iterable start end} {
                         if {[dict get $clause $field] ne ""} {
@@ -611,15 +635,16 @@ proc surface::ast::Children {node} {
                         }
                     }
                 }
-                return [concat $children [list [dict get $node body]]]
+            } elseif {[dict get $node iterable] ne ""} {
+                lappend children [dict get $node iterable]
+            } elseif {[dict get $node countStart] ne ""} {
+                lappend children [dict get $node countStart] [dict get $node countEnd]
             }
-            if {[dict get $node iterable] ne ""} {
-                return [list [dict get $node iterable] [dict get $node body]]
+            set fold [dict getdef $node fold ""]
+            if {$fold ne ""} {
+                lappend children [dict get $fold initial]
             }
-            if {[dict get $node countStart] ne ""} {
-                return [list [dict get $node countStart] [dict get $node countEnd] [dict get $node body]]
-            }
-            return [list [dict get $node body]]
+            return [concat $children [list [dict get $node body]]]
         }
         if {
             set children [list [dict get $node condition] [dict get $node then]]
@@ -687,7 +712,7 @@ proc surface::ast::MapChildren {node cmd} {
         with - yield {
             dict set node value [{*}$cmd [dict get $node value]]
         }
-        function - static {
+        function - static - inject {
             dict set node body [{*}$cmd [dict get $node body]]
         }
         loop {
@@ -705,6 +730,11 @@ proc surface::ast::MapChildren {node cmd} {
             } elseif {[dict get $node countStart] ne ""} {
                 dict set node countStart [{*}$cmd [dict get $node countStart]]
                 dict set node countEnd [{*}$cmd [dict get $node countEnd]]
+            }
+            set fold [dict getdef $node fold ""]
+            if {$fold ne ""} {
+                dict set fold initial [{*}$cmd [dict get $fold initial]]
+                dict set node fold $fold
             }
             dict set node body [{*}$cmd [dict get $node body]]
         }
@@ -1155,6 +1185,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             foreach field [dict get $node fields] {
                 lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
             }
+            if {[dict exists $node identity]} {
+                set identity [dict get $node identity]
+                lappend lines "${pad}    identity [dict get $identity form]([join [dict get $identity fields] {, }])"
+            }
             return
         }
         fail {
@@ -1197,6 +1231,9 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             if {[dict getdef $node exported ""] ne ""} {
                 append modifier "exported [dict get $node exported] "
             }
+            if {[dict getdef $node callback ""] ne ""} {
+                append modifier "callback [dict get $node callback] "
+            }
             set line "${pad}${modifier}fn [dict get $node name] ([join $params { }])"
             if {[dict exists $node resultType] && [dict get $node resultType] ne ""} {
                 append line " -> [showType [dict get $node resultType]]"
@@ -1233,6 +1270,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             StaticIntrinsic $node "" $indent $show lines
             return
         }
+        inject {
+            Injection $node "" $indent $show lines
+            return
+        }
         bind - return - break - destructure - coroutinebind {
             set value [dict get $node value]
             set prefix [switch -- [dict get $node kind] {
@@ -1255,6 +1296,10 @@ proc surface::ast::StatementLines {node indent show linesVar} {
             }
             if {$value ne "" && [dict get $value kind] eq "static"} {
                 StaticIntrinsic $value $prefix $indent $show lines
+                return
+            }
+            if {$value ne "" && [dict get $value kind] eq "inject"} {
+                Injection $value $prefix $indent $show lines
                 return
             }
         }
@@ -1316,6 +1361,21 @@ proc surface::ast::StaticIntrinsic {node prefix indent show linesVar} {
     Body [dict get $node body] [expr {$indent + 1}] $show lines
 }
 
+# Lines of the inject block NODE ("inject context T, ..." or "inject no
+# context", and its block; RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md), its
+# first line starting with PREFIX.
+proc surface::ast::Injection {node prefix indent show linesVar} {
+    upvar 1 $linesVar lines
+    set pad [string repeat {    } $indent]
+    if {[dict get $node none]} {
+        set what "no context"
+    } else {
+        set what "context [join [lmap c [dict get $node contexts] {showType [dict get $c type]}] {, }]"
+    }
+    lappend lines "$pad${prefix}inject $what[At $node $show]"
+    Body [dict get $node body] [expr {$indent + 1}] $show lines
+}
+
 # Source text of the destructuring PATTERN, as written: "{a, b: c, d: {e}}"
 # (with -spans, each field entry is followed by its @LINE:COLUMN-...).
 proc surface::ast::PatternText {pattern show} {
@@ -1340,9 +1400,13 @@ proc surface::ast::PatternText {pattern show} {
 proc surface::ast::Loop {node prefix indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
-    set header loop
+    set fold [dict getdef $node fold ""]
+    set header [expr {$fold eq "" ? "loop" : "fold"}]
     if {[llength [dict get $node clauses]] > 0} {
         append header " [join [lmap clause [dict get $node clauses] {Clause $clause $show}] { and }]"
+    }
+    if {$fold ne ""} {
+        append header " with intermediate [dict get $fold name] [Expr [dict get $fold initial] $show]"
     }
     lappend lines "$pad$prefix$header[At $node $show]"
     Body [dict get $node body] [expr {$indent + 1}] $show lines

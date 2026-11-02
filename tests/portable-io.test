@@ -260,6 +260,50 @@ test io-substitute-context {a test context implementing std::io::IO is selected 
 } -result {{value {["ok"]}} {value {["failed"]}}}
 
 # ---------------------------------------------------------------------------
+# An implementation of an ordinary trait that prints
+# (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md; the
+# TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md reproducers): the operation's
+# selected implementation needs std::io::IO, so the specialization calling it
+# does, and its top-level call selects the installed provider.
+
+# A trait Thing, its polymorphic twice, and witnesses whose implementations
+# print TEXT (handling std::io::WriteFailed: their result is 0 then).
+proc ioThing {witness field text} {
+    return "struct $witness:\n    $field: int\n\nfn show(t: $witness) -> int:\n    std::io::print_line(\"$text\"):\n        on std::io::WriteFailed:\n            return 0\n    t.$field\n"
+}
+set ioThingTrait "trait Thing:\n    fn show(t: Thing) -> int\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n"
+
+test io-implementation-context {the implementation in the entry program, in a module of its own beside the trait's (std::io::fs's layout), two witnesses in two modules: each specialization needs std::io::IO through its own implementation, its call selects the installed provider -- a test context (Limited) implementing std::io::IO, so on every backend -- and each implementation's print succeeds or fails by what that provider does with its own text (a line of four characters, of five)} -body {
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir limited.bot] w]
+        puts -nonewline $f [lindex $::limitedLib 1]
+        close $f
+        foreach {name text} [list thing.bot $::ioThingTrait ay.bot "import std::io\n\n[ioThing A v one]" bee.bot "import std::io\n\n[ioThing B w four]"] {
+            set f [open [file join $::core::libraryDir $name] w]
+            puts -nonewline $f $text
+            close $f
+        }
+        set results {}
+        lappend results [sourceAgree "import std::io\nimport std::limited\n\n${::ioThingTrait}\n[ioThing A v A]\nwith context std::limited::create(20)\ntwice(A {v: 1})\n"]
+        lappend results [sourceAgree "import std::limited\nimport std::thing\nimport std::ay\n\nwith context std::limited::create(20)\nstd::thing::twice(std::ay::A {v: 1})\n"]
+        lappend results [sourceAgree "import std::limited\nimport std::thing\nimport std::ay\nimport std::bee\n\nwith context std::limited::create(4)\n\[std::thing::twice(std::ay::A {v: 1}), std::thing::twice(std::bee::B {w: 10})\]\n"]
+    }
+    set results
+} -result {{value 2} {value 2} {value {[2, 0]}}}
+
+test io-implementation-context-missing {without an installation the call of the specialization is MISSING-CONTEXT -- std::io::IO, through the operation's implementation and std::io::print_line -- never an internal error} -body {
+    catch {ioHir "import std::io\n\n${::ioThingTrait}\n[ioThing A v A]\ntwice(A {v: 1})\n"} message options
+    list [dict get $options -errorcode] [lrange [split [regsub -all {[^ ]*/p[0-9]+\.bot} $message p.bot] \n] 0 4]
+} -cleanup {unset -nocomplain message options} -result {{CORE SEMANTIC MISSING-CONTEXT} {{p.bot:18:1: std::io::IO is required by this call, but no installed context implements it (install one with "with context EXPR" before the call):} {    twice (for A)} {     -> show, the implementation of Thing's operation show for A, called at p.bot:7:5} {     -> std::io::print_line} {        directly requires std::io::IO}}}
+
+test io-implementation-context-executable {the entry-io reproducer as a standalone executable over std::linux::io: the operation's implementation prints through the installed LinuxIO's write(2), twice} -constraints {nativeLinux posixShell} -body {
+    runCaptured [buildExecutable impl-context "import std::io\nimport std::linux::io\n\n${::ioThingTrait}\n[ioThing A v A]\nwith context std::linux::io::create()\ntwice(A {v: 1})\n"]
+} -result {{A
+A
+2
+} {}}
+
+# ---------------------------------------------------------------------------
 # The line operations' newline (S16, 2048-ENGINE-WORKLOAD.md): print_line and
 # write_error_line append it as a character, text.append_char('\n'), so
 # stdlib/io.bot carries no warning -- its two one-character String literals

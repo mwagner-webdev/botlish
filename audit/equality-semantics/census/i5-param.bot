@@ -1,0 +1,6 @@
+# I5 a function value passed to an untyped parameter and called there
+fn hyphen?(c):
+    c == '-'
+fn apply(g, x):
+    g(x)
+apply(hyphen?, "-")

@@ -1,0 +1,83 @@
+# sendvalues.bot -- the runtime half of Probe C (THREAD-ACTOR-ARCHITECTURE-
+# CENSUS.md): what a same-thread message of a MUTABLE collection means.
+# MutableVector, MutableArray and MutableMap are values (MUTABLE-VECTOR.md):
+# a send is a logical copy, so the sender's later mutation never reaches the
+# receiver and the receiver's never reaches the sender -- no alias between
+# actors exists to be shared by accident, on one thread, today.
+import actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::mutable_array
+import std::mutable_map
+import std::mutable_vector
+import std::str
+
+struct Parcel:
+    label: str
+    nums: MutableVector[int]
+    grid: MutableArray[int]
+    table: std::mutable_map::MutableMap[str, int]
+
+context struct Mail:
+    parcels: actor::Postbox[Parcel]
+
+nomethod fn show(who: str, p: Parcel, context ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    looked = p.table.at("k"):
+        on std::mutable_map::KeyNotFound:
+            -1
+    std::event_loop::log(who.concat(": ").concat(p.label)
+        .concat(" nums.length=").concat(std::int::to_string(p.nums.length()))
+        .concat(" grid[0]=").concat(std::int::to_string(p.grid.at(0)))
+        .concat(" table[k]=").concat(std::int::to_string(looked)))
+
+fn receiver(inbox: actor::Inbox[Parcel], back: actor::Address[Parcel], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    p = actor::receive(mail.parcels, inbox):
+        on actor::MailboxClosed:
+            return -1
+    show("receiver got", p)
+    p.nums.push(1000)
+    p.grid.set(0, 1000)
+    p.table.set("k", 1000)
+    show("receiver changed its copy", p)
+    actor::send(mail.parcels, back, p)
+    0
+
+fn sender(to: actor::Address[Parcel], mine: actor::Inbox[Parcel], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    table = std::mutable_map::create[str, int]()
+    table.set("k", 1)
+    p = Parcel {label: "parcel", nums: std::mutable_vector::from_list([1, 2, 3]), grid: std::mutable_array::from_list([7, 8]), table: table}
+    actor::send(mail.parcels, to, p)
+    p.nums.push(4)
+    p.grid.set(0, 70)
+    p.table.set("k", 2)
+    show("sender changed its own after sending", p)
+    back = actor::receive(mail.parcels, mine):
+        on actor::MailboxClosed:
+            return -1
+    show("sender got the reply", back)
+    show("sender's own is unchanged by the receiver", p)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, mail: Mail) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    r = actor::open(mail.parcels)
+    s = actor::open(mail.parcels)
+    coroutine {step: rs, first: rf} = receiver(r.inbox, s.to)
+    std::event_loop::adopt(rs, rf)
+    coroutine {step: ss, first: sf} = sender(r.to, s.inbox)
+    std::event_loop::adopt(ss, sf)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context Mail {parcels: actor::postbox[Parcel](1, 4)}
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

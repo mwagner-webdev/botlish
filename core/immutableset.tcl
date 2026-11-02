@@ -5,11 +5,15 @@
 # mutated afterward. This is deliberately the simplest sound representation
 # (spec item 10): an ordinary internal Tcl list of already-deduplicated
 # member values, kept in first-occurrence order as an implementation/display
-# detail only -- a set has no semantic order (item 14) -- with construction
-# (dedup) and membership both a linear/O(n^2) scan using Botlish's existing
-# generic value equality (core::value::equal). No hashing, no bitmap, no
-# perfect hash: those are deferred, later-representation concerns (see the
-# report's "Future specialization notes").
+# detail only -- a set has no semantic order (item 14) -- with membership a
+# linear scan using Botlish's existing generic value equality
+# (core::value::equal). Construction and set equality of more than
+# core::value::pairwiseLimit members match by public hash first (expected
+# O(n): REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md), comparing only a
+# bucket's members, and fall back to the pairwise scan when a member has no
+# hash; the result is the pairwise scan's either way. No stored hash, no
+# bitmap, no perfect hash: those remain later-representation concerns (see
+# MINIMAL-IMMUTABLE-SET.md's "Future specialization notes").
 #
 # Two root primitives, registered under their qualified `immutable_set`
 # names like core/lists.tcl's `list` ones (STDLIB-NAMESPACES.md):
@@ -28,13 +32,48 @@
 namespace eval core::immutableset {}
 
 # ITEMS (a Tcl list of runtime values) deduplicated by core::value::equal,
-# O(n^2), keeping first-occurrence order. May raise {CORE SEMANTIC EQUALITY}
+# O(n^2) pairwise (expected O(n) by hash for many hashable items, below),
+# keeping first-occurrence order. May raise {CORE SEMANTIC EQUALITY}
 # -- the same, pre-existing restriction core::value::equal already has for
 # Block/Native/MutableArray operands -- if two or more members of that kind
 # would need to be compared (a single such member, or a list whose only
 # duplicates are of comparable kinds, never triggers this: see MINIMAL-
 # IMMUTABLE-SET.md's "Deduplication semantics").
 proc core::immutableset::Dedup {items} {
+    if {[llength $items] > $::core::value::pairwiseLimit} {
+        # Many items are deduplicated by hash (REPRESENTATION-INDEPENDENT-
+        # VALUE-IDENTITY.md): an item is compared only with the kept items
+        # of its hash, which are all the items it can equal (equal values
+        # hash equally), so the result is the pairwise one's in expected
+        # O(n). An item with no hash leaves it to the pairwise scan below,
+        # whose comparison refuses it as it always did.
+        set hashes {}
+        try {
+            foreach item $items {
+                lappend hashes [core::hashing::Fold public $item]
+            }
+        } trap {CORE SEMANTIC EQUALITY} {} {
+            set hashes ""
+        }
+        if {$hashes ne ""} {
+            set result {}
+            set kept [dict create]
+            foreach item $items h $hashes {
+                set seen 0
+                foreach existing [dict getdef $kept $h {}] {
+                    if {[core::value::equal $existing $item]} {
+                        set seen 1
+                        break
+                    }
+                }
+                if {!$seen} {
+                    lappend result $item
+                    dict lappend kept $h $item
+                }
+            }
+            return $result
+        }
+    }
     set result {}
     foreach item $items {
         set seen 0

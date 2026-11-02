@@ -1,0 +1,224 @@
+# actor.bot -- a DISPOSABLE prototype of same-thread actors over
+# std::event_loop (THREAD-ACTOR-ARCHITECTURE-CENSUS.md, Probe A). It is
+# evidence for the census, not a library: nothing loads it but the probe.
+#
+# A Postbox[M] is a table of mailboxes for messages of ONE type M. It is an
+# ordinary opaque parameterized struct held as a field of a context struct
+# the APPLICATION declares: a context struct takes no type slots
+# (hir/structs.tcl, "cannot have type slots"), so no library can own a
+# typed mailbox itself. Every operation takes the postbox as a place
+# parameter (PLACE-PARAMETERS.md), which may be a field of a context
+# parameter.
+#
+# open makes a mailbox (a slot of the postbox) and returns two opaque
+# rights: Address[M] (send) and Inbox[M] (receive). Each mailbox is a FIFO
+# in the postbox's message pool and one Reliable std::event_loop channel
+# whose events carry no data: one event per queued message wakes the
+# receiver; the payload stays in the pool. The channel is the only
+# scheduler state an actor adds -- no native, no scheduler of its own.
+import std::event_loop
+import std::mutable_array
+import std::mutable_vector
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# The inbox was closed (by its owner, or by the loop's shutdown).
+error MailboxClosed
+
+# What send did with a message.
+enum Sent:
+    Delivered,
+    Full,
+    Closed,
+    Stale,
+
+# The right to send M to one mailbox of postbox BOX. A copy is the same
+# right (send rights are shared by design: many senders, one receiver).
+opaque struct Address[M]:
+    box: int
+    slot: int
+    gen: int
+
+# The right to receive from that mailbox. NOT unique: an opaque struct is
+# unrestricted, and a library cannot make an affine token of its own (the
+# only affine roots are coroutine handles and C pointers). That the
+# receiver is one task is this prototype's CONVENTION.
+opaque struct Inbox[M]:
+    box: int
+    slot: int
+    gen: int
+
+# What open returns.
+struct Opened[M]:
+    to: Address[M]
+    inbox: Inbox[M]
+
+# counters' rows
+private c_delivered = 0
+private c_full = 1
+private c_closed = 2
+private c_stale = 3
+private c_received = 4
+private c_dropped_at_close = 5
+
+# (id and capacity live in META, a MutableArray: an installed context's
+# native representation admits only small-domain Ints, bools, enums,
+# C words and collection headers as leaves -- native/lower.tcl's
+# ContextLeaves -- so a plain `int` field would make the context
+# CONTEXT-NATIVE-LOWERING-UNSUPPORTED on the native backends.)
+opaque struct Postbox[M]:
+    meta: MutableArray[int]
+    pool: MutableVector[M]
+    next: MutableVector[int]
+    pool_free: MutableVector[int]
+    head: MutableVector[int]
+    tail: MutableVector[int]
+    count: MutableVector[int]
+    gen: MutableVector[int]
+    live: MutableVector[int]
+    chan: MutableVector[std::event_loop::Reg]
+    slot_free: MutableVector[int]
+    counters: MutableVector[int]
+
+# An empty postbox (ID tells postboxes apart; CAPACITY bounds each mailbox).
+fn postbox(id: int, capacity: int) -> Postbox[M]:
+    Postbox[M] {
+        meta: std::mutable_array::from_list([id, capacity]),
+        pool: std::mutable_vector::from_list([]),
+        next: std::mutable_vector::from_list([]),
+        pool_free: std::mutable_vector::from_list([]),
+        head: std::mutable_vector::from_list([]),
+        tail: std::mutable_vector::from_list([]),
+        count: std::mutable_vector::from_list([]),
+        gen: std::mutable_vector::from_list([]),
+        live: std::mutable_vector::from_list([]),
+        chan: std::mutable_vector::from_list([]),
+        slot_free: std::mutable_vector::from_list([]),
+        counters: std::mutable_vector::from_list([0, 0, 0, 0, 0, 0])
+    }
+
+# An address that names no mailbox (sending to it is Stale).
+fn nowhere() -> Address[M]:
+    Address[M] {box: -1, slot: -1, gen: -1}
+
+private nomethod fn bump(place pb: Postbox[M], row: int) errors IndexNotFound:
+    pb.counters.swap(row, pb.counters.at(row) + 1)
+
+# Open a mailbox. A slot freed by close is reused with the next generation,
+# so an address of the old mailbox never reaches the new one.
+nomethod fn open(place pb: Postbox[M], context ev: std::event_loop::Loop) -> Opened[M] errors IndexNotFound, std::event_loop::SchedulerFault:
+    ch = std::event_loop::channel(Delivery::Reliable, pb.meta.at(1))
+    slot = if pb.slot_free.length() > 0:
+        s = pb.slot_free.pop()
+        pb.gen.swap(s, pb.gen.at(s) + 1)
+        pb.live.swap(s, 1)
+        pb.head.swap(s, -1)
+        pb.tail.swap(s, -1)
+        pb.count.swap(s, 0)
+        pb.chan.swap(s, ch)
+        s
+    else:
+        s = pb.gen.length()
+        pb.gen.push(0)
+        pb.live.push(1)
+        pb.head.push(-1)
+        pb.tail.push(-1)
+        pb.count.push(0)
+        pb.chan.push(ch)
+        s
+    g = pb.gen.at(slot)
+    Opened {to: Address[M] {box: pb.meta.at(0), slot: slot, gen: g}, inbox: Inbox[M] {box: pb.meta.at(0), slot: slot, gen: g}}
+
+private nomethod fn current?(place pb: Postbox[M], box: int, slot: int, gen: int) -> bool errors IndexNotFound:
+    box == pb.meta.at(0) and slot >= 0 and slot < pb.gen.length() and pb.gen.at(slot) == gen
+
+# Queue M for TO and wake its receiver. Full when the mailbox holds
+# CAPACITY messages (the sender sees the backpressure; nothing is dropped),
+# Closed when its owner closed it, Stale when the address is of an earlier
+# mailbox of that slot (or of another postbox).
+nomethod fn send(place pb: Postbox[M], to: Address[M], m: M, context ev: std::event_loop::Loop) -> Sent errors IndexNotFound, std::event_loop::SchedulerFault:
+    if not current?(pb, to.box, to.slot, to.gen):
+        bump(pb, c_stale)
+        return Sent::Stale
+    slot = to.slot
+    if pb.live.at(slot) != 1:
+        bump(pb, c_closed)
+        return Sent::Closed
+    if pb.count.at(slot) >= pb.meta.at(1):
+        bump(pb, c_full)
+        return Sent::Full
+    i = if pb.pool_free.length() > 0:
+        j = pb.pool_free.pop()
+        pb.pool.swap(j, m)
+        pb.next.swap(j, -1)
+        j
+    else:
+        pb.pool.push(m)
+        pb.next.push(-1)
+        pb.pool.length() - 1
+    t = pb.tail.at(slot)
+    if t == -1:
+        pb.head.swap(slot, i)
+    else:
+        pb.next.swap(t, i)
+    pb.tail.swap(slot, i)
+    pb.count.swap(slot, pb.count.at(slot) + 1)
+    pb.chan.at(slot).post(0, 0)
+    bump(pb, c_delivered)
+    Sent::Delivered
+
+private nomethod fn take_head(place pb: Postbox[M], slot: int) -> M errors IndexNotFound:
+    i = pb.head.at(slot)
+    nxt = pb.next.at(i)
+    pb.head.swap(slot, nxt)
+    if nxt == -1:
+        pb.tail.swap(slot, -1)
+    pb.count.swap(slot, pb.count.at(slot) - 1)
+    pb.pool_free.push(i)
+    bump(pb, c_received)
+    pb.pool.at(i)
+
+# The next message of INBOX, in the order it was sent; suspends the calling
+# task (yields to the loop) until there is one. MailboxClosed when the
+# inbox is closed or the loop shut down.
+nomethod fn receive(place pb: Postbox[M], inbox: Inbox[M], context ev: std::event_loop::Loop) -> M errors MailboxClosed, IndexNotFound, std::event_loop::SchedulerFault:
+    if not current?(pb, inbox.box, inbox.slot, inbox.gen):
+        fail MailboxClosed
+    if pb.live.at(inbox.slot) != 1:
+        fail MailboxClosed
+    e = std::event_loop::wait(pb.chan.at(inbox.slot))
+    if e.reason != Wake::Event:
+        fail MailboxClosed
+    # after the suspension: the place is the context's, so what other tasks
+    # sent meanwhile is here
+    if not current?(pb, inbox.box, inbox.slot, inbox.gen) or pb.count.at(inbox.slot) == 0:
+        fail MailboxClosed
+    take_head(pb, inbox.slot)
+
+# Messages queued for INBOX (not yet received).
+nomethod fn queued(place pb: Postbox[M], inbox: Inbox[M]) -> int errors IndexNotFound:
+    if not current?(pb, inbox.box, inbox.slot, inbox.gen):
+        return 0
+    pb.count.at(inbox.slot)
+
+# Close INBOX: later sends are Closed (Stale once the slot is reused), its
+# undelivered messages are dropped and COUNTED (the result), its waiting
+# receiver wakes with MailboxClosed.
+nomethod fn close(place pb: Postbox[M], inbox: Inbox[M], context ev: std::event_loop::Loop) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    if not current?(pb, inbox.box, inbox.slot, inbox.gen) or pb.live.at(inbox.slot) != 1:
+        return 0
+    slot = inbox.slot
+    dropped = pb.count.at(slot)
+    loop k from 0 to dropped:
+        take_head(pb, slot)
+    pb.counters.swap(c_received, pb.counters.at(c_received) - dropped)
+    pb.counters.swap(c_dropped_at_close, pb.counters.at(c_dropped_at_close) + dropped)
+    pb.live.swap(slot, 0)
+    std::event_loop::revoke(pb.chan.at(slot))
+    pb.slot_free.push(slot)
+    dropped
+
+# delivered, full, closed, stale, received, dropped at close
+fn counters(place pb: Postbox[M]) -> List[int] errors IndexNotFound:
+    loop i from 0 to pb.counters.length():
+        pb.counters.at(i)

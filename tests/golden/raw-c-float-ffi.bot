@@ -1,0 +1,249 @@
+# raw-c-float-ffi.bot -- raw C floating values (RAW-C-FLOAT-FFI-
+# MILESTONE-1.md): the source-level specification of
+#
+#   * std::ffi::c::RawFloat and std::ffi::c::RawDouble made from any bit
+#     pattern and giving exactly those bits back -- zeros, infinities, quiet
+#     and signaling NaNs of both signs and several payloads, subnormals, the
+#     extremes, ordinary values;
+#   * their classification by the bits alone (finite?, nan?, infinite?,
+#     zero?, negative?: the sign bit);
+#   * the explicit admission to a Float64 (std::ffi::c::Float's and Double's
+#     own rule: NonFiniteFloat naming a NaN or an infinity, -0 as 0.0, a
+#     binary32 widened exactly) and narrowing from one (to nearest, ties to
+#     even, an overflow NonFiniteFloat of its sign, never clamped);
+#   * raw layout fields, array elements and union alternatives over bytes,
+#     carried as their bits by parse, read, write and emit, charged no
+#     NonFiniteFloat, where the same bytes through finite fields fail;
+#   * no arithmetic, ordering or equality of a raw value, and no implicit
+#     conversion between a raw value and a Float64 or another raw type.
+#
+# Ported from tests/raw-c-float-ffi.test, which stays authoritative
+# (audit/golden/migration/fragments/raw-c-float-ffi.tsv maps every test; what
+# only Tcl observes -- C calls and native memory (its C fixture),
+# declarations a static compile block cannot hold (layouts, externs), HIR,
+# NIR and generated code, interchange, executables and GC stress -- stays
+# there).
+#
+# Imports: compiler and test (the framework); abi, std::abi::bytes, binary,
+# byte, std::ffi::c and std::ffi::c::raw (the programs).
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::byte
+import std::compiler
+import std::ffi::c
+import std::ffi::c::raw
+import std::test
+
+layout REC:
+    size 24
+    align 8
+    field tag: std::ffi::c::UChar at 0
+    field f: std::ffi::c::RawFloat at 4
+    field d: std::ffi::c::RawDouble at 8
+    field xs: array 2 of std::ffi::c::RawFloat at 16
+
+layout FIN:
+    size 24
+    align 8
+    field tag: std::ffi::c::UChar at 0
+    field f: std::ffi::c::Float at 4
+    field d: std::ffi::c::Double at 8
+    field xs: array 2 of std::ffi::c::Float at 16
+
+union layout NUMBER:
+    size 8
+    align 8
+    alternative f: std::ffi::c::RawFloat
+    alternative d: std::ffi::c::RawDouble
+    alternative u: std::ffi::c::ULongLong
+
+layout RAW24:
+    size 24
+    align 1
+    field bs: array 24 of std::binary::U8 at 0
+
+layout RAW8:
+    size 8
+    align 1
+    field bs: array 8 of std::binary::U8 at 0
+
+fn bytes_of(values: List[int]) -> std::abi::bytes::Bytes:
+    bs = loop v in values:
+        b = std::byte::from_int(v):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                255
+        b
+    std::abi::bytes::from_list(bs)
+
+fn mutable(values: List[int]) -> std::abi::bytes::MutableBytes:
+    std::abi::bytes::from_bytes(bytes_of(values))
+
+fn raw24(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:
+    std::binary::parse(RAW24, d).bs
+
+fn raw8(d: std::abi::bytes::Bytes) -> list errors LayoutLengthMismatch:
+    std::binary::parse(RAW8, d).bs
+
+fn kind(r: NonFiniteResult) -> Float64:
+    if r == NonFiniteResult::NotANumber:
+        -1.0
+    elif r == NonFiniteResult::PositiveInfinity:
+        -2.0
+    else:
+        -3.0
+
+fn c32(b: std::ffi::c::raw::FloatBits) -> List[bool]:
+    x = std::ffi::c::raw::float_from_bits(b)
+    [x.float_finite?(), x.float_nan?(), x.float_infinite?(), x.float_zero?(), x.float_negative?()]
+
+fn c64(b: std::ffi::c::raw::DoubleBits) -> List[bool]:
+    x = std::ffi::c::raw::double_from_bits(b)
+    [x.double_finite?(), x.double_nan?(), x.double_infinite?(), x.double_zero?(), x.double_negative?()]
+
+fn a32(b: std::ffi::c::raw::FloatBits) -> Float64:
+    std::ffi::c::raw::float_to_float64(std::ffi::c::raw::float_from_bits(b)):
+        on NonFiniteFloat {result}:
+            return kind(result)
+
+fn a64(b: std::ffi::c::raw::DoubleBits) -> Float64:
+    std::ffi::c::raw::double_to_float64(std::ffi::c::raw::double_from_bits(b)):
+        on NonFiniteFloat {result}:
+            return kind(result)
+
+fn n32(x: Float64) -> int:
+    r = std::ffi::c::raw::float_from_float64(x):
+        on NonFiniteFloat {result}:
+            if result == NonFiniteResult::PositiveInfinity:
+                return -1
+            return -2
+    std::ffi::c::raw::float_to_bits(r)
+
+fn n64(x: Float64) -> int:
+    std::ffi::c::raw::double_to_bits(std::ffi::c::raw::double_from_float64(x))
+
+fn rt32(b: std::ffi::c::raw::FloatBits) -> int:
+    std::ffi::c::raw::float_to_bits(std::ffi::c::raw::float_from_bits(b))
+
+fn rt64(b: std::ffi::c::raw::DoubleBits) -> int:
+    std::ffi::c::raw::double_to_bits(std::ffi::c::raw::double_from_bits(b))
+
+# The inputs: binary32 ties and a value past the binary32 overflow
+# threshold the compiler cannot decide (a written overflow is decided at
+# compile time).
+fn register_raw_c_float_ffi_tests(tie: Float64, big: Float64):
+    fn bits_round_trip() -> list:
+        [[rt32(0), rt32(2147483648), rt32(2139095040), rt32(4286578688), rt32(2143289344), rt32(4290772992), rt32(2143289345), rt32(2147483647), rt32(4294967295), rt32(2141192192), rt32(2139095041), rt32(4288675840), rt32(1), rt32(8388607), rt32(8388608), rt32(2139095039), rt32(4286578687), rt32(1065353216), rt32(1036831949), rt32(3223322624)], [rt64(0), rt64(9223372036854775808), rt64(9218868437227405312), rt64(18442240474082181120), rt64(9221120237041090560), rt64(18444492273895866368), rt64(9221120237041090561), rt64(9223372036854775807), rt64(18446744073709551615), rt64(9219994337134247936), rt64(9218868437227405313), rt64(18443366373989023744), rt64(1), rt64(4503599627370495), rt64(4503599627370496), rt64(9218868437227405311), rt64(18442240474082181119), rt64(4607182418800017408), rt64(4591870180066957722), rt64(13836183955189006336)]]
+    std::test::value("rcf-bits-round-trip", [[0, 2147483648, 2139095040, 4286578688, 2143289344, 4290772992, 2143289345, 2147483647, 4294967295, 2141192192, 2139095041, 4288675840, 1, 8388607, 8388608, 2139095039, 4286578687, 1065353216, 1036831949, 3223322624], [0, 9223372036854775808, 9218868437227405312, 18442240474082181120, 9221120237041090560, 18444492273895866368, 9221120237041090561, 9223372036854775807, 18446744073709551615, 9219994337134247936, 9218868437227405313, 18443366373989023744, 1, 4503599627370495, 4503599627370496, 9218868437227405311, 18442240474082181119, 4607182418800017408, 4591870180066957722, 13836183955189006336]], bits_round_trip)
+
+    fn classify() -> list:
+        [c32(0), c32(2147483648), c32(2139095040), c32(4286578688), c32(2143289344), c32(4290772992), c32(2141192192), c32(1), c32(8388608), c32(2139095039), c64(0), c64(9223372036854775808), c64(9218868437227405312), c64(18442240474082181120), c64(9221120237041090560), c64(18444492273895866368), c64(9219994337134247936), c64(1), c64(4503599627370496), c64(9218868437227405311)]
+    std::test::value("rcf-classify", [[true, false, false, true, false], [true, false, false, true, true], [false, false, true, false, false], [false, false, true, false, true], [false, true, false, false, false], [false, true, false, false, true], [false, true, false, false, false], [true, false, false, false, false], [true, false, false, false, false], [true, false, false, false, false], [true, false, false, true, false], [true, false, false, true, true], [false, false, true, false, false], [false, false, true, false, true], [false, true, false, false, false], [false, true, false, false, true], [false, true, false, false, false], [true, false, false, false, false], [true, false, false, false, false], [true, false, false, false, false]], classify)
+
+    fn admission() -> list:
+        [a32(0), a32(2147483648), a32(2139095040), a32(4286578688), a32(2143289344), a32(2141192192), a32(1), a32(8388607), a32(2139095039), a32(1036831949), a32(3223322624), a64(9223372036854775808), a64(18442240474082181120), a64(18444492273895866368), a64(9219994337134247936), a64(1), a64(18442240474082181119), a64(4591870180066957722), a64(13836183955189006336)]
+    std::test::value("rcf-admission", [0.0, 0.0, -2.0, -3.0, -1.0, -1.0, 1.401298464324817e-45, 1.1754942106924411e-38, 3.4028234663852886e38, 0.10000000149011612, -2.5, 0.0, -3.0, -1.0, -1.0, 5.0e-324, -1.7976931348623157e308, 0.1, -2.5], admission)
+
+    fn narrowing() -> list:
+        [n32(0.0), n32(1.401298464324817e-45), n32(7.006492321624085e-46), n32(2.1019476964872256e-45), n32(tie), n32(3.4028234663852886e38), n32(big), n32(-big), n32(-1.0e-50), n32(0.1), n32(-2.5), n64(5.0e-324), n64(0.1), n64(-2.5), n64(1.7976931348623157e308)]
+    std::test::value("rcf-narrowing", [0, 1, 0, 2, 1065353216, 2139095039, -1, -2, 0, 1036831949, 3223322624, 1, 4591870180066957722, 13836183955189006336, 9218868437227405311], narrowing)
+
+    fn bytes() -> list:
+        d = bytes_of([7, 0, 0, 0, 1, 0, 160, 127, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 128, 255, 1, 0, 0, 0])
+        s = std::binary::parse(REC, d):
+            on LayoutLengthMismatch:
+                return []
+        elements = loop x in s.xs:
+            x.float_to_bits()
+        parsed = [s.tag, s.f.float_to_bits(), s.d.double_to_bits(), elements]
+        again = raw24(std::binary::emit(s)):
+            on LayoutLengthMismatch:
+                return []
+        w = std::binary::write(mutable([1, 2, 3, 4, 5, 6, 7, 8]), NUMBER.f, std::ffi::c::raw::float_from_bits(2139095041)):
+            on LayoutLengthMismatch:
+                return []
+        n = std::abi::bytes::freeze(w)
+        read = std::binary::read(n, NUMBER.d):
+            on LayoutLengthMismatch:
+                return []
+        original = raw24(d):
+            on LayoutLengthMismatch:
+                return []
+        numbers = raw8(n):
+            on LayoutLengthMismatch:
+                return []
+        finite = std::binary::parse(FIN, d):
+            on NonFiniteFloat {result}:
+                return [parsed, again == original, numbers, read.double_to_bits(), kind(result)]
+            on LayoutLengthMismatch:
+                return []
+        [parsed, finite.tag]
+    std::test::value("rcf-bytes", [[7, 2141192193, 9223372036854775808, [4286578688, 1]], true, [1, 0, 128, 127, 5, 6, 7, 8], 578437697824096257, -1.0], bytes)
+
+    fn bytes_emit() -> list:
+        nz = std::ffi::c::raw::float_from_bits(2147483648)
+        m = LayoutStruct[REC] {tag: 9, f: nz, d: std::ffi::c::raw::double_from_bits(9219994337134247936), xs: [std::ffi::c::raw::float_from_bits(2143289345), nz]}
+        e = raw24(std::binary::emit(m)):
+            on LayoutLengthMismatch:
+                return []
+        w = std::binary::write(mutable([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), REC.xs, [nz, std::ffi::c::raw::float_from_bits(2139095040)]):
+            on LayoutLengthMismatch:
+                return []
+            on LayoutExtentMismatch:
+                return []
+        written = raw24(std::abi::bytes::freeze(w)):
+            on LayoutLengthMismatch:
+                return []
+        [e, written]
+    std::test::value("rcf-bytes-emit", [[9, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 244, 127, 1, 0, 192, 127, 0, 0, 0, 128], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 128, 127]], bytes_emit)
+
+    fn no_arithmetic() errors std::compiler::CompilerError:
+        static compile:
+            x = std::ffi::c::raw::double_from_bits(0)
+            x + 1.0
+    std::test::rejects("rcf-no-arithmetic", std::compiler::DiagnosticCode::Type, no_arithmetic)
+
+    fn no_ordering() errors std::compiler::CompilerError:
+        static compile:
+            x = std::ffi::c::raw::double_from_bits(0)
+            x < x
+    std::test::rejects("rcf-no-ordering", std::compiler::DiagnosticCode::Type, no_ordering)
+
+    fn no_equality() errors std::compiler::CompilerError:
+        static compile:
+            x = std::ffi::c::raw::float_from_bits(0)
+            x == x
+    std::test::rejects("rcf-no-equality", std::compiler::DiagnosticCode::Type, no_equality)
+
+    fn no_admission_implicit() errors std::compiler::CompilerError:
+        static compile:
+            fn f(y: Float64) -> Float64:
+                y
+            f(std::ffi::c::raw::double_from_bits(0))
+    std::test::rejects("rcf-no-implicit-admission", std::compiler::DiagnosticCode::Type, no_admission_implicit)
+
+    fn no_raw_implicit() errors std::compiler::CompilerError:
+        static compile:
+            fn f(y: std::ffi::c::RawDouble) -> int:
+                1
+            f(1.5)
+    std::test::rejects("rcf-no-implicit-raw", std::compiler::DiagnosticCode::Type, no_raw_implicit)
+
+    fn no_format_change() errors std::compiler::CompilerError:
+        static compile:
+            std::ffi::c::raw::double_to_bits(std::ffi::c::raw::float_from_bits(0))
+    std::test::rejects("rcf-no-format-change", std::compiler::DiagnosticCode::Type, no_format_change)
+
+    fn bits_proven() errors std::compiler::CompilerError:
+        static compile:
+            std::ffi::c::raw::float_from_bits(4294967296)
+    std::test::rejects("rcf-bits-proven", std::compiler::DiagnosticCode::Type, bits_proven)
+
+fn register_tests():
+    register_raw_c_float_ffi_tests(1.0000000596046448, 3.4028235677973367e38)
+
+with context std::test::suite()
+register_tests()
+std::test::report()

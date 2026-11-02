@@ -139,7 +139,11 @@
 #             exported (c, only on an `exported c fn`: a C export of a native
 #             library, NATIVE-LIBRARY-MILESTONE-1.md; printed by hir::format
 #             as `exported c`, read back by hir::parse; hir/exports.tcl
-#             checks and lists the exports)
+#             checks and lists the exports), callback (c, only on a
+#             `callback c fn`: a function C may call back synchronously
+#             through the function pointer std::ffi::c::callback makes of
+#             it, C-CALLBACK-MILESTONE-1.md; printed as `callback c`, read
+#             back by hir::parse; hir/callbacks.tcl checks and lists them)
 #   call      callee, args (ExprIds), target ("" | {native SymbolId} |
 #             {block ExprId}), known ("" | 1 | 0: result decided statically).
 #             A call written `receiver.name(args)` with a function `name`
@@ -182,6 +186,12 @@
 #             itself is visited -- explicit semantic fields, never an
 #             `end + 1` / `start - 1` rewrite (hir::cardinality::Numeric
 #             spells the exact element count of each combination).
+#             Any of the four loop kinds may also be a folding loop
+#             (FOLD-LOOPS-MILESTONE-1.md): foldBinding (the intermediate, a
+#             parameter of bodyScope) and foldInitial (its first value,
+#             evaluated in the enclosing scope after the loop's operands);
+#             hir::isFold. A fold's value is its last intermediate, never a
+#             List.
 #   lockloop  domains, bodyScope, body -- the lockstep collecting loop (`loop
 #             x in xs and i from 0 to n:`): one loop whose iteration domains
 #             all advance together. domains is a list of dicts in written
@@ -662,6 +672,10 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
         # imprint, written into the call (LIST-CARDINALITY-REFINEMENTS.md,
         # hir::listlength::Elaborate).
         hir::listlength::Elaborate hir
+        # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each certified
+        # from its function's declaration and the code every backend
+        # compiles, or rejected; nothing for a program without one.
+        hir::emission::verify hir
     }
     return $hir
 }
@@ -938,6 +952,19 @@ proc hir::CheckWith {hirVar feedback} {
     upvar 1 $hirVar hir
     variable recheckReuse
     variable recheckAudit
+    # The selected implementation graph (hir::coroutines::Implementations):
+    # what the previous check's typing bound each trait operation and each
+    # call of a trait-polymorphic function to, per specialization -- the
+    # one call graph through trait operations every analysis of the check
+    # reads (the coroutine analysis's yields and protocols, the context
+    # analysis's requirements; TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-
+    # MILESTONE-1.md). Kept only when it has an edge.
+    set graph [dict getdef $feedback graph {}]
+    if {$graph ne {}} {
+        dict set hir implementations $graph
+    } else {
+        dict unset hir implementations
+    }
     set input $hir
     hir::coroutines::analyze hir $feedback
     set pre $hir
@@ -1021,10 +1048,12 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::listlength::verify hir
     hir::callables::verify hir
     hir::lockstep::verify hir
+    hir::fold::verify hir
     hir::structs::verify hir
     hir::resources::verify hir
     hir::contexts::verify hir
     hir::direct::verify hir
+    hir::injection::verify hir
     hir::privacy::verify hir
     hir::coroutines::verify hir
     hir::resources::verifyLate hir
@@ -1038,6 +1067,7 @@ proc hir::CheckOnce {hirVar demote {roundsVar ""}} {
     hir::layouts::verify hir
     hir::semantic::verify hir
     hir::exports::verify hir
+    hir::callbacks::verify hir
     # {FROM TO}: the diagnostics at indices FROM to TO - 1 were reported
     # before the completion walk -- by resolution and the checks above --
     # and so are no contract-boundary report (hir::completions::Subsume),
@@ -1205,15 +1235,16 @@ proc hir::children {hir e} {
             return [concat [list [dict get $node condition]] \
                 [dict get $node thenBody] [dict get $node elseBody]]
         }
-        loop  { return [dict get $node body] }
+        loop  { return [concat [hir::FoldInitials $node] [dict get $node body]] }
         listloop {
-            return [concat [list [dict get $node iterable]] [dict get $node body]]
+            return [concat [list [dict get $node iterable]] [hir::FoldInitials $node] [dict get $node body]]
         }
         countloop {
-            return [concat [list [dict get $node start] [dict get $node end]] [dict get $node body]]
+            return [concat [list [dict get $node start] [dict get $node end]] \
+                [hir::FoldInitials $node] [dict get $node body]]
         }
         lockloop {
-            return [concat [hir::loopOperands $node] [dict get $node body]]
+            return [concat [hir::loopOperands $node] [hir::FoldInitials $node] [dict get $node body]]
         }
         struct  { return [dict get $node fields] }
         project { return [list [dict get $node receiver]] }
@@ -1231,6 +1262,35 @@ proc hir::children {hir e} {
             return $result
         }
     }
+}
+
+# Folding loops (FOLD-LOOPS-MILESTONE-1.md). A loop node of any of the four
+# kinds is a fold when it carries `foldBinding` (the intermediate: an
+# immutable parameter of its bodyScope, bound each iteration to the value
+# the previous one carried) and `foldInitial` (the ExprId of the value the
+# first iteration sees, evaluated once in the enclosing scope after the
+# loop's own operands). A fold is the value it carries: its normal
+# exhaustion and a bare break yield the current intermediate, a normal
+# completion of the body replaces it, `continue` keeps it. Its iteration
+# (domains, cardinality, lockstep proofs, induction) is its loop's own.
+
+# 1 if loop ExprId E of HIR is a fold.
+proc hir::isFold {hir e} {
+    return [dict exists $hir exprs $e foldBinding]
+}
+
+# 1 if loop node NODE is a fold.
+proc hir::IsFoldNode {node} {
+    return [dict exists $node foldBinding]
+}
+
+# {foldInitial} of a fold NODE, {} of any other node: the child it adds to
+# its loop's, after the loop's own operands.
+proc hir::FoldInitials {node} {
+    if {[dict exists $node foldInitial]} {
+        return [list [dict get $node foldInitial]]
+    }
+    return {}
 }
 
 # The operand ExprIds of lockloop NODE's domains, in written order (a list
@@ -1376,7 +1436,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine resources mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep resourceescape warnings recovery methods declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range intset emitdfa emission rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

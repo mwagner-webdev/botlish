@@ -2,13 +2,14 @@
 # (TYPED-CALLABLE-ESCAPE-SOUNDNESS.md).
 #
 # A *typed callable* is a block with at least one declared parameter type
-# (hir::resolve.tcl's declaredParamTypes, STRICT-TYPED-PARAMETERS.md): it
-# imposes a caller-side precondition. hir::range::verifyDeclaredParams
-# already enforces that precondition at every call whose target resolves
-# to an exact known block (hir::types::Call's `target` field) -- but a
-# callable *value* can flow through the program in other ways (an
-# ordinary call argument, an "if" branch join, a loop break, a function
-# return) before ever being called. Whenever one of those positions would
+# other than `any` (hir::resolve.tcl's declaredParamTypes, STRICT-TYPED-
+# PARAMETERS.md): it imposes a caller-side precondition.
+# hir::range::verifyDeclaredParams already enforces that precondition at
+# every call whose target resolves to an exact known block
+# (hir::types::Call's `target` field) -- but a callable *value* can flow
+# through the program in other ways (an ordinary call argument, an "if"
+# branch join, a loop break, a function return) before ever being
+# called. Whenever one of those positions would
 # discard the value's exact `{block B arity result}` type -- the only
 # type shape verifyDeclaredParams's target resolution can ever use --
 # B's own precondition becomes permanently unenforceable at whatever
@@ -71,8 +72,9 @@ namespace eval hir::callables {}
 # 1 if TYPE is an exact callable value -- {block B ARITY RESULT} -- whose
 # block B declares at least one typed parameter (STRICT-TYPED-PARAMETERS.
 # md's own "typed callable" -- TYPED-CALLABLE-ESCAPE-SOUNDNESS.md item 10:
-# an untyped-parameter function, or one with only a declared *result*
-# type, is not precondition-bearing and gains no new restriction here) OR
+# an untyped-parameter function, one whose parameters are declared `any`,
+# or one with only a declared *result* type, is not precondition-bearing
+# and gains no new restriction here) OR
 # declares a non-empty error set (EXPLICIT-ERROR-COMPLETIONS.md item 73):
 # a declared error is exactly as much a caller-side obligation as a typed
 # parameter -- the caller (or an enclosing function's own `errors` clause)
@@ -112,8 +114,12 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
             }
             # Declared, or trusted-inferred from the block's own body
             # (hir::signatures::entryTypes): the body assumes either one.
+            # An entry type of `any` assumes nothing, so it obliges a caller
+            # to nothing an untyped parameter does not (as an Fn argument
+            # of `any`, below): `fn f(c: any)` is no more bearing than
+            # `fn f(c)`.
             foreach declared [hir::signatures::entryTypes $hir $block] {
-                if {$declared ne {}} {
+                if {$declared ni {{} any}} {
                     return 1
                 }
             }
@@ -437,6 +443,27 @@ proc hir::callables::CheckTrailing {hirVar body finalType contextText} {
     CheckPreserved hir [lindex $body end] $finalType $contextText
 }
 
+# The rest of a fold NODE's walk, after its loop's operands (WalkExpr): its
+# initial value and its body's trailing value become its intermediate
+# (FOLD-LOOPS-MILESTONE-1.md), a join like an if's, of the intermediate's
+# one type. 1 when NODE is a fold (walked), 0 otherwise.
+proc hir::callables::WalkFold {hirVar node} {
+    upvar 1 $hirVar hir
+    if {![hir::IsFoldNode $node]} {
+        return 0
+    }
+    set intermediate [hir::bindingType $hir [dict get $node foldBinding]]
+    WalkExpr hir [dict get $node foldInitial]
+    CheckPreserved hir [dict get $node foldInitial] $intermediate \
+        {as a fold's initial intermediate, whose type differs}
+    foreach child [dict get $node body] {
+        WalkExpr hir $child
+    }
+    CheckTrailing hir [dict get $node body] $intermediate \
+        {as a fold's next intermediate, whose type differs}
+    return 1
+}
+
 # Walks E (and its children, generically, via hir::children) checking
 # every position that could erase a typed callable's exact type: a call's
 # own arguments (never its callee -- a direct/exact invocation is exactly
@@ -488,12 +515,18 @@ proc hir::callables::WalkExpr {hirVar e} {
                 {in an "if" branch whose joined type differs from the other branch}
         }
         loop {
+            if {[WalkFold hir $node]} {
+                return
+            }
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
         }
         listloop {
             WalkExpr hir [dict get $node iterable]
+            if {[WalkFold hir $node]} {
+                return
+            }
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
@@ -509,6 +542,9 @@ proc hir::callables::WalkExpr {hirVar e} {
         countloop {
             WalkExpr hir [dict get $node start]
             WalkExpr hir [dict get $node end]
+            if {[WalkFold hir $node]} {
+                return
+            }
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
@@ -519,6 +555,9 @@ proc hir::callables::WalkExpr {hirVar e} {
         lockloop {
             foreach operand [hir::loopOperands $node] {
                 WalkExpr hir $operand
+            }
+            if {[WalkFold hir $node]} {
+                return
             }
             foreach child [dict get $node body] {
                 WalkExpr hir $child
@@ -611,7 +650,7 @@ proc hir::callables::WalkExpr {hirVar e} {
 # untyped): a direct call's declared parameter type (hir::range::
 # VerifyCall proves the argument admissible for it), a structural callee's
 # contract argument type (VerifyStructuralCall), or -- for a List-building
-# native (-result-shape elements/append, core/native.tcl), a List read
+# native (-result-shape elements/append/flat, core/native.tcl), a List read
 # (element) or std::immutable_set::from_list (immutable-set) -- the position the
 # value provably lands in inside the call's own result type.
 proc hir::callables::ArgContexts {hir e} {
@@ -653,6 +692,17 @@ proc hir::callables::ArgContexts {hir e} {
     set result [hir::typeOf $hir $e]
     set elem [hir::types::elementOf $result]
     switch -- [lindex $shape 0] {
+        callback-pointer {
+            # std::ffi::c::callback(NAME) (C-CALLBACK-MILESTONE-1.md): the
+            # callback leaves as a C function pointer whose every call
+            # converts C's values into exactly its declared parameter types
+            # (hir/callbacks.tcl: only total conversions), so its contract
+            # is kept by construction.
+            lassign $shape _ f
+            set contexts $none
+            lset contexts $f [hir::typeOf $hir [lindex $args $f]]
+            return $contexts
+        }
         elements {
             if {$elem ne ""} {
                 return [lrepeat [llength $args] $elem]
@@ -664,6 +714,18 @@ proc hir::callables::ArgContexts {hir e} {
                 set contexts $none
                 lset contexts $l $result
                 lset contexts $v $elem
+                return $contexts
+            }
+        }
+        flat {
+            # std::list::flat(L) (LIST-FLAT-MILESTONE-1.md): the elements of
+            # L's Lists land, unchanged and in order, in the result -- so L
+            # is preserved exactly as a List of Lists of the result's
+            # element type.
+            lassign $shape _ l
+            if {$elem ne ""} {
+                set contexts $none
+                lset contexts $l [hir::types::MakeList [hir::types::MakeList $elem]]
                 return $contexts
             }
         }

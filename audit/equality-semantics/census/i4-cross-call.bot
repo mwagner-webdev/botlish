@@ -1,0 +1,6 @@
+# I4 a comparison reached through another untyped function: the instance chain
+fn hyphen?(c):
+    c == '-'
+fn g(x):
+    hyphen?(x)
+[g("-"), g('-')]

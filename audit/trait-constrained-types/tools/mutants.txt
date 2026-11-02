@@ -173,23 +173,23 @@
 ## hir/structs.tcl
 <<<<
     foreach t [hir::imprint::Parts $type] {
-        set problem [ApplicationProblem $t]
+        set issue [ApplicationIssue $t]
 ====
     foreach t [lrange [hir::imprint::Parts $type] 0 -1] {
-        set problem [ApplicationProblem $t]
+        set issue [ApplicationIssue $t]
 >>>>
 
 @@ enclosing-declaration-hides-obligation a declaration need not state the obligation of an application its field holds (a field over a slot variable is not checked)
 ## hir/structs.tcl
 <<<<
         foreach {name t} [dict get $entry types] {
-            set problem [ApplicationProblem $t]
-            if {$problem eq ""} continue
+            set issue [ApplicationIssue $t]
+            if {$issue eq ""} continue
 ====
         foreach {name t} [dict get $entry types] {
             if {[string first imprint $t] >= 0} continue
-            set problem [ApplicationProblem $t]
-            if {$problem eq ""} continue
+            set issue [ApplicationIssue $t]
+            if {$issue eq ""} continue
 >>>>
 
 @@ arity-ignored an application's arity is not checked (missing slots resolve to whatever comes, extra arguments are dropped)
@@ -408,12 +408,12 @@
 >>>>
 ## hir/types.tcl
 <<<<
-        return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
+        return [list unknown "its type is the imprint variable [hir::imprint::Shown [lindex $type 1]], which no constraint holds to total equality and hashing"]
 ====
         if {[ImprintConstraints $type] eq {} && $operation in {equality hash}} {
             return {total ""}
         }
-        return [list unknown "its type is the imprint variable [lindex $type 1], which no constraint holds to total equality and hashing"]
+        return [list unknown "its type is the imprint variable [hir::imprint::Shown [lindex $type 1]], which no constraint holds to total equality and hashing"]
 >>>>
 
 @@ trait-operation-not-specialized a trait operation on a constrained variable is never specialized per binding (no clone: the build fails in the monomorphized program)
@@ -483,11 +483,13 @@
 <<<<
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
                     dict set hir exprs $e structApplicationProblem $problem
+                    dict set hir exprs $e structApplicationKind $kind
                 }
                 return [Poison hir $e]
 ====
                 if {[dict getdef $hir exprs $e structApplicationProblem ""] ne $problem} {
                     dict set hir exprs $e structApplicationProblem $problem
+                    dict set hir exprs $e structApplicationKind $kind
                 }
                 return $type
 >>>>
@@ -538,4 +540,62 @@
     return [dict filter $binding script {v t} {dict exists $selecting $v}]
 ====
     return $binding
+>>>>
+
+# --- nested functions: an enclosing function's variable is that function's
+
+@@ nested-enclosing-variable-own a nested function's declared variable named like an enclosing function's is its own again, bound at each of its calls (the conflation: g(Box {value: "s"}) accepted beside the enclosing b)
+## hir/imprint.tcl
+<<<<
+    set enclosing {}
+    foreach name [dict keys [EnclosingOf $hir $e]] {
+====
+    set enclosing {}
+    foreach name {} {
+>>>>
+
+@@ nested-enclosing-bound-in-mixed-parameter an enclosing variable is bound at a nested function's call where a parameter holds it beside the nested function's own (Pair[T, U] binds T to the argument's)
+## hir/imprint.tcl
+<<<<
+        if {$name in $enclosing} {
+            # An enclosing function's variable (BlockSignature): rigid
+====
+        if {0 && $name in $enclosing} {
+            # An enclosing function's variable (BlockSignature): rigid
+>>>>
+
+@@ nested-enclosing-unestablished an enclosing variable used bare in a nested signature is "not established" (fn g(x: T) rejected inside a function that has T)
+## hir/resolve.tcl
+<<<<
+                [lmap param [dict get $node params] {lindex $param 0}] $enclosing]
+====
+                [lmap param [dict get $node params] {lindex $param 0}]]
+>>>>
+
+@@ nested-enclosing-constraint-own an enclosing variable in a nested signature is constrained by the nested signature's own applications, not the enclosing one's (g(h: H[K]) inside outer(b: Box[K]) adds Hashable)
+## hir/resolve.tcl
+<<<<
+                lassign [hir::imprint::ConstrainEnclosing $constrainedParams $declared $traits] constrainedParams declared
+====
+>>>>
+
+@@ nested-enclosing-clone-binding-ignored in a specialization of the enclosing function, a nested signature keeps the enclosing variable instead of the binding's type
+## hir/resolve.tcl
+<<<<
+                set constrainedParams [lmap t $constrainedParams {
+                    if {$t eq {}} { set t } else { hir::imprint::BodyType $ctx $t }
+                }]
+                if {$declared ne {}} {
+                    set declared [hir::imprint::BodyType $ctx $declared]
+                }
+====
+>>>>
+
+@@ read-nested-constraints-own HIR text reading constrains a nested function's enclosing variable by the nested signature's own applications (the enclosing constraint lost)
+## hir/read.tcl
+<<<<
+    ConstrainEnclosingSignatures hir
+    CanonicalBlockTypes hir
+====
+    CanonicalBlockTypes hir
 >>>>

@@ -1,0 +1,47 @@
+# headless.bot -- the counter scripted, with no window system
+# (RAVEN-BINDINGS.md, "The example"): Raven's null platform and renderer,
+# three clicks of "Click me" and one of "Quit" injected where the last
+# frame laid the buttons out, each frame's events handled as main.bot's
+# loop handles them.
+#
+#   tclsh9.0 tests/cffi/raven.tcl                # once: the headless libraven.so
+#   tclsh9.0 tools/raven-package.tcl install examples/raven
+#   LD_LIBRARY_PATH=DIR tclsh9.0 main.tcl -backend cranelift -L DIR examples/raven/headless.bot
+#
+# The value: the count, the label, whether the loop still runs after Quit
+# ("false"), and the exit code: ["3", "3 clicks", "false", "0"].
+import counter
+import raven
+import std::int
+
+with context raven::create()
+
+fn text(value: bool) -> str:
+    if value:
+        return "true"
+    "false"
+
+# COUNT after a click of the button named NAME and the frame that follows.
+fn press(window: raven::Window, name: str, count: int, context ui: raven::Ui) -> int errors NonFiniteFloat:
+    window.click(window.find(name))
+    drawn = raven::draw_frame()
+    window.step(count)
+
+fn main(context ui: raven::Ui) -> List[str] errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::headless())
+    window = counter::open()
+    laid_out = raven::draw_frame()
+    clicked = window.press("click", window.press("click", window.press("click", 0)))
+    ended = window.press("quit", clicked)
+    running = raven::draw_frame()
+    label = raven::label_text(window.find("status"))
+    code = raven::exit_code()
+    raven::stop()
+    [std::int::to_string(ended), label, text(running), std::int::to_string(code)]
+
+result = main():
+    on raven::RavenFailed failure:
+        ["RavenFailed", failure.call, failure.detail]
+    on NonFiniteFloat:
+        ["NonFiniteFloat"]
+result

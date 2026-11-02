@@ -48,7 +48,8 @@
 # immutable local binding (its one `bind`, whose value is what every read
 # sees: single assignment is what makes aliases sound without any flow
 # analysis) or to a scalar root constant (true/false/unit); a call of
-# `list` (a List literal), `std::list::append` of an exactly known List, `std::list::at`
+# `list` (a List literal), `std::list::append` of an exactly known List,
+# `std::list::flat` of an exactly known List of exactly known Lists, `std::list::at`
 # of an exactly known List at an exactly known index (nested projection),
 # `std::list::length` of an exactly known List, `+ - *` of two exact Ints, and a
 # native with a fold (-fold: a floating-point operation) of exact arguments.
@@ -268,6 +269,32 @@ proc hir::exact::CallFact {hir e node level stepsVar} {
                 return ""
             }
             return [concat $fact [list [list e [lindex $args 1]]]]
+        }
+        std::list::flat {
+            # An exactly known List of exactly known Lists
+            # (LIST-FLAT-MILESTONE-1.md): their elements' sources, in
+            # order -- one level of nesting removed. A List of anything not
+            # exactly known, or a result past the element bound, is
+            # forgotten (never truncated).
+            if {[llength $args] != 1 || $level >= $maxDepth} {
+                return ""
+            }
+            set fact [Eval $hir [lindex $args 0] $level steps]
+            if {[lindex $fact 0] ne "list"} {
+                return ""
+            }
+            set result [list list $level]
+            foreach src [lrange $fact 2 end] {
+                set inner [SourceFact $hir $src [expr {$level + 1}] steps]
+                if {[lindex $inner 0] ne "list"} {
+                    return ""
+                }
+                lappend result {*}[lrange $inner 2 end]
+                if {[Length $result] > $maxElements} {
+                    return ""
+                }
+            }
+            return $result
         }
         std::list::at {
             if {[llength $args] != 2} {

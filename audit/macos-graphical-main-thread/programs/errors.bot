@@ -1,0 +1,44 @@
+# errors.bot -- how a program's failures leave the process
+# (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, section 21), on whichever thread
+# runs it. A declared Botlish error cannot reach the process: the checker
+# requires every one handled (UNHANDLED-ERROR), so `errors declared` fails
+# one and handles it -- the value carries its payload. `errors runtime`
+# ends in a runtime error: `+` of Lists whose static type is `any`, checked
+# when it runs (CORE SEMANTIC TYPE). Anything else returns normally. The
+# executable's reporting -- the error's text and code on standard error,
+# status 1 -- must be the same on every thread.
+import std::list
+import std::str
+
+error Rejected:
+    code: int
+
+fn reject(n: int) -> int errors Rejected:
+    if n > 0:
+        fail Rejected {code: n}
+    n
+
+fn mode() -> str:
+    args = argv():
+        on InvalidArgumentEncoding:
+            ["", ""]
+    std::list::at(args, 1):
+        on IndexNotFound:
+            ""
+
+# `any` stays dynamic: an operand of a known other kind (the erased `list`
+# this program used to add) is a compile-time TYPE since
+# METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md.
+fn add(a: any, b: any) -> int:
+    a + b
+
+fn run(m: str) -> int:
+    if m == "declared":
+        return reject(std::str::length(m)):
+            on Rejected {code}:
+                1000 + code
+    if m == "runtime":
+        return add([true], [1])
+    0
+
+run(mode())

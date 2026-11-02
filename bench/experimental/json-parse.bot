@@ -1,0 +1,56 @@
+# json-parse.bot -- EXPERIMENTAL: validating a JSON document with the
+# declared recognizers of DFA-COROUTINE-MILESTONE-2.md (examples/dfa/json:
+# json_lex.bot's RFC 8259 lexical grammar, json.bot's driver and its
+# structural layer with an explicit stack) -- json::validate_text, the
+# report's dfa-validate workload (bench/dfa.tcl), here at one size, on every
+# backend.
+#
+# bench-modules: examples/dfa/json/json_lex.bot examples/dfa/json/json.bot
+#
+# bench/bench.tcl stages those two modules beside this file in a private
+# directory and compiles it there (application modules resolve from the
+# entry file's directory: IMPORTS.md); the modules are the example's own,
+# unchanged.
+#
+# The document is one array of COPIES objects and a final {}, handed to the
+# validator as chunks (one per object: chunk boundaries are invisible to it,
+# so the text is never concatenated). Each object has every token kind:
+# strings with escapes (\", \n, é, a surrogate pair), a non-ASCII
+# character, integers, fractions and exponents, the three literals, and
+# nested empty and non-empty containers. The value is json::Summary's
+# [tokens, symbols]: the tokens validated and the Unicode scalar values
+# read.
+#
+# expect: [1444, 3984]
+import json
+import std::list
+import std::str
+
+copies = 20
+piece = "{\"id\": 12, \"name\": \"café \\\"bot\\\"\", \"tags\": [\"a\", \"b\\n\", \"\\u00e9\\ud83d\\ude00\"], \"pos\": [-1.5, 2e3, 0.25E-2, 0], \"ok\": true, \"off\": false, \"next\": null, \"nested\": {\"x\": [[], {}], \"y\": [1, [2, [3]]]}},\n"
+
+fn chunks(n: int) -> List[str]:
+    body = loop i from 0 to n:
+        if i == 0:
+            "".append_char('[').concat(piece)
+        else:
+            piece
+    body.append("{}]")
+
+fn run() -> List[int] errors IndexNotFound, json::Lexical, json::Truncated, json::TokenTooLong, json::Structure, json::TooDeep:
+    summary = chunks(copies).validate_text(64, 100000)
+    [summary.tokens, summary.symbols]
+
+run():
+    on IndexNotFound:
+        [-1]
+    on json::Lexical:
+        [-2]
+    on json::Truncated:
+        [-3]
+    on json::Structure:
+        [-4]
+    on json::TooDeep:
+        [-5]
+    on json::TokenTooLong:
+        [-6]

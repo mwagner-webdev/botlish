@@ -1,0 +1,7 @@
+# I4 the integer-domain precedent: an untyped forwarder acquires a trusted contract, checked at its calls
+type Small = Int in 0..9
+fn f(x: Small) -> Small:
+    x
+fn g(n):
+    f(n)
+g(12)

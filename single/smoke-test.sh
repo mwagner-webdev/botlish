@@ -25,7 +25,9 @@
 # works with no cache directory at all (no HOME); and the language server
 # (-lsp) answers a scripted editor session, its analysis worker started
 # from the executable itself and the standard library's source given to the
-# editor as files (LSP-MILESTONE-1.md).
+# editor as files (LSP-MILESTONE-1.md); and the package commands pack, add
+# and verify a package without installing the native backend
+# (PACKAGE-MANAGER-MILESTONE-1.md).
 #
 # On macOS the program that prints is examples/io/hello-darwin.bot, whose
 # Darwin IO calls libSystem: every executable is linked by the system
@@ -267,5 +269,40 @@ if (( macos )); then
 fi
 grep -q 'analysis worker started' "$work/lsp.err" || fail "-lsp started no worker"
 echo "   -lsp: hover, diagnostics, definition into $definition"
+
+# The package manager (PACKAGE-MANAGER-MILESTONE-1.md): a pure-Botlish
+# package packed, added from a local repository and verified with no
+# toolchain, and no package command installs the native backend (it never
+# compiles anything: single/main.tcl).
+mkdir -p "$work/pkgsrc/geometry" "$work/pkgrepo" "$work/pkgapp"
+printf '{"schema": 1, "name": "geometry", "version": "1.0.0"}\n' >"$work/pkgsrc/geometry/botlish.json"
+printf 'fn area(w: int, h: int) -> int:\n    w * h\n' >"$work/pkgsrc/geometry/geometry.bot"
+printf 'import geometry\n\ngeometry::area(6, 7)\n' >"$work/pkgapp/main.bot"
+pm() { env -i HOME="$work/home-pm" "$botlish" "$@"; }
+pm package pack "$work/pkgsrc/geometry" -out "$work/pkgrepo" >/dev/null || fail "package pack"
+pm add geometry -project "$work/pkgapp" -repository "$work/pkgrepo" >/dev/null || fail "add"
+pm verify -project "$work/pkgapp" -repository "$work/pkgrepo" >/dev/null || fail "verify"
+[[ ! -e $work/home-pm/.cache ]] || fail "a package command installed the native backend ($(ls "$work/home-pm/.cache"))"
+run -warnings off "$work/pkgapp/main.bot" | grep -qF 'value: 42' || fail "a program over an installed package"
+echo "   packages: pack, add, verify, with no native backend installed"
+
+# PM-2 (PACKAGE-MANAGER-MILESTONE-2.md): a target-aware package -- one
+# release for two targets -- packed, added, a second target's view
+# prepared, each target's program compiled from its own view, and a native
+# file inspected, still with no native backend installed.
+mkdir -p "$work/pkgsrc/geo/targets/linux-x86_64/geo" "$work/pkgsrc/geo/targets/linux-aarch64/geo" "$work/pkgapp2"
+printf '{"schema": 2, "name": "geo", "version": "1.0.0", "targets": {"linux-x86_64": {"files": "targets/linux-x86_64"}, "linux-aarch64": {"files": "targets/linux-aarch64"}}}\n' >"$work/pkgsrc/geo/botlish.json"
+printf 'import geo::arch\n\nfn which() -> str:\n    geo::arch::name()\n' >"$work/pkgsrc/geo/geo.bot"
+printf 'fn name() -> str:\n    "x86-64"\n' >"$work/pkgsrc/geo/targets/linux-x86_64/geo/arch.bot"
+printf 'fn name() -> str:\n    "aarch64"\n' >"$work/pkgsrc/geo/targets/linux-aarch64/geo/arch.bot"
+printf 'import geo\n\ngeo::which()\n' >"$work/pkgapp2/main.bot"
+pm package pack "$work/pkgsrc/geo" -out "$work/pkgrepo" >/dev/null || fail "package pack (schema 2)"
+pm add geo -project "$work/pkgapp2" -repository "$work/pkgrepo" -target linux-x86_64 -target linux-aarch64 >/dev/null || fail "add -target"
+pm verify -project "$work/pkgapp2" -target linux-x86_64 >/dev/null || fail "verify -target"
+pm native inspect "$botlish" >/dev/null || fail "native inspect"
+[[ ! -e $work/home-pm/.cache ]] || fail "a package command installed the native backend ($(ls "$work/home-pm/.cache"))"
+run -warnings off -target linux-x86_64 "$work/pkgapp2/main.bot" | grep -qF 'value: "x86-64"' || fail "the linux-x86_64 view"
+run -warnings off -target linux-aarch64 "$work/pkgapp2/main.bot" | grep -qF 'value: "aarch64"' || fail "the linux-aarch64 view"
+echo "   packages: a two-target release, its views and native inspect, with no native backend installed"
 
 echo "== smoke test passed"

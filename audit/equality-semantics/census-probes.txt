@@ -1,0 +1,606 @@
+== i1-applied.bot  # I1 applications of one parameterized struct with different type arguments
+  check              ok
+  interp             value [false, true, false]
+  compile            value [false, true, false]
+  cranelift          value [false, true, false]
+  cranelift-generic  value [false, true, false]
+== i1-domains.bot  # I1 integer domains: overlapping, disjoint, a constant outside
+  check              ok
+  interp             value [false, true, false, true]
+  compile            value [false, true, false, true]
+  cranelift          value [false, true, false, true]
+  cranelift-generic  value [false, true, false, true]
+== i1-enums.bot  # I1 nominal enums: two declarations with the same case names
+  check              ok
+  interp             value [false, true, false, false]
+  compile            value [false, true, false, false]
+  cranelift          value [false, true, false, false]
+  cranelift-generic  value [false, true, false, false]
+== i1-lists.bot  # I1 Lists with compatible and disjoint element types, empty and nonempty
+  check              ok
+  interp             value [true, false, true, true, true, false, true, false]
+  compile            value [true, false, true, true, true, false, true, false]
+  cranelift          value [true, false, true, true, true, false, true, false]
+  cranelift-generic  value [true, false, true, true, true, false, true, false]
+== i1-nested.bot  # I1 structs whose field types share only the empty List: equal values exist
+  check              ok
+  interp             value [true, false, false]
+  compile            value [true, false, false]
+  cranelift          value [true, false, false]
+  cranelift-generic  value [true, false, false]
+== i1-phantom.bot  # I1 a type slot no field names (a phantom argument), if the language admits one
+  check              ok
+  interp             value [true, false]
+  compile            value [true, false]
+  cranelift          value [true, false]
+  cranelift-generic  value [true, false]
+== i1-primitives.bot  # I1 distinct primitive kinds: str, UnicodeChar, Int, Float64, Bool, Bytes, unit
+  check              ok
+  interp             value [false, false, false, false, false, false, false, true, false, false, true, true]
+  compile            value [false, false, false, false, false, false, false, true, false, false, true, true]
+  cranelift          value [false, false, false, false, false, false, false, true, false, false, true, true]
+  cranelift-generic  value [false, false, false, false, false, false, false, true, false, false, true, true]
+== i1-refinement.bot  # I1 a refinement value against its carrier and against another refinement
+  check              ok
+  interp             value [true, true]
+  compile            value [true, true]
+  cranelift          value [true, true]
+  cranelift-generic  value [true, true]
+== i1-sets.bot  # I1 ImmutableSets with disjoint element types, empty and nonempty
+  check              ok
+  interp             value [true, false, true]
+  compile            value [true, false, true]
+  cranelift          value [true, false, true]
+  cranelift-generic  value [true, false, true]
+== i1-structs.bot  # I1 nominal structs, named against anonymous, anonymous field sets and field types
+  check              ok
+  interp             value [false, false, true, false, false, false, true]
+  compile            value [false, false, true, false, false, false, true]
+  cranelift          value [false, false, true, false, false, false, true]
+  cranelift-generic  value [false, false, true, false, false, false, true]
+== i2-affine-instance.bot  # I2 an affine value reaching == through an untyped function
+  check              static AFFINE-EQUALITY-UNSUPPORTED: 6:1: call to same? with a : std::ffi::c::Ptr[std::ffi::c::Int], b : int is invalid: `a` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead) (in the body of same?, at 4:5)
+  interp             static AFFINE-EQUALITY-UNSUPPORTED: 6:1: call to same? with a : std::ffi::c::Ptr[std::ffi::c::Int], b : int is invalid: `a` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead) (in the body of same?, at 4:5)
+  compile            static AFFINE-EQUALITY-UNSUPPORTED: 6:1: call to same? with a : std::ffi::c::Ptr[std::ffi::c::Int], b : int is invalid: `a` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead) (in the body of same?, at 4:5)
+  cranelift          static AFFINE-EQUALITY-UNSUPPORTED: 6:1: call to same? with a : std::ffi::c::Ptr[std::ffi::c::Int], b : int is invalid: `a` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead) (in the body of same?, at 4:5)
+  cranelift-generic  static AFFINE-EQUALITY-UNSUPPORTED: 6:1: call to same? with a : std::ffi::c::Ptr[std::ffi::c::Int], b : int is invalid: `a` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead) (in the body of same?, at 4:5)
+== i2-affine-list-empty.bot  # I2 an empty List of affine values: rejected by type though [] == [] would hold
+  check              static AFFINE-EQUALITY-UNSUPPORTED: 4:5: `a` is an affine List[std::ffi::c::Ptr[std::ffi::c::Int]], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  interp             static AFFINE-EQUALITY-UNSUPPORTED: 4:5: `a` is an affine List[std::ffi::c::Ptr[std::ffi::c::Int]], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  compile            static AFFINE-EQUALITY-UNSUPPORTED: 4:5: `a` is an affine List[std::ffi::c::Ptr[std::ffi::c::Int]], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  cranelift          static AFFINE-EQUALITY-UNSUPPORTED: 4:5: `a` is an affine List[std::ffi::c::Ptr[std::ffi::c::Int]], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  cranelift-generic  static AFFINE-EQUALITY-UNSUPPORTED: 4:5: `a` is an affine List[std::ffi::c::Ptr[std::ffi::c::Int]], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+== i2-coroutine.bot  # I2 a coroutine handle compared with itself (an affine value)
+  check              static AFFINE-EQUALITY-UNSUPPORTED: 6:1: `step` is an affine Coroutine{args: [], return: int, errors: []}, which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  interp             static AFFINE-EQUALITY-UNSUPPORTED: 6:1: `step` is an affine Coroutine{args: [], return: int, errors: []}, which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  compile            static AFFINE-EQUALITY-UNSUPPORTED: 6:1: `step` is an affine Coroutine{args: [], return: int, errors: []}, which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  cranelift          static AFFINE-EQUALITY-UNSUPPORTED: 6:1: `step` is an affine Coroutine{args: [], return: int, errors: []}, which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  cranelift-generic  static AFFINE-EQUALITY-UNSUPPORTED: 6:1: `step` is an affine Coroutine{args: [], return: int, errors: []}, which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+== i2-cptr.bot  # I2 a null C pointer compared with itself
+  check              static AFFINE-EQUALITY-UNSUPPORTED: 4:1: `p` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  interp             static AFFINE-EQUALITY-UNSUPPORTED: 4:1: `p` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  compile            static AFFINE-EQUALITY-UNSUPPORTED: 4:1: `p` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  cranelift          static AFFINE-EQUALITY-UNSUPPORTED: 4:1: `p` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+  cranelift-generic  static AFFINE-EQUALITY-UNSUPPORTED: 4:1: `p` is an affine std::ffi::c::Ptr[std::ffi::c::Int], which has no equality and no hash: comparing or hashing it would observe the identity of what it owns (compare unrestricted fields instead)
+== i2-decimal-instance.bot  # I2 DecimalRounded operands reaching == through an untyped function: the static rule is the generic body's only
+  check              ok
+  interp             runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+  compile            runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+  cranelift          runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+  cranelift-generic  runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+== i2-decimal-list-instance.bot  # I2 Lists of DecimalRounded values through an untyped function
+  check              ok
+  interp             runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+  compile            runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+  cranelift          runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+  cranelift-generic  runtime EQUALITY: == of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)
+== i2-decimal-list-reached.bot  # I2 DecimalRounded values inside Lists: the type-blind equality is refused at run time
+  check              static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  interp             static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  compile            static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  cranelift          static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  cranelift-generic  static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+== i2-decimal-list.bot  # I2 DecimalRounded values: directly (precise) and in empty Lists (true)
+  check              static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  interp             static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  compile            static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  cranelift          static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+  cranelift-generic  static TYPE: 3:5: == of List[DecimalRounded{minDecimalsPreserved: 2}] and List[DecimalRounded{minDecimalsPreserved: 2}]: a DecimalRounded value is equal to another at the precision its type guarantees, which equality of a value holding one does not know (compare the DecimalRounded values themselves)
+== i2-hash-admission.bot  # I2 hash's checked admission rejects List[Fn] although hash([]) of that type would succeed
+  check              static ?: 3:10: the argument of hash does not satisfy trait Hashable:
+  interp             static ?: 3:10: the argument of hash does not satisfy trait Hashable:
+  compile            static ?: 3:10: the argument of hash does not satisfy trait Hashable:
+  cranelift          static ?: 3:10: the argument of hash does not satisfy trait Hashable:
+  cranelift-generic  static ?: 3:10: the argument of hash does not satisfy trait Hashable:
+== i2-hash-untyped.bot  # I2 hash of an empty List of no static element type succeeds at run time
+  check              ok
+  interp             value true
+  compile            value true
+  cranelift          value true
+  cranelift-generic  value true
+== i2-list-callables-first.bot  # I2 a callable compared with an Int inside Lists: refused before kinds are compared
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+  compile            runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+  cranelift          runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+== i2-list-callables-reached.bot  # I2 Lists of callables: equal prefixes reach the callables
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  compile            runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  cranelift          runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+== i2-list-callables.bot  # I2 Lists holding an untyped callable: different lengths, and a first element that differs, answer false
+  check              ok
+  interp             value [false, false, false, true]
+  compile            value [false, false, false, true]
+  cranelift          value [false, false, false, true]
+  cranelift-generic  value [false, false, false, true]
+== i2-list-struct-callable.bot  # I2 untyped callables (no contract to erase): a List or a struct holding one still compares
+  check              ok
+  interp             value [false, false, false]
+  compile            value [false, false, false]
+  cranelift          value [false, false, false]
+  cranelift-generic  value [false, false, false]
+== i2-mutable.bot  # I2 MutableArray and MutableVector values, top level and inside a List
+  check              ok
+  interp             value [false, false]
+  compile            value [false, false]
+  cranelift          value [false, false]
+  cranelift-generic  value [false, false]
+== i2-mutarray-top.bot  # I2 a MutableArray compared with itself
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <mutable-array [0]> == <mutable-array [0]>
+  compile            runtime EQUALITY: == is not defined for callables: <mutable-array [0]> == <mutable-array [0]>
+  cranelift          runtime EQUALITY: == is not defined for callables: <mutable-array [0]> == <mutable-array [0]>
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <mutable-array [0]> == <mutable-array [0]>
+== i2-mutvec-list.bot  # I2 a MutableVector compared with a List: interp and native refuse it, the Tcl compiler answers false
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <mutable-vector [1]> == [1]
+  compile            value false
+  cranelift          runtime EQUALITY: == is not defined for callables: <mutable-vector [1]> == [1]
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <mutable-vector [1]> == [1]
+== i2-mutvec-top.bot  # I2 a MutableVector compared with an Int: refused before kinds are compared
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <mutable-vector [1]> == 1
+  compile            value false
+  cranelift          runtime EQUALITY: == is not defined for callables: <mutable-vector [1]> == 1
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <mutable-vector [1]> == 1
+== i2-named-order-reached.bot  # I2 a named struct whose callable field is declared first: every comparison reaches it
+  check              static TYPE: 7:1: this value of type T has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  interp             static TYPE: 7:1: this value of type T has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  compile            static TYPE: 7:1: this value of type T has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift          static TYPE: 7:1: this value of type T has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift-generic  static TYPE: 7:1: this value of type T has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+== i2-named-order.bot  # I2 a named struct compares in declaration order: an Int field declared first stops a difference
+  check              static TYPE: 7:2: this value of type S has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  interp             static TYPE: 7:2: this value of type S has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  compile            static TYPE: 7:2: this value of type S has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift          static TYPE: 7:2: this value of type S has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift-generic  static TYPE: 7:2: this value of type S has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+== i2-sets-build.bot  # I2 building a set of two callables compares them
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  compile            runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  cranelift          runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+== i2-sets-contains.bot  # I2 membership of an Int in a set holding a callable: the callable is reached
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+  compile            runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+  cranelift          runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <block (x)> == 1
+== i2-sets.bot  # I2 a set holding a callable: building it, its size against another set, membership
+  check              ok
+  interp             value [false, false]
+  compile            value [false, false]
+  cranelift          value [false, false]
+  cranelift-generic  value [false, false]
+== i2-struct-order-reached.bot  # I2 the same struct with the Int field named after the callable field: the callable is compared first
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  compile            runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  cranelift          runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <block (x)> == <block (x)>
+== i2-struct-order.bot  # I2 anonymous structs holding a callable: fields compare in name order, so the field names decide
+  check              ok
+  interp             value [false, false]
+  compile            value [false, false]
+  cranelift          value [false, false]
+  cranelift-generic  value [false, false]
+== i2-typed-callable-erasure.bot  # I2 a typed callable passed to == is rejected statically, by the erasure audit, not by an equality rule
+  check              static TYPE: 4:1: "f" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  interp             static TYPE: 4:1: "f" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  compile            static TYPE: 4:1: "f" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift          static TYPE: 4:1: "f" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift-generic  static TYPE: 4:1: "f" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+== i2-typed-callable-list-empty.bot  # I2 an empty List of a typed callable type compared: rejected by the erasure audit
+  check              static TYPE: 3:5: this value of type List[Fn{args: [int], return: int, errors: []}] has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  interp             static TYPE: 3:5: this value of type List[Fn{args: [int], return: int, errors: []}] has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  compile            static TYPE: 3:5: this value of type List[Fn{args: [int], return: int, errors: []}] has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift          static TYPE: 3:5: this value of type List[Fn{args: [int], return: int, errors: []}] has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift-generic  static TYPE: 3:5: this value of type List[Fn{args: [int], return: int, errors: []}] has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+== i3-any-char.bot  # I3 a parameter declared any compared with a character
+  check              ok
+  interp             value [false, true, false]
+  compile            value [false, true, false]
+  cranelift          value [false, true, false]
+  cranelift-generic  value [false, true, false]
+== i3-any-same.bot  # I3 two parameters declared any compared
+  check              ok
+  interp             value [false, true, false, true]
+  compile            value [false, true, false, true]
+  cranelift          value [false, true, false, true]
+  cranelift-generic  value [false, true, false, true]
+== i3-checked-then-compared.bot  # I3 a parameter with a checked inferred contract (str, from std::str::length) compared with a character
+  check              ok
+  interp             value [false, false]
+  compile            value [false, false]
+  cranelift          value [false, false]
+  cranelift-generic  value [false, false]
+== i3-computed.bot  # I3 a value of unknown kind produced by another operation (an element of a List of mixed kinds)
+  check              ok
+  interp             value [true, false, false]
+  compile            value [true, false, false]
+  cranelift          value [true, false, false]
+  cranelift-generic  value [true, false, false]
+== i3-describe.bot  # I3 std::test::describe's `v == true`: a Bool kind test written as an equality
+  check              ok
+  interp             value ["true", "1", "\"a\"", "[a value with no text form]"]
+  compile            value ["true", "1", "\"a\"", "[a value with no text form]"]
+  cranelift          value ["true", "1", "\"a\"", "[a value with no text form]"]
+  cranelift-generic  value ["true", "1", "\"a\"", "[a value with no text form]"]
+== i3-equality-narrows-char.bot  # I3 an equality with a character constant does not narrow the kind of an untyped operand
+  check              static TYPE: 8:3: argument for parameter "v" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 5:26)
+  interp             static TYPE: 8:3: argument for parameter "v" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 5:26)
+  compile            static TYPE: 8:3: argument for parameter "v" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 5:26)
+  cranelift          static TYPE: 8:3: argument for parameter "v" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 5:26)
+  cranelift-generic  static TYPE: 8:3: argument for parameter "v" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 5:26)
+== i3-equality-narrows.bot  # I3 an equality with an Int constant admits an untyped operand into an integer domain: the analyses rely on "different kinds are never equal"
+  check              static TYPE: 10:10: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+  interp             static TYPE: 10:10: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+  compile            static TYPE: 10:10: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+  cranelift          static TYPE: 10:10: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+  cranelift-generic  static TYPE: 10:10: argument for parameter "v" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 7:11)
+== i3-imprint-mismatch.bot  # I3 one slot variable imprinted by two different argument types
+  check              static IMPRINT: 6:1: same_box?: imprint variable T is int by an earlier argument but str by argument 2
+  interp             static IMPRINT: 6:1: same_box?: imprint variable T is int by an earlier argument but str by argument 2
+  compile            static IMPRINT: 6:1: same_box?: imprint variable T is int by an earlier argument but str by argument 2
+  cranelift          static IMPRINT: 6:1: same_box?: imprint variable T is int by an earlier argument but str by argument 2
+  cranelift-generic  static IMPRINT: 6:1: same_box?: imprint variable T is int by an earlier argument but str by argument 2
+== i3-imprint.bot  # I3 imprint variables: two parameters sharing a slot variable, and two different variables
+  check              ok
+  interp             value [true, false]
+  compile            value [true, false]
+  cranelift          value [true, false]
+  cranelift-generic  value [true, false]
+== i3-kind-test.bot  # I3 a kind test narrows an untyped parameter; there is no kind test for UnicodeChar, Bool or Float64
+  check              ok
+  interp             value [true, true, true, false]
+  compile            value [true, true, true, false]
+  cranelift          value [true, true, true, false]
+  cranelift-generic  value [true, true, true, false]
+== i3-test-equal.bot  # I3 std::test::equal compares an expectation with a value of any kind
+  check              ok
+  interp             value [true, false, true, false]
+  compile            value [true, false, true, false]
+  cranelift          value [true, false, true, false]
+  cranelift-generic  value [true, false, true, false]
+== i3-untyped-char.bot  # I3 an untyped parameter compared with a character
+  check              ok
+  interp             value [false, true, false]
+  compile            value [false, true, false]
+  cranelift          value [false, true, false]
+  cranelift-generic  value [false, true, false]
+== i3-untyped-same.bot  # I3 two untyped parameters compared
+  check              ok
+  interp             value [false, true, false, true]
+  compile            value [false, true, false, true]
+  cranelift          value [false, true, false, true]
+  cranelift-generic  value [false, true, false, true]
+== i4-branch.bot  # I4 a comparison under a kind test constrains nothing; one outside it would
+  check              ok
+  interp             value [true, true, false]
+  compile            value [true, true, false]
+  cranelift          value [true, true, false]
+  cranelift-generic  value [true, true, false]
+== i4-checked-native.bot  # I4 a checked contract from a native: a statically known argument of another kind is rejected at the call
+  check              static TYPE: 5:4: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  interp             static TYPE: 5:4: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  compile            static TYPE: 5:4: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  cranelift          static TYPE: 5:4: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  cranelift-generic  static TYPE: 5:4: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: UnicodeChar); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+== i4-cross-call.bot  # I4 a comparison reached through another untyped function: the instance chain
+  check              ok
+  interp             value [false, true]
+  compile            value [false, true]
+  cranelift          value [false, true]
+  cranelift-generic  value [false, true]
+== i4-domain-contract.bot  # I4 the integer-domain precedent: an untyped forwarder acquires a trusted contract, checked at its calls
+  check              static TYPE: 7:3: argument for parameter "n" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: int, facts: [12, 12] {12}); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 6:7)
+  interp             static TYPE: 7:3: argument for parameter "n" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: int, facts: [12, 12] {12}); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 6:7)
+  compile            static TYPE: 7:3: argument for parameter "n" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: int, facts: [12, 12] {12}); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 6:7)
+  cranelift          static TYPE: 7:3: argument for parameter "n" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: int, facts: [12, 12] {12}); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 6:7)
+  cranelift-generic  static TYPE: 7:3: argument for parameter "n" cannot be proven to satisfy int[Small], the parameter type inferred from the function body (argument type: int, facts: [12, 12] {12}); inferred from the function body: argument 1 of f (declared int[Small]) requires int[Small] (at 6:7)
+== i4-imprint-forwarder-box.bot  # I4 the same with a user's parameterized struct: an untyped forwarder of a Box[T] parameter
+  check              static TYPE: 8:9: argument for parameter "b" cannot be proven to satisfy Box[T], the parameter type inferred from the function body (argument type: Box[int]); Box[int] and Box[T] are distinct applications of Box (T is int, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of unbox (declared Box[T]) requires Box[T] (at 7:11)
+  interp             static TYPE: 8:9: argument for parameter "b" cannot be proven to satisfy Box[T], the parameter type inferred from the function body (argument type: Box[int]); Box[int] and Box[T] are distinct applications of Box (T is int, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of unbox (declared Box[T]) requires Box[T] (at 7:11)
+  compile            static TYPE: 8:9: argument for parameter "b" cannot be proven to satisfy Box[T], the parameter type inferred from the function body (argument type: Box[int]); Box[int] and Box[T] are distinct applications of Box (T is int, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of unbox (declared Box[T]) requires Box[T] (at 7:11)
+  cranelift          static TYPE: 8:9: argument for parameter "b" cannot be proven to satisfy Box[T], the parameter type inferred from the function body (argument type: Box[int]); Box[int] and Box[T] are distinct applications of Box (T is int, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of unbox (declared Box[T]) requires Box[T] (at 7:11)
+  cranelift-generic  static TYPE: 8:9: argument for parameter "b" cannot be proven to satisfy Box[T], the parameter type inferred from the function body (argument type: Box[int]); Box[int] and Box[T] are distinct applications of Box (T is int, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of unbox (declared Box[T]) requires Box[T] (at 7:11)
+== i4-imprint-forwarder.bot  # I4 an untyped forwarder of a function whose parameter mentions an imprint variable: inference copies MutableSet[T]
+  check              static TYPE: 6:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::length (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  interp             static TYPE: 6:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::length (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  compile            static TYPE: 6:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::length (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  cranelift          static TYPE: 6:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::length (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  cranelift-generic  static TYPE: 6:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::length (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+== i4-kind-tolerant.bot  # I4 one parameter compared with two kinds: no single concrete contract exists
+  check              ok
+  interp             value [true, true, false]
+  compile            value [true, true, false]
+  cranelift          value [true, true, false]
+  cranelift-generic  value [true, true, false]
+== i4-list-invariance.bot  # I4 is a List[Small] admitted where a List[int] is declared? (a concrete List[int] contract from `xs == [1, 2]` would be held to this)
+  check              static TYPE: 7:6: argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[Small]])
+  interp             static TYPE: 7:6: argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[Small]])
+  compile            static TYPE: 7:6: argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[Small]])
+  cranelift          static TYPE: 7:6: argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[Small]])
+  cranelift-generic  static TYPE: 7:6: argument for parameter "xs" cannot be proven to satisfy List[int] (argument type: List[int[Small]])
+== i4-list-literal.bot  # I4 an untyped parameter compared with a List literal: what a concrete contract List[int] would reject
+  check              ok
+  interp             value [true, false, false, false]
+  compile            value [true, false, false, false]
+  cranelift          value [true, false, false, false]
+  cranelift-generic  value [true, false, false, false]
+== i4-relational-forward.bot  # I4 a relational comparison of two parameters forwarded from a third function
+  check              ok
+  interp             value [false, true]
+  compile            value [false, true]
+  cranelift          value [false, true]
+  cranelift-generic  value [false, true]
+== i4-same-list-generic.bot  # I4 a relational comparison whose operands are Lists of disjoint element types: equal when empty
+  check              ok
+  interp             value [true, false]
+  compile            value [true, false]
+  cranelift          value [true, false]
+  cranelift-generic  value [true, false]
+== i4-unconstrained-pinned.bot  # I4 ic-unconstrained-stays-any: equality imposes no contract today (the recorded decision)
+  check              ok
+  interp             value [true, false]
+  compile            value [true, false]
+  cranelift          value [true, false]
+  cranelift-generic  value [true, false]
+== i5-any-erased.bot  # I5 a function value erased through an untyped struct field read back as any
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-checked-erasure.bot  # I5 a CHECKED inferred contract is not part of a Fn type: a str function stored as Fn{args: [int]} and called with an Int
+  check              ok
+  interp             runtime TYPE: std::str::length: expected str, got 5
+  compile            runtime TYPE: std::str::length: expected str, got 5
+  cranelift          runtime TYPE: std::str::length: expected str, got 5
+  cranelift-generic  runtime TYPE: std::str::length: expected str, got 5
+== i5-declared-any-bearing.bot  # I5 a function whose parameter is declared any is precondition-bearing for the erasure audit; an untyped one is not
+  check              static TYPE: 4:1: "char?" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  interp             static TYPE: 4:1: "char?" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  compile            static TYPE: 4:1: "char?" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift          static TYPE: 4:1: "char?" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+  cranelift-generic  static TYPE: 4:1: "char?" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+== i5-declared-fn.bot  # I5 a function value passed where a structural Fn type is declared
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-direct-checked.bot  # I5 the same function called directly: the checked contract rejects the call
+  check              static TYPE: 5:7: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: int); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  interp             static TYPE: 5:7: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: int); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  compile            static TYPE: 5:7: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: int); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  cranelift          static TYPE: 5:7: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: int); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+  cranelift-generic  static TYPE: 5:7: argument for parameter "s" is statically incompatible with str, the parameter type inferred from the function body (argument type: int); inferred from the function body: argument 1 of native std::str::length requires str (at 4:22)
+== i5-equality-erasure.bot  # I5 the same route for an equality-only function: today it has no contract to lose
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-list.bot  # I5 a function value stored in a List and called after it is read back
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-local.bot  # I5 a local binding of a function value keeps its identity: the call has a target and an instance
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-param.bot  # I5 a function value passed to an untyped parameter and called there
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-returned.bot  # I5 a function value returned from a function and called
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-struct.bot  # I5 a function value stored in a struct field and called through the projection
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-trusted-preserved.bot  # I5 a TRUSTED inferred contract is part of the exact callable's contract: the same conversion is rejected
+  check              static TYPE: 9:7: argument for parameter "h" cannot be proven to satisfy Fn{args: [int], return: int, errors: []} (argument type: g/1 -> int[Small]); argument 1 is incompatible: the callable's parameter requires int[Small], but callers of the function type may pass any int
+  interp             static TYPE: 9:7: argument for parameter "h" cannot be proven to satisfy Fn{args: [int], return: int, errors: []} (argument type: g/1 -> int[Small]); argument 1 is incompatible: the callable's parameter requires int[Small], but callers of the function type may pass any int
+  compile            static TYPE: 9:7: argument for parameter "h" cannot be proven to satisfy Fn{args: [int], return: int, errors: []} (argument type: g/1 -> int[Small]); argument 1 is incompatible: the callable's parameter requires int[Small], but callers of the function type may pass any int
+  cranelift          static TYPE: 9:7: argument for parameter "h" cannot be proven to satisfy Fn{args: [int], return: int, errors: []} (argument type: g/1 -> int[Small]); argument 1 is incompatible: the callable's parameter requires int[Small], but callers of the function type may pass any int
+  cranelift-generic  static TYPE: 9:7: argument for parameter "h" cannot be proven to satisfy Fn{args: [int], return: int, errors: []} (argument type: g/1 -> int[Small]); argument 1 is incompatible: the callable's parameter requires int[Small], but callers of the function type may pass any int
+== i5-untargeted.bot  # I5 a call through an untyped parameter that escapes to a List: no target, no instance
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i5-untyped-not-bearing.bot  # I5 the same comparison of an untyped function compiles and raises EQUALITY at run time
+  check              ok
+  interp             runtime EQUALITY: == is not defined for callables: <block (c)> == <block (c)>
+  compile            runtime EQUALITY: == is not defined for callables: <block (c)> == <block (c)>
+  cranelift          runtime EQUALITY: == is not defined for callables: <block (c)> == <block (c)>
+  cranelift-generic  runtime EQUALITY: == is not defined for callables: <block (c)> == <block (c)>
+== i6-budget-checked-first.bot  # I6 an invalid instance (big(n): n > 5 given a str through apply) requested before 16 other instances of apply
+  check              static TYPE: 38:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+  interp             static TYPE: 38:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+  compile            static TYPE: 38:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+  cranelift          static TYPE: 38:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+  cranelift-generic  static TYPE: 38:7: call to apply with g : big/1 -> bool, x : str is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str); inferred from the function body: argument 1 of native > requires int (at 3:5) (in the body of apply, at 5:7)
+== i6-budget-checked-last.bot  # I6 the same invalid instance requested after 16 other instances of apply: past the per-block budget
+  check              ok
+  interp             runtime TYPE: >: expected int, got "a"
+  compile            runtime TYPE: >: expected int, got "a"
+  cranelift          runtime TYPE: >: expected int, got "a"
+  cranelift-generic  runtime TYPE: >: expected int, got "a"
+== i6-budget-equality-first.bot  # I6 a disjoint comparison in an instance of same? requested before 16 other instances of same?
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i6-budget-equality-last.bot  # I6 the same comparison requested after 16 other instances of same?: no instance sees it
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i7-decimal-float.bot  # I7 DecimalRounded compared with a computed Float64: no implicit conversion
+  check              static TYPE: 5:1: the operands of "==" are DecimalRounded{minDecimalsPreserved: 3} and Float64: a DecimalRounded operation needs DecimalRounded operands, and nothing converts one implicitly (std::float64::from_decimal_rounded decays a DecimalRounded value to a Float64, std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one; a decimal literal is a DecimalRounded constant beside a DecimalRounded operand)
+  interp             static TYPE: 5:1: the operands of "==" are DecimalRounded{minDecimalsPreserved: 3} and Float64: a DecimalRounded operation needs DecimalRounded operands, and nothing converts one implicitly (std::float64::from_decimal_rounded decays a DecimalRounded value to a Float64, std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one; a decimal literal is a DecimalRounded constant beside a DecimalRounded operand)
+  compile            static TYPE: 5:1: the operands of "==" are DecimalRounded{minDecimalsPreserved: 3} and Float64: a DecimalRounded operation needs DecimalRounded operands, and nothing converts one implicitly (std::float64::from_decimal_rounded decays a DecimalRounded value to a Float64, std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one; a decimal literal is a DecimalRounded constant beside a DecimalRounded operand)
+  cranelift          static TYPE: 5:1: the operands of "==" are DecimalRounded{minDecimalsPreserved: 3} and Float64: a DecimalRounded operation needs DecimalRounded operands, and nothing converts one implicitly (std::float64::from_decimal_rounded decays a DecimalRounded value to a Float64, std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one; a decimal literal is a DecimalRounded constant beside a DecimalRounded operand)
+  cranelift-generic  static TYPE: 5:1: the operands of "==" are DecimalRounded{minDecimalsPreserved: 3} and Float64: a DecimalRounded operation needs DecimalRounded operands, and nothing converts one implicitly (std::float64::from_decimal_rounded decays a DecimalRounded value to a Float64, std::decimal_rounded::round[DecimalRounded{...}] rounds a Float64 to one; a decimal literal is a DecimalRounded constant beside a DecimalRounded operand)
+== i7-decimal-precision.bot  # I7 DecimalRounded ==: the precision of the operands' static types decides; a Float64 operand is a TYPE error
+  check              ok
+  interp             value [true, true, true]
+  compile            value [true, true, true]
+  cranelift          value [true, true, true]
+  cranelift-generic  value [true, true, true]
+== i7-hash-generic-callable.bot  # I7 hash of an untyped callable through an untyped function: refused at run time
+  check              ok
+  interp             runtime EQUALITY: hash is not defined for callables: <block (x)>
+  compile            runtime EQUALITY: hash is not defined for callables: <block (x)>
+  cranelift          runtime EQUALITY: hash is not defined for callables: <block (x)>
+  cranelift-generic  runtime EQUALITY: hash is not defined for callables: <block (x)>
+== i7-hash-generic.bot  # I7 hash of an untyped parameter: dynamic; the checked admission sees only the generic body
+  check              ok
+  interp             value [true, true]
+  compile            value [true, true]
+  cranelift          value [true, true]
+  cranelift-generic  value [true, true]
+== i7-immutable-set-mixed.bot  # I7 an ImmutableSet built from a List of mixed kinds keeps one member per kind
+  check              ok
+  interp             value [true, true, true, false, true]
+  compile            value [true, true, true, false, true]
+  cranelift          value [true, true, true, false, true]
+  cranelift-generic  value [true, true, true, false, true]
+== i7-immutable-set.bot  # I7 ImmutableSet: a needle of another kind is false, sets of disjoint element types are equal when empty
+  check              ok
+  interp             value [false, true, false, false, true]
+  compile            value [false, true, false, false, true]
+  cranelift          value [false, true, false, false, true]
+  cranelift-generic  value [false, true, false, false, true]
+== i7-mutable-map-key.bot  # I7 MutableMap[str, int] lookup with a character key: a static TYPE error at the key
+  check              static TYPE: 5:12: argument for parameter "key" cannot be proven to satisfy str (argument type: UnicodeChar)
+  interp             static TYPE: 5:12: argument for parameter "key" cannot be proven to satisfy str (argument type: UnicodeChar)
+  compile            static TYPE: 5:12: argument for parameter "key" cannot be proven to satisfy str (argument type: UnicodeChar)
+  cranelift          static TYPE: 5:12: argument for parameter "key" cannot be proven to satisfy str (argument type: UnicodeChar)
+  cranelift-generic  static TYPE: 5:12: argument for parameter "key" cannot be proven to satisfy str (argument type: UnicodeChar)
+== i7-mutable-set-any.bot  # I7 a MutableSet of any: the slot requires Hashable, which any does not satisfy
+  check              static TRAIT-NOT-SATISFIED: 3:5: std::mutable_set::create: type argument for "T" in std::mutable_set::MutableSet[any] does not satisfy Hashable: its static type is any, whose values are not known to have total equality and hashing (one may hold a function)
+  interp             static TRAIT-NOT-SATISFIED: 3:5: std::mutable_set::create: type argument for "T" in std::mutable_set::MutableSet[any] does not satisfy Hashable: its static type is any, whose values are not known to have total equality and hashing (one may hold a function)
+  compile            static TRAIT-NOT-SATISFIED: 3:5: std::mutable_set::create: type argument for "T" in std::mutable_set::MutableSet[any] does not satisfy Hashable: its static type is any, whose values are not known to have total equality and hashing (one may hold a function)
+  cranelift          static TRAIT-NOT-SATISFIED: 3:5: std::mutable_set::create: type argument for "T" in std::mutable_set::MutableSet[any] does not satisfy Hashable: its static type is any, whose values are not known to have total equality and hashing (one may hold a function)
+  cranelift-generic  static TRAIT-NOT-SATISFIED: 3:5: std::mutable_set::create: type argument for "T" in std::mutable_set::MutableSet[any] does not satisfy Hashable: its static type is any, whose values are not known to have total equality and hashing (one may hold a function)
+== i7-mutable-set-domain.bot  # I7 MutableSet[Small].contains with an Int outside the domain and with an unproven Int
+  check              static TYPE: 6:12: argument for parameter "x" cannot be proven to satisfy int[Small] (argument type: int, facts: [12, 12] {12})
+  interp             static TYPE: 6:12: argument for parameter "x" cannot be proven to satisfy int[Small] (argument type: int, facts: [12, 12] {12})
+  compile            static TYPE: 6:12: argument for parameter "x" cannot be proven to satisfy int[Small] (argument type: int, facts: [12, 12] {12})
+  cranelift          static TYPE: 6:12: argument for parameter "x" cannot be proven to satisfy int[Small] (argument type: int, facts: [12, 12] {12})
+  cranelift-generic  static TYPE: 6:12: argument for parameter "x" cannot be proven to satisfy int[Small] (argument type: int, facts: [12, 12] {12})
+== i7-mutable-set-empty-list.bot  # I7 MutableSet[List[int]].contains([]): the empty List is admitted as a List[int]
+  check              ok
+  interp             value [true, false]
+  compile            value [true, false]
+  cranelift          value [true, false]
+  cranelift-generic  value [true, false]
+== i7-mutable-set-generic-needle.bot  # I7 MutableSet membership through an untyped function: the needle meets the element type in an instance only
+  check              static TYPE: 7:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::contains (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  interp             static TYPE: 7:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::contains (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  compile            static TYPE: 7:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::contains (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  cranelift          static TYPE: 7:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::contains (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+  cranelift-generic  static TYPE: 7:6: argument for parameter "s" cannot be proven to satisfy std::mutable_set::MutableSet[T], the parameter type inferred from the function body (argument type: std::mutable_set::MutableSet[str]); std::mutable_set::MutableSet[str] and std::mutable_set::MutableSet[T] are distinct applications of std::mutable_set::MutableSet (T is str, not T): an application is a type of its own for each argument of each slot, and no slot is converted, widened or narrowed; inferred from the function body: argument 1 of std::mutable_set::contains (declared std::mutable_set::MutableSet[T]) requires std::mutable_set::MutableSet[T] (at 4:5)
+== i7-mutable-set-needle.bot  # I7 MutableSet[str].contains with a character: a static TYPE error at the needle
+  check              static TYPE: 5:12: argument for parameter "x" cannot be proven to satisfy str (argument type: UnicodeChar)
+  interp             static TYPE: 5:12: argument for parameter "x" cannot be proven to satisfy str (argument type: UnicodeChar)
+  compile            static TYPE: 5:12: argument for parameter "x" cannot be proven to satisfy str (argument type: UnicodeChar)
+  cranelift          static TYPE: 5:12: argument for parameter "x" cannot be proven to satisfy str (argument type: UnicodeChar)
+  cranelift-generic  static TYPE: 5:12: argument for parameter "x" cannot be proven to satisfy str (argument type: UnicodeChar)
+== i7-set-of-sets.bot  # I7 a set of sets: set equality inside membership
+  check              ok
+  interp             value [true, false]
+  compile            value [true, false]
+  cranelift          value [true, false]
+  cranelift-generic  value [true, false]
+== i8-hazard-any.bot  # I8 the warning's respelling against an explicit any: dynamic by declaration
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i8-hazard-list.bot  # I8 the warning's respelling inside a List literal: a head-only rule (kinds and shapes) still admits it
+  check              ok
+  interp             value [false, false]
+  compile            value [false, false]
+  cranelift          value [false, false]
+  cranelift-generic  value [false, false]
+== i8-hazard-set.bot  # I8 the warning's respelling as an ImmutableSet needle
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i8-hazard-struct.bot  # I8 the warning's respelling inside an anonymous struct: the same shape, a field type of another kind
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== i8-hazard-untyped.bot  # I8 the warning's respelling against an untyped parameter: only an instance (or an inferred contract) sees it
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false
+== ambiguous.bot  # I4 method applicability: a str receiver, m1's mark? (compares with a character) and m2's (a checked str contract)
+  check              static AMBIGUOUS-METHOD-CALL: 4:5: method-style call "mark?" is ambiguous: more than one visible function accepts the call (m1::mark?, m2::mark?); there is no precedence between them (none by namespace, result type, how the result is used, or which one's context requirements are met): call the one you mean explicitly, e.g. m1::mark?(receiver, ...)
+  interp             static AMBIGUOUS-METHOD-CALL: 4:5: method-style call "mark?" is ambiguous: more than one visible function accepts the call (m1::mark?, m2::mark?); there is no precedence between them (none by namespace, result type, how the result is used, or which one's context requirements are met): call the one you mean explicitly, e.g. m1::mark?(receiver, ...)
+  compile            static AMBIGUOUS-METHOD-CALL: 4:5: method-style call "mark?" is ambiguous: more than one visible function accepts the call (m1::mark?, m2::mark?); there is no precedence between them (none by namespace, result type, how the result is used, or which one's context requirements are met): call the one you mean explicitly, e.g. m1::mark?(receiver, ...)
+  cranelift          static AMBIGUOUS-METHOD-CALL: 4:5: method-style call "mark?" is ambiguous: more than one visible function accepts the call (m1::mark?, m2::mark?); there is no precedence between them (none by namespace, result type, how the result is used, or which one's context requirements are met): call the one you mean explicitly, e.g. m1::mark?(receiver, ...)
+  cranelift-generic  static AMBIGUOUS-METHOD-CALL: 4:5: method-style call "mark?" is ambiguous: more than one visible function accepts the call (m1::mark?, m2::mark?); there is no precedence between them (none by namespace, result type, how the result is used, or which one's context requirements are met): call the one you mean explicitly, e.g. m1::mark?(receiver, ...)
+== decided.bot  # I4 method applicability: a UnicodeChar receiver; m2's checked str contract excludes it
+  check              ok
+  interp             value true
+  compile            value true
+  cranelift          value true
+  cranelift-generic  value true
+== only-m1.bot  # I4 method applicability: only m1's mark?, a str receiver (today false; a concrete contract would make it inapplicable)
+  check              ok
+  interp             value false
+  compile            value false
+  cranelift          value false
+  cranelift-generic  value false

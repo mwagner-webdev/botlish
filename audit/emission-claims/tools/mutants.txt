@@ -1,0 +1,643 @@
+# Mutants of emission claims (audit/emission-claims/tools/mutate.tcl;
+# EMISSION-CLAIMS-MILESTONE-1.md, "Mutation results"): one deliberate bug
+# per rule a certificate rests on -- the checker's proof rules (the modular
+# prototype's 34, ported), the recognizer outcome model, the value facts
+# (hir/intset.tcl and the hir::range transfers it lifts, native result
+# sets) and the trust boundary. Each is a way a certificate could be false.
+#
+#   @@ NAME DESCRIPTION
+#   %% match PATTERN...         the tests run first (tcltest -match globs,
+#                               over tests/emission-claims.test and
+#                               tests/interval-sets.test)
+#   ## FILE                     a file of the repository
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant every test of its `match` misses is run against both whole test
+# files before it is reported as surviving.
+
+# ---------------------------------------------------------------------------
+# The checker's rules (the prototype's mutants, on hir/emission.tcl)
+
+@@ declared-narrowed parameter-domain initialization: an Int parameter enters as 0..9, not every Int
+%% match ec-declared-domain ec-unused ec-hole-edge
+## hir/emission.tcl
+<<<<
+            lappend out [TypeValue $t]
+====
+            lappend out [hir::intset::inter [TypeValue $t] {{0 9}}]
+>>>>
+
+@@ undeclared-as-nothing an undeclared parameter's value: no value at all, so a yield of it is unreachable (where the prototype's `caller-facts-leak` read the program's calls)
+%% match ec-declared-domain ec-unused ec-nested-function ec-unknown-value ec-undeclared-parameter
+## hir/emission.tcl
+<<<<
+        if {$t eq ""} {
+            lappend out *
+        } else {
+====
+        if {$t eq ""} {
+            lappend out {}
+        } else {
+>>>>
+
+@@ negation-strict branch negation: `x < K` false read as `x > K` (K itself dropped)
+%% match ec-order-narrowing ec-negation-boundary ec-hole-edge ec-negation-holes ec-arithmetic ec-loop-* ec-recursion*
+## hir/emission.tcl
+<<<<
+                set op [dict get {< >= <= > > <= >= < == !=} $op]
+====
+                set op [dict get {< > <= > > <= >= < == !=} $op]
+>>>>
+
+@@ negation-equality branch negation: `x == K` false read as true
+%% match ec-hole-edge ec-negation-holes ec-lift-components ec-surrogate-codes ec-trusted-scalar
+## hir/emission.tcl
+<<<<
+                set op [dict get {< >= <= > > <= >= < == !=} $op]
+====
+                set op [dict get {< >= <= > > <= >= < == ==} $op]
+>>>>
+
+@@ minus-extra-point interval subtraction removes the point below the hole too
+%% match ec-hole-edge iset-minus-hole iset-hole-*
+## hir/intset.tcl
+<<<<
+                lappend next [list $xl [Pred $yl]]
+====
+                lappend next [list $xl [Pred [Pred $yl]]]
+>>>>
+
+@@ inter-wide interval intersection keeps the larger upper bound
+%% match iset-inter ec-arithmetic ec-dfa-* ec-negation-holes ec-order-narrowing
+## hir/intset.tcl
+<<<<
+            set hi [MinB $xh $yh]
+====
+            set hi [MaxB $xh $yh]
+>>>>
+
+@@ sub-as-add arithmetic transfer: `-` computed as hir::range::add
+%% match ec-arithmetic ec-context-sensitive iset-arith-sound--
+## hir/intset.tcl
+<<<<
+        - { return [Lift2 hir::range::sub $a $b] }
+====
+        - { return [Lift2 hir::range::add $a $b] }
+>>>>
+
+@@ lift-first-component a two-operand transfer reads only the first component of its left operand
+%% match ec-lift-components iset-arith-sound-*
+## hir/intset.tcl
+<<<<
+    set out {}
+    foreach x $a {
+        foreach y $b {
+            set out [concat $out [OfRange [{*}$op [ToRange $x] [ToRange $y]]]]
+====
+    set out {}
+    foreach x [lrange $a 0 0] {
+        foreach y $b {
+            set out [concat $out [OfRange [{*}$op [ToRange $x] [ToRange $y]]]]
+>>>>
+
+@@ narrow-order-ignored an order comparison narrows to the other side's hull bound, off by one (hir::range::Narrowed's `<`)
+%% match ec-hole-edge ec-order-narrowing iset-order-edges iset-narrow-sound-lt
+## hir/range.tcl
+<<<<
+            set mx [Min $mx [SubBound [dict get $ry max] 1]]
+====
+            set mx [Min $mx [SubBound [dict get $ry max] 2]]
+>>>>
+
+@@ handler-keeps-guard guard failure facts: a handler starts with the facts of the call's success
+%% match ec-guard-facts
+## hir/emission.tcl
+<<<<
+        # A handler runs where the call failed: none of the call's own
+        # facts (a guard's) hold there.
+        set env $before
+====
+        # A handler runs where the call failed: none of the call's own
+        # facts (a guard's) hold there.
+>>>>
+
+@@ guard-any-binding guard success facts: the guard's set given to every binding, not only its argument
+%% match ec-guard-facts
+## hir/emission.tcl
+<<<<
+            } elseif {$b ne ""} {
+                dict set env $b [hir::intset::inter [TypeValue [TypeOf [lindex [dict get $node args] 0]]] [dict get $guards $t]]
+            }
+====
+            } elseif {$b ne ""} {
+                dict set env $b [hir::intset::inter [TypeValue [TypeOf [lindex [dict get $node args] 0]]] [dict get $guards $t]]
+            }
+            dict for {other v} $env {
+                if {$v ne "*"} {
+                    dict set env $other [hir::intset::inter $v [dict get $guards $t]]
+                }
+            }
+>>>>
+
+@@ fail-not-a-failure-point error-handler propagation: a `fail` records no failure state
+%% match ec-exploratory-false-proofs ec-fail-after-yield ec-fail-before-yield
+## hir/emission.tcl
+<<<<
+            # A failure point.
+            Failing $s
+====
+            # A failure point.
+>>>>
+
+@@ natives-never-fail error-handler propagation: no native call may fail
+%% match ec-native-may-fail
+## hir/emission.tcl
+<<<<
+proc hir::emission::NativeMayFail {name} {
+====
+proc hir::emission::NativeMayFail {name} {
+    return 0
+>>>>
+
+@@ handlers-unreached error-handler propagation: a handler starts nowhere
+%% match ec-exploratory-false-proofs ec-fail-after-yield ec-native-may-fail
+## hir/emission.tcl
+<<<<
+        lassign [EvalBody $body $inside] h hv
+====
+        lassign [EvalBody $body {}] h hv
+>>>>
+
+@@ loop-one-round loop fixed points: the loop body analyzed for one round only
+%% match ec-loop-*
+## hir/emission.tcl
+<<<<
+            set next [lsort -unique [concat $head $after [dict get $continues $e]]]
+            if {$next eq $head} break
+====
+            set next [lsort -unique [concat $head $after [dict get $continues $e]]]
+            break
+>>>>
+
+@@ peel-later-is-first loop fixed points: a counted loop's later iterations read as its first
+%% match ec-loop-*
+## hir/emission.tcl
+<<<<
+        set loopEnv [dict replace $loopEnv $counter $later]
+====
+        set loopEnv [dict replace $loopEnv $counter $first]
+>>>>
+
+@@ unroll-short an exactly counted loop unrolled one iteration short
+%% match ec-loop-exact-count
+## hir/emission.tcl
+<<<<
+    for {set k 0} {$k < $count && $head ne {}} {incr k} {
+====
+    for {set k 0} {$k < $count - 1 && $head ne {}} {incr k} {
+>>>>
+
+@@ join-first-state function-summary joins: a call's exits from its first entry state only
+%% match ec-join-states ec-boundary-* ec-loop-*
+## hir/emission.tcl
+<<<<
+    set certificates [UsableCertificates $t]
+    foreach c $s {
+====
+    set certificates [UsableCertificates $t]
+    foreach c [lrange $s 0 0] {
+>>>>
+
+@@ recursion-one-round recursive helper summaries: the solve stops after one round
+%% match ec-recursion*
+## hir/emission.tcl
+<<<<
+        Summary $b $c $args_
+        if {!$changed} break
+====
+        Summary $b $c $args_
+        break
+>>>>
+
+@@ summary-context-free function summaries keyed without their arguments: a helper's first argument context stands for every later one
+%% match ec-context-sensitive ec-arithmetic
+## hir/emission.tcl
+<<<<
+    if {[dict exists $seen $vals]} {
+        return $vals
+    }
+====
+    if {[dict size $seen] > 0} {
+        return [lindex [dict keys $seen] 0]
+    }
+>>>>
+
+@@ accept-before-taken DFA acceptance: the outermost token ending before a symbol read as ending on it (core::dfa::Unread)
+%% match ec-conformance ec-dfa-beyond ec-dfa-*
+## core/dfa.tcl
+<<<<
+        current { if {$atEnd} { return 0 } else { return 1 } }
+====
+        current { return 0 }
+>>>>
+
+@@ reconsider-dropped delegation return: a callee's unread symbol waited past instead of reconsidered by `then STATE` (core::dfa::Resume)
+%% match ec-conformance ec-dfa-*
+## core/dfa.tcl
+<<<<
+        current { return [list reconsider $then] }
+====
+        current { return [list wait $then] }
+>>>>
+
+@@ more-as-one `accept before N` read as `accept before 1` (core::dfa::Unread)
+%% match ec-conformance ec-dfa-lookahead-two ec-outcome-model
+## core/dfa.tcl
+<<<<
+        more    { return [lindex $class 1] }
+    }
+    error "core::dfa::Unread: no completion class \"$class\""
+====
+        more    { return 1 }
+    }
+    error "core::dfa::Unread: no completion class \"$class\""
+>>>>
+
+@@ end-not-checked EOF: a completion never checked against the end
+%% match ec-dfa-incomplete ec-early-return ec-loop-exact-count ec-recursion
+## hir/emission.tcl
+<<<<
+    set b [dict get $claim block]
+    set key [dict get $claim key]
+    set out {}
+    foreach c $exits {
+====
+    set b [dict get $claim block]
+    set key [dict get $claim key]
+    set out {}
+    return {}
+    foreach c $exits {
+>>>>
+
+@@ boundary-same-depth token boundary: an obligation discharged when its frame takes the symbol
+%% match ec-boundary-*
+## hir/emitdfa.tcl
+<<<<
+                if {$md >= $depth} {
+====
+                if {$md > $depth} {
+>>>>
+
+@@ boundary-never token boundary: a helper's exit never carries its obligation
+%% match ec-boundary-*
+## hir/emission.tcl
+<<<<
+    if {$x eq "done"} { return $x }
+    foreach key [dict getdef $claimsOf $t {}] {
+====
+    return $x
+    foreach key [dict getdef $claimsOf $t {}] {
+>>>>
+
+@@ reattach-dropped token boundary: a certificate's open obligations dropped at its caller
+%% match ec-boundary-nested
+## hir/emitdfa.tcl
+<<<<
+    if {$c eq "done" || $obligations eq {}} { return $c }
+====
+    return [Base $c]
+>>>>
+
+@@ certificate-violations-dropped certificate composition: symbols of the helper's language the caller rejects not reported
+%% match ec-compose-weaker-certificate
+## hir/emission.tcl
+<<<<
+                foreach v $vs {
+                    lassign $v y violation from
+                    ViolationAt $e $violation $from $y "a token of [dict get $cert recognizer] that [dict get $cert display] may emit (its certificate)"
+                }
+====
+>>>>
+
+@@ valid-ignores-functions cached certificate invalidation: a memo certificate valid whatever its functions' code
+%% match ec-memo-*
+## hir/emission.tcl
+<<<<
+        if {[FunctionFingerprint [dict get $byName $name]] ne $fp} { return [list 0 "$name changed"] }
+====
+>>>>
+
+@@ valid-ignores-recognizers cached certificate invalidation: a memo certificate valid whatever its recognizers
+%% match ec-memo-*
+## hir/emission.tcl
+<<<<
+        if {![dict exists $byQualified $r] || [DeepFingerprint [dict get $byQualified $r]] ne $fp} {
+            return [list 0 "recognizer $r changed"]
+        }
+====
+>>>>
+
+@@ fingerprint-ignores-constants a function's fingerprint without its constants
+%% match ec-fingerprint ec-memo-*
+## hir/emission.tcl
+<<<<
+        const { lappend out [dict get $node value] }
+====
+        const { lappend out const }
+>>>>
+
+@@ fingerprint-ignores-types a function's fingerprint without the type facts it reads (a struct field's declared domain)
+%% match ec-fingerprint ec-memo-types
+## hir/emission.tcl
+<<<<
+    set out [list $kind [dict get $node reachable] [TypeFact $e]]
+====
+    set out [list $kind [dict get $node reachable]]
+>>>>
+
+@@ statement-without-exits a certificate's statement digest without its exits
+%% match ec-statement-digest
+## hir/emission.tcl
+<<<<
+        [dict get $cert domain] [Statable [dict get $cert exits]] [dict get $cert visits] [dict get $cert fails] \
+====
+        [dict get $cert domain] {} [dict get $cert visits] [dict get $cert fails] \
+>>>>
+
+@@ trusted-scalar-narrow a native result set narrower than the implementation: a scalar value is never a control
+%% match ec-trusted-scalar iset-registered-scalar-value
+## core/unicodechar.tcl
+<<<<
+    -param-types {UnicodeChar} -result-type int -result-range {intervals {0 0xD7FF} {0xE000 0x10FFFF}} -context-free 1
+====
+    -param-types {UnicodeChar} -result-type int -result-range {intervals {32 0xD7FF} {0xE000 0x10FFFF}} -context-free 1
+>>>>
+
+@@ coroutine-yields-counted coroutine boundaries: a value resumed from another coroutine read as a digit
+%% match ec-separate-coroutine
+## hir/emission.tcl
+<<<<
+    set type [TypeOf $e]
+    if {![IsInt $type]} {
+        return *
+    }
+====
+    set type [TypeOf $e]
+    if {![IsInt $type]} {
+        return *
+    }
+    if {[string match coroutine#* $name]} {
+        return {{48 57}}
+    }
+>>>>
+
+# ---------------------------------------------------------------------------
+# The integration's own rules
+
+@@ reverify-trusts-text trust: a HIR read from interchange text keeps its certificates unverified
+%% match ec-interchange-* ec-cache
+## hir/emission.tcl
+<<<<
+    upvar 1 $hirVar hir
+    set given [dict getdef $hir emissions {}]
+====
+    upvar 1 $hirVar hir
+    return
+    set given [dict getdef $hir emissions {}]
+>>>>
+
+@@ clones-followed trait specializations: a clone's selected implementations followed, certifying one program's selection
+%% match ec-trait-unsupported
+## hir/emission.tcl
+<<<<
+    foreach field {traitClone contextClone} {
+        if {[dict exists [Node $b] $field]} {
+====
+    foreach field {} {
+        if {[dict exists [Node $b] $field]} {
+>>>>
+## hir/emission.tcl
+<<<<
+    set node [Node $b]
+    foreach field {traitClone contextClone} {
+====
+    set node [Node $b]
+    foreach field {} {
+>>>>
+
+@@ trait-call-followed a trait operation read as an ordinary call
+%% match ec-trait-unsupported
+## hir/emission.tcl
+<<<<
+    if {[dict exists $node traitCall]} {
+        Violation EMIT-UNSUPPORTED $e
+====
+    if {0} {
+        Violation EMIT-UNSUPPORTED $e
+>>>>
+## hir/emission.tcl
+<<<<
+    foreach field {traitClone contextClone} {
+        if {[dict exists [Node $b] $field]} {
+====
+    foreach field {} {
+        if {[dict exists [Node $b] $field]} {
+>>>>
+## hir/emission.tcl
+<<<<
+    set node [Node $b]
+    foreach field {traitClone contextClone} {
+====
+    set node [Node $b]
+    foreach field {} {
+>>>>
+
+@@ dependent-reports a claim whose code holds another diagnostic still reports its own (restating poison)
+%% match ec-recovery-dependent
+## hir/emission.tcl
+<<<<
+    if {[dict exists $hir poisoned $e] || [dict exists $hir syntaxDependent $e] || [dict exists $diagnosed $e]} {
+====
+    if {0} {
+>>>>
+
+@@ budget-certifies an exhausted budget certifies what a round found
+%% match ec-budget
+## hir/emission.tcl
+<<<<
+    if {$budgetHit} {
+        # An analysis that did not converge
+====
+    if {0} {
+        # An analysis that did not converge
+>>>>
+
+@@ unknown-value-silent a yield of a value of no known Int set is skipped, not reported
+%% match ec-unknown-value ec-not-symbol
+## hir/emission.tcl
+<<<<
+    if {$v eq "*"} {
+        set type [TypeOf $arg]
+====
+    if {$v eq "*"} {
+        return [list $s unit]
+        set type [TypeOf $arg]
+>>>>
+
+@@ unresolved-claim-dropped a claim naming no recognizer is dropped without a diagnostic
+%% match ec-recognizer-*
+## hir/resolve.tcl
+<<<<
+            hir::DiagnoseAt hir EMIT-RECOGNIZER $message $e $origin
+====
+>>>>
+
+# ---------------------------------------------------------------------------
+# The value transfers certificates read (hir/range.tcl), as soundness rules
+
+@@ range-add-low addition's lower bound from the wrong corner
+%% match iset-arith-sound-+ ec-arithmetic
+## hir/range.tcl
+<<<<
+    set r [dict create min [AddBound [dict get $a min] [dict get $b min]] \
+====
+    set r [dict create min [AddBound [dict get $a min] [dict get $b max]] \
+>>>>
+
+@@ range-sub-swap subtraction's lower bound subtracts the other's minimum
+%% match iset-arith-sound-- iset-negation ec-arithmetic
+## hir/range.tcl
+<<<<
+    set r [dict create min [SubBound [dict get $a min] [dict get $b max]] \
+====
+    set r [dict create min [SubBound [dict get $a min] [dict get $b min]] \
+>>>>
+
+@@ range-mul-corners multiplication's bound from three of its four corners
+%% match iset-arith-sound-*
+## hir/range.tcl
+<<<<
+    foreach p [list [expr {$amin * $bmin}] [expr {$amin * $bmax}] [expr {$amax * $bmin}] [expr {$amax * $bmax}]] {
+====
+    foreach p [list [expr {$amin * $bmin}] [expr {$amax * $bmin}] [expr {$amax * $bmax}]] {
+>>>>
+
+@@ range-mod-wrap mod of a range crossing a multiple of its divisor keeps one part
+%% match iset-mod-ranges iset-arith-sound-mod
+## hir/range.tcl
+<<<<
+        return [list [dict create min 0 max $rh] [dict create min $rl max [expr {$m - 1}]]]
+====
+        return [list [dict create min $rl max [expr {$m - 1}]]]
+>>>>
+
+@@ range-mod-sign mod of exact operands by a negative divisor, Tcl's remainder (negative) instead of Euclidean
+%% match iset-mod-exact iset-arith-sound-mod
+## hir/range.tcl
+<<<<
+                set r [expr {$a % abs($b)}]
+====
+                set r [expr {$a % $b}]
+>>>>
+
+@@ range-mod-below an operand range up to the divisor read as itself (x = d is 0, not d)
+%% match iset-mod-ranges iset-arith-sound-mod
+## hir/range.tcl
+<<<<
+    if {$dmn ne "-inf" && $dmn > 0 && $xmn >= 0 && $xmx < $dmn} {
+====
+    if {$dmn ne "-inf" && $dmn > 0 && $xmn >= 0 && $xmx <= $dmn} {
+>>>>
+
+@@ range-shift-right-bound shift_right's upper bound by the largest shift, not the smallest
+%% match iset-shifts-unknown iset-arith-sound-shift_right
+## hir/range.tcl
+<<<<
+            set mx [ShiftRightBound $xmx $ymn]
+====
+            set mx [ShiftRightBound $xmx $ymx]
+>>>>
+
+@@ range-narrowed-le `x <= y` narrows below y's maximum
+%% match iset-order-edges iset-narrow-sound-lteq ec-order-narrowing
+## hir/range.tcl
+<<<<
+            set mx [Min $mx [dict get $ry max]]
+====
+            set mx [Min $mx [SubBound [dict get $ry max] 1]]
+>>>>
+
+@@ range-narrowed-gt `x > y` narrows two past y's minimum
+%% match iset-order-edges iset-narrow-sound-gt ec-order-narrowing
+## hir/range.tcl
+<<<<
+            set mn [Max $mn [AddBound [dict get $ry min] 1]]
+====
+            set mn [Max $mn [AddBound [dict get $ry min] 2]]
+>>>>
+
+@@ range-induction-exclusive a counted loop `to` its end excludes one value too many
+%% match iset-induction-sound ec-loop-*
+## hir/range.tcl
+<<<<
+            set max [expr {$max - 1}]
+====
+            set max [expr {$max - 2}]
+>>>>
+
+@@ range-registered-gap a registered result set's components read one short
+%% match iset-registered-* ec-trusted-scalar
+## hir/range.tcl
+<<<<
+                dict create min [lindex $component 0] max [lindex $component 1]
+====
+                dict create min [lindex $component 0] max [expr {[lindex $component 1] - 1}]
+>>>>
+
+@@ range-typefact-domain a declared integer domain read as its lower bound only
+%% match ec-domain-parameter ec-declared-domain
+## hir/range.tcl
+<<<<
+    set r [dict create min [dict get $facts min] max [dict get $facts max]]
+====
+    set r [dict create min [dict get $facts min] max [dict get $facts min]]
+>>>>
+
+@@ intset-bound-drops past the component budget, components dropped instead of the hull
+%% match iset-component-budget
+## hir/intset.tcl
+<<<<
+    if {[llength $a] > $maxComponents} {
+        return [hull $a]
+    }
+====
+    if {[llength $a] > $maxComponents} {
+        return [lrange $a 0 [expr {$maxComponents - 1}]]
+    }
+>>>>
+
+@@ intset-not-equal-wide `x != K` removes K's neighbours too
+%% match iset-hole-* ec-hole-edge ec-negation-holes iset-narrow-sound-noteq
+## hir/intset.tcl
+<<<<
+        != {
+            if {[isPoint $b]} {
+                return [minus $a $b]
+====
+        != {
+            if {[isPoint $b]} {
+                return [minus $a [list [list [Pred [lindex $b 0 0]] [Succ [lindex $b 0 0]]]]]
+>>>>
+
+@@ dfa-consume-next the outcome model's consuming code continues in the next state
+%% match ec-conformance ec-outcome-model
+## core/dfa.tcl
+<<<<
+        state   { return [list consume [lindex $leaf 1]] }
+====
+        state   { return [list consume [expr {([lindex $leaf 1] + 1) % 2}]] }
+>>>>

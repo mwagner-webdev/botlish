@@ -1,0 +1,40 @@
+# lifecycle.bot -- Raven's lifetime under the Ui context (tests/raven.test,
+# raven-lifecycle): what is known before start, start, a window's size and
+# a widget's rectangle read through native out-parameters, Raven's last
+# error, stop (twice), and a second start and stop.
+import raven
+import show
+import std::float64
+import std::list
+
+with context raven::create()
+
+fn main(context ui: raven::Ui) -> List[List[str]] errors raven::RavenFailed, NonFiniteFloat:
+    before = [show::flag(raven::running?()), show::int(raven::last_error().code), raven::last_error().detail]
+    raven::start(raven::headless())
+    again = raven::start(raven::headless())
+    w = raven::window("Sizes", 420, 220)
+    b = raven::button("Wide")
+    w.set_content(raven::vbox().add(b))
+    drawn = raven::draw_frame()
+    size = raven::size(w)
+    r = raven::rect(b)
+    quiet = raven::last_error()
+    raven::destroy(raven::Widget {id: 4242})
+    loud = raven::last_error()
+    running = [show::flag(raven::running?()), raven::version(), show::int(size.width), show::int(size.height), show::int(std::float64::round(r.width)), show::flag(r.height > 0.0), show::int(quiet.code), show::int(loud.code), show::int(loud.severity), loud.detail]
+    raven::stop()
+    raven::stop()
+    stopped = [show::flag(raven::running?()), show::int(raven::size(w).width)]
+    raven::start(raven::headless())
+    second = raven::window("Second", 100, 50)
+    restarted = [show::flag(raven::running?()), show::int(raven::size(second).width)]
+    raven::stop()
+    [before, running, stopped, restarted]
+
+result = main():
+    on raven::RavenFailed failure:
+        [["RavenFailed", failure.call, failure.detail]]
+    on NonFiniteFloat:
+        [["NonFiniteFloat"]]
+result

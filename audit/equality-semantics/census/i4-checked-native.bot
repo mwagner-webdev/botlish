@@ -1,0 +1,5 @@
+# I4 a checked contract from a native: a statically known argument of another kind is rejected at the call
+import std::str
+fn n?(s):
+    std::str::length(s) == 1
+n?('-')

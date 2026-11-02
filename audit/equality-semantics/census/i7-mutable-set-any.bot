@@ -1,0 +1,4 @@
+# I7 a MutableSet of any: the slot requires Hashable, which any does not satisfy
+import std::mutable_set
+s = std::mutable_set::create[any]()
+s.length()

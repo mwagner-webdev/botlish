@@ -1,0 +1,57 @@
+# cryptoonly.bot -- consumer A alone: a program that uses the crypto
+# airlock and nothing else. Its link plan is the provider (bssl), the
+# airlock's archive and libstdc++ -- no Rust unit, no Hyper, no quiche, no
+# event loop: general cryptography does not depend on the HTTP stack.
+import bssl
+import crypto
+import std::abi::bytes
+import std::byte
+import std::int
+import std::str
+
+# A byte (the literals below are in range).
+fn b(x: int) -> std::byte::Byte:
+    if x < 0:
+        0
+    elif x > 255:
+        255
+    else:
+        x
+
+# Known answers: SHA-256("abc") (FIPS 180-2) and HMAC-SHA-256 RFC 4231
+# test case 2.
+fn sha256_abc() -> List[std::byte::Byte]:
+    [b(186), b(120), b(22), b(191), b(143), b(1), b(207), b(234), b(65), b(65), b(64), b(222), b(93), b(174), b(34), b(35), b(176), b(3), b(97), b(163), b(150), b(23), b(122), b(156), b(180), b(16), b(255), b(97), b(242), b(0), b(21), b(173)]
+
+fn hmac_rfc4231_2() -> List[std::byte::Byte]:
+    [b(91), b(220), b(193), b(70), b(191), b(96), b(117), b(78), b(106), b(4), b(36), b(38), b(8), b(149), b(117), b(199), b(90), b(0), b(63), b(8), b(157), b(39), b(57), b(131), b(157), b(236), b(88), b(185), b(100), b(236), b(56), b(67)]
+
+fn yes(b: bool) -> str:
+    if b:
+        "ok"
+    else:
+        "FAILED"
+
+fn main(context c: crypto::Crypto) -> List[str] errors IndexNotFound:
+    abc = crypto::sha256(crypto::text("abc"))
+    want = std::abi::bytes::from_list(sha256_abc())
+    mac = crypto::hmac_sha256(crypto::text("Jefe"), crypto::text("what do ya want for nothing?"))
+    mac_want = std::abi::bytes::from_list(hmac_rfc4231_2())
+    k = crypto::new_signing_key()
+    msg = crypto::text("botlish census")
+    sig = crypto::sign(k, msg)
+    public = crypto::public_key(k)
+    good = crypto::verify(public, msg, sig)
+    bad = crypto::verify(public, crypto::text("botlish censux"), sig)
+    released = crypto::release(k)
+    again = crypto::sign(k, msg)
+    ["provider ".concat(bssl::pin()), "api version ".concat(std::int::to_string(crypto::api_version())),
+     "sha256 kat ".concat(yes(abc == want)), "hmac-sha256 kat ".concat(yes(mac == mac_want)),
+     "ed25519 verify ".concat(yes(good)), "ed25519 rejects altered message ".concat(yes(not bad)),
+     "key released ".concat(std::int::to_string(released)), "sign after release bytes ".concat(std::int::to_string(std::abi::bytes::length(again).value)),
+     "operations ".concat(std::int::to_string(crypto::operations()))]
+
+with context crypto::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]

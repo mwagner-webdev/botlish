@@ -1,0 +1,77 @@
+# hstls.bot -- TLS configurations for hsh (Hyper) and hsq (quiche), and the
+# provider-identity probes of the Rust unit
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "TLS").
+#
+# Policy lives in a configuration Botlish makes: a client trusts the
+# census's test CA and nothing else, always verifies the chain and the host
+# name, and offers ALPN protocols; a server presents one of the test
+# certificates. There is no option to skip verification.
+import hs
+import std::abi::bytes
+import std::event_loop
+import std::ffi::c
+import std::str
+
+extern c fn hs_tls_client(host: std::ffi::c::Ptr[std::ffi::c::Void] read noescape, host_len: std::ffi::c::ULong, alpn: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_tls_server(cert: std::ffi::c::LongLong, alpn: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_tls_outcome(i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn hs_bssl_sha256_fn() -> std::ffi::c::LongLong
+extern c fn hs_bssl_evp_sha256() -> std::ffi::c::LongLong
+extern c fn hs_bssl_api_version() -> std::ffi::c::LongLong
+
+# ALPN protocol bits.
+fn h1() -> int:
+    1
+
+fn h2() -> int:
+    2
+
+fn odd() -> int:
+    4
+
+# Server certificates.
+fn good() -> int:
+    0
+
+fn wrong_host() -> int:
+    1
+
+fn expired() -> int:
+    2
+
+fn untrusted() -> int:
+    3
+
+# Handshake failure codes (hs_tls): -91000 minus the X509 verify result,
+# no_application_protocol, the peer gone mid-handshake.
+fn verify_error(x509: int) -> int:
+    -91000 - x509
+
+fn alpn_error() -> int:
+    -91120
+
+fn eof_error() -> int:
+    -91999
+
+nomethod fn client(host: str, alpn: int) -> int:
+    b = std::abi::bytes::from_list(std::str::encode_utf8(host))
+    b.hs_tls_client(std::abi::bytes::length(b).value, hs::cll(alpn))
+
+nomethod fn server(cert: int, alpn: int) -> int:
+    hs::cll(cert).hs_tls_server(hs::cll(alpn))
+
+# Handshakes so far, and the I-th's outcome (0, or a failure code).
+fn handshakes() -> int:
+    hs_tls_outcome(-1)
+
+fn outcome(i: int) -> int:
+    hs_tls_outcome(hs::cll(i))
+
+fn rust_sha256_fn() -> int:
+    hs_bssl_sha256_fn()
+
+fn rust_evp_sha256() -> int:
+    hs_bssl_evp_sha256()
+
+fn rust_api_version() -> int:
+    hs_bssl_api_version()

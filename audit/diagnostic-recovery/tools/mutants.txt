@@ -258,3 +258,28 @@
         }
         if {$kind in {NOT-A-STRUCT OPAQUE-REPRESENTATION PRIVATE-ACCESS}} {
 >>>>
+
+@@ internal-only-empty-report a rejected build none of whose diagnostics is reported raises its empty report (TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md, section 6.2): the compiler crashes reading the first entry of nothing, with no error code
+## hir/recovery.tcl
+<<<<
+    if {$reported eq {} && [dict get $hir diagnostics] ne {} && ![dict exists $hir syntaxRecovery]} {
+        return [list [Internal $hir $locate]]
+    }
+====
+>>>>
+## core/errors.tcl
+<<<<
+    if {$diagnostics eq {}} {
+        # (A rejection always has a diagnostic: hir::recovery::entries
+====
+    if {0} {
+        # (A rejection always has a diagnostic: hir::recovery::entries
+>>>>
+
+@@ internal-only-presented-as-source a rejected build none of whose diagnostics is reported presents the compiler's own diagnostics as the program's: each one an entry with its own code
+## hir/recovery.tcl
+<<<<
+        return [list [Internal $hir $locate]]
+====
+        set reported [dict get $hir diagnostics]
+>>>>

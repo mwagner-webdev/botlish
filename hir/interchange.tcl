@@ -165,6 +165,15 @@ proc hir::interchange::decode {text args} {
             throw {HIR INTERCHANGE FORMAT} "HIR interchange text with a malformed link plan: $problem"
         }
     }
+    # A target package tree's native library directory (surface/modules.tcl,
+    # "Target package trees"): absolute directories, nothing else.
+    if {[dict exists $hir nativeDirs]} {
+        set dirs [dict get $hir nativeDirs]
+        if {[catch {llength $dirs}] || $dirs eq ""
+                || [llength [lmap d $dirs {if {$d ne "" && [file pathtype $d] eq "absolute" && [string first \x00 $d] < 0} continue; set d}]] > 0} {
+            throw {HIR INTERCHANGE FORMAT} "HIR interchange text with malformed native library directories"
+        }
+    }
     if {$check} {
         set problem [hir::cabi::TargetMismatch $hir [dict get $options -target]]
         if {$problem ne ""} {
@@ -175,6 +184,10 @@ proc hir::interchange::decode {text args} {
         core::loadLibrary $name
     }
     hir::activate $hir
+    # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
+    # is no proof, whoever wrote it -- the claims are verified again here,
+    # and text that states anything else is refused.
+    hir::emission::reverify hir
     return $hir
 }
 

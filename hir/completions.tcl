@@ -690,7 +690,9 @@ proc hir::completions::Positions {hir e finals} {
             }
         }
         listloop - countloop - lockloop {
-            lappend result [list [lindex [dict get $node body] end] [hir::types::elementOf [hir::typeOf $hir $e]]]
+            if {![hir::IsFoldNode $node]} {
+                lappend result [list [lindex [dict get $node body] end] [hir::types::elementOf [hir::typeOf $hir $e]]]
+            }
         }
         return {
             if {[dict get $node target] ne ""} {
@@ -714,6 +716,15 @@ proc hir::completions::Positions {hir e finals} {
             foreach body [dict get $node handlerBodies] {
                 lappend result [list [lindex $body end] [hir::typeOf $hir $e]]
             }
+        }
+    }
+    if {[hir::IsFoldNode $node]} {
+        # A fold's initial value and its body's trailing value become its
+        # intermediate (FOLD-LOOPS-MILESTONE-1.md), of its binding's type.
+        set intermediate [hir::bindingType $hir [dict get $node foldBinding]]
+        lappend result [list [dict get $node foldInitial] $intermediate]
+        if {[dict get $node body] ne ""} {
+            lappend result [list [lindex [dict get $node body] end] $intermediate]
         }
     }
     return $result
@@ -1540,6 +1551,11 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
             return [EvalIf hir ctx $diagnose $enclosing $guard $e $node]
         }
         loop {
+            # A fold's initial value (FOLD-LOOPS-MILESTONE-1.md) runs once,
+            # in the enclosing scope, before the first iteration.
+            if {[LoopDomain hir ctx $diagnose $enclosing $guard [hir::FoldInitials $node]] eq {never}} {
+                return never
+            }
             return [EvalLoop hir ctx $diagnose $enclosing $guard $e $node]
         }
         listloop {
@@ -1906,9 +1922,12 @@ proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
 proc hir::completions::EvalLoop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set saved [dict get $ctx bindings]
+    set savedExact [dict get $ctx exact]
     set relations [Relations $ctx]
+    FoldEntry hir ctx $diagnose $guard $node
     SubsumeCollected hir ctx $diagnose $guard $e $node [Seq hir ctx $diagnose $enclosing $guard [dict get $node body]]
     dict set ctx bindings $saved
+    dict set ctx exact $savedExact
     RestoreRelations ctx $relations
     return [hir::range::unknown]
 }
@@ -1918,11 +1937,40 @@ proc hir::completions::EvalLoop {hirVar ctxVar diagnose enclosing guard e node} 
 # the loop's List result (RETURNING-ITERABLE-LOOPS.md, COLLECTING-LOOPS.md).
 proc hir::completions::SubsumeCollected {hirVar ctxVar diagnose guard e node result} {
     upvar 1 $hirVar hir $ctxVar ctx
-    if {$result eq {never} || [dict get $node kind] ni {listloop countloop lockloop}} {
+    if {$result eq {never}} {
+        return
+    }
+    if {[hir::IsFoldNode $node]} {
+        # A fold's trailing value is its next intermediate
+        # (FOLD-LOOPS-MILESTONE-1.md), of the intermediate's one type.
+        Subsume hir ctx $diagnose $guard [lindex [dict get $node body] end] \
+            [hir::bindingType $hir [dict get $node foldBinding]]
+        return
+    }
+    if {[dict get $node kind] ni {listloop countloop lockloop}} {
         return
     }
     Subsume hir ctx $diagnose $guard [lindex [dict get $node body] end] \
         [hir::types::elementOf [hir::typeOf $hir $e]]
+}
+
+# A fold's initial value, walked by its loop's domain (LoopDomain) with RANGE
+# its Range, enters the intermediate: subsumed against the intermediate's
+# type, as the body's trailing value is (SubsumeCollected). The intermediate
+# itself is left unseeded in the body -- it carries whatever any iteration
+# made of it, which no walk of the body once proves -- so any fact recorded
+# of it is dropped; the loop's own walk restores the bindings after the body.
+proc hir::completions::FoldEntry {hirVar ctxVar diagnose guard node {subsume 1}} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    if {![hir::IsFoldNode $node]} {
+        return
+    }
+    set b [dict get $node foldBinding]
+    if {$subsume} {
+        Subsume hir ctx $diagnose $guard [dict get $node foldInitial] [hir::bindingType $hir $b]
+    }
+    dict set ctx bindings $b [hir::range::unknown]
+    dict unset ctx exact $b
 }
 
 # The relational facts (ctx.upperBounds, ctx.sizes) in effect: what a scope
@@ -1987,20 +2035,24 @@ proc hir::completions::LoopDomain {hirVar ctxVar diagnose enclosing guard operan
 # case.
 proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
-    set ranges [LoopDomain hir ctx $diagnose $enclosing $guard [list [dict get $node start] [dict get $node end]]]
+    set ranges [LoopDomain hir ctx $diagnose $enclosing $guard \
+        [concat [list [dict get $node start] [dict get $node end]] [hir::FoldInitials $node]]]
     if {$ranges eq {never}} {
         return never
     }
     lassign $ranges start end
     set saved [dict get $ctx bindings]
+    set savedExact [dict get $ctx exact]
     set savedBounds [dict get $ctx indexBounds]
     set relations [Relations $ctx]
+    FoldEntry hir ctx $diagnose $guard $node
     dict set ctx bindings [dict get $node countBinding] \
         [hir::range::InductionBinding $start $end [dict get $node direction] [dict get $node endKind]]
     NoteIndexBound hir ctx [dict get $node countBinding] $start [dict get $node end] \
         [dict get $node direction] [dict get $node endKind]
     SubsumeCollected hir ctx $diagnose $guard $e $node [Seq hir ctx $diagnose $enclosing $guard [dict get $node body]]
     dict set ctx bindings $saved
+    dict set ctx exact $savedExact
     dict set ctx indexBounds $savedBounds
     RestoreRelations ctx $relations
     return [hir::range::unknown]
@@ -2042,17 +2094,19 @@ proc hir::completions::NoteIndexBound {hirVar ctxVar binding startRange end dire
 proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set operands [hir::loopOperands $node]
-    set results [LoopDomain hir ctx $diagnose $enclosing $guard $operands]
+    set results [LoopDomain hir ctx $diagnose $enclosing $guard [concat $operands [hir::FoldInitials $node]]]
     if {$results eq {never}} {
         return never
     }
     set ranges [dict create]
-    foreach operand $operands r $results {
+    foreach operand $operands r [lrange $results 0 [llength $operands]-1] {
         dict set ranges $operand $r
     }
     set saved [dict get $ctx bindings]
+    set savedExact [dict get $ctx exact]
     set savedBounds [dict get $ctx indexBounds]
     set relations [Relations $ctx]
+    FoldEntry hir ctx $diagnose $guard $node
     foreach domain [dict get $node domains] {
         if {[dict get $domain kind] eq "count"} {
             dict set ctx bindings [dict get $domain binding] [hir::range::InductionBinding \
@@ -2064,6 +2118,7 @@ proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e no
     }
     SubsumeCollected hir ctx $diagnose $guard $e $node [Seq hir ctx $diagnose $enclosing $guard [dict get $node body]]
     dict set ctx bindings $saved
+    dict set ctx exact $savedExact
     dict set ctx indexBounds $savedBounds
     RestoreRelations ctx $relations
     return [hir::range::unknown]
@@ -2103,7 +2158,7 @@ proc hir::completions::EvalLockloop {hirVar ctxVar diagnose enclosing guard e no
 proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set iterable [dict get $node iterable]
-    if {[LoopDomain hir ctx $diagnose $enclosing $guard [list $iterable]] eq {never}} {
+    if {[LoopDomain hir ctx $diagnose $enclosing $guard [concat [list $iterable] [hir::FoldInitials $node]]] eq {never}} {
         return never
     }
     set fact [LiteralListOf $hir $ctx $iterable]
@@ -2115,6 +2170,10 @@ proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e no
     }
     set elements [LiteralElements $fact]
     set elementBinding [dict get $node elementBinding]
+    if {[hir::IsFoldNode $node]} {
+        Subsume hir ctx $diagnose $guard [dict get $node foldInitial] \
+            [hir::bindingType $hir [dict get $node foldBinding]]
+    }
     set saved [dict get $ctx bindings]
     set savedExact [dict get $ctx exact]
     set relations [Relations $ctx]
@@ -2123,6 +2182,7 @@ proc hir::completions::EvalListloop {hirVar ctxVar diagnose enclosing guard e no
         dict set ctx bindings $saved
         dict set ctx exact $savedExact
         RestoreRelations ctx $relations
+        FoldEntry hir ctx $diagnose $guard $node 0
         if {[core::value::kind $v] eq {int}} {
             dict set ctx bindings $elementBinding [hir::range::point [core::value::intOf $v]]
         } else {

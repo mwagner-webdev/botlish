@@ -127,9 +127,9 @@ test loop-interval-slice-bounds {a slice whose bounds are the loop variable (plu
 test loop-interval-lockstep {a lockstep numeric domain gets the interval range gives it; the cardinality solver is untouched (an unequal pair is still LOCKSTEP-UNEQUAL)} -body {
     set xs "xs = \[1, 2, 3\]\n"
     kindsOf [list \
-        "${xs}loop x in xs and i from 0 to 3:\n    std::abi::u8(i) + x" \
-        "${xs}loop x in xs and i from 253 to 256:\n    std::abi::u8(i) + x" \
-        "${xs}loop x in xs and i from 254 to 257:\n    std::abi::u8(i) + x" \
+        "${xs}loop x in xs and i from 0 to 3:\n    std::abi::u8(i).value + x" \
+        "${xs}loop x in xs and i from 253 to 256:\n    std::abi::u8(i).value + x" \
+        "${xs}loop x in xs and i from 254 to 257:\n    std::abi::u8(i).value + x" \
         "${xs}loop x in xs and i from 0 to 3:\n    std::list::at(xs, i) + x" \
         "${xs}loop x in xs and i from 0 to 4:\n    std::list::at(xs, i) + x" \
         "${xs}loop x in xs and i from 1 to 4:\n    std::list::at(xs, i - 1) + x"]

@@ -562,9 +562,11 @@ test loop-collecting-cardinality-symbolic {cardinality is symbolic and normalize
 } -result {1 1 1 0}
 
 # ---------------------------------------------------------------------------
-# Regression: nothing reducing was introduced, `through`/`down` stay contextual
+# Regression: a collecting loop has no reducing clause, `through`/`down`
+# stay contextual, and so do the words of folds: `fold` begins a fold only
+# directly before a name (FOLD-LOOPS-MILESTONE-1.md, tests/fold-loops.test)
 
-test loop-collecting-no-reducing-syntax {reducing/fold/accumulate are not syntax} -body {
+test loop-collecting-no-reducing-syntax {a loop has no reducing clause; fold/reduce/accumulate are ordinary names} -body {
     list [lcParseError "loop i from 0 to 3 reducing s from 0:\n    s\n"] \
          [lcParseError "fold = 1\nreduce = 2\nsum = 3\naccumulate = 4\nfold + reduce + sum + accumulate\n"]
 } -match glob -result {{*} parsed}

@@ -1,0 +1,1470 @@
+# emission-claims.test -- emission claims (EMISSION-CLAIMS-MILESTONE-1.md):
+# `fn F(...) emits R:` certified from F's declaration and implementation
+# alone, or rejected.
+#
+# * the guarantee is the declaration's: declared domains, never callers;
+# * value facts (hir/intset.tcl over hir::range): holes, order, arithmetic,
+#   registered result sets, huge values, the end and non-symbols;
+# * control flow: loops (fixpoints, peeling, exact counts), recursion,
+#   early returns, break and continue, functions that never return;
+# * failures and handlers: failure points after a yield, guards;
+# * coroutine boundaries: a constructed coroutine's yields are its own;
+# * the recognizer semantics (core/dfa.tcl's one outcome model) against the
+#   reference interpreter (tests/dfa-support.tcl), and the token boundaries
+#   between helpers;
+# * the compiler's integration: the clause's grammar and resolution, its
+#   diagnostics' recovery, HIR text, interchange's trust boundary (a
+#   certificate in text is never a proof), the in-process certificate memo
+#   and its invalidation, static intrinsics, the compiler service;
+# * erasure: a claim changes no code.
+#
+# The prototype's tests (audit/emission-proofs/tests/emission-proofs.test)
+# are ported here, renamed ec-*; their programs are the same, their
+# directives (`#: emits R`) now the clause. The prototype's verdict "not
+# proved" is the compiler's `rejected` (an EMIT-REJECTED-family violation
+# found) or `not-proved` (facts missing); "disproven" needs a run (the
+# witness tool, audit/emission-claims/tools/witness.tcl).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot service service.tcl]
+source [file join $::projectRoot tests emission-support.tcl]
+source [file join $::projectRoot audit emission-claims tools witness.tcl]
+interp recursionlimit {} 100000
+core::useProgramRecursionLimit
+
+# The claims of the program TEXT (main.bot, beside the JSON workload's
+# modules; FILES more files), checked: {NAME VERDICT KINDS}... of the
+# claims of main.bot and FILES (every claim with -all 1).
+proc claims {text args} {
+    set options [dict merge {-files {} -all 0} $args]
+    set dir [emit::workspace main.bot $text {*}[dict get $options -files]]
+    set hir [emit::compile [file join $dir main.bot]]
+    if {[dict get $options -all]} {
+        return [emit::results $hir *]
+    }
+    return [emit::results $hir [concat main.bot [dict keys [dict get $options -files]]]]
+}
+
+proc verdicts {text args} {
+    return [lmap c [claims $text {*}$args] {list [lindex $c 0] [lindex $c 1]}]
+}
+
+# A program: imports, then BODY.
+proc program {body {imports {json_lex json_grammar}}} {
+    set text ""
+    foreach i $imports {
+        append text "import $i\n"
+    }
+    return "$text\n$body\n"
+}
+
+proc readFile {path} {
+    return [emit::readText $path]
+}
+
+# A recognizer of one digit, the head of many programs below.
+set digitDfa "import std::dfa\n\nclass digit = '0'..'9'\n\ndfa digit_token over ascii:\n    start:\n        digit -> accept\n\n"
+
+testConstraint python3 [expr {![catch {exec python3 -I -c "import json"}]}]
+
+# ---------------------------------------------------------------------------
+# The guarantee is the declaration's
+
+test ec-declared-domain {an unguarded digit is rejected from its declared domain, though the program only ever passes 3} -body {
+    verdicts [program {fn digit(d: int) -> unit emits json_grammar::digit_symbol:
+    yield 48 + d
+    unit
+
+fn src() -> int:
+    digit(3)
+    -1
+
+coroutine {step, first} = src()
+first}]
+} -result {{digit rejected}}
+
+test ec-declared-domain-witness {...and a concrete run disproves it (the witness tool, outside the compiler): d = -1 yields '/'} -body {
+    set dir [emit::workspace main.bot [program {fn digit(d: int) -> unit emits json_grammar::digit_symbol:
+    yield 48 + d
+    unit
+
+0}]]
+    set hir [emit::compile [file join $dir main.bot]]
+    set record [lindex [hir::emission::claims $hir] end]
+    lindex [emitw::witness $dir [file join $dir main.bot] $hir $record] 0
+} -result {-1}
+
+test ec-unused {a function no program calls is certified, or rejected, all the same} -body {
+    verdicts [program {fn good(d: int) -> unit emits json_grammar::digit_symbol:
+    if d >= 0 and d <= 9:
+        yield 48 + d
+    else:
+        yield 48
+    unit
+
+fn bad(d: int) -> unit emits json_grammar::digit_symbol:
+    if d >= 0 and d <= 10:
+        yield 48 + d
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{good proven} {bad rejected}}
+
+test ec-undeclared-parameter {a parameter without a declared type enters with no fact from its body's inferred contract: a yield of it is checked against every value it may hold, never against none} -body {
+    list [verdicts [program {fn raw(c) -> unit emits json_grammar::digit_symbol:
+    yield c
+    unit
+
+fn plus(c) -> unit emits json_grammar::digit_symbol:
+    yield c + 0
+    unit
+
+0}]] [verdicts [program {fn guarded(c) -> unit emits json_grammar::digit_symbol:
+    if c >= 48 and c <= 57:
+        yield c
+    else:
+        yield 48
+    unit
+
+0}]]
+} -result {{{raw not-proved} {plus rejected}} {{guarded proven}}}
+
+test ec-domain-parameter {a declared integer domain is a parameter fact: 0..9 proves a digit, 0..10 does not} -body {
+    verdicts [program {type D9 = Int in 0..9
+type D10 = Int in 0..10
+
+fn nine(d: D9) -> unit emits json_grammar::digit_symbol:
+    yield 48 + d
+    unit
+
+fn ten(d: D10) -> unit emits json_grammar::digit_symbol:
+    yield 48 + d
+    unit
+
+0}]
+} -result {{nine proven} {ten rejected}}
+
+test ec-callers-stable {the independent library's verdicts are the same from five unrelated programs -- safe values only, the whole domain, invalid values, compositions, no call at all -- an unguarded digit and two glued numbers rejected in every one; compose.bot's own two claims certified through the library's certificates} -body {
+    set lib [readFile [file join $::emit::jsonDir emitlib.bot]]
+    set lib [string map {
+        "fn digit_unchecked(d: int) -> unit:" "fn digit_unchecked(d: int) -> unit emits json_grammar::digit_symbol:"
+        "fn pair_glued(a: int, b: int) -> unit errors IndexNotFound:" "fn pair_glued(a: int, b: int) -> unit errors IndexNotFound emits json_grammar::json_text:"
+    } $lib]
+    set callers [file join $::projectRoot audit emission-claims callers]
+    set out {}
+    set own {}
+    foreach caller {safe full invalid compose unused} {
+        set dir [emit::workspace main.bot [readFile [file join $callers $caller.bot]] emitlib.bot $lib]
+        set hir [emit::compile [file join $dir main.bot]]
+        lappend out [lsort [lmap c [emit::results $hir emitlib.bot] {list [lindex $c 0] [lindex $c 1]}]]
+        if {$caller eq "compose"} {
+            set own [emit::results $hir main.bot]
+        }
+    }
+    list [llength [lsort -unique $out]] [lindex $out 0] $own
+} -result {1 {{digit_checked proven} {digit_checked_source proven} {digit_of proven} {digit_unchecked rejected} {json_string proven} {json_string_source proven} {member proven} {pair_glued rejected}} {{digits proven {}} {object proven {}}}}
+
+test ec-library-json-string-runs {emitlib's strict string emitter run on the texts the milestone names -- empty, quotation marks, reverse solidi, every control, supplementary characters, U+2028, 2,000 characters -- every output one strict JSON string token for the reference interpreter, and decoding (CPython) to its text} -constraints python3 -body {
+    set dir [emit::workspace main.bot "import emitlib\n\n0\n"]
+    set controls ""
+    for {set c 0} {$c < 32} {incr c} { append controls [format %c $c] }
+    set texts [list "" "\"" "\\" "\"\\\"" $controls "\x7f/é" "😀a😀" "  " "퟿￿" \
+        [string repeat "aé😀\"\\\n" 333]]
+    set saved $::emitw::limit
+    set ::emitw::limit 4000
+    set copy [emitw::Stripped $dir]
+    set runs [emitw::traces $copy emitlib::json_string_source {str} {IndexNotFound} [lmap t $texts {list $t}]]
+    set ::emitw::limit $saved
+    set model [emit::reference $copy]
+    set bad {}
+    set lines {}
+    foreach run $runs t $texts {
+        lassign $run tuple outcome symbols
+        if {$outcome ne "complete" || [emit::judge $model {json_lex json_string_strict} $outcome $symbols] ne "ok"} {
+            lappend bad [list $tuple $outcome]
+        }
+        lappend lines [join [lmap c $symbols {format %c $c}] ""]
+    }
+    emit::writeText [file join $dir out.txt] [join $lines \n]
+    set decoded [exec python3 -I -c {
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8").read().split("\n"):
+    print(" ".join(str(ord(c)) for c in json.loads(line)))
+} [file join $dir out.txt]]
+    set want [join [lmap t $texts {join [lmap ch [split $t ""] {scan $ch %c}] " "}] \n]
+    list $bad [expr {$decoded eq $want}] [llength $runs]
+} -result {{} 1 10}
+
+# ---------------------------------------------------------------------------
+# The recognizer semantics against the reference interpreter
+
+set laText "import std::dfa\n\ndfa ab over ascii:\n    start:\n        'a' -> one\n    one:\n        'b' -> two\n    two:\n        'c' -> accept before 2\n        end -> accept\n\ndfa ab_more over ascii:\n    start:\n        'b' -> more\n    more:\n        'b' -> more\n        ')' 'c' -> accept before\n        end -> reject\n\ndfa wrap over ascii:\n    start:\n        '(' -> inner\n    inner:\n        'a' -> call ab then accept\n        'b' -> call ab_more then close\n    close:\n        ')' -> accept\n        'c' -> accept\n"
+
+test ec-outcome-model {core/dfa.tcl's one statement of a code's meaning: a run function's result encodes its class and decodes back; Resume and Unread agree with what the generated recognizer function computes from it} -body {
+    set out {}
+    foreach class {taken current {more 1} {more 3}} {
+        set r [core::dfa::RunResult $class]
+        if {$r eq "c"} {
+            lappend out [list $class [core::dfa::ClassOf 65] [core::dfa::ClassOf -1]]
+        } else {
+            lappend out [list $class [core::dfa::ClassOf $r]]
+        }
+        lappend out [core::dfa::Resume accept $class] [core::dfa::Resume s $class] \
+            [core::dfa::Unread $class 0] [core::dfa::Unread $class 1]
+    }
+    set out
+} -result {{taken taken} propagate {wait s} 0 0 {current current current} propagate {reconsider s} 1 0 {{more 1} {more 1}} propagate reject 1 1 {{more 3} {more 3}} propagate reject 3 3}
+
+# ---------------------------------------------------------------------------
+# Value facts
+
+test ec-negation-holes {`c == 34 or c == 92` false excludes both values from a scalar value: a raw character of the string body} -body {
+    verdicts [program {import std::char
+import std::str
+
+fn body(c: int) -> unit:
+    if c == 34 or c == 92:
+        yield 92
+        yield c
+    elif c < 32:
+        yield 92
+        yield 110
+    else:
+        yield c
+    unit
+
+fn s(text: str) -> unit errors IndexNotFound emits json_lex::json_string:
+    yield 34
+    loop i from 0 to text.length():
+        body(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+fn body_bad(c: int) -> unit:
+    if c == 34:
+        yield 92
+        yield c
+    elif c < 32:
+        yield 92
+        yield 110
+    else:
+        yield c
+    unit
+
+fn s_bad(text: str) -> unit errors IndexNotFound emits json_lex::json_string:
+    yield 34
+    loop i from 0 to text.length():
+        body_bad(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+0} {json_lex}]
+} -result {{s proven} {s_bad rejected}}
+
+test ec-trusted-scalar {a scalar value is never a surrogate (the trusted fact), but its controls are not excluded: raw scalar values above the controls are a string body, all of them are not} -body {
+    verdicts [program {import std::char
+import std::str
+
+fn upper(text: str) -> unit errors IndexNotFound emits json_lex::json_string:
+    yield 34
+    loop i from 0 to text.length():
+        c = std::char::scalar_value(text.char_at(i))
+        if c >= 93:
+            yield c
+        continue
+    yield 34
+    unit
+
+fn all(text: str) -> unit errors IndexNotFound emits json_lex::json_string:
+    yield 34
+    loop i from 0 to text.length():
+        c = std::char::scalar_value(text.char_at(i))
+        if c != 34 and c != 92:
+            yield c
+        continue
+    yield 34
+    unit
+
+0} {json_lex}]
+} -result {{upper proven} {all rejected}}
+
+test ec-surrogate-codes {an Int from a List may be a surrogate until a check excludes it; json_string_strict rejects a raw surrogate} -body {
+    verdicts [program {import std::list
+
+error NotScalar:
+    at: int
+
+fn checked(codes: List[int]) -> unit errors NotScalar emits json_lex::json_string_strict:
+    yield 34
+    loop c in codes:
+        if c < 93 or c > 1114111 or (c >= 55296 and c <= 57343):
+            fail NotScalar {at: c}
+        yield c
+        continue
+    yield 34
+    unit
+
+fn unchecked(codes: List[int]) -> unit errors NotScalar emits json_lex::json_string_strict:
+    yield 34
+    loop c in codes:
+        if c < 93 or c > 1114111:
+            fail NotScalar {at: c}
+        yield c
+        continue
+    yield 34
+    unit
+
+0} {json_lex}]
+} -result {{checked proven} {unchecked rejected}}
+
+test ec-arithmetic {hir::range's transfers, per component: 48 + d, 57 - d, (v - 64) shift_right 1, v mod 10} -body {
+    verdicts [program {fn add(d: int) -> unit emits json_grammar::digit_symbol:
+    if d >= 0 and d <= 9:
+        yield 48 + d
+    else:
+        yield 49
+    unit
+
+fn sub(d: int) -> unit emits json_grammar::digit_symbol:
+    if d >= 0 and d <= 9:
+        yield 57 - d
+    else:
+        yield 49
+    unit
+
+fn sub_bad(d: int) -> unit emits json_grammar::digit_symbol:
+    if d >= 0 and d <= 9:
+        yield 58 - d
+    else:
+        yield 49
+    unit
+
+fn shift(v: int) -> unit emits json_grammar::digit_symbol:
+    if v >= 64 and v <= 83:
+        yield 48 + (v - 64).shift_right(1)
+    else:
+        yield 49
+    unit
+
+fn modulo(v: int) -> unit emits json_grammar::digit_symbol:
+    yield 48 + v.mod(10)
+    unit
+
+fn modulo_bad(v: int) -> unit emits json_grammar::digit_symbol:
+    yield 48 + v.mod(11)
+    unit
+
+0}]
+} -result {{add proven} {sub proven} {sub_bad rejected} {shift proven} {modulo proven} {modulo_bad rejected}}
+
+test ec-hole-edge {`c != 48` removes 48, and only 48: 47 is still possible} -body {
+    verdicts [program {fn edge(c: int) -> unit emits json_grammar::digit_symbol:
+    if c != 48 and c >= 47 and c <= 57:
+        yield c
+    else:
+        yield 48
+    unit
+
+fn inner(c: int) -> unit emits json_grammar::digit_symbol:
+    if c != 47 and c >= 47 and c <= 57:
+        yield c
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{edge rejected} {inner proven}}
+
+test ec-lift-components {an operator applies to every component of a value with holes, on either side: v + 48 and 48 + v for v in {1, 15} may be '?'} -body {
+    verdicts [program {fn two(v: int) -> unit emits json_grammar::digit_symbol:
+    if v == 1 or v == 15:
+        yield v + 48
+    else:
+        yield 48
+    unit
+
+fn two_right(v: int) -> unit emits json_grammar::digit_symbol:
+    if v == 1 or v == 15:
+        yield 48 + v
+    else:
+        yield 48
+    unit
+
+fn two_ok(v: int) -> unit emits json_grammar::digit_symbol:
+    if v == 1 or v == 9:
+        yield v + 48
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{two rejected} {two_right rejected} {two_ok proven}}
+
+test ec-context-sensitive {one helper, two calls with different facts: each analyzed with its own} -body {
+    verdicts [program {fn put(n: int) -> unit:
+    yield 48 + n
+    unit
+
+fn twice(d: int) -> unit emits json_lex::json_number:
+    if d >= 1 and d <= 9:
+        put(d)
+        put(d + 20)
+    else:
+        yield 49
+    unit
+
+fn twice_ok(d: int) -> unit emits json_lex::json_number:
+    if d >= 1 and d <= 9:
+        put(d)
+        put(d - 1)
+    else:
+        yield 49
+    unit
+
+0} {json_lex}]
+} -result {{twice rejected} {twice_ok proven}}
+
+test ec-order-narrowing {branches narrow by order, on both outcomes} -body {
+    verdicts [program {fn clamp(c: int) -> unit emits json_grammar::digit_symbol:
+    if c < 48:
+        yield 48
+    elif c > 57:
+        yield 57
+    else:
+        yield c
+    unit
+
+fn clamp_bad(c: int) -> unit emits json_grammar::digit_symbol:
+    if c < 48:
+        yield 48
+    elif c > 58:
+        yield 57
+    else:
+        yield c
+    unit
+
+fn reversed(c: int) -> unit emits json_grammar::digit_symbol:
+    if 48 <= c and 57 >= c:
+        yield c
+    else:
+        yield 50
+    unit
+
+0}]
+} -result {{clamp proven} {clamp_bad rejected} {reversed proven}}
+
+test ec-negation-boundary {the false outcome of `x < K` keeps K itself: below 47 a '0', else the value up to '9' -- '/' (47) possible, rejected; below 48, certified} -body {
+    verdicts [program {fn below47(c: int) -> unit emits json_grammar::digit_symbol:
+    if c < 47:
+        yield 48
+    elif c <= 57:
+        yield c
+    else:
+        yield 48
+    unit
+
+fn below48(c: int) -> unit emits json_grammar::digit_symbol:
+    if c < 48:
+        yield 48
+    elif c <= 57:
+        yield c
+    else:
+        yield 48
+    unit
+
+fn above58(c: int) -> unit emits json_grammar::digit_symbol:
+    if c > 58 or c < 48:
+        yield 48
+    else:
+        yield c
+    unit
+
+0}]
+} -result {{below47 rejected} {below48 proven} {above58 rejected}}
+
+test ec-sentinel {a value past every bound the recognizers use is still a value: 10^23 is rejected} -body {
+    claims [program {fn big() -> unit emits json_lex::json_number:
+    yield 49
+    yield 100000000000000000000000
+    unit
+
+0}]
+} -result {{big rejected EMIT-REJECTED}}
+
+test ec-end-symbol {-1 is the end, never a symbol} -body {
+    claims [program {fn m(n: int) -> unit emits json_grammar::digit_symbol:
+    if n >= 0 and n <= 10:
+        yield n - 1
+    else:
+        yield 48
+    unit
+
+0}]
+} -result {{m rejected {EMIT-END-SYMBOL EMIT-REJECTED}}}
+
+test ec-not-symbol {a String yielded is no symbol} -body {
+    claims [program {fn s() -> unit emits json_grammar::digit_symbol:
+    yield "1"
+    unit
+
+0}]
+} -result {{s not-proved EMIT-NOT-SYMBOL}}
+
+# ---------------------------------------------------------------------------
+# Control flow
+
+test ec-loop-fixpoint {a loop of digits after a nonzero one is a number; after a zero it is not} -body {
+    verdicts [program {fn one_then_zeros(n: int) -> unit emits json_lex::json_number:
+    yield 49
+    loop i from 0 to n:
+        yield 48
+        continue
+    unit
+
+fn zero_then_ones(n: int) -> unit emits json_lex::json_number:
+    yield 48
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+0} {json_lex}]
+} -result {{one_then_zeros proven} {zero_then_ones rejected}}
+
+test ec-loop-first-iteration {the list printer's separator, `if i > 0:`, proved by the first iteration's own facts; without it, rejected} -body {
+    verdicts [program {import number_emit
+
+fn list(n: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 91
+    loop i from 0 to n:
+        if i > 0:
+            yield 44
+        number_emit::integer(i)
+        continue
+    yield 93
+    unit
+
+fn list_bad(n: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 91
+    loop i from 0 to n:
+        number_emit::integer(i)
+        continue
+    yield 93
+    unit
+
+0}]
+} -result {{list proven} {list_bad rejected}}
+
+test ec-loop-second-iteration {the loop's fixpoint: a '.' in a second iteration, after a '0', is rejected in the fraction it starts} -body {
+    verdicts [program {fn dots(n: int) -> unit emits json_lex::json_number:
+    yield 49
+    loop i from 0 to n:
+        if i.mod(2) == 0:
+            yield 48
+        else:
+            yield 46
+        continue
+    unit
+
+fn dotted(n: int) -> unit emits json_lex::json_number:
+    yield 49
+    loop:
+        if n > 5:
+            break
+        yield 46
+        yield 48
+        continue
+    unit
+
+0} {json_lex}]
+} -result {{dots rejected} {dotted rejected}}
+
+test ec-loop-later-iterations {a counted loop's later iterations are past its start: what only they write is checked} -body {
+    verdicts [program {fn later(n: int) -> unit emits json_lex::json_number:
+    loop i from 0 to n:
+        if i > 0:
+            yield 120
+        yield 49
+        continue
+    yield 49
+    unit
+
+0} {json_lex}]
+} -result {{later rejected}}
+
+test ec-loop-exact-count {a loop of exactly one iteration emits one digit; one of n iterations may emit none} -body {
+    verdicts [program {fn once() -> unit emits json_grammar::digit_symbol:
+    loop i from 0 to 1:
+        yield 55
+        continue
+    unit
+
+fn twice() -> unit emits json_grammar::digit_symbol:
+    loop i from 0 to 2:
+        yield 55
+        continue
+    unit
+
+fn maybe(n: int) -> unit emits json_lex::json_number:
+    loop i from 0 to n:
+        yield 55
+        continue
+    unit
+
+0}]
+} -result {{once proven} {twice rejected} {maybe rejected}}
+
+test ec-recursion-second-round {recursion to a fixpoint: what follows a recursive call that returns is checked in the states it returns in} -body {
+    verdicts [program {fn rec(n: int) -> unit emits json_lex::json_number:
+    if n > 0:
+        rec(n - 1)
+        yield 120
+    else:
+        yield 49
+    unit
+
+0} {json_lex}]
+} -result {{rec rejected}}
+
+test ec-recursion-same-context {a recursive call in its own argument context reads the previous round's summary: only a later round sees what follows it} -body {
+    verdicts [program {fn r(b: bool) -> unit emits json_lex::json_number:
+    if b:
+        r(false)
+        yield 120
+    else:
+        yield 49
+    unit
+
+0} {json_lex}]
+} -result {{r rejected}}
+
+test ec-join-states {a helper called from several states is summarized from each: a digit after a leading zero is rejected, though after a nonzero digit it is not} -body {
+    verdicts [program {fn two() -> unit:
+    yield 50
+    unit
+
+fn lead(n: int) -> unit emits json_lex::json_number:
+    if n > 0:
+        yield 49
+    else:
+        yield 48
+    two()
+    unit
+
+0} {json_lex}]
+} -result {{lead rejected}}
+
+test ec-break-continue {break and continue reach their targets: a digit then a break; a skipped iteration} -body {
+    verdicts [program {fn first(n: int) -> unit emits json_lex::json_number:
+    yield 49
+    loop i from 0 to n:
+        if i == 2:
+            break
+        if i == 0:
+            continue
+        yield 48
+        continue
+    unit
+
+fn broken(n: int) -> unit emits json_grammar::digit_symbol:
+    loop:
+        yield 49
+        if n > 0:
+            break
+        yield 50
+        break
+    unit
+
+0} {json_lex json_grammar}]
+} -result {{first proven} {broken rejected}}
+
+test ec-early-return {a return before the symbol leaves the token incomplete} -body {
+    claims [program {fn early(n: int) -> unit emits json_grammar::digit_symbol:
+    if n > 0:
+        return unit
+    yield 49
+    unit
+
+fn after(n: int) -> unit emits json_grammar::digit_symbol:
+    yield 49
+    if n > 0:
+        return unit
+    unit
+
+0}]
+} -result {{early rejected EMIT-INCOMPLETE} {after proven {}}}
+
+test ec-recursion {a recursive run of ones: proven when one comes first, rejected when the base case may be all} -body {
+    verdicts [program {fn ones(n: int) -> unit emits json_lex::json_number:
+    if n > 0:
+        yield 49
+        ones(n - 1)
+    unit
+
+fn ones1(n: int) -> unit emits json_lex::json_number:
+    yield 49
+    ones(n - 1)
+    unit
+
+0} {json_lex}]
+} -result {{ones rejected} {ones1 proven}}
+
+test ec-never-returns {an emitter that never completes claims nothing, every prefix checked: ones forever is proven, a zero after a one is not} -body {
+    verdicts [program {fn forever() -> unit emits json_lex::json_number:
+    yield 49
+    loop:
+        yield 49
+        continue
+    unit
+
+fn forever_bad() -> unit emits json_lex::json_number:
+    yield 48
+    loop:
+        yield 49
+        continue
+    unit
+
+0} {json_lex}]
+} -result {{forever proven} {forever_bad rejected}}
+
+# ---------------------------------------------------------------------------
+# Failures and handlers
+
+test ec-fail-after-yield {a helper that fails after its quotation mark, caught by a handler that writes another: rejected (the exploratory checker proved it)} -body {
+    set p [program {error Oops:
+    at: int
+
+fn h(n: int) -> unit errors Oops:
+    yield 34
+    if n > 0:
+        fail Oops {at: 1}
+    unit
+
+fn s(n: int) -> unit emits json_lex::json_string:
+    yield 34
+    h(n):
+        on Oops:
+            yield 34
+    unit
+
+fn src(n: int) -> int:
+    s(n)
+    -1
+
+coroutine {step, first} = src(0)
+first} {json_lex}]
+    claims $p
+} -result {{s rejected EMIT-AFTER-TOKEN}}
+
+test ec-fail-before-yield {a guarded helper fails before its symbol: the handler's digit is the token} -body {
+    verdicts [program {import std::dfa
+
+error NotDigit:
+    at: int
+
+fn guarded(c: int) -> unit errors NotDigit emits json_grammar::digit_symbol:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail NotDigit {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail NotDigit {at: 0}
+    yield c
+    unit
+
+fn safe(c: int) -> unit emits json_grammar::digit_symbol:
+    guarded(c):
+        on NotDigit:
+            yield 48
+    unit
+
+0} {json_grammar}]
+} -result {{guarded proven} {safe proven}}
+
+test ec-native-may-fail {a native that may fail after a symbol (std::list::at) and a handler that writes another: rejected} -body {
+    claims [program {import std::list
+
+fn s(xs: List[int]) -> unit emits json_lex::json_string:
+    yield 34
+    yield 34
+    std::list::at(xs, 3):
+        on IndexNotFound:
+            yield 34
+            0
+    unit
+
+0} {json_lex}]
+} -result {{s rejected EMIT-AFTER-TOKEN}}
+
+test ec-guard-facts {a guard proves its own binding, on the paths where it completed: not another binding, not a value computed from it, not after a handler absorbed its failure} -body {
+    verdicts [program {import std::dfa
+
+error Bad:
+    at: int
+
+fn good(c: int) -> unit errors Bad emits json_grammar::digit_symbol:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    yield c
+    unit
+
+fn other(c: int, d: int) -> unit errors Bad emits json_grammar::digit_symbol:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    yield d
+    unit
+
+fn derived(c: int) -> unit errors Bad emits json_grammar::digit_symbol:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail Bad {at: 0}
+        on std::dfa::UnexpectedEnd:
+            fail Bad {at: 0}
+    yield c + 1
+    unit
+
+fn absorbed(c: int) -> unit emits json_grammar::digit_symbol:
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            0
+        on std::dfa::UnexpectedEnd:
+            0
+    yield c
+    unit
+
+0} {json_grammar}]
+} -result {{good proven} {other rejected} {derived rejected} {absorbed rejected}}
+
+# ---------------------------------------------------------------------------
+# Coroutine boundaries
+
+test ec-separate-coroutine {a coroutine an emitter constructs is another execution: its yields are not the emitter's; what it resumes from one is an unknown Int} -body {
+    verdicts [program {import std::coroutine
+
+fn junk() -> int:
+    yield 120
+    yield 121
+    -1
+
+fn outer() -> unit emits json_grammar::digit_symbol:
+    coroutine {step, first} = junk()
+    if first > 0 and not std::coroutine::done?(step):
+        step()
+    yield 55
+    unit
+
+fn forward() -> unit emits json_grammar::digit_symbol:
+    coroutine {step, first} = junk()
+    yield first
+    unit
+
+0} {json_grammar}]
+} -result {{outer proven} {forward rejected}}
+
+# ---------------------------------------------------------------------------
+# Recognizer semantics
+
+test ec-dfa-accept-before {a number ends before ',' or ']' in a text, the text reconsidering it; before a digit it would absorb it} -body {
+    claims [program {fn ok() -> unit emits json_grammar::json_text:
+    yield 91
+    yield 49
+    yield 44
+    yield 50
+    yield 93
+    unit
+
+fn spaced() -> unit emits json_grammar::json_text:
+    yield 49
+    yield 32
+    yield 50
+    unit
+
+0}]
+} -result {{ok proven {}} {spaced proven {}}}
+
+test ec-dfa-continuations {a number then a string's quote, a literal then a letter: each token rejects the symbol that would follow it} -body {
+    claims [program {fn number_string() -> unit emits json_grammar::json_text:
+    yield 49
+    yield 34
+    yield 120
+    yield 34
+    unit
+
+fn literal_x() -> unit emits json_grammar::json_text:
+    yield 110
+    yield 117
+    yield 108
+    yield 108
+    yield 120
+    unit
+
+fn string_comma() -> unit emits json_grammar::json_text:
+    yield 34
+    yield 34
+    yield 44
+    unit
+
+0}]
+} -result {{number_string rejected EMIT-REJECTED} {literal_x rejected EMIT-REJECTED} {string_comma proven {}}}
+
+test ec-dfa-beyond {a number claimed whole, then a ',' it ends before: beyond its token} -body {
+    claims [program {fn n() -> unit emits json_lex::json_number:
+    yield 49
+    yield 44
+    unit
+
+0}]
+} -result {{n rejected EMIT-BEYOND-TOKEN}}
+
+test ec-dfa-after {a string, then a space after its closing quote} -body {
+    claims [program {fn s() -> unit emits json_lex::json_string:
+    yield 34
+    yield 34
+    yield 32
+    unit
+
+0}]
+} -result {{s rejected EMIT-AFTER-TOKEN}}
+
+test ec-dfa-incomplete {a completion in a state that rejects the end} -body {
+    claims [program {fn minus() -> unit emits json_lex::json_number:
+    yield 45
+    unit
+
+0}]
+} -result {{minus rejected EMIT-INCOMPLETE}}
+
+test ec-dfa-lookahead-two {`accept before 2`: a token whose last two symbols would not be part of it is beyond the token, never read as before 1} -body {
+    claims [program {fn abc() -> unit emits la::ab:
+    yield 97
+    yield 98
+    yield 99
+    unit
+
+fn ab_only() -> unit emits la::ab:
+    yield 97
+    yield 98
+    unit
+
+0} {la}] -files [list la.bot "import std::dfa\n\ndfa ab over ascii:\n    start:\n        'a' -> one\n    one:\n        'b' -> two\n    two:\n        'c' -> accept before 2\n        end -> accept\n"]
+} -result {{abc rejected EMIT-BEYOND-TOKEN} {ab_only proven {}}}
+
+test ec-conformance {the checker's step (hir/emitdfa.tcl over core/dfa.tcl's outcome model, the recognizers' tables as the HIR carries them) against the reference interpreter on every case dfatest makes for the JSON recognizers and three with lookahead two, a call `then accept` and a call `then STATE` that reconsiders: the same outcome everywhere} -body {
+    set dir [emit::workspace main.bot "import json_grammar\nimport la\n\n0\n" la.bot $::laText]
+    lassign [emit::conformance $dir 12 3] cases mismatches
+    list [expr {$cases > 2000}] [lrange $mismatches 0 2]
+} -result {1 {}}
+
+# ---------------------------------------------------------------------------
+# Boundaries and composition
+
+test ec-boundary-adjacent {two numbers back to back in a text are one number: each integer's boundary obligation is broken} -body {
+    claims [program {import number_emit
+
+fn pair(a: int, b: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 91
+    number_emit::integer(a)
+    number_emit::integer(b)
+    yield 93
+    unit
+
+fn pair_ok(a: int, b: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 91
+    number_emit::integer(a)
+    yield 44
+    number_emit::integer(b)
+    yield 93
+    unit
+
+0}]
+} -result {{pair rejected {EMIT-BOUNDARY EMIT-REJECTED}} {pair_ok proven {}}}
+
+test ec-boundary-branch {a number written on one branch only: the obligation is on that branch's exits, so a separator after the branches is proven, a digit is not (and, composed by the certificate, which may end in `zero`, also rejected)} -body {
+    claims [program {import number_emit
+
+fn branch_ok(a: int, b: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 91
+    if a > 0:
+        number_emit::integer(a)
+        yield 44
+    number_emit::integer(b)
+    yield 93
+    unit
+
+fn branch_bad(a: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 91
+    if a > 0:
+        number_emit::integer(a)
+    yield 53
+    yield 93
+    unit
+
+0}]
+} -result {{branch_ok proven {}} {branch_bad rejected {EMIT-BOUNDARY EMIT-REJECTED}}}
+
+test ec-boundary-nested {a certificate carries its helpers' open obligations: after a member (whose number is still open) a digit breaks the number's boundary (and, after a zero, is rejected), a ',' does not} -body {
+    claims [program {import emitlib
+
+fn after_digit(k: str, n: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 123
+    emitlib::member(k, n)
+    yield 49
+    yield 125
+    unit
+
+fn after_comma(k: str, n: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 123
+    emitlib::member(k, n)
+    yield 44
+    emitlib::member(k, n)
+    yield 125
+    unit
+
+0} {json_grammar}]
+} -result {{after_digit rejected {EMIT-BOUNDARY EMIT-REJECTED}} {after_comma proven {}}}
+
+test ec-compose-weaker-certificate {a helper certified for the permissive string grammar, composed into a strict claim: its tokens may hold a lone surrogate escape} -body {
+    list [verdicts [program {fn lone() -> unit emits json_lex::json_string:
+    yield 34
+    yield 92
+    yield 117
+    yield 100
+    yield 56
+    yield 48
+    yield 48
+    yield 34
+    unit
+
+fn strict() -> unit emits json_lex::json_string_strict:
+    lone()
+    unit
+
+0} {json_lex}]]
+} -result {{{lone proven} {strict rejected}}}
+
+# ---------------------------------------------------------------------------
+# Certificates
+
+test ec-statement-digest {what a certificate states -- its exits, visits, failure states, result, boundary -- is in its statement digest; what its proof read is not} -body {
+    set cert [dict create function f recognizer r depends [dict create recognizers [dict create r X] functions {f A}] \
+        domain int exits {a} visits {a b} fails {a} result {{-1 -1}} follow self]
+    set d0 [hir::emission::StatementDigest $cert]
+    set out {}
+    foreach {k v} {exits {b} visits {a} fails {} result {{0 0}} follow {}} {
+        lappend out [expr {[hir::emission::StatementDigest [dict replace $cert $k $v]] ne $d0}]
+    }
+    lappend out [expr {[hir::emission::StatementDigest [dict replace $cert depends [dict create recognizers [dict create r X] functions {f B}]]] eq $d0}]
+} -result {1 1 1 1 1 1}
+
+# The claims of the program at PATH in a fresh analysis: {NAME VERDICT
+# REUSED}... (every claim).
+proc reuse {path} {
+    set hir [emit::compile $path]
+    set reused [dict getdef $::hir::emission::stats reusedClaims {}]
+    return [lmap r [hir::emission::claims $hir] {
+        list [namespace tail [dict get $r function]] [dict get $r verdict] \
+            [expr {[list [dict get $r function] [dict get $r recognizer]] in $reused}]
+    }]
+}
+
+test ec-memo-reuse {a certificate this process proved is reused by a later compilation of another program -- validated against that program's code, never proved again -- and decides the same} -body {
+    set ::hir::emission::memo [dict create]
+    set dir [emit::workspace a.bot "import emitlib\n\n0\n" b.bot "import emitlib\nimport std::coroutine\n\ncoroutine {step, first} = emitlib::digit_checked_source(4)\nfirst\n"]
+    set first [reuse [file join $dir a.bot]]
+    set second [reuse [file join $dir b.bot]]
+    set ::hir::emission::useMemo 0
+    set fresh [reuse [file join $dir b.bot]]
+    set ::hir::emission::useMemo 1
+    list [lsort -unique [lmap c $first {lindex $c 2}]] [lsort -unique [lmap c $second {lindex $c 2}]] \
+        [expr {[lmap c $second {lrange $c 0 1}] eq [lmap c $fresh {lrange $c 0 1}]}] [llength $second]
+} -cleanup {set ::hir::emission::useMemo 1} -result {0 1 1 10}
+
+test ec-memo-invalidate {a helper's change invalidates the certificate whose proof analyzed it, not one that composed with that certificate's unchanged statement; a recognizer's change invalidates every certificate reading it; a comment and a new caller invalidate nothing} -body {
+    set ::hir::emission::memo [dict create]
+    set dir [emit::workspace main.bot "import emitlib\n\n0\n" other.bot "# another caller\nimport emitlib\n\nfn uses() -> int:\n    3\n\nuses()\n"]
+    reuse [file join $dir main.bot]
+    set lib [file join $dir emitlib.bot]
+    set text [readFile $lib]
+    set out {}
+    # A comment, and a new program: everything reused.
+    emit::writeText $lib "# a comment\n$text"
+    lappend out [lsort [lmap c [reuse [file join $dir other.bot]] {if {[lindex $c 2]} continue; lindex $c 0}]]
+    # A helper's code (hex_digit's letters uppercase): its analyzer re-proved.
+    emit::writeText $lib [string map {"        yield 87 + n" "        yield 55 + n"} $text]
+    lappend out [lsort [lmap c [reuse [file join $dir main.bot]] {if {[lindex $c 2]} continue; lindex $c 0}]]
+    emit::writeText $lib $text
+    reuse [file join $dir main.bot]
+    # The recognizer: json_lex's escapes lose `\/`.
+    set lex [file join $dir json_lex.bot]
+    set ltext [readFile $lex]
+    emit::writeText $lex [string map {"'\"' '\\\\' '/' 'b'" "'\"' '\\\\' 'b'"} $ltext]
+    lappend out [lsort [lmap c [reuse [file join $dir main.bot]] {if {[lindex $c 2]} continue; lindex $c 0}]]
+    set out
+} -result {{} json_string {json_string json_string_source member}}
+
+test ec-memo-types {a memoized certificate is invalidated by a type its proof read: a struct field's declared domain changed from 0..9 to every Int -- the claimed function's code unchanged -- is proved again, and rejected} -body {
+    set ::hir::emission::memo [dict create]
+    set out {}
+    foreach domain {"Int in 0..9" "int"} {
+        set dir [emit::workspace main.bot "import json_grammar\nimport m\n\nfn d(p: m::P) -> unit emits json_grammar::digit_symbol:\n    yield 48 + p.x\n    unit\n\n0\n" \
+            m.bot "type D = Int in 0..9\n\nstruct P:\n    x: [string map {"Int in 0..9" D} $domain]\n"]
+        lappend out [lmap c [reuse [file join $dir main.bot]] {lrange $c 1 2}]
+    }
+    set out
+} -result {{{proven 0}} {{rejected 0}}}
+
+test ec-memo-registered {a memoized certificate is invalidated when a native result set its proof read is not the registration's any more} -body {
+    set ::hir::emission::memo [dict create]
+    set dir [emit::workspace main.bot "import emitlib\n\n0\n"]
+    reuse [file join $dir main.bot]
+    set id [list emitlib::json_string json_lex::json_string_strict]
+    set cert [dict get $::hir::emission::memo $id]
+    list [dict keys [dict get $cert depends registered]] [lindex [hir::emission::Valid $cert] 0] \
+        [hir::emission::Valid [dict set cert depends registered std::char::scalar_value {interval 0 1114111}]]
+} -result {{std::char::scalar_value std::str::length} 1 {0 {the registered result set of std::char::scalar_value changed}}}
+
+test ec-syntax-recovery {a program with a syntax error is analyzed past it (the compiler service's partial revisions): a claim whose code is intact is still certified, one whose code holds the malformed statement is dependent, never certified} -body {
+    set dir [emit::workspace main.bot "${::digitDfa}type DigitValue = Int in 0..9\n\nfn good(d: DigitValue) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\nfn broken(d: DigitValue) -> unit emits digit_token:\n    x = = 3\n    yield 48 + d\n    unit\n\n0\n"]
+    set hir [surface::readProgramFile [file join $dir main.bot] -warnings off -strict 0 -recover-syntax 1]
+    lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}
+} -result {{good proven} {broken dependent}}
+
+test ec-clause-coexists {the clause beside the other parts of a declaration: private, nomethod, a proof clause, errors -- each keeps its meaning, the claim is certified} -body {
+    set hir [surface::compile "${::digitDfa}error Bad:\n    v: int\n\nprivate nomethod fn d(x: int) -> unit errors Bad emits digit_token:\n    if x < 0 or x > 9:\n        fail Bad {v: x}\n    yield 48 + x\n    unit\n\nrefined type Small = int\n\nfn small?(x: int) -> bool proves x: Small:\n    x < 10\n\n0\n" -warnings off]
+    set block [dict get [lindex [hir::emission::claims $hir] 0] block]
+    list [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}] \
+        [dict get $hir exprs $block declaredErrors] [dict exists $hir exprs $block nomethod]
+} -result {{{d proven}} Bad 1}
+
+test ec-fingerprint {a function's fingerprint ignores comments and unrelated code, and changes with a constant, and with the declared type of a module binding it reads} -body {
+    set out {}
+    foreach text [list "fn f(n: int) -> int:\n    48 + n\n\n0\n" \
+            "# a comment\nfn g() -> int:\n    5\n\nfn f(n: int) -> int:\n    # another\n    48 + n\n\n0\n" \
+            "fn f(n: int) -> int:\n    49 + n\n\n0\n"] {
+        set hir [surface::compile $text -warnings off -strict 0]
+        hir::emission::Reset $hir
+        lappend out [hir::emission::FunctionFingerprint [dict get $::hir::emission::byName f]]
+    }
+    set fps {}
+    foreach domain {"Int in 0..9" "Int in 0..10"} {
+        set dir [emit::workspace main.bot "import m\n\nfn f() -> int:\n    m::k\n\n0\n" m.bot "type K = $domain\n\nfn make() -> K:\n    3\n\nk = make()\n"]
+        set hir [emit::compile [file join $dir main.bot]]
+        hir::emission::Reset $hir
+        lappend fps [hir::emission::FunctionFingerprint [dict get $::hir::emission::byName f]]
+    }
+    list [expr {[lindex $out 0] eq [lindex $out 1]}] [expr {[lindex $out 0] ne [lindex $out 2]}] [expr {[lindex $fps 0] ne [lindex $fps 1]}]
+} -result {1 1 1}
+
+test ec-exploratory-false-proofs {the exploratory checker certified a symbol of 10^23 and a quotation mark after a caught failure, for this very program; the compiler rejects both} -body {
+    verdicts [program {error Oops:
+    at: int
+
+fn h(n: int) -> unit errors Oops:
+    yield 34
+    if n > 0:
+        fail Oops {at: 1}
+    unit
+
+fn s(n: int) -> unit emits json_lex::json_string:
+    yield 34
+    h(n):
+        on Oops:
+            yield 34
+    unit
+
+fn big() -> unit emits json_lex::json_number:
+    yield 49
+    yield 100000000000000000000000
+    unit
+
+fn src(n: int) -> int:
+    s(n)
+    big()
+    -1
+
+coroutine {step, first} = src(1)
+first} {json_lex}]
+} -result {{s rejected} {big rejected}}
+
+# ---------------------------------------------------------------------------
+# Erasure
+
+test ec-claim-erased {a claim is erased: the JSON emitters with and without their claims lower to the same core IR} -body {
+    set dir [emit::workspace main.bot "import value_emit\nimport emitlib\n\n0\n"]
+    set a [hir::lower [emit::compile [file join $dir main.bot]]]
+    foreach f {number_emit string_emit value_emit emitlib} {
+        set path [file join $dir $f.bot]
+        emit::writeText $path [emit::strip [readFile $path]]
+    }
+    set hir [emit::compile [file join $dir main.bot]]
+    set b [hir::lower $hir]
+    list [expr {$a eq $b}] [llength [hir::emission::claims $hir]] [expr {[string length $a] > 10000}]
+} -result {1 0 1}
+
+test ec-native-erasure {a certified emitter's fused code holds no transition of its grammar, and is the code of the same emitter without its claim} -constraints nativeCoroutines -body {
+    set main "import emitlib\nimport std::coroutine\n\nfn text(t: str) -> int errors IndexNotFound:\n    coroutine {step, first} = emitlib::json_string_source(t)\n    n = first\n    loop:\n        if std::coroutine::done?(step):\n            break\n        step()\n        continue\n    n\n\ntext(\"a\\\"b\"):\n    on IndexNotFound:\n        -2\n"
+    set dir [emit::workspace main.bot $main]
+    set nir [native::fusedNir [surface::readProgramFile [file join $dir main.bot] -warnings off]]
+    set lib [file join $dir emitlib.bot]
+    emit::writeText $lib [emit::strip [readFile $lib]]
+    set bare [native::fusedNir [surface::readProgramFile [file join $dir main.bot] -warnings off]]
+    list [regexp -all {rtabload} $nir] [regexp -all -line {^\s*switch } $nir] [regexp -all {dfa#transition} $nir] [expr {$nir eq $bare}]
+} -result {0 0 0 1}
+
+# ---------------------------------------------------------------------------
+# The clause
+
+proc parsedEmits {text} {
+    set ast [surface::parse $text]
+    return [lmap s [dict get $ast body] {
+        if {[dict get $s kind] ne "function"} continue
+        lmap c [dict get $s emits] {list [dict get $c name] [dict get $c qualified] [dict get $c rooted]}
+    }]
+}
+
+test ec-syntax-forms {`emits R, ...` after the result type and `errors`, or alone; qualified and rooted names; `emits` an ordinary name everywhere else} -body {
+    list [parsedEmits "fn a() -> unit emits r:\n    unit\nfn b() -> unit errors E emits ns::r, ::x::y::z:\n    unit\nfn c() emits r:\n    unit\nfn d(emits: int) -> int:\n    emits\n"] \
+        [expr {[dict get [surface::compile "emits = 2\nfn f(emits: int) -> int:\n    emits + 1\nf(emits)\n" -warnings off] roots] ne {}}]
+} -result {{{{r {} 0}} {{ns::r {ns r} 0} {x::y::z {x::y z} 1}} {{r {} 0}} {}} 1}
+
+proc syntaxError {text} {
+    if {[catch {surface::parse $text} message options]} {
+        return [list [lrange [dict get $options -errorcode] 0 1] $message]
+    }
+    return ok
+}
+
+test ec-syntax-errors {the clause's order is errors then emits; one clause; a recognizer's name after it; a rooted name has a namespace} -body {
+    list [syntaxError "fn a() -> unit emits r errors E:\n    unit\n"] [syntaxError "fn a() -> unit emits r emits s:\n    unit\n"] \
+        [syntaxError "fn a() -> unit emits:\n    unit\n"] [lindex [syntaxError "fn a() -> unit emits ::r:\n    unit\n"] 0]
+} -result {{{SURFACE SYNTAX} {<input>:1:24: a function's "errors" declaration comes before its emission claims: write "errors E emits R"}} {{SURFACE SYNTAX} {<input>:1:24: a function's emission claims are one clause: write "emits R1, R2"}} {{SURFACE SYNTAX} {<input>:1:21: expected the name of a recognizer after "emits", found ":"}} {SURFACE SYNTAX}}
+
+# {KIND LINE:COLUMN} of every diagnostic of the program TEXT (one file).
+proc diagnosticsOf {text} {
+    set hir [surface::compile $text -warnings off -strict 0]
+    return [lmap d [dict get $hir diagnostics] {
+        set origin [hir::static::PrimaryOrigin $hir $d]
+        list [dict get $d kind] [dict get [lrange $origin 2 end] line]:[dict get [lrange $origin 2 end] column]
+    }]
+}
+
+
+test ec-recognizer-resolution {a claim names a recognizer: an unknown name, an ordinary function, one declared after the function, one claimed twice -- each EMIT-RECOGNIZER at the claim} -body {
+    list [diagnosticsOf "${digitDfa}fn a() -> unit emits nothing:\n    yield 49\n    unit\n\n0\n"] \
+        [diagnosticsOf "${digitDfa}fn helper() -> unit:\n    yield 49\n    unit\n\nfn a() -> unit emits helper:\n    yield 49\n    unit\n\n0\n"] \
+        [diagnosticsOf "import std::dfa\n\nfn a() -> unit emits later:\n    yield 49\n    unit\n\ndfa later over ascii:\n    start:\n        '1' -> accept\n\n0\n"] \
+        [diagnosticsOf "${digitDfa}fn a() -> unit emits digit_token, digit_token:\n    yield 49\n    unit\n\n0\n"]
+} -result {{{EMIT-RECOGNIZER 9:22}} {{EMIT-RECOGNIZER 13:22}} {{EMIT-RECOGNIZER 3:22}} {{EMIT-RECOGNIZER 9:35}}}
+
+test ec-recognizer-later-message {the message of a forward reference says so} -body {
+    set hir [surface::compile "import std::dfa\n\nfn a() -> unit emits later:\n    yield 49\n    unit\n\ndfa later over ascii:\n    start:\n        '1' -> accept\n\n0\n" -warnings off -strict 0]
+    string match "*\"later\" is declared later*" [dict get [lindex [dict get $hir diagnostics] 0] message]
+} -result 1
+
+test ec-recognizer-import {a module's recognizer is named NS::NAME after `import NS`, the loader's rule for every qualified name: without the import, MISSING-IMPORT; a rooted name resolves the same} -body {
+    set dir [emit::workspace main.bot "fn a() -> unit emits json_grammar::digit_symbol:\n    yield 49\n    unit\n\n0\n" \
+        rooted.bot "import json_grammar\n\nfn a() -> unit emits ::json_grammar::digit_symbol:\n    yield 49\n    unit\n\n0\n"]
+    catch {emit::compile [file join $dir main.bot]} message options
+    list [lindex [dict get $options -errorcode] end] [emit::results [emit::compile [file join $dir rooted.bot]] rooted.bot]
+} -result {MISSING-IMPORT {{a proven {}}}}
+
+test ec-strict-raises {a strict compilation of a rejected claim raises its diagnostic, located at the yield, with the claim and the recognizer's state as related data} -body {
+    catch {surface::compile "${digitDfa}type Nibble = Int in 0..15\n\nfn a(d: Nibble) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n0\n" -warnings off} message options
+    set entry [lindex [dict get $options -diagnostics] 0]
+    list [dict get $options -errorcode] [dict get $entry location line] [dict get $entry location column] \
+        [llength [dict get $entry related]] [lmap n [dict get $entry notes] {dict get $n summary}]
+} -result {{CORE SEMANTIC EMIT-REJECTED} 12 5 1 {{state start of digit_token is declared here}}}
+
+test ec-nested-function {a claim on a nested function is checked from its own declaration; what it captures is read through its type} -body {
+    set hir [surface::compile "${digitDfa}fn outer(k: int) -> int:\n    fn inner(d: int) -> unit emits digit_token:\n        if d >= 0 and d <= 9:\n            yield 48 + d\n        else:\n            yield 48 + k\n        unit\n    3\n\n0\n" -warnings off -strict 0]
+    lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}
+} -result {{inner rejected}}
+
+test ec-recovery-dependent {a claim whose code holds another diagnostic says nothing more (dependent); an independent claim in the same program is still reported} -body {
+    set hir [surface::compile "${digitDfa}fn a() -> unit emits digit_token:\n    yield 48 + \"x\"\n    unit\n\nfn b(d: int) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n0\n" -warnings off -strict 0]
+    list [lmap d [hir::recovery::reported $hir] {dict get $d kind}] \
+        [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}]
+} -result {{TYPE EMIT-END-SYMBOL EMIT-REJECTED} {{a dependent} {b rejected}}}
+
+test ec-terminal-value {a claimed symbol source completes with -1; any other final value is EMIT-TERMINAL-VALUE} -body {
+    list [diagnosticsOf "${digitDfa}fn s() -> int emits digit_token:\n    yield 55\n    0\n\n0\n"] \
+        [diagnosticsOf "${digitDfa}fn s() -> int emits digit_token:\n    yield 55\n    -1\n\n0\n"]
+} -result {{{EMIT-TERMINAL-VALUE 9:21}} {}}
+
+test ec-byte-character {a character's scalar value sent to a recognizer over bytes} -body {
+    diagnosticsOf "import std::dfa\nimport std::char\nimport std::str\n\ndfa byte_token over bytes:\n    start:\n        0..255 -> accept\n\nfn first_char(text: str) -> unit errors IndexNotFound emits byte_token:\n    yield std::char::scalar_value(text.char_at(0))\n    unit\n\n0\n"
+} -result {{EMIT-BYTE-CHARACTER 10:5} {EMIT-REJECTED 10:5}}
+
+test ec-unknown-value {an element of List[any] is of no known Int set: not proved, EMIT-UNKNOWN-VALUE (no violation is claimed)} -body {
+    set hir [surface::compile "import std::list\n${digitDfa}fn first(xs: List\[any\]) -> unit errors IndexNotFound emits digit_token:\n    yield std::list::at(xs, 0)\n    unit\n\n0\n" -warnings off -strict 0]
+    list [lmap d [dict get $hir diagnostics] {dict get $d kind}] [lmap r [hir::emission::claims $hir] {dict get $r verdict}]
+} -result {EMIT-UNKNOWN-VALUE not-proved}
+
+test ec-trait-unsupported {a trait-polymorphic emitter's specialization calls the implementation this program selects: EMIT-UNSUPPORTED, not proved -- never certified from the selection} -body {
+    set hir [surface::compile "${digitDfa}trait Coded:\n    fn code(self: Coded) -> int\n\nstruct Seven:\n    unused: int\n\nfn code(s: Seven) -> int:\n    55\n\nfn emit(c: Coded) -> unit emits digit_token:\n    yield c.code()\n    unit\n\nfn source() -> int:\n    emit(Seven {unused: 0})\n    -1\n\ncoroutine {step, first} = source()\nfirst\n" -warnings off -strict 0]
+    list [lmap d [dict get $hir diagnostics] {dict get $d kind}] [lmap r [hir::emission::claims $hir] {dict get $r verdict}]
+} -result {EMIT-UNSUPPORTED not-proved}
+
+test ec-budget {an analysis past its budget is EMIT-BUDGET: not proved, never proved} -body {
+    set saved $::hir::emission::maxRounds
+    set ::hir::emission::maxRounds 1
+    try {
+        set hir [surface::compile "${digitDfa}fn ones(n: int) -> unit:\n    if n > 0:\n        yield 49\n        ones(n - 1)\n    unit\n\nfn d(n: int) -> unit emits digit_token:\n    ones(n)\n    unit\n\n0\n" -warnings off -strict 0]
+    } finally {
+        set ::hir::emission::maxRounds $saved
+    }
+    list [lsort -unique [lmap d [dict get $hir diagnostics] {dict get $d kind}]] [lmap r [hir::emission::claims $hir] {dict get $r verdict}]
+} -result {EMIT-BUDGET not-proved}
+
+test ec-domain-admission {a certificate never admits an argument: a call of a domain-typed emitter with a value outside its domain is the caller's rejection, certified callee or not} -body {
+    set hir [surface::compile "${digitDfa}type DigitValue = Int in 0..9\n\nfn digit(d: DigitValue) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\nfn source() -> int:\n    digit(12)\n    -1\n\ncoroutine {step, first} = source()\nfirst\n" -warnings off -strict 0]
+    list [lmap d [dict get $hir diagnostics] {dict get $d kind}] [lmap r [hir::emission::claims $hir] {dict get $r verdict}]
+} -result {TYPE proven}
+
+# ---------------------------------------------------------------------------
+# HIR text, interchange, the cache: a certificate in text is never a proof
+
+test ec-hir-text {HIR text prints a block's claims (the recognizer's binding and name) and reads them back; text carries no recognizer table, so a claim read back is not proved, never certified} -body {
+    set hir [surface::compile "${digitDfa}type DigitValue = Int in 0..9\n\nfn digit(d: DigitValue) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n0\n" -warnings off]
+    set text [hir::format $hir]
+    set read [hir::read::Program $text]
+    set printed [regexp -inline {emits \(b[0-9]+ digit_token\)} $text]
+    list [llength $printed] [lmap r [hir::emission::claims $read] {dict get $r verdict}] \
+        [lmap d [dict get $read diagnostics] {dict get $d kind}]
+} -result {1 not-proved EMIT-UNSUPPORTED}
+
+test ec-interchange-roundtrip {interchange text of a certified program reads back as the same HIR: its claims verified again by the reader, with the same certificates} -body {
+    set hir [surface::compile "${digitDfa}type DigitValue = Int in 0..9\n\nfn digit(d: DigitValue) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n0\n" -warnings off]
+    set back [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [expr {$back eq $hir}] [lmap r [hir::emission::claims $back] {dict get $r verdict}]
+} -result {1 proven}
+
+test ec-interchange-forged {a forged or stale certificate in interchange text is refused (HIR INTERCHANGE EMISSION): a rejected claim turned proven, a certificate whose statement was edited, a claim's diagnostics removed} -body {
+    set hir [surface::compile "${digitDfa}type DigitValue = Int in 0..9\n\nfn digit(d: DigitValue) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\nfn bad(d: int) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n0\n" -warnings off -strict 0]
+    set records [dict get $hir emissions]
+    set out {}
+    # 1. The rejected claim reported proven, with the certificate of the other.
+    set forged [lmap r $records {
+        if {[dict get $r verdict] eq "rejected"} {
+            dict set r verdict proven
+            dict set r certificate [dict get [lindex $records 0] certificate]
+        }
+        set r
+    }]
+    lappend out [catch {hir::interchange::decode [hir::interchange::encode [dict replace $hir emissions $forged]]} m o] [dict get $o -errorcode]
+    # 2. A certificate's statement edited.
+    set stale [lreplace $records 0 0 [dict set [lindex $records 0] certificate exits {anything}]]
+    lappend out [catch {hir::interchange::decode [hir::interchange::encode [dict replace $hir emissions $stale]]} m o] [dict get $o -errorcode]
+    # 3. The claim's diagnostics removed.
+    set clean [lmap d [dict get $hir diagnostics] {if {[string match EMIT-* [dict get $d kind]]} continue; set d}]
+    lappend out [catch {hir::interchange::decode [hir::interchange::encode [dict replace $hir diagnostics $clean]]} m o] [dict get $o -errorcode]
+} -result {1 {HIR INTERCHANGE EMISSION} 1 {HIR INTERCHANGE EMISSION} 1 {HIR INTERCHANGE EMISSION}}
+
+test ec-cache {a front-end cache entry is verified again when it is read: a hit equals the build; an entry whose certificate was forged is a miss, rebuilt} -body {
+    set dir [emit::workspace main.bot "import emitlib\n\n0\n"]
+    set cache [file join $dir cache]
+    file mkdir $cache
+    set a [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache]
+    set before [dict get $::surface::cache::stats hits]
+    set b [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache]
+    set hit [expr {[dict get $::surface::cache::stats hits] - $before}]
+    # Forge every entry: one claim's verdict.
+    foreach entry [glob -directory $cache -type f *] {
+        set text [readFile $entry]
+        emit::writeText $entry [regsub {statement [0-9a-f]{16}} $text {statement 0000000000000000}]
+    }
+    set invalid [dict get $::surface::cache::stats invalid]
+    set c [surface::readProgramFile [file join $dir main.bot] -warnings off -cache $cache]
+    list [expr {$a eq $b}] $hit [expr {[dict get $::surface::cache::stats invalid] - $invalid}] [expr {$c eq $a}]
+} -result {1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Static intrinsics
+
+test ec-static-compile {a claim in a static compile block is decided like any diagnostic: a rejected claim rejects the block, with its DiagnosticCode} -body {
+    set text "import std::compiler\n${digitDfa}fn probe() -> str errors std::compiler::CompilerError:\n    static compile:\n        fn bad(d: int) -> unit emits digit_token:\n            yield 48 + d\n            unit\n        0\n    \"accepted\"\n\nprobe():\n    on std::compiler::CompilerError {code}:\n        \"rejected\"\n"
+    set hir [surface::compile $text -warnings off]
+    set sites [hir::static::sites $hir]
+    lmap {key site} $sites {
+        list [dict get $site outcome] [dict get $site diagnostic kind] [hir::static::CodeOf [dict get $site diagnostic kind]]
+    }
+} -result {{rejected EMIT-END-SYMBOL EmitEndSymbol}}
+
+# ---------------------------------------------------------------------------
+# The compiler service
+
+test ec-service {hover on a claimed function shows its guarantee (or why it has none); on the claim's recognizer name, the recognizer: its definition, and its references, the claim among them} -body {
+    set dir [emit::workspace main.bot "${digitDfa}type DigitValue = Int in 0..9\n\nfn digit(d: DigitValue) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\nfn bad(d: int) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n0\n"]
+    set ws [service::workspace -root $dir]
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    set path [file join $dir main.bot]
+    set good [service::at $rev $path 11 4]
+    set badHover [service::at $rev $path 15 4]
+    set claim [service::at $rev $path 11 41]
+    set out [list [lindex [split [dict get $good hover] \n] 1] [lindex [split [dict get $badHover hover] \n] 1] \
+        [dict get $claim construct kind] [dict get $claim definition line] \
+        [lmap r [dict get $claim references] {dict get $r line}]]
+    service::closeWorkspace $ws
+    set out
+} -result {{emits digit_token: certified to emit digit_token: every normal completion has yielded exactly one token, every prefix it yields is viable; its token completes on its own last symbol} {emits digit_token: rejected -- the analysis found a trace the recognizer does not accept (see its diagnostics)} emits-claim 5 {11 15}}
+
+# ---------------------------------------------------------------------------
+# The examples
+
+test ec-examples-certified {examples/dfa/json's emitters: every claim certified, from a program that calls none of them and from the probe program that runs them all} -body {
+    set dir [emit::workspace main.bot "import value_emit\nimport emitlib\n\n0\n"]
+    set a [emit::results [emit::compile [file join $dir main.bot]] *]
+    set b [emit::results [emit::compile [file join $dir emit_probes.bot]] *]
+    list [llength $a] [lsort -unique [lmap c $a {lindex $c 1}]] [llength $b] [lsort -unique [lmap c $b {lindex $c 1}]]
+} -result {28 proven 22 proven}
+
+test ec-examples-run {emit_probes.bot runs the same on the Tcl compiler and on fused native code; its integers are one json_number each, its texts one json_text each (the reference interpreter), and CPython reads them as the values they denote} -constraints {nativeCoroutines python3} -body {
+    set dir [emit::workspace]
+    set hir [surface::readProgramFile [file join $dir emit_probes.bot] -warnings off]
+    set a [outcomeUnderHir compile $hir]
+    set b [outcomeUnderHir cranelift $hir]
+    set outputs [lindex [string map {\[ \{ \] \} , ""} [lindex $a 1]] 0]
+    set model [emit::reference $dir emit_probes.bot]
+    set verdicts {}
+    foreach i {0 1 2 3 4} {
+        lappend verdicts [dfaref::text [dfaref::run $model json_lex json_number [concat [lindex $outputs $i] -1] 0]]
+    }
+    set text [lindex $outputs 10]
+    lappend verdicts [lindex [dfaref::text [dfaref::run $model json_grammar json_text [concat $text -1] 0]] 0]
+    set json [join [lmap c $text {format %c $c}] ""]
+    emit::writeText [file join $dir doc.json] $json
+    set parsed [exec python3 -I -c {
+import json, sys
+v = json.loads(open(sys.argv[1], encoding="utf-8").read())
+print(len(v), json.dumps(v["ab"], separators=(",", ":"))[:40])
+} [file join $dir doc.json]]
+    set ints [lmap i {0 1 2 3 4} {join [lmap c [lindex $outputs $i] {format %c $c}] ""}]
+    # json.bot's own validator over the same text.
+    emit::writeText [file join $dir validate.bot] "import json\n\njson::validate_scalars(\[\[[join $text {, }]\]\], 64, 4096):\n    on json::Lexical:\n        json::Summary {tokens: -1, symbols: 0}\n    on json::Truncated:\n        json::Summary {tokens: -2, symbols: 0}\n    on json::Structure:\n        json::Summary {tokens: -3, symbols: 0}\n    on json::TooDeep:\n        json::Summary {tokens: -4, symbols: 0}\n    on json::TokenTooLong:\n        json::Summary {tokens: -5, symbols: 0}\n"
+    set summary [outcomeUnderHir compile [surface::readProgramFile [file join $dir validate.bot] -warnings off]]
+    list [expr {$a eq $b}] [lindex $a 0] $verdicts $parsed $ints [expr {[string match "*tokens: -*" $summary] == 0}]
+} -result {1 value {{accept 1 0} {accept 4 0} {accept 20 0} {accept 1 0} {accept 3 0} accept} {4 -12} {0 -120 98765432109876543210 0 -77} 1}
+
+test ec-examples-warning-clean {the emitter modules compile under -warnings error (the warning gate's corpus does not include examples/dfa)} -body {
+    set dir [emit::workspace main.bot "import value_emit\nimport emitlib\nimport sinks\n\n0\n"]
+    surface::readProgramFile [file join $dir main.bot] -warnings error
+    string cat ok
+} -result ok
+
+test ec-example-invalid {examples/dfa/json/invalid_emitter.bot is rejected, its diagnostic the guarantee's demonstration} -body {
+    catch {surface::readProgramFile [file join $::emit::jsonDir invalid_emitter.bot] -warnings off} message options
+    lindex [dict get $options -errorcode] end
+} -result EMIT-BOUNDARY
+
+emit::cleanup
+cleanupTests

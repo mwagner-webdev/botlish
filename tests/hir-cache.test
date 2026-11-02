@@ -429,4 +429,56 @@ test hc-qualifier-namespace-appears {a file the loader asked about is a dependen
     removeDirectory hc-qualifier
 } -result {false {misses 1 stores 1} {hits 1} 0 1 AMBIGUOUS-QUALIFIER 1}
 
+
+# The outcome of the program file PATH, compiled through the cache in DIR
+# (hcCompile) and from scratch: {OUTCOME SAME} -- OUTCOME the value (on the
+# compile backend) or the error's kind, SAME 1 if the clean compilation's is
+# the same.
+proc hcOutcomes {path dir} {
+    set outcomes {}
+    foreach cache [list $dir ""] {
+        if {[catch {surface::readProgramFile $path -cache $cache -warnings off} hir options]} {
+            lappend outcomes [lindex [dict get $options -errorcode] end]
+        } else {
+            lappend outcomes [hcValue $hir]
+        }
+    }
+    return [list [lindex $outcomes 0] [expr {[lindex $outcomes 0] eq [lindex $outcomes 1]}]]
+}
+
+test hc-implementation-context-edits {the change experiments of TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md (section 13) as edits through the front-end cache: an implementation that acquires a context requirement (MISSING-CONTEXT), an installation added, the requirement moving into a helper, a second provider (AMBIGUOUS-CONTEXT-IMPLEMENTATION), the witness changing to one that needs nothing, an unselected implementation changing, the installation removed, one implementation changing its yield and its requirement together -- every compilation through the cache has the outcome of a clean one (an edited module is the entry's dependency: hc-module-edited)} -setup {
+    set dir [makeDirectory hc-impl-context]
+    set cache [file join $dir cache]
+    hcWrite [file join $dir defs.bot] "trait Thing:\n    fn show(t: Thing) -> int\n\ncontext trait Log:\n    fn level() -> int\n\nfn logged(context g: Log) -> int:\n    g.level()\n\nfn twice(t: Thing) -> int:\n    t.show() + t.show()\n"
+    foreach {name value} {lp 100 lq 200} {
+        hcWrite [file join $dir $name.bot] "type Small = Int in 0..1000\n\ncontext struct P:\n    l: Small\n\nfn create() -> P:\n    P {l: $value}\n\nfn level(context c: P) -> int:\n    c.l\n"
+    }
+    hcWrite [file join $dir bee.bot] "struct B:\n    w: int\n\nfn show(t: B) -> int:\n    t.w\n"
+    hcWrite [file join $dir yy.bot] "import defs\n\nstruct Y:\n    v: int\n\nfn show(t: Y) -> int:\n    yield t.v\n    t.v + defs::logged()\n"
+    set imports "import defs\nimport ay\nimport bee\nimport yy\nimport lp\nimport lq\n\n"
+    set path [file join $dir program.bot]
+} -body {
+    set results {}
+    foreach {ay program} [list \
+            "fn helper(n: int) -> int:\n    n\n\nfn show(t: A) -> int:\n    helper(t.v)\n" "defs::twice(ay::A {v: 1})\n" \
+            "fn helper(n: int) -> int:\n    n\n\nfn show(t: A) -> int:\n    helper(t.v) + defs::logged()\n" "defs::twice(ay::A {v: 1})\n" \
+            "fn helper(n: int) -> int:\n    n\n\nfn show(t: A) -> int:\n    helper(t.v) + defs::logged()\n" "with context lp::create()\ndefs::twice(ay::A {v: 1})\n" \
+            "fn helper(n: int) -> int:\n    n + defs::logged()\n\nfn show(t: A) -> int:\n    helper(t.v)\n" "with context lp::create()\ndefs::twice(ay::A {v: 1})\n" \
+            "fn helper(n: int) -> int:\n    n + defs::logged()\n\nfn show(t: A) -> int:\n    helper(t.v)\n" "with context lp::create()\nwith context lq::create()\ndefs::twice(ay::A {v: 1})\n" \
+            "fn helper(n: int) -> int:\n    n + defs::logged()\n\nfn show(t: A) -> int:\n    helper(t.v)\n" "with context lp::create()\ndefs::twice(bee::B {w: 2})\n" \
+            "fn helper(n: int) -> int:\n    n\n\nfn show(t: A) -> int:\n    helper(t.v)\n" "with context lp::create()\ndefs::twice(bee::B {w: 2})\n" \
+            "fn helper(n: int) -> int:\n    n\n\nfn show(t: A) -> int:\n    helper(t.v)\n" "defs::twice(bee::B {w: 2})\n" \
+            "fn helper(n: int) -> int:\n    n\n\nfn show(t: A) -> int:\n    helper(t.v)\n" "with context lp::create()\ncoroutine {step, first} = defs::twice(yy::Y {v: 5})\na = step()\n\[first, a, step()\]\n"] {
+        hcWrite [file join $dir ay.bot] "import defs\n\nstruct A:\n    v: int\n\n$ay"
+        hcWrite $path "$imports$program"
+        lappend results [hcOutcomes $path $cache]
+    }
+    # The implementation stops yielding and needing Log: the construction
+    # is never-yielding.
+    hcWrite [file join $dir yy.bot] "struct Y:\n    v: int\n\nfn show(t: Y) -> int:\n    t.v\n"
+    lappend results [hcOutcomes $path $cache]
+} -cleanup {
+    removeDirectory hc-impl-context
+} -result {{2 1} {MISSING-CONTEXT 1} {202 1} {202 1} {AMBIGUOUS-CONTEXT-IMPLEMENTATION 1} {4 1} {4 1} {4 1} {{[5, 5, 210]} 1} {COROUTINE-RHS-NOT-YIELDING 1}}
+
 cleanupTests

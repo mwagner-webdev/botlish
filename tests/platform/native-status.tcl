@@ -321,6 +321,14 @@ fib(20)
 
 fib(20)
 } {}] \
+    main-thread-executable [list main-thread-executable {fn fib(n):
+    if n <= 1:
+        return n
+
+    fib(n - 1) + fib(n - 2)
+
+fib(20)
+} {}] \
     target [list target {} {}] \
     c-convention [list convention {import std::ffi::c
 
@@ -410,6 +418,13 @@ f(1)
 # before the shadow stack's depth check fired. The outcomes are the same
 # line; what makes it is now the guard, and no call can fail for it.
 #
+# A standalone executable started on the process's main thread
+# (main-thread-executable: native::executable -startup main-thread,
+# MAIN-THREAD-STARTUP-MILESTONE-1.md) is macos-aarch64's: there it prints its
+# value and its startup report says the policy and that the thread is the
+# process's main thread; every other target refuses the policy before
+# anything is linked (NATIVE UNSUPPORTED startup), saying why.
+#
 # Since milestone 2 (MACOS-AARCH64-MILESTONE-2.md) a program importing a
 # Linux namespace does not compile for macos-aarch64 at all
 # (UNSUPPORTED-PLATFORM), where it used to compile with Linux's
@@ -445,10 +460,12 @@ set expected [dict create \
     linux-x86_64 [dict merge $linux {
         object {value {elf x86_64 relocatable}}
         executable {value {{elf x86_64 shared} 6765}}
+        main-thread-executable {error {NATIVE UNSUPPORTED startup} {the startup policy main-thread is supported for macOS AArch64 native executables only, and this executable is for linux-x86_64. On Linux, glibc reports no guard*}}
     }] \
     linux-aarch64 [dict merge $linux {
         object {value {elf aarch64 relocatable}}
         executable {value {{elf aarch64 shared} 6765}}
+        main-thread-executable {error {NATIVE UNSUPPORTED startup} {the startup policy main-thread is supported for macOS AArch64 native executables only, and this executable is for linux-aarch64. On Linux, glibc reports no guard*}}
     }] \
     macos-aarch64 [dict create \
         jit {value 6765} \
@@ -475,6 +492,7 @@ unit}}} \
         windows-executable {error {SURFACE MODULE UNSUPPORTED-PLATFORM} {*namespace "std::windows::io" belongs to the Windows platform*unavailable for target macos-aarch64 (macOS on aarch64)*}} \
         object {value {macho arm64 object}} \
         executable {value {{macho arm64 execute} 6765}} \
+        main-thread-executable {value {{macho arm64 execute} 6765 {startup main-thread} {process-main-thread 1}}} \
         target {value {format macho c-call-conv apple_aarch64 runs 1}} \
         c-convention {value {labs apple_aarch64 abs apple_aarch64}} \
         c-variadic {value {printf apple_aarch64}} \
@@ -505,6 +523,7 @@ unit}}} \
 unit}}} \
         object {value {coff x86_64 object}} \
         executable {value {{pe x86_64 executable} 6765}} \
+        main-thread-executable {error {NATIVE UNSUPPORTED startup} {the startup policy main-thread is supported for macOS AArch64 native executables only, and this executable is for windows-x86_64. On Windows, the main thread's stack is the 1 MiB link.exe reserves*}} \
         target {value {format coff c-call-conv windows_fastcall runs 1}} \
         c-convention {value {labs windows_fastcall abs windows_fastcall}} \
         c-variadic {value {printf windows_fastcall}} \
@@ -592,6 +611,20 @@ proc observe {name} {
                 return [outcome $environment {
                     set path [native::executable [surface::compile $argument -warnings off] [file join $work probe]]
                     list [binaryHeader $path] [string trim [exec $path]]
+                }]
+            } finally {
+                file delete -force $work
+            }
+        }
+        main-thread-executable {
+            set work [file tempdir botlish-native-status]
+            try {
+                return [outcome $environment {
+                    set path [native::executable [surface::compile $argument -warnings off] [file join $work probe] -startup main-thread]
+                    set report [file join $work report]
+                    set value [string trim [exec env BOTLISH_NATIVE_STARTUP_REPORT=$report $path]]
+                    set lines [split [core::ReadFile $report] \n]
+                    list [binaryHeader $path] $value [lsearch -inline $lines {startup *}] [lsearch -inline $lines {process-main-thread *}]
                 }]
             } finally {
                 file delete -force $work

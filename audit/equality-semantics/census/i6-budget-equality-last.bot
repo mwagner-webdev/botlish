@@ -1,0 +1,53 @@
+# I6 the same comparison requested after 16 other instances of same?: no instance sees it
+fn same?(a, b):
+    a == b
+struct S1:
+    n: int
+struct S2:
+    n: int
+struct S3:
+    n: int
+struct S4:
+    n: int
+struct S5:
+    n: int
+struct S6:
+    n: int
+struct S7:
+    n: int
+struct S8:
+    n: int
+struct S9:
+    n: int
+struct S10:
+    n: int
+struct S11:
+    n: int
+struct S12:
+    n: int
+struct S13:
+    n: int
+struct S14:
+    n: int
+struct S15:
+    n: int
+struct S16:
+    n: int
+r1 = same?(S1 {n: 1}, S1 {n: 1})
+r2 = same?(S2 {n: 2}, S2 {n: 2})
+r3 = same?(S3 {n: 3}, S3 {n: 3})
+r4 = same?(S4 {n: 4}, S4 {n: 4})
+r5 = same?(S5 {n: 5}, S5 {n: 5})
+r6 = same?(S6 {n: 6}, S6 {n: 6})
+r7 = same?(S7 {n: 7}, S7 {n: 7})
+r8 = same?(S8 {n: 8}, S8 {n: 8})
+r9 = same?(S9 {n: 9}, S9 {n: 9})
+r10 = same?(S10 {n: 10}, S10 {n: 10})
+r11 = same?(S11 {n: 11}, S11 {n: 11})
+r12 = same?(S12 {n: 12}, S12 {n: 12})
+r13 = same?(S13 {n: 13}, S13 {n: 13})
+r14 = same?(S14 {n: 14}, S14 {n: 14})
+r15 = same?(S15 {n: 15}, S15 {n: 15})
+r16 = same?(S16 {n: 16}, S16 {n: 16})
+bad = same?("-", '-')
+bad

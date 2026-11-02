@@ -626,24 +626,26 @@ args.length() >= 1
 
 @topic stdlib.module.std::list
 title: -
-summary: Immutable List operations: length, indexed access (at, get), append, and the search helpers any?, all?, none? and find.
+summary: Immutable List operations: length, indexed access (at, get), append, flat (one level of nesting removed), and the search helpers any?, all?, none? and find.
 index: stdlib
 keywords: list functions; array functions; sequence operations
-related: concept.lists concept.list-length task.list-element capability.map-filter
+related: concept.lists concept.list-length task.list-element capability.map-filter stdlib.std::list::flat
 
-== NOTES Four intrinsics (std::list::length, std::list::at,
-std::list::append and the length validator std::list::with_length) and the
-ordinary Botlish functions of stdlib/list.bot built on them. `import
-std::list` makes both callable, qualified (std::list::at(xs, 0)) or as
-methods (xs.at(0)). A List is immutable: append returns a new List and
-nothing changes one in place (a MutableVector is the growable mutable
-alternative).
+== NOTES Five intrinsics (std::list::length, std::list::at,
+std::list::append, std::list::flat and the length validator
+std::list::with_length) and the ordinary Botlish functions of
+stdlib/list.bot built on them. `import std::list` makes both callable,
+qualified (std::list::at(xs, 0)) or as methods (xs.at(0)). A List is
+immutable: append and flat return a new List and nothing changes one in
+place (a MutableVector is the growable mutable alternative).
 
 There is deliberately no map, filter, reduce, sum, reverse, sort, slice,
-concatenation of two Lists or index-of: a collecting loop
-(`loop x in xs: f(x)`, with `continue` to skip) is the transformation
-(capability.map-filter), and std::list::any?, all?, none? and find cover
-search.
+flat_map or index-of: a collecting loop (`loop x in xs: f(x)`, with
+`continue` to skip) is the transformation (capability.map-filter), a fold
+reduces (concept.folds), std::list::flat joins Lists (flat([xs, ys]) is
+their concatenation, and a collecting loop whose body makes a List, then
+flat, is what other languages call flat_map), and std::list::any?, all?,
+none? and find cover search.
 
 @topic stdlib.std::list::length
 title: -
@@ -713,14 +715,16 @@ title: -
 summary: A new List of the elements of xs followed by one value, written xs.append(v); xs itself is unchanged.
 index: stdlib
 keywords: add element; push; append item; insert at end; extend
-related: concept.lists stdlib.list stdlib.module.std::mutable_vector stdlib.std::str::append_char
+related: concept.lists stdlib.list stdlib.module.std::mutable_vector stdlib.std::str::append_char stdlib.std::list::flat
 
 == NOTES
 Lists are immutable values, so append builds a new List one element
 longer and every other holder of xs still sees the old one. It appends
 exactly one value: appending a List adds it as a single, nested element.
-There is no operation that joins two Lists; build the combined List with
-a collecting loop, or use a MutableVector (std::mutable_vector::push) when
+Each append copies the List it extends, so a List built by appending in a
+fold costs time quadratic in its length: join Lists with std::list::flat
+(flat([xs, ys]) is their concatenation, in linear time), build with a
+collecting loop, or use a MutableVector (std::mutable_vector::push) when
 many elements are added one by one.
 
 == EXAMPLES
@@ -731,6 +735,72 @@ xs = [1, 2]
 ys = xs.append(3)
 [xs, ys, xs.append([4])]
 @value [[1, 2], [1, 2, 3], [1, 2, [4]]]
+@end
+
+@topic stdlib.std::list::flat
+title: -
+summary: A new List of the elements of every List in lists, in order -- exactly one level of nesting removed -- written lists.flat(); lists itself is unchanged.
+index: stdlib
+alias: flatten; flatten a list; concat lists; concatenate lists; join lists; flat_map; flatmap; concat_map
+keywords: flatten; concatenate; join lists; combine lists; merge lists; nested list; list of lists; flat map
+related: concept.lists capability.map-filter concept.folds stdlib.std::list::append stdlib.module.std::list concept.list-length
+
+== NOTES
+std::list::flat[T](lists: List[List[T]]) -> List[T]: the elements of the
+first List, then of the second, and so on. It removes exactly one level:
+flat([[[1, 2]], [[3]]]) is [[1, 2], [3]], never [1, 2, 3]; empty Lists
+contribute nothing, duplicates stay, and the elements are neither compared,
+converted nor copied deeply. flat([xs, ys]) is the concatenation of two
+Lists. It is eager and linear: one pass over lists, one new List of exactly
+the total length, each inner List copied into place once -- never a prefix
+copied again, as appending in a loop would.
+
+The argument must be a List of Lists: flat([1, 2]) is a TYPE error at
+compile time, and an element that is no List is the run-time TYPE error
+`std::list::flat element I: expected list, got V` where the compiler cannot
+see the element type (`any`). The result's type is List[T] for a
+List[List[T]]; when the inner Lists all have one proven length M and the
+outer one N, the result is List[T]{length: N*M} (concept.list-length).
+
+flat_map is not a separate function: write the collecting loop, bound to a
+name (a loop is never a call argument: rule.loop-placement), then flatten
+it. Only flat itself is linear; the loop still builds its List and each
+inner List (no fusion), and a fold that grows a List by appending still
+copies it on every append. Runs on every backend.
+
+== EXAMPLES
+@example accept
+import std::list
+
+[std::list::flat([[1, 2], [], [3, 4]]), std::list::flat([[], []]), std::list::flat([[[1, 2]], [[3]]])]
+@value [[1, 2, 3, 4], [], [[1, 2], [3]]]
+@caption One level removed, in order; empty Lists contribute nothing
+@end
+
+@example accept
+import std::list
+
+fn expand(x: int) -> List[int]:
+    if x > 2:
+        [x, x * 10]
+    else:
+        []
+
+xs = [1, 2, 3, 4]
+chunks = loop x in xs:
+    expand(x)
+chunks.flat()
+@value [3, 30, 4, 40]
+@caption flat_map: a collecting loop, then flat
+@end
+
+@example reject
+import std::list
+
+std::list::flat([1, 2])
+@caption Not a List of Lists
+@error CORE SEMANTIC TYPE
+@at 3:17
 @end
 
 @topic stdlib.std::list::with_length
@@ -1144,7 +1214,7 @@ title: -
 summary: Whether a one-character String is a letter (Unicode general category L*), exactly as Tcl 9's [:alpha:] decides; a temporary compatibility primitive.
 index: stdlib
 keywords: is letter; alphabetic; character class; unicode letter
-related: stdlib.std::str::is_tcl_alnum stdlib.module.std::ascii stdlib.std::web::emailish?
+related: stdlib.std::str::is_tcl_alnum stdlib.std::char::is_tcl_alpha stdlib.module.std::ascii stdlib.std::web::emailish?
 
 == NOTES
 Exists so that stdlib/web.bot's emailish? can reproduce Tcl's character
@@ -1153,8 +1223,10 @@ character-classification API, so new code should not build on it. True
 for general categories Lu, Ll, Lt, Lm and Lo -- Unicode-aware, not
 ASCII-only. The argument must be a String of exactly one character;
 anything else (the empty String included) is the run-time RANGE error.
-It takes a String, not a UnicodeChar, so pass a one-character slice. For
-byte values, std::ascii::is_alphabetic is the structural ASCII test.
+It takes a String, not a UnicodeChar, so pass a one-character slice; for a
+character (std::str::char_at's result) std::char::is_tcl_alpha decides the
+same class without a slice. For byte values, std::ascii::is_alphabetic is
+the structural ASCII test.
 
 == EXAMPLES
 @example accept
@@ -1173,14 +1245,15 @@ title: -
 summary: Whether a one-character String is a letter or a decimal digit (categories L* and Nd), exactly as Tcl 9's [:alnum:] decides; a temporary compatibility primitive.
 index: stdlib
 keywords: is alphanumeric; letter or digit; character class
-related: stdlib.std::str::is_tcl_alpha stdlib.std::ascii::is_alphanumeric
+related: stdlib.std::str::is_tcl_alpha stdlib.std::char::is_tcl_alnum stdlib.std::ascii::is_alphanumeric
 
 == NOTES
 std::str::is_tcl_alpha plus general category Nd (decimal numbers, in any
 script); other numerals (Roman numerals, superscripts) are not included.
 Same contract as std::str::is_tcl_alpha: exactly one character or the
 run-time RANGE error, and a temporary compatibility primitive rather than a
-general API.
+general API. For a character, std::char::is_tcl_alnum decides the same
+class.
 
 == EXAMPLES
 @example accept
@@ -1196,18 +1269,21 @@ text = "7-"
 
 @topic stdlib.module.std::char
 title: -
-summary: The UnicodeChar operation: std::char::scalar_value, a character's Unicode scalar value as an Int.
+summary: The UnicodeChar operations: std::char::scalar_value, a character's Unicode scalar value as an Int, and the character classes std::char::is_tcl_alpha and std::char::is_tcl_alnum.
 index: stdlib
-keywords: character functions; char functions; unicode character
-related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char
+keywords: character functions; char functions; unicode character; character class
+related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char stdlib.std::char::is_tcl_alpha stdlib.std::char::is_tcl_alnum
 
 == NOTES
-`char` has no module file: its one member is an intrinsic. A UnicodeChar is
+`char` has no module file: its members are intrinsics. A UnicodeChar is
 written as a character literal ('a', '\n', '😀') and read from a String with
 std::str::char_at; it becomes text with std::str::append_char. There is no
-conversion from an Int to a UnicodeChar and no character classification
-beyond comparing scalar values (plus the byte-level ascii:: predicates and
-the temporary std::str::is_tcl_alpha/alnum).
+conversion from an Int to a UnicodeChar. A character is classified with
+std::char::is_tcl_alpha and std::char::is_tcl_alnum (Tcl 9's [:alpha:] and
+[:alnum:], the classes the temporary std::str forms decide for a
+one-character String), compared with character literals (c == '_'), or
+measured with std::char::scalar_value (with the byte-level ascii::
+predicates for an ASCII scalar).
 
 @topic stdlib.std::char::scalar_value
 title: -
@@ -1230,6 +1306,63 @@ import std::char
 
 ['A'.scalar_value(), 'é'.scalar_value(), '😀'.scalar_value()]
 @value [65, 233, 128512]
+@end
+
+@topic stdlib.std::char::is_tcl_alpha
+title: -
+summary: Whether a character (UnicodeChar) is a letter (Unicode general category L*), exactly as Tcl 9's [:alpha:] decides: std::str::is_tcl_alpha's class, for a character instead of a one-character String.
+index: stdlib
+keywords: is letter; alphabetic; character class; unicode letter; classify character
+related: stdlib.module.std::char stdlib.std::char::is_tcl_alnum stdlib.std::str::is_tcl_alpha stdlib.std::str::char_at stdlib.std::web::emailish?
+
+== NOTES
+True for general categories Lu, Ll, Lt, Lm and Lo -- Unicode-aware, not
+ASCII-only -- and for no other character: not a decimal digit, a Roman
+numeral (Nl), a combining mark or punctuation. It decides what
+std::str::is_tcl_alpha decides for the one-character String of the same
+character, but it is total -- every UnicodeChar is one character, so there
+is no RANGE case -- and it never makes a String: read the characters of a
+text with std::str::char_at and classify them as they are
+(UNICODECHAR-CLASSIFIERS.md). Like the std::str form, it reproduces Tcl's
+class rather than being Botlish's eventual character-classification API.
+Its parameter is a UnicodeChar: a one-character String is the TYPE error,
+and a method-style call x.is_tcl_alpha() with both std::char and std::str
+imported needs x's type to choose (with an untyped x it is
+AMBIGUOUS-METHOD-CALL: call the one you mean).
+
+== EXAMPLES
+@example accept
+import std::char
+import std::str
+
+text = "é7例"
+loop i from 0 to text.length():
+    std::char::is_tcl_alpha(text.char_at(i))
+@value [true, false, true]
+@caption A character read from a String, classified without a slice
+@end
+
+@topic stdlib.std::char::is_tcl_alnum
+title: -
+summary: Whether a character (UnicodeChar) is a letter or a decimal digit (categories L* and Nd), exactly as Tcl 9's [:alnum:] decides: std::str::is_tcl_alnum's class, for a character.
+index: stdlib
+keywords: is alphanumeric; letter or digit; character class; classify character
+related: stdlib.module.std::char stdlib.std::char::is_tcl_alpha stdlib.std::str::is_tcl_alnum stdlib.std::ascii::is_alphanumeric
+
+== NOTES
+std::char::is_tcl_alpha plus general category Nd (decimal numbers, in any
+script: ARABIC-INDIC DIGIT ZERO is alnum and not alpha); other numerals
+(Roman numerals, circled digits, fractions, superscripts) are not included.
+Total and allocation-free, like std::char::is_tcl_alpha; it decides what
+std::str::is_tcl_alnum decides for the one-character String of the same
+character.
+
+== EXAMPLES
+@example accept
+import std::char
+
+['7'.is_tcl_alnum(), '٠'.is_tcl_alnum(), 'Ⅻ'.is_tcl_alnum(), '_'.is_tcl_alnum()]
+@value [true, true, false, false]
 @end
 
 @topic stdlib.module.std::decimal_rounded
@@ -2280,15 +2413,17 @@ keywords: byte storage; raw bytes; byte buffer
 related: stdlib.module.std::abi::bytes stdlib.module.std::mutable_byte_store
 
 == NOTES
-Two intrinsics, no module file. A byte storage is a runtime value kind of
-its own: an immutable, finite sequence of bytes with an exact length, no
+Intrinsics, no module file. A byte storage is a runtime value kind of its
+own: an immutable, finite sequence of bytes with an exact length, no
 terminator, compared and hashed by its bytes. No source type spells it (its
 static type is any); std::abi::bytes::Bytes is the opaque struct whose one
 field holds one, and only module std::abi::bytes can construct or open a
-Bytes. So programs use std::abi::bytes::from_list and
-std::abi::bytes::length; these intrinsics are what that module is written
-in. There is deliberately no operation that reads, slices or iterates the
-bytes.
+Bytes. So programs use std::abi::bytes::from_list, std::abi::bytes::length
+and the rest of that module; these intrinsics are what it is written in.
+There is deliberately no operation that indexes or iterates the bytes: they
+are combined and cut whole (join, slice) and converted to and from text
+(decode_utf8; encode_utf16le and decode_utf16le,
+UTF16-BYTE-STORAGE-MILESTONE-1.md).
 
 @topic stdlib.std::byte_store::from_list
 title: -
@@ -2413,6 +2548,57 @@ import std::str
 
 std::byte_store::from_list("hé".encode_utf8()).decode_utf8():
     on InvalidUtf8:
+        "not text"
+@value "hé"
+@end
+
+@topic stdlib.std::byte_store::encode_utf16le
+title: -
+summary: A String's UTF-16LE encoding as a new byte storage: two bytes per code unit, low byte first, no byte-order mark and no terminator.
+index: stdlib
+keywords: encode utf-16; utf16le; string to utf-16 bytes; wide string; utf-16 little endian
+related: stdlib.std::abi::bytes::encode_utf16le stdlib.std::byte_store::decode_utf16le stdlib.module.std::byte_store
+
+== NOTES
+The substrate of std::abi::bytes::encode_utf16le, which is what programs
+call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is one
+UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair, high unit
+first; each unit is stored low byte first whatever the host's byte order.
+U+0000 is the bytes 00 00; nothing is added (no byte-order mark, no NUL
+terminator) and nothing normalized. Total.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").byte_count()
+@value 4
+@end
+
+@topic stdlib.std::byte_store::decode_utf16le
+title: -
+summary: The String whose UTF-16LE encoding is a byte storage's bytes, or the declared error InvalidUtf16.
+index: stdlib
+keywords: decode utf-16; utf16le; utf-16 bytes to string; wide string; InvalidUtf16
+related: stdlib.std::abi::bytes::decode_utf16le stdlib.std::byte_store::encode_utf16le stdlib.module.std::byte_store
+
+== NOTES
+The substrate of std::abi::bytes::decode_utf16le, which is what programs
+call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or code
+units that are not well-formed UTF-16 -- an unpaired high or low surrogate,
+in any position -- is the declared error InvalidUtf16, never a replacement
+character. FF FE is the character U+FEFF, never a byte-order mark: the byte
+order is always little-endian, never detected. A UTF-16 code unit is not a
+character: a surrogate pair is one scalar.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").decode_utf16le():
+    on InvalidUtf16:
         "not text"
 @value "hé"
 @end
@@ -3304,6 +3490,39 @@ p = std::ffi::c::null[std::ffi::c::Void]()
 [p.null?(), p.null?()]
 @value [true, true]
 @caption Observing does not move the pointer
+@end
+
+@topic stdlib.std::ffi::c::callback
+title: -
+summary: The C function pointer of a `callback c fn`, by name: a std::ffi::c::FnPtr of its declared C signature, whose calls run the function in the Botlish execution environment waiting in a foreign call.
+index: stdlib
+keywords: function pointer; C callback; FnPtr of a function; callback address
+related: concept.c-callbacks error.callback-reference stdlib.std::ffi::c::null?
+
+== NOTES
+The argument is the name of a top-level `callback c fn` (CALLBACK-REFERENCE
+otherwise), and the operation is only called, never a value. The pointer is
+affine, like every C pointer: bind it, then pass it to a C function whose
+FnPtr parameter is declared noescape -- C may call it only while such a
+call runs (NATIVE CALLBACK otherwise). Native backends only: the Tcl
+backends refuse it at run time (NATIVE-ONLY).
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+
+callback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    0
+
+fn pointer():
+    cb = std::ffi::c::callback(decide)
+    cb.null?()
+
+decide(4)
+@value 1
+@caption The pointer is made where it is passed to C
 @end
 
 @topic stdlib.std::ffi::c::clone
@@ -4348,7 +4567,7 @@ passed where a std::web::Emailish is required.
 
 @topic stdlib.std::web::local_extra_chars
 title: -
-summary: The punctuation emailish? accepts in an address's local part (. _ % + -), as an ImmutableSet of one-character Strings: an internal table.
+summary: The punctuation emailish? accepts in an address's local part ('.' '_' '%' '+' '-'), as an ImmutableSet of UnicodeChars: an internal table.
 index: stdlib
 keywords: email punctuation
 related: stdlib.std::web::emailish?

@@ -1,0 +1,50 @@
+# VARIANT (BENCHMARK-BIMODALITY.md): bench/uri-steady.bot's workload with
+# the escaping written against features that arrived after the benchmark:
+# std::str::char_at (a UnicodeChar, no one-character String),
+# std::str::append_char and character literals (a table of hex digit
+# characters), a counted loop and a one-slot MutableArray as the
+# accumulator. It escapes exactly as std::web::uri_escape_text does (the
+# value is the same sum of lengths) but there is still no in-place string
+# builder: each append copies the text so far.
+#
+import std::char
+import std::list
+import std::mutable_array
+import std::str
+import std::web
+
+corpus = ["abcXYZ012", "a b+c?", "café", "hello 世界?"]
+hex = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F']
+
+fn put_byte(acc: str, b: int) -> str errors IndexNotFound:
+    acc.append_char('%').append_char(hex.at(b.shift_right(4))).append_char(hex.at(bit_and(b, 15)))
+
+fn escape(s: str) -> str errors IndexNotFound:
+    acc = std::mutable_array::create(1, "")
+    loop i from 0 to std::str::length(s):
+        c = s.char_at(i)
+        v = std::char::scalar_value(c)
+        if v > 127:
+            if v < 2048:
+                acc.set(0, acc.at(0).put_byte(bit_or(192, v.shift_right(6))).put_byte(bit_or(128, bit_and(v, 63))))
+            elif v < 65536:
+                acc.set(0, acc.at(0).put_byte(bit_or(224, v.shift_right(12))).put_byte(bit_or(128, bit_and(v.shift_right(6), 63))).put_byte(bit_or(128, bit_and(v, 63))))
+            else:
+                acc.set(0, acc.at(0).put_byte(bit_or(240, v.shift_right(18))).put_byte(bit_or(128, bit_and(v.shift_right(12), 63))).put_byte(bit_or(128, bit_and(v.shift_right(6), 63))).put_byte(bit_or(128, bit_and(v, 63))))
+        elif std::web::is_unreserved(v):
+            acc.set(0, acc.at(0).append_char(c))
+        else:
+            acc.set(0, acc.at(0).put_byte(v))
+        continue
+    acc.at(0)
+
+fn repeat_uri(i, total, acc) errors IndexNotFound:
+    if i >= total:
+        return acc
+    text = corpus.at(i.mod(std::list::length(corpus)))
+    escaped = escape(text)
+    repeat_uri(i + 1, total, acc + std::str::length(escaped))
+
+0.repeat_uri(2000, 0):
+    on IndexNotFound:
+        -1

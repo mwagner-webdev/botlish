@@ -1,0 +1,13 @@
+# I1 integer domains: overlapping, disjoint, a constant outside
+type Small = Int in 0..9
+type Big = Int in 100..199
+type Mid = Int in 5..150
+fn sb(a: Small, b: Big) -> bool:
+    a == b
+fn sm(a: Small, b: Mid) -> bool:
+    a == b
+fn outside(a: Small) -> bool:
+    a == 12
+fn plain(a: Small, b: int) -> bool:
+    a == b
+[sb(3, 150), sm(7, 7), outside(3), plain(3, 3)]

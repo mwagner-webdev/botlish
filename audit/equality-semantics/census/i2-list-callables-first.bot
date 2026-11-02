@@ -1,0 +1,4 @@
+# I2 a callable compared with an Int inside Lists: refused before kinds are compared
+fn f(x):
+    x
+[f] == [1]

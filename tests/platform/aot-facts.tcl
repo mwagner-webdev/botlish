@@ -31,6 +31,12 @@
 #               the system C library (`nm`); the linker's words for a
 #               missing library and an undefined symbol (MACOS-AARCH64-
 #               MILESTONE-6.md)
+#   main thread the same program linked with the startup policy
+#               main-thread (MAIN-THREAD-STARTUP-MILESTONE-1.md): on macOS
+#               its LC_MAIN reserving 512 MiB and the worker executable's
+#               nothing (`otool -l`), a valid signature, its value and its
+#               main thread's exhaustion run standalone; elsewhere its
+#               refusal (NATIVE UNSUPPORTED startup)
 #   standalone  the executable moved out of its build directory, its source
 #               deleted, run with an empty environment from another
 #               directory: its value, also under BOTLISH_NATIVE_GC_STRESS=1;
@@ -577,6 +583,36 @@ proc checks {} {
     check executable-symbols [expr {[regexp -line "^${prefix}botlish_fn_0 T " $exeSymbols]}] \
         "${prefix}botlish_fn_0 [expr {[regexp -line "^${prefix}botlish_fn_0 T " $exeSymbols] ? "defined" : "missing"}] in the executable" $::toolError
 
+    # ---- The main thread's startup policy: LC_MAIN's stack size (otool -l)
+    # in a main-thread executable, none in the worker's; the main-thread
+    # executable signed, run standalone, its stack exhausted. Refused on
+    # every other host.
+    set mainExecutable [file join $buildDir "probe main"]
+    set refused [catch {native::executable $hir $mainExecutable -startup main-thread} message options]
+    if {![native::hostSupports mainThreadStartup]} {
+        check main-thread-refused [expr {$refused && [dict get $options -errorcode] eq {NATIVE UNSUPPORTED startup} && ![file exists $mainExecutable]}] \
+            [expr {$refused ? "[dict get $options -errorcode]: [string range $message 0 90]..." : "linked, not refused"}] $message
+    } elseif {$refused} {
+        check main-thread-link 0 "[dict get $options -errorcode]: [lindex [split $message \n] 0]" $message
+    } else {
+        set lcMain {}
+        foreach {which path} [list worker $executable main-thread $mainExecutable] {
+            set loads [tool otool -l $path]
+            # From LC_MAIN on, its stacksize: never `.*?` before the digits,
+            # which makes the whole expression non-greedy in Tcl and matches
+            # one digit.
+            set at [string first "cmd LC_MAIN" $loads]
+            if {$at >= 0} { regexp {stacksize (\d+)} [string range $loads $at end] -> size }
+            lappend lcMain $which [expr {[info exists size] ? $size : "none"}]
+            unset -nocomplain size
+        }
+        check main-thread-lc-main [expr {$::toolError eq "" && $lcMain eq {worker 0 main-thread 536870912}}] "LC_MAIN stacksize: $lcMain" $::toolError
+        set verified [tool codesign -v $mainExecutable]
+        check main-thread-signature [expr {$::toolError eq ""}] "codesign -v: [expr {$::toolError eq "" ? "valid" : "invalid"}]" "$::toolError$verified"
+        set outcome [run env -i PATH=/nonexistent $mainExecutable]
+        check main-thread-run [expr {$outcome eq [list 0 "$programValue\n" ""]}] [shown $outcome]
+    }
+
     # The platform linker's command line, as rustc runs it for this link
     # (`--print link-args`, through a wrapper given as RUSTC: the link
     # itself is native::executable's): the linker program and its options,
@@ -620,6 +656,13 @@ proc checks {} {
     check standalone-runtime-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "16 MiB stack, exhausted in the runtime: [shown $outcome]"
     set outcome [standalone co-overflow $coroutineOverflowProgram {}]
     check standalone-co-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] [shown $outcome]
+    if {[native::hostSupports mainThreadStartup]} {
+        # The main thread's own stack exhausted: the guard's line, as the worker's.
+        set path [native::executable [surface::compile [string map {DEPTH 100000000} $downProgram] main-overflow.bot -warnings off] \
+            [file join $runDir main-overflow] -startup main-thread]
+        set outcome [run env -i $path]
+        check standalone-main-thread-overflow [expr {$outcome eq [list 1 "" "$overflowLine\n"]}] "512 MiB main stack: [shown $outcome]"
+    }
 
     cCalls
 

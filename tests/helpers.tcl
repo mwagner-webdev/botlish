@@ -173,6 +173,14 @@ testConstraint nativeDepthChecked [expr {!([testConstraint nativeFrameRoots] && 
 # nativeCCalls.
 testConstraint executableAot [native::hostSupports executables]
 
+# Executables started on the process's main thread (native::executable
+# -startup main-thread, MAIN-THREAD-STARTUP-MILESTONE-1.md): macOS AArch64's
+# only; every other target starts an executable on a worker, and refuses the
+# policy (NATIVE UNSUPPORTED startup). A capability of the host target, never
+# an operating system: a test that runs a main-thread executable carries it
+# (tests/main-thread-startup.test; its refusal elsewhere, mainThreadRefused).
+testConstraint mainThreadStartup [expr {[testConstraint executableAot] && [native::hostSupports mainThreadStartup]}]
+
 # A Unix shell for scripts the tests write and run (`#!/bin/sh` wrappers, `sh
 # -c`): a test that needs one carries this, never an operating system.
 testConstraint unixShell [expr {$::tcl_platform(platform) eq "unix" && [auto_execok sh] ne ""}]
@@ -246,6 +254,12 @@ testConstraint nativeCCalls [native::hostSupports cCalls]
 # lowering would make one a codegen error. A test that compiles one to
 # machine code, or runs one, carries this beside nativeCCalls.
 testConstraint nativeCVariadics [native::hostSupports cVariadics]
+
+# Synchronous C callbacks (C-CALLBACK-MILESTONE-1.md): where the collector's
+# frame-pointer walk crosses a foreign transition (Linux x86-64 and AArch64,
+# macOS AArch64). A test that runs a callback C calls carries this beside
+# nativeCCalls; Windows refuses one (NATIVE CALLBACK UNSUPPORTED).
+testConstraint nativeCCallbacks [native::hostSupports cCallbacks]
 
 # The host's own C toolchain, the one C fixtures are built with
 # (tests/ctoolchain.tcl): cc and ar on Linux and macOS, MSVC's cl, ml64 and

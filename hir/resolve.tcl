@@ -207,6 +207,38 @@ proc hir::resolve::NewBinding {hirVar name kind scope origin} {
     return $b
 }
 
+# A folding loop's initial value (FOLD-LOOPS-MILESTONE-1.md), resolved in
+# the enclosing scope CTX after the loop's own operands -- the order they
+# are written and evaluated in -- into loop E's `foldInitial`. Nothing for
+# a collecting loop NODE.
+proc hir::resolve::ResolveFoldInitial {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    set fold [hir::syntax::foldOf $node]
+    if {$fold eq ""} {
+        return
+    }
+    SetField hir $e foldInitial [Expr hir [dict get $fold initial] $ctx]
+}
+
+# A folding loop's intermediate: a fresh immutable parameter of its
+# iteration scope ITERATION (each iteration binds it anew, to the value the
+# previous one carried), recorded as loop E's `foldBinding`, after the
+# loop's own variables NAMES. Its name is one of those a
+# DUPLICATE-LOOP-VARIABLE, as two lockstep clauses' are.
+proc hir::resolve::BindFold {hirVar e node iteration names} {
+    upvar 1 $hirVar hir
+    set fold [hir::syntax::foldOf $node]
+    if {$fold eq ""} {
+        return
+    }
+    set name [dict get $fold name]
+    if {$name in $names} {
+        hir::Diagnose hir DUPLICATE-LOOP-VARIABLE \
+            "the fold's intermediate \"$name\" has the name of its own loop variable: name the value it carries something else" $e
+    }
+    SetField hir $e foldBinding [NewBinding hir $name param $iteration [dict get $fold origin]]
+}
+
 # Records, for the diagnostic index only (LaterNames), the syntax NODES that
 # make up the body of scope S. Resolution never reads it.
 proc hir::resolve::NoteBody {hirVar s nodes} {
@@ -957,6 +989,55 @@ proc hir::resolve::ResolveProofs {hirVar e node params declaredTypes declared ct
 # 1 if TYPEEXPR (a surface::parser::TypeExpr result) is an application of
 # several type arguments, {apply NAME {ARG ...}} (TRAIT-CONSTRAINED-
 # IMPRINTED-TYPES.md).
+# The emission claims of function block E (its syntax NODE's `emits`,
+# hir::syntax::withEmits), resolved in the scope the function is declared in
+# (CTX's): each recognizer a name of a function binding, by the ordinary
+# rules of a reference -- a module member through its qualified name (the
+# loader has already checked the file may write it: an import, privacy), an
+# unqualified name lexically, established before the claim (no forward
+# reference). A name that denotes nothing is EMIT-RECOGNIZER; whether the
+# binding is a recognizer the emission checker decides (hir/emission.tcl).
+# Sets E's `emits` ({name origin binding} dicts) only when it has claims.
+proc hir::resolve::ResolveEmits {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    if {![dict exists $node emits]} {
+        return
+    }
+    set scope [dict get $ctx scope]
+    set claims {}
+    foreach claim [dict get $node emits] {
+        set name [dict get $claim name]
+        set origin [dict get $claim origin]
+        set q [dict get $claim qualified]
+        set b ""
+        if {$q ne ""} {
+            lassign $q ns member
+            set name ${ns}::$member
+            if {[dict exists $hir modules $ns] && [dict exists $hir scopes [dict get $hir modules $ns] names $member]} {
+                set b [dict get $hir scopes [dict get $hir modules $ns] names $member]
+            }
+        } else {
+            set b [Lookup hir $scope $name]
+        }
+        set entry [dict create name $name origin $origin binding $b]
+        if {$b eq "" && $q eq "" && [AfterBindingHole hir $scope ""]} {
+            # A malformed statement before the function may have declared
+            # it (SYNTAX-RECOVERY-MILESTONE-1.md): not known.
+            dict set entry dependent 1
+        } elseif {$b eq ""} {
+            set message "the claim \"emits $name\" names no recognizer visible here"
+            if {$q eq "" && [DeclaredLater hir $scope $name]} {
+                append message ": \"$name\" is declared later, and a claim names a recognizer declared before the function, like any reference"
+            } else {
+                append message ": a claim names a recognizer declared with \"dfa NAME over ALPHABET:\" (an imported module's as NS::NAME)"
+            }
+            hir::DiagnoseAt hir EMIT-RECOGNIZER $message $e $origin
+        }
+        lappend claims $entry
+    }
+    SetField hir $e emits $claims
+}
+
 proc hir::resolve::IsApplyTypeExpr {typeExpr} {
     return [expr {[llength $typeExpr] == 3 && [lindex $typeExpr 0] eq "apply"}]
 }
@@ -1090,9 +1171,23 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # A C export (hir/exports.tcl): its foreign ABI.
                 SetField hir $e exported [dict get $node exported]
             }
+            if {[dict exists $node callback]} {
+                # A C callback (hir/callbacks.tcl): its foreign ABI.
+                SetField hir $e callback [dict get $node callback]
+            }
             set params {}
             set paramTypes [if {[dict exists $node paramTypes]} {dict get $node paramTypes} else {lrepeat [llength [dict get $node params]] {}}]
             set declaredParamTypes {}
+            set head [hir::traits::CloneHead $ctx $node]
+            # The imprint variables of the functions this one is declared in
+            # (hir/imprint.tcl): a name of one in its signature is that
+            # variable, never one of its own -- in a specialization of the
+            # enclosing function for a binding of its variables
+            # (cloneImprints) too.
+            set enclosing [hir::imprint::EnclosingVariables $hir $ctx]
+            if {$head eq ""} {
+                lappend enclosing {*}[dict keys [dict getdef $ctx cloneImprints {}]]
+            }
             # The variadic parameter (VARIADICS-VERTICAL-SLICE-1.md, hir/
             # variadic.tcl): the last ordinary one, a List.
             set variadic [expr {[dict exists $node variadic] ? [llength [dict get $node params]] - 1 : -1}]
@@ -1124,8 +1219,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     # A bare List in the variadic section: List[T] of a fresh
                     # imprint variable, the element type each call imprints.
                     lappend declaredParamTypes [hir::types::MakeList [list imprint \
-                        [hir::variadic::ElementVariable $node [CtxNamespace $ctx] \
-                            [hir::imprint::EnclosingVariables $hir $ctx]]] {} 0 0]
+                        [hir::variadic::ElementVariable $node [CtxNamespace $ctx] $enclosing]] {} 0 0]
                     continue
                 }
                 # (With imprint variables: hir/imprint.tcl.)
@@ -1159,8 +1253,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # Imprint variables (hir/imprint.tcl): each one a parameter uses
             # must be established by an earlier one.
             set declaredParamTypes [hir::imprint::CheckSignature hir $e $declaredParamTypes \
-                [lmap param [dict get $node params] {lindex $param 0}]]
-            set head [hir::traits::CloneHead $ctx $node]
+                [lmap param [dict get $node params] {lindex $param 0}] $enclosing]
             if {$head ne ""} {
                 # The block of a trait clone (TRAITS.md, "Monomorphization"):
                 # each trait parameter takes its witness type -- the
@@ -1232,6 +1325,24 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # structs give its imprint variables, written on every
             # occurrence -- derived from the contract, never declared.
             lassign [hir::imprint::Constrain $declaredParamTypes $declared] constrainedParams declared
+            if {$enclosing ne {}} {
+                # An enclosing function's variable is that function's, as a
+                # type written in its body names it (hir::imprint::ConstrainEnclosing):
+                # constrained as its signature constrains it, or, in a
+                # specialization of it, the type the binding imprints.
+                set constraints [hir::imprint::EnclosingConstraints $hir $ctx]
+                set traits [dict create]
+                foreach name $enclosing {
+                    dict set traits $name [dict getdef $constraints $name {}]
+                }
+                lassign [hir::imprint::ConstrainEnclosing $constrainedParams $declared $traits] constrainedParams declared
+                set constrainedParams [lmap t $constrainedParams {
+                    if {$t eq {}} { set t } else { hir::imprint::BodyType $ctx $t }
+                }]
+                if {$declared ne {}} {
+                    set declared [hir::imprint::BodyType $ctx $declared]
+                }
+            }
             if {$constrainedParams ne $declaredParamTypes} {
                 set declaredParamTypes $constrainedParams
                 SetField hir $e declaredParamTypes $declaredParamTypes
@@ -1256,6 +1367,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # resolved parameters and result: the generic metadata every
             # consumer reads (hir/refine.tcl), never a predicate's name.
             SetField hir $e proofs [ResolveProofs hir $e $node $params $declaredParamTypes $declared $ctx]
+            # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each
+            # recognizer named, resolved where the function is declared; a
+            # recognizer's own table (surface/dfa.tcl's Lower).
+            ResolveEmits hir $e $node $ctx
+            if {[dict exists $node recognizer]} {
+                SetField hir $e recognizer [dict get $node recognizer]
+            }
             set declaredErrorPairs [dict getdef $node declaredErrors {}]
             set errorNames {}
             set seenErrors [dict create]
@@ -1481,6 +1599,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e known ""
         }
         if {
+            if {[dict exists $node inject]} {
+                # An inject block (RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md):
+                # the context types it injects, as canonical identities
+                # (hir/injection.tcl checks what its code uses against them).
+                SetField hir $e injects [hir::injection::Resolve hir $e [dict get $node inject] [CtxNamespace $ctx]]
+            }
             SetField hir $e condition [Expr hir [dict get $node condition] $ctx]
             foreach {role outcome} {then 1 else 0} {
                 set body [dict get $node ${role}Body]
@@ -1494,20 +1618,24 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e refinements [dict create 1 {} 0 {}]
         }
         loop {
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
+            BindFold hir $e $node $iteration {}
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
         }
         listloop {
             SetField hir $e iterable [Expr hir [dict get $node iterable] $ctx]
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
             set elementBinding [NewBinding hir [dict get $node elementName] param \
                 $iteration [dict get $node elementOrigin]]
+            BindFold hir $e $node $iteration [list [dict get $node elementName]]
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e elementBinding $elementBinding
@@ -1520,11 +1648,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # in the body, exactly like listloop's own element binding.
             SetField hir $e start [Expr hir [dict get $node start] $ctx]
             SetField hir $e end [Expr hir [dict get $node end] $ctx]
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
             set countBinding [NewBinding hir [dict get $node countName] param \
                 $iteration [dict get $node countOrigin]]
+            BindFold hir $e $node $iteration [list [dict get $node countName]]
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e countBinding $countBinding
@@ -1548,6 +1678,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 }
                 lappend domains $domain
             }
+            ResolveFoldInitial hir $e $node $ctx
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
@@ -1565,6 +1696,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 dict unset domain origin
                 lappend resolved $domain
             }
+            BindFold hir $e $node $iteration $seen
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e domains $resolved
@@ -1587,6 +1719,12 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e target $loop
             if {$loop eq ""} {
                 hir::Diagnose hir BREAK-OUTSIDE-LOOP "break outside lexical loop" $e
+            } elseif {$value ne "" && [hir::isFold $hir $loop]} {
+                # A folding loop's every exit carries its intermediate
+                # (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it with
+                # the current one. Only raw core IR can write a payload.
+                hir::Diagnose hir LISTLOOP-BREAK-VALUE \
+                    "break with a value is not valid inside a fold: a bare break ends the fold with its current intermediate value" $e
             } elseif {$value ne "" && [dict get $hir exprs $loop kind] in {listloop countloop lockloop}} {
                 # RETURNING-ITERABLE-LOOPS.md: a returning iterable loop
                 # (`loop x in xs:`) has exactly one stable result type, the
@@ -2185,8 +2323,10 @@ proc hir::resolve::ResolveIdent {hirVar e ident ctx} {
 }
 
 # Resolves call E (syntax NODE) as the trait plan's ACTION says: {redirect
-# KEY} calls clone KEY, {trait IDENT ...} the implementation IDENT names, the
-# receiver of a method-syntax call becoming the first argument; {context
+# KEY} calls clone KEY, {trait OPERATION ?KEY?} the implementation the
+# operation record names (or, with KEY, that implementation's clone: one the
+# plan replaces), the receiver of a method-syntax call becoming the first
+# argument; {context
 # OPERATION ?KEY?} the selected context's implementation of a context-trait
 # operation (or, with KEY, that implementation's own clone), with the written
 # arguments only -- the context-trait binding that was the receiver is no
@@ -2251,7 +2391,13 @@ proc hir::resolve::ResolvePlannedCall {hirVar e node action ctx} {
             ResolveIdent hir $c [list clone [lindex $action 1]] $ctx
         }
         trait {
-            ResolveIdent hir $c [dict get [lindex $action 1] impl] $ctx
+            if {[llength $action] > 2} {
+                # (An implementation the plan replaces by its clone:
+                # hir::traits::CallImplementationClone.)
+                ResolveIdent hir $c [list clone [lindex $action 2]] $ctx
+            } else {
+                ResolveIdent hir $c [dict get [lindex $action 1] impl] $ctx
+            }
             SetField hir $e traitImpl [lindex $action 1]
         }
         method {

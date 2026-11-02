@@ -64,9 +64,10 @@
 //! Windows SDK's import libraries -- by itself, without a Developer Command
 //! Prompt, and the C runtime's startup (`mainCRTStartup`) is rustc's. An
 //! executable's file name ends in `.exe` (`executable_path`).
-use super::{ObjectProgram, emit_object};
+use super::{ObjectProgram, emit_executable_object};
 use crate::nir::{Link, Program};
 use botlish_native::runtime::aotimage::{self, Fixup, Image, Target};
+use botlish_native::runtime::program::Startup;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt::Write;
@@ -133,28 +134,77 @@ impl Drop for WorkDir {
 
 /// The `rustc` linker's startup crate: the same text for every program. The
 /// program object carries its own startup data -- its descriptor, code table
-/// and `botlish_program` record (runtime::program,
-/// NATIVE-LIBRARY-MILESTONE-1.md, "One startup") -- so the crate only names
-/// the record and hands it to `program::instantiate_linked` on the thread
-/// `aot::run` starts, as the stub linker's loader and a native library do.
+/// and `botlish_program` record, its startup policy among them
+/// (runtime::program, NATIVE-LIBRARY-MILESTONE-1.md, "One startup";
+/// MAIN-THREAD-STARTUP-MILESTONE-1.md) -- so the crate only names the record
+/// and hands it to `aot::start_linked`, the system linker's startup too
+/// (`aot::linked_main`), which reads the policy and builds the Vm on the
+/// thread it names, as the stub linker's loader does.
 const STARTUP: &str = "\
 use botlish_native::runtime::{aot, program};
 unsafe extern \"C\" {
     static botlish_program: program::LinkedProgram;
 }
 fn main() {
-    std::process::exit(aot::run(aot::process_argv(), || {
-        // SAFETY: the record the program object defines, relocated by this link.
-        match unsafe { program::instantiate_linked(&*std::ptr::addr_of!(botlish_program)) } {
-            Ok(started) => started,
-            Err(error) => {
-                eprintln!(\"{error} (NATIVE STARTUP)\");
-                std::process::exit(1);
-            }
-        }
-    }));
+    // SAFETY: the record the program object defines, relocated by this link.
+    std::process::exit(unsafe { aot::start_linked(&*std::ptr::addr_of!(botlish_program)) });
 }
 ";
+
+/// The stack a main-thread executable's main thread is linked with
+/// (MAIN-THREAD-STARTUP-MILESTONE-1.md): 512 MiB, the most Apple's ld
+/// gives an arm64 executable (`-stack_size must be <= 512MB on arm64
+/// platforms`; MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, section 11), in
+/// LC_MAIN's `stacksize`. A reservation of address space, which the kernel
+/// maps below the main thread with a one-page guard; nothing is allocated
+/// at startup. A worker executable's stack is the worker's own
+/// (BOTLISH_NATIVE_STACK_BYTES, 1 GiB by default), sized when it runs.
+pub const MAIN_THREAD_STACK_BYTES: u64 = 512 << 20;
+
+/// The arguments of a FLAVOR system linker's C compiler driver that an
+/// executable started by STARTUP needs (`system_link_args`; the rustc
+/// linker passes each as a `-C link-arg=`): for the main-thread policy on
+/// Apple's ld, LC_MAIN's stack size, `-Wl,-stack_size,0x20000000`
+/// (MAIN_THREAD_STACK_BYTES); nothing for the worker, and nothing for any
+/// other linker (`emit_executable` refuses the main-thread policy for every
+/// other target first).
+fn startup_link_args(flavor: LinkerFlavor, startup: Startup) -> Vec<String> {
+    match (flavor, startup) {
+        (LinkerFlavor::Apple, Startup::MainThread) => vec![format!("-Wl,-stack_size,{MAIN_THREAD_STACK_BYTES:#x}")],
+        _ => Vec::new(),
+    }
+}
+
+/// Why an executable of PROGRAM cannot have the startup policy STARTUP:
+/// None when it can (the worker everywhere, the main thread for a macOS
+/// AArch64 target: codegen::target's `main_thread_startup`), else the
+/// NATIVE UNSUPPORTED startup refusal, said before anything is linked or
+/// written.
+pub fn startup_refusal(program: &Program, startup: Startup) -> Option<String> {
+    if startup == Startup::Worker {
+        return None;
+    }
+    let triple = match super::target::executable_triple(program) {
+        Ok(triple) => triple,
+        Err(message) => return Some(message),
+    };
+    if super::target::main_thread_startup(&triple) {
+        return None;
+    }
+    let target = program.target.as_ref().map_or(HOST_TARGET, |t| t.name.as_str());
+    let why = match triple.operating_system {
+        target_lexicon::OperatingSystem::Linux => {
+            " On Linux, glibc reports no guard below the process's main thread's stack, and the stack-overflow guard runs only on a stack whose guard is confirmed (NATIVE-STACK-OVERFLOW.md)."
+        }
+        target_lexicon::OperatingSystem::Windows => {
+            " On Windows, the main thread's stack is the 1 MiB link.exe reserves unless the link reserves more, which no Botlish link does yet."
+        }
+        _ => "",
+    };
+    Some(format!(
+        "the startup policy main-thread is supported for macOS AArch64 native executables only, and this executable is for {target}.{why} No other target has had main-thread startup's acceptance (MAIN-THREAD-STARTUP-MILESTONE-1.md); the worker startup (-native-startup worker, the default) is supported on every target"
+    ))
+}
 
 /// Whether PROGRAM calls C or names a native library (C-FFI.md): it is then
 /// linked by the system linker, and run as an executable.
@@ -247,23 +297,50 @@ fn linker_named(name: Option<&str>, program: &Program, stub: bool) -> Result<Lin
 /// for a framework (-FDIR), in order; and where the driver looks for a
 /// static archive declared without a path (`resolve_link_plan`). The two
 /// lists are kept apart: a framework directory is never a library one.
+///
+/// `runtime` (`--runtime-path`; main.tcl's -runtime-path, and a native
+/// backend's run of a program compiled from a target package tree:
+/// PACKAGE-MANAGER-MILESTONE-2.md, "Native deployment") are directories the
+/// executable's loader searches for its shared libraries, recorded in it by
+/// the GNU and Apple linkers (`-Wl,-rpath,DIR`: an ELF RUNPATH, a Mach-O
+/// LC_RPATH) after every other argument of the plan. Windows' loader has
+/// none (it searches the executable's own directory): `emit_executable`
+/// refuses them there. A program that calls no C links no shared library,
+/// and its link is given none of them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LinkSearch {
     pub libraries: Vec<String>,
     pub frameworks: Vec<String>,
+    pub runtime: Vec<String>,
 }
 
 #[cfg(test)]
 impl LinkSearch {
     /// Library directories DIRS and no framework directory.
     pub fn libraries(dirs: &[String]) -> LinkSearch {
-        LinkSearch { libraries: dirs.to_vec(), frameworks: Vec::new() }
+        LinkSearch { libraries: dirs.to_vec(), ..LinkSearch::default() }
     }
 }
 
-/// Links PROGRAM as a standalone executable at `executable_path(DESTINATION)`
-/// and returns that path (absolute).
-pub fn emit_executable(program: &Program, destination: &Path, search: &LinkSearch) -> Result<PathBuf, LinkError> {
+/// "" when PATH can be one runtime search path argument (`-Wl,-rpath,PATH`,
+/// which GNU's and Apple's compiler drivers split at commas, and a loader's
+/// path list at colons), else why not.
+pub fn runtime_path_problem(path: &str) -> Option<String> {
+    if path.is_empty() || path.contains([',', ':', ';', '\0', '\n']) {
+        return Some(format!("a runtime path is one directory with no comma, colon, semicolon or newline (found {path:?})"));
+    }
+    None
+}
+
+/// Links PROGRAM as a standalone executable at `executable_path(DESTINATION)`,
+/// started by STARTUP (runtime::program's `Startup`, recorded in its program
+/// record), and returns that path (absolute). A policy its target does not
+/// support (`startup_refusal`) is refused before anything is written: an
+/// executable already at the destination is left as it was.
+pub fn emit_executable(program: &Program, destination: &Path, search: &LinkSearch, startup: Startup) -> Result<PathBuf, LinkError> {
+    if let Some(message) = startup_refusal(program, startup) {
+        return Err(LinkError { detail: Some("STARTUP"), message });
+    }
     if !EXECUTABLES {
         return Err("executable emission requires Linux glibc on x86_64 or aarch64, macOS on aarch64, or Windows on x86_64 with the MSVC toolchain".into());
     }
@@ -274,9 +351,22 @@ pub fn emit_executable(program: &Program, destination: &Path, search: &LinkSearc
         )
         .into());
     }
+    if calls_c(program) && !search.runtime.is_empty() {
+        if LINKER == LinkerFlavor::Msvc {
+            return Err(LinkError {
+                detail: Some("RUNTIME-PATH"),
+                message: "a runtime path (-runtime-path) is an ELF RUNPATH or a Mach-O LC_RPATH: Windows has none, and its loader finds a program's DLLs in the executable's own directory (deploy them there)".to_string(),
+            });
+        }
+        for path in &search.runtime {
+            if let Some(problem) = runtime_path_problem(path) {
+                return Err(LinkError { detail: Some("RUNTIME-PATH"), message: problem });
+            }
+        }
+    }
     let destination = std::path::absolute(executable_path(destination)).map_err(|e| e.to_string())?;
     match chosen_linker(program)? {
-        Linker::Rustc => link_rustc(program, &destination, search)?,
+        Linker::Rustc => link_rustc(program, &destination, search, startup)?,
         Linker::Stub if calls_c(program) => {
             return Err(format!(
                 "native link failed: this program calls C or declares a C library ({}), which only the system linker resolves, and the stub linker (BOTLISH_NATIVE_LINKER=stub) links no native library: link it with the system linker (BOTLISH_NATIVE_LINKER=system or auto, the single executable's: a C compiler driver and the runtime archive) or the rustc linker of a Botlish checkout (BOTLISH_NATIVE_LINKER=rustc; C-FFI.md)",
@@ -284,8 +374,8 @@ pub fn emit_executable(program: &Program, destination: &Path, search: &LinkSearc
             )
             .into());
         }
-        Linker::Stub => link_stub(program, &destination)?,
-        Linker::System => link_system(program, &destination, search)?,
+        Linker::Stub => link_stub(program, &destination, startup)?,
+        Linker::System => link_system(program, &destination, search, startup)?,
     }
     Ok(destination)
 }
@@ -389,8 +479,8 @@ fn link_hint(flavor: LinkerFlavor, diagnostics: &str) -> Option<&'static str> {
 }
 
 /// The `rustc` linker: a generated startup crate, compiled and linked
-/// against this build's runtime library.
-fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch) -> Result<(), LinkError> {
+/// against this build's runtime library, started by STARTUP.
+fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch, startup: Startup) -> Result<(), LinkError> {
     let driver = std::env::current_exe().map_err(|e| e.to_string())?;
     let release = driver.parent().ok_or("cannot locate native runtime")?;
     let library = release.join("libbotlish_native.rlib");
@@ -404,7 +494,7 @@ fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch) -> Res
     let inputs = resolve_link_plan(program, search)?;
     log_plan(&inputs);
     let work = WorkDir::beside(destination)?;
-    let object = emit_object(program).map_err(|e| e.message().to_string())?;
+    let object = emit_executable_object(program, startup).map_err(|e| e.message().to_string())?;
     let object_path = work.0.join("program.o");
     let source_path = work.0.join("startup.rs");
     // With the platform's executable suffix: MinGW's gcc would append .exe
@@ -435,6 +525,7 @@ fn link_rustc(program: &Program, destination: &Path, search: &LinkSearch) -> Res
         .arg("-C")
         .arg(format!("link-arg={}", object_path.display()))
         .args(link_plan_args(program, &inputs, search))
+        .args(startup_link_args(LINKER, startup).into_iter().flat_map(|arg| ["-C".to_string(), format!("link-arg={arg}")]))
         .args(crt_args(program))
         .arg(&source_path)
         .arg("-o")
@@ -646,6 +737,9 @@ fn link_plan_args_for(flavor: LinkerFlavor, program: &Program, inputs: &[LinkInp
             arg("-framework".to_string());
             arg(name.clone());
         }
+    }
+    for dir in &search.runtime {
+        arg(format!("-Wl,-rpath,{dir}"));
     }
     args
 }
@@ -1110,14 +1204,19 @@ fn log_plan(inputs: &[LinkInput]) {
 }
 
 /// The `stub` linker: the prebuilt `botlish-aot-stub` with the program's
-/// image appended (runtime/aotimage.rs).
-fn link_stub(program: &Program, destination: &Path) -> Result<(), String> {
+/// image appended (runtime/aotimage.rs), started by STARTUP -- the worker
+/// only: the stub is Linux x86-64's, where `emit_executable` refuses the
+/// main-thread policy first, and refuses it itself too.
+fn link_stub(program: &Program, destination: &Path, startup: Startup) -> Result<(), String> {
     // `image` lays out and relocates an ELF x86-64 object (its relocation
     // types and call trampolines are x86-64's), and the stub's loader is
     // built for x86-64 Linux only (runtime/aotimage.rs). No Mach-O stub:
     // macOS executables are the system linker's.
     if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         return Err("the stub linker supports x86_64 Linux only: use BOTLISH_NATIVE_LINKER=rustc".into());
+    }
+    if startup != Startup::Worker {
+        return Err(format!("the stub linker links worker-startup executables only, not the startup policy {}", startup.spelling()));
     }
     let stub = match std::env::var_os("BOTLISH_NATIVE_AOT_STUB") {
         Some(path) => PathBuf::from(path),
@@ -1135,7 +1234,7 @@ fn link_stub(program: &Program, destination: &Path) -> Result<(), String> {
     if bytes.ends_with(aotimage::MAGIC) {
         return Err(format!("{} already carries a program image: not a botlish-aot-stub", stub.display()));
     }
-    let object = emit_object(program).map_err(|e| e.message().to_string())?;
+    let object = emit_executable_object(program, startup).map_err(|e| e.message().to_string())?;
     let payload = image(program, &object)?.encode();
     bytes.extend_from_slice(&payload);
     bytes.extend_from_slice(&aotimage::trailer(payload.len()));
@@ -1463,6 +1562,7 @@ fn system_link_args(
     program: &Program,
     inputs: &[LinkInput],
     search: &LinkSearch,
+    startup: Startup,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     let mut push = |a: &str| args.push(a.into());
@@ -1479,6 +1579,9 @@ fn system_link_args(
                 push("-mmacosx-version-min=11.0");
             }
             push("-Wl,-dead_strip");
+            for arg in startup_link_args(flavor, startup) {
+                push(&arg);
+            }
         }
         LinkerFlavor::Msvc => {
             for flag in ["/NOLOGO", "/SUBSYSTEM:CONSOLE", "/INCREMENTAL:NO", "/OPT:REF", "/OPT:ICF", "/NXCOMPAT", "/DYNAMICBASE"] {
@@ -1591,18 +1694,18 @@ fn undefined_helper(output: &str) -> Option<&'static str> {
 /// no rustc, no Rust library and no checkout: only `system_linker`, the
 /// runtime archive (`runtime_archive`) and the libraries the program
 /// declares.
-fn link_system(program: &Program, destination: &Path, search: &LinkSearch) -> Result<(), LinkError> {
+fn link_system(program: &Program, destination: &Path, search: &LinkSearch, startup: Startup) -> Result<(), LinkError> {
     let runtime = runtime_archive()?;
     let tool = system_linker(LINKER)?;
     let inputs = resolve_link_plan(program, search)?;
     log_plan(&inputs);
     let work = WorkDir::beside(destination)
         .map_err(|e| format!("native link failed: cannot write the executable {}: {e}", destination.display()))?;
-    let object = emit_object(program).map_err(|e| e.message().to_string())?;
+    let object = emit_executable_object(program, startup).map_err(|e| e.message().to_string())?;
     let object_path = work.0.join(if LINKER == LinkerFlavor::Msvc { "program.obj" } else { "program.o" });
     let executable = work.0.join(format!("executable{}", std::env::consts::EXE_SUFFIX));
     std::fs::write(&object_path, &object.bytes).map_err(|e| e.to_string())?;
-    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &inputs, search);
+    let args = system_link_args(LINKER, &[&object_path], &runtime, &executable, program, &inputs, search, startup);
     let output = Command::new(&tool)
         .args(&args)
         .output()
@@ -2234,7 +2337,7 @@ mod tests {
     fn system_link_args_gnu() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let objects = [Path::new("/w d/program.o")];
-        let args = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &ffi, &resolved(LinkerFlavor::Gnu, &ffi), &LinkSearch::libraries(&["/opt/my lib".to_string()]));
+        let args = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &ffi, &resolved(LinkerFlavor::Gnu, &ffi), &LinkSearch::libraries(&["/opt/my lib".to_string()]), Startup::Worker);
         assert_eq!(
             texts(&args),
             [
@@ -2248,9 +2351,28 @@ mod tests {
             .into_iter().filter_map(|a| a.strip_prefix("link-arg=").map(String::from)).collect();
         assert!(texts(&args).windows(plan.len()).any(|w| w == plan.as_slice()));
         // A program that calls no C: no plan, the rest as it was.
-        let plain = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &plain_program(), &resolved(LinkerFlavor::Gnu, &plain_program()), &LinkSearch::libraries(&["/opt/my lib".to_string()]));
+        let plain = system_link_args(LinkerFlavor::Gnu, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w d/executable"), &plain_program(), &resolved(LinkerFlavor::Gnu, &plain_program()), &LinkSearch::libraries(&["/opt/my lib".to_string()]), Startup::Worker);
         assert!(texts(&plain).iter().all(|a| !a.starts_with("-L") && !a.contains("group") && a != "-lfirst"));
         assert_eq!(texts(&plain).len(), texts(&args).len() - 5);
+    }
+
+    /// A runtime path (--runtime-path) is the last argument of the plan,
+    /// -Wl,-rpath,DIR, for GNU's and Apple's linkers; a program that calls
+    /// no C gets none; a path a driver would split is refused.
+    #[test]
+    fn runtime_paths_lower_per_linker() {
+        let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let search = LinkSearch { runtime: vec!["$ORIGIN/lib".into()], ..LinkSearch::default() };
+        for flavor in [LinkerFlavor::Gnu, LinkerFlavor::Apple] {
+            let args = link_plan_args_for(flavor, &ffi, &resolved(flavor, &ffi), &search);
+            assert_eq!(args.last().map(String::as_str), Some("link-arg=-Wl,-rpath,$ORIGIN/lib"), "{flavor:?}: {args:?}");
+        }
+        let plain = link_plan_args_for(LinkerFlavor::Gnu, &plain_program(), &[], &search);
+        assert!(plain.is_empty(), "a program that calls no C gets no runtime path: {plain:?}");
+        assert!(runtime_path_problem("$ORIGIN/lib").is_none());
+        for bad in ["", "a,b", "a:b", "a;b", "a\nb"] {
+            assert!(runtime_path_problem(bad).is_some(), "{bad:?}");
+        }
     }
 
     /// Apple's: arm64 and the deployment target, -dead_strip, no GNU flag.
@@ -2258,7 +2380,7 @@ mod tests {
     fn system_link_args_apple_has_no_gnu_flags() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let objects = [Path::new("/w/program.o")];
-        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &ffi, &resolved(LinkerFlavor::Apple, &ffi), &LinkSearch::libraries(&["/opt/lib".to_string()])));
+        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &ffi, &resolved(LinkerFlavor::Apple, &ffi), &LinkSearch::libraries(&["/opt/lib".to_string()]), Startup::Worker));
         assert_eq!(&args[..2], ["-arch", "arm64"]);
         assert!(args.contains(&"-Wl,-dead_strip".to_string()));
         let tail: Vec<&str> = args.iter().skip_while(|a| *a != "/w/program.o").map(String::as_str).collect();
@@ -2274,7 +2396,7 @@ mod tests {
     fn system_link_args_msvc() {
         let ffi = crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let objects = [Path::new("C:\\w\\program.obj")];
-        let args = texts(&system_link_args(LinkerFlavor::Msvc, &objects, Path::new("C:\\rt\\botlish_runtime.lib"), Path::new("C:\\w d\\executable.exe"), &ffi, &resolved(LinkerFlavor::Msvc, &ffi), &LinkSearch::libraries(&["C:\\opt lib".to_string()])));
+        let args = texts(&system_link_args(LinkerFlavor::Msvc, &objects, Path::new("C:\\rt\\botlish_runtime.lib"), Path::new("C:\\w d\\executable.exe"), &ffi, &resolved(LinkerFlavor::Msvc, &ffi), &LinkSearch::libraries(&["C:\\opt lib".to_string()]), Startup::Worker));
         for flag in ["/NOLOGO", "/SUBSYSTEM:CONSOLE", "/INCREMENTAL:NO", "/OPT:REF", "/OUT:C:\\w d\\executable.exe"] {
             assert!(args.contains(&flag.to_string()), "{flag} not in {args:?}");
         }
@@ -2287,6 +2409,90 @@ mod tests {
         let excluded: Vec<&str> = args.iter().filter_map(|a| a.strip_prefix("/NODEFAULTLIB:")).collect();
         assert_eq!(excluded, OTHER_MSVC_RUNTIMES);
         assert!(args.iter().all(|a| !a.starts_with("-l") && !a.starts_with("-L") && !a.contains("-Wl,")));
+    }
+
+    /// The main-thread startup's link: LC_MAIN's stack size, 512 MiB, on
+    /// Apple's ld (the system linker's argument, the rustc linker's
+    /// `-C link-arg=`), and nothing for the worker or for any other linker;
+    /// the rest of Apple's link as the worker's (MAIN-THREAD-STARTUP-
+    /// MILESTONE-1.md).
+    #[test]
+    fn main_thread_startup_link_args() {
+        assert_eq!(MAIN_THREAD_STACK_BYTES, 0x2000_0000);
+        assert_eq!(startup_link_args(LinkerFlavor::Apple, Startup::MainThread), ["-Wl,-stack_size,0x20000000"]);
+        for flavor in [LinkerFlavor::Apple, LinkerFlavor::Gnu, LinkerFlavor::Msvc] {
+            assert!(startup_link_args(flavor, Startup::Worker).is_empty());
+        }
+        assert!(startup_link_args(LinkerFlavor::Gnu, Startup::MainThread).is_empty());
+        assert!(startup_link_args(LinkerFlavor::Msvc, Startup::MainThread).is_empty());
+        let objects = [Path::new("/w/program.o")];
+        let link = |program: &Program, startup| {
+            texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"),
+                program, &resolved(LinkerFlavor::Apple, program), &LinkSearch::default(), startup))
+        };
+        for program in [plain_program(), crate::nir::parse(FFI_PROGRAM).unwrap_or_else(|e| panic!("{}", e.message))] {
+            let main = link(&program, Startup::MainThread);
+            let worker = link(&program, Startup::Worker);
+            assert_eq!(main.iter().filter(|a| a.contains("stack_size")).collect::<Vec<_>>(), ["-Wl,-stack_size,0x20000000"]);
+            assert!(worker.iter().all(|a| !a.contains("stack_size")));
+            assert_eq!(main.iter().filter(|a| !a.contains("stack_size")).collect::<Vec<_>>(), worker.iter().collect::<Vec<_>>());
+            // Before the output and the objects, with the driver's own flags.
+            let at = main.iter().position(|a| a.contains("stack_size")).unwrap();
+            assert!(at < main.iter().position(|a| a == "-o").unwrap());
+        }
+    }
+
+    /// An executable's program object records its startup policy in its
+    /// record's last word (runtime::program's LinkedProgram), the only
+    /// difference between the two policies' objects.
+    #[test]
+    fn executable_object_records_the_startup_policy() {
+        use botlish_native::runtime::program::LINKED_MAGIC;
+        let word = |startup| {
+            let bytes = super::super::emit_executable_object(&plain_program(), startup).unwrap_or_else(|e| panic!("{}", e.message())).bytes;
+            let magic = LINKED_MAGIC.to_le_bytes();
+            let at = (0..bytes.len() - 56)
+                .find(|&i| bytes[i..i + 8] == magic && u64::from_le_bytes(bytes[i + 40..i + 48].try_into().unwrap()) == 1)
+                .expect("the program record");
+            (u64::from_le_bytes(bytes[at + 48..at + 56].try_into().unwrap()), bytes)
+        };
+        let (worker, worker_bytes) = word(Startup::Worker);
+        let (main, main_bytes) = word(Startup::MainThread);
+        assert_eq!((worker, main), (0, 1));
+        assert_eq!(worker_bytes.len(), main_bytes.len());
+        assert_eq!(worker_bytes.iter().zip(&main_bytes).filter(|(a, b)| a != b).count(), 1);
+    }
+
+    /// The main-thread policy is refused for every target but macOS AArch64,
+    /// before anything is linked, with the target and the reason; the worker
+    /// never is.
+    #[test]
+    fn main_thread_startup_refusal() {
+        let program = |target: Option<(&str, &str)>| {
+            let line = target.map_or(String::new(), |(name, triple)| format!("target \"{name}\" triple=\"{triple}\"\n"));
+            crate::nir::parse(&format!(
+                "nir 1 call-effects=1 statics=0\n{line}\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = int 42\n    ret %0\nend\n"
+            ))
+            .unwrap_or_else(|e| panic!("{}", e.message))
+        };
+        let macos = program(Some(("macos-aarch64", "aarch64-apple-darwin")));
+        assert_eq!(startup_refusal(&macos, Startup::MainThread), None);
+        for (name, triple, why) in [
+            ("linux-x86_64", "x86_64-unknown-linux-gnu", "glibc reports no guard"),
+            ("linux-aarch64", "aarch64-unknown-linux-gnu", "glibc reports no guard"),
+            ("windows-x86_64", "x86_64-pc-windows-msvc", "1 MiB link.exe reserves"),
+            ("macos-x86_64", "x86_64-apple-darwin", "macOS AArch64 native executables only"),
+        ] {
+            let other = program(Some((name, triple)));
+            let refusal = startup_refusal(&other, Startup::MainThread).unwrap_or_else(|| panic!("{name} accepted"));
+            assert!(refusal.contains("macOS AArch64 native executables only") && refusal.contains(name) && refusal.contains(why), "{refusal}");
+            assert!(refusal.contains("-native-startup worker"), "{refusal}");
+            assert_eq!(startup_refusal(&other, Startup::Worker), None);
+        }
+        // A program every target shares is the host's.
+        let shared = program(None);
+        assert_eq!(startup_refusal(&shared, Startup::MainThread).is_none(), botlish_native::runtime::aot::MAIN_THREAD_STARTUP);
+        assert_eq!(startup_refusal(&shared, Startup::Worker), None);
     }
 
     /// One member of an `ar` archive: its 60-byte header and data, padded to
@@ -2571,7 +2777,7 @@ mod tests {
             LinkInput::Framework("Cocoa".into()),
         ];
         let program = with_links("link \"m\"\nlink \"fx\" static\nframework \"Cocoa\"\n");
-        let search = LinkSearch { libraries: vec!["/opt/lib".into()], frameworks: vec!["/opt/My Frameworks".into()] };
+        let search = LinkSearch { libraries: vec!["/opt/lib".into()], frameworks: vec!["/opt/My Frameworks".into()], ..LinkSearch::default() };
         let shown = |args: Vec<String>| args.into_iter().filter(|a| a != "-C").collect::<Vec<_>>();
         let fx = format!("link-arg={}", path.display());
         assert_eq!(
@@ -2590,7 +2796,7 @@ mod tests {
         // The system linker's arguments carry the same plan, unwrapped: the
         // archive one argument, a framework two.
         let objects = [Path::new("/w/program.o")];
-        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &program, &inputs, &search));
+        let args = texts(&system_link_args(LinkerFlavor::Apple, &objects, Path::new("/rt/libbotlish_runtime.a"), Path::new("/w/executable"), &program, &inputs, &search, Startup::Worker));
         let tail: Vec<&str> = args.iter().skip_while(|a| *a != "/w/program.o").map(String::as_str).collect();
         assert_eq!(&tail[..8], ["/w/program.o", "-L/opt/lib", "-F/opt/My Frameworks", "-lm", path.to_str().unwrap(), "-framework", "Cocoa", "/rt/libbotlish_runtime.a"]);
         // Frameworks never reach another linker: resolution refuses them.

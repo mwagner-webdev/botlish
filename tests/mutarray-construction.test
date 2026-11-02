@@ -385,11 +385,11 @@ test mutarray-neg-7 {an unknown value is never silently a mutarray (no cast exis
 # ---------------------------------------------------------------------------
 # Constructor argument contract (spec items 65-66)
 
-test mutarray-arg-1 {a statically non-List argument is the TYPE error of every intrinsic, at run time (from_list is a registered native since MUTABLE-ARRAY.md)} -body {
+test mutarray-arg-1 {a statically non-List argument is the TYPE error of every intrinsic (from_list is a registered native since MUTABLE-ARRAY.md): at compile time (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md), and at run time where no strict build runs (-strict 0), on every backend} -body {
     set exprs [hir::lower [mcCompile "import std::mutable_array\nstd::mutable_array::from_list(123)" 0]]
     list [mcRejects "import std::mutable_array\nstd::mutable_array::from_list(123)" *] \
         [lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 1}]
-} -result {accepted {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}}
+} -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}}
 
 test mutarray-arg-2 {a string argument is a run-time TYPE error too} -body {
     set exprs [hir::lower [mcCompile "import std::mutable_array\nstd::mutable_array::from_list(\"abc\")" 0]]

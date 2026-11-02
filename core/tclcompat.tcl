@@ -2,6 +2,9 @@
 #   std::str::is_tcl_alpha(c), std::str::is_tcl_alnum(c) : one-scalar str -> bool
 #   (root natives registered under their qualified `str` names, beside
 #   core/strings.tcl's)
+#   std::char::is_tcl_alpha(c), std::char::is_tcl_alnum(c) : UnicodeChar -> bool
+#   (the same classes of a UnicodeChar, beside core/unicodechar.tcl's
+#   std::char::scalar_value; UNICODECHAR-CLASSIFIERS.md)
 #
 # STATUS: temporary compatibility primitives -- NOT Botlish's eventual
 # public Unicode character-classification API.
@@ -71,17 +74,27 @@
 #     an equivalent simplification: Tcl's [:alpha:]/[:alnum:] are
 #     Unicode-aware (e.g. "café", "日本語" match [:alpha:]+ in Tcl 9).
 #
-# Contract: the argument must be a str of exactly one Unicode scalar
-# (core::strings::length == 1) -- the smallest representation that fits
-# Botlish's current architecture (no public UnicodeChar/one-scalar type
-# exists yet: see this milestone's brief). An argument of any other length,
-# including the empty string, is a RANGE error, following the same
-# out-of-domain convention core::strings::substring uses for an
-# out-of-range index, rather than silently classifying only the first
-# scalar of a longer string.
+# Contract: the argument of the `str` forms must be a str of exactly one
+# Unicode scalar (core::strings::length == 1) -- the smallest representation
+# that fit Botlish's architecture when they were written (no public
+# UnicodeChar existed yet). An argument of any other length, including the
+# empty string, is a RANGE error, following the same out-of-domain
+# convention core::strings::substring uses for an out-of-range index, rather
+# than silently classifying only the first scalar of a longer string.
 #
-# native/src/runtime/ops.rs's rt_is_tcl_alpha/rt_is_tcl_alnum are the
-# Cranelift-native counterpart (used by stdlib/web.bot's emailish?); this file (Tcl's
+# The `char` forms classify a UnicodeChar (UNICODE-CHAR-LITERALS.md) by the
+# same rule and are total: every UnicodeChar is one Unicode scalar, so there
+# is no RANGE case and no allocation -- a character read with
+# std::str::char_at is classified without ever becoming a one-character
+# String (UNICODECHAR-CLASSIFIERS.md, which measured what that costs). The
+# two forms must agree on every scalar: each pair shares one classification
+# here (Classify) and one in native/src/runtime/ops.rs (tcl_alpha_char,
+# tcl_alnum_char), whose generated code also classifies an ASCII scalar
+# inline (codegen::clif's CharIsTclAlpha/CharIsTclAlnum).
+#
+# native/src/runtime/ops.rs's rt_is_tcl_alpha/rt_is_tcl_alnum (and
+# rt_char_is_tcl_alpha/rt_char_is_tcl_alnum, which stdlib/web.bot's emailish?
+# reaches) are the Cranelift-native counterpart; this file (Tcl's
 # own built-in `string is alpha -strict`/`string is alnum -strict`, verified
 # identical to `regexp {^[:alpha:]$}`/`{^[:alnum:]}$}` on the same corpus)
 # stays authoritative for interp/compile and for the reference contract
@@ -99,21 +112,40 @@ proc core::tclcompat::CheckOneScalar {v native} {
     return $text
 }
 
+# Whether TEXT, exactly one scalar, is in Tcl 9's class CLASS (alpha or
+# alnum): the one classification both forms use.
+proc core::tclcompat::Classify {class text} {
+    return [core::value::bool [string is $class -strict $text]]
+}
+
 proc core::tclcompat::isTclAlpha {c} {
-    set text [CheckOneScalar $c std::str::is_tcl_alpha]
-    return [core::value::bool [string is alpha -strict $text]]
+    return [Classify alpha [CheckOneScalar $c std::str::is_tcl_alpha]]
 }
 
 proc core::tclcompat::isTclAlnum {c} {
-    set text [CheckOneScalar $c std::str::is_tcl_alnum]
-    return [core::value::bool [string is alnum -strict $text]]
+    return [Classify alnum [CheckOneScalar $c std::str::is_tcl_alnum]]
 }
 
-# Both are context-free value operations (a pure function of the String
+proc core::tclcompat::charIsTclAlpha {c} {
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
+    return [Classify alpha [format %c [core::value::charOf $c]]]
+}
+
+proc core::tclcompat::charIsTclAlnum {c} {
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alnum]
+    return [Classify alnum [format %c [core::value::charOf $c]]]
+}
+
+# All four are context-free value operations (a pure function of the
 # argument, no I/O or process state): a module initializer may call them, and
 # a function calling them can be repeatable (hir/repeatable.tcl,
-# REFINEMENT-VALUES.md).
+# REFINEMENT-VALUES.md). The `char` forms need no -runtime tag: they index
+# nothing, cannot fail and allocate nothing.
 core::native::register std::str::is_tcl_alpha -arity 1 -impl core::tclcompat::isTclAlpha \
     -param-types {str} -result-type bool -runtime {char-index range-check} -context-free 1
 core::native::register std::str::is_tcl_alnum -arity 1 -impl core::tclcompat::isTclAlnum \
     -param-types {str} -result-type bool -runtime {char-index range-check} -context-free 1
+core::native::register std::char::is_tcl_alpha -arity 1 -impl core::tclcompat::charIsTclAlpha \
+    -param-types {UnicodeChar} -result-type bool -context-free 1
+core::native::register std::char::is_tcl_alnum -arity 1 -impl core::tclcompat::charIsTclAlnum \
+    -param-types {UnicodeChar} -result-type bool -context-free 1

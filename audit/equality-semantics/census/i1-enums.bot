@@ -1,0 +1,8 @@
+# I1 nominal enums: two declarations with the same case names
+enum Color:
+    Red, Green
+enum Light:
+    Red, Green
+fn same(c):
+    c
+[Color::Red == Light::Red, Color::Red == Color::Red, Color::Red == Color::Green, same(Color::Red) == same(Light::Red)]

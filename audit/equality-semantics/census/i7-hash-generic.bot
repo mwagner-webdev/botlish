@@ -1,0 +1,6 @@
+# I7 hash of an untyped parameter: dynamic; the checked admission sees only the generic body
+fn h(x):
+    hash(x)
+fn f(x: int) -> int:
+    x
+[h(1) == h(1), h("a") == h("a")]

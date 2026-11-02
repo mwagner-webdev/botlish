@@ -99,9 +99,9 @@
 @@ transitive-trait-requirement-dropped context-trait requirements do not propagate to callers
 ## hir/contexts.tcl
 <<<<
-                    if {$id ni [dict get $required $b]} {
+                    if {$id ni [dict get $required $n]} {
 ====
-                    if {$id ni [dict get $required $b] && ![isTrait $id]} {
+                    if {$id ni [dict get $required $n] && ![isTrait $id]} {
 >>>>
 
 @@ unreachable-consumer-requires an unreachable call of a context-trait-dependent function is redirected as if a provider reached it
@@ -666,4 +666,36 @@ read noescape, count: std::ffi::c::ULongLong, written:
     return ", the implementation of [dict get $via trait]'s operation [dict get $via operation] for [dict get $via witness],"
 ====
     return ""
+>>>>
+
+# Implementation context requirements (TRAIT-IMPLEMENTATION-CONTEXT-
+# REQUIREMENTS-MILESTONE-1.md): the selected implementation of an ordinary
+# trait operation contributes its context requirement to the call.
+
+@@ implementation-context-ignored the context analysis gives an ordinary trait operation no edge, whatever implementation the program selects for it: its context requirement never reaches the specialization or the top-level call
+## hir/contexts.tcl
+<<<<
+        if {[dict exists $hir exprs $c traitCall context] || ![dict exists $graph impl $key]} {
+====
+        if {1} {
+>>>>
+
+@@ implementation-missing-context-suppressed a context a specialization needs through its implementations is not checked at the top-level call: no MISSING-CONTEXT for it
+## hir/contexts.tcl
+<<<<
+    foreach target $targets {
+        if {![dict exists $required $target]} continue
+====
+    foreach target $targets {
+        if {![dict exists $required $target] || [llength $target] == 2} continue
+>>>>
+
+@@ ambiguous-provider-chosen two installed providers of a required context trait: the first installed is selected instead of AMBIGUOUS-CONTEXT-IMPLEMENTATION
+## hir/contexts.tcl
+<<<<
+        if {[llength $providers] > 1} {
+            hir::Diagnose hir AMBIGUOUS-CONTEXT-IMPLEMENTATION \
+====
+        if {0} {
+            hir::Diagnose hir AMBIGUOUS-CONTEXT-IMPLEMENTATION \
 >>>>

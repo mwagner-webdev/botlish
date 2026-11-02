@@ -63,6 +63,14 @@
 #             name origin start end direction endKind}, each binding its own
 #             per-iteration name; the operand expressions are evaluated once,
 #             in the enclosing scope, before the first iteration
+#
+#   Any of the four loop kinds may carry `fold`: a dict {name origin
+#   initial} making it a folding loop (FOLD-LOOPS-MILESTONE-1.md) -- the
+#   intermediate binding's name and origin and its initial value's node.
+#   The initial value is evaluated once, in the *enclosing* scope, after
+#   the loop's own operands; the name is a per-iteration immutable binding
+#   of the body, bound to the value carried from the previous iteration
+#   (withFold, foldOf).
 #   struct    type, fields -- STRUCTS.md. TYPE is "" for an anonymous struct
 #             value { x: a, y: b }, or for a named construction `Name { ... }`
 #             a dict {name NAME namespace NS origin ORIGIN} (an as-written,
@@ -330,6 +338,15 @@ proc hir::syntax::withExported {block abi} {
     return $block
 }
 
+# BLOCK (a `block` node) declared `callback ABI fn` (ABI: c): a function C
+# may call back synchronously through the C function pointer
+# std::ffi::c::callback makes of it (C-CALLBACK-MILESTONE-1.md;
+# hir/callbacks.tcl).
+proc hir::syntax::withCallback {block abi} {
+    dict set block callback $abi
+    return $block
+}
+
 # BLOCK (a `block` node) declaring a variadic section at ORIGIN
 # (VARIADICS-VERTICAL-SLICE-1.md): its last ordinary parameter is the
 # variadic one, bound at each call to the List of the call's trailing
@@ -365,6 +382,40 @@ proc hir::syntax::withPlaces {block places} {
 # validator, `-> unit`), the argument of parameter NAME satisfies the
 # refinement. hir/resolve.tcl validates it and records the
 # resolved contract on the block expression (`proofs`).
+# BLOCK (a `block` node: a declared recognizer's function, surface/dfa.tcl's
+# Lower) with the recognizer's table RECOGNIZER (EMISSION-CLAIMS-
+# MILESTONE-1.md): {key {NS NAME} qualified Q alphabet A numbers STATE->N
+# leaves {LEAF...} rows {ROW...} suspends 0|1 stateOrigins STATE->ORIGIN} --
+# surface::dfa::Codes's table and leaves, whose meaning core/dfa.tcl states
+# (core::dfa::Outcome). Read by the emission checker only; no backend reads
+# it (the function's own code is what runs).
+proc hir::syntax::withRecognizer {block recognizer} {
+    foreach field {key qualified alphabet numbers leaves rows suspends stateOrigins} {
+        if {![dict exists $recognizer $field]} {
+            core::malformed "a block's recognizer table needs its $field" [list block $recognizer]
+        }
+    }
+    dict set block recognizer $recognizer
+    return $block
+}
+
+# BLOCK (a `block` node) with its emission claims CLAIMS (EMISSION-CLAIMS-
+# MILESTONE-1.md, `emits R, ...`): {name NAME qualified {NS MEMBER}|""
+# origin ORIGIN} dicts in written order, NAME the recognizer as written.
+# hir/resolve.tcl resolves each to the recognizer's function binding; the
+# emission checker (hir/emission.tcl) certifies or rejects each.
+proc hir::syntax::withEmits {block claims} {
+    foreach claim $claims {
+        if {[catch {dict get $claim name; dict get $claim qualified; dict get $claim origin}]} {
+            core::malformed "block emission claims must be {name qualified origin} dicts" [list block $claims]
+        }
+    }
+    if {$claims ne {}} {
+        dict set block emits $claims
+    }
+    return $block
+}
+
 proc hir::syntax::withProofs {block proofs} {
     foreach clause $proofs {
         if {[catch {dict get $clause outcome; dict get $clause param; dict get $clause paramOrigin
@@ -459,6 +510,44 @@ proc hir::syntax::countLoopNode {origin start end countName countOrigin bodyOrig
 #   {kind count name N origin O start EXPR end EXPR direction D endKind K}
 proc hir::syntax::lockLoopNode {origin domains bodyOrigin body} {
     return [Node lockloop $origin domains $domains bodyOrigin $bodyOrigin body $body]
+}
+
+# Makes loop syntax node LOOP (loop, listloop, countloop or lockloop) a
+# folding loop (FOLD-LOOPS-MILESTONE-1.md) whose intermediate binding NAME
+# (written at ORIGIN) starts as the value of INITIAL.
+proc hir::syntax::withFold {loop name origin initial} {
+    if {[dict get $loop kind] ni {loop listloop countloop lockloop}} {
+        error "hir::syntax::withFold: not a loop: [dict get $loop kind]"
+    }
+    dict set loop fold [dict create name $name origin $origin initial $initial]
+    return $loop
+}
+
+# The `fold` dict of syntax node NODE, or "" when it is no folding loop.
+proc hir::syntax::foldOf {node} {
+    return [dict getdef $node fold ""]
+}
+
+# {INITIAL} for a folding loop syntax NODE, {} for any other node: the child
+# its fold adds after the loop's own operands and before its body.
+proc hir::syntax::foldChildren {node} {
+    set fold [foldOf $node]
+    if {$fold eq ""} {
+        return {}
+    }
+    return [list [dict get $fold initial]]
+}
+
+# NODE with a fold's initial value replaced by the result of CMD applied to
+# it (CMD's last argument); NODE itself when it is no folding loop.
+proc hir::syntax::mapFold {node cmd} {
+    set fold [foldOf $node]
+    if {$fold eq ""} {
+        return $node
+    }
+    dict set fold initial [{*}$cmd [dict get $fold initial]]
+    dict set node fold $fold
+    return $node
 }
 
 proc hir::syntax::returnNode {origin value} {
@@ -597,6 +686,16 @@ proc hir::syntax::fromIR {node path} {
             return [Node lockloop $origin domains $domains \
                 bodyOrigin [list ir [concat $path 2]] \
                 body [Sequence [core::ir::blockBody [lindex $node 2]] [concat $path 2] 2]]
+        }
+        fold {
+            # (fold INIT LOOP): LOOP is a loop form whose block binds the
+            # intermediate as its last parameter (core/ir.tcl).
+            set loop [lindex $node 2]
+            set blockIndex [core::ir::loopBlockIndex $loop]
+            set last [expr {[llength [core::ir::blockParams [lindex $loop $blockIndex]]] - 1}]
+            return [withFold [fromIR [core::ir::foldLoop $node] [concat $path 2]] \
+                [core::ir::foldIntermediate $node] [list ir [concat $path 2 $blockIndex 1 $last]] \
+                [fromIR [lindex $node 1] [concat $path 1]]]
         }
         struct {
             # (struct HEAD NAME EXPR ...): HEAD is {} (anonymous) or {ID
@@ -741,5 +840,10 @@ proc hir::syntax::CollectBindNames {node namesVar} {
         handle {
             CollectBindNames [dict get $node call] names
         }
+    }
+    if {[foldOf $node] ne ""} {
+        # A folding loop's initial value is evaluated in the enclosing
+        # scope, like the loop's own operands.
+        CollectBindNames [dict get [foldOf $node] initial] names
     }
 }

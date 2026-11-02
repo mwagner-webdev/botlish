@@ -1,0 +1,4 @@
+# I4 method applicability: a str receiver, m1's mark? (compares with a character) and m2's (a checked str contract)
+import m1
+import m2
+"-".mark?()

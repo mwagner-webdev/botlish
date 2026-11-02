@@ -359,6 +359,24 @@ proc surface::modules::NamespaceFile {dir name} {
 # shell's working directory, an environment variable or a parent directory,
 # and nothing searches: each path has one candidate file.
 #
+# Target package trees (PACKAGE-MANAGER-MILESTONE-2.md, "Target views").
+# When the application root's .bot_modules holds a directory .targets, the
+# application's packages are not ROOT/.bot_modules but the tree of the
+# compilation's target, ROOT/.bot_modules/.targets/TARGET: an ordinary
+# package tree in every other respect (its packages, their own .bot_modules,
+# downward-only resolution, instance identities: all as above), one per
+# target, so that packages whose bindings or native files differ by target
+# are compiled from the right ones, and compiling for one target never sees
+# another's. A .targets without the target's tree is no tree at all: the
+# application then has no package for that target (UNKNOWN-NAMESPACE says
+# so), never the store beside it. The compiler knows the directory's name
+# and nothing of who made it (the package manager derives each tree from
+# the packages it installed; a tree assembled by hand is read the same way),
+# and nothing of versions or metadata. A HIR compiled from such a tree is
+# its target's (targetRead), and when the tree holds a directory .lib, its
+# native libraries are searched there when the program links
+# (`nativeDirs`: native/native.tcl).
+#
 # Identity (BOT-MODULES-MILESTONE-1.md, "Semantic identity"). A module's
 # canonical identity -- the one every later stage keys it by (its section,
 # its types, structs, enums, errors, traits, layouts and contexts, its
@@ -463,9 +481,38 @@ proc surface::modules::Probe {kind path} {
     return [surface::source::exists $path]
 }
 
-# The directory of the package NAME installed in SCOPE (DIR/.bot_modules/NAME).
+# The directory of the package NAME installed in SCOPE (DIR/.bot_modules/NAME,
+# or for the application, its packages directory: ApplicationTree).
 proc surface::modules::PackageDir {state scope name} {
+    if {$scope eq "" && [dict exists $state appPackages]} {
+        return [file join [dict get $state appPackages] $name]
+    }
     return [file join [ScopeDir $state $scope] .bot_modules $name]
+}
+
+# Decides STATE's application packages directory (header, "Target package
+# trees"): `appPackages`, and `appTreeMissing` when .targets holds no tree
+# for the target; `nativeDirs` the tree's .lib when it has one.
+proc surface::modules::ApplicationTree {stateVar} {
+    upvar 1 $stateVar state
+    set modules [file join [dict get $state root] .bot_modules]
+    dict set state appPackages $modules
+    set targets [file join $modules .targets]
+    if {![Probe directory $targets]} {
+        return
+    }
+    set target [dict get $state target]
+    dict set state targetRead 1
+    set tree [file join $targets $target]
+    dict set state appPackages $tree
+    if {![Probe directory $tree]} {
+        dict set state appTreeMissing $tree
+        return
+    }
+    set lib [file join $tree .lib]
+    if {[Probe directory $lib]} {
+        dict set state nativeDirs [list [file normalize $lib]]
+    }
 }
 
 # 1 if a package NAME is installed in SCOPE (one with a module tree): its
@@ -679,6 +726,9 @@ proc surface::modules::NoSuchNamespace {stateVar key ns} {
         if {[Installed $state $scope $head]} {
             set instance [Instance state $scope $head]
             return "the package \"$head\" installed at [ScopeDir $state $instance] has no module \"$ns\" (no such module file [NamespaceFile [ScopeDir $state $instance] $ns])$hint"
+        }
+        if {$scope eq "" && [dict exists $state appTreeMissing]} {
+            set hint "; [file dirname [dict get $state appTreeMissing]] holds the application's packages by target, and none for [dict get $state target] (no directory [dict get $state appTreeMissing]): its packages are not prepared for that target$hint"
         }
         set path [NamespaceFile [ScopeDir $state $scope] $ns]
         if {[surface::source::exists $path] && [InStandardLibrary $path]} {
@@ -1072,6 +1122,19 @@ proc surface::modules::Walk {node} {
                     dict set clause type [TypeRefs [dict get $clause type] [dict get $clause typeSpan]]
                 }]
             }
+            # An emission claim's qualified recognizer (EMISSION-CLAIMS-
+            # MILESTONE-1.md): a reference to a member of its namespace,
+            # like a qualified value.
+            if {[dict getdef $node emits {}] ne {}} {
+                Put node emits [lmap claim [dict get $node emits] {
+                    if {[dict get $claim qualified] ne ""} {
+                        lassign [dict get $claim qualified] ns member
+                        set ns [Ref $ns $member [dict get $claim span] value [dict get $claim rooted]]
+                        dict set claim qualified [list $ns $member]
+                    }
+                    set claim
+                }]
+            }
             # A context parameter's type (CONTEXTS.md), the variadic
             # parameter's List type (VARIADICS-VERTICAL-SLICE-1.md) and the
             # resume clause's message type (COROUTINES.md).
@@ -1130,6 +1193,13 @@ proc surface::modules::Walk {node} {
                 dict set r errors [lmap pair [dict get $r errors] {
                     lreplace $pair 0 0 [ErrorRef {*}$pair]
                 }]
+            }]
+        }
+        inject {
+            # The injected context types (RESTRICTED-CONTEXT-INJECTION-
+            # MILESTONE-1.md): qualified types like any annotation.
+            Put node contexts [lmap c [dict get $node contexts] {
+                dict set c type [TypeRefs [dict get $c type] [dict get $c typeSpan]]
             }]
         }
         classdecl - dfadecl {
@@ -1351,6 +1421,20 @@ proc surface::modules::RemapFile {node fileId} {
             if {[dict exists $node variadic]} {
                 dict set node variadic [RemapOrigin [dict get $node variadic] $fileId]
             }
+            # Emission claims and a recognizer's state declarations
+            # (EMISSION-CLAIMS-MILESTONE-1.md).
+            if {[dict exists $node emits]} {
+                dict set node emits [lmap claim [dict get $node emits] {
+                    dict set claim origin [RemapOrigin [dict get $claim origin] $fileId]
+                }]
+            }
+            if {[dict exists $node recognizer]} {
+                set origins [dict create]
+                dict for {q o} [dict get $node recognizer stateOrigins] {
+                    dict set origins $q [RemapOrigin $o $fileId]
+                }
+                dict set node recognizer stateOrigins $origins
+            }
             # paramTypes carries no origin of its own (plain type-name
             # strings, resolved later by hir/resolve.tcl): nothing to remap.
         }
@@ -1401,6 +1485,16 @@ proc surface::modules::RemapFile {node fileId} {
             dict set node bodyOrigin [RemapOrigin [dict get $node bodyOrigin] $fileId]
             dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
         }
+    }
+    set fold [hir::syntax::foldOf $node]
+    if {$fold ne ""} {
+        # A folding loop's intermediate and initial value (FOLD-LOOPS-
+        # MILESTONE-1.md).
+        dict set fold origin [RemapOrigin [dict get $fold origin] $fileId]
+        dict set fold initial [RemapFile [dict get $fold initial] $fileId]
+        dict set node fold $fold
+    }
+    switch -- [dict get $node kind] {
         handle {
             dict set node call [RemapFile [dict get $node call] $fileId]
             set handlers {}
@@ -2155,9 +2249,10 @@ proc surface::modules::CheckInternal {state own ns span {member ""}} {
     if {$member ne "" && [core::native::isInternalMember "${ns}::$member"]
             && ($own eq "" || [dict exists $state application $own])} {
         # A standard library module's representation access for another
-        # standard library module (core::native::declareInternalMember).
+        # standard library module (core::native::declareInternalMember: a
+        # collection's table, a tree's child field).
         Error INTERNAL-NAMESPACE $span \
-            "\"${ns}::$member\" is internal to the standard library: it gives another standard library module the representation of a collection of \"$ns\", which only those modules may see ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one)"
+            "\"${ns}::$member\" is internal to the standard library: it gives the standard library's own modules a representation of \"$ns\" that only they may see ([expr {$own eq "" ? "the entry program" : "the application module \"$own\""}] is not one)"
     }
     if {![core::native::isInternalNamespace $ns]} {
         return
@@ -2591,6 +2686,7 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     if {$root ne ""} {
         dict set state root [file normalize $root]
         dict set state entry [file normalize [dict get $ast span file]]
+        ApplicationTree state
     }
     dict set state recover $recover
     if {$recover && [dict get $ast diagnostics] ne ""} {
@@ -2643,6 +2739,11 @@ proc surface::modules::BuildProgram {ast strict {target ""} {root ""} {recover 0
     # service (surface/dfa.tcl's Fact): read by no backend or analysis.
     if {[dict get $state dfaNames] ne {}} {
         dict set hir dfaNames [dict get $state dfaNames]
+    }
+    # The target package tree's native library directory (header, "Target
+    # package trees"), for the native backends' links.
+    if {[dict exists $state nativeDirs]} {
+        dict set hir nativeDirs [dict get $state nativeDirs]
     }
     return $hir
 }

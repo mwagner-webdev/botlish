@@ -1,0 +1,24 @@
+direct module
+# runonmain.bot -- SDL's own main-thread queue against a dispatcher that does
+# not pump SDL's events (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, section 17):
+# SDL_Init(SDL_INIT_VIDEO) on the process's main thread (one dispatched
+# request, so SDL's main thread is the process's), then, from the Botlish
+# worker, SDL_RunOnMainThread(callback, NULL, wait_complete = true). SDL runs
+# the callback only inside its event processing on the main thread
+# (SDL_PumpEvents: src/events/SDL_events.c's SDL_RunMainThreadCallbacks);
+# the experimental dispatcher's main thread waits for requests instead, so
+# the worker waits forever. A watchdog (mtd_watchdog) ends the process after
+# five seconds with status 124 and a "deadlock" line; never a hang.
+import mtd
+import probe
+import std::ffi::c
+
+probe::mark(0)
+mtd::watchdog(5)
+initialized = mtd::init(32)
+callback = mtd::callback_ptr()
+nothing = std::ffi::c::null[std::ffi::c::Void]()
+probe::mark(13)
+ran = probe::SDL_RunOnMainThread(callback, nothing, true)
+probe::mark(9)
+[initialized, ran]

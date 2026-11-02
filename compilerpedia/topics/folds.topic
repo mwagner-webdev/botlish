@@ -1,0 +1,208 @@
+# folds.topic -- folding loops (FOLD-LOOPS-MILESTONE-1.md): the construct and
+# the diagnostics that are its own.
+
+@topic concept.folds
+title: Folds: a loop that carries one value, `with intermediate acc INITIAL`
+summary: A fold iterates like a loop but, instead of collecting its iterations' values, carries one value (its intermediate) from each iteration to the next and is that value at the end.
+index: concepts
+alias: fold; reduce; accumulate with a loop; fold loop; folding loop; carry a value through a loop; with intermediate; running value
+keywords: fold, reduce, accumulate, accumulator, intermediate, carry, sum, count, running, state, scanner, aggregate
+related: concept.loops concept.lockstep task.accumulate capability.map-filter rule.immutable-bindings error.fold-intermediate-type error.affine-fold-unsupported
+docs: FOLD-LOOPS-MILESTONE-1.md COLLECTING-LOOPS.md
+
+== WHAT IT IS
+    fold x in xs with intermediate acc INITIAL:      every element
+    fold i from a to b with intermediate acc INITIAL:   (and through,
+                                                         down from)
+    fold x in xs and i from 0 to n with intermediate ...  lockstep
+    fold with intermediate acc INITIAL:              until a break
+
+The clauses are a loop's, word for word. `acc` is the intermediate: in
+each iteration it is the value the previous iteration produced (INITIAL
+for the first), an immutable binding of the body. The body's value
+becomes the next intermediate. The fold itself is the last intermediate.
+
+    loop x in xs:                      the List of the body's values
+        transform(x)
+    fold x in xs with intermediate a initial:
+        transform(a, x)                the final intermediate
+
+== RULES
+  * The loop's operands are evaluated first, in written order, then
+    INITIAL, exactly once, in the enclosing scope; then the iterations.
+  * An empty fold is INITIAL. `continue` keeps the intermediate for that
+    iteration; a bare `break` ends the fold with the current intermediate
+    (the one the iteration started with). Errors and `return` leave the
+    fold as they leave any loop.
+  * The intermediate is not in scope in INITIAL or the loop's operands, nor
+    after the fold. Binding its name again in the body's own scope is a
+    DUPLICATE (it is immutable); a nested scope may shadow it.
+  * The fold's type is the intermediate's: the join of INITIAL's type and
+    every normal completion of the body. A join of two different kinds
+    is error.fold-intermediate-type; `continue` and `break` produce no
+    value, they carry the intermediate unchanged.
+  * A fold is a statement value, exactly where a loop or an `if` may be:
+    the right side of `=`, after `return`, a body's last expression --
+    never a call argument. Outside that position `fold` is an ordinary
+    name.
+  * An affine intermediate is error.affine-fold-unsupported.
+
+== WHY
+Iteration, aggregation and construction are different operations. A
+collecting loop builds a List; a fold carries one value and builds
+nothing it does not compute, so a count or a sum needs no List and no
+mutable cell: natively the intermediate is one register carried around
+the loop.
+
+== EXAMPLES
+@example accept
+fn total(xs: List[int]) -> int:
+    fold x in xs with intermediate sum 0:
+        sum + x
+
+fn count_evens(xs: List[int]) -> int:
+    fold x in xs with intermediate n 0:
+        if x.mod(2) == 1:
+            continue
+        n + 1
+
+[total([1, 2, 3]), total([]), count_evens([1, 2, 3, 4])]
+@caption A sum, an empty fold (its initial value) and a count that skips with continue
+@value [6, 0, 2]
+@end
+
+@example accept
+fn first_run(xs: List[int]) -> int:
+    fold x in xs with intermediate longest 0:
+        if x < 0:
+            break
+        longest + 1
+
+fn state(text: List[int]) -> int:
+    s = fold c in text with intermediate st {depth: 0, max: 0}:
+        d = st.depth + c
+        if d > st.max:
+            {depth: d, max: d}
+        else:
+            {depth: d, max: st.max}
+    s.max
+
+[first_run([4, 5, -1, 6]), state([1, 1, -1, 1, 1, -1])]
+@caption break ends a fold with its current intermediate; a struct intermediate carries several values
+@value [2, 3]
+@end
+
+@example reject
+fn f(xs: List[int]) -> int:
+    fold x in xs with intermediate acc 0:
+        if x > 0:
+            acc + x
+
+f([1])
+@caption An if without else completes the body with unit when its condition is false
+@error CORE SEMANTIC FOLD-INTERMEDIATE-TYPE
+@at 3:9
+@end
+
+== MORE
+FOLD-LOOPS-MILESTONE-1.md; concept.loops for collecting loops;
+task.accumulate for running totals.
+
+@topic error.fold-intermediate-type
+title: FOLD-INTERMEDIATE-TYPE: a fold's intermediate would change its kind
+summary: A fold carries one value, of one type, from each iteration to the next; its initial value and some normal completion of its body have no common type but the dynamic one.
+index: errors
+alias: the intermediate of this fold is; have no common type
+keywords: fold, intermediate, type, join, initial value, unit, else, struct
+related: concept.folds concept.if-expressions error.type
+docs: FOLD-LOOPS-MILESTONE-1.md
+code: CORE SEMANTIC FOLD-INTERMEDIATE-TYPE
+
+== MEANING
+A fold's intermediate has one type: the join of its initial value's type
+and the type of every way its body completes normally. Unlike an `if`,
+whose joined value is read once, the intermediate is read by the same body
+again on the next iteration, so a join that only the dynamic type covers
+-- an Int and a String, two different named structs, anonymous structs of
+different fields, a value and the `unit` of an `if` without `else` -- is
+rejected where the body first completes with the other type:
+
+    the intermediate "acc" of this fold is int (its initial value), but
+    this completion of the body is str
+
+The diagnostic's related locations are the fold and its initial value.
+Nothing that only follows from the conflict (a field read of the
+intermediate, a use of the fold's value) is reported beside it.
+
+== WHAT TO DO
+Make every normal completion of the body a value of the intermediate's
+type: give an `if` its `else` (usually the unchanged intermediate), build
+the same struct fields in every branch, or convert the value. A path that
+should leave the intermediate as it is can `continue`; one that should end
+the fold can `break`.
+
+@example reject
+fn f(xs: List[int]) -> int:
+    fold x in xs with intermediate acc 0:
+        "no"
+
+f([1])
+@caption A String completion of an Int fold
+@error CORE SEMANTIC FOLD-INTERMEDIATE-TYPE
+@at 3:9
+@end
+
+@example accept
+fn f(xs: List[int]) -> int:
+    fold x in xs with intermediate acc 0:
+        if x > 1:
+            acc + x
+        else:
+            acc
+
+f([1, 2, 3])
+@caption Every completion an Int: the else keeps the intermediate
+@value 5
+@end
+
+@topic error.affine-fold-unsupported
+title: AFFINE-FOLD-UNSUPPORTED: a fold cannot carry an affine value
+summary: An affine value (a coroutine handle, or a struct holding one) cannot be a fold's initial value or body value: carrying it would move it from each iteration into the next.
+index: errors
+alias: which would become the intermediate of a fold
+keywords: fold, affine, coroutine, handle, ownership, intermediate
+related: concept.folds concept.affine concept.coroutines error.affine-list-operation-unsupported
+docs: FOLD-LOOPS-MILESTONE-1.md AFFINE-VALUES.md
+code: CORE SEMANTIC AFFINE-FOLD-UNSUPPORTED
+
+== MEANING
+A fold binds its intermediate anew in every iteration, to the value the
+previous iteration completed with. For an affine value that is a move from
+one iteration's binding into the next, with a release on every way the
+fold can be left; the ownership analysis has no rule for it yet, so the
+fold is rejected where the affine value would enter its intermediate: its
+initial value, or a value its body completes with.
+
+== WHAT TO DO
+Carry an unrestricted value (a count, a state struct without the handle)
+and keep the affine value outside the fold, or move it with a loop or a
+function of its own.
+
+@example reject
+import std::coroutine
+
+fn gen() -> int:
+    yield 1
+    2
+
+fn f(n: int) -> int:
+    coroutine {step: h} = gen()
+    c = fold i from 0 to n with intermediate c h:
+        c
+    0
+
+f(2)
+@caption A coroutine handle as a fold's intermediate
+@error CORE SEMANTIC AFFINE-FOLD-UNSUPPORTED
+@at 9:48
+@end

@@ -1,0 +1,4 @@
+# I2 Lists of callables: equal prefixes reach the callables
+fn f(x):
+    x
+[1, f] == [1, f]

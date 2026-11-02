@@ -1,0 +1,4 @@
+# I8 the warning's respelling against an explicit any: dynamic by declaration
+fn dash?(c: any) -> bool:
+    c == '-'
+dash?("-")

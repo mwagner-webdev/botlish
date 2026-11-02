@@ -1,0 +1,202 @@
+diff --git a/native/src/codegen/aot.rs b/native/src/codegen/aot.rs
+index aea21b4b..b3e06840 100644
+--- a/native/src/codegen/aot.rs
++++ b/native/src/codegen/aot.rs
+@@ -1486,6 +1486,15 @@ fn system_link_args(
+             }
+         }
+     }
++    // EXPERIMENT (audit/macos-graphical-main-thread): the main thread's
++    // stack size, LC_MAIN's stacksize (Apple ld's -stack_size, hexadecimal).
++    if flavor == LinkerFlavor::Apple {
++        if let Some(size) = std::env::var_os("BOTLISH_EXPERIMENT_MAIN_STACK").filter(|v| !v.is_empty()) {
++            let mut flag = OsString::from("-Wl,-stack_size,");
++            flag.push(size);
++            args.push(flag);
++        }
++    }
+     if flavor == LinkerFlavor::Msvc {
+         let mut out = OsString::from("/OUT:");
+         out.push(output);
+diff --git a/native/src/runtime/aot.rs b/native/src/runtime/aot.rs
+index fac8e279..c16af369 100644
+--- a/native/src/runtime/aot.rs
++++ b/native/src/runtime/aot.rs
+@@ -222,7 +222,10 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) +
+         .unwrap_or(1 << 30);
+     let protocol = std::env::var_os("BOTLISH_NATIVE_RESULT").filter(|p| !p.is_empty());
+     let report = std::env::var_os("BOTLISH_NATIVE_STARTUP_REPORT").filter(|p| !p.is_empty());
+-    let worker = std::thread::Builder::new().stack_size(stack_size).spawn(move || {
++    // EXPERIMENT (audit/macos-graphical-main-thread): where the program runs.
++    let mode = experiment::mode();
++    let body = move || {
++        experiment::report_thread(mode);
+         let (mut vm, entry) = init();
+         if let Some(path) = report {
+             // What the startup installed (Vm::startup_report), before any of
+@@ -239,10 +242,10 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) +
+             return driver_protocol(std::path::Path::new(&path), &mut vm, entry);
+         }
+         #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+-        let _guard = {
++        let _guard = (!experiment::skip_guard()).then(|| {
+             let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+             super::platform::OverflowGuard::install_executable(&stack).expect("the stack-overflow guard")
+-        };
++        });
+         let result = entry(&mut *vm);
+         if result == NO_VALUE {
+             let error = vm
+@@ -259,9 +262,23 @@ pub fn run(argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>, ProgramEntry) +
+                 1
+             }
+         }
+-    });
++    };
++    if mode == experiment::Mode::Main {
++        // Candidate A: the program on the thread that called run -- the
++        // process's main thread -- and its stack.
++        return body();
++    }
++    let queue = (mode == experiment::Mode::Dispatch).then(experiment::open_queue);
++    let worker = std::thread::Builder::new().stack_size(stack_size).spawn(body);
+     let status = match worker {
+-        Ok(worker) => match worker.join() {
++        Ok(worker) => match {
++            // Candidate B: the main thread serves the worker's requests
++            // instead of blocking in join until the worker ends.
++            if let Some(queue) = queue {
++                experiment::serve(queue, &worker);
++            }
++            worker.join()
++        } {
+             Ok(status) => status,
+             Err(_) => {
+                 eprintln!("native executable panicked (NATIVE BUG)");
+@@ -294,11 +311,11 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) ->
+         }
+     };
+     #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
+-    let _guard = {
++    let _guard = (!experiment::skip_guard()).then(|| {
+         super::platform::set_result_file(&file);
+         let stack = super::native_stack::NativeStack::current().expect("the thread's stack bounds");
+         super::platform::OverflowGuard::install(&stack).expect("the stack-overflow guard")
+-    };
++    });
+     let runs = std::env::var("BOTLISH_NATIVE_RUNS").ok().and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0);
+     let mut lines = Vec::new();
+     let mut result = NO_VALUE;
+@@ -345,3 +362,112 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) ->
+     }
+     0
+ }
++
++/// EXPERIMENT ONLY -- audit/macos-graphical-main-thread
++/// (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md); never part of the production
++/// runtime. Selected per run by the environment, so one build runs every
++/// model side by side:
++///
++///   BOTLISH_EXPERIMENT_THREAD=main      candidate A: `run` executes the
++///                                       program on its own thread (the
++///                                       process's main thread) and stack
++///   BOTLISH_EXPERIMENT_THREAD=dispatch  candidate B: the worker as ever,
++///                                       and the main thread serves
++///                                       `botlish_experiment_main_call`
++///                                       requests until the worker ends
++///   (unset)                             the production model: the worker
++///   BOTLISH_EXPERIMENT_NO_GUARD=1       no overflow guard (a positive
++///                                       control of the overflow tests)
++///   BOTLISH_EXPERIMENT_REPORT=1         one "MTP" line on standard error:
++///                                       the thread and the stack the
++///                                       runtime found
++pub mod experiment {
++    use std::ffi::c_void;
++    use std::sync::{mpsc, Mutex};
++    use std::time::Duration;
++
++    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
++    pub enum Mode { Worker, Main, Dispatch }
++
++    pub fn mode() -> Mode {
++        match std::env::var("BOTLISH_EXPERIMENT_THREAD").as_deref() {
++            Ok("main") => Mode::Main,
++            Ok("dispatch") => Mode::Dispatch,
++            _ => Mode::Worker,
++        }
++    }
++
++    pub fn skip_guard() -> bool {
++        std::env::var_os("BOTLISH_EXPERIMENT_NO_GUARD").is_some_and(|v| v == "1")
++    }
++
++    fn process_main() -> i32 {
++        #[cfg(target_vendor = "apple")]
++        // SAFETY: no preconditions.
++        return unsafe { libc::pthread_main_np() };
++        #[cfg(target_os = "linux")]
++        // SAFETY: no preconditions.
++        return unsafe { (libc::syscall(libc::SYS_gettid) == libc::getpid() as libc::c_long) as i32 };
++        #[allow(unreachable_code)]
++        -1
++    }
++
++    pub fn report_thread(mode: Mode) {
++        if std::env::var_os("BOTLISH_EXPERIMENT_REPORT").is_none() {
++            return;
++        }
++        #[cfg(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc")))]
++        let stack = match super::super::native_stack::NativeStack::current() {
++            Ok(s) => format!(
++                "\"stack_low\":\"{:#x}\",\"stack_high\":\"{:#x}\",\"guard_low\":\"{:#x}\",\"usable_bytes\":{},\"guard_bytes\":{}",
++                s.low_bound, s.high_bound, s.guard_low, s.high_bound - s.low_bound, s.low_bound - s.guard_low
++            ),
++            Err(e) => format!("\"stack_error\":\"{e}\""),
++        };
++        #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
++        let stack = String::from("\"stack_error\":\"unsupported host\"");
++        eprintln!("MTP {{\"kind\":\"runtime\",\"mode\":\"{mode:?}\",\"pthread_main\":{},{stack}}}", process_main());
++    }
++
++    type Job = (extern "C" fn(*mut c_void), usize, mpsc::SyncSender<()>);
++    static QUEUE: Mutex<Option<mpsc::Sender<Job>>> = Mutex::new(None);
++
++    /// Runs F(DATA) on the main thread and waits for it: 0, or -1 when no
++    /// main thread serves requests (the production model, and after the
++    /// worker ended).
++    #[unsafe(no_mangle)]
++    pub extern "C" fn botlish_experiment_main_call(f: extern "C" fn(*mut c_void), data: *mut c_void) -> i32 {
++        let sender = QUEUE.lock().ok().and_then(|q| q.clone());
++        let Some(sender) = sender else { return -1 };
++        let (done, wait) = mpsc::sync_channel(1);
++        if sender.send((f, data as usize, done)).is_err() {
++            return -1;
++        }
++        if wait.recv().is_ok() { 0 } else { -1 }
++    }
++
++    pub fn open_queue() -> mpsc::Receiver<Job> {
++        let (sender, receiver) = mpsc::channel();
++        *QUEUE.lock().unwrap() = Some(sender);
++        receiver
++    }
++
++    /// The main thread's loop: every request, in order, until WORKER ends.
++    pub fn serve<T>(queue: mpsc::Receiver<Job>, worker: &std::thread::JoinHandle<T>) {
++        loop {
++            match queue.recv_timeout(Duration::from_millis(2)) {
++                Ok((f, data, done)) => {
++                    f(data as *mut c_void);
++                    let _ = done.send(());
++                }
++                Err(mpsc::RecvTimeoutError::Timeout) => {
++                    if worker.is_finished() {
++                        break;
++                    }
++                }
++                Err(mpsc::RecvTimeoutError::Disconnected) => break,
++            }
++        }
++        *QUEUE.lock().unwrap() = None;
++    }
++}

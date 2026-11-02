@@ -158,6 +158,34 @@ it the same way (`program::instantiate_linked`, `runtime::aot::run`);
 `tests/system-linker.test` checks that their startups install exactly the
 same program state (`BOTLISH_NATIVE_STARTUP_REPORT`).
 
+## The startup policy
+
+An executable runs its program on one of two threads, chosen when it is
+emitted and recorded in its program record's `startup` word
+(MAIN-THREAD-STARTUP-MILESTONE-1.md; `runtime::program::Startup`):
+
+| | `worker` (the default) | `main-thread` |
+| --- | --- | --- |
+| selected by | nothing, or `-native-startup worker` | `-native-startup main-thread` (`native::executable -startup`, the driver's `--startup`) |
+| the program's thread | a worker the process's main thread starts and joins | the process's main thread, which entered the executable's `main` |
+| its stack | `BOTLISH_NATIVE_STACK_BYTES` when it runs (1 GiB by default) | 512 MiB, reserved by the link (Mach-O's LC_MAIN, `-Wl,-stack_size,0x20000000`); `BOTLISH_NATIVE_STACK_BYTES` does not apply |
+| targets | every target | macOS AArch64 only: every other refuses it before anything is written (`NATIVE UNSUPPORTED startup`) |
+| linkers | rustc, stub, system | rustc and system (Botlish.app's); the stub is Linux x86-64's |
+
+Every linker's startup reads the policy from the record before it builds
+anything (`runtime::aot::start_linked`, the stub's loader) and `aot::run`
+runs one body on the thread it names: the Vm made there, the startup report,
+the argument snapshot, the driver protocol or the overflow guard, the
+program, its value or error -- so output, errors, statuses, the driver
+protocol and every runtime guarantee are the same; a Rust panic is "native
+executable panicked (NATIVE BUG)", status 1, under both. The startup report
+ends in `startup POLICY`, `process-main-thread 1|0|unknown` and `stack
+USABLE GUARD`. A macOS graphical program -- AppKit, SDL3's Cocoa video
+driver -- needs `main-thread`: on the worker, SDL3's video initialization
+fails (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md). Nothing selects it
+automatically, and linked runs of programs that call C (the native
+backends' `run`) are always the worker's.
+
 ## The system linker
 
 SINGLE-EXECUTABLE-FFI-MILESTONE-1.md has the design and its evidence. In
@@ -366,6 +394,12 @@ Botlish.app/Contents/MacOS/botlish -version    # (or a symbolic link to it on PA
   Darwin IO included) needs Apple's Command Line Tools or Xcode; without
   them the link says so (`NATIVE LINK TOOLCHAIN`, "xcode-select
   --install").
+* **Graphical programs.** `botlish -native-startup main-thread
+  -emit-native-executable app.bot` builds an executable that runs its
+  program on the process's main thread, which AppKit and SDL3's Cocoa
+  driver need (the startup policy, above); a static SDL3 is an ordinary
+  link-plan entry (NATIVE-LINK-PLAN-MILESTONE-1.md). The application needs
+  nothing more for it: no Rust, no checkout.
 * **Signing.** Ad hoc, inner code first: the framework's version, the
   driver, then the application (its launcher and the seal of its
   resources). `codesign --verify --deep --strict` passes, after moving the

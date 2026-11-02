@@ -1021,7 +1021,7 @@ fn register_value_transport_tests():
     fn b_gc_frontier_strings() errors std::compiler::CompilerError:
         static compile:
             fn f0(r, k):
-                std::str::concat(r.a, r.b) + k
+                std::str::length(std::str::concat(r.a, r.b)) + k
             fn f1(r, k):
                 f0(r, k)
             fn f2(r, k):

@@ -2189,6 +2189,55 @@ error InvalidUtf8, never a replacement character -- so
 decode_utf8(from_list(s.encode_utf8())) == s for every String s. A 0 byte is
 the character U+0000. No byte-order mark is skipped, nothing normalized.
 
+@topic stdlib.std::abi::bytes::encode_utf16le
+title: std::abi::bytes::encode_utf16le -- Function of module std::abi::bytes
+summary: TEXT's UTF-16LE encoding (UTF16-BYTE-STORAGE-MILESTONE-1.md)
+index: stdlib
+symbol: std::abi::bytes::encode_utf16le
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn encode_utf16le(text: str) -> Bytes:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::encode_utf16le or, as a method,
+receiver.encode_utf16le(...).
+
+== DESCRIPTION
+TEXT's UTF-16LE encoding (UTF16-BYTE-STORAGE-MILESTONE-1.md): each Unicode
+scalar value of TEXT as UTF-16 code units -- one unit, or for a scalar above
+U+FFFF its surrogate pair, high unit first -- and each unit as two bytes,
+low byte first, whatever the host's byte order: exactly two bytes per unit,
+in one contiguous Bytes. No byte-order mark is added, no terminator (a Win32
+call adds its own NUL unit: std::windows::fs), nothing normalized; U+0000 is
+the bytes 00 00, an ordinary character. Total.
+
+@topic stdlib.std::abi::bytes::decode_utf16le
+title: std::abi::bytes::decode_utf16le -- Function of module std::abi::bytes
+summary: The String whose UTF-16LE encoding is DATA
+index: stdlib
+symbol: std::abi::bytes::decode_utf16le
+related: stdlib.module.std::abi::bytes
+
+== DECLARATION
+    fn decode_utf16le(data: Bytes) -> str errors InvalidUtf16:
+
+== MODULE
+stdlib/abi/bytes.bot: import std::abi::bytes, then write
+std::abi::bytes::decode_utf16le or, as a method,
+receiver.decode_utf16le(...).
+
+== DESCRIPTION
+The String whose UTF-16LE encoding is DATA: encode_utf16le's inverse. Strict
+-- an odd byte count, or code units (byte pairs read low byte first) that
+are no well-formed UTF-16 (a high surrogate D800..DBFF not followed at once
+by a low one DC00..DFFF, a low surrogate not preceded at once by a high one)
+is the declared error InvalidUtf16, never a replacement character -- so
+decode_utf16le(encode_utf16le(s)) == s for every String s. FF FE is the
+character U+FEFF, never a byte-order mark: no order is detected or skipped.
+Nothing normalized.
+
 @topic stdlib.std::abi::bytes::length
 title: std::abi::bytes::length -- Function of module std::abi::bytes
 summary: The exact byte count of DATA, as the ABI size domain.
@@ -2439,8 +2488,10 @@ stdlib/abi/bytes.bot (import std::abi::bytes).
 == MEMBERS
     std::abi::bytes::Bytes         opaque struct
     std::abi::bytes::MutableBytes  opaque struct
+    std::abi::bytes::decode_utf16le function -- The String whose UTF-16LE e...
     std::abi::bytes::decode_utf8   function -- The String whose UTF-8 encod...
     std::abi::bytes::detach        function -- DATA itself, as a value (a l...
+    std::abi::bytes::encode_utf16le function -- TEXT's UTF-16LE encoding (U...
     std::abi::bytes::freeze        function -- An immutable snapshot of all...
     std::abi::bytes::freeze_prefix function -- An immutable snapshot of the...
     std::abi::bytes::from_bytes    function -- An independent writable copy...
@@ -4514,6 +4565,51 @@ std::byte_store::from_list([]).byte_count()
 @value 0
 @end
 
+@topic stdlib.std::byte_store::decode_utf16le
+title: std::byte_store::decode_utf16le -- intrinsic of namespace std::byte_store
+summary: The String whose UTF-16LE encoding is a byte storage's bytes, or the declared error InvalidUtf16.
+index: stdlib
+symbol: std::byte_store::decode_utf16le
+keywords: decode utf-16; utf16le; utf-16 bytes to string; wide string; InvalidUtf16
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::decode_utf16le stdlib.std::byte_store::encode_utf16le
+
+== SIGNATURE
+    std::byte_store::decode_utf16le(any) -> str
+
+== ERRORS
+    InvalidUtf16
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::decode_utf16le. Method syntax:
+receiver.decode_utf16le(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::decode_utf16le, which is what programs
+call (it takes a std::abi::bytes::Bytes). Strict: an odd byte count, or code
+units that are not well-formed UTF-16 -- an unpaired high or low surrogate,
+in any position -- is the declared error InvalidUtf16, never a replacement
+character. FF FE is the character U+FEFF, never a byte-order mark: the byte
+order is always little-endian, never detected. A UTF-16 code unit is not a
+character: a surrogate pair is one scalar.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").decode_utf16le():
+    on InvalidUtf16:
+        "not text"
+@value "hé"
+@end
+
 @topic stdlib.std::byte_store::decode_utf8
 title: std::byte_store::decode_utf8 -- intrinsic of namespace std::byte_store
 summary: The String whose UTF-8 encoding is a byte storage's bytes, or the declared error InvalidUtf8.
@@ -4556,6 +4652,42 @@ std::byte_store::from_list("hé".encode_utf8()).decode_utf8():
     on InvalidUtf8:
         "not text"
 @value "hé"
+@end
+
+@topic stdlib.std::byte_store::encode_utf16le
+title: std::byte_store::encode_utf16le -- intrinsic of namespace std::byte_store
+summary: A String's UTF-16LE encoding as a new byte storage: two bytes per code unit, low byte first, no byte-order mark and no terminator.
+index: stdlib
+symbol: std::byte_store::encode_utf16le
+keywords: encode utf-16; utf16le; string to utf-16 bytes; wide string; utf-16 little endian
+related: stdlib.module.std::byte_store stdlib.std::abi::bytes::encode_utf16le stdlib.std::byte_store::decode_utf16le
+
+== SIGNATURE
+    std::byte_store::encode_utf16le(str) -> any
+
+== USE
+An intrinsic of namespace std::byte_store: import std::byte_store, then
+write std::byte_store::encode_utf16le. Method syntax:
+receiver.encode_utf16le(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The substrate of std::abi::bytes::encode_utf16le, which is what programs
+call (it returns a std::abi::bytes::Bytes). Each Unicode scalar value is one
+UTF-16 code unit, or for a scalar above U+FFFF its surrogate pair, high unit
+first; each unit is stored low byte first whatever the host's byte order.
+U+0000 is the bytes 00 00; nothing is added (no byte-order mark, no NUL
+terminator) and nothing normalized. Total.
+UTF16-BYTE-STORAGE-MILESTONE-1.md.
+
+== EXAMPLES
+@example accept
+import std::byte_store
+
+std::byte_store::encode_utf16le("hé").byte_count()
+@value 4
 @end
 
 @topic stdlib.std::byte_store::from_list
@@ -4694,7 +4826,9 @@ Compiler intrinsics only, no module file (import std::byte_store).
 
 == MEMBERS
     std::byte_store::byte_count    intrinsic -- The exact number of bytes o...
+    std::byte_store::decode_utf16le intrinsic -- The String whose UTF-16LE ...
     std::byte_store::decode_utf8   intrinsic -- The String whose UTF-8 enco...
+    std::byte_store::encode_utf16le intrinsic -- A String's UTF-16LE encodi...
     std::byte_store::from_list     intrinsic -- A new immutable byte storag...
     std::byte_store::join          intrinsic -- One new immutable byte stor...
     std::byte_store::slice         intrinsic -- The byte storage of a stora...
@@ -4703,15 +4837,98 @@ Each member is a topic: -help NAME (e.g. -help
 std::byte_store::byte_count).
 
 == NOTES
-Two intrinsics, no module file. A byte storage is a runtime value kind of
-its own: an immutable, finite sequence of bytes with an exact length, no
+Intrinsics, no module file. A byte storage is a runtime value kind of its
+own: an immutable, finite sequence of bytes with an exact length, no
 terminator, compared and hashed by its bytes. No source type spells it (its
 static type is any); std::abi::bytes::Bytes is the opaque struct whose one
 field holds one, and only module std::abi::bytes can construct or open a
-Bytes. So programs use std::abi::bytes::from_list and
-std::abi::bytes::length; these intrinsics are what that module is written
-in. There is deliberately no operation that reads, slices or iterates the
-bytes.
+Bytes. So programs use std::abi::bytes::from_list, std::abi::bytes::length
+and the rest of that module; these intrinsics are what it is written in.
+There is deliberately no operation that indexes or iterates the bytes: they
+are combined and cut whole (join, slice) and converted to and from text
+(decode_utf8; encode_utf16le and decode_utf16le,
+UTF16-BYTE-STORAGE-MILESTONE-1.md).
+
+@topic stdlib.std::char::is_tcl_alnum
+title: std::char::is_tcl_alnum -- intrinsic of namespace std::char
+summary: Whether a character (UnicodeChar) is a letter or a decimal digit (categories L* and Nd), exactly as Tcl 9's [:alnum:] decides: std::str::is_tcl_alnum's class, for a character.
+index: stdlib
+symbol: std::char::is_tcl_alnum
+keywords: is alphanumeric; letter or digit; character class; classify character
+related: stdlib.module.std::char stdlib.std::char::is_tcl_alpha stdlib.std::str::is_tcl_alnum stdlib.std::ascii::is_alphanumeric
+
+== SIGNATURE
+    std::char::is_tcl_alnum(UnicodeChar) -> bool
+
+== USE
+An intrinsic of namespace std::char: import std::char, then write
+std::char::is_tcl_alnum. Method syntax: receiver.is_tcl_alnum(...) is the
+same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+std::char::is_tcl_alpha plus general category Nd (decimal numbers, in any
+script: ARABIC-INDIC DIGIT ZERO is alnum and not alpha); other numerals
+(Roman numerals, circled digits, fractions, superscripts) are not included.
+Total and allocation-free, like std::char::is_tcl_alpha; it decides what
+std::str::is_tcl_alnum decides for the one-character String of the same
+character.
+
+== EXAMPLES
+@example accept
+import std::char
+
+['7'.is_tcl_alnum(), '٠'.is_tcl_alnum(), 'Ⅻ'.is_tcl_alnum(), '_'.is_tcl_alnum()]
+@value [true, true, false, false]
+@end
+
+@topic stdlib.std::char::is_tcl_alpha
+title: std::char::is_tcl_alpha -- intrinsic of namespace std::char
+summary: Whether a character (UnicodeChar) is a letter (Unicode general category L*), exactly as Tcl 9's [:alpha:] decides: std::str::is_tcl_alpha's class, for a character instead of a one-character String.
+index: stdlib
+symbol: std::char::is_tcl_alpha
+keywords: is letter; alphabetic; character class; unicode letter; classify character
+related: stdlib.module.std::char stdlib.std::char::is_tcl_alnum stdlib.std::str::is_tcl_alpha stdlib.std::str::char_at stdlib.std::web::emailish?
+
+== SIGNATURE
+    std::char::is_tcl_alpha(UnicodeChar) -> bool
+
+== USE
+An intrinsic of namespace std::char: import std::char, then write
+std::char::is_tcl_alpha. Method syntax: receiver.is_tcl_alpha(...) is the
+same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+True for general categories Lu, Ll, Lt, Lm and Lo -- Unicode-aware, not
+ASCII-only -- and for no other character: not a decimal digit, a Roman
+numeral (Nl), a combining mark or punctuation. It decides what
+std::str::is_tcl_alpha decides for the one-character String of the same
+character, but it is total -- every UnicodeChar is one character, so there
+is no RANGE case -- and it never makes a String: read the characters of a
+text with std::str::char_at and classify them as they are
+(UNICODECHAR-CLASSIFIERS.md). Like the std::str form, it reproduces Tcl's
+class rather than being Botlish's eventual character-classification API.
+Its parameter is a UnicodeChar: a one-character String is the TYPE error,
+and a method-style call x.is_tcl_alpha() with both std::char and std::str
+imported needs x's type to choose (with an untyped x it is
+AMBIGUOUS-METHOD-CALL: call the one you mean).
+
+== EXAMPLES
+@example accept
+import std::char
+import std::str
+
+text = "é7例"
+loop i from 0 to text.length():
+    std::char::is_tcl_alpha(text.char_at(i))
+@caption A character read from a String, classified without a slice
+@value [true, false, true]
+@end
 
 @topic stdlib.std::char::scalar_value
 title: std::char::scalar_value -- intrinsic of namespace std::char
@@ -4750,27 +4967,32 @@ import std::char
 
 @topic stdlib.module.std::char
 title: std::char -- standard namespace
-summary: The UnicodeChar operation: std::char::scalar_value, a character's Unicode scalar value as an Int.
+summary: The UnicodeChar operations: std::char::scalar_value, a character's Unicode scalar value as an Int, and the character classes std::char::is_tcl_alpha and std::char::is_tcl_alnum.
 index: stdlib
 symbol: std::char
-keywords: character functions; char functions; unicode character
-related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char
+keywords: character functions; char functions; unicode character; character class
+related: concept.strings stdlib.std::str::char_at stdlib.std::str::append_char stdlib.std::char::is_tcl_alpha stdlib.std::char::is_tcl_alnum
 
 == SOURCE
 Compiler intrinsics only, no module file (import std::char).
 
 == MEMBERS
+    std::char::is_tcl_alnum        intrinsic -- Whether a character (Unicod...
+    std::char::is_tcl_alpha        intrinsic -- Whether a character (Unicod...
     std::char::scalar_value        intrinsic -- The Unicode scalar value of...
 
-Each member is a topic: -help NAME (e.g. -help std::char::scalar_value).
+Each member is a topic: -help NAME (e.g. -help std::char::is_tcl_alnum).
 
 == NOTES
-`char` has no module file: its one member is an intrinsic. A UnicodeChar is
+`char` has no module file: its members are intrinsics. A UnicodeChar is
 written as a character literal ('a', '\n', '😀') and read from a String with
 std::str::char_at; it becomes text with std::str::append_char. There is no
-conversion from an Int to a UnicodeChar and no character classification
-beyond comparing scalar values (plus the byte-level ascii:: predicates and
-the temporary std::str::is_tcl_alpha/alnum).
+conversion from an Int to a UnicodeChar. A character is classified with
+std::char::is_tcl_alpha and std::char::is_tcl_alnum (Tcl 9's [:alpha:] and
+[:alnum:], the classes the temporary std::str forms decide for a
+one-character String), compared with character literals (c == '_'), or
+measured with std::char::scalar_value (with the byte-level ascii::
+predicates for an ASCII scalar).
 
 @topic stdlib.std::compiler::DiagnosticCode
 title: std::compiler::DiagnosticCode -- Enum of module std::compiler
@@ -4789,6 +5011,7 @@ related: stdlib.module.std::compiler
         AffineEqualityUnsupported,
         AffineErasureUnsupported,
         AffineFieldMoveRequiresDestructure,
+        AffineFoldUnsupported,
         AffineGenericNestedUnsupported,
         AffineInstanceBudget,
         AffineListOperationUnsupported,
@@ -4801,9 +5024,8 @@ related: stdlib.module.std::compiler
         Arity,
         BinaryOperand,
         BreakOutsideLoop,
-        ContextBindingCollision,
-        ContextFunctionValue,
-        ContextInstallationUnsupported,
+        CallbackEnvironment,
+        CallbackPlacement,
 
 == MODULE
 stdlib/compiler.bot: import std::compiler, then write
@@ -8691,6 +8913,51 @@ std::event_loop::deterministic).
 Each member is a topic: -help NAME (e.g. -help
 std::event_loop::deterministic::Deterministic).
 
+@topic stdlib.std::ffi::c::callback
+title: std::ffi::c::callback -- intrinsic of namespace std::ffi::c
+summary: The C function pointer of a `callback c fn`, by name: a std::ffi::c::FnPtr of its declared C signature, whose calls run the function in the Botlish execution environment waiting in a foreign call.
+index: stdlib
+symbol: std::ffi::c::callback
+keywords: function pointer; C callback; FnPtr of a function; callback address
+related: stdlib.module.std::ffi::c concept.c-callbacks error.callback-reference stdlib.std::ffi::c::null?
+
+== SIGNATURE
+    std::ffi::c::callback(any) -> cptr
+
+== USE
+An intrinsic of namespace std::ffi::c: import std::ffi::c, then write
+std::ffi::c::callback. Method syntax: receiver.callback(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The argument is the name of a top-level `callback c fn` (CALLBACK-REFERENCE
+otherwise), and the operation is only called, never a value. The pointer is
+affine, like every C pointer: bind it, then pass it to a C function whose
+FnPtr parameter is declared noescape -- C may call it only while such a
+call runs (NATIVE CALLBACK otherwise). Native backends only: the Tcl
+backends refuse it at run time (NATIVE-ONLY).
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+
+callback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    0
+
+fn pointer():
+    cb = std::ffi::c::callback(decide)
+    cb.null?()
+
+decide(4)
+@caption The pointer is made where it is passed to C
+@value 1
+@end
+
 @topic stdlib.std::ffi::c::clone
 title: std::ffi::c::clone -- intrinsic of namespace std::ffi::c
 summary: A second alias of a C pointer (the same address, the same type), written p.clone(): the one way to have two pointers.
@@ -8878,9 +9145,9 @@ related: concept.c-ffi concept.affine
 
 == DESCRIPTION
 These are the values a C boundary carries, modeled as C's ABI sees them, not
-as C's source language spells them. Nothing here calls C yet: there is no
-`extern c fn`, no linking and no callback (C-ABI-TYPES.md, "What is not
-here").
+as C's source language spells them. Nothing here calls C: C calls are
+`extern c fn` declarations (C-FFI.md), and C calling Botlish back is a
+`callback c fn` (C-CALLBACK-MILESTONE-1.md, below).
 
 C integer scalars (intrinsic types of this namespace):
 
@@ -8917,6 +9184,30 @@ zero is zero. Where a value type is written, std::ffi::c::Double means
 Float64 and std::ffi::c::Float is an error: Botlish has no binary32 number.
 C long double has no type.
 
+Raw C floating values (intrinsic types of this namespace,
+RAW-C-FLOAT-FFI-MILESTONE-1.md): the same two C types, carried as they are.
+
+  std::ffi::c::RawFloat     C's float, every binary32 bit pattern
+  std::ffi::c::RawDouble    C's double, every binary64 bit pattern
+
+Each has exactly its finite counterpart's C representation (format, size,
+alignment, register class), so a parameter, result, field, element or
+pointee declared raw passes the same machine values -- and every value of
+the format crosses unchanged: NaN of any sign and payload, both infinities,
+negative zero, subnormals. Unlike Float and Double they are types of values
+too, of their own kind, in every position: a raw value is no number. It has
+no arithmetic, ordering, equality or hash (`==` and `hash` refuse it, as
+they refuse a pointer), nothing converts it implicitly, and it needs no
+authority (representing a NaN is no memory access). Between a raw value and
+anything else stand only the explicit operations of the module
+std::ffi::c::raw (stdlib/ffi/c/raw.bot, imported by the programs that use
+them): a raw value from and to its bit pattern, its classification by the
+bits alone, its admission to a Float64 (Float's and Double's own rule:
+NonFiniteFloat for NaN and the infinities, negative zero 0.0) and a
+Float64's narrowing to one (Float's own rounding: to nearest, ties to even,
+an overflow NonFiniteFloat). A raw value's display is its C type and its
+bits: <C float 0x7fc00000>, <C double 0x8000000000000000>.
+
 Pointers (intrinsic types and operations of this namespace):
 
   std::ffi::c::Void         the C void: an incomplete pointee, no values
@@ -8934,6 +9225,21 @@ Pointers (intrinsic types and operations of this namespace):
   std::ffi::c::clone(p)          p's type    a second alias of p (p.clone())
   std::ffi::c::erase(p)          Ptr[Void]   the same address as void *
   std::ffi::c::retype[T](p)      Ptr[T]      the same address of a Ptr[Void]
+  std::ffi::c::callback(NAME)    FnPtr[...]  the C function pointer of the
+                                             `callback c fn` NAME, of its
+                                             declared C signature
+
+Callbacks (C-CALLBACK-MILESTONE-1.md). A top-level, environment-free
+function declared `callback c fn NAME(...) -> T:` with C types whose
+conversions are total (the C integer scalars, Bool, RawFloat, RawDouble,
+Ptr, FnPtr; for the result also Float64, C's double, and unit) and no errors
+has a C entry point; std::ffi::c::callback(NAME) is its address. C may call
+it during a call of a C function whose FnPtr parameter is declared noescape,
+synchronously, on that call's thread: it then runs in the Botlish execution
+environment waiting in the call. Anywhere else -- another thread, after the
+call returned, during a call whose contract does not let C call back -- the
+runtime refuses it before any Botlish code runs, and ends the process
+(NATIVE CALLBACK). Native backends only.
 
 A pointer is affine: binding, passing, returning or storing it moves it, and
 `p.clone()` is the one way to have two aliases. Affinity is not ownership: a
@@ -8968,13 +9274,14 @@ parameter metadata (a native's, and later an `extern c fn` declaration's).
 stdlib/ffi/c.bot (import std::ffi::c).
 
 == MEMBERS
+    std::ffi::c::callback          intrinsic -- The C function pointer of a...
     std::ffi::c::clone             intrinsic -- A second alias of a C point...
     std::ffi::c::erase             intrinsic -- The same address as a Ptr[s...
     std::ffi::c::null              intrinsic -- The null C pointer of point...
     std::ffi::c::null?             intrinsic -- Whether a C pointer (data o...
     std::ffi::c::retype            intrinsic -- The same address of a Ptr[s...
 
-Each member is a topic: -help NAME (e.g. -help std::ffi::c::clone).
+Each member is a topic: -help NAME (e.g. -help std::ffi::c::callback).
 
 == NOTES
 `import std::ffi::c` declares the C integer scalars (std::ffi::c::Char ...
@@ -8985,6 +9292,381 @@ storing it moves it), owns nothing, is never dereferenced, and has no
 arithmetic, ordering, equality or conversion to or from an Int. Calling C
 itself is `extern c fn` (concept.c-ffi), which runs only on the native
 backends.
+
+@topic stdlib.std::ffi::c::raw::FloatBits
+title: std::ffi::c::raw::FloatBits -- Type of module std::ffi::c::raw
+summary: The type std::ffi::c::raw::FloatBits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::FloatBits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    type FloatBits = Int in 0..4294967295
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::FloatBits.
+
+@topic stdlib.std::ffi::c::raw::DoubleBits
+title: std::ffi::c::raw::DoubleBits -- Type of module std::ffi::c::raw
+summary: The type std::ffi::c::raw::DoubleBits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::DoubleBits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    type DoubleBits = Int in 0..18446744073709551615
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::DoubleBits.
+
+@topic stdlib.std::ffi::c::raw::float_from_bits
+title: std::ffi::c::raw::float_from_bits -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::float_from_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_from_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn float_from_bits(bits: std::ffi::c::raw::FloatBits) -> std::ffi::c::RawFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_from_bits.
+
+@topic stdlib.std::ffi::c::raw::float_to_bits
+title: std::ffi::c::raw::float_to_bits -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_to_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_to_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_to_bits(x: std::ffi::c::RawFloat) -> std::ffi::c::raw::FloatBits:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_to_bits or, as a method,
+receiver.float_to_bits(...).
+
+@topic stdlib.std::ffi::c::raw::float_to_float64
+title: std::ffi::c::raw::float_to_float64 -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_to_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_to_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_to_float64(x: std::ffi::c::RawFloat) -> Float64 errors NonFiniteFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_to_float64 or, as a method,
+receiver.float_to_float64(...).
+
+@topic stdlib.std::ffi::c::raw::float_from_float64
+title: std::ffi::c::raw::float_from_float64 -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::float_from_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_from_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn float_from_float64(x: Float64) -> std::ffi::c::RawFloat errors NonFiniteFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_from_float64.
+
+@topic stdlib.std::ffi::c::raw::double_from_bits
+title: std::ffi::c::raw::double_from_bits -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::double_from_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_from_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn double_from_bits(bits: std::ffi::c::raw::DoubleBits) -> std::ffi::c::RawDouble:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_from_bits.
+
+@topic stdlib.std::ffi::c::raw::double_to_bits
+title: std::ffi::c::raw::double_to_bits -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_to_bits of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_to_bits
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_to_bits(x: std::ffi::c::RawDouble) -> std::ffi::c::raw::DoubleBits:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_to_bits or, as a method,
+receiver.double_to_bits(...).
+
+@topic stdlib.std::ffi::c::raw::double_to_float64
+title: std::ffi::c::raw::double_to_float64 -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_to_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_to_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_to_float64(x: std::ffi::c::RawDouble) -> Float64 errors NonFiniteFloat:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_to_float64 or, as a method,
+receiver.double_to_float64(...).
+
+@topic stdlib.std::ffi::c::raw::double_from_float64
+title: std::ffi::c::raw::double_from_float64 -- Function (nomethod)
+summary: The function (nomethod) std::ffi::c::raw::double_from_float64 of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_from_float64
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    nomethod fn double_from_float64(x: Float64) -> std::ffi::c::RawDouble:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_from_float64.
+
+@topic stdlib.std::ffi::c::raw::float_finite?
+title: std::ffi::c::raw::float_finite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_finite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_finite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_finite?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_finite? or, as a method,
+receiver.float_finite?(...).
+
+@topic stdlib.std::ffi::c::raw::float_nan?
+title: std::ffi::c::raw::float_nan? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_nan? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_nan?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_nan?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_nan? or, as a method, receiver.float_nan?(...).
+
+@topic stdlib.std::ffi::c::raw::float_infinite?
+title: std::ffi::c::raw::float_infinite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_infinite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_infinite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_infinite?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_infinite? or, as a method,
+receiver.float_infinite?(...).
+
+@topic stdlib.std::ffi::c::raw::float_zero?
+title: std::ffi::c::raw::float_zero? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_zero? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_zero?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_zero?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_zero? or, as a method, receiver.float_zero?(...).
+
+@topic stdlib.std::ffi::c::raw::float_negative?
+title: std::ffi::c::raw::float_negative? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::float_negative? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::float_negative?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn float_negative?(x: std::ffi::c::RawFloat) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::float_negative? or, as a method,
+receiver.float_negative?(...).
+
+@topic stdlib.std::ffi::c::raw::double_finite?
+title: std::ffi::c::raw::double_finite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_finite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_finite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_finite?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_finite? or, as a method,
+receiver.double_finite?(...).
+
+@topic stdlib.std::ffi::c::raw::double_nan?
+title: std::ffi::c::raw::double_nan? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_nan? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_nan?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_nan?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_nan? or, as a method, receiver.double_nan?(...).
+
+@topic stdlib.std::ffi::c::raw::double_infinite?
+title: std::ffi::c::raw::double_infinite? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_infinite? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_infinite?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_infinite?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_infinite? or, as a method,
+receiver.double_infinite?(...).
+
+@topic stdlib.std::ffi::c::raw::double_zero?
+title: std::ffi::c::raw::double_zero? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_zero? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_zero?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_zero?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_zero? or, as a method,
+receiver.double_zero?(...).
+
+@topic stdlib.std::ffi::c::raw::double_negative?
+title: std::ffi::c::raw::double_negative? -- Function of module std::ffi::c::raw
+summary: The function std::ffi::c::raw::double_negative? of the standard module std::ffi::c::raw.
+index: stdlib
+symbol: std::ffi::c::raw::double_negative?
+related: stdlib.module.std::ffi::c::raw
+
+== DECLARATION
+    fn double_negative?(x: std::ffi::c::RawDouble) -> bool:
+
+== MODULE
+stdlib/ffi/c/raw.bot: import std::ffi::c::raw, then write
+std::ffi::c::raw::double_negative? or, as a method,
+receiver.double_negative?(...).
+
+@topic stdlib.module.std::ffi::c::raw
+title: std::ffi::c::raw -- standard namespace
+summary: The explicit operations of the raw C floating values std::ffi::c::RawFloat and std::ffi::c::RawDouble (RAW-C-FLOAT-FFI-MILESTONE-1.md.
+index: stdlib
+symbol: std::ffi::c::raw
+
+== DESCRIPTION
+A raw value is C's float or double as C holds it: any binary32 or binary64
+bit pattern -- NaN of any sign and payload, quiet or signaling, both
+infinities, negative zero, subnormals. These are the only ways between one
+and anything else, each explicit:
+
+  float_from_bits(b)      RawFloat     the binary32 whose bit pattern is
+                                       B (a FloatBits: 0..2^32-1)
+  float_to_bits(x)        FloatBits    X's bit pattern, exactly
+  float_to_float64(x)     Float64      the number X is, widened exactly;
+                                       a NaN or an infinity is
+                                       NonFiniteFloat (its result names
+                                       which), negative zero 0.0 --
+                                       std::ffi::c::Float's own admission
+  float_from_float64(x)   RawFloat     X rounded to nearest, ties to even;
+                                       an overflow to an infinity is
+                                       NonFiniteFloat of its sign, never
+                                       clamped, a zero +0 --
+                                       std::ffi::c::Float's own narrowing
+  double_from_bits(b), double_to_bits(x), double_to_float64(x),
+  double_from_float64(x)               the same for binary64 (a
+                                       DoubleBits: 0..2^64-1), whose
+                                       from_float64 is exact and total
+                                       (every Float64 is a binary64)
+
+and the classifications, which read the bits alone:
+
+  float_finite?(x)    neither NaN nor an infinity (zeros, subnormals,
+                      normals)
+  float_nan?(x)       any NaN, quiet or signaling, of either sign
+  float_infinite?(x)  either infinity
+  float_zero?(x)      either zero
+  float_negative?(x)  the sign bit: -0.0, a negative number, -inf, and a
+                      NaN whose sign bit is set
+  (and double_finite?, double_nan?, double_infinite?, double_zero?,
+  double_negative?)
+
+So -0.0 is `x.double_zero?() and x.double_negative?()`, positive infinity
+`x.double_infinite?() and not x.double_negative?()`. Nothing here needs
+authority, and nothing computes on a floating value: a raw value's bits are
+never canonicalized, quieted or rounded by an operation that does not say
+so.
+
+The masks, in decimal (an Int is written in decimal): binary32's exponent
+2139095040 = 0x7f800000, fraction 8388607 = 0x007fffff, magnitude 2147483647
+= 0x7fffffff, sign 2147483648 = 0x80000000; binary64's exponent
+9218868437227405312 = 0x7ff0000000000000, fraction 4503599627370495 =
+0x000fffffffffffff, magnitude 9223372036854775807 = 0x7fffffffffffffff, sign
+9223372036854775808 = 0x8000000000000000.
+
+== SOURCE
+stdlib/ffi/c/raw.bot (import std::ffi::c::raw).
+
+== MEMBERS
+    std::ffi::c::raw::DoubleBits   type
+    std::ffi::c::raw::FloatBits    type
+    std::ffi::c::raw::double_finite? function
+    std::ffi::c::raw::double_from_bits function (nomethod)
+    std::ffi::c::raw::double_from_float64 function (nomethod)
+    std::ffi::c::raw::double_infinite? function
+    std::ffi::c::raw::double_nan?  function
+    std::ffi::c::raw::double_negative? function
+    std::ffi::c::raw::double_to_bits function
+    std::ffi::c::raw::double_to_float64 function
+    std::ffi::c::raw::double_zero? function
+    std::ffi::c::raw::float_finite? function
+    std::ffi::c::raw::float_from_bits function (nomethod)
+    std::ffi::c::raw::float_from_float64 function (nomethod)
+    std::ffi::c::raw::float_infinite? function
+    std::ffi::c::raw::float_nan?   function
+    std::ffi::c::raw::float_negative? function
+    std::ffi::c::raw::float_to_bits function
+    std::ffi::c::raw::float_to_float64 function
+    std::ffi::c::raw::float_zero?  function
+
+Each member is a topic: -help NAME (e.g. -help
+std::ffi::c::raw::DoubleBits).
 
 @topic stdlib.std::float64::min
 title: std::float64::min -- Function (nomethod) of module std::float64
@@ -9250,6 +9932,277 @@ is one mixing a Float64 and a DecimalRounded value). The bounds never fail:
 they compare and at most negate, so no NonFiniteFloat can arise. There is no
 rounding mode, no Float64-to-String conversion beyond a program's printed
 result, no math library beyond these, and no bit-level access to a Float64.
+
+@topic stdlib.std::immutable_map::ImmutableMap
+title: std::immutable_map::ImmutableMap -- Opaque struct of module std::immutable_map
+summary: The opaque struct std::immutable_map::ImmutableMap of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::ImmutableMap
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    opaque struct ImmutableMap[K satisfies Hashable, V]:
+        keys: List[K]
+        vals: List[V]
+        hashes: List[int]
+        index: List[int]
+        identity associations(keys, vals)
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::ImmutableMap.
+
+@topic stdlib.std::immutable_map::ImmutableMapEntry
+title: std::immutable_map::ImmutableMapEntry -- Struct of module std::immutable_map
+summary: One association of a map, as a loop over it visits it.
+index: stdlib
+symbol: std::immutable_map::ImmutableMapEntry
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    struct ImmutableMapEntry[K, V]:
+        key: K
+        value: V
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::ImmutableMapEntry.
+
+== DESCRIPTION
+One association of a map, as a loop over it visits it.
+
+@topic stdlib.std::immutable_map::KeyNotFound
+title: std::immutable_map::KeyNotFound -- Error of module std::immutable_map
+summary: A key with no association in the map.
+index: stdlib
+symbol: std::immutable_map::KeyNotFound
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    error KeyNotFound
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::KeyNotFound.
+
+== DESCRIPTION
+A key with no association in the map.
+
+@topic stdlib.std::immutable_map::OrderMismatch
+title: std::immutable_map::OrderMismatch -- Error of module std::immutable_map
+summary: A candidate order that does not hold exactly the map's keys.
+index: stdlib
+symbol: std::immutable_map::OrderMismatch
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    error OrderMismatch
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::OrderMismatch.
+
+== DESCRIPTION
+A candidate order that does not hold exactly the map's keys.
+
+@topic stdlib.std::immutable_map::empty
+title: std::immutable_map::empty -- Function of module std::immutable_map
+summary: The function std::immutable_map::empty of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::empty
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn empty() -> ImmutableMap[K, V]:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::empty or, as a method, receiver.empty(...).
+
+@topic stdlib.std::immutable_map::length
+title: std::immutable_map::length -- Function of module std::immutable_map
+summary: The function std::immutable_map::length of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::length
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn length(m: ImmutableMap[K, V]) -> int:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::length or, as a method, receiver.length(...).
+
+@topic stdlib.std::immutable_map::empty?
+title: std::immutable_map::empty? -- Function of module std::immutable_map
+summary: The function std::immutable_map::empty? of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::empty?
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn empty?(m: ImmutableMap[K, V]) -> bool:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::empty? or, as a method, receiver.empty?(...).
+
+@topic stdlib.std::immutable_map::contains
+title: std::immutable_map::contains -- Function of module std::immutable_map
+summary: The function std::immutable_map::contains of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::contains
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn contains(m: ImmutableMap[K, V], key: K) -> bool:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::contains or, as a method, receiver.contains(...).
+
+@topic stdlib.std::immutable_map::at
+title: std::immutable_map::at -- Function of module std::immutable_map
+summary: The function std::immutable_map::at of the standard module std::immutable_map.
+index: stdlib
+symbol: std::immutable_map::at
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn at(m: ImmutableMap[K, V], key: K) -> V errors KeyNotFound:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::at or, as a method, receiver.at(...).
+
+@topic stdlib.std::immutable_map::order
+title: std::immutable_map::order -- Function of module std::immutable_map
+summary: M's keys in M's iteration order
+index: stdlib
+symbol: std::immutable_map::order
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn order(m: ImmutableMap[K, V]) -> std::mutable_set::MutableSet[K]:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::order or, as a method, receiver.order(...).
+
+== DESCRIPTION
+M's keys in M's iteration order: a MutableSet of exactly M's keys, which the
+compiler knows it is (an order M.reordered admits). O(n).
+
+@topic stdlib.std::immutable_map::validate_order
+title: std::immutable_map::validate_order -- Function of module std::immutable_map
+summary: CANDIDATE unchanged, once checked to hold exactly M's keys, in any order (OrderMismatch otherwise)
+index: stdlib
+symbol: std::immutable_map::validate_order
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn validate_order(m: ImmutableMap[K, V], candidate: std::mutable_set::MutableSet[K]) -> std::mutable_set::MutableSet[K] errors OrderMismatch:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::validate_order or, as a method,
+receiver.validate_order(...).
+
+== DESCRIPTION
+CANDIDATE unchanged, once checked to hold exactly M's keys, in any order
+(OrderMismatch otherwise): the compiler then knows it is an order of M.
+O(n), no key hashed again.
+
+@topic stdlib.std::immutable_map::reordered
+title: std::immutable_map::reordered -- Function of module std::immutable_map
+summary: The map of M's associations in ORDER's order
+index: stdlib
+symbol: std::immutable_map::reordered
+related: stdlib.module.std::immutable_map
+
+== DECLARATION
+    fn reordered(m: ImmutableMap[K, V], order: std::mutable_set::MutableSet[K]) -> ImmutableMap[K, V]:
+
+== MODULE
+stdlib/immutable_map.bot: import std::immutable_map, then write
+std::immutable_map::reordered or, as a method, receiver.reordered(...).
+
+== DESCRIPTION
+The map of M's associations in ORDER's order: equal to M (the same
+associations), with the same hashes, iterating in ORDER's order. ORDER must
+be known to hold exactly M's current keys (order, validate_order:
+REORDER-NOT-PROVEN otherwise); nothing is checked at run time. O(n), no key
+hashed again.
+
+@topic stdlib.module.std::immutable_map
+title: std::immutable_map -- standard namespace
+summary: ImmutableMap[K, V], an immutable, insertion-ordered map of Hashable keys whose equality and hashes are its associations' (REPRESENTATION-INDEPENDEN.
+index: stdlib
+symbol: std::immutable_map
+
+== DESCRIPTION
+  m.freeze()                       (std::mutable_map) the ImmutableMap of a
+                                   MutableMap's current associations, in
+                                   its current order
+  std::immutable_map::empty[K, V]()
+                                   the map with no association
+  m.length()                       the number of associations
+  m.empty?()                       whether there is none
+  m.contains(key)                  whether KEY has an association
+  m.at(key)                        KEY's value, or the error KeyNotFound
+  m.order()                        the keys in their order: a
+                                   std::mutable_set::MutableSet[K] of
+                                   exactly m's keys, known so
+  m.validate_order(candidate)      CANDIDATE, once checked to hold exactly
+                                   m's keys (any order), or OrderMismatch
+  m.reordered(order)               the map with m's associations in
+                                   ORDER's order: ORDER must be known to
+                                   hold exactly m's keys
+  loop e in m:                     every association, in order, as an
+                                   ImmutableMapEntry[K, V]
+  a == b, hash(m)                  by the associations, in no order
+
+An ImmutableMap is an immutable VALUE. Its *identity* is its associations --
+which keys map to which values -- and nothing else: two maps holding the
+same associations are equal (`==`) and hash equally, publicly and in the
+standard library's keyed tables, whatever order they iterate in and however
+they were built. Its *order* is observable and is no part of its identity: a
+loop visits the associations in the order the map was frozen with (its
+MutableMap's insertion order, or the last reorder's), and `reordered`
+returns an equal map that iterates in another order.
+
+It is Equatable exactly when V is (K, being Hashable, always is), and
+Hashable exactly when V is: a map of Hashable keys and values may itself be
+a key of a map, an element of a set or a field of a Hashable value.
+
+Expected cost: O(1) for contains and at, O(n) for freeze, a loop, equality
+and either hash (no sort, no key hashed again by equality's own lookup
+structure beyond one table hash per key), O(n) for order, validate_order and
+reordered.
+
+The representation is std::ordered_table's, frozen into Lists, opaque: no
+program sees a slot, a stored hash or a capacity, and no equality or hash
+reads them (the `identity` clause below).
+
+== SOURCE
+stdlib/immutable_map.bot (import std::immutable_map).
+
+== MEMBERS
+    std::immutable_map::ImmutableMap opaque struct
+    std::immutable_map::ImmutableMapEntry struct -- One association of a ma...
+    std::immutable_map::KeyNotFound error -- A key with no association in t...
+    std::immutable_map::OrderMismatch error -- A candidate order that does ...
+    std::immutable_map::at         function
+    std::immutable_map::contains   function
+    std::immutable_map::empty      function
+    std::immutable_map::empty?     function
+    std::immutable_map::length     function
+    std::immutable_map::order      function -- M's keys in M's iteration order
+    std::immutable_map::reordered  function -- The map of M's associations ...
+    std::immutable_map::validate_order function -- CANDIDATE unchanged, onc...
+
+Each member is a topic: -help NAME (e.g. -help
+std::immutable_map::ImmutableMap).
 
 @topic stdlib.std::immutable_set::contains
 title: std::immutable_set::contains -- intrinsic of namespace std::immutable_set
@@ -12207,7 +13160,7 @@ summary: A new List of the elements of xs followed by one value, written xs.appe
 index: stdlib
 symbol: std::list::append
 keywords: add element; push; append item; insert at end; extend
-related: stdlib.module.std::list concept.lists stdlib.list stdlib.module.std::mutable_vector stdlib.std::str::append_char
+related: stdlib.module.std::list concept.lists stdlib.list stdlib.module.std::mutable_vector stdlib.std::str::append_char stdlib.std::list::flat
 
 == SIGNATURE
     std::list::append(list, any) -> list
@@ -12223,8 +13176,10 @@ every backend (interp, compile, cranelift-generic, cranelift)
 Lists are immutable values, so append builds a new List one element
 longer and every other holder of xs still sees the old one. It appends
 exactly one value: appending a List adds it as a single, nested element.
-There is no operation that joins two Lists; build the combined List with
-a collecting loop, or use a MutableVector (std::mutable_vector::push) when
+Each append copies the List it extends, so a List built by appending in a
+fold costs time quadratic in its length: join Lists with std::list::flat
+(flat([xs, ys]) is their concatenation, in linear time), build with a
+collecting loop, or use a MutableVector (std::mutable_vector::push) when
 many elements are added one by one.
 
 == EXAMPLES
@@ -12290,6 +13245,83 @@ fn third(xs: List[int]) -> int:
 [[10, 20, 30].at(1), third([1, 2, 3]), third([1])]
 @caption A proven index and a handled one
 @value [20, 3, -1]
+@end
+
+@topic stdlib.std::list::flat
+title: std::list::flat -- intrinsic of namespace std::list
+summary: A new List of the elements of every List in lists, in order -- exactly one level of nesting removed -- written lists.flat(); lists itself is unchanged.
+index: stdlib
+symbol: std::list::flat
+alias: flatten; flatten a list; concat lists; concatenate lists; join lists; flat_map; flatmap; concat_map
+keywords: flatten; concatenate; join lists; combine lists; merge lists; nested list; list of lists; flat map
+related: stdlib.module.std::list concept.lists capability.map-filter concept.folds stdlib.std::list::append concept.list-length
+
+== SIGNATURE
+    std::list::flat(list) -> list
+
+== USE
+An intrinsic of namespace std::list: import std::list, then write
+std::list::flat. Method syntax: receiver.flat(...) is the same call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+std::list::flat[T](lists: List[List[T]]) -> List[T]: the elements of the
+first List, then of the second, and so on. It removes exactly one level:
+flat([[[1, 2]], [[3]]]) is [[1, 2], [3]], never [1, 2, 3]; empty Lists
+contribute nothing, duplicates stay, and the elements are neither compared,
+converted nor copied deeply. flat([xs, ys]) is the concatenation of two
+Lists. It is eager and linear: one pass over lists, one new List of exactly
+the total length, each inner List copied into place once -- never a prefix
+copied again, as appending in a loop would.
+
+The argument must be a List of Lists: flat([1, 2]) is a TYPE error at
+compile time, and an element that is no List is the run-time TYPE error
+`std::list::flat element I: expected list, got V` where the compiler cannot
+see the element type (`any`). The result's type is List[T] for a
+List[List[T]]; when the inner Lists all have one proven length M and the
+outer one N, the result is List[T]{length: N*M} (concept.list-length).
+
+flat_map is not a separate function: write the collecting loop, bound to a
+name (a loop is never a call argument: rule.loop-placement), then flatten
+it. Only flat itself is linear; the loop still builds its List and each
+inner List (no fusion), and a fold that grows a List by appending still
+copies it on every append. Runs on every backend.
+
+== EXAMPLES
+@example accept
+import std::list
+
+[std::list::flat([[1, 2], [], [3, 4]]), std::list::flat([[], []]), std::list::flat([[[1, 2]], [[3]]])]
+@caption One level removed, in order; empty Lists contribute nothing
+@value [[1, 2, 3, 4], [], [[1, 2], [3]]]
+@end
+
+@example accept
+import std::list
+
+fn expand(x: int) -> List[int]:
+    if x > 2:
+        [x, x * 10]
+    else:
+        []
+
+xs = [1, 2, 3, 4]
+chunks = loop x in xs:
+    expand(x)
+chunks.flat()
+@caption flat_map: a collecting loop, then flat
+@value [3, 30, 4, 40]
+@end
+
+@example reject
+import std::list
+
+std::list::flat([1, 2])
+@caption Not a List of Lists
+@error CORE SEMANTIC TYPE
+@at 3:17
 @end
 
 @topic stdlib.std::list::length
@@ -12384,11 +13416,11 @@ fn middle(xs: List[int]) -> int:
 
 @topic stdlib.module.std::list
 title: std::list -- standard namespace
-summary: Immutable List operations: length, indexed access (at, get), append, and the search helpers any?, all?, none? and find.
+summary: Immutable List operations: length, indexed access (at, get), append, flat (one level of nesting removed), and the search helpers any?, all?, none? and find.
 index: stdlib
 symbol: std::list
 keywords: list functions; array functions; sequence operations
-related: concept.lists concept.list-length task.list-element capability.map-filter
+related: concept.lists concept.list-length task.list-element capability.map-filter stdlib.std::list::flat
 
 == DESCRIPTION
 The namespace's intrinsics are root natives registered under their qualified
@@ -12473,6 +13505,7 @@ stdlib/list.bot (import std::list).
     std::list::append              intrinsic -- A new List of the elements ...
     std::list::at                  intrinsic -- The element of a List at in...
     std::list::find                function
+    std::list::flat                intrinsic -- A new List of the elements ...
     std::list::get                 function
     std::list::length              intrinsic -- The number of elements of a...
     std::list::none?               function
@@ -12480,19 +13513,21 @@ stdlib/list.bot (import std::list).
 
 Each member is a topic: -help NAME (e.g. -help std::list::NotFound).
 
-== NOTES Four intrinsics (std::list::length, std::list::at,
-std::list::append and the length validator std::list::with_length) and the
-ordinary Botlish functions of stdlib/list.bot built on them. `import
-std::list` makes both callable, qualified (std::list::at(xs, 0)) or as
-methods (xs.at(0)). A List is immutable: append returns a new List and
-nothing changes one in place (a MutableVector is the growable mutable
-alternative).
+== NOTES Five intrinsics (std::list::length, std::list::at,
+std::list::append, std::list::flat and the length validator
+std::list::with_length) and the ordinary Botlish functions of
+stdlib/list.bot built on them. `import std::list` makes both callable,
+qualified (std::list::at(xs, 0)) or as methods (xs.at(0)). A List is
+immutable: append and flat return a new List and nothing changes one in
+place (a MutableVector is the growable mutable alternative).
 
 There is deliberately no map, filter, reduce, sum, reverse, sort, slice,
-concatenation of two Lists or index-of: a collecting loop
-(`loop x in xs: f(x)`, with `continue` to skip) is the transformation
-(capability.map-filter), and std::list::any?, all?, none? and find cover
-search.
+flat_map or index-of: a collecting loop (`loop x in xs: f(x)`, with
+`continue` to skip) is the transformation (capability.map-filter), a fold
+reduces (concept.folds), std::list::flat joins Lists (flat([xs, ys]) is
+their concatenation, and a collecting loop whose body makes a List, then
+flat, is what other languages call flat_map), and std::list::any?, all?,
+none? and find cover search.
 
 @topic stdlib.std::mathish::inc
 title: std::mathish::inc -- Function of module std::mathish
@@ -13631,6 +14666,27 @@ only the iteration order changes. ORDER must be known to hold exactly M's
 current keys (order, validate_order: REORDER-NOT-PROVEN otherwise); nothing
 is checked at run time. O(n), no key hashed again.
 
+@topic stdlib.std::mutable_map::freeze
+title: std::mutable_map::freeze -- Function of module std::mutable_map
+summary: The ImmutableMap of M's current associations, in M's current order
+index: stdlib
+symbol: std::mutable_map::freeze
+related: stdlib.module.std::mutable_map
+
+== DECLARATION
+    fn freeze(m: MutableMap[K, V]) -> std::immutable_map::ImmutableMap[K, V]:
+
+== MODULE
+stdlib/mutable_map.bot: import std::mutable_map, then write
+std::mutable_map::freeze or, as a method, receiver.freeze(...).
+
+== DESCRIPTION
+The ImmutableMap of M's current associations, in M's current order: its live
+entries copied into Lists (keys, values and their stored hashes, so nothing
+is hashed again) and an index of them at M's own slot count. M is a value
+parameter, so nothing later done to the caller's map reaches the result, and
+the result is never changed. O(n + slots).
+
 @topic stdlib.module.std::mutable_map
 title: std::mutable_map -- standard namespace
 summary: MutableMap[K, V], a mutable, insertion-ordered map of Hashable keys (ORDERED-MUTABLE-MAP-SET.md).
@@ -13667,6 +14723,13 @@ symbol: std::mutable_map
   loop e in m:                              every entry, in insertion order
                                             (or the last reorder's), as a
                                             MutableMapEntry[K, V]
+  m.freeze()                                the std::immutable_map::
+                                            ImmutableMap of m's current
+                                            associations, in m's current
+                                            order: an immutable value,
+                                            equal and hashed by its
+                                            associations, which no later
+                                            change of m reaches
 
 A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing m,
 returning it, storing it in a struct) makes a logical copy, and mutating one
@@ -13705,6 +14768,7 @@ stdlib/mutable_map.bot (import std::mutable_map).
     std::mutable_map::contains     function
     std::mutable_map::create       function
     std::mutable_map::empty?       function
+    std::mutable_map::freeze       function -- The ImmutableMap of M's curr...
     std::mutable_map::length       function
     std::mutable_map::order        function -- M's keys in M's iteration order
     std::mutable_map::remove       function
@@ -13919,6 +14983,27 @@ order changes. ORDER must be known to hold exactly S's current elements
 (order, a copy, validate_order: REORDER-NOT-PROVEN otherwise); nothing is
 checked at run time. O(n), no element hashed again.
 
+@topic stdlib.std::mutable_set::freeze
+title: std::mutable_set::freeze -- Function of module std::mutable_set
+summary: The ImmutableSet of S's current elements
+index: stdlib
+symbol: std::mutable_set::freeze
+related: stdlib.module.std::mutable_set
+
+== DECLARATION
+    fn freeze(s: MutableSet[T]) -> ImmutableSet[T]:
+
+== MODULE
+stdlib/mutable_set.bot: import std::mutable_set, then write
+std::mutable_set::freeze or, as a method, receiver.freeze(...).
+
+== DESCRIPTION
+The ImmutableSet of S's current elements: equal to another exactly when
+their members are, and hashed by its members, whatever the order. S is a
+value parameter, so nothing later done to the caller's set reaches it. The
+intrinsic set deduplicates by hash, so this is O(n) expected (its elements
+are distinct already).
+
 @topic stdlib.module.std::mutable_set
 title: std::mutable_set -- standard namespace
 summary: MutableSet[T], a mutable, insertion-ordered set of Hashable elements (ORDERED-MUTABLE-MAP-SET.md).
@@ -13952,6 +15037,11 @@ symbol: std::mutable_set
                                           exactly s's elements
   loop x in s:                            every element, in insertion order
                                           (or the last reorder's)
+  s.freeze()                              the ImmutableSet[T] of s's
+                                          current elements: an immutable
+                                          value, equal and hashed by its
+                                          members, which no later change
+                                          of s reaches
 
 A MutableSet is a mutable VALUE, like MutableVector: a copy is a logical
 copy, and mutating one copy never changes another. The mutating operations
@@ -13983,6 +15073,7 @@ stdlib/mutable_set.bot (import std::mutable_set).
     std::mutable_set::contains     function
     std::mutable_set::create       function
     std::mutable_set::empty?       function
+    std::mutable_set::freeze       function -- The ImmutableSet of S's curr...
     std::mutable_set::length       function
     std::mutable_set::order        function -- S's elements in S's iteratio...
     std::mutable_set::remove       function
@@ -14637,7 +15728,7 @@ summary: Whether a one-character String is a letter or a decimal digit (categori
 index: stdlib
 symbol: std::str::is_tcl_alnum
 keywords: is alphanumeric; letter or digit; character class
-related: stdlib.module.std::str stdlib.std::str::is_tcl_alpha stdlib.std::ascii::is_alphanumeric
+related: stdlib.module.std::str stdlib.std::str::is_tcl_alpha stdlib.std::char::is_tcl_alnum stdlib.std::ascii::is_alphanumeric
 
 == SIGNATURE
     std::str::is_tcl_alnum(str) -> bool
@@ -14655,7 +15746,8 @@ std::str::is_tcl_alpha plus general category Nd (decimal numbers, in any
 script); other numerals (Roman numerals, superscripts) are not included.
 Same contract as std::str::is_tcl_alpha: exactly one character or the
 run-time RANGE error, and a temporary compatibility primitive rather than a
-general API.
+general API. For a character, std::char::is_tcl_alnum decides the same
+class.
 
 == EXAMPLES
 @example accept
@@ -14675,7 +15767,7 @@ summary: Whether a one-character String is a letter (Unicode general category L*
 index: stdlib
 symbol: std::str::is_tcl_alpha
 keywords: is letter; alphabetic; character class; unicode letter
-related: stdlib.module.std::str stdlib.std::str::is_tcl_alnum stdlib.module.std::ascii stdlib.std::web::emailish?
+related: stdlib.module.std::str stdlib.std::str::is_tcl_alnum stdlib.std::char::is_tcl_alpha stdlib.module.std::ascii stdlib.std::web::emailish?
 
 == SIGNATURE
     std::str::is_tcl_alpha(str) -> bool
@@ -14695,8 +15787,10 @@ character-classification API, so new code should not build on it. True
 for general categories Lu, Ll, Lt, Lm and Lo -- Unicode-aware, not
 ASCII-only. The argument must be a String of exactly one character;
 anything else (the empty String included) is the run-time RANGE error.
-It takes a String, not a UnicodeChar, so pass a one-character slice. For
-byte values, std::ascii::is_alphabetic is the structural ASCII test.
+It takes a String, not a UnicodeChar, so pass a one-character slice; for a
+character (std::str::char_at's result) std::char::is_tcl_alpha decides the
+same class without a slice. For byte values, std::ascii::is_alphabetic is
+the structural ASCII test.
 
 == EXAMPLES
 @example accept
@@ -15756,6 +16850,98 @@ stdlib/test.bot (import std::test).
 
 Each member is a topic: -help NAME (e.g. -help std::test::Erased).
 
+@topic stdlib.std::tree::Order
+title: std::tree::Order -- Enum of module std::tree
+summary: How a traversal orders a tree's nodes (std::tree::Order::DepthFirst, std::tree::Order::BreadthFirst).
+index: stdlib
+symbol: std::tree::Order
+related: stdlib.module.std::tree
+
+== DECLARATION
+    enum Order:
+        DepthFirst,
+        BreadthFirst,
+
+== MODULE
+stdlib/tree.bot: import std::tree, then write std::tree::Order.
+
+== DESCRIPTION
+How a traversal orders a tree's nodes (std::tree::Order::DepthFirst,
+std::tree::Order::BreadthFirst).
+
+@topic stdlib.std::tree::walk
+title: std::tree::walk -- Function (nomethod) of module std::tree
+summary: The nodes of ROOT, a tree struct's value, in ORDER
+index: stdlib
+symbol: std::tree::walk
+related: stdlib.module.std::tree
+
+== DECLARATION
+    nomethod fn walk(root, order: Order):
+
+== MODULE
+stdlib/tree.bot: import std::tree, then write std::tree::walk.
+
+== DESCRIPTION
+The nodes of ROOT, a tree struct's value, in ORDER: a coroutine handing over
+each node (each subtree, root included, once per occurrence) in turn, the
+last one its result. Start it with `coroutine {step, first} =
+std::tree::walk(root, order)`.
+
+@topic stdlib.module.std::tree
+title: std::tree -- standard namespace
+summary: Order and walk, the depth-first (preorder) and breadth-first traversal of tree struct values (TREE-STRUCT-MILESTONE-1.md).
+index: stdlib
+symbol: std::tree
+
+== DESCRIPTION
+A `tree struct` is a finite recursive value: an ordinary immutable struct
+whose one recursive field, its child field, is a List of values of its own
+type. `walk` traverses any tree struct's value by that field -- the
+declaration says which field it is, so no children callback is passed -- and
+is an ordinary coroutine whose every segment hands over one node: the
+subtree value itself, of the tree's own type, never a handle, a cursor or a
+reference into the tree.
+
+    coroutine {step, first} = std::tree::walk(root, std::tree::Order::BreadthFirst)
+    visit(first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        visit(step())
+
+A tree has at least one node, its root: the first segment hands over the
+first node, each resume the next, and the last node is the coroutine's
+result (std::coroutine::done? is true once it is handed over).
+
+  DepthFirst    preorder: a node, then each of its children's subtrees,
+                first child to last. A
+                                               ├─ B
+                                               │  ├─ D
+                                               │  └─ E
+                                               └─ C          is A B D E C.
+  BreadthFirst  every node at depth N before any at depth N + 1, and the
+                children of each node in their order: A B C D E.
+
+Neither recursion nor the host's stack bounds a tree: the depth-first walk
+keeps the nodes still to visit on an explicit stack (at most the depth times
+the widest node's child count), the breadth-first walk a queue of the
+frontier, whose visited prefix is dropped as it grows (at most about twice
+the widest level). A tree is a tree by construction, so neither walk keeps a
+visited set: two equal subtrees are two occurrences, visited twice.
+
+The child field is read by the internal std::tree::children (core/tree.tcl),
+which the compiler resolves to the field of the walked tree's own type.
+
+== SOURCE
+stdlib/tree.bot (import std::tree).
+
+== MEMBERS
+    std::tree::Order               enum -- How a traversal orders a tree's ...
+    std::tree::walk                function (nomethod) -- The nodes of ROOT...
+
+Each member is a topic: -help NAME (e.g. -help std::tree::Order).
+
 @topic stdlib.std::web::Emailish
 title: std::web::Emailish -- Type of module std::web
 summary: A String proven to have the shape of an e-mail address by std::web::emailish? (a refinement of str, with a String's representation).
@@ -15772,27 +16958,27 @@ stdlib/web.bot: import std::web, then write std::web::Emailish.
 
 @topic stdlib.std::web::local_extra_chars
 title: std::web::local_extra_chars -- Value of module std::web
-summary: The punctuation emailish? accepts in an address's local part (. _ % + -), as an ImmutableSet of one-character Strings: an internal table.
+summary: The punctuation emailish? accepts in an address's local part ('.' '_' '%' '+' '-'), as an ImmutableSet of UnicodeChars: an internal table.
 index: stdlib
 symbol: std::web::local_extra_chars
 keywords: email punctuation
 related: stdlib.module.std::web stdlib.std::web::emailish?
 
 == DECLARATION
-    local_extra_chars = std::immutable_set::from_list([".", "_", "%", "+", "-"])
+    local_extra_chars = std::immutable_set::from_list(['.', '_', '%', '+', '-'])
 
 == MODULE
 stdlib/web.bot: import std::web, then write std::web::local_extra_chars.
 
 == DESCRIPTION
 local_extra_chars is the established immutable-set membership idiom
-(MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class (". _ % +"
-plus "-"), over ordinary one-scalar str values (char_at's own result type)
--- never UTF-8 bytes, unlike additional_unreserved_chars's std::byte::set
-below. Retained once at module scope, exactly like
-additional_unreserved_chars: constructed once at module initialization,
-never per emailish? call (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed the
-bridge-reachability defect that once forced building this per call).
+(MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class ('.' '_'
+'%' '+' plus '-'), over UnicodeChars (char_at's own result type,
+UNICODECHAR-CLASSIFIERS.md) -- never UTF-8 bytes, unlike
+additional_unreserved_chars's std::byte::set below. Retained once at module
+scope, exactly like additional_unreserved_chars: constructed once at module
+initialization, never per emailish? call (R2A1-MODULE-FN-BRIDGE-
+REACHABILITY.md fixed the defect that once forced building this per call).
 
 @topic stdlib.std::web::emailish?
 title: std::web::emailish? -- Function of module std::web
@@ -16332,14 +17518,17 @@ related: stdlib.module.std::windows::fs
 
 == DECLARATION
     opaque struct NativePath:
-        units: List[int]
+        data: std::abi::bytes::Bytes
 
 == MODULE
 stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::NativePath.
 
 == DESCRIPTION
-A Windows name or path: its UTF-16 code units (each 1..65535), non-empty.
+A Windows name or path: its UTF-16 code units (each 1..65535), non-empty,
+held as their UTF-16LE bytes (the module comment): DATA's byte pairs, low
+byte first, are the units, exactly -- unpaired surrogates included, no
+terminator.
 
 @topic stdlib.std::windows::fs::WindowsFS
 title: std::windows::fs::WindowsFS -- Opaque context struct
@@ -16511,9 +17700,10 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::from_text or, as a method, receiver.from_text(...).
 
 == DESCRIPTION
-The native path of TEXT: its UTF-16 code units; std::io::path::NotAPath when
-TEXT is empty or holds U+0000. (A std::windows::path::WindowsPath converts
-with std::windows::path::native, which cannot fail.)
+The native path of TEXT: its UTF-16 code units (encode_utf16le);
+std::io::path::NotAPath when TEXT is empty or holds U+0000 (the unit 0). (A
+std::windows::path::WindowsPath converts with std::windows::path::native,
+which cannot fail.)
 
 @topic stdlib.std::windows::fs::units
 title: std::windows::fs::units -- Function of module std::windows::fs
@@ -16534,7 +17724,7 @@ PATH's UTF-16 code units, exactly.
 
 @topic stdlib.std::windows::fs::text
 title: std::windows::fs::text -- Function of module std::windows::fs
-summary: PATH's String
+summary: PATH's String (strict decode_utf16le)
 index: stdlib
 symbol: std::windows::fs::text
 related: stdlib.module.std::windows::fs
@@ -16547,8 +17737,8 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::text or, as a method, receiver.text(...).
 
 == DESCRIPTION
-PATH's String; std::io::path::NotText when PATH holds an unpaired surrogate
-(never a replacement character).
+PATH's String (strict decode_utf16le); std::io::path::NotText when PATH
+holds an unpaired surrogate (never a replacement character).
 
 @topic stdlib.std::windows::fs::display
 title: std::windows::fs::display -- Function of module std::windows::fs
@@ -16565,8 +17755,9 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::display or, as a method, receiver.display(...).
 
 == DESCRIPTION
-PATH as text for people: every unpaired surrogate shown as U+FFFD. LOSSY:
-never a path (the experiment's lossy name opened another file).
+PATH as text for people: its String when it has one, else every unpaired
+surrogate shown as U+FFFD (`lossy`). LOSSY: never a path (the experiment's
+lossy name opened another file); the path itself is unchanged.
 
 @topic stdlib.std::windows::fs::kind
 title: std::windows::fs::kind -- Function of module std::windows::fs
@@ -16588,7 +17779,7 @@ the filesystem or the process.
 
 @topic stdlib.std::windows::fs::join
 title: std::windows::fs::join -- Function of module std::windows::fs
-summary: PATH joined with the relative native NAME, by Win32's syntax (`joined_units`)
+summary: PATH joined with the relative native NAME, by Win32's syntax (`joined_data`)
 index: stdlib
 symbol: std::windows::fs::join
 related: stdlib.module.std::windows::fs
@@ -16602,17 +17793,17 @@ std::windows::fs::join or, as a method, receiver.join(...).
 
 == DESCRIPTION
 PATH joined with the relative native NAME, by Win32's syntax
-(`joined_units`); std::io::path::NotAPath when NAME is no relative path,
-when PATH is verbatim and NAME holds "/", "." or ".." or an empty component,
-and when PATH is not verbatim and a component of NAME ends with a period or
-a space -- which Win32 would drop, so the result would name another entry (a
+(`joined_data`); std::io::path::NotAPath when NAME is no relative path, when
+PATH is verbatim and NAME holds "/", "." or ".." or an empty component, and
+when PATH is not verbatim and a component of NAME ends with a period or a
+space -- which Win32 would drop, so the result would name another entry (a
 name listed under a verbatim directory, "verb.", is joined to that verbatim
 directory). Nothing is normalized, no unit decoded and no filesystem
 observed.
 
 @topic stdlib.std::windows::fs::concat
 title: std::windows::fs::concat -- Function of module std::windows::fs
-summary: PATH joined with the textual relative COMPONENT (its UTF-16 units), by `join`'s rule.
+summary: PATH joined with the textual relative COMPONENT (its UTF-16 units, as from_text makes them
 index: stdlib
 symbol: std::windows::fs::concat
 related: stdlib.module.std::windows::fs
@@ -16625,7 +17816,8 @@ stdlib/windows/fs.bot: import std::windows::fs, then write
 std::windows::fs::concat or, as a method, receiver.concat(...).
 
 == DESCRIPTION
-PATH joined with the textual relative COMPONENT (its UTF-16 units), by
+PATH joined with the textual relative COMPONENT (its UTF-16 units, as
+from_text makes them: NotAPath when it is empty or holds U+0000), by
 `join`'s rule.
 
 @topic stdlib.std::windows::fs::open
@@ -16907,6 +18099,18 @@ identity: NTFS compares names without case ("Case.txt" and "CASE.TXT" are
 one file, W4), Win32 rewrites some (below), and nothing here asks the
 filesystem.
 
+A NativePath holds its units as their UTF-16LE bytes, two per unit, low byte
+first (UTF16-BYTE-STORAGE-MILESTONE-1.md): exactly what a wide function
+reads, without the terminator. Text and native paths convert by
+std::abi::bytes's UTF-16LE codec -- encode_utf16le (total), decode_utf16le
+(strict: an unpaired surrogate is NotText) -- one runtime operation each, on
+contiguous storage; a Win32 call's LPCWSTR is the bytes and one NUL unit
+joined for that call (`wide`), the NUL never part of the path; and the path
+syntax below reads the units, unvalidated, through
+std::abi::bytes::utf16le_units (internal to the standard library). The units
+a path holds are exactly the units it was made of, an unpaired surrogate
+included: the bytes are a representation, never a decoding.
+
 Path syntax (`kind`, `join`) is Win32's, not Unix's with backslashes:
 
   Relative       a\b         relative to the current directory
@@ -17007,7 +18211,7 @@ stdlib/windows/fs.bot (import std::windows::fs).
     std::windows::fs::read_file    function -- Every byte of the file PATH.
     std::windows::fs::remove_directory function -- Removes the empty direct...
     std::windows::fs::remove_file  function -- Removes the file PATH (Delet...
-    std::windows::fs::text         function -- PATH's String
+    std::windows::fs::text         function -- PATH's String (strict decode...
     std::windows::fs::units        function -- PATH's UTF-16 code units, ex...
     std::windows::fs::write        function -- One WriteFile of DATA
     std::windows::fs::write_all    function -- Writes all of DATA to FILE (...
@@ -17276,7 +18480,7 @@ std::windows::path::WindowsPath.
 
 @topic stdlib.std::windows::path::nul_free?
 title: std::windows::path::nul_free? -- Function of module std::windows::path
-summary: true when no character of VALUE is U+0000.
+summary: true when no character of VALUE is U+0000
 index: stdlib
 symbol: std::windows::path::nul_free?
 related: stdlib.module.std::windows::path
@@ -17289,7 +18493,12 @@ stdlib/windows/path.bot: import std::windows::path, then write
 std::windows::path::nul_free? or, as a method, receiver.nul_free?(...).
 
 == DESCRIPTION
-true when no character of VALUE is U+0000.
+true when no character of VALUE is U+0000: when no byte of its UTF-8
+encoding is 0 (U+0000 is the one character whose encoding holds one). One
+pass over the bytes (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Performance"): a
+loop over std::str::char_at locates every non-ASCII character from the start
+of the String again, so it was quadratic in the path's length -- 9.0 ms for
+4096 mixed characters -- where this is linear (36 us).
 
 @topic stdlib.std::windows::path::valid?
 title: std::windows::path::valid? -- Function of module std::windows::path

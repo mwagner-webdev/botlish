@@ -134,6 +134,47 @@ fn slice(data: Bytes, start: int, end: int) -> Bytes errors LowerUnderrun, Upper
 fn decode_utf8(data: Bytes) -> str errors InvalidUtf8:
     std::byte_store::decode_utf8(data.storage)
 
+# TEXT's UTF-16LE encoding (UTF16-BYTE-STORAGE-MILESTONE-1.md): each Unicode
+# scalar value of TEXT as UTF-16 code units -- one unit, or for a scalar
+# above U+FFFF its surrogate pair, high unit first -- and each unit as two
+# bytes, low byte first, whatever the host's byte order: exactly two bytes
+# per unit, in one contiguous Bytes. No byte-order mark is added, no
+# terminator (a Win32 call adds its own NUL unit: std::windows::fs), nothing
+# normalized; U+0000 is the bytes 00 00, an ordinary character. Total.
+fn encode_utf16le(text: str) -> Bytes:
+    Bytes {storage: std::byte_store::encode_utf16le(text)}
+
+# The String whose UTF-16LE encoding is DATA: encode_utf16le's inverse.
+# Strict -- an odd byte count, or code units (byte pairs read low byte
+# first) that are no well-formed UTF-16 (a high surrogate D800..DBFF not
+# followed at once by a low one DC00..DFFF, a low surrogate not preceded at
+# once by a high one) is the declared error InvalidUtf16, never a
+# replacement character -- so decode_utf16le(encode_utf16le(s)) == s for
+# every String s. FF FE is the character U+FEFF, never a byte-order mark: no
+# order is detected or skipped. Nothing normalized.
+fn decode_utf16le(data: Bytes) -> str errors InvalidUtf16:
+    std::byte_store::decode_utf16le(data.storage)
+
+# DATA's 16-bit code units, each byte pair read low byte first, unvalidated
+# (a surrogate is a unit like any other): what std::windows::fs's path
+# syntax reads a native path's units through. Internal to the standard
+# library (core/utf16text.tcl): never API. DATA must hold whole units (an odd
+# byte count is RANGE).
+nomethod fn utf16le_units(data: Bytes) -> List[int]:
+    std::byte_store::utf16le_units(data.storage)
+
+# How many 16-bit code units of DATA's bytes START..END-1 -- each byte pair
+# from START read low byte first -- come before the first unit 0 (the bytes
+# 00 00 at an even distance from START), or all (END - START) / 2 of them
+# when none is 0: the length of a NUL-terminated UTF-16LE name stored in
+# DATA, with no List built (a single 00 byte, or two that belong to
+# different units, ends nothing). What std::windows::fs reads a listed
+# name's length by. Internal to the standard library (core/utf16text.tcl):
+# never API. The slice rule (LowerUnderrun or UpperOverrun unless 0 <= START
+# <= END <= length(DATA)); END - START must be even (odd is RANGE).
+nomethod fn utf16le_units_before_nul(data: Bytes, start: int, end: int) -> int errors LowerUnderrun, UpperOverrun:
+    data.storage.utf16le_units_before_nul(start, end)
+
 # The exact byte count of DATA, as the ABI size domain. The runtime's
 # collection-length ceiling (below 2^62) already guarantees the count is a
 # valid native buffer extent, so no caller re-proves 0 <= n <= 2^64 - 1.

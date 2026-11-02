@@ -13,7 +13,8 @@
 # the compiler, library and native backend (a temporary directory) gets the
 # replacements, and the detectors run against it:
 #
-#   * the test files FILES (default tests/c-float-ffi.test; each with a
+#   * the test files FILES (default tests/c-float-ffi.test and tests/raw-c-
+#     float-ffi.test, RAW-C-FLOAT-FFI-MILESTONE-1.md's; each with a
 #     private -tmpdir): killed if any test fails or a file does not complete;
 #   * audit/c-float-ffi/tools/fuzz.tcl -n N -seed S (random C signatures of
 #     floats, doubles and integers, generated as real C and called on both
@@ -33,7 +34,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests tests/c-float-ffi.test -fuzz-count 4 -fuzz-seed 7 -timeout 1800]
+set options [dict create -only "" -tests {tests/c-float-ffi.test tests/raw-c-float-ffi.test} -fuzz-count 4 -fuzz-seed 7 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value

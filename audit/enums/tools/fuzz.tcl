@@ -48,8 +48,10 @@
 # (ENUM-EMPTY), an unknown qualifier (UNKNOWN-NAMESPACE), a struct used as a
 # qualifier (NOT-AN-ENUM), a bare case (UNBOUND), an anonymous enum
 # (ANONYMOUS-ENUM), a cross-enum value where a List of one enum is declared
-# (TYPE), and, at run time on every backend, arithmetic or ordering of cases
-# (the natives' TYPE error). Cross-enum `==` is not a fault: it is false.
+# (TYPE), and arithmetic or ordering of cases (TYPE: an operand of another
+# kind than the operator requires, METHOD-RECEIVER-TYPE-CORRECTNESS-
+# MILESTONE-1.md; the natives' run-time TYPE error until then). Cross-enum
+# `==` is not a fault: it is false.
 #
 # Every accepted program's value is compared on every backend of BACKENDS
 # against the model's; with -gc-stress 1, the native run again with a
@@ -493,12 +495,12 @@ proc Fault {stateVar} {
         }
         arith {
             set c [Pick [dict get $enums $e]]
-            return [list runtime:TYPE [list "bad = ${e}::$c + 1"] ""]
+            return [list TYPE [list "bad = ${e}::$c + 1"] ""]
         }
         order {
             set c [Pick [dict get $enums $e]]
             set d [Pick [dict get $enums $e]]
-            return [list runtime:TYPE [list "bad = ${e}::$c < ${e}::$d"] ""]
+            return [list TYPE [list "bad = ${e}::$c < ${e}::$d"] ""]
         }
     }
 }

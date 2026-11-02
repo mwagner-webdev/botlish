@@ -1,0 +1,3 @@
+# I4 method applicability: only m1's mark?, a str receiver (today false; a concrete contract would make it inapplicable)
+import m1
+"-".mark?()

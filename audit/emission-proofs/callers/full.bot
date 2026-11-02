@@ -1,0 +1,54 @@
+# full.bot -- calls the library's emitters across their whole relevant
+# domains: digit_unchecked and digit_checked for every Int in -20..20 and
+# some huge ones, json_string on texts of every character class.
+
+import emitlib
+import std::coroutine
+
+fn unchecked(d: int) -> List[int]:
+    coroutine {step, first} = emitlib::digit_unchecked_source(d)
+    loop k from 0 to 3:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn checked(d: int) -> List[int] errors emitlib::NotADigit:
+    coroutine {step, first} = emitlib::digit_checked_source(d)
+    loop k from 0 to 3:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn checked_or(d: int) -> List[int]:
+    checked(d):
+        on emitlib::NotADigit:
+            [-3]
+
+fn text(t: str) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = emitlib::json_string_source(t)
+    loop k from 0 to 64:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn all() -> List[List[List[int]]] errors IndexNotFound:
+    a = loop d from -20 to 21:
+        unchecked(d)
+    b = loop d from -20 to 21:
+        checked_or(d)
+    c = loop t in ["", "\"", "\\", "\n\t\r", "", "/é😀", " "]:
+        text(t)
+    [a, b, c, [unchecked(100000000000000000000), checked_or(-100000000000000000000)]]
+
+all():
+    on IndexNotFound:
+        [[[-2]]]

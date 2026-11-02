@@ -56,7 +56,7 @@ namespace eval surface::recover {
     # Contextual words that start a declaration when the next token is right
     # (surface/parser.tcl's Statement), and the type-level declarations.
     variable declarationWords {enum layout trait union refined opaque context extern}
-    variable functionModifiers {nomethod exported}
+    variable functionModifiers {nomethod exported callback}
 }
 
 proc surface::recover::apply {ast source} {
@@ -213,7 +213,7 @@ proc surface::recover::Suites {node} {
         return {}
     }
     switch -- [dict get $node kind] {
-        function - static - loop {
+        function - static - inject - loop {
             return [list [dict get $node body]]
         }
         if {
@@ -310,7 +310,7 @@ proc surface::recover::Rebuild {node stateVar topLevel} {
             }
             dict set node body $body
         }
-        function - static - loop {
+        function - static - inject - loop {
             dict set node body [Rebuild [dict get $node body] state 0]
         }
         if {
@@ -393,8 +393,8 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
     set texts [lmap t $prefix {dict get $t text}]
     set i 0
     while {[lindex $kinds $i] eq "IDENT" && [lindex $texts $i] in $functionModifiers} {
-        if {[lindex $texts $i] eq "exported" && [lindex $kinds $i+1] eq "IDENT"} {
-            # `exported c fn`: the modifier's foreign ABI.
+        if {[lindex $texts $i] in {exported callback} && [lindex $kinds $i+1] eq "IDENT"} {
+            # `exported c fn`, `callback c fn`: the modifier's foreign ABI.
             incr i
         }
         incr i
@@ -443,8 +443,8 @@ proc surface::recover::Hole {statement at stateVar topLevel} {
         } elseif {$word eq "with" && [lindex $texts 1] eq "context"} {
             set installs $topLevel
         }
-        # Otherwise an expression statement (`f(`, `x.`, `a +`), a `with`
-        # or `static` statement: nothing it binds is visible after it.
+        # Otherwise an expression statement (`f(`, `x.`, `a +`), a `with`,
+        # `static` or `inject` statement: nothing it binds is visible after it.
     } elseif {[lindex $kinds 0] in {INT DECIMAL STRING CHAR ( \[ - true false unit not ::}} {
         # An expression statement.
     } elseif {[lindex $kinds 0] eq "\{"} {

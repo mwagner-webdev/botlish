@@ -1,0 +1,241 @@
+# Mutants of FOLD-LOOPS-MILESTONE-1.md (audit/fold-loops/tools/mutate.tcl):
+# each a deliberate bug in folding loops -- an intermediate collected,
+# replaced by `continue`, yielded as unit or a List by `break` or
+# exhaustion, never replaced; an initial value evaluated before the loop's
+# operands or its error swallowed; a type without its fixpoint, conflicts
+# ignored or restated; the intermediate visible outside its fold; a fold
+# credited with its domain's length; an affine intermediate accepted; a
+# fold's body value taken for discarded; the initial value uncharged, not
+# lowered, not printed; `fold` a reserved word -- in the parser, HIR, core IR
+# and the evaluator, the Tcl compiler or native lowering.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments. Update a mutant's text when the code it mutates changes,
+# keeping it a mutant of the same rule.
+
+@@ eval-fold-yields-list the reference evaluator yields a fold's intermediate wrapped in a List
+## core/evaluator.tcl
+<<<<
+        return [dict get $result value]
+====
+        return [core::value::listOf [list [dict get $result value]]]
+>>>>
+
+@@ eval-initial-before-bounds the reference evaluator evaluates a numeric fold's initial value before its bounds
+## core/evaluator.tcl
+<<<<
+    set startValue [core::interp::valueOf [core::interp::evalIn $startExpr $env]]
+====
+    set result [Results $fold $env]
+    set startValue [core::interp::valueOf [core::interp::evalIn $startExpr $env]]
+>>>>
+<<<<
+    set result [Results $fold $env]
+    while {[$holds $i $end]} {
+====
+    while {[$holds $i $end]} {
+>>>>
+
+@@ eval-continue-replaces the reference evaluator's `continue` replaces the intermediate (adds to a List) with unit
+## core/evaluator.tcl
+<<<<
+            continue {
+                # contributes nothing; next iteration
+            }
+====
+            continue {
+                ResultAdd result [core::value::unit]
+            }
+>>>>
+
+@@ eval-initial-error-swallowed the reference evaluator turns an initial value's error into a unit intermediate
+## core/evaluator.tcl
+<<<<
+    if {![core::completion::isNormal $completion]} {
+        return -level 2 $completion
+    }
+    return [dict create fold 1 value [core::completion::payload $completion]]
+====
+    if {![core::completion::isNormal $completion]} {
+        return [dict create fold 1 value [core::value::unit]]
+    }
+    return [dict create fold 1 value [core::completion::payload $completion]]
+>>>>
+
+@@ tcl-fold-collects the Tcl compiler appends a body value to the intermediate instead of replacing it
+## compiler/compiler.tcl
+<<<<
+        return "set $acc [BoxWord $value]"
+====
+        return "lappend $acc [BoxWord $value]"
+>>>>
+
+@@ tcl-break-yields-list the Tcl compiler's break out of a fold yields a List of the intermediate
+## compiler/compiler.tcl
+<<<<
+                # with its current intermediate.
+                Emit ctx "set $var \$$acc"
+====
+                # with its current intermediate.
+                Emit ctx "set $var \[core::value::listOf \[list \$$acc\]\]"
+>>>>
+
+@@ native-intermediate-not-replaced native lowering never moves the body's value into the carried register
+## native/lower.tcl
+<<<<
+            Emit fn "$accReg = move $value" $e
+====
+>>>>
+
+@@ native-break-yields-unit native lowering's break out of a fold yields unit
+## native/lower.tcl
+<<<<
+                Emit fn "$resultReg = move $accReg" $e
+                Emit fn "jump $exit" $e
+                dict set fn broken [dict get $node target] 1
+====
+                Emit fn "$resultReg = move [Assign fn unit]" $e
+                Emit fn "jump $exit" $e
+                dict set fn broken [dict get $node target] 1
+>>>>
+
+@@ native-exhaustion-yields-unit native lowering's exhausted fold yields unit
+## native/lower.tcl
+<<<<
+        fold {
+            Emit fn "$resultReg = move $accReg" $e
+        }
+====
+        fold {
+            Emit fn "$resultReg = move [Assign fn unit]" $e
+        }
+>>>>
+
+@@ aot-bare-fold-body-discarded a fold with no domain has its body value taken for discarded, as a plain loop's
+## hir/aot.tcl
+<<<<
+                    # (FOLD-LOOPS-MILESTONE-1.md): used, in every form.
+                    set bodies [list [hir::get $hir $e body]]
+====
+                    # (FOLD-LOOPS-MILESTONE-1.md): used, in every form.
+                    set bodies [list [concat [hir::get $hir $e body] [list ""]]]
+>>>>
+
+@@ types-no-fixpoint the intermediate is typed by its initial value alone: the body never widens it
+## hir/types.tcl
+<<<<
+        if {$joined eq $assumed || $assumed eq "any"} {
+====
+        if {1} {
+>>>>
+
+@@ types-conflict-ignored no completion ever collapses the join: FOLD-INTERMEDIATE-TYPE is never reported
+## hir/fold.tcl
+<<<<
+            return [list $leaf $running $type $how]
+====
+            return ""
+>>>>
+
+@@ types-conflict-not-poisoned a conflicting intermediate stays the dynamic type: what reads it restates the conflict
+## hir/types.tcl
+<<<<
+            if {$conflict ne "" && [dict exists $hir foldConflicts $e]} {
+                if {[MakesPoison $hir $ctx]} {
+====
+            if {$conflict ne "" && [dict exists $hir foldConflicts $e]} {
+                if {0} {
+>>>>
+
+@@ types-stale-poison a fold's walk keeps the poison an earlier walk of it (a recursive block's attempt) made
+## hir/types.tcl
+<<<<
+    foreach x [concat [list $e $b] [hir::fold::Subtree $hir $body]] {
+====
+    foreach x {} {
+>>>>
+
+@@ resolve-intermediate-outside the intermediate is bound in the enclosing scope: it leaks out of the fold
+## hir/resolve.tcl
+<<<<
+    SetField hir $e foldBinding [NewBinding hir $name param $iteration [dict get $fold origin]]
+====
+    SetField hir $e foldBinding [NewBinding hir $name param [dict get $hir scopes $iteration parent] [dict get $fold origin]]
+>>>>
+
+@@ cardinality-fold-collects a fold is credited with its domain's element count, as a collecting loop
+## hir/cardinality.tcl
+<<<<
+        if {[dict get $node kind] in {listloop countloop lockloop} && ![hir::IsFoldNode $node]} {
+====
+        if {[dict get $node kind] in {listloop countloop lockloop}} {
+>>>>
+<<<<
+    if {[dict get $hir exprs $e kind] ni {listloop countloop lockloop} || [hir::isFold $hir $e]} {
+====
+    if {[dict get $hir exprs $e kind] ni {listloop countloop lockloop}} {
+>>>>
+<<<<
+            if {![hir::IsFoldNode $node] && [of_loop $hir $id] eq "exact"} {
+====
+            if {[of_loop $hir $id] eq "exact"} {
+>>>>
+
+@@ affine-fold-accepted an affine value may become a fold's intermediate
+## hir/affine.tcl
+<<<<
+            if {[hir::IsFoldNode $node] && ($e eq [dict get $node foldInitial] || $role ne "operand")} {
+====
+            if {0} {
+>>>>
+
+@@ coroutines-fold-body-discarded a fold's body value is taken for discarded when the fold's value is
+## hir/coroutines.tcl
+<<<<
+        if {[hir::isFold $hir $p]} {
+            # A fold's body value is its next intermediate, which the next
+====
+        if {0} {
+            # A fold's body value is its next intermediate, which the next
+>>>>
+
+@@ completions-initial-unwalked the completion analysis never walks a List fold's initial value: its errors go uncharged
+## hir/completions.tcl
+<<<<
+    if {[LoopDomain hir ctx $diagnose $enclosing $guard [concat [list $iterable] [hir::FoldInitials $node]]] eq {never}} {
+====
+    if {[LoopDomain hir ctx $diagnose $enclosing $guard [list $iterable]] eq {never}} {
+>>>>
+
+@@ lower-fold-dropped HIR lowers a List fold to core IR as the collecting loop it carries
+## hir/lower.tcl
+<<<<
+            return [FoldWrap $hir $node [list listloop $domain $body]]
+====
+            return [list listloop $domain $body]
+>>>>
+
+@@ format-fold-header-dropped HIR text does not print a fold's intermediate
+## hir/format.tcl
+<<<<
+    return " fold ([ParamList $hir [list [dict get $node foldBinding]] {{}}])"
+====
+    return ""
+>>>>
+
+@@ parser-fold-reserved "fold" starts a fold wherever it is the first word: it is no ordinary name any more
+## surface/parser.tcl
+<<<<
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "fold"
+        && [Kind p 1] eq "IDENT"}]
+====
+    return [expr {[dict get $token kind] eq "IDENT" && [dict get $token text] eq "fold"}]
+>>>>

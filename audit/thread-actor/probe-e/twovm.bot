@@ -1,0 +1,51 @@
+# twovm.bot -- Probe E of THREAD-ACTOR-ARCHITECTURE-CENSUS.md: the Botlish
+# side of two VMs exchanging messages. A native library: host.c creates one
+# instance on a producer thread and another on a consumer thread -- two
+# VMs, two GC heaps, one process -- and moves messages between them as C
+# bytes only. produce allocates a nested value and renders it as text;
+# digest rebuilds a nested value from the text and checksums it. Under
+# BOTLISH_NATIVE_GC_STRESS=1 every allocation of either VM collects its own
+# heap while the other VM runs.
+import std::char
+import std::int
+import std::list
+import std::str
+
+struct Item:
+    id: int
+    name: str
+    tags: List[str]
+
+fn tags_of(i: int) -> List[str]:
+    loop t from 0 to 3:
+        "t".concat(std::int::to_string(i * t))
+
+fn build(seed: int, n: int) -> List[Item]:
+    loop i from 0 to n:
+        Item {id: seed * 1000 + i, name: "item-".concat(std::int::to_string(seed + i)), tags: tags_of(i)}
+
+fn render(items: List[Item]) -> str:
+    fold it in items with intermediate text "":
+        tags = fold t in it.tags with intermediate s "":
+            s.concat(t).concat(",")
+        text.concat(std::int::to_string(it.id)).concat(":").concat(it.name).concat(":").concat(tags).concat(";")
+
+fn hash_text(text: str) -> int:
+    fold i from 0 to text.length() with intermediate h 7:
+        (h * 31 + std::char::scalar_value(text.char_at(i))).mod(1000000007)
+
+# The message for SEED: N items rendered as text (a str result is a
+# malloc'ed copy the host owns).
+exported c fn produce(seed: int, n: int) -> str:
+    render(build(seed, n))
+
+# The receiving VM's own work on a received message: its characters
+# rebuilt into a List (allocation in this heap), then hashed.
+exported c fn digest(text: str) -> int:
+    chars = loop i from 0 to text.length():
+        text.char_at(i)
+    rebuilt = fold c in chars with intermediate s "":
+        s.append_char(c)
+    if std::list::length(chars) != text.length():
+        return -1
+    hash_text(rebuilt)

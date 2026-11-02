@@ -1,0 +1,35 @@
+# The HTTP stack census's Rust workspace (HTTP-STACK-INTEGRATION-CENSUS.md).
+# Exploratory code: built by tools/build.tcl into Botlish's cache
+# (CARGO_TARGET_DIR), never into the repository.
+#
+#   bridge       hs_bridge: the bounded executor, Botlish-clock timers,
+#                readiness registry, handle table, notices, FFI guard
+#   hyper        hs_hyper: Hyper 1.x HTTP/1.1 and HTTP/2 over bridge I/O
+#   tls          hs_tls: nonblocking BoringSSL (boring) under Hyper
+#   quiche       hs_quiche: quiche QUIC + HTTP/3 over bridge UDP
+#   integration  hs_native: the one Rust linking unit (staticlib), the C ABI
+[workspace]
+resolver = "2"
+members = ["bridge", "hyper", "tls", "quiche", "integration"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+version = "0.0.0"
+
+[workspace.dependencies]
+hyper = { version = "=1.12.0", default-features = false }
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+boring = "=5.4.0"
+boring-sys = "=5.4.0"
+quiche = "=0.30.0"
+libc = "0.2"
+
+[profile.release]
+# Unwinding stays on: every export catches panics (hs_bridge::ffi::guard).
+panic = "unwind"
+debug = false
+codegen-units = 16

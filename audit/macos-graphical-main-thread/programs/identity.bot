@@ -1,0 +1,10 @@
+# identity.bot -- which thread runs a Botlish program
+# (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, section 3): the fixture's report
+# at the program's first instruction, and its answers as the value --
+# [pthread_main_np(), [NSThread isMainThread], the process's thread count].
+# No SDL call: the identity of the thread, before any library has an
+# opinion about it.
+import probe
+
+entry = probe::mark(0)
+[entry, probe::ns_is_main(), probe::threads()]

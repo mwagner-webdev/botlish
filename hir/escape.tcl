@@ -700,6 +700,13 @@ proc hir::escape::TrailingPositions {hir topBody exprs} {
         switch -- [hir::kind $hir $e] {
             if   { set bodies [list [hir::get $hir $e thenBody] [hir::get $hir $e elseBody]] }
             loop { set bodies [list [hir::get $hir $e body]] }
+            listloop - countloop - lockloop {
+                # A fold's body value is its next intermediate
+                # (FOLD-LOOPS-MILESTONE-1.md).
+                if {[hir::isFold $hir $e]} {
+                    set bodies [list [hir::get $hir $e body]]
+                }
+            }
         }
         foreach body $bodies {
             if {$body ne ""} {
@@ -1030,12 +1037,20 @@ proc hir::escape::ParentsAndLoops {view topBody} {
             block {
             }
             loop {
+                # (A fold's initial value runs once, outside the loop:
+                # FOLD-LOOPS-MILESTONE-1.md.)
+                foreach c [hir::FoldInitials $node] {
+                    lappend stack [list $c $e $loop]
+                }
                 foreach c [dict get $node body] {
                     lappend stack [list $c $e $e]
                 }
             }
             listloop {
                 lappend stack [list [dict get $node iterable] $e $loop]
+                foreach c [hir::FoldInitials $node] {
+                    lappend stack [list $c $e $loop]
+                }
                 foreach c [dict get $node body] {
                     lappend stack [list $c $e $e]
                 }
@@ -1043,12 +1058,15 @@ proc hir::escape::ParentsAndLoops {view topBody} {
             countloop {
                 lappend stack [list [dict get $node start] $e $loop]
                 lappend stack [list [dict get $node end] $e $loop]
+                foreach c [hir::FoldInitials $node] {
+                    lappend stack [list $c $e $loop]
+                }
                 foreach c [dict get $node body] {
                     lappend stack [list $c $e $e]
                 }
             }
             lockloop {
-                foreach operand [hir::loopOperands $node] {
+                foreach operand [concat [hir::loopOperands $node] [hir::FoldInitials $node]] {
                     lappend stack [list $operand $e $loop]
                 }
                 foreach c [dict get $node body] {

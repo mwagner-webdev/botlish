@@ -1,0 +1,4 @@
+# I2 an empty List of a typed callable type compared: rejected by the erasure audit
+fn fns(a: List[Fn{args: [int], return: int}]) -> bool:
+    a == []
+fns([])

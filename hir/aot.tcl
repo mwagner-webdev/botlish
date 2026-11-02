@@ -158,7 +158,8 @@ proc hir::aot::analyze {hir} {
 #               run as plain functions with no environment at all
 #   callees     callee ExprId -> call ExprId
 #   discarded   ExprId -> 1 for expressions whose value nothing uses: all
-#               but the last of a sequence, and the last of a loop body
+#               but the last of a sequence, and the last of a plain loop's
+#               body (a fold's is its next intermediate)
 #   bound       block ExprId -> bind ExprId, for blocks bound to a name
 #
 # The facts depend only on HIR structure (scopes, bindings, call targets),
@@ -235,7 +236,15 @@ proc hir::aot::context {hir} {
         switch -- [hir::kind $hir $e] {
             block { set bodies [list [hir::get $hir $e body]] }
             if    { set bodies [list [hir::get $hir $e thenBody] [hir::get $hir $e elseBody]] }
-            loop  { set bodies [list [concat [hir::get $hir $e body] [list ""]]] }
+            loop  {
+                if {[hir::isFold $hir $e]} {
+                    # A fold's body value is its next intermediate
+                    # (FOLD-LOOPS-MILESTONE-1.md): used, in every form.
+                    set bodies [list [hir::get $hir $e body]]
+                } else {
+                    set bodies [list [concat [hir::get $hir $e body] [list ""]]]
+                }
+            }
             listloop - countloop - lockloop {
                 # Unlike `loop`, a collecting loop body's last value is used
                 # (it contributes to the accumulated result): not discarded.

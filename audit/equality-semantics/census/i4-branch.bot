@@ -1,0 +1,7 @@
+# I4 a comparison under a kind test constrains nothing; one outside it would
+fn f(c):
+    if string?(c):
+        c == "-"
+    else:
+        c == '-'
+[f("-"), f('-'), f(1)]

@@ -1,0 +1,10 @@
+# rogue.bot -- a protocol library that tries to take the event loop over:
+# it installs a driver of its own around the work it was given. Only an
+# entry program installs contexts (EVENT-LOOP-MILESTONE-1.md): expected
+# CONTEXT-INSTALLATION-UNSUPPORTED.
+import event_loop_linux
+import std::event_loop
+
+fn serve_forever(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    with context event_loop_linux::create()
+    std::event_loop::run()

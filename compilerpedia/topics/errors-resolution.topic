@@ -36,6 +36,10 @@ The message says which case it is:
 
 == LIKELY CAUSES
   * A typo, or a name from another language (`len`, `print`, `string`).
+  * A name bound inside an `if` branch, a loop body or a handler, used
+    after it: each of those is a scope, and its bindings end with it. Bind
+    the `if`'s value to the name instead (`word = if c:`, third example
+    below); for a value built in a loop, see task.accumulate.
   * A function called above the line that defines it. Functions are
     bindings like any other: a function may call itself and what is
     defined above it, never what is defined below it -- also when the
@@ -64,6 +68,9 @@ definition and move it above the first use, together with what it needs.
     argument: functions that reach each other through arguments are
     legal (second example below).
   * Write enum cases qualified: `Color::Red`.
+  * For a name each branch of an `if` would set, make the `if` the
+    binding's value: `word = if c:` with the value as each branch's last
+    line.
   * Instead of `T(x)` or `T?(x)`, call a function you write: a converter
     whose declared result is the type, or a predicate with a `proves`
     clause (concept.refinements, concept.integer-domains).
@@ -94,6 +101,34 @@ fn is_odd(n: int) -> bool:
 is_odd(7)
 @caption Mutual recursion through an argument
 @value true
+@end
+
+@example reject
+fn describe(n: int) -> str:
+    if n < 0:
+        word = "negative"
+    else:
+        word = "positive"
+    word
+
+0
+@caption A name bound in each branch is gone after the if
+@error CORE SEMANTIC UNBOUND
+@at 6:5
+@message unbound name "word"
+@end
+
+@example accept
+fn describe(n: int) -> str:
+    word = if n < 0:
+        "negative"
+    else:
+        "positive"
+    word
+
+describe(-2)
+@caption The if's value bound to the name
+@value "negative"
 @end
 
 @topic error.duplicate
@@ -127,6 +162,9 @@ A nested scope (a function body, an `if` arm, a loop body) may bind a
 name its enclosing scope also binds. That is a new binding, visible only
 inside the nested scope; the outer binding is unchanged after it.
 
+A duplicate binding is the rule rule.immutable-bindings states, and its
+help line names that page; this page covers the other lists.
+
 == LIKELY CAUSES
   * Updating a variable as in an imperative language: `total = total + x`
     in the same scope, or a counter "incremented" in place.
@@ -151,12 +189,15 @@ computes a new value under a new name instead of changing an old one.
   * Merge duplicate handlers into one `on E:` body; list each error once.
 
 @example reject
-x = 1
-x = 2
-x
-@caption A second binding of x in the same scope
+error Boom
+
+fn explode() errors Boom, Boom:
+    fail Boom
+
+0
+@caption The same error twice in an errors clause
 @error CORE SEMANTIC DUPLICATE
-@at 2:1
+@message duplicate error "Boom"*
 @end
 
 @example accept
@@ -298,7 +339,7 @@ pairs
 
 @topic error.type
 title: TYPE: a value, annotation or declaration that does not fit its type
-summary: The broad type diagnostic: a value cannot be proven to have the type its context declares, a type expression or declaration is invalid, or, at run time, an intrinsic got an argument of the wrong kind.
+summary: The broad type diagnostic: a value not proven to have the type its context declares, an intrinsic's argument of another kind, an invalid type expression or declaration.
 index: errors
 alias: type error; type mismatch; wrong type
 keywords: type, cannot be proven, declared type, admissible, annotation, parameter type, result type, expected, got, kind
@@ -356,18 +397,30 @@ Other compile-time families, reported as TYPE with this page:
   * The C ABI: an `extern c fn` signature that is not one ("unit is not a C
     parameter type"), and `std::ffi::c::Void {...}` (SURFACE MODULE TYPE,
     reported by the loader: C's void has no values).
+  * Intrinsics and operators: an argument whose type is statically of
+    another kind than the intrinsic's parameter requires, in an ordinary
+    call, a method-style call (its receiver is argument 1) or an operator:
+    "argument 2 of native + requires int, but this operand has type str:
+    the call could only fail when it runs" (`1 + "a"`), "argument 1 of
+    native std::mutable_array::at requires mutarray, but the receiver has
+    type List[int]: ...". Inside a function with an imprint variable T
+    (`fn f(b: Box[T])`), a value of type T is no particular kind: "... has
+    type T: the function is checked once, for every T, and not every T is
+    mutarray".
 
 At run time, TYPE has a different source. The primitive operations and
-the standard-library intrinsics check the kinds of their arguments when
-they run, and a value of the wrong kind stops the program with this code:
+the standard-library intrinsics also check the kinds of their arguments
+when they run, and a value of the wrong kind stops the program with this
+code:
 
     +: expected int, got "a"
     std::str::length: expected str, got 5
 
-A direct call of an intrinsic or operator is not rejected at compile
-time for an argument of the wrong kind (`1 + "a"` compiles); the
-argument is rejected statically only when it flows into a declared or
-inferred parameter type of a Botlish function.
+Only an argument whose kind the compiler does not know reaches that
+check: a declared `any` parameter's value, or any other value of type
+`any`. (An untyped parameter's body imposes the kind as its inferred
+contract, which every call whose argument type is known is held to:
+rule.type-generic-call.)
 
 == LIKELY CAUSES
   * A value whose type the compiler does not know precisely enough:
@@ -414,6 +467,18 @@ std::ffi::c::Void {}
 @at 3:1
 @end
 
+@example reject
+import std::mutable_array
+
+fn first(a: List[int]) errors IndexNotFound:
+    a.at(0)
+
+1
+@caption A List receiver of std::mutable_array::at, which requires a MutableArray
+@error CORE SEMANTIC TYPE
+@at 4:5
+@end
+
 @topic rule.type-generic-call
 title: Calls of untyped functions are checked against what their bodies need
 summary: An untyped (generic) parameter is checked at each call against what the function's body does with it: an argument the body cannot accept rejects the call.
@@ -439,6 +504,11 @@ checks every call of the function in two ways:
     body: argument 1 of native + requires int (at 2:5)"). If two uses in
     the body need types that nothing satisfies, the function itself is
     rejected ("cannot infer a sound type for parameter ...").
+    When g's parameter type holds an imprint variable (`b: Box[T]`), x
+    takes it with a variable of its own function's, shown T': the
+    function is imprinted as if declared `fn f(x: Box[T])`, and each call
+    establishes T' from its argument (see "Inherited imprint variables"
+    in INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
   * Semantic instance. A direct call is also analyzed with the actual
     argument types, as if the body had been written for them. A problem
     found there is reported at the call that made it:
@@ -1869,8 +1939,9 @@ parentheses) or the call as a whole (its instance, an imprint):
     method-style call "length": none of the visible functions of that
     name accepts the call (length rejects the receiver: argument for
     parameter "s" cannot be proven to satisfy str (argument type: int);
-    std::list::length rejects the receiver: the receiver is a int, but
-    argument 1 of native std::list::length requires list)
+    std::list::length rejects the receiver: argument 1 of native
+    std::list::length requires list, but the receiver has type int: the
+    call could only fail when it runs)
 
 A note for each candidate declared in source (`note:` lines under the
 error; an editor's related information) says where it is declared.
@@ -1885,8 +1956,9 @@ the call is not reported: its failure depends on that first error.
 Botlish has no overloading: candidates are not ranked or converted to,
 they are only tried. With a single candidate there is nothing to choose:
 the call is that function's call, checked like any other (a typed
-parameter rejects a wrong receiver as TYPE at compile time; an intrinsic
-checks its argument's kind when it runs).
+parameter rejects a wrong receiver as TYPE at compile time, and so does
+an intrinsic whose parameter requires another kind than the receiver's
+type has; a receiver of type `any` is checked when the call runs).
 
 == LIKELY CAUSES
   * A receiver of the wrong type: an int where a list was meant.
@@ -1895,9 +1967,9 @@ checks its argument's kind when it runs).
 
 == HOW TO INVESTIGATE
 The message gives each candidate's reason, separated by ";": "rejects the
-receiver" when the receiver's type is wrong for it ("the receiver is a
-int"), "rejects argument N" when a later argument is. The notes locate the
-candidates.
+receiver" when the receiver's type is wrong for it ("... but the
+receiver has type int"), "rejects argument N" when a later argument is.
+The notes locate the candidates.
 
 == WHAT TO DO
 Read each candidate's reason; fix the receiver's or the argument's type,
@@ -3782,6 +3854,151 @@ fn sum(a: DecimalRounded{minDecimalsPreserved: 2}, b: DecimalRounded{minDecimals
         0.00
 @caption Decay, compute, round back
 @value 0.75
+@end
+
+@topic error.callback-signature
+title: CALLBACK-SIGNATURE: a callback c fn's signature has no total C form
+summary: A `callback c fn` declares C types whose conversion from or to C cannot fail, and no errors, flags, contexts, variadic parameter or resume clause.
+index: errors
+alias: callback c fn parameter type; callback signature; C callback type
+keywords: callback c fn, callback, std::ffi::c::FnPtr, RawDouble, RawFloat, Float64, Double, errors, error channel
+related: concept.c-callbacks error.callback-environment error.callback-placement error.callback-reference error.export-signature
+docs: C-CALLBACK-MILESTONE-1.md C-FFI.md
+code: CORE SEMANTIC CALLBACK-SIGNATURE
+
+== MEANING
+C calls a callback with its own values and receives one back, through no
+error channel: a conversion that could fail -- a C double admitted as a
+finite Float64, a Float64 narrowed to a C float -- would fail before the
+body runs or after it returns, with nowhere to report it. So a callback's
+parameters are the C types every C value of which is a Botlish value: the
+C integer scalars, std::ffi::c::Bool, the raw floating values
+std::ffi::c::RawFloat and std::ffi::c::RawDouble (every bit pattern), and
+pointers; its result one of those, a Float64 (every Float64 is a C double)
+or unit. Declared errors are refused too: C has no handler for them.
+
+== WHAT TO DO
+Declare C types (`-> unit` for void). For a double parameter declare
+std::ffi::c::RawDouble and admit it explicitly with
+std::ffi::c::raw::double_to_float64, handling NonFiniteFloat in the body;
+handle every error in the body.
+
+@example reject
+import std::ffi::c
+
+callback c fn f(x: int) -> std::ffi::c::Int:
+    0
+@caption A plain int is no C type
+@error CORE SEMANTIC CALLBACK-SIGNATURE
+@at 3:16
+@end
+
+@example accept
+import std::ffi::c
+
+callback c fn clamp(n: std::ffi::c::Int) -> std::ffi::c::Int:
+    if n > 100 or n < -100:
+        return 0
+    n
+
+[clamp(21), clamp(500)]
+@caption C types, and an ordinary function to Botlish callers
+@value [21, 0]
+@end
+
+@topic error.callback-placement
+title: CALLBACK-PLACEMENT: a C callback is a top-level function
+summary: A `callback c fn` is declared at the top level of a program or a module, never inside another function: C calls it with no enclosing call.
+index: errors
+alias: nested callback c fn; callback inside a function
+keywords: callback c fn, top level, nested function
+related: concept.c-callbacks error.callback-signature
+docs: C-CALLBACK-MILESTONE-1.md
+code: CORE SEMANTIC CALLBACK-PLACEMENT
+
+== WHAT TO DO
+Move the function to the top level of its file.
+
+@example reject
+import std::ffi::c
+
+fn outer() -> std::ffi::c::Int:
+    callback c fn inner(n: std::ffi::c::Int) -> std::ffi::c::Int:
+        n
+    inner(2)
+
+outer()
+@caption Declared inside another function
+@error CORE SEMANTIC CALLBACK-PLACEMENT
+@at 4:24
+@end
+
+@topic error.callback-environment
+title: CALLBACK-ENVIRONMENT: a C callback is environment-free
+summary: A `callback c fn` captures no value, requires no context and never suspends: C calls it through a bare machine address, which carries no closure, no context and no coroutine.
+index: errors
+alias: callback c fn captures; callback requires a context; callback yields
+keywords: callback c fn, capture, closure, context, yield, coroutine, module static, authority
+related: concept.c-callbacks error.callback-signature concept.contexts
+docs: C-CALLBACK-MILESTONE-1.md
+code: CORE SEMANTIC CALLBACK-ENVIRONMENT
+
+== MEANING
+Calling other top-level functions is fine; reading a top-level value of
+the entry program is capturing it. A context requirement is refused
+because a function pointer is no authority to install one, and a yield
+because no suspension crosses a C frame.
+
+== WHAT TO DO
+Move the value into an imported module (a module static), or into the
+function.
+
+@example reject
+import std::ffi::c
+
+limit = 3
+
+callback c fn capped(n: std::ffi::c::Int) -> std::ffi::c::Int:
+    if n > limit:
+        return 3
+    n
+
+capped(5)
+@caption Captures the entry program's `limit`
+@error CORE SEMANTIC CALLBACK-ENVIRONMENT
+@at 5:21
+@end
+
+@topic error.callback-reference
+title: CALLBACK-REFERENCE: std::ffi::c::callback takes a callback c fn by name
+summary: std::ffi::c::callback(NAME) makes the C function pointer of the `callback c fn` NAME; any other argument, and the operation taken as a value, are refused.
+index: errors
+alias: callback of an ordinary function; Fn to FnPtr; closure as C callback
+keywords: std::ffi::c::callback, FnPtr, Fn, closure, function value, callback c fn
+related: concept.c-callbacks stdlib.std::ffi::c::callback error.callback-signature
+docs: C-CALLBACK-MILESTONE-1.md C-ABI-TYPES.md
+code: CORE SEMANTIC CALLBACK-REFERENCE
+
+== MEANING
+A C function pointer has a C signature and a C entry point; a Botlish
+function value has neither. Nothing converts one into the other: only a
+function declared `callback c fn` has an entry point, and only its name
+says statically which one.
+
+== WHAT TO DO
+Declare the function `callback c fn` with C types, and pass its name.
+
+@example reject
+import std::ffi::c
+
+fn twice(n: std::ffi::c::Int) -> int:
+    n * 2
+
+p = std::ffi::c::callback(twice)
+0
+@caption An ordinary function has no C entry point
+@error CORE SEMANTIC CALLBACK-REFERENCE
+@at 6:5
 @end
 
 @topic error.export-signature

@@ -670,7 +670,8 @@ twice("x")
 A value whose type is unknown statically (from an untyped generic
 parameter, `any`) does not prove a specific type: annotate the source of the
 value, or narrow it with a type test the compiler recognizes. Native
-operations check their argument kinds at run time too.
+operations check the kinds of such arguments when they run (an argument
+of a statically known kind they do not take is rejected at compile time).
 
 @topic proof.refinements
 title: Refinement proofs: predicates and validators

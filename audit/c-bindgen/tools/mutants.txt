@@ -901,3 +901,23 @@ _Static_assert(1, \"variadic prototype of $name\");
         append head " named [Quote [dict get $entry symbol]]"
     }
 >>>>
+
+# --- representation rules (RAW-C-FLOAT-FFI-MILESTONE-1.md) ------------------
+
+@@ bindgen-representations-ignored a profile's representation rules are checked but never applied: every C float and double stays finite
+## tools/c-bindgen/model.tcl
+<<<<
+            if {$position eq "result"} {
+                dict set entry result type [dict get $raw $type]
+====
+            if {0} {
+                dict set entry result type [dict get $raw $type]
+>>>>
+
+@@ bindgen-representation-of-any-type a representation rule naming a position that is no C float or double is accepted (and leaves it as it was) instead of being a stale policy
+## tools/c-bindgen/model.tcl
+<<<<
+            if {![dict exists $raw $type]} {
+====
+            if {0 && ![dict exists $raw $type]} {
+>>>>

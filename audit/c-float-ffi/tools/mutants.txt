@@ -155,13 +155,15 @@
 @@ float-double-collapsed std::ffi::c::Float resolves to std::ffi::c::Double wherever a C type is named: one C type of both
 ## hir/cabi.tcl
 <<<<
-proc hir::cabi::FloatingType {name} {
     return [list cfloat $name]
 }
+
+# 1 if TYPE is a C floating type: a finite one
 ====
-proc hir::cabi::FloatingType {name} {
     return [list cfloat Double]
 }
+
+# 1 if TYPE is a C floating type: a finite one
 >>>>
 
 @@ stride-carrier-width an array of C floats strides the carrier's 8 bytes, not the C type's 4
@@ -181,17 +183,23 @@ proc hir::cabi::FloatingType {name} {
 @@ extern-float-class-f64 an extern's C float parameter or result is passed in the ABI class of a double (f64): C reads a binary64 where it expects a binary32
 ## hir/foreign.tcl
 <<<<
-        return [dict get [hir::cabi::FloatingInfo $type] class]
+        if {[dict get $info raw]} {
+            return "r[dict get $info class]"
+        }
+        return [dict get $info class]
 ====
+        if {[dict get $info raw]} {
+            return rf64
+        }
         return f64
 >>>>
 
 @@ extern-narrowing-undeclared a call with a C float parameter (and no floating result) declares no NonFiniteFloat: its overflow is an error no handler may name
 ## hir/foreign.tcl
 <<<<
-        if {[hir::cabi::IsFloating $result] || [NarrowedParameters $abi] ne ""} {
+        if {[hir::cabi::IsFiniteFloating $result] || [NarrowedParameters $abi] ne ""} {
 ====
-        if {[hir::cabi::IsFloating $result]} {
+        if {[hir::cabi::IsFiniteFloating $result]} {
 >>>>
 
 @@ static-narrowing-at-largest-float the compile-time decision rejects every literal above the largest float, also those that round down to it (a rule of its own, not the boundary's)
@@ -227,14 +235,7 @@ proc hir::cabi::FloatingType {name} {
 @@ native-float-encoding-as-integer the native layout codec reads and writes a C floating field as an unsigned integer of its width
 ## native/src/runtime/ops.rs
 <<<<
-    let float = if c & 64 != 0 {
-        if signed {
-            return None;
-        }
-        Some(CFloatFormat::of_width(width)?)
-    } else {
-        None
-    };
+    let float = format(64)?;
 ====
     let float: Option<CFloatFormat> = None;
 >>>>
@@ -255,4 +256,162 @@ proc hir::cabi::FloatingType {name} {
         if {$class eq "f32"} {
 ====
         if {0} {
+>>>>
+
+# --- raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md) -------------------
+# Killed by tests/raw-c-float-ffi.test (a default detector), the Rust tests
+# `raw_c_float_*` (`--lib c_float` matches them) or the c-float-ffi tests.
+
+@@ raw-argument-converted a raw C float argument is converted numerically from its bits (fcvt), not moved into the float register by bitcast: C receives another number
+## native/src/codegen/clif.rs
+<<<<
+            let bits = self.b.ins().load(types::I32, MemFlagsData::trusted(), v, FLOAT_BITS_OFFSET);
+            self.b.ins().bitcast(types::F32, MemFlagsData::new(), bits)
+====
+            let bits = self.b.ins().load(types::I32, MemFlagsData::trusted(), v, FLOAT_BITS_OFFSET);
+            self.b.ins().fcvt_from_uint(types::F32, bits)
+>>>>
+
+@@ raw-result-admitted a raw C call result is admitted like a finite one: NaN and the infinities fail, negative zero is zero, and the value is a Float64
+## native/src/codegen/clif.rs
+<<<<
+        if class.raw_floating() {
+            // A raw C float or double: the register's bits, as they are
+====
+        if false && class.raw_floating() {
+            // A raw C float or double: the register's bits, as they are
+>>>>
+
+@@ raw-f32-result-widened a raw C float result is widened to a double before its bits are taken: the raw value holds a binary64's low bits, not the binary32
+## native/src/codegen/clif.rs
+<<<<
+            let narrow = self.b.ins().bitcast(types::I32, MemFlagsData::new(), returned);
+            (self.b.ins().uextend(I64, narrow), 0)
+====
+            let wide = self.b.ins().fpromote(types::F64, returned);
+            (self.b.ins().bitcast(I64, MemFlagsData::new(), wide), 0)
+>>>>
+
+@@ raw-class-as-finite an extern's raw parameter or result travels in the finite ABI class (f32, f64): its arguments narrowed from Float64s, its results admitted
+## hir/foreign.tcl
+<<<<
+        if {[dict get $info raw]} {
+            return "r[dict get $info class]"
+        }
+        return [dict get $info class]
+====
+        return [dict get $info class]
+>>>>
+
+@@ raw-layout-as-finite a raw layout field's descriptor is a finite float's ({f WIDTH ENDIAN}): its reads admit (NaN fails, -0 is 0.0) and its writes narrow Float64s
+## hir/layouts.tcl
+<<<<
+            return [list [expr {[dict getdef $repr raw 0] ? "r" : "f"}] [dict get $repr width] [dict get $repr endian]]
+====
+            return [list f [dict get $repr width] [dict get $repr endian]]
+>>>>
+
+@@ raw-layout-as-integer a raw layout field's descriptor is an unsigned integer's ({u WIDTH ENDIAN}): its reads make Ints, not raw values
+## hir/layouts.tcl
+<<<<
+            return [list [expr {[dict getdef $repr raw 0] ? "r" : "f"}] [dict get $repr width] [dict get $repr endian]]
+====
+            return [list [expr {[dict getdef $repr raw 0] ? "u" : "f"}] [dict get $repr width] [dict get $repr endian]]
+>>>>
+
+@@ raw-tcl-decode-drops-sign the Tcl backends' raw field read clears the sign bit: -0.0 reads as +0.0, a negative NaN as a positive one
+## core/binary.tcl
+<<<<
+    binary scan $bytes @$at[Letter $width u $endian] n
+    return [core::cabi::rawValue [core::cabi::formatOfWidth $width] $n]
+====
+    binary scan $bytes @$at[Letter $width u $endian] n
+    return [core::cabi::rawValue [core::cabi::formatOfWidth $width] [expr {$n & ((1 << (8 * $width - 1)) - 1)}]]
+>>>>
+
+@@ raw-native-decode-quiets-nan the native raw field read sets the quiet bit of a NaN: a signaling NaN in memory reads as a quiet one
+## native/src/runtime/ops.rs
+<<<<
+        // A raw C floating field: the bits, as they are.
+        return vm(p).new_raw_float(format, raw);
+====
+        // A raw C floating field: the bits, as they are.
+        let quiet = if format == CFloatFormat::Binary32 { 0x0040_0000 } else { 0x0008_0000_0000_0000 };
+        let exponent = if format == CFloatFormat::Binary32 { 0x7f80_0000u64 } else { 0x7ff0_0000_0000_0000 };
+        let nan = raw & exponent == exponent && raw & (exponent >> 1 | quiet) != raw & exponent;
+        return vm(p).new_raw_float(format, if nan { raw | quiet } else { raw });
+>>>>
+
+@@ raw-native-bits-signed a raw double's bit pattern is boxed as a signed word: a pattern with the sign bit set (every negative double) becomes a negative Int
+## native/src/runtime/ffi.rs
+<<<<
+        Ok(bits) => vm(p).new_big(BigInt::from(bits)),
+====
+        Ok(bits) => vm(p).new_big(BigInt::from(bits as i64)),
+>>>>
+
+@@ raw-equality-bitwise == of two raw values compares their bits (the Tcl backends' type-blind equality accepts them) instead of refusing them
+## core/value.tcl
+<<<<
+        if {$k in {rawfloat32 rawfloat64}} {
+            # A raw C floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md) has no
+====
+        if {0 && $k in {rawfloat32 rawfloat64}} {
+            # A raw C floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md) has no
+>>>>
+## core/value.tcl
+<<<<
+    variable incomparable {block native mutarray coroutine mutvec cptr DecimalRounded rawfloat32 rawfloat64}
+====
+    variable incomparable {block native mutarray coroutine mutvec cptr DecimalRounded}
+>>>>
+
+@@ raw-number-unchecked a raw value given to a native of another kind (an ordering, arithmetic) is no compile-time error
+## hir/cabi.tcl
+<<<<
+        if {[IsRawFloating $argType] && $paramType ni {"" any} && [core::type::base $paramType] ne $argType
+====
+        if {0 && [IsRawFloating $argType] && $paramType ni {"" any} && [core::type::base $paramType] ne $argType
+>>>>
+
+@@ raw-carrier-float64 a raw C double's carrier is Float64: its values are admitted numbers, not raw values
+## core/cabi.tcl
+<<<<
+        RawDouble {c double carrier rawfloat64 representation Double raw 1}]
+====
+        RawDouble {c double carrier Float64 representation Double raw 1}]
+>>>>
+
+@@ raw-float-as-double a raw C float has a C double's representation (8 bytes, the f64 class): every C fact of its finite counterpart lost
+## core/cabi.tcl
+<<<<
+        RawFloat  {c float carrier rawfloat32 representation Float raw 1} \
+====
+        RawFloat  {c float carrier rawfloat32 representation Double raw 1} \
+>>>>
+
+@@ raw-vararg-accepted a raw value is accepted as a trailing argument of a variadic C function
+## hir/cabi.tcl
+<<<<
+    if {[IsRawFloating $type]} {
+        return [dict create problem TYPE message [format \
+====
+    if {0 && [IsRawFloating $type]} {
+        return [dict create problem TYPE message [format \
+>>>>
+
+@@ raw-tcl-admit-wrong-format the Tcl backends admit a raw float's bits as a binary64's
+## core/cabi.tcl
+<<<<
+    return [FloatingValue $what [AdmitBits [rawFormat $kind] $bits]]
+====
+    return [FloatingValue $what [AdmitBits binary64 $bits]]
+>>>>
+
+@@ raw-display-unpadded a raw value's display drops the leading zero digits natively (the Tcl backends keep every digit): the backends disagree
+## native/src/runtime/show.rs
+<<<<
+        Kind::RawFloat32 => out.push_str(&format!("<C float 0x{:08x}>", super::value::raw_bits(v))),
+====
+        Kind::RawFloat32 => out.push_str(&format!("<C float 0x{:x}>", super::value::raw_bits(v))),
 >>>>

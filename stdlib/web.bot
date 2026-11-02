@@ -80,7 +80,7 @@ refined type Emailish = str
 # (R2-ORDINARY-EMAILISH-PREDICATE.md): the same
 # left-to-right scan emailRegex's grammar always described -- local part: 1+
 # of [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); TLD:
-# 2+ alpha -- over std::str::is_tcl_alnum/std::str::is_tcl_alpha (core/tclcompat.tcl). R2.a
+# 2+ alpha -- over std::char::is_tcl_alnum/std::char::is_tcl_alpha (core/tclcompat.tcl). R2.a
 # (R2A-IDIOMATIC-EMAILISH-SOURCE.md) normalized this from R2's own almost-
 # structural port of the old hand-written core-IR validator into the
 # idiomatic Botlish shape; R2.a.2 (R2A2-TRAILING-QUESTION-IDENTIFIERS.md)
@@ -96,26 +96,26 @@ refined type Emailish = str
 #
 # local_extra_chars is the established immutable-set membership idiom
 # (MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class
-# (". _ % +" plus "-"), over ordinary one-scalar str values (char_at's own
-# result type) -- never UTF-8 bytes, unlike additional_unreserved_chars's
-# std::byte::set below. Retained once at module scope, exactly like
-# additional_unreserved_chars: constructed once at module initialization,
-# never per emailish? call (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed the
-# bridge-reachability defect that once forced building this per call).
-local_extra_chars = std::immutable_set::from_list([".", "_", "%", "+", "-"])
+# ('.' '_' '%' '+' plus '-'), over UnicodeChars (char_at's own result type,
+# UNICODECHAR-CLASSIFIERS.md) -- never UTF-8 bytes, unlike
+# additional_unreserved_chars's std::byte::set below. Retained once at module
+# scope, exactly like additional_unreserved_chars: constructed once at module
+# initialization, never per emailish? call (R2A1-MODULE-FN-BRIDGE-
+# REACHABILITY.md fixed the defect that once forced building this per call).
+local_extra_chars = std::immutable_set::from_list(['.', '_', '%', '+', '-'])
 
 fn emailish?(v: str) -> bool proves v: Emailish:
 
     n = std::str::length(v)
 
-    # The one-character String at position I, or "" outside the String:
-    # the guard is what makes the slice provably valid (STDLIB-NAMESPACES.md),
-    # so emailish? stays total; every caller below only asks for positions
-    # inside 0..n-1.
+    # The character at position I, or ' ' outside the String: the guard is
+    # what makes std::str::char_at provably valid (STDLIB-NAMESPACES.md), so
+    # emailish? stays total; every caller below only asks for positions
+    # inside 0..n-1. A UnicodeChar: no one-character String is ever made.
     fn char_at(i):
         if i < 0 or i >= n:
-            return ""
-        v.substring(i, i + 1)
+            return ' '
+        v.char_at(i)
 
     # true when position I holds the character C, false outside the String:
     # the same guard as char_at's, which makes std::str::char_at provably valid.
@@ -124,16 +124,16 @@ fn emailish?(v: str) -> bool proves v: Emailish:
             return false
         v.char_at(i) == c
 
-    fn local_char?(c: str) -> bool:
-        std::str::is_tcl_alnum(c) or local_extra_chars.contains(c)
+    fn local_char?(c: UnicodeChar) -> bool:
+        std::char::is_tcl_alnum(c) or local_extra_chars.contains(c)
 
-    # label_char?'s own extra character is a single "-": a one-element set
+    # label_char?'s own extra character is a single '-': a one-element set
     # would be less idiomatic than the direct equality already used
     # throughout this codebase for singleton comparisons (e.g.
     # uri_query_value?'s c == '%'), so it stays a plain "==" rather than a second
     # membership set.
     fn label_char?(c):
-        std::str::is_tcl_alnum(c) or c == "-"
+        std::char::is_tcl_alnum(c) or c == '-'
 
     # scan_while(start, predicate) is the one reusable operation the old
     # scan_local/scan_label/scan_alpha triplet was really three copies of:
@@ -146,10 +146,10 @@ fn emailish?(v: str) -> bool proves v: Emailish:
     # means the whole remaining domain matched, so the natural-exhaustion
     # value is N itself, exactly the old recursion's own "i >= n" base
     # case. PREDICATE is passed as an ordinary first-class value, declared
-    # with its call contract (Fn{args: [str], return: bool},
+    # with its call contract (Fn{args: [UnicodeChar], return: bool},
     # STRUCTURAL-FUNCTION-TYPES.md): local_char? (a typed Botlish function)
-    # and std::str::is_tcl_alpha (a native) both satisfy it. REFINEMENT-VALUES.md
-    # added that contract and local_char?'s own `c: str`: since emailish? is
+    # and std::char::is_tcl_alpha (a native) both satisfy it. REFINEMENT-VALUES.md
+    # added that contract and local_char?'s declared parameter: since emailish? is
     # now called as the module function it is from every program (no root
     # native standing in front of it), local_char?'s Block-value entry is
     # part of every closed program, and a standalone executable needs its
@@ -157,7 +157,7 @@ fn emailish?(v: str) -> bool proves v: Emailish:
     # one of those two exact targets, which is also what lets the compiler
     # prove emailish? repeatable (hir/repeatable.tcl follows exact callables
     # into the parameters they are passed for).
-    fn scan_while(start, predicate: Fn{args: [str], return: bool}):
+    fn scan_while(start, predicate: Fn{args: [UnicodeChar], return: bool}):
         loop i from start to n:
             if predicate(char_at(i)):
                 continue
@@ -165,7 +165,7 @@ fn emailish?(v: str) -> bool proves v: Emailish:
         n
 
     fn tld?(i):
-        e = i.scan_while(std::str::is_tcl_alpha)
+        e = i.scan_while(std::char::is_tcl_alpha)
         if e == n:
             e - i >= 2
         else:

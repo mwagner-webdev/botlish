@@ -516,7 +516,7 @@ f('A')
     outcomeUnder interp [hir::lower [surface::readProgramFile $mainPath]]
 } -result {value 65 {}}
 
-test char-scalar-value-static-contract {an Int reaching std::char::scalar_value through a typed or an untyped parameter is a compile-time error; the direct call std::char::scalar_value(65) is the native's run-time TYPE error, like any intrinsic's} -body {
+test char-scalar-value-static-contract {an Int reaching std::char::scalar_value through a typed or an untyped parameter is a compile-time error, and so is the direct call std::char::scalar_value(65), like any intrinsic's argument statically of another kind (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it was the native's run-time TYPE error)} -body {
     set typed [makeFile {import std::char
 fn f(c: UnicodeChar) -> int:
     std::char::scalar_value(c)
@@ -534,10 +534,11 @@ std::char::scalar_value(65)
 } char-direct.bot]
     catch {surface::readProgramFile $typed} m1 o1
     catch {surface::readProgramFile $untyped} m2 o2
+    catch {surface::readProgramFile $direct} m3 o3
     list [dict get $o1 -errorcode] [string match {*cannot be proven to satisfy UnicodeChar*} $m1] \
         [dict get $o2 -errorcode] [string match {*statically incompatible with UnicodeChar*native std::char::scalar_value requires UnicodeChar*} $m2] \
-        [outcomeUnder interp [hir::lower [surface::readProgramFile $direct]]]
-} -result {{CORE SEMANTIC TYPE} 1 {CORE SEMANTIC TYPE} 1 {error {CORE SEMANTIC TYPE} {std::char::scalar_value: expected UnicodeChar, got 65} {}}}
+        [dict get $o3 -errorcode] [string match {*:2:25: argument 1 of native std::char::scalar_value requires UnicodeChar, but this argument has type int*} $m3]
+} -result {{CORE SEMANTIC TYPE} 1 {CORE SEMANTIC TYPE} 1 {CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
 # Backend parity: interp / compile / cranelift-generic / cranelift (spec item 84)

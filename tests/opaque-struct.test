@@ -1346,11 +1346,16 @@ test opaque-print-reveal-is-explicit {internal tooling can still ask for the rep
     }
 } -result {{<opaque std::wrapped::Wrapped>} {<opaque std::wrapped::Wrapped>} {std::wrapped::Wrapped {value: 3, label: "three"}} {<opaque std::wrapped::Wrapped>}}
 
+# (An operand statically of another kind is a compile-time TYPE,
+# METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md: the value reaches `+` as
+# an `any` parameter's, which the native checks when it runs.)
+set ::bump "fn bump(v: any):\n    v + 1\n"
+
 test opaque-print-runtime-errors-all-backends {a runtime TYPE error that shows an opaque value names its type only, in the interpreter, the compiler and both native modes} -body {
     withScratchLibrary {
         writeFixtures $dir
         lmap backend $::allBackends {
-            runtimeMessage $backend "${::consume}x + 1\n"
+            runtimeMessage $backend "${::consume}${::bump}bump(x)\n"
         }
     }
 } -result [lrepeat 4 {+: expected int, got <opaque std::wrapped::Wrapped>}]
@@ -1359,10 +1364,17 @@ test opaque-print-ordinary-struct-error-unchanged {the same error on an ordinary
     withScratchLibrary {
         writeFixtures $dir
         lmap backend $::allBackends {
-            runtimeMessage $backend "import std::mixed\nstd::mixed::Public {value: 3} + 1\n"
+            runtimeMessage $backend "import std::mixed\n${::bump}bump(std::mixed::Public {value: 3})\n"
         }
     }
 } -result [lrepeat 4 {+: expected int, got std::mixed::Public {value: 3}}]
+
+test opaque-print-static-operand-names-the-type {an opaque operand statically of another kind is the compile-time TYPE, which names its type, never a representation} -body {
+    withScratchLibrary {
+        writeFixtures $dir
+        rejection "${::consume}x + 1\n"
+    }
+} -result {TYPE: argument 1 of native + requires int, but this operand has type std::wrapped::Wrapped: the call could only fail when it runs}
 
 test opaque-print-diagnostics-name-the-type {static diagnostics that mention an opaque value name its type, never a representation} -body {
     withScratchLibrary {

@@ -95,12 +95,21 @@ proc hir::modulebinding::ContextExpr {hir e stateVar} {
             return {ok}
         }
         loop {
+            # (A fold's initial value runs first: FOLD-LOOPS-MILESTONE-1.md.)
+            foreach initial [hir::FoldInitials $node] {
+                set result [ContextExpr $hir $initial state]
+                if {[lindex $result 0] ne "ok"} {
+                    return $result
+                }
+            }
             return [ContextSequence $hir [dict get $node body] state]
         }
         listloop {
-            set result [ContextExpr $hir [dict get $node iterable] state]
-            if {[lindex $result 0] ne "ok"} {
-                return $result
+            foreach operand [concat [list [dict get $node iterable]] [hir::FoldInitials $node]] {
+                set result [ContextExpr $hir $operand state]
+                if {[lindex $result 0] ne "ok"} {
+                    return $result
+                }
             }
             return [ContextSequence $hir [dict get $node body] state]
         }
@@ -295,6 +304,12 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
             return {bad unknown "control-flow result cannot be proven immutable"}
         }
         listloop {
+            if {[hir::IsFoldNode $node]} {
+                # A fold's value is its last intermediate
+                # (FOLD-LOOPS-MILESTONE-1.md), not the List of its body's
+                # values the proof below follows.
+                return {bad unknown "a fold's result cannot be proven immutable"}
+            }
             # Unlike a bare `loop` (whose result is whatever an arbitrary,
             # data-dependent `break` supplies, never proven here), a
             # listloop's own result is exactly the List of every iteration's
@@ -438,6 +453,24 @@ proc hir::modulebinding::ImmutableNative {hir symbol proofs} {
                 return {bad unknown "std::list::append source List is not structurally known"}
             }
             return [list ok [list list [concat [lindex $sourceProof 1] [lindex $proofs 1]]]]
+        }
+        std::list::flat {
+            # (LIST-FLAT-MILESTONE-1.md) The same structural pattern: a
+            # structurally known List of structurally known Lists makes the
+            # List of their item proofs, in order; any other source (an
+            # inner List this pass cannot see through) proves nothing.
+            set sourceProof [lindex $proofs 0]
+            if {[lindex $sourceProof 0] ne "list"} {
+                return {bad unknown "std::list::flat source List is not structurally known"}
+            }
+            set items {}
+            foreach inner [lindex $sourceProof 1] {
+                if {[lindex $inner 0] ne "list"} {
+                    return {bad unknown "std::list::flat source List holds an element that is not a structurally known List"}
+                }
+                lappend items {*}[lindex $inner 1]
+            }
+            return [list ok [list list $items]]
         }
         std::immutable_set::from_list {
             # MINIMAL-IMMUTABLE-SET.md item 36: the same structural-proof

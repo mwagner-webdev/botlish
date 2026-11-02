@@ -286,8 +286,8 @@ proc hir::read::EnumDeclLine {content number} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(resource )?(?:slots \[([^\]]*)\] )?fields (.*)$} $content -> id name ns opaqueWord contextWord resourceWord slotsText fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[resource\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(resource )?(?:slots \[([^\]]*)\] )?(?:identity ([a-z]+)\(([^)]*)\) )?(?:tree (\S+) )?fields (.*)$} $content -> id name ns opaqueWord contextWord resourceWord slotsText identityForm identityFields treeField fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[resource\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] \[identity FORM(FIELD,...)\] \[tree FIELD\] fields FIELD: TYPE, ...\""
     }
     # A parameterized struct's slots (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
     # {SLOT {TRAIT ...}} pairs, as hir::format::TypeDecl printed them.
@@ -329,6 +329,20 @@ proc hir::read::StructDeclLine {content number} {
     }
     if {$slots ne {}} {
         dict set decl slots $slots
+    }
+    if {$identityForm ne ""} {
+        # A declared identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md):
+        # the registry's {form FORM fields {FIELD ...}}, as the entry
+        # hir::structs::apply returned held it.
+        dict set decl identity [dict create form $identityForm fields [split $identityFields ,]]
+    }
+    if {$treeField ne ""} {
+        # A tree struct (TREE-STRUCT-MILESTONE-1.md): its child field, as
+        # the entry hir::structs::apply returned held it.
+        if {$treeField ni $names} {
+            Fail $number "the tree field \"$treeField\" of struct $id is not one of its fields"
+        }
+        dict set decl tree $treeField
     }
     return $decl
 }
@@ -561,6 +575,10 @@ proc hir::read::Program {text} {
     # yields from them.
     hir::coroutines::analyze hir
     hir::declarations::stamp hir
+    # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): HIR text carries no
+    # recognizer table, so a claim read back is reported not proved -- never
+    # taken for certified.
+    hir::emission::verify hir
     return $hir
 }
 
@@ -658,6 +676,29 @@ proc hir::read::NewBinding {hirVar b name kind s origin number} {
         declaredBy "" origin $origin type "" symbol "" value ""]
     dict set hir scopes $s names $name $b
     dict set hir scopes $s bindings [concat [dict get $hir scopes $s bindings] [list $b]]
+}
+
+# A folding loop's intermediate (FOLD-LOOPS-MILESTONE-1.md), printed as
+# " fold (B NAME)": binding B, a parameter of the loop's body scope S, the
+# last of loop E's block parameters (the block at INDEX of its form, the
+# parameter at POSITION). Nothing when B is "" (a collecting loop).
+proc hir::read::ReadFoldBinding {hirVar e b name s path index position number} {
+    upvar 1 $hirVar hir
+    if {$b eq ""} {
+        return
+    }
+    NewBinding hir $b $name param $s [list ir [concat $path $index 1 $position]] $number
+    dict set hir exprs $e foldBinding $b
+}
+
+# A folding loop E's initial value: the child after the loop's operands, at
+# LEVEL in the enclosing scope S. Nothing for a collecting loop (FOLDID "").
+proc hir::read::ReadFoldInitial {hirVar e foldId level s path block} {
+    upvar 1 $hirVar hir
+    if {$foldId eq ""} {
+        return
+    }
+    dict set hir exprs $e foldInitial [Expr hir $level $s [concat $path 0] $block]
 }
 
 proc hir::read::Declare {hirVar s text kind number} {
@@ -915,9 +956,12 @@ proc hir::read::ParseType {text number} {
         return never
     }
     if {[catch {core::type::normalize $text} type]} {
-        if {[hir::imprint::IsVariableName $text]} {
+        if {[hir::imprint::IsVariableName $text] || [regexp {^[A-Z][0-9]*'$} $text]} {
             # An imprint variable (hir/imprint.tcl): a variable name that
-            # names no type, as in the source signature it came from.
+            # names no type, as in the source signature it came from, or an
+            # inherited one as hir::types::show prints it (T', T2': the
+            # parameter it belongs to is not printed; the names of one
+            # function's variables and of its enclosing functions' differ).
             return [list imprint $text]
         }
         Fail $number "bad type \"$text\": $type"
@@ -1140,8 +1184,8 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported cleanup]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported callback emitsText cleanup]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?cleanup? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
                 SetField hir $e nomethod 1
@@ -1151,6 +1195,9 @@ proc hir::read::Expr {hirVar level s path block} {
             }
             if {$exported ne ""} {
                 SetField hir $e exported $exported
+            }
+            if {$callback ne ""} {
+                SetField hir $e callback $callback
             }
             if {$variadic ne ""} {
                 SetField hir $e variadic $variadic
@@ -1252,6 +1299,21 @@ proc hir::read::Expr {hirVar level s path block} {
                 set declaredErrors [lsort -unique $declaredErrors]
             }
             SetField hir $e declaredErrors $declaredErrors
+            if {$emitsText ne ""} {
+                # Emission claims, as printed: the recognizer's binding and
+                # name. (HIR text carries no recognizer table: a claim read
+                # back is checked against what the text has, and a
+                # recognizer it does not have is not proved.)
+                set claims {}
+                foreach item [split [string map {", " \x01} $emitsText] \x01] {
+                    if {![regexp {^(b[0-9]+|\?) (\S+)$} $item -> claimBinding claimName]} {
+                        Fail $number "expected \"BINDING NAME\" in a block's emission claims"
+                    }
+                    if {$claimBinding eq "?"} { set claimBinding "" }
+                    lappend claims [dict create name $claimName origin [list ir $path] binding $claimBinding]
+                }
+                SetField hir $e emits $claims
+            }
             SetField hir $e inferredResultType [hir::types::intern hir [lindex $type 3]]
             set ids {}
             set index 2
@@ -1326,7 +1388,12 @@ proc hir::read::Expr {hirVar level s path block} {
         }
         if {
             if {$head ne ""} {
-                Fail $number "expected \"if : TYPE\""
+                # An inject block's contexts (RESTRICTED-CONTEXT-INJECTION-
+                # MILESTONE-1.md).
+                if {![regexp {^injects \((.*)\)$} $head -> ids]} {
+                    Fail $number "expected \"if ?injects (IDS)? : TYPE\""
+                }
+                SetField hir $e injects [if {$ids eq ""} {list} else {split [string map {", " ,} $ids] ,}]
             }
             SetField hir $e condition [Expr hir $inner $s [concat $path 1] $block]
             set refinements [dict create 1 {} 0 {}]
@@ -1355,12 +1422,14 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e refinements $refinements
         }
         loop {
-            if {![regexp {^(s[0-9]+)(?: binds (.*))?$} $head -> body binds]} {
-                Fail $number "expected \"loop SCOPE ?binds ...?\""
+            if {![regexp {^(s[0-9]+)(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} $head -> body foldId foldName binds]} {
+                Fail $number "expected \"loop SCOPE ?fold (BINDING NAME)? ?binds ...?\""
             }
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 1]] $number
+            ReadFoldBinding hir $e $foldId $foldName $body $path 1 0 $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
@@ -1370,16 +1439,18 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         listloop {
-            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: binds (.*))?$} \
-                    $head -> body elemId elemName binds]} {
-                Fail $number "expected \"listloop SCOPE (ELEMBINDING NAME) ?binds ...?\""
+            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} \
+                    $head -> body elemId elemName foldId foldName binds]} {
+                Fail $number "expected \"listloop SCOPE (ELEMBINDING NAME) ?fold (BINDING NAME)? ?binds ...?\""
             }
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 2]] $number
             NewBinding hir $elemId $elemName param $body [list ir [concat $path 2 1 0]] $number
+            ReadFoldBinding hir $e $foldId $foldName $body $path 2 1 $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
             SetField hir $e elementBinding $elemId
             SetField hir $e iterable [Expr hir $inner $s [concat $path 1] $block]
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
@@ -1389,19 +1460,21 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         countloop {
-            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: (up|down) (exclusive|inclusive))?(?: binds (.*))?$} \
-                    $head -> body countId countName direction endKind binds]} {
-                Fail $number "expected \"countloop SCOPE (COUNTBINDING NAME) ?DIRECTION ENDKIND? ?binds ...?\""
+            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: (up|down) (exclusive|inclusive))?(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} \
+                    $head -> body countId countName direction endKind foldId foldName binds]} {
+                Fail $number "expected \"countloop SCOPE (COUNTBINDING NAME) ?DIRECTION ENDKIND? ?fold (BINDING NAME)? ?binds ...?\""
             }
             SetField hir $e direction [if {$direction eq ""} {string cat "up"} else {set direction}]
             SetField hir $e endKind [if {$endKind eq ""} {string cat "exclusive"} else {set endKind}]
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 3]] $number
             NewBinding hir $countId $countName param $body [list ir [concat $path 3 1 0]] $number
+            ReadFoldBinding hir $e $foldId $foldName $body $path 3 1 $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
             SetField hir $e countBinding $countId
             SetField hir $e start [Expr hir $inner $s [concat $path 1] $block]
             SetField hir $e end [Expr hir $inner $s [concat $path 2] $block]
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
@@ -1411,9 +1484,9 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         lockloop {
-            if {![regexp {^(s[0-9]+)((?: \(b[0-9]+ \S+ (?:list|count (?:up|down) (?:exclusive|inclusive))\))+)(?: binds (.*))?$} \
-                    $head -> body groups binds]} {
-                Fail $number "expected \"lockloop SCOPE (BINDING NAME list|count DIR KIND)... ?binds ...?\""
+            if {![regexp {^(s[0-9]+)((?: \(b[0-9]+ \S+ (?:list|count (?:up|down) (?:exclusive|inclusive))\))+)(?: fold \((b[0-9]+) (\S+)\))?(?: binds (.*))?$} \
+                    $head -> body groups foldId foldName binds]} {
+                Fail $number "expected \"lockloop SCOPE (BINDING NAME list|count DIR KIND)... ?fold (BINDING NAME)? ?binds ...?\""
             }
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 2]] $number
             set domains {}
@@ -1429,6 +1502,7 @@ proc hir::read::Expr {hirVar level s path block} {
                 }
                 incr index
             }
+            ReadFoldBinding hir $e $foldId $foldName $body $path 2 $index $number
             Declare hir $body $binds local $number
             SetField hir $e bodyScope $body
             set index 0
@@ -1445,6 +1519,7 @@ proc hir::read::Expr {hirVar level s path block} {
                 incr index
             }
             SetField hir $e domains $resolved
+            ReadFoldInitial hir $e $foldId $inner $s $path $block
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
@@ -1609,11 +1684,11 @@ proc hir::read::Expr {hirVar level s path block} {
 # Derives what the text implies: which bind declares each binding, binding
 # types, and id counters past every id in use.
 # Parses a block line's HEAD ("SCOPE (PARAMS) captures (BINDINGS)
-# ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?declares TYPE? ?errors E1, E2? ?binds ...?")
+# ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?cleanup? ?declares TYPE? ?errors E1, E2? ?binds ...?")
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {cleanupVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {callbackVar ""} {emitsVar ""} {cleanupVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1643,6 +1718,15 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
         upvar 1 $exportedVar exported
         set exported ""
         if {[regexp {^ exported (c)(.*)$} $rest -> exported after]} {
+            set rest $after
+        }
+    }
+    # A C callback's foreign ABI (C-CALLBACK-MILESTONE-1.md), as hir::format
+    # prints it.
+    if {$callbackVar ne ""} {
+        upvar 1 $callbackVar callback
+        set callback ""
+        if {[regexp {^ callback (c)(.*)$} $rest -> callback after]} {
             set rest $after
         }
     }
@@ -1722,6 +1806,19 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
     if {$i >= 0} {
         if {$resumeVar ne "" && [regexp {^ coroutine-effect \((.*)\)$} [string range $rest $i end] -> effectText]} {}
         set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md), as hir::format
+    # prints them: "emits (BINDING NAME, ...)".
+    if {$emitsVar ne ""} {
+        upvar 1 $emitsVar emits
+        set emits ""
+        set i [TopIndex $rest " emits ("]
+        if {$i >= 0} {
+            if {![regexp {^ emits \((.*)\)$} [string range $rest $i end] -> emits]} {
+                return 0
+            }
+            set rest [string range $rest 0 [expr {$i - 1}]]
+        }
     }
     set i [TopIndex $rest " resume "]
     if {$i >= 0 && $resumeVar ne ""} {
@@ -1811,31 +1908,64 @@ proc hir::read::CanonicalBlockTypes {hirVar} {
     dict set hir typeIds $typeIds
 }
 
+# Gives the enclosing functions' variables a nested function's signature
+# names their constraints (hir::imprint::ConstrainEnclosing), as resolution
+# does: Constrain derived the signature's own, which are not theirs.
+# Enclosing blocks are visited first, so each one's signature is final
+# when the blocks inside it read it (hir::imprint::EnclosingOf).
+proc hir::read::ConstrainEnclosingSignatures {hirVar} {
+    upvar 1 $hirVar hir
+    if {[string first imprint [dict get $hir types]] < 0} {
+        return
+    }
+    foreach e [hir::walk $hir] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] ne "block" || ![dict exists $node declaredParamTypes]} {
+            continue
+        }
+        set params [dict get $node declaredParamTypes]
+        set declared [dict getdef $node declaredResult {}]
+        if {[string first imprint $params$declared] < 0} {
+            continue
+        }
+        lassign [hir::imprint::ConstrainEnclosing $params $declared [hir::imprint::EnclosingOf $hir $e]] params declared
+        SetField hir $e declaredParamTypes $params
+        SetField hir $e declaredResult $declared
+    }
+}
+
 # Gives every type in the body of each block whose signature constrains an
 # imprint variable that variable's constraints (TRAIT-CONSTRAINED-IMPRINTED-
 # TYPES.md): HIR text prints a variable by its name, as a source message
 # does, and the constraints are the signature's (read back by Constrain), so
-# a read HIR's types are the built one's. An enclosing block is visited
-# before the blocks inside it, so a nested function's own variable of the
-# same name is its own again.
+# a read HIR's types are the built one's. A block's own variables are no
+# enclosing function's (hir::imprint::BlockSignature), so an enclosing
+# block's variable is constrained in the blocks inside it too.
 proc hir::read::ConstrainBodies {hirVar} {
     upvar 1 $hirVar hir
     if {[string first imprint [dict get $hir types]] < 0} {
         return
     }
     # An exact block type's result is its own block's, constrained as that
-    # block's signature constrains it, wherever the type is.
+    # block's signature constrains it (an enclosing function's variable as
+    # that function's), wherever the type is.
     dict for {x node} [dict get $hir exprs] {
         set t [hir::typeOf $hir $x]
         if {![hir::types::IsExactBlock $t] || [string first imprint [lindex $t 3]] < 0
                 || ![dict exists $hir exprs [lindex $t 1]]} {
             continue
         }
+        set constraints [hir::imprint::EnclosingOf $hir [lindex $t 1]]
         set sig [hir::imprint::BlockSignature $hir [lindex $t 1]]
-        if {$sig eq ""} {
+        if {$sig ne ""} {
+            dict for {name traits} [hir::imprint::ConstraintsOf $sig] {
+                dict set constraints $name $traits
+            }
+        }
+        if {$constraints eq {}} {
             continue
         }
-        set constrained [lreplace $t 3 3 [hir::imprint::ConstrainVariables [lindex $t 3] [hir::imprint::ConstraintsOf $sig]]]
+        set constrained [lreplace $t 3 3 [hir::imprint::ConstrainVariables [lindex $t 3] $constraints]]
         if {$constrained ne $t} {
             dict set hir exprs $x type [hir::types::intern hir $constrained]
         }
@@ -1873,6 +2003,7 @@ proc hir::read::ConstrainBodies {hirVar} {
 
 proc hir::read::Finish {hirVar} {
     upvar 1 $hirVar hir
+    ConstrainEnclosingSignatures hir
     CanonicalBlockTypes hir
     ConstrainBodies hir
     foreach e [hir::walk $hir] {

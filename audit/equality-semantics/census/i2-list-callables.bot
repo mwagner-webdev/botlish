@@ -1,0 +1,4 @@
+# I2 Lists holding an untyped callable: different lengths, and a first element that differs, answer false
+fn f(x):
+    x
+[[f] == [], [1, f] == [2, f], [1, f] == [1], [] == []]

@@ -665,6 +665,223 @@ In source: write a bare `break`. To produce a different result when a loop
 stops early, compute it after the loop (or in a function that `return`s
 it).
 
+@topic error.context-not-injected
+title: CONTEXT-NOT-INJECTED: an inject block's code needs a context it lacks
+summary: A call, context parameter or nested inject block inside `inject context A, B:` needs a context the block does not list; the code may use only the injected contexts.
+index: errors
+alias: is required by this call, but the enclosing inject block; which this inject block does not inject; which the enclosing inject block; does not inject; injects no context; injects only
+keywords: inject, inject context, inject no context, injection, authority, restricted, context, installed, requirement, chain, nested, airlock
+related: concept.context-injection concept.contexts concept.context-traits error.context-retained-authority error.missing-context error.duplicate-injected-context concept.direct-modules
+docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md CONTEXTS.md
+code: CORE SEMANTIC CONTEXT-NOT-INJECTED
+
+== MEANING
+An inject block is a computation that receives the authority explicitly
+injected into it, not all the authority its creator possesses. Installing
+a context makes it available to the program; injecting it grants a block
+permission to use it. Inside the block, everything the code does must be
+covered by what it injects:
+
+  * every call: the callee's whole requirement -- the contexts it, and
+    every function it calls, uses (the chain in the message);
+  * every reference to a context parameter of an enclosing function, and
+    every call of a nested function that reads one;
+  * every nested inject block: it may inject only what the enclosing block
+    injects (a computation grants only authority it was given);
+  * every call of a direct module that the enclosing function mediates
+    through its context (DIRECT-MODULES.md): the context must be injected.
+
+    std::linux::io::LinuxIO is required by this call, but the enclosing
+    inject block (at f.bot:12:1) injects no context: ...
+        report
+         -> std::linux::io::write
+            directly requires std::linux::io::LinuxIO
+
+A context trait injected (`inject context std::io::IO:`) grants its
+operations, through the implementation the program selected; it does not
+grant the implementing context's other functions.
+
+== LIKELY CAUSES
+  * A helper several calls deep needs a context: the chain names it.
+  * The block reads a context parameter of the function it is written in
+    (`net.id`): that is the function's authority, not the block's.
+  * An inner `inject context X:` inside a block that does not inject X.
+  * The code needs a context trait and the block injects only the context
+    that implements it (or the other way round): injection names
+    identities, exactly as requirements do.
+
+== HOW TO INVESTIGATE
+Follow the chain to the function that "directly requires" the context.
+`-contexts FILE.bot` prints every function's requirement and every inject
+block (`contextinject`).
+
+== WHAT TO DO
+Inject the context if the computation should have it (`inject context
+Storage, Network:`); otherwise move the call out of the block, or pass the
+block a value that represents exactly the operation it may perform (an
+explicit, typed delegation). Never widen an inner block beyond the outer
+one.
+
+@example reject
+context struct Network:
+    id: int
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn prepare(n: int) -> int:
+    send(n)
+
+with context Network {id: 1}
+inject no context:
+    prepare(41)
+@caption prepare needs Network through send; the block injects nothing
+@error CORE SEMANTIC CONTEXT-NOT-INJECTED
+@at 12:5
+@end
+
+@example reject
+context struct Network:
+    id: int
+
+context struct Storage:
+    base: int
+
+with context Network {id: 1}
+with context Storage {base: 40}
+inject context Storage:
+    inject context Network:
+        0
+@caption An inner block cannot grant what its enclosing block was not given
+@error CORE SEMANTIC CONTEXT-NOT-INJECTED
+@at 10:5
+@end
+
+@example accept
+context struct Network:
+    id: int
+
+context struct Storage:
+    base: int
+
+fn store(n: int, context st: Storage) -> int:
+    n + st.base
+
+with context Network {id: 1}
+with context Storage {base: 40}
+inject context Storage:
+    store(2)
+@caption Storage is injected; Network, installed too, is not needed
+@value 42
+@end
+
+@topic error.context-retained-authority
+title: CONTEXT-RETAINED-AUTHORITY: a resumed coroutine retains more authority
+summary: A coroutine keeps its construction's contexts; an inject block may not resume one built with more than it injects, or one whose construction cannot be followed.
+index: errors
+alias: this call runs coroutine code with authority the enclosing inject block; may resume a coroutine that retains; whose retained authority cannot be proven
+keywords: inject, coroutine, resume, retained, authority, construction, handle, laundering, provenance, context place, parameter
+related: concept.context-injection concept.coroutines error.context-not-injected concept.context-owned-state
+docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md COROUTINES.md
+code: CORE SEMANTIC CONTEXT-RETAINED-AUTHORITY
+
+== MEANING
+A coroutine's providers are fixed at its construction: its code runs with
+the contexts its construction had, and a resume selects nothing. Its
+handle's type does not say which, so resuming inside an inject block a
+handle constructed by privileged code would run privileged code inside the
+block. The compiler follows every handle from its construction (through
+bindings, struct fields, collections, arguments, results and place
+parameters) and accepts a resume in an inject block only when every
+coroutine it may run was constructed with contexts the block injects. It
+rejects:
+
+  * a coroutine constructed with a context the block does not inject
+    ("may resume a coroutine that retains Network");
+  * a coroutine whose construction it cannot follow ("cannot be proven"):
+    one moved out of an installed context's state, where any code using
+    that context may have put it; a parameter of the function the block is
+    written in, which its caller constructed; an affine error payload.
+
+The same holds for a call whose callee resumes a handle it is given, and
+for a coroutine constructed in the block whose code resumes one.
+
+Moving a handle through the block without resuming it -- handing it to an
+event loop, returning it -- uses none of its authority and is accepted.
+
+== LIKELY CAUSES
+  * The coroutine was constructed before (outside) the block by code with
+    more authority.
+  * A helper that resumes its parameter is called with such a handle.
+  * Tasks are taken out of a context's collection and resumed: their
+    constructors are unknown.
+
+== WHAT TO DO
+Construct the coroutine inside the block (its construction is then
+checked against what the block injects), inject what it retains, or resume
+it outside the block, where its creator's authority is available.
+
+@example reject
+context struct Network:
+    id: int
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn task(n: int) -> int:
+    yield n
+    send(n)
+
+with context Network {id: 1}
+coroutine {step: privileged} = task(41)
+inject no context:
+    privileged()
+@caption privileged retains Network from its construction; the block injects nothing
+@error CORE SEMANTIC CONTEXT-RETAINED-AUTHORITY
+@at 14:5
+@end
+
+@example accept
+fn task(n: int) -> int:
+    yield n
+    n + 1
+
+inject no context:
+    coroutine {step: worker} = task(41)
+    worker()
+@caption Constructed inside the block, within what it injects
+@value 42
+@end
+
+@topic error.duplicate-injected-context
+title: DUPLICATE-INJECTED-CONTEXT: an inject block names a context twice
+summary: `inject context A, A:` names one context twice; each context is injected once.
+index: errors
+alias: is injected twice by this inject block
+keywords: inject, duplicate, context, list
+related: concept.context-injection error.context-not-injected error.not-a-context
+docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md
+code: CORE SEMANTIC DUPLICATE-INJECTED-CONTEXT
+
+== MEANING
+An inject block's list is the set of contexts its code may use, by
+identity: a second mention adds nothing and is reported.
+
+== WHAT TO DO
+Remove the repeated name.
+
+@example reject
+context struct Storage:
+    base: int
+
+with context Storage {base: 1}
+inject context Storage, Storage:
+    0
+@caption Storage twice
+@error CORE SEMANTIC DUPLICATE-INJECTED-CONTEXT
+@at 5:25
+@end
+
 @topic error.missing-context
 title: MISSING-CONTEXT: a call needs a context that is not installed
 summary: The called function (or one it calls) declares a context parameter, and no `with context` installation of that context precedes this call at the program's top level.
@@ -696,11 +913,29 @@ installed contexts:
     std::io::IO is required by this call, but no installed context implements
     it (install one with "with context EXPR" before the call): ...
 
+A trait operation's implementation counts like any callee: a call of a
+trait-polymorphic function with a concrete witness requires what the
+implementation its operation binds for that witness requires (another
+witness's implementation is no part of it). The chain then names the
+specialization and the step through the operation:
+
+    Clock is required by this call but is not installed here (...):
+        twice (for A)
+         -> show, the implementation of Thing's operation show for A,
+            called at f.bot:17:5
+         -> now
+            directly requires Clock
+
 The reason for the check: a context is never looked up at run time. A
 program that compiles has every context it uses installed before the code
 that uses it runs.
 
 == LIKELY CAUSES
+  * A trait implementation calls a function that needs a context, and the
+    program calls a trait-polymorphic function with that witness: the
+    implementation's requirement is the call's. Installing the context is
+    the fix; the operation never switches to another implementation because
+    a context is missing.
   * The `with context` line is missing, or it comes after the call:
     installation takes effect from its line onward, never earlier.
   * A top-level binding (`start = now()`) evaluated before the
@@ -737,6 +972,31 @@ report()
 @caption report requires Clock through now; nothing installs it
 @error CORE SEMANTIC MISSING-CONTEXT
 @at 10:1
+@end
+
+@example reject
+context struct Clock:
+    ticks: int
+
+fn now(context clock: Clock) -> int:
+    clock.ticks
+
+trait Thing:
+    fn show(t: Thing) -> int
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    t.v + now()
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+twice(A {v: 1})
+@caption twice's specialization for A requires Clock through A's show; nothing installs it
+@error CORE SEMANTIC MISSING-CONTEXT
+@at 19:1
 @end
 
 @example accept
@@ -968,7 +1228,11 @@ see what it needs. The frontier is closed at the source:
 
 This includes returning the function as a body's or the program's last
 expression, choosing it in an `if` value, and closures that call a
-context consumer (they require the context too).
+context consumer (they require the context too). A function nested in a
+trait-polymorphic function is judged in every specialization: one whose
+trait operation binds, for some witness, an implementation that needs a
+context is reported for that specialization, `function inner (for A)
+requires context ...`.
 
 == WHAT TO DO
 Pass the data instead of the function, or wrap the work so the
@@ -1558,6 +1822,12 @@ establishes nothing; that declaration is a TYPE error, not IMPRINT. A
 binding that makes an application of the signature invalid (K bound to a
 function where a slot requires Hashable) is TRAIT-NOT-SATISFIED, not
 IMPRINT: the variables were established.
+
+A nested function's signature names its enclosing function's variable as
+that variable: rigid there, never bound at a call of the nested function,
+every argument held to it (a TYPE error otherwise). Only the variables the
+enclosing functions do not have are the nested function's own; one with no
+variable of its own takes no imprint (`g[int]()` is IMPRINT).
 
 == WHAT TO DO
 Give explicit imprints, all of them, in first-occurrence order:

@@ -33,12 +33,13 @@
 @@ nested-call-problems-charged a call's problems include those of the calls in its arguments (the old subtree rule): an inner call's failure in the build of an outer candidate rules that candidate out
 ## hir/methods.tcl
 <<<<
-    set problems [dict getdef $owned $e {}]
+    return [lsort -unique [dict getdef $owned $e {}]]
 ====
     set problems [dict getdef $owned $e {}]
     foreach a [dict get $hir exprs $e args] {
         lappend problems {*}[dict getdef $owned $a {}]
     }
+    return [lsort -unique $problems]
 >>>>
 
 @@ subject-not-recorded no diagnostic records the call whose check produced it: no candidate has a problem of its own but a native's kind mismatch

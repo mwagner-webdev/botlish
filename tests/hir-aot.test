@@ -134,8 +134,8 @@ test hir-aot-11 {the result of a block with an unknown result is an unknown call
     list [dict get $blocker kind] [dict get $blocker cause cause] [dict get $blocker cause block]
 } -result {UnknownCallResultKind block-result e2}
 
-test hir-aot-12 {a known wrong kind is a known error, not a blocker} -body {
-    set a [aotSource "fn f():\n    1 + \"a\"\n\nf()"]
+test hir-aot-12 {a known wrong kind is a known error, not a blocker (core IR: in a source program the wrong kind is the call's compile-time TYPE since METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md, and the program is not compiled)} -body {
+    set a [aotOf [hirOf {bind f {block {} {call {ref +} {const 1} {const "a"}}}} {call {ref f}}]]
     list [aotStatus $a f] [lmap x [aotFacts $a f known-error] {dict get $x error}]
 } -result {{closed closed} TYPE}
 

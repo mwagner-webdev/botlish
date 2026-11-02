@@ -1,0 +1,232 @@
+# c-bindgen layout manifest: profile raven, target linux-x86_64, toolchain clang x86_64-linux-gnu (Ubuntu clang version 21.1.8 (6ubuntu1)) (C-BINDGEN-LAYOUTS.md)
+kind	record	index	name	status	offset	size	align	c	type	detail
+record	struct RInitDesc	-	RInitDesc	layout-direct	-	40	8	struct RInitDesc	-	typedefs=RInitDesc; identity=raven::ctypes::RInitDesc; header=include/raven/raven_core.h:105; pointed-by=1
+field	struct RInitDesc	0	backend	scalar	0	4	-	RBackend backend	std::ffi::c::UInt	c=backend
+field	struct RInitDesc	1	app_name	pointer	8	8	-	const char *app_name	std::ffi::c::Ptr[std::ffi::c::Char]	c=app_name
+field	struct RInitDesc	2	worker_threads	scalar	16	4	-	int worker_threads	std::ffi::c::Int	c=worker_threads
+field	struct RInitDesc	3	disable_render_thread	scalar	20	4	-	int disable_render_thread	std::ffi::c::Int	c=disable_render_thread
+field	struct RInitDesc	4	disable_vsync	scalar	24	4	-	int disable_vsync	std::ffi::c::Int	c=disable_vsync
+field	struct RInitDesc	5	enable_validation	scalar	28	4	-	int enable_validation	std::ffi::c::Int	c=enable_validation
+field	struct RInitDesc	6	headless	scalar	32	4	-	int headless	std::ffi::c::Int	c=headless
+field	struct RInitDesc	7	ui_scale	scalar	36	4	-	float ui_scale	std::ffi::c::Float	c=ui_scale
+record	struct RAllocator	-	RAllocator	layout-direct	-	32	8	struct RAllocator	-	typedefs=RAllocator; identity=raven::ctypes::RAllocator; header=include/raven/raven_core.h:125; pointed-by=2
+field	struct RAllocator	0	alloc	function-pointer	0	8	-	void *(*alloc)(size_t size, void *user_data)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::ULong, std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Ptr[std::ffi::c::Void]}]	c=alloc
+field	struct RAllocator	1	realloc	function-pointer	8	8	-	void *(*realloc)(void *ptr, size_t size, void *user_data)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::ULong, std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Ptr[std::ffi::c::Void]}]	c=realloc
+field	struct RAllocator	2	free	function-pointer	16	8	-	void (*free)(void *ptr, void *user_data)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void], std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}]	c=free
+field	struct RAllocator	3	user_data	pointer	24	8	-	void *user_data	std::ffi::c::Ptr[std::ffi::c::Void]	c=user_data
+record	struct RMemoryStats	-	RMemoryStats	layout-direct	-	40	8	struct RMemoryStats	-	typedefs=RMemoryStats; identity=raven::ctypes::RMemoryStats; header=include/raven/raven_core.h:133; pointed-by=1
+field	struct RMemoryStats	0	used_bytes	scalar	0	8	-	size_t used_bytes	std::ffi::c::ULong	c=used_bytes
+field	struct RMemoryStats	1	peak_bytes	scalar	8	8	-	size_t peak_bytes	std::ffi::c::ULong	c=peak_bytes
+field	struct RMemoryStats	2	reserved_bytes	scalar	16	8	-	size_t reserved_bytes	std::ffi::c::ULong	c=reserved_bytes
+field	struct RMemoryStats	3	allocation_count	scalar	24	8	-	size_t allocation_count	std::ffi::c::ULong	c=allocation_count
+field	struct RMemoryStats	4	total_allocations	scalar	32	8	-	uint64_t total_allocations	std::ffi::c::ULong	c=total_allocations
+record	struct RFrameStats	-	RFrameStats	layout-direct	-	56	8	struct RFrameStats	-	typedefs=RFrameStats; identity=raven::ctypes::RFrameStats; header=include/raven/raven_core.h:147; pointed-by=1
+field	struct RFrameStats	0	layout_ms	scalar	0	8	-	double layout_ms	std::ffi::c::Double	c=layout_ms
+field	struct RFrameStats	1	paint_ms	scalar	8	8	-	double paint_ms	std::ffi::c::Double	c=paint_ms
+field	struct RFrameStats	2	render_ms	scalar	16	8	-	double render_ms	std::ffi::c::Double	c=render_ms
+field	struct RFrameStats	3	widget_count	scalar	24	4	-	Ruint widget_count	std::ffi::c::UInt	c=widget_count
+field	struct RFrameStats	4	instance_count	scalar	28	4	-	Ruint instance_count	std::ffi::c::UInt	c=instance_count
+field	struct RFrameStats	5	draw_call_count	scalar	32	4	-	Ruint draw_call_count	std::ffi::c::UInt	c=draw_call_count
+field	struct RFrameStats	6	backdrop_count	scalar	36	4	-	Ruint backdrop_count	std::ffi::c::UInt	c=backdrop_count
+field	struct RFrameStats	7	paint_job_count	scalar	40	4	-	Ruint paint_job_count	std::ffi::c::UInt	c=paint_job_count
+field	struct RFrameStats	8	frame_index	scalar	48	8	-	uint64_t frame_index	std::ffi::c::ULong	c=frame_index
+record	struct RNativeWindow	-	RNativeWindow	layout-direct	-	40	8	struct RNativeWindow	-	typedefs=RNativeWindow; identity=raven::ctypes::RNativeWindow; header=include/raven/raven_window.h:79; pointed-by=2
+field	struct RNativeWindow	0	system	scalar	0	4	-	RWindowSystem system	std::ffi::c::UInt	c=system
+field	struct RNativeWindow	1	display	pointer	8	8	-	void *display	std::ffi::c::Ptr[std::ffi::c::Void]	c=display
+field	struct RNativeWindow	2	window	scalar	16	8	-	uintptr_t window	std::ffi::c::ULong	c=window
+field	struct RNativeWindow	3	visual	scalar	24	8	-	uintptr_t visual	std::ffi::c::ULong	c=visual
+field	struct RNativeWindow	4	transparent	scalar	32	4	-	int transparent	std::ffi::c::Int	c=transparent
+record	struct REvent	-	REvent	layout-direct	-	68	4	struct REvent	-	typedefs=REvent; identity=raven::ctypes::REvent; header=include/raven/raven_window.h:217
+field	struct REvent	0	type_	scalar	0	4	-	REventType type	std::ffi::c::UInt	c=type
+field	struct REvent	1	window	scalar	4	4	-	Rid window	std::ffi::c::UInt	c=window
+field	struct REvent	2	target	scalar	8	4	-	Rid target	std::ffi::c::UInt	c=target
+field	struct REvent	3	x	scalar	12	4	-	float x	std::ffi::c::Float	c=x
+field	struct REvent	4	y	scalar	16	4	-	float y	std::ffi::c::Float	c=y
+field	struct REvent	5	local_x	scalar	20	4	-	float local_x	std::ffi::c::Float	c=local_x
+field	struct REvent	6	local_y	scalar	24	4	-	float local_y	std::ffi::c::Float	c=local_y
+field	struct REvent	7	delta_x	scalar	28	4	-	float delta_x	std::ffi::c::Float	c=delta_x
+field	struct REvent	8	delta_y	scalar	32	4	-	float delta_y	std::ffi::c::Float	c=delta_y
+field	struct REvent	9	wheel_x	scalar	36	4	-	float wheel_x	std::ffi::c::Float	c=wheel_x
+field	struct REvent	10	wheel_y	scalar	40	4	-	float wheel_y	std::ffi::c::Float	c=wheel_y
+field	struct REvent	11	button	scalar	44	4	-	RMouseButton button	std::ffi::c::UInt	c=button
+field	struct REvent	12	clicks	scalar	48	4	-	int clicks	std::ffi::c::Int	c=clicks
+field	struct REvent	13	key	scalar	52	4	-	RKey key	std::ffi::c::UInt	c=key
+field	struct REvent	14	modifiers	scalar	56	4	-	Ruint modifiers	std::ffi::c::UInt	c=modifiers
+field	struct REvent	15	repeat	scalar	60	4	-	int repeat	std::ffi::c::Int	c=repeat
+field	struct REvent	16	codepoint	scalar	64	4	-	Ruint codepoint	std::ffi::c::UInt	c=codepoint
+record	struct RDropEvent	-	RDropEvent	layout-direct	-	64	8	struct RDropEvent	-	typedefs=RDropEvent; identity=raven::ctypes::RDropEvent; header=include/raven/raven_window.h:257
+field	struct RDropEvent	0	phase	scalar	0	4	-	RDropPhase phase	std::ffi::c::UInt	c=phase
+field	struct RDropEvent	1	window	scalar	4	4	-	Rid window	std::ffi::c::UInt	c=window
+field	struct RDropEvent	2	x	scalar	8	4	-	float x	std::ffi::c::Float	c=x
+field	struct RDropEvent	3	y	scalar	12	4	-	float y	std::ffi::c::Float	c=y
+field	struct RDropEvent	4	local_x	scalar	16	4	-	float local_x	std::ffi::c::Float	c=local_x
+field	struct RDropEvent	5	local_y	scalar	20	4	-	float local_y	std::ffi::c::Float	c=local_y
+field	struct RDropEvent	6	paths	pointer	24	8	-	const char *const *paths	std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]	c=paths
+field	struct RDropEvent	7	path_count	scalar	32	4	-	int path_count	std::ffi::c::Int	c=path_count
+field	struct RDropEvent	8	text	pointer	40	8	-	const char *text	std::ffi::c::Ptr[std::ffi::c::Char]	c=text
+field	struct RDropEvent	9	drag_type	pointer	48	8	-	const char *drag_type	std::ffi::c::Ptr[std::ffi::c::Char]	c=drag_type
+field	struct RDropEvent	10	drag_source	scalar	56	4	-	Rid drag_source	std::ffi::c::UInt	c=drag_source
+record	struct RTileItem	-	RTileItem	layout-direct	-	80	8	struct RTileItem	-	typedefs=RTileItem; identity=raven::ctypes::RTileItem; header=include/raven/raven_controls.h:390
+field	struct RTileItem	0	text	pointer	0	8	-	const char *text	std::ffi::c::Ptr[std::ffi::c::Char]	c=text
+field	struct RTileItem	1	detail	pointer	8	8	-	const char *detail	std::ffi::c::Ptr[std::ffi::c::Char]	c=detail
+field	struct RTileItem	2	badge	pointer	16	8	-	const char *badge	std::ffi::c::Ptr[std::ffi::c::Char]	c=badge
+field	struct RTileItem	3	icon	scalar	24	4	-	Rid icon	std::ffi::c::UInt	c=icon
+field	struct RTileItem	4	uv	array	28	16	-	float uv[4]	array 4 of std::ffi::c::Float	c=uv; element=scalar float; bounds=4; extent=4
+field	struct RTileItem	5	tint	array	44	16	-	float tint[4]	array 4 of std::ffi::c::Float	c=tint; element=scalar float; bounds=4; extent=4
+field	struct RTileItem	6	icon_radius	scalar	60	4	-	float icon_radius	std::ffi::c::Float	c=icon_radius
+field	struct RTileItem	7	text_color	array	64	16	-	float text_color[4]	array 4 of std::ffi::c::Float	c=text_color; element=scalar float; bounds=4; extent=4
+record	struct RLanguageDesc	-	RLanguageDesc	layout-direct	-	112	8	struct RLanguageDesc	-	typedefs=RLanguageDesc; identity=raven::ctypes::RLanguageDesc; header=include/raven/raven_text_editor.h:75; pointed-by=2
+field	struct RLanguageDesc	0	name	pointer	0	8	-	const char *name	std::ffi::c::Ptr[std::ffi::c::Char]	c=name
+field	struct RLanguageDesc	1	extensions	pointer	8	8	-	const char *extensions	std::ffi::c::Ptr[std::ffi::c::Char]	c=extensions
+field	struct RLanguageDesc	2	keywords	pointer	16	8	-	const char *keywords	std::ffi::c::Ptr[std::ffi::c::Char]	c=keywords
+field	struct RLanguageDesc	3	types	pointer	24	8	-	const char *types	std::ffi::c::Ptr[std::ffi::c::Char]	c=types
+field	struct RLanguageDesc	4	constants	pointer	32	8	-	const char *constants	std::ffi::c::Ptr[std::ffi::c::Char]	c=constants
+field	struct RLanguageDesc	5	line_comment	pointer	40	8	-	const char *line_comment	std::ffi::c::Ptr[std::ffi::c::Char]	c=line_comment
+field	struct RLanguageDesc	6	block_comment_start	pointer	48	8	-	const char *block_comment_start	std::ffi::c::Ptr[std::ffi::c::Char]	c=block_comment_start
+field	struct RLanguageDesc	7	block_comment_end	pointer	56	8	-	const char *block_comment_end	std::ffi::c::Ptr[std::ffi::c::Char]	c=block_comment_end
+field	struct RLanguageDesc	8	string_quotes	pointer	64	8	-	const char *string_quotes	std::ffi::c::Ptr[std::ffi::c::Char]	c=string_quotes
+field	struct RLanguageDesc	9	multiline_strings	pointer	72	8	-	const char *multiline_strings	std::ffi::c::Ptr[std::ffi::c::Char]	c=multiline_strings
+field	struct RLanguageDesc	10	directive	pointer	80	8	-	const char *directive	std::ffi::c::Ptr[std::ffi::c::Char]	c=directive
+field	struct RLanguageDesc	11	annotation	pointer	88	8	-	const char *annotation	std::ffi::c::Ptr[std::ffi::c::Char]	c=annotation
+field	struct RLanguageDesc	12	flags	scalar	96	4	-	Ruint flags	std::ffi::c::UInt	c=flags
+field	struct RLanguageDesc	13	script_language	pointer	104	8	-	const char *script_language	std::ffi::c::Ptr[std::ffi::c::Char]	c=script_language
+record	struct RFileFilter	-	RFileFilter	layout-direct	-	16	8	struct RFileFilter	-	typedefs=RFileFilter; identity=raven::ctypes::RFileFilter; header=include/raven/raven_dialogs.h:36; pointed-by=1
+field	struct RFileFilter	0	name	pointer	0	8	-	const char *name	std::ffi::c::Ptr[std::ffi::c::Char]	c=name
+field	struct RFileFilter	1	patterns	pointer	8	8	-	const char *patterns	std::ffi::c::Ptr[std::ffi::c::Char]	c=patterns
+record	struct RFileDialogDesc	-	RFileDialogDesc	layout-direct	-	64	8	struct RFileDialogDesc	-	typedefs=RFileDialogDesc; identity=raven::ctypes::RFileDialogDesc; header=include/raven/raven_dialogs.h:52; pointed-by=3
+field	struct RFileDialogDesc	0	parent	scalar	0	4	-	Rid parent	std::ffi::c::UInt	c=parent
+field	struct RFileDialogDesc	1	title	pointer	8	8	-	const char *title	std::ffi::c::Ptr[std::ffi::c::Char]	c=title
+field	struct RFileDialogDesc	2	directory	pointer	16	8	-	const char *directory	std::ffi::c::Ptr[std::ffi::c::Char]	c=directory
+field	struct RFileDialogDesc	3	file_name	pointer	24	8	-	const char *file_name	std::ffi::c::Ptr[std::ffi::c::Char]	c=file_name
+field	struct RFileDialogDesc	4	filters	pointer	32	8	-	const RFileFilter *filters	std::ffi::c::Ptr[RFileFilter]	c=filters
+field	struct RFileDialogDesc	5	filter_count	scalar	40	4	-	int filter_count	std::ffi::c::Int	c=filter_count
+field	struct RFileDialogDesc	6	default_extension	pointer	48	8	-	const char *default_extension	std::ffi::c::Ptr[std::ffi::c::Char]	c=default_extension
+field	struct RFileDialogDesc	7	flags	scalar	56	4	-	Ruint flags	std::ffi::c::UInt	c=flags
+record	struct RViewportDrawInfo	-	RViewportDrawInfo	layout-direct	-	88	8	struct RViewportDrawInfo	-	typedefs=RViewportDrawInfo; identity=raven::ctypes::RViewportDrawInfo; header=include/raven/raven_viewport.h:41
+field	struct RViewportDrawInfo	0	backend	scalar	0	4	-	RBackend backend	std::ffi::c::UInt	c=backend
+field	struct RViewportDrawInfo	1	viewport	scalar	4	4	-	Rid viewport	std::ffi::c::UInt	c=viewport
+field	struct RViewportDrawInfo	2	window	scalar	8	4	-	Rid window	std::ffi::c::UInt	c=window
+field	struct RViewportDrawInfo	3	x	scalar	12	4	-	int x	std::ffi::c::Int	c=x
+field	struct RViewportDrawInfo	4	y	scalar	16	4	-	int y	std::ffi::c::Int	c=y
+field	struct RViewportDrawInfo	5	width	scalar	20	4	-	int width	std::ffi::c::Int	c=width
+field	struct RViewportDrawInfo	6	height	scalar	24	4	-	int height	std::ffi::c::Int	c=height
+field	struct RViewportDrawInfo	7	clip_x	scalar	28	4	-	int clip_x	std::ffi::c::Int	c=clip_x
+field	struct RViewportDrawInfo	8	clip_y	scalar	32	4	-	int clip_y	std::ffi::c::Int	c=clip_y
+field	struct RViewportDrawInfo	9	clip_width	scalar	36	4	-	int clip_width	std::ffi::c::Int	c=clip_width
+field	struct RViewportDrawInfo	10	clip_height	scalar	40	4	-	int clip_height	std::ffi::c::Int	c=clip_height
+field	struct RViewportDrawInfo	11	framebuffer_width	scalar	44	4	-	int framebuffer_width	std::ffi::c::Int	c=framebuffer_width
+field	struct RViewportDrawInfo	12	framebuffer_height	scalar	48	4	-	int framebuffer_height	std::ffi::c::Int	c=framebuffer_height
+field	struct RViewportDrawInfo	13	frame_index	scalar	56	8	-	uint64_t frame_index	std::ffi::c::ULong	c=frame_index
+field	struct RViewportDrawInfo	14	command_buffer	pointer	64	8	-	void *command_buffer	std::ffi::c::Ptr[std::ffi::c::Void]	c=command_buffer
+field	struct RViewportDrawInfo	15	render_pass	pointer	72	8	-	void *render_pass	std::ffi::c::Ptr[std::ffi::c::Void]	c=render_pass
+field	struct RViewportDrawInfo	16	color_format	scalar	80	4	-	Ruint color_format	std::ffi::c::UInt	c=color_format
+record	struct RSpring	-	RSpring	layout-direct	-	12	4	struct RSpring	-	typedefs=RSpring; identity=raven::ctypes::RSpring; header=include/raven/raven_draw.h:37; pointed-by=3
+field	struct RSpring	0	value	scalar	0	4	-	float value	std::ffi::c::Float	c=value
+field	struct RSpring	1	velocity	scalar	4	4	-	float velocity	std::ffi::c::Float	c=velocity
+field	struct RSpring	2	started	scalar	8	4	-	int started	std::ffi::c::Int	c=started
+record	struct RShaderLook	-	RShaderLook	layout-direct	-	72	4	struct RShaderLook	-	typedefs=RShaderLook; identity=raven::ctypes::RShaderLook; header=include/raven/raven_shader.h:76; pointed-by=5
+field	struct RShaderLook	0	color	array	0	16	-	float color[4]	array 4 of std::ffi::c::Float	c=color; element=scalar float; bounds=4; extent=4
+field	struct RShaderLook	1	color2	array	16	16	-	float color2[4]	array 4 of std::ffi::c::Float	c=color2; element=scalar float; bounds=4; extent=4
+field	struct RShaderLook	2	params	array	32	16	-	float params[4]	array 4 of std::ffi::c::Float	c=params; element=scalar float; bounds=4; extent=4
+field	struct RShaderLook	3	radius	scalar	48	4	-	float radius	std::ffi::c::Float	c=radius
+field	struct RShaderLook	4	texture	scalar	52	4	-	Rid texture	std::ffi::c::UInt	c=texture
+field	struct RShaderLook	5	animate	scalar	56	4	-	int animate	std::ffi::c::Int	c=animate
+field	struct RShaderLook	6	pointer	scalar	60	4	-	int pointer	std::ffi::c::Int	c=pointer
+field	struct RShaderLook	7	hover	scalar	64	4	-	float hover	std::ffi::c::Float	c=hover
+field	struct RShaderLook	8	press	scalar	68	4	-	float press	std::ffi::c::Float	c=press
+record	struct RXmlError	-	RXmlError	layout-direct	-	168	4	struct RXmlError	-	typedefs=RXmlError; identity=raven::ctypes::RXmlError; header=include/raven/raven_xml.h:84; pointed-by=1
+field	struct RXmlError	0	line	scalar	0	4	-	int line	std::ffi::c::Int	c=line
+field	struct RXmlError	1	column	scalar	4	4	-	int column	std::ffi::c::Int	c=column
+field	struct RXmlError	2	message	array	8	160	-	char message[160]	array 160 of std::ffi::c::Char	c=message; element=char char; bounds=160; extent=160
+record	struct RXmlAttributeInfo	-	RXmlAttributeInfo	layout-direct	-	40	8	struct RXmlAttributeInfo	-	typedefs=RXmlAttributeInfo; identity=raven::ctypes::RXmlAttributeInfo; header=include/raven/raven_xml.h:112; pointed-by=1
+field	struct RXmlAttributeInfo	0	name	pointer	0	8	-	const char *name	std::ffi::c::Ptr[std::ffi::c::Char]	c=name
+field	struct RXmlAttributeInfo	1	type_	scalar	8	4	-	RXmlValueType type	std::ffi::c::UInt	c=type
+field	struct RXmlAttributeInfo	2	choices	pointer	16	8	-	const char *choices	std::ffi::c::Ptr[std::ffi::c::Char]	c=choices
+field	struct RXmlAttributeInfo	3	group	pointer	24	8	-	const char *group	std::ffi::c::Ptr[std::ffi::c::Char]	c=group
+field	struct RXmlAttributeInfo	4	description	pointer	32	8	-	const char *description	std::ffi::c::Ptr[std::ffi::c::Char]	c=description
+record	struct RXmlCompiledNode	-	RXmlCompiledNode	layout-direct	-	40	8	struct RXmlCompiledNode	-	typedefs=RXmlCompiledNode; identity=raven::ctypes::RXmlCompiledNode; header=include/raven/raven_xml.h:153; pointed-by=2
+field	struct RXmlCompiledNode	0	tag	pointer	0	8	-	const char *tag	std::ffi::c::Ptr[std::ffi::c::Char]	c=tag
+field	struct RXmlCompiledNode	1	text	pointer	8	8	-	const char *text	std::ffi::c::Ptr[std::ffi::c::Char]	c=text
+field	struct RXmlCompiledNode	2	attributes	pointer	16	8	-	const char *const *attributes	std::ffi::c::Ptr[std::ffi::c::Ptr[std::ffi::c::Char]]	c=attributes
+field	struct RXmlCompiledNode	3	attribute_count	scalar	24	4	-	int attribute_count	std::ffi::c::Int	c=attribute_count
+field	struct RXmlCompiledNode	4	parent	scalar	28	4	-	int parent	std::ffi::c::Int	c=parent
+field	struct RXmlCompiledNode	5	line	scalar	32	4	-	int line	std::ffi::c::Int	c=line
+record	struct RAccessibilitySettings	-	RAccessibilitySettings	layout-direct	-	16	4	struct RAccessibilitySettings	-	typedefs=RAccessibilitySettings; identity=raven::ctypes::RAccessibilitySettings; header=include/raven/raven_accessibility.h:91; pointed-by=1
+field	struct RAccessibilitySettings	0	text_scale	scalar	0	4	-	float text_scale	std::ffi::c::Float	c=text_scale
+field	struct RAccessibilitySettings	1	high_contrast	scalar	4	4	-	int high_contrast	std::ffi::c::Int	c=high_contrast
+field	struct RAccessibilitySettings	2	reduce_motion	scalar	8	4	-	int reduce_motion	std::ffi::c::Int	c=reduce_motion
+field	struct RAccessibilitySettings	3	screen_reader	scalar	12	4	-	int screen_reader	std::ffi::c::Int	c=screen_reader
+record	struct RSharedTextureInfo	-	RSharedTextureInfo	layout-direct	-	24	8	struct RSharedTextureInfo	-	typedefs=RSharedTextureInfo; identity=raven::ctypes::RSharedTextureInfo; header=include/raven/raven_vulkan.h:24; pointed-by=1
+field	struct RSharedTextureInfo	0	handle	scalar	0	8	-	intptr_t handle	std::ffi::c::Long	c=handle
+field	struct RSharedTextureInfo	1	allocation_size	scalar	8	8	-	uint64_t allocation_size	std::ffi::c::ULong	c=allocation_size
+field	struct RSharedTextureInfo	2	width	scalar	16	4	-	int width	std::ffi::c::Int	c=width
+field	struct RSharedTextureInfo	3	height	scalar	20	4	-	int height	std::ffi::c::Int	c=height
+record	struct RDrawInstance	-	RDrawInstance	layout-direct	-	80	4	struct RDrawInstance	-	typedefs=RDrawInstance; identity=raven::ctypes::RDrawInstance; header=include/raven/raven_backend.h:121
+field	struct RDrawInstance	0	rect	array	0	16	-	float rect[4]	array 4 of std::ffi::c::Float	c=rect; element=scalar float; bounds=4; extent=4
+field	struct RDrawInstance	1	uv	array	16	16	-	float uv[4]	array 4 of std::ffi::c::Float	c=uv; element=scalar float; bounds=4; extent=4
+field	struct RDrawInstance	2	clip	array	32	16	-	float clip[4]	array 4 of std::ffi::c::Float	c=clip; element=scalar float; bounds=4; extent=4
+field	struct RDrawInstance	3	radii	array	48	16	-	float radii[4]	array 4 of std::ffi::c::Float	c=radii; element=scalar float; bounds=4; extent=4
+field	struct RDrawInstance	4	color	scalar	64	4	-	uint32_t color	std::ffi::c::UInt	c=color
+field	struct RDrawInstance	5	border_color	scalar	68	4	-	uint32_t border_color	std::ffi::c::UInt	c=border_color
+field	struct RDrawInstance	6	border_width	scalar	72	4	-	float border_width	std::ffi::c::Float	c=border_width
+field	struct RDrawInstance	7	flags	scalar	76	4	-	uint32_t flags	std::ffi::c::UInt	c=flags
+record	struct RDrawCommand	-	RDrawCommand	layout-direct	-	72	8	struct RDrawCommand	-	typedefs=RDrawCommand; identity=raven::ctypes::RDrawCommand; header=include/raven/raven_backend.h:167
+field	struct RDrawCommand	0	type_	scalar	0	4	-	RDrawCommandType type	std::ffi::c::UInt	c=type
+field	struct RDrawCommand	1	texture	scalar	4	4	-	Rid texture	std::ffi::c::UInt	c=texture
+field	struct RDrawCommand	2	first_instance	scalar	8	4	-	Ruint first_instance	std::ffi::c::UInt	c=first_instance
+field	struct RDrawCommand	3	instance_count	scalar	12	4	-	Ruint instance_count	std::ffi::c::UInt	c=instance_count
+field	struct RDrawCommand	4	callback	function-pointer	16	8	-	RViewportDrawCallback callback	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[RViewportDrawInfo], std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}]	c=callback
+field	struct RDrawCommand	5	user_data	pointer	24	8	-	void *user_data	std::ffi::c::Ptr[std::ffi::c::Void]	c=user_data
+field	struct RDrawCommand	6	viewport	scalar	32	4	-	Rid viewport	std::ffi::c::UInt	c=viewport
+field	struct RDrawCommand	7	rect	array	36	16	-	int rect[4]	array 4 of std::ffi::c::Int	c=rect; element=scalar int; bounds=4; extent=4
+field	struct RDrawCommand	8	clip	array	52	16	-	int clip[4]	array 4 of std::ffi::c::Int	c=clip; element=scalar int; bounds=4; extent=4
+field	struct RDrawCommand	9	shader	scalar	68	4	-	Rid shader	std::ffi::c::UInt	c=shader
+record	struct RDrawData	-	RDrawData	layout-direct	-	88	8	struct RDrawData	-	typedefs=RDrawData; identity=raven::ctypes::RDrawData; header=include/raven/raven_backend.h:185
+field	struct RDrawData	0	window	scalar	0	4	-	Rid window	std::ffi::c::UInt	c=window
+field	struct RDrawData	1	instances	pointer	8	8	-	const RDrawInstance *instances	std::ffi::c::Ptr[RDrawInstance]	c=instances
+field	struct RDrawData	2	instance_count	scalar	16	4	-	Ruint instance_count	std::ffi::c::UInt	c=instance_count
+field	struct RDrawData	3	commands	pointer	24	8	-	const RDrawCommand *commands	std::ffi::c::Ptr[RDrawCommand]	c=commands
+field	struct RDrawData	4	command_count	scalar	32	4	-	Ruint command_count	std::ffi::c::UInt	c=command_count
+field	struct RDrawData	5	framebuffer_width	scalar	36	4	-	Ruint framebuffer_width	std::ffi::c::UInt	c=framebuffer_width
+field	struct RDrawData	6	framebuffer_height	scalar	40	4	-	Ruint framebuffer_height	std::ffi::c::UInt	c=framebuffer_height
+field	struct RDrawData	7	clear_color	array	44	16	-	float clear_color[4]	array 4 of std::ffi::c::Float	c=clear_color; element=scalar float; bounds=4; extent=4
+field	struct RDrawData	8	frame_index	scalar	64	8	-	uint64_t frame_index	std::ffi::c::ULong	c=frame_index
+field	struct RDrawData	9	scale	scalar	72	4	-	float scale	std::ffi::c::Float	c=scale
+field	struct RDrawData	10	vsync	scalar	76	4	-	int vsync	std::ffi::c::Int	c=vsync
+field	struct RDrawData	11	pointer	array	80	8	-	float pointer[2]	array 2 of std::ffi::c::Float	c=pointer; element=scalar float; bounds=2; extent=2
+record	struct RTextureDesc	-	RTextureDesc	layout-direct	-	16	4	struct RTextureDesc	-	typedefs=RTextureDesc; identity=raven::ctypes::RTextureDesc; header=include/raven/raven_backend.h:210
+field	struct RTextureDesc	0	width	scalar	0	4	-	Ruint width	std::ffi::c::UInt	c=width
+field	struct RTextureDesc	1	height	scalar	4	4	-	Ruint height	std::ffi::c::UInt	c=height
+field	struct RTextureDesc	2	format	scalar	8	4	-	RTextureFormat format	std::ffi::c::UInt	c=format
+field	struct RTextureDesc	3	filter	scalar	12	4	-	RFilterType filter	std::ffi::c::UInt	c=filter
+record	struct RBackendInitInfo	-	RBackendInitInfo	layout-direct	-	32	8	struct RBackendInitInfo	-	typedefs=RBackendInitInfo; identity=raven::ctypes::RBackendInitInfo; header=include/raven/raven_backend.h:217
+field	struct RBackendInitInfo	0	app_name	pointer	0	8	-	const char *app_name	std::ffi::c::Ptr[std::ffi::c::Char]	c=app_name
+field	struct RBackendInitInfo	1	enable_validation	scalar	8	4	-	int enable_validation	std::ffi::c::Int	c=enable_validation
+field	struct RBackendInitInfo	2	vsync	scalar	12	4	-	int vsync	std::ffi::c::Int	c=vsync
+field	struct RBackendInitInfo	3	window_system	scalar	16	4	-	RWindowSystem window_system	std::ffi::c::UInt	c=window_system
+field	struct RBackendInitInfo	4	native_display	pointer	24	8	-	void *native_display	std::ffi::c::Ptr[std::ffi::c::Void]	c=native_display
+record	struct RCapture	-	RCapture	layout-direct	-	16	8	struct RCapture	-	typedefs=RCapture; identity=raven::ctypes::RCapture; header=include/raven/raven_backend.h:227
+field	struct RCapture	0	pixels	pointer	0	8	-	uint8_t *pixels	std::ffi::c::Ptr[std::ffi::c::UChar]	c=pixels
+field	struct RCapture	1	width	scalar	8	4	-	int width	std::ffi::c::Int	c=width
+field	struct RCapture	2	height	scalar	12	4	-	int height	std::ffi::c::Int	c=height
+record	struct RBackendVTable	-	RBackendVTable	layout-direct	-	104	8	struct RBackendVTable	-	typedefs=RBackendVTable; identity=raven::ctypes::RBackendVTable; header=include/raven/raven_backend.h:234; pointed-by=1
+field	struct RBackendVTable	0	name	pointer	0	8	-	const char *name	std::ffi::c::Ptr[std::ffi::c::Char]	c=name
+field	struct RBackendVTable	1	Init	function-pointer	8	8	-	int (*Init)(const RBackendInitInfo *info)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[RBackendInitInfo]], return: std::ffi::c::Int}]	c=Init
+field	struct RBackendVTable	2	Shutdown	function-pointer	16	8	-	void (*Shutdown)(void)	std::ffi::c::FnPtr[Fn{args: [], return: unit}]	c=Shutdown
+field	struct RBackendVTable	3	CreateSurface	function-pointer	24	8	-	int (*CreateSurface)(Rid window, const RNativeWindow *native, Ruint width, Ruint height)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::Ptr[RNativeWindow], std::ffi::c::UInt, std::ffi::c::UInt], return: std::ffi::c::Int}]	c=CreateSurface
+field	struct RBackendVTable	4	DestroySurface	function-pointer	32	8	-	void (*DestroySurface)(Rid window)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt], return: unit}]	c=DestroySurface
+field	struct RBackendVTable	5	CreateTexture	function-pointer	40	8	-	int (*CreateTexture)(Rid texture, const RTextureDesc *desc, const void *pixels)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::Ptr[RTextureDesc], std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Int}]	c=CreateTexture
+field	struct RBackendVTable	6	UpdateTexture	function-pointer	48	8	-	void (*UpdateTexture)(Rid texture, Ruint x, Ruint y, Ruint width, Ruint height, const void *pixels)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}]	c=UpdateTexture
+field	struct RBackendVTable	7	SetTextureFilter	function-pointer	56	8	-	void (*SetTextureFilter)(Rid texture, RFilterType filter)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::UInt], return: unit}]	c=SetTextureFilter
+field	struct RBackendVTable	8	DestroyTexture	function-pointer	64	8	-	void (*DestroyTexture)(Rid texture)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt], return: unit}]	c=DestroyTexture
+field	struct RBackendVTable	9	RenderFrame	function-pointer	72	8	-	void (*RenderFrame)(const RDrawData *data, RCapture *capture)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[RDrawData], std::ffi::c::Ptr[RCapture]], return: unit}]	c=RenderFrame
+field	struct RBackendVTable	10	WaitIdle	function-pointer	80	8	-	void (*WaitIdle)(void)	std::ffi::c::FnPtr[Fn{args: [], return: unit}]	c=WaitIdle
+field	struct RBackendVTable	11	CreateShader	function-pointer	88	8	-	int (*CreateShader)(Rid shader, const uint32_t *spirv, size_t size)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::UInt], std::ffi::c::ULong], return: std::ffi::c::Int}]	c=CreateShader
+field	struct RBackendVTable	12	DestroyShader	function-pointer	96	8	-	void (*DestroyShader)(Rid shader)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt], return: unit}]	c=DestroyShader
+record	struct RHostPlatformDesc	-	RHostPlatformDesc	layout-direct	-	40	8	struct RHostPlatformDesc	-	typedefs=RHostPlatformDesc; identity=raven::ctypes::RHostPlatformDesc; header=include/raven/raven_host.h:22; pointed-by=1
+field	struct RHostPlatformDesc	0	set_cursor	function-pointer	0	8	-	void (*set_cursor)(Rid window, RCursor cursor, void *user_data)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::UInt, std::ffi::c::UInt, std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}]	c=set_cursor
+field	struct RHostPlatformDesc	1	clipboard_set	function-pointer	8	8	-	void (*clipboard_set)(const char *text, void *user_data)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Char], std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}]	c=clipboard_set
+field	struct RHostPlatformDesc	2	clipboard_get	function-pointer	16	8	-	const char *(*clipboard_get)(void *user_data)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: std::ffi::c::Ptr[std::ffi::c::Char]}]	c=clipboard_get
+field	struct RHostPlatformDesc	3	wake	function-pointer	24	8	-	void (*wake)(void *user_data)	std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}]	c=wake
+field	struct RHostPlatformDesc	4	user_data	pointer	32	8	-	void *user_data	std::ffi::c::Ptr[std::ffi::c::Void]	c=user_data
+record	struct RPainter	-	-	opaque-only	-	-	-	-	-	typedefs=RPainter; identity=raven::ctypes::RPainter; header=include/raven/raven_draw.h:18; pointed-by=13

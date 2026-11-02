@@ -177,8 +177,8 @@ test enum-principal-rejections {the acceptance program's five rejected programs 
         [enumError "enum Bad:\n    A,\n    A,\n"] \
         [enumError "enum A:\n    Same,\n\nenum B:\n    Same,\n\nfn wants_a(x: A):\n    x\n\nwants_a(B::Same)\n"] \
         [enumError "${vehicle}VehicleType::Unknown\n"] \
-        [enumRun "${vehicle}VehicleType::Car + 1\n"]
-} -result {{enum.bot:1:6: ENUM-EMPTY: enum "Empty" declares no case: an enum needs at least one case, written on the indented lines after "enum Empty:" ("Case,")} {TYPE: enum.bot:3:5: duplicate case "A" in enum "Bad": every case of an enum is a distinct nominal case, declared once (there are no case aliases)} {TYPE: enum.bot:10:9: argument for parameter "x" cannot be proven to satisfy A (argument type: B); A is a nominal enum type: only its own cases (A::Same) are its values, never a case of another enum, an Int or a String} {UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "Unknown" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)} {same error: CORE SEMANTIC TYPE: +: expected int, got VehicleType::Car}}
+        [enumError "${vehicle}VehicleType::Car + 1\n"]
+} -result {{enum.bot:1:6: ENUM-EMPTY: enum "Empty" declares no case: an enum needs at least one case, written on the indented lines after "enum Empty:" ("Case,")} {TYPE: enum.bot:3:5: duplicate case "A" in enum "Bad": every case of an enum is a distinct nominal case, declared once (there are no case aliases)} {TYPE: enum.bot:10:9: argument for parameter "x" cannot be proven to satisfy A (argument type: B); A is a nominal enum type: only its own cases (A::Same) are its values, never a case of another enum, an Int or a String} {UNKNOWN-ENUM-CASE: enum.bot:8:1: enum VehicleType has no case "Unknown" (its cases: Boat, Car, Truck, Tank, Tractor, Airplane)} {TYPE: enum.bot:8:1: argument 1 of native + requires int, but this operand has type VehicleType: the call could only fail when it runs}}
 
 # ---------------------------------------------------------------------------
 # Grammar
@@ -428,18 +428,21 @@ test enum-equality-constant-folded {the compiler decides a comparison of two kno
     list $known [regexp -all {bool true} $nir] [regexp -all {bool false} $nir] [regexp -all {enumeq|veq} $nir]
 } -result {{1 0 0} 1 2 0}
 
-test enum-ordering-rejected {declaration order is not an ordering: < and friends reject a case through ordinary typing} -body {
+test enum-ordering-rejected {declaration order is not an ordering: < and friends reject a case through ordinary typing, at compile time (an operand statically of another kind than the operator requires, METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it was the run-time TYPE before)} -body {
     list \
-        [enumRun "${vehicle}VehicleType::Boat < VehicleType::Car\n"] \
-        [enumRun "${vehicle}VehicleType::Boat >= VehicleType::Car\n"]
-} -result {{same error: CORE SEMANTIC TYPE: <: expected int, got VehicleType::Boat} {same error: CORE SEMANTIC TYPE: >=: expected int, got VehicleType::Boat}}
+        [enumError "${vehicle}VehicleType::Boat < VehicleType::Car\n"] \
+        [enumError "${vehicle}VehicleType::Boat >= VehicleType::Car\n"]
+} -result {{TYPE: enum.bot:8:1: argument 1 of native < requires int, but this operand has type VehicleType: the call could only fail when it runs
+enum.bot:8:21: argument 2 of native < requires int, but this operand has type VehicleType: the call could only fail when it runs (CORE SEMANTIC TYPE)} {TYPE: enum.bot:8:1: argument 1 of native >= requires int, but this operand has type VehicleType: the call could only fail when it runs
+enum.bot:8:22: argument 2 of native >= requires int, but this operand has type VehicleType: the call could only fail when it runs (CORE SEMANTIC TYPE)}}
 
-test enum-arithmetic-rejected {an enum is not an Int: arithmetic rejects a case through ordinary typing} -body {
+test enum-arithmetic-rejected {an enum is not an Int: arithmetic rejects a case through ordinary typing, at compile time (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it was the run-time TYPE before)} -body {
     list \
-        [enumRun "${vehicle}VehicleType::Car + 1\n"] \
-        [enumRun "${vehicle}VehicleType::Truck - VehicleType::Boat\n"] \
-        [enumRun "${vehicle}2 * VehicleType::Truck\n"]
-} -result {{same error: CORE SEMANTIC TYPE: +: expected int, got VehicleType::Car} {same error: CORE SEMANTIC TYPE: -: expected int, got VehicleType::Truck} {same error: CORE SEMANTIC TYPE: *: expected int, got VehicleType::Truck}}
+        [enumError "${vehicle}VehicleType::Car + 1\n"] \
+        [enumError "${vehicle}VehicleType::Truck - VehicleType::Boat\n"] \
+        [enumError "${vehicle}2 * VehicleType::Truck\n"]
+} -result {{TYPE: enum.bot:8:1: argument 1 of native + requires int, but this operand has type VehicleType: the call could only fail when it runs} {TYPE: enum.bot:8:1: argument 1 of native - requires int, but this operand has type VehicleType: the call could only fail when it runs
+enum.bot:8:22: argument 2 of native - requires int, but this operand has type VehicleType: the call could only fail when it runs (CORE SEMANTIC TYPE)} {TYPE: enum.bot:8:5: argument 2 of native * requires int, but this operand has type VehicleType: the call could only fail when it runs}}
 
 test enum-hash {hashing is nominal and agrees with equality on every backend} -body {
     enumRun "${vehicle}enum Other:\n    Car,\nfn same(x):\n    x\nh = hash(VehicleType::Car)\n\[h == hash(same(VehicleType::Car)), h == hash(VehicleType::Boat), h == hash(Other::Car), h == hash(\"VehicleType::Car\"), h\]\n"

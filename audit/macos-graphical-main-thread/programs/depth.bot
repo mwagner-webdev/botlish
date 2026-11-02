@@ -1,0 +1,71 @@
+# depth.bot -- recursion of the shapes tests/native-stack-overflow.test
+# runs (MACOS-AARCH64-MILESTONE-4.md, section 11), at the depth the command
+# line names: `depth SHAPE N` -- down (the smallest frame), keep (a String
+# held across the call: roots in every frame, and allocation), wide (six
+# Ints live across the call), rec (through a Fn value). N = 0 means
+# unbounded (until the stack ends). The value is the recursion's result, or
+# NATIVE LIMIT STACK (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, sections 8, 11).
+import std::int
+import std::list
+import std::str
+
+fn down(n: int) -> int:
+    if n == 0:
+        return 0
+    1 + down(n - 1)
+
+fn keep(n: int, s: str) -> int:
+    if n == 0:
+        return 0
+    t = std::str::concat(s, "x")
+    k = keep(n - 1, s)
+    k + std::str::length(t)
+
+fn wide(n: int) -> int:
+    if n == 0:
+        return 0
+    a = n + 1
+    b = a * 2
+    c = b + 3
+    d = c * 5
+    e = d + 7
+    f = e * 11
+    k = wide(n - 1)
+    k + a + b + c + d + e + f - 135 * n - 417
+
+fn apply(f: Fn{args: [int], return: int}, n: int) -> int:
+    f(n)
+
+fn rec(n: int) -> int:
+    if n == 0:
+        return 0
+    1 + apply(rec, n - 1)
+
+fn arg(i: int) -> str:
+    args = argv():
+        on InvalidArgumentEncoding:
+            ["", "", ""]
+    std::list::at(args, i):
+        on IndexNotFound:
+            ""
+
+fn number(text: str) -> int:
+    std::int::from_string(text):
+        on InvalidIntegerText:
+            0
+
+fn run(shape: str, n: int) -> int:
+    if shape == "keep":
+        return keep(n, "s")
+    if shape == "wide":
+        return wide(n)
+    if shape == "rec":
+        return rec(n)
+    down(n)
+
+depth = number(arg(2))
+limit = if depth == 0:
+    -1
+else:
+    depth
+run(arg(1), limit)

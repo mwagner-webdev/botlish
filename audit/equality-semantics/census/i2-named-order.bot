@@ -1,0 +1,7 @@
+# I2 a named struct compares in declaration order: an Int field declared first stops a difference
+struct S:
+    n: int
+    h: Fn{args: [int], return: int}
+fn f(x: int) -> int:
+    x
+[S {n: 1, h: f} == S {n: 2, h: f}]

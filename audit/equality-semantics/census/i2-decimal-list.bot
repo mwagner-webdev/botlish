@@ -1,0 +1,8 @@
+# I2 DecimalRounded values: directly (precise) and in empty Lists (true)
+fn prices(a: List[DecimalRounded{minDecimalsPreserved: 2}], b: List[DecimalRounded{minDecimalsPreserved: 2}]) -> bool:
+    a == b
+fn direct(a: DecimalRounded{minDecimalsPreserved: 2}, b: DecimalRounded{minDecimalsPreserved: 2}) -> bool:
+    a == b
+fn two() -> DecimalRounded{minDecimalsPreserved: 2}:
+    1.25
+[prices([], []), direct(two(), two())]

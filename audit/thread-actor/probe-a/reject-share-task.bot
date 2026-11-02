@@ -1,0 +1,18 @@
+# reject-share-task.bot -- must be REJECTED (Probe A): an actor's coroutine,
+# once adopted by the loop, belongs to the loop; resuming it (or adopting it
+# again) is USE-AFTER-MOVE. No caller ever holds an actor's continuation.
+import std::event_loop
+
+fn worker(context ev: std::event_loop::Loop) -> int:
+    std::event_loop::yield_now()
+    1
+
+fn main(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    coroutine {step, first} = worker()
+    std::event_loop::adopt(step, first)
+    step()
+
+with context std::event_loop::create(8)
+main():
+    on std::event_loop::SchedulerFault:
+        0

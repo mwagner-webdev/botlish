@@ -126,12 +126,12 @@ test range-lattice-7 {host range arithmetic is arbitrary precision: never overfl
     hir::range::add [hir::range::point $huge] [hir::range::point $huge]
 } -result [list min [expr {2 * 2 ** 200}] max [expr {2 * 2 ** 200}]]
 
-test range-lattice-8 {mod by a divisor whose bounds are beyond 64 bits: the magnitude of the larger bound, and the front end survives such a program (Tcl 9.0.1's max() of a computed BigInt aborts the process)} -body {
+test range-lattice-8 {mod by a divisor whose bounds are beyond 64 bits: the magnitude of the larger bound (an operand range below an exact divisor's magnitude: itself), and the front end survives such a program (Tcl 9.0.1's max() of a computed BigInt aborts the process)} -body {
     set big 100000000000000000000
     lassign [rangeOf "fn f(x: int) -> int:\n    mod(x, 0 - $big)\n\nf(7)"] hir spec analysis
     list [hir::range::Mod [r 0 10] [r -$big -$big]] [hir::range::Mod [r 0 10] [r -$big 3]] \
          [hir::range::Mod [r 0 10] [r -3 $big]] [hir::range::Mod [r 0 10] [r 0 0]]
-} -result {{min 0 max 99999999999999999999} {min 0 max 99999999999999999999} {min 0 max 99999999999999999999} {min 0 max +inf}}
+} -result {{min 0 max 10} {min 0 max 99999999999999999999} {min 0 max 99999999999999999999} {min 0 max +inf}}
 
 # ---------------------------------------------------------------------------
 # Analysis over specialized instances

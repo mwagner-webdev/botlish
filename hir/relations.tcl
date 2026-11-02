@@ -30,8 +30,11 @@
 #   mints I        the call's result has the members of argument I, as the
 #                  call read it
 #   requires {I J} the call is admitted only where argument I is known to
-#                  have the members argument J (a place) has when the call
-#                  runs (REORDER-NOT-PROVEN otherwise)
+#                  have the members argument J has when the call runs -- a
+#                  place's when the call runs, a value's as the call read it
+#                  (an immutable map's reordered: REPRESENTATION-
+#                  INDEPENDENT-VALUE-IDENTITY.md) -- REORDER-NOT-PROVEN
+#                  otherwise
 #   preserves I    the call changes the place argument I in place without
 #                  changing its members (an order-only mutation): every
 #                  relation of the place survives it
@@ -96,10 +99,14 @@ namespace eval hir::relations {
         std::mutable_set::validate_order {mints 0}
         std::mutable_set::reorder {requires {1 0} preserves 0 members elements
             snapshot order validator validate_order error std::mutable_set::OrderMismatch}
+        std::immutable_map::order {mints 0}
+        std::immutable_map::validate_order {mints 0}
+        std::immutable_map::reordered {requires {1 0} mints 0 members keys
+            snapshot order validator validate_order error std::immutable_map::OrderMismatch}
     }
     # The collection structs whose members the relation tracks: a value of
     # one of them is a *leaf* (Leaves), by declaration identity.
-    variable collections {std::mutable_map::MutableMap std::mutable_set::MutableSet}
+    variable collections {std::mutable_map::MutableMap std::mutable_set::MutableSet std::immutable_map::ImmutableMap}
     # Field depth to which a struct's tracked leaves are followed.
     variable maxDepth 4
     # The walk under way: the next fresh stamp, the break values of the
@@ -634,6 +641,8 @@ proc hir::relations::Loop {hirVar contracts stateVar e node} {
         lockloop { set operands [hir::loopOperands $node] }
         default { set operands {} }
     }
+    # A fold's initial value runs after them (FOLD-LOOPS-MILESTONE-1.md).
+    lappend operands {*}[hir::FoldInitials $node]
     foreach operand $operands {
         if {[Eval hir $contracts state $operand] eq "never"} {
             return never
@@ -647,6 +656,15 @@ proc hir::relations::Loop {hirVar contracts stateVar e node} {
     KillWritten hir $contracts state $body
     set values [dict getdef $breaks $e {}]
     dict unset breaks $e
+    if {[hir::IsFoldNode $node]} {
+        # A fold's value is its intermediate, which no fact follows from one
+        # iteration to the next; one with no domain completes only by a
+        # break.
+        if {[dict get $node kind] eq "loop" && $values eq {}} {
+            return never
+        }
+        return [dict create]
+    }
     if {[dict get $node kind] ne "loop"} {
         # (A collecting loop's value is a List.)
         return [dict create]
@@ -693,10 +711,16 @@ proc hir::relations::Call {hirVar contracts stateVar e node} {
         set order [lindex [dict get $node args] $i]
         set place [lindex [dict get $node args] $j]
         set path [PlaceOf $hir $place]
-        if {$order ne "" && $path ne "" && ![Poisoned $hir [list $e $order $place]]} {
+        if {$order ne "" && $place ne "" && ![Poisoned $hir [list $e $order $place]]} {
             # The place's members when the call runs (after every argument),
-            # the order's as it was read.
-            set have [Read $state $path]
+            # or a value's as it was read (no place: a call's result, an
+            # element, ... whose token is unknown, so nothing is proven of
+            # it); the order's as it was read.
+            if {$path ne ""} {
+                set have [Read $state $path]
+            } else {
+                set have [dict getdef [lindex $values $j] {} ""]
+            }
             set given [dict getdef [lindex $values $i] {} ""]
             if {$given ne "" && $given eq $have} {
                 lappend provenCalls $e
@@ -731,6 +755,13 @@ proc hir::relations::Unproven {hirVar e row order path} {
     set fn [dict get $row name]
     set ns [string range $fn 0 [expr {[string last :: $fn] - 1}]]
     set members [dict get $row members]
+    if {$path eq ""} {
+        # (A receiver that is no place: the value the call was given.)
+        hir::Diagnose hir REORDER-NOT-PROVEN \
+            "the order is not known to hold exactly the current $members of the value $fn reorders, which it requires of its order (an order of the right type may hold other $members, and equal lengths are not equal $members): bind the value first, then take the order from `VALUE.[dict get $row snapshot]()`, or check a candidate once with `VALUE.[dict get $row validator](candidate)` ([dict get $row error] when it does not hold them)" \
+            $e
+        return
+    }
     set receiver [join [concat [list [hir::semantic::SourceName $hir [lindex $path 0]]] [lrange $path 1 end]] .]
     set orderPath [PlaceOf $hir $order]
     if {$orderPath ne ""} {

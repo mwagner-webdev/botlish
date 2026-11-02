@@ -1,0 +1,4 @@
+# I3 two parameters declared any compared
+fn same?(a: any, b: any):
+    a == b
+[same?("-", '-'), same?('-', '-'), same?(1, 1.0), same?([], [])]

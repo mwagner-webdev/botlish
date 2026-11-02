@@ -1,0 +1,30 @@
+entry-io                   cranelift-generic  DEFECT: should be value 2, got error MALFORMED
+entry-io                   cranelift          DEFECT: should be value 2, got error MALFORMED
+entry-user-trait           interp             DEFECT: should be value 22, got error MALFORMED
+entry-user-trait           compile            DEFECT: should be value 22, got error MALFORMED
+entry-user-trait           cranelift-generic  DEFECT: should be value 22, got error MALFORMED
+entry-user-trait           cranelift          DEFECT: should be value 22, got error MALFORMED
+entry-indirect             cranelift-generic  DEFECT: should be value 2, got error MALFORMED
+entry-indirect             cranelift          DEFECT: should be value 2, got error MALFORMED
+module-impl                cranelift-generic  DEFECT: should be value 2, got error TCL-ERROR
+module-impl                cranelift          DEFECT: should be value 2, got error TCL-ERROR
+split-modules              cranelift-generic  DEFECT: should be value 2, got error MALFORMED
+split-modules              cranelift          DEFECT: should be value 2, got error MALFORMED
+two-witnesses              cranelift-generic  DEFECT: should be value 22, got error MALFORMED
+two-witnesses              cranelift          DEFECT: should be value 22, got error MALFORMED
+missing-context            interp             DEFECT: should be error MISSING-CONTEXT, got error MALFORMED
+control-struct             interp             ok
+control-struct             compile            ok
+control-struct             cranelift-generic  ok
+control-struct             cranelift          ok
+control-none               interp             ok
+control-none               compile            ok
+control-none               cranelift-generic  ok
+control-none               cranelift          ok
+control-direct             cranelift-generic  ok
+control-direct             cranelift          ok
+control-context-operation  interp             ok
+control-context-operation  compile            ok
+control-context-operation  cranelift-generic  ok
+control-context-operation  cranelift          ok
+deviations 15

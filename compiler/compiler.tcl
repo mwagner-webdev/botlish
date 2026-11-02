@@ -976,9 +976,16 @@ proc core::compiler::CompileForm {ctxVar e} {
         }
         break {
             set loop [N $e target]
-            set var "" ; set acc ""
+            set var "" ; set acc "" ; set mode ""
             if {[dict exists $ctx loops $loop]} {
-                lassign [dict get $ctx loops $loop] var acc
+                lassign [dict get $ctx loops $loop] var acc mode
+            }
+            if {$mode eq "fold"} {
+                # A fold (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it
+                # with its current intermediate.
+                Emit ctx "set $var \$$acc"
+                Emit ctx "break"
+                return [Never]
             }
             if {$acc ne ""} {
                 # A returning iterable loop (listloop, RETURNING-ITERABLE-
@@ -1537,7 +1544,9 @@ proc core::compiler::CompileLayoutOperation {ctxVar e name role argOps} {
         # (FIXED-LAYOUT-ARRAYS.md: the reference implementation's loop.)
         return ""
     }
-    if {[hir::layouts::DescriptorFormats $descriptor] ne {}} {
+    if {[hir::layouts::DescriptorFormats $descriptor] ne {} || [core::binary::HoldsRaw $descriptor]} {
+        # (A raw C floating field, RAW-C-FLOAT-FFI-MILESTONE-1.md, is no Int:
+        # the reference implementation's raw value.)
         # A C floating field (C-FLOAT-FFI-MILESTONE-1.md) is admitted or
         # narrowed, and may fail with NonFiniteFloat: the reference
         # implementation's boundary rules (core::cabi), never a second copy
@@ -1704,7 +1713,10 @@ proc core::compiler::IntrinsicValueEqual {ctxVar name argOps} {
     set ka [hir::types::kindOf [OpType $a]]
     set kb [hir::types::kindOf [OpType $b]]
     set t [NewTemp]
-    if {$ka eq "" || $kb eq "" || $ka in {block native mutarray} || $kb in {block native mutarray}} {
+    # A kind the runtime refuses (core::value's `incomparable`) is refused
+    # before kinds are compared, by core::value::equal and natively alike:
+    # the call stays the runtime's, never a constant `false`.
+    if {$ka eq "" || $kb eq "" || $ka in $::core::value::incomparable || $kb in $::core::value::incomparable} {
         return ""
     }
     if {$ka ne $kb} {
@@ -2112,20 +2124,102 @@ proc core::compiler::ConditionBranch {ctxVar e role outVar substitute} {
 
 proc core::compiler::CompileLoop {ctxVar e} {
     upvar 1 $ctxVar ctx
+    variable hir
     set result [NewTemp]
+    set fold [hir::isFold $hir $e]
+    if {$fold} {
+        # A fold with no domain (FOLD-LOOPS-MILESTONE-1.md): only a break
+        # ends it, with its intermediate.
+        set acc [NewTemp]
+        if {[FoldStart ctx $e $acc] eq "never"} {
+            return [Never]
+        }
+    }
     set parentFrame [CurrentFrameExpr $ctx]
     Emit ctx "while 1 \{"
     Indent ctx 1
     set id [N $e bodyScope]
     OpenScope ctx $id $parentFrame
+    if {$fold} {
+        FoldBind ctx $e $id $acc
+        dict set ctx loops $e [list $result $acc fold]
+    } else {
+        dict set ctx loops $e [list $result ""]
+    }
     DeclareScope ctx $id
-    dict set ctx loops $e [list $result ""]
-    CompileSequence ctx [N $e body]
+    set bodyValue [CompileSequence ctx [N $e body]]
     dict unset ctx loops $e
+    if {$fold && [OpType $bodyValue] ne "never"} {
+        Emit ctx "set $acc [BoxWord $bodyValue]"
+    }
     PopScope ctx
     Indent ctx -1
     Emit ctx "\}"
     return [Op box "\$$result" any]
+}
+
+# Folding loops (FOLD-LOOPS-MILESTONE-1.md): the intermediate is the Tcl
+# variable ACC of the loop E, set from the initial value before the first
+# iteration (after the loop's operands are evaluated and checked), replaced
+# by each ordinary completion of the body (ResultLine), kept by `continue`
+# (a Tcl continue skips the replacement) and yielded by exhaustion and by a
+# bare break (the loop's `loops` entry {RESULT ACC fold}). Nothing is
+# collected.
+
+# Emits ACC := the initial value of fold E; "never" when it never completes.
+proc core::compiler::FoldStart {ctxVar e acc} {
+    upvar 1 $ctxVar ctx
+    set initial [CompileExpr ctx [N $e foldInitial]]
+    if {[OpType $initial] eq "never"} {
+        return never
+    }
+    Emit ctx "set $acc [BoxWord $initial]"
+    return ""
+}
+
+# Binds fold E's intermediate in its body scope SCOPEID (just opened) to the
+# current value of ACC, per iteration, as an element binding is bound.
+proc core::compiler::FoldBind {ctxVar e scopeId acc} {
+    upvar 1 $ctxVar ctx
+    set b [N $e foldBinding]
+    if {[dict get $ctx scopes $scopeId materialized]} {
+        set frame [dict get $ctx scopes $scopeId frame]
+        Emit ctx "core::env::define \$$frame [Word [B $b name]] \$$acc"
+    } else {
+        set var [NewTemp]
+        Emit ctx "set $var \$$acc"
+        dict set ctx scopes $scopeId locals $b [list box "\$$var"]
+    }
+}
+
+# The line that accounts for an ordinary body completion with VALUE in loop
+# E, whose accumulator (a List of values, or a fold's intermediate) is ACC.
+proc core::compiler::ResultLine {e acc value} {
+    variable hir
+    if {[hir::isFold $hir $e]} {
+        return "set $acc [BoxWord $value]"
+    }
+    return "lappend $acc [BoxWord $value]"
+}
+
+# The line that sets RESULT to what loop E completes with when its domain is
+# exhausted, ACC its accumulator: the collected List, or a fold's
+# intermediate. RESULT is already set when a break ended the loop.
+proc core::compiler::ResultFinish {e result acc} {
+    variable hir
+    if {[hir::isFold $hir $e]} {
+        return "if \{!\[info exists $result\]\} \{ set $result \$$acc \}"
+    }
+    return "if \{!\[info exists $result\]\} \{ set $result \[core::value::listOf \$$acc\] \}"
+}
+
+# The `loops` entry of loop E (its result variable RESULT, accumulator ACC).
+proc core::compiler::LoopEntry {e result acc} {
+    variable hir
+    if {[hir::isFold $hir $e]} {
+        return [list $result $acc fold]
+    }
+    return [list $result $acc]
 }
 
 # (listloop ITERABLE-EXPR (block (ELEM) BODY...)): the returning iterable
@@ -2166,7 +2260,13 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     } else {
         Emit ctx "set $items \[core::value::items \[core::value::expect list [BoxWord $iterable] {loop iterable}\]\]"
     }
-    Emit ctx "set $acc \{\}"
+    if {[hir::isFold $hir $e]} {
+        if {[FoldStart ctx $e $acc] eq "never"} {
+            return [Never]
+        }
+    } else {
+        Emit ctx "set $acc \{\}"
+    }
     # $result must start unset on every logical execution of this listloop,
     # not merely once per compiled proc: when this listloop is itself
     # nested inside another loop, its own compiled code (including this
@@ -2189,12 +2289,15 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     } else {
         dict set ctx scopes $scopeId locals $b [list box "\$$item"]
     }
+    if {[hir::isFold $hir $e]} {
+        FoldBind ctx $e $scopeId $acc
+    }
     DeclareScope ctx $scopeId
-    dict set ctx loops $e [list $result $acc]
+    dict set ctx loops $e [LoopEntry $e $result $acc]
     set bodyValue [CompileSequence ctx [N $e body]]
     dict unset ctx loops $e
     if {[OpType $bodyValue] ne "never"} {
-        Emit ctx "lappend $acc [BoxWord $bodyValue]"
+        Emit ctx [ResultLine $e $acc $bodyValue]
     }
     PopScope ctx
     Indent ctx -1
@@ -2203,8 +2306,8 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     # `foreach` via a real Tcl `break`) before this point ever runs; only an
     # ordinary exhaustion of the items (no break) leaves $result unset here,
     # in which case it becomes the List built from every iteration's own
-    # contributed value.
-    Emit ctx "if \{!\[info exists $result\]\} \{ set $result \[core::value::listOf \$$acc\] \}"
+    # contributed value (or a fold's intermediate).
+    Emit ctx [ResultFinish $e $result $acc]
     return [Op box "\$$result" any]
 }
 
@@ -2252,6 +2355,7 @@ proc core::compiler::CountBoundWord {ctxVar op name} {
 # CompileListLoop's own "no break happened" case).
 proc core::compiler::CompileCountLoop {ctxVar e} {
     upvar 1 $ctxVar ctx
+    variable hir
     set startOp [CompileExpr ctx [N $e start]]
     if {[OpType $startOp] eq "never"} {
         return $startOp
@@ -2271,7 +2375,13 @@ proc core::compiler::CompileCountLoop {ctxVar e} {
     set advance [expr {[N $e direction] eq "up" ? "+" : "-"}]
     Emit ctx "set $i $startWord"
     Emit ctx "set $endVar $endWord"
-    Emit ctx "set $acc \{\}"
+    if {[hir::isFold $hir $e]} {
+        if {[FoldStart ctx $e $acc] eq "never"} {
+            return [Never]
+        }
+    } else {
+        Emit ctx "set $acc \{\}"
+    }
     # $result must start unset on every logical execution of this
     # countloop, not merely once per compiled proc -- see CompileListLoop's
     # own identical comment (nesting inside another loop re-executes this
@@ -2288,21 +2398,25 @@ proc core::compiler::CompileCountLoop {ctxVar e} {
     } else {
         dict set ctx scopes $scopeId locals $b [list box "\[list int \$$i\]"]
     }
+    if {[hir::isFold $hir $e]} {
+        FoldBind ctx $e $scopeId $acc
+    }
     DeclareScope ctx $scopeId
-    dict set ctx loops $e [list $result $acc]
+    dict set ctx loops $e [LoopEntry $e $result $acc]
     set bodyValue [CompileSequence ctx [N $e body]]
     dict unset ctx loops $e
     if {[OpType $bodyValue] ne "never"} {
-        Emit ctx "lappend $acc [BoxWord $bodyValue]"
+        Emit ctx [ResultLine $e $acc $bodyValue]
     }
     PopScope ctx
     Indent ctx -1
     Emit ctx "\}"
     # A `break` inside the body already set $result (to the prefix collected
-    # in $acc) and left the Tcl `for` via a real Tcl `break` before this
-    # point ever runs; only exhausting the domain leaves $result unset here,
-    # in which case it becomes the List of every contributed value.
-    Emit ctx "if \{!\[info exists $result\]\} \{ set $result \[core::value::listOf \$$acc\] \}"
+    # in $acc, or a fold's intermediate) and left the Tcl `for` via a real
+    # Tcl `break` before this point ever runs; only exhausting the domain
+    # leaves $result unset here, in which case it becomes the List of every
+    # contributed value (or a fold's intermediate).
+    Emit ctx [ResultFinish $e $result $acc]
     return [Op box "\$$result" any]
 }
 
@@ -2369,7 +2483,13 @@ proc core::compiler::CompileLockLoop {ctxVar e} {
     set total [NewTemp]
     set parentFrame [CurrentFrameExpr $ctx]
     Emit ctx "set $total [dict get [lindex $domains 0] size]"
-    Emit ctx "set $acc \{\}"
+    if {[hir::isFold $hir $e]} {
+        if {[FoldStart ctx $e $acc] eq "never"} {
+            return [Never]
+        }
+    } else {
+        Emit ctx "set $acc \{\}"
+    }
     Emit ctx "unset -nocomplain $result"
     Emit ctx "for \{set $k 0\} \{\$$k < \$$total\} \{set $k \[expr \{\$$k + 1\}\]\} \{"
     Indent ctx 1
@@ -2391,17 +2511,20 @@ proc core::compiler::CompileLockLoop {ctxVar e} {
             dict set ctx scopes $scopeId locals $b [list box "\$$var"]
         }
     }
+    if {[hir::isFold $hir $e]} {
+        FoldBind ctx $e $scopeId $acc
+    }
     DeclareScope ctx $scopeId
-    dict set ctx loops $e [list $result $acc]
+    dict set ctx loops $e [LoopEntry $e $result $acc]
     set bodyValue [CompileSequence ctx [N $e body]]
     dict unset ctx loops $e
     if {[OpType $bodyValue] ne "never"} {
-        Emit ctx "lappend $acc [BoxWord $bodyValue]"
+        Emit ctx [ResultLine $e $acc $bodyValue]
     }
     PopScope ctx
     Indent ctx -1
     Emit ctx "\}"
-    Emit ctx "if \{!\[info exists $result\]\} \{ set $result \[core::value::listOf \$$acc\] \}"
+    Emit ctx [ResultFinish $e $result $acc]
     return [Op box "\$$result" any]
 }
 

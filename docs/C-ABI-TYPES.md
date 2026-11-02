@@ -362,10 +362,13 @@ runtime kind and its operations `null?` and `clone`. It is **affine**, like a
 data pointer, for consistency: both are raw foreign addresses whose lifetime
 Botlish does not manage (a function pointer can point into an unloaded
 library or a freed trampoline), and Botlish's own `Fn` values are
-unrestricted only because Botlish manages their lifetime. Nothing produces
-one yet but the test fixture: function-pointer values come with `exported c
-fn`, and a null one with it (`null[T]()` makes a `Ptr[T]`, so a null
-callback needs its own operation then).
+unrestricted only because Botlish manages their lifetime. C returns them
+(an `extern c fn` result), the test fixture makes them, and since
+C-CALLBACK-MILESTONE-1.md `std::ffi::c::callback(NAME)` makes one of a
+`callback c fn` NAME: the address of its C entry point, of exactly its
+declared C signature, affine like the others. Nothing converts a Botlish
+`Fn` into one, and Botlish still never calls a `FnPtr`. A null one still
+has no operation (`null[T]()` makes a `Ptr[T]`).
 
 The archaeology's specimens (`ca-fnptr-specimens`):
 
@@ -446,6 +449,23 @@ The rules (hir/imprint.tcl):
   related only to itself, `never` and `any` -- so `fn bad(xs: List[T]) -> T:
   5` is rejected. It is compiled once, its T values handled as values of any
   type.
+* **Nested functions.** A nested function's signature is written in the
+  enclosing function's body, where a type naming the enclosing function's
+  variable is that variable (an explicit imprint, an applied construction):
+  so is a name in the nested signature. Only the variables no enclosing
+  function has are the nested function's own, bound at its calls; an
+  enclosing one is rigid there, as in the enclosing body (constrained as
+  the enclosing signature constrains it), established without an argument
+  (`fn g(x: T)` is fine inside a function that has T), never bound at a call
+  of the nested function, and every argument is held to it: in
+  `fn outer(b: Box[T])`, a nested `fn g(c: Box[T]) -> List[T]` takes `b`
+  but not `Box {value: "s"}` (TYPE). A nested function whose every variable
+  is an enclosing one has no imprint signature: it takes no explicit
+  imprint and may be used as a value (`hir::imprint::BlockSignature`,
+  `EnclosingOf`, `ConstrainEnclosing`). Before, the nested function bound such a T anew
+  at each call while its body's captured values kept the enclosing T --
+  one term `{imprint T}` for two variables -- and an ill-typed program
+  was accepted.
 * **Affinity.** A variable bound where values of it exist must not be an
   affine type (the body may copy its values); one that occurs only as a
   pointee (`Ptr[T]`) may be any valid pointee, a pointer included.
@@ -696,9 +716,14 @@ For **`exported c fn`** and **static callback passing**:
 
 1. producing a `FnPtr` value from a top-level, non-capturing Botlish
    function with a C signature (its address, a C-ABI entry trampoline into
-   the Botlish calling convention);
-2. a null function pointer operation (`null[T]()` makes a `Ptr[T]`);
-3. the same error/yield restrictions in the other direction;
+   the Botlish calling convention) -- done: `callback c fn` and
+   `std::ffi::c::callback` (C-CALLBACK-MILESTONE-1.md), for synchronous,
+   non-retaining callbacks into the active execution environment;
+2. a null function pointer operation (`null[T]()` makes a `Ptr[T]`) --
+   still open;
+3. the same error/yield restrictions in the other direction -- done
+   (C-CALLBACK-MILESTONE-1.md: CALLBACK-SIGNATURE, CALLBACK-ENVIRONMENT,
+   and a run-time failure ends the process);
 4. userdata: already expressible as `Ptr[Void]` with `erase`/`retype`.
 
 No new basic value type is on either list.

@@ -1,0 +1,7 @@
+# I7 MutableSet membership through an untyped function: the needle meets the element type in an instance only
+import std::mutable_set
+fn has?(s, x):
+    s.contains(x)
+s = std::mutable_set::create[str]()
+s.add("-")
+has?(s, '-')

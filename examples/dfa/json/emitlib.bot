@@ -1,0 +1,159 @@
+# emitlib.bot -- an emitter library whose claims are certified from its
+# declarations alone (EMISSION-CLAIMS-MILESTONE-1.md; MODULAR-EMISSION-
+# PROOFS-MILESTONE-1.md, "The independent library"): every claim below holds
+# for every argument its function's declaration permits, whoever calls it
+# -- the same verdict in every program that imports the library, and in
+# none that calls none of it.
+#
+#   json_string      emitter A: a JSON string for any str, strict (I-JSON):
+#                    raw characters except the quotation mark, the reverse
+#                    solidus and the controls, which are escaped, and
+#                    U+2028/U+2029, which are escaped too (a JavaScript-safe
+#                    policy); helpers that emit parts of a token
+#   digit_unchecked  emitter B unguarded: '0' + d for any Int d -- not a
+#                    digit for every d (d = -1 is '/'), so it carries no
+#                    claim: the compiler would reject it
+#   digit_checked    emitter B guarded: the same symbol, passed through a
+#                    guard declared from json_lex's digit class first; for
+#                    every Int it fails NotADigit or emits a digit
+#   digit_of         emitter B with a declared domain: d is a DigitValue
+#                    (0..9), which every caller must prove
+#   member           a JSON object member `"key":n` -- a composition of
+#                    json_string and number_emit::integer, certified
+#                    against json_text through their certificates
+#   pair_glued       two numbers written back to back: lexically one
+#                    number, so it breaks integer's boundary obligation and
+#                    carries no claim (invalid_emitter.bot claims it, and is
+#                    rejected)
+
+import std::dfa
+import std::char
+import std::str
+import json_lex
+import json_grammar
+import number_emit
+
+type Nibble = Int in 0..15
+type CodeUnit = Int in 0..65535
+type Scalar = Int in 0..1114111
+type DigitValue = Int in 0..9
+
+# A digit that was not one (digit_checked's guard failed).
+error NotADigit:
+    value: int
+
+# The lowercase hexadecimal digit of N: part of a token, never one.
+fn hex_digit(n: Nibble) -> unit:
+    if n < 10:
+        yield 48 + n
+    else:
+        yield 87 + n
+    unit
+
+# "\u" and the four hexadecimal digits of V (its callers pass no
+# surrogate). The first digit is V's top four bits as they are: written
+# `.mod(16)` it would be correct too, but hir::range's mod transfer bounds
+# any operand to 0..15, and after "\u" a 'd' starts a surrogate escape
+# (the report's section 17).
+fn unicode_escape(v: CodeUnit) -> unit:
+    yield 92
+    yield 117
+    hex_digit(v.shift_right(12))
+    hex_digit(v.shift_right(8).mod(16))
+    hex_digit(v.shift_right(4).mod(16))
+    hex_digit(v.mod(16))
+    unit
+
+# The two-symbol escape of C, the quotation mark or the reverse solidus,
+# or of a control with a short escape.
+fn short_escape(c: int) -> unit:
+    yield 92
+    if c == 8:
+        yield 98
+    elif c == 9:
+        yield 116
+    elif c == 10:
+        yield 110
+    elif c == 12:
+        yield 102
+    elif c == 13:
+        yield 114
+    else:
+        yield c
+    unit
+
+# One character C (a scalar value) of the string's body.
+fn body_char(c: Scalar) -> unit:
+    if c == 34 or c == 92:
+        short_escape(c)
+    elif c == 8 or c == 9 or c == 10 or c == 12 or c == 13:
+        short_escape(c)
+    elif c < 32:
+        unicode_escape(c)
+    elif c == 8232 or c == 8233:
+        unicode_escape(c)
+    else:
+        yield c
+    unit
+
+fn json_string(text: str) -> unit errors IndexNotFound emits json_lex::json_string_strict:
+    yield 34
+    loop i from 0 to text.length():
+        body_char(std::char::scalar_value(text.char_at(i)))
+        continue
+    yield 34
+    unit
+
+fn digit_unchecked(d: int) -> unit:
+    yield 48 + d
+    unit
+
+fn digit_checked(d: int) -> unit errors NotADigit emits json_grammar::digit_symbol:
+    c = 48 + d
+    json_grammar::digit_symbol(c):
+        on std::dfa::UnrecognizedInput:
+            fail NotADigit {value: d}
+        on std::dfa::UnexpectedEnd:
+            fail NotADigit {value: d}
+    yield c
+    unit
+
+fn digit_of(d: DigitValue) -> unit emits json_grammar::digit_symbol:
+    yield 48 + d
+    unit
+
+fn member(key: str, n: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    json_string(key)
+    yield 58
+    number_emit::integer(n)
+    unit
+
+fn pair_glued(a: int, b: int) -> unit errors IndexNotFound:
+    yield 91
+    number_emit::integer(a)
+    number_emit::integer(b)
+    yield 93
+    unit
+
+# Coroutine roots: the symbols, then -1.
+
+fn json_string_source(text: str) -> int errors IndexNotFound emits json_lex::json_string_strict:
+    json_string(text)
+    -1
+
+fn digit_checked_source(d: int) -> int errors NotADigit emits json_grammar::digit_symbol:
+    digit_checked(d)
+    -1
+
+fn digit_unchecked_source(d: int) -> int:
+    digit_unchecked(d)
+    -1
+
+# (A coroutine's construction captures its argument, and a capture carries
+# no range into the thunk: the source takes an Int and narrows it.)
+fn digit_of_source(d: int) -> int:
+    if d >= 0 and d <= 9:
+        digit_of(d)
+    else:
+        digit_of(0)
+    -1

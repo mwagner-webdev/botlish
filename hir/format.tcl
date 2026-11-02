@@ -21,12 +21,14 @@
 #   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
 #                                        staticRefs (hir::isModuleBinding)
 #                                        omitted when empty; then ?nomethod?,
-#                                        ?exported c?,
+#                                        ?exported c?, ?callback c?,
 #                                        ?variadic N?, ?places (N ...)?
 #                                        (PLACE-PARAMETERS.md),
 #                                        ?declares TYPE?, ?proves BINDING
 #                                        NAME: TYPE? (a proof contract,
-#                                        REFINEMENT-VALUES.md), ?errors ...?
+#                                        REFINEMENT-VALUES.md), ?errors ...?,
+#                                        ?emits (BINDING NAME, ...)? (emission
+#                                        claims, EMISSION-CLAIMS-MILESTONE-1.md)
 #                                        and ?contexts (DIRECT) requires
 #                                        (REQUIRED)? -- the block's direct and
 #                                        transitive context requirements
@@ -35,9 +37,13 @@
 #                                        "= true"/"= false" when decided;
 #                                        "installs ID" on a verified context
 #                                        installation (CONTEXTS.md)
-#   eN if                                followed by "then SCOPE ..." and
+#   eN if ?injects (IDS)?                followed by "then SCOPE ..." and
 #                                        "else SCOPE ..." lines with the
-#                                        refinements proven on entry
+#                                        refinements proven on entry;
+#                                        "injects" on an inject block, the
+#                                        contexts its code may use
+#                                        (RESTRICTED-CONTEXT-INJECTION-
+#                                        MILESTONE-1.md)
 #   eN loop SCOPE
 #   eN listloop SCOPE (ELEM)             children: the iterable, then the body
 #   eN countloop SCOPE (I) ?DIR KIND?    DIR up|down, KIND exclusive|inclusive,
@@ -48,6 +54,11 @@
 #                                        domain; children: each domain's
 #                                        operands in order (one for list,
 #                                        start then end for count), the body
+#   ... fold (B NAME)                    any loop's header, after its own
+#                                        groups: a folding loop and its
+#                                        intermediate (FOLD-LOOPS-MILESTONE-
+#                                        1.md); its initial value is the
+#                                        child after the loop's operands
 #   eN return -> eN / break -> eN / continue -> eN
 #   eN ok / eN error
 #   eN struct (anon|ID) (FIELD, ...)     a struct value/construction; one
@@ -261,6 +272,17 @@ proc hir::format::TypeDecl {entry} {
                 }
             }] {, }]\] "
         }
+        if {[dict exists $entry identity]} {
+            # A declared identity (REPRESENTATION-INDEPENDENT-VALUE-
+            # IDENTITY.md): "identity FORM(F1,F2) ", printed only for one.
+            set identity [dict get $entry identity]
+            append opaque "identity [dict get $identity form]([join [dict get $identity fields] ,]) "
+        }
+        if {[dict exists $entry tree]} {
+            # A tree struct (TREE-STRUCT-MILESTONE-1.md): "tree FIELD ", its
+            # child field, printed only for one.
+            append opaque "tree [dict get $entry tree] "
+        }
         return "struct [dict get $entry id] name [dict get $entry name] ns [if {$ns eq ""} {string cat "-"} else {set ns}] ${opaque}fields [join $fields {, }]"
     }
     set domain [dict get $entry domain]
@@ -340,6 +362,24 @@ proc hir::format::BindingLabel {hir b} {
 
 proc hir::format::BindingList {hir bindings} {
     return [join [lmap b $bindings {BindingLabel $hir $b}] {, }]
+}
+
+# " fold (BINDING NAME)" for a folding loop NODE (FOLD-LOOPS-MILESTONE-1.md),
+# "" for any other loop.
+proc hir::format::FoldHeader {hir node} {
+    if {![hir::IsFoldNode $node]} {
+        return ""
+    }
+    return " fold ([ParamList $hir [list [dict get $node foldBinding]] {{}}])"
+}
+
+# The line(s) of a folding loop NODE's initial value, a child after the
+# loop's operands; none for any other loop.
+proc hir::format::FoldInitial {hir node indent origins linesVar} {
+    upvar 1 $linesVar lines
+    if {[hir::IsFoldNode $node]} {
+        Expr $hir [dict get $node foldInitial] $indent $origins lines
+    }
 }
 
 # Like BindingList, but for a block's own PARAMS: appends ":TYPE" (hir::
@@ -533,6 +573,10 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                 # A C export (NATIVE-LIBRARY-MILESTONE-1.md): its foreign ABI.
                 append text " exported [dict get $node exported]"
             }
+            if {[dict exists $node callback]} {
+                # A C callback (C-CALLBACK-MILESTONE-1.md): its foreign ABI.
+                append text " callback [dict get $node callback]"
+            }
             if {[dict exists $node cleanup]} {
                 # A resource's cleanup (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
                 # MILESTONE-1.md).
@@ -597,6 +641,15 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict get $node declaredErrors] ne {}} {
                 append text " errors [join [dict get $node declaredErrors] {, }]"
             }
+            if {[dict exists $node emits]} {
+                # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each
+                # recognizer's function binding and the name as written.
+                append text " emits ([join [lmap claim [dict get $node emits] {
+                    set b [dict get $claim binding]
+                    if {$b eq ""} { set b ? }
+                    string cat $b " " [dict get $claim name]
+                }] {, }])"
+            }
             set effect [hir::coroutines::EffectText $hir $e]
             if {$effect ne ""} {
                 # The function's coroutine effect (COROUTINES.md), derived
@@ -648,7 +701,13 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
         }
         if {
-            Line $hir $e if $indent $origins lines
+            set text if
+            if {[dict exists $node injects]} {
+                # An inject block (RESTRICTED-CONTEXT-INJECTION-
+                # MILESTONE-1.md): the contexts its code may use.
+                append text " injects ([join [dict get $node injects] {, }])"
+            }
+            Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node condition] $inner $origins lines
             foreach {role outcome} {then 1 else 0} {
                 set s [dict get $node ${role}Scope]
@@ -665,25 +724,27 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
         }
         loop {
-            set text "loop [dict get $node bodyScope]"
+            set text "loop [dict get $node bodyScope][FoldHeader $hir $node]"
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
             }
             Line $hir $e $text $indent $origins lines
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }
         }
         listloop {
             set text "listloop [dict get $node bodyScope]\
-                ([ParamList $hir [list [dict get $node elementBinding]] {{}}])"
+                ([ParamList $hir [list [dict get $node elementBinding]] {{}}])[FoldHeader $hir $node]"
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
             }
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node iterable] $inner $origins lines
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }
@@ -694,6 +755,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict get $node direction] ne "up" || [dict get $node endKind] ne "exclusive"} {
                 append text " [dict get $node direction] [dict get $node endKind]"
             }
+            append text [FoldHeader $hir $node]
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
@@ -701,6 +763,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node start] $inner $origins lines
             Expr $hir [dict get $node end] $inner $origins lines
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }
@@ -715,6 +778,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                     append text " ($label count [dict get $domain direction] [dict get $domain endKind])"
                 }
             }
+            append text [FoldHeader $hir $node]
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
@@ -723,6 +787,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             foreach operand [hir::loopOperands $node] {
                 Expr $hir $operand $inner $origins lines
             }
+            FoldInitial $hir $node $inner $origins lines
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }

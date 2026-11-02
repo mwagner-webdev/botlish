@@ -1,0 +1,10 @@
+# I1 nominal structs, named against anonymous, anonymous field sets and field types
+struct P:
+    x: int
+struct Q:
+    x: int
+[
+    P {x: 1} == Q {x: 1}, P {x: 1} == {x: 1}, P {x: 1} == P {x: 1},
+    {x: 1} == {y: 1}, {x: 1} == {x: 1, y: 2}, {x: 1} == {x: "1"},
+    {x: 1, y: "a"} == {y: "a", x: 1}
+]

@@ -1,0 +1,8 @@
+# an unproven Int into a domain
+import std::list
+type Small = Int in 0..9
+fn f(x: Small) -> Small:
+    x
+fn g(xs: List[int]) -> int:
+    f(std::list::at(xs, 0))
+g([3])

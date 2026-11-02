@@ -1,0 +1,4 @@
+# I5 a function whose parameter is declared any is precondition-bearing for the erasure audit; an untyped one is not
+fn char?(c: any) -> bool:
+    c == '-'
+char? == char?

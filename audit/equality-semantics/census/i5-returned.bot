@@ -1,0 +1,6 @@
+# I5 a function value returned from a function and called
+fn hyphen?(c):
+    c == '-'
+fn pick():
+    hyphen?
+pick()("-")

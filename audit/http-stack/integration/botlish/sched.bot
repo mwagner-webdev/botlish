@@ -1,0 +1,109 @@
+# sched.bot -- the bridge's scheduling claims
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Scheduling", "Testing"). Each part
+# reports a measurement; the
+# negative controls run the same program with HS_CENSUS_FAULT set:
+#
+#   bounded   a Rust future that wakes itself 20,000 times beside a Botlish
+#             task that yields each turn: with the budget, Botlish runs
+#             between bounded Rust runs (2: HS_CENSUS_FAULT=2 lets one run
+#             poll everything, and the Botlish task waits it out)
+#   foreign   a future completed by another OS thread after 20 ms: its wake
+#             posts a record through the integration ABI and the sleeping
+#             loop wakes at once (1: the wake never posts; only the 500 ms
+#             watchdog nudge finds it)
+#   kick      a Rust timer started by an application call while the
+#             executor is parked (8: the call never kicks the executor)
+#   panics    a panicking task is dropped and counted, a panicking call
+#             returns an error, a call from another thread is refused --
+#             and the loop carries on
+import event_loop_linux
+import hs
+import hsfx
+import hsnet
+import probe
+import std::event_loop
+import std::mutable_array
+import std::str
+
+nomethod fn bounded(context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) errors IndexNotFound, std::event_loop::SchedulerFault:
+    probe::set_flag(3, 0)
+    coroutine {step: s, first: f} = probe::yielder(3)
+    std::event_loop::adopt(s, f)
+    t0 = std::event_loop::turn_number()
+    fx = hsfx::spinner(20000)
+    r = hsfx::finish(fx)
+    probe::set_flag(3, 1)
+    probe::log("bounded: spinner ".concat(probe::n(r)).concat(" over turns ").concat(probe::n(std::event_loop::turn_number() - t0)).concat(" max polls per run ").concat(probe::n(hs::rstat(18))))
+
+nomethod fn foreign(context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) errors IndexNotFound, std::event_loop::SchedulerFault:
+    t0 = std::event_loop::now()
+    fx = hsfx::foreign(20000)
+    probe::set_flag(4, fx)
+    us = hsfx::finish(fx)
+    probe::log("foreign: completed after us ".concat(probe::n(std::event_loop::now() - t0)).concat(" (thread slept 20000) posts ").concat(probe::n(hs::rstat(9))).concat(" lost ").concat(probe::n(hs::rstat(21))).concat(" foreign wakes ").concat(probe::n(hs::rstat(6))))
+    probe::set_flag(4, 0)
+
+# Nudges the executor after 500 ms if FOREIGN is still pending: what a lost
+# wake costs is how long it takes something else to wake the loop.
+nomethod fn rescue(context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    std::event_loop::sleep(500000)
+    if probe::flag(4) != 0:
+        probe::log("rescue: the executor was woken by the watchdog")
+        hs::rx().post(0, 0)
+    0
+
+nomethod fn kick(context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) errors IndexNotFound, std::event_loop::SchedulerFault:
+    std::event_loop::sleep(1000)
+    t0 = std::event_loop::now()
+    probe::set_flag(4, 1)
+    fx = hsfx::sleep(10000)
+    hsfx::finish(fx)
+    probe::set_flag(4, 0)
+    probe::log("kick: a 10 ms Rust sleep started by an application call finished after us ".concat(probe::n(std::event_loop::now() - t0)).concat(" nudges ").concat(probe::n(hs::counter("nudges"))))
+
+nomethod fn panics(context ev: std::event_loop::Loop, h: hs::Hs) errors IndexNotFound, std::event_loop::SchedulerFault:
+    before = hs::rstat(17)
+    hsfx::panic_task()
+    std::event_loop::sleep(1000)
+    call = hsfx::panic_call()
+    thread = hsfx::wrong_thread()
+    probe::log("panics: contained ".concat(probe::n(hs::rstat(17) - before)).concat(" call returned ").concat(probe::n(call)).concat(" other thread got ").concat(probe::n(thread)).concat(" executor still runs ").concat(probe::n(hsfx::finish(hsfx::sleep(100)))))
+
+nomethod fn all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    bounded()
+    coroutine {step: s, first: f} = rescue()
+    std::event_loop::adopt(s, f)
+    foreign()
+    coroutine {step: s2, first: f2} = rescue()
+    std::event_loop::adopt(s2, f2)
+    kick()
+    panics()
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    probe::log("fault ".concat(probe::n(hs::fault())))
+    coroutine {step: s, first: f} = all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_watchdog(1, 8000000)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

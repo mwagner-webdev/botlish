@@ -70,6 +70,32 @@ pub struct ShapeInfo {
     /// type only; no operation, check or layout consults it. Always false for
     /// an anonymous shape.
     pub opaque: bool,
+    /// The declaration's semantic identity, when it declares one
+    /// (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md): equality, the public
+    /// hash and the table hash of a value of this shape read its identity
+    /// fields' entries in no order, and no other field (ops.rs's `equal` and
+    /// `walk`). None for every other shape, which is compared and hashed
+    /// field by field.
+    pub identity: Option<Identity>,
+    /// The slot of the child field, when the declaration is a tree struct
+    /// (TREE-STRUCT-MILESTONE-1.md): a List of values of this very shape.
+    /// Equality, both hashes and `show` walk a value of it with a work stack
+    /// of their own (ops.rs's `tree_equal`, `tree_walk`; show.rs), so a
+    /// tree's depth is never bounded by the host's stack, and `treechildren`
+    /// reads the slot for a receiver whose shape no static type gave. None
+    /// for every other shape.
+    pub tree: Option<usize>,
+}
+
+/// A struct declaration's semantic identity (`identity members(F)`,
+/// `identity associations(K, V)`): its form and its identity fields' slot
+/// positions, each a List field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Identity {
+    /// The elements of one List field, in no order.
+    Members(usize),
+    /// The pairs of two List fields (keys, values), in no order.
+    Associations(usize, usize),
 }
 
 /// One enum declaration of the program (ENUMS.md): its declaration identity
@@ -265,6 +291,17 @@ pub struct Vm {
     /// walked (NATIVE-LIBRARY-MILESTONE-1.md, "The collector at the
     /// boundary"). Executables and the driver leave it 0.
     pub stack_ceiling: usize,
+    /// The foreign transitions in progress (C-CALLBACK-MILESTONE-1.md,
+    /// runtime::callback): per open call of a C function that may call back,
+    /// innermost last, the frame record of the transition shim the Botlish
+    /// frame called it through (codegen::callback). Balanced by the shim
+    /// itself (rt_ffi_open, rt_ffi_close).
+    pub foreign_open: Vec<usize>,
+    /// The callbacks running in this execution environment, innermost last:
+    /// (the callback entry's own frame record, the transition it entered
+    /// through). The collector's walk jumps from the one to the other
+    /// (framewalk::walk_segmented): C's frames between them are never read.
+    pub callback_segments: Vec<(usize, usize)>,
     /// The innermost running coroutine (COROUTINES.md, runtime/coroutine.rs),
     /// null while the main stack runs. With each running coroutine's own
     /// `resumer` link it is the chain of running coroutines: every one a GC
@@ -331,6 +368,8 @@ impl Vm {
             framemap: Rc::new(ProgramMap::new()),
             native_stack,
             stack_ceiling: 0,
+            foreign_open: Vec::new(),
+            callback_segments: Vec::new(),
             co_current: std::ptr::null_mut(),
         })
     }
@@ -355,6 +394,26 @@ impl Vm {
         }
         #[cfg(not(any(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")), all(target_os = "macos", target_arch = "aarch64"), all(windows, target_arch = "x86_64", target_env = "msvc"))))]
         let _ = stack;
+    }
+
+    /// The native stack running now: the innermost running coroutine's, or
+    /// the thread's own (None on a host without stack discovery). Where a
+    /// callback must run (runtime::callback: on the stack its transition
+    /// left).
+    pub fn running_stack(&self) -> Option<NativeStack> {
+        if self.co_current.is_null() {
+            self.native_stack
+        } else {
+            // SAFETY: a running coroutine is alive while it runs.
+            unsafe { (*self.co_current).stack.as_ref().map(|s| s.bounds()) }
+        }
+    }
+
+    /// The stack of the thread that made this Vm, as `NativeStack::current`
+    /// found it (None on a host without stack discovery): the startup
+    /// report's `stack` line (runtime::aot's `startup_lines`).
+    pub fn native_stack(&self) -> Option<NativeStack> {
+        self.native_stack
     }
 
     /// Makes this Vm's code bound its recursion by the running stack's
@@ -434,7 +493,14 @@ impl Vm {
             writeln!(r, "native {i} {:?} arity {:?} params {:?} op {}", n.name, n.arity, n.params.iter().map(|k| k.map(|k| k.name())).collect::<Vec<_>>(), n.op.spelling()).unwrap();
         }
         for (i, sh) in self.info.shapes.iter().enumerate() {
-            writeln!(r, "shape {i} {:?} fields {:?} opaque {}", sh.name, sh.fields, sh.opaque).unwrap();
+            write!(r, "shape {i} {:?} fields {:?} opaque {}", sh.name, sh.fields, sh.opaque).unwrap();
+            if let Some(identity) = sh.identity {
+                write!(r, " identity {identity:?}").unwrap();
+            }
+            if let Some(child) = sh.tree {
+                write!(r, " tree {child}").unwrap();
+            }
+            r.push('\n');
         }
         for (i, e) in self.info.enums.iter().enumerate() {
             writeln!(r, "enum {i} {:?} cases {:?}", e.name, e.cases).unwrap();
@@ -574,13 +640,17 @@ impl Vm {
             stack
         });
         let current = stack_of(self.co_current, main_stack);
-        super::framewalk::walk(&self.framemap, current.as_ref(), |addr| native_frame_roots.push(unsafe { *addr }));
+        // Across the foreign transitions of callbacks in progress
+        // (C-CALLBACK-MILESTONE-1.md): C's frames between two Botlish
+        // activations are skipped, never read (framewalk::walk_segmented).
+        let jumps = &self.callback_segments;
+        super::framewalk::walk_segmented(&self.framemap, current.as_ref(), jumps, |addr| native_frame_roots.push(unsafe { *addr }));
         let mut running = self.co_current;
         while !running.is_null() {
             native_frame_roots.push(running as Value);
             let (resumer, resumer_sp) = unsafe { ((*running).resumer, (*running).resumer_sp) };
             let bounds = stack_of(resumer, main_stack);
-            super::framewalk::walk_from(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), |addr| {
+            super::framewalk::walk_from_segmented(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), jumps, |addr| {
                 native_frame_roots.push(unsafe { *addr })
             });
             running = resumer;
@@ -923,7 +993,7 @@ impl Vm {
     /// normal). Every String/List constructor routes through this, so
     /// `str::length`/`list::length`'s `-result-range collection-length` metadata
     /// (core/native.tcl) is an actual checked invariant, not an assumption.
-    fn reject_oversized_collection(&mut self, len: usize) -> Option<Value> {
+    pub(crate) fn reject_oversized_collection(&mut self, len: usize) -> Option<Value> {
         if len <= MAX_COLLECTION_LENGTH {
             return None;
         }
@@ -937,6 +1007,16 @@ impl Vm {
     /// BITS: a number FloatType::admit accepted.
     pub fn new_float(&mut self, ty: FloatType, bits: u64) -> Value {
         self.alloc(FloatObj { hdr: Header::new(ty.heap_kind(), false), bits }, 0)
+    }
+
+    /// A raw C floating value of FORMAT whose bits are BITS (its low 32 for
+    /// a binary32), exactly (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+    pub fn new_raw_float(&mut self, format: CFloatFormat, bits: u64) -> Value {
+        let bits = match format {
+            CFloatFormat::Binary32 => bits & 0xffff_ffff,
+            CFloatFormat::Binary64 => bits,
+        };
+        self.alloc(FloatObj { hdr: Header::new(raw_heap_kind(format), false), bits }, 0)
     }
 
     pub fn new_result(&mut self, ok: bool, payload: Value) -> Value {

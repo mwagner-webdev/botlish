@@ -1,0 +1,13 @@
+[package]
+name = "hs_hyper"
+edition.workspace = true
+publish.workspace = true
+version.workspace = true
+[dependencies]
+hs_bridge = { path = "../bridge" }
+hyper = { workspace = true, features = ["client", "server", "http1", "http2"] }
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+libc.workspace = true

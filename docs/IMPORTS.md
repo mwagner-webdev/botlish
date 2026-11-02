@@ -425,8 +425,12 @@ NIR, CLIF or an executable with the source directory gone. The front-end
 cache keys a program by its application root as well and records each
 import's application path as a dependency (HIR-INTERCHANGE.md).
 
-There is no package manager here: no manifest, no dependency download, no
-versions, no lock file, no search through installation directories.
+The compiler has no package manager here: no manifest, no dependency
+download, no versions, no lock file, no search through installation
+directories. (A package manager came later, beside the compiler:
+PACKAGE-MANAGER-MILESTONE-1.md builds `.bot_modules` trees from
+`botlish.json` and `.botpkg` artifacts, and the compiler still reads none
+of them.)
 (`surface/modules.tcl`'s `ResolveModule` is the rule; tests in
 `tests/application-modules.test`; 2048-ENGINE-WORKLOAD.md's S4 is the
 finding.)
@@ -484,7 +488,9 @@ that reason alone it was removed.
 Import aliases, `as`, namespace aliases, wildcard imports, `using`, selective
 function/value imports, re-exports, public/private imports, export lists,
 private module members, package management (installed packages came later,
-without a package manager: [Installed packages](#installed-packages-bot_modules)),
+without a package manager: [Installed packages](#installed-packages-bot_modules);
+the package manager later still, outside the compiler:
+PACKAGE-MANAGER-MILESTONE-1.md),
 subtree imports, implicit imports, import-driven initialization,
 transitive visibility, nested-namespace *creation* or inheritance, overload
 resolution, namespaced `error` declarations.

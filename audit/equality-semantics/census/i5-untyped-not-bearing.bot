@@ -1,0 +1,4 @@
+# I5 the same comparison of an untyped function compiles and raises EQUALITY at run time
+fn char?(c) -> bool:
+    c == '-'
+char? == char?

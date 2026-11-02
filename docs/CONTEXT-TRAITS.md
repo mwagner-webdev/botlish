@@ -286,12 +286,13 @@ required(B)  = direct(B) ∪ ⋃ required(E) for every function E that B's regio
 `fn twice(n, context out: Out)` directly requires `Out`; `ct::app::run`, with
 no context parameter, requires it transitively (`ct-transitive`), and
 intermediate functions receive nothing. A trait operation (`out.emit(n)`) is
-never a call edge, whatever function of that name its method syntax sees
-(its implementation is bound only in the monomorphized program; its
-implementation's yield effect, though, is the call's in the checked program
-too: TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md). Reasons are
-kept per (function, identity) and diagnostics print the shortest
-deterministic chain (`ct-missing-chain`):
+never a call edge to whatever function of that name its method syntax sees
+(its implementation's yield effect, though, is the call's in the checked
+program: TRAIT-IMPLEMENTATION-YIELD-INFERENCE-MILESTONE-1.md). A
+context-trait operation's implementation is the installed provider's, so
+its requirement is the obligation of the top-level call that selects the
+provider (section 4). Reasons are kept per (function, identity) and
+diagnostics print the shortest deterministic chain (`ct-missing-chain`):
 
 ```
 MISSING-CONTEXT: Out is required by this call, but no installed context implements it (...):
@@ -303,6 +304,42 @@ installed contexts:
     none
 ```
 
+**An ordinary trait operation's implementation's requirement is the
+specialization's** (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md).
+An ordinary trait's implementation is the witness's, so it depends on the
+specialization: `fn twice(t: Thing): t.show() + t.show()` requires nothing
+as written, but its specialization for a witness `A` whose `show` prints
+requires `std::io::IO`. The checked program's requirement graph has, besides
+every function's own node, a node per specialization the trait plan makes of
+a trait-polymorphic (or per-binding imprinted) function, whose operations
+are edges to the implementations the plan binds them to -- the selected
+implementation graph hir::check's feedback carries
+(`hir::coroutines::Implementations`, from the plan's own call resolution,
+`hir::traits::PlanCalls`; the coroutine analysis reads the same graph). So
+a top-level call passing concrete witnesses requires what its specialization
+requires, selects that requirement's providers and is MISSING-CONTEXT or
+AMBIGUOUS-CONTEXT-IMPLEMENTATION in source terms:
+
+```
+MISSING-CONTEXT: std::io::IO is required by this call, but no installed context implements it (...):
+    twice (for A)
+     -> show, the implementation of Thing's operation show for A, called at main.bot:18:5
+     -> std::io::print_line
+        directly requires std::io::IO
+installed contexts:
+    none
+```
+
+A specialization requires the contexts of the implementations it invokes and
+nothing from one it does not: `twice` for a witness whose implementation
+needs nothing needs nothing, whatever another witness's needs, and two
+specializations of one function keep their own requirements and selections.
+Provider availability never selects an implementation (SFIAE): the
+operation binds its witness's implementation, and a missing provider is that
+call's MISSING-CONTEXT. An implementation itself may not declare a context
+parameter (TRAIT-NOT-SATISFIED: "context-dependent implementations are not
+supported yet"); it acquires a requirement only through what it calls.
+
 **Unreachable consumers require nothing**: functions nobody calls, calls in
 statically unreachable code, a nested function its enclosing function never
 calls (`ct-unreachable-requires-nothing`, with nothing installed).
@@ -310,7 +347,11 @@ calls (`ct-unreachable-requires-nothing`, with nothing installed).
 **Function values**: a function whose requirement includes a context trait
 has a non-empty requirement, so the existing frontier applies unchanged
 (`CONTEXT-FUNCTION-VALUE`); an alias in statement position is called like the
-function (`ct-function-value-frontier`). No new escaping case exists:
+function (`ct-function-value-frontier`). A nested function of a
+trait-polymorphic function is judged in each specialization too: one that
+needs a context only through the implementation its operation binds for a
+witness is CONTEXT-FUNCTION-VALUE at its use, naming the specialization
+(`function inner (for A) requires context ...`). No new escaping case exists:
 clones are bound and called like any function, and a clone's requirement
 (the selected context's exact identity) keeps it under the same frontier.
 
@@ -328,7 +369,11 @@ again from the same syntax under a plan (build 2, `hir::traits::Plan`):
   `{function, ordinary-trait witnesses, {TRAIT WITNESS ...}}` (one function
   can be polymorphic in an ordinary trait and a context trait at once:
   `both<ct::named::P,ct::out::Out=ct::a::A>`). Since there is one selection
-  per trait, there is one clone per function.
+  per trait, there is one clone per function. A specialization of a
+  trait-polymorphic function is keyed by the selection of its own
+  requirement (section 5): `twice<A,std::io::IO=std::linux::io::LinuxIO>`
+  for a witness whose implementation prints, `twice<C>` for one whose does
+  not (`hir::traits::SpecializationTraits`).
 * **Placement.** A clone is bound in the entry program immediately before the
   first top-level statement that needs it (directly or through other clones).
   This is what makes the rewrite possible across modules: stdlib/io.bot is
@@ -351,6 +396,18 @@ again from the same syntax under a plan (build 2, `hir::traits::Plan`):
 * **Calls** of dependent functions from the entry program's top level and
   from clones call the clones; aliases of them are dropped and their calls
   redirected, exactly as for trait-polymorphic functions.
+* **Replaced implementations.** An implementation whose requirement includes
+  a context trait -- of a context trait's operation, or of an ordinary
+  trait's -- is a dependent function too: the plan drops it, and the
+  operation calls its clone under the selection in force, by one rule for
+  both kinds of operation (`hir::traits::CallImplementationClone`: the
+  action names the clone, the placement edge is recorded and the clone is
+  made; where no provider of its context traits reaches the operation, the
+  dead-code placeholder below). No action may name a declaration the plan
+  drops, or a clone it does not make: `hir::traits::Dangling` checks every
+  action before build 2 and reports a violation as TRAIT-INTERNAL at the
+  call, never as malformed IR
+  (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md).
 * **Dead code.** An operation, or a call of a dependent function, that no
   selection reaches -- in statically unreachable code, or in a nested
   function its enclosing function never calls -- never runs (every call of

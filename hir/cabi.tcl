@@ -19,6 +19,16 @@
 #                                        bits on the C side (core/cabi.tcl's
 #                                        "The C floating types": admission,
 #                                        narrowing)
+#   std::ffi::c::RawFloat  rawfloat32    C float and C double without the
+#   std::ffi::c::RawDouble rawfloat64    admission (RAW-C-FLOAT-FFI-
+#                                        MILESTONE-1.md): the same C types
+#                                        (format, size, alignment, ABI class
+#                                        their finite counterparts'), whose
+#                                        values are every bit pattern of the
+#                                        format -- a runtime kind of their
+#                                        own, so a C type and a type of
+#                                        values at once (the canonical type
+#                                        is the kind wherever it is written)
 #   std::ffi::c::Void                    the C void: a permanently
 #                                        incomplete pointee, never a type of
 #                                        a value
@@ -57,6 +67,9 @@
 #
 #   {cfloat NAME}            C float or C double (std::ffi::c::Float,
 #                            std::ffi::c::Double)
+#   rawfloat32, rawfloat64   a raw C float or double (std::ffi::c::RawFloat,
+#                            std::ffi::c::RawDouble): a pointee identity of its
+#                            own, never the finite type's
 #
 # Everything else -- int, str, Float64, List[...], an ordinary struct, an
 # enum, LayoutStruct[L], a non-C integer domain -- has no C representation
@@ -82,11 +95,23 @@
 # never collapse into one: they differ in width, alignment, ABI class,
 # element stride and outbound conversion (core/cabi.tcl's floatingInfo), and
 # a future Float32 carrier for std::ffi::c::Float changes Carrier alone.
+#
+# The raw C floating types (RAW-C-FLOAT-FFI-MILESTONE-1.md) carry the C
+# value itself, so their carrier is no Botlish number but a runtime kind of
+# their own (rawfloat32, rawfloat64: core/cabi.tcl's "Raw C floating
+# values"), which is also their canonical C type: std::ffi::c::RawFloat
+# denotes rawfloat32 in every position, as a C integer scalar denotes its
+# domain. A raw type is never its finite counterpart: Ptr[RawFloat] is no
+# Ptr[Float], a raw field no finite field, and no conversion between a raw
+# value and a Float64 is implicit (the explicit ones are std::ffi::c's
+# raw_*_to_float64 and raw_*_from_float64). They share every C fact with
+# their counterparts (core::cabi::floatingInfo reads the same model entry),
+# so choosing raw or finite never changes a signature's machine form.
 
 namespace eval hir::cabi {
     # The intrinsic type names of namespace std::ffi::c besides its scalars: the
     # incomplete pointee and the two pointer constructors.
-    variable intrinsicTypes {Void Ptr FnPtr Bool Float Double}
+    variable intrinsicTypes {Void Ptr FnPtr Bool Float Double RawFloat RawDouble}
 }
 
 # The C target a compilation uses: TARGET when given, else the host's. An
@@ -179,6 +204,8 @@ proc hir::cabi::VoidName {} { return "$::core::cabi::namespace\::Void" }
 proc hir::cabi::BoolName {} { return "$::core::cabi::namespace\::Bool" }
 proc hir::cabi::DoubleName {} { return "$::core::cabi::namespace\::Double" }
 proc hir::cabi::FloatName {} { return "$::core::cabi::namespace\::Float" }
+proc hir::cabi::RawFloatName {} { return "$::core::cabi::namespace\::RawFloat" }
+proc hir::cabi::RawDoubleName {} { return "$::core::cabi::namespace\::RawDouble" }
 proc hir::cabi::PtrName {} { return "$::core::cabi::namespace\::Ptr" }
 proc hir::cabi::FnPtrName {} { return "$::core::cabi::namespace\::FnPtr" }
 
@@ -186,14 +213,40 @@ proc hir::cabi::FnPtrName {} { return "$::core::cabi::namespace\::FnPtr" }
 # C floating types (the file header's "C representations and Botlish
 # carriers")
 
-# The C floating type std::ffi::c::NAME's canonical type ({cfloat NAME}).
+# The C floating type std::ffi::c::NAME's canonical type: {cfloat NAME} for
+# a finite one, the raw kind (its carrier) for a raw one.
 proc hir::cabi::FloatingType {name} {
+    if {[core::cabi::isRawFloating $name]} {
+        return [dict get $::core::cabi::floatings $name carrier]
+    }
     return [list cfloat $name]
 }
 
-# 1 if TYPE is a C floating type ({cfloat NAME}).
+# 1 if TYPE is a C floating type: a finite one ({cfloat NAME}) or a raw one
+# (rawfloat32, rawfloat64).
 proc hir::cabi::IsFloating {type} {
-    return [expr {[llength $type] == 2 && [lindex $type 0] eq "cfloat" && [core::cabi::isFloating [lindex $type 1]]}]
+    return [expr {[IsFiniteFloating $type] || [IsRawFloating $type]}]
+}
+
+# 1 if TYPE is a finite C floating type ({cfloat Float}, {cfloat Double}):
+# a C representation only, whose values are its carrier's.
+proc hir::cabi::IsFiniteFloating {type} {
+    return [expr {[llength $type] == 2 && [lindex $type 0] eq "cfloat" && [core::cabi::isFloating [lindex $type 1]]
+        && ![core::cabi::isRawFloating [lindex $type 1]]}]
+}
+
+# 1 if TYPE is a raw C floating type (rawfloat32, rawfloat64).
+proc hir::cabi::IsRawFloating {type} {
+    return [expr {$type in {rawfloat32 rawfloat64}}]
+}
+
+# The `floatings` name (Float, Double, RawFloat, RawDouble) of the C
+# floating type TYPE.
+proc hir::cabi::FloatingName {type} {
+    if {[IsRawFloating $type]} {
+        return [core::cabi::rawFloatingOf $type]
+    }
+    return [lindex $type 1]
 }
 
 # The C floating type the type expression TYPEEXPR spells (std::ffi::c::Float,
@@ -210,10 +263,11 @@ proc hir::cabi::FloatingOfExpr {typeExpr} {
     return ""
 }
 
-# The Botlish type of the values of C type TYPE: a C floating type's
-# carrier (Float64), any other type itself.
+# The Botlish type of the values of C type TYPE: a finite C floating type's
+# carrier (Float64), any other type -- a raw C floating type among them,
+# its own carrier -- itself.
 proc hir::cabi::Carrier {type} {
-    if {[IsFloating $type]} {
+    if {[IsFiniteFloating $type]} {
         return [dict get $::core::cabi::floatings [lindex $type 1] carrier]
     }
     return $type
@@ -231,12 +285,43 @@ proc hir::cabi::FloatingInfo {type {target ""}} {
     if {$target eq ""} {
         set target [ResolveTarget ""]
     }
-    return [core::cabi::floatingInfo [lindex $type 1] $target]
+    return [core::cabi::floatingInfo [FloatingName $type] $target]
 }
 
 # The display of C floating type TYPE (std::ffi::c::Float).
 proc hir::cabi::ShowFloating {type} {
-    return "$::core::cabi::namespace\::[lindex $type 1]"
+    return "$::core::cabi::namespace\::[FloatingName $type]"
+}
+
+# The qualified stem of the raw C floating type TYPE's operations
+# (std::ffi::c::raw::double: std::ffi::c::raw::double_to_bits).
+proc hir::cabi::RawStem {type} {
+    return "$::core::cabi::namespace\::raw::[dict get {rawfloat32 float rawfloat64 double} $type]"
+}
+
+# A clause for an argument of static type ARG where DECLARED is expected
+# when one of them is a raw C floating type and they differ, naming the
+# explicit conversion (RAW-C-FLOAT-FFI-MILESTONE-1.md), or "".
+proc hir::cabi::RawMismatchClause {arg declared} {
+    if {$arg eq $declared || $arg in {any never}} {
+        return ""
+    }
+    if {[IsRawFloating $arg] && $declared eq "Float64"} {
+        return "; a raw C floating value is admitted to a Float64 only explicitly ([RawStem $arg]_to_float64: NonFiniteFloat for a NaN or an infinity)"
+    }
+    if {$arg eq "Float64" && [IsRawFloating $declared]} {
+        return "; a Float64 becomes a raw C floating value only explicitly ([RawStem $declared]_from_float64)"
+    }
+    if {[IsRawFloating $arg] && [IsRawFloating $declared]} {
+        return "; [hir::types::show $arg] and [hir::types::show $declared] are distinct C types, and nothing converts one into the other"
+    }
+    return ""
+}
+
+# The message for a bare raw kind's spelling (rawfloat32) where a type is
+# written: never source-spellable, like cptr.
+proc hir::cabi::RawKindMessage {kind} {
+    return "\"$kind\" is not a type: a raw C floating value's type is spelled [core::cabi::rawName $kind]"
 }
 
 # The message for std::ffi::c::Float written where a type of Botlish values is
@@ -478,6 +563,21 @@ proc hir::cabi::VerifyCallKinds {hirVar e node} {
         return
     }
     set name [dict get [hir::symbol $hir [lindex [dict get $node target] 1]] name]
+    if {$name eq "=="} {
+        foreach arg [dict get $node args] {
+            set argType [hir::typeOf $hir $arg]
+            if {[IsRawFloating $argType]} {
+                # A raw C floating value has no equality (RAW-C-FLOAT-FFI-
+                # MILESTONE-1.md; core::value::equal refuses it at run time):
+                # bit identity and numeric equality differ, and the program
+                # says which it means.
+                hir::Diagnose hir TYPE [format \
+                    {== is not defined for %s, a raw C floating value: bit identity and numeric equality differ (two NaNs, two zeros), so compare its bits (%s) or the Float64 it admits to (%s)} \
+                    [hir::types::show $argType] "[RawStem $argType]_to_bits" "[RawStem $argType]_to_float64"] $arg
+                return
+            }
+        }
+    }
     set paramTypes [dict get [core::native::metadata $name] paramTypes]
     if {$paramTypes eq ""} {
         return
@@ -508,6 +608,20 @@ proc hir::cabi::VerifyCallKinds {hirVar e node} {
             }
             hir::Diagnose hir TYPE [format "argument %d of %s is %s, $what" \
                 $index $name [hir::types::show $argType] $name [core::type::show $paramType]] $arg
+            continue
+        }
+        if {[IsRawFloating $argType] && $paramType ni {"" any} && [core::type::base $paramType] ne $argType
+                && [dict get [core::native::metadata $name] foreign] eq "" && [string first # $name] < 0} {
+            # (A foreign call's typed parameters are hir::borrow's to hold
+            # an argument to, and an operator a floating-point operand
+            # selected is hir/operators.tcl's to report.)
+            # A raw C floating value given to a native of another kind --
+            # `x + 1.0`, `x < y`, `std::float64::truncate(x)`: a raw value is
+            # a C bit pattern, never a number (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+            hir::Diagnose hir TYPE [format \
+                {argument %d of %s is %s, a raw C floating value, where %s requires %s: a raw value is a C bit pattern, not a number (it has no arithmetic, ordering or implicit conversion; %s admits it to a Float64)} \
+                $index $name [hir::types::show $argType] $name [core::type::show $paramType] \
+                "[RawStem $argType]_to_float64"] $arg
             continue
         }
         if {![hir::types::IsCAddress $argType] || $paramType in {"" any}
@@ -587,6 +701,11 @@ proc hir::cabi::VariadicArgument {type} {
         lassign [lindex $scalars 0] name info
         set class [expr {[dict get $info signed] ? "i" : "u"}][dict get $info bits]
         return [dict create c $name class $class promoted [core::cabi::promoted $info]]
+    }
+    if {[IsRawFloating $type]} {
+        return [dict create problem TYPE message [format \
+            {%s is a raw C floating value, which a variadic C function cannot take as a trailing argument: C passes a trailing floating argument as a double after its default promotion, which a raw value's bits are not (a raw float would be converted, a raw double's NaN payload is no Float64) -- declare the parameter, or admit the value (%s) and pass its Float64} \
+            [hir::types::show $type] "$::core::cabi::namespace\::raw::double_to_float64"]]
     }
     if {[llength $scalars] > 1} {
         return [dict create problem TYPE message [format \

@@ -87,6 +87,16 @@ test cli-help-overview-newcomer-line {the overview names the one query for a new
     list [expr {$line ne ""}] [lindex [split [dict get $r out] \n] 0]
 } -cleanup {unset -nocomplain out line r} -result {1 principle.idiomatic-botlish}
 
+test cli-help-overview-primer {the overview opens with the primer's table, before the newcomer line and the indices; the usage summary names the primer before the options; and that query shows the primer} -body {
+    set overview [dict get [runMain -help] out]
+    set usage [dict get [runMain] out]
+    set line [lindex [regexp -inline -line {^Before writing a program, read: .* -help primer$} $usage] 0]
+    list [expr {[string first "BEFORE YOU WRITE A PROGRAM" $overview] < [string first "New to Botlish?" $overview]}] \
+        [expr {[string first "New to Botlish?" $overview] < [string first "INDICES" $overview]}] \
+        [expr {$line ne "" && [string first $line $usage] < [string first "Running:" $usage]}] \
+        [lindex [split [dict get [runMain -help primer] out] \n] 0]
+} -cleanup {unset -nocomplain overview usage line} -result {1 1 1 task.first-program}
+
 test cli-help-spellings {--help and -h are -help} -body {
     list [expr {[dict get [runMain --help] out] eq [dict get [runMain -help] out]}] \
         [expr {[dict get [runMain -h warnings] out] eq [dict get [runMain -help warnings] out]}]

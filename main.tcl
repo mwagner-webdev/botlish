@@ -4,6 +4,13 @@
 #   tclsh9.0 main.tcl -help [QUERY...]
 #   tclsh9.0 main.tcl -version
 #   tclsh9.0 main.tcl                     (no arguments: the usage summary)
+#   tclsh9.0 main.tcl add|install|update|remove|verify|package ...
+#                                         the package manager (pm/pm.tcl,
+#                                         PACKAGE-MANAGER-MILESTONE-1.md):
+#                                         a first argument naming one of
+#                                         its commands runs it, without the
+#                                         compiler (no other invocation
+#                                         loads it or reads a botlish.json)
 #
 # The options, one table (cliOptions below) that the parser, the usage
 # summary and Compilerpedia's cli.options topic (tests/main-cli.test checks
@@ -15,10 +22,14 @@
 #   -L DIR                 a library directory for a program that calls C
 #   -F DIR                 a framework directory (macOS) for one that links a
 #                          framework
+#   -runtime-path PATH     a directory an emitted executable's loader searches
+#                          for shared libraries ($ORIGIN/lib)
 #   -argv TEXT / -argv-hex HEX / -argv-none    the program's argv()
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
 #   -emit-native-executable / -emit-hir-interchange    build, do not run
+#   -native-startup POLICY the executable's startup policy: worker (default)
+#                          or main-thread (macOS AArch64)
 #   -emit-native-library NAME ?-export FUNCTION...? ?-out DIR?    build the
 #                          native library NAME (NATIVE-LIBRARY-MILESTONE-1.md:
 #                          libNAME.a, libNAME.so, NAME.h,
@@ -115,6 +126,19 @@
 # for any other: SINGLE-EXECUTABLE.md, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
 # It does not evaluate the program.
 # Running the executable prints its value.
+# -native-startup POLICY sets the executable's startup policy
+# (MAIN-THREAD-STARTUP-MILESTONE-1.md), fixed in it when it is built, never
+# by the environment it later runs in: worker (the default) runs the
+# program on a worker thread of its own, whose stack
+# BOTLISH_NATIVE_STACK_BYTES sizes (1 GiB by default); main-thread runs it
+# on the process's main thread, which a macOS graphical program needs
+# (AppKit, so SDL3's Cocoa driver, works there only), with a 512 MiB stack
+# the link reserves (LC_MAIN) -- for a macOS AArch64 executable only, and
+# refused for any other target before anything is written. Nothing else
+# changes: the program's meaning, its output, errors and exit status are the
+# same under both. It is an option of -emit-native-executable only (no
+# other invocation makes an executable); given twice, it must name the same
+# policy.
 # -emit-hir-interchange writes each .bot or .hir input's analyzed HIR in the
 # HIR interchange format (HIR-INTERCHANGE.md) beside it, as FILE.hirx, without
 # evaluating it; a .hirx input is run like any other, on any backend, with no
@@ -158,6 +182,17 @@
 # program needs the host's system linker and its libraries; one that calls no
 # C needs neither.
 #
+# -runtime-path PATH records PATH in an executable -emit-native-executable
+# links as a directory its loader searches for shared libraries (an ELF
+# RUNPATH, a Mach-O LC_RPATH; PACKAGE-MANAGER-MILESTONE-2.md, "Native
+# deployment"): $ORIGIN/lib on Linux, @executable_path/lib on macOS, where
+# `botlish native deploy` places a target's bundled libraries, so the
+# executable runs wherever its directory is moved. Windows has none (its
+# loader searches the executable's own directory): the link refuses it there.
+# A program compiled from a target package tree (.bot_modules/.targets/T)
+# links that tree's .lib without -L, and a native backend's own run finds
+# its shared libraries there.
+#
 # A .hir file (HIR text, e.g. examples/hir/*.hir) is read with hir::readFile;
 # a .hirx file (HIR interchange) with hir::interchange::readFile;
 # a .bot file (Botlish source, e.g. examples/surface/*.bot) is parsed and
@@ -199,10 +234,12 @@ set cliOptions {
     -target NAME run {the C ABI target (default: the host's)}
     -L DIR run {a library directory, for a program that calls C}
     -F DIR run {a framework directory (macOS), for a program linking one}
+    -runtime-path PATH build {where an executable loads shared libraries from}
     -argv TEXT argv {append the argument TEXT to argv()}
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}
     -emit-native-executable {} build {build a standalone executable beside each input}
+    -native-startup POLICY build {the executable's thread: worker (default) or main-thread}
     -emit-hir-interchange {} build {write each input's analyzed HIR as FILE.hirx}
     -emit-native-library NAME build {build native library NAME from the one input}
     -export FUNCTION build {export a top-level function (default: exported c fns)}
@@ -243,15 +280,27 @@ proc cliInvocation {} {
 }
 set cliInvocation [cliInvocation]
 
+# The package manager's commands (pm/pm.tcl, PACKAGE-MANAGER-MILESTONE-1.md):
+# a first argument naming one runs the package manager, and nothing of the
+# compiler is loaded. No other invocation loads the package manager or reads
+# a botlish.json: compiling reads .bot_modules as it is.
+set pmCommands {add install update remove verify package native}
+if {[lindex $argv 0] in $pmCommands} {
+    source [file join $root pm pm.tcl]
+    exit [pm::cli::main $argv $cliInvocation]
+}
+
 proc usage {} {
     global cliOptions cliInvocation
     set me $cliInvocation
     set lines [list "usage: $me \[OPTION...\] FILE..." \
         "       $me -help \[QUERY...\]" \
-        "       $me -version" "" \
+        "       $me -version" \
+        "       $me add|install|update|remove|verify|package ..." "" \
         "Compiles and runs Botlish programs: FILE.bot (source), FILE.hir (HIR text)," \
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
-        "Each program's output is printed, then its value." ""]
+        "Each program's output is printed, then its value." "" \
+        "Before writing a program, read: $me -help primer" ""]
     foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} lsp {Language server (with -warnings, -target; no FILE)} inspect {Inspecting (printed before the program runs)} help Reference} {
         lappend lines "$heading:"
         foreach {name argument optionGroup description} $cliOptions {
@@ -271,7 +320,8 @@ proc usage {} {
         "  $me -help                     the indices of Compilerpedia" \
         "  $me -help cli.options         every option in detail" \
         "  $me -help KNOWN-ERROR         a diagnostic or warning code" \
-        "  $me -help \"bounds proof\"      a search"
+        "  $me -help \"bounds proof\"      a search" \
+        "  $me -help cli.packages        the package manager"
     return [join $lines \n]
 }
 
@@ -804,7 +854,7 @@ proc emitExecutable {path} {
             .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
             default { throw {NATIVE AOT INPUT} "expected a .bot, .hir or .hirx input file (native executables are built from HIR, never from core IR text): $path" }
         }
-        set executable [native::executable $hir [file rootname $path]]
+        set executable [native::executable $hir [file rootname $path] -startup $::nativeStartup]
     } message options]} {
         printError stderr "$path: " $message $options
         return 1
@@ -831,6 +881,7 @@ set injectedArgvGiven 0
 set libraryName ""
 set libraryExports {}
 set libraryDir ""
+set nativeStartup ""
 set check 0
 foreach option [dict get $commandLine options] {
     lassign $option arg value
@@ -899,6 +950,15 @@ foreach option [dict get $commandLine options] {
             set showNative library
             set libraryName $value
         }
+        -native-startup {
+            if {$value ni {worker main-thread}} {
+                usageError "unknown native startup policy \"$value\" (known: worker main-thread)"
+            }
+            if {$nativeStartup ne "" && $nativeStartup ne $value} {
+                usageError "-native-startup is given twice with different policies (\"$nativeStartup\" and \"$value\"): an executable has one"
+            }
+            set nativeStartup $value
+        }
         -export { lappend libraryExports $value }
         -out { set libraryDir $value }
         -argv - -argv-hex {
@@ -925,6 +985,12 @@ foreach option [dict get $commandLine options] {
             }
             lappend native::frameworkDirs [file normalize $value]
         }
+        -runtime-path {
+            if {$value eq "" || [regexp {[,\x00\n:;]} $value]} {
+                usageError "-runtime-path needs one path, with no comma, colon, semicolon or newline (found \"$value\")"
+            }
+            lappend native::runtimePaths $value
+        }
         -lsp-scheduler {
             usageError "-lsp-scheduler is an option of -lsp"
         }
@@ -932,6 +998,14 @@ foreach option [dict get $commandLine options] {
 }
 if {$showNative ne "library" && ($libraryExports ne "" || $libraryDir ne "")} {
     usageError "-export and -out are options of -emit-native-library"
+}
+if {$nativeStartup ne "" && $showNative ne "executable"} {
+    # The policy is fixed into an executable when it is built: no other
+    # invocation makes one, and an explicit choice is never ignored.
+    usageError "-native-startup is an option of -emit-native-executable: it chooses the thread a built executable runs its program on, and nothing else this invocation does makes one (a native library runs on its host's thread; -backend cranelift runs a program on the driver's own)"
+}
+if {$nativeStartup eq ""} {
+    set nativeStartup worker
 }
 if {$showNative eq "library" && [llength $files] != 1} {
     usageError "-emit-native-library builds one library from one input file (found [llength $files])"

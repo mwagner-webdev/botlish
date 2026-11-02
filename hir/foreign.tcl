@@ -103,13 +103,38 @@ proc hir::foreign::AbiClass {type} {
         return bool
     }
     if {[hir::cabi::IsFloating $type]} {
-        return [dict get [hir::cabi::FloatingInfo $type] class]
+        # A raw C float or double travels in exactly its finite
+        # counterpart's register class, its bits unchanged: rf32, rf64
+        # (RAW-C-FLOAT-FFI-MILESTONE-1.md; nir.rs's CAbi::RawF32/RawF64).
+        set info [hir::cabi::FloatingInfo $type]
+        if {[dict get $info raw]} {
+            return "r[dict get $info class]"
+        }
+        return [dict get $info class]
     }
     if {[hir::types::IsCPtr $type] || [hir::types::IsCFnPtr $type]} {
         return ptr
     }
     set info [core::type::cabiScalar $type]
     return [expr {[dict get $info signed] ? "i" : "u"}][dict get $info bits]
+}
+
+# 1 if the foreign call contract CONTRACT lets its C function call back into
+# the calling Botlish execution environment during the call
+# (C-CALLBACK-MILESTONE-1.md): it has a C function pointer parameter whose
+# escape is noescape (declared or proven) -- C may call the pointer while
+# the call runs and keeps it no longer. A data pointer's noescape says
+# nothing of callbacks, and an unknown or capturing function pointer
+# parameter is no permission: the runtime refuses a callback outside a
+# call of such a function.
+proc hir::foreign::CallsBack {contract} {
+    foreach param [dict get $contract params] {
+        if {[hir::types::IsCFnPtr [dict get $param type]] && [dict exists $param escape]
+                && [core::cabi::isNoescape [dict get $param escape]]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # Registers DECLS (surface/lower.tcl's ExternDeclOf dicts, across every unit
@@ -232,9 +257,11 @@ proc hir::foreign::apply {decls linkDecls} {
         # and a Float64 narrowed to a C float may round to an infinity: the
         # call completes with NonFiniteFloat then (FLOAT64-MILESTONE-1.md,
         # C-FLOAT-FFI-MILESTONE-1.md) -- after C returned, or before C is
-        # called. A double argument is exact: every Float64 is a double.
+        # called. A double argument is exact: every Float64 is a double. A
+        # raw float or double crosses as its bits, either way: no error
+        # (RAW-C-FLOAT-FFI-MILESTONE-1.md).
         set errors ""
-        if {[hir::cabi::IsFloating $result] || [NarrowedParameters $abi] ne ""} {
+        if {[hir::cabi::IsFiniteFloating $result] || [NarrowedParameters $abi] ne ""} {
             set errors NonFiniteFloat
         }
         core::native::register $native -arity [expr {$variadic ? "*" : [llength $params]}] \

@@ -246,10 +246,14 @@ proc hir::construction::Uses {view b loops e} {
             return [list $n $a]
         }
         loop - listloop {
-            set prefix {0 -1}
+            # The iterable, then a fold's initial value
+            # (FOLD-LOOPS-MILESTONE-1.md): once each, before the body.
+            set operands {}
             if {[hir::kind $view $e] eq "listloop"} {
-                set prefix [Uses $view $b $loops [hir::get $view $e iterable]]
+                lappend operands [hir::get $view $e iterable]
             }
+            lappend operands {*}[hir::FoldInitials [dict get $view exprs $e]]
+            set prefix [SeqUses $view $b $loops $operands]
             lassign [SeqUses $view $b $loops [hir::get $view $e body]] bn ba
             set per [Max $bn $ba]
             if {$per > 0 && ![dict exists $loops $e]} {
@@ -273,6 +277,7 @@ proc hir::construction::Uses {view b loops e} {
             } else {
                 set operands [hir::loopOperands [dict get $view exprs $e]]
             }
+            lappend operands {*}[hir::FoldInitials [dict get $view exprs $e]]
             set prefix [SeqUses $view $b $loops $operands]
             lassign [SeqUses $view $b $loops [hir::get $view $e body]] bn ba
             set per [Max $bn $ba]
@@ -314,22 +319,27 @@ proc hir::construction::Linear {info b} {
     set declaredBy [dict get [hir::binding $view $b] declaredBy]
     for {set e $declaredBy} {$e ne "" && [dict exists $parent $e]} {set e [dict get $parent $e]} {
         set p [dict get $parent $e]
+        # (A fold's initial value runs once, before the loop:
+        # FOLD-LOOPS-MILESTONE-1.md.)
+        set initials [hir::FoldInitials [dict get $view exprs $p]]
         switch -- [hir::kind $view $p] {
             loop {
-                dict set loops $p 1
+                if {$e ni $initials} {
+                    dict set loops $p 1
+                }
             }
             listloop {
-                if {$e ne [hir::get $view $p iterable]} {
+                if {$e ne [hir::get $view $p iterable] && $e ni $initials} {
                     dict set loops $p 1
                 }
             }
             countloop {
-                if {$e ne [hir::get $view $p start] && $e ne [hir::get $view $p end]} {
+                if {$e ne [hir::get $view $p start] && $e ne [hir::get $view $p end] && $e ni $initials} {
                     dict set loops $p 1
                 }
             }
             lockloop {
-                if {$e ni [hir::loopOperands [dict get $view exprs $p]]} {
+                if {$e ni [concat [hir::loopOperands [dict get $view exprs $p]] $initials]} {
                     dict set loops $p 1
                 }
             }
@@ -521,19 +531,28 @@ proc hir::construction::Context {s id e} {
             if {[hir::kind $view $p] eq "listloop" && $e eq [hir::get $view $p iterable]} {
                 return {0 "flat-only operation (listloop iterable)"}
             }
-            return {0 "loop body value (collected or discarded)"}
+            if {$e in [hir::FoldInitials [dict get $view exprs $p]]} {
+                return {0 "fold intermediate (initial value)"}
+            }
+            return {0 "loop body value (collected, carried or discarded)"}
         }
         countloop {
             if {$e eq [hir::get $view $p start] || $e eq [hir::get $view $p end]} {
                 return {0 "flat-only operation (countloop bound)"}
             }
-            return {0 "loop body value (collected or discarded)"}
+            if {$e in [hir::FoldInitials [dict get $view exprs $p]]} {
+                return {0 "fold intermediate (initial value)"}
+            }
+            return {0 "loop body value (collected, carried or discarded)"}
         }
         lockloop {
             if {$e in [hir::loopOperands [dict get $view exprs $p]]} {
                 return {0 "flat-only operation (lockloop domain operand)"}
             }
-            return {0 "loop body value (collected or discarded)"}
+            if {$e in [hir::FoldInitials [dict get $view exprs $p]]} {
+                return {0 "fold intermediate (initial value)"}
+            }
+            return {0 "loop body value (collected, carried or discarded)"}
         }
         handle {
             return {0 "handled call result"}

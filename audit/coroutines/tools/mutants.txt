@@ -313,15 +313,13 @@
 @@ context-reselected-per-resume every top-level resume selects the coroutine's context-trait providers again
 ## hir/contexts.tcl
 <<<<
-            if {[isLoad $hir $c]} continue
-            set target [Callee $hir $c]
+            set targets [Targets $hir $graph $regionRoot "" $c]
 ====
-            if {[isLoad $hir $c]} continue
-            set target [Callee $hir $c]
+            set targets [Targets $hir $graph $regionRoot "" $c]
             if {[hir::coroutines::NativeOf $hir $c] eq [core::coroutines::resumeNative]} {
                 set thunk [hir::coroutines::thunkOfHandle $hir [lindex [hir::get $hir $c args] 0]]
                 if {$thunk ne ""} {
-                    set target [dict get $hir coroutines thunks $thunk root]
+                    set targets [list [dict get $hir coroutines thunks $thunk root]]
                 }
             }
 >>>>
@@ -445,11 +443,11 @@
 @@ gc-resumer-frames-untraced the collector does not trace the frames suspended below a running coroutine (its resumers' stacks)
 ## native/src/runtime/vm.rs
 <<<<
-            super::framewalk::walk_from(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), |addr| {
+            super::framewalk::walk_from_segmented(&self.framemap, suspended_rbp(resumer_sp), bounds.as_ref(), jumps, |addr| {
                 native_frame_roots.push(unsafe { *addr })
             });
 ====
-            let _ = (bounds, resumer_sp, suspended_rbp(0));
+            let _ = (bounds, resumer_sp, suspended_rbp(0), jumps);
 >>>>
 
 # ---------------------------------------------------------------------------

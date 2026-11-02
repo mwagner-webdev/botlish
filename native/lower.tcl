@@ -141,10 +141,14 @@ namespace eval native::lower {
         std::str::char_at      {op strcharat} \
         std::str::is_tcl_alpha {op strtclalpha} \
         std::str::is_tcl_alnum {op strtclalnum} \
+        std::char::is_tcl_alpha {op chartclalpha} \
+        std::char::is_tcl_alnum {op chartclalnum} \
         argv         {op argv} \
         std::list::length {op listlen} \
+        std::tree::children {op treechildren} \
         std::list::at     {op listget} \
         std::list::append {op listappend} \
+        std::list::flat   {op listflat} \
         list#with_length {op listwithlen} \
         std::immutable_set::from_list {equality-list} \
         std::immutable_set::contains  {equality-set} \
@@ -180,6 +184,10 @@ namespace eval native::lower {
         std::byte_store::from_list {op bytesfromlist} \
         std::byte_store::join      {op bytesjoin} \
         std::byte_store::decode_utf8 {op bytesdecodeutf8} \
+        std::byte_store::encode_utf16le {op strencodeutf16le} \
+        std::byte_store::decode_utf16le {op bytesdecodeutf16le} \
+        std::byte_store::utf16le_units {op bytesutf16leunits} \
+        std::byte_store::utf16le_units_before_nul {op bytesutf16lenul} \
         std::byte_store::slice     {op bytesslice} \
         std::byte_store::byte_count    {op byteslen} \
         std::mutable_byte_store::zeroed   {op mbytesnew} \
@@ -195,6 +203,14 @@ namespace eval native::lower {
         coroutine#yield  {op coyield} \
         std::coroutine::done? {op codone} \
         coroutine#release {op corelease} \
+        std::rawfloat::from_bits32 {op rawfrombits32} \
+        std::rawfloat::from_bits64 {op rawfrombits64} \
+        std::rawfloat::bits32      {op rawbits32} \
+        std::rawfloat::bits64      {op rawbits64} \
+        std::rawfloat::admit32     {op rawadmit32} \
+        std::rawfloat::admit64     {op rawadmit64} \
+        std::rawfloat::narrow32    {op rawnarrow32} \
+        std::rawfloat::narrow64    {op rawnarrow64} \
         std::ffi::c::null      {op cptrnull} \
         std::ffi::c::null?     {op cptrisnull} \
         std::ffi::c::clone     {op cptrsame} \
@@ -1536,7 +1552,8 @@ proc native::lower::Program {hirProgram args} {
         -exact-callable-opt [dict get $options -exact-callable-opt] \
         -exact-callable-limit [dict get $options -exact-callable-limit] \
         -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
-            [CleanupBlocks $hirProgram]]]
+            [CleanupBlocks $hirProgram] \
+            [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
@@ -1625,6 +1642,20 @@ proc native::lower::Program {hirProgram args} {
     foreach export [dict get $options -exports] {
         lappend exportLines "export [Quote [dict get $export symbol]] func=[GenericRef [dict get $export block]] params=[Quote [join [dict get $export params] { }]] result=[dict get $export result]"
     }
+    # The callback roots (C-CALLBACK-MILESTONE-1.md): each `callback c fn`'s
+    # generic instance, which hir::specialize made a used, open instance (as
+    # an export's: C may call it with any value of its declared C types).
+    # Its C entry point -- a trampoline in the target's C calling
+    # convention, codegen's -- calls that instance's generic entry, whether
+    # or not any Botlish code calls the function; `cbaddr N` is its address.
+    variable callbackIndex
+    set callbackIndex [dict create]
+    set callbackLines {}
+    foreach callback [hir::callbacks::of $hirProgram] {
+        set n [dict size $callbackIndex]
+        dict set callbackIndex [dict get $callback block] $n
+        lappend callbackLines "callback $n func=[GenericRef [dict get $callback block]] params=[Quote [join [dict get $callback params] { }]] result=[dict get $callback result] name=[Quote [dict get $callback name]]"
+    }
     while {$pending ne ""} {
         set pending [lassign $pending item]
         lassign $item id mode
@@ -1679,6 +1710,7 @@ proc native::lower::Program {hirProgram args} {
     set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount][expr {$contextBytes > 0 ? " contexts=$contextBytes" : ""}]"]
     lappend header {*}[ContextHeader]
     lappend header {*}[lmap line $exportLines {string map $map $line}]
+    lappend header {*}[lmap line $callbackLines {string map $map $line}]
     if {[llength $exportLines]} {
         # A library's error table (NATIVE-LIBRARY-MILESTONE-1.md, "Errors"):
         # the canonical identity of every declared error a call can end in,
@@ -1709,6 +1741,20 @@ proc native::lower::Program {hirProgram args} {
             # else (layout, allocation, access) differs from an ordinary
             # named shape, and an ordinary one prints exactly as before.
             set opaque [expr {[hir::structs::isOpaque $id] ? " opaque=1" : ""}]
+            # A declared identity (REPRESENTATION-INDEPENDENT-VALUE-
+            # IDENTITY.md): its form and its fields, by name -- what the
+            # runtime's equality and hashes read of a value of this shape.
+            set identity [hir::structs::identityOf $id]
+            if {$identity ne ""} {
+                append opaque " identity=[Quote [join [concat [list [dict get $identity form]] [dict get $identity fields]] { }]]"
+            }
+            # A tree struct (TREE-STRUCT-MILESTONE-1.md): its child field, by
+            # name -- what the runtime's equality, hashes and printer walk a
+            # value of this shape's topology by.
+            set child [hir::structs::treeField $id]
+            if {$child ne ""} {
+                append opaque " tree=[Quote $child]"
+            }
             lappend header "shape [dict get $shapeIds $key] named [Quote $id]$opaque fields=[Quote [join $layout { }]]"
         }
     }
@@ -1741,7 +1787,12 @@ proc native::lower::Program {hirProgram args} {
     foreach key $foreignList {
         set record [dict get $declarations $key]
         set alias [core::cabi::AliasIndex [dict get $record contract]]
-        lappend header "foreign [ForeignIndex $key] [Quote [dict get $record symbol]] params=[Quote [join [dict get $record abi params] { }]] result=[dict get $record abi result][expr {$alias >= 0 ? " alias=$alias" : ""}][expr {[dict getdef $record abi variadic 0] ? " variadic=1" : ""}] name=[Quote $key]"
+        # A C function whose contract lets it call back (a function pointer
+        # parameter it does not keep, C-CALLBACK-MILESTONE-1.md): every call
+        # of it is a foreign transition the runtime records, during which C
+        # may run a callback in this execution environment.
+        set callbacks [expr {[hir::foreign::CallsBack [dict get $record contract]] ? " callbacks=1" : ""}]
+        lappend header "foreign [ForeignIndex $key] [Quote [dict get $record symbol]] params=[Quote [join [dict get $record abi params] { }]] result=[dict get $record abi result][expr {$alias >= 0 ? " alias=$alias" : ""}][expr {[dict getdef $record abi variadic 0] ? " variadic=1" : ""}]$callbacks name=[Quote $key]"
     }
     # The target the program was built for (core/cabi.tcl's name and
     # triple), when its HIR depends on one (hir::cabi::targetOf): the driver
@@ -1917,18 +1968,24 @@ proc native::lower::SkipAfter {fnVar e} {
                 set bodies [list [dict get $node thenBody] [dict get $node elseBody]]
             }
             listloop {
-                set operands [list [dict get $node iterable]]
+                set operands [concat [list [dict get $node iterable]] [hir::FoldInitials $node]]
                 set bodies [list [dict get $node body]]
             }
             countloop {
-                set operands [list [dict get $node start] [dict get $node end]]
+                set operands [concat [list [dict get $node start] [dict get $node end]] [hir::FoldInitials $node]]
                 set bodies [list [dict get $node body]]
             }
             lockloop {
-                set operands [hir::loopOperands $node]
+                set operands [concat [hir::loopOperands $node] [hir::FoldInitials $node]]
                 set bodies [list [dict get $node body]]
             }
-            block - loop { set bodies [list [dict get $node body]] }
+            loop {
+                # (A fold's initial value runs before its body:
+                # FOLD-LOOPS-MILESTONE-1.md.)
+                set operands [hir::FoldInitials $node]
+                set bodies [list [dict get $node body]]
+            }
+            block { set bodies [list [dict get $node body]] }
             handle       { set bodies [dict get $node handlerBodies] }
             default      { set operands [hir::children $hir $parent] }
         }
@@ -2115,6 +2172,19 @@ proc native::lower::Placeholder {id {mode canonical}} {
 }
 
 # FunctionRef of the generic instance of block E.
+# The C function pointer of the callback call E (NODE) names: `cbaddr N`, N
+# the callback's index among the program's (the header's `callback` lines).
+proc native::lower::CallbackAddress {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable callbackIndex
+    set block [hir::callbacks::Referenced $hir [lindex [dict get $node args] 0]]
+    if {$block eq "" || ![dict exists $callbackIndex $block]} {
+        throw {NATIVE BUG} "native lowering: std::ffi::c::callback of no valid callback c fn ($e)"
+    }
+    return [Assign fn "cbaddr [dict get $callbackIndex $block]" $e]
+}
+
 proc native::lower::GenericRef {e} {
     variable baseHir
     variable spec
@@ -3929,8 +3999,15 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         break {
             lassign [hir::affine::releasesOnExit $hir $e] before after
             ReleaseHandles fn $before $e
-            lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg
-            if {$accReg ne ""} {
+            lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg mode
+            if {$mode eq "fold"} {
+                # A fold (FOLD-LOOPS-MILESTONE-1.md): a bare break ends it
+                # with its current intermediate, the register it carries.
+                Emit fn "$resultReg = move $accReg" $e
+                Emit fn "jump $exit" $e
+                dict set fn broken [dict get $node target] 1
+                set result never
+            } elseif {$accReg ne ""} {
                 # A returning iterable loop (listloop, RETURNING-ITERABLE-
                 # LOOPS.md): a bare break ends the loop and returns the
                 # List collected so far. break VALUE is rejected earlier,
@@ -6044,11 +6121,17 @@ proc native::lower::BorrowCall {fnVar e node {wantVirtual ""} {wantCut ""} {want
 # NonFiniteFloat, negative zero zero) and whose stores narrow (a binary32
 # overflow is NonFiniteFloat) in the runtime's one implementation of the
 # boundary rules -- so a program with one may raise NonFiniteFloat there.
+#
+# SIGN r is a raw C floating representation of WIDTH bytes (RAW-C-FLOAT-FFI-
+# MILESTONE-1.md: 128 set): its loads make a raw value of exactly the bits
+# and its stores write exactly a raw value's bits -- no admission, no
+# narrowing, nothing raised.
 proc native::lower::LayoutEncoding {sign width endian} {
     if {$sign eq "f"} {
         RuntimeRaises NonFiniteFloat
     }
-    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)}]
+    return [expr {$width + ($sign eq "i" ? 16 : 0) + ($endian eq "big" ? 32 : 0) + ($sign eq "f" ? 64 : 0)
+        + ($sign eq "r" ? 128 : 0)}]
 }
 
 # Call E (NODE) of a binary operation: {REGISTER tagged} or {never tagged}.
@@ -6655,7 +6738,7 @@ proc native::lower::ArrayRead {fnVar e mode source repr base} {
     upvar 1 $fnVar fn
     variable unrollExtent
     lassign $repr - extent stride element
-    if {[lindex $element 0] in {u i f}} {
+    if {[lindex $element 0] in {u i f r}} {
         lassign $element sign width endian
         set at [At fn $e $base 0]
         set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]
@@ -6803,7 +6886,7 @@ proc native::lower::ReprWrite {fnVar e mode target repr base value} {
         }
         array {
             lassign $repr - extent stride element
-            if {[lindex $element 0] in {u i f}} {
+            if {[lindex $element 0] in {u i f r}} {
                 lassign $element sign width endian
                 set at [At fn $e $base 0]
                 set code [Assign fn "int [LayoutEncoding $sign $width $endian]" $e]
@@ -8365,6 +8448,13 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
         if {$static ne ""} {
             return $static
         }
+    }
+    if {$targetKind eq "native" && [hir::callbacks::IsPointerNative [dict get [hir::symbol $hir $target] name]]} {
+        # std::ffi::c::callback(NAME) (C-CALLBACK-MILESTONE-1.md): the
+        # address of NAME's C entry point, a C address word; the reference
+        # itself is no value made (the function is called by its entry, never
+        # through a closure).
+        return [list [CallbackAddress fn $e $node] tagged]
     }
     if {$targetKind eq "native"
             && [hir::layouts::RoleOf [hir::layouts::Role [dict get [hir::symbol $hir $target] name]] op] ne ""} {
@@ -10463,6 +10553,21 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     if {$raw ne ""} {
         return $raw
     }
+    if {$op eq "treechildren"} {
+        # std::tree::children (TREE-STRUCT-MILESTONE-1.md) of a value whose
+        # static type is a tree struct: its child field, read from the slot
+        # the type names, as a projection is. Only where no static type
+        # names one (one compile of a generic body: -specialize 0) is it
+        # the runtime's read of the slot the value's shape records.
+        set type [hir::types::Unrefined [hir::typeOf $hir [lindex $argExprs 0]]]
+        if {[hir::types::IsNamedStruct $type]} {
+            set field [hir::structs::treeField [lindex $type 1]]
+            set slot [lsearch -exact [hir::types::StructLayout $type] $field]
+            if {$field ne "" && $slot >= 0} {
+                return [list [Assign fn "structget $slot [lindex $argRegs 0]" $e] tagged]
+            }
+        }
+    }
     return [list [Assign fn [string trimright "op $op [join $argRegs { }]"] $e] tagged]
 }
 
@@ -11726,6 +11831,93 @@ proc native::lower::CollectFinish {fnVar e accReg} {
     return $accReg
 }
 
+# A loop's result accumulator, by MODE:
+#
+#   collect  a retained collecting loop's List plan (CollectStart)
+#   discard  a collecting loop whose List nothing reads: none
+#   fold     a fold's intermediate (FOLD-LOOPS-MILESTONE-1.md): one ordinary
+#            loop-carried register, set from the initial value before the
+#            first iteration (after the loop's operands are evaluated and
+#            guarded), bound as the intermediate for the body, replaced at
+#            the end of every ordinary completion of the body by a `move`
+#            (the If join's multi-definition register pattern, fed back to
+#            the loop head), kept by `continue` (whose jump skips the move)
+#            and moved into the result at exhaustion and at a bare break.
+#            Nothing is collected or allocated for it: no List, no plan, no
+#            MutableArray -- what it holds is whatever the body computes.
+#
+# {MODE ACCREG} for loop E (node NODE), or never when a fold's initial value
+# never completes.
+proc native::lower::LoopResultStart {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable context
+    if {[hir::IsFoldNode $node]} {
+        set initial [Expr fn [dict get $node foldInitial]]
+        if {$initial eq "never"} {
+            return never
+        }
+        set accReg [NewReg fn]
+        Emit fn "$accReg = move $initial" $e
+        JoinKeepAddr fn $accReg $initial
+        return [list fold $accReg]
+    }
+    if {![dict exists $context discarded $e]} {
+        return [list collect [CollectStart fn $e]]
+    }
+    return [list discard ""]
+}
+
+# The `loops` entry of a loop whose continue target is CONTINUELABEL, exit
+# EXIT, result register RESULTREG, accumulator MODE ACCREG
+# (LoopResultStart): what the shared break and continue lowering read.
+proc native::lower::LoopEntry {continueLabel exit resultReg mode accReg} {
+    switch -- $mode {
+        collect { return [list $continueLabel $exit $resultReg $accReg] }
+        discard { return [list $continueLabel $exit $resultReg discard] }
+        fold    { return [list $continueLabel $exit $resultReg $accReg fold] }
+    }
+    error "native::lower::LoopEntry: bad mode $mode"
+}
+
+# Binds a fold NODE's intermediate to its register ACCREG for the body.
+proc native::lower::LoopResultBind {fnVar node mode accReg} {
+    upvar 1 $fnVar fn
+    if {$mode eq "fold"} {
+        dict set fn locals [dict get $node foldBinding] [list reg $accReg]
+    }
+}
+
+# Accounts for an ordinary completion of loop E's body with VALUE.
+proc native::lower::LoopResultAdd {fnVar e mode accReg value} {
+    upvar 1 $fnVar fn
+    switch -- $mode {
+        collect {
+            CollectAppend fn $e $accReg $value
+        }
+        fold {
+            Emit fn "$accReg = move $value" $e
+            JoinKeepAddr fn $accReg $value
+        }
+    }
+}
+
+# Moves what loop E completes with at exhaustion into RESULTREG.
+proc native::lower::LoopResultFinish {fnVar e mode accReg resultReg} {
+    upvar 1 $fnVar fn
+    switch -- $mode {
+        collect {
+            Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
+        }
+        fold {
+            Emit fn "$resultReg = move $accReg" $e
+        }
+        discard {
+            set unitConst [Assign fn unit $e]
+            Emit fn "$resultReg = move $unitConst" $e
+        }
+    }
+}
+
 # (listloop LIST-EXPR (block (ELEM) BODY...)): the returning iterable loop
 # (RETURNING-ITERABLE-LOOPS.md). Lowers directly to the shape item 50 of
 # BYTE-SET.md describes -- evaluate the list once, an index/accumulator
@@ -11787,12 +11979,11 @@ proc native::lower::ListLoop {fnVar e node} {
         Emit fn "$idxReg = move $idx0" $e
     }
     set resultReg [NewReg fn]
-    set retained [expr {![dict exists $context discarded $e]}]
-    if {$retained} {
-        set accReg [CollectStart fn $e]
-    } else {
-        set accReg ""
+    set accumulator [LoopResultStart fn $e $node]
+    if {$accumulator eq "never"} {
+        return never
     }
+    lassign $accumulator mode accReg
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances the index
@@ -11821,8 +12012,8 @@ proc native::lower::ListLoop {fnVar e node} {
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg \
-        [if {$retained} {set accReg} else {string cat "discard"}]]
+    dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
+    LoopResultBind fn $node $mode $accReg
     if {$consuming} {
         set elemReg [Assign fn "op ${drain}takefront $iterReg" $e]
     } else {
@@ -11832,9 +12023,7 @@ proc native::lower::ListLoop {fnVar e node} {
     set bodyValue [IterationBody fn $e [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
-        if {$retained} {
-            CollectAppend fn $e $accReg $bodyValue
-        }
+        LoopResultAdd fn $e $mode $accReg $bodyValue
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -11850,12 +12039,7 @@ proc native::lower::ListLoop {fnVar e node} {
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    if {$retained} {
-        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
-    } else {
-        set unitConst [Assign fn unit $e]
-        Emit fn "$resultReg = move $unitConst" $e
-    }
+    LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg
@@ -12004,12 +12188,11 @@ proc native::lower::CountLoop {fnVar e node} {
         set advanceOp r$advanceOp
     }
     Emit fn "$idxReg = move $startReg" $e
-    set retained [expr {![dict exists $context discarded $e]}]
-    if {$retained} {
-        set accReg [CollectStart fn $e]
-    } else {
-        set accReg ""
+    set accumulator [LoopResultStart fn $e $node]
+    if {$accumulator eq "never"} {
+        return never
     }
+    lassign $accumulator mode accReg
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances I and loops
@@ -12031,15 +12214,13 @@ proc native::lower::CountLoop {fnVar e node} {
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg \
-        [if {$retained} {set accReg} else {string cat "discard"}]]
+    dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
+    LoopResultBind fn $node $mode $accReg
     dict set fn locals [dict get $node countBinding] [list [expr {$raw ? "rawreg" : "reg"}] $idxReg]
     set bodyValue [Sequence fn [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
-        if {$retained} {
-            CollectAppend fn $e $accReg $bodyValue
-        }
+        LoopResultAdd fn $e $mode $accReg $bodyValue
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -12058,12 +12239,7 @@ proc native::lower::CountLoop {fnVar e node} {
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    if {$retained} {
-        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
-    } else {
-        set unitConst [Assign fn unit $e]
-        Emit fn "$resultReg = move $unitConst" $e
-    }
+    LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg
@@ -12178,12 +12354,11 @@ proc native::lower::LockLoop {fnVar e node} {
         set firstLen [Assign fn "op listlen [dict get $first list]" $e]
     }
     set resultReg [NewReg fn]
-    set retained [expr {![dict exists $context discarded $e]}]
-    if {$retained} {
-        set accReg [CollectStart fn $e]
-    } else {
-        set accReg ""
+    set accumulator [LoopResultStart fn $e $node]
+    if {$accumulator eq "never"} {
+        return never
     }
+    lassign $accumulator mode accReg
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     set continueLabel [NewLabel fn]
@@ -12206,8 +12381,8 @@ proc native::lower::LockLoop {fnVar e node} {
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg \
-        [if {$retained} {set accReg} else {string cat "discard"}]]
+    dict set fn loops $e [LoopEntry $continueLabel $exit $resultReg $mode $accReg]
+    LoopResultBind fn $node $mode $accReg
     foreach domain $domains state $states {
         if {[dict get $state kind] eq "list"} {
             set elemReg [Assign fn "op listget [dict get $state list] $posReg" $e]
@@ -12220,9 +12395,7 @@ proc native::lower::LockLoop {fnVar e node} {
     set bodyValue [IterationBody fn $e [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
-        if {$retained} {
-            CollectAppend fn $e $accReg $bodyValue
-        }
+        LoopResultAdd fn $e $mode $accReg $bodyValue
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -12250,12 +12423,7 @@ proc native::lower::LockLoop {fnVar e node} {
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    if {$retained} {
-        Emit fn "$resultReg = move [CollectFinish fn $e $accReg]" $e
-    } else {
-        set unitConst [Assign fn unit $e]
-        Emit fn "$resultReg = move $unitConst" $e
-    }
+    LoopResultFinish fn $e $mode $accReg $resultReg
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg
@@ -12452,9 +12620,21 @@ proc native::lower::Handle {fnVar e node} {
 
 proc native::lower::Loop {fnVar e node} {
     upvar 1 $fnVar fn
+    variable hir
     set head [NewLabel fn]
     set exit [NewLabel fn]
     set result [NewReg fn]
+    set mode ""
+    set accReg ""
+    if {[hir::IsFoldNode $node]} {
+        # A fold with no domain (FOLD-LOOPS-MILESTONE-1.md): only a break
+        # ends it, with its intermediate.
+        set accumulator [LoopResultStart fn $e $node]
+        if {$accumulator eq "never"} {
+            return never
+        }
+        lassign $accumulator mode accReg
+    }
     # What the body needs built of a deferred value bound outside it,
     # built once, here (C-FFI-ERROR-CAPTURE-MILESTONE-2.md).
     HoistDeferredUses fn [dict get $node body] $e
@@ -12462,9 +12642,17 @@ proc native::lower::Loop {fnVar e node} {
     EmitLabel fn $head
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $head $exit $result]
+    if {$mode eq "fold"} {
+        dict set fn loops $e [LoopEntry $head $exit $result $mode $accReg]
+        LoopResultBind fn $node $mode $accReg
+    } else {
+        dict set fn loops $e [list $head $exit $result]
+    }
     set value [Sequence fn [dict get $node body]]
     if {$value ne "never"} {
+        if {$mode eq "fold"} {
+            LoopResultAdd fn $e $mode $accReg $value
+        }
         Emit fn "jump $head" $e
     }
     set used [dict exists $fn broken $e]

@@ -83,7 +83,7 @@ test nrb-mod-transfer {mod is Euclidean: a divisor of bounded magnitude M > 0 bo
     }
 } -result {{[0, 15]} {[0, 15]} {[0, 2]} {[0, +∞]} {[0, +∞]} never}
 
-test nrb-mod-in-range-analysis {hir/range.tcl applies the divisor bound to a call: the result of x.mod(16) is [0, 15] for any x} -body {
+test nrb-mod-in-range-analysis {hir/range.tcl applies the divisor bound to a call: the result of x.mod(16) is [0, 15] for any x, and exactly the residues of exactly known operands (here 3 and 10^21, whose residue is 0: EMISSION-CLAIMS-MILESTONE-1.md, "Value facts")} -body {
     set hir [surface::compile "fn m(x):\n    x.mod(16)\n\n\[m(3), m(1000000000000000000000)\]\n" t.bot -strict 0]
     set spec [hir::specialize::analyze $hir]
     set ranges [hir::range::analyze $hir $spec]
@@ -93,8 +93,8 @@ test nrb-mod-in-range-analysis {hir/range.tcl applies the divisor bound to a cal
             lappend out [hir::range::show [dict get [dict get $ranges instances $id] result]]
         }
     }
-    set out
-} -result {{[0, 15]}}
+    lappend out [hir::range::show [hir::range::Mod [hir::range::unknown] [hir::range::point 16]]]
+} -result {{[0, 3] {0,3}} {[0, 15]}}
 
 # ---------------------------------------------------------------------------
 # The real case: bench/refined-checks.bot's uri_escape_text

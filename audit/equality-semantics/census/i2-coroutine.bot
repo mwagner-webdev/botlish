@@ -1,0 +1,6 @@
+# I2 a coroutine handle compared with itself (an affine value)
+fn counter() -> int:
+    yield 1
+    2
+coroutine {step} = counter()
+step == step

@@ -1,0 +1,108 @@
+# stall.bot -- a stalled consumer (HTTP-STACK-INTEGRATION-CENSUS.md,
+# "Streaming"): the server's Botlish producer offers 4 MiB as fast as Hyper
+# takes it over HTTP/2 (16 KiB stream window); the client's Botlish
+# consumer reads one chunk, then stops for 500 ms. Backpressure must reach
+# the producer: during the stall it can get no further than the stream
+# window and the buffers below it, and the Rust side holds one chunk.
+# HS_CENSUS_FAULT=512 (the receive pump takes every frame whether or not
+# the consumer took the last) is the negative control: the whole body piles
+# up in Rust. Then an idle second with the connection open and HTTP/2
+# keep-alive pings on Botlish timers: the loop sleeps.
+import event_loop_linux
+import hs
+import hsh
+import hsnet
+import probe
+import std::event_loop
+import std::mutable_array
+import std::str
+
+nomethod fn produce(server: int, context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        x = hsh::next_request(server)
+        if x == 0:
+            hs::await(server)
+            continue
+        hsh::respond(x, 200, true)
+        data = probe::payload(10)
+        loop i from 0 to 256:
+            loop:
+                if hsh::send(x, data) > 0:
+                    break
+                hs::await(x)
+            probe::set_flag(6, (i + 1) * 16384)
+        hsh::finish(x)
+        return 1
+
+nomethod fn all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    hsh::configure(16384, 200000)
+    server = hsh::server(2, 0)
+    lfd = hsh::listen_socket(0)
+    hsh::serve(server, lfd)
+    coroutine {step: s, first: f} = produce(server)
+    std::event_loop::adopt(s, f)
+    client = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), 2, 0)
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    x = hsh::request(client, "GET", "/big", false)
+    loop:
+        if hsh::status(x) != 0:
+            break
+        hs::await(x)
+    rss0 = hsh::rss_kb()
+    first = std::mutable_array::create(1, 0)
+    loop:
+        c = hsh::recv(x)
+        if c.n > 0:
+            first.set(0, c.n)
+            break
+        hs::await(x)
+    std::event_loop::sleep(500000)
+    probe::log("stall 500 ms: producer offered bytes ".concat(probe::n(probe::flag(6))).concat(" consumer took ").concat(probe::n(first.at(0))).concat(" rust received ").concat(probe::n(hsh::stat(x, 0))).concat(" rust holds at most ").concat(probe::n(hsh::stat(x, 7))).concat(" rss growth kb ").concat(probe::n(hsh::rss_kb() - rss0)))
+    total = std::mutable_array::from_list([first.at(0)])
+    loop:
+        c = hsh::recv(x)
+        if c.n > 0:
+            total.set(0, total.at(0) + c.n)
+        elif c.n == 0:
+            hs::await(x)
+        else:
+            break
+    probe::log("drained: bytes ".concat(probe::n(total.at(0))).concat(" rust held at most ").concat(probe::n(hsh::stat(x, 7))))
+    hs::release(x)
+    cpu0 = event_loop_linux::cpu_us()
+    sleeps0 = event_loop_linux::stats().sleeps
+    timers0 = hs::rstat(12)
+    std::event_loop::sleep(1000000)
+    probe::log("idle 1 s with an open HTTP/2 connection (keep-alive every 200 ms): cpu us ".concat(probe::n(event_loop_linux::cpu_us() - cpu0)).concat(" kernel sleeps ").concat(probe::n(event_loop_linux::stats().sleeps - sleeps0)).concat(" rust timers fired ").concat(probe::n(hs::rstat(12) - timers0)).concat(" client state ").concat(probe::n(hsh::state(client))))
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    probe::log("fault ".concat(probe::n(hs::fault())))
+    coroutine {step: s, first: f} = all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_watchdog(1, 8000000)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -488,11 +488,22 @@ test rec-error-path-range {a function that can fail still gets a finite successf
         }]
 } -result {{solved {} {[1, 3]}} {-3 never 0 {[1, 1]} 1 {[2, 2]} 2 {[3, 3]}}}
 
+# The inputs below are mod(k, 11) with k = 500: 5 at run time, but the
+# analysis knows only its range [0, 10]. k is hidden by
+# std::int::from_string, which is never folded (a literal mod(500, 11) is
+# exact since EMISSION-CLAIMS-MILESTONE-1.md's exact modulo, and g of an
+# exact failing argument is a KNOWN-ERROR).
+set hiddenInput {
+    import std::int
+    k = std::int::from_string("500"):
+        on InvalidIntegerText:
+            0
+}
+
 test rec-error-path-value {success and failure agree on every backend, with and without the analysis} -body {
-    # mod(500, 11) is 5, but not statically known.
-    list [parity [format $errorProgram {mod(500, 11)} {mod(500, 11) - 5}]] \
-        [parity [format $errorProgram {mod(500, 11) + 3} {mod(500, 11) - 2}]] \
-        [parity [format $errorProgram {mod(500, 11) - 4} {mod(500, 11) - 3}]]
+    list [parity $hiddenInput[format $errorProgram {mod(k, 11)} {mod(k, 11) - 5}]] \
+        [parity $hiddenInput[format $errorProgram {mod(k, 11) + 3} {mod(k, 11) - 2}]] \
+        [parity $hiddenInput[format $errorProgram {mod(k, 11) - 4} {mod(k, 11) - 3}]]
 } -result {{[3, -1]} {[6, 1]} {[-1, -1]}}
 
 # ---------------------------------------------------------------------------
@@ -632,7 +643,7 @@ test rec-executable-negative {a negative-to-base measure} -constraints executabl
 } -result 10
 
 test rec-executable-error-path {a failing recursion handled by the caller} -constraints executableAot -body {
-    executableParity [format $errorProgram {mod(500, 11)} {mod(500, 11) - 5}]
+    executableParity $hiddenInput[format $errorProgram {mod(k, 11)} {mod(k, 11) - 5}]
 } -result {[3, -1]}
 
 cleanupTests

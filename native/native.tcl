@@ -42,7 +42,8 @@
 #                                       BEST-US is fractional (nanosecond-
 #                                       derived) microseconds, not truncated
 #                                       to a whole number
-#   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test)
+#   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test;
+#                                         -startup POLICY as native::executable's)
 #   native::targetFacts TRIPLE          how the driver reads a target triple
 #   native::linkPlan HIR ?OPTIONS?      the program's link plan as this host
 #                                         links it, one record per dependency
@@ -65,7 +66,16 @@
 #                                         toolchain, SINGLE-EXECUTABLE.md),
 #                                         system (the host's C driver and
 #                                         the runtime archive, no rustc) or
-#                                         auto (system for C, else stub)
+#                                         auto (system for C, else stub).
+#                                         -startup worker|main-thread is the
+#                                         executable's startup policy
+#                                         (MAIN-THREAD-STARTUP-MILESTONE-1.md):
+#                                         worker (the default) or, on a
+#                                         macOS aarch64 target only
+#                                         (capability mainThreadStartup), the
+#                                         process's main thread; elsewhere
+#                                         {NATIVE UNSUPPORTED startup}, before
+#                                         anything is written
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
@@ -139,6 +149,39 @@ namespace eval native {
     # (botlish-native's --framework-dir; main.tcl's -F DIR), kept apart from
     # the library directories; no other linker is given them.
     variable frameworkDirs {}
+    # Runtime library search paths of an emitted executable (main.tcl's
+    # -runtime-path, botlish-native's --runtime-path: PACKAGE-MANAGER-
+    # MILESTONE-2.md, "Native deployment"): where its loader finds the
+    # shared libraries deployed with it ($ORIGIN/lib, @executable_path/lib),
+    # recorded in the executable (an ELF RUNPATH, a Mach-O LC_RPATH) by the
+    # GNU and Apple linkers; refused for Windows, whose loader searches the
+    # executable's own directory. A build option, never part of a program.
+    variable runtimePaths {}
+}
+
+# The native library directories of the program HIR (its target package
+# tree's .lib: surface/modules.tcl, "Target package trees"), searched after
+# -L's when it links; a run (RUN 1) also finds its shared libraries there at
+# run time. Evaluates SCRIPT in the caller's scope with them in force.
+proc native::WithProgramDirs {hir run script} {
+    variable linkDirs
+    variable runtimePaths
+    set dirs [dict getdef $hir nativeDirs {}]
+    if {$dirs eq ""} {
+        return [uplevel 1 $script]
+    }
+    set savedLinks $linkDirs
+    set savedPaths $runtimePaths
+    foreach dir $dirs {
+        if {$dir ni $linkDirs} { lappend linkDirs $dir }
+        if {$run && $dir ni $runtimePaths} { lappend runtimePaths $dir }
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set linkDirs $savedLinks
+        set runtimePaths $savedPaths
+    }
 }
 
 # What the native backend does on each host target (core::cabi::hostTarget):
@@ -157,6 +200,11 @@ namespace eval native {
 #                x86-64 and AArch64, for Apple AArch64 and, since
 #                WINDOWS-X86-64-MILESTONE-6.md, for Win64; on another C
 #                convention a variadic call is a codegen error)
+#   cCallbacks   synchronous C callbacks (`callback c fn`,
+#                C-CALLBACK-MILESTONE-1.md: runtime/callback.rs's SUPPORTED):
+#                where the collector walks frames by frame pointer across a
+#                foreign transition; Windows (its unwinder) refuses one at
+#                run time (NATIVE CALLBACK UNSUPPORTED)
 #   coroutines   native coroutines (stack switching, runtime/coroutine.rs;
 #                on Windows a fiber per coroutine stack,
 #                runtime/coroutine/windows.rs)
@@ -164,6 +212,13 @@ namespace eval native {
 #   libraries    native libraries (native::library, NATIVE-LIBRARY-MILESTONE-1.md:
 #                codegen/library.rs's SUPPORTED; the archive's partial link
 #                and symbol localization are GNU binutils')
+#   mainThreadStartup  executables started on the process's main thread
+#                (native::executable -startup main-thread, MAIN-THREAD-
+#                STARTUP-MILESTONE-1.md: runtime/aot.rs's MAIN_THREAD_STARTUP,
+#                codegen/target.rs's main_thread_startup): macOS AArch64,
+#                whose main-thread stack has a confirmed guard and whose link
+#                reserves its size (LC_MAIN, 512 MiB); every other target
+#                starts its executables on a worker only
 #   frameRoots   GC roots in native frames, found by the frame walk
 #                (runtime/framewalk.rs's NATIVE_FRAME_ROOTS: the frame-pointer
 #                chain, on Windows with Windows' unwinder across Rust frames);
@@ -190,10 +245,12 @@ namespace eval native {
         executables {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cCalls {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         cVariadics {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
+        cCallbacks {linux-x86_64 linux-aarch64 macos-aarch64} \
         coroutines {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         stackGuard {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
         frameRoots {linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64} \
-        libraries {linux-x86_64 linux-aarch64}]
+        libraries {linux-x86_64 linux-aarch64} \
+        mainThreadStartup {macos-aarch64}]
 }
 
 # Whether the native backend has CAPABILITY (native::capabilities) on this
@@ -287,7 +344,8 @@ proc native::targetFacts {triple} {
 # error, raised ({NATIVE LINK ARCHIVE}: a static archive missing, of another
 # format or architecture, an import library; a framework off macOS).
 proc native::linkPlan {hir args} {
-    return [LinkPlanOf [nir $hir {*}$args]]
+    set text [nir $hir {*}$args]
+    return [WithProgramDirs $hir 0 {LinkPlanOf $text}]
 }
 
 # linkPlan of the NIR text TEXT.
@@ -350,6 +408,10 @@ proc native::RunDriver {output command nirText arguments} {
     }
     foreach dir $frameworkDirs {
         lappend args --framework-dir $dir
+    }
+    variable runtimePaths
+    foreach dir $runtimePaths {
+        lappend args --runtime-path $dir
     }
     if {$command in {run bench batch} && $::core::hashing::tableKeyOverride ne ""} {
         # A test harness fixed the private table hash's key
@@ -477,7 +539,8 @@ proc native::evalHir {hir args} {
             error "native::evalHir: -output must be discard or inherit, not \"$output\""
         }
     }
-    return [Outcome [RunDriver $output run [nir $hir {*}$args] {}]]
+    set text [nir $hir {*}$args]
+    return [WithProgramDirs $hir 1 {Outcome [RunDriver $output run $text {}]}]
 }
 
 # Compile closed, specialized HIR to a standalone executable: a Linux glibc
@@ -500,7 +563,24 @@ proc native::executableFile {path} {
     return $path
 }
 
+# The startup policy (-startup worker|main-thread, worker when absent) of
+# native::executable's or native::object's options ARGS, checked, and the
+# options without it: {POLICY OPTIONS}. The driver decides whether the
+# program's target supports it (codegen/aot.rs's startup_refusal).
+proc native::StartupOption {command args} {
+    set startup worker
+    if {[dict exists $args -startup]} {
+        set startup [dict get $args -startup]
+        dict unset args -startup
+        if {$startup ni {worker main-thread}} {
+            error "$command: -startup must be worker or main-thread, not \"$startup\""
+        }
+    }
+    return [list $startup $args]
+}
+
 proc native::executable {hir path args} {
+    lassign [StartupOption native::executable {*}$args] startup args
     set analysisOptions [dict create -specialize 1]
     foreach {option variable} {
         -call-facts-opt BOTLISH_NATIVE_CALL_FACTS_OPT
@@ -533,7 +613,7 @@ proc native::executable {hir path args} {
         throw {NATIVE AOT NOT-READY} "program is not AOT-ready:\n[join $failures \n]"
     }
     set text [nir $hir {*}$args {*}$analysisOptions]
-    set lines [Driver executable $text [file normalize $path]]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup}]
     foreach line $lines {
         if {[lindex $line 0] eq "error"} { Outcome $lines }
     }
@@ -1059,7 +1139,8 @@ proc native::codeSize {hir args} {
 }
 
 proc native::object {hir path args} {
-    set lines [Driver object [nir $hir {*}$args] $path]
+    lassign [StartupOption native::object {*}$args] startup args
+    set lines [Driver object [nir $hir {*}$args] $path --startup $startup]
     if {[regexp {^error } [lindex $lines 0]]} {
         Outcome $lines
     }

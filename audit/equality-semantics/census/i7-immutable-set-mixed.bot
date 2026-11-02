@@ -1,0 +1,4 @@
+# I7 an ImmutableSet built from a List of mixed kinds keeps one member per kind
+import std::immutable_set
+s = std::immutable_set::from_list([1, "1", '1', 1, "1"])
+[s.contains(1), s.contains("1"), s.contains('1'), s.contains(1.0), s == std::immutable_set::from_list(['1', "1", 1])]

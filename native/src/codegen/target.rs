@@ -111,6 +111,28 @@ pub fn same_target(target: &Triple, host: &Triple) -> bool {
         && target.environment == host.environment
 }
 
+/// Whether an executable for TARGET may start its program on the process's
+/// main thread (runtime::program's `Startup::MainThread`,
+/// MAIN-THREAD-STARTUP-MILESTONE-1.md): macOS on AArch64, and nothing
+/// else. The executable's target decides, never the host's name: an
+/// executable is emitted for its program's target, which `check_host`
+/// requires to be the host's (`executable_triple`). The runtime's own
+/// statement of it is `runtime::aot::MAIN_THREAD_STARTUP`, which a build
+/// for this host agrees with (`main_thread_startup_is_the_runtimes`).
+pub fn main_thread_startup(target: &Triple) -> bool {
+    matches!(target.operating_system, OperatingSystem::Darwin(_) | OperatingSystem::MacOSX(_))
+        && matches!(target.architecture, target_lexicon::Architecture::Aarch64(_))
+}
+
+/// The target an executable of PROGRAM is for: its own target's triple
+/// (NIR's `target` line), or this host's for a program every target shares.
+pub fn executable_triple(program: &crate::nir::Program) -> Result<Triple, String> {
+    match &program.target {
+        Some(target) => parse_triple(&target.triple),
+        None => Ok(Triple::host()),
+    }
+}
+
 /// TEXT as a target triple, or why it is not one.
 pub fn parse_triple(text: &str) -> Result<Triple, String> {
     Triple::from_str(text).map_err(|e| format!("invalid target triple \"{text}\": {e}"))
@@ -195,6 +217,34 @@ mod tests {
         assert_eq!(conv("x86_64-pc-windows-msvc"), CallConv::WindowsFastcall);
         assert_eq!(conv("x86_64-pc-windows-gnu"), CallConv::WindowsFastcall);
         assert_eq!(conv("aarch64-pc-windows-msvc"), CallConv::WindowsFastcall);
+    }
+
+    /// Main-thread startup is macOS AArch64's: never another operating
+    /// system of the same architecture, nor macOS on another one.
+    #[test]
+    fn main_thread_startup_is_macos_aarch64s() {
+        let supports = |text: &str| main_thread_startup(&parse_triple(text).unwrap());
+        assert!(supports("aarch64-apple-darwin"));
+        assert!(supports("arm64-apple-darwin"));
+        for other in [
+            "aarch64-unknown-linux-gnu",
+            "x86_64-unknown-linux-gnu",
+            "x86_64-apple-darwin",
+            "x86_64-pc-windows-msvc",
+            "x86_64-pc-windows-gnu",
+            "aarch64-pc-windows-msvc",
+            "aarch64-apple-ios",
+        ] {
+            assert!(!supports(other), "{other}");
+        }
+    }
+
+    /// The driver's rule for this host is the runtime's: an executable the
+    /// driver emits with the main-thread policy is one this host's runtime
+    /// starts so, and one it refuses to emit is one the runtime refuses.
+    #[test]
+    fn main_thread_startup_is_the_runtimes() {
+        assert_eq!(main_thread_startup(&Triple::host()), crate::runtime::aot::MAIN_THREAD_STARTUP);
     }
 
     #[test]

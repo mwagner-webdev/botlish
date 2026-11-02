@@ -1,0 +1,56 @@
+# chunks-vector.bot -- chunks-fold.bot's chunking in the pre-fold mutable
+# idiom: the chunks and the chunk being built are MutableVectors pushed in
+# place (amortized growth, no copy per addition), turned into Lists by
+# collecting loops at the end.
+#
+# expect: [56, 117, 5556]
+
+import std::list
+import std::mutable_vector
+
+fn token(i: int) -> int:
+    if i.mod(5) == 4:
+        return 0
+    if i.mod(7) == 6:
+        return -i
+    i
+
+fn list_of(v: MutableVector[int]) -> List[int]:
+    loop x in v:
+        x
+
+fn chunks(tokens: List[int]) -> List[List[int]]:
+    done = std::mutable_vector::from_list([[0]])
+    done.clear()
+    current = std::mutable_vector::from_list([0])
+    current.clear()
+    loop t in tokens:
+        if t == 0:
+            if current.length() > 0:
+                done.push(list_of(current))
+                current.clear()
+        elif t < 0:
+            done.push([t])
+            done.push([-t])
+        else:
+            current.push(t)
+    if current.length() > 0:
+        done.push(list_of(current))
+    loop c in done:
+        c
+
+fn size(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate n 0:
+        n + c.length()
+
+fn total(cs: List[List[int]]) -> int:
+    fold c in cs with intermediate s 0:
+        inner = fold x in c with intermediate t 0:
+            t + x
+        s + inner
+
+n = 128
+tokens = loop i from 0 to n:
+    token(i)
+cs = chunks(tokens)
+[cs.length(), size(cs), total(cs)]

@@ -1,0 +1,85 @@
+# game-server.bot -- EXPERIMENTAL: the game-server workload of
+# EVENT-LOOP-EXPLORATION.md (audit/event-loop/src/gameserver.bot) on the
+# audit's prototype scheduler (evloop.bot) and its deterministic driver
+# (simdrv.bot), scaled up from a-gameserver.bot and without the scheduler's
+# trace (tracing 0).
+#
+# bench-modules: audit/event-loop/src/evloop.bot audit/event-loop/src/gameserver.bot audit/event-loop/src/simdrv.bot
+#
+# bench/bench.tcl stages those three modules beside this file in a private
+# directory and compiles it there (application modules resolve from the
+# entry file's directory: IMPORTS.md); the modules are the audit's own,
+# unchanged.
+#
+# CONNS connections arrive one microsecond apart. Each sends LINES lines,
+# every fourth a MOVE (a path of 10 to 50 steps: a pathfinding task that
+# yields every 10 steps, which its session waits for on a channel) and the
+# rest TALK (an echo), then BYE. The world ticks every PERIOD microseconds
+# and advances its AI coroutine directly; the flusher sends the turn's
+# replies once per turn. Everything runs on the virtual clock, so every
+# backend -- and every reference implementation in
+# bench/experimental/equivalents/ -- makes exactly the same scheduling
+# decisions: the value holds the scheduler's counters, so a port that
+# schedules differently disagrees.
+#
+# The value: [turns, dispatched, completed, observed, stale, sent values
+# (conn, value pairs),
+# checksum of what was sent, checksum of the tasks' results (id, value
+# pairs in completion order), trace lines, trace characters].
+#
+# expect: [112, 604, 74, 112, 0, 480, 972395168, 705481770, 209, 5838]
+import evloop
+import gameserver
+import simdrv
+import std::list
+import std::mutable_array
+import std::str
+
+conns = 12
+lines = 18
+period = 25
+ticks = 12
+
+# A fold of VALUES that depends on their order (every value >= -1).
+fn checksum(values: List[int]) -> int errors IndexNotFound:
+    h = std::mutable_array::create(1, 7)
+    loop v in values:
+        h.set(0, (h.at(0) * 31 + v + 2).mod(1000000007))
+    h.at(0)
+
+fn script(context ev: evloop::Loop, d: simdrv::Sim) errors IndexNotFound:
+    listener = evloop::source(1, conns + 4)
+    loop c from 1 to conns + 1:
+        simdrv::inject(4 + c, listener.slot, listener.gen, c, 0)
+        spacing = 3 + c.mod(3)
+        loop k from 0 to lines:
+            if k.mod(4) == 1:
+                c.line(1 + k * spacing, 1, 10 * (1 + (c + k).mod(5)))
+            else:
+                c.line(1 + k * spacing, 2, c * 100 + k)
+        c.line(6 + lines * spacing, 9, 0)
+    outbox = evloop::channel(4096)
+    coroutine {step: a, first: af} = gameserver::acceptor(listener, outbox, conns)
+    evloop::adopt(a, af)
+    coroutine {step: f, first: ff} = gameserver::flusher(outbox)
+    evloop::adopt(f, ff)
+    coroutine {step: w, first: wf} = gameserver::world(period, ticks)
+    evloop::adopt(w, wf)
+
+fn main(context ev: evloop::Loop, d: simdrv::Sim) -> List[int] errors IndexNotFound, evloop::LoopReentered:
+    script()
+    turns = evloop::run()
+    sent = simdrv::sent()
+    trace = evloop::trace()
+    chars = std::mutable_array::create(1, 0)
+    loop line in trace:
+        chars.set(0, chars.at(0) + std::str::length(line))
+    [turns, evloop::stat(evloop::s_dispatched), evloop::stat(evloop::s_completed), evloop::stat(evloop::s_observed), evloop::stat(evloop::s_stale), std::list::length(sent), checksum(sent), checksum(evloop::results()), std::list::length(trace), chars.at(0)]
+
+with context evloop::create(8, 0)
+with context simdrv::create()
+main():
+    on IndexNotFound:
+        [-1]
+    on evloop::LoopReentered:
+        [-2]

@@ -44,6 +44,8 @@ fn cabi(c: CAbi) -> &'static str {
         CAbi::Bool => "bool",
         CAbi::F32 => "f32",
         CAbi::F64 => "f64",
+        CAbi::RawF32 => "rf32",
+        CAbi::RawF64 => "rf64",
         CAbi::Ptr => "ptr",
         CAbi::Void => "void",
     }
@@ -129,6 +131,7 @@ pub fn inst(program: &Program, inst: &Inst) -> String {
             format!("    %{dst} = native {}", quote(&program.natives[*native as usize].name))
         }
         Inst::FnValue { dst, func } => format!("    %{dst} = fnvalue {func}"),
+        Inst::CallbackAddress { dst, callback } => format!("    %{dst} = cbaddr {callback}"),
         Inst::SelfClosure { dst } => format!("    %{dst} = self"),
         Inst::Capture { dst, index } => format!("    %{dst} = capture {index}"),
         Inst::StaticGet { dst, index } => format!("    %{dst} = staticget {index}"),

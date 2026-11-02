@@ -1,0 +1,197 @@
+# VARIANT (BENCHMARK-BIMODALITY.md): audit/event-loop/src/simdrv.bot with one
+# `continue` in release_due (below).
+#
+# simdrv.bot -- a deterministic driver for evloop (EVENT-LOOP-EXPLORATION.md):
+# a virtual monotonic clock and a script of native records, each released
+# once the clock reaches its time. block(DEADLINE) never sleeps: it advances
+# the clock to the next scripted record or to DEADLINE, whichever comes
+# first. Every visit to the driver takes one virtual microsecond, so a loop
+# that never sleeps still sees time pass; a task can make its segment take
+# time (advance). Every backend runs it (no C), so the scheduler's
+# semantics can be compared across all four.
+import std::list
+import std::mutable_array
+import std::mutable_vector
+
+# The script: records (time, slot, gen, a, b, released), stride 6. `avail`
+# holds released records (slot, gen, a, b) not yet taken.
+opaque context struct Sim:
+    clock: MutableArray[int]
+    script: MutableVector[int]
+    avail: MutableVector[int]
+    waits: MutableVector[int]
+    lines: MutableVector[int]
+    sent: MutableVector[int]
+
+# clock registers
+c_now = 0
+c_scripted = 1
+c_read = 2
+c_slot = 3
+c_gen = 4
+c_a = 5
+c_b = 6
+c_released = 7
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+fn create() -> Sim:
+    Sim {clock: std::mutable_array::create(8, 0), script: ints(), avail: ints(), waits: ints(), lines: ints(), sent: ints()}
+
+# Script a record for registration (SLOT, GEN) at time WHEN. Records may be
+# scripted in any order; those due at the same time are released in the
+# order they were scripted.
+fn inject(when: int, slot: int, gen: int, a: int, b: int, context s: Sim) errors IndexNotFound:
+    s.script.push(when)
+    s.script.push(slot)
+    s.script.push(gen)
+    s.script.push(a)
+    s.script.push(b)
+    s.script.push(0)
+    s.clock.set(c_scripted, s.clock.at(c_scripted) + 1)
+
+# The deadlines the loop blocked with, in order (-1: none).
+fn waits(context s: Sim) -> List[int] errors IndexNotFound:
+    loop i from 0 to s.waits.length():
+        s.waits.at(i)
+
+fn clock(context s: Sim) -> int:
+    s.clock.at(c_now):
+        on IndexNotFound:
+            0
+
+fn release_due(context s: Sim) errors IndexNotFound:
+    now = s.clock.at(c_now)
+    loop i from 0 to s.clock.at(c_scripted):
+        if s.script.at(i * 6 + 5) == 0 and s.script.at(i * 6) <= now:
+            loop k from 1 to 5:
+                s.avail.push(s.script.at(i * 6 + k))
+            s.script.swap(i * 6 + 5, 1)
+            s.clock.set(c_released, s.clock.at(c_released) + 1)
+        # VARIANT (BENCHMARK-BIMODALITY.md): without this `continue` the
+        # loop, release_due's last expression, collects its bodies' values.
+        continue
+
+# The earliest time of a record not yet released, or -1.
+fn next_due(context s: Sim) -> int errors IndexNotFound:
+    best = std::mutable_array::create(1, -1)
+    loop i from 0 to s.clock.at(c_scripted):
+        if s.script.at(i * 6 + 5) == 0:
+            t = s.script.at(i * 6)
+            b = best.at(0)
+            if b == -1 or t < b:
+                best.set(0, t)
+    best.at(0)
+
+fn available(context s: Sim) -> int errors IndexNotFound:
+    s.avail.length() - s.clock.at(c_read) * 4
+
+fn block_checked(deadline: int, context s: Sim) -> int errors IndexNotFound:
+    s.waits.push(deadline)
+    s.clock.set(c_now, s.clock.at(c_now) + 1)
+    release_due()
+    now = s.clock.at(c_now)
+    next = next_due()
+    target = if available() > 0:
+        now
+    elif deadline >= 0 and deadline <= now:
+        now
+    elif next == -1 and deadline == -1:
+        -1
+    elif next == -1:
+        deadline
+    elif deadline == -1 or next < deadline:
+        next
+    else:
+        deadline
+    if target == -1:
+        return -1
+    if target > now:
+        s.clock.set(c_now, target)
+        release_due()
+    available()
+
+fn block(deadline: int, context s: Sim) -> int:
+    block_checked(deadline):
+        on IndexNotFound:
+            -1
+
+fn take_checked(context s: Sim) -> int errors IndexNotFound:
+    r = s.clock.at(c_read)
+    if r * 4 >= s.avail.length():
+        return -1
+    s.clock.set(c_slot, s.avail.at(r * 4))
+    s.clock.set(c_gen, s.avail.at(r * 4 + 1))
+    s.clock.set(c_a, s.avail.at(r * 4 + 2))
+    s.clock.set(c_b, s.avail.at(r * 4 + 3))
+    s.clock.set(c_read, r + 1)
+    s.clock.at(c_slot)
+
+fn take_record(context s: Sim) -> int:
+    take_checked():
+        on IndexNotFound:
+            -1
+
+nomethod fn field(i: int, context s: Sim) -> int:
+    s.clock.at(i):
+        on IndexNotFound:
+            0
+
+fn record_gen(context s: Sim) -> int:
+    field(c_gen)
+
+fn record_a(context s: Sim) -> int:
+    field(c_a)
+
+fn record_b(context s: Sim) -> int:
+    field(c_b)
+
+# Move the virtual clock forward by DELTA (a segment that takes time).
+fn advance(delta: int, context s: Sim) errors IndexNotFound:
+    s.clock.set(c_now, s.clock.at(c_now) + delta)
+
+# ---------------------------------------------------------------------------
+# A scripted network (gameserver::Net): connection CONN's lines are known in
+# advance (line); when the program attaches the connection to a
+# registration, each line becomes a record DELAY microseconds later.
+
+fn line(conn: int, delay: int, cmd: int, arg: int, context s: Sim):
+    s.lines.push(conn)
+    s.lines.push(delay)
+    s.lines.push(cmd)
+    s.lines.push(arg)
+
+nomethod fn attach_checked(conn: int, slot: int, gen: int, context s: Sim) -> int errors IndexNotFound:
+    now = s.clock.at(c_now)
+    n = s.lines.length()
+    count = loop i from 0 to n:
+        if i.mod(4) == 0 and s.lines.at(i) == conn:
+            inject(now + s.lines.at(i + 1), slot, gen, s.lines.at(i + 2), s.lines.at(i + 3))
+            1
+        else:
+            continue
+    count.length()
+
+fn attach(conn: int, slot: int, gen: int, context s: Sim) -> int:
+    attach_checked(conn, slot, gen):
+        on IndexNotFound:
+            -1
+
+fn send(conn: int, value: int, context s: Sim) -> int:
+    s.sent.push(conn)
+    s.sent.push(value)
+    1
+
+fn hangup(conn: int, context s: Sim) -> int:
+    s.sent.push(conn)
+    s.sent.push(-1)
+    1
+
+fn ack(conn: int, context s: Sim) -> int:
+    conn
+
+# What was sent, as conn, value pairs (-1: hung up).
+fn sent(context s: Sim) -> List[int] errors IndexNotFound:
+    loop i from 0 to s.sent.length():
+        s.sent.at(i)

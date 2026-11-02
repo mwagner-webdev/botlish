@@ -1,0 +1,187 @@
+# measure.bot -- the census's representative costs
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Performance"): N sequential small
+# requests on one
+# connection each for HTTP/1.1, HTTP/2 and HTTP/3 (client and server in this
+# process, both counted), then one 1 MiB body streamed in 4 KiB chunks over
+# HTTP/2. Each line reports totals over the phase; per-request and per-chunk
+# figures are the totals divided by the count (Botlish has no integer
+# division; the report divides).
+import event_loop_linux
+import hs
+import hsh
+import hsnet
+import hsq
+import hstls
+import probe
+import std::event_loop
+import std::ffi::c
+import std::list
+import std::mutable_array
+import std::str
+
+extern c fn hs_allocs(i: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+
+fn allocs(i: int) -> int:
+    hs_allocs(hs::cll(i))
+
+# A snapshot of the counters, as a list.
+nomethod fn snap(context ev: std::event_loop::Loop, h: hs::Hs) -> List[int] errors IndexNotFound, std::event_loop::SchedulerFault:
+    [hs::rstat(0), hs::rstat(2), hs::rstat(5) + hs::rstat(6), hs::rstat(1), hs::rstat(16), hs::rstat(15), hs::rstat(14), hs::rstat(19), hs::rstat(20), allocs(0), allocs(1), hs::counter("nudges"), std::event_loop::now(), std::event_loop::turn_number()]
+
+nomethod fn report(name: str, count: int, a: List[int], b: List[int], context ev: std::event_loop::Loop) errors IndexNotFound, std::event_loop::SchedulerFault:
+    d = std::mutable_array::create(14, 0)
+    loop i from 0 to 14:
+        d.set(i, b.at(i) - a.at(i))
+    probe::log("measure ".concat(name).concat(" n ").concat(probe::n(count)).concat(": calls ").concat(probe::n(d.at(0))).concat(" polls ").concat(probe::n(d.at(1))).concat(" wakes ").concat(probe::n(d.at(2))).concat(" runs ").concat(probe::n(d.at(3))).concat(" notices ").concat(probe::n(d.at(4))).concat(" readiness ").concat(probe::n(d.at(5))).concat(" interest ").concat(probe::n(d.at(6))).concat(" copied-out ").concat(probe::n(d.at(7))).concat(" copied-in ").concat(probe::n(d.at(8))).concat(" allocs ").concat(probe::n(d.at(9))).concat(" alloc-bytes ").concat(probe::n(d.at(10))).concat(" nudges ").concat(probe::n(d.at(11))).concat(" wall-us ").concat(probe::n(d.at(12))).concat(" turns ").concat(probe::n(d.at(13))))
+
+nomethod fn http_server(server: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    data = probe::payload(8)
+    loop:
+        x = hsh::next_request(server)
+        if x == 0:
+            e = hs::await(server)
+            if e.reason != std::event_loop::Wake::Event:
+                return 0
+            continue
+        hsh::respond(x, 200, true)
+        n = if hsh::path(x) == "GET /big":
+            chunks
+        else:
+            1
+        loop i from 0 to n:
+            loop:
+                if hsh::send(x, data) > 0:
+                    break
+                hs::await(x)
+        hsh::finish(x)
+
+nomethod fn h3_server(server: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    data = probe::payload(8)
+    loop:
+        s = hsq::next_request(server)
+        if s == 0:
+            e = hs::await(server)
+            if e.reason != std::event_loop::Wake::Event:
+                return 0
+            continue
+        hsq::respond(s, 200, true)
+        loop:
+            if hsq::send(s, data) != 0:
+                break
+            hs::await(s)
+        hsq::finish(s)
+
+nomethod fn http_get(client: int, path: str, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    x = hsh::request(client, "GET", path, false)
+    loop:
+        if hsh::status(x) != 0:
+            break
+        hs::await(x)
+    total = std::mutable_array::create(1, 0)
+    loop:
+        c = hsh::recv(x)
+        if c.n > 0:
+            total.set(0, total.at(0) + c.n)
+        elif c.n == 0:
+            hs::await(x)
+        else:
+            break
+    hs::release(x)
+    total.at(0)
+
+nomethod fn h3_get(ep: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    s = hsq::request(ep, "GET", "/small", false)
+    loop:
+        if hsq::status(s) != 0:
+            break
+        hs::await(s)
+    total = std::mutable_array::create(1, 0)
+    loop:
+        c = hsq::recv(s)
+        if c.n > 0:
+            total.set(0, total.at(0) + c.n)
+        elif c.n == 0:
+            hs::await(s)
+        else:
+            break
+    hs::release(s)
+    total.at(0)
+
+nomethod fn http_phase(name: str, proto: int, count: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    server = hsh::server(proto, 0)
+    lfd = hsh::listen_socket(0)
+    hsh::serve(server, lfd)
+    coroutine {step: s, first: f} = http_server(server, 256)
+    std::event_loop::adopt(s, f)
+    client = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), proto, 0)
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    http_get(client, "/warm")
+    a = snap()
+    loop i from 0 to count:
+        http_get(client, "/small")
+    report(name, count, a, snap())
+    if proto == 2:
+        b = snap()
+        got = http_get(client, "/big")
+        report("h2-stream-4k-chunks", 256, b, snap())
+        probe::log("streamed bytes ".concat(probe::n(got)))
+    hs::release(client)
+    hs::release(server)
+    0
+
+nomethod fn h3_phase(count: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    sfd = hsq::udp_socket()
+    server = hsq::server(sfd, hstls::good(), 65536)
+    coroutine {step: s, first: f} = h3_server(server)
+    std::event_loop::adopt(s, f)
+    ep = hsq::client(hsq::udp_socket(), hs::port_of(sfd), "localhost", 65536)
+    loop:
+        if hsq::state(ep) != 0:
+            break
+        hs::await(ep)
+    h3_get(ep)
+    a = snap()
+    loop i from 0 to count:
+        h3_get(ep)
+    report("h3", count, a, snap())
+    hs::release(ep)
+    hs::release(server)
+    0
+
+nomethod fn all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    http_phase("h1", 1, 100)
+    http_phase("h2", 2, 100)
+    h3_phase(100)
+    probe::log("longest rust call us ".concat(probe::n(hs::rstat(23))).concat(" longest executor run us ").concat(probe::n(hs::rstat(24))))
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    coroutine {step: s, first: f} = all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_bystander(400, 1000)
+    probe::spawn_watchdog(1, 20000000)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

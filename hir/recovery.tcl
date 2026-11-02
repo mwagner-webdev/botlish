@@ -340,7 +340,16 @@ proc hir::recovery::raise {hir reported locate} {
 # itself as its `record`. The one statement of what a semantic diagnostic is
 # outside HIR: a strict compilation raises these, and the compiler service
 # reports exactly these for a lenient one (COMPILER-SERVICE-MILESTONE-1.md).
+#
+# A rejected build's report is never empty: when HIR has diagnostics but
+# REPORTED has none -- every one of them the compiler's own, none a problem
+# of the program (Internal) -- the entries are one COMPILER-INTERNAL entry
+# that names them. (Not when a syntax recovery's only diagnostics are its
+# holes': the syntax errors are that compilation's report, Finish.)
 proc hir::recovery::entries {hir reported locate} {
+    if {$reported eq {} && [dict get $hir diagnostics] ne {} && ![dict exists $hir syntaxRecovery]} {
+        return [list [Internal $hir $locate]]
+    }
     set entries {}
     foreach diagnostic $reported {
         set message [dict get $diagnostic message]
@@ -368,4 +377,34 @@ proc hir::recovery::entries {hir reported locate} {
         lappend entries $entry
     }
     return $entries
+}
+
+# The core::raiseDiagnostics entry of a build whose diagnostics HIR has but
+# none of which is reported (entries): COMPILER-INTERNAL, a compiler bug,
+# never a problem of the program -- typically a build of the monomorphized
+# program whose diagnostics, all `internal` (hir::traits::monomorphize), are
+# in units a resolution failure there taints. Its text names each of them
+# with its kind, as the compiler's, so none is presented as a source error
+# of its own (no entry, no code, no help topic of its kind); its location is
+# the first's; its record holds them all (`internal`).
+proc hir::recovery::Internal {hir locate} {
+    set diagnostics [dict get $hir diagnostics]
+    set summary "internal compiler error: this program was rejected, but by none of its own problems -- each of the [llength $diagnostics] diagnostic(s) the compiler made is its own (a compiler bug; please report the program):"
+    set location ""
+    set prefix ""
+    foreach diagnostic $diagnostics {
+        set text [dict get $diagnostic message]
+        if {$locate} {
+            set origin [if {[dict exists $diagnostic origin]} {dict get $diagnostic origin} else {hir::get $hir [dict get $diagnostic expr] origin}]
+            set text "[hir::originLocation $hir $origin]: $text"
+            if {$location eq ""} {
+                set location [hir::originSpan $hir $origin]
+                set prefix "[hir::originLocation $hir $origin]: "
+            }
+        }
+        append summary "\n    $text ([dict get $diagnostic kind])"
+    }
+    return [dict create errorcode {CORE SEMANTIC COMPILER-INTERNAL} message $prefix$summary summary $summary \
+        location $location related {} \
+        record [dict create kind COMPILER-INTERNAL message $summary internal $diagnostics]]
 }

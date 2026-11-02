@@ -1,0 +1,159 @@
+# tls.bot -- Probe C: TLS (BoringSSL through boring) between Hyper and the
+# Botlish-watched socket, with real authentication. Each scenario makes a
+# fresh server (a certificate kind, accepted ALPN protocols), a fresh
+# listening socket and a client (trusting the census's test CA only,
+# verifying the chain and "localhost", offering ALPN protocols), waits for
+# the handshake and, when it succeeds, makes one request. The failures are
+# the point: none is accepted.
+import event_loop_linux
+import hs
+import hsh
+import hsnet
+import hstls
+import probe
+import std::event_loop
+import std::mutable_array
+import std::str
+
+nomethod fn answer(server: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        x = hsh::next_request(server)
+        if x == 0:
+            e = hs::await(server)
+            if e.reason != std::event_loop::Wake::Event:
+                return 0
+            continue
+        hsh::respond(x, 200, true)
+        loop:
+            if hsh::send(x, "over tls") > 0:
+                break
+            hs::await(x)
+        hsh::finish(x)
+        return 1
+
+# One scenario: the handshake's outcome (1 HTTP/1.1, 2 HTTP/2, or a
+# failure code) and, when it succeeded, the response status and body.
+nomethod fn scenario(name: str, cert: int, server_alpn: int, client_alpn: int, expect: int, context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    lfd = hsh::listen_socket(0)
+    server = hsh::server(1, hstls::server(cert, server_alpn))
+    hsh::serve(server, lfd)
+    coroutine {step: s, first: f} = answer(server)
+    std::event_loop::adopt(s, f)
+    client = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), 1, hstls::client("localhost", client_alpn))
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    state = hsh::state(client)
+    detail = std::mutable_array::from_list([""])
+    if state > 0:
+        x = hsh::request(client, "GET", "/secure", false)
+        loop:
+            if hsh::status(x) != 0:
+                break
+            hs::await(x)
+        loop:
+            c = hsh::recv(x)
+            if c.n > 0:
+                detail.set(0, detail.at(0).concat(c.text))
+            elif c.n == 0:
+                hs::await(x)
+            else:
+                break
+        detail.set(0, " status ".concat(probe::n(hsh::status(x))).concat(" body ").concat(detail.at(0)))
+        hs::release(x)
+    verdict = if state == expect:
+        "ok"
+    else:
+        "UNEXPECTED"
+    probe::log("tls ".concat(name).concat(": ").concat(probe::n(state)).concat(" expected ").concat(probe::n(expect)).concat(" -- ").concat(verdict).concat(detail.at(0)))
+    hs::release(client)
+    hs::release(server)
+    if verdict == "ok":
+        probe::bump_flag(2)
+    state
+
+# The peer goes away mid-handshake: a listening socket nobody accepts on is
+# closed under the client's ClientHello (the kernel resets the connection).
+nomethod fn disconnect(context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    lfd = hsh::listen_socket(0)
+    client = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), 1, hstls::client("localhost", hstls::h1()))
+    std::event_loop::sleep(20000)
+    hs::close_fd(lfd)
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    state = hsh::state(client)
+    verdict = if state == hstls::eof_error():
+        "ok"
+    else:
+        "UNEXPECTED"
+    probe::log("tls peer-disconnect: ".concat(probe::n(state)).concat(" expected ").concat(probe::n(hstls::eof_error())).concat(" -- ").concat(verdict))
+    hs::release(client)
+    if verdict == "ok":
+        probe::bump_flag(2)
+    state
+
+# Interrupted by its owner: a handshake that cannot progress (nobody
+# answers) is released; its descriptor comes back to be unwatched and
+# closed, and nothing more is heard of it.
+nomethod fn interrupted(context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    lfd = hsh::listen_socket(0)
+    client = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), 1, hstls::client("localhost", hstls::h1()))
+    std::event_loop::sleep(20000)
+    before = hsh::state(client)
+    released = hs::release(client)
+    after = hsh::state(client)
+    hs::close_fd(lfd)
+    ok = before == 0 and released == 0 and after == -90004
+    verdict = if ok:
+        "ok"
+    else:
+        "UNEXPECTED"
+    probe::log("tls interrupted-by-owner: state ".concat(probe::n(before)).concat(" release ").concat(probe::n(released)).concat(" after ").concat(probe::n(after)).concat(" -- ").concat(verdict))
+    if ok:
+        probe::bump_flag(2)
+    0
+
+nomethod fn all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    both = hstls::h1() + hstls::h2()
+    scenario("good-h2", hstls::good(), both, both, 2)
+    scenario("good-http1.1", hstls::good(), both, hstls::h1(), 1)
+    scenario("wrong-host", hstls::wrong_host(), both, both, hstls::verify_error(62))
+    scenario("untrusted-ca", hstls::untrusted(), both, both, hstls::verify_error(20))
+    scenario("expired", hstls::expired(), both, both, hstls::verify_error(10))
+    scenario("alpn-mismatch", hstls::good(), both, hstls::odd(), hstls::alpn_error())
+    disconnect()
+    interrupted()
+    probe::log("tls scenarios as expected ".concat(probe::n(probe::flag(2))).concat(" of 8; handshakes ").concat(probe::n(hstls::handshakes())))
+    probe::log("rust: calls ".concat(probe::n(hs::rstat(0))).concat(" polls ").concat(probe::n(hs::rstat(2))).concat(" readiness ").concat(probe::n(hs::rstat(15))))
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    coroutine {step: s, first: f} = all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_watchdog(1, 10000000)
+    std::event_loop::run()
+    probe::log("watched after stop ".concat(probe::n(hsnet::watched())).concat(" retired ").concat(probe::n(hsnet::count(3))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

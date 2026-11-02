@@ -1,0 +1,4 @@
+# an untyped parameter compared with a character: the inferred contract
+fn hyphen?(c):
+    c == '-'
+[hyphen?("-"), hyphen?('-'), hyphen?(45)]

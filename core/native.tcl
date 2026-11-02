@@ -12,6 +12,18 @@
 #   paramTypes      types (type.tcl) the implementation *requires* of each
 #                   argument (any = no requirement); a call that returns
 #                   proves its arguments had these types. "" = unknown.
+#   elementKinds    "" or one entry per parameter: "" (no requirement) or
+#                   the kind (a primitive type) every element of that List
+#                   argument must have -- std::list::flat's {list}: the
+#                   argument is a List of Lists (LIST-FLAT-MILESTONE-1.md).
+#                   Like paramTypes it is a run-time kind contract (the
+#                   implementation raises TYPE for an element of another
+#                   kind), held statically by the one native-kind rule
+#                   (hir::types::NativeKindMismatch): an argument whose
+#                   static element type is of a known other kind is the
+#                   call's compile-time TYPE error; an element of no fixed
+#                   kind (`any`) is checked when the call runs. Read by
+#                   registration, never by name.
 #   resultType      type of every result, or any
 #   testsType       "" or a type T: the native is a *type test*, a pure
 #                   one-argument predicate returning exactly whether its
@@ -74,6 +86,13 @@
 #                     list K          the length of List argument K
 #                     list K D        the length of List argument K plus D
 #                                     (std::list::append: one more)
+#                     flat K          the exact length N of List argument K
+#                                     times the exact length M every one of
+#                                     its elements has, when its static type
+#                                     states both (List[List[T]{length: M}]
+#                                     {length: N}: std::list::flat makes N*M
+#                                     elements, LIST-FLAT-MILESTONE-1.md);
+#                                     nothing otherwise
 #                     extent K        the extent N of argument K's static
 #                                     type when it is a live fixed array,
 #                                     NativeView[array N of E] or
@@ -190,6 +209,9 @@
 #                                     index given by Int argument I
 #                     append L V      a list of list argument L's elements
 #                                     followed by argument V
+#                     flat L          a list of the elements of list
+#                                     argument L's Lists, in order: a
+#                                     List[List[T]] makes a List[T]
 #                     immutable-set L an ImmutableSet of list argument L's
 #                                     element type (MINIMAL-IMMUTABLE-SET.md)
 #                     mutarray-element A  argument A is a MutableArray[T]:
@@ -285,8 +307,16 @@
 #                     interval LO HI  the result is always in LO..HI (two
 #                                     integers, LO <= HI; stored in decimal):
 #                                     a bound of the operation itself, e.g.
-#                                     std::char::scalar_value's Unicode scalar
-#                                     values or hash's 61-bit mask
+#                                     hash's 61-bit mask
+#                     intervals {LO HI} {LO HI}...   the result is always
+#                                     in the union of these components (at
+#                                     least two, sorted, disjoint and not
+#                                     adjacent, stored in decimal): a set
+#                                     with gaps, e.g. std::char::scalar_value's
+#                                     Unicode scalar values, never a
+#                                     surrogate. hir::range::RegisteredRange
+#                                     reads its hull, the interval-set facts
+#                                     (hir/intset.tcl) its components
 #                     collection-length   the result is always a String or
 #                                     List length: >= 0 and, by the runtime's
 #                                     own enforced construction limit
@@ -572,7 +602,7 @@ proc core::native::register {name args} {
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
         -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
         -result-length {} -keeps-length 0 -drop-form {} -layout {} -imprint {} -foreign {} -extern {} \
-        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0]
+        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0 -element-kinds {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -654,6 +684,18 @@ proc core::native::register {name args} {
     if {$arity ne "*" && $paramTypes ne "" && [llength $paramTypes] != $arity} {
         error "core::native::register: -param-types of \"$name\" must list $arity type(s)"
     }
+    set elementKinds {}
+    if {[dict get $options -element-kinds] ne ""} {
+        if {$arity eq "*" || [llength [dict get $options -element-kinds]] != $arity} {
+            error "core::native::register: -element-kinds of \"$name\" must list $arity kind(s)"
+        }
+        foreach kind [dict get $options -element-kinds] param $paramTypes {
+            if {$kind ne "" && ($param ne "list" || [llength [CanonicalType $name -element-kinds $kind]] != 1)} {
+                error "core::native::register: -element-kinds of \"$name\": \"$kind\" must be a primitive kind of a List parameter's elements"
+            }
+            lappend elementKinds $kind
+        }
+    }
     variable runtimeTags
     foreach tag [dict get $options -runtime] {
         if {$tag ni $runtimeTags} {
@@ -704,7 +746,7 @@ proc core::native::register {name args} {
         error "core::native::register: bad -measures \"$measures\" for \"$name\" (FAMILY PARAM K, an Int result)"
     }
     set length [dict get $options -result-length]
-    if {$length ne "" && $length ne "args" && ([llength $length] ni {2 3} || [lindex $length 0] ni {int list extent path}
+    if {$length ne "" && $length ne "args" && ([llength $length] ni {2 3} || [lindex $length 0] ni {int list flat extent path}
             || ![string is digit -strict [lindex $length 1]] || $arity eq "*" || [lindex $length 1] >= $arity
             || ([llength $length] == 3 && ([lindex $length 0] ne "list" || ![string is digit -strict [lindex $length 2]])))} {
         error "core::native::register: bad -result-length \"$length\" for \"$name\""
@@ -771,7 +813,7 @@ proc core::native::register {name args} {
         keepsLength [dict get $options -keeps-length] dropForm $dropForm \
         layout $layout imprint $imprint foreign $foreign extern [dict get $options -extern] \
         mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
-        measures $measures hashing $hashing elementPlace $elementPlace]
+        measures $measures hashing $hashing elementPlace $elementPlace elementKinds $elementKinds]
     return [core::value::native $name]
 }
 
@@ -863,6 +905,26 @@ proc core::native::ValidLayoutRole {role arity} {
 proc core::native::ValidResultRange {range} {
     if {$range in {{} nonneg collection-length}} {
         return $range
+    }
+    if {![catch {llength $range} n] && $n >= 2 && [lindex $range 0] eq "intervals"} {
+        # A set with gaps: at least two components (one is `interval`),
+        # each {LO HI} of integers LO <= HI, sorted, each above the
+        # previous one's successor (disjoint and not adjacent: the
+        # canonical form, so a registration states each set one way).
+        set out [list intervals]
+        set previous ""
+        foreach component [lrange $range 1 end] {
+            if {[catch {llength $component} m] || $m != 2} { return bad }
+            lassign $component lo hi
+            if {![string is entier -strict $lo] || ![string is entier -strict $hi] || $lo > $hi} {
+                return bad
+            }
+            if {$previous ne "" && $lo <= $previous + 1} { return bad }
+            set previous $hi
+            lappend out [list [expr {$lo + 0}] [expr {$hi + 0}]]
+        }
+        if {[llength $out] < 3} { return bad }
+        return $out
     }
     if {[catch {llength $range} n] || $n != 3 || [lindex $range 0] ne "interval"} {
         return bad
@@ -971,10 +1033,26 @@ proc core::native::ValidShape {shape count} {
         # outward value of its segment, the resume message of a yield.
         return 1
     }
+    if {[lindex $shape 0] eq {callback-pointer}} {
+        # {callback-pointer I}: the result is the C function pointer of the
+        # `callback c fn` argument I names, a std::ffi::c::FnPtr of its
+        # declared C signature (std::ffi::c::callback,
+        # C-CALLBACK-MILESTONE-1.md), resolved by hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
+    }
     if {$shape eq {never}} {
         # {never}: the native never completes normally
         # (context#unreachable, core/contexts.tcl).
         return 1
+    }
+    if {[lindex $shape 0] eq {tree-children}} {
+        # {tree-children I}: the result is the child List of argument I, a
+        # tree struct's value -- its declaration's child field type for its
+        # application (std::tree::children, core/tree.tcl;
+        # TREE-STRUCT-MILESTONE-1.md), resolved by hir::types::ShapeResult.
+        return [expr {$length == 2 && [string is digit -strict [lindex $shape 1]]
+            && ($count eq "" || [lindex $shape 1] < $count)}]
     }
     if {[lindex $shape 0] eq {layout-struct}} {
         # {layout-struct I}: the result is a LayoutStruct[L] whose layout L
@@ -1063,6 +1141,11 @@ proc core::native::ValidShape {shape count} {
         ""       { return [expr {$length == 0}] }
         elements { return [expr {$length == 1}] }
         element - append { return [expr {$length == 3 && $count ne ""}] }
+        flat {
+            # {flat L}: argument L is a List of Lists, List[List[T]]: the
+            # result is a List[T] (std::list::flat, LIST-FLAT-MILESTONE-1.md).
+            return [expr {$length == 2 && $count ne ""}]
+        }
         immutable-set { return [expr {$length == 2}] }
         mutarray-element - mutarray-freeze - mutarray-create - mutarray-from-list - mutarray-generate {
             return [expr {$length == 2 && $count ne ""}]
@@ -1406,6 +1489,9 @@ core::native::declareInternalModule std::io::bytepath
 # ... and the internal members of its public ones (declareInternalMember).
 core::native::declareInternalMember std::mutable_set::table_of
 core::native::declareInternalMember std::mutable_set::of_table
+# ... and the frozen map std::mutable_map's freeze builds from a table's
+# parts (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+core::native::declareInternalMember std::immutable_map::of_parts
 # ... and the native path of a text a platform's path module already proved
 # a valid path (WINDOWS-X86-64-MILESTONE-7.md): std::linux::path::native and
 # its siblings build it with no second validation.

@@ -1,0 +1,30 @@
+# invalid_emitter.bot -- an emitter whose claim the compiler rejects
+# (EMISSION-CLAIMS-MILESTONE-1.md): the guarantee demonstrated by its
+# failure. Compiling this program is an error, by design:
+#
+#   tclsh9.0 main.tcl -check examples/dfa/json/invalid_emitter.bot
+#
+# number_emit::integer is certified to emit one whole json_number token.
+# Called twice with nothing between, the second number continues the first:
+# `[1 2]` would be fine, `[12]` is one number, and for `pair(0, 0)` the
+# trace `[00]` is no JSON text at all. The compiler finds both:
+# EMIT-BOUNDARY (the second integer's first digit continues the token the
+# first integer emitted, which claims to emit it whole) and EMIT-REJECTED
+# (after a zero, json_number takes no digit). Its witness tool runs it:
+#
+#   tclsh9.0 audit/emission-claims/tools/witness.tcl examples/dfa/json/invalid_emitter.bot
+#
+# The repair is the grammar's: a separator between the numbers
+# (emitlib::member, value_emit's arrays).
+
+import json_grammar
+import number_emit
+
+fn pair(a: int, b: int) -> unit errors IndexNotFound emits json_grammar::json_text:
+    yield 91
+    number_emit::integer(a)
+    number_emit::integer(b)
+    yield 93
+    unit
+
+0

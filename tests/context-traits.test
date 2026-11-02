@@ -1277,6 +1277,83 @@ test ct-implementation-yield-hir {the checked program: the operation's call in r
     list [llength $ops] $targets [lsort $edges] $yielding [dict getdef [dict get $quiet traitSource] coroutines graph {}]
 } -result {2 std::ty::ysim::wait {{std::ty::drv::run std::ty::ysim::wait}} {std::ty::drv::both std::ty::drv::deep std::ty::drv::poll std::ty::drv::run std::ty::drv::wait std::ty::drv::wrapper std::ty::ysim::wait} {}}
 
+# ---------------------------------------------------------------------------
+# Context requirements through ordinary trait implementations
+# (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md): an ordinary
+# trait operation's selected implementation may need a context trait; the
+# specialization that binds it needs it, so the top-level call that reaches
+# the specialization selects its provider -- and a context-trait provider's
+# own implementation reaching such an operation makes it the selecting
+# call's obligation too.
+
+set ::cicLib {cic/defs.bot {trait Thing:
+    fn show(t: Thing) -> int
+
+context trait Out:
+    fn emit(n: int) -> int
+
+context trait Log:
+    fn level() -> int
+
+fn logged(context g: Log) -> int:
+    g.level()
+
+fn twice(t: Thing) -> int:
+    t.show() + t.show()
+
+fn send(n: int, context o: Out) -> int:
+    o.emit(n)
+}
+cic/a.bot {import std::cic::defs
+
+struct A:
+    v: int
+
+fn show(t: A) -> int:
+    t.v + std::cic::defs::logged()
+}
+cic/k.bot {import std::cic::defs
+import std::cic::a
+
+type Small = Int in 0..10000
+
+context struct K:
+    k: Small
+
+fn create() -> K:
+    K {k: 10}
+
+fn emit(n: int, context c: K) -> int:
+    n + c.k + std::cic::defs::twice(std::cic::a::A {v: n})
+}
+cic/l.bot {type Small = Int in 0..10000
+
+context struct L:
+    l: Small
+
+fn create() -> L:
+    L {l: 100}
+
+fn level(context c: L) -> int:
+    c.l
+}}
+
+test ct-implementation-context-provider {the selected provider of a context-trait operation (K's emit) calls a trait-polymorphic function whose specialization's implementation needs another context trait (twice for A needs Log): that requirement is the selecting call's obligation, so send(1) runs with L installed -- in either declaration and installation order, one outcome on four backends -- and is MISSING-CONTEXT without it, the chain through the provider, the specialization and the implementation} -body {
+    set results {}
+    lappend results [moduleAgree $::cicLib "import std::cic::defs\nimport std::cic::k\nimport std::cic::l\n\nwith context std::cic::l::create()\nwith context std::cic::k::create()\nstd::cic::defs::send(1)\n"]
+    lappend results [moduleAgree $::cicLib "import std::cic::l\nimport std::cic::k\nimport std::cic::defs\n\nwith context std::cic::k::create()\nwith context std::cic::l::create()\nstd::cic::defs::send(1)\n"]
+    set rejected [moduleRejection $::cicLib "import std::cic::defs\nimport std::cic::k\n\nwith context std::cic::k::create()\nstd::cic::defs::send(1)\n"]
+    lappend results [lindex $rejected 0] [lrange [split [regsub -all {[^ ]*/cic/} [lindex $rejected 1] cic/] \n] 1 6]
+} -result {{value 213} {value 213} MISSING-CONTEXT {{    std::cic::defs::send} {        directly requires std::cic::defs::Out, which installed context std::cic::k::K implements:} {     -> std::cic::k::emit} {     -> std::cic::defs::twice (for std::cic::a::A)} {     -> std::cic::a::show, the implementation of std::cic::defs::Thing's operation show for std::cic::a::A, called at cic/defs.bot:14:5} {     -> std::cic::defs::logged}}}
+
+test ct-implementation-context-summary {-contexts (hir::contexts::summary): the specialization's own requirement (twice for A needs Out, through its implementation), the top-level call's static selection of Out's provider, and the clones the program compiles: the implementation's under that selection, the specialization's under its own (the defect's entry-user-trait program, TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot audit trait-impl-context-trait repro entry-user-trait main.bot] -warnings off]
+    lmap line [split [hir::contexts::summary $hir] \n] {
+        if {![regexp {^(specialization|contextselect|contextclone|function twice)} $line]} continue
+        regsub { e[0-9]+ } $line { }
+    }
+} -result {{function twice<A,Out=K> direct-contexts () required-contexts (K)} {specialization twice (for A) required-contexts (Out)} {contextselect Out K} {contextclone through<Out=K> Out=K} {contextclone show<Out=K> Out=K} {contextclone twice<A,Out=K> Out=K}}
+
 test ct-source-audit {no backend implements context traits: core/, compiler/ and native/ never name a library context trait, context or refinement, never read the trait registry, satisfaction or selection, and the only context-trait mention below HIR is the dead-code placeholder's comment} -body {
     set hits {}
     foreach dir {core compiler native native/src native/src/codegen native/src/runtime} {

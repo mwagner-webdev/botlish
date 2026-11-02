@@ -1,0 +1,8 @@
+# I3 imprint variables: two parameters sharing a slot variable, and two different variables
+struct Box[T]:
+    value: T
+fn same_box?(a: Box[T], b: Box[T]) -> bool:
+    a.value == b.value
+fn cross?(a: Box[A], b: Box[B]) -> bool:
+    a.value == b.value
+[same_box?(Box {value: 1}, Box {value: 1}), cross?(Box {value: 1}, Box {value: "1"})]

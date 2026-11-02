@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "dependencies": {
+    "raven": "0.3"
+  },
+  "lock": {
+    "raven": "0.3.0"
+  },
+  "sources": {
+    "raven": {
+      "archive": "../inputs/raven-0.3.0.botpkg",
+      "sha256": "927f7850964507a279522b2c0810288841d187269dec733f75a84b0a8915485d"
+    }
+  }
+}

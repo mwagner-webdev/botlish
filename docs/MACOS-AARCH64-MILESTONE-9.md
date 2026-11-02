@@ -1569,6 +1569,12 @@ Developer ID distribution needs, beyond this milestone:
 
 ## 42. Prerequisites for native Icy Tower distribution
 
+**Done since:** ICY-TOWER-MACOS-MILESTONE-1.md (the binding generated on the
+Mac, SDL3 linked statically -- no framework or dylib in a bundle -- and the
+main thread) and ICY-TOWER-MACOS-APP-MILESTONE-1.md (the game's own bundle,
+Developer ID signing with the hardened runtime, notarization and a
+release). Section 41 stays this application's.
+
 Icy Tower (`examples/games/icy-tower`) is Linux x86-64's (its SDL3 binding
 is generated for that target, ICY-TOWER-VERTICAL-SLICE-1.md). Distributing
 it as a macOS application of its own, compiled by this Botlish.app, needs:

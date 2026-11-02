@@ -1,0 +1,3 @@
+# I3 std::test::describe's `v == true`: a Bool kind test written as an equality
+import std::test
+[std::test::describe(true), std::test::describe(1), std::test::describe("a"), std::test::describe(['a'])]

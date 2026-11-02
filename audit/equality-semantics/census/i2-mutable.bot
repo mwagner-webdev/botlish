@@ -1,0 +1,5 @@
+# I2 MutableArray and MutableVector values, top level and inside a List
+import std::mutable_array
+import std::mutable_vector
+a = std::mutable_array::create(1, 0)
+[[] == [a], [1] == [2]]

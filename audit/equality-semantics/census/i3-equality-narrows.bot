@@ -1,0 +1,10 @@
+# I3 an equality with an Int constant admits an untyped operand into an integer domain: the analyses rely on "different kinds are never equal"
+type Small = Int in 0..9
+fn f(x: Small) -> Small:
+    x
+fn g(v):
+    if v == 3:
+        f(v)
+    else:
+        0
+[g(3), g("3"), g(3.0)]

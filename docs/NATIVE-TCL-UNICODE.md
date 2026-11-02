@@ -13,6 +13,14 @@ expresses `Emailish?`'s validator as ordinary compiled core IR over them.
 `bench/refined-checks.ir` progresses past it, to a new (expected, correctly
 unfixed) blocker, `UriQueryValue?`.
 
+**Successor note (UNICODECHAR-CLASSIFIERS.md).** The same classes of a
+`UnicodeChar` are `std::char::is_tcl_alpha` and `std::char::is_tcl_alnum`,
+total and allocation-free. `std::web::emailish?` (the successor of
+`Emailish?`, stdlib/web.bot) classifies the `UnicodeChar`s
+`std::str::char_at` reads with them, and no longer makes a one-character
+String per character. The String forms here are unchanged, and both forms
+share one classification in each implementation.
+
 ## 1. Files changed
 
 - `core/tclcompat.tcl` -- **new**. Registers `is_tcl_alpha`/`is_tcl_alnum`

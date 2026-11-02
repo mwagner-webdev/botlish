@@ -1,0 +1,4 @@
+# set membership with a needle of another kind
+import std::immutable_set
+s = std::immutable_set::from_list(["-", "+"])
+[std::immutable_set::contains(s, '-'), std::immutable_set::contains(s, "-"), s.contains('+')]

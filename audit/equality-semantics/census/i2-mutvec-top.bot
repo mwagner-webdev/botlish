@@ -1,0 +1,4 @@
+# I2 a MutableVector compared with an Int: refused before kinds are compared
+import std::mutable_vector
+v = std::mutable_vector::from_list([1])
+v == 1

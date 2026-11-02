@@ -1,5 +1,13 @@
 # TRAIT-IMPLEMENTATION-CONTEXT-TRAIT-DEFECT.md
 
+> **Status: resolved** by TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-
+> MILESTONE-1.md (`audit/trait-impl-context-trait/tools/run.tcl`: deviations
+> 0, every control unchanged). That report confirms sections 4.1-4.4 against
+> the code it started from and corrects section 6.2's mechanism (build 2's
+> rewritten diagnostics no longer matched `resolutionDiagnostics`, whose
+> taint then withheld them all; section 3.2 there). The text below is the
+> record as it was written, the starting evidence.
+
 A defect record, written to be the starting evidence of the milestone that
 fixes it: what fails, exactly when, why (traced to the code), what a fix must
 establish and how it will be accepted. Nothing here is fixed. Found while

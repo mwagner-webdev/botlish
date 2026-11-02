@@ -1,0 +1,12 @@
+== audit/thread-actor/probe-a/reject-affine-message.bot
+   error: audit/thread-actor/probe-a/reject-affine-message.bot:14:11: unknown or invalid type actor::Postbox[Coroutine{args: [], return: int, errors: []}] for field "jobs" of struct "Mail": the argument for slot M of actor::Postbox is the affine type Coroutine{args: [], return: int, errors: []}: a type slot takes an unrestricted type (its values may be copied wherever the slot's type is used) (CORE SEMANTIC TYPE)
+== audit/thread-actor/probe-a/reject-forge-address.bot
+   error: audit/thread-actor/probe-a/reject-forge-address.bot:6:5: actor::Address has an opaque representation owned by module "actor"; construct it through the public operations provided by that module (CORE SEMANTIC OPAQUE-CONSTRUCTION)
+== audit/thread-actor/probe-a/reject-handler-value.bot
+   error: audit/thread-actor/probe-a/reject-handler-value.bot:18:10: function on_message requires context Mail, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed (CORE SEMANTIC CONTEXT-FUNCTION-VALUE)
+== audit/thread-actor/probe-a/reject-read-mailbox.bot
+   error: audit/thread-actor/probe-a/reject-read-mailbox.bot:11:15: field access on actor::Postbox is not available outside module "actor"; actor::Postbox has an opaque representation, so its fields can be neither projected nor destructured here (use the public operations provided by that module) (CORE SEMANTIC OPAQUE-REPRESENTATION)
+== audit/thread-actor/probe-a/reject-share-task.bot
+   error: audit/thread-actor/probe-a/reject-share-task.bot:13:5: `step` was used after its coroutine value was moved
+== audit/thread-actor/probe-a/reject-wrong-type.bot
+   error: audit/thread-actor/probe-a/reject-wrong-type.bot:12:5: actor::send: imprint variable M is str by an earlier argument but int by argument 2 (CORE SEMANTIC IMPRINT)

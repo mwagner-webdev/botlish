@@ -465,6 +465,77 @@ test dr-main-prints-each {main.tcl prints each reported diagnostic on a line of 
 } -cleanup {removeFile dr-main.bot; unset -nocomplain path output} -result {{dr-main.bot:1:5: function result does not prove declared type str (CORE SEMANTIC TYPE)} {dr-main.bot:5:7: namespace "std::str" is not imported; add `import std::str` to use `std::str::concat` (the method-style call ".concat(...)" applies only a function visible by that name) (CORE SEMANTIC MISSING-IMPORT)}}
 
 # ---------------------------------------------------------------------------
+# A build whose diagnostics are all the compiler's own
+# (TRAIT-IMPLEMENTATION-CONTEXT-REQUIREMENTS-MILESTONE-1.md, section 7)
+
+# The lenient HIR of SOURCE with the diagnostics of its resolution failures
+# made the compiler's own, as hir::traits::monomorphize makes a monomorphized
+# build's: none is reported (each sits in a unit the failure, as recorded in
+# `resolutionDiagnostics`, taints, and none is that record's any longer).
+proc drInternalOnly {source} {
+    set path [makeFile $source dr-internal.bot]
+    try {
+        set hir [surface::readProgramFile $path -warnings off -strict 0]
+    } finally {
+        removeFile dr-internal.bot
+    }
+    dict set hir diagnostics [lmap d [dict get $hir diagnostics] {
+        if {$d ni [dict get $hir resolutionDiagnostics]} {
+            set d
+        } else {
+            dict set d message "in the monomorphized program: [dict get $d message]"
+            dict set d internal 1
+            set d
+        }
+    }]
+    return $hir
+}
+
+# What the strict boundary raises for HIR (surface::lower::Finish):
+# {ERRORCODE ENTRYCODES FIRSTLINE}, or `accepted`.
+proc drFinish {hir} {
+    if {![catch {surface::lower::Finish $hir 1 off} result options]} {
+        return accepted
+    }
+    list [dict get $options -errorcode] [lmap e [dict getdef $options -diagnostics {}] {dict get $e errorcode}] \
+        [regsub {^[^ ]*dr-internal\.bot:} [lindex [split $result \n] 0] {dr-internal.bot:}]
+}
+
+test dr-internal-only-coded {a rejected build none of whose diagnostics is reported -- each the compiler's own -- raises one coded COMPILER-INTERNAL error naming them, never a Tcl error (it once read the first entry of an empty report: key "message" not known in dictionary), and its diagnostics are not presented as the program's (no entry, no code of their own)} -body {
+    set hir [drInternalOnly "fn f() -> int:\n    g()\n\nf()\n"]
+    catch {surface::lower::Finish $hir 1 off} message
+    list [llength [hir::diagnostics $hir]] [llength [hir::recovery::reported $hir]] [drFinish $hir] \
+        [string match {*in the monomorphized program: unbound name "g"* (UNBOUND)*} $message]
+} -cleanup {unset -nocomplain hir message} -result {1 0 {{CORE SEMANTIC COMPILER-INTERNAL} {{CORE SEMANTIC COMPILER-INTERNAL}} {dr-internal.bot:2:5: internal compiler error: this program was rejected, but by none of its own problems -- each of the 1 diagnostic(s) the compiler made is its own (a compiler bug; please report the program):}} 1}
+
+test dr-internal-only-entries {the entries the compiler service reports for such a HIR are the same one COMPILER-INTERNAL entry, its record holding the compiler's diagnostics: a lenient analysis of a build the compiler failed is a failure, never a clean revision} -body {
+    set hir [drInternalOnly "fn f() -> int:\n    g()\n\nf()\n"]
+    set entries [hir::recovery::entries $hir [hir::recovery::reported $hir] 1]
+    list [llength $entries] [dict get [lindex $entries 0] errorcode] [dict get [lindex $entries 0] record kind] \
+        [lmap d [dict get [lindex $entries 0] record internal] {list [dict get $d kind] [dict get $d internal]}] \
+        [dict get [lindex $entries 0] location line]
+} -cleanup {unset -nocomplain hir entries} -result {1 {CORE SEMANTIC COMPILER-INTERNAL} COMPILER-INTERNAL {{UNBOUND 1}} 2}
+
+test dr-internal-mixed-ordinary {beside an ordinary diagnostic of another unit the program's own problem is reported exactly as before -- first, alone, with its own code -- and the compiler's own are not: recovery's rule that a dependent or internal diagnostic is not the program's is unchanged} -body {
+    set hir [drInternalOnly "fn f() -> int:\n    g()\n\nfn h(x: int) -> str:\n    x\n\nf()\n"]
+    list [llength [hir::diagnostics $hir]] [lmap d [hir::recovery::reported $hir] {dict get $d kind}] [drFinish $hir]
+} -cleanup {unset -nocomplain hir} -result {2 TYPE {{CORE SEMANTIC TYPE} {{CORE SEMANTIC TYPE}} {dr-internal.bot:4:5: function result does not prove declared type str}}}
+
+test dr-internal-ordinary-unchanged {an ordinary rejected build reports what it always did (the resolution failure and nothing dependent on it), and an accepted one is accepted: the internal entry exists only where nothing else would be reported} -body {
+    set path [makeFile "fn f() -> int:\n    g()\n\nf()\n" dr-internal.bot]
+    set hir [surface::readProgramFile $path -warnings off -strict 0]
+    removeFile dr-internal.bot
+    set ok [makeFile "fn f() -> int:\n    1\n\nf()\n" dr-internal.bot]
+    set clean [surface::readProgramFile $ok -warnings off -strict 0]
+    removeFile dr-internal.bot
+    list [drFinish $hir] [drFinish $clean] [hir::recovery::entries $clean [hir::recovery::reported $clean] 1]
+} -cleanup {unset -nocomplain path hir ok clean} -result {{{CORE SEMANTIC UNBOUND} {{CORE SEMANTIC UNBOUND}} {dr-internal.bot:2:5: unbound name "g"}} accepted {}}
+
+test dr-internal-empty-raise {core::raiseDiagnostics never reads the first entry of an empty report: an empty one is a coded compiler error too} -body {
+    list [catch {core::raiseDiagnostics {}} message options] [dict get $options -errorcode] $message
+} -cleanup {unset -nocomplain message options} -result {1 {CORE SEMANTIC COMPILER-INTERNAL} {internal compiler error: a compilation was rejected with no diagnostic}}
+
+# ---------------------------------------------------------------------------
 # The diagnostic-efficiency corpus
 
 test dr-corpus-efficiency {every known primary of every corpus case is reported by its first compilation, with no known cascade and no other diagnostic, and the cases compile clean once the primaries' fixes are applied (audit/diagnostic-recovery/results.txt has the before/after table)} -body {

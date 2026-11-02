@@ -1,0 +1,6 @@
+# I3 a parameter with a checked inferred contract (str, from std::str::length) compared with a character
+import std::str
+fn f(c):
+    n = std::str::length(c)
+    c == '-'
+[f("-"), f("ab")]

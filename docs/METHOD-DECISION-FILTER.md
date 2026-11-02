@@ -25,10 +25,13 @@ receiver's type already makes the ordinary call invalid by kind alone, or by
 a named struct's declaration:
 
 * a qualified native (`std::list::at`) whose first parameter has another known
-  kind than the receiver's -- `hir::methods::NativeMismatch`, the one
-  statement of the rule: a call's own problems report its TYPE problem by it
-  (`hir::methods::CallProblems`: a native's kind mismatch is its run-time
-  TYPE error, not diagnosed) and the kind proof excludes by it;
+  kind than the receiver's -- `hir::methods::NativeMismatch`, which asks the
+  one statement of the rule, `hir::types::NativeKindMismatch`: the call's own
+  check reports it as a TYPE diagnostic (`hir::range::VerifyNativeKinds`,
+  METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; until then a native's kind
+  mismatch was its run-time TYPE error, not diagnosed, and
+  `hir::methods::CallProblems` added it to a call's own problems itself) and
+  the kind proof excludes by it;
 * a module function (`std::mutable_array::get`) one of whose first-parameter
   contracts -- declared, trusted-inferred or checked-inferred
   (hir/signatures.tcl) -- has another kind than the receiver's, when both are

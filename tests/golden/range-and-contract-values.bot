@@ -43,18 +43,18 @@
 # are part of what the analyses see (a self-recursive result range exists
 # only for a bounded entry, a closed closure's caller theorem only for exact
 # callers): the ports keep the Tcl programs' literals. Where the Tcl test
-# itself hides an input from the analysis (mod(500, 11)), or where a port
-# needs a run-time failure the compiler must not decide statically, the
-# input is hidden the same way or comes in as a registration parameter.
+# itself hides an input from the analysis (std::int::from_string, never
+# folded), or a port needs a run-time failure the compiler must not decide
+# statically, the input is hidden the same way or is a parameter.
 #
-# Imports: compiler and test (the framework); list, str and immutable_set
-# because the Tcl programs call list::, str:: and immutable_set:: natives
-# (intrinsic-contracts.test's programs import all three); byte for the
-# checked-domain tests' std::byte::from_int and std::byte::set; web for
-# ic-emailish-callers-valid's std::web::emailish?.
+# Imports: compiler and test (the framework); list, str and immutable_set for
+# the Tcl programs' natives (intrinsic-contracts.test's import all three);
+# byte for std::byte::from_int and std::byte::set; int for the hidden input;
+# web for ic-emailish-callers-valid's std::web::emailish?.
 import std::byte
 import std::compiler
 import std::immutable_set
+import std::int
 import std::list
 import std::str
 import std::test
@@ -649,10 +649,10 @@ fn register_closed_closure_tests():
 
 fn register_self_recursive_range_tests():
     # rec-error-path-value: f fails Negative below zero; g reaches it with
-    # arguments the analysis knows only as a range (mod(500, 11) is 5, but
-    # not statically known), so some states fail and some succeed. /1: g(5)
-    # succeeds, g(0) fails; /2: g(8) and g(3) succeed; /3: g(1) and g(2)
-    # fail.
+    # arguments the analysis knows only as a range (mod(k, 11) is 5, k
+    # hidden by std::int::from_string), so some states fail and some
+    # succeed. /1: g(5) succeeds, g(0) fails; /2: g(8) and g(3) succeed;
+    # /3: g(1) and g(2) fail.
     fn error_path_1() errors std::compiler::CompilerError:
         static compile:
             fn f(n) errors Negative:
@@ -664,10 +664,13 @@ fn register_self_recursive_range_tests():
                     f(n - 1) + 1
             fn g(m) errors Negative:
                 f(m - 3)
-            r1 = g(mod(500, 11)):
+            k = std::int::from_string("500"):
+                on InvalidIntegerText:
+                    0
+            r1 = g(mod(k, 11)):
                 on Negative:
                     -1
-            r2 = g(mod(500, 11) - 5):
+            r2 = g(mod(k, 11) - 5):
                 on Negative:
                     -1
             [r1, r2]
@@ -683,10 +686,13 @@ fn register_self_recursive_range_tests():
                     f(n - 1) + 1
             fn g(m) errors Negative:
                 f(m - 3)
-            r1 = g(mod(500, 11) + 3):
+            k = std::int::from_string("500"):
+                on InvalidIntegerText:
+                    0
+            r1 = g(mod(k, 11) + 3):
                 on Negative:
                     -1
-            r2 = g(mod(500, 11) - 2):
+            r2 = g(mod(k, 11) - 2):
                 on Negative:
                     -1
             [r1, r2]
@@ -702,10 +708,13 @@ fn register_self_recursive_range_tests():
                     f(n - 1) + 1
             fn g(m) errors Negative:
                 f(m - 3)
-            r1 = g(mod(500, 11) - 4):
+            k = std::int::from_string("500"):
+                on InvalidIntegerText:
+                    0
+            r1 = g(mod(k, 11) - 4):
                 on Negative:
                     -1
-            r2 = g(mod(500, 11) - 3):
+            r2 = g(mod(k, 11) - 3):
                 on Negative:
                     -1
             [r1, r2]

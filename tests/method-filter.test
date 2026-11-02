@@ -134,7 +134,7 @@ proc mfWithNominalModules {script} {
 # ---------------------------------------------------------------------------
 # The exclusion rule
 
-test mf-native-mismatch-rule {NativeMismatch is the rule a call's own problems report a native's TYPE problem by: a receiver of a known kind other than the one the native's first parameter requires, nothing for an unknown kind, never, or a native that requires none} -body {
+test mf-native-mismatch-rule {NativeMismatch is the rule the kind proof excludes a native by, the call's own TYPE problem with its receiver: a receiver of a known kind other than the one the native's first parameter requires, nothing for an unknown kind, never, or a native that requires none} -body {
     list [hir::methods::NativeMismatch std::str::length {list int}] \
         [hir::methods::NativeMismatch std::list::length {list int}] \
         [hir::methods::NativeMismatch std::list::length int] \
@@ -144,12 +144,14 @@ test mf-native-mismatch-rule {NativeMismatch is the rule a call's own problems r
         [hir::methods::NativeMismatch std::mutable_array::at {mutarray int}]
 } -result {{list str} {} {int list} {} {} {list mutarray} {}}
 
-test mf-native-rule-one-statement {a call's own problems and the kind proof ask NativeMismatch for the native TYPE problem and state no kind rule of their own} -body {
+test mf-native-rule-one-statement {the native TYPE problem is the call's own check's (hir::range::VerifyNativeKinds, a diagnostic whose subject is the call: METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md), so a call's own problems state no native rule of their own; the kind proof asks NativeMismatch, which asks the one statement, hir::types::NativeKindMismatch} -body {
     set problems [info body hir::methods::CallProblems]
     set excluded [info body hir::methods::Excluded]
-    list [regexp {NativeMismatch} $problems] [regexp {paramTypes|core::type::base} $problems] \
-        [regexp {NativeMismatch} $excluded] [regexp {paramTypes|core::type::base} $excluded]
-} -result {1 0 1 0}
+    set mismatch [info body hir::methods::NativeMismatch]
+    list [regexp {NativeMismatch|paramTypes|core::type::base} $problems] \
+        [regexp {NativeMismatch} $excluded] [regexp {paramTypes|core::type::base} $excluded] \
+        [regexp {hir::types::NativeKindMismatch} $mismatch] [regexp {paramTypes|core::type::base} $mismatch]
+} -result {0 1 0 1 0}
 
 test mf-excluded-by-kind {a native is ruled out by its first parameter's kind, a module function by the kind of its declared or inferred first-parameter contract, a lexical name (a bare display) never; an unknown or never receiver rules out nothing} -body {
     set hir [dict get [mfCompile $::mfChain 0] hir]
@@ -404,13 +406,13 @@ test mf-seeds-are-decided {a call seeded by an earlier round is decided as it is
         [expr {[lsort -stride 2 [dict get $some methodDecided]] eq [lsort -stride 2 $decided]}]
 } -result {0 1 1}
 
-test mf-never-receiver-is-not-guessed {a receiver that is `never` because the program itself narrowed its binding to nothing (an explicit call of `std::mutable_array::at` on a List) is read as the binding's defined type only by the kind waves' guess: certification reads the receiver the build gives, `never`, which every candidate accepts, and the call is AMBIGUOUS-METHOD-CALL} -body {
+test mf-poisoned-call-narrows-nothing {an explicit call of `std::mutable_array::at` on a List is its own TYPE (METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md; it used to compile, narrow the binding to `never` and leave the method call after it ambiguous): the call is poison and narrows nothing, so `a.at(0)` is decided by its List receiver, as the reference rule decides it} -body {
     set text "${::mfImports}fn bad(a: List\[int\]) -> int errors IndexNotFound:\n    n = std::mutable_array::at(a, 0)\n    n + a.at(0)\n\nr = bad(\[1\]):\n    on IndexNotFound:\n        -1\nr\n"
     set reference [mfCompile $text 0]
     set decided [mfCompile $text 1]
-    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [mfSame $decided $reference] \
-        [mfSame [mfCompile $text 1 1] $reference]
-} -result {AMBIGUOUS-METHOD-CALL 1 1}
+    list [lmap d [dict get $decided diagnostics] {lindex $d 0}] [lmap {k v} [dict get $decided decided] {set v}] \
+        [mfSame $decided $reference] [mfSame [mfCompile $text 1 1] $reference]
+} -result {TYPE std::list::at 1 1}
 
 test mf-two-survivors-judged-by-builds {two candidates that both fit a receiver (the String receiver of a module's `length(s: str)` and `std::str::length`, with `std::list::length` ruled out, so neither survivor is the standing first candidate): each survivor is judged by its own build, and both are applicable} -body {
     withPrivateLibrary {

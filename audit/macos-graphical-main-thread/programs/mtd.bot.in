@@ -1,0 +1,22 @@
+# mtd.bot -- candidate B's dispatcher client (native/mtdispatch.c), for the
+# executables linked against the EXPERIMENTAL runtime only
+# (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, section 11). Every mtd function
+# is one synchronous request: its SDL calls run on the process's main
+# thread, and the Botlish caller, on its worker, waits for them.
+# tools/census.py writes the link declaration below @LINK@.
+import probe
+import std::ffi::c
+
+# @LINK@
+
+extern c fn available named "mtd_available"() -> std::ffi::c::Int
+extern c fn roundtrips named "mtd_roundtrips"(n: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn init named "mtd_init"(flags: std::ffi::c::UInt) -> std::ffi::c::Bool
+extern c fn create_window named "mtd_create_window"() -> std::ffi::c::Ptr[probe::Window]
+extern c fn create_renderer named "mtd_create_renderer"(w: std::ffi::c::Ptr[probe::Window] noescape) -> std::ffi::c::Ptr[probe::Renderer]
+extern c fn frame named "mtd_frame"(r: std::ffi::c::Ptr[probe::Renderer] noescape) -> std::ffi::c::Bool
+extern c fn push_quit named "mtd_push_quit"() -> std::ffi::c::Bool
+extern c fn poll named "mtd_poll"() -> std::ffi::c::UInt
+extern c fn destroy_and_quit named "mtd_destroy_and_quit"(r: std::ffi::c::Ptr[probe::Renderer], w: std::ffi::c::Ptr[probe::Window]) -> std::ffi::c::Bool
+extern c fn callback_ptr named "mtd_callback_ptr"() -> std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Ptr[std::ffi::c::Void]], return: unit}]
+extern c fn watchdog named "mtd_watchdog"(seconds: std::ffi::c::UInt) -> std::ffi::c::Int

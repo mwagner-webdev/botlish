@@ -1,0 +1,51 @@
+# compose.bot -- composes the library's emitters into larger streams: an
+# object of members (each emitlib::member: a string, a colon, a number)
+# and a document of digits, both claimed against json_text and checked
+# through the library's certificates (the boundary of each member's
+# number token is one the next separator ends).
+
+import emitlib
+import json_lex
+import json_grammar
+import std::list
+import std::coroutine
+
+#: emits json_grammar::json_text
+fn object(keys: List[str], base: int) -> unit errors IndexNotFound:
+    yield 123
+    loop i from 0 to std::list::length(keys):
+        if i > 0:
+            yield 44
+        emitlib::member(std::list::at(keys, i), base + i)
+        continue
+    yield 125
+    unit
+
+#: emits json_grammar::json_text
+fn digits(n: int) -> unit errors emitlib::NotADigit:
+    yield 91
+    loop i from 0 to n:
+        if i > 0:
+            yield 44
+        emitlib::digit_checked(i)
+        continue
+    yield 93
+    unit
+
+fn src() -> int errors IndexNotFound:
+    object(["a", "b\"", ""], -2)
+    -1
+
+fn collect() -> List[int] errors IndexNotFound:
+    coroutine {step, first} = src()
+    loop k from 0 to 40:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+collect():
+    on IndexNotFound:
+        [-2]

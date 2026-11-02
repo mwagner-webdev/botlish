@@ -1,0 +1,6 @@
+# callables: refused at run time? statically?
+fn a(x):
+    x
+fn b(x):
+    x
+a == b

@@ -236,8 +236,10 @@ never has to be a one-character String first. What still uses a
 one-character String -- a join or an escape that `std::str::concat` builds as one
 virtual construction, where a flat append would cost an allocation; a table
 of characters as text; a character handed to a String-taking classifier such
-as `std::str::is_tcl_alnum` -- is listed, with its reason, in the warning manifest
-(§23).
+as `std::str::is_tcl_alnum` in the canonical benchmarks that measure it (a
+character's own classes are `std::char::is_tcl_alpha` and `is_tcl_alnum`,
+UNICODECHAR-CLASSIFIERS.md) -- is listed, with its reason, in the warning
+manifest (§23).
 
 **Equality (`==`)** compares structure. Values of different kinds are never
 equal (`1.0 == 1` is false). Integers and Float64s compare numerically
@@ -419,6 +421,27 @@ branch. Each iteration runs in a fresh child environment.
 | `return(v)`          | propagates to the enclosing callable |
 | `propagate-error(e)` | propagates                          |
 
+### `(fold INIT-EXPR LOOP)`
+
+A folding loop (FOLD-LOOPS-MILESTONE-1.md). `LOOP` is any of the loop forms
+-- `(loop ...)`, `(listloop ...)`, `(countloop ...)`, `(lockloop ...)` --
+whose block binds one more parameter than its own form does, last: the
+intermediate. `LOOP`'s operands are evaluated and checked as that loop's
+are, then `INIT-EXPR`, once; each iteration binds the intermediate to the
+current value, which starts as `INIT-EXPR`'s.
+
+| Body completion      | Effect                                        |
+|----------------------|-----------------------------------------------|
+| `value(v)`           | `v` is the next intermediate; next iteration |
+| `continue`           | the intermediate is kept; next iteration      |
+| `break`              | the fold evaluates to the current intermediate |
+| `return(v)`          | propagates to the enclosing callable          |
+| `propagate-error(e)` | propagates                                    |
+
+Exhausting the domain evaluates to the current intermediate (`INIT-EXPR`'s
+value for an empty domain); a plain `(loop ...)` ends only by a `break`.
+Nothing is collected.
+
 ### `(return EXPR)`
 
 Completes with `return(v)`. The current invocation stops, and nothing after
@@ -586,6 +609,7 @@ Standard intrinsics (qualified root natives):
 | `std::list::length` | list → int |
 | `std::list::at` | list, int → any, errors `IndexNotFound`: the element at `0 <= i < length`; any other Int index fails with `IndexNotFound` |
 | `std::list::append` | list, any → list (a new list; the argument is unchanged) |
+| `std::list::flat` | list of lists → list: `flat[T](lists: List[List[T]]) -> List[T]`, the elements of the first List, then of the second, and so on -- exactly one level of nesting removed, eager, linear (LIST-FLAT-MILESTONE-1.md); the arguments are unchanged. An element that is not a List is `TYPE` (statically where its kind is known) |
 | `std::str::length` | str → int (Unicode scalar values) |
 | `std::str::substring` | str, int, int → str, errors `LowerUnderrun` `UpperOverrun`: the characters `start <= i < end` of a valid slice (below) |
 | `std::str::lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") |
@@ -595,6 +619,7 @@ Standard intrinsics (qualified root natives):
 | `std::str::char_at` | str, int → UnicodeChar, errors `IndexNotFound`: the scalar at character index `0 <= i < length` (the index space of `length`/`substring`); any other Int index fails with `IndexNotFound`; never allocates. With char literals (`c == '%'`) and `std::char::scalar_value` it classifies a String's characters without a one-character String or an `encode_utf8` List (ENCODE-UTF8-ALLOCATION-RESEARCH.md) |
 | `std::str::is_tcl_alpha` `std::str::is_tcl_alnum` | one-scalar str → bool (temporary Tcl-compatibility classes, core/tclcompat.tcl) |
 | `std::char::scalar_value` | UnicodeChar → int (the Unicode scalar value: `0..0x10FFFF` without the surrogates, never a byte or a code unit of an encoding) |
+| `std::char::is_tcl_alpha` `std::char::is_tcl_alnum` | UnicodeChar → bool: the String forms' classes of a character, total and allocation-free (UNICODECHAR-CLASSIFIERS.md) |
 | `std::float64::from_int` | int → Float64, errors `NonFiniteFloat`: the nearest Float64 (ties to even), from the exact Int at any size; an Int beyond the largest finite Float64 fails (FLOAT64-MILESTONE-1.md) |
 | `std::float64::truncate` | Float64 → int: the integer part, rounding toward zero, exact at any magnitude; never fails |
 | `std::float64::from_decimal_rounded` | DecimalRounded → Float64: the Float64 nearest round(x, N), N the precision x's static type guarantees (elaborated to `decimal_rounded#to_float64`); never fails (DECIMAL-ROUNDED-MILESTONE-1.md) |
@@ -633,12 +658,16 @@ Ordinary Botlish members of the same namespaces (library modules, not
 natives): `std::list::get`, `std::list::any?`, `std::list::all?`, `std::list::none?`,
 `std::list::find` (`stdlib/list.bot`); `std::mutable_array::from_list`,
 `std::mutable_array::create`, `std::mutable_array::get` (`stdlib/mutable_array.bot`).
-`char` has no library module: `std::char::scalar_value` is its one member
+`char` has no library module: its members are the intrinsics
+`std::char::scalar_value`, `std::char::is_tcl_alpha` and `std::char::is_tcl_alnum`
 (`std::str::char_at` produces a UnicodeChar from a String position; a
 "code point" also names surrogates and, colloquially, Latin-1 or other
 encodings' numbers; a scalar value is exactly what a UnicodeChar holds).
-Like every native's parameter types, its `UnicodeChar` requirement is
-checked at run time (`std::char::scalar_value(65)` is the `TYPE` error).
+Like every native's parameter types, their `UnicodeChar` requirement holds
+an argument of a statically known kind at compile time
+(`std::char::scalar_value(65)` is a compile-time `TYPE` error,
+METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md) and an `any` argument when
+the call runs.
 
 **Indexed access: `at` and `get`.** `at(container, index)` is required
 indexed lookup: it returns the element or fails with the builtin declared
@@ -1740,6 +1769,72 @@ add10(32)          # 42 (add captures x)
   the counts provably differ); there is no shortest-wins rule and no runtime
   length check. See COLLECTING-LOOPS.md. A bare `loop:` (no clause) is
   unchanged.
+* **Folding loops.** `fold` takes a loop's clauses (any of the forms above,
+  lockstep included, or none) and carries one value, the *intermediate*,
+  instead of collecting:
+
+  ```
+  total = fold x in xs with intermediate sum 0:
+      sum + x
+  ```
+
+  A collecting loop produces the List of its iterations' values; a fold
+  produces its final intermediate. The rules (FOLD-LOOPS-MILESTONE-1.md):
+
+  - The loop's operands are evaluated (and checked) first, in written order,
+    then the initial value, exactly once, in the enclosing scope; then the
+    iterations run as the loop's would.
+  - In each iteration `sum` is a fresh immutable binding of the body, bound
+    to the value the previous iteration produced (the initial value for the
+    first). A normal completion of the body is the next intermediate;
+    `continue` keeps the current one; a bare `break` ends the fold with the
+    current one; exhaustion yields the last one, and an empty domain the
+    initial value. `return` and errors leave the fold as they leave any loop.
+    `fold with intermediate s INITIAL:` (no clause) repeats until a `break`.
+  - The intermediate is in scope in the body only: not in the initial value,
+    not in the operands, not after the fold. Binding its name again in the
+    body's own scope is a DUPLICATE; a nested scope may shadow it.
+  - The fold's type is the intermediate's: the join of the initial value's
+    type and the type of every normal completion of the body (inferred by a
+    local fixpoint, widening to the dynamic type when the join keeps
+    growing). A join of two known types that only the dynamic type covers
+    (an Int and a String, two different named structs, a value and the
+    `unit` of an `if` without `else`) is `FOLD-INTERMEDIATE-TYPE`, reported
+    at the completion that causes it. An affine intermediate is
+    `AFFINE-FOLD-UNSUPPORTED`.
+  - Like a loop or an `if`, a fold is a statement value: the right side of
+    `=`, after `return`, a body's last expression, never an operand or an
+    argument. `fold` is contextual: it begins a fold only directly before a
+    name, and stays an ordinary name everywhere else (`fold = 1`).
+
+  Iteration, aggregation and construction are distinct operations: a fold
+  aggregates without building anything it does not compute (natively, one
+  loop-carried register: no List, no plan, no MutableArray).
+* **Flattening.** `std::list::flat(xss)` removes exactly one level of
+  nesting from a List of Lists: the elements of the first List, then of the
+  second, and so on, in order (LIST-FLAT-MILESTONE-1.md). Collecting,
+  folding and flattening are three operations:
+
+  ```
+  squares = loop x in xs:              # collecting: one value per iteration
+      x * x
+  total = fold x in xs with intermediate s 0:    # folding: one value carried
+      s + x
+  joined = std::list::flat(nested)     # flattening: one level removed
+  chunks = loop x in xs:               # composed: what other languages call
+      expand(x)                        # flat_map -- a collecting loop whose
+  pieces = std::list::flat(chunks)     # body makes a List, then flat
+  ```
+
+  `flat` is eager, generic over the element type, order-preserving and
+  linear in the number of inner Lists plus the number of elements: one new
+  List of exactly the total length, each inner List copied into it once
+  (never a prefix copied again). `flat([xs, ys])` is the concatenation of two
+  Lists. A loop is never a call argument (rule.loop-placement), so the
+  composition binds the loop's List first. Only `flat` itself is linear: the
+  collecting loop still builds its outer List and every inner List, and a
+  fold that grows a List by appending still copies it on every append --
+  nothing fuses construction across these operations yet.
 * An `if` can also be the value of a binding or of `return`
   (`sign = if n < 0:` followed by its blocks). It can't be an operand or an
   argument.
@@ -1925,6 +2020,23 @@ add10(32)          # 42 (add captures x)
   std::io::IO`): the one installed context implementing it is selected statically,
   and portable code (`std::io::print_line`) compiles to direct calls of its
   implementation. See CONTEXT-TRAITS.md.
+* **Inject blocks.** `inject context Storage, std::io::IO:` (or `inject no
+  context:`) followed by an indented block runs the block with exactly the
+  listed contexts' authority, whatever its creator can use: installation
+  makes a context available, injection grants a computation permission to
+  use it. Every call of the block's code -- transitively, through imported,
+  method-style, generic and trait calls and coroutine constructions -- may
+  require only injected contexts (`CONTEXT-NOT-INJECTED`, with the chain); a
+  nested block injects a subset of the enclosing one; a function containing
+  a block requires what the block injects; the block may not read an
+  enclosing function's context parameter it does not inject; and it may not
+  resume a coroutine constructed with more authority than it injects, which
+  the compiler follows from construction through bindings, structs,
+  collections, arguments and results (`CONTEXT-RETAINED-AUTHORITY`). An
+  inject block is a statement or a value (`x = inject ...:`), installs and
+  selects nothing, and costs nothing at run time: it is the ordinary block
+  `if true:` on every backend. `inject` is a contextual word. See
+  RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md.
 * **Struct destructuring.** `{user, expires: expiry} = result` binds fields
   of a struct value by name: it evaluates `result` once, then binds `user` to
   `result.user` and `expiry` to `result.expires`, exactly as the explicit
@@ -3065,6 +3177,12 @@ unchanged):
 * `std::list::append(xs, x)` is `list<lub(ELEM, type of x)>`: `list<int>` stays
   `list<int>` with an Int, and becomes plain `list` with a String. Appending
   drops a shape.
+* `std::list::flat(xss)` is `list<E>` for `list<list<E>>` (`list<never>` for
+  an empty List or a List of empty Lists, plain `list` when the elements'
+  element type is not known), and `List[E]{length: N*M}` when `xss` is
+  `List[List[E]{length: M}]{length: N}`. A List whose element type is of a
+  known other kind (`flat([1, 2])`) is a compile-time `TYPE`: the native's
+  `-element-kinds` contract, held by the one native-kind rule.
 * lub joins element types and, for equal lengths, positions; plain `list`
   is `list<any>`.
 * **Bounds:** list forms nest at most three deep (deeper lists are plain
@@ -3470,8 +3588,9 @@ that no longer fires, or a drifted location fails it -- and compiles every
 program and loader without a manifest entry under `-warnings error`. A
 library's findings print for every program that loads it (there is no "system
 header" notion); since the refactor only two modules carry any, all
-`ONE-CHAR-STRING-LITERAL`: `stdlib/web.bot` (23: its hexadecimal digit table,
-`"%"`, and the local-part and label classes beside `std::str::is_tcl_alnum`) and
+`ONE-CHAR-STRING-LITERAL`: `stdlib/web.bot` (17: its hexadecimal digit table
+and `"%"`; its local-part and label classes read UnicodeChars since
+UNICODECHAR-CLASSIFIERS.md) and
 `stdlib/linux/path.bot` (2: the joining `"/"`, and an index the completion proof
 does not cover). `stdlib/io.bot`'s line operations append their newline as a
 character (`std::str::append_char`), so every program that prints through `io`

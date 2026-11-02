@@ -60,6 +60,10 @@ pub enum OpCode {
     /// exactly as StrCat is (the collection-length ceiling).
     StrAppendChar,
     ListLen,
+    /// `std::tree::children(t)` where no static type names T's tree shape
+    /// (TREE-STRUCT-MILESTONE-1.md): the child field of a tree struct's
+    /// object, by the slot its shape records (`ShapeInfo::tree`).
+    TreeChildren,
     ListGet,
     ListAppend,
     /// `list#with_length(L, N)` (core/listlength.tcl, LIST-CARDINALITY-
@@ -67,6 +71,14 @@ pub enum OpCode {
     /// declared LengthMismatch -- the explicit validator of the List
     /// length refinement; never a copy.
     ListWithLength,
+    /// `std::list::flat(L)` (core/lists.tcl, LIST-FLAT-MILESTONE-1.md): a
+    /// new List of the elements of L's Lists, in order -- one level of
+    /// nesting removed. Linear (ops.rs's rt_list_flat: one pass to check
+    /// the inner kinds and sum the lengths, one allocation of exactly that
+    /// many elements, each inner List copied straight into place).
+    /// Fallible: TYPE for an element that is not a List (only an `any`
+    /// argument reaches it), RANGE past the collection-length ceiling.
+    ListFlat,
     /// List -> ImmutableSet, deduplicating by VEq's own rule (MINIMAL-
     /// IMMUTABLE-SET.md's `immutable_set::from_list`): O(n^2), the
     /// deliberately simple first representation -- no inline fast path
@@ -209,6 +221,22 @@ pub enum OpCode {
     /// exactly P fraction digits (std::decimal_rounded::to_string,
     /// runtime::decimal's rt_decimal_to_str; never fails).
     D64ToStr,
+    /// Raw C floating values (RAW-C-FLOAT-FFI-MILESTONE-1.md; core/cabi.tcl's
+    /// std::rawfloat intrinsics): `rawfrombits32`/`64` the raw value of
+    /// an Int bit pattern (proven in range; RANGE otherwise), `rawbits32`/
+    /// `64` a raw value's bit pattern as an Int, `rawadmit32`/`64` the
+    /// Float64 it admits to (NonFiniteFloat for NaN or an infinity, -0 as
+    /// 0.0, a binary32 widened exactly), `rawnarrow32`/`64` the raw value of
+    /// a Float64 (binary32: rounded to nearest, ties to even, an overflow
+    /// NonFiniteFloat; binary64 exact). runtime::ffi's rt_raw_* helpers.
+    RawFromBits32,
+    RawFromBits64,
+    RawBits32,
+    RawBits64,
+    RawAdmit32,
+    RawAdmit64,
+    RawNarrow32,
+    RawNarrow64,
     MkOk,
     MkError,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
@@ -323,6 +351,25 @@ pub enum OpCode {
     /// whose UTF-8 encoding is a storage's bytes, or the declared builtin
     /// error InvalidUtf8 (routed like a `fail`). One operand, the storage.
     BytesDecodeUtf8,
+    /// `byte_store::encode_utf16le` (UTF16-BYTE-STORAGE-MILESTONE-1.md): a
+    /// String's UTF-16LE bytes, two per code unit, low byte first (one
+    /// allocation, or the shared static empty storage). One operand, the
+    /// String.
+    StrEncodeUtf16Le,
+    /// `byte_store::decode_utf16le`: the String whose UTF-16LE encoding is a
+    /// storage's bytes, or the declared builtin error InvalidUtf16 (routed
+    /// like a `fail`). One operand, the storage.
+    BytesDecodeUtf16Le,
+    /// `byte_store::utf16le_units` (internal to the standard library): a
+    /// storage's byte pairs, low byte first, as a List of small Ints. One
+    /// operand, the storage.
+    BytesUtf16LeUnits,
+    /// `byte_store::utf16le_units_before_nul` (internal to the standard
+    /// library): how many code units of a storage's bytes START..END-1 come
+    /// before the first unit 0 (both bytes of one pair 0), or all of them, a
+    /// small Int; the declared LowerUnderrun / UpperOverrun of the slice
+    /// rule. Three operands: the storage, START, END. Allocates nothing.
+    BytesUtf16LeNul,
     /// `byte_store::slice` (WINDOWS-X86-64-MILESTONE-7.md): a storage's bytes
     /// START..END-1 in a new storage, or the declared LowerUnderrun /
     /// UpperOverrun. Three operands: the storage, START, END.
@@ -638,6 +685,13 @@ pub enum OpCode {
     /// is per Unicode scalar, never per UTF-8 byte).
     StrIsTclAlpha,
     StrIsTclAlnum,
+    /// `chartclalpha %c` / `chartclalnum %c`: the same classes of a
+    /// UnicodeChar operand (core/tclcompat.tcl's std::char::is_tcl_alpha/
+    /// is_tcl_alnum, UNICODECHAR-CLASSIFIERS.md). Total and non-allocating:
+    /// every UnicodeChar is one scalar. An ASCII scalar is classified inline,
+    /// any other by a helper reading its General_Category.
+    CharIsTclAlpha,
+    CharIsTclAlnum,
     /// `StrIsTclAlpha`/`StrIsTclAlnum`'s non-materializing counterpart for a
     /// validated StringRegion operand (base, start, end -- exactly
     /// `RegionCheck`'s three operands): classifies the region's one Unicode
@@ -869,9 +923,11 @@ op_spellings! {
     "strcat" => StrCat,
     "strappendchar" => StrAppendChar,
     "listlen" => ListLen,
+    "treechildren" => TreeChildren,
     "listget" => ListGet,
     "listappend" => ListAppend,
     "listwithlen" => ListWithLength,
+    "listflat" => ListFlat,
     "setfromlist" => SetFromList,
     "setfromlisttotal" => SetFromListTotal,
     "setcontains" => SetContains,
@@ -956,6 +1012,10 @@ op_spellings! {
     "bytesfromlist" => BytesFromList,
     "bytesjoin" => BytesJoin,
     "bytesdecodeutf8" => BytesDecodeUtf8,
+    "strencodeutf16le" => StrEncodeUtf16Le,
+    "bytesdecodeutf16le" => BytesDecodeUtf16Le,
+    "bytesutf16leunits" => BytesUtf16LeUnits,
+    "bytesutf16lenul" => BytesUtf16LeNul,
     "bytesslice" => BytesSlice,
     "byteslen" => BytesLen,
     "bytesaddr" => BytesAddr,
@@ -969,6 +1029,14 @@ op_spellings! {
     "coresume0" => CoResume0,
     "coyield" => CoYield,
     "codone" => CoDone,
+    "rawfrombits32" => RawFromBits32,
+    "rawfrombits64" => RawFromBits64,
+    "rawbits32" => RawBits32,
+    "rawbits64" => RawBits64,
+    "rawadmit32" => RawAdmit32,
+    "rawadmit64" => RawAdmit64,
+    "rawnarrow32" => RawNarrow32,
+    "rawnarrow64" => RawNarrow64,
     "cptrnull" => CPtrNull,
     "cptrisnull" => CPtrIsNull,
     "cptrsame" => CPtrSame,
@@ -1028,6 +1096,8 @@ op_spellings! {
     "mbytesaddr" => MBytesAddr,
     "strtclalpha" => StrIsTclAlpha,
     "strtclalnum" => StrIsTclAlnum,
+    "chartclalpha" => CharIsTclAlpha,
+    "chartclalnum" => CharIsTclAlnum,
     "strregiontclalpha" => StrRegionIsTclAlpha,
     "strregiontclalnum" => StrRegionIsTclAlnum,
     "rbox" => RBox,
@@ -1123,17 +1193,18 @@ impl OpCode {
             ListNew | CleanupTable => None,
             Argv | CPtrNull | CoFailed => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
-            StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
+            StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
-            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
+            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharIsTclAlpha | CharIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt
+            | RawFromBits32 | RawFromBits64 | RawBits32 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64
             | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
-            | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
+            | AsciiToShort | BytesFromList | BytesJoin | BytesDecodeUtf8 | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits | BytesLen | BytesAddr | KeepAlive | BytesZeroed | MBytesNew | MBytesFrom | MBytesLen
             | MBytesClone | MBytesFreeze | MBytesAddr | CoCreate | CoStart | CoResume0 | CoYield | CoDone
             | CoRelease | CoAbandon | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
-            Substr | SubstrProven | BytesSlice | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
+            Substr | SubstrProven | BytesSlice | BytesUtf16LeNul | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy => Some(3),
             RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | MvSwapDropRun | MutArraySwapDropRun | MutArraySetDropRun
             | BinStore | FfiFixtureMixed
@@ -1250,6 +1321,10 @@ pub enum Inst {
     Unit { dst: Reg },
     Native { dst: Reg, native: u32 },
     FnValue { dst: Reg, func: FuncId },
+    /// `%d = cbaddr N`: the C function pointer of the program's callback N
+    /// (C-CALLBACK-MILESTONE-1.md): the address of its C entry point, a C
+    /// address word. Allocates nothing and never fails.
+    CallbackAddress { dst: Reg, callback: u32 },
     SelfClosure { dst: Reg },
     Capture { dst: Reg, index: u32 },
     /// Reads module-static slot INDEX (runtime::vm::Vm's own `statics`
@@ -1697,11 +1772,18 @@ pub struct NativeDecl {
 /// shape's fields are its canonical (sorted) field set; a named shape's are
 /// its declaration's slot order. Shape numbers are dense, in order. A named
 /// shape may carry `opaque=1` (the declaration is an `opaque struct`,
-/// OPAQUE-STRUCTS.md): a rendering fact only, see `ShapeInfo::opaque`.
+/// OPAQUE-STRUCTS.md): a rendering fact only, see `ShapeInfo::opaque`; and
+/// `identity="members F"` or `identity="associations K V"` (the declaration's
+/// semantic identity, REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md, by field
+/// name): what equality and the hashes read, see `ShapeInfo::identity`; and
+/// `tree="F"` (the declaration is a tree struct whose child field is F,
+/// TREE-STRUCT-MILESTONE-1.md), see `ShapeInfo::tree`.
 pub struct ShapeDecl {
     pub name: Option<String>,
     pub fields: Vec<String>,
     pub opaque: bool,
+    pub identity: Option<crate::runtime::vm::Identity>,
+    pub tree: Option<usize>,
 }
 
 /// One statically assigned context slot (`context N "ID" offset=O words=W
@@ -1737,7 +1819,7 @@ pub struct EnumDecl {
 /// argument is the Float64 narrowed (checked: an overflow is NonFiniteFloat
 /// before the call), an F32 result is widened exactly, and either result is
 /// admitted only when finite.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CAbi {
     I8,
     U8,
@@ -1752,6 +1834,12 @@ pub enum CAbi {
     F32,
     /// C double, an IEEE 754 binary64 (FLOAT64-MILESTONE-1.md).
     F64,
+    /// A raw C float or double (RAW-C-FLOAT-FFI-MILESTONE-1.md: `rf32`,
+    /// `rf64`): the same C types in the same floating-point registers, whose
+    /// Botlish values are raw C floating values -- passed as, and made of,
+    /// exactly their bits (no narrowing, no admission, nothing raised).
+    RawF32,
+    RawF64,
     Ptr,
     Void,
 }
@@ -1763,7 +1851,7 @@ pub enum CAbi {
 /// promotion (hir::cabi::VariadicArgument): an `int` for every integer
 /// narrower than one and for `_Bool`, every other class itself. Never a
 /// narrow integer, a `_Bool` or void.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VarArg {
     pub class: CAbi,
     pub promoted: CAbi,
@@ -1779,9 +1867,11 @@ impl VarArg {
         let (class, promoted) = text.split_once(':')?;
         let class = CAbi::parse(class)?;
         let promoted = CAbi::parse(promoted)?;
-        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::Ptr | CAbi::Void);
+        let integer = |c: CAbi| !matches!(c, CAbi::Bool | CAbi::F32 | CAbi::F64 | CAbi::RawF32 | CAbi::RawF64 | CAbi::Ptr | CAbi::Void);
         let valid = match class {
-            CAbi::Void | CAbi::F32 => false,
+            // (No trailing argument is a raw C floating value:
+            // hir::cabi::VariadicArgument refuses one.)
+            CAbi::Void | CAbi::F32 | CAbi::RawF32 | CAbi::RawF64 => false,
             CAbi::F64 | CAbi::Ptr => promoted == class,
             CAbi::Bool => integer(promoted) && promoted.bits() >= 32,
             _ => {
@@ -1809,6 +1899,8 @@ impl CAbi {
             "bool" => CAbi::Bool,
             "f32" => CAbi::F32,
             "f64" => CAbi::F64,
+            "rf32" => CAbi::RawF32,
+            "rf64" => CAbi::RawF64,
             "ptr" => CAbi::Ptr,
             "void" => CAbi::Void,
             _ => return None,
@@ -1820,8 +1912,8 @@ impl CAbi {
         match self {
             CAbi::I8 | CAbi::U8 | CAbi::Bool => 8,
             CAbi::I16 | CAbi::U16 => 16,
-            CAbi::I32 | CAbi::U32 | CAbi::F32 => 32,
-            CAbi::I64 | CAbi::U64 | CAbi::Ptr | CAbi::F64 => 64,
+            CAbi::I32 | CAbi::U32 | CAbi::F32 | CAbi::RawF32 => 32,
+            CAbi::I64 | CAbi::U64 | CAbi::Ptr | CAbi::F64 | CAbi::RawF64 => 64,
             CAbi::Void => 0,
         }
     }
@@ -1830,10 +1922,26 @@ impl CAbi {
         matches!(self, CAbi::I8 | CAbi::I16 | CAbi::I32 | CAbi::I64)
     }
 
-    /// 1 for a floating-point class (F32, F64): it travels in the
-    /// floating-point registers, never extended.
+    /// 1 for a floating-point class (F32, F64, and their raw forms): it
+    /// travels in the floating-point registers, never extended.
     pub fn floating(self) -> bool {
-        matches!(self, CAbi::F32 | CAbi::F64)
+        matches!(self, CAbi::F32 | CAbi::F64 | CAbi::RawF32 | CAbi::RawF64)
+    }
+
+    /// 1 for a raw floating-point class (RawF32, RawF64): its Botlish value
+    /// is a raw C floating value, crossing as its bits.
+    pub fn raw_floating(self) -> bool {
+        matches!(self, CAbi::RawF32 | CAbi::RawF64)
+    }
+
+    /// The machine floating-point class of a floating class: a raw one's
+    /// finite counterpart (the same register class and width).
+    pub fn machine_floating(self) -> CAbi {
+        match self {
+            CAbi::RawF32 => CAbi::F32,
+            CAbi::RawF64 => CAbi::F64,
+            c => c,
+        }
     }
 }
 
@@ -1923,6 +2031,29 @@ pub struct ForeignDecl {
     pub result: CAbi,
     pub alias: Option<u32>,
     pub variadic: bool,
+    /// `callbacks=1` (C-CALLBACK-MILESTONE-1.md; hir::foreign::CallsBack):
+    /// the contract lets the C function call back into this execution
+    /// environment during the call -- a function pointer parameter it does
+    /// not keep. Every call of it is a *foreign transition*
+    /// (codegen::clif's transition shim): the runtime records the calling
+    /// frame and permits callbacks while it runs. A call of any other C
+    /// function permits none.
+    pub callbacks: bool,
+}
+
+/// A `callback c fn` of the program (`callback N func=F params="..."
+/// result=K name="NAME"`, C-CALLBACK-MILESTONE-1.md): a C entry point
+/// codegen emits in the target's C calling convention -- the C ABI classes
+/// of its parameters and result -- that runs function F's generic entry in
+/// the execution environment suspended in a foreign transition
+/// (runtime::callback). `cbaddr N` is its address. NAME is the declaration's
+/// Botlish name, for messages.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallbackDecl {
+    pub func: FuncId,
+    pub params: Vec<CAbi>,
+    pub result: CAbi,
+    pub name: String,
 }
 
 /// The compilation target a program was built for (`target "NAME"
@@ -1969,6 +2100,10 @@ pub struct Program {
     /// The exported functions (`export` declarations, in order;
     /// NATIVE-LIBRARY-MILESTONE-1.md): empty but for a library's program.
     pub exports: Vec<ExportDecl>,
+    /// The program's C callbacks (`callback` declarations, dense, in order;
+    /// C-CALLBACK-MILESTONE-1.md): each one's C entry point is a root of the
+    /// program, whether or not an instruction refers to it.
+    pub callbacks: Vec<CallbackDecl>,
     /// The canonical identity of every declared error the program may raise,
     /// by its NIR id (`error ID "NAME"` declarations): what a library reports
     /// as a declared error's identity. Empty but for a library's program.
@@ -2138,6 +2273,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         context_bytes: 0,
         contexts: Vec::new(),
         exports: Vec::new(),
+        callbacks: Vec::new(),
         errors: Vec::new(),
         call_effects: true,
         stack_limit_checked: false,
@@ -2225,6 +2361,13 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
                     program.foreigns.push(decl.1);
                 }
                 "export" => program.exports.push(parse_export(&p, &tokens)?),
+                "callback" => {
+                    let (index, decl) = parse_callback(&p, &tokens)?;
+                    if index as usize != program.callbacks.len() {
+                        return p.err(format!("callback numbers must be dense and in order, got {index}"));
+                    }
+                    program.callbacks.push(decl);
+                }
                 "error" => {
                     let id = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok());
                     match (id, tokens.get(2)) {
@@ -2452,7 +2595,42 @@ fn parse_foreign(p: &Parser, tokens: &[Token]) -> Result<(u32, ForeignDecl), Nir
         Some("1") if !params.is_empty() => true,
         Some(_) => return p.err("foreign variadic=1 needs at least one fixed parameter"),
     };
-    Ok((index, ForeignDecl { symbol, name, params, result, alias, variadic }))
+    let callbacks = match kv.get("callbacks").map(String::as_str) {
+        None => false,
+        Some("1") if params.contains(&CAbi::Ptr) => true,
+        Some(_) => return p.err("foreign callbacks=1 needs a pointer parameter (the function pointer C calls back through)"),
+    };
+    Ok((index, ForeignDecl { symbol, name, params, result, alias, variadic, callbacks }))
+}
+
+/// `callback N func=F params="CLASS ..." result=CLASS name="NAME"`
+/// (CallbackDecl).
+fn parse_callback(p: &Parser, tokens: &[Token]) -> Result<(u32, CallbackDecl), NirError> {
+    let Some(index) = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok()) else {
+        return p.err("callback needs a number");
+    };
+    let kv = pairs(tokens);
+    let Some(func) = kv.get("func").and_then(|f| f.parse::<FuncId>().ok()) else {
+        return p.err("callback needs func=N");
+    };
+    // A callback's C types are those whose conversions are total
+    // (hir/callbacks.tcl): no C float, and a C double only as the result.
+    let params = kv
+        .get("params")
+        .map(String::as_str)
+        .unwrap_or("")
+        .split_whitespace()
+        .map(|w| CAbi::parse(w).filter(|c| !matches!(c, CAbi::Void | CAbi::F32 | CAbi::F64)))
+        .collect::<Option<Vec<CAbi>>>();
+    let Some(params) = params else { return p.err("callback needs params= of C ABI classes a callback takes") };
+    let Some(result) = kv.get("result").and_then(|w| CAbi::parse(w)).filter(|c| *c != CAbi::F32) else {
+        return p.err("callback needs result= (a C ABI class a callback returns, or void)");
+    };
+    let Some(name) = kv.get("name").cloned() else { return p.err("callback needs name=") };
+    if tokens.len() != 6 {
+        return p.err("callback: expected N func=F params=\"...\" result=K name=\"NAME\"");
+    }
+    Ok((index, CallbackDecl { func, params, result, name }))
 }
 
 fn parse_export(p: &Parser, tokens: &[Token]) -> Result<ExportDecl, NirError> {
@@ -2626,7 +2804,43 @@ fn parse_shape(p: &Parser, tokens: &[Token]) -> Result<(u32, ShapeDecl), NirErro
     if opaque && name.is_none() {
         return p.err("an anonymous shape cannot be opaque");
     }
-    Ok((index, ShapeDecl { name, fields, opaque }))
+    let identity = match kv.get("identity") {
+        None => None,
+        Some(text) => {
+            use crate::runtime::vm::Identity;
+            let words: Vec<&str> = text.split_whitespace().collect();
+            let position = |field: &str| fields.iter().position(|f| f == field);
+            let identity = match words.as_slice() {
+                ["members", f] => position(f).map(Identity::Members),
+                ["associations", k, v] if k != v => match (position(k), position(v)) {
+                    (Some(k), Some(v)) => Some(Identity::Associations(k, v)),
+                    _ => None,
+                },
+                _ => return p.err("shape identity= must be \"members FIELD\" or \"associations KEYS VALUES\""),
+            };
+            let Some(identity) = identity else { return p.err("shape identity= names a field the shape does not have") };
+            if !opaque {
+                return p.err("a shape with an identity must be opaque");
+            }
+            Some(identity)
+        }
+    };
+    let tree = match kv.get("tree") {
+        None => None,
+        Some(field) => {
+            let Some(slot) = fields.iter().position(|f| f == field) else {
+                return p.err("shape tree= names a field the shape does not have");
+            };
+            if name.is_none() {
+                return p.err("an anonymous shape cannot be a tree struct's");
+            }
+            if identity.is_some() {
+                return p.err("a tree struct's shape has no identity");
+            }
+            Some(slot)
+        }
+    };
+    Ok((index, ShapeDecl { name, fields, opaque, identity, tree }))
 }
 
 fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError> {
@@ -2918,6 +3132,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 }
             }
             "fnvalue" => Inst::FnValue { dst, func: num(3)? },
+            "cbaddr" => {
+                let callback = num(3)?;
+                if callback as usize >= program.callbacks.len() {
+                    return p.err(format!("cbaddr of undeclared callback {callback}"));
+                }
+                Inst::CallbackAddress { dst, callback }
+            }
             "self" => Inst::SelfClosure { dst },
             "capture" => Inst::Capture { dst, index: num(3)? },
             "staticget" => {
@@ -3163,6 +3384,17 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
             return fail(format!("export {} is declared twice", e.symbol));
         }
     }
+    // A callback's C entry point calls its function's generic entry with one
+    // tagged Value per parameter (C-CALLBACK-MILESTONE-1.md), as an export's
+    // trampoline does.
+    for (index, c) in program.callbacks.iter().enumerate() {
+        let Some(f) = func(c.func) else {
+            return fail(format!("callback {index} ({}): no function {}", c.name, c.func));
+        };
+        if c.func == 0 || f.results != 1 || f.env || f.params as usize != c.params.len() || f.has_scalar_abi() {
+            return fail(format!("callback {index} ({}): function {} ({}) is not an environment-free function of {} parameters with a generic entry", c.name, f.id, f.name, c.params.len()));
+        }
+    }
     for f in &program.functions {
         if only.is_some_and(|i| i != f.id as usize) {
             continue;
@@ -3291,6 +3523,7 @@ fn validate_selected(program: &Program, only: Option<usize>) -> Result<(), NirEr
                 | Inst::Enum { dst, .. }
                 | Inst::Bool { dst, .. }
                 | Inst::Unit { dst }
+                | Inst::CallbackAddress { dst, .. }
                 | Inst::Native { dst, .. } => used.push(*dst),
                 Inst::SelfClosure { dst } => {
                     if !f.env {
@@ -3759,7 +3992,7 @@ fn validate_plans(program: &Program, only: Option<usize>) -> Result<(), NirError
                 | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::DeclaredPayload { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::CWord { .. } | Inst::ShortLit { .. }
                 | Inst::AsciiLit { .. }
                 | Inst::Str { .. } | Inst::Bytes { .. } | Inst::Char { .. } | Inst::Float { .. } | Inst::Enum { .. } | Inst::Bool { .. } | Inst::Unit { .. }
-                | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
+                | Inst::Native { .. } | Inst::FnValue { .. } | Inst::CallbackAddress { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
                 | Inst::StaticGet { .. } | Inst::ContextLoad { .. } => {}
                 Inst::StaticSet { value, .. } => used.push(*value),
                 Inst::ContextStore { value, .. } => used.push(*value),
@@ -3942,12 +4175,36 @@ fn def_of(inst: &Inst) -> Option<Reg> {
     match inst {
         Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::CWord { dst, .. } | Inst::ShortLit { dst, .. } | Inst::AsciiLit { dst, .. } | Inst::Str { dst, .. } | Inst::Bytes { dst, .. } | Inst::Char { dst, .. }
         | Inst::Float { dst, .. } | Inst::Enum { dst, .. } | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
+        | Inst::CallbackAddress { dst, .. }
         | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
         | Inst::Closure { dst, .. }
         | Inst::Op { dst, .. } | Inst::Call { dst, .. } | Inst::CallEnv { dst, .. } | Inst::CallValue { dst, .. }
         | Inst::ForeignCall { dst, .. }
         | Inst::DeclaredErrorEq { dst, .. } | Inst::DeclaredPayload { dst, .. } | Inst::Construct { dst, .. } => Some(*dst),
         _ => None,
+    }
+}
+
+/// Raw C floating classes (RAW-C-FLOAT-FFI-MILESTONE-1.md): `rf32` and
+/// `rf64` are their finite counterparts' widths and floating-point register
+/// class, marked raw, and never a variadic call's trailing class.
+#[cfg(test)]
+mod raw_float_class_tests {
+    use super::*;
+
+    #[test]
+    fn raw_float_classes() {
+        assert_eq!(CAbi::parse("rf32"), Some(CAbi::RawF32));
+        assert_eq!(CAbi::parse("rf64"), Some(CAbi::RawF64));
+        for (raw, finite) in [(CAbi::RawF32, CAbi::F32), (CAbi::RawF64, CAbi::F64)] {
+            assert_eq!(raw.bits(), finite.bits());
+            assert!(raw.floating() && raw.raw_floating() && !finite.raw_floating());
+            assert_eq!(raw.machine_floating(), finite);
+            assert!(!raw.signed());
+        }
+        for text in ["rf32:rf32", "rf64:rf64", "rf32:f64", "rf64:f64", "i32:rf64"] {
+            assert!(VarArg::parse(text).is_none(), "{text} is no trailing argument");
+        }
     }
 }
 
@@ -4181,6 +4438,23 @@ mod struct_tests {
         let body = "    %0 = unit\n    ret %0";
         assert!(message(text("shape 0 anon opaque=1 fields=\"x\"\n", body)).contains("anonymous shape cannot be opaque"));
         assert!(message(text("shape 0 named \"T\" opaque=2 fields=\"x\"\n", body)).contains("0 or 1"));
+    }
+
+    #[test]
+    fn a_tree_shape_names_its_child_field() {
+        // TREE-STRUCT-MILESTONE-1.md: `tree="F"` records a tree struct's
+        // child field, by name, as the slot the runtime walks.
+        let p = parse(&text(
+            "shape 0 named \"Node\" tree=\"children\" fields=\"value children\"\nshape 1 named \"Plain\" fields=\"value children\"\n",
+            "    %0 = unit\n    ret %0",
+        ))
+        .unwrap();
+        assert_eq!(p.shapes[0].tree, Some(1));
+        assert_eq!(p.shapes[1].tree, None);
+        let body = "    %0 = unit\n    ret %0";
+        assert!(message(text("shape 0 named \"Node\" tree=\"kids\" fields=\"value children\"\n", body)).contains("does not have"));
+        assert!(message(text("shape 0 anon tree=\"x\" fields=\"x\"\n", body)).contains("anonymous"));
+        assert!(message(text("shape 0 named \"N\" opaque=1 identity=\"members x\" tree=\"x\" fields=\"x\"\n", body)).contains("no identity"));
     }
 
     #[test]
@@ -4924,3 +5198,41 @@ mod c_word_tests {
     }
 }
 
+
+#[cfg(test)]
+mod callback_tests {
+    use super::*;
+
+    const FUNCS: &str = "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = cbaddr 0\n    ret %0\nend\n\nfunc 1 \"cb\" params=1 env=0 regs=2 pnames=\"x\" captures=0\n    ret %0\nend\n";
+
+    fn parsed(header: &str) -> Result<Program, String> {
+        let program = parse(&format!("nir 1\n{header}\n{FUNCS}")).map_err(|e| e.message)?;
+        validate(&program).map_err(|e| e.message)?;
+        Ok(program)
+    }
+
+    #[test]
+    fn callback_declarations_parse_and_validate() {
+        let program = parsed("callback 0 func=1 params=\"i32\" result=i32 name=\"m::cb\"").unwrap();
+        assert_eq!(program.callbacks, vec![CallbackDecl { func: 1, params: vec![CAbi::I32], result: CAbi::I32, name: "m::cb".into() }]);
+        for (header, expected) in [
+            // A C float never; a C double only as the result.
+            ("callback 0 func=1 params=\"f32\" result=i32 name=\"m\"", "params="),
+            ("callback 0 func=1 params=\"f64\" result=i32 name=\"m\"", "params="),
+            ("callback 0 func=1 params=\"i32\" result=f32 name=\"m\"", "result="),
+            ("callback 1 func=1 params=\"i32\" result=i32 name=\"m\"", "dense"),
+            ("callback 0 func=0 params=\"\" result=i32 name=\"m\"", "environment-free"),
+            ("callback 0 func=1 params=\"i32 i32\" result=i32 name=\"m\"", "environment-free"),
+            ("callback 0 func=7 params=\"i32\" result=i32 name=\"m\"", "no function 7"),
+        ] {
+            let error = parsed(header).err().unwrap_or_else(|| panic!("{header} accepted"));
+            assert!(error.contains(expected), "{header}: {error}");
+        }
+        assert!(parse(&format!("nir 1\n\n{FUNCS}")).err().unwrap().message.contains("cbaddr of undeclared callback 0"));
+        // A transition is a C function with a pointer parameter to call back
+        // through.
+        assert!(parse("nir 1\nforeign 0 \"f\" params=\"i32\" result=i32 callbacks=1 name=\"m::f\"\n").err().unwrap().message.contains("callbacks=1 needs a pointer parameter"));
+        let program = parse("nir 1\nforeign 0 \"f\" params=\"ptr\" result=i32 callbacks=1 name=\"m::f\"\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = int 0\n    ret %0\nend\n").unwrap();
+        assert!(program.foreigns[0].callbacks);
+    }
+}

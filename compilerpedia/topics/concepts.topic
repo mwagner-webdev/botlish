@@ -950,22 +950,23 @@ title: Lists: immutable sequences
 summary: List[T] is an immutable sequence written [a, b]; its operations need `import std::list`, collecting loops transform it, and it is never destructured positionally.
 index: concepts
 alias: List type; list literal; immutable list; sequence
-keywords: list, List, at, get, append, length, find, any?, all?, IndexNotFound, element, index, empty list
+keywords: list, List, at, get, append, flat, length, find, any?, all?, IndexNotFound, element, index, empty list
 related: concept.loops concept.values concept.destructuring concept.list-length proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.std::list stdlib.std::list::at stdlib.std::list::get
 docs: README.md STDLIB-NAMESPACES.md RETURNING-ITERABLE-LOOPS.md MINIMAL-APPLIED-LIST-TYPES.md
 
 == WHAT IT IS
 `[1, 2, 3]` is a `List[int]`; `[]` is the empty List. After `import
 std::list`: length, at, append (a new List with one more element), get (with
-a default), find, any?, all?, none?. Element types are inferred; a parameter
-or result may declare `List[T]`, or `List[T]{length: N}` for a List of a
-proven exact length (concept.list-length).
+a default), find, any?, all?, none?, and flat (the elements of a List of
+Lists, in order: one level of nesting removed). Element types are inferred;
+a parameter or result may declare `List[T]`, or `List[T]{length: N}` for a
+List of a proven exact length (concept.list-length).
 
 == RULES
   * `xs.at(i)` fails with the declared error IndexNotFound unless the
     compiler proves i in range (proof.list-bounds); handle it, admit it,
     or use `xs.get(i, default)`.
-  * A List never changes: append returns a new List.
+  * A List never changes: append and flat return a new List.
   * Lists are not destructured positionally: `[a, b] = xs` is
     LIST-DESTRUCTURING. A fixed group of different values is a struct
     (principle.name-the-parts).
@@ -2570,7 +2571,7 @@ summary: `if c:` / `elif c2:` / `else:` chooses a branch; an `if` is a value onl
 index: concepts
 alias: if statement; elif; else branch; if expression; conditional expression; ternary
 keywords: if, elif, else, condition, branch, value, ternary, operand, argument, placement, NOT-BOOLEAN
-related: concept.booleans concept.loops concept.unit rule.if-placement principle.guard-clauses principle.bind-before-use error.not-boolean error.surface-syntax
+related: concept.booleans concept.loops concept.unit rule.if-placement rule.else-if principle.guard-clauses principle.bind-before-use error.not-boolean error.surface-syntax
 docs: README.md ELIF.md
 
 == WHAT IT IS
@@ -2593,6 +2594,7 @@ when no branch is taken. Each branch is a scope of its own.
     errors ("an "if" value must be the whole right side of "=" or
     "return""): bind the `if` to a name, then use the name.
   * There is no one-line form (`if c: a else: b`) and no ternary operator.
+  * `else if` is written `elif` (rule.else-if).
   * A condition must be a Bool (NOT-BOOLEAN when it is evaluated).
   * Branches may end in `return`, `fail`, `break` or `continue`.
 
@@ -2639,9 +2641,9 @@ ELIF.md; rule.if-placement.
 title: Loops: `loop:`, collecting loops, `break` and `continue`
 summary: `loop x in xs:` and `loop i from a to b:` collect their body's values into a List; a bare `loop:` repeats until `break`; a loop value is never an operand or argument.
 index: concepts
-alias: loop; for loop; while loop; collecting loop; break and continue; counted loop
+alias: loop; for loop; while loop; collecting loop; break and continue; counted loop; for; while; for x in xs; for i in range; while true
 keywords: loop, in, from, to, through, down from, break, continue, while, for, collect, map, filter, iteration, iterator, iterate, range, placement
-related: concept.lockstep concept.lists concept.if-expressions concept.mutable-map concept.mutable-set rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index
+related: concept.folds concept.lockstep concept.lists concept.if-expressions concept.mutable-map concept.mutable-set rule.loop-placement rule.control-placement capability.map-filter proof.list-bounds task.iterate-with-index
 docs: COLLECTING-LOOPS.md RETURNING-ITERABLE-LOOPS.md PAYLOAD-FREE-BREAK.md
 
 == WHAT IT IS
@@ -2669,8 +2671,11 @@ whose bounds are empty runs zero times and never reverses direction.
     loop of the same function.
   * There is no `while` or `for`: `loop:` with an `if ...: break` is the
     while loop, and a collecting loop with `continue` is map and filter.
-  * A bare loop cannot accumulate (no assignment): use a collecting loop,
-    recursion, or a MutableVector.
+  * A loop cannot accumulate into a name (no assignment): carry the value
+    through a fold (concept.folds), or use a collecting loop or recursion
+    (task.accumulate). `total = total + x` in a body compiles, but binds a
+    new `total` of the body: the outer one never changes
+    (rule.immutable-bindings).
 
 == WHY
 Collecting loops replace map, filter and list-building variables with one
@@ -3009,7 +3014,7 @@ summary: A `context struct` value installed with `with context EXPR` reaches eve
 index: concepts
 alias: context struct; with context; context parameter; dependency injection; environment value
 keywords: context, with, installed, requirement, MISSING-CONTEXT, DUPLICATE-CONTEXT, CONTEXT-FUNCTION-VALUE, global, singleton, LinuxIO, suite
-related: concept.context-traits concept.context-owned-state concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
+related: concept.context-traits concept.context-owned-state concept.context-injection concept.opaque-structs concept.direct-modules concept.testing proof.contexts rule.context-installation error.missing-context error.duplicate-context error.context-function-value error.context-installation-unsupported
 docs: CONTEXTS.md CONTEXT-TRAITS.md CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md
 
 == WHAT IT IS
@@ -3088,6 +3093,103 @@ x
 
 == MORE
 CONTEXTS.md; concept.context-traits for contexts named by what they do.
+
+@topic concept.context-injection
+title: Inject blocks: a computation with only the contexts it is given
+summary: `inject context A, B:` runs its block with only the listed installed contexts (`inject no context:` with none), whatever its creator can use; checked statically, at no runtime cost.
+index: concepts
+alias: inject; inject context; inject no context; restricted context; restricted authority; context injection; capability restriction; sandbox; least privilege; request handler; actor authority
+keywords: inject, injection, authority, restricted, least privilege, actor, request handler, coroutine, CONTEXT-NOT-INJECTED, CONTEXT-RETAINED-AUTHORITY, installation, selection
+related: concept.contexts concept.context-traits concept.coroutines concept.direct-modules error.context-not-injected error.context-retained-authority error.duplicate-injected-context
+docs: RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md CONTEXTS.md
+
+== WHAT IT IS
+    with context network::create()
+    with context storage::create()
+
+    report = inject context storage::Storage:
+        build_report(data)
+
+Three things stay apart: *installation* (`with context EXPR`, entry
+program, top level) makes an implementation available; *selection* picks
+the one implementation of a context trait, once per program; *injection*
+grants a computation permission to use some of what is installed. An
+inject block is a statement or a value (`x = inject ...:` is its last
+statement's value); its code may use exactly the contexts it lists -- a
+context struct or a context trait each -- and `inject no context:` none.
+
+== RULES
+  * Every call in the block -- direct, imported, method-style, a coroutine
+    construction, a trait operation -- requires only injected contexts,
+    transitively (CONTEXT-NOT-INJECTED, with the chain).
+  * The block may not read a context parameter of the function it is in,
+    nor call a nested function that does, unless it injects that context.
+  * A nested inject block injects a subset of the enclosing one: authority
+    never widens. A function containing an inject block requires what the
+    block injects, so its callers -- and their inject blocks -- must have
+    it too.
+  * At top level each injected context must be installed where the block
+    runs (a context trait: implemented by exactly one installed context).
+  * A coroutine resumed in the block must have been constructed within the
+    injected contexts (CONTEXT-RETAINED-AUTHORITY): a coroutine keeps its
+    creator's contexts.
+  * Values cross freely: data, a copy of a context value, a handle moved
+    through without being resumed, an address of a mailbox. Passing a
+    value is explicit delegation; what is restricted is direct use of
+    context authority.
+
+== WHY
+Availability is not authority. A request handler, a calculation task or a
+storage service can be given exactly the dependencies it needs, and the
+compiler proves it cannot reach the others through any call chain. There
+is no runtime cost: no permission table, no context copy, no second
+selection; the block compiles to its code.
+
+== EXAMPLES
+@example accept
+context struct Network:
+    id: int
+
+context struct Storage:
+    base: int
+
+fn store(n: int, context st: Storage) -> int:
+    n + st.base
+
+fn calculate(n: int) -> int:
+    n * 2
+
+with context Network {id: 7}
+with context Storage {base: 10}
+a = inject no context:
+    calculate(16)
+b = inject context Storage:
+    store(a)
+b
+@caption A contextless calculation and a Storage-only computation beside an installed Network
+@value 42
+@end
+
+@example reject
+context struct Network:
+    id: int
+
+fn send(n: int, context net: Network) -> int:
+    n + net.id
+
+fn handler(n: int) -> int:
+    send(n)
+
+with context Network {id: 1}
+inject no context:
+    handler(1)
+@caption handler reaches Network through send; the block grants none
+@error CORE SEMANTIC CONTEXT-NOT-INJECTED
+@at 12:5
+@end
+
+== MORE
+RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md.
 
 @topic concept.context-owned-state
 title: Context-owned state: an installed context owns its affine members
@@ -3366,8 +3468,8 @@ summary: Hashable is a built-in trait, used like any trait, whose witnesses the 
 index: concepts
 alias: Hashable; hashable; hashable trait; hash key; map key; set key; dictionary key
 keywords: Hashable, hash, ==, equality, total, witness, built-in trait, callable, function, key, collision, keyed hash, TRAIT-NOT-SATISFIED
-related: concept.traits stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
-docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md
+related: concept.traits concept.equatable concept.value-identity stdlib.hash stdlib.== error.trait-not-satisfied error.equality error.internal-namespace
+docs: HASHABLE-AND-KEYED-HASH.md TRAITS.md REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md
 
 == WHAT IT IS
     fn fingerprint(x: Hashable) -> int:
@@ -3384,7 +3486,10 @@ EQUALITY) and a hash, and so equal values always hash equally:
   * Int and every integer domain, String, Bool, unit, UnicodeChar,
     Float64, enum cases;
   * a List or ImmutableSet of Hashable elements;
-  * a struct (also an opaque one) whose every field is Hashable.
+  * a struct (also an opaque one) whose every field is Hashable;
+  * an opaque struct that declares its identity (concept.value-identity)
+    whose identity's elements are Hashable, whatever its other fields
+    hold: an ImmutableMap[K, V] whose V is Hashable (concept.immutable-map).
 
 Not Hashable: a function (functions have no equality), a coroutine handle,
 a MutableArray or MutableVector, a C pointer or native view, a
@@ -3407,6 +3512,8 @@ then it is.
     checked when it runs (EQUALITY), as before.
   * Hashable cannot be declared, implemented or named by a type, struct,
     enum, layout or trait of a program: the name is reserved.
+  * Every Hashable type is Equatable (concept.equatable): a Hashable value
+    is accepted where an Equatable one is expected, never the reverse.
 
 == WHY
 Hash-based collections need keys whose equality and hash agree and never
@@ -3958,9 +4065,9 @@ title: Order, membership and identity of a map or set
 summary: A MutableMap's or MutableSet's iteration order is a permutation of its members that reorder may replace, never part of its contents: reorder changes the order only.
 index: concepts
 alias: reorder; reordering; iteration order; collection order; permutation of keys
-keywords: reorder, order, validate_order, OrderMismatch, permutation, members, keys, insertion order, MutableMap, MutableSet
-related: concept.mutable-map concept.mutable-set proof.same-members error.reorder-not-proven concept.place-parameters concept.values stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder stdlib.std::mutable_map::order stdlib.std::mutable_map::validate_order
-docs: PROVEN-COLLECTION-REORDERING.md ORDERED-MUTABLE-MAP-SET.md
+keywords: reorder, reordered, order, validate_order, OrderMismatch, permutation, members, keys, insertion order, MutableMap, MutableSet, ImmutableMap, equality, ==
+related: concept.mutable-map concept.mutable-set concept.immutable-map concept.value-identity proof.same-members error.reorder-not-proven concept.place-parameters concept.values stdlib.std::mutable_map::reorder stdlib.std::mutable_set::reorder stdlib.std::mutable_map::order stdlib.std::mutable_map::validate_order stdlib.std::immutable_map::reordered
+docs: PROVEN-COLLECTION-REORDERING.md ORDERED-MUTABLE-MAP-SET.md REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md
 
 == WHAT IT IS
     o = m.order()                  the keys, in m's order: a MutableSet
@@ -3975,7 +4082,16 @@ default history: reorder replaces the order and nothing else -- every
 key keeps its stored key and its value, lookups and length are
 unchanged, and the next new key still goes last. The same holds for
 `s.order()`, `s.validate_order(c)` and `s.reorder(o)` of a set (a copy
-of the set is an order of it too).
+of the set is an order of it too), and for a frozen map's
+`f.order()`, `f.validate_order(c)` and `f.reordered(o)`, which returns
+f in O's order (concept.immutable-map).
+
+Equality reads contents, never order: two ImmutableMaps (or
+ImmutableSets) are == when they hold the same associations (members),
+whatever order each iterates in, and they hash equally
+(concept.value-identity). A MutableMap or MutableSet has no ==; freeze
+it to compare it. So `f.reordered(o) == f` always, while a loop over
+each may visit the keys differently.
 
 == RULES
   * The order is a MutableSet (distinct by construction) that must hold
@@ -4041,8 +4157,8 @@ title: MutableMap[K, V]: an insertion-ordered mutable map
 summary: std::mutable_map::MutableMap[K, V] maps Hashable keys to values and iterates in insertion order: a replaced value keeps its key's place, a removed and re-set key goes last.
 index: concepts
 alias: MutableMap; hash map; dictionary; dict; associative array; ordered map; hashmap; lookup table
-keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value, reorder
-related: concept.collection-order concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
+keywords: mutable_map, create, with_capacity, set, at, contains, remove, clear, length, empty?, KeyNotFound, MutableMapEntry, insertion order, Hashable, key, value, reorder, freeze
+related: concept.collection-order concept.immutable-map concept.mutable-set concept.place-parameters concept.mutable-vector concept.values concept.loops concept.parameterized-structs stdlib.module.std::mutable_map stdlib.std::mutable_map::KeyNotFound
 docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
 
 == WHAT IT IS
@@ -4057,9 +4173,10 @@ docs: ORDERED-MUTABLE-MAP-SET.md PLACE-PARAMETERS.md HASHABLE-AND-KEYED-HASH.md
 
 After `import std::mutable_map`: create[K, V](), with_capacity[K, V](n),
 length, empty?, contains, at, set, remove (returns the value), clear,
-order, validate_order, reorder (concept.collection-order) and
-`loop e in m:`. Expected cost: O(1) for contains, at, set and remove,
-O(n) for a loop.
+order, validate_order, reorder (concept.collection-order), freeze (the
+frozen, comparable std::immutable_map::ImmutableMap of its current
+associations: concept.immutable-map) and `loop e in m:`. Expected cost:
+O(1) for contains, at, set and remove, O(n) for a loop and a freeze.
 
 == RULES
   * K must satisfy Hashable (TRAIT-NOT-SATISFIED otherwise): Ints, Strings,
@@ -4078,7 +4195,8 @@ O(n) for a loop.
   * A loop iterates the map as it was when the loop began: the body may
     mutate the map, which never changes what the loop visits.
   * A map is not Hashable, and `==` of two maps is a run-time EQUALITY
-    error: compare contents with a loop and contains/at.
+    error: freeze both and compare the frozen maps, which are == by
+    their associations (concept.immutable-map).
 
 == WHY
 The keyed hash that places a key is private and different in every
@@ -4120,14 +4238,15 @@ title: MutableSet[T]: an insertion-ordered mutable set
 summary: std::mutable_set::MutableSet[T] holds distinct Hashable values in insertion order: adding a present element changes nothing, removing and re-adding one moves it last.
 index: concepts
 alias: MutableSet; ordered set; mutable set
-keywords: reorder, mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership
+keywords: reorder, mutable_set, create, with_capacity, add, contains, remove, clear, length, empty?, insertion order, Hashable, membership, freeze
 related: concept.mutable-map concept.immutable-set concept.place-parameters concept.values concept.loops stdlib.module.std::mutable_set
 docs: ORDERED-MUTABLE-MAP-SET.md
 
 == WHAT IT IS
 After `import std::mutable_set`: create[T](), with_capacity[T](n), length,
 empty?, contains, add (true when it added), remove (true when it removed),
-clear, and `loop x in s:`. Expected cost: O(1) for contains, add and
+clear, freeze (the std::immutable_set::ImmutableSet of its members), and
+`loop x in s:`. Expected cost: O(1) for contains, add and
 remove, O(n) for a loop.
 
 == RULES
@@ -4137,7 +4256,7 @@ remove, O(n) for a loop.
   * A set is a value (copies are independent), its mutations take it as a
     place, and a loop iterates it as it was when the loop began.
   * A set is not Hashable and has no `==`; std::immutable_set is the
-    immutable, comparable set (concept.immutable-set).
+    immutable, comparable set (concept.immutable-set): `s.freeze()`.
 
 == EXAMPLES
 @example accept
@@ -4157,6 +4276,251 @@ order = loop x in s:
 
 == MORE
 ORDERED-MUTABLE-MAP-SET.md.
+
+@topic concept.value-identity
+title: Value identity: equality and hashing by contents, not representation
+summary: An opaque struct may declare `identity members(F)` or `identity associations(K, V)`: its values are then == when those List fields hold the same entries, in any order.
+index: concepts
+alias: identity; value identity; semantic equality; representation-independent equality; identity members; identity associations; custom equality; equality by contents; order-independent equality
+keywords: identity, members, associations, opaque, ==, hash, Hashable, Equatable, representation, order, multiset, table hash, ImmutableMap, TYPE, TRAIT-NOT-SATISFIED
+related: concept.equatable concept.hashable concept.immutable-map concept.collection-order concept.opaque-structs concept.structs error.type error.trait-not-satisfied
+docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md OPAQUE-STRUCTS.md HASHABLE-AND-KEYED-HASH.md
+
+== WHAT IT IS
+    opaque struct Bag[T]:
+        items: List[T]
+        note: str
+        identity members(items)            == and hash: items, in no order
+
+    opaque struct Dict[K, V]:
+        keys: List[K]
+        vals: List[V]
+        index: List[int]
+        identity associations(keys, vals)  the i-th key with the i-th
+                                           value, pairs in no order
+
+A struct's `==` and hash compare every field, slot by slot. An opaque
+struct may declare instead what its values mean: the elements of one List
+field (`members`), or the pairs of two (`associations`). Two values of the
+declaration are equal exactly when they hold the same entries, each as many
+times, in any order; the public hash and the standard library's keyed table
+hash are computed from those entries alone, combined so that their order
+does not matter. Every other field -- a note, an index, stored hashes, the
+order the entries happen to be in -- is representation: no `==`, hash or
+Hashable check reads it.
+
+== RULES
+  * Only an opaque struct may declare an identity (its module alone makes
+    and reads its values, so it alone keeps them consistent), never a
+    context struct, and with one clause (TYPE otherwise).
+  * The fields named are List fields of the struct, two distinct ones for
+    associations. Every field of the struct is immutable: no MutableVector,
+    MutableArray, C pointer, native view or affine value (TYPE).
+  * Two declarations are two types: values of different declarations are
+    never equal, whatever their entries.
+  * The Hashable and Equatable witnesses read the identity's elements only:
+    Bag[int] is Hashable, Bag[MutableVector[int]] is neither (a
+    TRAIT-NOT-SATISFIED that names "the members of Bag[...]"), and a
+    representation field of any type takes no part.
+  * Equal hashes never make two values equal: entries are compared by ==.
+  * == and a hash cost O(n) expected (entries matched in place first, the
+    rest by hash) and allocate no managed memory.
+  * Order is not identity: where a type iterates, its order is its owner's
+    representation (concept.collection-order).
+
+== WHY
+A map built in two histories, or a set stored in two orders, is the same
+value to the program that uses it; comparing the representation would make
+equality depend on the order of insertion, on removed entries or on a
+hidden hash's placement. The owner states the meaning once, and every
+operation that compares or hashes -- ==, hash, ImmutableSet, MutableMap
+keys, the Hashable check -- follows it on every backend.
+
+== EXAMPLES
+@example accept
+opaque struct Bag[T]:
+    items: List[T]
+    note: str
+    identity members(items)
+
+nomethod fn bag(items: List[int], note: str) -> Bag[int]:
+    Bag[int] {items: items, note: note}
+
+[bag([1, 2, 3], "first") == bag([3, 1, 2], "second"), bag([1, 1], "") == bag([1], ""), hash(bag([1, 2], "first")) == hash(bag([2, 1], "second"))]
+@caption Same members in another order: equal and equally hashed; the note is representation
+@value [true, false, true]
+@end
+
+@example reject
+struct Bag:
+    items: List[int]
+    identity members(items)
+
+Bag {items: [1]}
+@caption Only an opaque struct may declare its identity
+@error CORE SEMANTIC TYPE
+@at 3:5
+@end
+
+== MORE
+REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md; concept.immutable-map for
+the standard library's map with an identity.
+
+@topic concept.equatable
+title: Equatable: values whose == is total
+summary: Equatable is a built-in trait with no operation: its witnesses are exactly the types whose == never stops with EQUALITY, and every Hashable type is Equatable.
+index: concepts
+alias: Equatable; equatable; total equality; comparable values; equality trait
+keywords: Equatable, ==, equality, total, witness, built-in trait, Hashable, refines, satisfies, TRAIT-NOT-SATISFIED
+related: concept.hashable concept.value-identity concept.traits concept.parameterized-structs error.trait-not-satisfied error.equality
+docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md HASHABLE-AND-KEYED-HASH.md TRAITS.md
+
+== WHAT IT IS
+    fn same(a: Equatable, b: Equatable) -> bool:
+        a == b
+
+    struct Box[T satisfies Equatable]:
+        value: T
+
+Equatable is a trait like Hashable whose witnesses the language supplies:
+a type is Equatable exactly when == of two of its values never stops with
+EQUALITY. A parameter, a view or a struct slot can require it. It has no
+operation of its own (== is every value's); what it buys is the guarantee,
+and the compiler drops the failure path of == on such operands.
+
+== RULES
+  * Witnesses: Int, String, Bool, unit, UnicodeChar, Float64, enum cases;
+    Lists and ImmutableSets of Equatable elements; structs whose fields
+    are Equatable; an identity struct whose identity's elements are
+    (concept.value-identity). Not: functions, coroutine handles, mutable
+    collections, C pointers, DecimalRounded, `any`.
+  * Hashable refines Equatable: a Hashable value (or view) is accepted
+    where an Equatable one is expected; an Equatable one is not Hashable.
+  * Today the two traits have the same witnesses (every kind with total
+    equality has a total hash); they are separate guarantees, and a
+    program that only compares asks for Equatable.
+  * The name is reserved: no program declares or implements Equatable.
+
+== WHY
+Some code only compares values -- a membership scan, a dedup -- and needs
+the guarantee that == never fails, not a hash. Naming that guarantee keeps
+it a static obligation of the caller instead of a run-time EQUALITY.
+
+== EXAMPLES
+@example accept
+nomethod fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+nomethod fn via(x: Hashable) -> bool:
+    same(x, x)
+
+[same(1, 1), same("apple", "pear"), via([1, 2])]
+@caption A Hashable value is Equatable too
+@value [true, false, true]
+@end
+
+@example reject
+fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn twice(n: int) -> int:
+    n * 2
+
+same(twice, twice)
+@caption A function has no total equality
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 7:6
+@end
+
+== MORE
+REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md.
+
+@topic concept.immutable-map
+title: ImmutableMap[K, V]: a frozen, comparable map
+summary: std::immutable_map::ImmutableMap[K, V] is a MutableMap frozen into an immutable value: O(1) lookups, iteration in the order it was frozen in, and == and hash by its associations whatever their order.
+index: concepts
+alias: ImmutableMap; immutable map; frozen map; map as key; comparable map; hashable map; map equality; freeze a map
+keywords: immutable_map, freeze, at, contains, length, empty?, empty, order, validate_order, reordered, KeyNotFound, OrderMismatch, ImmutableMapEntry, ==, hash, Hashable, Equatable, insertion order
+related: concept.mutable-map concept.value-identity concept.collection-order concept.equatable concept.hashable concept.immutable-set stdlib.module.std::immutable_map stdlib.std::mutable_map::freeze
+docs: REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md ORDERED-MUTABLE-MAP-SET.md PROVEN-COLLECTION-REORDERING.md
+
+== WHAT IT IS
+    m = std::mutable_map::create[str, int]()
+    m.set("pear", 3)
+    f = m.freeze()                 ImmutableMap[str, int]: m's associations,
+                                   in m's order
+    n = f.at("pear"):              KeyNotFound when absent
+        on std::immutable_map::KeyNotFound:
+            0
+    loop e in f:                   ImmutableMapEntry {key, value}
+        e.key
+
+After `import std::immutable_map` (freeze is std::mutable_map's): empty(),
+length, empty?, contains, at, order, validate_order, reordered and
+`loop e in f:`. Expected cost: O(1) for contains and at, O(n) for a freeze,
+a loop, == and a hash.
+
+== RULES
+  * K must satisfy Hashable. ImmutableMap[K, V] is Equatable exactly when
+    V is, and Hashable exactly when V is: then a map can be a MutableMap
+    key, a set member, a List element, a field of a Hashable struct or a
+    key of another map.
+  * f == g when both hold the same keys with equal values, whatever their
+    orders or histories; the hashes agree with it (concept.value-identity).
+  * Iteration is the order the map had when it was frozen;
+    `f.reordered(o)` is f in O's order (O proven to hold exactly f's keys:
+    concept.collection-order) and is == f.
+  * A frozen map never changes: freeze copies, and nothing done to the
+    MutableMap afterward reaches it. There is no update operation.
+  * at of a missing key fails with std::immutable_map::KeyNotFound.
+
+== WHY
+A MutableMap's == would have to compare what it holds now, through every
+copy; a frozen map is a value whose meaning is fixed, so it can be
+compared, hashed and used as a key. Its order is kept for iteration, and
+kept out of equality, so maps built in different orders are the same map.
+
+== EXAMPLES
+@example accept
+import std::mutable_map
+import std::immutable_map
+import std::mutable_set
+
+a = std::mutable_map::create[str, int]()
+a.set("pear", 2)
+a.set("fig", 1)
+b = std::mutable_map::create[str, int]()
+b.set("fig", 1)
+b.set("pear", 2)
+fa = a.freeze()
+fb = b.freeze()
+seen = std::mutable_set::create[std::immutable_map::ImmutableMap[str, int]]()
+first = seen.add(fa)
+again = seen.add(fb)
+keys = loop e in fb:
+    e.key
+[fa == fb, hash(fa) == hash(fb), first, again, keys]
+@caption Equal maps built in different orders: one set member, two iteration orders
+@value [true, true, true, false, ["fig", "pear"]]
+@end
+
+@example reject
+import std::mutable_map
+import std::immutable_map
+import std::mutable_vector
+
+fn fingerprint(x: Hashable) -> int:
+    hash(x)
+
+m = std::mutable_map::create[int, MutableVector[int]]()
+fingerprint(m.freeze())
+@caption A map of MutableVectors is not Hashable: its values are not
+@error CORE SEMANTIC TRAIT-NOT-SATISFIED
+@at 9:13
+@end
+
+== MORE
+REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md.
 
 @topic concept.mutable-array
 title: MutableArray[T]: a fixed-length mutable value
@@ -4236,7 +4600,9 @@ membership (false for absence; never an error for comparable values).
 
 == RULES
   * Duplicates collapse by `==`; two sets are `==` when they hold the same
-    elements, whatever the construction order.
+    elements, whatever the construction order. Construction and `==` of
+    sets of more than eight Hashable members cost O(n) expected (matched
+    by hash; equal hashes never make two members equal).
   * There is no insert, remove, size or iteration (`loop x in s:` is a
     run-time TYPE error): keep the List if you need the elements.
   * Membership of a value whose equality is undefined (a function) fails
@@ -4612,13 +4978,70 @@ fn say(text: str) -> int:
 DIRECT-MODULES.md; `botlish -direct FILE` prints each module's
 directness.
 
+@topic concept.c-callbacks
+title: C callbacks: `callback c fn` and std::ffi::c::callback
+summary: A `callback c fn` is a Botlish function C may call back synchronously, through std::ffi::c::callback(NAME), during a foreign call whose FnPtr parameter is noescape.
+index: concepts
+alias: C callback; callback c fn; function pointer from Botlish; C calls back into Botlish; qsort comparator
+keywords: callback, FnPtr, std::ffi::c::callback, noescape, synchronous, re-entry, RawDouble, RawFloat, thread, retained
+related: concept.c-ffi stdlib.std::ffi::c::callback error.callback-signature error.callback-environment error.callback-placement error.callback-reference error.native-callback concept.raw-c-floats
+docs: C-CALLBACK-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md
+
+== WHAT IT IS
+    import std::ffi::c
+    extern c fn count named "count_accepted"(decide: std::ffi::c::FnPtr[Fn{args: [std::ffi::c::Int], return: std::ffi::c::Int}] noescape, n: std::ffi::c::Int) -> std::ffi::c::Int
+
+    callback c fn decide(value: std::ffi::c::Int) -> std::ffi::c::Int:
+        if value > 0:
+            return 1
+        0
+
+    cb = std::ffi::c::callback(decide)
+    count(cb, 10)
+
+The declaration states the callback's C signature (C types only, each
+converting totally: no NaN admission, no narrowing), and no errors; the
+function is environment-free and never suspends. To Botlish callers it is
+an ordinary function. std::ffi::c::callback(decide) is the address of its
+C entry point, a std::ffi::c::FnPtr of exactly that signature -- affine,
+like every C pointer (bind it, then pass it).
+
+C may call it only during a call of a C function whose FnPtr parameter is
+declared noescape (C calls it during the call and keeps it no longer). The
+callback then runs nested in the Botlish execution environment waiting in
+that call -- the same heap and context -- and may allocate, call C and be
+called back again; the collector keeps every waiting Botlish frame's values.
+Anything else is refused at run time before Botlish code runs (NATIVE
+CALLBACK: another thread, after the call, another stack), and a failure of
+the body ends the process (a C callback has no error channel). Passing the
+pointer to a parameter that may keep it is a direct edge (DIRECT): a
+retained registration is not provided yet.
+
+Native backends only: on the Tcl backends std::ffi::c::callback is
+NATIVE-ONLY, and a callback c fn is an ordinary function.
+
+@example accept
+import std::ffi::c
+
+callback c fn sign(value: std::ffi::c::Int) -> std::ffi::c::Int:
+    if value > 0:
+        return 1
+    if value < 0:
+        return -1
+    0
+
+[sign(5), sign(-3), sign(0)]
+@caption An ordinary function to Botlish callers
+@value [1, -1, 0]
+@end
+
 @topic concept.c-ffi
 title: Calling C: `extern c fn` and `extern c library`
 summary: `extern c fn` declares a C function by its ABI signature and pointer contracts, `extern c library` a library to link; C calls run only on the native backends.
 index: concepts
 alias: C FFI; extern c; foreign function interface; call C function
 keywords: extern, c, ffi, foreign, library, link, std::ffi::c, Ptr, Int, noescape, borrow, NATIVE-ONLY, bindgen
-related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats concept.native-link-plan backend.native-only backend.native-executable error.native-only
+related: concept.direct-modules concept.binary-layouts concept.c-bindgen-layouts concept.c-floats concept.raw-c-floats concept.native-link-plan backend.native-only backend.native-executable error.native-only
 docs: C-FFI.md C-ABI-TYPES.md C-POINTER-BORROWING.md C-BINDGEN.md C-FLOAT-FFI-MILESTONE-1.md NATIVE-LINK-PLAN-MILESTONE-1.md
 
 == WHAT IT IS
@@ -4781,8 +5204,8 @@ summary: C's float (binary32) and double (binary64) are C representations of Flo
 index: concepts
 alias: C float; C double; std::ffi::c::Float; std::ffi::c::Double; float32; binary32; single precision
 keywords: float, double, std::ffi::c::Float, std::ffi::c::Double, binary32, binary64, NonFiniteFloat, round to nearest, ties to even, subnormal, negative zero, long double, layout, extern
-related: concept.floats concept.c-ffi concept.binary-layouts concept.c-bindgen-layouts error.known-error
-docs: C-FLOAT-FFI-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md FLOAT64-MILESTONE-1.md
+related: concept.floats concept.c-ffi concept.raw-c-floats concept.binary-layouts concept.c-bindgen-layouts error.known-error
+docs: C-FLOAT-FFI-MILESTONE-1.md RAW-C-FLOAT-FFI-MILESTONE-1.md C-FFI.md C-ABI-TYPES.md FLOAT64-MILESTONE-1.md
 
 == WHAT IT IS
     import std::ffi::c
@@ -4892,6 +5315,97 @@ takes(1.0e39)
 
 == MORE
 C-FLOAT-FFI-MILESTONE-1.md; C-FFI.md; FLOAT64-MILESTONE-1.md.
+
+@topic concept.raw-c-floats
+title: Raw C floating values: std::ffi::c::RawFloat and std::ffi::c::RawDouble
+summary: C's float and double carried exactly as C holds them -- NaN, the infinities, negative zero, subnormals -- as values of their own kind, admitted to a Float64 only explicitly.
+index: concepts
+alias: raw float; raw double; RawFloat; RawDouble; std::ffi::c::RawFloat; std::ffi::c::RawDouble; NaN payload; signaling NaN; bit pattern
+keywords: raw, RawFloat, RawDouble, std::ffi::c::raw, bits, NaN, infinity, negative zero, subnormal, from_bits, to_bits, to_float64, from_float64, NonFiniteFloat, extern, layout
+related: concept.c-floats concept.c-ffi concept.binary-layouts concept.floats
+docs: RAW-C-FLOAT-FFI-MILESTONE-1.md C-FLOAT-FFI-MILESTONE-1.md C-FFI.md
+
+== WHAT IT IS
+    import std::ffi::c
+    import std::ffi::c::raw
+    extern c fn get() -> std::ffi::c::RawDouble
+
+    x = get()
+    if x.double_nan?(): ... else: std::ffi::c::raw::double_to_float64(x)
+
+std::ffi::c::RawFloat and std::ffi::c::RawDouble are C's float and double
+without the admission std::ffi::c::Float and std::ffi::c::Double apply:
+every binary32 or binary64 bit pattern is a value. They have exactly their
+finite counterparts' C representation (size, alignment, register class),
+so choosing raw or finite never changes a C signature. They are types of
+values too, of their own kind, written anywhere a type is.
+
+== RULES
+  * A raw argument, result, field, array element or union alternative
+    crosses as exactly its bits: no rounding, no NonFiniteFloat, no
+    normalization of negative zero, no quieting of a NaN. A C call with
+    only raw floating positions declares no NonFiniteFloat.
+  * A raw value is no number: no arithmetic, ordering, equality (==) or
+    hash, and no implicit conversion to or from a Float64, an Int or the
+    other raw type -- each is a compile-time TYPE error.
+  * Explicit operations (import std::ffi::c::raw): float_from_bits /
+    double_from_bits (a FloatBits / DoubleBits proven in range),
+    float_to_bits / double_to_bits, float_to_float64 / double_to_float64
+    (the finite types' admission: NonFiniteFloat for NaN or an infinity,
+    -0 as 0.0), float_from_float64 (rounded to nearest, ties to even; an
+    overflow NonFiniteFloat) and double_from_float64 (exact), and the
+    classifications finite?, nan?, infinite?, zero?, negative? (the sign
+    bit) of each format.
+  * A raw value is never a trailing argument of a variadic C function:
+    C promotes a trailing float to a double.
+  * A raw value's display is its C type and its bits:
+    <C double 0x8000000000000000>.
+
+== WHY
+Carrying a foreign value is not admitting it: a NaN a C library returns is
+legal C, and a program that only stores, inspects or passes it back must
+not fail first. Admission into Float64 stays an explicit, checked step.
+
+== EXAMPLES
+@example accept
+import std::ffi::c
+import std::ffi::c::raw
+
+fn inspect(b: std::ffi::c::raw::DoubleBits) -> list:
+    x = std::ffi::c::raw::double_from_bits(b)
+    v = x.double_to_float64():
+        on NonFiniteFloat:
+            return [x.double_to_bits(), x.double_nan?(), x.double_negative?()]
+    [x.double_to_bits(), v]
+
+[inspect(18444492273895866369), inspect(9223372036854775808)]
+@caption a negative NaN kept bit for bit; negative zero admitted as 0.0
+@value [[18444492273895866369, true, true], [9223372036854775808, 0.0]]
+@end
+
+@example reject
+import std::ffi::c
+import std::ffi::c::raw
+
+x = std::ffi::c::raw::double_from_bits(0)
+x + 1.0
+@caption A raw value is no number: no arithmetic
+@error CORE SEMANTIC TYPE
+@at 5:1
+@end
+
+@example reject
+import std::ffi::c
+import std::ffi::c::raw
+
+fn half(y: Float64) -> Float64:
+    y / 2.0
+
+half(std::ffi::c::raw::double_from_bits(0))
+@caption Nothing admits a raw value to a Float64 implicitly
+@error CORE SEMANTIC TYPE
+@at 7:6
+@end
 
 @topic concept.c-bindgen-layouts
 title: Generated C record layouts: a target's and a toolchain's facts

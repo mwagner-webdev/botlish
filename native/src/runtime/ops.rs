@@ -48,10 +48,13 @@
 //! |                        | x8 x0 x1 x2 x3 x4 x5| an operand is no i64 word    |           |
 //! | rt_is_tcl_alpha        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_is_tcl_alnum        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
+//! | rt_char_is_tcl_alpha   | UnicodeChar         | Bool                         | no        |
+//! | rt_char_is_tcl_alnum   | UnicodeChar         | Bool                         | no        |
 //! | rt_str_region_is_tcl_alpha | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
 //! | rt_str_region_is_tcl_alnum | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
 //! | rt_list_len            | List                | Int                          | no        |
+//! | rt_tree_children       | tree struct object  | its child List; TYPE if none | no        |
 //! | rt_list_get            | List, Int           | element; declared            | no        |
 //! |                        |                     | IndexNotFound (list::at)     |           |
 //! | rt_list_get_proven     | List, Int           | element (index proven valid  | no        |
@@ -59,6 +62,8 @@
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
 //! | rt_list_with_length    | List, Int           | the same List; declared      | no        |
 //! |                        |                     | LengthMismatch               |           |
+//! | rt_list_flat           | List of Lists       | new List (one copy of each   | yes       |
+//! |                        |                     | inner List); TYPE, RANGE     |           |
 //! | rt_set_from_list       | List                | ImmutableSet; EQUALITY       | yes       |
 //! | rt_set_contains        | ImmutableSet, any   | Bool; EQUALITY               | no        |
 //! | rt_mutarray_allocate   | count                | MutableArray (slots = UNIT)  | yes       |
@@ -84,6 +89,7 @@
 
 use super::construct::{rt_construct, rt_plan_materialize};
 use super::affine::{rt_affine_drop, rt_affine_drop_run, rt_cleanup_call, rt_cleanup_table};
+use super::callback::{rt_callback_call, rt_ffi_close, rt_ffi_open};
 use super::mutvec::{
     rt_mv_at, rt_mv_clear, rt_mv_clear_drop, rt_mv_empty, rt_mv_from_list, rt_mv_len, rt_mv_pop, rt_mv_push, rt_mv_share,
     rt_mv_swap, rt_mv_swap_drop, rt_mv_take, rt_mv_take_front, rt_mv_to_list,
@@ -94,7 +100,7 @@ use super::ffifixture::{
     rt_ffi_fixture_copy, rt_ffi_fixture_fill, rt_ffi_fixture_fill_checked, rt_ffi_fixture_mixed, rt_ffi_fixture_read,
     rt_ffi_fixture_read_reentrant,
 };
-use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word, rt_ffi_word_cmp};
+use super::ffi::{rt_ffi_bad_address, rt_ffi_bad_bool, rt_ffi_box_i64, rt_ffi_box_u64, rt_ffi_contract_violation, rt_ffi_int_word, rt_ffi_word_cmp, rt_raw_admit, rt_raw_bits, rt_raw_from_bits, rt_raw_narrow, rt_raw_new};
 use super::nview::{
     rt_cptr_fixture_bytes, rt_cptr_fixture_memory, rt_cptr_offset, rt_mbytes_write, rt_mbytes_write_ptr, rt_native_load,
     rt_bin_load_array, rt_native_load_array, rt_bin_store_array, rt_native_store_array, rt_bin_store_ptr,
@@ -102,7 +108,7 @@ use super::nview::{
 };
 use super::syscall::{rt_linux_aarch64_syscall, rt_linux_x86_64_syscall};
 use super::value::*;
-use super::vm::{current_program, Vm, NativeInfo};
+use super::vm::{current_program, Identity, Vm, NativeInfo};
 use crate::nir::OpCode;
 use super::decimal::{rt_decimal_cmp, rt_decimal_round, rt_decimal_to_f64, rt_decimal_to_str};
 use super::inttext::{rt_int_to_str, rt_str_to_int};
@@ -138,11 +144,18 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         // An Int's text is a String, a text's Int may be a BigInt
         // (runtime::inttext).
         IntToStr | StrToInt |
+        // A raw C floating value is a heap object (KIND_RAWF32/64), its bit
+        // pattern may be a BigInt, its admission a Float64
+        // (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+        RawFromBits32 | RawFromBits64 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64 |
         IAdd | ISub | IMul | IMod | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat | StrAppendChar
-            | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
+            | StrUtf8Bytes | Argv | ListNew | ListAppend | ListFlat | MutArrayAllocate | MutArrayFreeze | MkOk
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
             | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice
+            // UTF-16LE (UTF16-BYTE-STORAGE-MILESTONE-1.md): a storage, a
+            // String, a List of units -- one allocation each.
+            | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits
             // The writable storage family (MUTABLE-BYTES.md): each of these
             // but length/address makes a fresh object (a collection may run
             // first, with the operands rooted).
@@ -227,6 +240,10 @@ pub fn op_may_error(op: OpCode) -> bool {
         // InvalidIntegerText (runtime::inttext). Its inverse, IntToStr, and
         // the other conversions to text and to Int never fail.
         | StrToInt
+        // A raw value's admission or a binary32 narrowing: the declared
+        // NonFiniteFloat; a bit pattern out of the format's range: RANGE; an
+        // operand of another kind: TYPE (a checked program reaches neither).
+        | RawFromBits32 | RawFromBits64 | RawBits32 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64
         // The raw mod's zero divisor (ARITHMETIC, IMod's own error).
         // RIModTotal is not here: native/lower.tcl emits it only where the
         // divisor's Range excludes 0 (see OpCode::RIMod).
@@ -243,6 +260,14 @@ pub fn op_may_error(op: OpCode) -> bool {
         // program cannot produce any of them: lib/abi/bytes.bot's creator takes
         // a List[Byte] and its storage field only ever holds a storage.
         | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice | BytesLen | BytesAddr
+        // UTF-16LE: the declared InvalidUtf16 (decode), an encoding past the
+        // ceiling (RANGE), an odd byte count or an operand of the wrong kind
+        // for the internal units bridge (RANGE, TYPE: no checked program).
+        | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits
+        // The internal NUL-unit measure: the slice rule's declared
+        // LowerUnderrun / UpperOverrun, an odd range (RANGE) or an operand
+        // of the wrong kind (TYPE). It allocates nothing.
+        | BytesUtf16LeNul
         // The writable family: a length that is not 0..the ceiling (RANGE), an
         // operand of the wrong kind (TYPE: the readable and writable storages
         // are never interchanged), an index/count outside the payload (RANGE),
@@ -276,7 +301,7 @@ pub fn op_may_error(op: OpCode) -> bool {
         // another architecture's target the transport is NATIVE
         // UNSUPPORTED, also through NO_VALUE.)
         | SyscallLinuxX86_64 | SyscallLinuxAarch64
-        | ListNew | ListGet | ListAppend | ListWithLength | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
+        | ListNew | ListGet | ListAppend | ListWithLength | ListFlat | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         // MutableVector: the declared IndexNotFound (runtime/mutvec.rs).
         | MvAt | MvPop | MvTake | MvSwap | MvSwapDrop
         // MutableArray: a capacity outside the limit (RANGE), the declared
@@ -607,8 +632,23 @@ pub extern "C" fn rt_int_cmp(_p: *mut Vm, a: Value, b: Value) -> i64 {
 pub const DECIMAL_EQUALITY_MESSAGE: &str = "== of a DecimalRounded value needs the precision of its type, which this equality does not know (compare DecimalRounded values directly)";
 pub const DECIMAL_HASH_MESSAGE: &str = "hash of a DecimalRounded value needs the precision of its type, which a hash does not know";
 
+/// core::value::equal's and core::hashing::Encode's refusals of a raw C
+/// floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md), word for word.
+pub fn raw_equality_message(v: Value) -> String {
+    format!("== is not defined for a raw C floating value ({}): compare its bits (std::ffi::c::raw::float_to_bits, std::ffi::c::raw::double_to_bits) or the Float64 it admits to", super::show::show(v))
+}
+pub fn raw_hash_message(v: Value) -> String {
+    format!("hash is not defined for a raw C floating value ({}): hash its bits", super::show::show(v))
+}
+
 fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     let (ka, kb) = (kind_of(a), kind_of(b));
+    for (k, v) in [(ka, a), (kb, b)] {
+        if matches!(k, Kind::RawFloat32 | Kind::RawFloat64) {
+            vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_equality_message(v) });
+            return Err(());
+        }
+    }
     // MutableArray, like Block/Native, has no structural equality (req #31:
     // its identity/equality semantics are a separate design question).
     if matches!(ka, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr)
@@ -646,7 +686,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         Kind::Float64 => float_bits(a) == float_bits(b),
         // (Refused above: a DecimalRounded value has no type-blind
         // equality.)
-        Kind::DecimalRounded => unreachable!(),
+        Kind::DecimalRounded | Kind::RawFloat32 | Kind::RawFloat64 => unreachable!(),
         // Exact byte-sequence equality (core::value::equal's bytestore
         // case): length and every byte, never the storage's identity or
         // address -- a static constant, a heap buffer and a copy of either
@@ -682,6 +722,27 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             if x.shape != y.shape {
                 return Ok(false);
             }
+            if let Some(child) = current_program(|prog| prog.shapes[x.shape as usize].tree) {
+                // A tree struct's value (TREE-STRUCT-MILESTONE-1.md): the
+                // same comparison, walked with a work stack of its own.
+                return tree_equal(p, a, b, x.shape, child);
+            }
+            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity) {
+                // A shape that declares its identity (REPRESENTATION-
+                // INDEPENDENT-VALUE-IDENTITY.md): equal when the identities
+                // are, whatever its other fields hold. Opaque, so a refusal
+                // inside it is the opaque values' (below).
+                return match identity_equal(p, identity, x.fields(), y.fields()) {
+                    Ok(r) => Ok(r),
+                    Err(()) => {
+                        let vm = vm(p);
+                        if matches!(vm.error, Some(RtError::Equality { .. })) {
+                            vm.error = Some(RtError::Equality { a, b });
+                        }
+                        Err(())
+                    }
+                };
+            }
             for (u, w) in x.fields().iter().zip(y.fields().iter()) {
                 match equal(p, *u, *w) {
                     Ok(true) => {}
@@ -709,6 +770,170 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Tree values (TREE-STRUCT-MILESTONE-1.md; core/value.tcl's TreeEqual and
+// TreeShow, core/hashing.tcl's TreeEncode)
+//
+// A tree struct's value is an ordinary struct object whose child field holds
+// a List of objects of the same shape: a finite rooted ordered tree, as deep
+// as a program builds it. Equality, both hashes and `show` of such a value
+// mean exactly what they mean for any struct -- the same comparisons in the
+// same order, the same canonical input byte for byte, the same text -- but
+// walk the tree's topology with a work stack on the heap instead of the
+// host's stack, so its depth is bounded by memory, never by the worker's
+// stack (a native library runs on its caller's). Nothing here reads an
+// address, an allocation order or the GC's state: only shapes, slots and
+// child order. None of them allocates on the managed heap or runs Botlish
+// code (no safepoint).
+
+/// 1 if V is an object of struct shape SHAPE (a node of that tree).
+fn tree_node(v: Value, shape: u32) -> bool {
+    kind_of(v) == Kind::Struct && struct_of(v).shape == shape
+}
+
+/// equal's struct case for A and B, objects of the tree shape SHAPE whose
+/// child field is slot CHILD. A refusal inside an opaque tree is the opaque
+/// values' own, as the recursive comparison reported it (OPAQUE-STRUCTS.md):
+/// every node has the root's shape, so the outermost opaque pair is the
+/// root's.
+fn tree_equal(p: *mut Vm, a: Value, b: Value, shape: u32, child: usize) -> Result<bool, ()> {
+    let result = tree_equal_walk(p, a, b, shape, child);
+    if result.is_err() && current_program(|prog| prog.shapes[shape as usize].opaque) {
+        let vm = vm(p);
+        if matches!(vm.error, Some(RtError::Equality { .. })) {
+            vm.error = Some(RtError::Equality { a, b });
+        }
+    }
+    result
+}
+
+/// What remains of one comparison: slots I.. of two nodes, or child pairs
+/// I.. of two child Lists of equal length.
+enum TreeFrame<'a> {
+    Fields(&'a [Value], &'a [Value], usize),
+    Kids(&'a [Value], &'a [Value], usize),
+}
+
+/// The recursive comparison's exact order -- slot by slot, the child List's
+/// length before its elements, each child completely before the next slot
+/// -- from a stack of frames.
+fn tree_equal_walk(p: *mut Vm, a: Value, b: Value, shape: u32, child: usize) -> Result<bool, ()> {
+    let mut stack = vec![TreeFrame::Fields(struct_of(a).fields(), struct_of(b).fields(), 0)];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            TreeFrame::Kids(xs, ys, i) => {
+                if i >= xs.len() {
+                    continue;
+                }
+                let (x, y) = (xs[i], ys[i]);
+                stack.push(TreeFrame::Kids(xs, ys, i + 1));
+                if tree_node(x, shape) && tree_node(y, shape) {
+                    stack.push(TreeFrame::Fields(struct_of(x).fields(), struct_of(y).fields(), 0));
+                } else if !equal(p, x, y)? {
+                    return Ok(false);
+                }
+            }
+            TreeFrame::Fields(xs, ys, mut i) => {
+                while i < xs.len() {
+                    let (x, y) = (xs[i], ys[i]);
+                    if i == child && kind_of(x) == Kind::List && kind_of(y) == Kind::List {
+                        let (kx, ky) = (list_of(x).items(), list_of(y).items());
+                        if kx.len() != ky.len() {
+                            return Ok(false);
+                        }
+                        stack.push(TreeFrame::Fields(xs, ys, i + 1));
+                        stack.push(TreeFrame::Kids(kx, ky, 0));
+                        break;
+                    }
+                    if !equal(p, x, y)? {
+                        return Ok(false);
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// One node of a tree walk in progress: its slot values, the next slot, and
+/// the next child while its child List is being walked.
+struct TreeWalkFrame<'a> {
+    values: &'a [Value],
+    field: usize,
+    kid: Option<usize>,
+}
+
+/// Hands the rest of a tree value's canonical input to SINK, ROOT an object
+/// of the tree shape SHAPE (declaration NAME, slot names FIELDS) whose child
+/// field is slot CHILD, its kind tag and declaration identity already
+/// handed: walk's struct case byte for byte -- the field count, each slot's
+/// name and value, the child List as a List of nested values, each child as
+/// a nested struct -- with a stack of frames. A nested value is opened and
+/// closed around its input (`open_nested`, `close_nested`): a public
+/// sub-hash folded into its parent, or the table hash's inline input.
+fn tree_walk<S: CanonicalSink>(
+    p: *mut Vm,
+    sink: &mut S,
+    root: Value,
+    shape: u32,
+    name: &str,
+    fields: &[String],
+    child: usize,
+) -> Result<(), ()> {
+    let mut saved = Vec::new();
+    sink.bytes(&(fields.len() as u64).to_le_bytes());
+    let mut frames = vec![TreeWalkFrame { values: struct_of(root).fields(), field: 0, kid: None }];
+    while let Some(top) = frames.last_mut() {
+        let f = top.field;
+        if f == top.values.len() {
+            frames.pop();
+            if !frames.is_empty() {
+                // A child's input ends.
+                sink.close_nested(&mut saved);
+            }
+            continue;
+        }
+        let value = top.values[f];
+        if f == child && kind_of(value) == Kind::List {
+            let kids = list_of(value).items();
+            let k = match top.kid {
+                Some(k) => k,
+                None => {
+                    sink.text(fields[f].as_bytes());
+                    sink.open_nested(&mut saved);
+                    sink.bytes(&[4]);
+                    sink.bytes(&(kids.len() as u64).to_le_bytes());
+                    0
+                }
+            };
+            if k < kids.len() {
+                top.kid = Some(k + 1);
+                let kid = kids[k];
+                if tree_node(kid, shape) {
+                    sink.open_nested(&mut saved);
+                    sink.bytes(&[8]);
+                    sink.text(name.as_bytes());
+                    sink.bytes(&(fields.len() as u64).to_le_bytes());
+                    frames.push(TreeWalkFrame { values: struct_of(kid).fields(), field: 0, kid: None });
+                } else {
+                    sink.child(p, kid)?;
+                }
+                continue;
+            }
+            // The child List's input ends.
+            sink.close_nested(&mut saved);
+            top.field += 1;
+            top.kid = None;
+            continue;
+        }
+        sink.text(fields[f].as_bytes());
+        sink.child(p, value)?;
+        top.field += 1;
+    }
+    Ok(())
+}
+
 /// Set equality, independent of construction/insertion order (MINIMAL-
 /// IMMUTABLE-SET.md item 16, matching core::value::equal's own Tcl-side
 /// implementation exactly): both operands are already deduplicated by
@@ -720,6 +945,15 @@ fn set_equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     let (xs, ys) = (set_of(a).items(), set_of(b).items());
     if xs.len() != ys.len() {
         return Ok(false);
+    }
+    if xs.len() > PAIRWISE_LIMIT {
+        // A larger set is matched by hash (`bucket_match`, identity
+        // equality's matcher): expected O(n). Where a member has no hash,
+        // the comparison below is the one that refuses it.
+        let (a, b) = (Entries { keys: xs, vals: None }, Entries { keys: ys, vals: None });
+        if let Some(r) = bucket_match(p, &a, &b, 0)? {
+            return Ok(r);
+        }
     }
     for x in xs {
         let mut found = false;
@@ -734,6 +968,152 @@ fn set_equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         }
     }
     Ok(true)
+}
+
+// ---------------------------------------------------------------------------
+// Semantic identity (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md;
+// core/value.tcl's IdentityEqual and BucketMatch, core/hashing.tcl's
+// Identity)
+//
+// A struct shape may declare its identity apart from its representation: the
+// elements of one List field in no order (members), or the pairs of two in no
+// order (associations). Equality is multiset equality of those entries (a
+// pair matches a pair whose key and value are both equal): set or map
+// equality for the distinct members or keys an owner keeps, and an
+// equivalence coherent with the hashes' commutative combination (`walk`)
+// whatever the representation holds. Matching is greedy, exact for an
+// equivalence: a positional prefix first (two values built alike match in
+// order, unhashed), then the rest by hash buckets (expected O(n)), or
+// pairwise where the rest is small or an entry has no hash (its comparison
+// refuses it). Nothing allocates on the managed heap and no Botlish code
+// runs, so equality stays no safepoint: the buckets are two Rust vectors per
+// comparison of more than PAIRWISE_LIMIT unmatched entries.
+
+/// Up to this many unmatched entries are compared pairwise, never hashed.
+const PAIRWISE_LIMIT: usize = 8;
+
+/// The entries of a value's identity: its members (VALS None), or its keys
+/// and their values, as many as both Lists hold.
+struct Entries<'a> {
+    keys: &'a [Value],
+    vals: Option<&'a [Value]>,
+}
+
+/// The entries of identity IDENTITY over a struct value's FIELDS.
+fn identity_entries(identity: Identity, fields: &[Value]) -> Entries<'_> {
+    match identity {
+        Identity::Members(f) => Entries { keys: list_of(fields[f]).items(), vals: None },
+        Identity::Associations(k, v) => {
+            let (keys, vals) = (list_of(fields[k]).items(), list_of(fields[v]).items());
+            let n = keys.len().min(vals.len());
+            Entries { keys: &keys[..n], vals: Some(&vals[..n]) }
+        }
+    }
+}
+
+/// Whether entry X of A equals entry Y of B: its key, and for pairs its value.
+fn entry_equal(p: *mut Vm, a: &Entries, x: usize, b: &Entries, y: usize) -> Result<bool, ()> {
+    if !equal(p, a.keys[x], b.keys[y])? {
+        return Ok(false);
+    }
+    match (a.vals, b.vals) {
+        (Some(av), Some(bv)) => equal(p, av[x], bv[y]),
+        _ => Ok(true),
+    }
+}
+
+/// Whether two values of one shape whose identity is IDENTITY, with fields
+/// XF and YF, are equal.
+fn identity_equal(p: *mut Vm, identity: Identity, xf: &[Value], yf: &[Value]) -> Result<bool, ()> {
+    let (a, b) = (identity_entries(identity, xf), identity_entries(identity, yf));
+    let n = a.keys.len();
+    if n != b.keys.len() {
+        return Ok(false);
+    }
+    let mut i = 0;
+    while i < n && entry_equal(p, &a, i, &b, i)? {
+        i += 1;
+    }
+    if i == n {
+        return Ok(true);
+    }
+    if n - i > PAIRWISE_LIMIT
+        && let Some(r) = bucket_match(p, &a, &b, i)?
+    {
+        return Ok(r);
+    }
+    let mut used = vec![false; n - i];
+    'entries: for x in i..n {
+        for y in i..n {
+            if !used[y - i] && entry_equal(p, &a, x, &b, y)? {
+                used[y - i] = true;
+                continue 'entries;
+            }
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+/// The keyed table hash of V as a 64-bit word, or None (the Vm's error state
+/// as it was) when V has no hash: the buckets' hash. Keyed, so no input
+/// arranged against the public hash makes the buckets degenerate; equal
+/// values hash equally in one process, which is all a bucket needs.
+fn bucket_hash(p: *mut Vm, key: (u64, u64), v: Value) -> Option<u64> {
+    let clean = vm(p).error.is_none();
+    let mut sink = Sip13::new(key.0, key.1);
+    match walk(p, &mut sink, v) {
+        Ok(()) => Some(sink.finish()),
+        Err(()) => {
+            if clean {
+                vm(p).error = None;
+            }
+            None
+        }
+    }
+}
+
+/// Matches A's entries from position FROM on against B's by hash: Some(true)
+/// when every one has an unused equal entry of B, Some(false) when one has
+/// none, None when a key has no hash (the caller compares pairwise, where
+/// that entry is refused). Equal keys hash equally, so only entries of one
+/// hash are compared; B's are found through an open-addressed index of
+/// their positions, A's probed in order.
+fn bucket_match(p: *mut Vm, a: &Entries, b: &Entries, from: usize) -> Result<Option<bool>, ()> {
+    let n = a.keys.len();
+    let m = n - from;
+    let key = table_hash_key();
+    let capacity = (2 * m).next_power_of_two().max(8);
+    let mask = capacity - 1;
+    let mut slots = vec![u32::MAX; capacity];
+    let mut hashes = Vec::with_capacity(m);
+    for y in from..n {
+        let Some(h) = bucket_hash(p, key, b.keys[y]) else { return Ok(None) };
+        let mut s = h as usize & mask;
+        while slots[s] != u32::MAX {
+            s = (s + 1) & mask;
+        }
+        slots[s] = (y - from) as u32;
+        hashes.push(h);
+    }
+    let mut used = vec![false; m];
+    for x in from..n {
+        let Some(h) = bucket_hash(p, key, a.keys[x]) else { return Ok(None) };
+        let mut s = h as usize & mask;
+        loop {
+            let j = slots[s];
+            if j == u32::MAX {
+                return Ok(Some(false));
+            }
+            let j = j as usize;
+            if !used[j] && hashes[j] == h && entry_equal(p, a, x, b, from + j)? {
+                used[j] = true;
+                break;
+            }
+            s = (s + 1) & mask;
+        }
+    }
+    Ok(Some(true))
 }
 
 #[unsafe(no_mangle)]
@@ -890,6 +1270,55 @@ trait CanonicalSink: Sized {
     fn child(&mut self, p: *mut Vm, v: Value) -> Result<(), ()>;
     /// The whole 64-bit hash of set member V, from a fresh state.
     fn member(&self, p: *mut Vm, v: Value) -> Result<u64, ()>;
+    /// The whole 64-bit hash of the identity entry pairing KEY with VALUE,
+    /// from a fresh state: the entry tag, then both as nested values
+    /// (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md).
+    fn entry(&self, p: *mut Vm, key: Value, value: Value) -> Result<u64, ()>;
+    /// A nested value's input begins: what `child` does around a walk, for
+    /// `tree_walk`, which walks the nested value itself (SAVED keeps the
+    /// enclosing states it needs).
+    fn open_nested(&mut self, saved: &mut Vec<u64>);
+    /// The nested value's input that `open_nested` began ends.
+    fn close_nested(&mut self, saved: &mut Vec<u64>);
+}
+
+/// The tags of an identity's canonical input (core/hashing.tcl's
+/// IdentityTag and EntryTag): its form, after the struct's declaration
+/// identity, and the first byte of each pair's own input.
+const IDENTITY_MEMBERS: u8 = 1;
+const IDENTITY_ASSOCIATIONS: u8 = 2;
+const IDENTITY_ENTRY: u8 = 3;
+
+/// Hands the identity IDENTITY of a struct value with FIELDS to SINK (the
+/// shape's declaration identity already handed): the form's tag, the entry
+/// count (8 bytes LE), then the wrapping sum of every entry's whole hash (8
+/// bytes LE) -- a member's own (`member`), a pair's (`entry`). The sum is
+/// commutative and a function of the entries' multiset, which identity
+/// equality compares, so equal values feed both folds equal input; no other
+/// field and no order is read. (A sum, never an XOR: a repeated entry does
+/// not cancel.)
+fn identity_walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, identity: Identity, fields: &[Value]) -> Result<(), ()> {
+    let entries = identity_entries(identity, fields);
+    sink.bytes(&[match identity {
+        Identity::Members(_) => IDENTITY_MEMBERS,
+        Identity::Associations(..) => IDENTITY_ASSOCIATIONS,
+    }]);
+    sink.bytes(&(entries.keys.len() as u64).to_le_bytes());
+    let mut sum = 0u64;
+    match entries.vals {
+        None => {
+            for &key in entries.keys {
+                sum = sum.wrapping_add(sink.member(p, key)?);
+            }
+        }
+        Some(vals) => {
+            for (&key, &value) in entries.keys.iter().zip(vals.iter()) {
+                sum = sum.wrapping_add(sink.entry(p, key, value)?);
+            }
+        }
+    }
+    sink.bytes(&sum.to_le_bytes());
+    Ok(())
 }
 
 /// The public hash's state: FNV-1a, 64-bit.
@@ -913,6 +1342,24 @@ impl CanonicalSink for Fnv {
         let mut sub = Fnv(FNV_OFFSET);
         walk(p, &mut sub, v)?;
         Ok(sub.0)
+    }
+    fn entry(&self, p: *mut Vm, key: Value, value: Value) -> Result<u64, ()> {
+        let mut sub = Fnv(FNV_OFFSET);
+        sub.bytes(&[IDENTITY_ENTRY]);
+        sub.child(p, key)?;
+        sub.child(p, value)?;
+        Ok(sub.0)
+    }
+    // A nested value is its own sub-hash (`child`): a fresh state, folded
+    // into the enclosing one when it ends.
+    fn open_nested(&mut self, saved: &mut Vec<u64>) {
+        saved.push(self.0);
+        self.0 = FNV_OFFSET;
+    }
+    fn close_nested(&mut self, saved: &mut Vec<u64>) {
+        let sub = self.0;
+        self.0 = saved.pop().expect("a nested value was opened");
+        self.bytes(&sub.to_le_bytes());
     }
 }
 
@@ -1027,6 +1474,16 @@ impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
         walk(p, &mut sub, v)?;
         Ok(sub.finish())
     }
+    fn entry(&self, p: *mut Vm, key: Value, value: Value) -> Result<u64, ()> {
+        let mut sub = Self::new(self.k.0, self.k.1);
+        sub.bytes(&[IDENTITY_ENTRY]);
+        walk(p, &mut sub, key)?;
+        walk(p, &mut sub, value)?;
+        Ok(sub.finish())
+    }
+    // A nested value is inline (`child`): nothing begins or ends.
+    fn open_nested(&mut self, _saved: &mut Vec<u64>) {}
+    fn close_nested(&mut self, _saved: &mut Vec<u64>) {}
 }
 
 /// Hands V's canonical input to SINK: its kind tag, then its payload,
@@ -1035,6 +1492,10 @@ impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
 /// the kinds `equal` refuses, as rt_hash always did.
 fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> {
     let kind = kind_of(v);
+    if matches!(kind, Kind::RawFloat32 | Kind::RawFloat64) {
+        vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_hash_message(v) });
+        return Err(());
+    }
     if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr) {
         vm(p).fail(RtError::Unhashable { value: v });
         return Err(());
@@ -1062,7 +1523,7 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
         Kind::Enum => 11,
         Kind::Float64 => 12,
         Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr
-        | Kind::DecimalRounded => unreachable!(),
+        | Kind::DecimalRounded | Kind::RawFloat32 | Kind::RawFloat64 => unreachable!(),
     };
     sink.bytes(&[tag]);
     match kind {
@@ -1096,7 +1557,7 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
         // The bits, 8 bytes little-endian (core/hashing.tcl's Float64 case):
         // consistent with the bit equality above.
         Kind::Float64 => sink.bytes(&float_bits(v).to_le_bytes()),
-        Kind::DecimalRounded => unreachable!(),
+        Kind::DecimalRounded | Kind::RawFloat32 | Kind::RawFloat64 => unreachable!(),
         // core/hashing.tcl's enum case, byte for byte (ENUMS.md): the enum's
         // declaration identity text, a 0xFF separator, the case's declared
         // name -- never the numbers the word carries.
@@ -1133,6 +1594,17 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
             current_program(|prog| {
                 let shape = &prog.shapes[obj.shape as usize];
                 sink.text(shape.name.as_deref().unwrap_or("").as_bytes());
+                if let Some(child) = shape.tree {
+                    // A tree struct's value (TREE-STRUCT-MILESTONE-1.md):
+                    // this very input, without the host's recursion.
+                    let name = shape.name.as_deref().unwrap_or("");
+                    return tree_walk(p, sink, v, obj.shape, name, &shape.fields, child);
+                }
+                if let Some(identity) = shape.identity {
+                    // A declared identity (REPRESENTATION-INDEPENDENT-VALUE-
+                    // IDENTITY.md): its entries, never the fields.
+                    return identity_walk(p, sink, identity, obj.fields());
+                }
                 sink.bytes(&(shape.fields.len() as u64).to_le_bytes());
                 for (field, item) in shape.fields.iter().zip(obj.fields().iter()) {
                     sink.text(field.as_bytes());
@@ -1332,6 +1804,230 @@ pub extern "C" fn rt_bytes_decode_utf8(p: *mut Vm, v: Value) -> Value {
     }
 }
 
+// ---------------------------------------------------------------------------
+// UTF-16LE (core/utf16text.tcl, UTF16-BYTE-STORAGE-MILESTONE-1.md): a
+// String's UTF-16LE bytes and back, on the byte storage, with no
+// intermediate List or Rust String. The byte order is the format's, written
+// and read explicitly (`to_le_bytes`, `from_le_bytes` of each byte pair):
+// never the host's, and the payload is never reinterpreted as a `[u16]`
+// (it need not be 2-byte aligned, and the host may be big-endian).
+
+/// The byte length of the UTF-16LE encoding of UNITS code units, or None
+/// when it would overflow the machine word or exceed the collection-length
+/// ceiling a Bytes has: `rt_str_encode_utf16le`'s one length computation,
+/// made before anything is allocated.
+pub fn utf16le_encoded_len(units: usize) -> Option<usize> {
+    units.checked_mul(2).filter(|&n| n <= MAX_COLLECTION_LENGTH)
+}
+
+/// The UTF-16 code units of DATA's byte pairs, each read low byte first (a
+/// trailing odd byte is no unit: the callers check the length).
+fn utf16le_units_of(data: &[u8]) -> impl Iterator<Item = u16> + '_ {
+    data.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+}
+
+/// The UTF-8 byte length and the character count of the String whose
+/// UTF-16LE encoding is DATA, or None when DATA is no such encoding: an odd
+/// byte count, or units that are no well-formed UTF-16. The rule, unit by
+/// unit: below U+0080 one UTF-8 byte, below U+0800 two, a high surrogate
+/// (D800..DBFF) followed at once by a low one (DC00..DFFF) one scalar of
+/// four bytes, a high surrogate followed by anything else or by nothing --
+/// and a low surrogate not consumed by a high one -- an error, any other
+/// unit three bytes. (`char::decode_utf16`'s rule, counted directly: half
+/// its cost, and `rt_bytes_decode_utf16le` decodes with
+/// `char::decode_utf16` itself, whose every item this has proven a scalar.)
+/// Reads DATA only.
+pub fn utf16le_measure(data: &[u8]) -> Option<(usize, usize)> {
+    if data.len() % 2 != 0 {
+        return None;
+    }
+    let mut byte_len = 0usize;
+    let mut chars = 0usize;
+    let mut units = utf16le_units_of(data);
+    while let Some(unit) = units.next() {
+        byte_len += match unit {
+            0..=0x7F => 1,
+            0x80..=0x7FF => 2,
+            0xD800..=0xDBFF => match units.next() {
+                Some(0xDC00..=0xDFFF) => 4,
+                _ => return None,
+            },
+            0xDC00..=0xDFFF => return None,
+            _ => 3,
+        };
+        chars += 1;
+    }
+    Some((byte_len, chars))
+}
+
+/// `byte_store::encode_utf16le`: String S's UTF-16LE encoding, one new
+/// storage of exactly two bytes per code unit (a scalar above U+FFFF is a
+/// surrogate pair, high unit first), each unit low byte first. No byte-order
+/// mark, no terminator; U+0000 is 00 00. The length is computed first
+/// (`utf16le_encoded_len`: RANGE, before any allocation, past the ceiling),
+/// then the units are written straight into the one allocation (the shared
+/// static empty storage for ""). S stays reachable as the allocating
+/// instruction's operand while the storage is made (the collector never
+/// moves an object), so reading its text inside the fill is sound.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_str_encode_utf16le(p: *mut Vm, s: Value) -> Value {
+    let obj = str_of(s);
+    let text = obj.as_str();
+    // One unit per scalar, and a second for each scalar above U+FFFF: the
+    // four-byte UTF-8 sequences, whose lead byte is F0..F4.
+    let units = if obj.ascii { text.len() } else { obj.chars + text.bytes().filter(|&b| b >= 0xF0).count() };
+    let Some(len) = utf16le_encoded_len(units) else {
+        let message = format!(
+            "std::abi::bytes::encode_utf16le: the encoding of {units} code units exceeds the {MAX_COLLECTION_LENGTH}-byte ceiling of a Bytes"
+        );
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    };
+    let r = vm(p).new_bytes_with(len, |init| {
+        // Units are written through a small stack buffer: one bounds-checked
+        // copy into the storage per 64 units, never one per unit.
+        let mut buffer = [0u8; 128];
+        if obj.ascii {
+            // An ASCII String's units are its bytes, each widened.
+            for chunk in text.as_bytes().chunks(64) {
+                for (i, &b) in chunk.iter().enumerate() {
+                    buffer[2 * i] = b;
+                    buffer[2 * i + 1] = 0;
+                }
+                init.push_slice(&buffer[..2 * chunk.len()]);
+            }
+        } else {
+            let mut n = 0;
+            for unit in text.encode_utf16() {
+                if n == buffer.len() {
+                    init.push_slice(&buffer);
+                    n = 0;
+                }
+                buffer[n..n + 2].copy_from_slice(&unit.to_le_bytes());
+                n += 2;
+            }
+            init.push_slice(&buffer[..n]);
+        }
+    });
+    vm(p).metrics.record_list_copy(len);
+    r
+}
+
+/// `byte_store::decode_utf16le`: the String whose UTF-16LE encoding is
+/// storage V's bytes, or the declared builtin error InvalidUtf16 (an odd
+/// byte count, an unpaired surrogate). Strict, never a replacement
+/// character; FF FE is U+FEFF, never a byte-order mark. Two passes over the
+/// payload and no intermediate buffer: `utf16le_measure` validates and sizes
+/// the result, then the scalars are encoded straight into the one String
+/// allocation (none for ""). V stays reachable as the allocating
+/// instruction's operand while the String is made.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_decode_utf16le(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::decode_utf16le") {
+        return failed;
+    }
+    let data = bytes_of(v);
+    let Some((byte_len, chars)) = utf16le_measure(data) else {
+        return fail_builtin(p, super::error::ERR_INVALID_UTF16, "InvalidUtf16");
+    };
+    vm(p).new_str_with(byte_len, chars, |init| {
+        // Validated above: every item is a scalar (StrInit's own `finish`
+        // would refuse a text shorter than measured). The UTF-8 is written
+        // through a small stack buffer, one piece into the String per
+        // buffer's worth (its `from_utf8` check is of text this loop just
+        // encoded: it cannot fail, and a failure would leave the String short,
+        // which `finish` refuses).
+        let mut buffer = [0u8; 256];
+        if byte_len == chars {
+            // Every unit is below U+0080 (each one UTF-8 byte): the text is
+            // the units' low bytes.
+            for chunk in data.chunks(2 * buffer.len()) {
+                let n = chunk.len() / 2;
+                for (i, pair) in chunk.chunks_exact(2).enumerate() {
+                    buffer[i] = pair[0];
+                }
+                if let Ok(piece) = std::str::from_utf8(&buffer[..n]) {
+                    init.push_str(piece);
+                }
+            }
+            return;
+        }
+        let mut n = 0;
+        for c in char::decode_utf16(utf16le_units_of(data)).flatten() {
+            if n + 4 > buffer.len() {
+                if let Ok(piece) = std::str::from_utf8(&buffer[..n]) {
+                    init.push_str(piece);
+                }
+                n = 0;
+            }
+            n += c.encode_utf8(&mut buffer[n..]).len();
+        }
+        if let Ok(piece) = std::str::from_utf8(&buffer[..n]) {
+            init.push_str(piece);
+        }
+    })
+}
+
+/// `byte_store::utf16le_units` (internal to the standard library: the
+/// bridge std::windows::fs's path syntax reads a native path's units
+/// through): storage V's byte pairs as a List of small Ints, each pair read
+/// low byte first, unvalidated (a surrogate is a unit like any other). RANGE
+/// for an odd byte count, TYPE for an operand that is no byte storage (no
+/// checked program passes either). One List allocation; V stays reachable
+/// as the allocating instruction's operand.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_utf16le_units(p: *mut Vm, v: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::utf16le_units") {
+        return failed;
+    }
+    let data = bytes_of(v);
+    if data.len() % 2 != 0 {
+        let message = format!("std::byte_store::utf16le_units: {} bytes are no whole number of 16-bit units", data.len());
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    }
+    let items: Vec<Value> = utf16le_units_of(data).map(|u| make_small(u as i64)).collect();
+    let n = items.len();
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_list_copy(n);
+    r
+}
+
+/// How many UTF-16 code units of DATA (whole byte pairs, each read low byte
+/// first) come before the first unit 0, or all of them when none is 0: a
+/// unit is 0 when both bytes of ITS pair are 0 -- a single 00 byte, or a 00
+/// byte ending one pair and another beginning the next, is no terminator. A
+/// trailing odd byte is no unit (the caller checks the length).
+pub fn utf16le_units_before_nul(data: &[u8]) -> usize {
+    utf16le_units_of(data).position(|unit| unit == 0).unwrap_or(data.len() / 2)
+}
+
+/// `byte_store::utf16le_units_before_nul` (internal to the standard
+/// library: how std::windows::fs measures a listed name in its find record,
+/// UTF16-BYTE-STORAGE-MILESTONE-1.md): the number of code units of storage
+/// V's bytes START..END-1 before the first unit 0, or (END - START) / 2,
+/// as a small Int. The one slice rule first (`check_slice`: LowerUnderrun /
+/// UpperOverrun unless 0 <= START <= END <= N), then RANGE for an odd
+/// END - START, TYPE for an operand that is no byte storage (no checked
+/// program passes either). Reads the payload in place: no allocation.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_utf16le_units_before_nul(p: *mut Vm, v: Value, start: Value, end: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::utf16le_units_before_nul") {
+        return failed;
+    }
+    let data = bytes_of(v);
+    let (from, to) = match check_slice(p, bound_of(start), SliceEnd::End(bound_of(end)), data.len()) {
+        Ok(bounds) => bounds,
+        Err(failed) => return failed,
+    };
+    if (to - from) % 2 != 0 {
+        let message = format!(
+            "std::byte_store::utf16le_units_before_nul: the bytes {from}..{} are no whole number of 16-bit units",
+            to - 1
+        );
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    }
+    make_small(utf16le_units_before_nul(&data[from..to]) as i64)
+}
+
 /// The storage V, or a TYPE error naming CONTEXT (the same text as
 /// core::value::expect's, `CONTEXT: expected bytestore, got VALUE`).
 fn bytes_operand(p: *mut Vm, v: Value, context: &str) -> Result<(), Value> {
@@ -1415,28 +2111,38 @@ pub(super) struct BinEncoding {
     pub signed: bool,
     pub big: bool,
     pub float: Option<CFloatFormat>,
+    /// A raw C floating representation (RAW-C-FLOAT-FFI-MILESTONE-1.md):
+    /// its bits are a raw value's, both ways.
+    pub raw: Option<CFloatFormat>,
 }
 
 /// The scalar encoding word of `binload`/`binstore`: width in bytes (1, 2, 4
 /// or 8, the low four bits), signed (16), big-endian (32), a C floating
-/// representation (64: the IEEE 754 format of 4 or 8 bytes, never signed)
-/// -- or None for a malformed word.
+/// representation (64: the IEEE 754 format of 4 or 8 bytes, never signed),
+/// a raw C floating representation (128: the same formats, never signed or
+/// both) -- or None for a malformed word.
 pub(super) fn bin_encoding(code: Value) -> Option<BinEncoding> {
     let c = int_small(code)?;
     let width = (c & 15) as usize;
-    if !matches!(width, 1 | 2 | 4 | 8) || c & !127 != 0 {
+    if !matches!(width, 1 | 2 | 4 | 8) || c & !255 != 0 {
         return None;
     }
     let signed = c & 16 != 0;
-    let float = if c & 64 != 0 {
+    if c & 64 != 0 && c & 128 != 0 {
+        return None;
+    }
+    let format = |flag: i64| -> Option<Option<CFloatFormat>> {
+        if c & flag == 0 {
+            return Some(None);
+        }
         if signed {
             return None;
         }
-        Some(CFloatFormat::of_width(width)?)
-    } else {
-        None
+        Some(Some(CFloatFormat::of_width(width)?))
     };
-    Some(BinEncoding { width, signed, big: c & 32 != 0, float })
+    let float = format(64)?;
+    let raw = format(128)?;
+    Some(BinEncoding { width, signed, big: c & 32 != 0, float, raw })
 }
 
 /// The storage, offset and encoding operands of a fixed-layout op, checked:
@@ -1502,6 +2208,10 @@ pub(super) fn bin_decode(p: *mut Vm, bytes: &[u8], encoding: BinEncoding) -> Val
         word[..width].reverse();
     }
     let raw = u64::from_le_bytes(word);
+    if let Some(format) = encoding.raw {
+        // A raw C floating field: the bits, as they are.
+        return vm(p).new_raw_float(format, raw);
+    }
     if let Some(format) = encoding.float {
         return match admit_c_float(format, raw) {
             Ok(bits) => vm(p).new_float(FloatType::Float64, bits),
@@ -1557,7 +2267,20 @@ pub extern "C" fn rt_bin_store(p: *mut Vm, storage: Value, offset: Value, code: 
 /// anything: never a truncation, a wrap or a reinterpretation.
 pub(super) fn bin_encode(p: *mut Vm, value: Value, encoding: BinEncoding, context: &str) -> Result<[u8; 8], Value> {
     use num_traits::ToPrimitive;
-    let BinEncoding { width, signed, big, float } = encoding;
+    let BinEncoding { width, signed, big, float, raw } = encoding;
+    if let Some(format) = raw {
+        // A raw C floating field: a raw value of the field's format, its
+        // bits written as they are (never narrowed or normalized).
+        if raw_format_of(value) != Some(format) {
+            let expected = if format == CFloatFormat::Binary32 { Kind::RawFloat32 } else { Kind::RawFloat64 };
+            return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected, got: value }));
+        }
+        let mut bytes = raw_bits(value).to_le_bytes();
+        if big {
+            bytes[..width].reverse();
+        }
+        return Ok(bytes);
+    }
     if let Some(format) = float {
         if heap_kind(value) != KIND_FLOAT {
             return Err(vm(p).fail(RtError::Type { context: context.to_string(), expected: Kind::Float64, got: value }));
@@ -2236,6 +2959,20 @@ fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
     Ok(obj.as_str().chars().next().expect("StrObj.chars == 1 but text has no scalar"))
 }
 
+/// `std::char::is_tcl_alpha(c)` (core/tclcompat.tcl): the class of a
+/// UnicodeChar, total -- generated code calls it for a non-ASCII scalar only
+/// (codegen::clif's CharIsTclAlpha classifies ASCII inline).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_char_is_tcl_alpha(_p: *mut Vm, c: Value) -> Value {
+    bool_value(tcl_alpha_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+}
+
+/// `std::char::is_tcl_alnum(c)`, as rt_char_is_tcl_alpha.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_char_is_tcl_alnum(_p: *mut Vm, c: Value) -> Value {
+    bool_value(tcl_alnum_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
     match one_scalar(p, s, "std::str::is_tcl_alpha") {
@@ -2326,6 +3063,23 @@ pub extern "C" fn rt_struct_new(p: *mut Vm, shape: u64, n: u64, fields: *const V
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
     vm(p).new_int(list_of(l).len as i64)
+}
+
+/// `std::tree::children(t)` where no static type named T's tree shape
+/// (native/lower.tcl's NativeCall; TREE-STRUCT-MILESTONE-1.md): the child List
+/// of T, read from the slot its shape records. TYPE for any other value, which
+/// a checked program never passes (hir/structs.tcl's TreeChildrenProblem).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_tree_children(p: *mut Vm, t: Value) -> Value {
+    if kind_of(t) == Kind::Struct {
+        let obj = struct_of(t);
+        if let Some(child) = current_program(|prog| prog.shapes[obj.shape as usize].tree) {
+            return obj.fields()[child];
+        }
+    }
+    let message = format!("std::tree::children: {} is not a tree struct value", super::show::show(t));
+    vm(p).fail(RtError::Semantic { kind: "TYPE", message });
+    NO_VALUE
 }
 
 /// `list::at` / `mutable_array::at` with an Int index that designates no
@@ -2461,6 +3215,45 @@ pub extern "C" fn rt_list_with_length(p: *mut Vm, l: Value, n: Value) -> Value {
     }
 }
 
+/// `std::list::flat(L)` (`listflat`; core/lists.tcl, LIST-FLAT-MILESTONE-1.md):
+/// a new List of the elements of L's first List, then of its second, and so
+/// on -- exactly one level of nesting removed, every element copied as the
+/// word it is (never compared, converted or flattened further), L and its
+/// Lists unchanged. O(m + n) for m inner Lists of n elements in all: one pass
+/// checks that every element of L is a List (TYPE, with its position, as
+/// core::lists::flat words it: only an `any` argument reaches it) and sums
+/// their lengths -- saturating, so a sum past the collection-length ceiling
+/// is the ordinary RANGE refusal before anything is allocated, never a
+/// wrapped count -- then one buffer of exactly that capacity receives each
+/// inner List's slice in order and becomes the result's one heap object (no
+/// prefix is ever copied again, no per-element allocation). The inner Lists
+/// and their elements stay reachable through L, an operand of the allocating
+/// instruction, while the result is allocated (the collector does not move
+/// objects), exactly as rt_list_append's copied prefix does.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_list_flat(p: *mut Vm, l: Value) -> Value {
+    let outer = list_of(l).items();
+    let mut total: usize = 0;
+    for (position, &inner) in outer.iter().enumerate() {
+        if heap_kind(inner) != KIND_LIST {
+            let context = format!("std::list::flat element {position}");
+            return vm(p).fail(RtError::Type { context, expected: Kind::List, got: inner });
+        }
+        total = total.saturating_add(list_of(inner).items().len());
+    }
+    if let Some(refused) = vm(p).reject_oversized_collection(total) {
+        return refused;
+    }
+    let mut items: Vec<Value> = Vec::with_capacity(total);
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+    debug_assert_eq!(items.len(), total);
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_list_copy(total);
+    r
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
     let old = list_of(l).items();
@@ -2495,6 +3288,60 @@ pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
 pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
     let source = list_of(l).items();
     let mut items: Vec<Value> = Vec::with_capacity(source.len());
+    if source.len() > PAIRWISE_LIMIT
+        && let Some(kept) = dedup_by_hash(p, source)
+    {
+        items = kept;
+    } else if let Err(failed) = dedup_pairwise(p, source, &mut items) {
+        return failed;
+    }
+    let elements = items.len();
+    let r = vm(p).new_set(items);
+    vm(p).metrics.record_list_copy(elements);
+    r
+}
+
+/// SOURCE's items, each kept unless an equal one was kept before it
+/// (first-occurrence order), deduplicated by hash: an item is compared only
+/// with the kept items of its hash, which are all it can equal, so the
+/// result is `dedup_pairwise`'s in expected O(n) (REPRESENTATION-
+/// INDEPENDENT-VALUE-IDENTITY.md). None when an item has no hash: the
+/// pairwise scan is then where it is refused, as it always was.
+fn dedup_by_hash(p: *mut Vm, source: &[Value]) -> Option<Vec<Value>> {
+    let key = table_hash_key();
+    let mut hashes = Vec::with_capacity(source.len());
+    for &item in source {
+        hashes.push(bucket_hash(p, key, item)?);
+    }
+    let capacity = (2 * source.len()).next_power_of_two().max(8);
+    let mask = capacity - 1;
+    let mut slots = vec![u32::MAX; capacity];
+    let mut kept: Vec<Value> = Vec::with_capacity(source.len());
+    let mut kept_hashes: Vec<u64> = Vec::with_capacity(source.len());
+    'items: for (&item, &h) in source.iter().zip(hashes.iter()) {
+        let mut s = h as usize & mask;
+        loop {
+            let j = slots[s];
+            if j == u32::MAX {
+                break;
+            }
+            // Hashable items compare totally: no comparison here refuses.
+            if kept_hashes[j as usize] == h && equal(p, kept[j as usize], item).unwrap_or(false) {
+                continue 'items;
+            }
+            s = (s + 1) & mask;
+        }
+        slots[s] = kept.len() as u32;
+        kept.push(item);
+        kept_hashes.push(h);
+    }
+    Some(kept)
+}
+
+/// SOURCE's items deduplicated pairwise into ITEMS (O(n^2): MINIMAL-
+/// IMMUTABLE-SET.md's reference construction): Err (NO_VALUE, the error
+/// recorded) when a comparison refuses its operands.
+fn dedup_pairwise(p: *mut Vm, source: &[Value], items: &mut Vec<Value>) -> Result<(), Value> {
     for &item in source {
         let mut seen = false;
         for &existing in items.iter() {
@@ -2504,17 +3351,14 @@ pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
                     break;
                 }
                 Ok(false) => {}
-                Err(()) => return NO_VALUE,
+                Err(()) => return Err(NO_VALUE),
             }
         }
         if !seen {
             items.push(item);
         }
     }
-    let elements = items.len();
-    let r = vm(p).new_set(items);
-    vm(p).metrics.record_list_copy(elements);
-    r
+    Ok(())
 }
 
 /// Membership: false for an absent value, never an Error *completion*
@@ -3257,10 +4101,14 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         Argv => rt_argv(p),
         StrIsTclAlpha => rt_is_tcl_alpha(p, a[0]),
         StrIsTclAlnum => rt_is_tcl_alnum(p, a[0]),
+        CharIsTclAlpha => rt_char_is_tcl_alpha(p, a[0]),
+        CharIsTclAlnum => rt_char_is_tcl_alnum(p, a[0]),
         ListLen => rt_list_len(p, a[0]),
+        TreeChildren => rt_tree_children(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
         ListWithLength => rt_list_with_length(p, a[0], a[1]),
+        ListFlat => rt_list_flat(p, a[0]),
         SetFromList => rt_set_from_list(p, a[0]),
         // Same runtime helper as SetFromList: the distinction is purely an
         // op_may_error classification (see OpCode::SetFromListTotal's own
@@ -3344,6 +4192,14 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         F64Round => rt_f64_round(p, a[0]),
         IntToStr => rt_int_to_str(p, a[0]),
         StrToInt => rt_str_to_int(p, a[0]),
+        RawFromBits32 => super::ffi::rt_raw_from_bits(p, 0, a[0]),
+        RawFromBits64 => super::ffi::rt_raw_from_bits(p, 1, a[0]),
+        RawBits32 => super::ffi::rt_raw_bits(p, 0, a[0]),
+        RawBits64 => super::ffi::rt_raw_bits(p, 1, a[0]),
+        RawAdmit32 => super::ffi::rt_raw_admit(p, 0, a[0]),
+        RawAdmit64 => super::ffi::rt_raw_admit(p, 1, a[0]),
+        RawNarrow32 => super::ffi::rt_raw_narrow(p, 0, a[0]),
+        RawNarrow64 => super::ffi::rt_raw_narrow(p, 1, a[0]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
         Hash | HashTotal => rt_hash(p, a[0]),
@@ -3351,6 +4207,10 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         BytesFromList => rt_bytes_from_list(p, a[0]),
         BytesJoin => rt_bytes_join(p, a[0]),
         BytesDecodeUtf8 => rt_bytes_decode_utf8(p, a[0]),
+        StrEncodeUtf16Le => rt_str_encode_utf16le(p, a[0]),
+        BytesDecodeUtf16Le => rt_bytes_decode_utf16le(p, a[0]),
+        BytesUtf16LeUnits => rt_bytes_utf16le_units(p, a[0]),
+        BytesUtf16LeNul => rt_bytes_utf16le_units_before_nul(p, a[0], a[1], a[2]),
         BytesSlice => rt_bytes_slice(p, a[0], a[1], a[2]),
         BytesLen => rt_bytes_len(p, a[0]),
         MBytesNew => rt_mbytes_new(p, a[0]),
@@ -3440,6 +4300,9 @@ macro_rules! runtime_helpers {
 
 runtime_helpers! {
     (rt_type_error, 4),
+    (rt_ffi_open, 1),
+    (rt_ffi_close, 2),
+    (rt_callback_call, 5),
     (rt_float_new, 3),
     (rt_decimal_cmp, 4),
     (rt_decimal_to_f64, 3),
@@ -3449,6 +4312,11 @@ runtime_helpers! {
     (rt_str_to_int, 2),
     (rt_f64_round, 2),
     (rt_float_nonfinite, 2),
+    (rt_raw_new, 3),
+    (rt_raw_from_bits, 3),
+    (rt_raw_bits, 3),
+    (rt_raw_admit, 3),
+    (rt_raw_narrow, 3),
     (rt_f64_from_int, 2),
     (rt_f64_trunc, 2),
     (rt_cptr_fixture, 2),
@@ -3512,6 +4380,10 @@ runtime_helpers! {
     (rt_bytes_from_list, 2),
     (rt_bytes_join, 2),
     (rt_bytes_decode_utf8, 2),
+    (rt_str_encode_utf16le, 2),
+    (rt_bytes_decode_utf16le, 2),
+    (rt_bytes_utf16le_units, 2),
+    (rt_bytes_utf16le_units_before_nul, 4),
     (rt_bytes_slice, 4),
     (rt_bytes_len, 2),
     (rt_bytes_addr, 2),
@@ -3542,13 +4414,17 @@ runtime_helpers! {
     (rt_cptr_fixture_bytes, 3),
     (rt_is_tcl_alpha, 2),
     (rt_is_tcl_alnum, 2),
+    (rt_char_is_tcl_alpha, 2),
+    (rt_char_is_tcl_alnum, 2),
     (rt_str_region_is_tcl_alpha, 4),
     (rt_str_region_is_tcl_alnum, 4),
     (rt_list_new, 3),
     (rt_struct_new, 4),
     (rt_list_len, 2),
+    (rt_tree_children, 2),
     (rt_list_get, 3),
     (rt_list_with_length, 3),
+    (rt_list_flat, 2),
     (rt_list_get_proven, 3),
     (rt_list_append, 3),
     (rt_construct, 4),
@@ -3650,6 +4526,8 @@ mod tests {
                         name: name.map(String::from),
                         fields: fields.iter().map(|f| f.to_string()).collect(),
                         opaque: false,
+                        identity: None,
+                        tree: None,
                     })
                     .collect(),
                 enums: Vec::new(),
@@ -3678,6 +4556,39 @@ mod tests {
             }),
             AllocMode::Summary,
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // Character classes (core/tclcompat.tcl, UNICODECHAR-CLASSIFIERS.md):
+    // the UnicodeChar forms agree with the one-scalar String forms on every
+    // scalar, and codegen::clif's inline ASCII rule agrees with the
+    // General_Category tables on every ASCII scalar.
+
+    #[test]
+    fn char_classifiers_agree_with_string_classifiers_on_every_scalar() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        for c in (0u32..=0x10FFFF).filter_map(char::from_u32) {
+            let ch = make_char(c as u32);
+            let s = vm.new_str(c.encode_utf8(&mut [0u8; 4]));
+            assert_eq!(rt_char_is_tcl_alpha(p, ch), rt_is_tcl_alpha(p, s), "alpha of U+{:04X}", c as u32);
+            assert_eq!(rt_char_is_tcl_alnum(p, ch), rt_is_tcl_alnum(p, s), "alnum of U+{:04X}", c as u32);
+            if c as u32 % 4096 == 0 {
+                // Strings the test made are garbage now: keep the heap small.
+                vm.reset();
+            }
+        }
+    }
+
+    #[test]
+    fn inline_ascii_rule_is_the_general_category_rule() {
+        for cp in 0u32..0x80 {
+            let c = char::from_u32(cp).expect("ASCII is scalar");
+            let letter = (cp | 0x20).wrapping_sub(b'a' as u32) < 26;
+            let digit = cp.wrapping_sub(b'0' as u32) < 10;
+            assert_eq!(letter, tcl_alpha_char(c), "alpha of U+{cp:04X}");
+            assert_eq!(letter || digit, tcl_alnum_char(c), "alnum of U+{cp:04X}");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -3989,7 +4900,7 @@ mod tests {
             std::rc::Rc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
-                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false }],
+                shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false, identity: None, tree: None }],
                 enums: vec![EnumInfo { name: "Color".to_string(), cases: vec!["Red".to_string(), "Green".to_string()] }],
                 errors: Vec::new(),
             }),
@@ -4077,6 +4988,8 @@ mod tests {
             name: name.map(String::from),
             fields: fields.iter().map(|f| f.to_string()).collect(),
             opaque: false,
+            identity: None,
+            tree: None,
         };
         let mut vm = Vm::new(
             std::rc::Rc::new(ProgramInfo {
@@ -4105,6 +5018,135 @@ mod tests {
         assert_eq!(rt_hash(&mut *vm, anon), reference_hash(anon));
     }
 
+    /// A VM whose shape 0 is the tree struct `Node {value, children}`
+    /// (TREE-STRUCT-MILESTONE-1.md) and shape 1 the same declaration as an
+    /// ordinary struct: what differs between them is how the runtime walks a
+    /// value, never what the walk means.
+    fn tree_vm() -> Box<Vm> {
+        use crate::runtime::vm::ShapeInfo;
+        let node = |tree| ShapeInfo {
+            name: Some("Node".into()),
+            fields: vec!["value".into(), "children".into()],
+            opaque: false,
+            identity: None,
+            tree,
+        };
+        Vm::new(
+            std::rc::Rc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: vec![node(Some(1)), node(None)],
+                enums: Vec::new(),
+                errors: Vec::new(),
+            }),
+            AllocMode::Summary,
+        )
+    }
+
+    /// A node of SHAPE with VALUE and the children KIDS.
+    fn tree_node(vm: &mut Vm, shape: u32, value: i64, kids: Vec<Value>) -> Value {
+        let list = rooted!(vm, vm.new_list(kids));
+        rooted!(vm, vm.new_struct(shape, vec![small(value), list]))
+    }
+
+    /// The chain of N + 1 nodes of SHAPE: the leaf BOTTOM under roots 1..N.
+    fn tree_chain(vm: &mut Vm, shape: u32, n: i64, bottom: i64) -> Value {
+        let mut t = tree_node(vm, shape, bottom, Vec::new());
+        for i in 1..=n {
+            t = tree_node(vm, shape, i, vec![t]);
+        }
+        t
+    }
+
+    /// node(1, [node(2, [leaf(4), leaf(5)]), leaf(3)]) of SHAPE, its two
+    /// first children swapped when SWAP.
+    fn tree_sample(vm: &mut Vm, shape: u32, swap: bool) -> Value {
+        let four = tree_node(vm, shape, 4, Vec::new());
+        let five = tree_node(vm, shape, 5, Vec::new());
+        let two = tree_node(vm, shape, 2, vec![four, five]);
+        let three = tree_node(vm, shape, 3, Vec::new());
+        let kids = if swap { vec![three, two] } else { vec![two, three] };
+        tree_node(vm, shape, 1, kids)
+    }
+
+    #[test]
+    fn tree_walks_are_the_struct_walks() {
+        // TREE-STRUCT-MILESTONE-1.md: ==, both hashes and the text of a tree
+        // are its struct's, computed with work stacks instead of recursion.
+        use crate::runtime::show::show;
+        let mut vm = tree_vm();
+        let tree = tree_sample(&mut vm, 0, false);
+        let again = tree_sample(&mut vm, 0, false);
+        let swapped = tree_sample(&mut vm, 0, true);
+        let plain = tree_sample(&mut vm, 1, false);
+        let plain_swapped = tree_sample(&mut vm, 1, true);
+        let deep = tree_chain(&mut vm, 0, 300, 7);
+        let deep_plain = tree_chain(&mut vm, 1, 300, 7);
+        for (t, p) in [(tree, plain), (swapped, plain_swapped), (deep, deep_plain)] {
+            assert_eq!(rt_hash(&mut *vm, t), rt_hash(&mut *vm, p));
+            assert_eq!(rt_hash(&mut *vm, t), reference_hash(p));
+            let key = (0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210);
+            assert_eq!(table_hash_with_key(&mut *vm, t, key), table_hash_with_key(&mut *vm, p, key));
+            assert_eq!(show(t), show(p));
+        }
+        assert_eq!(rt_value_eq(&mut *vm, tree, again), TRUE);
+        assert_eq!(rt_value_eq(&mut *vm, tree, swapped), FALSE);
+        assert_ne!(rt_hash(&mut *vm, tree), rt_hash(&mut *vm, swapped));
+        // A list of trees, and a tree inside a plain struct, walk the same.
+        let list = rooted!(vm, vm.new_list(vec![tree, deep]));
+        let plain_list = rooted!(vm, vm.new_list(vec![plain, deep_plain]));
+        assert_eq!(rt_hash(&mut *vm, list), rt_hash(&mut *vm, plain_list));
+        assert_eq!(show(list), show(plain_list));
+        assert_eq!(show(tree), "Node {value: 1, children: [Node {value: 2, children: [Node {value: 4, children: []}, Node {value: 5, children: []}]}, Node {value: 3, children: []}]}");
+    }
+
+    #[test]
+    fn tree_children_reads_the_recorded_slot() {
+        let mut vm = tree_vm();
+        let tree = tree_sample(&mut vm, 0, false);
+        let kids = rt_tree_children(&mut *vm, tree);
+        assert_eq!(kids, struct_of(tree).fields()[1]);
+        // A struct of no tree shape is refused (a checked program never
+        // passes one).
+        let plain = tree_sample(&mut vm, 1, false);
+        assert_eq!(rt_tree_children(&mut *vm, plain), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn deep_trees_need_no_host_stack() {
+        // A chain 200,000 nodes deep is compared, hashed (both hashes) and
+        // shown on a thread whose whole stack is 256 KiB: none of them
+        // recurses per level. The chains are built without
+        // BOTLISH_NATIVE_GC_STRESS's collection at every allocation, which
+        // would mark every node built so far at each of the 1.2 million
+        // allocations (hours, not milliseconds); what is measured here is the
+        // host stack, and the walks allocate nothing on the managed heap.
+        // tree_walks_are_the_struct_walks keeps the stressed coverage of the
+        // walks' rooting.
+        let worker = std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
+            let mut vm = tree_vm();
+            let stressed = std::env::var("BOTLISH_NATIVE_GC_STRESS").is_ok_and(|v| v == "1");
+            vm.heap.set_stress_for_test(false);
+            let a = tree_chain(&mut vm, 0, 200_000, 1);
+            let b = tree_chain(&mut vm, 0, 200_000, 1);
+            let c = tree_chain(&mut vm, 0, 200_000, 2);
+            vm.heap.set_stress_for_test(stressed);
+            let key = (1, 2);
+            (
+                rt_value_eq(&mut *vm, a, b) == TRUE,
+                rt_value_eq(&mut *vm, a, c) == FALSE,
+                rt_hash(&mut *vm, a) == rt_hash(&mut *vm, b),
+                rt_hash(&mut *vm, a) != rt_hash(&mut *vm, c),
+                table_hash_with_key(&mut *vm, a, key) == table_hash_with_key(&mut *vm, b, key),
+                crate::runtime::show::show(a).len(),
+            )
+        });
+        let (eq, ne, hash, hash_ne, table, shown) = worker.expect("thread").join().expect("no stack overflow");
+        assert!(eq && ne && hash && hash_ne && table);
+        assert!(shown > 200_000 * 30);
+    }
+
     #[test]
     fn an_opaque_struct_shows_its_nominal_type_only() {
         // OPAQUE-STRUCTS.md: user-facing text never dumps a private
@@ -4116,8 +5158,8 @@ mod tests {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: vec![
-                    ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true },
-                    ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false },
+                    ShapeInfo { name: Some("token::Token".into()), fields: vec!["secret".into()], opaque: true, identity: None, tree: None },
+                    ShapeInfo { name: Some("Holder".into()), fields: vec!["token".into()], opaque: false, identity: None, tree: None },
                 ],
                 enums: Vec::new(),
                 errors: Vec::new(),
@@ -4829,6 +5871,82 @@ mod tests {
         assert_eq!(rt_list_with_length(&mut *vm, empty, small(0)), empty);
     }
 
+    // std::list::flat (`listflat`, LIST-FLAT-MILESTONE-1.md): the elements of
+    // the inner Lists in order, exactly one level removed (a nested List
+    // stays one element), duplicates and empty Lists as they are; one List
+    // allocated and exactly n elements copied; operand and inner Lists
+    // unchanged; TYPE with the position for an element that is no List.
+    #[test]
+    fn list_flat_removes_one_level_in_order() {
+        let mut vm = vm();
+        let a = rooted!(vm, vm.new_list(vec![small(1), small(2)]));
+        let empty = rooted!(vm, vm.new_list(vec![]));
+        let nested = rooted!(vm, vm.new_list(vec![a]));
+        let b = rooted!(vm, vm.new_list(vec![small(3), nested, small(3)]));
+        let outer = rooted!(vm, vm.new_list(vec![a, empty, b, empty, a]));
+        let lists = vm.metrics.by_kind[KIND_LIST as usize].allocations;
+        let copied = vm.metrics.list_elements_copied;
+        let r = rooted!(vm, rt_list_flat(&mut *vm, outer));
+        assert_eq!(list_of(r).items(), &[small(1), small(2), small(3), nested, small(3), small(1), small(2)]);
+        assert_eq!(vm.metrics.by_kind[KIND_LIST as usize].allocations, lists + 1);
+        assert_eq!(vm.metrics.list_elements_copied, copied + 7);
+        assert_eq!(list_of(outer).items(), &[a, empty, b, empty, a]);
+        assert_eq!(list_of(a).items(), &[small(1), small(2)]);
+        assert_eq!(list_of(b).items(), &[small(3), nested, small(3)]);
+        for parts in [vec![], vec![empty], vec![empty, empty, empty]] {
+            let o = rooted!(vm, vm.new_list(parts));
+            let r = rt_list_flat(&mut *vm, o);
+            assert_eq!(list_of(r).items(), &[] as &[Value]);
+        }
+        let single = rooted!(vm, vm.new_list(vec![b]));
+        let r = rt_list_flat(&mut *vm, single);
+        assert_eq!(list_of(r).items(), list_of(b).items());
+        assert_ne!(r, b, "a new List, never the inner one");
+        let bad = rooted!(vm, vm.new_list(vec![a, empty, small(7)]));
+        assert_eq!(rt_list_flat(&mut *vm, bad), NO_VALUE);
+        assert_eq!(
+            vm.error.take().map(|e| (e.error_code(), e.message())),
+            Some((vec!["CORE", "SEMANTIC", "TYPE"], "std::list::flat element 2: expected list, got 7".to_string()))
+        );
+    }
+
+    // A collection at the result's allocation (stress: one at every
+    // allocation) frees nothing flat still reads: the inner Lists and their
+    // heap elements are reachable only through the operand, and freed
+    // Lists are poisoned, so a missed root would show in the result.
+    #[test]
+    fn list_flat_survives_a_collection_at_its_allocation() {
+        let mut vm = vm();
+        vm.heap.set_stress_for_test(true);
+        vm.heap.set_poison_for_test(true);
+        let mut inners = Vec::new();
+        for i in 0..20 {
+            // (The inner Lists made so far stay rooted while this one's
+            // Strings are allocated.)
+            let base = vm.temp_roots.len();
+            for j in 0..i {
+                rooted!(vm, vm.new_str(&format!("{i}.{j}")));
+            }
+            let items = vm.temp_roots[base..].to_vec();
+            let inner = vm.new_list(items);
+            vm.temp_roots.truncate(base);
+            vm.temp_roots.push(inner);
+            inners.push(inner);
+        }
+        let outer = vm.new_list(inners);
+        // From here on the inner Lists and their Strings are reachable only
+        // through the outer List.
+        vm.temp_roots.clear();
+        vm.temp_roots.push(outer);
+        let r = rooted!(vm, rt_list_flat(&mut *vm, outer));
+        let texts: Vec<String> = list_of(r).items().iter().map(|&v| str_of(v).as_str().to_string()).collect();
+        let expected: Vec<String> = (0..20).flat_map(|i| (0..i).map(move |j| format!("{i}.{j}"))).collect();
+        assert_eq!(texts, expected);
+        vm.collect_for_test(crate::runtime::metrics::GcReason::Explicit);
+        let again: Vec<String> = list_of(r).items().iter().map(|&v| str_of(v).as_str().to_string()).collect();
+        assert_eq!(again, expected);
+    }
+
     // The *proven helpers (hir/completions.tcl's bounds proof, PROOF-FACT-
     // CENSUS.md G1) are the checked helpers minus the checks: on every valid
     // index or slice they must produce exactly what the checked one does.
@@ -5126,6 +6244,92 @@ mod tests {
         }
     }
 
+    /// Raw C floating encodings (RAW-C-FLOAT-FFI-MILESTONE-1.md): 128 marks
+    /// one, of 4 or 8 bytes, never signed and never also a finite float's
+    /// (64). A load makes a raw value of exactly the bytes' bits -- a
+    /// signaling NaN, a negative NaN payload, negative zero, a subnormal --
+    /// and a store writes exactly a raw value's bits; a raw value of the
+    /// other format, or a Float64, is refused (TYPE), never converted.
+    #[test]
+    fn raw_c_float_codec_keeps_every_bit() {
+        assert!(matches!(bin_encoding(make_small(128 + 4)), Some(BinEncoding { width: 4, raw: Some(CFloatFormat::Binary32), float: None, .. })));
+        assert!(matches!(bin_encoding(make_small(128 + 8)), Some(BinEncoding { width: 8, raw: Some(CFloatFormat::Binary64), float: None, .. })));
+        assert!(bin_encoding(make_small(128 + 16 + 4)).is_none(), "a raw encoding is never signed");
+        assert!(bin_encoding(make_small(128 + 64 + 8)).is_none(), "raw and finite at once is malformed");
+        assert!(bin_encoding(make_small(128 + 2)).is_none(), "no 2-byte C floating format");
+        assert!(bin_encoding(make_small(256 + 4)).is_none());
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let cases: &[(usize, u64)] = &[
+            (4, 0x7fa0_0001), (4, 0xffc0_0001), (4, 0x8000_0000), (4, 0x0000_0001), (4, 0x7f80_0000), (4, 0xff80_0000),
+            (8, 0x7ff4_0000_0000_0000), (8, 0xfff8_0000_0000_0001), (8, 0x8000_0000_0000_0000), (8, 1), (8, u64::MAX),
+        ];
+        for &(width, bits) in cases {
+            vm.temp_roots.clear();
+            let encoding = bin_encoding(make_small(128 + width as i64)).unwrap();
+            let bytes = bits.to_le_bytes();
+            let v = bin_decode(p, &bytes[..width], encoding);
+            vm.temp_roots.push(v);
+            assert_eq!(raw_bits(v), bits, "load {width}/{bits:#x}");
+            assert_eq!(heap_kind(v), if width == 4 { KIND_RAWF32 } else { KIND_RAWF64 });
+            let back = bin_encode(p, v, encoding, "test").map_err(|_| ()).unwrap();
+            assert_eq!(&back[..width], &bytes[..width], "store {width}/{bits:#x}");
+            let other = bin_encoding(make_small(128 + if width == 4 { 8 } else { 4 })).unwrap();
+            assert!(bin_encode(p, v, other, "test").is_err(), "a raw value of the other format is refused");
+            assert!(vm.error.take().is_some());
+        }
+        let x = vm.new_float(FloatType::Float64, 1.5f64.to_bits());
+        vm.temp_roots.push(x);
+        assert!(bin_encode(p, x, bin_encoding(make_small(128 + 8)).unwrap(), "test").is_err(), "a Float64 is no raw value");
+        assert!(vm.error.take().is_some());
+    }
+
+    /// The raw helpers (codegen's and the generic ops'): bits in and out
+    /// exactly, admission and narrowing by the finite types' one rule.
+    #[test]
+    fn raw_c_float_helpers() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let f = rooted!(vm, rt_raw_from_bits(p, 0, make_small(0x7fa0_0001)));
+        assert_eq!(raw_bits(f), 0x7fa0_0001);
+        assert_eq!(int_small(rt_raw_bits(p, 0, f)), Some(0x7fa0_0001));
+        let big = rooted!(vm, vm.new_big(BigInt::from(0xfff8_0000_0000_0001u64)));
+        let d = rooted!(vm, rt_raw_from_bits(p, 1, big));
+        assert_eq!(raw_bits(d), 0xfff8_0000_0000_0001);
+        let back = rooted!(vm, rt_raw_bits(p, 1, d));
+        assert_eq!(int_to_big(back), BigInt::from(0xfff8_0000_0000_0001u64));
+        // Out of the format's range: RANGE, never truncated.
+        assert_eq!(rt_raw_from_bits(p, 0, make_small(1 << 32)), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        assert_eq!(rt_raw_from_bits(p, 0, make_small(-1)), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        // Admission: NaN and the infinities fail, -0 is 0.0, a binary32
+        // widens exactly.
+        assert_eq!(rt_raw_admit(p, 0, f), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        let nz = rooted!(vm, rt_raw_new(p, 1, 0x8000_0000_0000_0000));
+        let zero = rooted!(vm, rt_raw_admit(p, 1, nz));
+        assert_eq!(float64_of(zero).to_bits(), 0);
+        let sub = rooted!(vm, rt_raw_new(p, 0, 1));
+        let wide = rooted!(vm, rt_raw_admit(p, 0, sub));
+        assert_eq!(float64_of(wide), f32::from_bits(1) as f64);
+        // Narrowing: binary32 rounded (a tie to even), an overflow fails;
+        // binary64 exact.
+        let tie = rooted!(vm, vm.new_float(FloatType::Float64, (1.0f64 + 2f64.powi(-24)).to_bits()));
+        let narrowed = rooted!(vm, rt_raw_narrow(p, 0, tie));
+        assert_eq!(raw_bits(narrowed), 1.0f32.to_bits() as u64);
+        let huge = rooted!(vm, vm.new_float(FloatType::Float64, 1e39f64.to_bits()));
+        assert_eq!(rt_raw_narrow(p, 0, huge), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        let exact = rooted!(vm, rt_raw_narrow(p, 1, huge));
+        assert_eq!(raw_bits(exact), 1e39f64.to_bits());
+        // A raw value of the other format, or no raw value: TYPE.
+        assert_eq!(rt_raw_bits(p, 1, f), NO_VALUE);
+        assert!(vm.error.take().is_some());
+        assert_eq!(rt_raw_admit(p, 0, make_small(3)), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
     #[test]
     fn bin_store_never_truncates_and_ops_check_their_bounds() {
         let mut vm = vm();
@@ -5229,6 +6433,167 @@ mod tests {
             assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_UTF8, "{bad:?}");
             assert!(vm.error.take().is_some());
         }
+    }
+
+    // UTF16-BYTE-STORAGE-MILESTONE-1.md: exact vectors (written here, never
+    // computed by the code under test), strictness, the units bridge and the
+    // length ceiling.
+    #[test]
+    fn utf16le_encodes_exact_bytes() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let ascii64 = "a".repeat(64);
+        let ascii65 = "a".repeat(65);
+        let vectors: &[(&str, &[u8])] = &[
+            ("", &[]),
+            ("A", &[0x41, 0x00]),
+            ("\0", &[0x00, 0x00]),
+            ("\u{e9}", &[0xe9, 0x00]),
+            ("\u{20ac}", &[0xac, 0x20]),
+            ("\u{1f600}", &[0x3d, 0xd8, 0x00, 0xde]),
+            ("\u{fffd}", &[0xfd, 0xff]),
+            ("\u{feff}", &[0xff, 0xfe]),
+            ("\u{10ffff}", &[0xff, 0xdb, 0xff, 0xdf]),
+            ("\u{10000}", &[0x00, 0xd8, 0x00, 0xdc]),
+            ("a\u{e9}\u{1f600}z", &[0x61, 0x00, 0xe9, 0x00, 0x3d, 0xd8, 0x00, 0xde, 0x7a, 0x00]),
+        ];
+        for (text, want) in vectors {
+            let s = rooted!(vm, vm.new_str(text));
+            let b = rt_str_encode_utf16le(p, s);
+            assert_eq!(bytes_of(b), *want, "{text:?}");
+        }
+        // The ASCII path's 64-character chunks: every unit, in order.
+        for text in [ascii64.as_str(), ascii65.as_str()] {
+            let s = rooted!(vm, vm.new_str(text));
+            let b = rt_str_encode_utf16le(p, s);
+            let want: Vec<u8> = text.bytes().flat_map(|c| [c, 0]).collect();
+            assert_eq!(bytes_of(b), &want[..]);
+        }
+    }
+
+    #[test]
+    fn utf16le_decodes_strictly() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let accepted: &[(&[u8], &str)] = &[
+            (&[], ""),
+            (&[0x41, 0x00], "A"),
+            (&[0x00, 0x00], "\0"),
+            (&[0x3d, 0xd8, 0x00, 0xde], "\u{1f600}"),
+            (&[0xff, 0xfe, 0x41, 0x00], "\u{feff}A"),
+            (&[0x41, 0x00, 0xff, 0xfe, 0x42, 0x00], "A\u{feff}B"),
+            (&[0xfd, 0xff], "\u{fffd}"),
+            (&[0xff, 0xff, 0xfe, 0xff], "\u{ffff}\u{fffe}"),
+            // Big-endian "AB" is two other characters: no order is detected.
+            (&[0x00, 0x41, 0x00, 0x42], "\u{4100}\u{4200}"),
+        ];
+        for (bytes, want) in accepted {
+            let v = rooted!(vm, vm.new_bytes(bytes));
+            let s = rt_bytes_decode_utf16le(p, v);
+            assert_eq!(str_of(s).as_str(), *want, "{bytes:?}");
+            assert_eq!(str_of(s).chars, want.chars().count(), "{bytes:?}");
+        }
+        let rejected: &[&[u8]] = &[
+            &[0x41],
+            &[0x41, 0x00, 0x42],
+            &[0x00, 0xd8],
+            &[0x00, 0xdc],
+            &[0x00, 0xd8, 0x41, 0x00],
+            &[0x41, 0x00, 0x00, 0xd8],
+            &[0x00, 0xdc, 0x00, 0xd8],
+            &[0x00, 0xd8, 0x00, 0xd8],
+            &[0x00, 0xdc, 0x00, 0xdc],
+            &[0x00, 0xd8, 0x00, 0xd8, 0x00, 0xdc],
+            &[0xfd, 0xff, 0x00, 0xdc],
+        ];
+        for bad in rejected {
+            let v = rooted!(vm, vm.new_bytes(bad));
+            assert_eq!(rt_bytes_decode_utf16le(p, v), NO_VALUE, "{bad:?}");
+            assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_UTF16, "{bad:?}");
+            assert!(vm.error.take().is_some());
+        }
+    }
+
+    #[test]
+    fn utf16le_units_bridge_reads_low_byte_first() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let v = rooted!(vm, vm.new_bytes(&[0x75, 0x00, 0x00, 0xd8, 0xfd, 0xff]));
+        let l = rt_bytes_utf16le_units(p, v);
+        let units: Vec<i64> = list_of(l).items().iter().map(|&u| int_small(u).expect("small")).collect();
+        assert_eq!(units, vec![0x75, 0xd800, 0xfffd]);
+        let odd = rooted!(vm, vm.new_bytes(&[0x41, 0x00, 0x42]));
+        assert_eq!(rt_bytes_utf16le_units(p, odd), NO_VALUE);
+        assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn utf16le_units_before_nul_counts_whole_units() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        fn count(vm: &mut Vm, bytes: &[u8], start: i64, end: i64) -> Option<i64> {
+            let p: *mut Vm = vm;
+            let v = rooted!(vm, vm.new_bytes(bytes));
+            let r = rt_bytes_utf16le_units_before_nul(p, v, make_small(start), make_small(end));
+            if r == NO_VALUE {
+                assert!(vm.error.take().is_some());
+                return None;
+            }
+            int_small(r)
+        }
+        // The terminator first; in the middle; absent (every unit counts);
+        // an empty range.
+        assert_eq!(count(&mut vm, &[0x00, 0x00, 0x41, 0x00], 0, 4), Some(0));
+        assert_eq!(count(&mut vm, &[0x61, 0x00, 0x62, 0x00, 0x00, 0x00, 0x63, 0x00], 0, 8), Some(2));
+        assert_eq!(count(&mut vm, &[0x61, 0x00, 0x62, 0x00], 0, 4), Some(2));
+        assert_eq!(count(&mut vm, &[0x61, 0x00], 2, 2), Some(0));
+        // A unit is 0 only when both of ITS bytes are: U+0100 (00 01) and
+        // U+2E00 (00 2E) begin with a 00 byte, U+4100 after U+0041 puts
+        // 00 00 at an odd distance (41 00 | 00 41), and neither ends a name.
+        assert_eq!(count(&mut vm, &[0x00, 0x01, 0x00, 0x2e, 0x00, 0x00], 0, 6), Some(2));
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x00, 0x41, 0x00, 0x00], 0, 6), Some(2));
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x00, 0x41], 0, 4), Some(2));
+        // A lone surrogate is a unit like any other.
+        assert_eq!(count(&mut vm, &[0x75, 0x00, 0x00, 0xd8, 0x00, 0x00, 0x78, 0x00], 0, 8), Some(2));
+        // Units are counted from START, at an even distance from it: from
+        // byte 1 the pairs are (00 41) (00 00).
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x41, 0x00, 0x00, 0x7a], 1, 5), Some(1));
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x00, 0x00, 0x42, 0x00], 2, 6), Some(0));
+        // Only START..END-1 is read: the terminator past END is not seen.
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x42, 0x00, 0x00, 0x00], 0, 4), Some(2));
+        // The slice rule's declared errors, and RANGE for an odd range.
+        for (start, end, error) in [
+            (-1, 2, crate::runtime::error::ERR_LOWER_UNDERRUN),
+            (4, 2, crate::runtime::error::ERR_LOWER_UNDERRUN),
+            (0, 8, crate::runtime::error::ERR_UPPER_OVERRUN),
+            (7, 8, crate::runtime::error::ERR_UPPER_OVERRUN),
+        ] {
+            let v = rooted!(vm, vm.new_bytes(&[0x41, 0x00, 0x42, 0x00, 0x43, 0x00]));
+            assert_eq!(rt_bytes_utf16le_units_before_nul(p, v, make_small(start), make_small(end)), NO_VALUE, "{start} {end}");
+            assert_eq!(vm.declared_error, error, "{start} {end}");
+            assert!(vm.error.take().is_some());
+        }
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x42], 0, 3), None);
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x42, 0x00], 1, 4), None);
+        // The pure measure: a trailing odd byte is no unit.
+        assert_eq!(utf16le_units_before_nul(&[0x41, 0x00, 0x00]), 1);
+        assert_eq!(utf16le_units_before_nul(&[]), 0);
+    }
+
+    #[test]
+    fn utf16le_length_never_overflows_or_passes_the_ceiling() {
+        // The largest unit count whose encoding fits the ceiling, and the
+        // first that does not; a count whose doubling overflows the word.
+        let fits = MAX_COLLECTION_LENGTH / 2;
+        assert_eq!(utf16le_encoded_len(fits), Some(2 * fits));
+        assert_eq!(utf16le_encoded_len(fits + 1), None);
+        assert_eq!(utf16le_encoded_len(usize::MAX / 2 + 1), None);
+        assert_eq!(utf16le_encoded_len(usize::MAX), None);
+        assert_eq!(utf16le_encoded_len(0), Some(0));
+        // The measurement of a decoding never overflows either: it counts
+        // what it reads.
+        assert_eq!(utf16le_measure(&[0x3d, 0xd8, 0x00, 0xde, 0x41, 0x00]), Some((5, 2)));
+        assert_eq!(utf16le_measure(&[0x3d, 0xd8]), None);
     }
 
     #[test]

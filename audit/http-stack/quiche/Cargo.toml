@@ -1,0 +1,13 @@
+[package]
+name = "hs_quiche"
+description = "Core quiche (QUIC + HTTP/3) driven by the census's bridge: Botlish-watched UDP, Botlish timers, paced sends"
+edition.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+hs_bridge = { path = "../bridge" }
+hs_tls = { path = "../tls" }
+quiche.workspace = true
+boring.workspace = true
+libc.workspace = true

@@ -1,0 +1,78 @@
+# failure.bot -- Probe A (THREAD-ACTOR-ARCHITECTURE-CENSUS.md, "Errors"):
+# an actor whose handler fails. Its task ends with Ending::Failed (the
+# loop records it; nothing else is affected), but the mailbox it was
+# receiving from stays open: its exit code never ran. Later sends are
+# Delivered into a mailbox nobody will read, until it is Full. The cure
+# shown here is the one the census recommends for std::actor: the library
+# that started the task maps its id to the inbox and closes the inboxes of
+# ended tasks from the loop's outcomes ("reaping"), so senders then see
+# Closed with the undelivered count -- no code of the failed actor runs.
+import actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type actor::Sent
+import type std::event_loop::Ending
+
+context struct Mail:
+    nums: actor::Postbox[int]
+
+fn sent_name(s: Sent) -> str:
+    if s == Sent::Delivered:
+        "Delivered"
+    elif s == Sent::Full:
+        "Full"
+    elif s == Sent::Closed:
+        "Closed"
+    else:
+        "Stale"
+
+# Fails with TaskFailed on a negative number.
+fn fragile(inbox: actor::Inbox[int], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::TaskFailed:
+    total = fold with intermediate t 0:
+        v = actor::receive(mail.nums, inbox):
+            on actor::MailboxClosed:
+                break
+        if v < 0:
+            fail std::event_loop::TaskFailed {code: v}
+        t + v
+    actor::close(mail.nums, inbox)
+    total
+
+# (TaskFailed: a failure in the first segment reaches the spawner, construction being eager.)
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, mail: Mail) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed:
+    o = actor::open(mail.nums)
+    coroutine {step, first} = fragile(o.inbox)
+    id = std::event_loop::adopt(step, first)
+    actor::send(mail.nums, o.to, 5)
+    actor::send(mail.nums, o.to, -1)
+    std::event_loop::run()
+    loop k from 0 to 5:
+        std::event_loop::log("after the failure, send: ".concat(sent_name(actor::send(mail.nums, o.to, k))))
+    # reaping: close the inbox of every ended task this program started
+    loop out in std::event_loop::take_outcomes():
+        if out.task == id:
+            ending = if out.ending == Ending::Failed:
+                "Failed"
+            else:
+                "other"
+            std::event_loop::log("task ".concat(std::int::to_string(id)).concat(" ended ").concat(ending).concat(" code ").concat(std::int::to_string(out.value)))
+            std::event_loop::log("reaped: undelivered ".concat(std::int::to_string(actor::close(mail.nums, o.inbox))))
+    std::event_loop::log("after reaping, send: ".concat(sent_name(actor::send(mail.nums, o.to, 9))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context Mail {nums: actor::postbox[int](1, 3)}
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]
+    on std::event_loop::TaskFailed:
+        ["TaskFailed in the first segment"]

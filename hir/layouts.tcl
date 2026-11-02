@@ -141,6 +141,14 @@
 # L's and is recorded once. There is no `LayoutStruct Foo:`, no `struct
 # Foo[T]:` and no generic struct declaration of any kind.
 #
+# Raw C floating fields (RAW-C-FLOAT-FFI-MILESTONE-1.md). A field of type
+# std::ffi::c::RawFloat or std::ffi::c::RawDouble has its finite
+# counterpart's representation (format, width, alignment: the same C type)
+# and holds every bit pattern of it: its consumer type is the raw kind, its
+# descriptor words {r WIDTH ENDIAN}, and reading or writing it copies the
+# bits -- no admission, no narrowing, no NonFiniteFloat (FloatErrors reads
+# only `f`).
+#
 # C floating fields (C-FLOAT-FFI-MILESTONE-1.md). A field of type
 # std::ffi::c::Float or std::ffi::c::Double holds C's float or double: its
 # representation is the C type's on the compilation's target (core/cabi.tcl's
@@ -354,8 +362,10 @@ proc hir::layouts::ReprDescriptor {repr} {
     switch -- [dict get $repr kind] {
         float {
             # A C floating field: {f WIDTH ENDIAN}, the IEEE 754 format of
-            # WIDTH bytes (core::cabi::formatOfWidth).
-            return [list f [dict get $repr width] [dict get $repr endian]]
+            # WIDTH bytes (core::cabi::formatOfWidth); a raw one {r WIDTH
+            # ENDIAN}, the same bytes carried as they are, never admitted or
+            # narrowed (RAW-C-FLOAT-FFI-MILESTONE-1.md).
+            return [list [expr {[dict getdef $repr raw 0] ? "r" : "f"}] [dict get $repr width] [dict get $repr endian]]
         }
         layout {
             return [list layout [descriptor [dict get $repr layout]]]
@@ -1477,7 +1487,7 @@ proc hir::layouts::ResolveRepr {typeExpr pointerText ns byId doneVar stack id na
 proc hir::layouts::FloatingRepr {ctype} {
     set info [hir::cabi::FloatingInfo $ctype]
     return [dict create kind float format [dict get $info format] width [dict get $info bytes] endian little \
-        ctype $ctype type [hir::cabi::Carrier $ctype]]
+        ctype $ctype type [hir::cabi::Carrier $ctype] raw [dict get $info raw]]
 }
 
 # REPR (a representation) with the type of the leaf DEPTH arrays down set to

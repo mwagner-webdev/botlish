@@ -1,0 +1,11 @@
+# sleep.bot -- a program busy in a C call for five seconds
+# (MACOS-GRAPHICAL-MAIN-THREAD-CENSUS.md, section 21): what SIGTERM and
+# SIGINT (Ctrl+C) do to a program that has not initialized SDL, on the
+# worker and on the main thread. The runtime installs handlers for SIGSEGV
+# and SIGBUS only (the guard) and ignores SIGPIPE, so both signals keep
+# their default disposition: the process ends by the signal, wherever the
+# program runs.
+import probe
+
+probe::mark(0)
+probe::sleep_ms(5000)

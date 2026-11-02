@@ -1,0 +1,37 @@
+# invalid.bot -- passes invalid values to the guarded emitter (it fails
+# NotADigit, which this program handles) and to the unguarded one (which
+# then writes a symbol that is no digit: it is not certified).
+
+import emitlib
+import std::coroutine
+
+fn checked(d: int) -> List[int] errors emitlib::NotADigit:
+    coroutine {step, first} = emitlib::digit_checked_source(d)
+    loop k from 0 to 3:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn src_bad() -> int:
+    emitlib::digit_unchecked(-1)
+    -1
+
+fn bad() -> List[int]:
+    coroutine {step, first} = src_bad()
+    loop k from 0 to 3:
+        if k == 0:
+            first
+        elif std::coroutine::done?(step):
+            -9
+        else:
+            step()
+
+fn guarded(d: int) -> List[int]:
+    checked(d):
+        on emitlib::NotADigit:
+            [-3]
+
+[guarded(42), guarded(-7), bad()]

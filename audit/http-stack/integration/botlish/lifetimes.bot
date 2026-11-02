@@ -1,0 +1,181 @@
+# lifetimes.bot -- what owns what (HTTP-STACK-INTEGRATION-CENSUS.md,
+# "Resource lifetimes"). Explicit release only (lexical cleanup is the next
+# milestone's); each part checks what a release does and does not take:
+#
+#   listener    releasing a listener stops accepting and closes its socket;
+#               a connection it accepted is independently owned and keeps
+#               serving
+#   connection  releasing an HTTP/2 client connection invalidates its
+#               streams: both in-flight exchanges fail (cancelled), their
+#               waiters wake
+#   stale       an exchange released while its response is in flight never
+#               delivers that response -- not to its waiter, not to the
+#               exchange that reuses its table slot. HS_CENSUS_FAULT=384
+#               (released tasks keep running, handles looked up by index
+#               alone) is the negative control: the late response lands in
+#               the new exchange.
+#   shutdown    after the bridge stops, no descriptor is watched or open
+import event_loop_linux
+import hs
+import hsh
+import hsnet
+import probe
+import std::event_loop
+import std::mutable_array
+import std::str
+
+# Answers every request: /late after 50 ms with status 299 and body "late",
+# /hang never, anything else at once with 200 and "fast".
+nomethod fn handler(x: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    path = hsh::path(x)
+    if path == "GET /hang":
+        std::event_loop::sleep(10000000)
+        return 0
+    if path == "GET /late":
+        std::event_loop::sleep(50000)
+        hsh::respond(x, 299, true)
+        hsh::send(x, "late")
+    else:
+        hsh::respond(x, 200, true)
+        hsh::send(x, "fast")
+    hsh::finish(x)
+    1
+
+nomethod fn server_loop(server: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        x = hsh::next_request(server)
+        if x == 0:
+            e = hs::await(server)
+            if e.reason != std::event_loop::Wake::Event:
+                return 0
+            continue
+        coroutine {step: s, first: f} = handler(x)
+        std::event_loop::adopt(s, f)
+
+nomethod fn ready(client: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    hsh::state(client)
+
+# The status and body of exchange X once complete (or its error).
+nomethod fn outcome(x: int, context ev: std::event_loop::Loop, h: hs::Hs) -> str errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        if hsh::status(x) != 0:
+            break
+        e = hs::await(x)
+        if e.reason != std::event_loop::Wake::Event:
+            return "revoked"
+    if hsh::status(x) < 0:
+        return "error ".concat(probe::n(hsh::status(x)))
+    body = std::mutable_array::from_list([""])
+    loop:
+        c = hsh::recv(x)
+        if c.n > 0:
+            body.set(0, body.at(0).concat(c.text))
+        elif c.n == 0:
+            e = hs::await(x)
+            if e.reason != std::event_loop::Wake::Event:
+                break
+        else:
+            break
+    "status ".concat(probe::n(hsh::status(x))).concat(" body ").concat(body.at(0))
+
+nomethod fn waiter(x: int, name: str, context ev: std::event_loop::Loop, h: hs::Hs, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    probe::log("connection: ".concat(name).concat(": ").concat(outcome(x)))
+    probe::bump_flag(5)
+    0
+
+nomethod fn all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    # The negative control's faults apply to the stale part only.
+    fault = hs::fault()
+    hs::set_fault(0)
+    server = hsh::server(2, 0)
+    coroutine {step: s, first: f} = server_loop(server)
+    std::event_loop::adopt(s, f)
+    # listener
+    lfd = hsh::listen_socket(0)
+    listener = hsh::serve(server, lfd)
+    port = hsh::port_of(lfd)
+    c1 = hsh::client(hsh::connect_socket(port), 2, 0)
+    ready(c1)
+    first = outcome(hsh::request(c1, "GET", "/one", false))
+    hs::release(listener)
+    std::event_loop::sleep(5000)
+    second = outcome(hsh::request(c1, "GET", "/two", false))
+    refused = hsh::connect_socket(port)
+    std::event_loop::sleep(5000)
+    probe::log("listener: before release ".concat(first).concat("; after release, same connection ").concat(second).concat("; listening socket closed, connect attempt fd ").concat(probe::n(refused)).concat(" retired so far ").concat(probe::n(hsnet::count(3))))
+    hs::close_fd(refused)
+    # connection
+    probe::set_flag(5, 0)
+    l2 = hsh::serve(server, hsh::listen_socket(0))
+    c2 = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), 2, 0)
+    hs::release(l2)
+    c3fd = hsh::listen_socket(0)
+    l3 = hsh::serve(server, c3fd)
+    c3 = hsh::client(hsh::connect_socket(hsh::port_of(c3fd)), 2, 0)
+    ready(c3)
+    a = hsh::request(c3, "GET", "/hang", false)
+    bb = hsh::request(c3, "GET", "/hang", false)
+    coroutine {step: wa, first: fa} = waiter(a, "stream a")
+    std::event_loop::adopt(wa, fa)
+    coroutine {step: wb, first: fb} = waiter(bb, "stream b")
+    std::event_loop::adopt(wb, fb)
+    std::event_loop::sleep(10000)
+    hs::release(c3)
+    loop:
+        if probe::flag(5) == 2:
+            break
+        std::event_loop::sleep(1000)
+    hs::release(c2)
+    # stale
+    hs::set_fault(fault)
+    c4 = hsh::client(hsh::connect_socket(hsh::port_of(c3fd)), 2, 0)
+    ready(c4)
+    late = hsh::request(c4, "GET", "/late", false)
+    std::event_loop::sleep(10000)
+    stale0 = hs::counter("stale")
+    hs::release(late)
+    fresh = hsh::request(c4, "GET", "/fresh", false)
+    got = outcome(fresh)
+    std::event_loop::sleep(80000)
+    after = hsh::status(fresh)
+    probe::log("stale: released exchange ".concat(probe::n(late)).concat(" reused slot ").concat(probe::n(fresh)).concat(" got ").concat(got).concat("; its status 80 ms later ").concat(probe::n(after)).concat("; stale notices dropped ").concat(probe::n(hs::counter("stale") - stale0)))
+    hs::set_fault(0)
+    hs::release(fresh)
+    hs::release(c4)
+    hs::release(l3)
+    hs::release(server)
+    # shutdown
+    left = hsnet::stop()
+    probe::log("shutdown: tasks dropped ".concat(probe::n(left)).concat(" watched ").concat(probe::n(hsnet::watched())).concat(" retired ").concat(probe::n(hsnet::count(3))))
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    probe::log("fault ".concat(probe::n(hs::fault())))
+    coroutine {step: s, first: f} = all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_watchdog(1, 8000000)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

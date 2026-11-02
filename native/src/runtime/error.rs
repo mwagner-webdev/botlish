@@ -85,6 +85,10 @@ pub const ERR_INVALID_INTEGER_TEXT: u32 = BUILTIN_ERROR_ID_BASE + 11;
 /// are not the UTF-8 encoding of any String (runtime::ops's
 /// rt_bytes_decode_utf8, WINDOWS-X86-64-MILESTONE-7.md).
 pub const ERR_INVALID_UTF8: u32 = BUILTIN_ERROR_ID_BASE + 12;
+/// `InvalidUtf16` (builtin error 13): `std::abi::bytes::decode_utf16le`'s
+/// bytes are not the UTF-16LE encoding of any String (runtime::ops's
+/// rt_bytes_decode_utf16le, UTF16-BYTE-STORAGE-MILESTONE-1.md).
+pub const ERR_INVALID_UTF16: u32 = BUILTIN_ERROR_ID_BASE + 13;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[

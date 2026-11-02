@@ -19,8 +19,13 @@
 #             display (U+FFFD for each unpaired surrogate); one program
 #             compiled for windows-x86_64 computes them with
 #             std::windows::path::concat, std::windows::fs::join of the
-#             native paths, std::windows::fs::kind, text and display, on the
-#             Tcl backends (pure: no host needed).
+#             native paths, std::windows::fs::kind, units, text and display,
+#             on the Tcl backends (pure: no host needed) -- and, on a Linux
+#             host with the native backend, on both native backends too: the
+#             program's NIR with the host's target line (it calls no C), so
+#             the native runtime's UTF-16LE codec and units bridge
+#             (UTF16-BYTE-STORAGE-MILESTONE-1.md) run the Windows module's
+#             own code.
 #   linux     the same for LinuxPath's concat and NativePath's join (bytes:
 #             random byte strings, some not UTF-8), compiled for the host's
 #             Linux target (any host).
@@ -90,6 +95,30 @@ proc outcome {backend hir} {
             cranelift-generic { native::evalHir $hir -specialize 0 }
             cranelift { native::evalHir $hir }
         }
+    } result opts]} {
+        return [list error "[lindex [dict get $opts -errorcode] end]: [string range $result 0 300]"]
+    }
+    return [list value [tclValue $result]]
+}
+
+# The outcome of the windows-x86_64 program HIR on native BACKEND, run on
+# this Linux host: its NIR with the host's target line and no link plan
+# (refused if it holds a foreign declaration: it would call Windows).
+proc swappedOutcome {backend hir} {
+    if {![info exists ::hostTargetLine]} {
+        set host [build "0\n" [core::cabi::hostTarget]]
+        set ::hostTargetLine [lsearch -inline [split [native::nir $host] \n] {target *}]
+    }
+    set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
+    if {[catch {
+        set lines {}
+        foreach line [split [native::nir $hir {*}$options] \n] {
+            if {[string match {foreign *} $line]} { error "the program calls C" }
+            if {[string match {link *} $line]} continue
+            if {[string match {target *} $line]} { set line $::hostTargetLine }
+            lappend lines $line
+        }
+        native::Outcome [native::RunDriver "" run [join $lines \n] {}]
     } result opts]} {
         return [list error "[lindex [dict get $opts -errorcode] end]: [string range $result 0 300]"]
     }
@@ -172,12 +201,18 @@ proc winConcat {base comp} {
 
 # Segments joined by random separators: "." and ".." whole segments, empty
 # ones (a doubled separator), trailing periods and spaces, ":" past a
-# drive, non-ASCII and astral characters.
+# drive, non-ASCII and astral characters, and long ones (60 to 79
+# characters: a path past the 64 units std::windows::fs bridges whole, whose
+# kind and end it reads from slices: UTF16-BYTE-STORAGE-MILESTONE-1.md).
 proc randomWinSegments {count} {
     set out ""
     for {set i 0} {$i < $count} {incr i} {
         if {$i > 0} { append out [pick [list \\ \\ /]] }
-        append out [pick [list a b . .. x. "y " é 𝄞 ab:c "" a.b]]
+        set segment [pick [list a b . .. x. "y " é 𝄞 ab:c "" a.b LONG]]
+        if {$segment eq "LONG"} {
+            set segment [string repeat [pick [list x é 𝄞]] [expr {60 + [rand 20]}]]
+        }
+        append out $segment
     }
     return $out
 }
@@ -305,7 +340,11 @@ fn units(us: List\[int\]) -> List\[any\]:
             return \[\"NotAPath\"\]
     t = std::windows::fs::text(p):
         on std::io::path::NotText:
+            if std::windows::fs::units(p) != us:
+                return \[\"units changed\"\]
             return \[0, std::windows::fs::display(p)\]
+    if std::windows::fs::units(p) != us:
+        return \[\"units changed\"\]
     back = std::windows::fs::from_text(t):
         on std::io::path::NotAPath:
             return \[\"round trip refused\"\]
@@ -319,8 +358,16 @@ fn units(us: List\[int\]) -> List\[any\]:
         if {[dict get $::options -verbose]} { puts $text }
         return
     }
-    foreach backend {interp compile} {
-        lassign [outcome $backend $hir] kind value
+    set backends {interp compile}
+    if {$::linuxHost} {
+        lappend backends cranelift-generic cranelift
+    }
+    foreach backend $backends {
+        if {$backend in {interp compile}} {
+            lassign [outcome $backend $hir] kind value
+        } else {
+            lassign [swappedOutcome $backend $hir] kind value
+        }
         if {$kind ne "value"} {
             report windows $backend value $value
             continue

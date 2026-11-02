@@ -1,0 +1,56 @@
+# VARIANT (BENCHMARK-BIMODALITY.md): bench/refined-checks.bot with the Unicode email "café@例え.テスト"
+# replaced by the ASCII email "cafe@ab.tst" of the same length (11
+# characters) and the same verdicts: it separates the cost of locating a
+# character in non-ASCII text (a seek from byte 0) from everything else.
+#
+# refined-checks.bot -- repeated refinement predicates: an outer
+# std::web::emailish? check whose result is re-checked in the then branch
+# (statically redundant), and std::web::uri_query_value? on a different value.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md);
+# migrated from the historical raw-core-IR fixture bench/refined-checks.ir
+# (deleted by REFINEMENT-VALUES.md, along with the Tcl-registered
+# stdlib/web.tcl it required). Everything this program's checks mean now comes
+# from ordinary source declarations in stdlib/web.bot:
+#
+#   refined type Emailish = str
+#   fn emailish?(v: str) -> bool proves v: Emailish
+#   refined type UriQueryValue = str
+#   fn uri_query_value?(value: str) -> bool proves value: UriQueryValue
+#
+# The inner std::web::emailish?(s) is decided, not run: the outer call is the
+# same proof-producing function on the same value, its true result is known
+# on this path, and the compiler proves the function repeatable
+# (hir/repeatable.tcl) -- generic proof/fact machinery, no knowledge of
+# email addresses. std::web::uri_query_value?(q) is a different predicate on a
+# different value, so it runs: q is an ordinary String (the percent-encoded
+# text std::web::uri_escape_text returns), and only this check proves it a
+# UriQueryValue.
+#
+# The first check's string is a Unicode-forcing case, not ASCII-only: "é"
+# (local part), "例え" (a domain label) and "テスト" (the TLD) are all
+# non-ASCII letters that emailish?'s Tcl-compatible [:alpha:]/[:alnum:]
+# classes accept -- see NATIVE-TCL-UNICODE.md.
+#
+# expect: [400, 0]
+
+import std::web
+
+q = std::web::uri_escape_text("a b")
+
+fn check(n, acc, s, q):
+    if n <= 0:
+        return acc
+    hit = if std::web::emailish?(s):
+        if std::web::emailish?(s):
+            if std::web::uri_query_value?(q):
+                1
+            else:
+                0
+        else:
+            0
+    else:
+        0
+    check(n - 1, acc + hit, s, q)
+
+[400.check(0, "cafe@ab.tst", q), 400.check(0, "not-an-email", q)]

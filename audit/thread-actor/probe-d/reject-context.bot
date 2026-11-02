@@ -1,0 +1,7 @@
+# reject-context.bot -- Probe D negative (THREAD-ACTOR-ARCHITECTURE-CENSUS.md):
+# an export that needs an installed context (here std::event_loop's Loop,
+# a mailbox's owner) is refused: a library's entry file installs nothing.
+import std::event_loop
+
+exported c fn pending_turn(n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::turn_number() + n

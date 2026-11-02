@@ -1,0 +1,130 @@
+# h3time.bot -- Probe D's time: quiche's deadlines and pacing run on
+# Botlish timers, with the loop asleep in between.
+#
+# 1. loss: with HS_CENSUS_FAULT=32 the server drops the first datagram it
+#    receives (the client's Initial); QUIC recovers only by its own timer
+#    (the client's probe timeout retransmits). With HS_CENSUS_FAULT=48
+#    quiche's timeouts are never armed (the negative control): the
+#    handshake never completes and the watchdog reports the stall.
+# 2. pacing: 256 KiB at a pacing rate of 2 MB/s: quiche asks for packets
+#    to leave later than now; each waits on a Botlish timer (no busy
+#    polling: the process's CPU time stays far below the transfer's wall
+#    time).
+# 3. idle: a client with a 300 ms idle timeout and nothing to say; quiche's
+#    idle timer, a Botlish timer, closes the connection while the
+#    application sleeps.
+import event_loop_linux
+import hs
+import hsnet
+import hsq
+import hstls
+import probe
+import std::event_loop
+import std::mutable_array
+import std::str
+
+nomethod fn sink(server: int, chunks: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        s = hsq::next_request(server)
+        if s == 0:
+            e = hs::await(server)
+            if e.reason != std::event_loop::Wake::Event:
+                return 0
+            continue
+        hsq::respond(s, 200, true)
+        data = probe::payload(10)
+        loop i from 0 to chunks:
+            loop:
+                r = hsq::send(s, data)
+                if r != 0:
+                    break
+                hs::await(s)
+        hsq::finish(s)
+        return chunks
+
+nomethod fn connect(server_fd: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    client = hsq::client(hsq::udp_socket(), hs::port_of(server_fd), "localhost", 65536)
+    loop:
+        if hsq::state(client) != 0:
+            break
+        hs::await(client)
+    client
+
+nomethod fn run_all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    # 1. the handshake, maybe with its first Initial lost
+    sfd = hsq::udp_socket()
+    server = hsq::server(sfd, hstls::good(), 65536)
+    started = std::event_loop::now()
+    client = connect(sfd)
+    probe::log("h3 handshake: state ".concat(probe::n(hsq::state(client))).concat(" after us ").concat(probe::n(std::event_loop::now() - started)).concat(" client timeouts ").concat(probe::n(hsq::stat(client, 14))).concat(" early ").concat(probe::n(hsq::stat(client, 15))))
+    hs::release(client)
+    hs::release(server)
+    # 2. a paced transfer
+    hsq::configure(10000, 250000)
+    pfd = hsq::udp_socket()
+    paced_server = hsq::server(pfd, hstls::good(), 1048576)
+    coroutine {step: s1, first: f1} = sink(paced_server, 16)
+    std::event_loop::adopt(s1, f1)
+    paced = connect(pfd)
+    s = hsq::request(paced, "GET", "/paced", false)
+    cpu0 = event_loop_linux::cpu_us()
+    t0 = std::event_loop::now()
+    total = std::mutable_array::create(1, 0)
+    loop:
+        c = hsq::recv(s)
+        if c.n > 0:
+            total.set(0, total.at(0) + c.n)
+        elif c.n == 0:
+            hs::await(s)
+        else:
+            break
+    wall = std::event_loop::now() - t0
+    cpu = event_loop_linux::cpu_us() - cpu0
+    probe::log("h3 paced: bytes ".concat(probe::n(total.at(0))).concat(" wall us ").concat(probe::n(wall)).concat(" cpu us ").concat(probe::n(cpu)).concat(" server paced packets ").concat(probe::n(hsq::stat(paced_server, 12))).concat(" pacing wait us ").concat(probe::n(hsq::stat(paced_server, 13))).concat(" datagrams out ").concat(probe::n(hsq::stat(paced_server, 11))))
+    hs::release(s)
+    hs::release(paced)
+    hs::release(paced_server)
+    # 3. the idle timeout, while the application sleeps
+    hsq::configure(300, 0)
+    ifd = hsq::udp_socket()
+    idle_server = hsq::server(ifd, hstls::good(), 65536)
+    idle = connect(ifd)
+    t1 = std::event_loop::now()
+    sleeps0 = event_loop_linux::stats().sleeps
+    loop:
+        if hsq::state(idle) != 1:
+            break
+        hs::await(idle)
+    probe::log("h3 idle: closed with state ".concat(probe::n(hsq::state(idle))).concat(" after us ").concat(probe::n(std::event_loop::now() - t1)).concat(" kernel sleeps ").concat(probe::n(event_loop_linux::stats().sleeps - sleeps0)).concat(" timeouts ").concat(probe::n(hsq::stat(idle, 14))))
+    hs::release(idle)
+    hs::release(idle_server)
+    probe::log("botlish: timer expiries ".concat(probe::n(hs::counter("expiries"))).concat(" interrupts ").concat(probe::n(hs::counter("interrupts"))).concat(" rust timers fired ").concat(probe::n(hs::rstat(12))).concat(" early ").concat(probe::n(hs::rstat(13))))
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    coroutine {step: s, first: f} = run_all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_watchdog(1, 6000000)
+    std::event_loop::run()
+    probe::log("watched after stop ".concat(probe::n(hsnet::watched())).concat(" retired ").concat(probe::n(hsnet::count(3))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

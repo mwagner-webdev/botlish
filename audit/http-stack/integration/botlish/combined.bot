@@ -1,0 +1,149 @@
+# combined.bot -- the single-link proof's program
+# (HTTP-STACK-INTEGRATION-CENSUS.md, "Single-link proof"): the three
+# BoringSSL consumers in one
+# executable, sharing one event loop with unrelated work.
+#
+#   A  the crypto airlock (crypto.bot, C over libcrypto.a)
+#   B  HTTPS: Hyper over TLS through boring (HTTP/2 by ALPN)
+#   C  HTTP/3: quiche over QUIC, its TLS through boring
+#
+# Each consumer reports the provider as its own references resolved it: the
+# airlock's C code and the Rust unit's boring-sys must name the same SHA256
+# function and the same EVP_sha256 method table, and be compiled against
+# the same API version. tools/linkcheck.tcl inspects the same executable's
+# link (inputs, archive members, symbol table).
+import crypto
+import event_loop_linux
+import hs
+import hsh
+import hsnet
+import hsq
+import hstls
+import probe
+import std::abi::bytes
+import std::event_loop
+import std::mutable_array
+import std::str
+
+nomethod fn https_server(server: int, context ev: std::event_loop::Loop, h: hs::Hs, c: crypto::Crypto) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        x = hsh::next_request(server)
+        if x == 0:
+            hs::await(server)
+            continue
+        hsh::respond(x, 200, true)
+        # The body is signed by the airlock: one program, both consumers.
+        k = crypto::new_signing_key()
+        sig = crypto::sign(k, crypto::text("over h2"))
+        crypto::release(k)
+        hsh::send(x, "over h2, signature bytes ".concat(probe::n(std::abi::bytes::length(sig).value)))
+        hsh::finish(x)
+        return 1
+
+nomethod fn h3_server(server: int, context ev: std::event_loop::Loop, h: hs::Hs) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    loop:
+        s = hsq::next_request(server)
+        if s == 0:
+            hs::await(server)
+            continue
+        hsq::respond(s, 200, true)
+        hsq::send(s, "over h3")
+        hsq::finish(s)
+        return 1
+
+nomethod fn body(x: int, quic: bool, context ev: std::event_loop::Loop, h: hs::Hs) -> str errors IndexNotFound, std::event_loop::SchedulerFault:
+    text = std::mutable_array::from_list([""])
+    loop:
+        n = if quic:
+            c = hsq::recv(x)
+            if c.n > 0:
+                text.set(0, text.at(0).concat(c.text))
+            c.n
+        else:
+            c = hsh::recv(x)
+            if c.n > 0:
+                text.set(0, text.at(0).concat(c.text))
+            c.n
+        if n == 0:
+            hs::await(x)
+        elif n < 0:
+            break
+    text.at(0)
+
+nomethod fn all(context ev: std::event_loop::Loop, h: hs::Hs, net: hsnet::Net, nat: event_loop_linux::Native, b: probe::Board, c: crypto::Crypto) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    # A
+    digest = crypto::sha256(crypto::text("abc"))
+    probe::log("A crypto airlock: sha256 bytes ".concat(probe::n(std::abi::bytes::length(digest).value)).concat(" api ").concat(probe::n(crypto::api_version())))
+    # B
+    both = hstls::h1() + hstls::h2()
+    server = hsh::server(1, hstls::server(hstls::good(), both))
+    lfd = hsh::listen_socket(0)
+    hsh::serve(server, lfd)
+    coroutine {step: s1, first: f1} = https_server(server)
+    std::event_loop::adopt(s1, f1)
+    client = hsh::client(hsh::connect_socket(hsh::port_of(lfd)), 1, hstls::client("localhost", both))
+    loop:
+        if hsh::state(client) != 0:
+            break
+        hs::await(client)
+    x = hsh::request(client, "GET", "/b", false)
+    loop:
+        if hsh::status(x) != 0:
+            break
+        hs::await(x)
+    probe::log("B https: protocol ".concat(probe::n(hsh::state(client))).concat(" status ").concat(probe::n(hsh::status(x))).concat(" body ").concat(body(x, false)))
+    # C
+    sfd = hsq::udp_socket()
+    qserver = hsq::server(sfd, hstls::good(), 65536)
+    coroutine {step: s2, first: f2} = h3_server(qserver)
+    std::event_loop::adopt(s2, f2)
+    q = hsq::client(hsq::udp_socket(), hs::port_of(sfd), "localhost", 65536)
+    loop:
+        if hsq::state(q) != 0:
+            break
+        hs::await(q)
+    s = hsq::request(q, "GET", "/c", false)
+    loop:
+        if hsq::status(s) != 0:
+            break
+        hs::await(s)
+    probe::log("C http/3: status ".concat(probe::n(hsq::status(s))).concat(" body ").concat(body(s, true)))
+    # one provider
+    same_fn = crypto::provider_sha256_fn() == hstls::rust_sha256_fn()
+    same_md = crypto::provider_evp_sha256() == hstls::rust_evp_sha256()
+    same_api = crypto::api_version() == hstls::rust_api_version()
+    verdict = if same_fn and same_md and same_api:
+        "ONE PROVIDER"
+    else:
+        "DIFFERENT PROVIDERS"
+    probe::log("provider: SHA256 airlock ".concat(probe::n(crypto::provider_sha256_fn())).concat(" rust ").concat(probe::n(hstls::rust_sha256_fn())).concat("; EVP_sha256 airlock ").concat(probe::n(crypto::provider_evp_sha256())).concat(" rust ").concat(probe::n(hstls::rust_evp_sha256())).concat("; api ").concat(probe::n(crypto::api_version())).concat(" and ").concat(probe::n(hstls::rust_api_version())).concat(" -- ").concat(verdict))
+    hsnet::stop()
+    probe::set_flag(1, 1)
+    0
+
+fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, nat: event_loop_linux::Native, h: hs::Hs, net: hsnet::Net, b: probe::Board, c: crypto::Crypto) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    std::event_loop::sync()
+    hsnet::start()
+    coroutine {step: s, first: f} = all()
+    std::event_loop::adopt(s, f)
+    probe::spawn_bystander(50, 2000)
+    probe::spawn_watchdog(1, 8000000)
+    std::event_loop::run()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context hs::create(16)
+with context hsnet::create()
+with context probe::board()
+with context crypto::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault {code}:
+        ["DriverFault ".concat(probe::n(code))]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

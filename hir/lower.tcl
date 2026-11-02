@@ -16,6 +16,8 @@
 #   listloop   (listloop ITERABLE (block (ELEM) BODY...))
 #   countloop  (countloop START END (block (I) BODY...) DIRECTION ENDKIND)
 #   lockloop   (lockloop (DOMAIN...) (block (P...) BODY...) ?REJECTED?)
+#   a fold     (fold INITIAL LOOP): LOOP the loop's own form, its block
+#              binding the intermediate last (FOLD-LOOPS-MILESTONE-1.md)
 #   return     (return VALUE)
 #   break      (break) / (break VALUE)
 #   continue   (continue)
@@ -127,7 +129,7 @@ proc hir::lower::expr {hir e} {
                 [list block {} {*}[Seq $hir [dict get $node elseBody]]]]
         }
         loop {
-            return [list loop [list block {} {*}[Seq $hir [dict get $node body]]]]
+            return [FoldWrap $hir $node [list loop [list block {} {*}[Seq $hir [dict get $node body]]]]]
         }
         listloop {
             set elemName [dict get $hir bindings [dict get $node elementBinding] name]
@@ -149,12 +151,12 @@ proc hir::lower::expr {hir e} {
                 # releases by the domain's own name (hir::affine::LoopDomain).
                 set temp [TempName $iterable]
                 return [list if [list ref true] [list block {} [list bind $temp $domain] \
-                    [list listloop [list call [list ref [hir::mutvec::ConsumeNativeOf $consumed]] [list ref $temp]] $body]] [list block {}]]
+                    [FoldWrap $hir $node [list listloop [list call [list ref [hir::mutvec::ConsumeNativeOf $consumed]] [list ref $temp]] $body]]] [list block {}]]
             }
             if {$consuming} {
-                return [list listloop $marked $body]
+                return [FoldWrap $hir $node [list listloop $marked $body]]
             }
-            return [list listloop $domain $body]
+            return [FoldWrap $hir $node [list listloop $domain $body]]
         }
         countloop {
             set countName [dict get $hir bindings [dict get $node countBinding] name]
@@ -164,7 +166,7 @@ proc hir::lower::expr {hir e} {
                 lappend lowered [dict get $node direction] \
                     [::expr {[dict get $node endKind] eq "inclusive" ? "through" : "to"}]
             }
-            return $lowered
+            return [FoldWrap $hir $node $lowered]
         }
         lockloop {
             set domains {}
@@ -186,7 +188,7 @@ proc hir::lower::expr {hir e} {
                 # an unproven lockstep loop (see hir/lockstep.tcl).
                 lappend lowered [dict get $node unproven]
             }
-            return $lowered
+            return [FoldWrap $hir $node $lowered]
         }
         return {
             return [list return [expr $hir [dict get $node value]]]
@@ -267,6 +269,20 @@ proc hir::lower::params {hir e} {
 # Core IR body expressions of block expression E.
 proc hir::lower::body {hir e} {
     return [Seq $hir [dict get $hir exprs $e body]]
+}
+
+# The core IR of loop NODE whose own form is LOOP: LOOP itself, or for a
+# fold (FOLD-LOOPS-MILESTONE-1.md) (fold INITIAL LOOP), LOOP's block then
+# binding the intermediate as its last parameter (core/ir.tcl).
+proc hir::lower::FoldWrap {hir node loop} {
+    if {![hir::IsFoldNode $node]} {
+        return $loop
+    }
+    set index [core::ir::loopBlockIndex $loop]
+    set block [lindex $loop $index]
+    lset block 1 [concat [lindex $block 1] [list [dict get $hir bindings [dict get $node foldBinding] name]]]
+    lset loop $index $block
+    return [list fold [expr $hir [dict get $node foldInitial]] $loop]
 }
 
 # The core IR of the statement sequence IDS: each statement, followed by the

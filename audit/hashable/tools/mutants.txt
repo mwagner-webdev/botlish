@@ -233,9 +233,11 @@ proc core::hashing::tableHash {v} {
 @@ keyed-is-keyed-mix-of-hash-native the table hash is a keyed mix of the public hash, keyed_mix(hash(x)) (native runtime)
 ## native/src/runtime/ops.rs
 <<<<
+fn table_hash_with_key(p: *mut Vm, v: Value, key: (u64, u64)) -> Value {
     let mut sink = Sip13::new(key.0, key.1);
     match walk(p, &mut sink, v) {
 ====
+fn table_hash_with_key(p: *mut Vm, v: Value, key: (u64, u64)) -> Value {
     let mut sink = Sip13::new(key.0, key.1);
     let mut public = Fnv(FNV_OFFSET);
     let walked = walk(p, &mut public, v);

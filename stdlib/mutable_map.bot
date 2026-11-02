@@ -30,6 +30,13 @@
 #   loop e in m:                              every entry, in insertion order
 #                                             (or the last reorder's), as a
 #                                             MutableMapEntry[K, V]
+#   m.freeze()                                the std::immutable_map::
+#                                             ImmutableMap of m's current
+#                                             associations, in m's current
+#                                             order: an immutable value,
+#                                             equal and hashed by its
+#                                             associations, which no later
+#                                             change of m reaches
 #
 # A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing
 # m, returning it, storing it in a struct) makes a logical copy, and
@@ -57,6 +64,7 @@
 # slot, a hash, a capacity or a removed entry.
 import std::mutable_vector
 import std::mutable_set
+import std::immutable_map
 import std::table_hash
 import std::ordered_table
 
@@ -150,6 +158,19 @@ fn reorder(place m: MutableMap[K, V], order: std::mutable_set::MutableSet[K]) ->
     perm = m.table.arrangement(std::mutable_set::table_of(order))
     m.table.permute_values(perm, m.vals)
     m.table.permute(perm)
+
+# ---------------------------------------------------------------------------
+# Freezing (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md)
+
+# The ImmutableMap of M's current associations, in M's current order: its
+# live entries copied into Lists (keys, values and their stored hashes, so
+# nothing is hashed again) and an index of them at M's own slot count. M is
+# a value parameter, so nothing later done to the caller's map reaches the
+# result, and the result is never changed. O(n + slots).
+fn freeze(m: MutableMap[K, V]) -> std::immutable_map::ImmutableMap[K, V]:
+    hashes = std::ordered_table::live_hashes(m.table)
+    index = hashes.frozen_index(std::ordered_table::slots(m.table))
+    std::immutable_map::of_parts(std::ordered_table::live_keys(m.table), m.table.live_values(m.vals), hashes, index)
 
 # ---------------------------------------------------------------------------
 # The loop protocol (hir/iteration.tcl): internal to the standard library.

@@ -1,0 +1,263 @@
+# Mutants of the UnicodeChar classifiers (audit/char-classifiers/tools/mutate.tcl;
+# UNICODECHAR-CLASSIFIERS.md): deliberate bugs in std::char::is_tcl_alpha and
+# std::char::is_tcl_alnum -- their registration and the Tcl runtime
+# (core/tclcompat.tcl), native lowering (native/lower.tcl), NIR's spelling,
+# the inline ASCII rule of generated code (codegen/clif.rs) and the runtime
+# helpers (ops.rs), each of which must be killed separately -- and in
+# std::web::emailish?'s use of them (stdlib/web.bot).
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. A mutant editing native/src/ is a native
+# mutant: mutate.tcl rebuilds the native backend for it. Lines starting with
+# # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# The Tcl runtime and the registration (core/tclcompat.tcl)
+
+@@ tcl-alpha-is-alnum the Tcl backends classify std::char::is_tcl_alpha as alnum
+## core/tclcompat.tcl
+<<<<
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
+    return [Classify alpha [format %c [core::value::charOf $c]]]
+====
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
+    return [Classify alnum [format %c [core::value::charOf $c]]]
+>>>>
+
+@@ tcl-alnum-is-alpha the Tcl backends classify std::char::is_tcl_alnum as alpha
+## core/tclcompat.tcl
+<<<<
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alnum]
+    return [Classify alnum [format %c [core::value::charOf $c]]]
+====
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alnum]
+    return [Classify alpha [format %c [core::value::charOf $c]]]
+>>>>
+
+@@ tcl-bmp-only the Tcl backends' alpha classifies an astral scalar by its low 16 bits
+## core/tclcompat.tcl
+<<<<
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
+    return [Classify alpha [format %c [core::value::charOf $c]]]
+====
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
+    return [Classify alpha [format %c [expr {[core::value::charOf $c] & 0xFFFF}]]]
+>>>>
+
+@@ tcl-no-type-check the Tcl backends classify a one-character String given to the char form
+## core/tclcompat.tcl
+<<<<
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
+    return [Classify alpha [format %c [core::value::charOf $c]]]
+====
+    if {[core::value::kind $c] eq "str"} { return [isTclAlpha $c] }
+    set c [core::value::expect UnicodeChar $c std::char::is_tcl_alpha]
+    return [Classify alpha [format %c [core::value::charOf $c]]]
+>>>>
+
+@@ reg-param-any std::char::is_tcl_alnum's parameter is any
+## core/tclcompat.tcl
+<<<<
+core::native::register std::char::is_tcl_alnum -arity 1 -impl core::tclcompat::charIsTclAlnum \
+    -param-types {UnicodeChar} -result-type bool -context-free 1
+====
+core::native::register std::char::is_tcl_alnum -arity 1 -impl core::tclcompat::charIsTclAlnum \
+    -param-types {any} -result-type bool -context-free 1
+>>>>
+
+@@ reg-not-context-free std::char::is_tcl_alpha is not context-free (emailish? stops being repeatable)
+## core/tclcompat.tcl
+<<<<
+core::native::register std::char::is_tcl_alpha -arity 1 -impl core::tclcompat::charIsTclAlpha \
+    -param-types {UnicodeChar} -result-type bool -context-free 1
+====
+core::native::register std::char::is_tcl_alpha -arity 1 -impl core::tclcompat::charIsTclAlpha \
+    -param-types {UnicodeChar} -result-type bool
+>>>>
+
+@@ reg-result-any std::char::is_tcl_alpha's result is any
+## core/tclcompat.tcl
+<<<<
+core::native::register std::char::is_tcl_alpha -arity 1 -impl core::tclcompat::charIsTclAlpha \
+    -param-types {UnicodeChar} -result-type bool -context-free 1
+====
+core::native::register std::char::is_tcl_alpha -arity 1 -impl core::tclcompat::charIsTclAlpha \
+    -param-types {UnicodeChar} -result-type any -context-free 1
+>>>>
+
+# ---------------------------------------------------------------------------
+# Native lowering and NIR (native/lower.tcl, native/src/nir.rs)
+
+@@ lower-op-swap native lowering gives std::char::is_tcl_alpha the alnum op
+## native/lower.tcl
+<<<<
+        std::char::is_tcl_alpha {op chartclalpha} \
+====
+        std::char::is_tcl_alpha {op chartclalnum} \
+>>>>
+
+@@ lower-str-op native lowering gives std::char::is_tcl_alnum the String form's op
+## native/lower.tcl
+<<<<
+        std::char::is_tcl_alnum {op chartclalnum} \
+====
+        std::char::is_tcl_alnum {op strtclalnum} \
+>>>>
+
+@@ nir-spelling-swap NIR's spellings of the two ops are exchanged (each op reads as the other)
+## native/src/nir.rs
+<<<<
+    "chartclalpha" => CharIsTclAlpha,
+    "chartclalnum" => CharIsTclAlnum,
+====
+    "chartclalpha" => CharIsTclAlnum,
+    "chartclalnum" => CharIsTclAlpha,
+>>>>
+
+# ---------------------------------------------------------------------------
+# The inline ASCII rule (native/src/codegen/clif.rs)
+
+@@ clif-no-fold the inline rule does not fold case: only a-z are letters
+## native/src/codegen/clif.rs
+<<<<
+                let folded = self.b.ins().bor_imm_s(cp, 0x20);
+====
+                let folded = cp;
+>>>>
+
+@@ clif-latin1-inline the inline rule takes every Latin-1 scalar (é is no letter inline)
+## native/src/codegen/clif.rs
+<<<<
+                let ascii = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, cp, 0x80);
+====
+                let ascii = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, cp, 0x100);
+>>>>
+
+@@ clif-letter-bound-27 the inline rule counts one scalar past z (and past Z, folded) as a letter
+## native/src/codegen/clif.rs
+<<<<
+                let mut flag = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, offset, 26);
+====
+                let mut flag = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, offset, 27);
+>>>>
+
+@@ clif-digit-signed the inline digit test compares signed: every scalar below 0 is a digit
+## native/src/codegen/clif.rs
+<<<<
+                    let digit = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, digit_offset, 10);
+====
+                    let digit = self.b.ins().icmp_imm_s(IntCC::SignedLessThan, digit_offset, 10);
+>>>>
+
+@@ clif-no-digits the inline alnum rule forgets the digits
+## native/src/codegen/clif.rs
+<<<<
+                    flag = self.b.ins().bor(flag, digit);
+====
+                    let _ = digit;
+>>>>
+
+@@ clif-helper-swap the wide path of alpha calls the alnum helper
+## native/src/codegen/clif.rs
+<<<<
+                let helper = if op == CharIsTclAlpha { "rt_char_is_tcl_alpha" } else { "rt_char_is_tcl_alnum" };
+====
+                let helper = "rt_char_is_tcl_alnum";
+>>>>
+
+@@ clif-word-not-shifted the inline rule reads the tagged word, not the scalar
+## native/src/codegen/clif.rs
+<<<<
+                let cp = self.b.ins().ushr_imm_s(a[0], 3);
+                let ascii = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, cp, 0x80);
+====
+                let cp = a[0];
+                let ascii = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, cp, 0x80);
+>>>>
+
+# ---------------------------------------------------------------------------
+# The runtime helpers (native/src/runtime/ops.rs)
+
+@@ rs-alpha-alphabetic the helper's alpha is Rust's is_alphabetic (letter numbers and marks too)
+## native/src/runtime/ops.rs
+<<<<
+    bool_value(tcl_alpha_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+====
+    bool_value(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value").is_alphabetic())
+>>>>
+
+@@ rs-alnum-is-alpha the helper's alnum is its alpha (non-ASCII digits are no alnum)
+## native/src/runtime/ops.rs
+<<<<
+    bool_value(tcl_alnum_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+====
+    bool_value(tcl_alpha_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+>>>>
+
+@@ rs-alnum-numeric the helper's alnum is Rust's is_alphanumeric (every numeric category)
+## native/src/runtime/ops.rs
+<<<<
+    bool_value(tcl_alnum_char(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value")))
+====
+    bool_value(char::from_u32(char_of(c)).expect("a UnicodeChar is a Unicode scalar value").is_alphanumeric())
+>>>>
+
+@@ rs-apply-op-swap the interpreter of NIR ops (apply_op) runs chartclalpha as alnum
+## native/src/runtime/ops.rs
+<<<<
+        CharIsTclAlpha => rt_char_is_tcl_alpha(p, a[0]),
+====
+        CharIsTclAlpha => rt_char_is_tcl_alnum(p, a[0]),
+>>>>
+
+# ---------------------------------------------------------------------------
+# std::web::emailish? (stdlib/web.bot)
+
+@@ web-local-alpha the local part admits letters only, not digits
+## stdlib/web.bot
+<<<<
+    fn local_char?(c: UnicodeChar) -> bool:
+        std::char::is_tcl_alnum(c) or local_extra_chars.contains(c)
+====
+    fn local_char?(c: UnicodeChar) -> bool:
+        std::char::is_tcl_alpha(c) or local_extra_chars.contains(c)
+>>>>
+
+@@ web-label-no-hyphen a domain label admits no hyphen
+## stdlib/web.bot
+<<<<
+        std::char::is_tcl_alnum(c) or c == '-'
+====
+        std::char::is_tcl_alnum(c) or c == '_'
+>>>>
+
+@@ web-label-alpha a domain label admits letters only, not digits
+## stdlib/web.bot
+<<<<
+        std::char::is_tcl_alnum(c) or c == '-'
+====
+        std::char::is_tcl_alpha(c) or c == '-'
+>>>>
+
+@@ web-tld-alnum the top-level domain admits digits
+## stdlib/web.bot
+<<<<
+        e = i.scan_while(std::char::is_tcl_alpha)
+====
+        e = i.scan_while(std::char::is_tcl_alnum)
+>>>>
+
+@@ web-extra-chars-missing-percent the local part's extra characters lose '%'
+## stdlib/web.bot
+<<<<
+local_extra_chars = std::immutable_set::from_list(['.', '_', '%', '+', '-'])
+====
+local_extra_chars = std::immutable_set::from_list(['.', '_', '+', '-'])
+>>>>

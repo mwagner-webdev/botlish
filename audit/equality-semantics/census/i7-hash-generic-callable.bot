@@ -1,0 +1,6 @@
+# I7 hash of an untyped callable through an untyped function: refused at run time
+fn h(x):
+    hash(x)
+fn g(x):
+    x
+h(g)

@@ -1,0 +1,84 @@
+# raw.bot -- a slider's C float and a spin box's C double carried raw
+# through the real Raven (tests/raven.test, raven-raw;
+# RAW-C-FLOAT-FFI-MILESTONE-1.md): every bit Raven holds is the bit Botlish
+# reads -- negative zero, a subnormal, an infinity -- beside the finite
+# accessors' explicit admission (0.0 for -0.0, NonFiniteFloat for an
+# infinity). Raven's own rules stay Raven's: a slider's raw setter refuses a
+# NaN before Raven runs (a slider has no guard for one), a spin box ignores a
+# NaN (spin_box.c) and holds an infinity its range allows. Each step is shown
+# as the raw bits and the admitted value.
+import raven
+import show
+import std::ffi::c
+import std::ffi::c::raw
+
+with context raven::create()
+
+# The Float64 a raw value admits to, or which non-finite value it is.
+fn admitted32(x: std::ffi::c::RawFloat) -> any:
+    x.float_to_float64():
+        on NonFiniteFloat {result}:
+            return show::non_finite(result)
+
+fn admitted64(x: std::ffi::c::RawDouble) -> any:
+    x.double_to_float64():
+        on NonFiniteFloat {result}:
+            return show::non_finite(result)
+
+# A step: the bits Raven holds, their admitted value, their sign bit.
+fn slider_step(s: raven::Widget) -> list:
+    x = s.slider_raw_value()
+    [x.float_to_bits(), admitted32(x), x.float_negative?()]
+
+fn spin_step(b: raven::Widget) -> list:
+    x = b.spin_box_raw_value()
+    [x.double_to_bits(), admitted64(x), x.double_negative?()]
+
+fn refused(s: raven::Widget, x: std::ffi::c::RawFloat) -> str:
+    s.set_slider_raw_value(x):
+        on NonFiniteFloat {result}:
+            return show::non_finite(result)
+    "set"
+
+fn main(context ui: raven::Ui) -> list errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::headless())
+    w = raven::window("Raw", 320, 200)
+    s = raven::slider(-1.0, 1.0)
+    b = raven::spin_box(-10.0, 10.0)
+    w.set_content(raven::vbox().add(s).add(b))
+    s.set_slider_value(0.5)
+    half = s.slider_step()
+    s.set_slider_raw_value(std::ffi::c::raw::float_from_bits(2147483648))
+    negative_zero = s.slider_step()
+    s.set_slider_raw_value(std::ffi::c::raw::float_from_bits(1))
+    subnormal = s.slider_step()
+    nan = s.refused(std::ffi::c::raw::float_from_bits(2143289345))
+    kept = s.slider_step()
+    s.set_slider_value(0.1)
+    tenth = s.slider_step()
+    b.set_spin_box_value(2.5)
+    spun = b.spin_step()
+    b.set_spin_box_raw_value(std::ffi::c::raw::double_from_bits(9221120237041090561))
+    nan_ignored = b.spin_step()
+    b.set_spin_box_raw_value(std::ffi::c::raw::double_from_bits(9223372036854775808))
+    spin_negative_zero = b.spin_step()
+    b.set_spin_box_raw_value(std::ffi::c::raw::double_from_bits(9218868437227405312))
+    clamped = b.spin_step()
+    b.set_spin_box_raw_range(std::ffi::c::raw::double_from_bits(18442240474082181120), std::ffi::c::raw::double_from_bits(9218868437227405312))
+    b.set_spin_box_raw_value(std::ffi::c::raw::double_from_bits(9218868437227405312))
+    infinite = b.spin_step()
+    drawn = raven::draw_frame()
+    still = b.spin_step()
+    b.set_spin_box_raw_value(std::ffi::c::raw::double_from_bits(18442240474082181120))
+    minus_infinite = b.spin_step()
+    b.set_spin_box_raw_range(std::ffi::c::raw::double_from_float64(0.0), std::ffi::c::raw::double_from_float64(1.0))
+    rebounded = b.spin_step()
+    raven::stop()
+    [[half, negative_zero, subnormal, nan, kept, tenth], [spun, nan_ignored, spin_negative_zero, clamped, infinite, drawn, still, minus_infinite, rebounded]]
+
+result = main():
+    on raven::RavenFailed failure:
+        [["RavenFailed", failure.call, failure.detail]]
+    on NonFiniteFloat:
+        [["NonFiniteFloat"]]
+result

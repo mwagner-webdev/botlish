@@ -1,0 +1,591 @@
+# immutable-map.bot -- std::immutable_map::ImmutableMap[K satisfies Hashable,
+# V] and the freezes of the mutable collections (REPRESENTATION-INDEPENDENT-
+# VALUE-IDENTITY.md), ported from tests/immutable-map.test.
+#
+# * freeze keeps a MutableMap's associations and its order; nothing done to
+#   the MutableMap afterwards reaches the frozen value. A missing key is the
+#   declared error std::immutable_map::KeyNotFound.
+# * A map's identity is its associations: maps built in other orders, with
+#   other capacities, removal and compaction histories are equal and hash
+#   equally, and iterate in their own orders. A map of Hashable keys and
+#   values is Hashable: a key of a map, an element of a set, a field of a
+#   Hashable value, nested at any depth (a JSON-like value).
+# * reordered returns an equal map in an order proven to hold exactly the
+#   map's keys (ReorderNotProven otherwise). The representation is opaque.
+# * A MutableSet freezes into the ImmutableSet of its members.
+
+# What a Botlish program cannot observe stays in the Tcl suite: the private
+# table hash (a privileged fixture module) and its oracle, maps built under
+# different hidden keys and injected collisions of the stored hash (a
+# private library), the run-time EQUALITY of two MutableMaps, the printed
+# form of an opaque value, and every native fact (one keyed hash per lookup,
+# veqtotal and hashtotal, allocation). im-large-lookups runs over 300 keys
+# here (the Tcl test's 3000 take the reference interpreter minutes).
+import std::compiler
+import std::immutable_map
+import std::immutable_set
+import std::int
+import std::list
+import std::mutable_map
+import std::mutable_set
+import std::mutable_vector
+import std::test
+
+# ---------------------------------------------------------------------------
+# Declarations the tests need (top-level only): imDecls of the Tcl file.
+
+fn imap(ks: List[int], vs: List[int]) -> std::immutable_map::ImmutableMap[int, int]:
+    m = std::mutable_map::create[int, int]()
+    loop i from 0 to std::list::length(ks):
+        v = vs.at(i):
+            on IndexNotFound:
+                0
+        m.set(ks.at(i), v)
+    m.freeze()
+
+fn smap(ks: List[str], vs: List[int]) -> std::immutable_map::ImmutableMap[str, int]:
+    m = std::mutable_map::create[str, int]()
+    loop i from 0 to std::list::length(ks):
+        v = vs.at(i):
+            on IndexNotFound:
+                0
+        m.set(ks.at(i), v)
+    m.freeze()
+
+fn items(m: std::immutable_map::ImmutableMap[int, int]) -> List[List[int]]:
+    loop e in m:
+        [e.key, e.value]
+
+fn names(m: std::immutable_map::ImmutableMap[str, int]) -> List[str]:
+    loop e in m:
+        e.key
+
+fn at_or(m: std::immutable_map::ImmutableMap[int, int], k: int, d: int) -> int:
+    v = m.at(k):
+        on std::immutable_map::KeyNotFound:
+            d
+    v
+
+fn ints(n: int) -> List[int]:
+    loop i from 0 to n:
+        i
+
+fn rev(n: int) -> List[int]:
+    loop i down from n - 1 through 0:
+        i
+
+fn build(order: List[int]) -> std::mutable_map::MutableMap[int, int]:
+    m = std::mutable_map::create[int, int]()
+    loop k in order:
+        m.set(k, k * 2)
+    m
+
+fn cand(xs: List[str]) -> std::mutable_set::MutableSet[str]:
+    s = std::mutable_set::create[str]()
+    loop x in xs:
+        added = s.add(x)
+    s
+
+fn check(m: std::immutable_map::ImmutableMap[str, int], xs: List[str]) -> bool:
+    c = m.validate_order(cand(xs)):
+        on std::immutable_map::OrderMismatch:
+            return false
+    true
+
+fn threes(n: int) -> List[int]:
+    loop i down from n - 1 through 0:
+        i * 3
+
+# im-nested: a struct holding a map, maps of maps, maps of Lists of maps.
+struct Doc:
+    title: str
+    body: std::immutable_map::ImmutableMap[str, int]
+
+fn outer(order: List[str]) -> std::immutable_map::ImmutableMap[str, std::immutable_map::ImmutableMap[str, int]]:
+    m = std::mutable_map::create[str, std::immutable_map::ImmutableMap[str, int]]()
+    loop k in order:
+        if k == "x":
+            m.set(k, smap(["p", "q"], [1, 2]))
+        else:
+            m.set(k, smap(["q", "p"], [2, 1]))
+    m.freeze()
+
+fn lists(order: List[str]) -> std::immutable_map::ImmutableMap[str, List[std::immutable_map::ImmutableMap[str, int]]]:
+    m = std::mutable_map::create[str, List[std::immutable_map::ImmutableMap[str, int]]]()
+    loop k in order:
+        m.set(k, [smap([k], [1]), smap(["z", k], [0, 1])])
+    m.freeze()
+
+# im-json: a JSON-like value whose objects are ImmutableMaps.
+enum Kind:
+    Null, Num, Text, Arr, Obj
+
+struct Json:
+    kind: Kind
+    num: int
+    text: str
+    items: List[Json]
+    fields: std::immutable_map::ImmutableMap[str, Json]
+
+struct Member:
+    name: str
+    value: Json
+
+fn num(n: int) -> Json:
+    Json {kind: Kind::Num, num: n, text: "", items: [], fields: std::immutable_map::empty[str, Json]()}
+
+fn arr(items: List[Json]) -> Json:
+    Json {kind: Kind::Arr, num: 0, text: "", items: items, fields: std::immutable_map::empty[str, Json]()}
+
+fn mem(name: str, value: Json) -> Member:
+    Member {name: name, value: value}
+
+fn obj(members: List[Member]) -> Json:
+    m = std::mutable_map::create[str, Json]()
+    loop f in members:
+        m.set(f.name, f.value)
+    Json {kind: Kind::Obj, num: 0, text: "", items: [], fields: m.freeze()}
+
+fn order(j: Json) -> List[str]:
+    loop e in j.fields:
+        e.key
+
+# im-conditional-witness: maps of Lists, and of MutableVectors.
+fn lm(order: List[str]) -> std::immutable_map::ImmutableMap[str, List[int]]:
+    m = std::mutable_map::create[str, List[int]]()
+    loop k in order:
+        m.set(k, [1, 2])
+    m.freeze()
+
+fn vector_map() -> std::immutable_map::ImmutableMap[str, MutableVector[int]]:
+    std::mutable_map::create[str, MutableVector[int]]().freeze()
+
+# The trait-typed functions (top level); every rejected block calls one of
+# its own.
+fn same(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn fp(x: Hashable) -> int:
+    hash(x)
+
+fn same_vector_map(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn fp_vector_map(x: Hashable) -> int:
+    hash(x)
+
+fn same_mutable(a: Equatable, b: Equatable) -> bool:
+    a == b
+
+fn fp_mutable(x: Hashable) -> int:
+    hash(x)
+
+# ---------------------------------------------------------------------------
+# Freezing and the API
+
+fn register_api_tests():
+    # freeze keeps a MutableMap's associations and its order; length, empty?, contains and at read them; a missing key is KeyNotFound
+    fn b_im_freeze_basic() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[str, int]()
+            m.set("pear", 1)
+            m.set("fig", 2)
+            m.set("kiwi", 3)
+            x = m.freeze()
+            a = x.at("fig"):
+                on std::immutable_map::KeyNotFound:
+                    -1
+            b = x.at("plum"):
+                on std::immutable_map::KeyNotFound:
+                    -1
+            e = std::immutable_map::empty[str, int]()
+            [names(x), x.length(), x.empty?(), [x.contains("kiwi"), x.contains("plum")], a, b, e.length(), e.empty?(), e.contains("fig")]
+    std::test::value("im-freeze-basic", [["pear", "fig", "kiwi"], 3, false, [true, false], 2, -1, 0, true, false], b_im_freeze_basic)
+
+    # KeyNotFound is a declared error of at: unhandled, it is UnhandledError
+    fn b_im_key_not_found_unhandled() errors std::compiler::CompilerError:
+        static compile:
+            x = imap([1], [2])
+            x.at(5)
+    std::test::rejects("im-key-not-found-declared/unhandled", std::compiler::DiagnosticCode::UnhandledError, b_im_key_not_found_unhandled)
+
+    # declared, KeyNotFound propagates to the caller's handler
+    fn b_im_key_not_found_declared() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: std::immutable_map::ImmutableMap[int, int]) -> int errors std::immutable_map::KeyNotFound:
+                m.at(5)
+            r = f(imap([1], [2])):
+                on std::immutable_map::KeyNotFound:
+                    -7
+            r
+    std::test::value("im-key-not-found-declared/declared", -7, b_im_key_not_found_declared)
+
+    # a frozen map is a value: nothing done to its MutableMap afterwards reaches it, and two freezes are independent
+    fn b_im_freeze_snapshot() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[int, int]()
+            loop i from 0 to 5:
+                m.set(i, i * 10)
+            x = m.freeze()
+            m.set(1, 99)
+            r = m.remove(2):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            m.set(7, 70)
+            y = m.freeze()
+            m.clear()
+            z = m.freeze()
+            [items(x), items(y), items(z), x == y, z.length()]
+    std::test::value("im-freeze-snapshot", [[[0, 0], [1, 10], [2, 20], [3, 30], [4, 40]], [[0, 0], [1, 99], [3, 30], [4, 40], [7, 70]], [], false, 0], b_im_freeze_snapshot)
+
+    # freeze keeps the order every history gives its map: replacement in place, removal and reinsertion last, clear, growth and compaction
+    fn b_im_freeze_histories() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[int, int]()
+            loop i from 0 to 40:
+                m.set(i, i)
+            loop i from 0 to 40:
+                if i.mod(3) != 0:
+                    r = m.remove(i):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            m.set(3, 333)
+            r2 = m.remove(0):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            m.set(0, 1000)
+            x = m.freeze()
+            mutable = loop e in m:
+                [e.key, e.value]
+            [items(x) == mutable, items(x), at_or(x, 3, -1), at_or(x, 0, -1), at_or(x, 1, -1)]
+    std::test::value("im-freeze-histories", [true, [[3, 333], [6, 6], [9, 9], [12, 12], [15, 15], [18, 18], [21, 21], [24, 24], [27, 27], [30, 30], [33, 33], [36, 36], [39, 39], [0, 1000]], 333, 1000, -1], b_im_freeze_histories)
+
+    # lookups in a large frozen map: every key found with its value, absent keys absent
+    fn b_im_large_lookups() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[int, int]()
+            loop i from 0 to 300:
+                m.set(i * 7, i)
+            x = m.freeze()
+            found = loop i from 0 to 300:
+                if at_or(x, i * 7, -1) != i:
+                    i
+                else:
+                    continue
+            misses = loop i from 0 to 300:
+                if x.contains(i * 7 + 1):
+                    i
+                else:
+                    continue
+            [x.length(), found, misses]
+    std::test::value("im-large-lookups", [300, [], []], b_im_large_lookups)
+
+# ---------------------------------------------------------------------------
+# Identity
+
+fn register_identity_tests():
+    # two maps of the same associations built in different orders are equal and hash equally, and iterate differently
+    fn b_im_equality_ignores_order() errors std::compiler::CompilerError:
+        static compile:
+            a = smap(["a", "b", "c"], [1, 2, 3])
+            b = smap(["c", "a", "b"], [3, 1, 2])
+            [a == b, hash(a) == hash(b), names(a), names(b), names(a) == names(b)]
+    std::test::value("im-equality-ignores-order", [true, true, ["a", "b", "c"], ["c", "a", "b"], false], b_im_equality_ignores_order)
+
+    # equality is the associations: another value, another key, one more or one fewer, values swapped across keys are unequal; two empty maps are equal
+    fn b_im_equality_associations() errors std::compiler::CompilerError:
+        static compile:
+            a = smap(["a", "b"], [1, 2])
+            [
+                a == smap(["a", "b"], [1, 3]),
+                a == smap(["a", "c"], [1, 2]),
+                a == smap(["a", "b", "c"], [1, 2, 3]),
+                a == smap(["a"], [1]),
+                a == smap(["a", "b"], [2, 1]),
+                hash(a) == hash(smap(["a", "b"], [2, 1])),
+                std::immutable_map::empty[str, int]() == smap([], []),
+                hash(std::immutable_map::empty[str, int]()) == hash(smap([], []))
+            ]
+    std::test::value("im-equality-associations", [false, false, false, false, false, false, true, true], b_im_equality_associations)
+
+    # maps of the same associations with different representation histories are equal and hash equally (the public hash); their orders differ as built
+    fn b_im_representation_perturbation() errors std::compiler::CompilerError:
+        static compile:
+            a = build(ints(60)).freeze()
+            r = std::mutable_map::with_capacity[int, int](5000)
+            loop k in rev(60):
+                r.set(k, k * 2)
+            b = r.freeze()
+            c0 = build(ints(200))
+            loop k from 60 to 200:
+                gone = c0.remove(k):
+                    on std::mutable_map::KeyNotFound:
+                        -1
+            c = c0.freeze()
+            d0 = build(ints(60))
+            loop k from 0 to 60:
+                if k.mod(2) == 0:
+                    gone = d0.remove(k):
+                        on std::mutable_map::KeyNotFound:
+                            -1
+            loop k from 0 to 60:
+                if k.mod(2) == 0:
+                    d0.set(k, k * 2)
+            d = d0.freeze()
+            e0 = build([999, 998])
+            e0.clear()
+            loop k in rev(60):
+                e0.set(k, k * 2)
+            e = e0.freeze()
+            f0 = build(ints(60))
+            f1 = f0
+            f1.set(5000, 1)
+            gone = f1.remove(5000):
+                on std::mutable_map::KeyNotFound:
+                    -1
+            f = f1.freeze()
+            maps = [a, b, c, d, e, f]
+            equal = loop x in maps:
+                loop y in maps:
+                    x == y
+            public = loop x in maps:
+                hash(x) == hash(a)
+            firsts = loop x in maps:
+                std::list::at(items(x), 0):
+                    on IndexNotFound:
+                        []
+            [equal, public, firsts]
+    std::test::value("im-representation-perturbation", [[[true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true], [true, true, true, true, true, true]], [true, true, true, true, true, true], [[0, 0], [59, 118], [0, 0], [1, 2], [59, 118], [0, 0]]], b_im_representation_perturbation)
+
+# ---------------------------------------------------------------------------
+# Composition
+
+fn register_composition_tests():
+    # an ImmutableMap of Hashable keys and values is Hashable: a key of a MutableMap and of an ImmutableMap, found through an equal map built in another order
+    fn b_im_map_as_key() errors std::compiler::CompilerError:
+        static compile:
+            k1 = smap(["a", "b"], [1, 2])
+            k2 = smap(["b", "a"], [2, 1])
+            k3 = smap(["a"], [1])
+            byMap = std::mutable_map::create[std::immutable_map::ImmutableMap[str, int], str]()
+            byMap.set(k1, "first")
+            byMap.set(k3, "small")
+            hit = byMap.at(k2):
+                on std::mutable_map::KeyNotFound:
+                    "missing"
+            byMap.set(k2, "replaced")
+            frozen = byMap.freeze()
+            found = frozen.at(k2):
+                on std::immutable_map::KeyNotFound:
+                    "missing"
+            stored = loop e in byMap:
+                names(e.key)
+            [hit, byMap.length(), found, frozen.contains(smap(["a"], [2])), stored]
+    std::test::value("im-map-as-key", ["first", 2, "replaced", false, [["a", "b"], ["a"]]], b_im_map_as_key)
+
+    # sets deduplicate equal maps whatever their order: a MutableSet, an ImmutableSet built from a List, and a frozen MutableSet
+    fn b_im_sets_of_maps() errors std::compiler::CompilerError:
+        static compile:
+            k1 = smap(["a", "b"], [1, 2])
+            k2 = smap(["b", "a"], [2, 1])
+            k3 = smap(["c"], [3])
+            s = std::mutable_set::create[std::immutable_map::ImmutableMap[str, int]]()
+            added = [s.add(k1), s.add(k2), s.add(k3)]
+            i = std::immutable_set::from_list([k1, k2, k3, k2])
+            [added, s.length(), i == std::immutable_set::from_list([k3, k1]), std::immutable_set::contains(i, k2), s.freeze() == i]
+    std::test::value("im-sets-of-maps", [[true, false, true], 2, true, true, true], b_im_sets_of_maps)
+
+    # maps compose: a map of maps, a map of Lists of maps, a List of maps, a struct holding a map
+    fn b_im_nested() errors std::compiler::CompilerError:
+        static compile:
+            a = outer(["x", "y"])
+            b = outer(["y", "x"])
+            [
+                a == b,
+                hash(a) == hash(b),
+                lists(["s", "t"]) == lists(["t", "s"]),
+                hash(lists(["s", "t"])) == hash(lists(["t", "s"])),
+                [smap(["a", "b"], [1, 2]), smap([], [])] == [smap(["b", "a"], [2, 1]), smap([], [])],
+                Doc {title: "t", body: smap(["a", "b"], [1, 2])} == Doc {title: "t", body: smap(["b", "a"], [2, 1])},
+                hash(Doc {title: "t", body: smap(["a", "b"], [1, 2])}) == hash(Doc {title: "t", body: smap(["b", "a"], [2, 1])}),
+                outer(["x", "y"]) == outer(["x"])
+            ]
+    std::test::value("im-nested", [true, true, true, true, true, true, true, false], b_im_nested)
+
+    # a JSON-like value: two objects with the same members in another source order are equal, hash equally, and keep their own orders
+    fn b_im_json() errors std::compiler::CompilerError:
+        static compile:
+            a = obj([mem("id", num(1)), mem("tags", arr([num(1), num(2)])), mem("meta", obj([mem("x", num(3)), mem("y", num(4))]))])
+            b = obj([mem("meta", obj([mem("y", num(4)), mem("x", num(3))])), mem("id", num(1)), mem("tags", arr([num(1), num(2)]))])
+            c = obj([mem("meta", obj([mem("y", num(4)), mem("x", num(3))])), mem("id", num(1)), mem("tags", arr([num(2), num(1)]))])
+            docs = std::mutable_set::create[Json]()
+            added = [docs.add(a), docs.add(b), docs.add(c)]
+            [a == b, hash(a) == hash(b), a == c, order(a), order(b), added]
+    std::test::value("im-json", [true, true, false, ["id", "tags", "meta"], ["meta", "id", "tags"], [true, false, true]], b_im_json)
+
+# ---------------------------------------------------------------------------
+# Conditional witnesses
+
+fn register_witness_tests():
+    # ImmutableMap[K, V] is Equatable and Hashable when V is: a map of Ints and a map of Lists
+    fn b_im_conditional_witness() errors std::compiler::CompilerError:
+        static compile:
+            [same(smap(["a"], [1]), smap(["a"], [1])), fp(lm(["a", "b"])) == fp(lm(["b", "a"])), same(lm(["a", "b"]), lm(["b", "a"]))]
+    std::test::value("im-conditional-witness", [true, true, true], b_im_conditional_witness)
+
+    # a map of MutableVectors is not Equatable
+    fn b_im_conditional_witness_equatable() errors std::compiler::CompilerError:
+        static compile:
+            m = vector_map()
+            same_vector_map(m, m)
+    std::test::rejects("im-conditional-witness/equatable", std::compiler::DiagnosticCode::TraitNotSatisfied, b_im_conditional_witness_equatable)
+
+    # nor Hashable
+    fn b_im_conditional_witness_hashable() errors std::compiler::CompilerError:
+        static compile:
+            fp_vector_map(vector_map())
+    std::test::rejects("im-conditional-witness/hashable", std::compiler::DiagnosticCode::TraitNotSatisfied, b_im_conditional_witness_hashable)
+
+    # the key slot is constrained by Hashable at every application
+    fn b_im_key_hashable() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: std::immutable_map::ImmutableMap[MutableVector[int], int]) -> int:
+                0
+            1
+    std::test::rejects("im-key-hashable", std::compiler::DiagnosticCode::TraitNotSatisfied, b_im_key_hashable)
+
+    # the mutable collections stay neither Equatable nor Hashable
+    fn b_im_mutable_unchanged_equatable() errors std::compiler::CompilerError:
+        static compile:
+            m = std::mutable_map::create[int, int]()
+            same_mutable(m, m)
+    std::test::rejects("im-mutable-unchanged/equatable", std::compiler::DiagnosticCode::TraitNotSatisfied, b_im_mutable_unchanged_equatable)
+
+    fn b_im_mutable_unchanged_hashable() errors std::compiler::CompilerError:
+        static compile:
+            fp_mutable(std::mutable_map::create[int, int]())
+    std::test::rejects("im-mutable-unchanged/hashable", std::compiler::DiagnosticCode::TraitNotSatisfied, b_im_mutable_unchanged_hashable)
+
+# ---------------------------------------------------------------------------
+# Order
+
+fn register_order_tests():
+    # reordered returns an equal map with the same public hash that iterates in the order's order
+    fn b_im_reordered() errors std::compiler::CompilerError:
+        static compile:
+            m = smap(["one", "two", "three"], [1, 2, 3])
+            o = m.order()
+            o.reorder(o)
+            wanted = std::mutable_set::create[str]()
+            wanted.add("three")
+            wanted.add("one")
+            wanted.add("two")
+            c = m.validate_order(wanted):
+                on std::immutable_map::OrderMismatch:
+                    m.order()
+            r = m.reordered(c)
+            same_order = m.reordered(m.order())
+            v = r.at("two"):
+                on std::immutable_map::KeyNotFound:
+                    -1
+            [r == m, hash(r) == hash(m), names(r), names(m), names(same_order), v]
+    std::test::value("im-reordered", [true, true, ["three", "one", "two"], ["one", "two", "three"], ["one", "two", "three"], 2], b_im_reordered)
+
+    # a candidate one key short, one extra or one replaced is OrderMismatch
+    fn b_im_validate_mismatch() errors std::compiler::CompilerError:
+        static compile:
+            m = smap(["a", "b"], [1, 2])
+            [check(m, ["b", "a"]), check(m, ["a"]), check(m, ["a", "b", "c"]), check(m, ["a", "c"])]
+    std::test::value("im-validate-mismatch", [true, false, false, false], b_im_validate_mismatch)
+
+    # a set of the right type is no proven order
+    fn b_im_reordered_not_proven_type() errors std::compiler::CompilerError:
+        static compile:
+            m = smap(["a"], [1])
+            s = std::mutable_set::create[str]()
+            added = s.add("a")
+            m.reordered(s)
+    std::test::rejects("im-reordered-not-proven/type", std::compiler::DiagnosticCode::ReorderNotProven, b_im_reordered_not_proven_type)
+
+    # another map's order is no proven order
+    fn b_im_reordered_not_proven_other() errors std::compiler::CompilerError:
+        static compile:
+            m = smap(["a"], [1])
+            n = smap(["a"], [1])
+            m.reordered(n.order())
+    std::test::rejects("im-reordered-not-proven/other", std::compiler::DiagnosticCode::ReorderNotProven, b_im_reordered_not_proven_other)
+
+    # nothing is proven of a receiver that is no binding
+    fn b_im_reordered_not_proven_unbound() errors std::compiler::CompilerError:
+        static compile:
+            m = smap(["a"], [1])
+            smap(["a"], [1]).reordered(m.order())
+    std::test::rejects("im-reordered-not-proven/unbound", std::compiler::DiagnosticCode::ReorderNotProven, b_im_reordered_not_proven_unbound)
+
+    # an order changed after it was taken is no proven order
+    fn b_im_reordered_not_proven_changed() errors std::compiler::CompilerError:
+        static compile:
+            m = smap(["a"], [1])
+            o = m.order()
+            added = o.add("b")
+            m.reordered(o)
+    std::test::rejects("im-reordered-not-proven/changed", std::compiler::DiagnosticCode::ReorderNotProven, b_im_reordered_not_proven_changed)
+
+# ---------------------------------------------------------------------------
+# Encapsulation
+
+fn register_opaque_tests():
+    # the representation is the module's: construction outside it is refused
+    fn b_im_opaque_construction() errors std::compiler::CompilerError:
+        static compile:
+            m = std::immutable_map::ImmutableMap[int, int] {keys: [1], vals: [2], hashes: [0], index: [0]}
+            m
+    std::test::rejects("im-opaque/construction", std::compiler::DiagnosticCode::OpaqueConstruction, b_im_opaque_construction)
+
+    # ... and so is a field
+    fn b_im_opaque_field() errors std::compiler::CompilerError:
+        static compile:
+            m = imap([1], [2])
+            m.keys
+    std::test::rejects("im-opaque/field", std::compiler::DiagnosticCode::OpaqueRepresentation, b_im_opaque_field)
+
+    # the loop protocol is internal to the standard library
+    fn b_im_opaque_protocol() errors std::compiler::CompilerError:
+        static compile:
+            std::immutable_map::iteration_end(imap([1], [2]))
+    std::test::rejects("im-opaque/protocol", std::compiler::DiagnosticCode::InternalNamespace, b_im_opaque_protocol)
+
+    # ... and so is the constructor freeze uses
+    fn b_im_opaque_parts() errors std::compiler::CompilerError:
+        static compile:
+            std::immutable_map::of_parts([1], [2], [0], [0])
+    std::test::rejects("im-opaque/parts", std::compiler::DiagnosticCode::InternalNamespace, b_im_opaque_parts)
+
+# ---------------------------------------------------------------------------
+# MutableSet freeze
+
+fn register_set_freeze_tests():
+    # a MutableSet freezes into the ImmutableSet of its elements, untouched by later changes
+    fn b_im_set_freeze() errors std::compiler::CompilerError:
+        static compile:
+            s = std::mutable_set::create[int]()
+            loop i from 0 to 30:
+                added = s.add(i * 3)
+            f = s.freeze()
+            removed = s.remove(3)
+            g = s.freeze()
+            [f == std::immutable_set::from_list(threes(30)), g == f, std::immutable_set::contains(f, 3), std::immutable_set::contains(g, 3), hash(f) == hash(std::immutable_set::from_list(threes(30)))]
+    std::test::value("im-set-freeze", [true, false, true, false, true], b_im_set_freeze)
+
+fn register_immutable_map_tests():
+    register_api_tests()
+    register_identity_tests()
+    register_composition_tests()
+    register_witness_tests()
+    register_order_tests()
+    register_opaque_tests()
+    register_set_freeze_tests()
+
+with context std::test::suite()
+register_immutable_map_tests()
+std::test::report()
