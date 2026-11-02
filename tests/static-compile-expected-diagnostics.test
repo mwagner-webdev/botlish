@@ -674,6 +674,40 @@ r
     list [scedSites $hir] [scedProgram $hir] [sourceAgree [scedText $source]]
 } -cleanup {unset -nocomplain source hir} -result {{{UNBOUND 6 9}} {} {value -1}}
 
+test sced-value-position-diverges {a rejected block whose value is the value of its body (the last expression of a function), of a binding or of a `return` is that value's ordinary failure, a divergence: the decided program holds no poison (DIAGNOSTIC-RECOVERY.md: poison never exists in a valid program's HIR), it compiles strictly, and it runs to the handled CompilerErrors on every backend} -body {
+    set source {
+import std::compiler
+
+fn whole() -> int errors std::compiler::CompilerError:
+    static compile:
+        missing
+
+fn bound() -> int errors std::compiler::CompilerError:
+    x = static compile:
+        missing
+    x
+
+fn returned(n: int) -> int errors std::compiler::CompilerError:
+    if n > 0:
+        return static compile:
+            missing
+    n
+
+a = whole():
+    on std::compiler::CompilerError:
+        -1
+b = bound():
+    on std::compiler::CompilerError:
+        -2
+c = returned(1):
+    on std::compiler::CompilerError:
+        -3
+[a, b, c]
+}
+    set hir [surface::compile [scedText $source] -warnings off]
+    list [scedSites $hir] [dict exists $hir poisoned] [scedStrict $source] [sourceAgree [scedText $source]]
+} -cleanup {unset -nocomplain source hir} -result {{{UNBOUND 5 9} {UNBOUND 9 9} {UNBOUND 15 13}} 0 ok {value {[-1, -2, -3]}}}
+
 test sced-following-code-never-runs {the run time is unchanged: a function's rejected statement block fails with its CompilerError and nothing after it runs, on every backend; a coroutine created before the block and used after it is released by the block's failure, which is an exit of its function (hir::affine::releasesOnExit)} -body {
     set source {
 import std::compiler

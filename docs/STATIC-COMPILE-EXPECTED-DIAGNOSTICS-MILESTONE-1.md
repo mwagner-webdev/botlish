@@ -199,7 +199,10 @@ a body -- the reified failure is that value's failure, and the code
 reading the value is unreachable as after any failure. Checking it would
 check uses of a value that never exists: `x = static compile: missing`
 then `std::list::at([1], x)` must not report an unhandled IndexNotFound
-for an `x` with no facts (`sced-value-position-unchanged`).
+for an `x` with no facts (`sced-value-position-unchanged`). A block as a
+body's last expression, a binding's or a `return`'s value is a divergence,
+and the decided program holds no poison (`sced-value-position-diverges`;
+DIAGNOSTIC-RECOVERY.md: poison never exists in a valid program).
 
 No new diagnostic, mechanism, HIR form, side table or runtime operation.
 The `static` mark the completion walk and SAME-FAILURE already read is read
@@ -312,7 +315,7 @@ language server consumes the service unchanged; no feature was added.
 
 ## 10. Positive and negative tests
 
-`tests/static-compile-expected-diagnostics.test` (20 tests, about 90 s) and
+`tests/static-compile-expected-diagnostics.test` (21 tests, about 90 s) and
 its golden port `tests/golden/static-compile-expected-diagnostics.bot` (32
 tests, every backend; 6 whole-program builds). On the tree before this
 milestone the Tcl file fails exactly its five tests of the gap
@@ -399,6 +402,20 @@ program is unchanged.
   *valid* program, which DIAGNOSTIC-RECOVERY.md reserves for programs with
   a diagnostic; a test that wants the code after its block checked writes
   the block as a statement.
+* **An unhandled call of a fully rejected function.** A function whose
+  whole body is a rejected block and that declares no result type
+  (`fn t() errors std::compiler::CompilerError:`) infers the result
+  `never`, so a call of it that the caller does not handle (it admits
+  CompilerError) diverges for the types: the caller's code after that call
+  is unreachable for the flag-reading analyses (ownership among them),
+  while the completion analysis, by the `intended` rule, still checks it.
+  The test framework never calls a body that way (`body()` stands under a
+  handler, whose value does not diverge), and a declared result (`-> int`)
+  types the call by the declaration, so the code after it keeps every
+  diagnostic. Treating such calls as non-divergent would need a typed
+  notion of "never only by intention" for calls -- the mutant
+  `reified-any-position` shows that reusing poison for it puts poison in a
+  valid program -- and is left for a milestone that needs it.
 * **A pre-existing defect outside this milestone.** Ordinary dead code
   after a statement that always fails (`fail Other` then `want(5)`) gets no
   range facts, yet range admission checks it: a provable call is a spurious

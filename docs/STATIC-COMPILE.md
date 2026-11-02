@@ -245,7 +245,8 @@ evidence):
   time the block still fails there and nothing after it runs. Where the
   block's value is used (a binding's value), the code reading the value is
   unreachable as after any failure: it reads a value that never exists
-  (`sced-value-position-unchanged`).
+  (`sced-value-position-unchanged`); the decided program holds no poison
+  (`sced-value-position-diverges`).
 * **It is decided from complete facts.** Resolution is decided first (an
   unbound name rejects a block before any proof), and a verdict read from a
   callee whose own block is rejected later is not kept

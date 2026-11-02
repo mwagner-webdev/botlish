@@ -6760,6 +6760,7 @@ tests/static-compile-expected-diagnostics.test sced-following-range-facts pass
 tests/static-compile-expected-diagnostics.test sced-following-sequence-siblings pass
 tests/static-compile-expected-diagnostics.test sced-following-emission pass
 tests/static-compile-expected-diagnostics.test sced-value-position-unchanged pass
+tests/static-compile-expected-diagnostics.test sced-value-position-diverges pass
 tests/static-compile-expected-diagnostics.test sced-following-code-never-runs pass
 tests/static-compile-expected-diagnostics.test sced-callee-dependency pass
 tests/static-compile-expected-diagnostics.test sced-resolution-first pass
