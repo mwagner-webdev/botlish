@@ -35,7 +35,10 @@ if {[dict get $options -scenario] eq ""} {
         puts "$scenario: [lindex $runs 0]"
     }
     proc field {results scenario key} {
-        return [median [lmap r [dict get $results $scenario] {dict getdef $r $key 0}]]
+        set m [median [lmap r [dict get $results $scenario] {dict getdef $r $key 0}]]
+        # Milliseconds to the millisecond; counts stay integers.
+        if {[string is integer -strict $m]} { return $m }
+        return [format %.0f $m]
     }
     set p [dict get $results probes]
     set lines [list "## Costs (ms, median of [dict get $options -runs] runs, each a fresh process)" "" \
@@ -58,7 +61,7 @@ if {[dict get $options -scenario] eq ""} {
         "| certificates reused | [field $results library-memo reusedClaims] | 10 |" \
         "| check after a helper's change (hex_digit) | [field $results library-change check] | 59 |" \
         "| claims re-proved after it | [field $results library-change reproved] | 1 |" \
-        "| check per imported, uncalled claim | [format %.1f [expr {[field $results library check] / 10.0}]] | - |" \
+        "| check per imported, uncalled claim | [format %.0f [expr {[field $results library check] / 10.0}]] | - |" \
         "" "**A rejected claim's diagnostics** (invalid_emitter.bot): check [field $results invalid check] ms, [field $results invalid diagnostics] diagnostics." \
         "" "**Interchange** (emit_probes.bot): [field $results interchange bytes] bytes with its claims' records, [field $results interchange stripped] without claims ([format %.1f [expr {100.0 * ([field $results interchange bytes] - [field $results interchange stripped]) / [field $results interchange stripped]}]]% more); decoding re-proves: [field $results interchange decode] ms." \
         "" "**Native code** (emitlib::json_string_source driven and fused): fused NIR equal with and without the claims: [lindex [dict get $results native] 0 1]; coroutine allocations [lindex [dict get $results native] 0 3] and [lindex [dict get $results native] 0 5]; table loads, switches, dfa#transition: [lindex [dict get $results native] 0 7]."]

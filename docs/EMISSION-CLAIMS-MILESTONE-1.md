@@ -89,9 +89,9 @@ checker's rules, the outcome model, the value transfers and the trust
 boundary -- all killed (the first run left 5 alive; each was a missing
 test, now written, section 16).
 
-**Cost** (section 17): 0.40 s for the 22 claims the prototype measured at
+**Cost** (section 17): 0.30 s for the 22 claims the prototype measured at
 0.37 s (140 summaries computed, 60 reused, 44 rounds -- the prototype's
-exact counts); 0.10 s for an imported library of 10 uncalled claims, 0.017 s
+exact counts); 0.13 s for an imported library of 10 uncalled claims, 0.016 s
 when a later compilation in the same process reuses their certificates.
 **A certified emitter's native code is the code without its claim**: the
 fused NIR is identical, no table, switch or `dfa#transition` remains, no
@@ -619,31 +619,37 @@ report, on the same machine type):
 
 | workload | integrated | prototype |
 |---|---:|---:|
-| 22 claims (emit_probes.bot), summaries shared | 400 ms | 372 ms |
-| of it: products with certificates' languages | 94 ms | 87 ms |
-| of it: certificates (fingerprints, statements) | 53 ms | 32 ms |
-| the 22 claims each checked alone, fresh state | 798 ms | 1,169 ms |
+| 22 claims (emit_probes.bot), summaries shared | 304 ms | 372 ms |
+| of it: products with certificates' languages | 75 ms | 87 ms |
+| of it: certificates (fingerprints, statements) | 40 ms | 32 ms |
+| the 22 claims each checked alone, fresh state | 837 ms | 1,169 ms |
 | summaries computed / reused | 140 / 60 | 140 / 60 |
+| summaries computed, each claim alone | 448 | 348 |
 | fixpoint rounds | 44 | 44 |
-| emitlib from a program calling none of it, no memo | 100 ms | 127 ms |
-| the same, a later compilation reusing the memo | 17 ms | 20 ms |
+| emitlib from a program calling none of it, no memo | 127 ms | 127 ms |
+| the same, a later compilation reusing the memo | 16 ms | 20 ms |
 | of it: validation | 7 ms | 6 ms |
-| after a helper's change: re-proof of its one claim | 53 ms | 59 ms |
-| a rejected claim's diagnostics (invalid_emitter.bot) | 53 ms | -- |
-| an imported, uncalled claim | 10 ms | -- |
+| after a helper's change: re-proof of its one claim | 49 ms | 59 ms |
+| a rejected claim's diagnostics (invalid_emitter.bot) | 77 ms | -- |
+| an imported, uncalled claim | 13 ms | -- |
 
 * **Near the prototype** on every workload, without its whole-program
   specialization or range analysis. Certificates cost more (fingerprints
-  now include every expression's type fact). Checking each claim alone is
-  cheaper than the prototype's one-process-per-claim measurement because a
-  process here is not rebuilt per claim.
-* **Front end.** The check is the claims' whole cost: a program without
-  claims pays one scan of its expressions; parsing and resolving claims is
-  negligible. The whole compilation of emit_probes.bot takes 3.2-3.6 s on
-  an idle machine, of which the check is the 0.4 s above.
+  now include every expression's type fact). Checking each claim alone
+  computes more summaries than the prototype did (448 against 348: a
+  function with two claims is checked whole for each, where the prototype
+  ran one claim per process) and still takes less time, because a process
+  here is not rebuilt per claim.
+* **Front end.** A program without claims pays one scan of its expressions for
+  an `emits` field; parsing and resolving claims is negligible. The whole
+  compilation of emit_probes.bot took 3.82 s against 3.34 s with every
+  claim removed (medians of three; an earlier run on the same machine,
+  3.99 s against 3.66 s): the check measured inside it is 0.30-0.33 s, and
+  the rest of the difference is within the 0.2 s that whole compilations
+  of one program vary between runs.
 * **Interchange.** The claims' records add 2.4% to emit_probes.bot's
   interchange text (1,914,947 bytes against 1,869,862); reading it back
-  re-proves its 22 claims (0.38 s, the check again: text is no proof).
+  re-proves its 22 claims (0.37 s, the check again: text is no proof).
 * **Native code.** A claim is erased: the fused NIR of a program driving
   `emitlib::json_string_source` is identical with and without the library's
   claims (so is its machine code); it holds no table load, no switch and no
@@ -654,25 +660,55 @@ report, on the same machine type):
 
 ## 18. Compatibility and regression results
 
-* `tests/local.tcl` (every Tcl test file on interp and compile, every
-  golden suite on four backends through the front-end cache): see the
-  addendum below for the run on this branch.
-* Run directly before it, with private temporary directories: dfa (85),
-  dfa-workloads (21), static-compile (83, after the census's case count
-  moved 120 -> 133), compilerpedia (42), hir-interchange (11), hir-cache
-  (19), compiler-service (55), lsp (71), syntax-recovery (33),
-  diagnostic-recovery (57), surface-modules (37), imports (104),
-  bot-modules (56), application-modules (21), main-cli (64),
-  compilation-isolation (19), static-economics (90), numeric-looking-names
-  (5), coroutine-fusion (17), hir-range (74), native-mod-lowering (17),
-  native-result-bounds (12), checked-domain-proof-provenance (18), byte-set
-  (21), ascii (33): all pass.
+**The whole local suite.** `tests/local.tcl` (255 Tcl test files on interp
+and compile, golden duplicates skipped; 115 golden suites on all four
+backends through the front-end cache; 90 minutes on 4 cores): 8,201 Tcl
+tests passed on interp and 8,196 on compile, 5,510 golden tests on interp
+and compile, 5,418 on cranelift-generic and 5,520 on cranelift, with four
+failures -- each a consequence of this branch, each fixed:
+
+| failure | cause | fix |
+|---|---|---|
+| `range-and-contract-values.bot`'s `rec-error-path-value/1`, `/3` (4 backends) | exact `mod`: `mod(500, 11)` was the suite's way to give a recursion an input known only as a range; it is 5 now, and `g(mod(500, 11) - 5)` a KNOWN-ERROR (section 4) | the input is `mod(k, 11)` with k from `std::int::from_string`, never folded; same in the Tcl original and `rec-executable-error-path`, the fragment and census rows, the manifest regenerated |
+| `hir-closed-call-params.test`'s `closed-call-generic-interval-only` | the same idiom (`mod(999999, 1000000)`): exact, the narrowing gave the empty `[999999, 20]` the analysis has always given an exact value's unreachable branch (checked on the tree before this branch with a literal 999999) | input hidden the same way |
+| `native-byte.test`'s `native-byte-high-nibble-nir-is-mask-not-branch` | the same idiom (`mod(200, 1000000)`): exact, the `iand` folded away | input hidden the same way |
+| `golden-framework.test`'s `gf-code-name-complete` | `std::test::code_name` had no name for the 13 `Emit*` cases | the names added; the pinned count 120 -> 133 |
+
+After the fixes: the 56 Tcl files that call `mod` or
+`std::char::scalar_value` and `golden-framework.test`, every test
+(duplicates included, as CI runs them): 2,488 passed on interp and on
+compile, 0 failed; `range-and-contract-values.bot` 81/81 on all four
+backends; `tests/golden.test` 9/9; the warning gate passes
+(`stdlib/test.bot` is in its corpus).
+
+**Run directly**, with private temporary directories: dfa (85),
+dfa-workloads (21), static-compile (83, after the census's case count moved
+120 -> 133), compilerpedia (42), hir-interchange (11), hir-cache (19),
+compiler-service (55), lsp (71), syntax-recovery (33), diagnostic-recovery
+(57), surface-modules (37), imports (104), bot-modules (56),
+application-modules (21), main-cli (64), compilation-isolation (19),
+static-economics (90), numeric-looking-names (5), coroutine-fusion (17),
+hir-range (74), native-mod-lowering (17), native-result-bounds (12),
+checked-domain-proof-provenance (18), byte-set (21), ascii (33): all pass.
+
 * `tools/compilerpedia.tcl check`: 0 problems.
 * The golden-migration census has rows for the two new test files
   (KEEP-INTERNAL: what a claim certifies is a compile-time record, not a
   value a program observes); the manifest is regenerated.
 * Changed expectations, each a precision gain: `range-lattice-8`,
-  `nrb-mod-in-range-analysis`.
+  `nrb-mod-in-range-analysis`; changed inputs, each a test that hid a value
+  with `mod` of literals: the four rows above.
+* **Source compatibility.** Exact `mod` can reject a program that compiled
+  before, when a handled call's failure becomes statically known (section
+  4); the tests above are the repository's every instance. Nothing else
+  changes what a program without claims means or whether it compiles.
+* **Not run locally**, by the repository's rules: the static-decisions
+  comparison of the golden suites under both schedulers (CI's
+  `static-decisions` workflow; this branch changes the front end, so it
+  runs on its merge), the GC-stress run (CI's `gc-stress`; no file of
+  `native/` or `compiler/` changed: a claim is erased, and a tighter `mod`
+  Range only feeds decisions native lowering already makes) and the macOS
+  and Windows workflows.
 
 ## 19. Remaining precision limits
 
