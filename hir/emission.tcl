@@ -795,10 +795,21 @@ proc hir::emission::Walk {b c args_} {
 # The walk: Eval E from states S => {STATES VALUE}
 
 proc hir::emission::EvalBody {body s} {
+    variable hir
     set value unit
     foreach e $body {
+        set before $s
         lassign [Eval $e $s] s value
         if {$s eq {}} {
+            if {$before ne {} && [hir::static::reifiedStatement $hir $body $e]} {
+                # A rejected static block as a statement (STATIC-COMPILE.md,
+                # "Completions"): a failure point (Failing recorded it), and
+                # the walk goes on as if the block completed, from the states
+                # before it -- the code after it is checked as written.
+                set s $before
+                set value unit
+                continue
+            }
             return [list {} {}]
         }
     }

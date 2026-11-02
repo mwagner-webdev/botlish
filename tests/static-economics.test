@@ -587,10 +587,10 @@ test se-equal-independent {independent failures at every stage, nested in one fu
     list [seSame $nested] [seSame $top] [seOutcomes $nested] [seEcon $nested] [seEcon $top]
 } -result {{} {} {accepted UNBOUND TYPE accepted UNBOUND TYPE accepted UNBOUND TYPE} {3 3 0} {3 3 0}}
 
-test se-equal-sequence {sites in one function's statement sequence are judged one after another: an earlier rejection makes the code after it unreachable, where completion diagnostics are not reported -- the later site is accepted, as in the sequential order} -body {
+test se-equal-sequence {sites in one function's statement sequence are judged one after another, and an earlier rejection does not make the code after it unreachable for the checks (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md): the later site keeps its own diagnostic (boom() always fails: KNOWN-ERROR) -- it used to be accepted, its completion diagnostics gone with the dead code -- as in the sequential order} -body {
     set text "import std::compiler\n\nerror Boom\n\nfn boom() errors Boom:\n    fail Boom\n\nfn run() -> int errors std::compiler::CompilerError:\n    static compile:\n        missing_name\n    static compile:\n        boom()\n    0\n\nr = run():\n    on std::compiler::CompilerError:\n        0\nr\n"
     list [seSame $text] [seOutcomes $text]
-} -result {{} {UNBOUND accepted}}
+} -result {{} {UNBOUND KNOWN-ERROR}}
 
 # An emission claim (EMISSION-CLAIMS-MILESTONE-1.md) reads the code of the
 # functions its function calls: a site holding a claim depends on the sites
@@ -599,14 +599,16 @@ test se-equal-sequence {sites in one function's statement sequence are judged on
 # only once the callee's site is rejected (its rejection removes the yield
 # that broke the claim), so a missing edge would reject the claim's site in
 # the first build. In the second the callee's yield follows its rejected
-# site, unreachable: the callee no longer yields, its call completes as its
-# declared `unit` with nothing yielded (a rejected site's caller may
-# complete normally: hir/completions.tcl's `intended`), and the claim is
-# EMIT-INCOMPLETE under every scheduler.
+# site, which stands as a statement: the yield is checked as written, as if
+# the block completed (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md;
+# it used to be unreachable, the callee no longer yielding and the claim
+# EMIT-INCOMPLETE), so the claim's site is accepted and the program has the
+# claim's violations at the callee's yield -- exactly what it has when the
+# callee's block is accepted -- under every scheduler.
 set ::seEmissionPrelude "import std::compiler\nimport std::dfa\n\nclass digit = '0'..'9'\n\ndfa digit_token over ascii:\n    start:\n        digit -> accept\n\n"
 set ::seEmissionProbe "fn probe() -> str errors std::compiler::CompilerError:\n    static compile:\n        fn emit(d: int) -> unit errors std::compiler::CompilerError emits digit_token:\n            helper(d)\n        0\n    \"accepted\"\n\nr = probe():\n    on std::compiler::CompilerError:\n        \"rejected\"\nr\n"
 
-test se-equal-emission-callee {a claim's verdict that a rejection in its callee decides: the claim's site waits for the callee's site in the batched order, and a callee whose only yield follows its rejected site leaves the claim incomplete -- the batched decisions are the sequential ones} -body {
+test se-equal-emission-callee {a claim's verdict that a rejection in its callee decides: the claim's site waits for the callee's site in the batched order, and a callee whose only yield follows its rejected site (a statement) has that yield checked as written, the claim's violations the same as with the callee's block accepted -- the batched decisions are the sequential ones} -body {
     set flips "$::seEmissionPrelude[join {
         {fn helper(d: int) -> unit errors std::compiler::CompilerError:}
         {    if d > 100:}
@@ -624,9 +626,16 @@ test se-equal-emission-callee {a claim's verdict that a rejection in its callee 
         {    yield 48 + d}
         {    unit}
     } \n]\n\n$::seEmissionProbe"
+    set accepted [string map {{x = 1 + "a"} {x = 1}} $unreachable]
+    set violations [lmap h [list [seHir $unreachable] [seHir $accepted]] {
+        lmap d [hir::diagnostics $h] {
+            set o [hir::static::PrimaryOrigin $h $d]
+            list [dict get $d kind] [dict get $o line] [dict get $o column]
+        }
+    }]
     list [seSame $flips] [seOutcomes $flips] [seEcon $flips] \
-        [seSame $unreachable] [seOutcomes $unreachable]
-} -result {{} {TYPE accepted} {2 2 0} {} {TYPE EMIT-INCOMPLETE}}
+        [seSame $unreachable] [seOutcomes $unreachable] $violations
+} -cleanup {unset -nocomplain accepted violations} -result {{} {TYPE accepted} {2 2 0} {} {TYPE accepted} {{{EMIT-END-SYMBOL 14 5} {EMIT-REJECTED 14 5}} {{EMIT-END-SYMBOL 14 5} {EMIT-REJECTED 14 5}}}}
 
 test se-equal-ownership-siblings {sibling blocks with ownership effects: a rejected block's move of a coroutine handle is gone with it (the block after it in the same function is accepted), beside an independent USE-AFTER-MOVE and an accepted block whose handle lives across an error edge -- the batched decisions are the sequential ones} -body {
     set text "import std::compiler\n\nerror Boom\n\nfn boom(x: int) -> int errors Boom:\n    if x > 5:\n        fail Boom\n    x\n\nfn needs_int(v: int) -> int:\n    v\n\nfn producer():\n    yield 1\n    2\n\n"

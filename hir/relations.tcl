@@ -471,6 +471,13 @@ proc hir::relations::Seq {hirVar contracts stateVar body} {
         }
         set value [Eval hir $contracts state $e]
         if {$value eq "never"} {
+            if {[hir::static::reifiedStatement $hir $body $e]} {
+                # A rejected static block as a statement: what follows is
+                # analyzed as if it completed (STATIC-COMPILE.md,
+                # "Completions").
+                set value [dict create]
+                continue
+            }
             return never
         }
     }
