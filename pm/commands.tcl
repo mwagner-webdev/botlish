@@ -994,9 +994,12 @@ proc pm::commands::inspect {words given} {
         set audit [pm::author::Audit [dict create {*}[dict get $artifact files]] $descriptor]
         dict for {target report} [dict get $audit targets] {
             set status [dict get {complete complete partial "partially verified" incomplete INCOMPLETE} [dict get $report status]]
-            puts "  native closure of $target: $status[expr {[dict get $report status] eq "partial" ? " (from this host: [join [lmap p [dict get $report partial] {lindex [split $p :] 0}] {; }])" : ""}]"
+            puts "  native closure of $target: $status"
             foreach problem [dict get $report problems] {
                 puts "    problem: $problem"
+            }
+            foreach item [dict get $report partial] {
+                puts "    unverified from this host: $item"
             }
         }
         InspectProvenance $given $artifact

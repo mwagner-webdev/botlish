@@ -70,8 +70,10 @@ proc pm::release::Fail {kind message} {
 proc pm::release::PublishProblem {text} {
     set home ""
     catch {set home [file normalize ~]}
-    if {[regexp {(^|[\s=:"'(,])(/home/|/root(/|$)|/tmp/|/Users/|/var/folders/|/private/var/|[A-Za-z]:[\\/][Uu]sers[\\/])} $text]
-            || ($home ne "" && [string length $home] > 1 && [string first $home $text] >= 0)} {
+    # (A URL's path is no path of the machine: left out of the search.)
+    regsub -all {[A-Za-z][A-Za-z0-9+.-]*://[^\s"']*} $text "" local
+    if {[regexp {/home/|/root(/|$)|/tmp/|/Users/|/var/folders/|/private/var/|[A-Za-z]:[\\/][Uu]sers[\\/]} $local]
+            || ($home ne "" && [string length $home] > 1 && [string first $home $local] >= 0)} {
         return "it holds a path of the machine that built the package: write paths relative to a named root (\$SOURCE, \$BUILD, \$CACHE) -- a record is published, and the path says nothing a consumer can use"
     }
     if {[regexp -- {-----BEGIN [A-Z ]*PRIVATE KEY-----|\mghp_[A-Za-z0-9]{20,}|\mgithub_pat_|\mxox[abpr]-|\mAKIA[0-9A-Z]{16}\M|\mglpat-} $text]} {

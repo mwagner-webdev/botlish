@@ -1,50 +1,39 @@
 # package-repository.tcl -- pack this repository's packages into a local
-# package repository (PACKAGE-MANAGER-MILESTONE-1.md, "Workloads";
-# PACKAGE-MANAGER-MILESTONE-2.md, "Workloads").
+# package repository: the author's side (PACKAGE-MANAGER-MILESTONE-1.md,
+# -2.md, and -3.md, "Real-package migration").
 #
 #   tclsh9.0 tools/package-repository.tcl ?-force? OUT ?NAME...?
 #
 # writes OUT/NAME-VERSION.botpkg for each named package (default: every
-# package of packages/) and prints each release's identity: its name and
-# version, the targets it holds and its SHA-256. A release is immutable: an
-# OUT that already holds a different NAME-VERSION.botpkg is refused
-# (EXISTS: raise the version), unless -force says this local file may be
-# overwritten. A consumer then installs them with the ordinary
-# commands -- `botlish add sdlkit -repository OUT`, `botlish install
-# -target linux-aarch64` -- and nothing package-specific runs on the
-# consumer's side: no compiler, no script.
+# package of packages/) and, for a native package, its provenance record
+# OUT/NAME-VERSION.provenance.json, and prints each release's identity. A
+# release is immutable: an OUT that already holds a different
+# NAME-VERSION.botpkg is refused (EXISTS: raise the version), unless -force
+# says this local file may be overwritten. A consumer then installs them
+# with the ordinary commands -- `botlish add sdlkit -repository OUT` -- and
+# nothing package-specific runs on the consumer's side: no compiler, no
+# script.
 #
-# This is the *author's* side, and the one place left where packages differ
-# (PM-3 makes it a generic workflow). A package directory of packages/ whose
-# botlish.json names targets (schema 2) is one release for every target it
-# names: this tool assembles each target's directory, targets/TARGET/, as
-# that botlish.json declares it, and refuses to pack a release missing any
-# of them (a release never claims a target it does not hold):
+# Since PM-3 this file holds only what is genuinely each package's own: how
+# its native files are *built* (CMake, the cross compilers, the binding
+# generator's thunks) and what its author *states* about them (which
+# dependencies the system provides, what is opened at run time, licenses).
+# Everything else is the package manager's generic authoring workflow, run
+# as any author runs it (`main.tcl` is `botlish` in a checkout):
 #
-#   sdl3              targets/T/sdl3/: the committed generated binding of T
-#                     (generated/c/sdl3/T/sdl3/, never edited);
-#                     targets/T/native/: the binding's thunk archive, built
-#                     for T by tools/c-bindgen.tcl build (the host's C
-#                     compiler, or clang for T with T's C library headers),
-#                     and on linux-x86_64 the pinned SDL3 as a shared
-#                     library (tests/cffi/sdl3.tcl's build, stripped);
-#   raven             targets/T/raven/: the generated binding of T;
-#                     targets/T/native/: the event bridge's archive, built
-#                     for T against the pinned Raven's headers, and
-#                     libraven's *desktop* build for T -- Raven's X11
-#                     platform and Vulkan renderer, which runs headless too
-#                     (RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md): on the host
-#                     tests/cffi/raven.tcl's `desktop` configuration (built
-#                     here when it is not), for another architecture
-#                     Raven's CMake build with that architecture's GNU
-#                     cross compiler and that architecture's libX11 (Ubuntu
-#                     24.04's packages, pinned below), cached; each checked
-#                     to be the desktop build before it is packed;
-#   event_loop_linux  targets/T/native/: the adapter's archive built for T.
+#   botlish package stage DIR -target T -modules|-headers|-files SRC
+#   botlish native add FILE -target T -name N ...      (facts read from the file)
+#   botlish native require NAME -target T -origin system|-runtime ...
+#   botlish native audit DIR
+#   botlish package pack DIR -out OUT -evidence EVIDENCE.json
 #
-# A target-independent package (sdlkit, a pure-Botlish one) is packed as it
-# is. Native files are built here, by the author's toolchain, and travel in
-# the artifact as files the package manager inspects but never runs.
+# A release directory starts as a copy of packages/NAME (the package's own
+# files: its module, documentation and an authoring botlish.json with no
+# native metadata) in a temporary stage; the commands above write every
+# target's files and metadata into it; the pack audits it and writes the
+# artifact and its provenance record. The evidence file (sources, builds,
+# toolchains, generator outputs) is written here, from what this script ran,
+# with every host path replaced by a named root ($CACHE, $BOTLISH, $BUILD).
 
 set here [file dirname [file normalize [info script]]]
 set root [file dirname $here]
@@ -76,7 +65,29 @@ if {$names eq ""} {
 
 namespace eval author {
     variable root $::root
+    # The release being prepared: its directory and the evidence gathered.
+    variable dir ""
+    variable evidence ""
+    variable stage ""
 }
+
+# ---------------------------------------------------------------------------
+# The generic workflow, as an author runs it
+
+# Runs `botlish ARGS` (main.tcl in this checkout): the package manager's own
+# commands, nothing of this script's. Its output is shown on standard error
+# (this script's standard output is the releases' identities).
+proc author::botlish {args} {
+    variable root
+    if {[catch {exec [info nameofexecutable] [file join $root main.tcl] {*}$args 2>@1} output]} {
+        error "botlish [join $args]:\n$output"
+    }
+    puts stderr [lindex [split $output \n] 0]
+    return $output
+}
+
+# ---------------------------------------------------------------------------
+# Builds (the author's own toolchains; nothing here reaches a consumer)
 
 # The GNU compiler of TARGET's architecture: the host's cc for the host's
 # target, else ARCH-linux-gnu-gcc (Debian's cross compilers).
@@ -105,6 +116,42 @@ proc author::strip {target} {
     return [dict get [pm::target::facts $target] arch]-linux-gnu-strip
 }
 
+# The first line of a tool's version, for the evidence ("" when it has none).
+proc author::version {args} {
+    if {[catch {exec {*}$args 2>@1} text]} {
+        return ""
+    }
+    return [string trim [lindex [split $text \n] 0]]
+}
+
+# The installed version of the Debian packages NAMES, as "NAME VERSION; ...".
+proc author::debs {names} {
+    set out {}
+    foreach name $names {
+        if {![catch {exec dpkg-query -W -f {${Version}} $name 2>/dev/null} version] && $version ne ""} {
+            lappend out "$name $version"
+        }
+    }
+    return [join $out {; }]
+}
+
+# TEXT with this machine's directories replaced by named roots: a record is
+# published, and a path of the author's machine says nothing to anyone else.
+proc author::rooted {text} {
+    variable root
+    variable stage
+    set cache ""
+    catch {
+        source [file join $root tests cffi raven.tcl]
+        set cache [cffi::RavenCacheDir]
+    }
+    set map {}
+    if {$stage ne ""} { lappend map $stage \$BUILD }
+    if {$cache ne ""} { lappend map $cache \$CACHE }
+    lappend map $root \$BOTLISH [file normalize ~] \$HOME
+    return [string map $map $text]
+}
+
 # Compiles the C files SOURCES with FLAGS into the archive ARCHIVE for TARGET.
 proc author::archive {target sources flags archive} {
     file mkdir [file dirname $archive]
@@ -117,24 +164,36 @@ proc author::archive {target sources flags archive} {
     file delete $archive
     exec [ar $target] rcs $archive {*}$objects
     file delete {*}$objects
+    return $archive
 }
 
-proc author::copyStripped {target from to} {
+# A stripped copy of the library FROM (its bytes, never a link) at TO.
+proc author::stripped {target from to} {
     file mkdir [file dirname $to]
-    # The library's bytes, never a link (a build's libX.so.0 is one).
     file delete $to
     pm::WriteNew $to [pm::ReadBytes $from]
     exec [strip $target] --strip-unneeded $to
+    return $to
 }
 
-proc author::binding {profile target dir} {
+# This checkout's source revision (BOTLISH_SOURCE_REVISION where the tree is
+# no Git checkout: tools/package-build/author.sh's container).
+proc author::revision {} {
+    variable root
+    if {[info exists ::env(BOTLISH_SOURCE_REVISION)] && $::env(BOTLISH_SOURCE_REVISION) ne ""} {
+        return $::env(BOTLISH_SOURCE_REVISION)
+    }
+    return [version git -C $root rev-parse HEAD]
+}
+
+# The directory of a committed generated binding.
+proc author::binding {profile target} {
     variable root
     set binding [file join $root generated c $profile $target $profile]
     if {![file isdirectory $binding]} {
         error "no committed $profile binding for $target ($binding)"
     }
-    file mkdir [file join $dir targets $target]
-    file copy $binding [file join $dir targets $target $profile]
+    return $binding
 }
 
 # The pinned Raven's checkout (tools/c-bindgen.tcl fetch raven).
@@ -144,29 +203,44 @@ proc author::ravenSource {} {
     return [lindex [split [string trim $fetched] \n] end]
 }
 
+# The Git identity of the checkout DIR (the author's git, on the author's
+# side): {commit C tree T}; the record's check recomputes the tree from the
+# files, without git.
+proc author::gitIdentity {dir {tag ""}} {
+    set identity [dict create object-format sha1 commit [exec git -C $dir rev-parse HEAD] tree [exec git -C $dir rev-parse HEAD^{tree}]]
+    if {$tag ne ""} {
+        dict set identity tag $tag
+        if {![catch {exec git -C $dir rev-parse refs/tags/$tag 2>/dev/null} object] && $object ne [dict get $identity commit]} {
+            dict set identity tag-object $object
+        }
+    }
+    return $identity
+}
+
 # The libX11 a cross build of Raven's X11 platform links, per target: the
 # Debian packages of that architecture (Ubuntu 24.04's, from
 # ports.ubuntu.com), pinned by SHA-256 -- the values of the archive's index
 # (noble-updates for libX11, noble for the protocol headers), whose
 # signature was checked against the Ubuntu archive key when they were
 # recorded (RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md, "The desktop build").
-# Only the author's build reads them: they are a link-time stand-in for the
-# target system's libX11.so.6, never packed.
+# The ports pool drops a superseded version, and Ubuntu's snapshot service
+# keeps no ports archive: a pin that cannot be fetched fails, naming it,
+# and is never replaced by another version. Only the author's build reads
+# them: a link-time stand-in for the target system's libX11.so.6, never
+# packed.
 namespace eval author {
     variable x11Packages {
         linux-aarch64 {
-            https://ports.ubuntu.com/ubuntu-ports/pool/main/libx/libx11/libx11-6_1.8.7-1ubuntu0.1_arm64.deb
+            pool/main/libx/libx11/libx11-6_1.8.7-1ubuntu0.1_arm64.deb
             57f0bee78ea23caa31520a565fb12fcbea1ee5ecfd4f2055f12dd0ac3698f439
-            https://ports.ubuntu.com/ubuntu-ports/pool/main/libx/libx11/libx11-dev_1.8.7-1ubuntu0.1_arm64.deb
+            pool/main/libx/libx11/libx11-dev_1.8.7-1ubuntu0.1_arm64.deb
             c67aedaed249c629628c24e717c5b550a066e246c678aa98098002ed0a8017e9
-            https://ports.ubuntu.com/ubuntu-ports/pool/main/x/xorgproto/x11proto-dev_2023.2-1_all.deb
+            pool/main/x/xorgproto/x11proto-dev_2023.2-1_all.deb
             3bf13a2ffb79ecd4014d438936014e5863f79eb59ebf76e8f43356271c90e7ce
         }
     }
 }
 
-# A directory holding TARGET's libX11 headers and libraries (usr/include,
-# usr/lib/TRIPLET), unpacked from the pinned packages once, in the cache.
 proc author::x11Sysroot {target} {
     variable x11Packages
     if {![dict exists $x11Packages $target]} {
@@ -180,13 +254,17 @@ proc author::x11Sysroot {target} {
     }
     file delete -force $dir
     file mkdir [file join $dir debs]
-    foreach {url sha} $packages {
-        set deb [file join $dir debs [file tail $url]]
-        exec curl -fsSL --retry 3 -o $deb $url
+    foreach {path sha} $packages {
+        set deb [file join $dir debs [file tail $path]]
+        set url https://ports.ubuntu.com/ubuntu-ports/$path
+        if {[catch {exec curl -fsSL --retry 3 -o $deb $url} message]} {
+            file delete -force $dir
+            error "[file tail $path]: not available from $url ($message): the pinned package may have been withdrawn from the pool; it is never replaced by another version (check a preserved copy against the pin, or pin a new version deliberately)"
+        }
         set got [pm::sha256::hex [pm::ReadBytes $deb]]
         if {$got ne $sha} {
             file delete -force $dir
-            error "[file tail $url]: sha256 $got, not the pinned $sha (a changed or substituted package: check it, and only then update the pin)"
+            error "[file tail $path]: sha256 $got, not the pinned $sha (a changed or substituted package: check it, and only then update the pin)"
         }
         exec dpkg-deb -x $deb [file join $dir root]
     }
@@ -194,120 +272,271 @@ proc author::x11Sysroot {target} {
     return $dir
 }
 
+# The CMake flags Raven's cross build adds to the desktop configuration's.
+# CMAKE_SKIP_RPATH: CMake otherwise records the build tree's library
+# directories as the library's RUNPATH -- here the cache path of the pinned
+# libX11, a path of the build machine, with an empty entry (the current
+# directory) after it. It made raven 0.3.1's AArch64 library differ between
+# machines and search the current directory at run time
+# (PACKAGE-MANAGER-MILESTONE-3.md, "Reproducibility").
+proc author::crossFlags {target} {
+    set arch [dict get [pm::target::facts $target] arch]
+    return [list -DCMAKE_SKIP_RPATH=ON -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$arch]
+}
+
 # libraven.so.0 of Raven's desktop configuration (X11 and Vulkan) built for
-# TARGET.
+# TARGET, and the build's description for the evidence.
 proc author::libraven {target} {
     variable root
     source [file join $root tests cffi raven.tcl]
+    set configuration [cffi::RavenConfiguration desktop]
+    set base {-DCMAKE_BUILD_TYPE=Release -DRAVEN_BUILD_SHARED=ON -DRAVEN_BUILD_EXAMPLES=OFF -DRAVEN_BUILD_TESTS=OFF -DRAVEN_BUILD_TOOLS=OFF}
+    set flags [concat $base [dict get $configuration flags] [list -DRAVEN_VULKAN_INCLUDE_DIR=\$VULKAN_HEADERS/include]]
     if {$target eq [pm::target::host]} {
-        return [file join [cffi::ravenBuild desktop] libraven.so.0]
+        set build [dict create library [file join [cffi::ravenBuild desktop] libraven.so.0] flags $flags \
+            compiler [version [cc $target] --version] inputs {}]
+        return $build
     }
     # Another architecture: Raven's own CMake build with its GNU cross
     # compiler, the desktop configuration's flags and pinned Vulkan headers,
     # and the target's libX11 (x11Sysroot), cached by a stamp as
     # tests/cffi/raven.tcl caches its builds.
-    set configuration [cffi::RavenConfiguration desktop]
     set commit [dict get [cffi::RavenSource] commit]
     set build [file join [cffi::RavenCacheDir] raven-cross $target-$commit-desktop-[string range [dict get $configuration vulkan] 0 11]]
-    set stamp "target $target\n[cffi::RavenStamp $configuration]"
+    set stamp "target $target\ncross [crossFlags $target]\n[cffi::RavenStamp $configuration]"
     set library [file join $build libraven.so.0]
     set stampFile [file join $build botlish-raven-configuration]
+    set arch [dict get [pm::target::facts $target] arch]
+    set sysroot [file join [x11Sysroot $target] root]
     if {![file isfile $stampFile] || [pm::ReadBytes $stampFile] ne $stamp || ![file exists $library]} {
-        set arch [dict get [pm::target::facts $target] arch]
-        set sysroot [file join [x11Sysroot $target] root]
+        file delete -force $build
         file mkdir $build
-        file delete $stampFile
-        exec cmake -S [ravenSource] -B $build -GNinja -DCMAKE_BUILD_TYPE=Release -DRAVEN_BUILD_SHARED=ON \
-            -DRAVEN_BUILD_EXAMPLES=OFF -DRAVEN_BUILD_TESTS=OFF -DRAVEN_BUILD_TOOLS=OFF \
+        exec cmake -S [ravenSource] -B $build -GNinja {*}$base \
             {*}[dict get $configuration flags] -DRAVEN_VULKAN_INCLUDE_DIR=[file join [cffi::VulkanHeaders] include] \
             -DX11_X11_INCLUDE_PATH=[file join $sysroot usr include] \
             -DX11_X11_LIB=[file join $sysroot usr lib $arch-linux-gnu libX11.so] \
-            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$arch -DCMAKE_C_COMPILER=[cc $target] >@stderr 2>@stderr
+            {*}[crossFlags $target] -DCMAKE_C_COMPILER=[cc $target] >@stderr 2>@stderr
         exec ninja -C $build raven >@stderr 2>@stderr
         pm::WriteNew $stampFile $stamp
     }
-    return $library
+    variable x11Packages
+    set inputs {}
+    foreach {path sha} [dict get $x11Packages $target] {
+        lappend inputs [dict create name [file tail $path] sha256 $sha source https://ports.ubuntu.com/ubuntu-ports/$path]
+    }
+    return [dict create library $library compiler [version [cc $target] --version] inputs $inputs \
+        flags [concat $flags [crossFlags $target] [list -DCMAKE_C_COMPILER=[cc $target] \
+            "-DX11_X11_INCLUDE_PATH=\$X11_SYSROOT/usr/include" "-DX11_X11_LIB=\$X11_SYSROOT/usr/lib/$arch-linux-gnu/libX11.so"]]]
 }
 
-# Refuses LIBRARY unless it is Raven's desktop build for TARGET: a shared
-# object of the target that loads libX11.so.6 (the X11 platform) and
-# exports the Vulkan renderer's API (raven_vulkan.h exists only in a Vulkan
-# build). The pack checks the same against the package's metadata; this
-# names the mistake -- a headless library where the desktop one belongs --
-# before anything is staged.
-proc author::checkDesktop {target library} {
-    set facts [pm::binary::inspect [pm::ReadBytes $library] $library]
-    set problems {}
-    if {[dict get $facts kind] ne "elf" || ![pm::native::Matches $target $facts]} {
-        lappend problems "it is [pm::binary::describe $facts], not a $target shared object"
-    } else {
-        if {"libX11.so.6" ni [dict get $facts needed]} {
-            lappend problems "it does not load libX11.so.6 (no X11 platform)"
-        }
-        if {"Rvulkan_get_instance" ni [dict get $facts symbols]} {
-            lappend problems "it does not export Rvulkan_get_instance (no Vulkan renderer)"
-        }
-    }
-    if {$problems ne ""} {
-        error "$library is not Raven's desktop build for $target: [join $problems {; }]"
-    }
+# ---------------------------------------------------------------------------
+# The evidence: what this script ran, stated by the author
+
+proc author::upstream {name repository identity directory} {
+    variable evidence
+    dict lappend evidence sources [dict create name $name role upstream repository $repository git $identity directory $directory]
 }
 
-# The package directory for NAME, assembled in the new directory STAGE (or
-# the repository's own, when it is packed as it is).
-proc author::assemble {name stage} {
+proc author::build {name targets outputs sources configuration toolchain flags steps {inputs {}}} {
+    variable evidence
+    set build [dict create name $name targets $targets outputs $outputs sources $sources configuration $configuration \
+        toolchain $toolchain flags [lmap flag $flags {rooted $flag}] steps [lmap step $steps {rooted $step}]]
+    if {[info exists ::env(BOTLISH_AUTHOR_IMAGE)] && $::env(BOTLISH_AUTHOR_IMAGE) ne ""} {
+        dict set build image $::env(BOTLISH_AUTHOR_IMAGE)
+    }
+    set environment [dict create]
+    foreach name {CC CFLAGS LDFLAGS SOURCE_DATE_EPOCH} {
+        if {[info exists ::env($name)] && $::env($name) ne ""} {
+            dict set environment $name [rooted $::env($name)]
+        }
+    }
+    if {$environment ne ""} { dict set build environment $environment }
+    if {$inputs ne ""} { dict set build inputs $inputs }
+    dict lappend evidence builds $build
+}
+
+proc author::generator {name version inputs outputs} {
+    variable evidence
+    dict lappend evidence generators [dict create name $name version $version inputs $inputs outputs $outputs]
+}
+
+# The evidence as the JSON text pm::release::readEvidence reads.
+proc author::evidenceText {name version} {
+    variable evidence
+    set S {apply {{text} {list str $text}}}
+    set value [list obj [list evidence {num 1} package [list obj [list name [list str $name] version [list str $version]]]]]
+    set members [lindex $value 1]
+    foreach key {sources builds generators} {
+        set items {}
+        foreach item [dict getdef $evidence $key {}] {
+            set fields {}
+            dict for {k v} $item {
+                switch -- $k {
+                    git - toolchain - environment {
+                        lappend fields $k [list obj [concat {*}[lmap kk [dict keys $v] {list $kk [list str [dict get $v $kk]]}]]]
+                    }
+                    targets - outputs - sources - flags - steps {
+                        lappend fields $k [list arr [lmap x $v {list str $x}]]
+                    }
+                    inputs {
+                        if {$key eq "generators"} {
+                            lappend fields $k [list arr [lmap x $v {list str $x}]]
+                        } else {
+                            lappend fields $k [list arr [lmap x $v {list obj [concat {*}[lmap kk [dict keys $x] {list $kk [list str [dict get $x $kk]]}]]}]]
+                        }
+                    }
+                    default { lappend fields $k [list str $v] }
+                }
+            }
+            lappend items [list obj $fields]
+        }
+        lappend members $key [list arr $items]
+    }
+    return [pm::json::encode [list obj $members]]
+}
+
+# ---------------------------------------------------------------------------
+# The recipes: each package's builds and statements
+
+proc author::sdl3 {dir targets} {
     variable root
-    set package [file join $root packages $name]
-    set descriptor [pm::descriptor::read [file join $package botlish.json] pack]
-    if {![pm::targets::Aware $descriptor]} {
-        return $package
+    variable stage
+    source [file join $root tests cffi sdl3.tcl]
+    set revision [revision]
+    foreach target $targets {
+        set binding [binding sdl3 $target]
+        botlish package stage $dir -target $target -modules $binding
+        generator "botlish c-bindgen sdl3 $target" "$revision" [list "\$BOTLISH/generated/c/sdl3/$target (committed)"] [list targets/$target/sdl3/]
+        # The thunk archive, built for the target by the binding generator.
+        set built [file join $stage shim-$target]
+        exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] build sdl3 -target $target -out $built
+        set archives [lsort [glob -directory $built *.a]]
+        if {$target eq "linux-x86_64"} {
+            # The pinned SDL3, built headless (tests/cffi/sdl3.tcl), stripped.
+            if {[cffi::sdl3Dir] eq ""} {
+                error "no SDL3 shared library for $target: run tclsh9.0 tests/cffi/sdl3.tcl"
+            }
+            set library [stripped $target [file join [cffi::sdl3Dir] libSDL3.so.0] [file join $stage sdl3-$target libSDL3.so.0]]
+            botlish native add $library -target $target -name SDL3 -symbol SDL_GetVersion -symbol SDL_Init -package $dir
+            build "sdl3 $target" [list $target] [list targets/$target/native/libSDL3.so.0] {} headless \
+                [dict create cc [version [cc $target] --version] cmake [version cmake --version] ninja [version ninja --version]] \
+                [list -DSDL_UNIX_CONSOLE_BUILD=ON] [list "tclsh9.0 \$BOTLISH/tests/cffi/sdl3.tcl" "[strip $target] --strip-unneeded libSDL3.so.0"]
+        }
+        botlish native require SDL3 -target $target -origin system -identity libSDL3.so.0 -version 3 -pkg-config sdl3 -package $dir
+        foreach archive $archives {
+            # The generator names its archive libNAME.a, NAME the binding's
+            # extern c library: the author's knowledge, stated here.
+            regexp {^lib(.*)\.a$} [file tail $archive] -> name
+            botlish native add $archive -target $target -name $name -package $dir
+            build "sdl3 thunks $target" [list $target] [list targets/$target/native/[file tail $archive]] {} thunks \
+                [dict create cc "[version clang --version] (--target, tools/cheader's toolchain)"] {} \
+                [list "tclsh9.0 \$BOTLISH/tools/c-bindgen.tcl build sdl3 -target $target"]
+        }
     }
+}
+
+proc author::raven {dir targets} {
+    variable root
+    variable stage
+    source [file join $root tests cffi raven.tcl]
+    set checkout [ravenSource]
+    set pinned [cffi::RavenSource]
+    source [file join $root tests cffi raven.tcl]
+    set vulkan [cffi::VulkanHeaders]
+    upstream raven https://github.com/oscar-soirey/Raven [gitIdentity $checkout [dict get $pinned tag]] $checkout
+    upstream vulkan-headers https://github.com/KhronosGroup/Vulkan-Headers.git [gitIdentity $vulkan v1.3.290] $vulkan
+    set revision [revision]
+    # Raven's license and the notices its terms require to travel with the
+    # library (its own NOTICE, the third-party components it compiles in:
+    # THIRD_PARTY.md), staged as common files.
+    set notices {}
+    foreach path {LICENSE NOTICE THIRD_PARTY.md third_party/stb/LICENSE third_party/roboto/LICENSE third_party/roboto-mono/LICENSE} {
+        set as licenses/raven[expr {[file dirname $path] eq "." ? "" : "/[file dirname $path]"}]
+        botlish package stage $dir -files [file join $checkout {*}[split $path /]] -as $as
+        lappend notices licenses/raven/$path
+    }
+    set noticeOptions [concat {*}[lmap notice $notices {list -notice $notice}]]
+    foreach target $targets {
+        botlish package stage $dir -target $target -modules [binding raven $target]
+        generator "botlish c-bindgen raven $target" "$revision" [list "\$BOTLISH/generated/c/raven/$target (committed)"] [list targets/$target/raven/]
+        # The event bridge, built for the target against the pinned headers.
+        set flags [list -std=c11 -O2 -Wall -Wextra -Werror -fPIC -pthread -I[file join $checkout include]]
+        set bridge [archive $target [list [file join $dir native raven_bridge.c]] $flags [file join $stage bridge-$target libraven_bridge.a]]
+        botlish native add $bridge -target $target -name raven_bridge -package $dir
+        build "raven bridge $target" [list $target] [list targets/$target/native/libraven_bridge.a] {raven} bridge \
+            [dict create cc [version [cc $target] --version] ar [version [ar $target] --version]] \
+            [lmap flag $flags {string map [list [file join $checkout include] \$RAVEN/include] $flag}] \
+            [list "[cc $target] -c native/raven_bridge.c" "[ar $target] rcs libraven_bridge.a raven_bridge.o"]
+        # Raven's desktop build (X11 and Vulkan; it runs headless too).
+        set built [libraven $target]
+        set library [stripped $target [dict get $built library] [file join $stage raven-$target libraven.so.0]]
+        botlish native add $library -target $target -name raven -symbol Rinit_ex -symbol Rvulkan_get_instance \
+            -license "Apache-2.0 AND OFL-1.1 AND (MIT OR Unlicense)" {*}$noticeOptions -package $dir
+        build "raven desktop $target" [list $target] [list targets/$target/native/libraven.so.0] {raven vulkan-headers} desktop \
+            [dict create cc [dict get $built compiler] cmake [version cmake --version] ninja [version ninja --version] \
+                strip [version [strip $target] --version] packages [debs [expr {$target eq [pm::target::host]
+                    ? {gcc-13 libc6-dev libx11-dev binutils} : {gcc-13-aarch64-linux-gnu libc6-dev-arm64-cross binutils-aarch64-linux-gnu}}]]] \
+            [dict get $built flags] [list "cmake -GNinja" "ninja raven" "[strip $target] --strip-unneeded libraven.so.0"] [dict get $built inputs]
+        # What the library needs that the system provides (its loader
+        # dependency), and what it opens only at run time.
+        botlish native require X11 -target $target -origin system -identity libX11.so.6 -symbol XOpenDisplay -package $dir
+        botlish native require vulkan -target $target -runtime capability -capability desktop -identity libvulkan.so.1 -loaded-by raven \
+            -purpose "the Vulkan loader, opened by Raven's renderer when a program starts raven::desktop(); a headless program never opens it" -package $dir
+        botlish native require vulkan-driver -target $target -runtime capability -capability desktop -kind facility -loaded-by raven \
+            -purpose "a Vulkan driver (a GPU's, or Mesa's lavapipe) the loader finds, able to present to an X11 window: no file a package can name" -package $dir
+        botlish native require x11-display -target $target -runtime capability -capability desktop -kind facility \
+            -purpose "an X11 display (DISPLAY): an X server or Xvfb, for raven::desktop() windows" -package $dir
+        botlish native require x11-xcb -target $target -runtime optional -identity libX11-xcb.so.1 -loaded-by raven \
+            -purpose "opened by the renderer only for a Vulkan driver that presents through XCB alone" -package $dir
+        botlish native require dbus -target $target -runtime capability -capability accessibility -identity libdbus-1.so.3 -loaded-by raven \
+            -purpose "D-Bus, opened by Raven's AT-SPI accessibility bridge when a program enables accessibility" -package $dir
+    }
+}
+
+proc author::event_loop_linux {dir targets} {
+    variable stage
+    foreach target $targets {
+        set flags {-O2 -Wall -Wextra -Werror -fPIC -pthread}
+        set adapter [archive $target [list [file join $dir native event_loop_linux.c]] $flags [file join $stage evl-$target libevent_loop_linux.a]]
+        botlish native add $adapter -target $target -name event_loop_linux -package $dir
+        build "event loop adapter $target" [list $target] [list targets/$target/native/libevent_loop_linux.a] {} adapter \
+            [dict create cc [version [cc $target] --version] ar [version [ar $target] --version]] $flags \
+            [list "[cc $target] -c native/event_loop_linux.c" "[ar $target] rcs libevent_loop_linux.a event_loop_linux.o"]
+        # The public header, for consumers' own C (native plan -include).
+        botlish package stage $dir -target $target -headers [file join $::root packages event_loop_linux native botlish_event_loop.h]
+    }
+    # The release's header is each target's include/ (above), not a common
+    # file beside the adapter's source.
+    file delete [file join $dir native botlish_event_loop.h]
+}
+
+# The release directory of the package NAME, prepared in STAGE: packages/NAME
+# copied (its own files and authoring botlish.json), then its recipe run.
+# The evidence the recipe gathered is written beside it.
+proc author::prepare {name stage} {
+    variable root
+    variable evidence
+    set ::author::stage $stage
+    set evidence [dict create]
+    set package [file join $root packages $name]
     set dir [file join $stage $name]
     file mkdir $dir
-    # The common files: the package directory as it is.
     foreach entry [glob -nocomplain -tails -directory $package *] {
         file copy [file join $package $entry] [file join $dir $entry]
     }
-    foreach target [dict keys [dict get $descriptor targets]] {
-        set native [file join $dir targets $target native]
-        switch -- $name {
-            sdl3 {
-                binding sdl3 $target $dir
-                set built [file join $stage shim-$target]
-                exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] build sdl3 -target $target -out $built
-                file mkdir $native
-                foreach archive [glob -directory $built *.a] {
-                    file copy $archive $native
-                }
-                foreach library [dict get $descriptor targets $target libraries] {
-                    if {[dict get $library name] eq "SDL3" && [dict get $library origin] eq "bundled"} {
-                        source [file join $root tests cffi sdl3.tcl]
-                        if {[cffi::sdl3Dir] eq ""} {
-                            error "no SDL3 shared library for $target: run tclsh9.0 tests/cffi/sdl3.tcl"
-                        }
-                        copyStripped $target [file join [cffi::sdl3Dir] libSDL3.so.0] [file join $dir targets $target [dict get $library file]]
-                    }
-                }
-            }
-            raven {
-                binding raven $target $dir
-                archive $target [list [file join $package native raven_bridge.c]] \
-                    [list -std=c11 -O2 -Wall -Wextra -Werror -fPIC -pthread -I[file join [ravenSource] include]] \
-                    [file join $native libraven_bridge.a]
-                set library [libraven $target]
-                checkDesktop $target $library
-                copyStripped $target $library [file join $native libraven.so.0]
-            }
-            event_loop_linux {
-                archive $target [list [file join $package native event_loop_linux.c]] \
-                    {-O2 -Wall -Wextra -Werror -fPIC -pthread} [file join $native libevent_loop_linux.a]
-            }
-            default {
-                error "packages/$name names targets, and this tool knows no recipe for it"
-            }
-        }
+    set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
+    set targets [dict getdef [dict create sdl3 {linux-aarch64 linux-x86_64} raven {linux-aarch64 linux-x86_64} \
+        event_loop_linux {linux-aarch64 linux-x86_64}] $name {}]
+    if {$targets eq ""} {
+        return [list $dir ""]
     }
-    return $dir
+    if {[info commands ::author::$name] eq ""} {
+        error "packages/$name has no recipe here"
+    }
+    $name $dir $targets
+    set path [file join $stage $name.evidence.json]
+    pm::WriteNew $path [evidenceText [dict get $descriptor name] [dict get $descriptor version]]
+    return [list $dir $path]
 }
 
 file mkdir $out
@@ -315,10 +544,16 @@ set status 0
 foreach name $names {
     set stage [file tempdir botlish-package-repository]
     try {
-        set dir [author::assemble $name $stage]
-        set given [dict create -out [list $out]]
-        if {$force} { dict set given -force 1 }
-        pm::commands::pack [list $dir] $given
+        lassign [author::prepare $name $stage] dir evidence
+        set pack [list package pack $dir -out $out]
+        if {$evidence ne ""} {
+            # The audit, as an author reads it before packing.
+            author::botlish native audit $dir
+            lappend pack -evidence $evidence
+        }
+        if {$force} { lappend pack -force }
+        set output [author::botlish {*}$pack]
+        puts [join [lrange [split $output \n] 0 end] \n]
         set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
         if {[pm::targets::Aware $descriptor]} {
             puts "  targets [join [lsort [dict keys [dict get $descriptor targets]]] {, }]"

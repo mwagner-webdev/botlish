@@ -306,11 +306,14 @@ proc pm::author::Destination {target name facts} {
 }
 
 # The fields of a library entry that differ between OLD and NEW, as text.
+# An author's statement (symbols, license, notices) made where none was is
+# an addition, not a contradiction; any other difference is one.
 proc pm::author::Differences {old new keys} {
     set out {}
     foreach key $keys {
         set a [dict getdef $old $key ""]
         set b [dict getdef $new $key ""]
+        if {$key in {symbols license notices} && $a eq ""} continue
         if {$a ne $b} {
             lappend out "$key [expr {$a eq "" ? "(none)" : "\"[join $a {, }]\""}] -> [expr {$b eq "" ? "(none)" : "\"[join $b {, }]\""}]"
         }
@@ -412,7 +415,7 @@ proc pm::author::AddNative {pkg file options} {
     }
     dict set entry libraries $libraries
     set descriptor [SetTarget $descriptor $target $entry]
-    set changed [expr {$old eq "" || [Differences $old $library $keys] ne "" || $fileState ne "unchanged" || ($importState ni {"" unchanged})}]
+    set changed [expr {$old eq "" || [dict filter $old key {*}$keys] ne [dict filter $library key {*}$keys] || $fileState ne "unchanged" || ($importState ni {"" unchanged})}]
     set schema [Save $pkg $descriptor]
     # The report: what was established, and what was not.
     set lines {}
@@ -448,7 +451,7 @@ proc pm::author::AddNative {pkg file options} {
     }
     lappend missing "which libraries it opens at run time (native require NAME -target $target -runtime ...)"
     lappend lines "  not established from the file: [join $missing {; }]"
-    lappend lines "  botlish.json: targets.$target.libraries: $name [expr {$old eq "" ? "added" : ($changed ? "replaced" : "unchanged")}] (schema $schema)"
+    lappend lines "  botlish.json: targets.$target.libraries: $name [expr {$old eq "" ? "added" : ($changed ? "updated" : "unchanged")}] (schema $schema)"
     foreach note $notes {
         lappend lines "  note: $note"
     }
