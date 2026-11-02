@@ -698,6 +698,7 @@ CPU within a few percent (one thread). The output is
 | `audit/actor/tools/mutate.tcl`, `mutants.txt` | the mutation harness |
 | `bench/actor.tcl`, `bench/actor/` | the performance report |
 | `audit/actor/experiments/` | the typed routes section 4.3 found closed |
+| `audit/actor/results/` | the benchmark's and the mutation run's output (sections 14, 15) |
 | `compilerpedia/topics/concepts.topic` (`concept.actors`), `compilerpedia/generated/stdlib.topic` | the reference |
 | `audit/golden/migration/census/actor.tsv` | the tests' census rows |
 
