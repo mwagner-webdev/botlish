@@ -31,11 +31,17 @@
 #   native.tcl      native verification, the native closure, the plan
 #   view.tcl        target views: one package tree per target
 #   deploy.tcl      placing a target's bundled shared libraries
+#   install.tcl     resolution, plans, staging and transactions
+#   commands.tcl    the commands and the command line
+#
+# and, loaded only by the operations of the author's side (pm::authoring:
+# native add, require and audit, package stage, compare and inspect, the
+# pack of a native package or one with evidence), so that no consumer's
+# command and no pure-Botlish pack pays for them:
+#
 #   author.tcl      the author's side: native add/require, staging, the audit
 #   sha1.tcl        SHA-1, for Git object identities only (provenance checks)
 #   release.tcl     provenance records and the comparison of release candidates
-#   install.tcl     resolution, plans, staging and transactions
-#   commands.tcl    the commands and the command line
 #
 # Nothing here executes anything a package holds: no hook, no script, no
 # binary, no compilation. Installing a package is writing its files. The
@@ -50,10 +56,20 @@ namespace eval pm {
     variable here [file join $root pm]
 }
 
-foreach pm::file {json sha256 sha1 version target binary targets descriptor archive catalog state native view deploy author release install commands} {
+foreach pm::file {json sha256 version target binary targets descriptor archive catalog state native view deploy install commands} {
     source [file join $pm::here $pm::file.tcl]
 }
 unset pm::file
+
+# Loads the author's side (author.tcl, sha1.tcl, release.tcl) once, at the
+# global level, for the operations that use it.
+proc pm::authoring {} {
+    if {[info exists ::pm::authoringLoaded]} return
+    foreach file {sha1 author release} {
+        uplevel #0 [list source [file join $::pm::here $file.tcl]]
+    }
+    set ::pm::authoringLoaded 1
+}
 
 # Raises an operation error {PM KIND} with MESSAGE: the command reports it
 # and exits 1. (A plain error, raised here: never `return -level 2`, which a

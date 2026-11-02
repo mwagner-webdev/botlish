@@ -839,7 +839,7 @@ proc pm::release::compare {a b {ra ""} {rb ""}} {
         lappend lines "two different candidates of $label: a release is one artifact, so at most one of them may be published as $label (the other is a rebuild that did not reproduce it)"
     }
     if {$ra ne "" && $rb ne ""} {
-        lappend lines {*}[RecordDifferences $ra $rb]
+        lappend lines {*}[RecordDifferences $ra $rb $identical]
     }
     return [dict create identical $identical lines $lines]
 }
@@ -934,7 +934,7 @@ proc pm::release::FileDifferences {a b path} {
     return [list "the first differing byte is at offset $i"]
 }
 
-proc pm::release::RecordDifferences {ra rb} {
+proc pm::release::RecordDifferences {ra rb identical} {
     set lines {}
     set va [pm::json::payload [dict get $ra value]]
     set vb [pm::json::payload [dict get $rb value]]
@@ -951,7 +951,11 @@ proc pm::release::RecordDifferences {ra rb} {
         lappend lines "records: made by different package manager sources (producer), a difference of the tool, not of the release"
     }
     if {$different eq ""} {
-        lappend lines "records: the same declared inputs (sources, builds, generators, notes): the builds were described identically, so what differs is an input neither record states"
+        if {$identical} {
+            lappend lines "records: the same declared inputs (sources, builds, generators, notes)"
+        } else {
+            lappend lines "records: the same declared inputs (sources, builds, generators, notes): the builds were described identically, so what differs is an input neither record states"
+        }
     } else {
         lappend lines "records: the declared inputs differ in [join $different {, }] (equal: [Or $same])"
         foreach key $different {

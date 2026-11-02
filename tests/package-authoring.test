@@ -13,6 +13,8 @@
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot pm pm.tcl]
+# The author's side, which pm.tcl leaves to the operations that use it.
+pm::authoring
 
 set mainScript [file join $::projectRoot main.tcl]
 set ::paCounter 0
@@ -314,10 +316,10 @@ test pa-stage-modules {generated modules are staged at their namespace's path in
     list [dict get $first status] [string match "*skipped 1 hidden entry*" [dict get $first out]] [string match "*: unchanged*" [dict get $again out]] \
         [kindOf [dict get $conflict err]] [dict get $replaced status] \
         [lsort [glob -tails -directory [file join $pkg targets linux-x86_64 foo] -types f *]] \
-        [file isfile [file join $pkg targets linux-aarch64 foo sub b.bot]] \
+        [file isfile [file join $pkg targets linux-aarch64 foo sub b.bot]] [file exists [file join $pkg targets linux-x86_64 foo sub]] \
         [kindOf [dict get $outside err]] [kindOf [dict get $notModule err]] [string match "*symbolic link*" [dict get $link err]] \
         [lsort [dict keys [dict get [descriptorOf $pkg] targets]]]
-} -cleanup cleanup -result {0 1 1 CONFLICT 0 a.bot 1 AUTHOR AUTHOR 1 {linux-aarch64 linux-x86_64}}
+} -cleanup cleanup -result {0 1 1 CONFLICT 0 a.bot 1 0 AUTHOR AUTHOR 1 {linux-aarch64 linux-x86_64}}
 
 test pa-stage-headers-and-files {public headers go to each target's include/ and are declared its header directory (only C headers); common files are staged file by file into one directory, never into a target's directory} -body {
     set src [fresh src]
@@ -371,10 +373,11 @@ test pa-audit-runtime-search-paths {a bundled library carrying the build machine
         botlish native add $lib -target linux-x86_64 -name $name -package $pkg
         set r [botlish native audit $pkg]
         lappend out [list [dict get $r status] [llength [regexp -all -inline {problem: library \S+ carries} [dict get $r out]]] \
-            [regexp {note: library o searches \$ORIGIN/\.\./lib} [dict get $r out]]]
+            [regexp {note: library o searches \$ORIGIN/\.\./lib} [dict get $r out]] \
+            [regexp {problem: library e carries an empty run-time search path entry} [dict get $r out]]]
     }
     set out
-} -cleanup cleanup -result {{1 1 0} {1 2 0} {0 0 1}}
+} -cleanup cleanup -result {{1 1 0 0} {1 2 0 1} {0 0 1 0}}
 
 test pa-audit-native-closure-errors {the audit catches what the closure cannot hold: a bundled library that is a platform library, two libraries with one loader identity, two static archives defining one symbol, a native binary no library declares} -constraints {linuxCc} -body {
     set bin [fresh bin]
@@ -475,22 +478,41 @@ test pa-schema-raised-only-when-needed {an operation raises botlish.json's schem
 # ---------------------------------------------------------------------------
 # 6. The failed-system-library diagnostic
 
-test pa-failed-system-library-one-diagnostic {a declared system library this system lacks is one diagnostic naming the library and the package instance that declares it -- never followed by advice to declare the dependency the package already declares; an undeclared need is still reported} -constraints {linuxCc} -body {
+test pa-failed-system-library-one-diagnostic {a declared system library this system lacks is one diagnostic naming the library and the package instance that declares it -- never followed by advice to declare the dependency the package already declares; an undeclared need beside it (a package another tool packed, without the audit) is still reported} -constraints {linuxCc} -body {
     set bin [fresh bin]
-    set stub [sharedLibrary [file mkdir [file join $bin stub]][file join $bin stub] libzzghost.so.3 libzzghost.so.3 ghost_value]
-    set lib [sharedLibrary $bin libuser.so.1 libuser.so.1 user_value -L[file join $bin stub] -l:libzzghost.so.3 -Wl,--no-as-needed]
+    set stubs [file join $bin stub]
+    file mkdir $stubs
+    sharedLibrary $stubs libzzghost.so.3 libzzghost.so.3 ghost_value
+    sharedLibrary $stubs libzznothere.so.4 libzznothere.so.4 nothere_value
+    # --no-as-needed first: the toolchain's default --as-needed would drop
+    # a library the code never calls, and there would be no need to test.
+    set lib [sharedLibrary $bin libuser.so.1 libuser.so.1 user_value -Wl,--no-as-needed -L$stubs -l:libzzghost.so.3]
+    set lib2 [sharedLibrary $bin libuser2.so.1 libuser2.so.1 user2_value -Wl,--no-as-needed -L$stubs -l:libzzghost.so.3 -l:libzznothere.so.4]
+    set needs [dict get [pm::binary::inspect [pm::ReadBytes $lib] $lib] needed]
+    set repo [fresh repo]
     set pkg [authorPackage needy]
     botlish native add $lib -target linux-x86_64 -name user -package $pkg
     botlish native require zzghost -target linux-x86_64 -origin system -identity libzzghost.so.3 -package $pkg
-    set repo [fresh repo]
     set packed [botlish package pack $pkg -out $repo]
     set app [fresh app]
     set r [botlish add [file join $repo needy-1.0.0.botpkg] -project $app]
     set lines [lsearch -all -inline [split [dict get $r err] \n] "  *"]
-    list [dict get $packed status] [dict get $r status] [llength $lines] \
+    set pkg2 [authorPackage needy2]
+    botlish native add $lib2 -target linux-x86_64 -name user2 -package $pkg2
+    botlish native require zzghost -target linux-x86_64 -origin system -identity libzzghost.so.3 -package $pkg2
+    set refused [botlish package pack $pkg2 -out [fresh refused]]
+    packRaw $pkg2 $repo
+    set app2 [fresh app]
+    set r2 [botlish add [file join $repo needy2-1.0.0.botpkg] -project $app2]
+    set lines2 [lsearch -all -inline [split [dict get $r2 err] \n] "  *"]
+    list [expr {"libzzghost.so.3" in $needs}] [dict get $packed status] [dict get $r status] [llength $lines] \
         [string match "*system library zzghost (libzzghost.so.3 or libzzghost.so) is not installed*(declared by instance needy)*" [lindex $lines 0]] \
-        [regexp {neither part of linux-x86_64's platform} [dict get $r err]]
-} -cleanup cleanup -result {0 1 1 1 0}
+        [regexp {neither part of linux-x86_64's platform} [dict get $r err]] \
+        [dict get $refused status] [dict get $r2 status] [llength $lines2] \
+        [llength [lsearch -all $lines2 "*libzzghost.so.3*is not installed*(declared by instance needy2)*"]] \
+        [llength [lsearch -all $lines2 "*user2 needs libzznothere.so.4, which is neither part of linux-x86_64's platform*"]] \
+        [llength [lsearch -all $lines2 "*needs libzzghost.so.3*"]]
+} -cleanup cleanup -result {1 0 1 1 1 0 1 1 2 1 1 0}
 
 # ---------------------------------------------------------------------------
 # 7. Provenance records
@@ -604,6 +626,10 @@ test pa-provenance-deterministic {a record is canonical and deterministic: the s
         [dict get $stale status] $reformatted [string match "*canonical form*" $message]
 } -cleanup cleanup -result {1 0 1 1 0 1 1}
 
+test pa-authoring-loaded-on-demand {the author's side (author.tcl, sha1.tcl, release.tcl) is loaded only by the operations that use it: sourcing the package manager, as every consumer command does, defines none of it} -body {
+    exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; puts \[list \[info exists ::pm::authoringLoaded\] \[llength \[info procs ::pm::author::*\]\] \[llength \[info procs ::pm::release::*\]\] \[llength \[info procs ::pm::sha1::*\]\]\]; pm::authoring; puts \[expr {\[llength \[info procs ::pm::author::*\]\] > 0 && \[llength \[info procs ::pm::release::*\]\] > 0 && \[llength \[info procs ::pm::sha1::*\]\] > 0}\]"
+} -result "0 0 0 0\n1"
+
 test pa-sha1-backends {SHA-1 (Git object identities only) agrees between the system's tool and the Tcl implementation around block boundaries and on FIPS 180-4's vectors; the tool is the system's, at its fixed path: a lying sha1sum first on PATH is never run} -constraints {unixFiles} -body {
     set agree 1
     foreach n {0 1 55 56 63 64 65 4095 4096 4097 100000} {
@@ -615,7 +641,7 @@ test pa-sha1-backends {SHA-1 (Git object identities only) agrees between the sys
     writeText [file join $dir sha1sum] "#!/bin/sh\ntouch [file join $dir ran]\necho 0000000000000000000000000000000000000000  -\n"
     file attributes [file join $dir sha1sum] -permissions 0o755
     set digest [withEnvironment [list PATH $dir:$::env(PATH)] {
-        exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; puts \[pm::sha1::hex \[string repeat a 1000000\]\]"
+        exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; pm::authoring; puts \[pm::sha1::hex \[string repeat a 1000000\]\]"
     }]
     list $agree [pm::sha1::TclHex abc] $digest [file exists [file join $dir ran]]
 } -cleanup cleanup -result {1 a9993e364706816aba3e25717850c26c9cd0d89d 34aa973cd4c4daa4f61eeb2bdbad27316534016f 0}
@@ -643,6 +669,14 @@ test pa-compare {package compare tells two candidates of one release apart: iden
         [string match "*differs: t/native/libfoo.so.1*RUNPATH: \"/opt/a\" and \"/opt/bbb\"*GNU build ID*sections whose bytes differ: *.dynstr*" [dict get $different out]] \
         [string match "*at most one of them may be published as foo 1.0.0*" [dict get $different out]]
 } -cleanup cleanup -result {0 1 1 1 1}
+
+test pa-compare-records {compare reads the two records' declared inputs: identical artifacts described identically are only that; different artifacts described identically point at an input neither record states; a differing declared input is named} -body {
+    set r {value {obj {sources {arr {}} builds {arr {}} generators {arr {}} notes {arr {}} producer {obj {}}}}}
+    set r2 {value {obj {sources {arr {}} builds {arr {{obj {target {str linux-x86_64}}}}} generators {arr {}} notes {arr {}} producer {obj {}}}}}
+    list [pm::release::RecordDifferences $r $r 1] \
+        [string match "*described identically, so what differs is an input neither record states*" [pm::release::RecordDifferences $r $r 0]] \
+        [string match "*declared inputs differ in builds*" [pm::release::RecordDifferences $r $r2 0]]
+} -result {{{records: the same declared inputs (sources, builds, generators, notes)}} 1 1}
 
 test pa-compare-archive-members {for two static archives, compare names the member whose bytes differ and the section inside it} -constraints {linuxCc} -body {
     set bin [fresh bin]

@@ -4885,7 +4885,9 @@ package directory and its release; nothing else. Keep it so:
   differs is a CONFLICT unless `-replace`; staging copies regular files
   only (never follows a link), and `-replace` makes a directory exactly its
   source. An operation raises botlish.json's schema only to what its
-  contents need.
+  contents need. The author's side (author.tcl, sha1.tcl, release.tcl)
+  is loaded by `pm::authoring`, only for the operations that use it: never
+  source it with the rest of `pm/`, which every consumer command loads.
 * Run-time dependencies (schema 3's `runtime`: a library opened by name, a
   facility) are never loader dependencies: never in `needs`, never in the
   link, never a problem of the native plan, never a reason an installation

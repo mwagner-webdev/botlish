@@ -711,6 +711,9 @@ proc pm::commands::pack {words given} {
     # package is packed only when every target's mandatory native closure
     # is complete; a pure-Botlish package goes on as in PM-1.
     set evidence ""
+    if {[Option $given -evidence] ne "" || [pm::targets::Aware $descriptor]} {
+        pm::authoring
+    }
     if {[Option $given -evidence] ne ""} {
         set evidence [pm::release::readEvidence [file normalize [Option $given -evidence]]]
     }
@@ -929,6 +932,7 @@ proc pm::commands::inspect {words given} {
     if {[llength $words] != 1} {
         pm::cli::UsageError "package inspect takes one FILE.botpkg"
     }
+    pm::authoring
     set artifact [pm::catalog::Load [lindex $words 0] [lindex $words 0]]
     set descriptor [dict get $artifact descriptor]
     puts "[dict get $artifact name] [dict get $artifact version]"
@@ -1040,6 +1044,7 @@ proc pm::commands::compare {words given} {
     if {[llength $words] != 2} {
         pm::cli::UsageError "package compare takes two FILE.botpkg: two candidates of one release"
     }
+    pm::authoring
     set records [dict getdef $given -provenance {}]
     if {[llength $records] ni {0 2}} {
         pm::cli::UsageError "-provenance is given twice or not at all: the records of A and of B"
@@ -1305,6 +1310,7 @@ proc pm::commands::native_deploy {words given} {
 # The package directory an author's command works in: DIR (WORDS), else
 # -package, else the current directory.
 proc pm::commands::AuthorPackage {words given {positional 0}} {
+    pm::authoring
     set dir [Option $given -package [pwd]]
     if {$positional && $words ne ""} {
         if {[llength $words] > 1 || [dict exists $given -package]} {

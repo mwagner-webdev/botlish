@@ -25,8 +25,9 @@ unsigned provenance record bound to the artifact's SHA-256. SDL3, Raven and
 the Linux event-loop adapter are released this way; their recipes keep only
 their builds and their authors' statements. The 0.3.1 cross-machine
 difference of Raven was traced to one RUNPATH string, fixed, and the
-releases now reproduce byte for byte in two independently initialized
-builds of a pinned author image.
+releases now reproduce byte for byte from a pinned author image: in two
+fresh containers here and on two separate GitHub runners, each equal to
+the release recorded for its version.
 
 This is milestone PM-3 of PACKAGE-ECOSYSTEM-ROADMAP.md. The normative
 formats are BOTLISH-JSON.md section 13 (schema 3) and BOTPKG-PROVENANCE.md
@@ -96,7 +97,7 @@ and 2 stay in the recipe (they are each package's own).
 | `package inspect`: schema, run-time dependencies, licenses, bindings, each target's closure status, `-provenance` | **Executed** |
 | SDL3/sdlkit, Raven, the event loop authored through the generic commands; `packages/*/botlish.json` hold no native metadata | **Executed** (section H; `pw-native-metadata-derived`) |
 | the 0.3.1 discrepancy explained: an AArch64 RUNPATH holding the build machine's cache path | **Executed** (section G) |
-| a pinned author image; two independently initialized builds byte-identical (artifacts and records), equal to the host's | **Executed** here (section G); on two GitHub runners: see section G's CI line |
+| a pinned author image; independently initialized builds byte-identical (artifacts and records), equal to the host's and to the recorded releases | **Executed**: two containers here, and two GitHub runners each building the image itself (section G) |
 | release ledger: one version, one artifact; a rebuild that does not reproduce is a CANDIDATE, refused with `-release` | **Executed** (`pw-release-ledger`) |
 | the single-file compiler authors a native package with no compiler and no native backend installed | **Executed** (`single/smoke-test.sh`'s new check) |
 | the clean room with raven 0.3.2: install, headless example, a real X11/Vulkan window driven through the X server, a relocated executable | **Executed**: 33 of 33 checks (section I) |
@@ -730,15 +731,15 @@ empty cache, at the same commit:
 | commit bb99687, build A | `d4c2d1df` (0.2.1) | `2492c596` | `9d94f187` | `3746cece` | -- |
 | commit bb99687, build B | identical | identical | identical | identical | all 3 identical |
 | commit d80d5d6 (the fixed image), builds A and B with `-release` | the recorded release | the recorded release | the recorded release | the recorded release | all 3 identical between A and B |
+| commit d80d5d6, two GitHub runners (run 41530248818: runners 1000019397 and 1000019399, each building the image) | `d4c2d1df`, the recorded release | `2492c596`, the recorded release | `9d94f187`, the recorded release | `3746cece`, the recorded release | all 3 identical between the runners (`cmp`) |
 
 Both builds of each pair are byte for byte identical, artifacts and
 provenance records alike; the pinned image's outputs equal this host's
-(the same toolchain versions). Not yet established by this report: two
-*different machines* building the pinned image. That is CI's
-`package-reproducibility.yml` -- two GitHub runners, each building the image
-itself and every package with `-release` against the recorded digests,
-compared file for file -- which was pushed with this milestone; its result
-is the "CI" line below.
+(the same toolchain versions). Two *different machines* building the
+pinned image is CI's `package-reproducibility.yml`: two GitHub runners,
+each building the image itself and every package with `-release` against
+the recorded digests, then a third job comparing them with `package
+compare` and `cmp` (the "CI" paragraph below).
 
 **CI**: the workflow's first run (41527433764, commit bb99687) found a
 defect of the image, not of the packages: on a runner, with no proxy, the
@@ -749,8 +750,19 @@ host's own (`/etc/ssl/certs/ca-certificates.crt` on a runner) or a
 proxy's -- used during the build and removed (commit d80d5d6); TLS is
 verified everywhere. The two images built here before and after the fix
 hold the same 224 packages, and the builds of the fixed image reproduce
-every recorded release (the table above, `-release`). The two-runner
-result of the fixed workflow: RESULT-PENDING.
+every recorded release (the table above, `-release`). The fixed
+workflow's run (41530248818, commit d80d5d6; **Executed**, its logs read):
+both runners built the image from the Dockerfile (65 and 77 s) and all four
+packages from fresh containers (96 and 108 s); each printed `release: the
+recorded release of NAME VERSION (packages/RELEASES.tsv)` for every
+package; the comparing job found every artifact `identical: the same
+bytes, one artifact` (`d4c2d1df`, `2492c596`, `9d94f187`, `3746cece`, the
+ledger's digests) and the three provenance records byte-identical. So the
+releases reproduce byte for byte on two separate machines and on this one;
+the 0.3.1 difference does not recur. (That run's output also showed a
+wording defect of `package compare`: for identical artifacts with records
+it added "so what differs is an input neither record states". It now says
+only that the declared inputs are the same; `pa-compare-records`.)
 
 ### Release immutability
 
@@ -829,13 +841,14 @@ Every command with `LANG=C.utf8 LC_ALL=C.utf8` and a private `-tmpdir`.
 | command | result |
 |---|---|
 | `tclsh9.0 tests/local.tcl -jobs 3 tests/package-manager.test tests/package-native.test tests/package-authoring.test tests/package-workloads.test tests/bot-modules.test tests/main-cli.test tests/raven.test tests/event-loop-linux.test tests/native-link-plan.test tests/system-linker.test tests/compilerpedia.test` | interp: 420 passed, 0 failed, 3 skipped; compile: 419 passed, 0 failed, 4 skipped (the skips: `native-link-plan.test`'s two macOS and one Windows test, and on compile `compilerpedia.test`'s `cp-examples`, which runs on the interp pass only); 690 s wall, 3 jobs. Per file (both passes): package-manager 74, package-native 39, package-authoring 28, package-workloads 24, bot-modules 56, main-cli 64, raven 19, event-loop-linux 25, native-link-plan 34, system-linker 15, compilerpedia 42 |
-| `tclsh9.0 tests/package-authoring.test` | 28 tests, 28 passed (clang, lld, MinGW-w64 and git present: nothing skipped) |
-| `single/build.sh`, then `single/smoke-test.sh single/out/botlish` | passed, the new PM-3 check included: `native add`, `native audit`, `pack -evidence`, `inspect -provenance` with no C compiler and no native backend installed |
+| `tclsh9.0 tests/package-authoring.test` | 30 tests, 30 passed (clang, lld, MinGW-w64 and git present: nothing skipped) |
+| after the last changes (the three strengthened tests, `compare`'s wording, the authoring side loaded on demand): `tests/package-authoring.test`, `tests/package-manager.test`, `tests/package-native.test`, `tests/main-cli.test`, `tests/package-workloads.test` | 30, 74, 39, 64 and 24 tests: all passed, none skipped |
+| `single/build.sh`, then `single/smoke-test.sh single/out/botlish` | passed, the new PM-3 check included: `native add`, `native audit`, `pack -evidence`, `inspect -provenance` with no C compiler and no native backend installed (run again after the last changes: passed) |
 | `audit/raven-cleanroom/tools/cleanroom.sh run ...` | 33/33 (section I) |
 | `tools/package-build/author.sh build OUT -release` (twice, two commits) | section G |
 | `tclsh9.0 tools/compilerpedia.tcl check` | 1169 topics, 725 examples run, 0 problems |
 | `tclsh9.0 audit/package-manager/tools/mutate.tcl` | MUTANTS-PM |
-| `tclsh9.0 audit/raven-cleanroom/tools/mutate.tcl` | MUTANTS-RAVEN |
+| `tclsh9.0 audit/raven-cleanroom/tools/mutate.tcl` | 15 mutants, 15 killed, 0 survived |
 
 ### Mutation testing
 
@@ -892,16 +905,63 @@ results are CI's, not this report's evidence).
 
 ## K. Performance
 
-BENCH-TABLE
+`bench/package-authoring.tcl -repository OUT` (**Executed**; the pinned
+build's raven 0.3.2, 1,749,196 bytes; each command a `main.tcl` process,
+as an author runs it; medians of 5 on this 4-core container, otherwise
+idle):
+
+| operation | median |
+|---|---:|
+| `native add` libraven.so.0 (1.7 MB) into a fresh package | 130.5 ms |
+| `native add` of the same file again (unchanged) | 116.7 ms |
+| `package stage -modules` of the 22-module binding | 35.2 ms |
+| `package stage` of the same binding again (unchanged) | 30.2 ms |
+| `native audit` of the release (2 targets, 4 bundled files, 947 C functions each) | 636.8 ms |
+| `package pack` of the release (audit included), into an empty directory | 1451.1 ms |
+| `package pack` again over the identical artifact (unchanged) | 1430.7 ms |
+| `package pack -evidence` (the record; Raven's and the Vulkan headers' Git trees recomputed) | 4603.1 ms |
+| `package compare` of the release with itself | 122.8 ms |
+| `package compare` with a candidate whose AArch64 libraven differs | 321.4 ms |
+| `package inspect -provenance` | 939.5 ms |
+| `package pack` of a pure-Botlish package (no audit) | 22.1 ms |
+
+* **Unchanged inputs** cost nearly what changed ones do: `native add` and
+  `stage` compare the bytes before deciding (no file is rewritten), and
+  `pack` validates and audits the whole package every time, then finds the
+  artifact already there. Nothing is cached between commands, by design
+  (an audit is never of a state other than the package's).
+* **Where pack's time goes**: about 640 ms the audit (reading every
+  bundled ELF file and the host's platform libraries for the C-function
+  check), the rest the PM-2 pack (layout, descriptor, archive, SHA-256);
+  `-evidence` adds about 3.2 s: the two Git trees (452 and 79 files), a
+  SHA-256 of every packaged file and the ELF section facts of each native
+  file. An author pays it once per release.
+* **Comparing candidates** is cheap when they are identical (the digests
+  decide); a differing shared library costs its section comparison.
 
 * **Hashing** stays PM-2's (the system's SHA-256 tool for inputs of 4 KiB
   and more); Git trees use the system's SHA-1 tool the same way: the
   2194-file SDL3 tree in 4.0 s, Raven's 452 files in 0.9 s, the Vulkan
   headers' 79 in 0.5 s (in process).
-* **Consumers pay nothing new**: installation does no audit and reads no
-  record; the view's plan adds only the run-time list (Raven's 5 entries,
-  a dpkg lookup each on the host). `add` of a pure-Botlish package and
-  main.tcl's start-up are unchanged code paths.
+* **Consumers pay nothing new, measured** (**Executed**: the PM-2 tree,
+  commit 59eb6df, and this one on the same machine, medians of 5, rounds
+  interleaved): loading the package manager 5.4 ms and 5.9 ms; `pack` of a
+  pure-Botlish package 18.9-24.4 ms and 19.6-21.3 ms; `add` of it
+  24.0-25.1 ms and 25.3-28.9 ms; `add` of event_loop_linux 0.3.0 (a schema
+  2 native package) 178 ms and 177 ms -- differences inside the
+  run-to-run spread. The first measurement did find a cost: with the
+  author's side sourced at start-up, every package command paid 2.8 ms to
+  load its 2,545 lines (5.6 ms became 8.4 ms). `pm::authoring` now loads
+  author.tcl, sha1.tcl and release.tcl only for the operations that use
+  them (`pa-authoring-loaded-on-demand`; the mutant
+  `authoring-loaded-eagerly`). Installation does no audit and reads no
+  record; the plan adds only the run-time list (Raven's 5 entries, a dpkg
+  lookup each on the host). Ordinary compilation never loads the package
+  manager at all.
+* **Comparing independent builds**: CI's whole comparison step (`package
+  compare` of four releases with their records, and `cmp` of the records)
+  took 2 s; here, 123 ms for identical candidates and 321 ms for a
+  differing one.
 * **The real releases**: the generic recipe (`tools/package-repository.tcl
   OUT`, every package, builds cached) runs in 28 s wall time here, most of
   it the commands' Tcl start-up (each command a process, as an author runs
@@ -912,9 +972,10 @@ BENCH-TABLE
 
 ### PM-3 defects or incomplete requirements
 
-* **Cross-machine reproducibility of the pinned image is established on
-  one machine** (two independent containers); the two-runner CI
-  comparison is pushed and its result is section G's CI line.
+* **Reproducibility is shown for one architecture of build machine**:
+  this container and two GitHub runners, all x86-64 Linux hosts with the
+  same pinned image; neither the image nor the recipes were tried on an
+  arm64 build host.
 * **AArch64 never executed**: built, inspected, audited, compared, not run
   (no arm64 machine; CI's arm64 workflow does not build the packages).
 * **The audit's C-function check** reads the host's platform libraries only
@@ -1030,18 +1091,20 @@ What an authenticated registry needs from PM-3's outputs, precisely:
   `descriptor.tcl` (schema 3), `native.tcl` (the cascade fix, run-time
   dependencies in the plan), `binary.tcl` (`elfSections`: build ID,
   `.comment`, sections), `commands.tcl` (the new commands, pack's audit and
-  `-evidence`, `inspect`'s schema 3, closure and `-provenance`), `pm.tcl`.
+  `-evidence`, `inspect`'s schema 3, closure and `-provenance`), `pm.tcl`
+  (`pm::authoring`: the author's side loaded only by the operations that
+  use it).
 * `tools/package-repository.tcl`: the recipes on the generic commands; the
   evidence; `-release` and the ledger; `-DCMAKE_SKIP_RPATH=ON` for the
   cross build. `tools/package-build/`: the pinned author image and
   `author.sh`.
 * `packages/`: botlish.json files without native metadata; raven 0.3.2,
   sdl3 0.2.1, sdlkit 0.2.1, event_loop_linux 0.3.0; READMEs; `RELEASES.tsv`.
-* Tests: `tests/package-authoring.test` (new, 28 tests),
+* Tests: `tests/package-authoring.test` (new, 30 tests),
   `tests/package-workloads.test` (5 new), `tests/package-native.test` and
   `tests/package-manager.test` (expectations: the instance in a failed
   system library's diagnostic, schema 3, the SHA-1 tool), `single/smoke-test.sh`.
-* Audit: `audit/package-manager/tools/mutants.txt` (28 new),
+* Audit: `audit/package-manager/tools/mutants.txt` (30 new; `mutate.tcl` names the `pa-` and `pw-` tests that kill a mutant),
   `audit/raven-cleanroom/tools/mutants.txt` (rewritten and 2 new),
   `audit/raven-cleanroom/results/pm3-acceptance/`.
 * CI: `.github/workflows/package-reproducibility.yml` (new);

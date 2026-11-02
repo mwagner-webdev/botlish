@@ -570,13 +570,23 @@ proc pm::version::compare {a b} {
                     foreach entryPath {} {
 >>>>
 
-@@ audit-empty-runpath-entry-allowed an empty run-time search path entry (the current directory) is not refused
+@@ audit-empty-runpath-entry-misjudged an empty run-time search path entry (the current directory) is judged as a build machine's directory: still refused, with advice about a path that is not there
 %% package-authoring.test
 ## pm/author.tcl
 <<<<
                         if {$entryPath eq ""} {
 ====
                         if {0} {
+>>>>
+
+@@ audit-empty-runpath-entry-allowed an empty run-time search path entry (the current directory) is not refused
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+                        if {$entryPath eq ""} {
+====
+                        if {$entryPath eq ""} {
+                            continue
 >>>>
 
 @@ audit-platform-library-bundled a bundled library that is the target's platform library is accepted
@@ -777,4 +787,16 @@ proc pm::version::compare {a b} {
     return [list {sha1sum /usr/bin/sha1sum} {sha1sum /bin/sha1sum} {shasum /usr/bin/shasum}]
 ====
     return [list [list sha1sum [lindex [auto_execok sha1sum] 0]]]
+>>>>
+
+@@ authoring-loaded-eagerly the author's side is loaded with the package manager, so every consumer command pays for it
+%% package-authoring.test
+## pm/pm.tcl
+<<<<
+    set ::pm::authoringLoaded 1
+}
+====
+    set ::pm::authoringLoaded 1
+}
+pm::authoring
 >>>>

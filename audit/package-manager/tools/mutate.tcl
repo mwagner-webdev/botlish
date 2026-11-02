@@ -155,7 +155,7 @@ try {
             lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree tests $testFile] -tmpdir $tmp \
                 -skip {pm-bundled-compiler}] status output
             file delete -force $tmp
-            set failed [regexp -all -inline -line {^==== ((?:pm|pn)-\S+) } $output]
+            set failed [regexp -all -inline -line {^==== ((?:pm|pn|pa|pw)-\S+) } $output]
             set failed [lsort -unique [lmap {- n} $failed {set n}]]
             if {![regexp {Total\s+\d+\s+Passed} $output]} {
                 lappend verdicts "killed ($testFile did not complete[expr {$failed eq {} ? "" : "; failed: [join [lrange $failed 0 5] {, }]"}])"
