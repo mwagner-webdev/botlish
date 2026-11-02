@@ -1,0 +1,23 @@
+# tclsh9.0 bench/actor.tcl -runs 3 (cranelift, the Linux driver), 2026-11-02:
+# a 4-core container, Intel Xeon @ 2.10GHz, Linux 6.18, Tcl 9.0.1, rustc 1.97.0.
+# Shared machine: compare rows with each other and with the census's Probe F as relative costs.
+phase                                                           ops  wall us/op (best-worst) cpu us/op (best-worst) 
+raw-channel ping-pong                                         40000  1.06 (1.06-1.08)        1.06 (1.06-1.06)       
+contextless actors, int ping-pong                             40000  2.28 (2.28-2.41)        2.28 (2.28-2.36)       
+unrestricted actors, int ping-pong                            40000  2.24 (2.24-2.53)        2.23 (2.23-2.53)       
+contextless actors, Msg ping-pong                             40000  2.50 (2.50-2.56)        2.50 (2.50-2.56)       
+request/reply round trips                                     20000  4.81 (4.81-5.33)        4.68 (4.68-5.32)       
+deliver into a full mailbox (room waits)                      20000  2.89 (2.89-3.68)        2.86 (2.86-3.64)       
+ring of 100 actors, hops                                      20000  2.53 (2.53-2.92)        2.51 (2.51-2.92)       
+create 2000 idle actors                                        2000  30.47 (30.47-37.43)     30.20 (30.20-37.41)    
+stop 2000 actors (one message each, reaped by their hosts)     2000  16.60 (16.60-30.36)     15.97 (15.97-29.21)    
+fail 2000 actors (reaped by their hosts)                       2000  14.34 (14.34-21.92)     14.05 (14.05-21.48)    
+int ping-pong beside 50 spinning tasks                        40000  20.85 (20.85-22.14)     20.26 (20.26-22.05)    
+
+room waits 19996
+idle actors: RSS KiB added 17908
+idle actors: virtual KiB added 32760836
+after stopping: RSS KiB above before creating 2820
+after stopping: virtual KiB above before creating 1028
+open mailboxes after the failures 0
+-- cranelift, 3 run(s)

@@ -143,6 +143,14 @@ fn spinner(turns: int, context ev: std::event_loop::Loop) -> int errors std::eve
         std::event_loop::yield_now()
     turns
 
+# Empty vectors of the ring's addresses and receive rights: an empty
+# vector's element type is its declared one.
+nomethod fn no_addresses() -> MutableVector[std::actor::Address[int]]:
+    std::mutable_vector::from_list([])
+
+nomethod fn no_inboxes() -> MutableVector[std::actor::Inbox[int]]:
+    std::mutable_vector::from_list([])
+
 nomethod fn timed(name: str, t0: int, c0: int, ops: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault:
     say(name.concat(" ops "), ops)
     say(name.concat(" wall us "), event_loop_linux::now_us() - t0)
@@ -242,8 +250,8 @@ fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_
     # 6: 100 actors, 200 laps
     t5 = event_loop_linux::now_us()
     c5 = event_loop_linux::cpu_us()
-    tos = std::mutable_vector::from_list([])
-    inboxes = std::mutable_vector::from_list([])
+    tos = no_addresses()
+    inboxes = no_inboxes()
     loop k from 0 to 100:
         {to, inbox} = std::actor::open[int](4)
         tos.push(to)
