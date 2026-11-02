@@ -51,7 +51,7 @@ once, exactly as the same List carried by a self tail call already was.
   cranelift-generic and cranelift, compared with the eager fold too), a
   45-test golden suite on all four backends (every test fails when inverted
   or altered), a fuzzer whose values and eligibility decisions agree with
-  two independent models over 800 programs (60 more under GC stress), 18
+  two independent models over 900 programs (60 more under GC stress), 18
   mutants all killed, and the regression runs listed under Verification.
 
 ## 1. The preexisting mechanism
@@ -525,7 +525,8 @@ staged modules, and examples written to be rejected).
 On this container, on the final tree unless said otherwise.
 
 * **tests/fold-virtual-construction.test**: 58 tests, all passing, plain
-  and under `BOTLISH_NATIVE_GC_STRESS=1`. Every value test runs interp,
+  and under `BOTLISH_NATIVE_GC_STRESS=1` (as are tests/virtual-construction.test,
+  51, and tests/fold-loops.test, 104: `results/gc-stress.txt`). Every value test runs interp,
   compile, cranelift-generic, cranelift and cranelift with
   `-virtual-construction-opt 0`; decision tests pin plan or flat and the
   reason; structural tests pin the NIR (one extension per iteration into a
@@ -550,8 +551,10 @@ On this container, on the final tree unless said otherwise.
   compared with an independent Tcl model of their values; the compiler's
   decision compared with an independent model of the eligibility rule
   (written from section 4, not from the code). Seeds 1-7, 17 and 41, 100
-  programs each (840 in all, about a third plan folds), and seed 8 (60
-  programs) under GC stress: 0 disagreements, 0 mispredictions. (The first
+  programs each (900 in all: 326 plan folds, 572 declined, 2 whose fold
+  body no call reaches), and seed 8 (60 programs, 19 plan folds) under GC
+  stress: 0 disagreements, 0 mispredictions
+  (`audit/fold-virtual-construction/results/fuzz.txt`). (The first
   runs showed mispredictions; all were folds of an instance over an empty
   `List[never]`, whose body never runs and whose decision means nothing:
   the fuzzer now judges only folds whose body runs.)
@@ -579,7 +582,13 @@ On this container, on the final tree unless said otherwise.
 * **Other harnesses whose mutants edit the changed code.** Every mutant of
   every `audit/*/tools/*mutants*.txt` applies (two fold-loops mutants of the
   break and exhaustion lowering were updated to the new text, the same
-  rule). OTHER-MUTANTS
+  rule). The harnesses AGENTS.md names for the code this milestone
+  touched, run whole on the final tree: `audit/fold-loops/tools/mutate.tcl`
+  (fold lowering) 22 of 22 killed, `audit/affine/tools/mutate.tcl` and
+  `audit/coroutines/tools/mutate.tcl` (where releases lower: the
+  `SequenceTo` fix) 29 of 29 and 52 of 52 killed, the coroutine harness's
+  native mutants rebuilt in its private copy
+  (`results/mutate-{fold-loops,affine,coroutines}.txt`).
 * **Regression.** REGRESSION-RESULT
 
 ## 12. A defect found on the way: releases in plan-position sequences
