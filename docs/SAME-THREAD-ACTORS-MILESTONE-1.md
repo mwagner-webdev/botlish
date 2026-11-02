@@ -536,7 +536,41 @@ keep the loop alive, and the library adds no scheduling rule.
 
 ## 13. GC and resource correctness
 
-<<GC>>
+**Under `BOTLISH_NATIVE_GC_STRESS=1`** (a collection attempt at every
+allocation site), every test that runs a scenario -- the nine `agree`
+tests and the 21 that read their traces -- passes in both passes
+(cranelift beside interp, cranelift-generic beside compile): 30 of 30 each,
+the 37 front-end tests skipped by `-match`. Each `agree` test requires the
+native trace to equal the Tcl backend's, so a collection that lost or
+corrupted a suspended actor, a host, a queued message or a mailbox row
+would show as a different trace. The scenarios keep actors suspended across
+turns in every state the library has: waiting for a message, waiting for
+room, holding a reservation, paused, sleeping on a timer, abandoned by a
+shutdown, and failed.
+
+**What is released, and when.**
+
+| object | released |
+|---|---|
+| a message | when it is received, or when its mailbox closes (counted undelivered): the pool node's payload is replaced by `0` (`stdlib/actor.bot`'s `shut`, the receive path), so no taken or dropped message stays reachable |
+| a mailbox | its channels revoked and its row reset when it closes; its slot reused with a new generation and new channels |
+| an actor's coroutine | when its host ends (the host's last use of the handle; an affine release, COROUTINES.md) or when the loop abandons the host |
+| a host | when its task ends or is abandoned, as every loop task |
+| an actor record | freed on retirement, reused by the next `start` |
+
+Evidence: the scenarios end with no mailbox open (`open mailboxes 0` in
+`actor-probe-a-accounting`, `actor-shutdown`, `actor-coexist-outcomes`) and
+no actor running (`actor-probe-a-accounting`, `actor-lifecycle-accounting`,
+`actor-shutdown`); every message is either received or counted undelivered
+(`delivered = received + undelivered` in `actor-probe-a-accounting`,
+`actor-lifecycle-accounting` and `actor-shutdown`); after
+2,000 actors stop, their stacks are back (section 15: virtual +1,028 KiB,
+RSS +2,820 KiB above the level before they were created).
+
+**Not covered.** The tables (rows, channel registrations, the payload pool)
+grow to the program's peak number of open mailboxes and queued messages and
+do not shrink; their slots are reused. A long-running program that once
+held many mailboxes keeps their rows (14 Ints each).
 
 ## 14. Mutation testing
 
