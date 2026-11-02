@@ -4463,6 +4463,12 @@ mod win64_variadic_tests {
     /// (the fifth to eighth arguments).
     static mut CAPTURED: [u64; 12] = [0; 12];
 
+    /// Held from clearing CAPTURED to reading it back: the executed tests run
+    /// on parallel threads of the test harness and share the one buffer
+    /// `capture` writes (without it, one test read the other's arguments:
+    /// "argument 2 (l) in r8: 0xfffffffde78ee600", the other's -9000000000).
+    static CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Records the machine state a Win64 call arrives in before any compiled
     /// code runs, and returns 0.
     #[unsafe(naked)]
@@ -4545,9 +4551,12 @@ mod win64_variadic_tests {
         module.define_function(caller, &mut ctx).unwrap();
         module.finalize_definitions().unwrap();
         let entry: unsafe extern "win64" fn(*const u64) -> i64 = unsafe { std::mem::transmute(module.get_finalized_function(caller)) };
-        unsafe { std::ptr::addr_of_mut!(CAPTURED).write_volatile([0; 12]) };
-        assert_eq!(unsafe { entry(words.as_ptr()) }, 0);
-        let captured = unsafe { std::ptr::addr_of!(CAPTURED).read_volatile() };
+        let captured = {
+            let _held = CAPTURE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            unsafe { std::ptr::addr_of_mut!(CAPTURED).write_volatile([0; 12]) };
+            assert_eq!(unsafe { entry(words.as_ptr()) }, 0);
+            unsafe { std::ptr::addr_of!(CAPTURED).read_volatile() }
+        };
         unsafe { module.free_memory() };
         captured
     }

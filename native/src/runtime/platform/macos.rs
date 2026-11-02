@@ -142,12 +142,18 @@ mod tests {
 
     #[test]
     fn region_reads_the_protection_of_a_mapping() {
-        // SAFETY: a fresh private mapping of three pages, unmapped below.
+        // SAFETY: a fresh private mapping of four pages: an accessible
+        // sentinel page, the inaccessible guard, two accessible pages. The
+        // sentinel ends the downward walk inside the mapping: whatever lies
+        // below a fresh mapping is the process's (the kernel may place it
+        // directly above another inaccessible mapping, made by a test on
+        // another thread, and the walk would step into it).
         unsafe {
             let page = libc::sysconf(libc::_SC_PAGESIZE) as usize;
-            let base = libc::mmap(std::ptr::null_mut(), 3 * page, libc::PROT_READ | libc::PROT_WRITE,
+            let mapping = libc::mmap(std::ptr::null_mut(), 4 * page, libc::PROT_READ | libc::PROT_WRITE,
                 libc::MAP_PRIVATE | libc::MAP_ANONYMOUS, -1, 0) as usize;
-            assert_ne!(base, libc::MAP_FAILED as usize);
+            assert_ne!(mapping, libc::MAP_FAILED as usize);
+            let base = mapping + page;
             assert_eq!(libc::mprotect(base as *mut libc::c_void, page, libc::PROT_NONE), 0);
             let (start, end, protection) = region(base + page / 2).expect("the guard is mapped");
             assert_eq!((start, end, protection), (base, base + page, libc::VM_PROT_NONE));
@@ -158,7 +164,7 @@ mod tests {
             // A reported bottom that is inaccessible is stepped over.
             assert_eq!(usable_low(base, base + 3 * page), base + page);
             assert_eq!(usable_low(base + page, base + 3 * page), base + page);
-            libc::munmap(base as *mut libc::c_void, 3 * page);
+            libc::munmap(mapping as *mut libc::c_void, 4 * page);
         }
     }
 
