@@ -320,27 +320,76 @@ proc hir::range::collectionLength {} {
 # The Range native NAME's -result-range metadata (core/native.tcl) promises
 # for every Int it returns, unknown when it promises nothing. The one reading
 # of that metadata: this analysis and hir/completions.tcl both use it, so the
-# two never disagree about a native's result.
+# two never disagree about a native's result. An `intervals` registration
+# (a set with gaps, e.g. a Unicode scalar value: never a surrogate) is its
+# hull here: a Range cannot hold a gap, and RegisteredSet, which the
+# interval-set facts read (hir/intset.tcl), is the same registration's
+# components -- one fact read at two precisions, never two facts.
 proc hir::range::RegisteredRange {name} {
-    set range [dict get [core::native::metadata $name] resultRange]
-    switch -- [lindex $range 0] {
-        nonneg            { return [nonneg] }
-        collection-length { return [collectionLength] }
-        interval          { return [dict create min [lindex $range 1] max [lindex $range 2]] }
+    set sets [RegisteredSet $name]
+    if {[llength $sets] == 1} {
+        return [lindex $sets 0]
     }
-    return [unknown]
+    return [dict create min [dict get [lindex $sets 0] min] max [dict get [lindex $sets end] max]]
 }
 
-# The Range of `mod(x, d)` for X, D the operands' Ranges. mod is Euclidean
-# (core/primitives.tcl): every result r has 0 <= r < abs(d), so a divisor of
-# bounded magnitude M > 0 bounds the result to [0, M-1] (`mod(b, 16)` is
-# 0..15); otherwise the result is only nonnegative.
+# The Ranges whose union native NAME's -result-range metadata promises
+# contains every Int it returns, sorted and disjoint: one Range for every
+# registration but `intervals`, whose components it is ({unknown} when the
+# metadata promises nothing).
+proc hir::range::RegisteredSet {name} {
+    set range [dict get [core::native::metadata $name] resultRange]
+    switch -- [lindex $range 0] {
+        nonneg            { return [list [nonneg]] }
+        collection-length { return [list [collectionLength]] }
+        interval          { return [list [dict create min [lindex $range 1] max [lindex $range 2]]] }
+        intervals         {
+            return [lmap component [lrange $range 1 end] {
+                dict create min [lindex $component 0] max [lindex $component 1]
+            }]
+        }
+    }
+    return [list [unknown]]
+}
+
+# The Range of `mod(x, d)` for X, D the operands' Ranges: the hull of
+# ModParts.
 proc hir::range::Mod {x d} {
     if {$x eq "never" || $d eq "never"} {
         return never
     }
+    set parts [ModParts $x $d]
+    set r [lindex $parts 0]
+    foreach part [lrange $parts 1 end] {
+        set r [join $r $part]
+    }
+    return $r
+}
+
+# The Ranges whose union holds every `mod(x, d)` for X, D the operands'
+# Ranges (one or two). mod is Euclidean (core/primitives.tcl): every result
+# r of a divisor d != 0 has 0 <= r < abs(d) and r = x - k*abs(d) for an
+# integer k; d = 0 fails (ARITHMETIC), producing no value.
+#
+#   * a divisor of bounded magnitude M > 0 bounds the result to [0, M-1]
+#     (`mod(b, 16)` is 0..15); otherwise the result is only nonnegative;
+#   * an exact divisor m != 0 and an operand range of fewer than abs(m)
+#     values: the operands' residues, [lo mod m, hi mod m] when the range
+#     does not cross a multiple of m, else the two parts [lo mod m, abs(m)-1]
+#     and [0, hi mod m] (`97 + n.mod(3)` of n = 0 is 97);
+#   * an operand range inside [0, d_min - 1] of positive divisors: the
+#     operand itself (x < d);
+#   * exact operand and divisor sets within budget: their pairwise residues
+#     (CrossExact), a zero divisor contributing nothing.
+proc hir::range::ModParts {x d} {
+    if {$x eq "never" || $d eq "never"} {
+        return [list never]
+    }
+    set xmn [dict get $x min]
+    set xmx [dict get $x max]
     set dmn [dict get $d min]
     set dmx [dict get $d max]
+    set bound [nonneg]
     if {$dmn ne "-inf" && $dmx ne "+inf"} {
         # Not max(abs($dmn), abs($dmx)): Tcl 9.0.1's max() and min() abort
         # the process (an invalid free) when an argument is a BigInt the
@@ -353,10 +402,57 @@ proc hir::range::Mod {x d} {
             set m $hi
         }
         if {$m > 0} {
-            return [dict create min 0 max [expr {$m - 1}]]
+            set bound [dict create min 0 max [expr {$m - 1}]]
         }
     }
-    return [nonneg]
+    # Exact sets: every pair's residue.
+    set ex [ExactOf $x]
+    set ed [ExactOf $d]
+    if {$ex ne "" && $ed ne "" && [llength $ex] * [llength $ed] <= $::hir::range::maxExactValues} {
+        set values {}
+        foreach a $ex {
+            foreach b $ed {
+                if {$b == 0} continue
+                set r [expr {$a % abs($b)}]
+                lappend values $r
+            }
+        }
+        if {$values eq {}} {
+            # Only a zero divisor: the call never produces a value. Not
+            # `never`: a fact here never decides that a call fails (the
+            # failure stays the run's ARITHMETIC error, as before), so it
+            # keeps the divisor's bound.
+            return [list $bound]
+        }
+        set mn ""
+        set mx ""
+        foreach v $values {
+            if {$mn eq "" || $v < $mn} { set mn $v }
+            if {$mx eq "" || $v > $mx} { set mx $v }
+        }
+        return [list [Normalize [dict create min $mn max $mx] $values]]
+    }
+    if {$xmn eq "-inf" || $xmx eq "+inf"} {
+        return [list $bound]
+    }
+    # A finite operand range below every (positive) divisor: itself.
+    if {$dmn ne "-inf" && $dmn > 0 && $xmn >= 0 && $xmx < $dmn} {
+        return [list [dict create min $xmn max $xmx]]
+    }
+    # An exact divisor: the residues of the operand range.
+    if {$dmn ne "-inf" && $dmn eq $dmx && $dmn != 0} {
+        set m [expr {abs($dmn)}]
+        if {$xmx - $xmn + 1 >= $m} {
+            return [list $bound]
+        }
+        set rl [expr {$xmn % $m}]
+        set rh [expr {$xmx % $m}]
+        if {$rl <= $rh} {
+            return [list [dict create min $rl max $rh]]
+        }
+        return [list [dict create min 0 max $rh] [dict create min $rl max [expr {$m - 1}]]]
+    }
+    return [list $bound]
 }
 
 proc hir::range::isUnknown {r} {

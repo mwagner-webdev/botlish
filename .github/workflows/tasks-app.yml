@@ -1,0 +1,87 @@
+name: tasks app (raven, manual)
+
+# Builds "Tasks", the task-manager application an independent agent wrote
+# in the clean-room experiment of RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md
+# (audit/raven-cleanroom/results/agent-experiment/app), and publishes it as
+# the run's artifact `tasks-linux-x86_64`: a tarball holding the executable
+# `tasks`, the libraven it loads from lib/ beside itself, the sources and a
+# README.txt (a tarball, so the executable keeps its mode).
+#
+# It builds the way a consumer does: the single-file compiler and the raven
+# release this commit makes (tools/package-repository.tcl) go into a
+# clean-room container with no network and no checkout
+# (audit/raven-cleanroom/tools/build-app.sh), where `botlish add` installs
+# the release, the app's headless test runs, `botlish native deploy` and
+# `-emit-native-executable -runtime-path '$ORIGIN/lib'` make the
+# executable, and a smoke run opens its window on a virtual display and
+# closes it from outside. Manual only: Actions, "tasks app (raven, manual)",
+# Run workflow.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build tasks (linux x86-64)
+    runs-on: ubuntu-24.04
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the static Tcl base kit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/botlish-single
+          key: single-basekit-${{ runner.os }}-${{ hashFiles('single/build.sh') }}
+
+      - name: Build the single executable
+        run: single/build.sh -o dist/botlish
+
+      # The package author's side only (the release holds both Linux
+      # targets): CMake, Ninja, libX11's headers, the AArch64 cross compiler.
+      - name: Install the package author's prerequisites
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build libx11-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: Pack the raven release
+        run: tclsh9.0 tools/package-repository.tcl repo raven
+
+      - name: Build the clean room's image
+        run: audit/raven-cleanroom/tools/cleanroom.sh image
+
+      - name: Build Tasks in the clean room
+        run: |
+          audit/raven-cleanroom/tools/build-app.sh dist/botlish repo/raven-*.botpkg \
+            audit/raven-cleanroom/results/agent-experiment/app tasks Tasks out
+          tar tzvf out/tasks-linux-x86_64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tasks-linux-x86_64
+          path: out/tasks-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tasks-build-log
+          path: out/build.log
+          if-no-files-found: warn

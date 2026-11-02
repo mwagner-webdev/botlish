@@ -1,0 +1,12 @@
+== window.bot (cranelift)
+widget shout 0 18 360 22
+widget add 0 40 68 26
+widget reset 68 40 53 26
+frame 360 180
+ready
+state 1 false 1 clicks true
+state 1 true 1 clicks! true
+state 2 true 2 clicks! true
+state 0 true 0 clicks! true
+closed 0
+   value: "closed"

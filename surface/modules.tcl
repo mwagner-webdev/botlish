@@ -1122,6 +1122,19 @@ proc surface::modules::Walk {node} {
                     dict set clause type [TypeRefs [dict get $clause type] [dict get $clause typeSpan]]
                 }]
             }
+            # An emission claim's qualified recognizer (EMISSION-CLAIMS-
+            # MILESTONE-1.md): a reference to a member of its namespace,
+            # like a qualified value.
+            if {[dict getdef $node emits {}] ne {}} {
+                Put node emits [lmap claim [dict get $node emits] {
+                    if {[dict get $claim qualified] ne ""} {
+                        lassign [dict get $claim qualified] ns member
+                        set ns [Ref $ns $member [dict get $claim span] value [dict get $claim rooted]]
+                        dict set claim qualified [list $ns $member]
+                    }
+                    set claim
+                }]
+            }
             # A context parameter's type (CONTEXTS.md), the variadic
             # parameter's List type (VARIADICS-VERTICAL-SLICE-1.md) and the
             # resume clause's message type (COROUTINES.md).
@@ -1400,6 +1413,20 @@ proc surface::modules::RemapFile {node fileId} {
             }
             if {[dict exists $node variadic]} {
                 dict set node variadic [RemapOrigin [dict get $node variadic] $fileId]
+            }
+            # Emission claims and a recognizer's state declarations
+            # (EMISSION-CLAIMS-MILESTONE-1.md).
+            if {[dict exists $node emits]} {
+                dict set node emits [lmap claim [dict get $node emits] {
+                    dict set claim origin [RemapOrigin [dict get $claim origin] $fileId]
+                }]
+            }
+            if {[dict exists $node recognizer]} {
+                set origins [dict create]
+                dict for {q o} [dict get $node recognizer stateOrigins] {
+                    dict set origins $q [RemapOrigin $o $fileId]
+                }
+                dict set node recognizer stateOrigins $origins
             }
             # paramTypes carries no origin of its own (plain type-name
             # strings, resolved later by hir/resolve.tcl): nothing to remap.

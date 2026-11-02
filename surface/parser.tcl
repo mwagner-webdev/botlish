@@ -121,7 +121,11 @@
 #                  pattern, irrefutable). No guard, no value pattern
 #   function     = { functionModifier } "fn" IDENT "(" [ paramList ] ")"
 #                  [ "->" typeExpr ] [ proofClause ]
-#                  [ "errors" errorName { "," errorName } ] ":" suite
+#                  [ "errors" errorName { "," errorName } ]
+#                  [ "emits" recognizerName { "," recognizerName } ] ":" suite
+#                  -- EMISSION-CLAIMS-MILESTONE-1.md: "emits" is contextual
+#                  (only here); each recognizerName is a name, NS::NAME or
+#                  ::NS::NAME of a declared `dfa`
 #                  -- typeExpr (TypeExpr) is a type name, a qualified or
 #                  applied one, a structural Fn type, or the keyword "unit"
 #                  as the unit type's name (`-> unit`); or the fixed array
@@ -762,6 +766,38 @@ proc surface::parser::ErrorName {pVar what} {
         set span [surface::ast::cover $span [dict get $member span]]
     }
     return [dict create kind IDENT value $value span $span text $value]
+}
+
+# The recognizer an emission claim names (Suite's "emits"): a name, a
+# qualified one (`json_lex::json_string`) or a rooted one
+# (`::json_lex::json_string`): {name TEXT qualified {NS MEMBER}|"" rooted
+# 0|1 span SPAN}, NAME as written without a root.
+proc surface::parser::EmitsName {pVar} {
+    upvar 1 $pVar p
+    set root ""
+    if {[Kind p] eq "::"} {
+        set root [Advance p]
+    }
+    set first [Expect p IDENT "the name of a recognizer after \"emits\""]
+    set parts [list [dict get $first value]]
+    set span [dict get $first span]
+    if {$root ne ""} {
+        set span [surface::ast::cover [dict get $root span] $span]
+        if {[Kind p] ne "::"} {
+            RootedMemberError $root $first "a recognizer"
+        }
+    }
+    while {[Kind p] eq "::"} {
+        Advance p
+        set member [Expect p IDENT "a recognizer's name after \"::\""]
+        lappend parts [dict get $member value]
+        set span [surface::ast::cover $span [dict get $member span]]
+    }
+    set qualified ""
+    if {[llength $parts] > 1} {
+        set qualified [list [join [lrange $parts 0 end-1] ::] [lindex $parts end]]
+    }
+    return [dict create name [join $parts ::] qualified $qualified rooted [expr {$root ne ""}] span $span]
 }
 
 # The span from START (a span) to the last consumed token.
@@ -3353,7 +3389,7 @@ proc surface::parser::Function {pVar} {
         name [dict get $name value] nameSpan [dict get $name span] \
         params $params flags $flags contexts $contexts paramsSpan [SpanFrom p [dict get $open span]] \
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
-        errors [dict get $body errors] proves [dict get $body proves] body $body \
+        errors [dict get $body errors] proves [dict get $body proves] emits [dict get $body emits] body $body \
         nomethod $nomethod nomethodSpan [if {$nomethod} {dict get $modifiers nomethod} else {string cat ""}] \
         exported $abi exportedSpan [if {$abi ne ""} {dict get $modifiers exported} else {string cat ""}] \
         callback $callbackAbi callbackSpan [if {$callbackAbi ne ""} {dict get $modifiers callback} else {string cat ""}] \
@@ -4235,6 +4271,30 @@ proc surface::parser::Suite {pVar after} {
             Advance p
         }
     }
+    # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): "emits R, ...",
+    # after the "errors" declaration, before the final ":" -- the same one
+    # position as the result type, gated by the same flag. Each R names a
+    # declared recognizer (a `dfa`, an imported module's as NS::NAME); a
+    # claim is a verified property of the function, never a different way
+    # to run it. The word is contextual: no other construct allows a name
+    # here, so `emits` stays an ordinary name everywhere else.
+    set emits {}
+    if {$allowResult && [Kind p] eq "IDENT" && [dict get [Peek p] text] eq "emits"} {
+        Advance p
+        while 1 {
+            lappend emits [EmitsName p]
+            if {[Kind p] ne ","} {
+                break
+            }
+            Advance p
+        }
+        if {[Kind p] eq "errors"} {
+            Fail [Peek p] "a function's \"errors\" declaration comes before its emission claims: write \"errors E emits R\""
+        }
+        if {[Kind p] eq "IDENT" && [dict get [Peek p] text] eq "emits"} {
+            Fail [Peek p] "a function's emission claims are one clause: write \"emits R1, R2\""
+        }
+    }
     Expect p : "\":\" after $after"
     set token [Peek p]
     if {[dict get $token kind] ne "NEWLINE"} {
@@ -4257,10 +4317,10 @@ proc surface::parser::Suite {pVar after} {
     if {$body eq ""} {
         # Every statement of the block was skipped by recovery.
         return [surface::ast::node suite $start body {} resultType $resultType resultTypeSpan $resultTypeSpan \
-            errors $errors proves $proves]
+            errors $errors proves $proves emits $emits]
     }
     return [surface::ast::node suite [SpanFrom p $start] body $body resultType $resultType \
-        resultTypeSpan $resultTypeSpan errors $errors proves $proves]
+        resultTypeSpan $resultTypeSpan errors $errors proves $proves emits $emits]
 }
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,85 @@
+name: raven clean room
+
+# RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md: the desktop-capable raven release
+# packed on the author's side by its one operation
+# (tools/package-repository.tcl OUT raven: Raven's X11 and Vulkan build for
+# linux-x86_64 and, cross-built, linux-aarch64), the single-file compiler
+# built (single/build.sh), and the two consumed in a container that holds
+# neither Botlish nor Raven nor any of their build tools, with no network
+# (audit/raven-cleanroom: installed with `botlish add`, its documentation's
+# programs compiled and run, a real X11 window drawn by Raven's Vulkan
+# renderer on Mesa's software driver and driven through the X server,
+# missing-display and missing-driver failures, a deployed executable moved
+# and run after the package is removed). The transcript and the release are
+# the run's artifacts.
+
+on:
+  push:
+    paths:
+      - "packages/raven/**"
+      - "tools/package-repository.tcl"
+      - "tests/cffi/raven.tcl"
+      - "audit/raven-cleanroom/**"
+      - "pm/**"
+      - "single/**"
+      - ".github/workflows/raven-cleanroom.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanroom:
+    name: raven clean room (linux x86-64)
+    runs-on: ubuntu-24.04
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Cache the static Tcl base kit
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/botlish-single
+          key: single-basekit-${{ runner.os }}-${{ hashFiles('single/build.sh') }}
+
+      - name: Build the single executable
+        run: single/build.sh -o dist/botlish
+
+      # The author's side only: CMake, Ninja, libX11's headers, the AArch64
+      # cross compiler (the release holds both Linux targets).
+      - name: Install the package author's prerequisites
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build libx11-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: Pack the raven release (the author's one operation)
+        run: tclsh9.0 tools/package-repository.tcl repo raven
+
+      - name: Build the clean room's image
+        run: audit/raven-cleanroom/tools/cleanroom.sh image
+
+      - name: Run the clean-room acceptance
+        run: audit/raven-cleanroom/tools/cleanroom.sh run dist/botlish repo/raven-0.3.1.botpkg out
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raven-cleanroom
+          path: |
+            out/
+            repo/*.botpkg
+          if-no-files-found: warn

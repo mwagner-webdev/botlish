@@ -198,33 +198,13 @@ proc surface::dfa::AlphabetSet {alphabet} {
 }
 
 proc surface::dfa::AlphabetHull {alphabet} {
-    return [dict get {ascii {0 127} bytes {0 255} unicode {0 1114111}} $alphabet]
+    return [core::dfa::AlphabetHull $alphabet]
 }
 
-# How symbol S of ALPHABET is shown in a message.
+# How symbol S of ALPHABET is shown in a message (core::dfa::SymbolText:
+# the emission checker's messages show symbols the same way).
 proc surface::dfa::Sym {s alphabet} {
-    variable END
-    if {$s == $END} {
-        return end
-    }
-    if {$s >= 0x21 && $s <= 0x7E && $s != 0x27 && $s != 0x5C} {
-        return '[format %c $s]'
-    }
-    switch -- $s {
-        32 { return "' '" }
-        39 { return {'\''} }
-        92 { return {'\\'} }
-        10 { return {'\n'} }
-        13 { return {'\r'} }
-        9 { return {'\t'} }
-    }
-    if {$s < 0 || $s > 0x10FFFF} {
-        return $s
-    }
-    if {$alphabet eq "bytes"} {
-        return [format 0x%02X $s]
-    }
-    return [format U+%04X $s]
+    return [core::dfa::SymbolText $s $alphabet]
 }
 
 proc surface::dfa::SetText {set alphabet {limit 6}} {
@@ -1759,21 +1739,36 @@ proc surface::dfa::Lower {d origin} {
         lappend nodes [hir::syntax::bindNode $origin $name$suffix [hir::syntax::withNoMethod $block]]
         dict set payloads $field [Call $origin [Ref $origin $name$suffix] [Ref $origin next]]
     }
-    # The arms of the code chain: what a code at or above N does.
+    # The arms of the code chain: what a code at or above N does -- each
+    # leaf's outcome as core/dfa.tcl states it (Outcome, RunResult, Resume:
+    # the one statement of what a code means, which the emission checker
+    # steps over sets of symbols), compiled for one symbol.
+    set taken [core::dfa::RunResult taken]
     set arms {}
     foreach leaf [dict get $codes leaves] {
         set code [dict get $codes codeOf $leaf]
-        switch -- [lindex $leaf 0] {
-            taken { set body [list [hir::syntax::returnNode $origin [Int $origin -2]]] }
-            returnc { set body [list [hir::syntax::returnNode $origin [Ref $origin c]]] }
-            more { set body [list [hir::syntax::returnNode $origin [Int $origin [expr {-2 - [lindex $leaf 1]}]]]] }
+        set outcome [core::dfa::Outcome $leaf]
+        switch -- [lindex $outcome 0] {
+            complete {
+                # The run function's result: the completion's class.
+                set result [core::dfa::RunResult [lindex $outcome 1]]
+                if {$result eq "c"} {
+                    set value [Ref $origin c]
+                } else {
+                    set value [Int $origin $result]
+                }
+                set body [list [hir::syntax::returnNode $origin $value]]
+            }
             call {
-                lassign $leaf - key then
+                lassign $outcome - key then
                 set callee [Call $origin [FunctionRef $origin $own $key #run] [Int $origin 0] [Ref $origin c]]
-                if {$then eq "accept"} {
+                if {[core::dfa::Resume $then taken] eq "propagate"} {
+                    # `then accept`: the callee's completion is the caller's.
                     set body [list [hir::syntax::returnNode $origin $callee]]
                 } else {
-                    set target [Int $origin [dict get $codes numbers $then]]
+                    # A callee that completes taken: continue in THEN,
+                    # waiting (Resume's `wait`).
+                    set target [Int $origin [dict get $codes numbers [lindex [core::dfa::Resume $then taken] 1]]]
                     lassign $key ns cname
                     set info [CalleeOf $d $key]
                     if {[dict get $info returns] eq "taken"} {
@@ -1782,11 +1777,14 @@ proc surface::dfa::Lower {d origin} {
                         set body [list $callee $target]
                     } else {
                         # It may leave the current symbol (or the end): THEN
-                        # reconsiders it, at once.
+                        # reconsiders it, at once (Resume's `reconsider`; a
+                        # {more K} result, -2 - K, is a key no row holds,
+                        # so THEN's default rejects it: Resume's `reject`).
+                        set again [dict get $codes numbers [lindex [core::dfa::Resume $then current] 1]]
                         set body [list [hir::syntax::bindNode $origin r $callee] \
-                            [If $origin [Op $origin == [Ref $origin r] [Int $origin -2]] [list $target] \
+                            [If $origin [Op $origin == [Ref $origin r] [Int $origin $taken]] [list $target] \
                                 [list [hir::syntax::returnNode $origin \
-                                    [Call $origin [Ref $origin $run] [Int $origin [dict get $codes numbers $then]] [Ref $origin r]]]]]]
+                                    [Call $origin [Ref $origin $run] [Int $origin $again] [Ref $origin r]]]]]]
                     }
                 }
             }
@@ -1835,23 +1833,40 @@ proc surface::dfa::Lower {d origin} {
     set block [hir::syntax::blockNode $origin [list [list state $origin] [list c $origin]] $body int {int int} $errors]
     lappend nodes [hir::syntax::bindNode $origin $run \
         [hir::syntax::withResume [hir::syntax::withNoMethod $block] $symbolType $origin]]
-    # The recognizer: its result is the number of symbols left unread.
+    # The recognizer: its result is the number of symbols left unread
+    # (core::dfa::Unread of the run function's class: a taken completion,
+    # or the end, 0; a current symbol, 1; {more K}, K).
     set returns [dict get $d returns]
     set first [Call $origin [Ref $origin $run] [Int $origin 0] [Ref $origin first]]
     if {"unread1" ni $returns && "more" ni $returns} {
-        set body [list $first [Int $origin 0]]
+        set body [list $first [Int $origin [core::dfa::Unread taken 0]]]
     } else {
-        set rest [list [Int $origin 0]]
+        set rest [list [Int $origin [core::dfa::Unread taken 0]]]
         if {"more" in $returns} {
-            set rest [list [If $origin [Op $origin < [Ref $origin r] [Int $origin -2]] \
-                [list [Op $origin - [Int $origin -2] [Ref $origin r]]] $rest]]
+            set rest [list [If $origin [Op $origin < [Ref $origin r] [Int $origin $taken]] \
+                [list [Op $origin - [Int $origin $taken] [Ref $origin r]]] $rest]]
         }
         if {"unread1" in $returns} {
-            set rest [list [If $origin [Op $origin >= [Ref $origin r] [Int $origin 0]] [list [Int $origin 1]] $rest]]
+            set rest [list [If $origin [Op $origin >= [Ref $origin r] [Int $origin 0]] \
+                [list [Int $origin [core::dfa::Unread current 0]]] $rest]]
         }
         set body [list [hir::syntax::bindNode $origin r $first] {*}$rest]
     }
     set block [hir::syntax::blockNode $origin [list [list first $origin]] $body int int $errors]
+    # The recognizer's table on its function (hir::syntax::withRecognizer):
+    # what the emission checker steps (hir/emission.tcl), the codes this
+    # lowering compiled -- never a second statement of the declaration.
+    set id [dict get $origin node]
+    set stateOrigins [dict create]
+    dict for {q node} [dict get $d states] {
+        if {[dict exists $node nameSpan] && [dict exists $codes numbers $q]} {
+            dict set stateOrigins $q [surface::lower::Origin [dict get $node nameSpan] $id/state($q)]
+        }
+    }
+    set block [hir::syntax::withRecognizer $block [dict create key [list $own $name] \
+        qualified [dict get $d qualified] alphabet [dict get $d alphabet] \
+        numbers [dict get $codes numbers] leaves [dict get $codes leaves] rows [dict get $codes rows] \
+        suspends $suspends stateOrigins $stateOrigins]]
     lappend nodes [hir::syntax::bindNode $origin $name \
         [hir::syntax::withResume [hir::syntax::withNoMethod $block] $symbolType $origin]]
     return $nodes

@@ -2,7 +2,7 @@
 # Raven started with its defaults (real windows, the Vulkan renderer), the
 # window open until it is closed or Quit is clicked.
 #
-#   BOTLISH_RAVEN_CMAKE_FLAGS="" tclsh9.0 tests/cffi/raven.tcl      # once: X11 + Vulkan
+#   tclsh9.0 tests/cffi/raven.tcl desktop      # once: X11 + Vulkan
 #   tclsh9.0 tools/raven-package.tcl install examples/raven
 #   LD_LIBRARY_PATH=DIR tclsh9.0 main.tcl -backend cranelift -L DIR examples/raven/main.bot
 #

@@ -3,9 +3,9 @@
 # UnicodeChar is a builtin semantic scalar (core/value.tcl, core/type.tcl),
 # distinct from Int and String; see UNICODE-CHAR-LITERALS.md. The only
 # operation that observes a UnicodeChar's numeric scalar value is total,
-# never fails, and returns a plain Int in the Unicode scalar range
-# 0..0x10FFFF (its -result-range, which the range and completion analyses
-# read): std::char::scalar_value, a root native
+# never fails, and returns a plain Int, a Unicode scalar value
+# (0..0x10FFFF without the surrogates: its -result-range, which the range,
+# completion and emission analyses read): std::char::scalar_value, a root native
 # registered under its qualified `char` name (core::native::isQualifiedNative;
 # STDLIB-NAMESPACES.md -- before that milestone the root name
 # `char_codepoint`, wrapped by a stdlib/char.bot `std::char::codepoint`; the one
@@ -26,5 +26,14 @@ proc core::unicodechar::scalar_value {c} {
     return [core::value::int [core::value::charOf $c]]
 }
 
+# Its -result-range is the set of Unicode scalar values, 0..0x10FFFF without
+# the surrogates 0xD800..0xDFFF: the implementation's contract, which both
+# runtimes uphold by construction -- a UnicodeChar is made only through
+# core::value's isValidScalar (core/value.tcl) and, natively, Rust's `char`
+# (native/src/runtime/value.rs), neither of which admits a surrogate
+# (tests/interval-sets.test's is-scalar-value checks hold both to it). The
+# range analysis reads the hull 0..0x10FFFF; the interval-set facts the
+# emission checker reads see the gap (EMISSION-CLAIMS-MILESTONE-1.md,
+# "Native result sets").
 core::native::register std::char::scalar_value -arity 1 -impl core::unicodechar::scalar_value \
-    -param-types {UnicodeChar} -result-type int -result-range {interval 0 0x10FFFF} -context-free 1
+    -param-types {UnicodeChar} -result-type int -result-range {intervals {0 0xD7FF} {0xE000 0x10FFFF}} -context-free 1

@@ -1,0 +1,26 @@
+# main.bot -- the clicks example on the desktop: a real window (X11, drawn
+# by Raven's Vulkan renderer) until it is closed.
+#
+#   botlish -backend cranelift main.bot
+#
+# The value: how many clicks the window counted when it closed, or why
+# Raven did not start.
+import clicks
+import raven
+import std::int
+import std::str
+
+with context raven::create()
+
+fn main(context ui: raven::Ui) -> str errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::desktop())
+    count = clicks::build().run(0)
+    raven::stop()
+    "closed with ".concat(clicks::caption(count))
+
+result = main():
+    on raven::RavenFailed failure:
+        "Raven did not start: ".concat(failure.detail)
+    on NonFiniteFloat:
+        "Raven reported a number that is no Float64"
+result

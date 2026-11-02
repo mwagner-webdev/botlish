@@ -386,11 +386,15 @@ count(500)
 
 # ---------------------------------------------------------------------------
 # Plain interval facts (spec #76): a caller-side value the analysis cannot
-# reduce to a sparse set (mod's own wide, non-literal result) still narrows
+# reduce to a sparse set (mod's wide result for an operand it does not know:
+# k comes from std::int::from_string, which is never folded; mod of two
+# literals is exact since EMISSION-CLAIMS-MILESTONE-1.md) still narrows
 # through a caller's own branch guards to a genuine interval-only fact.
 
 test closed-call-generic-interval-only {a caller value with no exact set of its own still narrows through branch guards to a plain interval fact} -body {
     lassign [closedCallFacts {
+import std::int
+
 fn f(x):
     x
 
@@ -403,7 +407,10 @@ fn caller(n):
     else:
         0
 
-caller(mod(999999, 1000000))
+k = std::int::from_string("999999"):
+    on InvalidIntegerText:
+        0
+caller(mod(k, 1000000))
 }] hir spec analysis
     paramRanges $analysis [instanceNamed $spec f]
 } -result {{[10, 20]}}

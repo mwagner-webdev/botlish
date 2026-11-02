@@ -242,6 +242,11 @@ proc hir::signatures::text {hir e} {
     if {[dict get $signature errors] ne {}} {
         append text " errors [join [dict get $signature errors] {, }]"
     }
+    if {[dict exists $hir exprs $e emits]} {
+        # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): the recognizers
+        # as written.
+        append text " emits [join [lmap claim [dict get $hir exprs $e emits] {dict get $claim name}] {, }]"
+    }
     return $text
 }
 

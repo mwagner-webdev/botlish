@@ -1,0 +1,67 @@
+# layout_probe.bot -- where the desktop window lays its widgets out, for
+# xdrive.py, which drives a running main.bot from outside with real X11
+# input (XTEST) and so needs to know where to click. It builds the same
+# window as main.bot (tasks_app::build) on the desktop configuration,
+# lets Raven lay it out, and prints the centre of each widget in window
+# coordinates: with no task, one and two tasks added the way Add adds them.
+#
+#   DISPLAY=:99 botlish -backend cranelift layout_probe.bot
+import raven
+import std::float64
+import std::int
+import std::io
+import std::linux::io
+import std::list
+import std::str
+import tasks_app
+
+with context std::linux::io::create()
+with context raven::create()
+
+# "NAME X Y": the centre of WIDGET where the last frame laid it out.
+fn centre(widget: raven::Widget, name: str, context ui: raven::Ui) -> str errors NonFiniteFloat:
+    r = widget.rect()
+    x = std::float64::round(r.x + r.width / 2.0)
+    y = std::float64::round(r.y + r.height / 2.0)
+    name.append_char(' ').concat(std::int::to_string(x)).append_char(' ').concat(std::int::to_string(y))
+
+fn probe(context ui: raven::Ui) -> List[str] errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::desktop())
+    screen = tasks_app::build()
+    empty = raven::draw_frame()
+    input = screen.input.centre("input")
+    add_button = screen.add_button.centre("add")
+    clear0 = screen.clear_button.centre("clear0")
+    screen.input.set_input_text("Buy milk")
+    one_task = screen.add_task([])
+    one = raven::draw_frame()
+    clear1 = screen.clear_button.centre("clear1")
+    screen.input.set_input_text("Write report")
+    two_tasks = screen.add_task(one_task)
+    two = raven::draw_frame()
+    clear2 = screen.clear_button.centre("clear2")
+    task1 = two_tasks.at(0):
+        on IndexNotFound:
+            return ["error no first task"]
+    task2 = two_tasks.at(1):
+        on IndexNotFound:
+            return ["error no second task"]
+    box1 = task1.box.centre("box1")
+    box2 = task2.box.centre("box2")
+    raven::stop()
+    [input, add_button, clear0, clear1, clear2, box1, box2]
+
+fn main() -> str errors std::io::WriteFailed:
+    lines = probe():
+        on raven::RavenFailed failure:
+            ["error ".concat(failure.detail)]
+        on NonFiniteFloat:
+            ["error NonFiniteFloat"]
+    printed = loop line in lines:
+        std::io::print_line(line)
+    "probed"
+
+result = main():
+    on std::io::WriteFailed:
+        "cannot print"
+result

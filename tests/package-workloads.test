@@ -51,8 +51,13 @@ proc ravenAssemblable {} {
     return [expr {[file isdirectory [file join $::projectRoot generated c raven $target raven]]
         && [file exists [file join $headers raven include Raven.h]]}]
 }
-testConstraint ravenPackage [expr {[ravenAssemblable] && [cffi::ravenDir] ne "" && [core::cabi::hostTarget] eq "linux-x86_64"
-    && [auto_execok aarch64-linux-gnu-gcc] ne "" && [auto_execok cmake] ne "" && [auto_execok ninja] ne ""}]
+# The release bundles Raven's desktop build (RAVEN-CLEANROOM-DESKTOP-
+# MILESTONE-1.md) for both Linux targets: the host's from tests/cffi/raven.tcl
+# desktop, AArch64's cross-built by the tool against the pinned arm64 libX11
+# packages, which it fetches once (dpkg-deb unpacks them).
+testConstraint ravenPackage [expr {[ravenAssemblable] && [cffi::ravenDesktopDir] ne "" && [core::cabi::hostTarget] eq "linux-x86_64"
+    && [auto_execok aarch64-linux-gnu-gcc] ne "" && [auto_execok cmake] ne "" && [auto_execok ninja] ne ""
+    && [auto_execok dpkg-deb] ne ""}]
 testConstraint ravenRun [expr {[testConstraint ravenPackage] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
 testConstraint crossAarch64 [expr {[auto_execok aarch64-linux-gnu-gcc] ne "" && [auto_execok clang] ne ""}]
 # The repository's target-aware packages are one release for every target
@@ -108,7 +113,8 @@ proc repository {names} {
         return $::repositories($key)
     }
     set repo [makeDirectory pw-repo-[pid]-[incr ::counter]]
-    exec [info nameofexecutable] $::repositoryTool $repo {*}$names
+    # (A build the tool makes writes its progress on standard error.)
+    exec [info nameofexecutable] $::repositoryTool $repo {*}$names 2>@1
     set ::repositories($key) $repo
     return $repo
 }
@@ -356,6 +362,109 @@ test pw-raven-targets {Raven's release holds linux-x86_64 and linux-aarch64 (its
     list [dict get $arm status] [llength [lsearch -all [split [dict get $plan out] \n] {*ELF AArch64*}]] \
         [dict get $mac status] [kindOf [dict get $mac out]] [kindOf [dict get $win out]]
 } -cleanup cleanup -result {0 2 1 UNSUPPORTED UNSUPPORTED}
+
+# The release's file list, every target's native files' facts (read from
+# their bytes), from the store of an application that installed it.
+proc ravenStoreFacts {app target} {
+    set store [file join $app .bot_modules raven targets $target native]
+    lmap name {libraven.so.0 libraven_bridge.a} {
+        set path [file join $store $name]
+        set facts [pm::binary::inspect [pm::ReadBytes $path] $path]
+        if {[dict get $facts kind] eq "elf"} {
+            list $name [dict get $facts machine] [expr {"libX11.so.6" in [dict get $facts needed]}] \
+                [expr {"Rvulkan_get_instance" in [dict get $facts symbols]}] [dict get $facts soname]
+        } else {
+            list $name [dict get $facts kind]
+        }
+    }
+}
+
+test pw-raven-desktop-release {the release is raven 0.3.1, one artifact for linux-x86_64 and linux-aarch64, and on both it bundles Raven's desktop build -- a shared object of the target that loads libX11.so.6 (the X11 platform) and exports the Vulkan renderer's API -- beside the bridge's archive; libX11 is declared a system library, verified here by the system's own metadata, and the plan names no -L} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set app [fresh app]
+    set added [pm add raven -project $app -repository $repo]
+    set plan [dict get [pm native plan -project $app] out]
+    list [lsort [glob -tails -directory $repo *.botpkg]] [dict get $added status] \
+        [ravenStoreFacts $app linux-x86_64] [ravenStoreFacts $app linux-aarch64] \
+        [regexp {library X11: system shared \(instance raven\)\n    ELF x86-64 shared object; (pkg-config|dpkg package)} $plan] \
+        [string match "*needs libm.so.6, libX11.so.6, libc.so.6, ld-linux-x86-64.so.2*" $plan] [string match "*no -L is needed*" $plan]
+} -cleanup cleanup -result {raven-0.3.1.botpkg 0 {{libraven.so.0 62 1 1 libraven.so.0} {libraven_bridge.a archive}} {{libraven.so.0 183 1 1 libraven.so.0} {libraven_bridge.a archive}} 1 1 1}
+
+test pw-raven-artifact-contents {the artifact holds the package and nothing to run: its common files -- the module, the two guides, the example, the bridge's source -- and per target the generated binding, the bridge's archive and libraven; no script, no build file, no header but the binding's own modules} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set files [dict keys [dict get [pm::archive::read [file join $repo raven-0.3.1.botpkg]] files]]
+    set common [lsort [lsearch -all -inline -not -glob $files targets/*]]
+    set kinds {}
+    foreach target {linux-aarch64 linux-x86_64} {
+        set own [lsearch -all -inline -glob $files targets/$target/*]
+        set bindings [llength [lsearch -all -inline -regexp $own "^targets/$target/raven/\[a-z_\]+\\.bot\$"]]
+        set native [lsort [lsearch -all -inline -glob $own targets/$target/native/*]]
+        lappend kinds $target [expr {$bindings == [llength $own] - 2}] $native
+    }
+    list $common $kinds
+} -cleanup cleanup -result {{GUIDE.md README.md botlish.json examples/clicks/clicks.bot examples/clicks/main.bot examples/clicks/test.bot native/raven_bridge.c raven.bot} {linux-aarch64 1 {targets/linux-aarch64/native/libraven.so.0 targets/linux-aarch64/native/libraven_bridge.a} linux-x86_64 1 {targets/linux-x86_64/native/libraven.so.0 targets/linux-x86_64/native/libraven_bridge.a}}}
+
+test pw-raven-release-immutable {the author's one operation (tools/package-repository.tcl OUT raven) prints the release's identity -- name, version, SHA-256, targets -- and run again reproduces the same bytes from its cached builds (unchanged); a different file already holding raven 0.3.1 in OUT is refused (EXISTS) and left as it was, unless -force says to overwrite that local file} -constraints {ravenPackage} -body {
+    set out [fresh repo]
+    set first [exec [info nameofexecutable] $::repositoryTool $out raven 2>@1]
+    regexp {sha256 ([0-9a-f]{64})} $first -> digest
+    set again [exec [info nameofexecutable] $::repositoryTool $out raven 2>@1]
+    set artifact [file join $out raven-0.3.1.botpkg]
+    writeText $artifact "not this release"
+    set refused [catch {exec [info nameofexecutable] $::repositoryTool $out raven 2>@1} refusal]
+    set kept [expr {[pm::ReadBytes $artifact] eq "not this release"}]
+    set forced [exec [info nameofexecutable] $::repositoryTool -force $out raven 2>@1]
+    list [regexp {packed raven 0\.3\.1: \S+raven-0\.3\.1\.botpkg\n} $first] [string match "*targets linux-aarch64, linux-x86_64*" $first] \
+        [string match "*(unchanged)*sha256 $digest*" $again] $refused [string match "*already holds a different raven 0.3.1*" $refusal] $kept \
+        [string match "*sha256 $digest*" $forced] [expr {[pm::sha256::hex [pm::ReadBytes $artifact]] eq $digest}]
+} -cleanup cleanup -result {1 1 1 1 1 1 1 1}
+
+test pw-raven-metadata-checked {the release's native metadata is checked against its files when it is packed: without its X11 declaration the bundled libraven's need of libX11.so.6 resolves to nothing; with the headless library where the desktop one is declared, its loader dependencies and the declared Vulkan symbol are refused -- so the desktop release cannot be packed from the wrong build or with a dependency left out} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set app [fresh app]
+    pm add raven -project $app -repository $repo
+    set store [file join $app .bot_modules raven]
+    # Without X11.
+    set noX11 [file join [fresh pkg] raven]
+    file copy $store $noX11
+    set descriptor [pm::descriptor::read [file join $noX11 botlish.json] pack]
+    foreach target [dict keys [dict get $descriptor targets]] {
+        set libraries [lsearch -all -inline -not -glob [dict get $descriptor targets $target libraries] "*name X11*"]
+        dict set descriptor targets $target libraries $libraries
+    }
+    file delete [file join $noX11 botlish.json]
+    pm::WriteNew [file join $noX11 botlish.json] [pm::descriptor::encode $descriptor]
+    set a [pm package pack $noX11 -out [fresh out]]
+    # The headless library in the desktop release's place.
+    set headless [file join [fresh pkg] raven]
+    file copy $store $headless
+    set target [file join $headless targets linux-x86_64 native libraven.so.0]
+    file delete $target
+    exec strip --strip-unneeded -o $target [file join [cffi::ravenDir] libraven.so.0]
+    set b [pm package pack $headless -out [fresh out]]
+    list [dict get $a status] [string match "*linux-x86_64: library raven needs libX11.so.6, which is neither linux-x86_64's platform nor a library this package declares*" [dict get $a out]] \
+        [dict get $b status] [regexp {loader dependencies|needs|Rvulkan_get_instance} [dict get $b out]]
+} -cleanup cleanup -result {1 1 1 1}
+
+test pw-raven-deploy-relocates {the release's example test as a native executable: native deploy places the bundled libraven.so.0 in DIR/lib, the executable linked with -runtime-path '$ORIGIN/lib' runs after DIR is moved and the package is removed from the application (botlish remove), with no LD_LIBRARY_PATH and no display, and the loader resolves the deployed library} -constraints {ravenRun} -body {
+    set repo [repository {raven}]
+    set app [fresh app]
+    pm add raven -project $app -repository $repo
+    foreach file [glob -directory [file join $app .bot_modules raven examples clicks] *.bot] {
+        file copy $file $app
+    }
+    set dist [file join [fresh dist] out]
+    set d [pm native deploy -project $app -target linux-x86_64 -out $dist]
+    set e [pm -emit-native-executable -runtime-path {$ORIGIN/lib} [file join $app test.bot]]
+    file rename [file join $app test] [file join $dist test]
+    set moved [file join [fresh moved] app]
+    file rename $dist $moved
+    set removed [pm remove raven -project $app]
+    set run [withEnvironment [list LD_LIBRARY_PATH {} DISPLAY {}] {exec [file join $moved test]}]
+    set resolved [lsearch -inline [split [withEnvironment [list LD_LIBRARY_PATH {}] {exec ldd [file join $moved test]}] \n] *libraven*]
+    list [dict get $d status] [dict get $e status] [dict get $removed status] [file exists [file join $app .bot_modules raven]] \
+        $run [string match "*=> $moved/lib/libraven.so.0 *" $resolved]
+} -cleanup cleanup -result {0 0 0 0 {["2", "2 clicks", "0", "0 clicks"]} 1}
 
 # ---------------------------------------------------------------------------
 # F. The Linux event loop's driver

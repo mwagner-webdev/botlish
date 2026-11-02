@@ -374,6 +374,40 @@ proc hir::syntax::withPlaces {block places} {
 # validator, `-> unit`), the argument of parameter NAME satisfies the
 # refinement. hir/resolve.tcl validates it and records the
 # resolved contract on the block expression (`proofs`).
+# BLOCK (a `block` node: a declared recognizer's function, surface/dfa.tcl's
+# Lower) with the recognizer's table RECOGNIZER (EMISSION-CLAIMS-
+# MILESTONE-1.md): {key {NS NAME} qualified Q alphabet A numbers STATE->N
+# leaves {LEAF...} rows {ROW...} suspends 0|1 stateOrigins STATE->ORIGIN} --
+# surface::dfa::Codes's table and leaves, whose meaning core/dfa.tcl states
+# (core::dfa::Outcome). Read by the emission checker only; no backend reads
+# it (the function's own code is what runs).
+proc hir::syntax::withRecognizer {block recognizer} {
+    foreach field {key qualified alphabet numbers leaves rows suspends stateOrigins} {
+        if {![dict exists $recognizer $field]} {
+            core::malformed "a block's recognizer table needs its $field" [list block $recognizer]
+        }
+    }
+    dict set block recognizer $recognizer
+    return $block
+}
+
+# BLOCK (a `block` node) with its emission claims CLAIMS (EMISSION-CLAIMS-
+# MILESTONE-1.md, `emits R, ...`): {name NAME qualified {NS MEMBER}|""
+# origin ORIGIN} dicts in written order, NAME the recognizer as written.
+# hir/resolve.tcl resolves each to the recognizer's function binding; the
+# emission checker (hir/emission.tcl) certifies or rejects each.
+proc hir::syntax::withEmits {block claims} {
+    foreach claim $claims {
+        if {[catch {dict get $claim name; dict get $claim qualified; dict get $claim origin}]} {
+            core::malformed "block emission claims must be {name qualified origin} dicts" [list block $claims]
+        }
+    }
+    if {$claims ne {}} {
+        dict set block emits $claims
+    }
+    return $block
+}
+
 proc hir::syntax::withProofs {block proofs} {
     foreach clause $proofs {
         if {[catch {dict get $clause outcome; dict get $clause param; dict get $clause paramOrigin

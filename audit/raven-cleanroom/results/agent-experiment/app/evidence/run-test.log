@@ -1,0 +1,30 @@
+== test.bot (cranelift)
+PASS 1 start / state: (none)
+PASS 1 start / window: status="0 tasks, 0 done" input="" rows=0 boxes=(none)
+PASS 2 Add with empty text adds nothing / state: (none)
+PASS 2 Add with empty text adds nothing / window: status="0 tasks, 0 done" input="" rows=0 boxes=(none)
+PASS 3 typing shows in the input / state: (none)
+PASS 3 typing shows in the input / window: status="0 tasks, 0 done" input="Buy milk" rows=0 boxes=(none)
+PASS 4 Add adds the task and clears the input / state: [ ] Buy milk
+PASS 4 Add adds the task and clears the input / window: status="1 tasks, 0 done" input="" rows=1 boxes=[ ] Buy milk
+PASS 5 two more (Add, then Enter) / state: [ ] Buy milk, [ ] Write report, [ ] Call mom
+PASS 5 two more (Add, then Enter) / window: status="3 tasks, 0 done" input="" rows=3 boxes=[ ] Buy milk, [ ] Write report, [ ] Call mom
+PASS 6 checking a task marks it done / state: [ ] Buy milk, [x] Write report, [ ] Call mom
+PASS 6 checking a task marks it done / window: status="3 tasks, 1 done" input="" rows=3 boxes=[ ] Buy milk, [x] Write report, [ ] Call mom
+PASS 7 checking another / state: [ ] Buy milk, [x] Write report, [x] Call mom
+PASS 7 checking another / window: status="3 tasks, 2 done" input="" rows=3 boxes=[ ] Buy milk, [x] Write report, [x] Call mom
+PASS 8 unchecking marks it not done / state: [ ] Buy milk, [x] Write report, [ ] Call mom
+PASS 8 unchecking marks it not done / window: status="3 tasks, 1 done" input="" rows=3 boxes=[ ] Buy milk, [x] Write report, [ ] Call mom
+PASS 9 Clear done removes the done task / state: [ ] Buy milk, [ ] Call mom
+PASS 9 Clear done removes the done task / window: status="2 tasks, 0 done" input="" rows=2 boxes=[ ] Buy milk, [ ] Call mom
+PASS 9 / its checkbox is destroyed: false
+PASS 10 Clear done with nothing done changes nothing / state: [ ] Buy milk, [ ] Call mom
+PASS 10 Clear done with nothing done changes nothing / window: status="2 tasks, 0 done" input="" rows=2 boxes=[ ] Buy milk, [ ] Call mom
+PASS 11 Add with empty text again / state: [ ] Buy milk, [ ] Call mom
+PASS 11 Add with empty text again / window: status="2 tasks, 0 done" input="" rows=2 boxes=[ ] Buy milk, [ ] Call mom
+PASS 12 checking all and clearing empties the list / state: (none)
+PASS 12 checking all and clearing empties the list / window: status="0 tasks, 0 done" input="" rows=0 boxes=(none)
+PASS 13 adding after clearing / state: [ ] Water plants
+PASS 13 adding after clearing / window: status="1 tasks, 0 done" input="" rows=1 boxes=[ ] Water plants
+27 passed, 0 failed
+   value: "TEST PASS: 27 checks"

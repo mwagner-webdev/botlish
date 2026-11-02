@@ -26,7 +26,9 @@
 #                                        (PLACE-PARAMETERS.md),
 #                                        ?declares TYPE?, ?proves BINDING
 #                                        NAME: TYPE? (a proof contract,
-#                                        REFINEMENT-VALUES.md), ?errors ...?
+#                                        REFINEMENT-VALUES.md), ?errors ...?,
+#                                        ?emits (BINDING NAME, ...)? (emission
+#                                        claims, EMISSION-CLAIMS-MILESTONE-1.md)
 #                                        and ?contexts (DIRECT) requires
 #                                        (REQUIRED)? -- the block's direct and
 #                                        transitive context requirements
@@ -623,6 +625,15 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             }
             if {[dict get $node declaredErrors] ne {}} {
                 append text " errors [join [dict get $node declaredErrors] {, }]"
+            }
+            if {[dict exists $node emits]} {
+                # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each
+                # recognizer's function binding and the name as written.
+                append text " emits ([join [lmap claim [dict get $node emits] {
+                    set b [dict get $claim binding]
+                    if {$b eq ""} { set b ? }
+                    string cat $b " " [dict get $claim name]
+                }] {, }])"
             }
             set effect [hir::coroutines::EffectText $hir $e]
             if {$effect ne ""} {

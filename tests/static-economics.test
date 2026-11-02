@@ -592,6 +592,42 @@ test se-equal-sequence {sites in one function's statement sequence are judged on
     list [seSame $text] [seOutcomes $text]
 } -result {{} {UNBOUND accepted}}
 
+# An emission claim (EMISSION-CLAIMS-MILESTONE-1.md) reads the code of the
+# functions its function calls: a site holding a claim depends on the sites
+# in its callees' bodies through the exact call edges (R -> R -> F), and no
+# edge of its own is needed. In the first program the claim is certified
+# only once the callee's site is rejected (its rejection removes the yield
+# that broke the claim), so a missing edge would reject the claim's site in
+# the first build. In the second the callee's yield follows its rejected
+# site, unreachable: the callee no longer yields, its call completes as its
+# declared `unit` with nothing yielded (a rejected site's caller may
+# complete normally: hir/completions.tcl's `intended`), and the claim is
+# EMIT-INCOMPLETE under every scheduler.
+set ::seEmissionPrelude "import std::compiler\nimport std::dfa\n\nclass digit = '0'..'9'\n\ndfa digit_token over ascii:\n    start:\n        digit -> accept\n\n"
+set ::seEmissionProbe "fn probe() -> str errors std::compiler::CompilerError:\n    static compile:\n        fn emit(d: int) -> unit errors std::compiler::CompilerError emits digit_token:\n            helper(d)\n        0\n    \"accepted\"\n\nr = probe():\n    on std::compiler::CompilerError:\n        \"rejected\"\nr\n"
+
+test se-equal-emission-callee {a claim's verdict that a rejection in its callee decides: the claim's site waits for the callee's site in the batched order, and a callee whose only yield follows its rejected site leaves the claim incomplete -- the batched decisions are the sequential ones} -body {
+    set flips "$::seEmissionPrelude[join {
+        {fn helper(d: int) -> unit errors std::compiler::CompilerError:}
+        {    if d > 100:}
+        {        static compile:}
+        {            yield 48 + d}
+        {            1 + "a"}
+        {    yield 48}
+        {    unit}
+    } \n]\n\n$::seEmissionProbe"
+    set unreachable "$::seEmissionPrelude[join {
+        {fn helper(d: int) -> unit errors std::compiler::CompilerError:}
+        {    static compile:}
+        {        x = 1 + "a"}
+        {        x}
+        {    yield 48 + d}
+        {    unit}
+    } \n]\n\n$::seEmissionProbe"
+    list [seSame $flips] [seOutcomes $flips] [seEcon $flips] \
+        [seSame $unreachable] [seOutcomes $unreachable]
+} -result {{} {TYPE accepted} {2 2 0} {} {TYPE EMIT-INCOMPLETE}}
+
 test se-equal-ownership-siblings {sibling blocks with ownership effects: a rejected block's move of a coroutine handle is gone with it (the block after it in the same function is accepted), beside an independent USE-AFTER-MOVE and an accepted block whose handle lives across an error edge -- the batched decisions are the sequential ones} -body {
     set text "import std::compiler\n\nerror Boom\n\nfn boom(x: int) -> int errors Boom:\n    if x > 5:\n        fail Boom\n    x\n\nfn needs_int(v: int) -> int:\n    v\n\nfn producer():\n    yield 1\n    2\n\n"
     append text "fn run() -> int errors std::compiler::CompilerError:\n    coroutine \{step\} = producer()\n    static compile:\n        other = step\n        needs_int(\"s\")\n    static compile:\n        step()\n    0\n\n"

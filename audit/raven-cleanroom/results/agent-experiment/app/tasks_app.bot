@@ -1,0 +1,110 @@
+# tasks_app.bot -- the "Tasks" application: a window with a text input,
+# an "Add" button, one checkbox per task, a status label ("N tasks, M
+# done") and a "Clear done" button.
+#
+# It names no configuration: main.bot runs it on the desktop (a real X11
+# window), test.bot headless with synthetic input.
+import raven
+import std::int
+import std::list
+import std::str
+
+# One task: its text, whether it is done, and the checkbox showing it.
+struct Task:
+    text: str
+    done: bool
+    box: raven::Widget
+
+# The widgets the program reads and changes.
+struct Screen:
+    window: raven::Window
+    input: raven::Widget
+    add_button: raven::Widget
+    clear_button: raven::Widget
+    list_panel: raven::Widget
+    status: raven::Widget
+
+# How many TASKS are done.
+fn done_count(tasks: List[Task]) -> int:
+    fold t in tasks with intermediate n 0:
+        if t.done:
+            n + 1
+        else:
+            n
+
+# The status line for TASKS: "N tasks, M done".
+fn status_text(tasks: List[Task]) -> str:
+    total = std::int::to_string(tasks.length())
+    done = std::int::to_string(tasks.done_count())
+    total.concat(" tasks, ").concat(done).concat(" done")
+
+# The window and its widgets, with no tasks. Raven must be started.
+fn build() -> Screen:
+    window = raven::window("Tasks", 420, 360)
+    input = raven::text_input("")
+    add_button = raven::button("Add")
+    clear_button = raven::button("Clear done")
+    list_panel = raven::vbox()
+    status = raven::label(status_text([]))
+    entry_row = raven::hbox().add(input).add(add_button)
+    window.set_content(raven::vbox().add(entry_row).add(list_panel).add(status).add(clear_button))
+    Screen {window: window, input: input, add_button: add_button, clear_button: clear_button, list_panel: list_panel, status: status}
+
+# TASKS with the input's text added as a new task (a checkbox at the end
+# of the list) and the input cleared; TASKS unchanged when the text is
+# empty.
+fn add_task(screen: Screen, tasks: List[Task]) -> List[Task]:
+    text = screen.input.input_text()
+    if text == "":
+        return tasks
+    box = raven::checkbox(text)
+    shown = screen.list_panel.add(box)
+    screen.input.set_input_text("")
+    tasks.append(Task {text: text, done: false, box: box})
+
+# TASKS with the task whose checkbox EVENT came from marked as CHECKED.
+fn mark(tasks: List[Task], event: raven::Event, checked: bool) -> List[Task]:
+    loop t in tasks:
+        if event.from?(t.box):
+            Task {text: t.text, done: checked, box: t.box}
+        else:
+            t
+
+# TASKS without the done ones; their checkboxes are destroyed (which
+# removes them from the window).
+fn clear_done(tasks: List[Task]) -> List[Task]:
+    loop t in tasks:
+        if t.done:
+            t.box.destroy()
+            continue
+        t
+
+# TASKS after EVENT: Add (or Enter in the input) adds, a checkbox toggles
+# its task, Clear done removes the done tasks; anything else changes
+# nothing.
+fn handle(screen: Screen, tasks: List[Task], event: raven::Event) -> List[Task]:
+    clicked = event.kind == raven::EventKind::Clicked
+    if clicked and event.from?(screen.add_button):
+        return screen.add_task(tasks)
+    if event.kind == raven::EventKind::TextCommitted and event.from?(screen.input):
+        return screen.add_task(tasks)
+    if clicked and event.from?(screen.clear_button):
+        return tasks.clear_done()
+    if event.kind == raven::EventKind::Toggled:
+        return tasks.mark(event, event.value == 1)
+    tasks
+
+# TASKS after every event waiting (oldest first); the status label shows
+# the new state.
+fn step(screen: Screen, tasks: List[Task]) -> List[Task] errors NonFiniteFloat:
+    next = fold event in raven::events() with intermediate state tasks:
+        screen.handle(state, event)
+    screen.status.set_text(status_text(next))
+    next
+
+# The frame loop: a frame whenever something happens, its events handled
+# after it, until the window closes (the frame is false); the final tasks.
+fn run(screen: Screen, tasks: List[Task]) -> List[Task] errors NonFiniteFloat:
+    if not raven::wait_frame(-1.0):
+        return tasks
+    screen.run(screen.step(tasks))

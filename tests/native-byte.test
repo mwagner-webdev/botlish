@@ -251,16 +251,18 @@ test native-shift-range-error-parity {an out-of-range shift amount is the same e
 # core/scalarbits.tcl's by-construction argument).
 
 test native-byte-high-nibble-nir-is-mask-not-branch {std::byte::high_nibble's own NIR has no comparison/branch instruction} -body {
-    # extract's own argument is deliberately not a literal (mod's own wide,
-    # non-exact result: core/native.tcl's resultRange metadata gives it only
-    # [0,+inf), never a single proven value): this test is about the mask
+    # extract's own argument is deliberately not a literal (mod's wide
+    # result for an operand the analysis does not know: k comes from
+    # std::int::from_string, which is never folded, so the argument is only
+    # [0, 999999], never a single proven value; mod of two literals is exact
+    # since EMISSION-CLAIMS-MILESTONE-1.md): this test is about the mask
     # lowering staying branch-free for an *arbitrary* b, not about the
     # separate (and separately tested, tests/hir-range-bitop.test's own
     # pure-bitwise-fold-*) singleton-constant-folding case a literal-only
     # caller (e.g. extract(200)) would now trigger instead, since this
     # milestone's own generic exact-set transfer (hir/range.tcl's BitOp) can
     # prove *that* case a single value and fold the `iand` away entirely.
-    set path [makeFile "import std::byte\nfn extract(b):\n    std::byte::high_nibble(b)\n\nextract(mod(200, 1000000))\n" native-byte-nir.bot]
+    set path [makeFile "import std::byte\nimport std::int\nfn extract(b):\n    std::byte::high_nibble(b)\n\nk = std::int::from_string(\"200\"):\n    on InvalidIntegerText:\n        0\nextract(mod(k, 1000000))\n" native-byte-nir.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set nir [native::nir $hir]

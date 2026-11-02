@@ -256,6 +256,19 @@ namespace eval hir::static {
         DUPLICATE-FLAG                           DuplicateFlag
         DUPLICATE-FLAG-DECLARATION               DuplicateFlagDeclaration
         DUPLICATE-LOOP-VARIABLE                  DuplicateLoopVariable
+        EMIT-AFTER-TOKEN                         EmitAfterToken
+        EMIT-BEYOND-TOKEN                        EmitBeyondToken
+        EMIT-BOUNDARY                            EmitBoundary
+        EMIT-BUDGET                              EmitBudget
+        EMIT-BYTE-CHARACTER                      EmitByteCharacter
+        EMIT-END-SYMBOL                          EmitEndSymbol
+        EMIT-INCOMPLETE                          EmitIncomplete
+        EMIT-NOT-SYMBOL                          EmitNotSymbol
+        EMIT-RECOGNIZER                          EmitRecognizer
+        EMIT-REJECTED                            EmitRejected
+        EMIT-TERMINAL-VALUE                      EmitTerminalValue
+        EMIT-UNKNOWN-VALUE                       EmitUnknownValue
+        EMIT-UNSUPPORTED                         EmitUnsupported
         EXPORT-ENVIRONMENT                       ExportEnvironment
         EXPORT-NAME                              ExportName
         EXPORT-PLACEMENT                         ExportPlacement
