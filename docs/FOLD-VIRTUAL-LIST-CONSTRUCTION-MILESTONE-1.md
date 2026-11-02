@@ -565,7 +565,17 @@ On this container, on the final tree unless said otherwise.
   an append not committed, the initial value dropped, nested folds sharing
   one register, pieces in the wrong order, `SequenceTo`'s releases dropped,
   and (rebuilding a private copy of the backend) a `construct`'s pieces
-  missing from the collector's liveness. MUTATION-RESULT
+  missing from the collector's liveness. **18 of 18 killed**
+  (`audit/fold-virtual-construction/results/mutate.txt`), every one by
+  the test file: the value-changing ones also by the fuzzer (40 programs
+  of seed 1 per mutant), the GC-root one by the GC-stress test and the
+  GC-stress executable. Four change only cost or representation, never a
+  value -- `optimizer-disabled`, `continues-dropped`,
+  `next-value-check-dropped`, `next-value-materialized` -- and are killed
+  by the structural and decision tests (NIR, copy counts, reasons), as
+  they must be: values cannot tell them apart. `break-not-a-use` and
+  `continue-not-a-use` are killed by value too (`validate_plans` rejects
+  the double consumption, section 4).
 * **Other harnesses whose mutants edit the changed code.** Every mutant of
   every `audit/*/tools/*mutants*.txt` applies (two fold-loops mutants of the
   break and exhaustion lowering were updated to the new text, the same
