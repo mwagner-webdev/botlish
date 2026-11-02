@@ -577,13 +577,34 @@ otherwise:
   gate (no corpus program changed; `audit/list-flat/workloads/` is not
   corpus), the batched-against-sequential static-decision comparison
   (AGENTS.md: CI only) and the macOS and Windows hosts.
-* **CI on the branch** (`claude/upbeat-hypatia-34hk1w`, commit 24921d9):
-  `tests` was dispatched (run 41346012641) and `static-decisions` over
-  list-flat.bot, stdlib-namespaces.bot, loop-collecting.bot and
-  fold-loops.bot (run 41346014910); the push started `tests (macos arm64)`,
-  `tests (windows x86-64)` and both Icy Tower workflows. All six were still
-  queued -- no runner had started them -- about 35 minutes later, when this
-  report was written: no CI result is claimed here.
+* **CI on the branch** (`claude/upbeat-hypatia-34hk1w`).
+  - Commit 24921d9: `static-decisions` over list-flat.bot,
+    stdlib-namespaces.bot, loop-collecting.bot and fold-loops.bot (run
+    41346014910) and both Icy Tower workflows passed. `tests` (run
+    41346012641) failed one test of this change's making on interp,
+    compile and both coverage jobs: tests/mutable-array.test's
+    `ma-roles-audit`, which enumerates every collection primitive's
+    ownership roles and did not yet list std::list::flat's `copy-out`
+    (fixed in 9ebe8fc). Its other jobs -- the golden shards, the Rust
+    tests, the warning gate, the method-call decision, the stub- and
+    system-linked executables -- passed. Windows acceptance failed on
+    `ma-roles-audit` too (the same fix) and otherwise, like macOS, only
+    where main failed then: Windows on package-manager.test's
+    `pm-remove`, `pm-crash-recovery` and `pm-lock-busy`; macOS on `mts-main-process-semantics` and the
+    graphical census's 15 process-semantics cases (fixed on main since,
+    6d9cbbc), and its acceptance shard 1 at the 75-minute limit (as on
+    main; list-flat.test took 6 s of it).
+  - Commit dedd743 (the fix, main merged): every job of `tests` (run
+    41396991298) passed -- interp, compile, the cranelift and
+    cranelift-generic coverage, the four golden shards, the Rust tests,
+    the warning gate, the method-call decision and the stub- and
+    system-linked executables (GC stress runs on main only).
+  - Commit 141ae5e (main merged again): both Icy Tower workflows and the
+    macOS graphical census passed; `tests (windows x86-64)` failed only
+    package-manager.test's three tests above and package-native.test's
+    `pn-unsupported-target` and `pn-view-crash-recovery`, exactly the
+    failures of main's own run at PM-2 (1ed72b5, run 41395294901).
+    `tests (macos arm64)` for it was still queued when this was written.
 
 ## What remains, and the next milestone
 
