@@ -544,7 +544,61 @@ keep the loop alive, and the library adds no scheduling rule.
 
 ## 15. Performance
 
-<<PERF>>
+`tclsh9.0 bench/actor.tcl -runs 3`: `bench/actor/main.bot` natively
+(cranelift) on the Linux driver (`packages/event_loop_linux`, real clock),
+three fresh processes; the census's Probe F workloads plus the milestone's
+own. Every actor of the measured phases is constructed inside `inject no
+context:` except the "unrestricted" pair, the same actor code constructed
+outside any block. A 4-core container (Intel Xeon @ 2.10GHz, Linux 6.18,
+Tcl 9.0.1, rustc 1.97.0), shared: the rows are relative costs. Wall equals
+CPU within a few percent (one thread). The output is
+`audit/actor/results/bench-cranelift.txt`.
+
+| phase | ops | µs per op, best (worst) | Probe F (census 12.6) |
+|---|---:|---:|---:|
+| raw channel ping-pong (two tasks, ints) | 40,000 | 1.06 (1.08) | 1.46-1.70 |
+| contextless actors, `int` ping-pong | 40,000 | 2.28 (2.41) | `Postbox[int]` 2.21-2.44 |
+| unrestricted actors, `int` ping-pong | 40,000 | 2.24 (2.53) | -- |
+| contextless actors, `Msg` ping-pong (64-char str, a fresh 8-element List) | 40,000 | 2.50 (2.56) | `Postbox[Msg]` 2.19-2.58 |
+| request/reply round trip (send, receive, reply, receive) | 20,000 | 4.81 (5.33) | -- |
+| `deliver` into a full mailbox (capacity 4; 19,996 room waits) | 20,000 | 2.89 (3.68) | -- (Probe A polled) |
+| ring of 100 actors, hop | 20,000 | 2.53 (2.92) | 1.78-3.05 |
+| create an idle actor (open, construct, start, its listen served) | 2,000 | 30.5 (37.4) | 13-50 |
+| stop it (one message, run to completion, reaped by its host) | 2,000 | 16.6 (30.4) | 9-35 |
+| fail it (one message, TaskFailed, reaped by its host) | 2,000 | 14.3 (21.9) | -- |
+| `int` ping-pong beside 50 spinning tasks | 40,000 | 20.9 (22.1) | -- |
+
+| memory | added | per actor | Probe F |
+|---|---|---|---|
+| 2,000 idle actors | RSS +17,908 KiB, virtual +32,760,836 KiB | 9 KiB resident, 16 MiB reserved (two coroutine stacks, `MAP_NORESERVE`) | RSS +8,488 KiB, virtual +16,248,324 KiB (one stack) |
+| after stopping them | RSS +2,820 KiB, virtual +1,028 KiB | stacks returned | RSS +1,404 KiB, virtual +516 KiB |
+
+**Reading.**
+
+* **A message costs about 1.2 µs over the bare channel** (2.28 against
+  1.06 µs per hop); Probe F's postbox cost about 0.7 µs over its own. The
+  difference is the host: every request is two more coroutine switches
+  (actor to host and back) and an `Exit` and an `Answer` value. That is
+  the price of an actor that holds no context, and it is well inside what
+  an actor needs; nothing measured asks for a native mailbox.
+* **Restriction costs nothing at run time**: contextless and unrestricted
+  actors run the same code at the same speed (2.28 and 2.24 µs, within the
+  runs' spread). The inject block is a proof, not a mechanism.
+* **Room waits are events**: a producer four messages ahead of its
+  consumer waits for room on 19,996 of its 20,000 deliveries, at 2.89 µs
+  per message including the wait; no timer fires.
+* **Fairness is the loop's**: beside 50 spinning tasks, each ping-pong hop
+  takes one turn of 51 dispatches (about 0.4 µs per dispatch), as for any
+  task.
+* **The dominant cost of an idle actor is address space**: two 8 MiB
+  stack reservations, the actor's and its host's, against Probe F's one
+  (its actors received for themselves, with the Loop). Resident memory is
+  9 KiB per actor. The stacks are returned when the actors end. A host per
+  actor is what keeps the scheduling the loop's (one host serving many
+  actors would be a second scheduler); the stack size is the process-wide
+  knob `BOTLISH_NATIVE_COROUTINE_STACK_BYTES` (section 17).
+* **Creation and destruction** vary up to 2x between runs on this shared
+  machine; they are dominated by stack mapping (the pool keeps 32).
 
 ## 16. Documentation and compatibility
 
