@@ -25,6 +25,18 @@
 #
 # In memory a node is a dict {kind version sha256 files children} or {kind
 # version directory}; files a dict PATH -> {SIZE CRC}.
+#
+# Target views (PACKAGE-MANAGER-MILESTONE-2.md, "Target views") make the
+# record schema 2, which adds
+#
+#   "views": {TARGET: {"derived": D, "files": {PATH: {"size": N, "crc32": C}},
+#                      "links": {PATH: ABSOLUTE-DIRECTORY}}}
+#
+# for each view PROJECT/.bot_modules/.targets/TARGET the manager made: D the
+# SHA-256 of what it was derived from (pm/view.tcl's Derived: the record of
+# the packages, the target, the consumer's origins and the manual packages
+# it links), its files and links relative to the view's directory. A record
+# without views is written as schema 1, byte for byte PM-1's.
 
 namespace eval pm::state {}
 
@@ -39,9 +51,19 @@ proc pm::state::empty {} {
 # The record's packages (dict NAME -> NODE) of the metadata directory META;
 # empty when there is none.
 proc pm::state::read {meta} {
+    return [dict get [readAll $meta] packages]
+}
+
+# The record's views (TARGET -> {derived D files {PATH {SIZE CRC}} links
+# {PATH DIR}}).
+proc pm::state::views {meta} {
+    return [dict get [readAll $meta] views]
+}
+
+proc pm::state::readAll {meta} {
     set path [Path $meta]
     if {![pm::Exists $path]} {
-        return [empty]
+        return [dict create packages [empty] views [dict create]]
     }
     if {[file type $path] ne "file"} {
         pm::Fail STATE "the installation record $path is not a regular file"
@@ -49,14 +71,69 @@ proc pm::state::read {meta} {
     if {[catch {
         set value [pm::json::decode [pm::ReadBytes $path] -limit [expr {64 * 1024 * 1024}]]
         set members [Object $value record]
-        if {[dict keys $members] ne {state packages} || [dict get $members state] ne {num 1}} {
-            error "not a schema 1 installation record"
+        set views [dict create]
+        if {[dict keys $members] eq {state packages} && [dict get $members state] eq {num 1}} {
+        } elseif {[dict keys $members] eq {state packages views} && [dict get $members state] eq {num 2}} {
+            set views [Views [dict get $members views]]
+        } else {
+            error "not a schema 1 or 2 installation record"
         }
         set packages [Nodes [dict get $members packages]]
     } message]} {
         pm::Fail STATE "the installation record $path is damaged ($message): the package manager cannot tell its packages from yours. Move .bot_modules aside and run install again"
     }
-    return $packages
+    return [dict create packages $packages views $views]
+}
+
+proc pm::state::Views {value} {
+    set views [dict create]
+    foreach {target item} [Object $value views] {
+        if {![pm::target::isTarget $target]} {
+            error "the view target \"$target\""
+        }
+        set members [Object $item $target]
+        if {[lsort [dict keys $members]] ne {derived files links}} {
+            error "$target: unexpected view keys"
+        }
+        set derived [String $members derived]
+        if {![regexp {^[0-9a-f]{64}$} $derived]} {
+            error "$target: the view's digest"
+        }
+        set files [Files [dict get $members files] $target]
+        set links [dict create]
+        foreach {path dir} [Object [dict get $members links] links] {
+            if {[pm::json::type $dir] ne "str" || [ViewPathProblem $path] ne ""} {
+                error "$target: the link \"$path\""
+            }
+            dict set links $path [pm::json::payload $dir]
+        }
+        dict set views $target [dict create derived $derived files $files links $links]
+    }
+    return $views
+}
+
+# "" when PATH is a path inside a view: an archive path, or one under its
+# .lib or a package's .bot_modules.
+proc pm::state::ViewPathProblem {path} {
+    return [pm::archive::pathProblem [string map {.bot_modules/ bot_modules/ .lib/ lib/} $path]]
+}
+
+proc pm::state::Files {value what} {
+    set files [dict create]
+    foreach {path entry} [Object $value files] {
+        if {[ViewPathProblem $path] ne ""} {
+            error "$what: the file path \"$path\""
+        }
+        set entry [Object $entry $path]
+        set size [dict get $entry size]
+        if {[lsort [dict keys $entry]] ne {crc32 size} || [pm::json::type $size] ne "num"
+                || ![regexp {^[0-9]+$} [pm::json::payload $size]]
+                || ![regexp {^[0-9a-f]{8}$} [String $entry crc32]]} {
+            error "$what: the file entry \"$path\""
+        }
+        dict set files $path [list [pm::json::payload $size] [String $entry crc32]]
+    }
+    return $files
 }
 
 proc pm::state::Object {value what} {
@@ -145,8 +222,87 @@ proc pm::state::Value {nodes} {
     return [list obj $object]
 }
 
-proc pm::state::encode {nodes} {
-    return [pm::json::encode [list obj [list state {num 1} packages [Value $nodes]]]]
+proc pm::state::encode {nodes {views ""}} {
+    if {$views eq ""} {
+        return [pm::json::encode [list obj [list state {num 1} packages [Value $nodes]]]]
+    }
+    set object {}
+    foreach target [lsort [dict keys $views]] {
+        set view [dict get $views $target]
+        set files {}
+        foreach path [lsort [dict keys [dict get $view files]]] {
+            lassign [dict get $view files $path] size crc
+            lappend files $path [list obj [list size [list num $size] crc32 [list str $crc]]]
+        }
+        set links {}
+        foreach path [lsort [dict keys [dict get $view links]]] {
+            lappend links $path [list str [dict get $view links $path]]
+        }
+        lappend object $target [list obj [list derived [list str [dict get $view derived]] \
+            files [list obj $files] links [list obj $links]]]
+    }
+    return [pm::json::encode [list obj [list state {num 2} packages [Value $nodes] views [list obj $object]]]]
+}
+
+# How the view directory DIR differs from its record VIEW: a list of
+# descriptions naming paths relative to SHOWN (empty when it is exactly
+# what the record says). Links are compared by their targets; nothing is
+# followed.
+proc pm::state::ViewChanges {dir view shown} {
+    if {![pm::Exists $dir]} {
+        return [list "$shown is missing"]
+    }
+    if {[file type $dir] ne "directory"} {
+        return [list "$shown should be a directory, and is a [file type $dir]"]
+    }
+    set files [dict get $view files]
+    set links [dict get $view links]
+    set dirs [dict create]
+    foreach path [concat [dict keys $files] [dict keys $links]] {
+        set prefix ""
+        foreach part [lrange [split $path /] 0 end-1] {
+            append prefix $part
+            dict set dirs $prefix 1
+            append prefix /
+        }
+    }
+    set changes {}
+    ViewWalk $dir "" $files $links $dirs $shown changes
+    foreach path [concat [dict keys $files] [dict keys $links]] {
+        if {![pm::Exists [file join $dir {*}[split $path /]]]} {
+            lappend changes "$shown/$path is missing"
+        }
+    }
+    return $changes
+}
+
+proc pm::state::ViewWalk {dir relative files links dirs shown changesVar} {
+    upvar 1 $changesVar changes
+    set here [file join $dir {*}[split $relative /]]
+    foreach name [Entries $here] {
+        set path [expr {$relative eq "" ? $name : "$relative/$name"}]
+        set full [file join $here $name]
+        set type [file type $full]
+        if {[dict exists $links $path]} {
+            if {$type ne "link" || [file normalize [file join $here [file readlink $full]]] ne [dict get $links $path]} {
+                lappend changes "$shown/$path should be a link to [dict get $links $path]"
+            }
+            continue
+        }
+        if {$type eq "directory" && [dict exists $dirs $path]} {
+            ViewWalk $dir $path $files $links $dirs $shown changes
+            continue
+        }
+        if {$type eq "file" && [dict exists $files $path]} {
+            lassign [dict get $files $path] size crc
+            if {[file size $full] != $size
+                    || [format %08x [expr {[zlib crc32 [pm::ReadBytes $full]] & 0xffffffff}]] ne $crc} {
+                lappend changes "$shown/$path was changed"
+            }
+            continue
+        }
+        lappend changes "$shown/$path ($type) is not part of the view"
+    }
 }
 
 # The record of an artifact node made from the validated archive FILES

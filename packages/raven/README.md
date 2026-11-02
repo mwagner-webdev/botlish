@@ -31,13 +31,19 @@ Programs link Raven itself by `-L` (the directory `tests/cffi/raven.tcl`
 prints) and find `libraven.so` at run time by `LD_LIBRARY_PATH`. Native
 backends only: the Tcl backends refuse a C call.
 
-With the package manager (PACKAGE-MANAGER-MILESTONE-1.md) the same tree is
-an artifact: `tools/package-repository.tcl REPO` stages it as above -- the
-bridge's archive built there, on the author's side -- and packs it with its
-botlish.json as `REPO/raven-0.1.0.botpkg`, and an application installs it
-with `botlish add raven -repository REPO`: no build runs on the consumer's
-side. Such an artifact is one target's (its binding and its archive); Raven
-itself is still built and deployed separately (PM-2).
+With the package manager (PACKAGE-MANAGER-MILESTONE-1.md,
+PACKAGE-MANAGER-MILESTONE-2.md) the package is one release for linux-x86_64
+and linux-aarch64: `tools/package-repository.tcl REPO` assembles each
+target's directory -- its generated binding, the bridge's archive built for
+it, and libraven built for it (the host's by `tests/cffi/raven.tcl`,
+AArch64's by Raven's CMake build with the GNU cross compiler), all on the
+author's side -- and packs `REPO/raven-0.2.0.botpkg`. An application
+installs it with `botlish add raven -repository REPO` (and `-target
+linux-aarch64` for the other target): no build runs on the consumer's side,
+and the program links and runs with no -L or LD_LIBRARY_PATH (the target
+view's library directory); `botlish native deploy` places libraven beside
+an executable. macOS and Windows are not supported: their binding and
+native builds do not exist, and the package says so (UNSUPPORTED).
 
 Tests: `tests/raven.test`, `tests/package-workloads.test`. Example:
 `examples/raven/`.

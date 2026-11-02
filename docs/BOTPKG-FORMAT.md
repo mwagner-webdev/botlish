@@ -39,8 +39,13 @@ sdlkit-0.1.0.botpkg
 
 A pure-Botlish package and a native-backed one have the same format: a
 generated binding (`sdl3/*.bot`), a C source, a static archive
-(`native/libraven_bridge.a`) or a header are ordinary files of the archive,
-which this version transports and never interprets.
+(`native/libraven_bridge.a`), a shared library or a header are ordinary
+files of the archive, which the format transports and never interprets. A
+target-aware package (BOTLISH-JSON.md section 12) holds every target it
+supports in its one archive -- its targets' files under the directories its
+`botlish.json` names, `targets/linux-x86_64/...` -- so one release, one
+name and version and one digest, is every target's: there are never
+several archives claiming one release for different targets.
 
 ## 2. Identity and the verification boundary
 
@@ -241,10 +246,21 @@ and `NAME/...`. A package need not have a `NAME.bot` (one that provides only
 its namespace at all. A `.bot` file outside that tree is no module of
 anything, as in any installed package.
 
-Every other file is opaque: documentation, licenses, C sources, headers,
-static archives, generated binding metadata. Version 1 attaches no meaning
-to any path but `botlish.json`: no install script, hook, entry point or
-build step exists, and an executable bit cannot be represented.
+Every other file is opaque to the format: documentation, licenses, C
+sources, headers, static archives, shared libraries, generated binding
+metadata. The format attaches no meaning to any path but `botlish.json`: no
+install script, hook, entry point or build step exists, and an executable
+bit cannot be represented. A schema 2 `botlish.json` gives some files a
+meaning *for the package manager* -- a target's directory, a bundled
+library's file -- which it checks when it reads the artifact (the target
+layout, at every acquisition) and when it derives a target view (each
+bundled native file inspected as its declaration says:
+PACKAGE-MANAGER-MILESTONE-2.md); the archive stays the same restricted ZIP
+of regular files. Native libraries need no executable bit and get none: a
+deployment places them with mode 0644, which the loaders of every target
+accept. A macOS framework bundle, whose structure relies on symbolic links,
+is not representable and not needed by any package yet (a dylib or a static
+archive is); PM-3 decides a declarative reconstruction if one is.
 
 ## 10. Installation
 
@@ -262,7 +278,15 @@ Version 1 is identified by the profile itself (version needed 20, made by
 A later version will change a field a version-1 reader checks -- the
 version needed to extract, or the descriptor's schema -- so that a
 version-1 reader refuses it rather than half-reading it. Target-specific
-contents (PM-2: several targets' bindings and archives in one artifact,
-selected at installation) need a declared layout in a later
-`botlish.json` schema; signatures and registry metadata (PM-4) stay outside
-the archive, over its digest.
+contents (PM-2) needed no change to the format: they are a declared layout
+in `botlish.json` schema 2, which a PM-1 reader refuses as an unsupported
+schema rather than installing a target-aware package as if its target
+directories were ordinary files. Signatures and registry metadata (PM-4)
+stay outside the archive, over its digest -- the digest of the one archive
+that holds every target.
+
+The limits (section 6) were checked against the real multi-target packages
+(PACKAGE-MANAGER-MILESTONE-2.md, "Performance"): the SDL3 release with two
+targets' bindings, thunk archives and a bundled libSDL3 is 1.5 MiB packed
+and 4.3 MiB unpacked, Raven's 1.6 MiB and 3.8 MiB, far inside 256 MiB per
+archive and 64 MiB per file; they are unchanged.

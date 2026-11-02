@@ -1,5 +1,36 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "event_loop_linux",
-  "version": "0.1.0"
+  "version": "0.2.0",
+  "dependencies": {},
+  "targets": {
+    "linux-aarch64": {
+      "files": "targets/linux-aarch64",
+      "libraries": [
+        {
+          "name": "event_loop_linux",
+          "origin": "bundled",
+          "linkage": "static",
+          "file": "native/libevent_loop_linux.a"
+        }
+      ],
+      "headers": [
+        "native"
+      ]
+    },
+    "linux-x86_64": {
+      "files": "targets/linux-x86_64",
+      "libraries": [
+        {
+          "name": "event_loop_linux",
+          "origin": "bundled",
+          "linkage": "static",
+          "file": "native/libevent_loop_linux.a"
+        }
+      ],
+      "headers": [
+        "native"
+      ]
+    }
+  }
 }

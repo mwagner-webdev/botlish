@@ -2260,9 +2260,9 @@ title: Installed packages: .bot_modules, downward only
 summary: A package is a module tree in its owner's .bot_modules/NAME, claiming the root namespace NAME there; it sees its own modules, its own packages and std only, and each copy is its own instance.
 index: rules
 alias: package; packages; .bot_modules; install a library; third-party module; dependency; vendored library; node_modules
-keywords: package, .bot_modules, installed, dependency, scope, owner, instance, root namespace, identity, downward, consumer, sibling, collision, std
+keywords: package, .bot_modules, installed, dependency, scope, owner, instance, root namespace, identity, downward, consumer, sibling, collision, std, .targets, target package tree
 related: rule.application-modules concept.modules concept.imports error.module-collision error.unknown-namespace error.reserved-namespace cli.packages
-docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md PACKAGE-MANAGER-MILESTONE-1.md
+docs: BOT-MODULES-MILESTONE-1.md IMPORTS.md STD-NAMESPACE.md PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md
 
 == THE RULE
 A package is an ordinary module tree installed under the immediate
@@ -2294,6 +2294,18 @@ Nothing is looked up upward or sideways: a package never sees its
 consumer's modules or packages, a sibling package or an ancestor's, and the
 application never sees a package its package installed. Imports stay exact
 and non-transitive, and a leading `::` never escapes a scope.
+
+== TARGET PACKAGE TREES
+When ROOT/.bot_modules holds a directory .targets, the application's
+packages are the tree of the compilation's target (-target, the host's by
+default), ROOT/.bot_modules/.targets/TARGET -- an ordinary package tree in
+every other respect -- so packages whose bindings or native files differ by
+target are compiled from the right ones, and compiling for one target never
+reads another's. A .targets without the target's tree gives the application
+no packages for that target (UNKNOWN-NAMESPACE says so). The package
+manager derives these trees (cli.packages: target views); a HIR compiled
+from one is its target's, and the tree's .lib directory is searched when
+the program links natively.
 
 == IDENTITY
 A package instance is its place in the dependency tree (`physics`, the

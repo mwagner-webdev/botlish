@@ -149,6 +149,39 @@ namespace eval native {
     # (botlish-native's --framework-dir; main.tcl's -F DIR), kept apart from
     # the library directories; no other linker is given them.
     variable frameworkDirs {}
+    # Runtime library search paths of an emitted executable (main.tcl's
+    # -runtime-path, botlish-native's --runtime-path: PACKAGE-MANAGER-
+    # MILESTONE-2.md, "Native deployment"): where its loader finds the
+    # shared libraries deployed with it ($ORIGIN/lib, @executable_path/lib),
+    # recorded in the executable (an ELF RUNPATH, a Mach-O LC_RPATH) by the
+    # GNU and Apple linkers; refused for Windows, whose loader searches the
+    # executable's own directory. A build option, never part of a program.
+    variable runtimePaths {}
+}
+
+# The native library directories of the program HIR (its target package
+# tree's .lib: surface/modules.tcl, "Target package trees"), searched after
+# -L's when it links; a run (RUN 1) also finds its shared libraries there at
+# run time. Evaluates SCRIPT in the caller's scope with them in force.
+proc native::WithProgramDirs {hir run script} {
+    variable linkDirs
+    variable runtimePaths
+    set dirs [dict getdef $hir nativeDirs {}]
+    if {$dirs eq ""} {
+        return [uplevel 1 $script]
+    }
+    set savedLinks $linkDirs
+    set savedPaths $runtimePaths
+    foreach dir $dirs {
+        if {$dir ni $linkDirs} { lappend linkDirs $dir }
+        if {$run && $dir ni $runtimePaths} { lappend runtimePaths $dir }
+    }
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set linkDirs $savedLinks
+        set runtimePaths $savedPaths
+    }
 }
 
 # What the native backend does on each host target (core::cabi::hostTarget):
@@ -311,7 +344,8 @@ proc native::targetFacts {triple} {
 # error, raised ({NATIVE LINK ARCHIVE}: a static archive missing, of another
 # format or architecture, an import library; a framework off macOS).
 proc native::linkPlan {hir args} {
-    return [LinkPlanOf [nir $hir {*}$args]]
+    set text [nir $hir {*}$args]
+    return [WithProgramDirs $hir 0 {LinkPlanOf $text}]
 }
 
 # linkPlan of the NIR text TEXT.
@@ -374,6 +408,10 @@ proc native::RunDriver {output command nirText arguments} {
     }
     foreach dir $frameworkDirs {
         lappend args --framework-dir $dir
+    }
+    variable runtimePaths
+    foreach dir $runtimePaths {
+        lappend args --runtime-path $dir
     }
     if {$command in {run bench batch} && $::core::hashing::tableKeyOverride ne ""} {
         # A test harness fixed the private table hash's key
@@ -501,7 +539,8 @@ proc native::evalHir {hir args} {
             error "native::evalHir: -output must be discard or inherit, not \"$output\""
         }
     }
-    return [Outcome [RunDriver $output run [nir $hir {*}$args] {}]]
+    set text [nir $hir {*}$args]
+    return [WithProgramDirs $hir 1 {Outcome [RunDriver $output run $text {}]}]
 }
 
 # Compile closed, specialized HIR to a standalone executable: a Linux glibc
@@ -574,7 +613,7 @@ proc native::executable {hir path args} {
         throw {NATIVE AOT NOT-READY} "program is not AOT-ready:\n[join $failures \n]"
     }
     set text [nir $hir {*}$args {*}$analysisOptions]
-    set lines [Driver executable $text [file normalize $path] --startup $startup]
+    set lines [WithProgramDirs $hir 0 {Driver executable $text [file normalize $path] --startup $startup}]
     foreach line $lines {
         if {[lindex $line 0] eq "error"} { Outcome $lines }
     }

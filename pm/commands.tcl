@@ -10,7 +10,14 @@
 #   botlish remove NAME...
 #   botlish verify
 #   botlish package pack [DIR] [-out DIR] [-force]
-#   botlish package inspect FILE.botpkg
+#   botlish package inspect FILE.botpkg [-target T]
+#   botlish native inspect FILE [-target T]       what a native file is
+#   botlish native plan [-target T]               the project's native plan
+#   botlish native deploy -target T -out DIR      its shared libraries, placed
+#
+# add, install, update and remove take -target T (prepare the target view
+# of T: any number) and -drop-target T (remove that view); verify takes
+# -target T (check that view too) (PACKAGE-MANAGER-MILESTONE-2.md).
 #
 # with, for add, install, update, remove and verify, -project DIR (the
 # project: default the current directory), -repository DIR (a local
@@ -27,15 +34,18 @@ namespace eval pm::cli {
     variable invocation botlish
     # Each command's options: NAME ARGUMENT ("" for a flag).
     variable options {
-        add {-request R -replace {} -project DIR -repository DIR -force {} -recover {}}
-        install {-project DIR -repository DIR -force {} -recover {}}
-        update {-project DIR -repository DIR -force {} -recover {}}
-        remove {-project DIR -force {} -recover {}}
-        verify {-project DIR -repository DIR}
+        add {-request R -replace {} -project DIR -repository DIR -force {} -recover {} -target T -drop-target T}
+        install {-project DIR -repository DIR -force {} -recover {} -target T -drop-target T}
+        update {-project DIR -repository DIR -force {} -recover {} -target T -drop-target T}
+        remove {-project DIR -force {} -recover {} -target T -drop-target T}
+        verify {-project DIR -repository DIR -target T}
         pack {-out DIR -force {}}
-        inspect {}
+        inspect {-target T}
+        native-inspect {-target T}
+        native-plan {-project DIR -target T -include {}}
+        native-deploy {-project DIR -target T -out DIR -force {}}
     }
-    variable commands {add install update remove verify package}
+    variable commands {add install update remove verify package native}
 }
 
 proc pm::cli::usage {} {
@@ -48,13 +58,20 @@ proc pm::cli::usage {} {
         "       $me remove NAME... \[OPTION...\]" \
         "       $me verify \[-project DIR\] \[-repository DIR\]..." \
         "       $me package pack \[DIR\] \[-out DIR\] \[-force\]" \
-        "       $me package inspect FILE.botpkg" \
+        "       $me package inspect FILE.botpkg \[-target T\]" \
+        "       $me native inspect FILE \[-target T\]" \
+        "       $me native plan \[-project DIR\] \[-target T\] \[-include\]" \
+        "       $me native deploy -target T -out DIR \[-project DIR\] \[-force\]" \
         "" \
         "Options of add, install, update and remove:" \
         "  -project DIR       the project (the directory of its botlish.json);" \
         "                     default: the current directory" \
         "  -repository DIR    a local repository of NAME-VERSION.botpkg artifacts" \
         "                     (any number; never searched implicitly)" \
+        "  -target T          prepare the target view of T (a compilation target:" \
+        "                     linux-x86_64, macos-aarch64, ...; any number); views" \
+        "                     already prepared are kept up to date" \
+        "  -drop-target T     remove the target view of T" \
         "  -force             replace installed packages that were changed" \
         "  -recover           roll back an interrupted operation" \
         "" \
@@ -103,13 +120,33 @@ proc pm::cli::Run {argv} {
             }
             UsageError "unknown package command \"$command\" (known: pack, inspect)"
         }
+    } elseif {$command eq "native"} {
+        set command [lindex $rest 0]
+        set rest [lrange $rest 1 end]
+        if {$command ni {inspect plan deploy}} {
+            if {$command in {"" -help --help -h}} {
+                puts [usage]
+                return 0
+            }
+            UsageError "unknown native command \"$command\" (known: inspect, plan, deploy)"
+        }
+        set command native-$command
     }
     if {[lsearch -exact $rest -help] >= 0 || [lsearch -exact $rest --help] >= 0 || [lsearch -exact $rest -h] >= 0} {
         puts [usage]
         return 0
     }
     lassign [Parse $command $rest [dict get $options $command]] words given
-    return [pm::commands::$command $words $given]
+    if {$command in {verify inspect native-inspect native-plan native-deploy}
+            && [dict exists $given -target] && [llength [dict get $given -target]] > 1} {
+        UsageError "-target is given twice: $command checks one target"
+    }
+    foreach target [concat [dict getdef $given -target {}] [dict getdef $given -drop-target {}]] {
+        if {![pm::target::isTarget $target]} {
+            UsageError "\"$target\" is not a compilation target (known: [join [pm::target::names] {, }])"
+        }
+    }
+    return [pm::commands::[string map {- _} $command] $words $given]
 }
 
 # The positional WORDS and the GIVEN options (dict NAME -> list of values) of
@@ -197,6 +234,13 @@ proc pm::commands::DescriptorBytes {descriptor} {
     return $bytes
 }
 
+# The target views GIVEN asks for, with DESCRIPTOR's origins choices
+# (pm::install::Views).
+proc pm::commands::ViewSpec {given descriptor} {
+    return [dict create requested [dict getdef $given -target {}] dropped [dict getdef $given -drop-target {}] \
+        origins [dict getdef $descriptor origins {}]]
+}
+
 proc pm::commands::install {words given} {
     if {$words ne ""} {
         pm::cli::UsageError "install takes no package names (found \"[lindex $words 0]\"): it installs what botlish.json locks; add adds a package"
@@ -205,7 +249,7 @@ proc pm::commands::install {words given} {
         set state [pm::state::read [dict get $ctx meta]]
         set descriptor [pm::install::Descriptor $ctx]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
-        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] ""]
+        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] "" [ViewSpec $given $descriptor]]
         Notes $ctx $plan
     }
     return 0
@@ -313,7 +357,7 @@ proc pm::commands::add {words given} {
         set bytes [DescriptorBytes $descriptor]
         set descriptor [pm::descriptor::fromBytes $bytes project botlish.json]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
-        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes]
+        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
         if {$source ne "" && [dict get $source kind] eq "directory"} {
             puts "added $name (request \"$request\"), editable: a link to [dict get $source path], not an immutable release"
         } else {
@@ -377,7 +421,7 @@ proc pm::commands::update {words given} {
         }
         set bytes [DescriptorBytes $descriptor]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
-        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes]
+        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
         Print $lines
     }
     return 0
@@ -411,7 +455,7 @@ proc pm::commands::remove {words given} {
         }
         set bytes [DescriptorBytes $descriptor]
         set plan [pm::install::Resolve $ctx $descriptor $state [Flag $given -force]]
-        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes]
+        Print [pm::install::Apply $ctx $plan $state [Flag $given -force] $bytes [ViewSpec $given $descriptor]]
         Print $notes
         puts "removed [join $words {, }] from botlish.json"
     }
@@ -485,9 +529,10 @@ proc pm::commands::verify {words given} {
             lappend problems "$name: installed by the package manager, and no longer a dependency (install removes it)"
         }
     }
+    VerifyViews $ctx $state $descriptor [Option $given -target] problems notes
     if {[file isdirectory $modules]} {
         foreach entry [pm::state::Entries $modules] {
-            if {$entry eq ".botlish" || [dict exists $state $entry] || [dict exists $descriptor dependencies $entry]} continue
+            if {$entry in {.botlish .targets} || [dict exists $state $entry] || [dict exists $descriptor dependencies $entry]} continue
             lappend notes "$entry: .bot_modules/$entry was installed by hand: not managed, not verified"
         }
     }
@@ -565,6 +610,51 @@ proc pm::commands::VerifyNode {ctx name record dir shown source chain problemsVa
     }
 }
 
+# The project's target views against their record and their inputs; with
+# TARGET, that view's native plan verified again (system libraries
+# included, where the target is the host's).
+proc pm::commands::VerifyViews {ctx state descriptor target problemsVar notesVar} {
+    upvar 1 $problemsVar problems $notesVar notes
+    set views [pm::state::views [dict get $ctx meta]]
+    set origins [dict getdef $descriptor origins {}]
+    set manual [pm::view::Manual $ctx $state]
+    dict for {name view} $views {
+        set changes [pm::state::ViewChanges [pm::view::Dir $ctx $name] $view .bot_modules/.targets/$name]
+        foreach change $changes {
+            lappend problems "view $name: $change (run install)"
+        }
+        if {[dict get $view derived] ne [pm::view::Derived $name $state $origins $manual]} {
+            lappend problems "view $name: derived from another installation than the current one (run install)"
+        }
+    }
+    if {$target eq ""} {
+        if {[dict size $views] > 0} {
+            lappend notes "target views: [join [lsort [dict keys $views]] {, }] (verify -target T verifies one's native dependencies again)"
+        }
+        return
+    }
+    if {![dict exists $views $target]} {
+        if {[dict size $views] == 0} {
+            lappend notes "no installed package is target-specific: $target compiles from .bot_modules itself"
+        } else {
+            lappend problems "the packages are not prepared for $target (prepared: [join [lsort [dict keys $views]] {, }]): run install -target $target"
+        }
+        return
+    }
+    set plan [pm::native::Plan $target [pm::view::Instances [pm::view::Dir $ctx $target]] $origins]
+    foreach problem [dict get $plan problems] {
+        lappend problems "$target: $problem"
+    }
+    foreach note [dict get $plan notes] {
+        lappend notes "$target: $note"
+    }
+    foreach entry [dict get $plan libraries] {
+        if {[dict get $entry verified]} {
+            lappend notes "$target: [dict get $entry name]: [dict get $entry origin] [dict get $entry linkage], [dict get $entry facts]: [dict get $entry evidence]"
+        }
+    }
+}
+
 proc pm::commands::Pairs {pairs} {
     if {$pairs eq ""} {
         return none
@@ -588,6 +678,7 @@ proc pm::commands::pack {words given} {
     set version [dict get $descriptor version]
     set files [Collect $dir]
     dict set files botlish.json [pm::descriptor::encode $descriptor 0]
+    set targetNotes [PackTargets $descriptor $files $dir]
     set bytes [pm::archive::bytes $files]
     # The reader must accept what the writer made.
     set archive [pm::archive::fromBytes $bytes "the new artifact"]
@@ -617,13 +708,70 @@ proc pm::commands::pack {words given} {
     puts "packed $name $version: $target"
     puts "  sha256 $digest"
     puts "  [dict size $files] files, [string length $bytes] bytes ($size bytes unpacked)"
-    if {![dict exists $files $name.bot] && [llength [lsearch -all -inline -glob [dict keys $files] $name/*.bot]] == 0} {
+    set paths [dict keys $files]
+    if {[pm::targets::Aware $descriptor]} {
+        foreach target [dict keys [dict get $descriptor targets]] {
+            lappend paths {*}[dict keys [pm::targets::Map $descriptor $target [dict keys $files]]]
+        }
+    }
+    if {"$name.bot" ni $paths && [llength [lsearch -all -inline -glob $paths $name/*.bot]] == 0} {
         puts "note: the package has no module of its namespace ($name.bot or $name/...): an import of $name names nothing in it"
     }
     if {[dict get $descriptor sources] ne ""} {
         puts "note: botlish.json's \"sources\" stay with this directory: an artifact never holds them"
     }
+    if {[dict getdef $descriptor origins {}] ne ""} {
+        puts "note: botlish.json's \"origins\" stay with this directory: an artifact never holds them"
+    }
+    Print $targetNotes
     return 0
+}
+
+# The checks of a target-aware package's FILES (dict PATH -> BYTES) before
+# it is packed: its target layout, and every target's bundled libraries
+# (pm::native::CheckBundled) and their loader dependencies, which must be
+# the target's platform or libraries the package itself declares. Lines of
+# report; a problem fails the pack.
+proc pm::commands::PackTargets {descriptor files dir} {
+    if {![pm::targets::Aware $descriptor]} {
+        return {}
+    }
+    set problems [pm::targets::Problems $descriptor [dict keys $files]]
+    set lines {}
+    dict for {target entry} [dict get $descriptor targets] {
+        set view [pm::targets::Map $descriptor $target [dict keys $files]]
+        set identities {}
+        foreach library [dict get $entry libraries] {
+            if {[dict get $library identity] ne ""} {
+                lappend identities [string tolower [dict get $library identity]] [string tolower [file tail [dict get $library identity]]]
+            }
+        }
+        set summary {}
+        foreach library [dict get $entry libraries] {
+            set name [dict get $library name]
+            lappend summary "$name ([dict get $library origin] [dict get $library linkage])"
+            if {[dict get $library origin] ne "bundled" || ![dict exists $view [dict get $library file]]} continue
+            set importBytes ""
+            if {[dict get $library import] ne "" && [dict exists $view [dict get $library import]]} {
+                set importBytes [dict get $files [dict get $view [dict get $library import]]]
+            }
+            if {[catch {pm::native::CheckBundled $target $library [dict get $files [dict get $view [dict get $library file]]] \
+                    "$target: library $name ([dict get $view [dict get $library file]])" $importBytes} facts]} {
+                lappend problems $facts
+                continue
+            }
+            foreach need [dict get $facts needs] {
+                if {[pm::target::platformLibrary $target $need]} continue
+                if {[string tolower $need] in $identities || [string tolower [file tail $need]] in $identities} continue
+                lappend problems "$target: library $name needs $need, which is neither $target's platform nor a library this package declares for $target (with its identity): a consumer could not resolve it"
+            }
+        }
+        lappend lines "  target $target: [dict size $view] files[expr {$summary ne "" ? ", libraries [join $summary {, }]" : ""}]"
+    }
+    if {$problems ne ""} {
+        pm::Fail PACK "$dir cannot be packed:\n  [join $problems "\n  "]"
+    }
+    return $lines
 }
 
 # The files of the package directory DIR, as {PATH BYTES ...} with "/"
@@ -687,6 +835,255 @@ proc pm::commands::inspect {words given} {
     foreach {path bytes} [dict get $artifact files] {
         puts "  [format %9d [string length $bytes]]  $path"
     }
-    puts "(a valid .botpkg, format 1; its digest is computed here, and nothing authenticates who made it)"
+    if {[pm::targets::Aware $descriptor]} {
+        dict for {target entry} [dict get $descriptor targets] {
+            set view [pm::targets::Map $descriptor $target [dict keys [dict get $artifact files]]]
+            puts "  target $target: [dict size $view] files in its view[expr {[dict get $entry files] ne "" ? " ([dict get $entry files] at the package root)" : ""}]"
+            foreach library [dict get $entry libraries] {
+                set text "    library [dict get $library name]: [dict get $library origin] [dict get $library linkage]"
+                if {[dict get $library file] ne ""} { append text ", [dict get $library file]" }
+                if {[dict get $library identity] ne ""} { append text ", loads as [dict get $library identity]" }
+                if {[dict get $library version] ne ""} { append text ", version \"[dict get $library version]\"" }
+                puts $text
+            }
+            foreach framework [dict get $entry frameworks] {
+                puts "    framework $framework (system)"
+            }
+            foreach header [dict get $entry headers] {
+                puts "    headers $header"
+            }
+        }
+        set target [Option $given -target]
+        if {$target ne ""} {
+            if {![dict exists $descriptor targets $target]} {
+                pm::Fail UNSUPPORTED "[dict get $artifact name] [dict get $artifact version] supports [join [pm::targets::Supported $descriptor] {, }], not $target"
+            }
+            set view [pm::targets::Map $descriptor $target [dict keys [dict get $artifact files]]]
+            set files [dict get $artifact files]
+            foreach library [dict get $descriptor targets $target libraries] {
+                if {[dict get $library origin] ne "bundled"} continue
+                set importBytes ""
+                if {[dict get $library import] ne ""} {
+                    set importBytes [dict get $files [dict get $view [dict get $library import]]]
+                }
+                set facts [pm::native::CheckBundled $target $library [dict get $files [dict get $view [dict get $library file]]] \
+                    "library [dict get $library name]" $importBytes]
+                puts "  $target: [dict get $library name]: [dict get $facts description]: as declared"
+            }
+        }
+        puts "(a valid .botpkg, format 1, schema 2: one release for every target it names; nothing authenticates who made it)"
+    } else {
+        puts "  target-independent: every target"
+        puts "(a valid .botpkg, format 1; its digest is computed here, and nothing authenticates who made it)"
+    }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# native inspect, plan, deploy
+
+proc pm::commands::native_inspect {words given} {
+    if {[llength $words] != 1} {
+        pm::cli::UsageError "native inspect takes one FILE"
+    }
+    set path [lindex $words 0]
+    if {![file isfile $path]} {
+        pm::Fail NATIVE "$path is not a file"
+    }
+    set facts [pm::binary::inspect [pm::ReadBytes $path] $path]
+    puts "$path: [pm::binary::describe $facts]"
+    set shown $facts
+    foreach key {symbols index} {
+        if {[dict exists $shown $key]} {
+            dict set shown $key "[llength [dict get $shown $key]] names"
+        }
+    }
+    if {[dict exists $shown members]} {
+        dict set shown members "[llength [dict get $shown members]] members"
+    }
+    if {[dict exists $shown slices]} {
+        dict set shown slices [lmap slice [dict get $shown slices] {pm::binary::describe [dict get $slice facts]}]
+    }
+    dict for {key value} $shown {
+        if {$key eq "kind" || $value eq ""} continue
+        puts "  $key: $value"
+    }
+    set target [Option $given -target]
+    if {$target ne ""} {
+        set selected [pm::native::Slice $target $facts]
+        if {[dict get $facts kind] eq "archive"} {
+            set archive [pm::native::ArchiveFacts $target $facts $path]
+            puts "  for $target: [dict get $archive objects] object(s)[expr {[dict get $archive imports] ne "" ? ", an import library of [join [dict get $archive imports] {, }]" : ""}]"
+        } elseif {$selected eq "" || ![pm::native::Matches $target $selected]} {
+            pm::Fail NATIVE "$path is [pm::binary::describe $facts], not a native file of $target"
+        } else {
+            puts "  for $target: [pm::binary::describe $selected]"
+        }
+    }
+    puts "(read, never run: the file's own headers, not its provenance)"
+    return 0
+}
+
+# The project's native plan of TARGET (the host's by default), from its
+# view, verified: {ctx descriptor plan view}.
+proc pm::commands::NativePlan {given} {
+    set ctx [pm::install::Project [Option $given -project [pwd]]]
+    set descriptor [pm::install::Descriptor $ctx]
+    set target [Option $given -target [pm::target::host]]
+    if {$target eq ""} {
+        pm::cli::UsageError "this host is no compilation target: pass -target T"
+    }
+    set views [pm::state::views [dict get $ctx meta]]
+    if {![dict exists $views $target]} {
+        if {[dict size $views] == 0} {
+            return [dict create ctx $ctx descriptor $descriptor target $target plan "" view ""]
+        }
+        pm::Fail TARGET "the packages are not prepared for $target (prepared: [join [lsort [dict keys $views]] {, }]): run install -target $target"
+    }
+    set dir [pm::view::Dir $ctx $target]
+    set changes [pm::state::ViewChanges $dir [dict get $views $target] .bot_modules/.targets/$target]
+    if {$changes ne ""} {
+        pm::Fail MODIFIED "the view of $target changed since it was derived ([lindex $changes 0]): run install"
+    }
+    set plan [pm::native::Plan $target [pm::view::Instances $dir] [dict getdef $descriptor origins {}]]
+    return [dict create ctx $ctx descriptor $descriptor target $target plan $plan view $dir]
+}
+
+# Where TARGET's executables find shared libraries deployed beside them:
+# {SUBDIRECTORY RUNTIME-PATH} (RUNTIME-PATH "" when the loader needs none).
+proc pm::commands::DeployLayout {target} {
+    switch -- [dict get [pm::target::facts $target] os] {
+        linux { return [list lib {$ORIGIN/lib}] }
+        macos { return [list lib @executable_path/lib] }
+        windows { return [list . ""] }
+    }
+}
+
+proc pm::commands::native_plan {words given} {
+    if {$words ne ""} {
+        pm::cli::UsageError "native plan takes no arguments"
+    }
+    set result [NativePlan $given]
+    set target [dict get $result target]
+    set plan [dict get $result plan]
+    set project [dict get [dict get $result ctx] project]
+    if {[Flag $given -include]} {
+        # The include directories of the packages' public headers, one C
+        # compiler option per line (cc $(botlish native plan -include) ...).
+        if {$plan ne ""} {
+            if {[dict get $plan problems] ne ""} {
+                pm::Fail NATIVE "the native plan of $target has problems:\n  [join [dict get $plan problems] "\n  "]"
+            }
+            foreach header [dict get $plan headers] {
+                puts -I[dict get $header dir]
+            }
+        }
+        return 0
+    }
+    puts "native plan for $target ([expr {$target eq [pm::target::host] ? "this host" : "not this host: system libraries unverified"}]), project $project"
+    if {$plan eq ""} {
+        puts "  no installed package is target-specific: no native dependency is declared"
+        return 0
+    }
+    if {[dict get $plan problems] ne ""} {
+        Print [lmap p [dict get $plan problems] {string cat "problem: " $p}]
+        return 1
+    }
+    set shared {}
+    foreach entry [dict get $plan libraries] {
+        set text "  library [dict get $entry name]: [dict get $entry origin] [dict get $entry linkage] (instance[expr {[llength [dict get $entry instances]] > 1 ? "s" : ""}] [join [dict get $entry instances] {, }])"
+        puts $text
+        if {[dict get $entry verified]} {
+            puts "    [dict get $entry facts]; [dict get $entry evidence][expr {[dict get $entry version] ne "" ? ", version [dict get $entry version]" : ""}]"
+            puts "    [dict get $entry file]"
+        } else {
+            puts "    unverified on this host: $target's system must provide it"
+        }
+        if {[dict get $entry linkage] eq "shared"} {
+            if {[dict get $entry identity] ne ""} {
+                puts "    loads as [dict get $entry identity][expr {[dict get $entry needs] ne "" ? ", needs [join [dict get $entry needs] {, }]" : ""}]"
+            }
+            if {[dict get $entry glibc] ne ""} {
+                puts "    requires GLIBC_[join [dict get $entry glibc] .] or newer on the target system"
+            }
+            if {[dict get $entry origin] eq "bundled"} {
+                lappend shared [file tail [dict get $entry identity]]
+            }
+        }
+    }
+    foreach framework [dict get $plan frameworks] {
+        puts "  framework [dict get $framework name]: system ([join [dict get $framework instances] {, }])"
+    }
+    foreach header [dict get $plan headers] {
+        puts "  headers ([dict get $header instance]): [dict get $header dir]"
+    }
+    Print [lmap n [dict get $plan notes] {string cat "note: " $n}]
+    set lib [file join [dict get $result view] .lib]
+    puts "link: the compiler links these from the target package tree (.bot_modules/.targets/$target[expr {[file isdirectory $lib] ? ", its .lib" : ""}]): no -L is needed for bundled libraries"
+    if {$shared ne ""} {
+        lassign [DeployLayout $target] sub runtime
+        puts "deploy: $target's loader must find [join $shared {, }] at run time:"
+        puts "  botlish native deploy -target $target -out DIR    places them in DIR[expr {$sub ne "." ? "/$sub" : ""}]"
+        if {$runtime ne ""} {
+            puts "  and link the executable with -runtime-path '$runtime' (the compiler's option), so it finds them wherever DIR is moved"
+        } else {
+            puts "  beside the executable: Windows' loader searches the application's directory first (never PATH)"
+        }
+        puts "  (a native backend's own run finds them in the target package tree without either)"
+    }
+    return 0
+}
+
+# Deploys TARGET's bundled shared libraries into DIR (-out): a transaction
+# of its own, recorded in DIR/.botlish-deploy.json, which says which files
+# of DIR the package manager placed. A file it did not place is never
+# replaced (without -force); a failure, or an interruption the next deploy
+# finds, restores the previous deployment.
+proc pm::commands::native_deploy {words given} {
+    if {$words ne ""} {
+        pm::cli::UsageError "native deploy takes no arguments"
+    }
+    if {[Option $given -target] eq "" || [Option $given -out] eq ""} {
+        pm::cli::UsageError "native deploy needs -target T and -out DIR"
+    }
+    set result [NativePlan $given]
+    set target [dict get $result target]
+    set plan [dict get $result plan]
+    set out [file normalize [Option $given -out]]
+    if {$plan eq ""} {
+        puts "nothing to deploy: no installed package is target-specific"
+        return 0
+    }
+    if {[dict get $plan problems] ne ""} {
+        pm::Fail NATIVE "the native plan of $target has problems:
+  [join [dict get $plan problems] "
+  "]"
+    }
+    lassign [DeployLayout $target] sub runtime
+    # What to place: every bundled shared library, under its loader identity.
+    set placing [dict create]
+    foreach entry [dict get $plan libraries] {
+        if {[dict get $entry origin] ne "bundled" || [dict get $entry linkage] ne "shared"} continue
+        set file [file tail [dict get $entry identity]]
+        set relative [expr {$sub eq "." ? $file : "$sub/$file"}]
+        dict set placing $relative [dict get $entry file]
+    }
+    file mkdir $out
+    pm::deploy::Apply $out $placing [Flag $given -force]
+    if {$placing eq ""} {
+        puts "deploy $target: no bundled shared library (static and system libraries are not deployed)"
+        return 0
+    }
+    foreach relative [lsort [dict keys $placing]] {
+        puts "deployed $relative"
+    }
+    if {$runtime ne ""} {
+        puts "link the executable into $out with -runtime-path '$runtime'"
+    } else {
+        puts "put the executable in $out, beside its DLLs"
+    }
+    if {[dict get [pm::target::facts $target] os] eq "macos"} {
+        puts "note: sign the deployed libraries with the application (codesign): macOS arm64 loads only signed code, and the package manager signs nothing"
+    }
     return 0
 }

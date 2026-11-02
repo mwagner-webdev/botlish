@@ -1,0 +1,785 @@
+# package-native.test -- target-aware packages, target views, native
+# dependency verification and deployment (PACKAGE-MANAGER-MILESTONE-2.md):
+# botlish.json schema 2 (BOTLISH-JSON.md section 12), the compiler's target
+# package trees (BOT-MODULES-MILESTONE-1.md, "Target package trees"), the
+# package manager's native file inspection (pm/binary.tcl), native plans
+# (pm/native.tcl), views (pm/view.tcl), deployment (pm/deploy.tcl), the
+# driver's runtime search paths and the SHA-256 backends.
+#
+# Toy packages are made fresh in the tcltest temporary directory; their
+# native files are real ones, built here with the host's C compiler (and,
+# where installed, clang for other targets and MinGW-w64), never mocked.
+# The repository's real packages (SDL3, sdlkit, Raven, the event loop) are
+# tests/package-workloads.test.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot pm pm.tcl]
+
+interp recursionlimit {} 100000
+
+set mainScript [file join $::projectRoot main.tcl]
+set ::pnCounter 0
+set hostTarget [core::cabi::hostTarget]
+testConstraint linuxX86Host [expr {$hostTarget eq "linux-x86_64"}]
+testConstraint cc [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
+testConstraint linuxCc [expr {[testConstraint linuxX86Host] && [testConstraint cc]}]
+testConstraint clangAarch64 [expr {[auto_execok clang] ne "" && [testConstraint linuxX86Host]}]
+testConstraint mingw [expr {[auto_execok x86_64-w64-mingw32-gcc] ne "" && [auto_execok x86_64-w64-mingw32-dlltool] ne ""}]
+testConstraint llvmDlltool [expr {[auto_execok llvm-dlltool] ne "" || [auto_execok llvm-dlltool-18] ne ""}]
+testConstraint dpkgZlib [expr {[testConstraint linuxX86Host] && [file isdirectory /var/lib/dpkg/info]
+    && [file exists /usr/lib/x86_64-linux-gnu/libz.so.1]}]
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint unixFiles [expr {$::tcl_platform(platform) eq "unix"}]
+testConstraint linkedRun [expr {[testConstraint linuxCc] && [testConstraint nativeBuilt]
+    && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+proc fresh {{tag d}} {
+    return [makeDirectory pn-[pid]-$tag-[incr ::pnCounter]]
+}
+
+proc cleanup {} {
+    foreach dir [glob -nocomplain -directory [temporaryDirectory] pn-[pid]-*] {
+        file delete -force $dir
+    }
+}
+
+proc writeText {path text} {
+    file mkdir [file dirname $path]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $text
+    close $channel
+}
+
+proc readBytes {path} {
+    set channel [open $path rb]
+    set bytes [read $channel]
+    close $channel
+    return $bytes
+}
+
+proc copyBytes {from to} {
+    file mkdir [file dirname $to]
+    set channel [open $to wb]
+    puts -nonewline $channel [readBytes $from]
+    close $channel
+}
+
+proc pm {args} {
+    set errFile [file join [temporaryDirectory] pn-err-[pid]]
+    set status 0
+    if {[catch {exec [info nameofexecutable] $::mainScript {*}$args 2>$errFile} out options]} {
+        set status [lindex [dict get $options -errorcode] end]
+        if {[lindex [dict get $options -errorcode] 0] ne "CHILDSTATUS"} { set status 1 }
+    }
+    set err [encoding convertfrom utf-8 [readBytes $errFile]]
+    file delete $errFile
+    return [dict create status $status out [string trimright $out] err [string trimright $err]]
+}
+
+proc kindOf {err} {
+    if {[regexp {\(PM ([A-Z]+)\)\s*$} $err -> kind]} { return $kind }
+    return ""
+}
+
+# Packs DIR into REPO; raises with the error when it fails.
+proc pack {dir repo} {
+    set r [pm package pack $dir -out $repo]
+    if {[dict get $r status] != 0} { error "pack $dir: [dict get $r err]" }
+    return $r
+}
+
+# A package directory ROOT/NAME-VERSION with the botlish.json text JSON and
+# the files FILES (PATH TEXT-OR-{@file SOURCE} ...).
+proc packageDir {root name version json files} {
+    set dir [file join $root $name-$version]
+    writeText [file join $dir botlish.json] $json
+    foreach {path content} $files {
+        if {[lindex $content 0] eq "@file"} {
+            copyBytes [lindex $content 1] [file join $dir {*}[split $path /]]
+        } else {
+            writeText [file join $dir {*}[split $path /]] $content
+        }
+    }
+    return $dir
+}
+
+# The geo package VERSION: target-aware for TARGETS, its module geo::arch
+# answering "ARCH/VERSION" for each target.
+proc geoPackage {root version {targets {linux-x86_64 linux-aarch64}}} {
+    set entries {}
+    set files [list geo.bot "import geo::arch\n\nfn which() -> str:\n    geo::arch::name()\n"]
+    foreach target $targets {
+        lappend entries "\"$target\": {\"files\": \"targets/$target\"}"
+        lappend files targets/$target/geo/arch.bot "fn name() -> str:\n    \"$target/$version\"\n"
+    }
+    set json "{\"schema\": 2, \"name\": \"geo\", \"version\": \"$version\", \"targets\": {[join $entries {, }]}}"
+    return [packageDir $root geo $version $json $files]
+}
+
+proc application {text} {
+    set app [fresh app]
+    writeText [file join $app main.bot] $text
+    return $app
+}
+
+# The value of APP/main.bot compiled for TARGET on BACKEND (or "KIND:
+# MESSAGE").
+proc appValue {app {target ""} {backend interp}} {
+    set options [list -warnings off -cache ""]
+    if {$target ne ""} { lappend options -target $target }
+    if {[catch {surface::readProgramFile [file join $app main.bot] {*}$options} hir options]} {
+        return "[lindex [dict get $options -errorcode] end]: $hir"
+    }
+    lassign [outcomeUnderHir $backend $hir] tag value
+    if {$tag eq "value"} { return $value }
+    return "$tag: $value"
+}
+
+# Every file and link under DIR as {RELATIVE TYPE CONTENT-OR-TARGET}.
+proc treeState {dir} {
+    set entries {}
+    TreeWalk $dir "" entries
+    return [lsort -index 0 $entries]
+}
+
+proc TreeWalk {dir relative entriesVar} {
+    upvar 1 $entriesVar entries
+    set here [file join $dir {*}[split $relative /]]
+    foreach path [concat [glob -nocomplain -directory $here *] [glob -nocomplain -directory $here -types hidden *]] {
+        set name [file tail $path]
+        if {$name in {. ..}} continue
+        set rel [string trimleft $relative/$name /]
+        set type [file type $path]
+        switch -- $type {
+            directory { lappend entries [list $rel directory ""]; TreeWalk $dir $rel entries }
+            link { lappend entries [list $rel link [file readlink $path]] }
+            default { lappend entries [list $rel $type [readBytes $path]] }
+        }
+    }
+}
+
+# Native files built here: a shared library (soname SONAME) defining NAME()
+# returning VALUE, linked against NEEDS (shared libraries' paths), in DIR.
+proc sharedLibrary {dir file soname function value {needs {}} {extra ""}} {
+    set source [file join $dir $function.c]
+    writeText $source "int ${function}(void) { return $value; }\n$extra\n"
+    exec cc -shared -fPIC -o [file join $dir $file] $source -Wl,-soname,$soname -Wl,--no-as-needed {*}$needs -lc
+    return [file join $dir $file]
+}
+
+proc staticArchive {dir file function value {compiler cc} {flags {}}} {
+    set source [file join $dir $function.c]
+    writeText $source "int ${function}(void) { return $value; }\n"
+    set object [file join $dir $function.o]
+    exec {*}$compiler {*}$flags -c -fPIC -o $object $source
+    file delete [file join $dir $file]
+    exec ar rcs [file join $dir $file] $object
+    return [file join $dir $file]
+}
+
+# A target-aware package NAME VERSION for linux-x86_64 bundling the native
+# files NATIVE (VIEWPATH SOURCE ...) with the library objects LIBRARIES
+# (JSON text each) and the module text MODULE.
+proc nativePackage {root name version libraries native module {extraTarget ""}} {
+    set files [list $name.bot $module]
+    foreach {path source} $native {
+        lappend files targets/linux-x86_64/$path [list @file $source]
+    }
+    set targets "\"linux-x86_64\": {\"files\": \"targets/linux-x86_64\", \"libraries\": \[[join $libraries {, }]\]}"
+    if {$extraTarget ne ""} { append targets ", $extraTarget" }
+    if {$native eq ""} {
+        lappend files targets/linux-x86_64/README.txt "no native file\n"
+    }
+    return [packageDir $root $name $version "{\"schema\": 2, \"name\": \"$name\", \"version\": \"$version\", \"targets\": {$targets}}" $files]
+}
+
+proc descriptorProblems {text context} {
+    if {[catch {pm::descriptor::fromBytes $text $context X} message]} {
+        return [lrange [split $message \n] 1 end]
+    }
+    return ok
+}
+
+# ---------------------------------------------------------------------------
+# 1. Schema 2
+
+test pn-schema2-canonical {a schema 2 descriptor reads, and writes back in one canonical form (targets sorted, keys in order, libraries as written); reading the canonical text gives it again} -body {
+    set text {{"schema": 2, "name": "x", "version": "1.0.0", "targets": {"linux-x86_64": {"headers": ["inc"], "libraries": [{"linkage": "shared", "origin": "bundled", "name": "foo", "file": "lib/libfoo.so.1", "needs": [], "identity": "libfoo.so.1"}, {"name": "m2", "origin": "system", "linkage": "shared", "version": "2"}], "files": "t/x64"}, "linux-aarch64": {"files": "t/a64"}}}}
+    set d [pm::descriptor::fromBytes $text pack X]
+    set canonical [pm::descriptor::encode $d 0]
+    set again [pm::descriptor::encode [pm::descriptor::fromBytes $canonical artifact Y] 0]
+    list [expr {$canonical eq $again}] [dict keys [dict get $d targets]] \
+        [string map {\n | {  } {}} [encoding convertfrom utf-8 $canonical]]
+} -result {1 {linux-x86_64 linux-aarch64} {{|"schema": 2,|"name": "x",|"version": "1.0.0",|"dependencies": {},|"targets": {|"linux-aarch64": {|"files": "t/a64"|},|"linux-x86_64": {|"files": "t/x64",|"libraries": [|{|"name": "foo",|"origin": "bundled",|"linkage": "shared",|"file": "lib/libfoo.so.1",|"identity": "libfoo.so.1",|"needs": []|},|{|"name": "m2",|"origin": "system",|"linkage": "shared",|"version": "2"|}|],|"headers": [|"inc"|]|}|}|}|}}
+
+test pn-schema1-unchanged {a schema 1 descriptor reads and writes exactly as in PM-1: no targets or origins key in it, the same bytes} -body {
+    set text "{\n  \"schema\": 1,\n  \"name\": \"a\",\n  \"version\": \"1.0.0\",\n  \"dependencies\": {}\n}\n"
+    set d [pm::descriptor::fromBytes $text artifact X]
+    list [dict keys $d] [expr {[pm::descriptor::encode $d 0] eq $text}]
+} -result {{schema name version dependencies lock sources} 1}
+
+test pn-schema2-refusals {every target and library rule is checked, each problem reported: a target the compiler does not have, a files path an archive cannot hold, unknown keys, a bundled library without its file, a bundled shared one without identity, needs or (on Windows) its import library, a system one naming files, frameworks off Apple, two entries of one origin, a bad library name, origins in an artifact} -body {
+    lmap {text context} {
+        {{"schema": 2, "targets": {"linux-sparc": {}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"files": "../up"}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"scripts": "x"}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"libraries": [{"name": "a", "origin": "bundled", "linkage": "static"}]}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"libraries": [{"name": "a", "origin": "bundled", "linkage": "shared", "file": "a.so"}]}}}} project
+        {{"schema": 2, "targets": {"windows-x86_64": {"libraries": [{"name": "a", "origin": "bundled", "linkage": "shared", "file": "a.dll", "identity": "a.dll", "needs": []}]}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"libraries": [{"name": "a", "origin": "system", "linkage": "shared", "file": "a.so"}]}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"frameworks": ["Cocoa"]}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"libraries": [{"name": "a", "origin": "system", "linkage": "shared"}, {"name": "a", "origin": "system", "linkage": "static"}]}}}} project
+        {{"schema": 2, "targets": {"linux-x86_64": {"libraries": [{"name": "-la", "origin": "system", "linkage": "shared"}]}}}} project
+        {{"schema": 2, "name": "x", "version": "1.0.0", "origins": {"SDL3": "system"}}} artifact
+        {{"schema": 2, "origins": {"SDL3": "nearby"}}} project
+        {{"schema": 2, "targets": {}}} project
+    } {
+        string map {"(the compiler's targets: linux-aarch64, macos-aarch64, macos-x86_64, windows-aarch64, windows-x86_64, windows-x86_64-gnu)" "(...)"} [descriptorProblems $text $context]
+    }
+} -match glob -result {{{  targets: "linux-sparc" is not a compilation target*}} {{  targets: "linux-x86_64": "files": a ".." path component}} {{  targets: "linux-x86_64": unknown key "scripts" (a target has files, libraries, frameworks, headers)}} {{  targets: "linux-x86_64": libraries: "a": a bundled library names its "file" (a path in the target's view)}} {{  targets: "linux-x86_64": libraries: "a": a bundled shared library states its loader "identity" (its soname, install name or DLL name)} {  targets: "linux-x86_64": libraries: "a": a bundled shared library states what it "needs" (its loader dependencies, \[\] for none)}} {{  targets: "windows-x86_64": libraries: "a": a bundled Windows DLL names its "import" library (what the linker links)}} {{  targets: "linux-x86_64": libraries: "a": "file" names a bundled file; a system library is the target's own}} {{  targets: "linux-x86_64": "frameworks": linux-x86_64 has no frameworks (an Apple platform's linker mechanism)}} {{  targets: "linux-x86_64": libraries: "a" has two system entries}} {{  targets: "linux-x86_64": libraries: "-la": "-la" is not a native library name*}} {{  an artifact's botlish.json has no "origins": *}} {{  origins: "SDL3" must be "system" or "bundled"}} {{  "targets" names no target: a target-independent package leaves it out}}}
+
+test pn-target-layout-problems {an artifact's target layout is checked whole: a target file that would replace a common one, nested target directories, an empty target directory, a library file or header directory missing from the target's view, a target file named botlish.json, a case collision in a view} -body {
+    set d [pm::descriptor::fromBytes {{"schema": 2, "name": "x", "version": "1.0.0", "targets": {"linux-x86_64": {"files": "t/a", "libraries": [{"name": "q", "origin": "bundled", "linkage": "static", "file": "native/libq.a"}], "headers": ["inc"]}, "linux-aarch64": {"files": "t/a/b"}, "macos-aarch64": {"files": "t/m"}}}} pack X]
+    pm::targets::Problems $d {botlish.json x.bot t/a/x.bot t/a/botlish.json t/a/b/y.bot t/a/X.Bot}
+} -result {{targets: the directories of linux-x86_64 (t/a) and linux-aarch64 (t/a/b) are nested} {targets: the directories of linux-aarch64 (t/a/b) and linux-x86_64 (t/a) are nested} {targets: "macos-aarch64": its directory t/m holds no file} {targets: "linux-x86_64": t/a/x.bot and x.bot are both x.bot in its view (a target's file never replaces a common one)} {targets: "linux-x86_64": t/a/botlish.json and botlish.json are both botlish.json in its view (a target's file never replaces a common one)} {targets: "linux-x86_64": t/a/botlish.json would replace the package's botlish.json in its view} {targets: "linux-x86_64": in its view, the paths "X.Bot" and "x.bot" differ only in letter case: one file on a case-insensitive file system} {targets: "linux-x86_64": library "q": its file native/libq.a is no file of the target's view} {targets: "linux-x86_64": the header directory inc holds no file in the target's view}}
+
+test pn-target-names-are-the-compilers {the package manager's target names are the compiler's own table (core/cabi.tcl), read as data: no second naming convention} -body {
+    expr {[pm::target::names] eq [core::cabi::targetNames] && [pm::target::host] eq [core::cabi::hostTarget]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# 2. One artifact, several target views
+
+test pn-one-artifact-two-targets {one immutable geo 1.0.0 carries both targets' files; installed, the host's view is derived; adding a second target derives its view and leaves the first untouched (A, B, A); each target compiles from its own view, through the ordinary compiler} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    set added [pm add geo -project $app -repository $repo -target linux-x86_64]
+    set a1 [appValue $app linux-x86_64]
+    set before [treeState [file join $app .bot_modules .targets linux-x86_64]]
+    set b [pm install -project $app -repository $repo -target linux-aarch64]
+    set b1 [appValue $app linux-aarch64]
+    set again [pm install -project $app -repository $repo]
+    set a2 [appValue $app linux-x86_64]
+    list [dict get $added status] [lrange [split [dict get $added out] \n] 1 1] $a1 [lrange [split [dict get $b out] \n] 1 2] $b1 \
+        [lrange [split [dict get $again out] \n] 1 2] $a2 [expr {[treeState [file join $app .bot_modules .targets linux-x86_64]] eq $before}] \
+        [lsort [glob -tails -directory [file join $app .bot_modules .targets] *]]
+} -cleanup cleanup -result {0 {{view linux-x86_64: derived (3 files, 0 native libraries)}} {"linux-x86_64/1.0.0"} {{view linux-aarch64: derived (3 files, 0 native libraries)} {view linux-x86_64: unchanged}} {"linux-aarch64/1.0.0"} {{view linux-aarch64: unchanged} {view linux-x86_64: unchanged}} {"linux-x86_64/1.0.0"} 1 {linux-aarch64 linux-x86_64}}
+
+test pn-concurrent-target-compiles {two compilations for two targets, run at once in two processes, each read their own view: the results are what each gives alone} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
+    set outputs {}
+    set pids {}
+    foreach target {linux-x86_64 linux-aarch64 linux-x86_64 linux-aarch64} {
+        set out [file join $app out-[llength $pids]]
+        lappend outputs $out
+        lappend pids [exec [info nameofexecutable] $::mainScript -target $target [file join $app main.bot] > $out 2>@1 &]
+    }
+    foreach pid $pids {
+        while {[file isdirectory /proc/$pid] && ![catch {exec ps -o stat= -p $pid} s] && ![string match Z* $s]} { after 50 }
+    }
+    after 200
+    lmap out $outputs {lindex [split [string trim [readBytes $out]] \n] end}
+} -constraints {unixFiles} -cleanup cleanup -result {{   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"} {   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"}}
+
+test pn-update-derives-every-view {an update replaces the store and derives every view again in the same transaction: both targets compile the new release} -body {
+    set repo [fresh repo]
+    set src [fresh src]
+    pack [geoPackage $src 1.0.0] $repo
+    pack [geoPackage $src 1.0.1] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"geo": "1.0"}, "lock": {"geo": "1.0.0"}}}
+    pm install -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
+    set r [pm update -project $app -repository $repo]
+    list [dict get $r status] [lrange [split [dict get $r out] \n] 1 2] [appValue $app linux-x86_64] [appValue $app linux-aarch64]
+} -cleanup cleanup -result {0 {{view linux-aarch64: derived again (3 files, 0 native libraries)} {view linux-x86_64: derived again (3 files, 0 native libraries)}} {"linux-x86_64/1.0.1"} {"linux-aarch64/1.0.1"}}
+
+test pn-unsupported-target {a package names the targets it supports, and nothing else is assumed: preparing another is UNSUPPORTED, naming the dependency path, and changes nothing; a nested dependency with less target support limits its consumer} -body {
+    set repo [fresh repo]
+    set src [fresh src]
+    pack [geoPackage $src 1.0.0 {linux-x86_64}] $repo
+    pack [packageDir $src outer 1.0.0 {{"schema": 1, "name": "outer", "version": "1.0.0", "dependencies": {"geo": "1.0"}, "lock": {"geo": "1.0.0"}}} [list outer.bot "import geo\n\nfn which() -> str:\n    geo::which()\n"]] $repo
+    set app [application "import outer\n\nouter::which()\n"]
+    pm add outer -project $app -repository $repo
+    set before [treeState $app]
+    set r [pm install -project $app -repository $repo -target linux-aarch64]
+    list [dict get $r status] [kindOf [dict get $r err]] [string map [list $app APP] [dict get $r err]] [expr {[treeState $app] eq $before}] [appValue $app linux-x86_64]
+} -cleanup cleanup -result {1 UNSUPPORTED {error: the project -> outer 1.0.0 -> geo 1.0.0: geo 1.0.0 supports linux-x86_64, not linux-aarch64: its package has no bindings or native files for linux-aarch64 (the package's own metadata says so; nothing is assumed portable) (PM UNSUPPORTED)} 1 {"linux-x86_64/1.0.0"}}
+
+test pn-unprepared-target-diagnostic {compiling for a target whose view was never prepared reads no other tree: UNKNOWN-NAMESPACE says the packages are prepared by target and not for this one} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    pm add geo -project $app -repository $repo -target linux-x86_64
+    string map [list $app APP] [appValue $app linux-aarch64]
+} -cleanup cleanup -match glob -result {UNKNOWN-NAMESPACE: *APP/.bot_modules/.targets holds the application's packages by target, and none for linux-aarch64 (no directory APP/.bot_modules/.targets/linux-aarch64): its packages are not prepared for that target*}
+
+test pn-two-versions-in-views {two versions of one target-aware package on separate branches are two instances in every view, each with its own target files} -body {
+    set repo [fresh repo]
+    set src [fresh src]
+    pack [geoPackage $src 1.0.0] $repo
+    pack [geoPackage $src 2.0.0] $repo
+    foreach {name v} {physics 1.0 rendering 2.0} {
+        pack [packageDir $src $name 1.0.0 "{\"schema\": 1, \"name\": \"$name\", \"version\": \"1.0.0\", \"dependencies\": {\"geo\": \"$v\"}, \"lock\": {\"geo\": \"$v.0\"}}" [list $name.bot "import geo\n\nfn which() -> str:\n    geo::which()\n"]] $repo
+    }
+    set app [application "import physics\nimport rendering\n\n\[physics::which(), rendering::which()\]\n"]
+    pm add physics -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
+    pm add rendering -project $app -repository $repo
+    list [appValue $app linux-x86_64] [appValue $app linux-aarch64]
+} -cleanup cleanup -result {{["linux-x86_64/1.0.0", "linux-x86_64/2.0.0"]} {["linux-aarch64/1.0.0", "linux-aarch64/2.0.0"]}}
+
+test pn-pure-packages-no-views {target-independent packages never get views: no .targets, the record schema 1 as in PM-1, and -target asks for nothing to do} -body {
+    set repo [fresh repo]
+    pack [packageDir [fresh src] web 1.0.0 {{"schema": 1, "name": "web", "version": "1.0.0"}} [list web.bot "fn hello() -> str:\n    \"hello\"\n"]] $repo
+    set app [application "import web\n\nweb::hello()\n"]
+    set r [pm add web -project $app -repository $repo]
+    set t [pm install -project $app -repository $repo -target linux-aarch64]
+    list [regexp {^web 1\.0\.0 \(sha256 [0-9a-f]+\): installed\nadded web} [dict get $r out]] [file exists [file join $app .bot_modules .targets]] \
+        [string range [readBytes [file join $app .bot_modules .botlish state.json]] 0 14] [dict get $t out] [appValue $app]
+} -cleanup cleanup -result [list 1 0 "{\n  \"state\": 1," "web 1.0.0: unchanged\nnote: no installed package is target-specific: every target compiles from .bot_modules itself, so there is no target view to keep" {"hello"}]
+
+test pn-views-dropped-with-last-aware-package {removing the last target-aware package removes every view and .targets with them: the record is schema 1 again} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "1\n"]
+    pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
+    set r [pm remove geo -project $app]
+    list [dict get $r status] [lrange [split [dict get $r out] \n] 0 3] [file exists [file join $app .bot_modules .targets]] \
+        [string range [readBytes [file join $app .bot_modules .botlish state.json]] 0 14]
+} -cleanup cleanup -result [list 0 {{removed geo} {note: no installed package is target-specific any more: its target views are removed, and every target compiles from .bot_modules itself} {view linux-aarch64: removed} {view linux-x86_64: removed}} 0 "{\n  \"state\": 1,"]
+
+test pn-drop-target {-drop-target removes one view and keeps the others} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
+    set r [pm install -project $app -repository $repo -drop-target linux-aarch64]
+    list [dict get $r status] [lsort [glob -tails -directory [file join $app .bot_modules .targets] *]] [appValue $app linux-x86_64]
+} -cleanup cleanup -result {0 linux-x86_64 {"linux-x86_64/1.0.0"}}
+
+test pn-manual-and-editable-in-views {a package installed by hand and an editable directory appear in every view as links to themselves: never copied, never modified, still compiled} -constraints {unixFiles} -body {
+    set repo [fresh repo]
+    set src [fresh src]
+    pack [geoPackage $src 1.0.0] $repo
+    set editable [packageDir $src local 1.0.0 {{"schema": 1, "name": "local", "version": "1.0.0"}} [list local.bot "fn n() -> int:\n    7\n"]]
+    set app [application "import geo\nimport local\nimport hand\n\n\[geo::which(), local::n(), hand::m()\]\n"]
+    writeText [file join $app .bot_modules hand hand.bot] "fn m() -> int:\n    8\n"
+    pm add $editable -project $app
+    set handBefore [treeState [file join $app .bot_modules hand]]
+    pm add geo -project $app -repository $repo -target linux-x86_64
+    set view [file join $app .bot_modules .targets linux-x86_64]
+    list [appValue $app linux-x86_64] [file type [file join $view local]] [file type [file join $view hand]] \
+        [expr {[treeState [file join $app .bot_modules hand]] eq $handBefore}]
+} -cleanup cleanup -result {{["linux-x86_64/1.0.0", 7, 8]} link link 1}
+
+test pn-hand-made-targets-refused {a .bot_modules/.targets the package manager did not make is the user's: preparing a view there is MANUAL, and nothing changes} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "1\n"]
+    file mkdir [file join $app .bot_modules .targets linux-x86_64 mine]
+    set r [pm add geo -project $app -repository $repo]
+    list [dict get $r status] [kindOf [dict get $r err]] [file isdirectory [file join $app .bot_modules .targets linux-x86_64 mine]] \
+        [file exists [file join $app .bot_modules geo]]
+} -cleanup cleanup -result {1 MANUAL 1 0}
+
+test pn-view-changes-detected {verify finds a changed view file; install derives the view again (a view holds the manager's copies)} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    pm add geo -project $app -repository $repo -target linux-x86_64
+    writeText [file join $app .bot_modules .targets linux-x86_64 geo geo arch.bot] "fn name() -> str:\n    \"tampered\"\n"
+    set v [pm verify -project $app]
+    set i [pm install -project $app -repository $repo]
+    list [dict get $v status] [lsearch -inline [split [dict get $v out] \n] *arch.bot*] [lindex [split [dict get $i out] \n] 1] [appValue $app linux-x86_64]
+} -cleanup cleanup -result {1 {problem: view linux-x86_64: .bot_modules/.targets/linux-x86_64/geo/geo/arch.bot was changed (run install)} {note: the view of linux-x86_64 was changed (.bot_modules/.targets/linux-x86_64/geo/geo/arch.bot was changed); it is derived again (a view holds the package manager's copies, never your files)} {"linux-x86_64/1.0.0"}}
+
+test pn-view-fault-rollback {a failure while deriving a second target's view -- projecting, placing native libraries, moving an old view out or the new one in -- leaves the project exactly as it was, the first view usable} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    pm add geo -project $app -repository $repo -target linux-x86_64
+    set before [treeState $app]
+    set out [lmap point {project native-placed commit-view-new} {
+        set r [withEnvironment [list BOTLISH_PM_FAULT $point] {pm install -project $app -repository $repo -target linux-aarch64}]
+        list $point [dict get $r status] [expr {[treeState $app] eq $before}]
+    }]
+    lappend out [appValue $app linux-x86_64]
+} -cleanup cleanup -result {{project 1 1} {native-placed 1 1} {commit-view-new 1 1} {"linux-x86_64/1.0.0"}}
+
+test pn-view-crash-recovery {a process killed while committing views leaves a journal: the next command rolls back (the previous installation, file for file) or, committed, finishes; an empty .targets is never left} -body {
+    set repo [fresh repo]
+    set src [fresh src]
+    pack [geoPackage $src 1.0.0] $repo
+    pack [geoPackage $src 1.0.1] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"geo": "1.0"}, "lock": {"geo": "1.0.0"}}}
+    pm install -project $app -repository $repo -target linux-x86_64
+    set before [treeState $app]
+    set out {}
+    foreach point {commit-view-old commit-view-new state-written committed} {
+        set r [withEnvironment [list BOTLISH_PM_FAULT crash:$point] {pm update -project $app -repository $repo}]
+        set next [pm install -project $app -repository $repo]
+        set value [appValue $app linux-x86_64]
+        lappend out [list $point [dict get $r status] [lindex [split [dict get $next err] \n] 0] $value \
+            [expr {$value eq {"linux-x86_64/1.0.0"} ? [treeState $app] eq $before : 1}]]
+        if {$value ne {"linux-x86_64/1.0.0"}} {
+            writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"geo": "1.0"}, "lock": {"geo": "1.0.0"}}}
+            pm install -project $app -repository $repo
+        }
+    }
+    set out
+} -cleanup cleanup -result {{commit-view-old 99 {note: rolled back a package operation that was interrupted: the previous installation is restored} {"linux-x86_64/1.0.0"} 1} {commit-view-new 99 {note: rolled back a package operation that was interrupted: the previous installation is restored} {"linux-x86_64/1.0.0"} 1} {state-written 99 {note: rolled back a package operation that was interrupted: the previous installation is restored} {"linux-x86_64/1.0.0"} 1} {committed 99 {note: completed the cleanup of a package operation that was interrupted after it committed} {"linux-x86_64/1.0.1"} 1}}
+
+test pn-cache-and-interchange {a HIR compiled from a target view is its target's: the front-end cache keeps one entry per target, a changed view file is a miss, and HIR interchange refuses another target's HIR} -body {
+    set repo [fresh repo]
+    pack [geoPackage [fresh src] 1.0.0] $repo
+    set app [application "import geo\n\ngeo::which()\n"]
+    pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
+    set cache [fresh cache]
+    surface::cache::resetStats
+    set a [surface::readProgramFile [file join $app main.bot] -warnings off -cache $cache -target linux-x86_64]
+    set b [surface::readProgramFile [file join $app main.bot] -warnings off -cache $cache -target linux-aarch64]
+    set a2 [surface::readProgramFile [file join $app main.bot] -warnings off -cache $cache -target linux-x86_64]
+    set hits [dict get [surface::cache::stats] hits]
+    set text [hir::interchange::encode $a]
+    set refused [catch {hir::interchange::decode $text -target linux-aarch64} message options]
+    list [dict get $a target] [dict get $b target] $hits $refused [lrange [dict get $options -errorcode] 0 2]
+} -cleanup cleanup -result {linux-x86_64 linux-aarch64 1 1 {HIR INTERCHANGE TARGET}}
+
+# ---------------------------------------------------------------------------
+# 3. Native file inspection (real files built here)
+
+test pn-inspect-elf {an ELF shared object is read for its machine, soname, needed libraries, glibc symbol versions and exports; a static archive for its members and index; nothing runs} -constraints {linuxCc} -body {
+    set dir [fresh bin]
+    set dep [sharedLibrary $dir libdep.so.2 libdep.so.2 dep_value 2]
+    set lib [sharedLibrary $dir libfoo.so.1 libfoo.so.1 foo_value 7 [list -L$dir -l:libdep.so.2] "#include <stdio.h>\nint foo_print(void) { return printf(\"x\"); }"]
+    set a [staticArchive $dir libq.a q_value 3]
+    set f [pm::binary::inspect [readBytes $lib] lib]
+    set s [pm::binary::inspect [readBytes $a] a]
+    list [pm::binary::describe $f] [dict get $f soname] [dict get $f needed] [expr {"foo_value" in [dict get $f symbols]}] \
+        [expr {[dict exists $f verneed libc.so.6]}] [pm::binary::describe $s] [dict get $s index]
+} -cleanup cleanup -result {{ELF x86-64 shared object} libfoo.so.1 {libdep.so.2 libc.so.6} 1 1 {an ar archive of 1 ELF x86-64 object} q_value}
+
+test pn-inspect-foreign-formats {objects of other targets are recognized for what they are: AArch64 ELF (clang), Mach-O arm64 (clang), and an archive of them is refused for linux-x86_64 naming the other machine} -constraints {clangAarch64} -body {
+    set dir [fresh bin]
+    set arm [staticArchive $dir libarm.a arm_value 1 clang {--target=aarch64-linux-gnu}]
+    set mac [staticArchive $dir libmac.a mac_value 1 clang {--target=arm64-apple-macos11}]
+    set refused [catch {pm::native::ArchiveFacts linux-x86_64 [pm::binary::inspect [readBytes $arm] arm] libarm.a} message]
+    list [pm::binary::describe [pm::binary::inspect [readBytes $arm] arm]] [pm::binary::describe [pm::binary::inspect [readBytes $mac] mac]] \
+        $refused $message [dict get [pm::native::ArchiveFacts macos-aarch64 [pm::binary::inspect [readBytes $mac] mac] libmac.a] objects]
+} -cleanup cleanup -result {{an ar archive of 1 ELF AArch64 object} {an ar archive of 1 Mach-O arm64 object} 1 {libarm.a holds members that are not linux-x86_64 objects: arm_value.o: ELF AArch64 object} 1}
+
+test pn-inspect-windows {MinGW-w64's DLL, its import library and an MSVC-style short-import library are read for what they are: a DLL's exports and imports, an import library naming its DLL -- refused as a static archive, accepted as the DLL's import library} -constraints {mingw} -body {
+    set dir [fresh bin]
+    writeText [file join $dir w.c] "__declspec(dllexport) int w_value(void) { return 5; }\n"
+    exec x86_64-w64-mingw32-gcc -shared -o [file join $dir w.dll] [file join $dir w.c] -Wl,--out-implib,[file join $dir libw.dll.a]
+    set dll [pm::binary::inspect [readBytes [file join $dir w.dll]] w.dll]
+    set implib [readBytes [file join $dir libw.dll.a]]
+    set library [dict create name w origin bundled linkage static file native/libw.dll.a symbols {}]
+    set asStatic [catch {pm::native::CheckBundled windows-x86_64-gnu $library $implib libw.dll.a} message]
+    set shared [dict create name w origin bundled linkage shared file native/w.dll import native/libw.dll.a identity w.dll \
+        needs [dict get $dll needed] symbols w_value]
+    set facts [pm::native::CheckBundled windows-x86_64-gnu $shared [readBytes [file join $dir w.dll]] w.dll $implib]
+    list [pm::binary::describe $dll] [dict get $dll name] [dict get $dll symbols] [expr {"KERNEL32.dll" in [dict get $dll needed]}] \
+        $asStatic $message [dict get $facts identity]
+} -cleanup cleanup -match glob -result {{PE x86-64 DLL} w.dll w_value 1 1 {libw.dll.a is an import library of w.dll, and library w is declared a static archive: *} w.dll}
+
+# ---------------------------------------------------------------------------
+# 4. Bundled native libraries: pack and install checks
+
+proc fooLibrary {{extra ""}} {
+    return "{\"name\": \"foo\", \"origin\": \"bundled\", \"linkage\": \"shared\", \"file\": \"native/libfoo.so.1\", \"identity\": \"libfoo.so.1\", \"needs\": \[\"libc.so.6\"\]$extra}"
+}
+
+test pn-bundled-checks {every declared fact of a bundled library is checked against the file before it is packed: identity, needs, architecture, kind, symbols; a musl-built library is refused for the GNU C library's target} -constraints {linuxCc clangAarch64} -body {
+    set dir [fresh bin]
+    set good [sharedLibrary $dir libfoo.so.1 libfoo.so.1 foo_value 7]
+    set wrongName [sharedLibrary $dir libbar.so libbar.so.9 foo_value 7]
+    set archive [staticArchive $dir libfoo.a foo_value 1]
+    writeText [file join $dir musl.c] "int musl_stub;\n"
+    exec cc -shared -fPIC -o [file join $dir libc.musl-x86_64.so.1] [file join $dir musl.c] -Wl,-soname,libc.musl-x86_64.so.1
+    set musl [sharedLibrary $dir libmusl.so.1 libfoo.so.1 foo_value 7 [list -L$dir -l:libc.musl-x86_64.so.1]]
+    exec clang --target=aarch64-linux-gnu -shared -fPIC -nostdlib -o [file join $dir libarm.so.1] [file join $dir foo_value.c] -Wl,-soname,libfoo.so.1 -fuse-ld=lld
+    set src [fresh src]
+    set out {}
+    foreach {tag file library} [list \
+        ok $good [fooLibrary] \
+        identity $wrongName [fooLibrary] \
+        needs $good [string map {libc.so.6 libz.so.1} [fooLibrary]] \
+        arch [file join $dir libarm.so.1] [string map {{"libc.so.6"} {}} [fooLibrary]] \
+        kind $archive [fooLibrary] \
+        symbol $good [fooLibrary {, "symbols": ["foo_missing"]}] \
+        musl $musl [string map {libc.so.6\" libc.so.6\",\ \"libc.musl-x86_64.so.1\"} [fooLibrary]]] {
+        set pkg [nativePackage $src p_$tag 1.0.0 [list $library] [list native/libfoo.so.1 $file] "fn n() -> int:\n    1\n"]
+        set r [pm package pack $pkg -out [fresh repo]]
+        lappend out [list $tag [dict get $r status] [regsub -all {/\S+/} [lindex [split [dict get $r err] \n] 1] {/.../}]]
+    }
+    set out
+} -cleanup cleanup -match glob -result {{ok 0 {}} {identity 1 {*loader identity is "libbar.so.9", and its metadata declares "libfoo.so.1"*}} {needs 1 {*needs libc.so.6, and its metadata declares libz.so.1*}} {arch 1 {*is ELF AArch64 shared object, and linux-x86_64's libraries are elf x86_64*}} {kind 1 {*is an ar archive of 1 ELF x86-64 object, and linux-x86_64's libraries are elf x86_64*}} {symbol 1 {*does not export the declared symbol foo_missing*}} {musl 1 {*built against musl*}}}
+
+test pn-native-conflicts {the native closure is the whole application's: two instances bundling different libraries of one name, a bundled and a system one, two names with one loader identity, a missing transitive dependency, a symbol two static archives define -- each refused at installation, conservatively, and nothing installed; the same bytes twice are one library} -constraints {linuxCc} -body {
+    set dir [fresh bin]
+    set one [sharedLibrary [file mkdir [file join $dir a]][file join $dir a] libfoo.so.1 libfoo.so.1 foo_value 1]
+    set two [sharedLibrary [file mkdir [file join $dir b]][file join $dir b] libfoo.so.1 libfoo.so.1 foo_value 2]
+    set dep [sharedLibrary $dir libdep.so.2 libdep.so.2 dep_value 2]
+    set needy [sharedLibrary [file mkdir [file join $dir c]][file join $dir c] libneedy.so.1 libneedy.so.1 needy_value 3 [list -L$dir -l:libdep.so.2]]
+    set s1 [staticArchive [file mkdir [file join $dir s1]][file join $dir s1] libs1.a dup 1]
+    set s2 [staticArchive [file mkdir [file join $dir s2]][file join $dir s2] libs2.a dup 2]
+    set src [fresh src]
+    set repo [fresh repo]
+    foreach {name file} [list fa $one fb $two fsame $one] {
+        pack [nativePackage $src $name 1.0.0 [list [fooLibrary]] [list native/libfoo.so.1 $file] "fn n() -> int:\n    1\n"] $repo
+    }
+    pack [nativePackage $src fsys 1.0.0 [list {{"name": "foo", "origin": "system", "linkage": "shared"}}] {} "fn n() -> int:\n    1\n"] $repo
+    pack [nativePackage $src falias 1.0.0 [list {{"name": "bar", "origin": "bundled", "linkage": "shared", "file": "native/libfoo.so.1", "identity": "libfoo.so.1", "needs": ["libc.so.6"]}}] [list native/libfoo.so.1 $two] "fn n() -> int:\n    1\n"] $repo
+    pack [nativePackage $src fneedy 1.0.0 [list {{"name": "needy", "origin": "bundled", "linkage": "shared", "file": "native/libneedy.so.1", "identity": "libneedy.so.1", "needs": ["libdep.so.2", "libc.so.6"], "symbols": []}} {{"name": "dep", "origin": "system", "linkage": "shared", "identity": "libdep.so.2"}}] [list native/libneedy.so.1 $needy] "fn n() -> int:\n    1\n"] $repo
+    pack [nativePackage $src fs1 1.0.0 [list {{"name": "s1", "origin": "bundled", "linkage": "static", "file": "native/libs1.a"}}] [list native/libs1.a $s1] "fn n() -> int:\n    1\n"] $repo
+    pack [nativePackage $src fs2 1.0.0 [list {{"name": "s2", "origin": "bundled", "linkage": "static", "file": "native/libs2.a"}}] [list native/libs2.a $s2] "fn n() -> int:\n    1\n"] $repo
+    set out {}
+    foreach {tag first second} {different fa fb same fa fsame origin fa fsys identity fa falias statics fs1 fs2} {
+        set app [application "1\n"]
+        pm add $first -project $app -repository $repo
+        set before [treeState $app]
+        set r [pm add $second -project $app -repository $repo]
+        lappend out [list $tag [dict get $r status] [expr {[dict get $r status] == 0 || [treeState $app] eq $before}] \
+            [regsub -all {[0-9a-f]{12}} [lindex [split [dict get $r err] \n] 1] {D}]]
+    }
+    set app [application "1\n"]
+    set r [pm add fneedy -project $app -repository $repo]
+    lappend out [list needs [dict get $r status] [lindex [split [dict get $r err] \n] 1]]
+} -cleanup cleanup -result {{different 1 1 {  foo: instances fa and fb bundle different foo libraries (sha256 D and D): one process loads one foo, and the package manager never chooses between them (PM NATIVE)}} {same 0 1 {}} {origin 1 1 {  foo: instance fa uses a bundled shared foo and instance fsys a system shared one: one process links one foo (choose one origin with botlish.json's "origins", or use packages that agree) (PM NATIVE)}} {identity 1 1 {  the libraries foo and bar both load as libfoo.so.1: one loader identity is one library in a process}} {statics 1 1 {  the static libraries s1 and s2 both define dup: linking both into one executable is a duplicate definition (PM NATIVE)}} {needs 1 {  system library dep (libdep.so.2 or libdep.so) is not installed in linux-x86_64's system library directories (/usr/lib/x86_64-linux-gnu, /lib/x86_64-linux-gnu, /usr/lib, /lib, /usr/lib64, /usr/local/lib, /usr/local/lib/x86_64-linux-gnu)}}}
+
+test pn-missing-transitive-dependency {a bundled library's loader dependency must resolve to the target's platform or a library a package declares: one nobody declares is refused when the package is packed} -constraints {linuxCc} -body {
+    set dir [fresh bin]
+    set dep [sharedLibrary $dir libdep.so.2 libdep.so.2 dep_value 2]
+    set needy [sharedLibrary $dir libneedy.so.1 libneedy.so.1 needy_value 3 [list -L$dir -l:libdep.so.2]]
+    set pkg [nativePackage [fresh src] lone 1.0.0 [list {{"name": "needy", "origin": "bundled", "linkage": "shared", "file": "native/libneedy.so.1", "identity": "libneedy.so.1", "needs": ["libdep.so.2", "libc.so.6"]}}] [list native/libneedy.so.1 $needy] "fn n() -> int:\n    1\n"]
+    set r [pm package pack $pkg -out [fresh repo]]
+    list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
+} -cleanup cleanup -result {1 {  linux-x86_64: library needy needs libdep.so.2, which is neither linux-x86_64's platform nor a library this package declares for linux-x86_64 (with its identity): a consumer could not resolve it (PM PACK)}}
+
+test pn-source-metadata-contradiction {a package whose link declaration contradicts its metadata -- source requires a static library the metadata bundles as shared, or links an archive path the metadata does not bundle -- is refused at installation with both locations named} -constraints {linuxCc} -body {
+    set dir [fresh bin]
+    set good [sharedLibrary $dir libfoo.so.1 libfoo.so.1 foo_value 7]
+    set a [staticArchive $dir libq.a q_value 3]
+    set src [fresh src]
+    set repo [fresh repo]
+    pack [nativePackage $src cstatic 1.0.0 [list [fooLibrary]] [list native/libfoo.so.1 $good] "extern c library \"foo\" static\n\nfn n() -> int:\n    1\n"] $repo
+    pack [nativePackage $src cpath 1.0.0 [list {{"name": "q", "origin": "bundled", "linkage": "static", "file": "native/libq.a"}}] [list native/libq.a $a] "extern c library \"q\" static at \"native/other.a\"\n\nfn n() -> int:\n    1\n"] $repo
+    lmap name {cstatic cpath} {
+        set r [pm add $name -project [application "1\n"] -repository $repo]
+        list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
+    }
+} -cleanup cleanup -result {{1 {  cstatic/cstatic.bot:1 requires a static foo, and the package metadata provides a bundled shared one: correct the metadata or the declaration (PM NATIVE)}} {1 {  cpath/cpath.bot:1 links q from native/other.a, and the package metadata bundles it as native/libq.a: correct the metadata or the declaration (PM NATIVE)}}}
+
+# ---------------------------------------------------------------------------
+# 5. System libraries
+
+proc zlibPackage {src version request} {
+    return [nativePackage $src zuse $version [list "{\"name\": \"z\", \"origin\": \"system\", \"linkage\": \"shared\", \"identity\": \"libz.so.1\", \"version\": \"$request\", \"symbols\": \[\"compress2\"\]}"] {} "extern c library \"z\"\n\nfn n() -> int:\n    1\n"]
+}
+
+test pn-system-library-verified {a system library is verified by the system's own metadata, never a bare file: zlib by its pkg-config record or its dpkg package, its version against the request, its soname and declared symbols against the file; a request the system's version does not meet is refused} -constraints {dpkgZlib} -body {
+    set src [fresh src]
+    set repo [fresh repo]
+    pack [zlibPackage $src 1.0.0 1] $repo
+    pack [zlibPackage $src 1.0.1 9] $repo
+    set app [application "1\n"]
+    set ok [pm add zuse -request 1.0.0 -project $app -repository $repo]
+    set v [pm verify -project $app -target linux-x86_64]
+    set bad [pm add zuse -request 1.0.1 -project [application "1\n"] -repository $repo]
+    list [dict get $ok status] [regexp {z: system shared, ELF x86-64 shared object: (pkg-config|dpkg package) } [dict get $v out]] \
+        [dict get $bad status] [regexp {is version \S+ \(.*\), which the request "9" does not accept} [dict get $bad err]]
+} -cleanup cleanup -result {0 1 1 1}
+
+testConstraint unmanagedLocalLibrary [expr {[testConstraint linuxX86Host] && [file exists /usr/local/lib/libpython3.so]
+    && ![file exists /usr/lib/x86_64-linux-gnu/libpython3.so] && [pm::native::DpkgOwner /usr/local/lib/libpython3.so] eq ""}]
+
+test pn-system-library-needs-system-metadata {a library file in a library directory is not a system installation: one only /usr/local has (installed by hand, with a pkg-config record of /usr/local's own, which is no system metadata) is refused as system-managed, naming the file} -constraints {unmanagedLocalLibrary} -body {
+    set pkg [nativePackage [fresh src] pyuse 1.0.0 [list {{"name": "python3", "origin": "system", "linkage": "shared", "identity": "libpython3.so", "pkg-config": "python3"}}] {} "fn n() -> int:\n    1\n"]
+    set repo [fresh repo]
+    pack $pkg $repo
+    set r [pm add pyuse -project [application "1\n"] -repository $repo]
+    list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
+} -cleanup cleanup -result {1 {  system library python3: /usr/local/lib/libpython3.so is installed, but no system metadata (the dpkg database, or a pkg-config file of the system's) records it: a file in a library directory is not a system-managed installation (PM NATIVE)}}
+
+test pn-system-library-other-target {a system library of another target than the host's cannot be verified here: the view is made and the plan says so, never claiming it} -body {
+    set src [fresh src]
+    set repo [fresh repo]
+    set pkg [packageDir $src arm 1.0.0 {{"schema": 2, "name": "arm", "version": "1.0.0", "targets": {"linux-aarch64": {"files": "t", "libraries": [{"name": "SDL3", "origin": "system", "linkage": "shared", "identity": "libSDL3.so.0", "version": "3"}]}}}} [list arm.bot "fn n() -> int:\n    1\n" t/README.txt "x\n"]]
+    pack $pkg $repo
+    set app [application "1\n"]
+    set r [pm add arm -project $app -repository $repo -target linux-aarch64]
+    set plan [pm native plan -project $app -target linux-aarch64]
+    list [dict get $r status] [lsearch -inline [split [dict get $r out] \n] note:*] [lsearch -inline [split [dict get $plan out] \n] {    unverified*}]
+} -constraints {linuxX86Host} -cleanup cleanup -result {0 {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)} {    unverified on this host: linux-aarch64's system must provide it}}
+
+# ---------------------------------------------------------------------------
+# 6. Linking, running and deployment
+
+proc toyNative {} {
+    set dir [fresh bin]
+    set lib [sharedLibrary $dir libtoy.so.1 libtoy.so.1 toy_value 42]
+    set archive [staticArchive $dir libtoystatic.a toy_static 8]
+    set src [fresh src]
+    set module "extern c library \"toy\"\nextern c library \"toystatic\"\nextern c fn toy_value() -> std::ffi::c::Int\nextern c fn toy_static() -> std::ffi::c::Int\n\nfn total() -> int:\n    toy_value() + toy_static()\n"
+    set module "import std::ffi::c\n\n$module"
+    set pkg [nativePackage $src toy 1.0.0 [list {{"name": "toy", "origin": "bundled", "linkage": "shared", "file": "native/libtoy.so.1", "identity": "libtoy.so.1", "needs": ["libc.so.6"], "symbols": ["toy_value"]}} {{"name": "toystatic", "origin": "bundled", "linkage": "static", "file": "native/libtoystatic.a"}}] \
+        [list native/libtoy.so.1 $lib native/libtoystatic.a $archive] $module]
+    set repo [fresh repo]
+    pack $pkg $repo
+    return $repo
+}
+
+test pn-bundled-libraries-link-and-run {a program over a package bundling a shared and a static library links both from its target view's .lib and runs, with no -L and no LD_LIBRARY_PATH} -constraints {linkedRun} -body {
+    set repo [toyNative]
+    set app [application "import toy\n\ntoy::total()\n"]
+    set r [pm add toy -project $app -repository $repo]
+    set value [withEnvironment {LD_LIBRARY_PATH {}} {appValue $app "" cranelift}]
+    list [dict get $r status] [lsort [glob -tails -directory [file join $app .bot_modules .targets linux-x86_64 .lib] *]] $value
+} -cleanup cleanup -result {0 {libtoy.so libtoy.so.1 libtoystatic.a} 50}
+
+test pn-deploy-relocatable {native deploy places the bundled shared library, an executable linked with -runtime-path '$ORIGIN/lib' finds it there, and keeps running after the directory moves and the packages are deleted} -constraints {linkedRun} -body {
+    set repo [toyNative]
+    set app [application "import toy\n\ntoy::total()\n"]
+    pm add toy -project $app -repository $repo
+    set dist [file join [fresh dist] out]
+    set d [pm native deploy -project $app -target linux-x86_64 -out $dist]
+    set e [pm -emit-native-executable -runtime-path {$ORIGIN/lib} [file join $app main.bot]]
+    file rename [file join $app main] [file join $dist main]
+    set moved [file join [fresh moved] dist]
+    file rename $dist $moved
+    file delete -force [file join $app .bot_modules]
+    set run [withEnvironment {LD_LIBRARY_PATH {}} {exec [file join $moved main]}]
+    list [dict get $d status] [lindex [split [dict get $d out] \n] 0] [dict get $e status] $run [lsort [glob -tails -directory [file join $moved lib] *]]
+} -cleanup cleanup -result {0 {deployed lib/libtoy.so.1} 0 50 libtoy.so.1}
+
+test pn-deploy-ownership-and-faults {a deployment replaces only what it placed: a file it did not place is MANUAL, one changed since is MODIFIED (without -force); a failure at any step, or a crash and the next deploy, leaves the previous deployment} -constraints {linuxCc} -body {
+    set repo [toyNative]
+    set app [application "1\n"]
+    pm add toy -project $app -repository $repo
+    set dist [fresh dist]
+    writeText [file join $dist lib libtoy.so.1] "mine\n"
+    set manual [pm native deploy -project $app -target linux-x86_64 -out $dist]
+    file delete [file join $dist lib libtoy.so.1]
+    pm native deploy -project $app -target linux-x86_64 -out $dist
+    set before [treeState $dist]
+    set faults [lmap point {deploy-staged deploy-old deploy-new deploy-record} {
+        set r [withEnvironment [list BOTLISH_PM_FAULT $point] {pm native deploy -project $app -target linux-x86_64 -out $dist}]
+        list $point [dict get $r status] [expr {[treeState $dist] eq $before}]
+    }]
+    set crash [withEnvironment [list BOTLISH_PM_FAULT crash:deploy-new] {pm native deploy -project $app -target linux-x86_64 -out $dist}]
+    set next [pm native deploy -project $app -target linux-x86_64 -out $dist]
+    writeText [file join $dist lib libtoy.so.1] "changed\n"
+    set modified [pm native deploy -project $app -target linux-x86_64 -out $dist]
+    set forced [pm native deploy -project $app -target linux-x86_64 -out $dist -force]
+    list [kindOf [dict get $manual err]] $faults [dict get $crash status] [lindex [split [dict get $next err] \n] 0] \
+        [expr {[treeState $dist] eq $before}] [kindOf [dict get $modified err]] [dict get $forced status] \
+        [expr {[treeState $dist] eq $before}] [file attributes [file join $dist lib libtoy.so.1] -permissions]
+} -cleanup cleanup -result {MANUAL {{deploy-staged 1 1} {deploy-old 1 1} {deploy-new 1 1} {deploy-record 1 1}} 99 {note: rolled back a deployment that was interrupted: the previous deployment is restored} 1 MODIFIED 0 1 0o644}
+
+test pn-headers {a package's public header directories are the plan's: native plan -include prints them as compiler options, from the target view} -body {
+    set src [fresh src]
+    set repo [fresh repo]
+    pack [packageDir $src hdr 1.0.0 {{"schema": 2, "name": "hdr", "version": "1.0.0", "targets": {"linux-x86_64": {"files": "t", "headers": ["include"]}}}} [list hdr.bot "fn n() -> int:\n    1\n" include/hdr.h "int hdr(void);\n" t/README.txt "x\n"]] $repo
+    set app [application "1\n"]
+    pm add hdr -project $app -repository $repo -target linux-x86_64
+    string map [list $app APP] [dict get [pm native plan -project $app -target linux-x86_64 -include] out]
+} -cleanup cleanup -result {-IAPP/.bot_modules/.targets/linux-x86_64/hdr/include}
+
+test pn-runtime-path-option {-runtime-path is one directory: a comma, colon or empty path is a usage error before anything is compiled; a Windows-only refusal is the driver's} -body {
+    set app [application "1\n"]
+    lmap value {{} a,b a:b} {
+        set r [pm -runtime-path $value -emit-native-executable [file join $app main.bot]]
+        list [dict get $r status] [lindex [split [dict get $r err] \n] 0]
+    }
+} -cleanup cleanup -match glob -result {{2 *-runtime-path needs one path*} {2 *-runtime-path needs one path*} {2 *-runtime-path needs one path*}}
+
+testConstraint machoTools [expr {[auto_execok clang] ne "" && [auto_execok ld64.lld] ne "" || ([auto_execok clang] ne "" && [auto_execok lld] ne "")}]
+set lipo [lindex [concat [auto_execok llvm-lipo] [auto_execok llvm-lipo-18]] 0]
+testConstraint lipo [expr {$lipo ne ""}]
+
+# A Mach-O dynamic library for ARCH (arm64, x86_64) with install name NAME,
+# made by clang and lld's Mach-O linker; SIGN 0 leaves out the ad hoc
+# signature lld makes by default.
+proc dylib {dir file arch name {sign 1}} {
+    set source [file join $dir mac.c]
+    writeText $source "int mac_value(void) { return 9; }\n"
+    set flags [list --target=$arch-apple-macos11 -shared -nostdlib -fuse-ld=lld -Wl,-install_name,$name]
+    if {!$sign} { lappend flags -Wl,-no_adhoc_codesign }
+    exec clang {*}$flags -o [file join $dir $file] $source
+    return [file join $dir $file]
+}
+
+test pn-macos-deployment-requirements {a macOS target's bundled dylib (a real Mach-O, made by clang and lld) is verified from Linux -- install name, architecture, signature -- and its view's plan states what deployment still needs: an install name that is not @rpath-relative is not relocatable, an unsigned dylib must be signed with the application; deploy places it in DIR/lib and says to sign it; a universal file is read at the target's slice} -constraints {machoTools lipo} -body {
+    set dir [fresh bin]
+    set signed [dylib $dir libmac.1.dylib arm64 @rpath/libmac.1.dylib]
+    set unsigned [dylib [file mkdir [file join $dir u]][file join $dir u] libmac.1.dylib arm64 /usr/local/lib/libmac.1.dylib 0]
+    set intel [dylib [file mkdir [file join $dir x]][file join $dir x] libmac.1.dylib x86_64 @rpath/libmac.1.dylib]
+    exec $::lipo -create $intel $signed -output [file join $dir libfat.dylib]
+    set src [fresh src]
+    set repo [fresh repo]
+    foreach {name file identity} [list macgood $signed @rpath/libmac.1.dylib macbad $unsigned /usr/local/lib/libmac.1.dylib macfat [file join $dir libfat.dylib] @rpath/libmac.1.dylib] {
+        pack [packageDir $src $name 1.0.0 "{\"schema\": 2, \"name\": \"$name\", \"version\": \"1.0.0\", \"targets\": {\"macos-aarch64\": {\"files\": \"t\", \"libraries\": \[{\"name\": \"mac\", \"origin\": \"bundled\", \"linkage\": \"shared\", \"file\": \"native/libmac.1.dylib\", \"identity\": \"$identity\", \"needs\": \[\], \"symbols\": \[\"mac_value\"\]}\]}}}" [list $name.bot "fn n() -> int:\n    1\n" t/native/libmac.1.dylib [list @file $file]]] $repo
+    }
+    set out {}
+    foreach name {macgood macbad macfat} {
+        set app [application "1\n"]
+        set r [pm add $name -project $app -repository $repo -target macos-aarch64]
+        lappend out [list $name [dict get $r status] [lsearch -all -inline [split [dict get $r out] \n] note:*]]
+    }
+    set d [pm native deploy -project $app -target macos-aarch64 -out [file join [fresh dist] out]]
+    lappend out [dict get $d status] [lrange [split [dict get $d out] \n] 0 0] [lindex [split [dict get $d out] \n] end]
+    set wrong [dict create name mac origin bundled linkage shared file native/libmac.1.dylib identity @rpath/libmac.1.dylib needs {} symbols {}]
+    lappend out [catch {pm::native::CheckBundled macos-aarch64 $wrong [readBytes $intel] intel} message] $message
+} -cleanup cleanup -result {{macgood 0 {}} {macbad 0 {{note: macos-aarch64: mac: its install name /usr/local/lib/libmac.1.dylib is not @rpath-relative: an executable linked with it loads it from that absolute path, wherever the application is deployed} {note: macos-aarch64: mac: libmac.1.dylib carries no code signature: macOS on arm64 loads only signed code, so sign it when the application is signed (codesign; the package manager signs nothing)}}} {macfat 0 {}} 0 {{deployed lib/libmac.1.dylib}} {note: sign the deployed libraries with the application (codesign): macOS arm64 loads only signed code, and the package manager signs nothing} 1 {intel is Mach-O x86_64 dynamic library, and macos-aarch64's libraries are macho aarch64}}
+
+# ---------------------------------------------------------------------------
+# 7. SHA-256 backends
+
+test pn-sha256-backends-agree {the host system's SHA-256 tool and the Tcl implementation give the same digests for inputs around every block boundary and of a megabyte, and FIPS 180-4's vectors under either backend} -body {
+    set out {}
+    foreach length {0 1 55 56 63 64 65 4095 4096 4097 100000 1048576} {
+        set bytes [string range [string repeat "\x00\x01\xfe\xff\x80abc" [expr {$length / 7 + 1}]] 0 [expr {$length - 1}]]
+        if {[pm::sha256::hex $bytes] ne [pm::sha256::TclHex $bytes]} { lappend out $length }
+    }
+    foreach backend {tcl tool} {
+        if {$backend eq "tool" && [lindex [pm::sha256::backend] 0] ne "tool"} continue
+        set r [withEnvironment [list BOTLISH_PM_SHA256 $backend] {
+            exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; puts \[pm::sha256::hex abc\]; puts \[pm::sha256::hex \[string repeat a 1000000\]\]"
+        }]
+        lappend out $backend $r
+    }
+    set out
+} -result [concat {tcl {ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0}} [expr {[lindex [pm::sha256::backend] 0] eq "tool" ? {tool {ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0}} : {}}]]
+
+test pn-sha256-ignores-path {the tool is the system's, at its fixed path: a program named sha256sum first on PATH, which lies, is never run (the known-answer probe would refuse it too, but it must not even start)} -constraints {unixFiles} -body {
+    set dir [fresh path]
+    writeText [file join $dir sha256sum] "#!/bin/sh\ntouch [file join $dir ran]\necho 0000000000000000000000000000000000000000000000000000000000000000  -\n"
+    file attributes [file join $dir sha256sum] -permissions 0755
+    set digest [withEnvironment [list PATH $dir:$::env(PATH)] {
+        exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; puts \[pm::sha256::hex \[string repeat a 1000000\]\]"
+    }]
+    list $digest [file exists [file join $dir ran]]
+} -cleanup cleanup -result {cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0 0}
+
+test pn-sha256-forced-tool-missing {BOTLISH_PM_SHA256=tool where there is no tool is an error, never a silent fallback} -body {
+    set r [withEnvironment [list BOTLISH_PM_SHA256 tool] {
+        catch {exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; set pm::sha256::tool {none {probe}}; puts \[pm::sha256::hex abc\]"} m
+        set m
+    }]
+    string match *BOTLISH_PM_SHA256=tool* $r
+} -result 1
+
+cleanup
+cleanupTests

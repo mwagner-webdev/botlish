@@ -562,7 +562,7 @@ test bm-cache-package-installed {installing a package where an import found none
     lappend runs [lindex [dict get $options -errorcode] end] [dict get [surface::cache::stats] stale]
 } -cleanup {removeApps; file delete -force [file join [temporaryDirectory] bm-cache-[pid]-2]} -result {{0 1 0 1} {1 0 0 1} MODULE-COLLISION 1}
 
-test bm-service-sources {a compiler-service revision records the package directories it asked about and the package files it read; editing a package file it read makes it stale, and only that file} -body {
+test bm-service-sources {a compiler-service revision records the package directories it asked about and the package files it read; editing a package file it read makes it stale, and only that file (the application's .bot_modules/.targets among the directories: whether the packages are target trees, PACKAGE-MANAGER-MILESTONE-2.md)} -body {
     set dir [app [concat $twoGeometries [list main.bot "import physics\n\nphysics::read(physics::make(3))\n"]]]
     set ws [service::workspace -warnings off]
     set rev [service::analyze $ws [file join $dir main.bot]]
@@ -576,7 +576,7 @@ test bm-service-sources {a compiler-service revision records the package directo
     service::setDocument $ws [file join $dir .bot_modules rendering .bot_modules geometry geometry.bot] "garbage\n"
     set stale [lmap path [dict keys [service::stale $rev]] {string map [list $dir APP] $path}]
     list $dirs $stale [dict get [service::revision $rev] outcome]
-} -cleanup {service::closeWorkspace $ws; removeApps} -result {{{APP/.bot_modules/physics 1} {APP/.bot_modules/physics/.bot_modules/geometry 1} {APP/.bot_modules/physics/.bot_modules/geometry/.bot_modules/Side 0}} APP/.bot_modules/physics/.bot_modules/geometry/geometry.bot ok}
+} -cleanup {service::closeWorkspace $ws; removeApps} -result {{{APP/.bot_modules/.targets 0} {APP/.bot_modules/physics 1} {APP/.bot_modules/physics/.bot_modules/geometry 1} {APP/.bot_modules/physics/.bot_modules/geometry/.bot_modules/Side 0}} APP/.bot_modules/physics/.bot_modules/geometry/geometry.bot ok}
 
 test bm-service-directory-stale {a package directory appearing where an analysis found none makes its revision stale} -body {
     set dir [app {main.bot "import game\n\ngame::f()\n" game.bot "fn f() -> int:\n    1\n"}]
