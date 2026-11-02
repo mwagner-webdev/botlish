@@ -869,10 +869,21 @@ private layout FindData:
     field reparse_tag: std::binary::U32 at 36
     field name: array 260 of std::binary::U16 at 44
 
-# FindData.name's offset: a listed name's UTF-16LE bytes are the record's
-# bytes from here, two per unit.
+# FindData.name's offset and its end (260 units): a listed name's UTF-16LE
+# bytes are the record's bytes from here, two per unit, up to its NUL unit.
 private fn name_offset() -> int:
     44
+
+private fn name_end() -> int:
+    564
+
+# "." and ".." as UTF-16LE bytes (constants: static storages): the names
+# FindFirstFileW lists for a directory itself and its parent.
+private fn dot_unit() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([std::byte::from_int(46), std::byte::from_int(0)])
+
+private fn dot_dot_units() -> std::abi::bytes::Bytes:
+    std::abi::bytes::from_list([std::byte::from_int(46), std::byte::from_int(0), std::byte::from_int(46), std::byte::from_int(0)])
 
 private fn find_data() -> std::abi::bytes::MutableBytes:
     std::abi::bytes::zeroed(std::abi::usize(592))
@@ -892,30 +903,34 @@ private fn kind_of_entry(attributes: int, tag: int) -> std::io::fs::EntryKind:
     std::io::fs::EntryKind::File
 
 # The entry a FindFirstFileW / FindNextFileW wrote into DATA, pushed onto OUT
-# unless it is "." or "..".
+# unless it is "." or ".." (or empty). Its name is the record's units before
+# the first NUL unit -- all 260 when there is none -- exactly: the name's own
+# bytes, as Win32 wrote them, never decoded (an unpaired surrogate is kept
+# as itself), measured in place (std::abi::bytes::utf16le_units_before_nul)
+# with no List of units built (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Listing
+# without a List"). Every unit before the NUL is 1..65535, so a non-empty
+# name is a valid native path.
 private fn take(data: std::abi::bytes::MutableBytes, place out: MutableVector[Entry]) -> unit:
     record = std::abi::bytes::freeze(data)
-    name_units = std::binary::read(record, FindData.name):
-        on LayoutLengthMismatch:
+    n = std::abi::bytes::utf16le_units_before_nul(record, name_offset(), name_end()):
+        on LowerUnderrun:
             return unit
-    name = loop u in name_units:
-        if u == 0:
-            break
-        u + 0
-    if not name.valid_units?() or name == [46] or name == [46, 46]:
+        on UpperOverrun:
+            return unit
+    if n == 0:
+        return unit
+    named = record.slice(name_offset(), name_offset() + 2 * n):
+        on LowerUnderrun:
+            return unit
+        on UpperOverrun:
+            return unit
+    if n <= 2 and (named == dot_unit() or named == dot_dot_units()):
         return unit
     attributes = std::binary::read(record, FindData.attributes):
         on LayoutLengthMismatch:
             return unit
     tag = std::binary::read(record, FindData.reparse_tag):
         on LayoutLengthMismatch:
-            return unit
-    # The name's own bytes, its units as FindFirstFileW / FindNextFileW wrote
-    # them: never decoded.
-    named = record.slice(name_offset(), name_offset() + 2 * name.length()):
-        on LowerUnderrun:
-            return unit
-        on UpperOverrun:
             return unit
     out.push(Entry {name: NativePath {data: named}, kind: attributes.kind_of_entry(tag)})
 

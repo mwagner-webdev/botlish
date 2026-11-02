@@ -2936,6 +2936,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         BytesFromList => ("rt_bytes_from_list", None, true, Some(("bytesfromlist", KIND_BYTES))),
                         BytesJoin => ("rt_bytes_join", None, true, Some(("bytesjoin", KIND_BYTES))),
                         BytesLen => ("rt_bytes_len", None, true, None),
+                        // The internal NUL-unit measure (UTF16-BYTE-STORAGE-
+                        // MILESTONE-1.md): reads the payload in place, never
+                        // allocates; fallible with the slice rule's declared
+                        // errors (and the defensive RANGE and TYPE).
+                        BytesUtf16LeNul => ("rt_bytes_utf16le_units_before_nul", None, true, None),
                         BytesAddr => ("rt_bytes_addr", None, true, None),
                         // Fixed binary layouts (BINARY-LAYOUT.md): one helper
                         // call per field; all fallible only on operands a

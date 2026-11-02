@@ -144,19 +144,20 @@ std::abi::bytes::Bytes	opaque-struct	std::abi::bytes	api	source	stdlib/abi/bytes
 std::abi::bytes::MutableBytes	opaque-struct	std::abi::bytes	api	source	stdlib/abi/bytes.bot:100			
 std::abi::bytes::decode_utf16le	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:155			
 std::abi::bytes::decode_utf8	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:134			
-std::abi::bytes::detach	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:207			
+std::abi::bytes::detach	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:219			
 std::abi::bytes::encode_utf16le	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:144			
-std::abi::bytes::freeze	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:212			
-std::abi::bytes::freeze_prefix	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:218			
-std::abi::bytes::from_bytes	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:183			
+std::abi::bytes::freeze	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:224			
+std::abi::bytes::freeze_prefix	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:230			
+std::abi::bytes::from_bytes	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:195			
 std::abi::bytes::from_list	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:108			
 std::abi::bytes::join	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:115			
-std::abi::bytes::length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:169			
-std::abi::bytes::mutable_length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:188			
-std::abi::bytes::replace	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:194			
+std::abi::bytes::length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:181			
+std::abi::bytes::mutable_length	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:200			
+std::abi::bytes::replace	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:206			
 std::abi::bytes::slice	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:124			
 std::abi::bytes::utf16le_units	function	std::abi::bytes	std-internal	source	stdlib/abi/bytes.bot:163			
-std::abi::bytes::zeroed	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:178			
+std::abi::bytes::utf16le_units_before_nul	function	std::abi::bytes	std-internal	source	stdlib/abi/bytes.bot:175			
+std::abi::bytes::zeroed	function	std::abi::bytes	api	source	stdlib/abi/bytes.bot:190			
 std::abi::i16	function	std::abi	api	source	stdlib/abi.bot:201			
 std::abi::i32	function	std::abi	api	source	stdlib/abi.bot:209			
 std::abi::i64	function	std::abi	api	source	stdlib/abi.bot:217			
@@ -232,13 +233,14 @@ std::byte::position_low	function	std::byte	api	source	stdlib/byte.bot:125
 std::byte::set	function	std::byte	api	source	stdlib/byte.bot:174			
 std::byte_store	namespace		api	intrinsic				
 std::byte_store::byte_count	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:242			
-std::byte_store::decode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:93			
+std::byte_store::decode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:129			
 std::byte_store::decode_utf8	intrinsic	std::byte_store	api	intrinsic	core/utf8text.tcl:51			
-std::byte_store::encode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:91			
+std::byte_store::encode_utf16le	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:127			
 std::byte_store::from_list	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:235			
 std::byte_store::join	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:237			
 std::byte_store::slice	intrinsic	std::byte_store	api	intrinsic	core/bytestore.tcl:239			
-std::byte_store::utf16le_units	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:96			
+std::byte_store::utf16le_units	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:132			
+std::byte_store::utf16le_units_before_nul	intrinsic	std::byte_store	api	intrinsic	core/utf16text.tcl:135			
 std::char	namespace		api	intrinsic				
 std::char::is_tcl_alnum	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:150			
 std::char::is_tcl_alpha	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:148			
@@ -1306,20 +1308,22 @@ std::windows::fs::chunks	function	std::windows::fs	private	source	stdlib/windows
 std::windows::fs::close	function	std::windows::fs	api	source	stdlib/windows/fs.bot:831	windows		
 std::windows::fs::concat	function	std::windows::fs	api	source	stdlib/windows/fs.bot:571	windows		
 std::windows::fs::create	function	std::windows::fs	api	source	stdlib/windows/fs.bot:220	windows		
-std::windows::fs::create_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:961	windows		
+std::windows::fs::create_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:976	windows		
 std::windows::fs::create_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:857	windows		
 std::windows::fs::data_of_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:354	windows		
 std::windows::fs::decoded	function	std::windows::fs	private	source	stdlib/windows/fs.bot:334	windows		
 std::windows::fs::directory?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:608	windows		
 std::windows::fs::display	function	std::windows::fs	api	source	stdlib/windows/fs.bot:435	windows		
 std::windows::fs::disposition	function	std::windows::fs	private	source	stdlib/windows/fs.bot:674	windows		
+std::windows::fs::dot_dot_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:885	windows		
+std::windows::fs::dot_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:882	windows		
 std::windows::fs::dword	function	std::windows::fs	private	source	stdlib/windows/fs.bot:653	windows		
 std::windows::fs::dword_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:657	windows		
 std::windows::fs::end_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:272	windows		
 std::windows::fs::ends_separated?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:533	windows		
-std::windows::fs::entries	function	std::windows::fs	api	source	stdlib/windows/fs.bot:941	windows		
-std::windows::fs::find_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:877	windows		
-std::windows::fs::found	function	std::windows::fs	private	source	stdlib/windows/fs.bot:880	windows		
+std::windows::fs::entries	function	std::windows::fs	api	source	stdlib/windows/fs.bot:956	windows		
+std::windows::fs::find_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:888	windows		
+std::windows::fs::found	function	std::windows::fs	private	source	stdlib/windows/fs.bot:891	windows		
 std::windows::fs::from_text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:408	windows		
 std::windows::fs::from_units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:399	windows		
 std::windows::fs::head_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:249	windows		
@@ -1333,12 +1337,13 @@ std::windows::fs::joinable?	function	std::windows::fs	private	source	stdlib/wind
 std::windows::fs::joined_data	function	std::windows::fs	private	source	stdlib/windows/fs.bot:542	windows		
 std::windows::fs::kind	function	std::windows::fs	api	source	stdlib/windows/fs.bot:467	windows		
 std::windows::fs::kind_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:446	windows		
-std::windows::fs::kind_of_entry	function	std::windows::fs	private	source	stdlib/windows/fs.bot:887	windows		
+std::windows::fs::kind_of_entry	function	std::windows::fs	private	source	stdlib/windows/fs.bot:898	windows		
 std::windows::fs::last_error	function	std::windows::fs	private	source	stdlib/windows/fs.bot:603	windows		
 std::windows::fs::last_units	function	std::windows::fs	private	source	stdlib/windows/fs.bot:261	windows		
 std::windows::fs::lossy	function	std::windows::fs	private	source	stdlib/windows/fs.bot:342	windows		
 std::windows::fs::low_byte	function	std::windows::fs	private	source	stdlib/windows/fs.bot:346	windows		
 std::windows::fs::low_surrogate?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:297	windows		
+std::windows::fs::name_end	function	std::windows::fs	private	source	stdlib/windows/fs.bot:877	windows		
 std::windows::fs::name_offset	function	std::windows::fs	private	source	stdlib/windows/fs.bot:874	windows		
 std::windows::fs::nul_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:365	windows		
 std::windows::fs::of_valid_text	function	std::windows::fs	std-internal	source	stdlib/windows/fs.bot:418	windows		
@@ -1352,16 +1357,16 @@ std::windows::fs::read_some	function	std::windows::fs	private	source	stdlib/wind
 std::windows::fs::reason_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:614	windows		
 std::windows::fs::reason_of	function	std::windows::fs	private	source	stdlib/windows/fs.bot:582	windows		
 std::windows::fs::release	function	std::windows::fs	private	source	stdlib/windows/fs.bot:697	windows		
-std::windows::fs::remove_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:977	windows		
-std::windows::fs::remove_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:969	windows		
+std::windows::fs::remove_directory	function	std::windows::fs	api	source	stdlib/windows/fs.bot:992	windows		
+std::windows::fs::remove_file	function	std::windows::fs	api	source	stdlib/windows/fs.bot:984	windows		
 std::windows::fs::request	function	std::windows::fs	private	source	stdlib/windows/fs.bot:776	windows		
-std::windows::fs::rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:924	windows		
+std::windows::fs::rest	function	std::windows::fs	private	source	stdlib/windows/fs.bot:939	windows		
 std::windows::fs::rewritten?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:486	windows		
 std::windows::fs::scalars	function	std::windows::fs	private	source	stdlib/windows/fs.bot:308	windows		
 std::windows::fs::segments	function	std::windows::fs	private	source	stdlib/windows/fs.bot:471	windows		
 std::windows::fs::separator?	function	std::windows::fs	private	source	stdlib/windows/fs.bot:441	windows		
 std::windows::fs::star_unit	function	std::windows::fs	private	source	stdlib/windows/fs.bot:371	windows		
-std::windows::fs::take	function	std::windows::fs	private	source	stdlib/windows/fs.bot:896	windows		
+std::windows::fs::take	function	std::windows::fs	private	source	stdlib/windows/fs.bot:913	windows		
 std::windows::fs::text	function	std::windows::fs	api	source	stdlib/windows/fs.bot:427	windows		
 std::windows::fs::unit_at	function	std::windows::fs	private	source	stdlib/windows/fs.bot:301	windows		
 std::windows::fs::units	function	std::windows::fs	api	source	stdlib/windows/fs.bot:422	windows		

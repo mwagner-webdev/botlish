@@ -494,6 +494,83 @@ main():
     }
 } -result {{[std::abi::bytes::Bytes {storage: <bytes 8: 610034d81edd0000>}, std::abi::bytes::Bytes {storage: <bytes 6: 750000d80000>}, std::abi::bytes::Bytes {storage: <bytes 6: 00dc61000000>}, std::abi::bytes::Bytes {storage: <bytes 16: 43003a005c0064005c00750000d80000>}, std::windows::fs::NativePath {data: std::abi::bytes::Bytes {storage: <bytes 6: 610034d81edd>}}, [97, 55348, 56606], [67, 58, 92, 100, 92, 117, 55296]]}}
 
+test fs-windows-entry-names {a listed name is exactly its find record's units before the first NUL unit, measured in place (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Listing without a List"): every one of 260 units when there is none (the record's bytes past the name field unread), nothing after the NUL kept, "." and ".." (also "." with bytes after its NUL) and the empty name skipped, "...", ".a" and U+2E00 (00 2E: a 00 byte, but no "." and no NUL) kept, a lone surrogate kept as itself, U+0100 (00 01) ending nothing, 00 00 at an odd distance (U+0041 U+4100: 41 00 00 41) ending nothing, a surrogate pair whole; each with its kind (a directory, a symbolic link by its reparse tag). The records are made in the program and given to std::windows::fs's private `take` through a probe appended to a private copy of the standard library; on the Tcl backends and, on Linux, both native backends (the windows-x86_64 program calls no C), normally and under GC stress} -body {
+    withPrivateLibrary {
+        set module [file join $::core::libraryDir windows fs.bot]
+        set f [open $module a]
+        fconfigure $f -encoding utf-8 -translation lf
+        puts $f "\n# The test probe of tests/filesystem.test's fs-windows-entry-names.\nfn probe_take(records: List\[std::abi::bytes::Bytes\]) -> List\[any\]:\n    out = found()\n    loop r in records:\n        take(std::abi::bytes::from_bytes(r), out)\n    loop e in out:\n        \[e.name.data, e.name.units(), e.kind\]"
+        close $f
+        set text "[fsImports windows]
+# A WIN32_FIND_DATAW record (592 bytes): ATTRIBUTES at 0 and TAG at 36
+# (little-endian 32-bit), the units US from 44 (low byte first, zeros after
+# them, 260 units at most), and the byte AFTER from 564 to the end.
+fn byte_at(i: int, attributes: int, tag: int, us: List\[int\], after: int) -> int:
+    if i < 4:
+        return attributes.shift_right(8 * i).mod(256)
+    if i >= 36 and i < 40:
+        return tag.shift_right(8 * (i - 36)).mod(256)
+    if i < 44:
+        return 0
+    if i >= 564:
+        return after
+    u = us.at((i - 44).shift_right(1)):
+        on IndexNotFound:
+            return 0
+    if (i - 44).mod(2) == 0:
+        return u.mod(256)
+    u.shift_right(8)
+
+fn record(attributes: int, tag: int, us: List\[int\], after: int) -> std::abi::bytes::Bytes:
+    bs = loop i from 0 to 592:
+        std::byte::from_int(byte_at(i, attributes, tag, us, after)):
+            on std::byte::BelowRange:
+                0
+            on std::byte::AboveRange:
+                0
+    std::abi::bytes::from_list(bs)
+
+fn many(n: int) -> List\[int\]:
+    loop i from 0 to n:
+        97 + i.mod(26)
+
+std::windows::fs::probe_take(\[record(32, 0, \[97\], 0), record(16, 0, \[46\], 0), record(16, 0, \[46, 46\], 0), record(32, 0, \[\], 7), record(32, 0, \[46, 46, 46\], 0), record(16, 0, \[46, 97\], 0), record(32, 0, \[117, 55296, 120\], 0), record(32, 0, \[97, 98, 0, 99, 100\], 0), record(32, 0, \[46, 0, 46\], 0), record(32, 0, \[11776\], 0), record(32, 0, \[256, 11776, 97\], 0), record(32, 0, \[65, 16640, 66\], 0), record(1040, 2684354572, \[55348, 56606\], 0), record(32, 0, many(260), 255)\])
+"
+        set hir [fsHir $text windows-x86_64]
+        set want [lindex [outcomeUnderHir interp $hir] 1]
+        set out [list $want]
+        lappend out [expr {[lindex [outcomeUnderHir compile $hir] 1] eq $want}]
+        # The native driver shows a Bytes opaquely: there the units (and so
+        # the bytes, two per unit) are what is compared.
+        regsub -all {std::abi::bytes::Bytes \{storage: <bytes [0-9]+: [0-9a-f]*>\}} $want {<opaque std::abi::bytes::Bytes>} opaque
+        if {[testConstraint nativeLinux]} {
+            foreach stress {0 1} {
+                if {$stress} { set ::env(BOTLISH_NATIVE_GC_STRESS) 1 }
+                try {
+                    foreach backend {cranelift-generic cranelift} {
+                        set got [fsWindowsOnHost $hir $backend]
+                        if {$got ne $opaque} {
+                            lappend out [list $backend stress $stress got $got]
+                        }
+                    }
+                } finally {
+                    unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+                }
+            }
+        }
+        set out
+    }
+} -result [list [string cat {[[std::abi::bytes::Bytes {storage: <bytes 2: 6100>}, [97], std::io::fs::EntryKind::File], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 6: 2e002e002e00>}, [46, 46, 46], std::io::fs::EntryKind::File], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 4: 2e006100>}, [46, 97], std::io::fs::EntryKind::Directory], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 6: 750000d87800>}, [117, 55296, 120], std::io::fs::EntryKind::File], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 4: 61006200>}, [97, 98], std::io::fs::EntryKind::File], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 2: 002e>}, [11776], std::io::fs::EntryKind::File], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 6: 0001002e6100>}, [256, 11776, 97], std::io::fs::EntryKind::File], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 6: 410000414200>}, [65, 16640, 66], std::io::fs::EntryKind::File], } \
+    {[std::abi::bytes::Bytes {storage: <bytes 4: 34d81edd>}, [55348, 56606], std::io::fs::EntryKind::SymbolicLink], } \
+    "\[std::abi::bytes::Bytes {storage: <bytes 520: [join [lmap i [lrange [lsearch -all [lrepeat 260 x] x] 0 end] {format %02x00 [expr {97 + $i % 26}]}] {}]>}, \[[join [lmap i [lsearch -all [lrepeat 260 x] x] {expr {97 + $i % 26}}] {, }]\], std::io::fs::EntryKind::File\]\]"] 1]
+
 test fs-windows-native-runtime {std::windows's path code on the native runtime (this Linux host runs the windows-x86_64 programs, which call no C), normally and under GC stress, gives the Tcl backends' values: the native paths, units, text and display of fs-windows-native-paths, and kinds, concat and join of every pair of fs-windows-join-one-rule's bases (and two long ones) and parts} -constraints nativeLinux -body {
     set paths "[fsImports windows]fn n(us: List\[int\]) -> str:\n    p = std::windows::fs::from_units(us):\n        on std::io::path::NotAPath:\n            return \"NotAPath\"\n    p.text():\n        on std::io::path::NotText:\n            return std::str::concat(\"NotText \", p.display())\nfn main() -> List\[any\] errors std::io::path::NotAPath:\n    lone = std::windows::fs::from_units(\[117, 55296, 120\])\n    named = std::windows::fs::from_text(\"C:\\\\d\").join(lone)\n    \[n(\[\]), n(\[97, 0\]), n(\[65536\]), n(\[117, 55296, 120\]), n(\[56320\]), n(\[55348, 56606\]), n(\[233\]), named.units(), std::windows::fs::from_text(\"𝄞\").units()\]\nmain():\n    on std::io::path::NotAPath:\n        \[\]\n"
     set bases {C: C:\\ C:x \\ a \\\\s\\t \\\\?\\C:\\x \\??\\C:\\x \\\\.\\X C:\\x\\ C:/x/ é\\𝄞}

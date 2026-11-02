@@ -91,12 +91,11 @@
 >>>>
 
 @@ win-enumeration-loses-native-name a listed name is kept as the units of its lossy display, not its own units: an unpaired surrogate becomes U+FFFD, and the name reopens another file or none
-%% windows-x86_64
 ## stdlib/windows/fs.bot
 <<<<
     out.push(Entry {name: NativePath {data: named}, kind: attributes.kind_of_entry(tag)})
 ====
-    out.push(Entry {name: NativePath {data: std::abi::bytes::encode_utf16le(name.lossy())}, kind: attributes.kind_of_entry(tag)})
+    out.push(Entry {name: NativePath {data: std::abi::bytes::encode_utf16le(std::abi::bytes::utf16le_units(named).lossy())}, kind: attributes.kind_of_entry(tag)})
 >>>>
 
 @@ win-last-error-read-late another Win32 call (GetFileAttributesW of an invalid name, ERROR_INVALID_NAME) runs between a failed CreateFileW and the read of its last-error code
@@ -113,6 +112,40 @@
 
 # ---------------------------------------------------------------------------
 # Windows native paths on byte storage (UTF16-BYTE-STORAGE-MILESTONE-1.md)
+
+@@ win-entry-name-overruns-field a listed name is measured to the record's end, not to its 260-unit name field's: a name without a NUL unit takes the bytes after the field (cAlternateFileName) as units
+## stdlib/windows/fs.bot
+<<<<
+private fn name_end() -> int:
+    564
+====
+private fn name_end() -> int:
+    592
+>>>>
+
+@@ win-entry-dot-high-byte-first the "." and ".." a listing skips are compared high byte first (00 2E): "." and ".." are listed, and the name U+2E00 is skipped
+## stdlib/windows/fs.bot
+<<<<
+    std::abi::bytes::from_list([std::byte::from_int(46), std::byte::from_int(0)])
+====
+    std::abi::bytes::from_list([std::byte::from_int(0), std::byte::from_int(46)])
+>>>>
+## stdlib/windows/fs.bot
+<<<<
+    std::abi::bytes::from_list([std::byte::from_int(46), std::byte::from_int(0), std::byte::from_int(46), std::byte::from_int(0)])
+====
+    std::abi::bytes::from_list([std::byte::from_int(0), std::byte::from_int(46), std::byte::from_int(0), std::byte::from_int(46)])
+>>>>
+
+@@ win-entry-empty-name-listed a record whose name is empty (its first unit the NUL) is listed: an empty native path, which no path may be
+## stdlib/windows/fs.bot
+<<<<
+    if n == 0:
+        return unit
+    named = record.slice(name_offset(), name_offset() + 2 * n):
+====
+    named = record.slice(name_offset(), name_offset() + 2 * n):
+>>>>
 
 @@ win-call-buffer-unterminated the Win32 call boundary passes a path's bytes without the NUL unit an LPCWSTR ends with: the function reads past the name
 ## stdlib/windows/fs.bot

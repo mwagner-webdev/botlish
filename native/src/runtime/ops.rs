@@ -256,6 +256,10 @@ pub fn op_may_error(op: OpCode) -> bool {
         // ceiling (RANGE), an odd byte count or an operand of the wrong kind
         // for the internal units bridge (RANGE, TYPE: no checked program).
         | StrEncodeUtf16Le | BytesDecodeUtf16Le | BytesUtf16LeUnits
+        // The internal NUL-unit measure: the slice rule's declared
+        // LowerUnderrun / UpperOverrun, an odd range (RANGE) or an operand
+        // of the wrong kind (TYPE). It allocates nothing.
+        | BytesUtf16LeNul
         // The writable family: a length that is not 0..the ceiling (RANGE), an
         // operand of the wrong kind (TYPE: the readable and writable storages
         // are never interchanged), an index/count outside the payload (RANGE),
@@ -1977,6 +1981,43 @@ pub extern "C" fn rt_bytes_utf16le_units(p: *mut Vm, v: Value) -> Value {
     let r = vm(p).new_list(items);
     vm(p).metrics.record_list_copy(n);
     r
+}
+
+/// How many UTF-16 code units of DATA (whole byte pairs, each read low byte
+/// first) come before the first unit 0, or all of them when none is 0: a
+/// unit is 0 when both bytes of ITS pair are 0 -- a single 00 byte, or a 00
+/// byte ending one pair and another beginning the next, is no terminator. A
+/// trailing odd byte is no unit (the caller checks the length).
+pub fn utf16le_units_before_nul(data: &[u8]) -> usize {
+    utf16le_units_of(data).position(|unit| unit == 0).unwrap_or(data.len() / 2)
+}
+
+/// `byte_store::utf16le_units_before_nul` (internal to the standard
+/// library: how std::windows::fs measures a listed name in its find record,
+/// UTF16-BYTE-STORAGE-MILESTONE-1.md): the number of code units of storage
+/// V's bytes START..END-1 before the first unit 0, or (END - START) / 2,
+/// as a small Int. The one slice rule first (`check_slice`: LowerUnderrun /
+/// UpperOverrun unless 0 <= START <= END <= N), then RANGE for an odd
+/// END - START, TYPE for an operand that is no byte storage (no checked
+/// program passes either). Reads the payload in place: no allocation.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_bytes_utf16le_units_before_nul(p: *mut Vm, v: Value, start: Value, end: Value) -> Value {
+    if let Err(failed) = bytes_operand(p, v, "std::byte_store::utf16le_units_before_nul") {
+        return failed;
+    }
+    let data = bytes_of(v);
+    let (from, to) = match check_slice(p, bound_of(start), SliceEnd::End(bound_of(end)), data.len()) {
+        Ok(bounds) => bounds,
+        Err(failed) => return failed,
+    };
+    if (to - from) % 2 != 0 {
+        let message = format!(
+            "std::byte_store::utf16le_units_before_nul: the bytes {from}..{} are no whole number of 16-bit units",
+            to - 1
+        );
+        return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
+    }
+    make_small(utf16le_units_before_nul(&data[from..to]) as i64)
 }
 
 /// The storage V, or a TYPE error naming CONTEXT (the same text as
@@ -4163,6 +4204,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         StrEncodeUtf16Le => rt_str_encode_utf16le(p, a[0]),
         BytesDecodeUtf16Le => rt_bytes_decode_utf16le(p, a[0]),
         BytesUtf16LeUnits => rt_bytes_utf16le_units(p, a[0]),
+        BytesUtf16LeNul => rt_bytes_utf16le_units_before_nul(p, a[0], a[1], a[2]),
         BytesSlice => rt_bytes_slice(p, a[0], a[1], a[2]),
         BytesLen => rt_bytes_len(p, a[0]),
         MBytesNew => rt_mbytes_new(p, a[0]),
@@ -4330,6 +4372,7 @@ runtime_helpers! {
     (rt_str_encode_utf16le, 2),
     (rt_bytes_decode_utf16le, 2),
     (rt_bytes_utf16le_units, 2),
+    (rt_bytes_utf16le_units_before_nul, 4),
     (rt_bytes_slice, 4),
     (rt_bytes_len, 2),
     (rt_bytes_addr, 2),
@@ -6467,6 +6510,59 @@ mod tests {
         let odd = rooted!(vm, vm.new_bytes(&[0x41, 0x00, 0x42]));
         assert_eq!(rt_bytes_utf16le_units(p, odd), NO_VALUE);
         assert!(vm.error.take().is_some());
+    }
+
+    #[test]
+    fn utf16le_units_before_nul_counts_whole_units() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        fn count(vm: &mut Vm, bytes: &[u8], start: i64, end: i64) -> Option<i64> {
+            let p: *mut Vm = vm;
+            let v = rooted!(vm, vm.new_bytes(bytes));
+            let r = rt_bytes_utf16le_units_before_nul(p, v, make_small(start), make_small(end));
+            if r == NO_VALUE {
+                assert!(vm.error.take().is_some());
+                return None;
+            }
+            int_small(r)
+        }
+        // The terminator first; in the middle; absent (every unit counts);
+        // an empty range.
+        assert_eq!(count(&mut vm, &[0x00, 0x00, 0x41, 0x00], 0, 4), Some(0));
+        assert_eq!(count(&mut vm, &[0x61, 0x00, 0x62, 0x00, 0x00, 0x00, 0x63, 0x00], 0, 8), Some(2));
+        assert_eq!(count(&mut vm, &[0x61, 0x00, 0x62, 0x00], 0, 4), Some(2));
+        assert_eq!(count(&mut vm, &[0x61, 0x00], 2, 2), Some(0));
+        // A unit is 0 only when both of ITS bytes are: U+0100 (00 01) and
+        // U+2E00 (00 2E) begin with a 00 byte, U+4100 after U+0041 puts
+        // 00 00 at an odd distance (41 00 | 00 41), and neither ends a name.
+        assert_eq!(count(&mut vm, &[0x00, 0x01, 0x00, 0x2e, 0x00, 0x00], 0, 6), Some(2));
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x00, 0x41, 0x00, 0x00], 0, 6), Some(2));
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x00, 0x41], 0, 4), Some(2));
+        // A lone surrogate is a unit like any other.
+        assert_eq!(count(&mut vm, &[0x75, 0x00, 0x00, 0xd8, 0x00, 0x00, 0x78, 0x00], 0, 8), Some(2));
+        // Units are counted from START, at an even distance from it: from
+        // byte 1 the pairs are (00 41) (00 00).
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x41, 0x00, 0x00, 0x7a], 1, 5), Some(1));
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x00, 0x00, 0x42, 0x00], 2, 6), Some(0));
+        // Only START..END-1 is read: the terminator past END is not seen.
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x42, 0x00, 0x00, 0x00], 0, 4), Some(2));
+        // The slice rule's declared errors, and RANGE for an odd range.
+        for (start, end, error) in [
+            (-1, 2, crate::runtime::error::ERR_LOWER_UNDERRUN),
+            (4, 2, crate::runtime::error::ERR_LOWER_UNDERRUN),
+            (0, 8, crate::runtime::error::ERR_UPPER_OVERRUN),
+            (7, 8, crate::runtime::error::ERR_UPPER_OVERRUN),
+        ] {
+            let v = rooted!(vm, vm.new_bytes(&[0x41, 0x00, 0x42, 0x00, 0x43, 0x00]));
+            assert_eq!(rt_bytes_utf16le_units_before_nul(p, v, make_small(start), make_small(end)), NO_VALUE, "{start} {end}");
+            assert_eq!(vm.declared_error, error, "{start} {end}");
+            assert!(vm.error.take().is_some());
+        }
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x42], 0, 3), None);
+        assert_eq!(count(&mut vm, &[0x41, 0x00, 0x42, 0x00], 1, 4), None);
+        // The pure measure: a trailing odd byte is no unit.
+        assert_eq!(utf16le_units_before_nul(&[0x41, 0x00, 0x00]), 1);
+        assert_eq!(utf16le_units_before_nul(&[]), 0);
     }
 
     #[test]

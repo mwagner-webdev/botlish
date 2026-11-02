@@ -187,6 +187,7 @@ namespace eval native::lower {
         std::byte_store::encode_utf16le {op strencodeutf16le} \
         std::byte_store::decode_utf16le {op bytesdecodeutf16le} \
         std::byte_store::utf16le_units {op bytesutf16leunits} \
+        std::byte_store::utf16le_units_before_nul {op bytesutf16lenul} \
         std::byte_store::slice     {op bytesslice} \
         std::byte_store::byte_count    {op byteslen} \
         std::mutable_byte_store::zeroed   {op mbytesnew} \

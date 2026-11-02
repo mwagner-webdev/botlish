@@ -88,6 +88,42 @@ proc core::utf16text::units {storage} {
     return [core::value::listOf [lmap u $values {core::value::intFromNumber $u}]]
 }
 
+# std::byte_store::utf16le_units_before_nul(STORAGE, START, END): how many
+# code units -- STORAGE's byte pairs from START, each read low byte first --
+# lie in its bytes START..END-1 before the first unit 0 (the bytes 00 00 at
+# an even distance from START), or all of them, (END - START) / 2, when none
+# is 0. A pair that straddles the unit boundary is no unit: a 00 byte that
+# ends one unit and a 00 byte that begins the next are not a terminator, nor
+# is a single 00 byte. What std::windows::fs reads a listed name's length by
+# (UTF16-BYTE-STORAGE-MILESTONE-1.md, "Listing without a List"): Win32 writes
+# a find record's name as units ending with a NUL unit, and the name is its
+# units before it, exactly (a surrogate is a unit like any other), with no
+# List built. The one slice rule for START..END (core::native::checkSlice:
+# the declared LowerUnderrun or UpperOverrun unless 0 <= START <= END <=
+# the byte count), then RANGE when END - START is odd (no whole number of
+# units: no caller passes one). Internal to the standard library
+# (core::native::declareInternalMember, below; std::abi::bytes::
+# utf16le_units_before_nul is its typed wrapper, internal too).
+proc core::utf16text::unitsBeforeNul {storage start end} {
+    set name std::byte_store::utf16le_units_before_nul
+    core::value::expect bytestore $storage $name
+    set from [core::value::intOf [core::value::expect int $start $name]]
+    set to [core::value::intOf [core::value::expect int $end $name]]
+    core::native::checkSlice $name $from $to [core::value::bytestoreLength $storage]
+    if {($to - $from) % 2 != 0} {
+        core::semanticError RANGE \
+            "$name: the bytes $from..[expr {$to - 1}] are no whole number of 16-bit units"
+    }
+    set hex [core::value::bytestoreHex $storage]
+    set raw [binary decode hex [string range $hex [expr {2 * $from}] [expr {2 * $to - 1}]]]
+    binary scan $raw su* values
+    set count [lsearch -exact -integer $values 0]
+    if {$count < 0} {
+        set count [llength $values]
+    }
+    return [core::value::intFromNumber $count]
+}
+
 core::native::register std::byte_store::encode_utf16le -arity 1 -impl core::utf16text::encode \
     -param-types {str} -result-type any -runtime bytestore-alloc -context-free 1
 core::native::register std::byte_store::decode_utf16le -arity 1 -impl core::utf16text::decode \
@@ -96,5 +132,10 @@ core::native::register std::byte_store::decode_utf16le -arity 1 -impl core::utf1
 core::native::register std::byte_store::utf16le_units -arity 1 -impl core::utf16text::units \
     -param-types {any} -result-type list -runtime list-alloc -context-free 1 \
     -result-shape {element-type int}
+core::native::register std::byte_store::utf16le_units_before_nul -arity 3 -impl core::utf16text::unitsBeforeNul \
+    -param-types {any int int} -result-type int -result-range collection-length -context-free 1 \
+    -errors {LowerUnderrun UpperOverrun}
 core::native::declareInternalMember std::byte_store::utf16le_units
 core::native::declareInternalMember std::abi::bytes::utf16le_units
+core::native::declareInternalMember std::byte_store::utf16le_units_before_nul
+core::native::declareInternalMember std::abi::bytes::utf16le_units_before_nul

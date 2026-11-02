@@ -2040,10 +2040,20 @@ its units as those bytes. Keep it so:
   The path syntax reads the units through the internal
   `std::abi::bytes::utf16le_units` and stays the one statement of Win32's
   syntax: never a second parser over Strings.
+* A listed name is measured in its find record by the internal
+  `std::abi::bytes::utf16le_units_before_nul` (`std::byte_store::`'s, NIR
+  `bytesutf16lenul`; UTF16-BYTE-STORAGE-MILESTONE-1.md, "Listing without a
+  List"): the whole units of a byte range (pairs from its start, low byte
+  first) before the first unit 0, all of them when there is none; the slice
+  rule's declared errors, RANGE for an odd range, no allocation. A single
+  00 byte, or 00 00 across two units, ends nothing. Keep it internal (never
+  a public search or index of byte storage) and one rule in both runtimes
+  (core/utf16text.tcl, ops.rs's `utf16le_units_before_nul`).
 
 If you change any of that, run `tests/utf16-bytes.test`,
-`tests/filesystem.test` (its Windows tests on Windows; `fs-windows-call-buffer`
-and `fs-windows-native-runtime` everywhere they run), `tests/abi-bytes.test`,
+`tests/filesystem.test` (its Windows tests on Windows; `fs-windows-call-buffer`,
+`fs-windows-entry-names` and `fs-windows-native-runtime` everywhere they
+run), `tests/abi-bytes.test`,
 `cargo test --release --manifest-path native/Cargo.toml --lib utf16le`,
 `python3 -I audit/abi-bytes/tools/utf16-oracle.py selftest`,
 `audit/abi-bytes/tools/utf16-fuzz.tcl` (several seeds, once with

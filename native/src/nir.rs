@@ -364,6 +364,12 @@ pub enum OpCode {
     /// storage's byte pairs, low byte first, as a List of small Ints. One
     /// operand, the storage.
     BytesUtf16LeUnits,
+    /// `byte_store::utf16le_units_before_nul` (internal to the standard
+    /// library): how many code units of a storage's bytes START..END-1 come
+    /// before the first unit 0 (both bytes of one pair 0), or all of them, a
+    /// small Int; the declared LowerUnderrun / UpperOverrun of the slice
+    /// rule. Three operands: the storage, START, END. Allocates nothing.
+    BytesUtf16LeNul,
     /// `byte_store::slice` (WINDOWS-X86-64-MILESTONE-7.md): a storage's bytes
     /// START..END-1 in a new storage, or the declared LowerUnderrun /
     /// UpperOverrun. Three operands: the storage, START, END.
@@ -974,6 +980,7 @@ op_spellings! {
     "strencodeutf16le" => StrEncodeUtf16Le,
     "bytesdecodeutf16le" => BytesDecodeUtf16Le,
     "bytesutf16leunits" => BytesUtf16LeUnits,
+    "bytesutf16lenul" => BytesUtf16LeNul,
     "bytesslice" => BytesSlice,
     "byteslen" => BytesLen,
     "bytesaddr" => BytesAddr,
@@ -1156,7 +1163,7 @@ impl OpCode {
             | CoRelease | CPtrIsNull | CPtrSame | CPtrFixture | CPtrFixtureAddress | CPtrFixtureMemory | MvFromList | MvLen | MvEmpty | MvPop | MvClear | MvToList | MvTakeFront | CtxRoot
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
-            Substr | SubstrProven | BytesSlice | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
+            Substr | SubstrProven | BytesSlice | BytesUtf16LeNul | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
             | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy => Some(3),
             RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | BinStore | FfiFixtureMixed
             | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr

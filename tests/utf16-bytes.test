@@ -130,23 +130,25 @@ fn dd(xs: List\[int\]) -> any:
 # ---------------------------------------------------------------------------
 # Registration
 
-test u16-natives-registered {two public natives and one internal bridge: encode_utf16le takes a String and makes a storage (no declared error), decode_utf16le takes a storage and makes a String or fails with the declared builtin error InvalidUtf16 -- builtin error 13, after InvalidUtf8 (12), every earlier id unchanged; all context-free. std::byte_store::utf16le_units and its wrapper std::abi::bytes::utf16le_units are internal members of the standard library} -body {
+test u16-natives-registered {two public natives and two internal ones: encode_utf16le takes a String and makes a storage (no declared error), decode_utf16le takes a storage and makes a String or fails with the declared builtin error InvalidUtf16 -- builtin error 13, after InvalidUtf8 (12), every earlier id unchanged; all context-free. std::byte_store::utf16le_units (the units bridge) and std::byte_store::utf16le_units_before_nul (the NUL-unit measure: a storage and a byte range, an Int of collection-length range, the slice rule's declared errors), and their wrappers in std::abi::bytes, are internal members of the standard library} -body {
     set out {}
-    foreach name {std::byte_store::encode_utf16le std::byte_store::decode_utf16le std::byte_store::utf16le_units} {
+    foreach name {std::byte_store::encode_utf16le std::byte_store::decode_utf16le std::byte_store::utf16le_units std::byte_store::utf16le_units_before_nul} {
         set m [core::native::metadata $name]
         lappend out [list $name [dict get $m arity] [dict get $m paramTypes] [dict get $m resultType] \
             [dict get $m errors] [dict get $m contextFree] [core::native::isInternalMember $name]]
     }
     lappend out [lmap e {InvalidUtf8 InvalidUtf16} {core::native::builtinErrorIndex $e}] \
-        [core::native::isInternalMember std::abi::bytes::utf16le_units]
-} -result {{std::byte_store::encode_utf16le 1 str any {} 1 0} {std::byte_store::decode_utf16le 1 any str InvalidUtf16 1 0} {std::byte_store::utf16le_units 1 any list {} 1 1} {12 13} 1}
+        [core::native::isInternalMember std::abi::bytes::utf16le_units] \
+        [core::native::isInternalMember std::abi::bytes::utf16le_units_before_nul] \
+        [dict get [core::native::metadata std::byte_store::utf16le_units_before_nul] resultRange]
+} -result {{std::byte_store::encode_utf16le 1 str any {} 1 0} {std::byte_store::decode_utf16le 1 any str InvalidUtf16 1 0} {std::byte_store::utf16le_units 1 any list {} 1 1} {std::byte_store::utf16le_units_before_nul 3 {any int int} int {LowerUnderrun UpperOverrun} 1 1} {12 13} 1 1 collection-length}
 
-test u16-public-surface {std::abi::bytes declares the pair with their contracts: encode_utf16le(text: str) -> Bytes declares no error, decode_utf16le(data: Bytes) -> str errors InvalidUtf16 -- an ordinary typed function over the byte storage, beside decode_utf8} -body {
+test u16-public-surface {std::abi::bytes declares the pair with their contracts: encode_utf16le(text: str) -> Bytes declares no error, decode_utf16le(data: Bytes) -> str errors InvalidUtf16 -- an ordinary typed function over the byte storage, beside decode_utf8 -- and the two internal wrappers, nomethod} -body {
     set text [core::ReadFile [file join $::projectRoot stdlib abi bytes.bot]]
-    lmap name {encode_utf16le decode_utf16le utf16le_units} {
+    lmap name {encode_utf16le decode_utf16le utf16le_units utf16le_units_before_nul} {
         regexp -inline -line "^(?:nomethod )?fn $name\\(.*\$" $text
     }
-} -result {{{fn encode_utf16le(text: str) -> Bytes:}} {{fn decode_utf16le(data: Bytes) -> str errors InvalidUtf16:}} {{nomethod fn utf16le_units(data: Bytes) -> List[int]:}}}
+} -result {{{fn encode_utf16le(text: str) -> Bytes:}} {{fn decode_utf16le(data: Bytes) -> str errors InvalidUtf16:}} {{nomethod fn utf16le_units(data: Bytes) -> List[int]:}} {{nomethod fn utf16le_units_before_nul(data: Bytes, start: int, end: int) -> int errors LowerUnderrun, UpperOverrun:}}}
 
 # ---------------------------------------------------------------------------
 # Encoding: exact bytes
@@ -295,10 +297,47 @@ test u16-platform-free {the codec is the language's own, for every target: the s
     lsort -unique $out
 } -result [list [revealed {3d d8 00 de}]]
 
-test u16-internal-bridge {the units bridge is internal to the standard library: a program that names std::abi::bytes::utf16le_units or std::byte_store::utf16le_units is refused} -body {
+test u16-internal-bridge {the units bridge and the NUL-unit measure are internal to the standard library: a program that names std::abi::bytes::utf16le_units, std::byte_store::utf16le_units, std::abi::bytes::utf16le_units_before_nul or std::byte_store::utf16le_units_before_nul is refused} -body {
     list [lindex [u16Rejection "${::prelude}std::abi::bytes::utf16le_units(std::abi::bytes::from_list(\[\]))\n"] 0] \
-        [lindex [u16Rejection "${::prelude}std::byte_store::utf16le_units(0)\n"] 0]
-} -result {INTERNAL-NAMESPACE INTERNAL-NAMESPACE}
+        [lindex [u16Rejection "${::prelude}std::byte_store::utf16le_units(0)\n"] 0] \
+        [lindex [u16Rejection "${::prelude}std::abi::bytes::utf16le_units_before_nul(std::abi::bytes::from_list(\[\]), 0, 0)\n"] 0] \
+        [lindex [u16Rejection "${::prelude}std::byte_store::utf16le_units_before_nul(0, 0, 0)\n"] 0]
+} -result {INTERNAL-NAMESPACE INTERNAL-NAMESPACE INTERNAL-NAMESPACE INTERNAL-NAMESPACE}
+
+test u16-units-before-nul {the internal NUL-unit measure std::abi::bytes::utf16le_units_before_nul(data, start, end) -- how std::windows::fs measures a listed name -- counts the whole units of START..END-1 (byte pairs from START, low byte first) before the first unit 0, every one when there is none, on every backend: the terminator first, in the middle, past END (unseen), absent; a lone surrogate before it counted like any unit; a single 00 byte (U+0100, U+2E00) and 00 00 at an odd distance (41 00 | 00 41) ending nothing; units counted from an odd START; the slice rule's declared LowerUnderrun and UpperOverrun; and an odd range a RANGE error, never a guess. Read through a probe appended to a private copy of the standard library (the measure is internal)} -body {
+    withPrivateLibrary {
+        set module [file join $::core::libraryDir abi bytes.bot]
+        set f [open $module a]
+        fconfigure $f -encoding utf-8 -translation lf
+        puts $f "\n# The test probe of tests/utf16-bytes.test's u16-units-before-nul.\nfn probe_units_before_nul(data: Bytes, start: int, end: int) -> any:\n    utf16le_units_before_nul(data, start, end):\n        on LowerUnderrun:\n            return \"LowerUnderrun\"\n        on UpperOverrun:\n            return \"UpperOverrun\""
+        close $f
+        set cases {
+            {00 00 41 00} 0 4
+            {61 00 62 00 00 00 63 00} 0 8
+            {61 00 62 00 00 00} 0 4
+            {61 00 62 00} 0 4
+            {61 00} 2 2
+            {} 0 0
+            {75 00 00 d8 00 00 78 00} 0 8
+            {00 dc 00 00} 0 4
+            {00 01 00 2e 00 00} 0 6
+            {41 00 00 41 00 00} 0 6
+            {41 00 00 41} 0 4
+            {41 00 41 00 00 7a} 1 5
+            {41 00 00 00 42 00} 2 6
+            {41 00 42 00 43 00} -1 2
+            {41 00 42 00 43 00} 4 2
+            {41 00 42 00 43 00} 0 8
+            {41 00 42 00 43 00} 7 8
+        }
+        set calls [join [lmap {h s e} $cases {string cat "std::abi::bytes::probe_units_before_nul(raw([hexList $h]), $s, $e)"}] ", "]
+        set good [u16Agree "${::prelude}\[$calls\]\n"]
+        set odd [lmap {h s e} {{41 00 42} 0 3 {41 00 42 00} 1 4} {
+            u16Agree "${::prelude}std::abi::bytes::probe_units_before_nul(raw([hexList $h]), $s, $e)\n"
+        }]
+        list $good {*}$odd
+    }
+} -result {{[0, 2, 2, 2, 0, 0, 2, 1, 2, 2, 2, 1, 0, "LowerUnderrun", "LowerUnderrun", "UpperOverrun", "UpperOverrun"]} {ERROR: error {CORE SEMANTIC RANGE}} {ERROR: error {CORE SEMANTIC RANGE}}}
 
 test u16-nir-one-operation {natively each conversion is one runtime operation on the storage: encode_utf16le's body is `op strencodeutf16le` and decode_utf16le's `op bytesdecodeutf16le`, with no List built (no strutf8bytes, listnew or bytesfromlist)} -body {
     set hir [u16Hir "${::prelude}fn e(t: str) -> std::abi::bytes::Bytes:
