@@ -1,0 +1,8 @@
+local run: 257 Tcl test files on interp, compile (golden duplicates skipped), 117 golden suites on interp, compile, cranelift-generic, cranelift (front-end cache /root/.cache/botlish/hir/botlish-468c22df), 4 at a time
+
+Tcl tests on interp    8295 passed, 0 failed, 199 skipped, 2472 golden duplicates skipped
+Tcl tests on compile   8290 passed, 0 failed, 204 skipped, 2472 golden duplicates skipped
+Golden suites: 117 run, 0 failed; tests passed: interp 5602/5602, compile 5602/5602, cranelift-generic 5510/5510, cranelift 5612/5612
+Front-end cache /root/.cache/botlish/hir/botlish-468c22df: 117 entries, 288 MB
+Wall time 6874.7 s with 4 jobs.
+exit 0

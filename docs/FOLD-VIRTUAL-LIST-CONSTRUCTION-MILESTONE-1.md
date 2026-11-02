@@ -316,9 +316,11 @@ register, into the consumer (`fvc-coroutine` runs fused and unfused).
 
 GC stress (`BOTLISH_NATIVE_GC_STRESS=1`, a collection at every
 allocation): `fvc-gc-stress` (nested plan folds of fresh Strings, broken
-off) on every backend, `fvc-executable` as a standalone executable, the
-whole test file, the fuzzer (60 programs) and the golden suite's programs
-through the executable test.
+off) on every backend and `fvc-executable` as a standalone executable in
+every run; the whole test file, tests/virtual-construction.test and
+tests/fold-loops.test under it; and the fuzzer's seed 8 (60 programs).
+The mutant that drops a `construct`'s pieces from the collector's liveness
+is killed by exactly these GC-stress tests (section 11).
 
 ## 8. Positive and negative examples
 
@@ -589,7 +591,16 @@ On this container, on the final tree unless said otherwise.
   `SequenceTo` fix) 29 of 29 and 52 of 52 killed, the coroutine harness's
   native mutants rebuilt in its private copy
   (`results/mutate-{fold-loops,affine,coroutines}.txt`).
-* **Regression.** REGRESSION-RESULT
+* **Regression.** `tclsh9.0 tests/local.tcl` on the final tree (every
+  Tcl test file on interp and compile, golden duplicates skipped; every
+  golden suite on all four backends through the front-end cache): Tcl
+  tests 8,295 passed on interp and 8,290 on compile, 0 failed; 117 golden
+  suites, 0 failed (interp 5,602/5,602, compile 5,602/5,602,
+  cranelift-generic 5,510/5,510, cranelift 5,612/5,612)
+  (`results/local-run.txt`). `tools/compilerpedia.tcl check`: 1,165
+  topics, 718 examples, 0 problems. The static-decisions comparison was
+  not dispatched: the construction analysis runs in native lowering, after
+  every static decision, and moves none.
 
 ## 12. A defect found on the way: releases in plan-position sequences
 
