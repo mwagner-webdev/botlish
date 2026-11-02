@@ -53,8 +53,9 @@ What changed:
   *affinity summary* -- its affinity with every slot unrestricted, and the
   slots whose argument's affinity reaches a field -- computed by a least
   fixpoint from `AppliedFieldTypes` and `hir::types::IsAffine` themselves;
-  each application answered from the summary and its own arguments. No
-  application's answer is cached; no recursive application is unfolded.
+  each application answered from the summary and its own arguments, the
+  answer kept per whole application (never per declaration); no recursive
+  application is unfolded.
 * **Recursive affine applications** (`hir::structs::OwnedRecursion`,
   `ApplicationIssue`): the declaration rule (an affine struct that holds
   its own type in a container is AFFINE-CONTAINER-UNSUPPORTED) judged on an
@@ -78,6 +79,9 @@ What changed:
   before this milestone. Nested applications made it common.
 * **A diagnostic's account**: an affine-value diagnostic naming an
   application affine through its arguments says which field makes it so.
+* **Two memo tables, both measured necessary** (section 14): the answer per
+  whole application, and the drop descriptor per type -- each cleared with
+  the summaries at every change of the declarations.
 
 Nothing else changed: no HIR, Core IR, NIR or runtime representation, no
 HIR text or interchange format, no cache key, no ownership rule, no
@@ -228,10 +232,14 @@ declaration and every declaration it reaches together, as a least fixpoint:
 each starts `{0 {}}` and grows while a summary computed from the others'
 does. A declaration met inside the fixpoint joins it; an unfinished
 fixpoint's summaries are discarded. The summary is a fact of the
-declaration, kept per registration (`Reset`, `apply`, `applyEntries`,
-`addDecls` and `hir::declarations::Install` clear it, as they cleared the
-old cache). `hir::structs::IsAffine ID ARGUMENTS` answers an application
-from it and its own arguments every time; a missing argument (a bare
+declaration, kept per registration: `hir::structs::ForgetAffinity` clears
+it, and every place that cleared the old cache (`Reset`, `apply`,
+`applyEntries`, `addDecls`, `hir::declarations::Install`) calls it.
+`hir::structs::IsAffine ID ARGUMENTS` answers an application from it and
+its own arguments, and keeps that answer for the whole application `{ID
+ARGUMENTS}` -- never for the declaration alone, and never while a summary
+fixpoint is still running (an answer then is provisional:
+`app-memo-provisional`, `aa-fixpoint-order`). A missing argument (a bare
 constructor) is `any`.
 
 This is exactly the governing rule: the summary is the substitution, read
@@ -419,9 +427,10 @@ fuzzer builds its boxes through a typed function for that reason.
 
 Affinity stays a type analysis, computed on demand: no HIR field, HIR text,
 interchange format, front-end cache key or native representation changed.
-What a backend reads -- the release tables and drop descriptors the front
-end writes into the HIR -- now describes applications correctly and is
-carried exactly as before.
+What a backend reads -- the HIR's release tables, and the drop descriptors
+it derives from the HIR's types under the HIR's own declarations
+(`hir::affine::DropPlan` after `hir::activate`) -- now describes
+applications correctly and is carried exactly as before.
 
 * **HIR text and interchange** (`aa-hir-text-and-interchange`): a program
   holding handles through `Box[...]` and `Box[Box[...]]` reads back from
@@ -431,12 +440,17 @@ carried exactly as before.
   differently (holding T; holding only an int), compiled, run and
   activated interleaved, each keep their own classification
   (`Box[Coroutine{...}]` affine in one, unrestricted in the other) and
-  outcome. The summaries live in `hir::structs::affinity`, which every
-  registration change clears (`hir::declarations::Install` included), and
-  are never an application's answer (`aa-summary-per-declaration`: Box[int]
-  asked first does not decide Box[Coroutine{...}], nor the reverse). The
-  mutants `app-summary-leaks-across-compilations` and
-  `app-answer-cached-by-declaration` are killed.
+  outcome. The summaries, the applications' answers and the drop
+  descriptors are cleared together at every registration change
+  (`hir::structs::ForgetAffinity`, `hir::declarations::Install` included);
+  an answer is kept per whole application, never per declaration
+  (`aa-summary-per-declaration`: Box[int] asked first does not decide
+  Box[Coroutine{...}], nor the reverse). `aa-isolation-descriptors` drops a
+  `Box` of a handle in two programs whose `Box` holds its slot at different
+  field positions, interleaved: each releases every handle by its own
+  descriptor. The mutants `app-summary-leaks-across-compilations`,
+  `app-answer-cached-by-declaration` and
+  `app-descriptor-memo-outlives-declarations` are killed.
 * The harnesses (section 15) ran clean: <!--HARNESS-->.
 
 ## 12. Oracle/fuzzing

@@ -1,0 +1,63 @@
+# binary.bot -- the "std::binary" namespace: fixed binary layouts
+# (BINARY-LAYOUT.md).
+#
+# A `layout` declaration describes a fixed number of physical bytes -- a
+# record of a binary format, or the resolved layout of a C struct a C-header
+# plugin emits:
+#
+#   layout Header:
+#       size 8
+#       align 4
+#       field magic: std::binary::U32 at 0
+#       field count: std::binary::I16 at 4
+#
+# The same layout imprints bytes into a structural value and emits that
+# value back into bytes:
+#
+#   h = std::binary::parse(Header, data)          # LayoutStruct[Header]
+#   h.magic                                  # a std::binary::U32
+#   bytes = std::binary::emit(h)                  # a std::abi::bytes::Bytes of 8 bytes
+#   n = std::binary::layout_length(Header)        # 8, a constant
+#
+# The operations are intrinsics of this namespace (core/binary.tcl):
+#
+#   std::binary::parse(L, data)          L names a layout; DATA is an
+#                                   std::abi::bytes::Bytes of exactly L's size
+#                                   (LayoutLengthMismatch otherwise)
+#   std::binary::emit(value)             VALUE is statically a LayoutStruct[L]
+#   std::binary::layout_length(L)        L's size
+#   std::binary::layout_alignment(L)     L's alignment
+#
+# and a LayoutStruct[L] is also built from its fields with the explicit
+# applied construction `LayoutStruct[Header] {magic: m, count: c}`, checked
+# like any named construction (every field, each proven in its type).
+#
+# The types below are the scalar field types this module names: integer
+# domains whose values are exactly one fixed-width encoding's, so a field of
+# one has a known width and signedness (hir/layouts.tcl's "Scalar
+# encodings": the encoding follows from the interval, never from a name --
+# `std::byte::Byte` or `std::abi::U32Value` is as good a field type as `std::binary::U32`).
+# Every byte order is the target's, little-endian.
+#
+# A layout read from live native memory instead of bytes is a native view
+# (NATIVE-LAYOUT-VIEWS.md): `std::binary::native::view(L, p)` (namespace
+# std::binary::native, direct authority) is a NativeView[L] whose fields are read
+# when projected, and `std::binary::load(v)` the LayoutStruct[L] of all of them.
+# A field may then also be a C pointer (std::ffi::c::Ptr[T], std::ffi::c::FnPtr[F]):
+# such a layout is native-only -- bytes never become a pointer, so
+# std::binary::parse and std::binary::emit of it are rejected.
+#
+# Nothing here knows about C: a C layer maps its target-dependent types
+# (`unsigned long` on Windows, on Linux) to these domains and emits resolved
+# layouts; this namespace records physical facts only.
+import std::abi::bytes
+
+type U8 = Int in 0..255
+type U16 = Int in 0..65535
+type U32 = Int in 0..4294967295
+type U64 = Int in 0..18446744073709551615
+
+type I8 = Int in -128..127
+type I16 = Int in -32768..32767
+type I32 = Int in -2147483648..2147483647
+type I64 = Int in -9223372036854775808..9223372036854775807

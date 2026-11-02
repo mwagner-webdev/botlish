@@ -171,11 +171,13 @@ proc hir::structs::ForgetAffinity {} {
 # declaration's affinity summary, computed by AffinitySummary from
 # AppliedFieldTypes and hir::types::IsAffine themselves -- no second
 # statement of what is affine, and no second substitution -- and kept per
-# registration (Reset clears it). Every application is answered from its own
-# arguments: no application's answer is kept, so Box[int] and
-# Box[Coroutine{...}] never share one, and a recursive application is never
-# unfolded (a non-uniform one, `next: List[W[List[T]]]`, meets ever larger
-# arguments and would never end).
+# registration (ForgetAffinity clears it). Every application is answered
+# from the summary and its own arguments, and that answer is kept for the
+# whole application -- the declaration with its arguments, never the
+# declaration alone, so Box[int] and Box[Coroutine{...}] never share one --
+# because a walk over nested applications asks again about every inner one.
+# A recursive application is never unfolded (a non-uniform one, `next:
+# List[W[List[T]]]`, meets ever larger arguments and would never end).
 
 # 1 if the named struct type {nstruct ID ARGUMENTS} is affine: ARGUMENTS its
 # type arguments in slot order ("" for an ordinary struct; a missing

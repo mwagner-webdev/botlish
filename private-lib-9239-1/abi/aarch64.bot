@@ -1,0 +1,170 @@
+# abi/aarch64.bot -- the "std::abi::aarch64" namespace: the AArch64 machine
+# register word as an opaque transport value (LINUX-SYSCALL-TRANSPORTS.md).
+#
+# This is stdlib/abi/x86_64.bot's AArch64 sibling, and deliberately the same
+# source with the architecture's own names: each architecture's transport
+# layer owns its register type and its conversions (LINUX-X86-64-SYSCALL.md,
+# "Why std::abi::x86_64::to_int, not std::abi::to_int"), so a std::abi::aarch64::Register64
+# is never a std::abi::x86_64::Register64 -- a register word of one architecture
+# cannot reach the other's transport (hir/syscall.tcl: TYPE).
+#
+# Register64 is one 64-bit AArch64 general-purpose register's contents (x0
+# .. x30), and nothing else: a bit pattern carried across an architecture
+# boundary (today, only std::linux::abi::aarch64::syscall's register inputs and
+# its x0 result). It is ordinary Botlish: a nominal struct whose one field
+# holds the register's contents under the signed (two's-complement) reading,
+# typed with the source-defined domain Register64Word below. That field type
+# is what keeps the value sound with no privileged code at all: a
+# construction `Register64 {word: x}` anywhere must statically prove x in the
+# domain (STRUCTS.md, "Named struct construction": no implicit runtime cast,
+# no guard), so no Register64 can hold anything but exactly one of the 2^64
+# register bit patterns.
+#
+# It is transport, not a machine-integer programming model: Register64 is a
+# struct, so it has no arithmetic, ordering, bitwise or pointer operations,
+# no wrapping, no promotion and no C integer semantics. The only ways in are
+# the conversions below (register64 from an Int, from_* from an ABI numeric
+# value, from_bytes / from_mutable_bytes from a byte buffer); the only way
+# out is to_int.
+#
+#   std::abi::aarch64::register64(value: int)  Int -> Register64, the checked
+#                         conversion: exactly -2^63 <= value <= 2^63 - 1 is
+#                         accepted, and its register contents are that
+#                         value's 64-bit two's-complement bit pattern. Anything
+#                         else is the declared error Register64BelowRange /
+#                         Register64AboveRange -- never truncation.
+#   std::abi::aarch64::to_int(register)        Register64 -> Int: the register
+#                         contents read as a signed 64-bit two's-complement
+#                         integer, an ordinary arbitrary-precision Int.
+#   std::abi::aarch64::from_i8(value) ... from_usize(value)
+#                         ABI numeric value -> Register64: total, no error, no
+#                         check. Signed values are sign-extended to 64 bits,
+#                         unsigned ones zero-extended -- see "Encoding ABI
+#                         numeric values" below (stdlib/abi/x86_64.bot's
+#                         encoding, bit for bit).
+#   std::abi::aarch64::from_bytes(data) / from_mutable_bytes(data)
+#                         the raw address bridges (root natives, core/
+#                         bytestore.tcl): the address of a byte buffer's
+#                         payload as register contents, consumed by the
+#                         syscall in the same function.
+#
+# The AArch64-specific *semantics* (that a register is 64 bits, read signed)
+# are all here, in source. The only privileged operation is the kernel
+# transition itself, std::linux::abi::aarch64::syscall (core/linuxabi.tcl, the
+# native backend's helper in native/src/runtime/syscall.rs), which takes and
+# returns Register64 values and nothing else.
+import std::abi
+
+# The two declared errors of the Int -> Register64 conversion, named after
+# their domain (std::abi::aarch64::Register64BelowRange beside std::byte::BelowRange: an
+# error's identity is its module and its name, so the short names need not
+# differ, but these say what they are about): the same two-error granularity
+# as std::byte::from_int.
+error Register64BelowRange
+error Register64AboveRange
+
+# The Ints one 64-bit register word holds under the signed reading:
+# -2^63..2^63-1, exactly the i64 range, one Int per bit pattern.
+type Register64Word = Int in -9223372036854775808..9223372036854775807
+
+struct Register64:
+    word: Register64Word
+
+# Int -> Register64. Written with the two literal bounds directly (not via a
+# named constant) so hir/range.tcl's comparison narrowing proves `value` is
+# a Register64Word in the final branch -- the proof the construction needs.
+fn register64(value: int) -> Register64 errors Register64BelowRange, Register64AboveRange:
+    if value < -9223372036854775808:
+        fail Register64BelowRange
+    elif value > 9223372036854775807:
+        fail Register64AboveRange
+    else:
+        Register64 {word: value}
+
+# Register64 -> Int: the signed reading, which is what `word` already holds.
+# The result is an ordinary Int (Register64Word is a subtype of Int: its
+# arithmetic is Int arithmetic, never fixed-width); declaring the domain only
+# tells callers the static fact that it fits a register again, so
+# register64(to_int(r)) needs no handler.
+fn to_int(register: Register64) -> Register64Word:
+    register.word
+
+# ---------------------------------------------------------------------------
+# Encoding ABI numeric values (stdlib/abi.bot) as register words.
+#
+# Register64 is a 64-bit bit-pattern transport value; `word` holds that bit
+# pattern's signed (two's-complement) reading, which is one Int per pattern.
+# Each conversion below says which pattern an ABI value travels as, written
+# as ordinary Int arithmetic on the value -- the mathematical domain is
+# never weakened to fit the signed reading, and Register64 itself is
+# unchanged:
+#
+# * Signed values are sign-extended. The sign extension of a signed n-bit
+#   value v to 64 bits is the 64-bit pattern whose signed reading is v
+#   itself, so the word is v: I8 -1 -> 0xffffffffffffffff, I8 -128 ->
+#   0xffffffffffffff80, I32 -2^31 -> 0xffffffff80000000, I8 127 ->
+#   0x000000000000007f. A negative value is never reread as a positive
+#   number first.
+# * Unsigned values are zero-extended: the pattern whose *unsigned* reading
+#   is v. For v < 2^63 (all of U8, U16, U32, and the lower half of U64 and
+#   Usize) that pattern's signed reading is v again: U32 2^32 - 1 ->
+#   0x00000000ffffffff. For 2^63 <= v < 2^64 the top bit is set, and the
+#   signed reading of the same 64 bits is v - 2^64: U64 2^63 ->
+#   0x8000000000000000 (word -2^63), U64 2^64 - 1 -> 0xffffffffffffffff
+#   (word -1). The full U64/Usize domain therefore encodes, never through
+#   the signed register64(Int) creator (which would reject its upper half).
+#
+# The bit transport is not an interpretation: to_int reads every word back
+# signed, so to_int(from_u64(std::abi::u64(2^64 - 1))) is -1 -- the same bits
+# I64 -1 travels as. Reading a register as an unsigned ABI value is not
+# provided (raw Linux results are signed words).
+#
+# One function per ABI type, because Botlish has no overloading and this
+# milestone adds none: the ABI type a caller has selects the encoder by name
+# (from_i32, from_usize) exactly as the creator's name selects the domain
+# (std::abi::i32, std::abi::usize). Each is an ordinary, nominally typed function --
+# from_usize does not accept a std::abi::U64 -- and none needs a check: the
+# parameter's domain proves every construction below.
+#
+# Isize/Usize are encoded at the target's address width, 64 bits on
+# AArch64: this architecture layer is where that width meets the register.
+
+fn from_i8(value: std::abi::I8) -> Register64:
+    Register64 {word: value.value}
+
+fn from_i16(value: std::abi::I16) -> Register64:
+    Register64 {word: value.value}
+
+fn from_i32(value: std::abi::I32) -> Register64:
+    Register64 {word: value.value}
+
+fn from_i64(value: std::abi::I64) -> Register64:
+    Register64 {word: value.value}
+
+fn from_isize(value: std::abi::Isize) -> Register64:
+    Register64 {word: value.value}
+
+fn from_u8(value: std::abi::U8) -> Register64:
+    Register64 {word: value.value}
+
+fn from_u16(value: std::abi::U16) -> Register64:
+    Register64 {word: value.value}
+
+fn from_u32(value: std::abi::U32) -> Register64:
+    Register64 {word: value.value}
+
+# The upper half, 2^63 .. 2^64 - 1, travels as the negative word v - 2^64
+# (the same 64 bits, read signed).
+fn from_u64(value: std::abi::U64) -> Register64:
+    v = value.value
+    if v > 9223372036854775807:
+        Register64 {word: v - 18446744073709551616}
+    else:
+        Register64 {word: v}
+
+fn from_usize(value: std::abi::Usize) -> Register64:
+    v = value.value
+    if v > 9223372036854775807:
+        Register64 {word: v - 18446744073709551616}
+    else:
+        Register64 {word: v}

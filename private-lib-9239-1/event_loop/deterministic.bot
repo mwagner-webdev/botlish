@@ -1,0 +1,387 @@
+# event_loop/deterministic.bot -- the "std::event_loop::deterministic"
+# namespace: a deterministic driver for std::event_loop
+# (EVENT-LOOP-MILESTONE-1.md, "Deterministic testing").
+#
+#   with context std::event_loop::create(8)
+#   with context std::event_loop::deterministic::create()
+#   std::event_loop::deterministic::inject(10, reg, 1, 2)   a record at t=10
+#   std::event_loop::run()
+#
+# A virtual monotonic clock and a script of native records, each released
+# once the clock reaches its time. block(DEADLINE) never sleeps: it advances
+# the clock to the next scripted record or to DEADLINE, whichever comes
+# first. Every visit to the driver takes one virtual microsecond, so a loop
+# that never sleeps still sees time pass; a task can make its segment take
+# time (advance). It is ordinary Botlish, with no native code, so the same
+# application runs under it on every backend (interp, compile,
+# cranelift-generic, cranelift) with identical results -- the scheduling
+# rules are the scheduler's, whichever driver advances it.
+#
+# Its sources are registration slots: the records scripted for one slot
+# are delivered in script order, and take_record serves the slots that have
+# records round-robin, one record per slot in turn -- the same contract the
+# Linux driver keeps for its endpoints and watches. hold_record and
+# release_held model backpressure exactly (a held slot delivers nothing
+# until released).
+#
+# Records are scripted by time; records due at the same time are released in
+# the order they were scripted.
+import std::event_loop
+import std::mutable_array
+import std::mutable_vector
+
+# The driver: its registers, the script (time, slot, gen, a, b; stride 5,
+# kept sorted by time, stable), the per-slot queues of released records,
+# the record nodes (gen, a, b, next; stride 4) and the round-robin rotation
+# of slots with records (a two-stack queue).
+opaque context struct Deterministic:
+    clock: MutableArray[int]
+    script: MutableVector[int]
+    queues: MutableVector[int]
+    nodes: MutableVector[int]
+    free: MutableVector[int]
+    rot_in: MutableVector[int]
+    rot_out: MutableVector[int]
+    waits: MutableVector[int]
+
+# registers
+private c_now = 0
+private c_cursor = 1
+private c_available = 2
+private c_slot = 3
+private c_gen = 4
+private c_a = 5
+private c_b = 6
+private c_released = 7
+private c_nodes = 8
+private c_count = 9
+
+# script entries
+private ss = 5
+
+# per-slot queues (stride qs): head, tail, count, in rotation, paused
+private qs = 5
+private q_head = 0
+private q_tail = 1
+private q_count = 2
+private q_rot = 3
+private q_paused = 4
+
+# record nodes (stride ns): gen, a, b, next
+private ns = 4
+
+private fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+# A driver at virtual time 0 with an empty script.
+fn create() -> Deterministic:
+    Deterministic {
+        clock: std::mutable_array::create(c_count, 0), script: ints(), queues: ints(),
+        nodes: ints(), free: ints(), rot_in: ints(), rot_out: ints(), waits: ints()
+    }
+
+private nomethod fn reg(i: int, context s: Deterministic) -> int errors IndexNotFound:
+    s.clock.at(i)
+
+private nomethod fn set_reg(i: int, v: int, context s: Deterministic) errors IndexNotFound:
+    s.clock.set(i, v)
+
+private nomethod fn qget(slot: int, f: int, context s: Deterministic) -> int errors IndexNotFound:
+    s.queues.at(slot * qs + f)
+
+private nomethod fn qset(slot: int, f: int, v: int, context s: Deterministic) errors IndexNotFound:
+    s.queues.swap(slot * qs + f, v)
+
+private nomethod fn nget(node: int, f: int, context s: Deterministic) -> int errors IndexNotFound:
+    s.nodes.at(node * ns + f)
+
+private nomethod fn nset(node: int, f: int, v: int, context s: Deterministic) errors IndexNotFound:
+    s.nodes.swap(node * ns + f, v)
+
+private nomethod fn script_at(i: int, f: int, context s: Deterministic) -> int errors IndexNotFound:
+    s.script.at(i * ss + f)
+
+private nomethod fn ensure_queue(slot: int, context s: Deterministic) errors IndexNotFound:
+    loop:
+        if s.queues.length() > slot * qs:
+            break
+        s.queues.push(-1)
+        s.queues.push(-1)
+        s.queues.push(0)
+        s.queues.push(0)
+        s.queues.push(0)
+
+private nomethod fn rotate_in(slot: int, context s: Deterministic) errors IndexNotFound:
+    qset(slot, q_rot, 1)
+    s.rot_in.push(slot)
+
+private fn rotate_out(context s: Deterministic) -> int errors IndexNotFound:
+    if s.rot_out.empty?():
+        loop:
+            if s.rot_in.empty?():
+                break
+            s.rot_out.push(s.rot_in.pop())
+    if s.rot_out.empty?():
+        -1
+    else:
+        s.rot_out.pop()
+
+# Append record (GEN, A, B) to SLOT's queue.
+private nomethod fn enqueue(slot: int, gen: int, a: int, b: int, context s: Deterministic) errors IndexNotFound:
+    ensure_queue(slot)
+    node = if s.free.empty?():
+        n = reg(c_nodes)
+        loop f from 0 to ns:
+            s.nodes.push(0)
+        set_reg(c_nodes, n + 1)
+        n
+    else:
+        s.free.pop()
+    nset(node, 0, gen)
+    nset(node, 1, a)
+    nset(node, 2, b)
+    nset(node, 3, -1)
+    tail = qget(slot, q_tail)
+    if tail == -1:
+        qset(slot, q_head, node)
+    else:
+        nset(tail, 3, node)
+    qset(slot, q_tail, node)
+    qset(slot, q_count, qget(slot, q_count) + 1)
+    if qget(slot, q_paused) == 0:
+        set_reg(c_available, reg(c_available) + 1)
+        if qget(slot, q_rot) == 0:
+            rotate_in(slot)
+
+# Move the entry at index INDEX (a multiple of ss) down past every later-due
+# entry before it, no further than FLOOR.
+private nomethod fn sink(index: int, floor: int, context s: Deterministic) errors IndexNotFound:
+    if index <= floor:
+        return unit
+    before = index - ss
+    if s.script.at(before) <= s.script.at(index):
+        return unit
+    loop f from 0 to ss:
+        x = s.script.at(before + f)
+        y = s.script.at(index + f)
+        s.script.swap(before + f, y)
+        s.script.swap(index + f, x)
+    sink(before, floor)
+
+private nomethod fn inject_checked(when: int, slot: int, gen: int, a: int, b: int, context s: Deterministic) errors IndexNotFound:
+    index = s.script.length()
+    s.script.push(when)
+    s.script.push(slot)
+    s.script.push(gen)
+    s.script.push(a)
+    s.script.push(b)
+    # Stable insertion: after every unreleased entry due at or before WHEN.
+    sink(index, reg(c_cursor) * ss)
+
+# Script a record of registration REG at virtual time WHEN, carrying (A, B).
+# Records may be scripted in any order and at any time, also while the loop
+# runs; those due at the same time are released in the order they were
+# scripted.
+nomethod fn inject(when: int, reg: std::event_loop::Reg, a: int, b: int, context s: Deterministic) errors std::event_loop::DriverFault:
+    inject_checked(when, std::event_loop::native_slot(reg), std::event_loop::native_generation(reg), a, b):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+# Script a record with an explicit tag (SLOT, GEN), as a native producer
+# would post it -- a record for a revoked registration (stale), for a slot
+# nothing uses, or for a later reuse of a slot.
+nomethod fn inject_tag(when: int, slot: int, gen: int, a: int, b: int, context s: Deterministic) errors std::event_loop::DriverFault:
+    if slot < 0:
+        fail std::event_loop::DriverFault {code: -22}
+    inject_checked(when, slot, gen, a, b):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+# The deadlines the loop blocked with, in order (-1: none; 0: a poll).
+fn waits(context s: Deterministic) -> List[int] errors std::event_loop::DriverFault:
+    out = loop i from 0 to s.waits.length():
+        s.waits.at(i):
+            on IndexNotFound:
+                fail std::event_loop::DriverFault {code: -1}
+    out
+
+# Move the virtual clock forward by DELTA (a segment that takes time).
+fn advance(delta: int, context s: Deterministic) errors std::event_loop::DriverFault:
+    now = reg(c_now):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+    set_reg(c_now, now + delta):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+private nomethod fn undelivered_from(slot: int, acc: int, context s: Deterministic) -> int errors IndexNotFound:
+    if slot * qs >= s.queues.length():
+        acc
+    else:
+        undelivered_from(slot + 1, acc + qget(slot, q_count))
+
+# Records released (due) and not yet taken by the loop, held ones included.
+fn undelivered(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    undelivered_from(0, 0):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+# --- std::event_loop::Driver
+
+fn clock(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    reg(c_now):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+private fn release_due(context s: Deterministic) errors IndexNotFound:
+    now = reg(c_now)
+    loop:
+        i = reg(c_cursor)
+        if i * ss >= s.script.length():
+            break
+        if script_at(i, 0) > now:
+            break
+        enqueue(script_at(i, 1), script_at(i, 2), script_at(i, 3), script_at(i, 4))
+        set_reg(c_cursor, i + 1)
+        set_reg(c_released, reg(c_released) + 1)
+
+# The time of the next record not yet released, or -1.
+private fn next_due(context s: Deterministic) -> int errors IndexNotFound:
+    i = reg(c_cursor)
+    if i * ss >= s.script.length():
+        -1
+    else:
+        script_at(i, 0)
+
+private fn block_checked(deadline: int, context s: Deterministic) -> int errors IndexNotFound:
+    s.waits.push(deadline)
+    set_reg(c_now, reg(c_now) + 1)
+    release_due()
+    now = reg(c_now)
+    next = next_due()
+    target = if reg(c_available) > 0:
+        now
+    elif deadline >= 0 and deadline <= now:
+        now
+    elif next == -1 and deadline == -1:
+        -1
+    elif next == -1:
+        deadline
+    elif deadline == -1 or next < deadline:
+        next
+    else:
+        deadline
+    if target == -1:
+        return -1
+    if target > now:
+        set_reg(c_now, target)
+        release_due()
+    reg(c_available)
+
+private fn advance_to_checked(time: int, context s: Deterministic) errors IndexNotFound:
+    if time > reg(c_now):
+        set_reg(c_now, time)
+    release_due()
+
+# Move the virtual clock forward to TIME (never backward) and release every
+# record due by then: the next turn collects them. With turn, this steps a
+# loop explicitly, outside run.
+fn advance_to(time: int, context s: Deterministic) errors std::event_loop::DriverFault:
+    advance_to_checked(time):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+fn block(deadline: int, context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    block_checked(deadline):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+private fn take_checked(context s: Deterministic) -> int errors IndexNotFound:
+    loop:
+        slot = rotate_out()
+        if slot == -1:
+            return -1
+        qset(slot, q_rot, 0)
+        if qget(slot, q_paused) == 0 and qget(slot, q_count) > 0:
+            node = qget(slot, q_head)
+            next = nget(node, 3)
+            qset(slot, q_head, next)
+            if next == -1:
+                qset(slot, q_tail, -1)
+            qset(slot, q_count, qget(slot, q_count) - 1)
+            set_reg(c_available, reg(c_available) - 1)
+            set_reg(c_slot, slot)
+            set_reg(c_gen, nget(node, 0))
+            set_reg(c_a, nget(node, 1))
+            set_reg(c_b, nget(node, 2))
+            s.free.push(node)
+            if qget(slot, q_count) > 0:
+                rotate_in(slot)
+            return slot
+
+fn take_record(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    take_checked():
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+private nomethod fn current(i: int, context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    reg(i):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+
+fn record_gen(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    current(c_gen)
+
+fn record_a(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    current(c_a)
+
+fn record_b(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    current(c_b)
+
+private fn hold_checked(context s: Deterministic) errors IndexNotFound:
+    slot = reg(c_slot)
+    # The current record goes back first in its slot's queue.
+    node = if s.free.empty?():
+        n = reg(c_nodes)
+        loop f from 0 to ns:
+            s.nodes.push(0)
+        set_reg(c_nodes, n + 1)
+        n
+    else:
+        s.free.pop()
+    nset(node, 0, reg(c_gen))
+    nset(node, 1, reg(c_a))
+    nset(node, 2, reg(c_b))
+    head = qget(slot, q_head)
+    nset(node, 3, head)
+    qset(slot, q_head, node)
+    if head == -1:
+        qset(slot, q_tail, node)
+    qset(slot, q_count, qget(slot, q_count) + 1)
+    if qget(slot, q_paused) == 0:
+        qset(slot, q_paused, 1)
+        # Its records (the held one included) are no longer available.
+        set_reg(c_available, reg(c_available) - qget(slot, q_count) + 1)
+
+fn hold_record(context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    hold_checked():
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+    0
+
+private nomethod fn release_checked(slot: int, context s: Deterministic) errors IndexNotFound:
+    if slot < 0 or slot * qs >= s.queues.length():
+        return unit
+    if qget(slot, q_paused) == 0:
+        return unit
+    qset(slot, q_paused, 0)
+    count = qget(slot, q_count)
+    set_reg(c_available, reg(c_available) + count)
+    if count > 0 and qget(slot, q_rot) == 0:
+        rotate_in(slot)
+
+fn release_held(slot: int, context s: Deterministic) -> int errors std::event_loop::DriverFault:
+    release_checked(slot):
+        on IndexNotFound:
+            fail std::event_loop::DriverFault {code: -1}
+    0

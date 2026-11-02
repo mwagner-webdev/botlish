@@ -1,0 +1,193 @@
+# compiler.bot -- the "std::compiler" namespace: the compiler's diagnostics as
+# ordinary Botlish values (STATIC-COMPILE.md).
+#
+#   std::compiler::CompilerError   the one error a `static compile:` block
+#                                  whose body the compiler rejects completes
+#                                  with
+#   std::compiler::DiagnosticCode  which diagnostic rejected it: the stable,
+#                                  typed identity of a compiler diagnostic
+#   std::compiler::SourceLocation  a line and column of the source file the
+#                                  block is written in
+#
+#   import std::compiler
+#
+#   fn probe() -> int errors std::compiler::CompilerError:
+#       static compile:
+#           missing
+#
+#   r = probe():
+#       on std::compiler::CompilerError {code, primary}:
+#           if code == std::compiler::DiagnosticCode::Unbound:
+#               primary.line
+#           else:
+#               0
+#
+# Nothing here is built in: the declarations below are ordinary namespaced
+# declarations, named qualified after `import std::compiler` like any module's.
+# The compiler's one privilege is constructing their values from its own
+# diagnostic when it reifies a rejected block (hir/static.tcl): the code is
+# the diagnostic's kind (UNBOUND is DiagnosticCode::Unbound, USE-AFTER-MOVE
+# is DiagnosticCode::UseAfterMove: one case per kind, one kind per case, the
+# table in hir/static.tcl), `primary` is where it is reported, `related` the
+# further locations it names (none yet: [] when it has none), and `message`
+# its ordinary human-readable text -- for reading, never the identity to
+# compare (compare `code`).
+#
+# There is one error, not one per diagnostic: what happened at the level of
+# control flow is that compilation rejected the block; which diagnostic did
+# is its payload's `code`.
+
+# The identity of a compiler error diagnostic: one case per kind of error the
+# compiler reports for a parser-valid block (warnings are not errors, and a
+# syntax error is the enclosing program's: no case).
+enum DiagnosticCode:
+    AffineCaptureUnsupported,
+    AffineContainerUnsupported,
+    AffineContextCopyOut,
+    AffineDuplicationUnsupported,
+    AffineElementCopyOut,
+    AffineEqualityUnsupported,
+    AffineErasureUnsupported,
+    AffineFieldMoveRequiresDestructure,
+    AffineFoldUnsupported,
+    AffineGenericNestedUnsupported,
+    AffineInstanceBudget,
+    AffineListOperationUnsupported,
+    AffineNotDefinitelyLive,
+    AffinePathReleaseUnsupported,
+    AffineTemporaryUnsupported,
+    AmbiguousContextImplementation,
+    AmbiguousMethodCall,
+    AmbiguousQualifier,
+    Arity,
+    BinaryOperand,
+    BreakOutsideLoop,
+    CallbackEnvironment,
+    CallbackPlacement,
+    CallbackReference,
+    CallbackSignature,
+    ContextBindingCollision,
+    ContextFunctionValue,
+    ContextInstallationUnsupported,
+    ContextNotInjected,
+    ContextRetainedAuthority,
+    ContextTraitMisuse,
+    ContextTraitPosition,
+    ContinueOutsideLoop,
+    CoroutineContract,
+    CoroutineNotFunction,
+    CoroutineResultMismatch,
+    CoroutineResumeArity,
+    CoroutineResumeConflict,
+    CoroutineResumeType,
+    CoroutineResumeUnderconstrained,
+    CoroutineRhsNotYielding,
+    DecimalGuaranteeLost,
+    DecimalPrecision,
+    Direct,
+    DirectCallableValue,
+    Duplicate,
+    DuplicateContextParameter,
+    DuplicateField,
+    DuplicateFlag,
+    DuplicateFlagDeclaration,
+    DuplicateInjectedContext,
+    DuplicateLoopVariable,
+    EmitAfterToken,
+    EmitBeyondToken,
+    EmitBoundary,
+    EmitBudget,
+    EmitByteCharacter,
+    EmitEndSymbol,
+    EmitIncomplete,
+    EmitNotSymbol,
+    EmitRecognizer,
+    EmitRejected,
+    EmitTerminalValue,
+    EmitUnknownValue,
+    EmitUnsupported,
+    ExportEnvironment,
+    ExportName,
+    ExportPlacement,
+    ExportSignature,
+    FlagBindingCollision,
+    FlagCalleeUnknown,
+    FlagFunctionValue,
+    FoldIntermediateType,
+    ForeignBorrow,
+    Imprint,
+    InternalIntrinsicValue,
+    InternalNamespace,
+    KnownError,
+    LayoutArrayExtent,
+    LayoutArrayIndex,
+    LayoutForeignWrite,
+    LayoutNativeOnly,
+    LayoutNotAType,
+    LayoutNotAValue,
+    LayoutOperand,
+    LayoutStructParameter,
+    LayoutUnion,
+    LockstepUnequal,
+    LockstepUnproven,
+    MissingContext,
+    MissingErrorPayload,
+    MissingField,
+    MissingImport,
+    ModuleContext,
+    ModuleImmutable,
+    MutablePlaceCapture,
+    MutablePlaceReceiver,
+    NoApplicableMethod,
+    NomethodCall,
+    NotAContext,
+    NotAStruct,
+    NotAnEnum,
+    OpaqueConstruction,
+    OpaqueRepresentation,
+    PrivateAccess,
+    ProofClause,
+    RefinementMintAuthority,
+    RefinementParameter,
+    ReorderNotProven,
+    ReturnOutsideCallable,
+    TraitImplOrder,
+    TraitInstanceBudget,
+    TraitNestedPolymorphic,
+    TraitNotSatisfied,
+    TraitPolymorphicFunctionValue,
+    TraitPolymorphicRecursion,
+    TraitStorageUnsupported,
+    TraitUnknownOperation,
+    TraitViewMisuse,
+    TraitWitnessJoin,
+    Type,
+    Unbound,
+    UndeclaredError,
+    UnexpectedErrorPayload,
+    UnhandledError,
+    UnknownEnumCase,
+    UnknownField,
+    UnknownFlag,
+    UnknownLayout,
+    UnknownNamespace,
+    UnknownStruct,
+    UnknownSymbol,
+    UnprovenField,
+    UnwrappedYield,
+    UseAfterMove,
+    YieldOutsideFunction
+
+# A location in a source file: 1-based line and column (columns count
+# characters, as the compiler's own "FILE:LINE:COLUMN" does).
+struct SourceLocation:
+    line: int
+    column: int
+
+# The completion of a `static compile:` block whose body the compiler
+# rejected: the diagnostic it rejected it with. Nothing of the body ran.
+error CompilerError:
+    code: DiagnosticCode
+    primary: SourceLocation
+    related: List[SourceLocation]
+    message: str

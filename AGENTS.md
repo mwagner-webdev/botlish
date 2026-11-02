@@ -2158,9 +2158,12 @@ so:
   the declaration's summary (`AffinitySummary`: its affinity with every slot
   unrestricted and its relevant slots, a least fixpoint computed from
   `AppliedFieldTypes` and `hir::types::IsAffine`) and the application's own
-  arguments. Keep only the summary, per registration (every registry
-  change clears it); never an application's answer, and never unfold a
-  recursive application to classify it.
+  arguments. Keep the summary per declaration and an answer per whole
+  application (`{ID ARGUMENTS}`), per registration (`ForgetAffinity`: every
+  registry change clears both, and the drop descriptors derived from them);
+  never an answer per declaration, never one computed while a summary is
+  still provisional, and never unfold a recursive application to classify
+  it.
 * A walk of a struct type's components (drop descriptors, recursive
   affine types: `hir::structs::OwnedRecursion`) reads an application's
   applied fields and identifies a struct by its whole type, never by its

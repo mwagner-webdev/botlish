@@ -1,0 +1,185 @@
+# mutable_map.bot -- the "std::mutable_map" namespace: MutableMap[K, V], a
+# mutable, insertion-ordered map of Hashable keys (ORDERED-MUTABLE-MAP-SET.md).
+#
+#   std::mutable_map::create[K, V]()          an empty map
+#   std::mutable_map::with_capacity[K, V](n)  an empty map holding n entries
+#                                             without growing (a performance
+#                                             request only)
+#   m.length()                                the number of entries
+#   m.empty?()                                whether there is none
+#   m.contains(key)                           whether KEY has an entry
+#   m.at(key)                                 KEY's value, or the error
+#                                             KeyNotFound
+#   m.set(key, value)                         KEY's value is VALUE: a new key
+#                                             is added last; an existing one
+#                                             keeps its place and its stored
+#                                             key, only its value changes
+#   m.remove(key)                             KEY's entry removed, its value
+#                                             returned, or KeyNotFound (the map
+#                                             unchanged)
+#   m.clear()                                 every entry removed
+#   m.order()                                 the keys in their order: a
+#                                             std::mutable_set::MutableSet[K]
+#                                             of exactly m's keys, known so
+#   m.validate_order(candidate)               CANDIDATE, once checked to hold
+#                                             exactly m's keys (any order),
+#                                             or OrderMismatch
+#   m.reorder(order)                          m's entries in ORDER's order:
+#                                             ORDER must be known to hold
+#                                             exactly m's keys
+#   loop e in m:                              every entry, in insertion order
+#                                             (or the last reorder's), as a
+#                                             MutableMapEntry[K, V]
+#   m.freeze()                                the std::immutable_map::
+#                                             ImmutableMap of m's current
+#                                             associations, in m's current
+#                                             order: an immutable value,
+#                                             equal and hashed by its
+#                                             associations, which no later
+#                                             change of m reaches
+#
+# A MutableMap is a mutable VALUE, like MutableVector: `n = m` (or passing
+# m, returning it, storing it in a struct) makes a logical copy, and
+# mutating one copy never changes another. The mutating operations take the
+# map as a place parameter (PLACE-PARAMETERS.md): `m.set(k, v)` updates the
+# caller's own map in place. A loop iterates the map as it was when the
+# loop began: mutating the map in the body changes the map, never what the
+# loop visits.
+#
+# Keys are compared by Botlish equality (`==`) and placed by a keyed hash
+# the program cannot observe: the iteration order is insertion order,
+# whatever the hash, on every backend and in every process. Removing a key
+# and setting it again adds it last. Expected cost: O(1) amortized for
+# contains, at, set and remove; O(1) for length; O(n) for a loop; a growth
+# or compaction is O(n), amortized over the operations before it.
+#
+# A map's identity is its associations; its order is a permutation of its
+# keys (PROVEN-COLLECTION-REORDERING.md). reorder changes the order only:
+# every key keeps its stored key and its value. Its order must be known, at
+# the call, to hold exactly the map's keys (REORDER-NOT-PROVEN otherwise):
+# from order(), or from validate_order, which checks a candidate once. A
+# proven reorder checks nothing; it is O(n) and hashes nothing again.
+#
+# The representation is std::ordered_table's, opaque: no program sees a
+# slot, a hash, a capacity or a removed entry.
+import std::mutable_vector
+import std::mutable_set
+import std::immutable_map
+import std::table_hash
+import std::ordered_table
+
+opaque struct MutableMap[K satisfies Hashable, V]:
+    table: std::ordered_table::Table[K]
+    vals: MutableVector[V]
+
+# One entry of a map, as a loop over it visits it.
+struct MutableMapEntry[K, V]:
+    key: K
+    value: V
+
+# A key with no entry in the map.
+error KeyNotFound
+
+# A candidate order that does not hold exactly the map's keys.
+error OrderMismatch
+
+fn create() -> MutableMap[K, V]:
+    MutableMap[K, V] {table: std::ordered_table::fresh[K](0), vals: std::mutable_vector::from_list([])}
+
+fn with_capacity(count: int) -> MutableMap[K, V]:
+    MutableMap[K, V] {table: std::ordered_table::fresh[K](count), vals: std::mutable_vector::from_list([])}
+
+fn length(m: MutableMap[K, V]) -> int:
+    std::ordered_table::length(m.table)
+
+fn empty?(m: MutableMap[K, V]) -> bool:
+    std::ordered_table::length(m.table) == 0
+
+fn contains(m: MutableMap[K, V], key: K) -> bool:
+    m.table.slot_of(std::table_hash::of(key), key) >= 0
+
+fn at(m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
+    slot = m.table.slot_of(std::table_hash::of(key), key)
+    p = m.table.position(slot)
+    if p < 0 or p >= std::mutable_vector::length(m.vals):
+        fail KeyNotFound
+    std::mutable_vector::at(m.vals, p)
+
+fn set(place m: MutableMap[K, V], key: K, value: V) -> unit:
+    h = std::table_hash::of(key)
+    slot = m.table.slot_of(h, key)
+    if slot >= 0:
+        old = m.vals.swap(m.table.position(slot), value):
+            on IndexNotFound:
+                value
+        return unit
+    if std::ordered_table::full?(m.table):
+        m.table.rebuild_with(m.vals, std::ordered_table::length(m.table) + 1)
+    m.table.append(h, key)
+    m.vals.push(value)
+
+fn remove(place m: MutableMap[K, V], key: K) -> V errors KeyNotFound:
+    slot = m.table.slot_of(std::table_hash::of(key), key)
+    value = std::mutable_vector::at(m.vals, m.table.position(slot)):
+        on IndexNotFound:
+            fail KeyNotFound
+    m.table.remove_slot(slot)
+    if std::ordered_table::garbage?(m.table):
+        m.table.rebuild_with(m.vals, std::ordered_table::length(m.table))
+    value
+
+fn clear(place m: MutableMap[K, V]) -> unit:
+    std::ordered_table::clear(m.table)
+    std::mutable_vector::clear(m.vals)
+
+# ---------------------------------------------------------------------------
+# Order (PROVEN-COLLECTION-REORDERING.md). The compiler knows, by these
+# functions' relational contracts (hir/relations.tcl), that order's result
+# and validate_order's hold exactly M's keys, and reorder requires it.
+
+# M's keys in M's iteration order: a MutableSet of exactly M's keys, which
+# the compiler knows it is (an order M.reorder admits).
+fn order(m: MutableMap[K, V]) -> std::mutable_set::MutableSet[K]:
+    std::mutable_set::of_table(m.table)
+
+# CANDIDATE unchanged, once checked to hold exactly M's keys, in any order
+# (OrderMismatch otherwise): the compiler then knows it is an order of M.
+# M is not reordered. O(n), no key hashed again.
+fn validate_order(m: MutableMap[K, V], candidate: std::mutable_set::MutableSet[K]) -> std::mutable_set::MutableSet[K] errors OrderMismatch:
+    if not m.table.same_members?(std::mutable_set::table_of(candidate)):
+        fail OrderMismatch
+    candidate
+
+# M's entries in ORDER's order: every key keeps its stored key and its
+# value, only the iteration order changes. ORDER must be known to hold
+# exactly M's current keys (order, validate_order: REORDER-NOT-PROVEN
+# otherwise); nothing is checked at run time. O(n), no key hashed again.
+fn reorder(place m: MutableMap[K, V], order: std::mutable_set::MutableSet[K]) -> unit:
+    perm = m.table.arrangement(std::mutable_set::table_of(order))
+    m.table.permute_values(perm, m.vals)
+    m.table.permute(perm)
+
+# ---------------------------------------------------------------------------
+# Freezing (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md)
+
+# The ImmutableMap of M's current associations, in M's current order: its
+# live entries copied into Lists (keys, values and their stored hashes, so
+# nothing is hashed again) and an index of them at M's own slot count. M is
+# a value parameter, so nothing later done to the caller's map reaches the
+# result, and the result is never changed. O(n + slots).
+fn freeze(m: MutableMap[K, V]) -> std::immutable_map::ImmutableMap[K, V]:
+    hashes = std::ordered_table::live_hashes(m.table)
+    index = hashes.frozen_index(std::ordered_table::slots(m.table))
+    std::immutable_map::of_parts(std::ordered_table::live_keys(m.table), m.table.live_values(m.vals), hashes, index)
+
+# ---------------------------------------------------------------------------
+# The loop protocol (hir/iteration.tcl): internal to the standard library.
+
+nomethod fn iteration_end(m: MutableMap[K, V]) -> int:
+    std::ordered_table::positions(m.table)
+
+nomethod fn iteration_live?(m: MutableMap[K, V], i: int) -> bool:
+    m.table.live_at?(i)
+
+nomethod fn iteration_at(m: MutableMap[K, V], i: int) -> MutableMapEntry[K, V]:
+    MutableMapEntry[K, V] {key: m.table.key_at(i), value: std::mutable_vector::at(m.vals, i.mod(std::mutable_vector::length(m.vals)))}

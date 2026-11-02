@@ -1,0 +1,49 @@
+# mutable_array.bot -- the "std::mutable_array" namespace: the ordinary Botlish
+# members of the MutableArray family (core/mutarray.tcl; MUTABLE-ARRAY.md).
+#
+# The namespace's intrinsics are root natives registered under their
+# qualified names -- std::mutable_array::allocate, ::create, ::from_list,
+# ::generate, ::capacity, ::at, ::set, ::swap, ::copy, ::freeze
+# (core/mutarray.tcl) -- and this module may never define a member of the
+# same name (surface/modules.tcl, DUPLICATE-NATIVE). The one member below is
+# an ordinary function over those intrinsics (STDLIB-NAMESPACES.md):
+#
+#   std::mutable_array::get(array, i, d)     the element at i, or D when i does
+#                                       not designate an element: exactly
+#                                       std::mutable_array::at(array, i) with its
+#                                       IndexNotFound -- and nothing else --
+#                                       handled by returning D.
+#
+# The constructors are intrinsics, each with a static ownership role for
+# what it does with the value it is given (core/native.tcl's -ownership):
+#
+#   std::mutable_array::create(n, x)      x is *repeated*: one value placed in n
+#                                    slots, so x must be unrestricted (an
+#                                    affine x is AFFINE-DUPLICATION-
+#                                    UNSUPPORTED)
+#   std::mutable_array::from_list(xs)     xs *moves* into the array, which owns
+#                                    every element it had
+#   std::mutable_array::generate(n, f)    f is a *factory*: called once per slot,
+#                                    in index order, each result owned by
+#                                    its slot (affine results included)
+#
+# They used to be ordinary functions here, typed at their calls by a
+# precomputed container rule (hir/containers.tcl) that hid their bodies from
+# the ownership discipline: `create(2, make_coroutine())` compiled and stored
+# one coroutine in two slots. An intrinsic's roles are what the discipline
+# reads, so no library body can do what the same body written in a program
+# could not (MUTABLE-ARRAY.md, "Library ownership").
+#
+# get's DEFAULT is an ordinary argument, evaluated before the call like any
+# other (no lazy default), and it is not an optional/null result: a present
+# index gives the element, IndexNotFound gives DEFAULT, and every other
+# failure of std::mutable_array::at (a non-MutableArray or non-Int argument)
+# propagates unchanged. get copies the element out, so an array of affine
+# elements cannot use it (its at is AFFINE-ELEMENT-COPY-OUT): swap the
+# element out instead.
+
+fn get(array, index, default):
+    value = std::mutable_array::at(array, index):
+        on IndexNotFound:
+            default
+    value

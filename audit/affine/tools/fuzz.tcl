@@ -1198,13 +1198,13 @@ proc AppValue {decls t appsVar countVar} {
             set j [lindex $t 1]
             set parts {}
             foreach field [dict get $decls $j fields] {
-                lassign $field name ft
-                set ft [AppSubst $ft {*}[lindex $t 2]]
-                if {[lindex $ft 0] eq "list" && [lindex $ft 1 0] eq "app" && [lindex $ft 1 1] eq $j} {
-                    # (Its own declaration in a List: empty.)
+                lassign $field name declared
+                if {[lindex $declared 0] eq "list" && [lindex $declared 1 0] eq "app" && [lindex $declared 1 1] eq $j} {
+                    # (Its own declaration in a List, as declared -- never
+                    # a slot's argument that happens to be one: empty.)
                     lappend parts "$name: \[\]"
                 } else {
-                    lappend parts "$name: [AppValue $decls $ft apps count]"
+                    lappend parts "$name: [AppValue $decls [AppSubst $declared {*}[lindex $t 2]] apps count]"
                 }
             }
             return "S$j {[join $parts {, }]}"

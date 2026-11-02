@@ -1,0 +1,177 @@
+# byte.bot -- the "std::byte" namespace: the Byte/Nibble/LowNibble/HighNibble
+# scalar types (declared below) and byte/bit-domain operations over them.
+#
+# Every function here is ordinary Botlish with a verified refined result
+# primitives core/scalarbits.tcl registers as root natives (bit_and, bit_or,
+# bit_xor, shift_left, shift_right -- already in native/lower.tcl's own op
+# table, so each compiles inline wherever it is called, module function or
+# not). This is deliberately NOT a thin wrapper around a separate native
+# with a declared HighNibble/LowNibble/Nibble result type: that shape was
+# tried first and does not natively compile from a call site *inside* a
+# cross-file module function (which is exactly this file's own shape, and
+# web.bot's high_nibble's) -- native lowering's -native-body/-module-fn
+# bridge (native/native.tcl) is a syntactic pre-pass over only the entry
+# program's own raw core IR, so it can substitute a native called directly
+# from an .ir program's top level, but never one called from inside a .bot
+# module's own compiled body (core/scalarbits.tcl's header has the full
+# trace). Plain functions over already-lowerable primitives sidestep that
+# wall entirely. Optional result contracts now preserve each nominal type
+# across ordinary module calls; hir/range.tcl derives interval and exact-set
+# facts from that semantic type without reanalyzing this body at call sites.
+#
+#   std::byte::high_nibble(b)   position-preserving high-half extraction: b&0xF0
+#   std::byte::low_nibble(b)    position-preserving low-half extraction: b&0x0F
+#   std::byte::nibble(x)        positioned nibble (either half) -> logical Nibble
+#                          (0..15): ((x&0x0F)|(x>>4))&0x0F -- correct for
+#                          any x in Byte's own domain (0..255): recovers x
+#                          unchanged when x is already low-positioned
+#                          (x<=15, so x>>4=0) and x>>4 when x is high-
+#                          positioned (x's low 4 bits are 0 by construction,
+#                          so x&0x0F=0) -- one branch-free formula, no
+#                          special-casing of which half x came from.
+#   std::byte::complement(b)    one's complement over Byte's 8-bit domain: b^0xFF
+#                          (never Int's own arbitrary-precision complement).
+#   std::byte::position_low(n)  Nibble -> LowNibble: representation-preserving.
+#   std::byte::position_high(n) Nibble -> HighNibble: n<<4, positioned.
+#   std::byte::from_int(value: int)  Int -> Byte, errors BelowRange, AboveRange:
+#                          the ordinary explicitly-fallible Int -> Byte
+#                          conversion (EXPLICIT-ERROR-COMPLETIONS.md;
+#                          replaces the old callable-type-syntax Byte(x),
+#                          removed from source -- see that report for why).
+#                          A statically provable in-range/out-of-range
+#                          argument needs no handler, or is a compile-time
+#                          KNOWN-ERROR, respectively -- see
+#                          STATIC-COMPLETION-PROOFS.md.
+#   std::byte::set(chars)       List[UnicodeChar] -> ImmutableSet[Byte], errors
+#                          AboveRange: each char's own Unicode scalar value
+#                          (std::char::scalar_value), converted via from_int above
+#                          -- never UTF-8 encoding, so 'é' (U+00E9) becomes
+#                          the one Byte 233, not the two UTF-8 bytes 0xC3
+#                          0xA9 -- see BYTE-SET.md. Propagates from_int's
+#                          own declared error for any char outside Byte's
+#                          domain (e.g. 'Ā', U+0100, or any astral
+#                          character): no partial set. BelowRange is not
+#                          declared: std::char::scalar_value's own result is always
+#                          nonnegative, so from_int's BelowRange branch is
+#                          statically proven unreachable from here, generically
+#                          (STATIC-COMPLETION-PROOFS.md), not by a Byte-
+#                          specific rule.
+#
+# ASCII/encoding interpretation, `is_unreserved`, and URI grammar are
+# deliberately absent: `byte::` holds only operations intrinsic to byte/bit
+# representation (core/scalarbits.tcl's header, and the milestone's own
+# namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
+import std::char
+import std::immutable_set
+
+# The two declared errors std::byte::from_int's Int -> Byte conversion may
+# produce (EXPLICIT-ERROR-COMPLETIONS.md item 23): application code
+# meaningfully benefits from distinguishing "too small" from "too large"
+# (a caller can clamp each direction differently, or report which bound was
+# violated), so this chooses the two-error granularity over a single
+# generic OutOfRange -- the smallest useful distinction, not the smallest
+# possible one.
+error BelowRange
+error AboveRange
+
+# The four scalar domains this milestone's own byte/bit-domain operations
+# are typed over. These used to be compiler-side Tcl registrations
+# (core/scalarbits.tcl); they are ordinary Botlish source declarations now
+# (see SOURCE-DEFINED-INTEGER-DOMAINS.md) -- the compiler knows what a
+# bounded integer refinement *is* (a named subtype of Int, or of another
+# such subtype, whose values are exactly an inclusive interval or a finite
+# set of integers); this file is what says Byte/Nibble/LowNibble/HighNibble
+# *are* ones, and what their own domains are. No downstream machinery
+# (result-contract verification, range/exact-set analysis, checked
+# constructors, native lowering) treats these four names specially:
+# everything below is the same generic feature any other source-defined
+# "type Child = Parent in Domain" declaration gets.
+#
+#   Byte        0..255                a plain 8-bit value
+#   Nibble      0..15                 a logical 4-bit value
+#   LowNibble   0..15                 a nibble already positioned in the low
+#                                     half of a Byte (numerically identical
+#                                     to Nibble's domain, but a distinct,
+#                                     nominal type: LowNibble means "already
+#                                     positioned", Nibble means "logical
+#                                     value" -- see item 6/74 of the report)
+#   HighNibble  {0,16,32,...,240}     a nibble positioned in the high half of
+#                                     a Byte -- 16 exact values, not every
+#                                     integer in [0,240]
+type Byte = Int in 0..255
+
+type Nibble = Byte in 0..15
+type LowNibble = Byte in 0..15
+
+type HighNibble = Byte in {
+    0, 16, 32, 48,
+    64, 80, 96, 112,
+    128, 144, 160, 176,
+    192, 208, 224, 240
+}
+
+fn high_nibble(b) -> HighNibble:
+    bit_and(b, 240)
+
+fn low_nibble(b) -> LowNibble:
+    bit_and(b, 15)
+
+fn nibble(x) -> Nibble:
+    bit_and(bit_or(bit_and(x, 15), x.shift_right(4)), 15)
+
+fn complement(b) -> Byte:
+    bit_and(bit_xor(b, 255), 255)
+
+fn position_low(n) -> LowNibble:
+    bit_and(n, 15)
+
+fn position_high(n) -> HighNibble:
+    bit_and(n.shift_left(4), 240)
+
+# Int -> Byte: the ordinary explicitly-fallible conversion. VALUE is
+# declared "value: int" (STATIC-COMPLETION-PROOFS.md item 3): a declared
+# parameter type demands *static* proof at every call site
+# (STRICT-TYPED-PARAMETERS.md) -- sound here because every actual call
+# site in this codebase now has a statically provable Int (or Byte, itself
+# a subtype) in hand, thanks to this same milestone's own producer-side
+# fixes (std::str::encode_utf8's truthful List[Byte] result, std::char::scalar_value's own
+# int result), rather than weakening this conversion back to an untyped
+# escape hatch to accommodate an under-typed caller.
+#
+# The call-specific completion proof (hir/completions.tcl) computes each
+# exact call site's own *effective* error set from its own argument facts:
+# a statically provable in-range value (std::byte::from_int(48)) needs no
+# handler and no enclosing "errors" declaration at all (its own declared
+# BelowRange/AboveRange are both proven impossible for that one call); a
+# statically provable out-of-range literal (std::byte::from_int(999)) is a
+# compile-time KNOWN-ERROR, not a call a handler can make legal. A
+# genuinely dynamic value keeps its full runtime error-completion
+# obligation, produces the matching declared error when actually out of
+# range, and never truncates or masks.
+fn from_int(value: int) -> Byte errors BelowRange, AboveRange:
+    if value < 0:
+        fail BelowRange
+    elif value > 255:
+        fail AboveRange
+    else:
+        value
+
+# List[UnicodeChar] -> ImmutableSet[Byte]: each char's own Unicode scalar
+# value (std::char::scalar_value), converted via from_int above. Never UTF-8: a
+# scalar value outside 0..255 propagates from_int's own declared error (no
+# handler needed here -- it simply propagates, item 28), not truncation,
+# masking, or encoding into more than one Byte -- see BYTE-SET.md. No
+# partial set: the first invalid element's error ends the loop immediately.
+#
+# Declares only AboveRange, not BelowRange (STATIC-COMPLETION-PROOFS.md
+# item 23): std::char::scalar_value's own result is a Unicode scalar value, always
+# nonnegative, so from_int's BelowRange branch can never actually be
+# reached from here -- the call-specific completion proof
+# (hir/completions.tcl) verifies this generically from std::char::scalar_value's
+# own static facts and from_int's own body, not from any Byte-specific
+# rule, every time this function's own body is checked against its
+# declaration.
+fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte] errors AboveRange:
+    bytes = loop c in chars:
+        from_int(std::char::scalar_value(c))
+    std::immutable_set::from_list(bytes)
