@@ -1,0 +1,29 @@
+an_int                   copy     unrestricted  a int
+a_bool                   copy     unrestricted  a bool
+a_char                   copy     unrestricted  a UnicodeChar
+a_float                  copy     unrestricted  a Float64
+a_decimal                copy     unrestricted  a DecimalRounded
+a_str                    copy     unrestricted  a str
+some_bytes               copy     unrestricted  byte storage (std::abi::bytes::Bytes's owner's statement: its `storage: any` is one byte block)
+mutable_bytes            copy     unrestricted  byte storage (std::abi::bytes::MutableBytes's owner's statement: its `storage: any` is one byte block)
+an_enum                  copy     unrestricted  a enum
+a_list                   copy     unrestricted  element: a int
+a_set                    copy     unrestricted  member: a str
+a_struct                 copy     unrestricted  
+nested_immutable         copy     unrestricted  
+a_tree                   copy     unrestricted  
+an_immutable_map         copy     unrestricted  
+a_mutable_vector         copy     unrestricted  deep copy (a value: no alias survives)
+a_mutable_array          copy     unrestricted  deep copy (a value: no alias survives)
+a_mutable_map            copy     unrestricted  
+struct_with_vector       copy     unrestricted  
+an_opaque_user_struct    local    unrestricted  Token is opaque: its representation is the entry program's, which alone could declare it sendable
+an_event_loop_reg        local    unrestricted  std::event_loop::Reg is opaque: its representation is module std::event_loop's, which alone could declare it sendable
+a_context_value          reject   unrestricted  Settings is a context: installed authority, never a message
+a_function               reject   unrestricted  a function value: code addresses and captures are its VM's
+struct_with_function     reject   unrestricted  field f of HoldsFn: a function value: code addresses and captures are its VM's
+a_coroutine              reject   affine        a coroutine: its frames hold its VM (coroutine.rs prepare) and live on its stack
+a_c_pointer              move     affine        an affine C pointer word: movable bits, but only an authority knows the pointee may be used from another thread
+struct_with_pointer      move     affine        field handle of HoldsPtr: an affine C pointer word: movable bits, but only an authority knows the pointee may be used from another thread
+a_native_view            reject   unrestricted  a native view or edit: access to native memory, not a value
+an_unknown               unknown  unrestricted  static type any

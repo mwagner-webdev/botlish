@@ -1,0 +1,179 @@
+# main.bot -- Probe F of THREAD-ACTOR-ARCHITECTURE-CENSUS.md: what a
+# same-thread actor costs over the bare std::event_loop, on the Linux
+# driver (real clock). Build and run with
+#   tclsh9.0 audit/thread-actor/tools/native-app.tcl audit/thread-actor/probe-f -also audit/thread-actor/probe-a/actor.bot
+# Each phase logs its wall and CPU microseconds; the census divides.
+import actor
+import event_loop_linux
+import meter
+import std::event_loop
+import std::int
+import std::list
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+struct Msg:
+    text: str
+    nums: List[int]
+
+context struct Mail:
+    ints: actor::Postbox[int]
+    msgs: actor::Postbox[Msg]
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+# --- 1. the baseline: two tasks, two channels, ints only
+fn raw_player(rounds: int, mine: std::event_loop::Reg, peer: std::event_loop::Reg, serve: bool, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    if serve:
+        peer.post(0, 0)
+    fold i from 0 to rounds with intermediate n 0:
+        e = std::event_loop::wait(mine)
+        if e.reason != Wake::Event:
+            break
+        peer.post(e.a + 1, 0)
+        n + 1
+
+# --- 2. typed mailboxes of int
+fn int_player(rounds: int, inbox: actor::Inbox[int], peer: actor::Address[int], serve: bool, context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    if serve:
+        actor::send(mail.ints, peer, 0)
+    n = fold i from 0 to rounds with intermediate n 0:
+        v = actor::receive(mail.ints, inbox):
+            on actor::MailboxClosed:
+                -1
+        if v < 0:
+            break
+        actor::send(mail.ints, peer, v + 1)
+        n + 1
+    actor::close(mail.ints, inbox)
+    n
+
+# --- 3. typed mailboxes of a struct with a 64-character str and a List
+fn msg_player(rounds: int, inbox: actor::Inbox[Msg], peer: actor::Address[Msg], serve: bool, context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    if serve:
+        actor::send(mail.msgs, peer, Msg {text: "0123456789012345678901234567890123456789012345678901234567890123", nums: [1, 2, 3, 4, 5, 6, 7, 8]})
+    n = fold i from 0 to rounds with intermediate n 0:
+        m = actor::receive(mail.msgs, inbox):
+            on actor::MailboxClosed:
+                Msg {text: "", nums: []}
+        if m.text == "":
+            break
+        actor::send(mail.msgs, peer, Msg {text: m.text, nums: [i, i + 1, i + 2, i + 3, i + 4, i + 5, i + 6, i + 7]})
+        n + 1
+    actor::close(mail.msgs, inbox)
+    n
+
+# --- 4. a ring: each actor forwards the token to the next
+fn ring_member(laps: int, inbox: actor::Inbox[int], next: actor::Address[int], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    n = fold i from 0 to laps with intermediate n 0:
+        v = actor::receive(mail.ints, inbox):
+            on actor::MailboxClosed:
+                -1
+        if v < 0:
+            break
+        actor::send(mail.ints, next, v + 1)
+        n + 1
+    n
+
+# --- 5/6. actors that wait for one message
+fn one_shot(inbox: actor::Inbox[int], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    v = actor::receive(mail.ints, inbox):
+        on actor::MailboxClosed:
+            -1
+    actor::close(mail.ints, inbox)
+    v
+
+nomethod fn timed(name: str, t0: int, c0: int, ops: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault:
+    say(name.concat(" ops "), ops)
+    say(name.concat(" wall us "), event_loop_linux::now_us() - t0)
+    say(name.concat(" cpu us "), event_loop_linux::cpu_us() - c0)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native, mail: Mail) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    rounds = 20000
+    # 1
+    t0 = event_loop_linux::now_us()
+    c0 = event_loop_linux::cpu_us()
+    a = std::event_loop::channel(Delivery::Reliable, 4)
+    b = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step: r1, first: r1f} = raw_player(rounds, a, b, true)
+    std::event_loop::adopt(r1, r1f)
+    coroutine {step: r2, first: r2f} = raw_player(rounds, b, a, false)
+    std::event_loop::adopt(r2, r2f)
+    std::event_loop::run()
+    timed("raw-channel ping-pong", t0, c0, rounds * 2)
+    std::event_loop::revoke(a)
+    std::event_loop::revoke(b)
+    # 2
+    t1 = event_loop_linux::now_us()
+    c1 = event_loop_linux::cpu_us()
+    p = actor::open(mail.ints)
+    q = actor::open(mail.ints)
+    coroutine {step: i1, first: i1f} = int_player(rounds, p.inbox, q.to, true)
+    std::event_loop::adopt(i1, i1f)
+    coroutine {step: i2, first: i2f} = int_player(rounds, q.inbox, p.to, false)
+    std::event_loop::adopt(i2, i2f)
+    std::event_loop::run()
+    timed("Postbox[int] ping-pong", t1, c1, rounds * 2)
+    # 3
+    t2 = event_loop_linux::now_us()
+    c2 = event_loop_linux::cpu_us()
+    pm = actor::open(mail.msgs)
+    qm = actor::open(mail.msgs)
+    coroutine {step: m1, first: m1f} = msg_player(rounds, pm.inbox, qm.to, true)
+    std::event_loop::adopt(m1, m1f)
+    coroutine {step: m2, first: m2f} = msg_player(rounds, qm.inbox, pm.to, false)
+    std::event_loop::adopt(m2, m2f)
+    std::event_loop::run()
+    timed("Postbox[Msg] ping-pong", t2, c2, rounds * 2)
+    # 4: 100 actors, 200 laps
+    t3 = event_loop_linux::now_us()
+    c3 = event_loop_linux::cpu_us()
+    boxes = loop k from 0 to 100:
+        actor::open(mail.ints)
+    loop k from 0 to 100:
+        me = std::list::at(boxes, k)
+        nxt = std::list::at(boxes, (k + 1).mod(100))
+        coroutine {step: rm, first: rmf} = ring_member(200, me.inbox, nxt.to)
+        std::event_loop::adopt(rm, rmf)
+    actor::send(mail.ints, std::list::at(boxes, 0).to, 0)
+    std::event_loop::run()
+    timed("ring of 100 actors, hops", t3, c3, 20000)
+    # 5 and 6: 2000 actors created, idle, then stopped
+    rss0 = meter::rss_kb()
+    vm0 = meter::vm_kb()
+    t4 = event_loop_linux::now_us()
+    c4 = event_loop_linux::cpu_us()
+    shots = loop k from 0 to 2000:
+        o = actor::open(mail.ints)
+        coroutine {step: os, first: osf} = one_shot(o.inbox)
+        std::event_loop::adopt(os, osf)
+        o.to
+    timed("create 2000 idle actors", t4, c4, 2000)
+    say("idle actors: RSS KiB added ", meter::rss_kb() - rss0)
+    say("idle actors: virtual KiB added ", meter::vm_kb() - vm0)
+    t5 = event_loop_linux::now_us()
+    c5 = event_loop_linux::cpu_us()
+    loop to in shots:
+        actor::send(mail.ints, to, 1)
+    std::event_loop::run()
+    timed("stop 2000 actors (one message each, run to completion)", t5, c5, 2000)
+    say("after stopping: RSS KiB above before creating ", meter::rss_kb() - rss0)
+    say("after stopping: virtual KiB above before creating ", meter::vm_kb() - vm0)
+    std::event_loop::take_outcomes()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context Mail {ints: actor::postbox[int](1, 4), msgs: actor::postbox[Msg](2, 4)}
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

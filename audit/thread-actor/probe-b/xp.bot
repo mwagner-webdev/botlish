@@ -1,0 +1,75 @@
+# xp.bot -- the binding of xport.c (Probe B, THREAD-ACTOR-ARCHITECTURE-CENSUS.md).
+# Every function takes and returns scalars, except xp_take, whose buffer is
+# a Botlish MutableBytes exposed `write noescape` for the one call: the
+# payload is copied into storage the loop's thread owns.
+import std::abi
+import std::abi::bytes
+import std::ffi::c
+
+extern c library "xport" static at "native/libxport.a"
+
+extern c fn xp_init(n: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn xp_start(endpoint: std::ffi::c::Int, slot: std::ffi::c::Int, gen: std::ffi::c::Int, id: std::ffi::c::Int, count: std::ffi::c::Int, size: std::ffi::c::Int, mode: std::ffi::c::Int, delay: std::ffi::c::Int) -> std::ffi::c::Int
+extern c fn xp_length(idx: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn xp_take(idx: std::ffi::c::Int, buf: std::ffi::c::Ptr[std::ffi::c::UChar] write noescape, cap: std::ffi::c::LongLong) -> std::ffi::c::LongLong
+extern c fn xp_join() -> std::ffi::c::Int
+extern c fn xp_stop() -> std::ffi::c::Int
+extern c fn xp_discard() -> std::ffi::c::Int
+extern c fn xp_stat(p: std::ffi::c::Int, what: std::ffi::c::Int) -> std::ffi::c::LongLong
+extern c fn xp_now() -> std::ffi::c::LongLong
+
+fn ci(x: int) -> std::ffi::c::Int:
+    if x < -2147483648:
+        -2147483648
+    elif x > 2147483647:
+        2147483647
+    else:
+        x
+
+fn cll(x: int) -> std::ffi::c::LongLong:
+    if x < -9223372036854775808:
+        -9223372036854775808
+    elif x > 9223372036854775807:
+        9223372036854775807
+    else:
+        x
+
+fn init(n: int) -> int:
+    xp_init(ci(n))
+
+nomethod fn start(endpoint: int, slot: int, gen: int, id: int, count: int, size: int, mode: int, delay: int) -> int:
+    ci(endpoint).xp_start(ci(slot), ci(gen), ci(id), ci(count), ci(size), ci(mode), ci(delay))
+
+fn length(idx: int) -> int:
+    xp_length(ci(idx))
+
+# The payload of slot IDX, copied into a fresh MutableBytes of this thread's
+# heap, frozen (empty when the slot held nothing).
+fn take(idx: int, n: int) -> std::abi::bytes::Bytes:
+    size = std::abi::usize(n):
+        on std::abi::AbiIntegerBelowRange:
+            std::abi::usize(0):
+                on std::abi::AbiIntegerBelowRange:
+                    return std::abi::bytes::from_list([])
+                on std::abi::AbiIntegerAboveRange:
+                    return std::abi::bytes::from_list([])
+        on std::abi::AbiIntegerAboveRange:
+            return std::abi::bytes::from_list([])
+    m = std::abi::bytes::zeroed(size)
+    r = ci(idx).xp_take(m, cll(n))
+    std::abi::bytes::freeze(r.buf)
+
+fn join() -> int:
+    xp_join()
+
+fn stop() -> int:
+    xp_stop()
+
+fn discard() -> int:
+    xp_discard()
+
+nomethod fn stat(p: int, what: int) -> int:
+    ci(p).xp_stat(ci(what))
+
+fn now() -> int:
+    xp_now()

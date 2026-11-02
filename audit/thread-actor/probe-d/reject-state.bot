@@ -1,0 +1,10 @@
+# reject-state.bot -- Probe D negative (THREAD-ACTOR-ARCHITECTURE-CENSUS.md):
+# an instance cannot keep an actor's mutable state between calls. A module
+# binding is immutable (a MutableVector there is MODULE-IMMUTABLE), and an
+# export cannot require a context (the only owner of mutable state).
+import std::mutable_vector
+
+counts = std::mutable_vector::from_list([0])
+
+exported c fn bump(n: int) -> int:
+    n

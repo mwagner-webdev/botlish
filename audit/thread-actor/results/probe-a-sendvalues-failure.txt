@@ -1,0 +1,17 @@
+sendvalues.bot                           interp              16162 ms  ["t=0: sender changed its own after sending: parcel nums.leng
+AGREE: sendvalues.bot (1 backends)
+  t=0: sender changed its own after sending: parcel nums.length=4 grid[0]=70 table[k]=2
+  t=1: receiver got: parcel nums.length=3 grid[0]=7 table[k]=1
+  t=1: receiver changed its copy: parcel nums.length=4 grid[0]=1000 table[k]=1000
+  t=2: sender got the reply: parcel nums.length=4 grid[0]=1000 table[k]=1000
+  t=2: sender's own is unchanged by the receiver: parcel nums.length=4 grid[0]=70 table[k]=2
+failure.bot                              interp              10244 ms  ["t=2: after the failure, send: Delivered", "t=2: after the f
+AGREE: failure.bot (1 backends)
+  t=2: after the failure, send: Delivered
+  t=2: after the failure, send: Delivered
+  t=2: after the failure, send: Delivered
+  t=2: after the failure, send: Full
+  t=2: after the failure, send: Full
+  t=2: task 0 ended Failed code -1
+  t=2: reaped: undelivered 3
+  t=2: after reaping, send: Closed

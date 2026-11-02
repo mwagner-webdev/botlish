@@ -1,0 +1,31 @@
+# reject-affine-message.bot -- must be REJECTED (Probe C): an affine message
+# (a coroutine handle: a continuation) cannot travel through a library-written
+# mailbox: a type slot takes an unrestricted type, so Postbox[M] cannot be
+# applied to one (TYPE). Were it a field type, a place parameter of an
+# affine type is refused too (PLACE-PARAMETERS.md: the caller would keep
+# owning what the function could move out). Moving an affine value between
+# same-thread actors needs a mailbox the application writes over its own
+# MutableVector (push moves in, pop/take moves out), as std::event_loop's
+# Loop does with task handles.
+import actor
+import std::event_loop
+
+context struct Mail:
+    jobs: actor::Postbox[Coroutine{args: [], return: int, errors: []}]
+
+fn job() -> int:
+    1
+
+fn main(context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    box = actor::open(mail.jobs)
+    coroutine {step, first} = job()
+    actor::send(mail.jobs, box.to, step)
+    first
+
+with context std::event_loop::create(8)
+with context Mail {jobs: actor::postbox[Coroutine{args: [], return: int, errors: []}](1, 4)}
+main():
+    on IndexNotFound:
+        0
+    on std::event_loop::SchedulerFault:
+        0

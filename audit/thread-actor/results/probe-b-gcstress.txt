@@ -1,0 +1,113 @@
+scalar consumer 0 received 20000
+scalar consumer 0 out of order 0
+scalar consumer 0 bad content 0
+scalar consumer 0 wrong producer 0
+scalar consumer 0 max latency us 904
+scalar consumer 0 total latency us 7058703
+scalar consumer 1 received 20000
+scalar consumer 1 out of order 0
+scalar consumer 1 bad content 0
+scalar consumer 1 wrong producer 0
+scalar consumer 1 max latency us 879
+scalar consumer 1 total latency us 6823368
+scalar producer 0 posted 20000
+scalar producer 0 refused posts (endpoint full) 483
+scalar producer 0 waits for payload table 0
+scalar producer 1 posted 20000
+scalar producer 1 refused posts (endpoint full) 450
+scalar producer 1 waits for payload table 0
+scalar payloads left in table, freed 0
+scalar wall us 44700
+scalar loop cpu us 67268
+scalar messages 40000
+text64 consumer 2 received 5000
+text64 consumer 2 out of order 0
+text64 consumer 2 bad content 0
+text64 consumer 2 wrong producer 0
+text64 consumer 2 max latency us 52548
+text64 consumer 2 total latency us 184253564
+text64 consumer 3 received 5000
+text64 consumer 3 out of order 0
+text64 consumer 3 bad content 0
+text64 consumer 3 wrong producer 0
+text64 consumer 3 max latency us 52622
+text64 consumer 3 total latency us 184537735
+text64 consumer 4 received 5000
+text64 consumer 4 out of order 0
+text64 consumer 4 bad content 0
+text64 consumer 4 wrong producer 0
+text64 consumer 4 max latency us 52685
+text64 consumer 4 total latency us 184693420
+text64 consumer 5 received 5000
+text64 consumer 5 out of order 0
+text64 consumer 5 bad content 0
+text64 consumer 5 wrong producer 0
+text64 consumer 5 max latency us 52659
+text64 consumer 5 total latency us 184996984
+text64 producer 2 posted 5000
+text64 producer 2 refused posts (endpoint full) 12526
+text64 producer 2 waits for payload table 0
+text64 producer 3 posted 5000
+text64 producer 3 refused posts (endpoint full) 12485
+text64 producer 3 waits for payload table 0
+text64 producer 4 posted 5000
+text64 producer 4 refused posts (endpoint full) 12356
+text64 producer 4 waits for payload table 0
+text64 producer 5 posted 5000
+text64 producer 5 refused posts (endpoint full) 12509
+text64 producer 5 waits for payload table 0
+text64 payloads left in table, freed 0
+text64 wall us 1058418
+text64 loop cpu us 1725275
+text64 messages 20000
+bytes4k consumer 6 received 2000
+bytes4k consumer 6 out of order 0
+bytes4k consumer 6 bad content 0
+bytes4k consumer 6 wrong producer 0
+bytes4k consumer 6 max latency us 43429
+bytes4k consumer 6 total latency us 58482459
+bytes4k consumer 7 received 2000
+bytes4k consumer 7 out of order 0
+bytes4k consumer 7 bad content 0
+bytes4k consumer 7 wrong producer 0
+bytes4k consumer 7 max latency us 43521
+bytes4k consumer 7 total latency us 58660430
+bytes4k producer 6 posted 2000
+bytes4k producer 6 refused posts (endpoint full) 3544
+bytes4k producer 6 waits for payload table 0
+bytes4k producer 7 posted 2000
+bytes4k producer 7 refused posts (endpoint full) 3727
+bytes4k producer 7 waits for payload table 0
+bytes4k payloads left in table, freed 0
+bytes4k wall us 345194
+bytes4k loop cpu us 474327
+bytes4k messages 4000
+wakeups consumer 8 received 200
+wakeups consumer 8 out of order 0
+wakeups consumer 8 bad content 0
+wakeups consumer 8 wrong producer 0
+wakeups consumer 8 max latency us 493
+wakeups consumer 8 total latency us 29417
+wakeups producer 8 posted 200
+wakeups producer 8 refused posts (endpoint full) 0
+wakeups producer 8 waits for payload table 0
+wakeups payloads left in table, freed 0
+wakeups wall us 229504
+wakeups loop cpu us 27049
+wakeups messages 200
+shutdown consumer 9 closed endpoint, records discarded 129
+shutdown consumer 9 received 100
+shutdown consumer 9 out of order 0
+shutdown consumer 9 bad content 0
+shutdown consumer 9 wrong producer 0
+shutdown consumer 9 max latency us 5844
+shutdown consumer 9 total latency us 304809
+shutdown producer 9 posted 291
+shutdown producer 9 refused posts (endpoint full) 72
+shutdown producer 9 waits for payload table 0
+shutdown producer 9 stopped at seq 291
+shutdown payloads left in table, freed 191
+shutdown wall us 6442
+shutdown loop cpu us 7482
+shutdown messages 100
+-- cranelift, gc-stress 1, 13265 ms (compile and run)

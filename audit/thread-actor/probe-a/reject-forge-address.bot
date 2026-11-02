@@ -1,0 +1,7 @@
+# reject-forge-address.bot -- must be REJECTED (Probe A): an address is an
+# opaque value only actor.bot makes; a program cannot forge one to reach a
+# mailbox it was never given (OPAQUE-CONSTRUCTION).
+import actor
+
+a = actor::Address[int] {box: 1, slot: 0, gen: 0}
+0

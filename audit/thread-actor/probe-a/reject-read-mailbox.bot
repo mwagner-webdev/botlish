@@ -1,0 +1,16 @@
+# reject-read-mailbox.bot -- must be REJECTED (Probe A): a sender holding the
+# postbox place cannot read another actor's queued messages: the postbox's
+# representation is actor.bot's (opaque), so its fields cannot be projected.
+import actor
+import std::event_loop
+
+context struct Mail:
+    nums: actor::Postbox[int]
+
+fn peek(context mail: Mail) -> int errors IndexNotFound:
+    mail.nums.pool.at(0)
+
+with context Mail {nums: actor::postbox[int](1, 4)}
+peek():
+    on IndexNotFound:
+        0

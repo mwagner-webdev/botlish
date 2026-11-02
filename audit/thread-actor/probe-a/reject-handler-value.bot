@@ -1,0 +1,18 @@
+# reject-handler-value.bot -- must be REJECTED (Probe A): an actor's handler
+# cannot be registered as a callback (a function value): it requires the
+# application's Mail context, and a function that requires a context can
+# only be called (CONTEXT-FUNCTION-VALUE). An actor is a coroutine instead.
+import actor
+import std::event_loop
+
+context struct Mail:
+    nums: actor::Postbox[int]
+
+fn on_message(n: int, context mail: Mail) -> int:
+    n
+
+fn register(handler: Fn{args: [int], return: int}) -> int:
+    handler(1)
+
+with context Mail {nums: actor::postbox[int](1, 4)}
+register(on_message)
