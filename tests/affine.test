@@ -598,16 +598,16 @@ test af-native-runtime-source {the runtime adds no ownership state: no moved fla
         [regexp {AffineDrop} $mayAllocate]
 } -cleanup {unset -nocomplain root affine ops mayAllocate f} -result {0 0 0}
 
-test af-fuzz-bounded {a bounded run of the ownership fuzzer (audit/affine/tools/fuzz.tcl): every backend computes the oracle's value on every accepted program, every identity is released exactly as the oracle's owner record says (the interpreter's release calls, the native counters), and every rejected program has the predicted diagnostic} -constraints nativeCoroutines -body {
+test af-fuzz-bounded {a bounded run of the ownership fuzzer (audit/affine/tools/fuzz.tcl): every backend computes the oracle's value on every accepted program, every identity is released exactly as the oracle's owner record says (the interpreter's release calls, the native counters), and every rejected program has the predicted diagnostic; and of its application programs, each classified by the substitution oracle (AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md)} -constraints nativeCoroutines -body {
     set here [pwd]
     cd [temporaryDirectory]
     try {
-        set output [exec [info nameofexecutable] [file join $::projectRoot audit affine tools fuzz.tcl] -n 8 -seed 101 2>@1]
+        set output [exec [info nameofexecutable] [file join $::projectRoot audit affine tools fuzz.tcl] -n 8 -seed 101 -applications 8 2>@1]
     } finally {
         cd $here
     }
     lindex [split [string trim $output] \n] end
-} -cleanup {unset -nocomplain here output} -result {programs 8 disagreements 0}
+} -cleanup {unset -nocomplain here output} -result {programs 16 disagreements 0}
 
 # ---------------------------------------------------------------------------
 # HIR evidence (items 51, 52)
@@ -633,10 +633,11 @@ test af-hir-affinity {the central affinity query: a coroutine is affine, a struc
         [hir::types::Affinity [hir::types::MakeFn [list $c] int {}]]
 } -cleanup {unset -nocomplain c} -result {affine affine affine affine unrestricted unrestricted unrestricted unrestricted}
 
-test af-descriptor-exception-safe {hir::affine::Descriptor pops the struct it is visiting when looking up the struct's layout fails: the id was pushed outside the try, so after one such failure every later descriptor of that struct, in any later compilation of the process, was empty -- its coroutines silently never released} -body {
+test af-descriptor-exception-safe {hir::affine::Descriptor pops the struct it is visiting when looking up the struct's layout fails: the id was pushed outside the try, so after one such failure every later descriptor of that struct, in any later compilation of the process, was empty -- its coroutines silently never released (an undeclared struct is unrestricted and drops nothing, so the test plants an affine summary for it: the walk then reaches the failing layout lookup)} -body {
     set before $::hir::affine::descriptorVisiting
+    dict set ::hir::structs::affinity NoSuchStruct {1 {}}
     set failed [catch {hir::affine::Descriptor {} {nstruct NoSuchStruct}}]
     list $failed $before $::hir::affine::descriptorVisiting
-} -cleanup {unset -nocomplain before failed} -result {1 {} {}}
+} -cleanup {hir::structs::ForgetAffinity; unset -nocomplain before failed} -result {1 {} {}}
 
 cleanupTests

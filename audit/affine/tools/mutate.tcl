@@ -3,6 +3,7 @@
 #
 #   tclsh9.0 audit/affine/tools/mutate.tcl ?-only NAME,...? ?-tests FILES?
 #                                          ?-fuzz-count N? ?-fuzz-seed N?
+#                                          ?-fuzz-applications N?
 #                                          ?-timeout SECONDS?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
@@ -11,11 +12,13 @@
 # (a temporary directory) gets the replacements, and the detectors run
 # against it:
 #
-#   * the test files FILES (default tests/affine.test; each with a private
-#     -tmpdir): killed if any test fails or a file does not complete;
-#   * audit/affine/tools/fuzz.tcl -n N -seed S (every backend, the
-#     independent ownership oracle): killed if it reports a disagreement or
-#     does not complete;
+#   * the test files FILES (default tests/affine.test and
+#     tests/affine-applications.test; each with a private -tmpdir): killed
+#     if any test fails or a file does not complete;
+#   * audit/affine/tools/fuzz.tcl -n N -seed S -applications M (every
+#     backend, the independent ownership oracle, and its M application
+#     programs with their own substitution oracle): killed if it reports a
+#     disagreement or does not complete;
 #   * for a native mutant (one that edits native/src/ or the crate's
 #     manifest), first a release build of the copy's native backend (a mutant
 #     that does not build is reported NOT-BUILT, never counted as killed),
@@ -31,7 +34,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests tests/affine.test -fuzz-count 25 -fuzz-seed 11 -timeout 1800]
+set options [dict create -only "" -tests {tests/affine.test tests/affine-applications.test} -fuzz-count 25 -fuzz-seed 11 -fuzz-applications 30 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -243,11 +246,12 @@ try {
         set here [pwd]
         cd $scratch
         lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit affine tools fuzz.tcl] \
-            -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed]] status output
+            -n [dict get $options -fuzz-count] -seed [dict get $options -fuzz-seed] \
+            -applications [dict get $options -fuzz-applications]] status output
         cd $here
         file delete -force $scratch
         if {[regexp {programs \d+ disagreements (\d+)} [lindex [split [string trim $output] \n] end] -> n]} {
-            set fuzz [expr {$n > 0 ? "killed ($n of [dict get $options -fuzz-count] programs disagree)" : "survived"}]
+            set fuzz [expr {$n > 0 ? "killed ($n programs disagree)" : "survived"}]
         } else {
             set fuzz "killed (did not complete: [lastLine $output])"
         }

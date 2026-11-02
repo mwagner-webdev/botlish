@@ -3754,15 +3754,31 @@ proc native::lower::DropAccess {fnVar access descriptor e} {
         virtual {
             # A virtualized construction (its fields in registers, never
             # materialized): the descriptor applied to its fields directly.
-            set fields [lindex $access 1]
-            set pos 0
+            # A struct's registers are its physical fields, an opened field's
+            # (CUT) contiguous among them: a descriptor slot is a layout
+            # field, found by FieldOffset, and an opened field's part applies
+            # to its own registers, as the virtual value of its own shape
+            # (`Outer {inner: Holder {...}}`, `Box {value: Box {...}}`: the
+            # inner struct's descriptor never reaches its fields' registers).
+            lassign $access - fields shape - - cut
+            set cuts [CutDict $cut]
             foreach {field inner} [DescriptorParts $descriptor] {
                 if {$field eq "*"} {
                     foreach r $fields {
                         DropAccess fn [list reg $r] $inner $e
                     }
-                } else {
+                } elseif {$shape eq ""} {
                     DropAccess fn [list reg [lindex $fields $field]] $inner $e
+                } else {
+                    set name [lindex $shape 1 $field]
+                    set offset [FieldOffset $shape $cut $name]
+                    if {[dict exists $cuts $name]} {
+                        lassign [dict get $cuts $name] sub subcut
+                        set width [hir::escape::CutFields $sub $subcut]
+                        DropAccess fn [list virtual [lrange $fields $offset [expr {$offset + $width - 1}]] $sub "" "" $subcut] $inner $e
+                    } else {
+                        DropAccess fn [list reg [lindex $fields $offset]] $inner $e
+                    }
                 }
             }
         }

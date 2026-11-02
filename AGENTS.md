@@ -2145,6 +2145,32 @@ affine, move, release/drop, callable contract and callable kind; an affine
 value is not a reference, a borrow or a linear value, and may be dropped
 unused.
 
+An application of a parameterized struct is affine exactly when its fields,
+its type arguments substituted, are
+(AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md):
+`Box[Coroutine{...}]` of `struct Box[T]: value: T` is affine,
+`Phantom[Coroutine{...}]` of `struct Phantom[T]: value: int` is not. Keep it
+so:
+
+* Never decide an application by its arguments ("any affine argument"), by
+  its declaration's unsubstituted fields, or by a tree-, collection- or
+  name-specific rule. `hir::structs::IsAffine ID ARGUMENTS` answers it from
+  the declaration's summary (`AffinitySummary`: its affinity with every slot
+  unrestricted and its relevant slots, a least fixpoint computed from
+  `AppliedFieldTypes` and `hir::types::IsAffine`) and the application's own
+  arguments. Keep only the summary, per registration (every registry
+  change clears it); never an application's answer, and never unfold a
+  recursive application to classify it.
+* A walk of a struct type's components (drop descriptors, recursive
+  affine types: `hir::structs::OwnedRecursion`) reads an application's
+  applied fields and identifies a struct by its whole type, never by its
+  declaration alone (`Box[Box[C]]`'s inner Box is another type). A
+  recursive affine application is AFFINE-CONTAINER-UNSUPPORTED by the one
+  declaration rule, judged on its own fields (`ApplicationIssue`), trees
+  included.
+* An affine application is never cut to `any` by a bound
+  (`hir::types::MakeApplied`), as an affine List element is never cut.
+
 If you change the affinity query (`hir/types.tcl`, `hir/structs.tcl`),
 `hir/affine.tcl`, contract-based call typing of `Fn`/`Coroutine` callees
 (`hir/types.tcl`'s `Call`, `hir/range.tcl`'s `VerifyStructuralCall`,
@@ -2153,15 +2179,21 @@ specialization (`hir/traits.tcl`, `hir/semantic.tcl`'s affine instances,
 `hir::signatures::CallableAdmits`), release or pending-temporary lowering in
 any backend, or the drop runtimes (`core/affine.tcl`,
 `native/src/runtime/affine.rs`), run `tests/affine.test`,
-`tests/coroutines.test`, `audit/affine/tools/fuzz.tcl` (several seeds),
+`tests/affine-applications.test`, `tests/coroutines.test`,
+`audit/affine/tools/fuzz.tcl` (several seeds; its application programs,
+`-applications N`, against their substitution oracle),
 `audit/affine/tools/mutate.tcl` and `audit/coroutines/tools/mutate.tcl`
 (every mutant in both `mutants.txt` files must still apply and be killed;
 the coroutine mutants of ownership and release edit `hir/affine.tcl` too).
 A change to `hir::traits::Plan` for affine witnesses also means re-checking
 the trait and context-trait mutants. A change to native drop or release
 lowering also needs a `BOTLISH_NATIVE_GC_STRESS=1` run of
-`tests/affine.test` and `cargo test --release --manifest-path
-native/Cargo.toml --lib affine`. `bench/affine.tcl` regenerates the
+`tests/affine.test` and `tests/affine-applications.test` (its
+`aa-native-nested-drop`: a scalar-replaced struct's opened affine field) and
+`cargo test --release --manifest-path native/Cargo.toml --lib affine`. A
+change to how an application's affinity is decided also runs
+`tests/tree-struct.test`, `tests/trait-constrained-types.test` and their
+mutation tools. `bench/affine.tcl` regenerates the
 performance report. `hir::affine::verify` computes release scopes (and so
 `AFFINE-PATH-RELEASE-UNSUPPORTED`) only for a program its whole-program
 analysis accepts, a program-wide channel of the static decisions

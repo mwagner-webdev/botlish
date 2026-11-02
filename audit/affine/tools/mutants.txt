@@ -1,7 +1,9 @@
 # Mutants of general affinity and callable abstraction
 # (audit/affine/tools/mutate.tcl; AFFINE-VALUES.md): the mutants the
 # milestone brief names (item 72), each a deliberate bug in the affinity
-# query (hir/types.tcl, hir/structs.tcl), the ownership analysis and release
+# query (hir/types.tcl, hir/structs.tcl; its applications of parameterized
+# structs: AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md, item
+# 13), the ownership analysis and release
 # elaboration (hir/affine.tcl), the callable contract and generic
 # specialization (hir/types.tcl, hir/semantic.tcl, hir/traits.tcl,
 # hir/coroutines.tcl) or the drop runtimes (core/affine.tcl,
@@ -26,7 +28,9 @@
 # that visits an element twice is observably the same program; the Tcl
 # runtime's twice-visiting drop is the mutant (list-drop-twice), caught by
 # the release-call probe (core::coroutines::releaseCalls) that counts every
-# release call, not every first release.
+# release call, not every first release: tests/affine-applications.test's
+# aa-release-calls-once, deterministically (the fuzzer's release check kills
+# it only when a seed happens to drop a List of handles).
 
 # ---------------------------------------------------------------------------
 # The affinity query
@@ -34,9 +38,11 @@
 @@ struct-affine-unrestricted a named struct with an affine field is unrestricted
 ## hir/structs.tcl
 <<<<
-        if {[hir::types::IsAffine $t [concat $seen [list $id]]]} {
+        if {[hir::types::IsAffine $t]} {
+            return {1 {}}
 ====
         if {0} {
+            return {1 {}}
 >>>>
 
 @@ list-affine-unrestricted a List of affine elements is unrestricted
@@ -65,6 +71,243 @@
         coroutine - cptr - cfnptr - block {
             return 1
         }
+>>>>
+
+# ---------------------------------------------------------------------------
+# Applications of parameterized structs (AFFINE-PARAMETERIZED-APPLICATIONS-
+# CORRECTNESS-MILESTONE-1.md): an application's affinity is its applied
+# fields'. tests/affine-applications.test and the fuzzer's application
+# programs (fuzz.tcl -applications) are their detectors.
+
+@@ app-ignores-arguments an application of a parameterized struct ignores its arguments (the starting defect): Box[Coroutine{...}] is unrestricted
+## hir/types.tcl
+<<<<
+            return [hir::structs::IsAffine [lindex $type 1] [StructArgs $type]]
+====
+            return [hir::structs::IsAffine [lindex $type 1]]
+>>>>
+
+@@ app-declaration-fields-only an application is judged by its declaration's fields before substitution: no slot is ever relevant
+## hir/structs.tcl
+<<<<
+        foreach {name t} [AppliedFieldTypes [list nstruct $id $probe]] {
+            if {[hir::types::IsAffine $t]} {
+                lappend relevant $index
+====
+        foreach {name t} [fieldTypes $id] {
+            if {[hir::types::IsAffine $t]} {
+                lappend relevant $index
+>>>>
+
+@@ app-any-affine-argument an application with any affine argument is affine (Phantom[Coroutine{...}] of a slot no field holds)
+## hir/structs.tcl
+<<<<
+        foreach index $relevant {
+            set argument [lindex $arguments $index]
+            if {$argument ne "" && [hir::types::IsAffine $argument]} {
+====
+        foreach argument $arguments {
+            if {$argument ne "" && [hir::types::IsAffine $argument]} {
+>>>>
+
+@@ app-every-slot-relevant every slot of a parameterized struct is relevant, used in a field or not (an unused affine slot makes the application affine)
+## hir/structs.tcl
+<<<<
+            if {[hir::types::IsAffine $t]} {
+                lappend relevant $index
+                break
+            }
+====
+            if {1} {
+                lappend relevant $index
+                break
+            }
+>>>>
+
+@@ app-first-slot-only only an application's first relevant slot counts: Pair[int, Coroutine{...}] is unrestricted
+## hir/structs.tcl
+<<<<
+        foreach index $relevant {
+            set argument [lindex $arguments $index]
+====
+        foreach index [lrange $relevant 0 0] {
+            set argument [lindex $arguments $index]
+>>>>
+
+@@ app-last-slot-only only an application's last relevant slot counts: Pair[Coroutine{...}, int] is unrestricted
+## hir/structs.tcl
+<<<<
+        foreach index $relevant {
+            set argument [lindex $arguments $index]
+====
+        foreach index [lrange $relevant end end] {
+            set argument [lindex $arguments $index]
+>>>>
+
+@@ app-relevance-ignored a direct affine field makes a struct affine, an affine value held through a slot never does (only the declaration's own affinity is computed)
+## hir/structs.tcl
+<<<<
+    return [list 0 $relevant]
+}
+====
+    return [list 0 {}]
+}
+>>>>
+
+@@ app-nested-argument-not-traversed an argument that is itself an application is not looked into: Box[Box[Coroutine{...}]] is unrestricted
+## hir/structs.tcl
+<<<<
+            if {$argument ne "" && [hir::types::IsAffine $argument]} {
+====
+            if {$argument ne "" && ![hir::types::IsAppliedStruct $argument] && [hir::types::IsAffine $argument]} {
+>>>>
+
+@@ app-nested-field-not-traversed a field whose type is another parameterized struct's application gives no relevant slot: Outer[Coroutine{...}] (inner: Inner[T]) is unrestricted
+## hir/structs.tcl
+<<<<
+        foreach {name t} [AppliedFieldTypes [list nstruct $id $probe]] {
+            if {[hir::types::IsAffine $t]} {
+====
+        foreach {name t} [AppliedFieldTypes [list nstruct $id $probe]] {
+            if {[hir::types::IsAppliedStruct $t]} continue
+            if {[hir::types::IsAffine $t]} {
+>>>>
+
+@@ app-list-slot-not-seen a List of a slot gives no relevant slot: Many[Coroutine{...}] (values: List[T]) is unrestricted
+## hir/structs.tcl
+<<<<
+        foreach {name t} [AppliedFieldTypes [list nstruct $id $probe]] {
+            if {[hir::types::IsAffine $t]} {
+====
+        foreach {name t} [AppliedFieldTypes [list nstruct $id $probe]] {
+            if {[hir::types::IsList $t]} continue
+            if {[hir::types::IsAffine $t]} {
+>>>>
+
+@@ app-recursive-assumed-unrestricted a recursive parameterized struct is assumed unrestricted at once (Node[Coroutine{...}] is copied, never rejected)
+## hir/structs.tcl
+<<<<
+proc hir::structs::AffinityOf {id} {
+    foreach {name t} [fieldTypes $id] {
+====
+proc hir::structs::AffinityOf {id} {
+    if {[string first "nstruct $id" [fieldTypes $id]] >= 0} {
+        return {0 {}}
+    }
+    foreach {name t} [fieldTypes $id] {
+>>>>
+
+@@ app-recursive-loops a recursive application is unfolded without the fixpoint: classifying Node[T] recurses forever
+## hir/structs.tcl
+<<<<
+    lassign [AffinitySummary $id] base relevant
+    set result $base
+====
+    lassign [AffinityOf $id] base relevant
+    set result $base
+>>>>
+
+@@ app-answer-cached-by-declaration an application's answer is kept per declaration: the first application asked decides every other's (Box[int] makes Box[Coroutine{...}] unrestricted)
+## hir/structs.tcl
+<<<<
+    set key [list $id $arguments]
+====
+    set key [list $id]
+>>>>
+
+@@ app-memo-provisional an application's answer is kept while a summary fixpoint is still running: a provisional "unrestricted" (Inner[T] not summarized yet) makes Outer[Coroutine{...}] unrestricted for good
+## hir/structs.tcl
+<<<<
+    if {!$summarizing} {
+        dict set applications $key $result
+    }
+====
+    if {1} {
+        dict set applications $key $result
+    }
+>>>>
+
+@@ app-summary-leaks-across-compilations a registry change keeps the affinity facts of the previous one: one program's Box decides another compilation's, and a HIR activated after another sees the other's
+## hir/structs.tcl
+<<<<
+    set affinity [dict create]
+    set applications [dict create]
+}
+====
+}
+>>>>
+
+@@ app-deep-application-cut an affine application nested past the applied-type depth has its arguments cut to any (the handle it owns erased)
+## hir/types.tcl
+<<<<
+    if {$nesting >= $appliedDepth && ![hir::structs::IsAffine $id $args]} {
+====
+    if {$nesting >= $appliedDepth} {
+>>>>
+
+@@ app-descriptor-visits-by-declaration the drop descriptor walk treats another application of a declaration it is inside of as itself: Box[Box[Coroutine{...}]] drops nothing
+## hir/affine.tcl
+<<<<
+        if {[hir::types::IsNamedStruct $type]} {
+            set key $type
+        } else {
+====
+        if {[hir::types::IsNamedStruct $type]} {
+            set key [lindex $type 1]
+        } else {
+>>>>
+
+@@ app-recursion-declared-fields the recursive-affine walk reads a struct's declared fields, not an application's: Node[Coroutine{...}] and a declaration holding itself through Box[D] are accepted
+## hir/structs.tcl
+<<<<
+        set owner $type
+        set fields [AppliedFieldTypes $type]
+====
+        set owner $type
+        set fields [fieldTypes $id]
+>>>>
+
+@@ app-recursion-same-type-only the recursive-affine walk finds only the very same application again: V[Coroutine{...}] (next: List[V[List[T]]]) is accepted
+## hir/structs.tcl
+<<<<
+        if {$path ne {} && $id eq $target} {
+            if {$crossed} {
+====
+        if {$path ne {} && $type eq $start} {
+            if {$crossed} {
+>>>>
+
+@@ app-recursion-tree-only a recursive affine application is rejected only for a tree struct (the tree milestone's special case): Node[Coroutine{...}] of an ordinary struct is accepted
+## hir/structs.tcl
+<<<<
+        set recursion [OwnedRecursion $type]
+        if {$recursion ne ""} {
+====
+        set recursion [expr {[treeField $id] ne "" ? [OwnedRecursion $type] : ""}]
+        if {$recursion ne ""} {
+>>>>
+
+@@ app-tree-any-affine-argument the tree milestone's rule comes back: a tree struct applied to any affine argument is rejected (Tree[int, Coroutine{...}], whose slot is only a function type's, included)
+## hir/structs.tcl
+<<<<
+        set recursion [OwnedRecursion $type]
+        if {$recursion ne ""} {
+====
+        set recursion [OwnedRecursion $type]
+        if {$recursion eq "" && [treeField $id] ne "" && [lsearch -exact [lmap arg [lindex $type 2] {hir::types::IsAffine $arg}] 1] >= 0} {
+            set recursion [list recursive {}]
+        }
+        if {$recursion ne ""} {
+>>>>
+
+@@ app-native-nested-drop-by-slot (native lowering) a virtualized struct's drop indexes its registers by descriptor slot: an opened affine field's descriptor is applied to its first register
+## native/lower.tcl
+<<<<
+                } elseif {$shape eq ""} {
+                    DropAccess fn [list reg [lindex $fields $field]] $inner $e
+====
+                } elseif {1} {
+                    DropAccess fn [list reg [lindex $fields $field]] $inner $e
 >>>>
 
 # ---------------------------------------------------------------------------

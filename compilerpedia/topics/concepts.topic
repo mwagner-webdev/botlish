@@ -3567,7 +3567,7 @@ index: concepts
 alias: affine; affine value; ownership; move semantics; use after move
 keywords: affine, move, owner, release, drop, USE-AFTER-MOVE, coroutine handle, copy, duplicate, unrestricted, AFFINE-CAPTURE-UNSUPPORTED
 related: concept.coroutines concept.mutable-vector concept.mutable-array concept.function-types proof.ownership rule.affine-use error.use-after-move
-docs: AFFINE-VALUES.md COROUTINES.md
+docs: AFFINE-VALUES.md COROUTINES.md AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md
 
 == WHAT IT IS
 Most values are unrestricted: they can be copied and used any number of
@@ -3575,6 +3575,10 @@ times. An affine value may have only one usable owner at a time. The
 coroutine handle is the one primitive affine value; a struct, anonymous
 struct, List, MutableVector or MutableArray that owns one is affine too,
 by its type. `other = step` moves the handle: `step` is dead afterwards.
+An application of a parameterized struct is affine exactly when its
+fields, its type arguments substituted, are: `Box[Coroutine{...}]` of
+`struct Box[T]: value: T` is affine, `Phantom[Coroutine{...}]` of
+`struct Phantom[T]: value: int` is not (no value of T is stored).
 
 == RULES
   * A use after a move is USE-AFTER-MOVE, naming where the value moved.
@@ -3635,8 +3639,28 @@ b = step
 @at 7:5
 @end
 
+@example reject
+fn ticks() -> int:
+    yield 1
+    2
+
+struct Box[T]:
+    value: T
+
+coroutine {step} = ticks()
+b = Box {value: step}
+c = b
+d = b
+0
+@caption Box[Coroutine{...}] owns the handle through its slot: b moved into c
+@error CORE SEMANTIC USE-AFTER-MOVE
+@at 11:5
+@end
+
 == MORE
-AFFINE-VALUES.md; proof.ownership.
+AFFINE-VALUES.md;
+AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md;
+proof.ownership.
 
 @topic concept.coroutines
 title: Coroutines: `yield`, eager start, resume

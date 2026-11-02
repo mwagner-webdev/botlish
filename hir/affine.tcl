@@ -123,8 +123,17 @@ namespace eval hir::affine {
     # Release points on infinite loops' breaks (PathReleases): break ->
     # bindings, merged into the exit table.
     variable pathExits {}
-    # The named structs Descriptor is inside of, outermost first.
+    # The named struct types (applications with their arguments) Descriptor
+    # is inside of, outermost first.
     variable descriptorVisiting {}
+    # While verify elaborates releases (1): {TYPE EXCLUDE} -> the descriptor
+    # of a top-level Descriptor call, which Releases and ExitReleases ask for
+    # every binding, so a deep type's descriptor is walked once per run, not
+    # once per binding. Only calls outside any struct walk are kept (an inner
+    # one's answer depends on the struct types being walked), and the table
+    # dies with the run.
+    variable memoizing 0
+    variable descriptorMemo {}
 }
 
 # ---------------------------------------------------------------------------
@@ -451,9 +460,17 @@ proc hir::affine::Named {hir e} {
     return "this value"
 }
 
-# The type text a diagnostic gives affine value E.
+# The type text a diagnostic gives affine value E: its type, and for an
+# application of a parameterized struct that is affine through its
+# arguments, the field that makes it so (hir::structs::AffineThrough).
 proc hir::affine::TypeText {hir e} {
-    return [hir::types::show [hir::typeOf $hir $e]]
+    set type [hir::typeOf $hir $e]
+    set through [hir::structs::AffineThrough $type]
+    if {$through eq ""} {
+        return [hir::types::show $type]
+    }
+    lassign $through field fieldType
+    return "[hir::types::show $type] (affine: its field \"$field\" holds [hir::types::show $fieldType])"
 }
 
 # ---------------------------------------------------------------------------
@@ -856,8 +873,17 @@ proc hir::affine::verify {hirVar} {
     }
     variable consumed
     dict set hir affine consumed $consumed
-    dict set hir affine releases [Releases hir $parentMap $scopes $accepted]
-    lassign [ExitReleases $hir $parentMap $scopes] exits errorExits
+    variable memoizing
+    variable descriptorMemo
+    set memoizing 1
+    set descriptorMemo {}
+    try {
+        dict set hir affine releases [Releases hir $parentMap $scopes $accepted]
+        lassign [ExitReleases $hir $parentMap $scopes] exits errorExits
+    } finally {
+        set memoizing 0
+        set descriptorMemo {}
+    }
     variable pathExits
     dict for {x items} $pathExits {
         foreach item $items {
@@ -2232,7 +2258,27 @@ proc hir::affine::temporaries {hir} {
 # Releases are unobservable, so the order changes no value; it is fixed so
 # runtime behavior is reproducible (AFFINE-VALUES.md, "Drop glue").
 proc hir::affine::Descriptor {hir type {exclude {}}} {
+    variable memoizing
+    variable descriptorMemo
+    variable descriptorVisiting
+    if {!$memoizing || $descriptorVisiting ne {}} {
+        return [DescriptorOf $hir $type $exclude]
+    }
+    set key [list $type $exclude]
+    if {![dict exists $descriptorMemo $key]} {
+        dict set descriptorMemo $key [DescriptorOf $hir $type $exclude]
+    }
+    return [dict get $descriptorMemo $key]
+}
+
+# Descriptor's walk.
+proc hir::affine::DescriptorOf {hir type exclude} {
     set type [hir::types::Unrefined $type]
+    if {![hir::types::IsAffine $type]} {
+        # An unrestricted value owns nothing affine (every component this
+        # walks is one hir::types::IsAffine reads).
+        return ""
+    }
     if {[hir::types::IsCAddress $type]} {
         # A C pointer (C-ABI-TYPES.md) is affine but owns nothing: its owner's
         # death releases nothing, so it has no descriptor (and an aggregate
@@ -2268,28 +2314,30 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
         return "a$inner"
     }
     if {[hir::types::IsStructLike $type]} {
-        # A named struct may name itself (STRUCTS.md). Met again inside
-        # itself, it is one no finite value has -- held through fields alone
-        # (each value would hold a smaller one, without end) -- or an
-        # unrestricted one, which owns nothing to drop: either way that inner
-        # occurrence drops nothing. An affine struct holding itself in a
-        # container element is rejected at its declaration
+        # A named struct type may name itself (STRUCTS.md). Met again inside
+        # itself -- the same type: an application with the same arguments
+        # (another application of its declaration, Box[Box[C]]'s Box[C], is
+        # another type, walked on) -- it is one no finite value has, held
+        # through fields alone (each value would hold a smaller one, without
+        # end): that inner occurrence drops nothing. An affine struct type
+        # holding an affine application of its own declaration in a
+        # container element is rejected where it is declared or applied
         # (hir::structs::OwnedRecursion): its values nest to any depth, past
         # every finite descriptor.
         variable descriptorVisiting
         if {[hir::types::IsNamedStruct $type]} {
-            set id [lindex $type 1]
+            set key $type
         } else {
-            set id ""
+            set key ""
         }
-        if {$id ne ""} {
-            if {$id in $descriptorVisiting} {
-                if {[hir::types::IsAffine $type] && [hir::structs::OwnedRecursion $id] ne ""} {
-                    error "internal compiler error: the affine struct $id holds itself in a container: it has no finite drop descriptor (hir::structs::apply rejects its declaration)"
+        if {$key ne ""} {
+            if {$key in $descriptorVisiting} {
+                if {[hir::structs::OwnedRecursion $type] ne ""} {
+                    error "internal compiler error: the affine struct type [hir::types::show $type] holds an affine application of its declaration in a container: it has no finite drop descriptor (hir::structs::apply rejects such a declaration, hir::structs::ApplicationIssue such an application)"
                 }
                 return ""
             }
-            lappend descriptorVisiting $id
+            lappend descriptorVisiting $key
         }
         set parts {}
         set n 0
@@ -2309,7 +2357,7 @@ proc hir::affine::Descriptor {hir type {exclude {}}} {
                 }
             }
         } finally {
-            if {$id ne ""} {
+            if {$key ne ""} {
                 set descriptorVisiting [lrange $descriptorVisiting 0 end-1]
             }
         }

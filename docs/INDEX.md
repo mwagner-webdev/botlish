@@ -98,6 +98,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 ### Ownership, coroutines and mutable collections
 
 - [AFFINE-VALUES.md](AFFINE-VALUES.md) -- affinity as a compositional property of a value's type
+- [AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md](AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md) -- a parameterized struct application is affine exactly when its fields, its type arguments substituted, are: Box[Coroutine{...}] affine, Phantom[Coroutine{...}] unrestricted; per-declaration affinity summaries (a least fixpoint, no unfolding of recursive applications), recursive affine applications AFFINE-CONTAINER-UNSUPPORTED by the declaration rule (trees included, no tree-only check), drop descriptors and the native release of nested virtualized structs fixed; the substitution oracle, fuzzer and mutants (completion report)
 - [COROUTINES.md](COROUTINES.md) -- eagerly started, affine, resumable computations with deep `yield`
 - [COROUTINE-PREREQUISITES.md](COROUTINE-PREREQUISITES.md) -- the research coroutines were built on
 - [COROUTINE-FUSION-MILESTONE-1.md](COROUTINE-FUSION-MILESTONE-1.md) -- coroutine fusion: a coroutine closed inside one function compiled natively into that function's control flow (one stack, no coroutine object or switch), deep yields, several coroutines per frame, scalar transport, the general runtime as fallback and oracle (completion report)

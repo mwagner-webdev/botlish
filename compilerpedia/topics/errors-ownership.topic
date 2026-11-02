@@ -240,7 +240,7 @@ index: errors
 alias: set of coroutines; recursive affine struct
 keywords: affine, ImmutableSet, set, recursive struct, tree, container, release, descriptor
 related: concept.affine concept.immutable-set concept.structs concept.mutable-vector error.affine-equality-unsupported
-docs: AFFINE-VALUES.md MUTABLE-ARRAY.md
+docs: AFFINE-VALUES.md MUTABLE-ARRAY.md AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md
 code: CORE SEMANTIC AFFINE-CONTAINER-UNSUPPORTED
 
 == MEANING
@@ -258,6 +258,11 @@ Reported where the type is written, for two forms:
     value is released by a static, finite walk of its type, and such a
     value nests to any depth. An unrestricted struct may hold itself in a
     container, and an affine struct may name itself through plain fields.
+    An application of a parameterized struct is judged by its own fields,
+    its arguments substituted, wherever it is written or constructed:
+    `Node[Coroutine{...}]` of `struct Node[T]: value: T, children:
+    List[Node[T]]` (a tree struct's too) is such a type, `Node[int]` is an
+    ordinary recursive value.
 
 == LIKELY CAUSES
   * a set of handles used to track "which workers are running";
