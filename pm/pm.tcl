@@ -3,8 +3,9 @@
 # artifacts (BOTPKG-FORMAT.md).
 #
 #   source pm/pm.tcl; pm::cli::main ARGV INVOCATION     the commands add,
-#       install, update, remove, verify and package pack|inspect; the exit
-#       status (0 success, 1 a failed operation, 2 a usage error)
+#       install, update, remove, verify, package pack|inspect and native
+#       inspect|plan|deploy; the exit status (0 success, 1 a failed
+#       operation, 2 a usage error)
 #
 # main.tcl sources this file only when its first argument is one of those
 # command words, before it loads anything of the compiler: an ordinary
@@ -17,24 +18,33 @@
 # Files:
 #
 #   json.tcl        strict JSON (duplicate keys rejected) and its canonical form
-#   sha256.tcl      SHA-256, in Tcl
+#   sha256.tcl      SHA-256: the host system's own tool when it has one, else Tcl
 #   version.tcl     versions, requests, their matching and order
-#   descriptor.tcl  botlish.json, schema 1
+#   target.tcl      compilation targets (the compiler's table, read as data)
+#   binary.tcl      native file inspection (ELF, ar, Mach-O, PE/COFF), no execution
+#   targets.tcl     schema 2's targets: target files and native metadata
+#   descriptor.tcl  botlish.json, schemas 1 and 2
 #   archive.tcl     the .botpkg format: deterministic writer, validating reader
 #   catalog.tcl     where artifacts come from: archive sources, repositories
 #   state.tcl       the installation record: what the manager installed
+#   native.tcl      native verification, the native closure, the plan
+#   view.tcl        target views: one package tree per target
+#   deploy.tcl      placing a target's bundled shared libraries
 #   install.tcl     resolution, plans, staging and transactions
 #   commands.tcl    the commands and the command line
 #
 # Nothing here executes anything a package holds: no hook, no script, no
-# binary, no compilation. Installing a package is writing its files.
+# binary, no compilation. Installing a package is writing its files. The
+# only programs it ever starts are the host system's own SHA-256 tool, at a
+# fixed system path (pm/sha256.tcl), and `kill -0` (a lock holder's
+# liveness).
 
 namespace eval pm {
     variable root [file dirname [file dirname [file normalize [info script]]]]
     variable here [file join $root pm]
 }
 
-foreach pm::file {json sha256 version descriptor archive catalog state install commands} {
+foreach pm::file {json sha256 version target binary targets descriptor archive catalog state native view deploy install commands} {
     source [file join $pm::here $pm::file.tcl]
 }
 unset pm::file

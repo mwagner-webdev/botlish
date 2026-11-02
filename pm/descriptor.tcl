@@ -1,5 +1,6 @@
-# descriptor.tcl -- botlish.json, schema 1 (BOTLISH-JSON.md, the normative
-# specification; PACKAGE-MANAGER-MILESTONE-1.md).
+# descriptor.tcl -- botlish.json, schemas 1 and 2 (BOTLISH-JSON.md, the
+# normative specification; PACKAGE-MANAGER-MILESTONE-1.md and
+# PACKAGE-MANAGER-MILESTONE-2.md).
 #
 #   pm::descriptor::read PATH CONTEXT          the descriptor of the file PATH
 #   pm::descriptor::fromBytes BYTES CONTEXT LABEL
@@ -8,7 +9,8 @@
 #
 # A descriptor is a dict:
 #
-#   schema        1
+#   schema        1 or 2 (2 only when the file says so: schema 1 files are
+#                 read and written as schema 1)
 #   name          the package's root namespace, or "" (an application may
 #                 have none)
 #   version       its exact release, or ""
@@ -16,6 +18,14 @@
 #   lock          dict NAME -> exact VERSION (direct dependencies only)
 #   sources       dict NAME -> {kind archive path P sha256 D}
 #                            | {kind directory path P}
+#   targets       (schema 2 only: absent from a schema 1 descriptor) dict TARGET -> {files DIR libraries {LIB...}
+#                 frameworks {NAME...} headers {DIR...}}: a target-aware
+#                 package's targets, each with the artifact directory
+#                 overlaid on the package root for it and its native
+#                 dependencies; empty for a target-independent package
+#                 (pm/targets.tcl, BOTLISH-JSON.md section 12)
+#   origins       (schema 2, projects) dict LIBRARY -> system|bundled: the
+#                 consumer's choice where a package offers both
 #
 # CONTEXT says which rules apply:
 #
@@ -36,6 +46,7 @@
 
 namespace eval pm::descriptor {
     variable keys {schema name version dependencies lock sources}
+    variable keys2 {schema name version dependencies lock sources targets origins}
     variable reserved {std}
     variable nameRule {^[a-z][a-z0-9_]{0,63}$}
 }
@@ -88,30 +99,42 @@ proc pm::descriptor::fromBytes {bytes context label} {
 
 proc pm::descriptor::Validate {value context label} {
     variable keys
+    variable keys2
     set problems {}
     set result [new]
     if {[pm::json::type $value] ne "obj"} {
         Raise $label [list "the file is not a JSON object"]
     }
     set members [pm::json::payload $value]
-    foreach {key item} $members {
-        if {$key ni $keys} {
-            lappend problems "unknown key \"$key\" (schema 1 has [join $keys {, }]): a key a later schema adds is never silently ignored"
-        }
-    }
     # schema
     if {![dict exists $members schema]} {
-        lappend problems "no \"schema\": a botlish.json starts with \"schema\": 1"
+        lappend problems "no \"schema\": a botlish.json starts with \"schema\": 1 (or 2)"
         Raise $label $problems
     }
     set schema [dict get $members schema]
     if {[pm::json::type $schema] ne "num" || ![regexp {^[0-9]+$} [pm::json::payload $schema]]} {
-        lappend problems "\"schema\" must be the number 1"
+        lappend problems "\"schema\" must be the number 1 or 2"
         Raise $label $problems
     }
-    if {[pm::json::payload $schema] ne "1"} {
-        lappend problems "unsupported schema [pm::json::payload $schema]: this package manager reads schema 1 only (a newer one needs a newer Botlish)"
+    set number [pm::json::payload $schema]
+    if {$number ni {1 2}} {
+        lappend problems "unsupported schema $number: this package manager reads schemas 1 and 2 (a newer one needs a newer Botlish)"
         Raise $label $problems
+    }
+    dict set result schema $number
+    if {$number == 2} {
+        dict set result targets {}
+        dict set result origins {}
+    }
+    set allowed [expr {$number == 1 ? $keys : $keys2}]
+    foreach {key item} $members {
+        if {$key ni $allowed} {
+            if {$number == 1 && $key in $keys2} {
+                lappend problems "\"$key\" is a schema 2 key: a botlish.json using it says \"schema\": 2 (schema 1 has [join $keys {, }])"
+            } else {
+                lappend problems "unknown key \"$key\" (schema $number has [join $allowed {, }]): a key a later schema adds is never silently ignored"
+            }
+        }
     }
     # name, version
     foreach key {name version} {
@@ -190,6 +213,28 @@ proc pm::descriptor::Validate {value context label} {
                 set source [Source $dep $spec problems]
                 if {$source ne ""} {
                     dict set result sources $dep $source
+                }
+            }
+        }
+    }
+    # targets, origins (schema 2)
+    if {[dict exists $members targets] && $number == 2} {
+        dict set result targets [pm::targets::Parse [dict get $members targets] problems]
+    }
+    if {[dict exists $members origins] && $number == 2} {
+        set item [dict get $members origins]
+        if {$context eq "artifact"} {
+            lappend problems "an artifact's botlish.json has no \"origins\": which origin a consumer's native library comes from is the consumer's choice, never the published package's"
+        } elseif {[pm::json::type $item] ne "obj"} {
+            lappend problems "\"origins\" must be an object of native library names"
+        } else {
+            foreach {library choice} [pm::json::payload $item] {
+                if {[set problem [pm::targets::LibraryNameProblem $library]] ne ""} {
+                    lappend problems "origins: $problem"
+                } elseif {[pm::json::type $choice] ne "str" || [pm::json::payload $choice] ni {system bundled}} {
+                    lappend problems "origins: \"$library\" must be \"system\" or \"bundled\""
+                } else {
+                    dict set result origins $library [pm::json::payload $choice]
                 }
             }
         }
@@ -302,7 +347,7 @@ proc pm::descriptor::PathProblem {path} {
 # key but dependencies of a project. WITHSOURCES 0 leaves sources out (an
 # artifact's descriptor never holds them).
 proc pm::descriptor::encode {descriptor {withSources 1}} {
-    set members [list schema {num 1}]
+    set members [list schema [list num [dict getdef $descriptor schema 1]]]
     foreach key {name version} {
         if {[dict get $descriptor $key] ne ""} {
             lappend members $key [list str [dict get $descriptor $key]]
@@ -328,6 +373,16 @@ proc pm::descriptor::encode {descriptor {withSources 1}} {
             }
         }
         lappend members sources [list obj $object]
+    }
+    if {[dict getdef $descriptor targets {}] ne ""} {
+        lappend members targets [pm::targets::Value [dict get $descriptor targets]]
+    }
+    if {$withSources && [dict getdef $descriptor origins {}] ne ""} {
+        set object {}
+        foreach library [lsort [dict keys [dict get $descriptor origins]]] {
+            lappend object $library [list str [dict get $descriptor origins $library]]
+        }
+        lappend members origins [list obj $object]
     }
     return [pm::json::encode [list obj $members]]
 }

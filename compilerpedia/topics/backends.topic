@@ -655,14 +655,15 @@ task.first-program), and `-help` alone opens with the primer's table.
     FILE.ir     core IR text: interp and compile only
 Several files are run one after another, each with its own "== FILE"
 header. A first argument that is a package command's word (add, install,
-update, remove, verify, package) is that command, never an input file.
+update, remove, verify, package, native) is that command, never an input
+file.
 
 @topic cli.options
 title: Every command-line option
 summary: The options of botlish (tclsh9.0 main.tcl): backend and warning selection, program arguments, building, checking, the language server, inspection output, and the reference.
 index: backends
 alias: options; flags of the command line; command-line options
-keywords: -backend, -warnings, -target, -L, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
+keywords: -backend, -warnings, -target, -L, -F, -runtime-path, -argv, -argv-hex, -argv-none, -emit-native-executable, -native-startup, -emit-hir-interchange, -emit-native-library, -export, -out, -check, -lsp, -lsp-scheduler, -lsp-worker, -code, -hir, -ast, -aot, -aot-data, -aot-spec, -contexts, -direct, -traits, -emit-nir, -emit-clif, -help, -version
 related: cli.usage cli.output cli.exit-status cli.lsp lint.policy backend.targets backend.hir-interchange backend.native-executable backend.native-startup backend.native-library concept.argv
 docs: README.md
 
@@ -685,6 +686,12 @@ docs: README.md
     -F DIR            add DIR to Apple's ld's framework search path (macOS),
                       for a program that declares `extern c framework`
                       (concept.native-link-plan)
+    -runtime-path PATH  record PATH in an executable -emit-native-executable
+                      links as a directory its loader searches for shared
+                      libraries: an ELF RUNPATH, a Mach-O LC_RPATH
+                      ($ORIGIN/lib, @executable_path/lib); refused on
+                      Windows, whose loader searches the executable's own
+                      directory (cli.packages: native deploy)
 
 == PROGRAM ARGUMENTS (argv())
     -argv TEXT        append one argument (its UTF-8 bytes); the first one
@@ -853,9 +860,9 @@ title: The package manager: botlish.json, .botpkg artifacts, add and install
 summary: botlish add, install, update, remove and verify manage a project's packages from local .botpkg artifacts and botlish.json; package pack makes an artifact. Nothing is downloaded or run.
 index: backends
 alias: package manager; botlish.json; .botpkg; botlish add; botlish install; package artifact; lock file; dependency versions
-keywords: add, install, update, remove, verify, pack, inspect, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules
-related: rule.package-modules concept.modules cli.usage cli.exit-status
-docs: PACKAGE-MANAGER-MILESTONE-1.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOT-MODULES-MILESTONE-1.md
+keywords: add, install, update, remove, verify, pack, inspect, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target
+related: rule.package-modules concept.modules concept.native-link-plan cli.usage cli.exit-status backend.targets
+docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOT-MODULES-MILESTONE-1.md
 
 == THE COMMANDS
     botlish add NAME|FILE.botpkg|DIR [-request R] [-replace]
@@ -864,13 +871,18 @@ docs: PACKAGE-MANAGER-MILESTONE-1.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOT-MODULE
     botlish remove NAME...
     botlish verify
     botlish package pack [DIR] [-out DIR] [-force]
-    botlish package inspect FILE.botpkg
+    botlish package inspect FILE.botpkg [-target T]
+    botlish native inspect FILE [-target T]
+    botlish native plan [-target T] [-include]
+    botlish native deploy -target T -out DIR [-force]
 (tclsh9.0 main.tcl add ... in a checkout.) add, install, update, remove
 and verify take -project DIR (the project: the directory of its
 botlish.json; default the current directory) and -repository DIR (a local
 repository of NAME-VERSION.botpkg files; any number, never searched
 implicitly); the first four also -force (replace installed packages that
-were changed) and -recover (roll back an interrupted operation).
+were changed), -recover (roll back an interrupted operation), -target T
+(prepare the target view of T) and -drop-target T (remove it); verify
+-target T verifies that view's native dependencies again.
 
 == WHAT THEY DO
   * add NAME installs the newest version a repository holds (or the newest
@@ -887,7 +899,38 @@ were changed) and -recover (roll back an interrupted operation).
     where a repository holds them, with the artifacts' bytes.
   * package pack makes a deterministic NAME-VERSION.botpkg from a package
     directory whose botlish.json has a name, a version and a lock for
-    every dependency.
+    every dependency, checking a target-aware package's layout and every
+    bundled native file first.
+
+== TARGETS AND NATIVE DEPENDENCIES
+A botlish.json of schema 2 may name the targets a package supports
+(`targets`): for each, a directory of target-specific files (generated
+bindings, native archives, shared libraries) and its native libraries --
+bundled (a file of the package) or system (the target's own installation),
+static or shared, with the facts the manager checks. One release (one name
+and version, one SHA-256) holds every target it names. When an installed
+package is target-aware, the manager derives a target view per prepared
+target, .bot_modules/.targets/TARGET: every package with that target's
+files at their module paths, and the bundled libraries in its .lib. The
+compiler reads the view of the target it compiles for (rule.package-modules)
+and links that .lib without -L; a native backend's run finds its shared
+libraries there. Preparing another target never touches a view already
+made; a package that does not name a target is UNSUPPORTED for it.
+  * native inspect reads a native file (ELF, ar, Mach-O, PE/COFF) without
+    running it; native plan shows a view's native closure -- what links,
+    from where, verified how, and what must be deployed (-include prints
+    the packages' public header directories as -I options); native deploy
+    places a target's bundled shared libraries in DIR/lib (Linux, macOS)
+    or DIR (Windows), as a transaction recorded in DIR, for an executable
+    linked with -runtime-path '$ORIGIN/lib' (cli.options).
+  * A system library is verified only on its own target's host, by the
+    system's metadata (its dpkg package or a pkg-config record), never by a
+    file merely present; for another target it is reported unverified.
+  * One process has one native loader namespace: two packages bundling
+    different libraries of one name, a bundled and a system one, one
+    loader identity for two libraries or two static archives defining one
+    symbol are refused, never resolved by a choice. botlish.json's
+    "origins" chooses system or bundled where a package offers both.
 
 == WHAT THEY NEVER DO
 Download anything, run anything a package holds (no install scripts,
@@ -900,7 +943,8 @@ leaves the previous installation as it was.
 == THE COMPILER
 The compiler reads the .bot_modules trees the package manager builds
 exactly as hand-made ones (rule.package-modules), and never reads
-botlish.json, a version, a lock or an artifact. A package's dependencies
+botlish.json, a version, a lock, an artifact or native
+metadata. A package's dependencies
 are in its own .bot_modules, so the application cannot import them;
 two packages may lock different versions of one dependency, and each
 gets its own instance.

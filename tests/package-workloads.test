@@ -7,12 +7,18 @@
 #
 #   A  a pure-Botlish package: the 2048 engine (examples/games/2048), packed
 #      as `game2048` -- no native file, no toolchain on either side;
-#   B  nested packages: sdlkit, which locks the generated SDL3 binding sdl3,
-#      installed in sdlkit's own .bot_modules;
-#   D  SDL3: sdlkit's frame through the package-owned libSDL3 (headless);
-#   E  Raven: the wrapper with its generated binding and the bridge archive
-#      built on the author's side, installed with no build on the consumer's;
-#   F  the Linux event loop's driver, likewise.
+#   B  nested packages: sdlkit, which locks sdl3 -- one release holding the
+#      generated SDL3 bindings, thunk archives and native libraries of
+#      linux-x86_64 and linux-aarch64 (PACKAGE-MANAGER-MILESTONE-2.md) --
+#      installed in sdlkit's own .bot_modules, compiled from target views;
+#   D  SDL3: sdlkit's frame through the libSDL3 the package bundles
+#      (headless), with no -L or LD_LIBRARY_PATH; deployed and relocated;
+#      the system's SDL3 chosen and honestly refused; a thunk;
+#   E  Raven: the wrapper with its generated bindings, bridge archives and
+#      libraven of both targets, built on the author's side, installed with
+#      no build on the consumer's;
+#   F  the Linux event loop's driver: archives of both targets and its
+#      public header.
 #
 # (C, two versions of one package on separate branches, is
 # tests/package-manager.test's pm-two-versions-two-branches.) The packages
@@ -36,8 +42,6 @@ testConstraint nativeBuilt [expr {![catch {native::binary}]}]
 set linuxHost [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
 testConstraint linuxHost $linuxHost
 testConstraint cToolchain [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
-testConstraint sdl3Run [expr {[core::cabi::hostTarget] eq "linux-x86_64" && [testConstraint nativeCCalls]
-    && [testConstraint cLinker] && [cffi::sdl3Dir] ne ""}]
 # Raven's package is assembled where its binding exists for the host and the
 # pinned headers are fetched (the bridge is compiled against them).
 proc ravenAssemblable {} {
@@ -47,10 +51,19 @@ proc ravenAssemblable {} {
     return [expr {[file isdirectory [file join $::projectRoot generated c raven $target raven]]
         && [file exists [file join $headers raven include Raven.h]]}]
 }
-testConstraint ravenPackage [ravenAssemblable]
-testConstraint ravenRun [expr {[testConstraint ravenPackage] && [testConstraint nativeCCalls]
-    && [testConstraint cLinker] && [cffi::ravenDir] ne ""}]
-testConstraint eventLoopRun [expr {$linuxHost && [testConstraint cToolchain] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+testConstraint ravenPackage [expr {[ravenAssemblable] && [cffi::ravenDir] ne "" && [core::cabi::hostTarget] eq "linux-x86_64"
+    && [auto_execok aarch64-linux-gnu-gcc] ne "" && [auto_execok cmake] ne "" && [auto_execok ninja] ne ""}]
+testConstraint ravenRun [expr {[testConstraint ravenPackage] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+testConstraint crossAarch64 [expr {[auto_execok aarch64-linux-gnu-gcc] ne "" && [auto_execok clang] ne ""}]
+# The repository's target-aware packages are one release for every target
+# their botlish.json names (linux-x86_64 and linux-aarch64): packing one
+# needs both targets' toolchains (tools/package-repository.tcl).
+testConstraint sdl3Package [expr {[core::cabi::hostTarget] eq "linux-x86_64" && [testConstraint crossAarch64]
+    && [testConstraint cToolchain] && [cffi::sdl3Dir] ne ""}]
+testConstraint sdl3Run [expr {[testConstraint sdl3Package] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
+testConstraint eventLoopPackage [expr {$linuxHost && [testConstraint cToolchain] && [testConstraint crossAarch64]
+    && [core::cabi::hostTarget] eq "linux-x86_64"}]
+testConstraint eventLoopRun [expr {[testConstraint eventLoopPackage] && [testConstraint nativeCCalls] && [testConstraint cLinker]}]
 
 proc fresh {tag} {
     return [makeDirectory pw-[pid]-$tag-[incr ::counter]]
@@ -98,6 +111,26 @@ proc repository {names} {
     exec [info nameofexecutable] $::repositoryTool $repo {*}$names
     set ::repositories($key) $repo
     return $repo
+}
+
+proc treeState {dir} {
+    set entries {}
+    foreach path [lsort [exec find $dir]] {
+        set type [file type $path]
+        set crc ""
+        if {$type eq "file"} {
+            set channel [open $path rb]
+            set crc [zlib crc32 [read $channel]]
+            close $channel
+        }
+        lappend entries [list [string range $path [string length $dir] end] $type $crc]
+    }
+    return $entries
+}
+
+proc kindOf {out} {
+    if {[regexp {\(PM ([A-Z]+)\)} $out -> kind]} { return $kind }
+    return ""
 }
 
 proc hirOf {path args} {
@@ -164,16 +197,17 @@ test pw-pure-botlish-same-hir {an installed package's program compiles to the HI
 } -cleanup cleanup -result 1
 
 # ---------------------------------------------------------------------------
-# B. Nested packages: sdlkit and its SDL3 binding
+# B. Nested packages: sdlkit and its SDL3 binding, one release for two targets
 
 set sdlkitMain "import sdlkit\n\nwith context sdlkit::open()\n\nshown = sdlkit::frame()\nsame = sdlkit::version_matches()\nsdlkit::close()\n\[shown, same\]\n"
+set hostView {.bot_modules .targets linux-x86_64}
 
-test pw-sdlkit-installs-its-binding {sdlkit and the generated SDL3 binding, packed for the host, install with one add: sdlkit in the application's .bot_modules, sdl3 in sdlkit's own; the compiler reads them as the instances sdlkit and sdlkit/sdl3, the binding ordinary and sdlkit contextualized, and the application cannot import the binding} -constraints {linuxHost} -body {
+test pw-sdlkit-installs-its-binding {sdlkit and the SDL3 package -- one release holding the generated bindings, thunk archives and native libraries of linux-x86_64 and linux-aarch64 -- install with one add: sdlkit in the application's .bot_modules, sdl3 in sdlkit's own; the host's target view holds the host's binding at its module paths; the compiler reads it as the instances sdlkit and sdlkit/sdl3, the binding ordinary and sdlkit contextualized, and the application cannot import the binding} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
     set app [fresh app]
     writeText [file join $app main.bot] $::sdlkitMain
     set r [pm add sdlkit -project $app -repository $repo]
-    set hir [hirOf [file join $app main.bot] -target [core::cabi::hostTarget]]
+    set hir [hirOf [file join $app main.bot] -target linux-x86_64]
     set statuses [dict create]
     dict for {ns unit} [dict get $hir direct units] {
         if {[string match sdlkit* $ns]} { dict set statuses $ns [dict get $unit status] }
@@ -182,49 +216,105 @@ test pw-sdlkit-installs-its-binding {sdlkit and the generated SDL3 binding, pack
     writeText [file join $sneaky main.bot] "import sdl3::init\n\n1\n"
     file copy -force [file join $app botlish.json] $sneaky
     pm install -project $sneaky -repository $repo
-    list [dict get $r status] [lrange [split [dict get $r out] \n] 0 1] \
-        [file isfile [file join $app .bot_modules sdlkit .bot_modules sdl3 sdl3 video.bot]] \
+    set view [file join $app {*}$::hostView sdlkit .bot_modules sdl3]
+    list [dict get $r status] [lrange [split [dict get $r out] \n] 0 2] \
+        [file isfile [file join $view sdl3 video.bot]] [file isdirectory [file join $view targets]] \
+        [file isfile [file join $app .bot_modules sdlkit .bot_modules sdl3 targets linux-aarch64 sdl3 video.bot]] \
         [dict get $statuses sdlkit] [lsort -unique [lmap {ns status} $statuses {expr {[string match sdlkit/sdl3::* $ns] ? $status : [continue]}}]] \
-        [catch {hirOf [file join $sneaky main.bot] -target [core::cabi::hostTarget]} m o] [lindex [dict get $o -errorcode] end]
-} -cleanup cleanup -match glob -result {0 {{sdlkit 0.1.0 (sha256 *): installed} {  sdl3 0.1.0 (sha256 *): installed}} 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
+        [catch {hirOf [file join $sneaky main.bot] -target linux-x86_64} m o] [lindex [dict get $o -errorcode] end]
+} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.0 (sha256 *): installed} {  sdl3 0.2.0 (sha256 *): installed} {view linux-x86_64: derived (* files, 2 native libraries)}} 1 0 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
 
-test pw-sdlkit-verify-and-reinstall {verify checks both instances against their artifacts; a fresh copy of the application reinstalls the same tree from botlish.json and the repository} -constraints {linuxHost} -body {
+test pw-sdl3-two-targets {the same sdl3 0.2.0 artifact serves linux-aarch64: preparing it derives a second view from the installed release (nothing reinstalled, the host's view untouched), the front end compiles sdlkit's program for linux-aarch64 from the AArch64 binding, its HIR is that target's, and the plan reports AArch64's system SDL3 unverified here} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
     set app [fresh app]
     writeText [file join $app main.bot] $::sdlkitMain
     pm add sdlkit -project $app -repository $repo
-    set v [pm verify -project $app -repository $repo]
+    set before [treeState [file join $app {*}$::hostView]]
+    set r [pm install -project $app -repository $repo -target linux-aarch64]
+    set hir [hirOf [file join $app main.bot] -target linux-aarch64]
+    set files [lmap {id file} [dict get $hir files] {
+        if {![string match *sdl3/video.bot [dict get $file path]]} continue
+        string map [list $app APP] [dict get $file path]
+    }]
+    set plan [pm native plan -project $app -target linux-aarch64]
+    list [dict get $r status] [lrange [split [dict get $r out] \n] 0 3] [expr {[treeState [file join $app {*}$::hostView]] eq $before}] \
+        [dict get $hir target] $files [hir::foreign::links $hir] \
+        [lsearch -inline [split [dict get $plan out] \n] {    unverified*}]
+} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.0: unchanged} {view linux-aarch64: derived (* files, 2 native libraries)} {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)} {view linux-x86_64: unchanged}} 1 linux-aarch64 APP/.bot_modules/.targets/linux-aarch64/sdlkit/.bot_modules/sdl3/sdl3/video.bot SDL3 {    unverified on this host: linux-aarch64's system must provide it}}
+
+test pw-sdlkit-verify-and-reinstall {verify checks both instances against their artifacts and the host's view, its native libraries verified again; a fresh copy of the application reinstalls the same tree and view from botlish.json and the repository} -constraints {sdl3Package} -body {
+    set repo [repository {sdlkit sdl3}]
+    set app [fresh app]
+    writeText [file join $app main.bot] $::sdlkitMain
+    pm add sdlkit -project $app -repository $repo
+    set v [pm verify -project $app -repository $repo -target linux-x86_64]
     set clone [fresh clone]
     file copy [file join $app botlish.json] [file join $app main.bot] $clone
     set i [pm install -project $clone -repository $repo]
-    set same 1
-    foreach path [glob -directory [file join $app .bot_modules sdlkit .bot_modules sdl3 sdl3] *.bot] {
-        if {[core::ReadFile $path] ne [core::ReadFile [file join $clone .bot_modules sdlkit .bot_modules sdl3 sdl3 [file tail $path]]]} { set same 0 }
-    }
-    list [dict get $v status] [lindex [split [dict get $v out] \n] end-1] [dict get $i status] $same
-} -cleanup cleanup -match glob -result {0 {verify: 2 package instance(s) in *: as installed} 0 1}
+    set same [expr {[treeState [file join $app {*}$::hostView]] eq [treeState [file join $clone {*}$::hostView]]}]
+    list [dict get $v status] [lindex [split [dict get $v out] \n] end-1] [dict get $i status] $same \
+        [llength [lsearch -all [split [dict get $v out] \n] {note: linux-x86_64: * bundled *}]]
+} -cleanup cleanup -match glob -result {0 {verify: 2 package instance(s) in *: as installed} 0 1 2}
 
 # ---------------------------------------------------------------------------
-# D. SDL3 running through the installed packages
+# D. SDL3 running and deployed through the installed packages
 
-test pw-sdlkit-runs {the application over the installed sdlkit runs natively, headless, against the package-owned libSDL3: every step of the frame and the version check true (the library itself is linked by -L and found by LD_LIBRARY_PATH: deployment is not the package manager's yet)} -constraints {sdl3Run} -body {
+test pw-sdlkit-runs {the application over the installed sdlkit runs natively, headless, against the SDL3 the package bundles: no -L and no LD_LIBRARY_PATH (the view's .lib is linked and searched), every step of the frame and the version check true} -constraints {sdl3Run} -body {
     set repo [repository {sdlkit sdl3}]
     set app [fresh app]
     writeText [file join $app main.bot] $::sdlkitMain
     pm add sdlkit -project $app -repository $repo
-    set lib [cffi::sdl3Dir]
     set hir [hirOf [file join $app main.bot]]
-    withEnvironment [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH $lib] {
-        native::withLinkDirs [list $lib] {
-            lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}
-        }
+    withEnvironment [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH {}] {
+        lmap backend {cranelift cranelift-generic} {lindex [outcomeUnderHir $backend $hir] 1}
     }
 } -cleanup cleanup -result {{[[true, true, true, true, true, true], true]} {[[true, true, true, true, true, true], true]}}
+
+test pw-sdlkit-deploy-relocates {native deploy places the bundled libSDL3.so.0 in DIR/lib; the executable linked with -runtime-path '$ORIGIN/lib' records that RUNPATH, and runs after DIR is moved and the application's packages are deleted, with no LD_LIBRARY_PATH} -constraints {sdl3Run} -body {
+    set repo [repository {sdlkit sdl3}]
+    set app [fresh app]
+    writeText [file join $app main.bot] $::sdlkitMain
+    pm add sdlkit -project $app -repository $repo
+    set dist [file join [fresh dist] out]
+    set d [pm native deploy -project $app -target linux-x86_64 -out $dist]
+    set e [pm -emit-native-executable -runtime-path {$ORIGIN/lib} [file join $app main.bot]]
+    file rename [file join $app main] [file join $dist main]
+    set moved [file join [fresh moved] game]
+    file rename $dist $moved
+    file delete -force [file join $app .bot_modules]
+    set runpath [lsearch -inline [split [exec readelf -d [file join $moved main]] \n] *RUNPATH*]
+    set run [withEnvironment [list SDL_VIDEO_DRIVER dummy LD_LIBRARY_PATH {}] {exec [file join $moved main]}]
+    list [dict get $d status] [dict get $e status] [string match {*\[$ORIGIN/lib\]*} $runpath] $run [lsort [glob -tails -directory [file join $moved lib] *]]
+} -cleanup cleanup -result {0 0 1 {[[true, true, true, true, true, true], true]} libSDL3.so.0}
+
+test pw-sdl3-system-origin {a consumer chooses the system's SDL3 with botlish.json's origins: the package manager then verifies a system-managed SDL3 and, finding none on this host (no distribution package, no system pkg-config record), refuses -- never taking the bundled one or a stray file instead -- and changes nothing} -constraints {sdl3Package} -body {
+    set repo [repository {sdlkit sdl3}]
+    set app [fresh app]
+    writeText [file join $app main.bot] $::sdlkitMain
+    pm add sdlkit -project $app -repository $repo
+    set descriptor [pm::descriptor::read [file join $app botlish.json] project]
+    dict set descriptor schema 2
+    dict set descriptor targets {}
+    dict set descriptor origins {SDL3 system}
+    writeText [file join $app botlish.json] [encoding convertfrom utf-8 [pm::descriptor::encode $descriptor]]
+    set before [treeState [file join $app .bot_modules]]
+    set r [pm install -project $app -repository $repo]
+    list [dict get $r status] [regexp {system library SDL3 \(libSDL3\.so\.0 or libSDL3\.so\) is not installed|no system metadata} [dict get $r out]] \
+        [expr {[treeState [file join $app .bot_modules]] eq $before}]
+} -cleanup cleanup -result {1 1 1}
+
+test pw-sdl3-thunk-archive {a program calling one of the binding's thunks (an SDL static inline function) links the package's prebuilt thunk archive from the view's .lib: no C compiler on the consumer's side, no -L} -constraints {sdl3Run} -body {
+    set repo [repository {sdlkit sdl3}]
+    set app [fresh app]
+    writeText [file join $app main.bot] "import sdl3::thunks::bits\n\nsdl3::thunks::bits::SDL_MostSignificantBitIndex32(8)\n"
+    pm add sdl3 -project $app -repository $repo
+    withEnvironment [list LD_LIBRARY_PATH {}] {lindex [outcomeUnderHir cranelift [hirOf [file join $app main.bot]]] 1}
+} -cleanup cleanup -result 3
 
 # ---------------------------------------------------------------------------
 # E. Raven
 
-test pw-raven-replaces-helper {the Raven package the package manager installs is file for file the tree tools/raven-package.tcl installs, plus its botlish.json: the bridge archive was built on the author's side, and nothing is compiled on the consumer's} -constraints {ravenPackage} -body {
+test pw-raven-installs-without-a-compiler {the Raven package installs with no C compiler or linker on PATH; its host view is file for file the tree tools/raven-package.tcl installs, plus its botlish.json and the bundled libraven: the bridge archive and the library were built on the author's side} -constraints {ravenPackage} -body {
     set repo [repository {raven}]
     set app [fresh app]
     set empty [fresh empty-path]
@@ -232,7 +322,7 @@ test pw-raven-replaces-helper {the Raven package the package manager installs is
     set helper [fresh helper]
     ravenPackage::install $helper
     set files {}
-    foreach root [list [file join $app .bot_modules raven] [file join $helper .bot_modules raven]] {
+    foreach root [list [file join $app {*}$::hostView raven] [file join $helper .bot_modules raven]] {
         set list {}
         foreach path [lsort [exec find $root -type f]] {
             lappend list [string range $path [string length $root/] end]
@@ -240,40 +330,60 @@ test pw-raven-replaces-helper {the Raven package the package manager installs is
         lappend files $list
     }
     lassign $files managed helped
-    list [dict get $r status] [lsearch -all -inline -not -exact $managed botlish.json] [expr {[lsearch -all -inline -not -exact $managed botlish.json] eq $helped}] \
-        [expr {[lsearch -exact $managed native/libraven_bridge.a] >= 0}]
-} -cleanup cleanup -result [list 0 [lsort [concat {README.md native/libraven_bridge.a native/raven_bridge.c raven.bot} [lmap f [glob -tails -directory [file join $::projectRoot generated c raven linux-x86_64 raven] *.bot] {string cat raven/ $f}]]] 1 1]
+    set managed [lsearch -all -inline -not -regexp $managed {^(botlish\.json|native/libraven\.so\.0)$}]
+    list [dict get $r status] [expr {$managed eq $helped}] [file isfile [file join $app {*}$::hostView .lib libraven.so.0]]
+} -cleanup cleanup -result {0 1 1}
 
-test pw-raven-runs {examples/raven's headless program over the installed raven package runs natively against the package-owned libraven: three clicks counted, Quit honored} -constraints {ravenRun} -body {
+test pw-raven-runs {examples/raven's headless program over the installed raven package runs natively against the libraven the package bundles, with no -L and no LD_LIBRARY_PATH: three clicks counted, Quit honored} -constraints {ravenRun} -body {
     set repo [repository {raven}]
     set app [fresh app]
     foreach file {headless.bot counter.bot} {
         file copy [file join $::projectRoot examples raven $file] $app
     }
     pm add raven -project $app -repository $repo
-    set lib [cffi::ravenDir]
     set hir [hirOf [file join $app headless.bot]]
-    withEnvironment [list LD_LIBRARY_PATH $lib] {
-        native::withLinkDirs [list $lib] {lindex [outcomeUnderHir cranelift $hir] 1}
-    }
+    withEnvironment [list LD_LIBRARY_PATH {}] {lindex [outcomeUnderHir cranelift $hir] 1}
 } -cleanup cleanup -result {["3", "3 clicks", "false", "0"]}
+
+test pw-raven-targets {Raven's release holds linux-x86_64 and linux-aarch64 (its AArch64 bridge archive and libraven inspected as AArch64 ELF); macos-aarch64 and windows-x86_64 it does not support, and preparing them is UNSUPPORTED, never an implied port} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set app [fresh app]
+    pm add raven -project $app -repository $repo
+    set arm [pm install -project $app -repository $repo -target linux-aarch64]
+    set plan [pm native plan -project $app -target linux-aarch64]
+    set mac [pm install -project $app -repository $repo -target macos-aarch64]
+    set win [pm install -project $app -repository $repo -target windows-x86_64]
+    list [dict get $arm status] [llength [lsearch -all [split [dict get $plan out] \n] {*ELF AArch64*}]] \
+        [dict get $mac status] [kindOf [dict get $mac out]] [kindOf [dict get $win out]]
+} -cleanup cleanup -result {0 2 1 UNSUPPORTED UNSUPPORTED}
 
 # ---------------------------------------------------------------------------
 # F. The Linux event loop's driver
 
-test pw-event-loop-runs {examples/event-loop/native over the installed event_loop_linux package: the driver's archive came in the artifact, the application builds only its own ticker (against the header the package installed), and the program's five ticks are handled} -constraints {eventLoopRun} -body {
+test pw-event-loop-runs {examples/event-loop/native over the installed event_loop_linux package: the driver's archive came in the artifact, the application builds only its own ticker -- against the header whose directory native plan -include names -- and the program's five ticks are handled} -constraints {eventLoopRun} -body {
     set repo [repository {event_loop_linux}]
     set app [fresh app]
     foreach file {main.bot ticker.bot ticks.bot ticker.c} {
         file copy [file join $::projectRoot examples event-loop native $file] $app
     }
     set r [pm add event_loop_linux -project $app -repository $repo]
-    exec cc -O2 -Wall -Wextra -Werror -fPIC -pthread -I[file join $app .bot_modules event_loop_linux native] \
-        -c [file join $app ticker.c] -o [file join $app ticker.o]
+    set include [string trim [dict get [pm native plan -project $app -include] out]]
+    exec cc -O2 -Wall -Wextra -Werror -fPIC -pthread $include -c [file join $app ticker.c] -o [file join $app ticker.o]
     exec ar rcs [file join $app libticker.a] [file join $app ticker.o]
     set value [lindex [outcomeUnderHir cranelift [hirOf [file join $app main.bot]]] 1]
-    list [dict get $r status] [file isfile [file join $app .bot_modules event_loop_linux native libevent_loop_linux.a]] $value
-} -cleanup cleanup -result {0 1 {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
+    list [dict get $r status] [string map [list $app APP] $include] \
+        [file isfile [file join $app {*}$::hostView event_loop_linux native libevent_loop_linux.a]] $value
+} -cleanup cleanup -result {0 -IAPP/.bot_modules/.targets/linux-x86_64/event_loop_linux/native 1 {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
+
+test pw-event-loop-linux-only {the event loop's driver is Linux's (x86-64 and AArch64 archives in one release): preparing a Windows or macOS view is UNSUPPORTED} -constraints {eventLoopPackage} -body {
+    set repo [repository {event_loop_linux}]
+    set app [fresh app]
+    pm add event_loop_linux -project $app -repository $repo
+    lmap target {windows-x86_64 macos-aarch64 linux-aarch64} {
+        set r [pm install -project $app -repository $repo -target $target]
+        list $target [dict get $r status] [kindOf [dict get $r out]]
+    }
+} -cleanup cleanup -result {{windows-x86_64 1 UNSUPPORTED} {macos-aarch64 1 UNSUPPORTED} {linux-aarch64 0 {}}}
 
 foreach dir [glob -nocomplain -directory [temporaryDirectory] pw-repo-[pid]-*] {
     file delete -force $dir

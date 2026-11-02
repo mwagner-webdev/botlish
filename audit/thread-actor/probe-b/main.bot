@@ -1,0 +1,141 @@
+# main.bot -- Probe B of THREAD-ACTOR-ARCHITECTURE-CENSUS.md: messages from
+# other OS threads into one Botlish thread's std::event_loop, with copied
+# payloads (xport.c). Build and run with ../tools/probe-b.tcl.
+#
+# One consumer actor (an ordinary event-loop task) per producer thread.
+# Each record names a payload slot; the consumer copies the payload into a
+# MutableBytes of this thread's heap (xp::take) and checks it: per-producer
+# FIFO order (sequence numbers), content, and nothing lost or duplicated.
+import event_loop_linux
+import std::abi
+import std::abi::bytes
+import std::byte
+import std::event_loop
+import std::int
+import std::mutable_array
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+import xp
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+fn expected_text(id: int, seq: int) -> str:
+    "p".concat(std::int::to_string(id)).concat(" seq ").concat(std::int::to_string(seq)).concat("|")
+
+# Whether DATA is the payload producer ID sent as SEQ in MODE (1 text, 2 bytes).
+fn content_ok?(data: std::abi::bytes::Bytes, mode: int, id: int, seq: int, size: int) -> bool errors LowerUnderrun, UpperOverrun:
+    if std::abi::bytes::length(data).value != size:
+        return false
+    if mode == 1:
+        want = expected_text(id, seq)
+        text = std::abi::bytes::decode_utf8(data):
+            on InvalidUtf8:
+                return false
+        return text.substring(0, want.length()) == want
+    first = std::abi::bytes::slice(data, 0, 1)
+    last = std::abi::bytes::slice(data, size - 1, size)
+    first == std::abi::bytes::from_list([std::byte::from_int(seq.mod(256))]) and last == std::abi::bytes::from_list([std::byte::from_int((seq + size - 1).mod(256))])
+
+# A consumer actor: TOTAL messages from producer ID on SRC (or until
+# STOP_AFTER, when it revokes its registration and closes the endpoint).
+# Its counters are private to its coroutine (a MutableArray local).
+nomethod fn consumer(label: str, id: int, src: std::event_loop::Reg, ep: event_loop_linux::Endpoint, total: int, mode: int, size: int, stop_after: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    # received, out of order, bad content, max latency, total latency, wrong producer
+    st = std::mutable_array::create(6, 0)
+    loop:
+        if st.at(0) >= total or (stop_after > 0 and st.at(0) >= stop_after):
+            break
+        e = std::event_loop::wait(src)
+        if e.reason != Wake::Event:
+            break
+        idx = e.a.mod(1048576)
+        from = e.a.shift_right(20).mod(256)
+        seq = e.a.shift_right(28)
+        if from != id:
+            st.set(5, st.at(5) + 1)
+        if seq != st.at(0):
+            st.set(1, st.at(1) + 1)
+        if mode != 0:
+            data = xp::take(idx, size)
+            ok = content_ok?(data, mode, id, seq, size):
+                on LowerUnderrun:
+                    false
+                on UpperOverrun:
+                    false
+            if not ok:
+                st.set(2, st.at(2) + 1)
+        lat = event_loop_linux::now_us() - e.b
+        if lat > st.at(3):
+            st.set(3, lat)
+        st.set(4, st.at(4) + lat)
+        st.set(0, st.at(0) + 1)
+    if stop_after > 0:
+        std::event_loop::revoke(src)
+        say(label.concat(" closed endpoint, records discarded "), event_loop_linux::close_endpoint(ep))
+    say(label.concat(" received "), st.at(0))
+    say(label.concat(" out of order "), st.at(1))
+    say(label.concat(" bad content "), st.at(2))
+    say(label.concat(" wrong producer "), st.at(5))
+    say(label.concat(" max latency us "), st.at(3))
+    say(label.concat(" total latency us "), st.at(4))
+    st.at(0)
+
+# Phase NAME: PRODUCERS threads each sending COUNT messages of SIZE bytes in
+# MODE (0 scalar record only, 1 text, 2 bytes), DELAY us apart; a consumer
+# each. Returns messages per second.
+nomethod fn phase(name: str, producers: int, count: int, size: int, mode: int, delay: int, stop_after: int, first_id: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native, d: std::event_loop::Driver) -> int errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    t0 = event_loop_linux::now_us()
+    c0 = event_loop_linux::cpu_us()
+    loop p from 0 to producers:
+        id = first_id + p
+        ep = event_loop_linux::endpoint(128)
+        src = std::event_loop::source(Delivery::Reliable, 64, :keep_alive)
+        coroutine {step, first} = consumer(name.concat(" consumer ").concat(std::int::to_string(id)), id, src, ep, count, mode, size, stop_after)
+        std::event_loop::adopt(step, first)
+        xp::start(event_loop_linux::endpoint_id(ep), std::event_loop::native_slot(src), std::event_loop::native_generation(src), id, count, size, mode, delay)
+    std::event_loop::run()
+    if stop_after > 0:
+        xp::stop()
+    xp::join()
+    t1 = event_loop_linux::now_us()
+    c1 = event_loop_linux::cpu_us()
+    loop p from first_id to first_id + producers:
+        say(name.concat(" producer ").concat(std::int::to_string(p)).concat(" posted "), xp::stat(p, 0))
+        say(name.concat(" producer ").concat(std::int::to_string(p)).concat(" refused posts (endpoint full) "), xp::stat(p, 1))
+        say(name.concat(" producer ").concat(std::int::to_string(p)).concat(" waits for payload table "), xp::stat(p, 2))
+        if stop_after > 0:
+            say(name.concat(" producer ").concat(std::int::to_string(p)).concat(" stopped at seq "), xp::stat(p, 3))
+    say(name.concat(" payloads left in table, freed "), xp::discard())
+    received = if stop_after > 0:
+        stop_after * producers
+    else:
+        count * producers
+    wall = t1 - t0
+    say(name.concat(" wall us "), wall)
+    say(name.concat(" loop cpu us "), c1 - c0)
+    say(name.concat(" messages "), received)
+    received
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    xp::init(1024)
+    phase("scalar", 2, 20000, 0, 0, 0, 0, 0)
+    phase("text64", 4, 5000, 64, 1, 0, 0, 2)
+    phase("bytes4k", 2, 2000, 4096, 2, 0, 0, 6)
+    phase("wakeups", 1, 200, 64, 1, 1000, 0, 8)
+    phase("shutdown", 1, 1000000, 64, 1, 0, 100, 9)
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

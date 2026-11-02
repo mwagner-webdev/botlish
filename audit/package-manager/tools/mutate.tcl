@@ -12,8 +12,9 @@
 # backend) gets the replacements, and tests/package-manager.test runs
 # against it (its own process, with a private -tmpdir; the single-file
 # compiler test skipped: it packs the copy, which no mutant changes the
-# packing of): the mutant is killed if a test fails or the file does not
-# complete. A mutant it misses SURVIVES; the report lists each mutant, the
+# packing of) -- or the test files a `%% FILE...` line of the mutant names
+# (PACKAGE-MANAGER-MILESTONE-2.md's mutants name tests/package-native.test):
+# the mutant is killed if a test fails or a file does not complete. A mutant it misses SURVIVES; the report lists each mutant, the
 # tests that killed it, and the survivors. The real checkout is never
 # modified.
 
@@ -26,7 +27,7 @@ foreach {option value} $argv {
 }
 
 # The mutants of mutants.txt (its header has the format), as
-# {NAME DESCRIPTION {FILE OLD NEW ...} ...}.
+# {NAME DESCRIPTION {FILE OLD NEW ...} TESTS ...}.
 proc readMutants {path} {
     set f [open $path r]
     fconfigure $f -encoding utf-8 -translation lf
@@ -39,10 +40,13 @@ proc readMutants {path} {
         switch -- $state {
             outside {
                 if {[regexp {^@@ (\S+) (.*)$} $line -> n d]} {
-                    if {$name ne ""} { lappend mutants $name $description $edits }
+                    if {$name ne ""} { lappend mutants $name $description $edits $tests }
                     set name $n
                     set description $d
                     set edits {}
+                    set tests {package-manager.test}
+                } elseif {[regexp {^%% (.+)$} $line -> files]} {
+                    set tests $files
                 } elseif {[regexp {^## (\S+)$} $line -> file]} {
                     set current $file
                 } elseif {$line eq "<<<<"} {
@@ -68,7 +72,7 @@ proc readMutants {path} {
             }
         }
     }
-    if {$name ne ""} { lappend mutants $name $description $edits }
+    if {$name ne ""} { lappend mutants $name $description $edits $tests }
     return $mutants
 }
 set mutants [readMutants [file join [file dirname [file normalize [info script]]] mutants.txt]]
@@ -119,7 +123,7 @@ proc run {timeout args} {
 set only [split [dict get $options -only] ,]
 set results {}
 try {
-    foreach {name description edits} $mutants {
+    foreach {name description edits tests} $mutants {
         if {$only ne {} && $name ni $only} continue
         set touched [dict create]
         set applied 1
@@ -145,19 +149,21 @@ try {
             }
             continue
         }
-        set tmp [file tempdir botlish-package-manager-mutant-run]
-        lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree tests package-manager.test] -tmpdir $tmp \
-            -skip {pm-bundled-compiler}] status output
-        file delete -force $tmp
-        set failed [regexp -all -inline -line {^==== (pm-\S+) } $output]
-        set failed [lsort -unique [lmap {- n} $failed {set n}]]
-        if {![regexp {Total\s+\d+\s+Passed} $output]} {
-            set tests "killed (the test file did not complete[expr {$failed eq {} ? "" : "; failed: [join [lrange $failed 0 5] {, }]"}])"
-        } elseif {[regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output -> n]} {
-            set tests [expr {$n > 0 ? "killed ($n failed: [join [lrange $failed 0 5] {, }][expr {[llength $failed] > 6 ? ", ..." : ""}])" : "survived"}]
-        } else {
-            set tests "killed (did not complete: [string range [lindex [split [string trim $output] \n] end] 0 120])"
+        set verdicts {}
+        foreach testFile $tests {
+            set tmp [file tempdir botlish-package-manager-mutant-run]
+            lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree tests $testFile] -tmpdir $tmp \
+                -skip {pm-bundled-compiler}] status output
+            file delete -force $tmp
+            set failed [regexp -all -inline -line {^==== ((?:pm|pn)-\S+) } $output]
+            set failed [lsort -unique [lmap {- n} $failed {set n}]]
+            if {![regexp {Total\s+\d+\s+Passed} $output]} {
+                lappend verdicts "killed ($testFile did not complete[expr {$failed eq {} ? "" : "; failed: [join [lrange $failed 0 5] {, }]"}])"
+            } elseif {[regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output -> n] && $n > 0} {
+                lappend verdicts "killed ($n failed: [join [lrange $failed 0 5] {, }][expr {[llength $failed] > 6 ? ", ..." : ""}])"
+            }
         }
+        set tests [expr {$verdicts eq {} ? "survived" : [join $verdicts {; }]}]
         set verdict [expr {[string match killed* $tests] ? "KILLED" : "SURVIVED"}]
         lappend results [list $name $description $verdict $tests]
         puts "$verdict $name\n    tests: $tests"

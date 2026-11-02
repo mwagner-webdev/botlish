@@ -194,16 +194,21 @@ proc pm::install::Rollback {ctx} {
         set name [pm::json::payload [dict get $op name]]
         set hasOld [pm::json::payload [dict get $op old]]
         set hasNew [pm::json::payload [dict get $op new]]
-        set active [file join $modules $name]
-        set staged [file join $txn new $name]
-        set old [file join $txn old $name]
+        # (A PM-1 journal has no kind: its operations are packages'.)
+        set kind package
+        if {[dict exists $op kind]} {
+            set kind [pm::json::payload [dict get $op kind]]
+        }
+        lassign [Paths $ctx $kind $name] active staged old
         if {$hasNew && ![pm::Exists $staged] && [pm::Exists $active]} {
-            pm::Rename $active [file join $txn discard $name]
+            pm::Rename $active [file join $txn discard $kind-$name]
         }
         if {$hasOld && [pm::Exists $old] && ![pm::Exists $active]} {
+            file mkdir [file dirname $active]
             pm::Rename $old $active
         }
     }
+    TidyViews $ctx
     foreach {key path} [list state [pm::state::Path [dict get $ctx meta]] descriptor [dict get $ctx descriptor]] {
         set saved [pm::json::payload [dict get $members $key]]
         set copy [file join $txn old-$key]
@@ -214,6 +219,27 @@ proc pm::install::Rollback {ctx} {
         }
     }
     pm::RemoveTree $txn
+}
+
+# {ACTIVE STAGED OLD}: where the operation KIND (package or view) on NAME
+# puts its active, staged and replaced trees.
+proc pm::install::Paths {ctx kind name} {
+    set txn [Txn $ctx]
+    if {$kind eq "view"} {
+        return [list [pm::view::Dir $ctx $name] [file join $txn views $name] [file join $txn oldviews $name]]
+    }
+    return [list [file join [dict get $ctx modules] $name] [file join $txn new $name] [file join $txn old $name]]
+}
+
+# Removes PROJECT/.bot_modules/.targets when it holds nothing: an empty one
+# would tell the compiler the packages are prepared for no target at all
+# (BOT-MODULES-MILESTONE-1.md, "Target package trees"), and the manager
+# never leaves one.
+proc pm::install::TidyViews {ctx} {
+    set root [pm::view::Root $ctx]
+    if {[pm::Exists $root] && [file type $root] eq "directory" && [pm::state::Entries $root] eq ""} {
+        file delete $root
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -359,10 +385,11 @@ proc pm::install::LinkTarget {path} {
 # Applies PLAN to the project CTX whose record is STATE, then writes
 # DESCRIPTORBYTES as its botlish.json ("" leaves it as it is). Lines
 # describing what changed are returned.
-proc pm::install::Apply {ctx plan state force descriptorBytes} {
+proc pm::install::Apply {ctx plan state force descriptorBytes {viewSpec {}}} {
     set modules [dict get $ctx modules]
     set report {}
     set operations {}
+    set oldViews [pm::state::views [dict get $ctx meta]]
     # What the plan replaces or removes must be the manager's, unchanged.
     foreach name [lsort [dict keys $plan]] {
         set node [dict get $plan $name]
@@ -389,29 +416,117 @@ proc pm::install::Apply {ctx plan state force descriptorBytes} {
     file mkdir [file join $txn new] [file join $txn old]
     try {
         # Stage.
+        set sources [dict create]
         foreach name [lsort [dict keys $plan]] {
             set node [dict get $plan $name]
             if {[dict get $node reuse]} {
                 dict set newState $name [Record $node]
+                dict set sources $name [file join $modules $name]
                 continue
             }
             dict set newState $name [Materialize $node [file join $txn new $name]]
+            dict set sources $name [file join $txn new $name]
             pm::Fault stage
         }
+        # The target views (pm/view.tcl): derived again where their inputs
+        # changed, made for the targets asked for, removed when dropped or
+        # when no package is target-aware any more.
+        lassign [Views $ctx $state $newState $sources $oldViews $viewSpec] newViews viewOperations viewLines
+        lappend operations {*}$viewOperations
     } on error {message options} {
         pm::RemoveTree $txn
         return -options $options $message
     }
-    set newStateBytes [pm::state::encode $newState]
+    set newStateBytes [pm::state::encode $newState $newViews]
     set statePath [pm::state::Path [dict get $ctx meta]]
     if {$operations eq "" && [pm::Exists $statePath] && [pm::ReadBytes $statePath] eq $newStateBytes
             && ($descriptorBytes eq "" || ([pm::Exists [dict get $ctx descriptor]]
                 && [pm::ReadBytes [dict get $ctx descriptor]] eq $descriptorBytes))} {
         pm::RemoveTree $txn
-        return [Report $plan $state {}]
+        return [concat [Report $plan $state {}] $viewLines]
     }
     Commit $ctx $operations $newStateBytes $descriptorBytes
-    return [Report $plan $state $operations]
+    return [concat [Report $plan $state $operations] $viewLines]
+}
+
+# The views of the new installation: {VIEWS OPERATIONS LINES}, VIEWS its
+# record (TARGET -> {derived files links}), OPERATIONS the view renames
+# ({TARGET HASOLD HASNEW view}) and LINES the report, after staging every
+# view that must be made in the transaction directory. VIEWSPEC: {requested
+# {T...} dropped {T...} origins {LIBRARY ORIGIN...}}.
+proc pm::install::Views {ctx oldState newState sources oldViews viewSpec} {
+    set requested [dict getdef $viewSpec requested {}]
+    set dropped [dict getdef $viewSpec dropped {}]
+    set origins [dict getdef $viewSpec origins {}]
+    set lines {}
+    set root [pm::view::Root $ctx]
+    if {[dict size $oldViews] == 0 && [pm::Exists $root]} {
+        pm::Fail MANUAL "$root exists, and the package manager did not make it: target package trees there are yours (the compiler reads them), and it never replaces them. Move it out of .bot_modules and run the command again"
+    }
+    foreach target [concat $requested $dropped] {
+        if {![pm::target::isTarget $target]} {
+            pm::Fail TARGET "\"$target\" is not a compilation target (the compiler's targets: [join [pm::target::names] {, }])"
+        }
+    }
+    set targets [lsort -unique [concat [dict keys $oldViews] $requested]]
+    set targets [lmap t $targets {if {$t in $dropped} continue; set t}]
+    set artifacts [dict create]
+    dict for {name record} $newState {
+        if {[dict get $record kind] eq "artifact"} {
+            dict set artifacts $name $record
+        }
+    }
+    set aware [pm::view::Aware $artifacts $sources]
+    if {!$aware} {
+        if {[dict size $oldViews] > 0} {
+            lappend lines "note: no installed package is target-specific any more: its target views are removed, and every target compiles from .bot_modules itself"
+        } elseif {$requested ne ""} {
+            lappend lines "note: no installed package is target-specific: every target compiles from .bot_modules itself, so there is no target view to keep"
+        }
+        set targets {}
+    } elseif {$targets eq "" && $dropped eq ""} {
+        set host [pm::target::host]
+        set supported [pm::view::Supported $artifacts $sources]
+        if {$host eq "" || ($supported ne "*" && $host ni $supported)} {
+            pm::Fail TARGET "the packages are target-specific and support [join $supported {, }], and this host's target is [expr {$host eq "" ? "none of the compiler's" : $host}]: prepare one with -target TARGET"
+        }
+        set targets [list $host]
+    }
+    # Manual packages (installed by hand: not the old or the new record's).
+    set manual [pm::view::Manual $ctx [dict merge $oldState $newState]]
+    set views [dict create]
+    set operations {}
+    foreach target $targets {
+        set dir [pm::view::Dir $ctx $target]
+        set derived [pm::view::Derived $target $newState $origins $manual]
+        if {[dict exists $oldViews $target] && [dict get $oldViews $target derived] eq $derived} {
+            set changes [pm::state::ViewChanges $dir [dict get $oldViews $target] .bot_modules/.targets/$target]
+            if {$changes eq ""} {
+                dict set views $target [dict get $oldViews $target]
+                lappend lines "view $target: unchanged"
+                continue
+            }
+            lappend lines "note: the view of $target was changed ([lindex $changes 0][expr {[llength $changes] > 1 ? ", ..." : ""}]); it is derived again (a view holds the package manager's copies, never your files)"
+        }
+        set staged [file join [Txn $ctx] views $target]
+        file mkdir [file dirname $staged]
+        set built [pm::view::Build $ctx $newState $sources $target $origins $manual $staged]
+        dict set views $target [dict get $built record]
+        set plan [dict get $built plan]
+        lappend operations [list $target [pm::Exists $dir] 1 view]
+        set libs [llength [dict get $plan libraries]]
+        lappend lines "view $target: [expr {[dict exists $oldViews $target] ? "derived again" : "derived"}] ([dict size [dict get $built record files]] files, $libs native librar[expr {$libs == 1 ? "y" : "ies"}])"
+        foreach note [dict get $plan notes] {
+            lappend lines "note: $target: $note"
+        }
+    }
+    dict for {target view} $oldViews {
+        if {![dict exists $views $target]} {
+            lappend operations [list $target [pm::Exists [pm::view::Dir $ctx $target]] 0 view]
+            lappend lines "view $target: removed"
+        }
+    }
+    return [list $views $operations $lines]
 }
 
 proc pm::install::CheckUnchanged {ctx name record force} {
@@ -492,8 +607,9 @@ proc pm::install::Commit {ctx operations stateBytes descriptorBytes} {
         }
     }
     set ops [lmap op $operations {
-        lassign $op name hasOld hasNew
-        list obj [list name [list str $name] old [list bool $hasOld] new [list bool $hasNew]]
+        lassign $op name hasOld hasNew kind
+        if {$kind eq ""} { set kind package }
+        list obj [list kind [list str $kind] name [list str $name] old [list bool $hasOld] new [list bool $hasNew]]
     }]
     set journal [list obj [list journal {num 1} operations [list arr $ops] \
         state [list str [dict get $saved state]] descriptor [list str [dict get $saved descriptor]]]]
@@ -503,17 +619,23 @@ proc pm::install::Commit {ctx operations stateBytes descriptorBytes} {
         file mkdir $modules
         set step 0
         foreach op $operations {
-            lassign $op name hasOld hasNew
+            lassign $op name hasOld hasNew kind
+            if {$kind eq ""} { set kind package }
+            lassign [Paths $ctx $kind $name] active staged old
+            set suffix [expr {$kind eq "view" ? "-view" : ""}]
             if {$hasOld} {
-                pm::Rename [file join $modules $name] [file join $txn old $name]
-                pm::Fault commit-old
+                file mkdir [file dirname $old]
+                pm::Rename $active $old
+                pm::Fault commit${suffix}-old
             }
             if {$hasNew} {
-                pm::Rename [file join $txn new $name] [file join $modules $name]
-                pm::Fault commit-new
+                file mkdir [file dirname $active]
+                pm::Rename $staged $active
+                pm::Fault commit${suffix}-new
             }
             incr step
         }
+        TidyViews $ctx
         pm::ReplaceFile $statePath $stateBytes
         pm::Fault state-written
         if {$descriptorBytes ne ""} {
@@ -538,8 +660,8 @@ proc pm::install::Report {plan state operations} {
         Describe [dict get $plan $name] [dict getdef $state $name ""] "" lines
     }
     foreach op $operations {
-        lassign $op name hasOld hasNew
-        if {!$hasNew} {
+        lassign $op name hasOld hasNew kind
+        if {!$hasNew && $kind ne "view"} {
             lappend lines "removed $name"
         }
     }

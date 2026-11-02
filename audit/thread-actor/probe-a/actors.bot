@@ -1,0 +1,285 @@
+# actors.bot -- Probe A of THREAD-ACTOR-ARCHITECTURE-CENSUS.md: several
+# actors on ONE std::event_loop, under the deterministic driver, with typed
+# mailboxes (actor.bot). Every actor is an ordinary coroutine adopted by the
+# loop; its state is the intermediate of a fold in its own body, which no
+# other code can name. Run on every backend by ../run-probes.tcl, which
+# requires one identical trace from all four.
+#
+#   tclsh9.0 main.tcl audit/thread-actor/probe-a/actors.bot
+import actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::list
+import std::str
+import type actor::Sent
+import type std::event_loop::Ending
+
+enum Kind:
+    Add,
+    SlowAdd,
+    Get,
+    Stop,
+    Closed,
+
+# A counter's message: what to do, a correlation id and where to reply.
+struct Op:
+    kind: Kind
+    amount: int
+    req: int
+    reply: actor::Address[Reply]
+
+struct Reply:
+    req: int
+    value: int
+
+# The application's mailboxes: one postbox per message type. Only this
+# program installs it; every function that sends or receives requires it.
+context struct Mail:
+    ops: actor::Postbox[Op]
+    replies: actor::Postbox[Reply]
+    lines: actor::Postbox[str]
+
+# A counter's private state (the fold's intermediate).
+struct Count:
+    total: int
+    handled: int
+
+nomethod fn say(who: str, text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(who.concat(": ").concat(text).concat(std::int::to_string(n)))
+
+fn closed_op() -> Op:
+    Op {kind: Kind::Closed, amount: 0, req: 0, reply: actor::nowhere[Reply]()}
+
+fn sent_name(s: Sent) -> str:
+    if s == Sent::Delivered:
+        "Delivered"
+    elif s == Sent::Full:
+        "Full"
+    elif s == Sent::Closed:
+        "Closed"
+    else:
+        "Stale"
+
+# Send, and while the mailbox is Full wait 50 us and try again: the
+# backpressure reaches the sender, which chooses to wait; nothing drops.
+# (A prototype without a "room" notification polls; see the census.)
+fn deliver(to: actor::Address[Op], m: Op, context ev: std::event_loop::Loop, mail: Mail) -> Sent errors IndexNotFound, std::event_loop::SchedulerFault:
+    first = actor::send(mail.ops, to, m)
+    if first != Sent::Full:
+        return first
+    say("deliver", "mailbox full, waiting for room, op ", m.amount)
+    fold with intermediate last Sent::Full:
+        if last != Sent::Full:
+            break
+        std::event_loop::sleep(50)
+        actor::send(mail.ops, to, m)
+
+# A counter actor. A SlowAdd handler suspends (sleeps 500 us of the
+# driver's clock) in the middle of the message: the actor takes no other
+# message meanwhile -- its one coroutine is suspended -- while every other
+# actor goes on.
+fn counter(name: str, inbox: actor::Inbox[Op], log_to: actor::Address[str], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    final = fold with intermediate st Count {total: 0, handled: 0}:
+        op = actor::receive(mail.ops, inbox):
+            on actor::MailboxClosed:
+                closed_op()
+        if op.kind == Kind::Stop or op.kind == Kind::Closed:
+            break
+        if op.kind == Kind::Add:
+            Count {total: st.total + op.amount, handled: st.handled + 1}
+        elif op.kind == Kind::SlowAdd:
+            say(name, "slow add begins, total ", st.total)
+            std::event_loop::sleep(500)
+            say(name, "slow add ends, total ", st.total + op.amount)
+            Count {total: st.total + op.amount, handled: st.handled + 1}
+        else:
+            s = actor::send(mail.replies, op.reply, Reply {req: op.req, value: st.total})
+            if s != Sent::Delivered:
+                say(name, "reply not delivered to req ", op.req)
+            Count {total: st.total, handled: st.handled + 1}
+    undelivered = actor::close(mail.ops, inbox)
+    actor::send(mail.lines, log_to, name.concat(" done total ").concat(std::int::to_string(final.total)).concat(" handled ").concat(std::int::to_string(final.handled)).concat(" undelivered ").concat(std::int::to_string(undelivered)))
+    final.total
+
+# The logger actor: a mailbox of str. It writes each line to the loop's
+# trace (a turn stamp is the trace's own).
+fn logger(inbox: actor::Inbox[str], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    n = fold with intermediate k 0:
+        line = actor::receive(mail.lines, inbox):
+            on actor::MailboxClosed:
+                ""
+        if line == "":
+            break
+        say("logger", line.concat(" #"), k)
+        k + 1
+    undelivered = actor::close(mail.lines, inbox)
+    say("logger", "closed, undelivered ", undelivered)
+    n
+
+# A client: N adds of 1..N to TO, then a Get; it waits for its reply on
+# its own reply mailbox and checks the correlation id. Two clients share
+# one counter; each gets only its own reply.
+fn client(name: str, n: int, base: int, to: actor::Address[Op], log_to: actor::Address[str], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    mine = actor::open(mail.replies)
+    loop i from 1 through n:
+        s = deliver(to, Op {kind: Kind::Add, amount: i, req: 0, reply: actor::nowhere[Reply]()})
+        if s != Sent::Delivered:
+            say(name, "add not delivered: ".concat(sent_name(s)).concat(" at "), i)
+        std::event_loop::yield_now()
+    req = base + n
+    deliver(to, Op {kind: Kind::Get, amount: 0, req: req, reply: mine.to})
+    r = actor::receive(mail.replies, mine.inbox):
+        on actor::MailboxClosed:
+            Reply {req: -1, value: -1}
+    if r.req == req:
+        say(name, "reply for my request, value ", r.value)
+    else:
+        say(name, "WRONG reply, req ", r.req)
+    actor::close(mail.replies, mine.inbox)
+    actor::send(mail.lines, log_to, name.concat(" finished"))
+    r.value
+
+# Backpressure: five sends into a mailbox of capacity 3 whose receiver is
+# busy (a slow add): the sender sees Full, yields, retries; nothing drops.
+fn flooder(to: actor::Address[Op], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    actor::send(mail.ops, to, Op {kind: Kind::SlowAdd, amount: 100, req: 0, reply: actor::nowhere[Reply]()})
+    refused = fold k in [1, 2, 3, 4, 5] with intermediate fulls 0:
+        first = actor::send(mail.ops, to, Op {kind: Kind::Add, amount: k, req: 0, reply: actor::nowhere[Reply]()})
+        if first == Sent::Full:
+            say("flooder", "Full at message ", k)
+            retried = fold with intermediate tries 1:
+                std::event_loop::yield_now()
+                again = actor::send(mail.ops, to, Op {kind: Kind::Add, amount: k, req: 0, reply: actor::nowhere[Reply]()})
+                if again == Sent::Delivered:
+                    break
+                tries + 1
+            say("flooder", "delivered after retries ", retried)
+            fulls + 1
+        else:
+            fulls
+    actor::send(mail.ops, to, Op {kind: Kind::Stop, amount: 0, req: 0, reply: actor::nowhere[Reply]()})
+    refused
+
+# Fairness: two actors exchange ROUNDS messages as fast as they can; a quiet
+# actor's one message, sent in the middle, is handled in the next turn.
+fn chatty(name: str, rounds: int, inbox: actor::Inbox[Op], peer: actor::Address[Op], serve: bool, context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    if serve:
+        actor::send(mail.ops, peer, Op {kind: Kind::Add, amount: 1, req: 0, reply: actor::nowhere[Reply]()})
+    got = fold i from 0 to rounds with intermediate n 0:
+        op = actor::receive(mail.ops, inbox):
+            on actor::MailboxClosed:
+                closed_op()
+        if op.kind != Kind::Add:
+            break
+        actor::send(mail.ops, peer, Op {kind: Kind::Add, amount: op.amount + 1, req: 0, reply: actor::nowhere[Reply]()})
+        n + 1
+    say(name, "exchanged ", got)
+    actor::close(mail.ops, inbox)
+    got
+
+fn quiet(inbox: actor::Inbox[Op], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    op = actor::receive(mail.ops, inbox):
+        on actor::MailboxClosed:
+            closed_op()
+    say("quiet", "handled its message, amount ", op.amount)
+    actor::close(mail.ops, inbox)
+    op.amount
+
+fn quiet_sender(to: actor::Address[Op], context ev: std::event_loop::Loop, mail: Mail) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    std::event_loop::yield_now()
+    say("quiet-sender", "sends in turn ", std::event_loop::turn_number())
+    actor::send(mail.ops, to, Op {kind: Kind::Add, amount: 7, req: 0, reply: actor::nowhere[Reply]()})
+    0
+
+fn ending_name(e: Ending) -> str:
+    if e == Ending::Returned:
+        "Returned"
+    elif e == Ending::Failed:
+        "Failed"
+    else:
+        "Fault"
+
+fn joined(xs: List[int]) -> str:
+    fold x in xs with intermediate s "":
+        s.concat(std::int::to_string(x)).concat(" ")
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, mail: Mail) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    log = actor::open(mail.lines)
+    coroutine {step: lg, first: lgf} = logger(log.inbox)
+    std::event_loop::adopt(lg, lgf)
+
+    # Stale addresses: a closed mailbox's address is Closed, and once its
+    # slot is reused, Stale -- it never reaches the replacement.
+    old = actor::open(mail.ops)
+    actor::close(mail.ops, old.inbox)
+    say("main", "send to a closed mailbox: ".concat(sent_name(actor::send(mail.ops, old.to, closed_op()))).concat(" "), 0)
+    shared = actor::open(mail.ops)
+    reused = if shared.to == old.to:
+        "same address"
+    else:
+        "new generation"
+    say("main", "same slot reused: ".concat(reused).concat(" "), 0)
+    say("main", "send to the old address: ".concat(sent_name(actor::send(mail.ops, old.to, closed_op()))).concat(" "), 0)
+    say("main", "queued in the replacement ", actor::queued(mail.ops, shared.inbox))
+
+    # Two clients share counter "c1"; a slow add suspends c1 mid-message.
+    coroutine {step: c1, first: c1f} = counter("c1", shared.inbox, log.to)
+    std::event_loop::adopt(c1, c1f)
+    actor::send(mail.ops, shared.to, Op {kind: Kind::SlowAdd, amount: 1000, req: 0, reply: actor::nowhere[Reply]()})
+    coroutine {step: a, first: af} = client("clientA", 3, 100, shared.to, log.to)
+    std::event_loop::adopt(a, af)
+    coroutine {step: b, first: bf} = client("clientB", 2, 200, shared.to, log.to)
+    std::event_loop::adopt(b, bf)
+
+    # Backpressure on a small mailbox (capacity 3, postbox ops is 3 too).
+    busy = actor::open(mail.ops)
+    coroutine {step: c2, first: c2f} = counter("c2", busy.inbox, log.to)
+    std::event_loop::adopt(c2, c2f)
+    coroutine {step: fl, first: flf} = flooder(busy.to)
+    std::event_loop::adopt(fl, flf)
+
+    # Fairness: ping-pong beside a quiet actor.
+    p = actor::open(mail.ops)
+    q = actor::open(mail.ops)
+    coroutine {step: pi, first: pif} = chatty("ping", 20, p.inbox, q.to, true)
+    std::event_loop::adopt(pi, pif)
+    coroutine {step: po, first: pof} = chatty("pong", 20, q.inbox, p.to, false)
+    std::event_loop::adopt(po, pof)
+    qq = actor::open(mail.ops)
+    coroutine {step: qu, first: quf} = quiet(qq.inbox)
+    std::event_loop::adopt(qu, quf)
+    coroutine {step: qs, first: qsf} = quiet_sender(qq.to)
+    std::event_loop::adopt(qs, qsf)
+
+    # Stop c1 after everything its clients send (the clients' Gets come
+    # after their adds; Stop is sent by main once the loop is quiet).
+    std::event_loop::run()
+    say("main", "loop quiet in turn ", std::event_loop::turn_number())
+    actor::send(mail.ops, shared.to, Op {kind: Kind::Stop, amount: 0, req: 0, reply: actor::nowhere[Reply]()})
+    actor::send(mail.ops, shared.to, Op {kind: Kind::Add, amount: 5, req: 0, reply: actor::nowhere[Reply]()})
+    std::event_loop::run()
+    # The logger still waits: shutdown revokes every registration, so its
+    # receive fails with MailboxClosed and it ends.
+    std::event_loop::shutdown(4)
+    outcomes = std::event_loop::take_outcomes()
+    loop o in outcomes:
+        std::event_loop::log("outcome task ".concat(std::int::to_string(o.task)).concat(" ").concat(ending_name(o.ending)).concat(" ").concat(std::int::to_string(o.value)))
+    std::event_loop::log("ops counters ".concat(joined(actor::counters(mail.ops))))
+    std::event_loop::log("replies counters ".concat(joined(actor::counters(mail.replies))))
+    std::event_loop::log("lines counters ".concat(joined(actor::counters(mail.lines))))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64, :trace)
+with context std::event_loop::deterministic::create()
+with context Mail {ops: actor::postbox[Op](1, 3), replies: actor::postbox[Reply](2, 3), lines: actor::postbox[str](3, 8)}
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -80,6 +80,12 @@ proc pm::catalog::Load {path origin} {
     if {[catch {pm::descriptor::fromBytes [dict get $archive descriptor] artifact "$path: botlish.json"} descriptor]} {
         pm::Fail ARTIFACT "$origin: $descriptor"
     }
+    if {[pm::targets::Aware $descriptor]} {
+        set problems [pm::targets::Problems $descriptor [dict keys [dict get $archive files]]]
+        if {$problems ne ""} {
+            pm::Fail ARTIFACT "$origin: the artifact's target layout is invalid:\n  [join $problems "\n  "]"
+        }
+    }
     set artifact [dict create name [dict get $descriptor name] version [dict get $descriptor version] \
         digest $digest path $path size [dict get $archive size] files [dict get $archive files] \
         descriptor $descriptor]

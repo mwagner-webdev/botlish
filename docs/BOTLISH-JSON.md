@@ -1,11 +1,13 @@
-# botlish.json, schema 1
+# botlish.json, schemas 1 and 2
 
 The normative specification of `botlish.json`, the package manager's
-metadata file (PACKAGE-MANAGER-MILESTONE-1.md). The implementation is
-`pm/descriptor.tcl` (the rules), `pm/json.tcl` (the encoding) and
-`pm/version.tcl` (versions and requests); `tests/package-manager.test`'s
-`pm-json-*`, `pm-version-*` and `pm-descriptor-*` tests check every rule
-below.
+metadata file (PACKAGE-MANAGER-MILESTONE-1.md; schema 2's targets and native
+dependencies: PACKAGE-MANAGER-MILESTONE-2.md). The implementation is
+`pm/descriptor.tcl` (the rules), `pm/targets.tcl` (schema 2's `targets`),
+`pm/json.tcl` (the encoding) and `pm/version.tcl` (versions and requests);
+`tests/package-manager.test`'s `pm-json-*`, `pm-version-*` and
+`pm-descriptor-*` tests and `tests/package-native.test`'s `pn-schema2-*`
+and `pn-target-*` tests check every rule below.
 
 The compiler never reads this file. A program compiles from the
 `.bot_modules` trees beside it (BOT-MODULES-MILESTONE-1.md) whether or not a
@@ -24,6 +26,7 @@ Contents:
 * [9. The canonical form](#9-the-canonical-form)
 * [10. Examples](#10-examples)
 * [11. Evolution](#11-evolution)
+* [12. Schema 2: targets and native dependencies](#12-schema-2-targets-and-native-dependencies)
 
 ## 1. Where it is, and who reads it
 
@@ -58,19 +61,25 @@ The value is an object whose keys are drawn from exactly these:
 
 | key | type | meaning |
 |---|---|---|
-| `schema` | number | required: `1` |
+| `schema` | number | required: `1` or `2` |
 | `name` | string | the package's name (section 4) |
 | `version` | string | the package's exact release (section 5) |
 | `dependencies` | object | direct dependency name -> request (section 6) |
 | `lock` | object | direct dependency name -> exact version (section 6) |
 | `sources` | object | direct dependency name -> where it comes from (section 7) |
+| `targets` | object | schema 2 only: the targets a package supports, each with its target-specific files and native dependencies (section 12) |
+| `origins` | object | schema 2 only, projects: native library name -> `"system"` or `"bundled"`, the consumer's choice where a package offers both (section 12) |
 
 Any other key is an error, never ignored: a key a later schema adds must not
 be half-understood by this one, and there is no `scripts`, `main`, `exports`,
 `type`, `engines`, `files`, `repository` or similar key. `schema` must be
-the JSON number `1` (not `"1"`, not `1.0`); a file whose `schema` is another
-number is refused as an unsupported schema ("a newer one needs a newer
-Botlish"), and one without `schema` is refused.
+the JSON number `1` or `2` (not `"1"`, not `1.0`); a file whose `schema` is
+another number is refused as an unsupported schema ("a newer one needs a
+newer Botlish"), and one without `schema` is refused. A schema 1 file using
+`targets` or `origins` is refused saying that they are schema 2's: a
+schema 1 reader (PM-1's) refuses them as unknown keys, so a file meant for
+schema 2 is never half-read by it. Everything else is the same in both
+schemas; a schema 1 file is read and written exactly as before.
 
 `dependencies`, `lock` and `sources` may be absent; absent and empty mean the
 same.
@@ -178,6 +187,8 @@ artifact (section 8).
 | every dependency locked | no (while authoring) | yes | yes |
 | an editable dependency | allowed | refused (it has no lock) | impossible |
 | `sources` | allowed | allowed (never packed) | refused |
+| `targets` (schema 2) | allowed | allowed (packed, its layout and native files checked) | allowed (checked again at every installation) |
+| `origins` (schema 2) | allowed | allowed (never packed) | refused |
 
 * **project**: the `botlish.json` of a directory a command manages (an
   application, or a package under development). `install` installs exact
@@ -195,9 +206,16 @@ artifact (section 8).
 The package manager writes a `botlish.json` in one form:
 
 * keys in the order `schema`, `name`, `version`, `dependencies`, `lock`,
-  `sources`; an absent `name` or `version`, an empty `lock` and empty
-  `sources` are left out, and `dependencies` is always written (`{}` when
-  there is none);
+  `sources`, `targets`, `origins`; an absent `name` or `version`, an empty
+  `lock`, empty `sources`, `targets` and `origins` are left out, and
+  `dependencies` is always written (`{}` when there is none); `schema` is
+  the file's own (a schema 1 file stays schema 1);
+* in `targets`, the targets sorted by name, each target's keys in the order
+  `files`, `libraries`, `frameworks`, `headers` (absent or empty ones left
+  out), each library's keys in the order `name`, `origin`, `linkage`,
+  `file`, `import`, `identity`, `needs`, `version`, `pkg-config`,
+  `symbols` (empty ones left out, but a bundled shared library's `needs`
+  always written), libraries, frameworks and headers in the order written;
 * the entries of `dependencies`, `lock` and `sources` sorted by name;
 * two spaces of indentation per level, `": "` after a key, one entry per
   line, `{}` and `[]` for empty containers, one trailing newline;
@@ -283,11 +301,149 @@ Refused, with the reason given:
 
 ## 11. Evolution
 
-A later schema is a new `schema` number. This schema reserves no key for
-it: a key added later is refused by this reader, never silently ignored, so
-a file meant for a later schema is never half-read. Native dependency
-metadata (PM-2), publication and signature records (PM-4) and provenance
-(PM-5) belong to later schemas or to records outside the artifact, never to
-optional keys of this one; signatures in particular are made over an
-artifact's digest (BOTPKG-FORMAT.md, "Identity"), never stored in the
-`botlish.json` they would sign.
+A later schema is a new `schema` number. A schema reserves no key for the
+next: a key added later is refused by this reader, never silently ignored,
+so a file meant for a later schema is never half-read. Native dependency
+metadata is schema 2 (section 12); publication and signature records (PM-4)
+and provenance (PM-5) belong to later schemas or to records outside the
+artifact, never to optional keys of these; signatures in particular are
+made over an artifact's digest (BOTPKG-FORMAT.md, "Identity"), never stored
+in the `botlish.json` they would sign -- and since a schema 2 artifact's
+`botlish.json` (its targets and native declarations with it) is inside the
+archive the digest covers, a signature over the digest authenticates every
+target variant and every native declaration at once.
+
+## 12. Schema 2: targets and native dependencies
+
+`"schema": 2` adds two keys. A package without `targets` is
+*target-independent* -- every file is the same for every target -- whatever
+its schema: a pure-Botlish package needs schema 1 and nothing else.
+
+### `targets`
+
+    "targets": {
+      TARGET: {
+        "files": DIR,                       optional
+        "libraries": [LIBRARY, ...],        optional
+        "frameworks": [NAME, ...],          optional, Apple targets only
+        "headers": [DIR, ...]               optional
+      }, ...
+    }
+
+A package with `targets` is *target-aware*: it supports exactly the targets
+it names, and none other -- a consumer preparing another is refused
+(`UNSUPPORTED`), never given the common files alone.
+
+* **TARGET** is a compilation target's name, exactly as the compiler's
+  `-target` takes it (core/cabi.tcl's table: `linux-x86_64`,
+  `linux-aarch64`, `macos-x86_64`, `macos-aarch64`, `windows-x86_64`,
+  `windows-x86_64-gnu`, `windows-aarch64`): an operating system, an
+  architecture and, where the C toolchain's ABI family differs, that family
+  too (`windows-x86_64` is MSVC's, `windows-x86_64-gnu` MinGW-w64's; the
+  Linux targets are the GNU C library's, and a library built against musl
+  is refused for them). There is no second naming convention.
+* **files** is a directory of the artifact (an archive path,
+  BOTPKG-FORMAT.md section 4) whose files are, for that target, at the
+  package root: `targets/linux-x86_64/sdl3/video.bot` is the module
+  `sdl3::video` when compiling for `linux-x86_64`. Every artifact file
+  under no target's directory is *common*: the same file for every target.
+  For each target, its *view* is the common files and its directory's files
+  so mapped; the files of another target's directory are not in it. Rules:
+  a target directory holds at least one file; two targets' directories are
+  equal or not nested; in a target's view no two files have one path (a
+  target file never replaces a common one), none collides ignoring case or
+  as a file and a directory, and no target file is `botlish.json`.
+  Several targets may name one directory.
+* **headers** are directories of the target's view holding public C
+  headers, for consumers' own C code (`botlish native plan -include`).
+* **frameworks** are Apple frameworks the package links (system-provided);
+  only a macOS target has them.
+
+A **LIBRARY** is an object:
+
+| key | | meaning |
+|---|---|---|
+| `name` | required | the native library's name as `extern c library "NAME"` writes it (letters, digits, `_ + . -`, not starting with `-`) |
+| `origin` | required | `bundled` (a file of the package) or `system` (the target's own installation) |
+| `linkage` | required | `static` or `shared` |
+| `file` | bundled | the library's file, a path in the target's view |
+| `import` | bundled shared, Windows | the DLL's import library (what the linker links), a path in the view |
+| `identity` | bundled shared: required; system: optional | the loader identity: an ELF soname, a Mach-O install name, a DLL's file name |
+| `needs` | bundled shared: required (`[]` for none) | the library's loader dependencies, exactly the binary's (ELF DT_NEEDED, Mach-O LC_LOAD_DYLIB, PE imports) |
+| `version` | system, optional | a request (section 5's grammar) the system's version must satisfy |
+| `pkg-config` | system, optional | the pkg-config module recording it (default: the name in lowercase) |
+| `symbols` | optional | exported C symbols the library must define |
+
+A library has at most one entry per origin in a target: two entries of one
+name, one bundled and one system, are alternatives the consumer chooses
+between (`origins`; bundled by default). A bundled library's facts are
+checked against its file when the package is packed and whenever a target
+view is derived (PACKAGE-MANAGER-MILESTONE-2.md, "Native verification"); a
+system library's on its own target's host only.
+
+### `origins`
+
+A project's choices, `"origins": {"SDL3": "system"}`: for every package
+offering both a bundled and a system `SDL3`, the system one. A project
+configuration like `sources`: never packed, refused in an artifact.
+
+### Example
+
+```json
+{
+  "schema": 2,
+  "name": "raven",
+  "version": "0.2.0",
+  "dependencies": {},
+  "targets": {
+    "linux-aarch64": {
+      "files": "targets/linux-aarch64",
+      "libraries": [
+        {
+          "name": "raven_bridge",
+          "origin": "bundled",
+          "linkage": "static",
+          "file": "native/libraven_bridge.a"
+        },
+        {
+          "name": "raven",
+          "origin": "bundled",
+          "linkage": "shared",
+          "file": "native/libraven.so.0",
+          "identity": "libraven.so.0",
+          "needs": [
+            "libm.so.6",
+            "libc.so.6",
+            "ld-linux-aarch64.so.1"
+          ]
+        }
+      ]
+    },
+    "linux-x86_64": {
+      "files": "targets/linux-x86_64",
+      "libraries": [ ... the same for x86-64 ... ]
+    }
+  }
+}
+```
+
+The package's common `raven.bot` declares `extern c library "raven_bridge"
+static at "native/libraven_bridge.a"`; each target's directory holds that
+archive, built for the target, at `native/libraven_bridge.a` of its view,
+and the target's generated binding at `raven/`. One artifact,
+`raven-0.2.0.botpkg`, is the release for both targets.
+
+Refused, with the reason given (each a line of the error):
+
+| text (in `targets`) | why |
+|---|---|
+| `{"linux-sparc": {}}` | not a compilation target |
+| `{"linux-x86_64": {"files": "../up"}}` | not an archive path |
+| `{"linux-x86_64": {"scripts": "x"}}` | unknown key |
+| a bundled library without `file` | a bundled library names its file |
+| a bundled shared library without `identity` or `needs` | both are stated |
+| a bundled Windows DLL without `import` | the linker links its import library |
+| a system library with `file` | a system library is the target's own |
+| `"frameworks"` for a Linux target | only Apple targets have frameworks |
+| two `system` entries of one name | at most one per origin |
+| `{}` | a target-independent package leaves `targets` out |

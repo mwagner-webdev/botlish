@@ -1,17 +1,34 @@
-# sha256.tcl -- SHA-256 (FIPS 180-4) in Tcl, for package artifact digests
-# (PACKAGE-MANAGER-MILESTONE-1.md, "Integrity").
+# sha256.tcl -- SHA-256 (FIPS 180-4) for package artifact digests
+# (PACKAGE-MANAGER-MILESTONE-1.md, "Integrity"; PACKAGE-MANAGER-MILESTONE-2.md,
+# "Hashing").
 #
 #   pm::sha256::hex BYTES      the lowercase hexadecimal digest of BYTES
 #   pm::sha256::file PATH      the digest of the file PATH's bytes
+#   pm::sha256::backend        "tool PATH" or "tcl", and why
 #
-# The package manager must run wherever the compiler does -- the single-file
-# compiler included, with no tcllib, no `sha256sum` and no native backend --
-# so the digest is computed here, in Tcl. The 64 rounds and the message
-# schedule are generated once, unrolled, as one procedure body (Compress), so
-# Tcl's bytecode compiler keeps every working variable in a local slot. It
-# hashes about 0.8 MB/s on a 2026 x86-64 container; an artifact is hashed
-# compressed, once per acquisition. Checked against FIPS 180-4's
-# test vectors and `sha256sum` (tests/package-manager.test, pm-sha256-*).
+# Two implementations of the one algorithm:
+#
+#   * the host system's own SHA-256 tool, at a fixed system path -- GNU
+#     coreutils' sha256sum (/usr/bin, /bin) on Linux, Perl's shasum
+#     (/usr/bin) on macOS, certutil.exe (%SystemRoot%\System32) on Windows:
+#     an established, trusted implementation the operating system ships
+#     (OpenSSL's command line is deliberately not used: it is no part of a
+#     distribution's contract). Never found on PATH, where any directory
+#     could hold a program of that name that lies about digests. It is
+#     started once per digest with the exact bytes on its standard input
+#     (certutil, which reads only files, gets a private temporary copy), so
+#     the bytes hashed are the bytes the package manager validated, never a
+#     file read again later. Before its first use in a process it must
+#     reproduce FIPS 180-4's known answers (Probe); a tool that does not, or
+#     fails, is not used again in the process;
+#   * the portable implementation below, in Tcl, for small inputs (where
+#     starting a process costs more than hashing) and wherever no tool is
+#     available. It hashes about 0.8 MiB/s.
+#
+# BOTLISH_PM_SHA256 (environment only) forces one: `tcl`, or `tool` (an
+# error where there is none: for the tests and benchmarks that must measure
+# one). The two are checked against each other and against independent
+# vectors (tests/package-manager.test, pm-sha256-*).
 
 namespace eval pm::sha256 {
     variable K {
@@ -101,14 +118,195 @@ proc pm::sha256::Hex {state} {
 }
 
 proc pm::sha256::hex {bytes} {
+    variable threshold
+    if {[string length $bytes] >= $threshold || [Forced] eq "tool"} {
+        set tool [Tool]
+        if {$tool ne ""} {
+            if {![catch {ToolHex $tool $bytes} digest]} {
+                return $digest
+            }
+            Disable "it failed: $digest"
+        }
+    }
+    return [TclHex $bytes]
+}
+
+proc pm::sha256::TclHex {bytes} {
     variable H0
     set state [Compress $H0 "$bytes[Padding [string length $bytes]]"]
     return [Hex $state]
 }
 
-# The digest of the file PATH, read in chunks (a large file is never held
-# whole).
+# The digest of the file PATH: the tool's when there is one, else read in
+# chunks (a large file is never held whole).
 proc pm::sha256::file {path} {
+    variable threshold
+    if {[::file size $path] >= $threshold || [Forced] eq "tool"} {
+        set tool [Tool]
+        if {$tool ne ""} {
+            if {![catch {ToolFile $tool $path} digest]} {
+                return $digest
+            }
+            Disable "it failed: $digest"
+        }
+    }
+    return [TclFile $path]
+}
+
+# ---------------------------------------------------------------------------
+# The system's tool
+
+namespace eval pm::sha256 {
+    # Below this many bytes the Tcl implementation is faster than starting
+    # a process (bench/package-manager.tcl measures both).
+    variable threshold 4096
+    # "" before the first use; then {KIND PATH}, or {none REASON}.
+    variable tool ""
+}
+
+proc pm::sha256::Forced {} {
+    if {[info exists ::env(BOTLISH_PM_SHA256)]} {
+        return $::env(BOTLISH_PM_SHA256)
+    }
+    return ""
+}
+
+# The candidates of this platform: {KIND PATH} each, in order.
+proc pm::sha256::Candidates {} {
+    if {$::tcl_platform(platform) eq "windows"} {
+        set root C:/Windows
+        if {[info exists ::env(SystemRoot)] && [regexp {^[A-Za-z]:[\\/][^;]*$} $::env(SystemRoot)]} {
+            set root [::file normalize $::env(SystemRoot)]
+        }
+        return [list [list certutil [::file join $root System32 certutil.exe]]]
+    }
+    return [list {sha256sum /usr/bin/sha256sum} {sha256sum /bin/sha256sum} {shasum /usr/bin/shasum}]
+}
+
+# The tool in use ({KIND PATH}), or "" when there is none.
+proc pm::sha256::Tool {} {
+    variable tool
+    set forced [Forced]
+    if {$forced eq "tcl"} {
+        return ""
+    }
+    if {$tool eq ""} {
+        set tool [list none "no SHA-256 tool at the system's fixed paths"]
+        foreach candidate [Candidates] {
+            lassign $candidate kind path
+            if {![::file isfile $path] || ![::file executable $path]} continue
+            if {[catch {Probe $candidate} problem] || $problem ne ""} {
+                set tool [list none "$path failed its known-answer test"]
+                continue
+            }
+            set tool $candidate
+            break
+        }
+    }
+    if {[lindex $tool 0] eq "none"} {
+        if {$forced eq "tool"} {
+            return -code error -errorcode {PM SHA256} "BOTLISH_PM_SHA256=tool, and there is none: [lindex $tool 1]"
+        }
+        return ""
+    }
+    return $tool
+}
+
+proc pm::sha256::Disable {reason} {
+    variable tool
+    set tool [list none $reason]
+    if {[Forced] eq "tool"} {
+        return -code error -errorcode {PM SHA256} "BOTLISH_PM_SHA256=tool, and the tool $reason"
+    }
+}
+
+# "" when the tool CANDIDATE reproduces FIPS 180-4's known answers (and
+# one more digest the Tcl implementation computes), else what differed.
+proc pm::sha256::Probe {candidate} {
+    set vectors [list abc ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad \
+        "" e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 \
+        abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq 248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1]
+    set block [string repeat "\x00\xff\x80\x7f" 300]
+    lappend vectors $block [TclHex $block]
+    foreach {input expected} $vectors {
+        set digest [ToolHex $candidate $input]
+        if {$digest ne $expected} {
+            return "[lindex $candidate 1] gave $digest for a known input"
+        }
+    }
+    return ""
+}
+
+# The tool's digest of BYTES, given on its standard input.
+proc pm::sha256::ToolHex {candidate bytes} {
+    lassign $candidate kind path
+    if {$kind eq "certutil"} {
+        set dir [::file tempdir botlish-sha256]
+        try {
+            set copy [::file join $dir input]
+            pm::WriteNew $copy $bytes
+            return [ToolFile $candidate $copy]
+        } finally {
+            ::file delete -force $dir
+        }
+    }
+    set command [list $path]
+    if {$kind eq "shasum"} {
+        lappend command -a 256
+    }
+    set channel [open |[concat $command [list 2>@1]] r+]
+    fconfigure $channel -translation binary -buffering full
+    try {
+        puts -nonewline $channel $bytes
+        chan close $channel write
+        set output [read $channel]
+    } finally {
+        catch {close $channel}
+    }
+    return [Parse $output $path]
+}
+
+proc pm::sha256::ToolFile {candidate path} {
+    lassign $candidate kind tool
+    switch -- $kind {
+        sha256sum { set output [exec $tool -- $path 2>@1] }
+        shasum { set output [exec $tool -a 256 -- $path 2>@1] }
+        certutil {
+            set output [exec $tool -hashfile [::file nativename $path] SHA256]
+            # certutil prints a header line, the digest (in older Windows
+            # versions spaced), and a status line.
+            set lines [split [string map {"\r" ""} $output] \n]
+            set output [string map {" " ""} [lindex $lines 1]]
+        }
+    }
+    return [Parse $output $tool]
+}
+
+proc pm::sha256::Parse {output tool} {
+    set digest [string tolower [lindex [split [string trim $output]] 0]]
+    if {![regexp {^[0-9a-f]{64}$} $digest]} {
+        error "$tool printed no SHA-256 digest"
+    }
+    return $digest
+}
+
+# Which implementation hashes large inputs here, and why: {tool PATH} or
+# {tcl REASON}.
+proc pm::sha256::backend {} {
+    if {[Forced] eq "tcl"} {
+        return [list tcl "BOTLISH_PM_SHA256=tcl"]
+    }
+    set found [Tool]
+    if {$found ne ""} {
+        return [list tool [lindex $found 1]]
+    }
+    variable tool
+    return [list tcl [lindex $tool 1]]
+}
+
+# The digest of the file PATH, read in chunks (a large file is never held
+# whole), in Tcl.
+proc pm::sha256::TclFile {path} {
     variable H0
     set state $H0
     set length 0

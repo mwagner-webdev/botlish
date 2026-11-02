@@ -1,0 +1,12 @@
+depth 1000: status 0 500500
+depth 1000000 (on the Botlish thread): status 0 500000500000
+greet: status 0 "hello, host"
+checked 21: status 0 42
+checked -5: status 1 Refused field -5
+direct call from a host thread: status 4 WRONG-THREAD
+depth 1000000 on the host's 512 KiB thread: status 2 NATIVE LIMIT STACK
+then depth 100 on the same instance: status 0 result 5050
+load: 1 host threads x 20000 requests: sum ok, mean round trip 14634 ns, max 3070428 ns, 35870 requests/s
+load: 4 host threads x 5000 requests: sum ok, mean round trip 21597 ns, max 1055533 ns, 114967 requests/s
+botlish thread: destroy 0, served 40008
+shutdown: pending served 0 0 0, late request status -1, refused after stop 1

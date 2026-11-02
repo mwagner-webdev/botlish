@@ -22,6 +22,8 @@
 #   -L DIR                 a library directory for a program that calls C
 #   -F DIR                 a framework directory (macOS) for one that links a
 #                          framework
+#   -runtime-path PATH     a directory an emitted executable's loader searches
+#                          for shared libraries ($ORIGIN/lib)
 #   -argv TEXT / -argv-hex HEX / -argv-none    the program's argv()
 #   -code -hir -ast -aot -aot-data -aot-spec -contexts -direct -traits
 #   -emit-nir -emit-clif   inspection output, before the program runs
@@ -180,6 +182,17 @@
 # program needs the host's system linker and its libraries; one that calls no
 # C needs neither.
 #
+# -runtime-path PATH records PATH in an executable -emit-native-executable
+# links as a directory its loader searches for shared libraries (an ELF
+# RUNPATH, a Mach-O LC_RPATH; PACKAGE-MANAGER-MILESTONE-2.md, "Native
+# deployment"): $ORIGIN/lib on Linux, @executable_path/lib on macOS, where
+# `botlish native deploy` places a target's bundled libraries, so the
+# executable runs wherever its directory is moved. Windows has none (its
+# loader searches the executable's own directory): the link refuses it there.
+# A program compiled from a target package tree (.bot_modules/.targets/T)
+# links that tree's .lib without -L, and a native backend's own run finds
+# its shared libraries there.
+#
 # A .hir file (HIR text, e.g. examples/hir/*.hir) is read with hir::readFile;
 # a .hirx file (HIR interchange) with hir::interchange::readFile;
 # a .bot file (Botlish source, e.g. examples/surface/*.bot) is parsed and
@@ -221,6 +234,7 @@ set cliOptions {
     -target NAME run {the C ABI target (default: the host's)}
     -L DIR run {a library directory, for a program that calls C}
     -F DIR run {a framework directory (macOS), for a program linking one}
+    -runtime-path PATH build {where an executable loads shared libraries from}
     -argv TEXT argv {append the argument TEXT to argv()}
     -argv-hex HEX argv {append an argument given as hex bytes}
     -argv-none {} argv {run the program with an empty argv()}
@@ -270,7 +284,7 @@ set cliInvocation [cliInvocation]
 # a first argument naming one runs the package manager, and nothing of the
 # compiler is loaded. No other invocation loads the package manager or reads
 # a botlish.json: compiling reads .bot_modules as it is.
-set pmCommands {add install update remove verify package}
+set pmCommands {add install update remove verify package native}
 if {[lindex $argv 0] in $pmCommands} {
     source [file join $root pm pm.tcl]
     exit [pm::cli::main $argv $cliInvocation]
@@ -970,6 +984,12 @@ foreach option [dict get $commandLine options] {
                 usageError "-F needs a directory (found an empty one)"
             }
             lappend native::frameworkDirs [file normalize $value]
+        }
+        -runtime-path {
+            if {$value eq "" || [regexp {[,\x00\n:;]} $value]} {
+                usageError "-runtime-path needs one path, with no comma, colon, semicolon or newline (found \"$value\")"
+            }
+            lappend native::runtimePaths $value
         }
         -lsp-scheduler {
             usageError "-lsp-scheduler is an option of -lsp"

@@ -1017,7 +1017,7 @@ main thread's 512 MiB stack:
 | Outcome | worker | main | main, rustc-linked | main, 512 MiB |
 |---|---|---|---|---|
 | success: a declared error failed and handled (`errors declared`) | `1008` on standard output, status 0 | the same | the same | the same |
-| a runtime error (`+` of an erased `list`, checked when it runs) | standard output empty; standard error `+: expected int, got [true] (CORE SEMANTIC TYPE)`; status 1 | the same | the same | the same |
+| a runtime error (`+` of two Lists, checked when it runs: run 2's operands were an erased `list`; since METHOD-RECEIVER-TYPE-CORRECTNESS-MILESTONE-1.md made those a compile-time TYPE they reach `+` through `any` parameters) | standard output empty; standard error `+: expected int, got [true] (CORE SEMANTIC TYPE)`; status 1 | the same | the same | the same |
 | the same in the driver protocol (`BOTLISH_NATIVE_RESULT`) | the result file holds `error {CORE SEMANTIC TYPE} {+: expected int, got [true]}`; status 0; standard output empty | the same | the same | the same |
 | the driver protocol with `BOTLISH_NATIVE_RUNS=3` | `times A B C`, `timing 0 BEST 3 COLLECTIONS`, `value {int 1008}` | the same | the same | the same |
 | the startup report unwritable (`BOTLISH_NATIVE_STARTUP_REPORT`) | `... (NATIVE IO)`, status 2 | the same | the same | the same |
