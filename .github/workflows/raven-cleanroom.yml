@@ -64,7 +64,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            cmake ninja-build libx11-dev gcc-aarch64-linux-gnu
+            cmake ninja-build libx11-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Pack the raven release (the author's one operation)
         run: tclsh9.0 tools/package-repository.tcl repo raven

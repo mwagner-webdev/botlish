@@ -277,8 +277,9 @@ repository already holding a different `raven-0.3.1.botpkg` is refused (`EXISTS`
 the author passes `-force` (`pw-raven-release-immutable`).
 
 Author-side prerequisites: Tcl 9, git, CMake, Ninja, a C compiler, libX11's
-development headers, the GNU AArch64 cross compiler, curl and dpkg-deb
-(the arm64 packages), network access once. None of them reaches the
+development headers, the GNU AArch64 cross compiler and its C library
+(Ubuntu: `gcc-aarch64-linux-gnu`, `libc6-dev-arm64-cross`), curl and
+dpkg-deb (the arm64 packages), network access once. None of them reaches the
 consumer.
 
 ## C. The clean-room environment
