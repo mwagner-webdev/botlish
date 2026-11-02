@@ -1,13 +1,15 @@
-# botlish.json, schemas 1 and 2
+# botlish.json, schemas 1, 2 and 3
 
 The normative specification of `botlish.json`, the package manager's
 metadata file (PACKAGE-MANAGER-MILESTONE-1.md; schema 2's targets and native
-dependencies: PACKAGE-MANAGER-MILESTONE-2.md). The implementation is
+dependencies: PACKAGE-MANAGER-MILESTONE-2.md; schema 3's run-time
+dependencies, licenses and notices: PACKAGE-MANAGER-MILESTONE-3.md). The implementation is
 `pm/descriptor.tcl` (the rules), `pm/targets.tcl` (schema 2's `targets`),
 `pm/json.tcl` (the encoding) and `pm/version.tcl` (versions and requests);
 `tests/package-manager.test`'s `pm-json-*`, `pm-version-*` and
-`pm-descriptor-*` tests and `tests/package-native.test`'s `pn-schema2-*`
-and `pn-target-*` tests check every rule below.
+`pm-descriptor-*` tests, `tests/package-native.test`'s `pn-schema2-*`
+and `pn-target-*` tests and `tests/package-authoring.test`'s `pa-schema*`
+tests check every rule below.
 
 The compiler never reads this file. A program compiles from the
 `.bot_modules` trees beside it (BOT-MODULES-MILESTONE-1.md) whether or not a
@@ -27,6 +29,7 @@ Contents:
 * [10. Examples](#10-examples)
 * [11. Evolution](#11-evolution)
 * [12. Schema 2: targets and native dependencies](#12-schema-2-targets-and-native-dependencies)
+* [13. Schema 3: run-time dependencies, licenses and notices](#13-schema-3-run-time-dependencies-licenses-and-notices)
 
 ## 1. Where it is, and who reads it
 
@@ -304,9 +307,11 @@ Refused, with the reason given:
 A later schema is a new `schema` number. A schema reserves no key for the
 next: a key added later is refused by this reader, never silently ignored,
 so a file meant for a later schema is never half-read. Native dependency
-metadata is schema 2 (section 12); publication and signature records (PM-4)
-and provenance (PM-5) belong to later schemas or to records outside the
-artifact, never to optional keys of these; signatures in particular are
+metadata is schema 2 (section 12), run-time dependencies and licenses
+schema 3 (section 13); publication and signature records (PM-4) and
+provenance (PM-3's records, BOTPKG-PROVENANCE.md; PM-5's anchors) belong to
+later schemas or to records outside the artifact, never to optional keys of
+these; signatures in particular are
 made over an artifact's digest (BOTPKG-FORMAT.md, "Identity"), never stored
 in the `botlish.json` they would sign -- and since a schema 2 artifact's
 `botlish.json` (its targets and native declarations with it) is inside the
@@ -447,3 +452,118 @@ Refused, with the reason given (each a line of the error):
 | `"frameworks"` for a Linux target | only Apple targets have frameworks |
 | two `system` entries of one name | at most one per origin |
 | `{}` | a target-independent package leaves `targets` out |
+
+## 13. Schema 3: run-time dependencies, licenses and notices
+
+`"schema": 3` is schema 2 with three keys more, and nothing else: a target's
+`runtime`, and a library's `license` and `notices`. A schema 2 file using
+one of them is refused, saying it is a schema 3 key; a reader of schemas 1
+and 2 (PM-2's) refuses schema 3 as an unsupported schema, so a file that
+declares run-time dependencies is never half-read as one without them. A
+file is read and written in its own schema; the package manager's author
+commands (PACKAGE-MANAGER-MILESTONE-3.md) raise a package's schema only to
+what its contents need -- native metadata 2, a run-time dependency, a
+license or a notice 3 -- and never lower one.
+
+### `runtime`
+
+    "runtime": [RUNTIME, ...]          in a target, optional
+
+A *run-time dependency* is something a package's native code uses at run
+time that no loader dependency names: a library its code opens by name
+(`dlopen`, `LoadLibrary`), or a *facility* that is no file at all (a
+graphics driver the Vulkan loader finds, a display server). The loader's
+dependencies are `needs` (section 12), exactly the binary's; a run-time
+dependency is never one of them, never part of the link, never part of the
+native closure an installation verifies, and its absence never makes a
+package uninstallable.
+
+| key | | meaning |
+|---|---|---|
+| `name` | required | its name (as a library name: letters, digits, `_ + . -`), unique in the target |
+| `kind` | required | `library` (opened by name) or `facility` (no file) |
+| `identity` | library: required; facility: absent | the name it is opened by: an ELF soname, a Mach-O install name, a DLL name |
+| `loaded-by` | optional | the library of this target that opens it |
+| `requirement` | required | `always` (whenever the package's native code runs), `capability` (only for one capability: a program that does not use it runs without it) or `optional` (used when present, never required) |
+| `capability` | `capability`: required; else absent | the capability's name: lowercase letters, digits and `-` |
+| `purpose` | required | what needs it, in one line of at most 300 characters |
+
+Rules: a `loaded-by` names a library of the same target; an `identity` is
+no library's identity and no bundled library's need in the target (a
+library the loader loads is declared as a library, `origin` system or
+bundled). Nothing checks that a library is opened at run time: `native
+audit` reports whether the identity's string occurs in the `loaded-by`
+library's bytes (consistent with an open by name, never a proof) and, on the
+target's own host, whether the system has a candidate (by its metadata, as
+for a system library); `native plan` lists run-time dependencies apart from
+the link, with that host's candidate. A facility cannot be verified from
+any file.
+
+### `license` and `notices`
+
+| key | | meaning |
+|---|---|---|
+| `license` | bundled, optional | the library's license, an SPDX license expression: identifiers (`MIT`, `Apache-2.0`, `LicenseRef-NAME`), `AND`, `OR`, `WITH` and parentheses, at most 256 characters |
+| `notices` | bundled, optional; needs `license` | files of the target's view (archive paths) that the license requires to travel with the library: its license text, NOTICE files, third-party notices |
+
+Both are the author's statement about what a consumer redistributes when
+it deploys the library (`native deploy`); nothing checks the statement
+against the library, and a system library has neither (it is the target's
+own). A notice must be a file of the target's view (checked with the rest
+of the layout, section 12). `native audit` notes a bundled library with no
+license.
+
+### Example
+
+The linux-x86_64 target of `raven` 0.3.2 (packages/raven, its release made
+by tools/package-repository.tcl), shortened:
+
+```json
+"linux-x86_64": {
+  "files": "targets/linux-x86_64",
+  "libraries": [
+    {"name": "raven_bridge", "origin": "bundled", "linkage": "static",
+     "file": "native/libraven_bridge.a"},
+    {"name": "raven", "origin": "bundled", "linkage": "shared",
+     "file": "native/libraven.so.0", "identity": "libraven.so.0",
+     "needs": ["libm.so.6", "libX11.so.6", "libc.so.6", "ld-linux-x86-64.so.2"],
+     "symbols": ["Rinit_ex", "Rvulkan_get_instance"],
+     "license": "Apache-2.0 AND OFL-1.1 AND (MIT OR Unlicense)",
+     "notices": ["licenses/raven/LICENSE", "licenses/raven/NOTICE", "licenses/raven/THIRD_PARTY.md", "..."]},
+    {"name": "X11", "origin": "system", "linkage": "shared",
+     "identity": "libX11.so.6", "symbols": ["XOpenDisplay"]}
+  ],
+  "runtime": [
+    {"name": "vulkan", "kind": "library", "identity": "libvulkan.so.1",
+     "loaded-by": "raven", "requirement": "capability", "capability": "desktop",
+     "purpose": "the Vulkan loader, opened by Raven's renderer when a program starts raven::desktop(); a headless program never opens it"},
+    {"name": "vulkan-driver", "kind": "facility", "loaded-by": "raven",
+     "requirement": "capability", "capability": "desktop",
+     "purpose": "a Vulkan driver (a GPU's, or Mesa's lavapipe) the loader finds, able to present to an X11 window: no file a package can name"},
+    {"name": "x11-xcb", "kind": "library", "identity": "libX11-xcb.so.1",
+     "loaded-by": "raven", "requirement": "optional",
+     "purpose": "opened by the renderer only for a Vulkan driver that presents through XCB alone"}
+  ]
+}
+```
+
+libX11 is a loader dependency (the bundled libraven's `DT_NEEDED`):
+declared a system library, verified at installation. The Vulkan loader is
+not: Raven opens it only when a program starts its renderer, so a headless
+installation needs no Vulkan at all, and `native plan` says what desktop
+rendering needs.
+
+Refused, with the reason given:
+
+| text | why |
+|---|---|
+| `"runtime"` in a schema 2 file | a schema 3 key |
+| a library run-time dependency without `identity` | the name it is opened by is stated |
+| a facility with `identity` | a facility is no file |
+| `"requirement": "sometimes"` | always, capability or optional |
+| a capability requirement without `capability` | the capability is named |
+| `"loaded-by"` naming no library of the target | it names the library that opens it |
+| an `identity` that is a declared library's or a bundled library's need | the loader loads it: it is a library |
+| `"license": "MIT AND"` | not a license expression |
+| `license` or `notices` on a system library | a system library is the target's own |
+| `notices` without `license` | the license the notices belong to |

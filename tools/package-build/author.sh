@@ -8,12 +8,14 @@
 #       instant, Tcl 9 by SHA-256), through $HTTPS_PROXY and its CA
 #       ($BOTLISH_PROXY_CA) when set -- the CA as a build secret, never in
 #       the image
-#   author.sh build OUT [NAME...]
+#   author.sh build OUT [-release] [NAME...]
 #       a fresh container from the image, the repository's committed tree
 #       (git archive HEAD) copied in at /src, an empty cache at /cache, and
 #       tools/package-repository.tcl run there for NAME... (default: every
 #       package); OUT receives the artifacts, their provenance records and
-#       build.log. Every build starts from nothing: no cache, no earlier
+#       build.log; -release makes a build of a recorded release that does
+#       not reproduce it an error (tools/package-repository.tcl). Every
+#       build starts from nothing: no cache, no earlier
 #       container. The container reaches the network (the recipes fetch the
 #       pinned sources and check them by commit and SHA-256).
 #
@@ -50,9 +52,14 @@ case ${1:-} in
     spec
     ;;
   build)
-    [[ $# -ge 2 ]] || { echo "usage: author.sh build OUT [NAME...]" >&2; exit 2; }
+    [[ $# -ge 2 ]] || { echo "usage: author.sh build OUT [-release] [NAME...]" >&2; exit 2; }
     out=$(realpath -m "$2")
     shift 2
+    flags=()
+    if [[ ${1:-} == -release ]]; then
+      flags=(-release)
+      shift
+    fi
     revision=$(git -C "$root" rev-parse HEAD)
     if [[ -n $(git -C "$root" status --porcelain --untracked-files=no) ]]; then
       echo "author.sh: the working tree has uncommitted changes; the build uses the committed tree $revision" >&2
@@ -74,7 +81,7 @@ case ${1:-} in
     docker start "$name" >/dev/null
     mkdir -p "$out"
     status=0
-    docker exec -w /src "$name" bash -c 'mkdir -p /out /cache && tclsh9.0 tools/package-repository.tcl /out "$@" > /out/release.txt 2> /out/build.log' bash "$@" || status=$?
+    docker exec -w /src "$name" bash -c 'mkdir -p /out /cache && tclsh9.0 tools/package-repository.tcl "$@" > /out/release.txt 2> /out/build.log' bash "${flags[@]}" /out "$@" || status=$?
     docker cp "$name:/out/." "$out/"
     docker cp "$name:/etc/botlish-author-packages" "$out/environment-packages.txt"
     cat "$out/release.txt"

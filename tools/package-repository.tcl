@@ -2,14 +2,24 @@
 # package repository: the author's side (PACKAGE-MANAGER-MILESTONE-1.md,
 # -2.md, and -3.md, "Real-package migration").
 #
-#   tclsh9.0 tools/package-repository.tcl ?-force? OUT ?NAME...?
+#   tclsh9.0 tools/package-repository.tcl ?-force? ?-release? OUT ?NAME...?
 #
 # writes OUT/NAME-VERSION.botpkg for each named package (default: every
 # package of packages/) and, for a native package, its provenance record
 # OUT/NAME-VERSION.provenance.json, and prints each release's identity. A
 # release is immutable: an OUT that already holds a different
 # NAME-VERSION.botpkg is refused (EXISTS: raise the version), unless -force
-# says this local file may be overwritten. A consumer then installs them
+# says this local file may be overwritten.
+#
+# A release once made is recorded in packages/RELEASES.tsv (name, version,
+# the artifact's SHA-256): one version, one artifact, on every machine. A
+# build of a recorded version whose bytes differ is a *candidate*, never
+# the release -- a rebuild that did not reproduce it (another toolchain, an
+# input left unpinned): the tool says so and names `botlish package compare`.
+# With -release (the publishing path: tools/package-build/author.sh's
+# container, whose builds reproduce the recorded releases) such a candidate
+# is an error, and its file is renamed NAME-VERSION.candidate-DIGEST.botpkg
+# so that nothing can take it for the release. A consumer then installs them
 # with the ordinary commands -- `botlish add sdlkit -repository OUT` -- and
 # nothing package-specific runs on the consumer's side: no compiler, no
 # script.
@@ -40,16 +50,19 @@ set root [file dirname $here]
 source [file join $root pm pm.tcl]
 
 proc usage {} {
-    puts stderr "usage: tclsh9.0 tools/package-repository.tcl ?-force? OUT ?NAME...?"
+    puts stderr "usage: tclsh9.0 tools/package-repository.tcl ?-force? ?-release? OUT ?NAME...?"
     exit 2
 }
 
 set out ""
 set names {}
 set force 0
+set release 0
 foreach arg $argv {
     if {$arg eq "-force"} {
         set force 1
+    } elseif {$arg eq "-release"} {
+        set release 1
     } elseif {[string match -* $arg]} {
         usage
     } elseif {$out eq ""} {
@@ -552,6 +565,45 @@ proc author::prepare {name stage} {
     return [list $dir $path]
 }
 
+# The releases recorded in packages/RELEASES.tsv: {NAME VERSION} -> SHA256.
+proc author::releases {} {
+    variable root
+    set recorded [dict create]
+    foreach line [split [pm::ReadBytes [file join $root packages RELEASES.tsv]] \n] {
+        if {$line eq "" || [string index $line 0] eq "#"} continue
+        lassign [split $line \t] name version digest
+        dict set recorded [list $name $version] $digest
+    }
+    return $recorded
+}
+
+# Compares the artifact just packed with the recorded release of its
+# version: the release, a new release, or a candidate.
+proc author::checkRelease {out descriptor release} {
+    set name [dict get $descriptor name]
+    set version [dict get $descriptor version]
+    set path [file join $out $name-$version.botpkg]
+    set digest [pm::sha256::hex [pm::ReadBytes $path]]
+    set recorded [releases]
+    set key [list $name $version]
+    if {![dict exists $recorded $key]} {
+        puts "  release: $name $version is not recorded in packages/RELEASES.tsv: a new release once it is published (record its SHA-256 there)"
+        return
+    }
+    if {[dict get $recorded $key] eq $digest} {
+        puts "  release: the recorded release of $name $version (packages/RELEASES.tsv)"
+        return
+    }
+    set message "CANDIDATE: the recorded release of $name $version is sha256 [dict get $recorded $key], and this build is $digest: a rebuild that did not reproduce it, never the release (botlish package compare RELEASE $path explains the difference)"
+    if {!$release} {
+        puts "  $message"
+        return
+    }
+    set candidate [file join $out $name-$version.candidate-[string range $digest 0 11].botpkg]
+    file rename -force $path $candidate
+    error "$message; renamed $candidate"
+}
+
 file mkdir $out
 set status 0
 foreach name $names {
@@ -573,6 +625,7 @@ foreach name $names {
         } else {
             puts "  targets: every target (no native files)"
         }
+        author::checkRelease $out $descriptor $release
     } on error {message options} {
         puts stderr "$name: $message"
         set status 1

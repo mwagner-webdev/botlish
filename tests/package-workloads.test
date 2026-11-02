@@ -228,9 +228,9 @@ test pw-sdlkit-installs-its-binding {sdlkit and the SDL3 package -- one release 
         [file isfile [file join $app .bot_modules sdlkit .bot_modules sdl3 targets linux-aarch64 sdl3 video.bot]] \
         [dict get $statuses sdlkit] [lsort -unique [lmap {ns status} $statuses {expr {[string match sdlkit/sdl3::* $ns] ? $status : [continue]}}]] \
         [catch {hirOf [file join $sneaky main.bot] -target linux-x86_64} m o] [lindex [dict get $o -errorcode] end]
-} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.0 (sha256 *): installed} {  sdl3 0.2.0 (sha256 *): installed} {view linux-x86_64: derived (* files, 2 native libraries)}} 1 0 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
+} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.1 (sha256 *): installed} {  sdl3 0.2.1 (sha256 *): installed} {view linux-x86_64: derived (* files, 2 native libraries)}} 1 0 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
 
-test pw-sdl3-two-targets {the same sdl3 0.2.0 artifact serves linux-aarch64: preparing it derives a second view from the installed release (nothing reinstalled, the host's view untouched), the front end compiles sdlkit's program for linux-aarch64 from the AArch64 binding, its HIR is that target's, and the plan reports AArch64's system SDL3 unverified here} -constraints {sdl3Package} -body {
+test pw-sdl3-two-targets {the same sdl3 0.2.1 artifact serves linux-aarch64: preparing it derives a second view from the installed release (nothing reinstalled, the host's view untouched), the front end compiles sdlkit's program for linux-aarch64 from the AArch64 binding, its HIR is that target's, and the plan reports AArch64's system SDL3 unverified here} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
     set app [fresh app]
     writeText [file join $app main.bot] $::sdlkitMain
@@ -246,7 +246,7 @@ test pw-sdl3-two-targets {the same sdl3 0.2.0 artifact serves linux-aarch64: pre
     list [dict get $r status] [lrange [split [dict get $r out] \n] 0 3] [expr {[treeState [file join $app {*}$::hostView]] eq $before}] \
         [dict get $hir target] $files [hir::foreign::links $hir] \
         [lsearch -inline [split [dict get $plan out] \n] {    unverified*}]
-} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.0: unchanged} {view linux-aarch64: derived (* files, 2 native libraries)} {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)} {view linux-x86_64: unchanged}} 1 linux-aarch64 APP/.bot_modules/.targets/linux-aarch64/sdlkit/.bot_modules/sdl3/sdl3/video.bot SDL3 {    unverified on this host: linux-aarch64's system must provide it}}
+} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.1: unchanged} {view linux-aarch64: derived (* files, 2 native libraries)} {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)} {view linux-x86_64: unchanged}} 1 linux-aarch64 APP/.bot_modules/.targets/linux-aarch64/sdlkit/.bot_modules/sdl3/sdl3/video.bot SDL3 {    unverified on this host: linux-aarch64's system must provide it}}
 
 test pw-sdlkit-verify-and-reinstall {verify checks both instances against their artifacts and the host's view, its native libraries verified again; a fresh copy of the application reinstalls the same tree and view from botlish.json and the repository} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]

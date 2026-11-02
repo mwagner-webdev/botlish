@@ -1,0 +1,6 @@
+# The releases of packages/ made by tools/package-repository.tcl (PACKAGE-MANAGER-MILESTONE-3.md,
+# "Release immutability"): one version, one artifact. A rebuild of a recorded version whose
+# SHA-256 differs is a candidate, never the release. Columns: name, version, the artifact's SHA-256.
+# A version is recorded once, when it is first released, and never changed or removed.
+raven	0.3.0	927f7850964507a279522b2c0810288841d187269dec733f75a84b0a8915485d
+raven	0.3.1	9336738e652d741e5a2d4785dcc1dc36f2e0b6f4d24329a20a0707df28ac5812

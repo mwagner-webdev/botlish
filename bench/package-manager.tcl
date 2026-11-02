@@ -93,7 +93,7 @@ try {
         set repo [file join $work repo]
         exec [info nameofexecutable] [file join $root tools package-repository.tcl] $repo sdlkit sdl3
     }
-    set artifact [file join $repo sdl3-0.2.0.botpkg]
+    set artifact [file join $repo sdl3-0.2.1.botpkg]
     lappend rows "the SDL3 release: one artifact, two targets" "[format %.1f [expr {[file size $artifact] / 1048576.0}]] MiB packed"
     lappend rows "SHA-256 of the SDL3 artifact (in process, auto)" "[measure $runs {pm::sha256::file $artifact}] ms"
     lappend rows "package inspect of the SDL3 artifact (full validation)" "[measure $runs {run package inspect $artifact}] ms"
