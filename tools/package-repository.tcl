@@ -403,6 +403,16 @@ proc author::sdl3 {dir targets} {
     variable stage
     source [file join $root tests cffi sdl3.tcl]
     set revision [revision]
+    # The pinned SDL3 (tools/c-bindgen/profiles/sdl3.tcl): its sources, which
+    # the binding generator's thunk build reads, and its headless build
+    # (tests/cffi/sdl3.tcl), both made here when they are not yet.
+    set fetched [exec [info nameofexecutable] [file join $root tools c-bindgen.tcl] fetch sdl3 2>@stderr]
+    set checkout [lindex [split [string trim $fetched] \n] end]
+    if {[cffi::sdl3Dir] eq ""} {
+        exec [info nameofexecutable] [file join $root tests cffi sdl3.tcl] >@stderr 2>@stderr
+    }
+    regexp {release-[0-9.]+} [pm::ReadBytes [file join $root tools c-bindgen profiles sdl3.tcl]] tag
+    upstream sdl3 https://github.com/libsdl-org/SDL [gitIdentity $checkout $tag] $checkout
     foreach target $targets {
         set binding [binding sdl3 $target]
         botlish package stage $dir -target $target -modules $binding
@@ -418,9 +428,12 @@ proc author::sdl3 {dir targets} {
             }
             set library [stripped $target [file join [cffi::sdl3Dir] libSDL3.so.0] [file join $stage sdl3-$target libSDL3.so.0]]
             botlish native add $library -target $target -name SDL3 -symbol SDL_GetVersion -symbol SDL_Init -package $dir
-            build "sdl3 $target" [list $target] [list targets/$target/native/libSDL3.so.0] {} headless \
-                [dict create cc [version [cc $target] --version] cmake [version cmake --version] ninja [version ninja --version]] \
-                [list -DSDL_UNIX_CONSOLE_BUILD=ON] [list "tclsh9.0 \$BOTLISH/tests/cffi/sdl3.tcl" "[strip $target] --strip-unneeded libSDL3.so.0"]
+            build "sdl3 $target" [list $target] [list targets/$target/native/libSDL3.so.0] {sdl3} headless \
+                [dict create cc [version [cc $target] --version] cmake [version cmake --version] ninja [version ninja --version] \
+                    strip [version [strip $target] --version]] \
+                [list -GNinja -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF \
+                    -DSDL_EXAMPLES=OFF -DSDL_INSTALL=OFF -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_X11=OFF -DSDL_WAYLAND=OFF] \
+                [list "tclsh9.0 \$BOTLISH/tests/cffi/sdl3.tcl (cmake, ninja SDL3-shared)" "[strip $target] --strip-unneeded libSDL3.so.0"]
         }
         botlish native require SDL3 -target $target -origin system -identity libSDL3.so.0 -version 3 -pkg-config sdl3 -package $dir
         foreach archive $archives {
@@ -428,7 +441,7 @@ proc author::sdl3 {dir targets} {
             # extern c library: the author's knowledge, stated here.
             regexp {^lib(.*)\.a$} [file tail $archive] -> name
             botlish native add $archive -target $target -name $name -package $dir
-            build "sdl3 thunks $target" [list $target] [list targets/$target/native/[file tail $archive]] {} thunks \
+            build "sdl3 thunks $target" [list $target] [list targets/$target/native/[file tail $archive]] {sdl3} thunks \
                 [dict create cc "[version clang --version] (--target, tools/cheader's toolchain)"] {} \
                 [list "tclsh9.0 \$BOTLISH/tools/c-bindgen.tcl build sdl3 -target $target"]
         }

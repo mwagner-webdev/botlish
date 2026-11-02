@@ -430,10 +430,18 @@ test pa-pack-refuses-incomplete {pack runs the audit: an incomplete native packa
     set written [lsort [glob -nocomplain -tails -directory $repo *]]
     set pure [authorPackage purely]
     set p [botlish package pack $pure -out $repo]
+    # A library PM-2's checks accept and the audit refuses: the build
+    # machine's run-time search path.
+    set rpath [sharedLibrary [file mkdir [file join $bin r]][file join $bin r] librp.so.1 librp.so.1 rp_value -Wl,-rpath,/home/builder/lib -Wl,--enable-new-dtags]
+    set rp [authorPackage rp]
+    botlish native add $rpath -target linux-x86_64 -name rp -package $rp
+    set audited [botlish package pack $rp -out $repo]
     list [dict get $r status] [kindOf [dict get $r err]] [string match "*cannot be packed*needs libz.so.1*" [dict get $r err]] \
         $written [dict get $p status] [regexp {audit|native} [dict get $p out]] \
-        [dict get [descriptorOf $pure] schema]
-} -cleanup cleanup -result {1 PACK 1 {} 0 0 1}
+        [dict get [descriptorOf $pure] schema] [dict get $audited status] \
+        [string match "*its native audit is incomplete*carries the run-time search path /home/builder/lib*" [dict get $audited err]] \
+        [file exists [file join $repo rp-1.0.0.botpkg]]
+} -cleanup cleanup -result {1 PACK 1 {} 0 0 1 1 1 0}
 
 # ---------------------------------------------------------------------------
 # 5. Schema 3
@@ -595,6 +603,22 @@ test pa-provenance-deterministic {a record is canonical and deterministic: the s
     list $same [dict get $refused status] [dict get $mismatch status] [string match "*MISMATCH*another file*" [dict get $mismatch out]] \
         [dict get $stale status] $reformatted [string match "*canonical form*" $message]
 } -cleanup cleanup -result {1 0 1 1 0 1 1}
+
+test pa-sha1-backends {SHA-1 (Git object identities only) agrees between the system's tool and the Tcl implementation around block boundaries and on FIPS 180-4's vectors; the tool is the system's, at its fixed path: a lying sha1sum first on PATH is never run} -constraints {unixFiles} -body {
+    set agree 1
+    foreach n {0 1 55 56 63 64 65 4095 4096 4097 100000} {
+        set input [string repeat "\x01b\xff" [expr {$n / 3 + 1}]]
+        set input [string range $input 0 [expr {$n - 1}]]
+        if {[pm::sha1::TclHex $input] ne [pm::sha1::hex $input]} { set agree 0 }
+    }
+    set dir [fresh path]
+    writeText [file join $dir sha1sum] "#!/bin/sh\ntouch [file join $dir ran]\necho 0000000000000000000000000000000000000000  -\n"
+    file attributes [file join $dir sha1sum] -permissions 0o755
+    set digest [withEnvironment [list PATH $dir:$::env(PATH)] {
+        exec [info nameofexecutable] << "source [list [file join $::projectRoot pm pm.tcl]]; puts \[pm::sha1::hex \[string repeat a 1000000\]\]"
+    }]
+    list $agree [pm::sha1::TclHex abc] $digest [file exists [file join $dir ran]]
+} -cleanup cleanup -result {1 a9993e364706816aba3e25717850c26c9cd0d89d 34aa973cd4c4daa4f61eeb2bdbad27316534016f 0}
 
 # ---------------------------------------------------------------------------
 # 8. Comparing release candidates

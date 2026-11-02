@@ -509,3 +509,272 @@ proc pm::version::compare {a b} {
 ====
     return [list [list sha256sum [lindex [auto_execok sha256sum] 0]]]
 >>>>
+
+# ---------------------------------------------------------------------------
+# PM-3: the author's side (PACKAGE-MANAGER-MILESTONE-3.md)
+
+@@ add-replaces-silently native add replaces a different file at a library's destination without -replace
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+        if {!$replace} {
+            Fail CONFLICT "$relative already holds a different file
+====
+        if {0} {
+            Fail CONFLICT "$relative already holds a different file
+>>>>
+
+@@ add-contradiction-ignored native add replaces a declaration its result contradicts without -replace
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+        if {$differences ne "" && ![dict get $options replace]} {
+====
+        if {0} {
+>>>>
+
+@@ add-destination-from-file-name a static library keeps the name of the file the author built instead of the name its linker searches for
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+        return native/[pm::target::linkFiles $target $name static]
+====
+        return native/static.a
+>>>>
+
+@@ stage-follows-links staging copies the file a symbolic link points to into the package
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+            link { lappend problems "$path is a symbolic link: staging copies regular files only, and never follows a link into the package" }
+====
+            link { dict set files $path [pm::ReadBytes $full] }
+>>>>
+
+@@ stage-replace-keeps-stale -replace adds the source's files and keeps the stale ones a regenerated binding dropped
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+        if {$state eq "replaced" && !$single} {
+            pm::RemoveTree [PathOf $pkg $prefix]
+        }
+====
+>>>>
+
+@@ audit-runpath-ignored a bundled library's run-time search path is not judged
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+                    foreach entryPath [dict get $facts rpath] {
+====
+                    foreach entryPath {} {
+>>>>
+
+@@ audit-empty-runpath-entry-allowed an empty run-time search path entry (the current directory) is not refused
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+                        if {$entryPath eq ""} {
+====
+                        if {0} {
+>>>>
+
+@@ audit-platform-library-bundled a bundled library that is the target's platform library is accepted
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+                    if {[pm::target::platformLibrary $target [dict get $facts identity]]} {
+                        lappend problems
+====
+                    if {0} {
+                        lappend problems
+>>>>
+
+@@ audit-unresolved-not-blocking a loader dependency nobody declares is listed but blocks nothing
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+                    lappend closure [list [dict get $library name] $need unresolved ""]
+                    lappend problems
+====
+                    lappend closure [list [dict get $library name] $need unresolved ""]
+                    list
+>>>>
+
+@@ audit-undeclared-native-allowed a native binary no library declares is packed unremarked
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+    if {[string range $head 0 3] in [list "\x7fELF" "\xcf\xfa\xed\xfe" "\xce\xfa\xed\xfe" "\xca\xfe\xba\xbe" "BC\xc0\xde" "\xde\xc0\x17\x0b"]} {
+        return 1
+    }
+====
+>>>>
+
+@@ audit-module-sets-ignored a target whose modules differ from another's is not reported
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+            if {$missing ne ""} {
+                lappend problems "its view lacks
+====
+            if {0} {
+                lappend problems "its view lacks
+>>>>
+
+@@ audit-functions-ignored a C function the modules declare that no library exports is not a problem
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+            if {$unverified || $target ne $host} {
+====
+            if {1} {
+>>>>
+
+@@ audit-static-duplicates-allowed two static archives defining one symbol are not reported
+%% package-authoring.test
+## pm/author.tcl
+<<<<
+                        if {[dict exists $definers $symbol] && [dict get $definers $symbol] ne $name} {
+====
+                        if {0} {
+>>>>
+
+@@ pack-skips-audit pack writes an artifact whatever the native audit says
+%% package-authoring.test
+## pm/commands.tcl
+<<<<
+        if {![pm::author::Packable $audit]} {
+====
+        if {0} {
+>>>>
+
+@@ runtime-made-mandatory a run-time dependency this machine lacks fails the installation, as a loader dependency would
+%% package-authoring.test
+## pm/native.tcl
+<<<<
+                    set candidate [dict create found 0 text $evidence]
+====
+                    set candidate [dict create found 0 text $evidence]
+                    lappend problems "[dict get $dependency name]: $evidence"
+>>>>
+
+@@ runtime-identity-in-link-allowed a run-time dependency naming a library of the link (a declared library or a bundled one's need) is accepted
+%% package-authoring.test
+## pm/targets.tcl
+<<<<
+                if {[dict get $dependency identity] ne "" && [string tolower [dict get $dependency identity]] in $loaded} {
+====
+                if {0} {
+>>>>
+
+@@ schema3-keys-in-schema2 a schema 2 file's target may hold schema 3's runtime
+%% package-authoring.test
+## pm/targets.tcl
+<<<<
+    set allowed [expr {$schema >= 3 ? $targetKeys3 : $targetKeys}]
+====
+    set allowed $targetKeys3
+>>>>
+
+@@ license-unchecked any text is accepted as a license expression
+%% package-authoring.test
+## pm/targets.tcl
+<<<<
+    set tokens [regexp -all -inline {\(|\)|[^\s()]+} $text]
+====
+    return ""
+    set tokens [regexp -all -inline {\(|\)|[^\s()]+} $text]
+>>>>
+
+@@ cascade-restored a failed system library's declared identity is reported again as an undeclared need
+%% package-authoring.test
+## pm/native.tcl
+<<<<
+            if {[dict exists $failedProviders [string tolower $need]] || [dict exists $failedProviders [string tolower [file tail $need]]]} continue
+====
+>>>>
+
+@@ provenance-tree-unchecked an asserted Git tree is recorded as confirmed whatever the source files' tree is
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+                        if {[dict get $computed tree] ne [dict get $source git tree]} {
+====
+                        if {0} {
+>>>>
+
+@@ provenance-binding-unchecked a record is taken for an artifact without comparing its subject's digest
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+    if {[dict get $subject sha256] ne [dict get $artifact digest]} {
+====
+    if {0} {
+>>>>
+
+@@ provenance-host-paths-published a path of the building machine passes into a published record
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+    regsub -all {[A-Za-z][A-Za-z0-9+.-]*://[^\s"']*} $text "" local
+====
+    set local ""
+>>>>
+
+@@ provenance-local-paths-recorded the local directory a source was checked from is written into the record
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+        if {![dict exists $item $key] || $type eq "local"} continue
+====
+        if {![dict exists $item $key]} continue
+>>>>
+
+@@ evidence-unknown-keys-ignored an evidence key the format does not know is skipped instead of refused
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+        if {$index < 0} {
+            lappend problems "$where: unknown key
+====
+        if {$index < 0} {
+            continue
+            lappend problems "$where: unknown key
+>>>>
+
+@@ git-tree-no-conversion the Git tree is computed from the working tree's bytes, without .gitattributes' text conversions
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+                switch -- [Conversion $rules $path] {
+====
+                switch -- none {
+>>>>
+
+@@ git-tree-octal-mode the executable bit is read with Tcl 9's decimal 0100, not 0o100: every file a 100755 blob
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+                if {$::tcl_platform(platform) eq "unix" && ([file attributes $full -permissions] & 0o100)} {
+====
+                if {$::tcl_platform(platform) eq "unix" && ([file attributes $full -permissions] & 0100)} {
+>>>>
+
+@@ compare-by-descriptor two candidates are reported identical when their botlish.json files are
+%% package-authoring.test
+## pm/release.tcl
+<<<<
+    set identical [expr {[dict get $a digest] eq [dict get $b digest]}]
+====
+    set identical [expr {[dict get $a descriptor] eq [dict get $b descriptor]}]
+>>>>
+
+@@ sha1-tool-from-path the SHA-1 tool is looked up on PATH
+%% package-authoring.test
+## pm/sha1.tcl
+<<<<
+    return [list {sha1sum /usr/bin/sha1sum} {sha1sum /bin/sha1sum} {shasum /usr/bin/shasum}]
+====
+    return [list [list sha1sum [lindex [auto_execok sha1sum] 0]]]
+>>>>
