@@ -1,0 +1,16 @@
+# erased-result.bot -- an `any` payload returned as the imprint variable M: rejected (TYPE: "function result does not prove declared type M").
+opaque struct Box[M]:
+    payload: any
+
+struct Pt:
+    x: int
+    y: int
+
+fn wrap(m: M) -> Box[M]:
+    Box[M] {payload: m}
+
+fn unwrap(b: Box[M]) -> M:
+    b.payload
+
+p = unwrap(wrap(Pt {x: 1, y: 2}))
+p.x + p.y

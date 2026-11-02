@@ -1,0 +1,30 @@
+# coroutine-place.bot -- a coroutine root holding a place of the application's context: rejected (MUTABLE-PLACE-RECEIVER).
+import std::mutable_vector
+
+opaque struct Box[M]:
+    items: MutableVector[M]
+
+fn box() -> Box[M]:
+    Box[M] {items: std::mutable_vector::from_list([])}
+
+nomethod fn put(place b: Box[M], m: M):
+    b.items.push(m)
+
+nomethod fn host(place b: Box[M]) -> int errors IndexNotFound:
+    yield 0
+    yield b.items.length()
+    b.items.length()
+
+context struct Mail:
+    ints: Box[int]
+
+fn main(context mail: Mail) -> int errors IndexNotFound:
+    coroutine {step, first} = host(mail.ints)
+    put(mail.ints, 4)
+    a = step()
+    put(mail.ints, 5)
+    b = step()
+    a * 10 + b
+
+with context Mail {ints: box[int]()}
+main()

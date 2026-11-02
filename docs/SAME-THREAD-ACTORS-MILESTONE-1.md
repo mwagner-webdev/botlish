@@ -192,9 +192,9 @@ yields to whoever resumes it, and that resumer must hold the mailboxes.
 
 ### 4.3 What the language allowed, and the one addition
 
-B needs a host that is generic in the message type. The experiments (run
-against this commit; the programs are short and are quoted in the
-report's history) found every typed route closed:
+B needs a host that is generic in the message type. The experiments
+(`audit/actor/experiments/`, each rejected as its README states) found
+every typed route closed:
 
 | what was tried | result |
 |---|---|
@@ -575,6 +575,7 @@ keep the loop alive, and the library adds no scheduling rule.
 | `tests/actor.test`, `tests/actor/*.bot` | scenarios, authority variants, rejections, source invariants |
 | `audit/actor/tools/mutate.tcl`, `mutants.txt` | the mutation harness |
 | `bench/actor.tcl`, `bench/actor/` | the performance report |
+| `audit/actor/experiments/` | the typed routes section 4.3 found closed |
 | `compilerpedia/topics/concepts.topic` (`concept.actors`), `compilerpedia/generated/stdlib.topic` | the reference |
 | `audit/golden/migration/census/actor.tsv` | the tests' census rows |
 
