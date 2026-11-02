@@ -285,8 +285,16 @@
 #                     interval LO HI  the result is always in LO..HI (two
 #                                     integers, LO <= HI; stored in decimal):
 #                                     a bound of the operation itself, e.g.
-#                                     std::char::scalar_value's Unicode scalar
-#                                     values or hash's 61-bit mask
+#                                     hash's 61-bit mask
+#                     intervals {LO HI} {LO HI}...   the result is always
+#                                     in the union of these components (at
+#                                     least two, sorted, disjoint and not
+#                                     adjacent, stored in decimal): a set
+#                                     with gaps, e.g. std::char::scalar_value's
+#                                     Unicode scalar values, never a
+#                                     surrogate. hir::range::RegisteredRange
+#                                     reads its hull, the interval-set facts
+#                                     (hir/intset.tcl) its components
 #                     collection-length   the result is always a String or
 #                                     List length: >= 0 and, by the runtime's
 #                                     own enforced construction limit
@@ -863,6 +871,26 @@ proc core::native::ValidLayoutRole {role arity} {
 proc core::native::ValidResultRange {range} {
     if {$range in {{} nonneg collection-length}} {
         return $range
+    }
+    if {![catch {llength $range} n] && $n >= 2 && [lindex $range 0] eq "intervals"} {
+        # A set with gaps: at least two components (one is `interval`),
+        # each {LO HI} of integers LO <= HI, sorted, each above the
+        # previous one's successor (disjoint and not adjacent: the
+        # canonical form, so a registration states each set one way).
+        set out [list intervals]
+        set previous ""
+        foreach component [lrange $range 1 end] {
+            if {[catch {llength $component} m] || $m != 2} { return bad }
+            lassign $component lo hi
+            if {![string is entier -strict $lo] || ![string is entier -strict $hi] || $lo > $hi} {
+                return bad
+            }
+            if {$previous ne "" && $lo <= $previous + 1} { return bad }
+            set previous $hi
+            lappend out [list [expr {$lo + 0}] [expr {$hi + 0}]]
+        }
+        if {[llength $out] < 3} { return bad }
+        return $out
     }
     if {[catch {llength $range} n] || $n != 3 || [lindex $range 0] ne "interval"} {
         return bad

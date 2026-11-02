@@ -951,6 +951,16 @@ proc surface::lower::Node {node} {
                         typeOrigin [Origin [dict get $clause typeSpan] "[dict get $node id]/proves($param)/type"]
                 }]]
             }
+            if {[dict getdef $node emits {}] ne {}} {
+                # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each
+                # recognizer as written, resolved by hir/resolve.tcl.
+                set index 0
+                set block [hir::syntax::withEmits $block [lmap claim [dict get $node emits] {
+                    incr index
+                    dict create name [dict get $claim name] qualified [dict get $claim qualified] \
+                        origin [Origin [dict get $claim span] "[dict get $node id]/emits$index"]
+                }]]
+            }
             if {[dict exists $node resume] && [dict get $node resume] ne ""} {
                 set block [hir::syntax::withResume $block [dict get $node resume type] \
                     [Origin [dict get $node resume typeSpan] "[dict get $node id]/resume"]]

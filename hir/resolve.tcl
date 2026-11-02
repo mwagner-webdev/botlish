@@ -989,6 +989,55 @@ proc hir::resolve::ResolveProofs {hirVar e node params declaredTypes declared ct
 # 1 if TYPEEXPR (a surface::parser::TypeExpr result) is an application of
 # several type arguments, {apply NAME {ARG ...}} (TRAIT-CONSTRAINED-
 # IMPRINTED-TYPES.md).
+# The emission claims of function block E (its syntax NODE's `emits`,
+# hir::syntax::withEmits), resolved in the scope the function is declared in
+# (CTX's): each recognizer a name of a function binding, by the ordinary
+# rules of a reference -- a module member through its qualified name (the
+# loader has already checked the file may write it: an import, privacy), an
+# unqualified name lexically, established before the claim (no forward
+# reference). A name that denotes nothing is EMIT-RECOGNIZER; whether the
+# binding is a recognizer the emission checker decides (hir/emission.tcl).
+# Sets E's `emits` ({name origin binding} dicts) only when it has claims.
+proc hir::resolve::ResolveEmits {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    if {![dict exists $node emits]} {
+        return
+    }
+    set scope [dict get $ctx scope]
+    set claims {}
+    foreach claim [dict get $node emits] {
+        set name [dict get $claim name]
+        set origin [dict get $claim origin]
+        set q [dict get $claim qualified]
+        set b ""
+        if {$q ne ""} {
+            lassign $q ns member
+            set name ${ns}::$member
+            if {[dict exists $hir modules $ns] && [dict exists $hir scopes [dict get $hir modules $ns] names $member]} {
+                set b [dict get $hir scopes [dict get $hir modules $ns] names $member]
+            }
+        } else {
+            set b [Lookup hir $scope $name]
+        }
+        set entry [dict create name $name origin $origin binding $b]
+        if {$b eq "" && $q eq "" && [AfterBindingHole hir $scope ""]} {
+            # A malformed statement before the function may have declared
+            # it (SYNTAX-RECOVERY-MILESTONE-1.md): not known.
+            dict set entry dependent 1
+        } elseif {$b eq ""} {
+            set message "the claim \"emits $name\" names no recognizer visible here"
+            if {$q eq "" && [DeclaredLater hir $scope $name]} {
+                append message ": \"$name\" is declared later, and a claim names a recognizer declared before the function, like any reference"
+            } else {
+                append message ": a claim names a recognizer declared with \"dfa NAME over ALPHABET:\" (an imported module's as NS::NAME)"
+            }
+            hir::DiagnoseAt hir EMIT-RECOGNIZER $message $e $origin
+        }
+        lappend claims $entry
+    }
+    SetField hir $e emits $claims
+}
+
 proc hir::resolve::IsApplyTypeExpr {typeExpr} {
     return [expr {[llength $typeExpr] == 3 && [lindex $typeExpr 0] eq "apply"}]
 }
@@ -1314,6 +1363,13 @@ proc hir::resolve::Expr {hirVar node ctx} {
             # resolved parameters and result: the generic metadata every
             # consumer reads (hir/refine.tcl), never a predicate's name.
             SetField hir $e proofs [ResolveProofs hir $e $node $params $declaredParamTypes $declared $ctx]
+            # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each
+            # recognizer named, resolved where the function is declared; a
+            # recognizer's own table (surface/dfa.tcl's Lower).
+            ResolveEmits hir $e $node $ctx
+            if {[dict exists $node recognizer]} {
+                SetField hir $e recognizer [dict get $node recognizer]
+            }
             set declaredErrorPairs [dict getdef $node declaredErrors {}]
             set errorNames {}
             set seenErrors [dict create]

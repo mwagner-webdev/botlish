@@ -572,6 +572,10 @@ proc hir::read::Program {text} {
     # yields from them.
     hir::coroutines::analyze hir
     hir::declarations::stamp hir
+    # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): HIR text carries no
+    # recognizer table, so a claim read back is reported not proved -- never
+    # taken for certified.
+    hir::emission::verify hir
     return $hir
 }
 
@@ -1177,7 +1181,7 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported callback]} {
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds nomethod contexts provesText cloneText resumeText variadic places exported callback emitsText]} {
                 Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?nomethod? ?exported c? ?callback c? ?variadic N? ?places (N ...)? ?contexts (IDS) requires (IDS)? ?declares ...? ?proves BINDING NAME: TYPE? ?errors ...? ?binds ...?\""
             }
             if {$nomethod} {
@@ -1289,6 +1293,21 @@ proc hir::read::Expr {hirVar level s path block} {
                 set declaredErrors [lsort -unique $declaredErrors]
             }
             SetField hir $e declaredErrors $declaredErrors
+            if {$emitsText ne ""} {
+                # Emission claims, as printed: the recognizer's binding and
+                # name. (HIR text carries no recognizer table: a claim read
+                # back is checked against what the text has, and a
+                # recognizer it does not have is not proved.)
+                set claims {}
+                foreach item [split [string map {", " \x01} $emitsText] \x01] {
+                    if {![regexp {^(b[0-9]+|\?) (\S+)$} $item -> claimBinding claimName]} {
+                        Fail $number "expected \"BINDING NAME\" in a block's emission claims"
+                    }
+                    if {$claimBinding eq "?"} { set claimBinding "" }
+                    lappend claims [dict create name $claimName origin [list ir $path] binding $claimBinding]
+                }
+                SetField hir $e emits $claims
+            }
             SetField hir $e inferredResultType [hir::types::intern hir [lindex $type 3]]
             set ids {}
             set index 2
@@ -1658,7 +1677,7 @@ proc hir::read::Expr {hirVar level s path block} {
 # into the named variables; 0 if malformed. The optional parts are found
 # outside brackets, so a declared type may itself contain spaces, ", " or
 # the word "errors" (a structural function type's own "errors: [...]").
-proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {callbackVar ""}} {
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar {nomethodVar ""} {contextsVar ""} {provesVar ""} {cloneVar ""} {resumeVar ""} {variadicVar ""} {placesVar ""} {exportedVar ""} {callbackVar ""} {emitsVar ""}} {
     foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
         upvar 1 [set $var] [string range $var 0 end-3]
     }
@@ -1766,6 +1785,19 @@ proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar de
     if {$i >= 0} {
         if {$resumeVar ne "" && [regexp {^ coroutine-effect \((.*)\)$} [string range $rest $i end] -> effectText]} {}
         set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md), as hir::format
+    # prints them: "emits (BINDING NAME, ...)".
+    if {$emitsVar ne ""} {
+        upvar 1 $emitsVar emits
+        set emits ""
+        set i [TopIndex $rest " emits ("]
+        if {$i >= 0} {
+            if {![regexp {^ emits \((.*)\)$} [string range $rest $i end] -> emits]} {
+                return 0
+            }
+            set rest [string range $rest 0 [expr {$i - 1}]]
+        }
     }
     set i [TopIndex $rest " resume "]
     if {$i >= 0 && $resumeVar ne ""} {

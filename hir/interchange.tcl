@@ -184,6 +184,10 @@ proc hir::interchange::decode {text args} {
         core::loadLibrary $name
     }
     hir::activate $hir
+    # Emission certificates (EMISSION-CLAIMS-MILESTONE-1.md, "Trust"): text
+    # is no proof, whoever wrote it -- the claims are verified again here,
+    # and text that states anything else is refused.
+    hir::emission::reverify hir
     return $hir
 }
 

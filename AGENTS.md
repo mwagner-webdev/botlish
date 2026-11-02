@@ -4205,6 +4205,77 @@ instead (answer a warning in the code, as the gate asks). `bench/dfa.tcl`
 regenerates the
 performance report and `audit/dfa/tools/evidence.tcl` the native evidence.
 
+## Emission claims (`emits`)
+
+`fn F(...) -> T errors E emits R1, R2:` (EMISSION-CLAIMS-MILESTONE-1.md)
+states that F's outward yield trace -- its own yields and its ordinary
+callees' (deep yields), never a coroutine it constructs -- is one token of
+each declared recognizer: every normal completion has yielded exactly one
+token with nothing unread, every finite prefix (before completion, at a
+failure, abandoned) is viable. hir/emission.tcl certifies each claim at the
+end of `hir::BuildFull` from F's declared parameter types and the code every
+backend compiles, or reports why not (EMIT-*). Keep it so:
+
+* A claim is a verified property, never a way to run F: no backend reads
+  `emits`, `emissions` or a block's `recognizer`; no runtime validator,
+  recognizer call, table, buffer, coroutine or authority for a claim
+  (tests/emission-claims.test's `ec-claim-erased`, `ec-native-erasure`).
+* Caller-independent: F is entered with its declared parameter facts only
+  (`hir::emission::Declared`). Never read hir::range's or hir::specialize's
+  instances, the program's call sites, an undeclared parameter's inferred
+  contract or anything observed; a function no program calls is checked
+  like any other. A domain-typed parameter trusts the callers' admission
+  (VerifyCall), which a certificate never replaces (`ec-domain-admission`).
+* Conservative: what the walk does not model (a trait operation, a trait or
+  context-trait clone, an unknown HIR form, a recognizer without its table)
+  is EMIT-UNSUPPORTED, an exhausted budget EMIT-BUDGET and nothing else --
+  never a certificate, never "yields nothing". Wording: violations "may"
+  (the facts over-approximate); "disproven" only with a run (the witness
+  tool, audit/emission-claims/tools/witness.tcl), never from the compiler.
+* One value analysis: the facts are hir/intset.tcl over hir::range's own
+  transfers (add, sub, mul, `ModParts`, `BitOp`, `Narrowed`, `TypeFact`,
+  `InductionBinding`, `RegisteredSet`, `Paths`); the one rule only a set can
+  state is `!=`'s hole. Never add a second arithmetic, comparison or domain
+  rule in the checker. A native's result set is its registration
+  (`-result-range {intervals ...}`, std::char::scalar_value's surrogate
+  gap), a contract of the implementation both runtimes uphold -- never a
+  table beside the checker, never inferred from runs.
+* One outcome model: what a recognizer code means is core/dfa.tcl's
+  `Outcome`, `RunResult`, `Resume`, `Unread`; surface/dfa.tcl's Lower
+  compiles it for one symbol, hir/emitdfa.tcl steps it over sets, both from
+  the same table (`hir::syntax::withRecognizer`). Never restate a transition
+  rule in either.
+* Trust: a certificate is a proof only when this process derived it. The
+  in-process memo reuses one only after `hir::emission::Valid` (every
+  function its proof read by canonical fingerprint -- type facts included
+  --, every recognizer, every registered result set, every composed
+  statement); a HIR read from interchange text or the front-end cache is
+  verified again (`hir::emission::reverify`, HIR INTERCHANGE EMISSION), and
+  HIR text carries no tables (its claims are not proved). Never accept a
+  certificate because its text looks right, and never put process history
+  (reuse) into the HIR.
+* Diagnostics anchor at the claimed function (its unit: recovery, static
+  sites) and are located at the yield or call; a claim whose code holds
+  another diagnostic, poison or a hole is `dependent` and says nothing.
+  Messages never print an internal id. Every EMIT-* kind has a
+  `std::compiler::DiagnosticCode` case and a Compilerpedia topic.
+
+If you change hir/emission.tcl, hir/emitdfa.tcl, hir/intset.tcl, the
+hir::range transfers above, core/dfa.tcl's outcome model or what Lower
+generates from it, a native's `-result-range`, the clause's grammar,
+lowering, loader walk or resolution, or the `emissions` table's trust
+(interchange, the cache), run `tests/emission-claims.test`,
+`tests/interval-sets.test`, `tests/dfa.test`, `audit/emission-claims/tools/
+census.tcl` (no false proof; every case as expected),
+`audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs) and
+`audit/emission-claims/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus
+`tests/hir-range.test` for a transfer, `tests/static-compile.test` and
+`tools/compilerpedia.tcl check` for a diagnostic kind, and the
+hir-interchange and compiler-service harnesses for a change to what they
+cover. `audit/emission-claims/tools/bench.tcl` regenerates the costs.
+
 ## Workloads (examples/games/2048)
 
 `examples/games/2048/` is the first workload of the post-golden stress-test

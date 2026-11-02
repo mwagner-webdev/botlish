@@ -672,6 +672,10 @@ proc hir::BuildFull {nodes options given halt checkedVar {seeds {}}} {
         # imprint, written into the call (LIST-CARDINALITY-REFINEMENTS.md,
         # hir::listlength::Elaborate).
         hir::listlength::Elaborate hir
+        # Emission claims (EMISSION-CLAIMS-MILESTONE-1.md): each certified
+        # from its function's declaration and the code every backend
+        # compiles, or rejected; nothing for a program without one.
+        hir::emission::verify hir
     }
     return $hir
 }
@@ -1429,7 +1433,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
+    foreach file {syntax static staticdeps imports resolve flags variadic contexts direct privacy coroutines affine mutvec iteration relations refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range intset emitdfa emission rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

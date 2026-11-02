@@ -1,0 +1,344 @@
+# interval-sets.test -- the value facts emission claims trust
+# (EMISSION-CLAIMS-MILESTONE-1.md, "Value facts and their soundness audit"):
+# hir/intset.tcl (unions of intervals over hir::range's own transfers),
+# hir::range's Euclidean `mod` parts, native result sets (-result-range
+# intervals) and the transfers the emission checker reads, each held to
+# concrete arbitrary-precision evaluation.
+#
+# The important failure is a false narrowing: a fact that excludes a value
+# execution can produce. Every property below samples concrete values of
+# abstract sets -- small Ints, interval edges, holes, values far past any
+# machine word, both infinities' neighbourhoods -- runs the operation the
+# way the runtime does (core/primitives.tcl, core/scalarbits.tcl) and
+# requires the result in the abstract result. A conservative result (a
+# superset) always passes; precision has its own, exact tests.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+namespace eval isets {
+    variable big [expr {10 ** 25}]
+    # Bounds the generator draws from: small values, edges of the shifts'
+    # and the recognizers' interesting ranges, values past any machine word.
+    variable palette [list -inf +inf 0 1 -1 2 -2 7 9 10 15 16 31 33 34 35 47 48 57 58 91 92 93 127 128 255 256 \
+        0xD7FF 0xD800 0xDFFF 0xE000 0x10FFFF 0x110000 [expr {1 << 62}] [expr {-(1 << 62)}] \
+        [expr {(1 << 63) - 1}] [expr {-(1 << 63)}] [expr {10 ** 21}] [expr {-(10 ** 21)}] \
+        [expr {10 ** 25}] [expr {-(10 ** 25)}]]
+}
+
+proc isets::Draw {} {
+    variable palette
+    while 1 {
+        set v [lindex $palette [expr {int(rand() * [llength $palette])}]]
+        if {$v ni {-inf +inf}} { return [expr {$v + 0}] }
+    }
+}
+
+proc isets::Bound {} {
+    variable palette
+    set v [lindex $palette [expr {int(rand() * [llength $palette])}]]
+    if {$v in {-inf +inf}} { return $v }
+    return [expr {$v + int(rand() * 5) - 2}]
+}
+
+# A random IntSet of 1..3 components.
+proc isets::Set {} {
+    set out {}
+    for {set i [expr {1 + int(rand() * 3)}]} {$i > 0} {incr i -1} {
+        set a [Bound]
+        set b [Bound]
+        if {[hir::intset::Cmp $a $b] > 0} { lassign [list $a $b] b a }
+        if {$a eq "+inf"} { set a [expr {10 ** 25}] }
+        if {$b eq "-inf"} { set b [expr {-(10 ** 25)}] }
+        lappend out [list $a $b]
+    }
+    return [hir::intset::norm $out]
+}
+
+# Concrete members of IntSet A: each component's edges, their neighbours
+# inside it, and a few points within (an infinite side sampled far out).
+proc isets::Members {a} {
+    set out {}
+    foreach x $a {
+        lassign $x lo hi
+        if {$lo eq "-inf"} {
+            if {$hi eq "+inf"} {
+                set lo [expr {-(10 ** 30)}]
+            } else {
+                set lo [expr {$hi - 10 ** 30}]
+            }
+        }
+        if {$hi eq "+inf"} { set hi [expr {$lo + 10 ** 30}] }
+        foreach v [list $lo [expr {$lo + 1}] $hi [expr {$hi - 1}] [expr {($lo + $hi) / 2}] 0 1 -1 34 92 0xD800 0xDFFF] {
+            set v [expr {$v + 0}]
+            if {$v >= $lo && $v <= $hi} { lappend out $v }
+        }
+        for {set i 0} {$i < 3} {incr i} {
+            set w [expr {$hi - $lo + 1}]
+            if {$w > 0} { lappend out [expr {$lo + entier(rand() * $w)}] }
+        }
+    }
+    return [lsort -unique $out]
+}
+
+# The runtime's result of OP on X and Y, or "" when the operation fails
+# (no value): core/primitives.tcl's Euclidean mod, core/scalarbits.tcl's
+# bit operations and shift bounds.
+proc isets::Concrete {op x y} {
+    switch -- $op {
+        + { return [expr {$x + $y}] }
+        - { return [expr {$x - $y}] }
+        * { return [expr {$x * $y}] }
+        mod {
+            if {$y == 0} { return "" }
+            set r [expr {$x % $y}]
+            if {$r < 0} { set r [expr {$r + abs($y)}] }
+            return $r
+        }
+        bit_and { return [expr {$x & $y}] }
+        bit_or { return [expr {$x | $y}] }
+        bit_xor { return [expr {$x ^ $y}] }
+        shift_left {
+            if {$y < 0 || $y > 64} { return "" }
+            return [expr {$x << $y}]
+        }
+        shift_right {
+            if {$y < 0 || $y > $::core::scalarbits::maxShift} { return "" }
+            return [expr {$x >> $y}]
+        }
+    }
+    error "no operator $op"
+}
+
+proc isets::Holds {op x y} {
+    switch -- $op {
+        < { return [expr {$x < $y}] }
+        <= { return [expr {$x <= $y}] }
+        > { return [expr {$x > $y}] }
+        >= { return [expr {$x >= $y}] }
+        == { return [expr {$x == $y}] }
+        != { return [expr {$x != $y}] }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The lattice
+
+test iset-norm {sorted, merged, adjacent intervals joined, empty ones dropped} -body {
+    list [hir::intset::norm {{5 9} {1 3} {4 4} {20 10}}] [hir::intset::norm {{-inf 3} {2 +inf}}] \
+        [hir::intset::union {{0 0}} {{2 2}}] [hir::intset::union {{0 0}} {{1 1}}]
+} -result {{{1 9}} {{-inf +inf}} {{0 0} {2 2}} {{0 1}}}
+
+test iset-minus-hole {removing a point leaves exactly the two sides: no extra point lost on either} -body {
+    list [hir::intset::minus {{0 100}} {{34 34}}] [hir::intset::minus {{-inf +inf}} {{92 92}}] \
+        [hir::intset::minus {{34 34}} {{34 34}}] [hir::intset::minus {{33 35}} {{34 34} {35 35}}]
+} -result {{{0 33} {35 100}} {{-inf 91} {93 +inf}} {} {{33 33}}}
+
+test iset-inter {intersection keeps the smaller upper and the larger lower bound} -body {
+    list [hir::intset::inter {{0 10} {20 30}} {{5 25}}] [hir::intset::inter {{-inf 0}} {{0 +inf}}] \
+        [hir::intset::inter {{0 1}} {{3 4}}]
+} -result {{{5 10} {20 25}} {{0 0}} {}}
+
+test iset-huge-bounds {bounds are arbitrary precision and true infinities: nothing disappears at a sentinel} -body {
+    set big [expr {10 ** 23}]
+    list [hir::intset::inter [hir::intset::point $big] {{-inf +inf}}] \
+        [hir::intset::contains {{0 +inf}} $big] [hir::intset::Arith + [hir::intset::point $big] {{1 1}}] \
+        [hir::intset::Narrow > [hir::intset::point $big] {{0 0}}]
+} -cleanup {unset -nocomplain big} -result {{{100000000000000000000000 100000000000000000000000}} 1 {{100000000000000000000001 100000000000000000000001}} {{100000000000000000000000 100000000000000000000000}}}
+
+test iset-empty {the empty set stays empty through every transfer, and is no value: never the universe} -body {
+    list [hir::intset::Arith + {} {{0 5}}] [hir::intset::Arith mod {} {{3 3}}] [hir::intset::Narrow < {} {{0 5}}] \
+        [hir::intset::Narrow < {{0 5}} {}] [hir::intset::HullRange {}]
+} -result {{} {} {} {} never}
+
+# ---------------------------------------------------------------------------
+# Narrowing: the hole rule and the order comparisons
+
+test iset-hole-rule {`c == 34 or c == 92` false: both points removed from the middle of every Int; true: exactly the two points} -body {
+    set c [hir::intset::universe]
+    set notEither [hir::intset::Narrow != [hir::intset::Narrow != $c {{34 34}}] {{92 92}}]
+    list $notEither [hir::intset::union [hir::intset::Narrow == $c {{34 34}}] [hir::intset::Narrow == $c {{92 92}}]]
+} -cleanup {unset -nocomplain c notEither} -result {{{-inf 33} {35 91} {93 +inf}} {{34 34} {92 92}}}
+
+test iset-hole-edges {a hole at a component's edge, at a point component, and a non-point other side (no narrowing)} -body {
+    list [hir::intset::Narrow != {{34 40}} {{34 34}}] [hir::intset::Narrow != {{30 34}} {{34 34}}] \
+        [hir::intset::Narrow != {{34 34}} {{34 34}}] [hir::intset::Narrow != {{0 9}} {{3 4}}] \
+        [hir::intset::Narrow == {{0 9}} {{3 4}}]
+} -result {{{35 40}} {{30 33}} {} {{0 9}} {{0 9}}}
+
+test iset-order-edges {order comparisons at their boundary: strict versus non-strict, per component} -body {
+    list [hir::intset::Narrow < {{0 9} {20 29}} {{20 20}}] [hir::intset::Narrow <= {{0 9} {20 29}} {{20 20}}] \
+        [hir::intset::Narrow > {{0 9}} {{9 9}}] [hir::intset::Narrow >= {{0 9}} {{9 9}}] \
+        [hir::intset::Narrow < {{0 9}} {{-inf +inf}}]
+} -result {{{0 9}} {{0 9} {20 20}} {} {{9 9}} {{0 9}}}
+
+foreach op {< <= > >= == !=} {
+    test iset-narrow-sound-[string map {< lt > gt = eq ! not} $op] "narrowing by `$op` never excludes a value for which the comparison holds (random sets, huge values included)" -body {
+        expr {srand(7101)}
+        set bad {}
+        for {set i 0} {$i < 400 && [llength $bad] < 3} {incr i} {
+            set a [isets::Set]
+            set b [isets::Set]
+            if {rand() < 0.4} { set b [hir::intset::point [isets::Draw]] }
+            set n [hir::intset::Narrow $op $a $b]
+            foreach x [isets::Members $a] {
+                foreach y [isets::Members $b] {
+                    if {[isets::Holds $op $x $y] && ![hir::intset::contains $n $x]} {
+                        lappend bad [list $a $op $b x=$x y=$y got $n]
+                        break
+                    }
+                }
+            }
+        }
+        set bad
+    } -cleanup {unset -nocomplain bad i a b n x y} -result {}
+}
+
+# ---------------------------------------------------------------------------
+# Arithmetic
+
+foreach op {+ - * mod bit_and bit_or bit_xor shift_left shift_right} {
+    test iset-arith-sound-$op "the transfer of `$op` contains every concrete result of every pair of members (random sets: arithmetic crossing zero, negative and huge operands, empty sets)" -body {
+        expr {srand(4242)}
+        set bad {}
+        for {set i 0} {$i < 300 && [llength $bad] < 3} {incr i} {
+            set a [isets::Set]
+            set b [isets::Set]
+            if {$op in {shift_left shift_right} && rand() < 0.6} {
+                set b [hir::intset::interval [expr {int(rand() * 8) - 2}] [expr {int(rand() * 70)}]]
+            }
+            if {$op eq "mod" && rand() < 0.5} {
+                set b [hir::intset::point [expr {int(rand() * 40) - 20}]]
+            } elseif {$op eq "mod" && rand() < 0.5} {
+                # A divisor of the palette's magnitudes, and an operand
+                # range narrower than it: a range that may wrap past a
+                # multiple of the divisor (ModParts' two parts).
+                set m [expr {abs([isets::Draw])}]
+                if {$m == 0} { set m 7 }
+                set b [hir::intset::point [expr {rand() < 0.5 ? $m : -$m}]]
+                set lo [expr {[isets::Draw] + int(rand() * 9) - 4}]
+                set a [hir::intset::interval $lo [expr {$lo + entier(rand() * ($m - 1))}]]
+            }
+            set r [hir::intset::Arith $op $a $b]
+            foreach x [isets::Members $a] {
+                foreach y [isets::Members $b] {
+                    if {$op eq "shift_left" && ($y > 64 || abs($x) > 10 ** 40)} continue
+                    set v [isets::Concrete $op $x $y]
+                    if {$v ne "" && ![hir::intset::contains $r $v]} {
+                        lappend bad [list $a $op $b x=$x y=$y v=$v got $r]
+                        break
+                    }
+                }
+            }
+        }
+        set bad
+    } -cleanup {unset -nocomplain bad i a b r x y v} -result {}
+}
+
+test iset-negation {negation is `0 - n`: exact, both infinities swapped} -body {
+    list [hir::intset::Arith - {{0 0}} {{-5 3} {10 +inf}}] [hir::intset::Arith - {{0 0}} {{-inf -1}}]
+} -result {{{-inf -10} {-3 5}} {{1 +inf}}}
+
+test iset-mod-exact {mod of an exact operand is exact (`97 + n.mod(3)` of n = 0 is 97), whatever the divisor's sign; Euclidean for negative operands} -body {
+    list [hir::intset::Arith mod {{0 0}} {{3 3}}] [hir::intset::Arith mod {{-7 -7}} {{3 3}}] \
+        [hir::intset::Arith mod {{7 7}} {{-3 -3}}] [hir::intset::Arith mod [hir::intset::point [expr {10 ** 23 + 5}]] {{10 10}}]
+} -result {{{0 0}} {{2 2}} {{1 1}} {{5 5}}}
+
+test iset-mod-ranges {mod of a range: within one residue cycle exact, wrapping into two parts, a full cycle every residue; a range below a positive divisor itself; a zero divisor (the run's ARITHMETIC error) decides nothing, keeping the bound} -body {
+    list [hir::intset::Arith mod {{17 19}} {{16 16}}] [hir::intset::Arith mod {{14 17}} {{16 16}}] \
+        [hir::intset::Arith mod {{0 99}} {{16 16}}] [hir::intset::Arith mod {{0 9}} {{10 20}}] \
+        [hir::intset::Arith mod {{-inf +inf}} {{16 16}}] [hir::intset::Arith mod {{0 0}} {{0 0}}] \
+        [hir::intset::Arith mod {{100 160}} {{128 128}}] [hir::intset::Arith mod {{-160 -100}} {{-128 -128}}] \
+        [hir::intset::Arith mod {{100 160}} {{160 200}}]
+} -result {{{1 3}} {{0 1} {14 15}} {{0 15}} {{0 9}} {{0 15}} {{0 +inf}} {{0 32} {100 127}} {{0 28} {96 127}} {{0 199}}}
+
+test iset-shifts-unknown {a shift of a possibly negative value, or by a possibly negative amount, keeps only what holds for every shift that completes} -body {
+    list [hir::intset::Arith shift_right {{-5 5}} {{1 1}}] [hir::intset::Arith shift_right {{0 255}} {{-inf +inf}}] \
+        [hir::intset::Arith shift_right {{0 65535}} {{12 12}}]
+} -result {{{-inf +inf}} {{0 255}} {{0 15}}}
+
+# ---------------------------------------------------------------------------
+# Types, loops and native result sets
+
+test iset-types {an Int is every Int; a type that is no integer domain says nothing (every Int); a domain's facts are hir::range::TypeFact's (tests/emission-claims.test's domain parameters)} -body {
+    list [hir::intset::OfType int] [hir::intset::OfType str] [hir::intset::OfType any]
+} -result {{{-inf +inf}} {{-inf +inf}} {{-inf +inf}}}
+
+test iset-induction-sound {every counted loop's counter value lies in hir::range::InductionBinding's interval (up and down, to and through, start and end anywhere)} -body {
+    expr {srand(99)}
+    set bad {}
+    for {set i 0} {$i < 400 && [llength $bad] < 3} {incr i} {
+        set s [expr {int(rand() * 40) - 20}]
+        set e [expr {int(rand() * 40) - 20}]
+        set ds [expr {int(rand() * 3)}]
+        set de [expr {int(rand() * 3)}]
+        foreach direction {up down} {
+            foreach endKind {exclusive inclusive} {
+                set r [hir::intset::OfRange [hir::range::InductionBinding \
+                    [dict create min [expr {$s - $ds}] max [expr {$s + $ds}]] \
+                    [dict create min [expr {$e - $de}] max [expr {$e + $de}]] $direction $endKind]]
+                foreach start [list [expr {$s - $ds}] $s [expr {$s + $ds}]] {
+                    foreach end [list [expr {$e - $de}] $e [expr {$e + $de}]] {
+                        set v $start
+                        while 1 {
+                            if {$direction eq "up"} {
+                                if {($endKind eq "exclusive" && $v >= $end) || ($endKind eq "inclusive" && $v > $end)} break
+                            } else {
+                                if {($endKind eq "exclusive" && $v <= $end) || ($endKind eq "inclusive" && $v < $end)} break
+                            }
+                            if {![hir::intset::contains $r $v]} {
+                                lappend bad [list $direction $endKind $start $end $v $r]
+                                break
+                            }
+                            if {$direction eq "up"} { set v [expr {$v + 1}] } else { set v [expr {$v - 1}] }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    set bad
+} -cleanup {unset -nocomplain bad i s e ds de direction endKind r start end v} -result {}
+
+test iset-registered-scalar-value {std::char::scalar_value's registered result set is the Unicode scalar values: the surrogate gap; the Range analysis reads the same registration's hull} -body {
+    list [hir::intset::OfRegistered std::char::scalar_value] [hir::range::RegisteredRange std::char::scalar_value] \
+        [dict get [core::native::metadata std::char::scalar_value] resultRange]
+} -result {{{0 55295} {57344 1114111}} {min 0 max 1114111} {intervals {0 55295} {57344 1114111}}}
+
+test iset-registered-forms {every other registration is one Range, read identically at both precisions; no registration is every Int} -body {
+    list [hir::range::RegisteredSet mod] [hir::intset::OfRegistered mod] [hir::intset::OfRegistered +] \
+        [hir::intset::OfRegistered std::list::length]
+} -result [list {{min 0 max +inf}} {{0 +inf}} {{-inf +inf}} [list [list 0 $::hir::range::smallMax]]]
+
+test iset-registered-validation {an `intervals` registration is canonical: at least two components, sorted, disjoint, not adjacent; anything else is refused} -body {
+    lmap r {{intervals {0 5} {7 9}} {intervals {0 5}} {intervals {0 5} {6 9}} {intervals {7 9} {0 5}}
+            {intervals {0 5} {3 9}} {intervals {0 x} {7 9}} {intervals {5 0} {7 9}} {intervals {0 0xFF} {0x100000 0x10FFFF}}} {
+        core::native::ValidResultRange $r
+    }
+} -result {{intervals {0 5} {7 9}} bad bad bad bad bad bad {intervals {0 255} {1048576 1114111}}}
+
+test iset-scalar-value-contract {the contract behind the registration: no runtime makes a UnicodeChar of a surrogate (core::value::char refuses one; every scalar either side of the gap is one)} -body {
+    set out {}
+    foreach cp {0 0xD7FF 0xD800 0xDBFF 0xDC00 0xDFFF 0xE000 0x10FFFF 0x110000} {
+        lappend out [expr {![catch {core::value::char [expr {$cp + 0}]}]}]
+    }
+    set out
+} -cleanup {unset -nocomplain out cp} -result {1 1 0 0 0 0 1 1 0}
+
+test iset-scalar-value-native {natively a UnicodeChar is a Rust char or a validated literal, never a surrogate (value.rs's is_valid_scalar, the one rule)} -body {
+    set f [open [file join $::projectRoot native src runtime value.rs]]
+    set text [read $f]
+    close $f
+    regexp {pub fn is_valid_scalar\(n: u32\) -> bool \{\s*n <= MAX_SCALAR && !\(SURROGATE_LO\.\.=SURROGATE_HI\)\.contains\(&n\)} $text
+} -cleanup {unset -nocomplain f text} -result 1
+
+test iset-component-budget {past maxComponents components a result is its hull: a superset} -body {
+    set many {}
+    for {set i 0} {$i < 60} {incr i} { lappend many [list [expr {$i * 3}] [expr {$i * 3}]] }
+    set r [hir::intset::Arith + $many {{0 0}}]
+    list [llength $r] [hir::intset::subset $many $r]
+} -cleanup {unset -nocomplain many i r} -result {1 1}
+
+cleanupTests

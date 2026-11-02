@@ -1,0 +1,366 @@
+# sinks.bot -- consumers of emitted symbols (EMITTER-COROUTINE-EXPLORATION.md,
+# "Streaming output and sinks"), and the run-time validation the static
+# check is compared with (the report's design A).
+#
+# An emitter's coroutine is a symbol source in std::dfa's protocol: each
+# segment yields one symbol, and its completion's stable value is -1, the
+# end, which no consumer writes (std::coroutine::done? tells it from a
+# symbol; a resume after the end answers -1 again and runs nothing). A
+# consumer here is the function that drives one emitter: constructed and
+# resumed in the same function, the pair is closed and coroutine fusion
+# compiles both into straight-line code (COROUTINE-FUSION-MILESTONE-1.md);
+# `drain`, which receives a handle, is the reusable form whose handle
+# crosses a call -- fusion keeps it on the general runtime (its limit, not
+# the emitter's).
+#
+#   collect_*      every symbol into a List (an accumulating sink)
+#   digest_*       a running checksum of the symbols, storing none (a
+#                  stand-in for a file or socket: no authority is involved,
+#                  and an emitter has none)
+#   chunked_*      the symbols handed to the checksum in chunks of 64: what
+#                  a buffered writer does
+#   validated_*    the symbols of an unchecked emitter, each fed to the
+#                  token's recognizer as it is emitted (design A): an
+#                  invalid token fails Invalid where it goes wrong
+#   buffered_*     the token collected, validated whole, then committed
+
+import number_emit
+import string_emit
+import value_emit
+import json_grammar
+import json_lex
+import std::dfa
+import std::coroutine
+import std::list
+import std::mutable_vector
+import std::mutable_array
+
+# The emitted symbols did not make a token of the recognizer (design A's
+# run-time verdict): AT the index of the symbol where it went wrong (the
+# end: the number of symbols), STATE the recognizer's state there.
+error Invalid:
+    at: int
+    recognizer: str
+    state: str
+
+# The sink's limit on the symbols it accepts (a consumer's own failure).
+error SinkFull:
+    limit: int
+
+fn no_symbols() -> List[int]:
+    v = std::mutable_vector::from_list([0])
+    v.pop():
+        on IndexNotFound:
+            return []
+    loop x in v:
+        x
+
+# Every symbol of the source STEP, whose construction yielded FIRST.
+fn drain(step: Coroutine{args: [], return: int, errors: [IndexNotFound]}, first: int) -> List[int] errors IndexNotFound:
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_integer(n: int) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = number_emit::integer_source(n)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_integer_text(n: int) -> List[int] errors IndexNotFound, number_emit::NotCanonical:
+    coroutine {step, first} = number_emit::integer_text_source(n)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_integer_trusted(n: int) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = number_emit::integer_trusted_source(n)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_string(text: str) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = string_emit::string_source(text)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_string_ascii(text: str) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = string_emit::string_ascii_source(text)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_string_bytes(text: str) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = string_emit::string_bytes_source(text)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_string_codes(codes: List[int]) -> List[int] errors IndexNotFound, string_emit::NotAScalar:
+    coroutine {step, first} = string_emit::string_codes_source(codes)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_text(v: value_emit::Value) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = value_emit::text_source(v)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_stacked(v: value_emit::Value) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = value_emit::stacked_source(v)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+fn collect_flat(v: value_emit::Value) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = value_emit::flat_source(v)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+# The checksum of a symbol stream: H * 31 + C, modulo a prime.
+fn mix(h: int, c: int) -> int:
+    (h * 31 + c + 1).mod(2147483647)
+
+# {digest, symbols} of the text of V, storing no symbol.
+struct Digest:
+    digest: int
+    symbols: int
+
+fn digest_stacked(v: value_emit::Value) -> Digest errors IndexNotFound:
+    coroutine {step, first} = value_emit::stacked_source(v)
+    state = std::mutable_array::create(3, 0)
+    state.set(2, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        state.set(0, state.at(0).mix(state.at(2)))
+        state.set(1, state.at(1) + 1)
+        state.set(2, step())
+    Digest {digest: state.at(0), symbols: state.at(1)}
+
+fn digest_text(v: value_emit::Value) -> Digest errors IndexNotFound:
+    coroutine {step, first} = value_emit::text_source(v)
+    state = std::mutable_array::create(3, 0)
+    state.set(2, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        state.set(0, state.at(0).mix(state.at(2)))
+        state.set(1, state.at(1) + 1)
+        state.set(2, step())
+    Digest {digest: state.at(0), symbols: state.at(1)}
+
+# The same checksum, the symbols handed over in chunks of 64 (the last one
+# shorter): the sink sees a chunk at a time, the emitter a symbol at a
+# time.
+fn chunked_stacked(v: value_emit::Value) -> Digest errors IndexNotFound:
+    coroutine {step, first} = value_emit::stacked_source(v)
+    chunk = std::mutable_array::create(64, 0)
+    # state: digest, symbols, the current symbol, the chunk's fill
+    state = std::mutable_array::create(4, 0)
+    state.set(2, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        fill = state.at(3)
+        chunk.set(fill, state.at(2))
+        if fill == 63:
+            loop i from 0 to 64:
+                state.set(0, state.at(0).mix(chunk.at(i)))
+                continue
+            state.set(3, 0)
+        else:
+            state.set(3, fill + 1)
+        state.set(1, state.at(1) + 1)
+        state.set(2, step())
+    loop i from 0 to state.at(3):
+        state.set(0, state.at(0).mix(chunk.at(i)))
+        continue
+    Digest {digest: state.at(0), symbols: state.at(1)}
+
+# A sink that accepts at most LIMIT symbols: past it the consumer fails,
+# abandoning the emitter mid-token (released, never resumed again).
+fn limited_text(v: value_emit::Value, limit: int) -> List[int] errors IndexNotFound, SinkFull:
+    coroutine {step, first} = value_emit::text_source(v)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        if out.length() >= limit:
+            fail SinkFull {limit: limit}
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+# The first K symbols of the text of V, the emitter then abandoned.
+fn prefix_text(v: value_emit::Value, k: int) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = value_emit::text_source(v)
+    out = std::mutable_vector::from_list(no_symbols())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step) or out.length() >= k:
+            break
+        out.push(c.at(0))
+        c.set(0, step())
+    loop x in out:
+        x
+
+# What a consumer sees resuming a completed emitter R more times: the
+# terminal value each time (never a symbol), and that it is done.
+fn after_end(n: int, more: int) -> List[int] errors IndexNotFound:
+    coroutine {step, first} = number_emit::integer_source(n)
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        c.set(0, step())
+    out = std::mutable_vector::from_list(no_symbols())
+    loop i from 0 to more:
+        out.push(step())
+        continue
+    if std::coroutine::done?(step):
+        out.push(1)
+    loop x in out:
+        x
+
+# Design A, incrementally: integer_trusted's symbols fed to json_number as
+# they are emitted. A completion before the end (json_number completes on
+# a symbol only before it, "accept before") means the token ended inside
+# the output; the end must then complete it with nothing unread.
+fn validated_integer(n: int) -> List[int] errors IndexNotFound, Invalid:
+    coroutine {step: next, first: c0} = number_emit::integer_trusted_source(n)
+    out = std::mutable_vector::from_list([c0])
+    coroutine {step: feed} = json_lex::json_number(c0):
+        on std::dfa::UnrecognizedInput {recognizer, state}:
+            fail Invalid {at: 0, recognizer: recognizer, state: state}
+        on std::dfa::UnexpectedEnd {recognizer, state}:
+            fail Invalid {at: 0, recognizer: recognizer, state: state}
+    loop:
+        if std::coroutine::done?(feed):
+            fail Invalid {at: out.length(), recognizer: "json_lex::json_number", state: "ended before this symbol"}
+        x = next()
+        if std::coroutine::done?(next):
+            break
+        feed(std::dfa::Symbol {code: x}):
+            on std::dfa::UnrecognizedInput {recognizer, state}:
+                fail Invalid {at: out.length(), recognizer: recognizer, state: state}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Invalid {at: out.length(), recognizer: recognizer, state: state}
+        out.push(x)
+    r = feed(std::dfa::Symbol {code: -1}):
+        on std::dfa::UnrecognizedInput {recognizer, state}:
+            fail Invalid {at: out.length(), recognizer: recognizer, state: state}
+        on std::dfa::UnexpectedEnd {recognizer, state}:
+            fail Invalid {at: out.length(), recognizer: recognizer, state: state}
+    if r != 0:
+        fail Invalid {at: out.length(), recognizer: "json_lex::json_number", state: "ended before the end"}
+    loop x in out:
+        x
+
+# SYMBOLS as one json_number token: nothing, or Invalid where it is not one
+# (design A's check, over a buffer).
+fn check_number(symbols: List[int]) -> unit errors IndexNotFound, Invalid:
+    coroutine {step: feed} = json_lex::json_number(symbols.at(0)):
+        on std::dfa::UnrecognizedInput {recognizer, state}:
+            fail Invalid {at: 0, recognizer: recognizer, state: state}
+        on std::dfa::UnexpectedEnd {recognizer, state}:
+            fail Invalid {at: 0, recognizer: recognizer, state: state}
+    loop k from 1 to std::list::length(symbols):
+        if std::coroutine::done?(feed):
+            fail Invalid {at: k, recognizer: "json_lex::json_number", state: "ended before this symbol"}
+        feed(std::dfa::Symbol {code: symbols.at(k)}):
+            on std::dfa::UnrecognizedInput {recognizer, state}:
+                fail Invalid {at: k, recognizer: recognizer, state: state}
+            on std::dfa::UnexpectedEnd {recognizer, state}:
+                fail Invalid {at: k, recognizer: recognizer, state: state}
+        continue
+    if std::coroutine::done?(feed):
+        fail Invalid {at: std::list::length(symbols), recognizer: "json_lex::json_number", state: "ended before the end"}
+    r = feed(std::dfa::Symbol {code: -1}):
+        on std::dfa::UnrecognizedInput {recognizer, state}:
+            fail Invalid {at: std::list::length(symbols), recognizer: recognizer, state: state}
+        on std::dfa::UnexpectedEnd {recognizer, state}:
+            fail Invalid {at: std::list::length(symbols), recognizer: recognizer, state: state}
+    if r != 0:
+        fail Invalid {at: std::list::length(symbols), recognizer: "json_lex::json_number", state: "ended before the end"}
+    unit
+
+# Design A, buffered: the token collected, validated whole, then handed on
+# (validating afterwards is the same work, with the sink already holding
+# the output when it fails).
+fn buffered_integer(n: int) -> List[int] errors IndexNotFound, Invalid:
+    token = collect_integer_trusted(n)
+    check_number(token)
+    token

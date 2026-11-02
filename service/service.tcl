@@ -900,6 +900,8 @@ proc service::SemanticIndex {revision} {
         dict set items $f {}
     }
     set references [dict create]
+    set claims [dict create]
+    set claimRefs [dict create]
     foreach e [hir::walk $hir] {
         set node [dict get $hir exprs $e]
         set origin [dict get $node origin]
@@ -912,6 +914,18 @@ proc service::SemanticIndex {revision} {
             # (A name whose binding depends on malformed source refers to it
             # only perhaps: SYNTAX-RECOVERY-MILESTONE-1.md.)
             dict lappend references [dict get $node binding] $e
+        }
+        if {[dict get $node kind] eq "block" && [dict exists $node emits]} {
+            # An emission claim names its recognizer (EMISSION-CLAIMS-
+            # MILESTONE-1.md): a reference to the recognizer's binding, at
+            # the name as written.
+            foreach claim [dict get $node emits] {
+                set o [dict get $claim origin]
+                if {[dict get $claim binding] eq "" || [lindex $o 0] ne "file"} continue
+                dict lappend claims [lindex $o 1] [dict get [lrange $o 2 end] start] [dict get [lrange $o 2 end] end] \
+                    [list $e [dict get $claim binding] $o]
+                dict lappend claimRefs [dict get $claim binding] $o
+            }
         }
     }
     set exprs [dict create]
@@ -926,7 +940,12 @@ proc service::SemanticIndex {revision} {
         if {[dict get $binding kind] in {root ambient} || [lindex $origin 0] ne "file"} continue
         dict lappend bindings [lindex $origin 1] $b
     }
-    return [dict create files $files ids $ids exprs $exprs references $references bindings $bindings]
+    set claimIndex [dict create]
+    dict for {f list} $claims {
+        dict set claimIndex $f [IntervalIndex $list]
+    }
+    return [dict create files $files ids $ids exprs $exprs references $references bindings $bindings \
+        claims $claimIndex claimRefs $claimRefs]
 }
 
 # The declaration sites of file F (a FileId) of a revision's query HIR: where
@@ -1145,7 +1164,16 @@ proc service::at {rev path line column args} {
     if {$f ne ""} {
         set declarations [Derived $rev declarations $f [list service::DeclarationIndex $f]]
         set names [Innermost [dict get $declarations index] $offset]
-        if {$names ne {}} {
+        set claimed {}
+        if {[dict exists $index claims $f]} {
+            set claimed [Innermost [dict get $index claims $f] $offset]
+        }
+        if {$claimed ne {}} {
+            # The recognizer an emission claim names: a reference to its
+            # binding, written in a function's header.
+            lassign [lindex [dict get $index claims $f values] [lindex $claimed 0]] claimBlock binding claimOrigin
+            set construct [dict create kind emits-claim block $claimBlock range [OriginRange $hir $claimOrigin]]
+        } elseif {$names ne {}} {
             set binding [lindex [dict get $declarations index values] [lindex $names 0]]
             set construct [dict create kind declaration binding $binding \
                 range [Range [dict merge [dict get $declarations sites $binding] [dict create file $source]]]]
@@ -1243,9 +1271,9 @@ proc service::at {rev path line column args} {
         } else {
             dict set result definition $definition
         }
-        dict set result references [lmap r [dict getdef $index references $binding {}] {
+        dict set result references [concat [lmap r [dict getdef $index references $binding {}] {
             OriginRange $hir [dict get $hir exprs $r origin]
-        }]
+        }] [lmap o [dict getdef $index claimRefs $binding {}] {OriginRange $hir $o}]]
         set symbol [SymbolOf $hir $binding]
         if {$symbol ne ""} {
             Compilerpedia
@@ -1392,7 +1420,15 @@ proc service::Hover {hir type b} {
         # (A private function says so: MODULE-PRIVACY-AND-CONTEXT-ESCAPE-
         # MILESTONE-1.md.)
         set prefix [expr {$b ne "" && [hir::privacy::BindingPrivate $hir $b] ? "private " : ""}]
-        return "$prefix[hir::signatures::text $hir [lindex $type 1]]"
+        set text "$prefix[hir::signatures::text $hir [lindex $type 1]]"
+        # Its emission claims' verdicts (EMISSION-CLAIMS-MILESTONE-1.md): the
+        # guarantee a certificate states, the checker's own words.
+        foreach record [hir::emission::claims $hir] {
+            if {[dict get $record block] eq [lindex $type 1]} {
+                append text \n [hir::emission::ClaimText $record]
+            }
+        }
+        return $text
     }
     if {$b eq ""} {
         return [hir::types::presented $type]

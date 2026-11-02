@@ -610,6 +610,27 @@ foreign entry as a miss, never as this error.
 A .hirx file is a compilation result, not a source: regenerate it from the
 .bot (or .hir) file with this compiler, -emit-hir-interchange FILE.bot.
 
+@topic error.hir-interchange-emission
+title: HIR INTERCHANGE EMISSION: emission certificates a .hirx file only claims
+summary: HIR INTERCHANGE EMISSION refuses a .hirx file whose emission claims' verdicts are not what this compiler's checker derives from its HIR: a certificate in text is never a proof.
+index: errors backends
+alias: forged certificate; stale certificate; emission certificate in hirx
+keywords: hirx, interchange, emits, certificate, trust, proof, cache
+related: backend.hir-interchange concept.emission-claims error.hir-interchange-compiler
+docs: EMISSION-CLAIMS-MILESTONE-1.md HIR-INTERCHANGE.md
+code: HIR INTERCHANGE EMISSION
+
+== MEANING
+When a .hirx file is read; not an error of the program. A HIR carries the
+certificates of its emission claims (EMISSION-CLAIMS-MILESTONE-1.md), but a
+file proves nothing however plausible its contents: reading HIR text
+verifies every claim again from the HIR, and refuses text whose claims'
+verdicts, certificates or diagnostics differ from what that verification
+finds. A cache entry that differs is a miss, rebuilt from the source.
+
+== WHAT TO DO
+Regenerate the .hirx file from its source with this compiler.
+
 @topic error.hir-interchange-format
 title: HIR INTERCHANGE FORMAT: a file that is not HIR interchange text
 summary: HIR INTERCHANGE FORMAT rejects a .hirx file whose header is not the interchange format's, whose version this compiler does not read, or which lacks its compiler or its HIR.
