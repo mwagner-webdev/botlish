@@ -483,7 +483,13 @@ container: `./run-test.sh` prints `27 passed, 0 failed`, `value: "TEST
 PASS: 27 checks"`, exit 0; `./run-desktop-test.sh` ends `main.bot exited
 with status 0 ... value: "closed with 1 tasks, 0 done"`, `DESKTOP TEST
 PASS`, exit 0. **The full task succeeded.** The source, tests, notes,
-evidence and trace are `audit/raven-cleanroom/results/agent-experiment/`.
+evidence and trace are `audit/raven-cleanroom/results/agent-experiment/`;
+the agent's built executable was not kept, and the manual workflow
+`tasks app (raven, manual)` (`.github/workflows/tasks-app.yml`) builds the
+same sources with the current release in a clean-room container
+(`audit/raven-cleanroom/tools/build-app.sh`: the headless test, deploy,
+`-emit-native-executable`, a window opened and closed on a virtual
+display) and publishes them as the artifact `tasks-linux-x86_64`.
 
 ### Obstacles, classified
 
@@ -778,5 +784,7 @@ front end's cost per run.
 | `audit/raven-cleanroom/acceptance/` | `inside.sh`, `window.bot`, `desktop-session.sh` |
 | `audit/raven-cleanroom/tools/xsession.py` | the X client (ctypes over libX11 and libXtst) |
 | `audit/raven-cleanroom/tools/mutate.tcl`, `mutants.txt` | the mutation harness |
+| `audit/raven-cleanroom/tools/build-app.sh`, `acceptance/build-inside.sh` | a Raven application built, smoke-run and packed in the clean room |
+| `.github/workflows/tasks-app.yml` | manual: the agent's Tasks app built by `build-app.sh`, the artifact `tasks-linux-x86_64` |
 | `audit/raven-cleanroom/results/` | the clean room's transcript and the agent experiment's trace, source and notes |
 | `.github/workflows/raven-cleanroom.yml`, `c-bindgen.yml` | CI |

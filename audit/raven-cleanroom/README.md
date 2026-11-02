@@ -12,6 +12,7 @@ compiler and the `.botpkg`.
 | `acceptance/window.bot` | the test's own application: a label, a checkbox and two buttons, reporting its state on standard output |
 | `acceptance/desktop-session.sh` | runs a program on a real X11 window under Xvfb and drives it only through the X server |
 | `tools/xsession.py` | the X client: finds a window, reads its pixels, clicks through XTest, asks it to close (python3 ctypes over libX11 and libXtst) |
+| `tools/build-app.sh`, `acceptance/build-inside.sh` | build a Raven application as a consumer does, in a fresh clean-room container: install the release, run its headless test, deploy, emit the executable, open and close its window on a virtual display, pack a tarball (the `tasks app (raven, manual)` workflow builds the agent's Tasks app with it) |
 | `tools/mutate.tcl`, `tools/mutants.txt` | the milestone's mutation harness |
 | `results/acceptance/` | the clean room's transcript, checks and window sessions for the release the report records |
 | `results/agent-experiment/` | the independent agent's application, notes, report and command trace |

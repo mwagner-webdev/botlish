@@ -19,6 +19,13 @@ raven 0.3.1), no network, nothing mounted. The agent reached it only
 through the wrapper `cr` (`docker exec` as `dev`, appending to
 `trace.log`).
 
+The agent's own build (`app/dist/tasks`, which its `app/README.md` lists)
+was not kept. The `tasks app (raven, manual)` workflow
+(`.github/workflows/tasks-app.yml`, run by hand) builds the same sources
+the same way, with the current release, in a clean-room container
+(`../../tools/build-app.sh`), and publishes the executable, its libraven
+and a README as the run's artifact `tasks-linux-x86_64`.
+
 `evidence/*.png` and `evidence/main-run.log` were last written by the
 milestone's own rerun of the agent's `run-test.sh` and
 `run-desktop-test.sh` after the agent finished (both passed); the

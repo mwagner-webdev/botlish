@@ -4763,7 +4763,10 @@ mutant's text when you change the code it mutates, keeping it a mutant of
 the same rule), and the clean room (`audit/raven-cleanroom/tools/cleanroom.sh
 image`, then `run single/out/botlish OUT/raven-VERSION.botpkg DIR` after
 `single/build.sh`; the `raven clean room` workflow runs it on a push that
-touches these files).
+touches these files). The manual `tasks app (raven, manual)` workflow builds
+the experiment's Tasks app with `audit/raven-cleanroom/tools/build-app.sh`
+(the clean room's consumer build) and publishes it as an artifact: run it
+after a change to `build-app.sh` or the release.
 
 ## Diagnostic recovery
 
