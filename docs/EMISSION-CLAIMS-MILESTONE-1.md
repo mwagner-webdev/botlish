@@ -708,13 +708,17 @@ checked-domain-proof-provenance (18), byte-set (21), ascii (33): all pass.
   before, when a handled call's failure becomes statically known (section
   4); the tests above are the repository's every instance. Nothing else
   changes what a program without claims means or whether it compiles.
-* **Not run locally**, by the repository's rules: the static-decisions
-  comparison of the golden suites under both schedulers (CI's
-  `static-decisions` workflow; this branch changes the front end, so it
-  runs on its merge), the GC-stress run (CI's `gc-stress`; no file of
-  `native/` or `compiler/` changed: a claim is erased, and a tighter `mod`
-  Range only feeds decisions native lowering already makes) and the macOS
-  and Windows workflows.
+* **The static-decisions comparison** (CI only, by the repository's
+  rules): the `static-decisions` workflow dispatched on the branch's head
+  (8b74b4f, run 41418077590) compiled all 115 golden suites under the
+  batched scheduler and the sequential reference -- mutable-array.bot in
+  its own job (batched 5 rounds and 7 builds, sequential 69 and 205), the
+  others in four shards -- and every suite agreed: no DISAGREE and no DOES
+  NOT COMPILE.
+* **Not run locally**, by the repository's rules: the GC-stress run (CI's
+  `gc-stress`; no file of `native/` or `compiler/` changed: a claim is
+  erased, and a tighter `mod` Range only feeds decisions native lowering
+  already makes) and the macOS and Windows workflows, which run on main.
 
 ## 19. Remaining precision limits
 

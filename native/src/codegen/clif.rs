@@ -3130,6 +3130,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         ListGet => ("rt_list_get", None, true, None),
                         ListWithLength => ("rt_list_with_length", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),
+                        // One List of exactly the inner Lists' total length
+                        // (LIST-FLAT-MILESTONE-1.md); fallible: TYPE for an
+                        // element that is no List, RANGE past the ceiling.
+                        ListFlat => ("rt_list_flat", None, true, Some(("listflat", KIND_LIST))),
                         // Deliberately no inline fast path (item 64: "a
                         // helper/runtime call is entirely acceptable"),
                         // unlike ListGet's own listget_fast special case

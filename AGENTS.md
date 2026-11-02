@@ -874,6 +874,54 @@ plus `tests/fold-loops.test` under `BOTLISH_NATIVE_GC_STRESS=1` for a change
 to native lowering. `audit/fold-loops/tools/measure.sh` and
 `economics.tcl` regenerate the report's measurements.
 
+## Flattening Lists (std::list::flat)
+
+`std::list::flat[T](lists: List[List[T]]) -> List[T]`
+(LIST-FLAT-MILESTONE-1.md) removes exactly one level of nesting, in order,
+eagerly: an ordinary root native (core/lists.tcl), `op listflat` natively
+(ops.rs's `rt_list_flat`). Keep it so:
+
+* One level, every element as it is: never recursive, no depth parameter,
+  no predicate or mapping callback, no flattening by an element's runtime
+  kind, and no element compared, hashed, converted or copied deeply. No
+  `flat_map`, `flatten` or `concat_map` beside it, and no new loop syntax:
+  a collecting loop bound to a name, then flat, is the composition.
+* Linear, in every implementation: one pass over the outer List (kinds
+  checked, lengths summed with saturating arithmetic, the collection
+  ceiling refused before anything is allocated), one result of exactly the
+  total length, each inner List copied into it once. Never build it by
+  appending, never copy a prefix again, never allocate per element.
+* No fusion, plan or builder: the operand is a completed List (a plan that
+  reaches it is materialized: hir/construction.tcl's "flat-only native
+  operation") and the result is an ordinary flat List. Fusing it with
+  collecting loops or folds is a later milestone's, justified by its own
+  escape and ownership analysis.
+* Typing is by registration, never by name in hir/types.tcl: the result
+  shape `{flat 0}` (List[List[E]] gives List[E]), the length form
+  `-result-length {flat 0}` (N*M only when both lengths are stated), and
+  `-element-kinds {list}`, which the one native-kind rule
+  (`hir::types::NativeKindMismatch`, `ElementKindMismatch`) holds statically
+  for an element type of a known other kind; `any` stays dynamic (the
+  run-time TYPE names the element's position, the same text on every
+  backend). An affine List is AFFINE-LIST-OPERATION-UNSUPPORTED (copy-out),
+  like every element-wise List operation.
+
+If you change any of that (core/lists.tcl's flat, `-element-kinds` in
+core/native.tcl, the `flat` cases of hir/types.tcl, hir/exactvalue.tcl,
+hir/modulebinding.tcl and hir/callables.tcl, `listflat` in native/lower.tcl,
+nir.rs, codegen/clif.rs or ops.rs), run `tests/list-flat.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), its golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/list-flat.bot`; generated with its fragment and census by
+`python3 -I audit/list-flat/tools/golden-port.py`),
+`audit/list-flat/tools/fuzz.tcl` (several seeds; once with `-profile large`,
+once with `-gc-stress 1`), `python3 -I audit/list-flat/tools/oracle.py
+selftest`, `cargo test --release --manifest-path native/Cargo.toml --lib
+list_flat` and `audit/list-flat/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed: update a mutant's text when
+you change the code it mutates, keeping it a mutant of the same rule), plus
+`tests/method-receiver-types.test` for a change to the native-kind rule.
+`audit/list-flat/tools/measure.tcl` regenerates the performance tables.
+
 ## Traits
 
 Traits (TRAITS.md) are eager, one-way, entirely static views: a trait-typed

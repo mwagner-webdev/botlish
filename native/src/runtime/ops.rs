@@ -62,6 +62,8 @@
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
 //! | rt_list_with_length    | List, Int           | the same List; declared      | no        |
 //! |                        |                     | LengthMismatch               |           |
+//! | rt_list_flat           | List of Lists       | new List (one copy of each   | yes       |
+//! |                        |                     | inner List); TYPE, RANGE     |           |
 //! | rt_set_from_list       | List                | ImmutableSet; EQUALITY       | yes       |
 //! | rt_set_contains        | ImmutableSet, any   | Bool; EQUALITY               | no        |
 //! | rt_mutarray_allocate   | count                | MutableArray (slots = UNIT)  | yes       |
@@ -147,7 +149,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         // (RAW-C-FLOAT-FFI-MILESTONE-1.md).
         RawFromBits32 | RawFromBits64 | RawBits64 | RawAdmit32 | RawAdmit64 | RawNarrow32 | RawNarrow64 |
         IAdd | ISub | IMul | IMod | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat | StrAppendChar
-            | StrUtf8Bytes | Argv | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk
+            | StrUtf8Bytes | Argv | ListNew | ListAppend | ListFlat | MutArrayAllocate | MutArrayFreeze | MkOk
             // The owned byte storage is one allocation (a collection may run
             // first); the empty storage is a shared static (no allocation).
             | BytesFromList | BytesJoin | BytesDecodeUtf8 | BytesSlice
@@ -291,7 +293,7 @@ pub fn op_may_error(op: OpCode) -> bool {
         // another architecture's target the transport is NATIVE
         // UNSUPPORTED, also through NO_VALUE.)
         | SyscallLinuxX86_64 | SyscallLinuxAarch64
-        | ListNew | ListGet | ListAppend | ListWithLength | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
+        | ListNew | ListGet | ListAppend | ListWithLength | ListFlat | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         // MutableVector: the declared IndexNotFound (runtime/mutvec.rs).
         | MvAt | MvPop | MvTake | MvSwap | MvSwapDrop
         // MutableArray: a capacity outside the limit (RANGE), the declared
@@ -3205,6 +3207,45 @@ pub extern "C" fn rt_list_with_length(p: *mut Vm, l: Value, n: Value) -> Value {
     }
 }
 
+/// `std::list::flat(L)` (`listflat`; core/lists.tcl, LIST-FLAT-MILESTONE-1.md):
+/// a new List of the elements of L's first List, then of its second, and so
+/// on -- exactly one level of nesting removed, every element copied as the
+/// word it is (never compared, converted or flattened further), L and its
+/// Lists unchanged. O(m + n) for m inner Lists of n elements in all: one pass
+/// checks that every element of L is a List (TYPE, with its position, as
+/// core::lists::flat words it: only an `any` argument reaches it) and sums
+/// their lengths -- saturating, so a sum past the collection-length ceiling
+/// is the ordinary RANGE refusal before anything is allocated, never a
+/// wrapped count -- then one buffer of exactly that capacity receives each
+/// inner List's slice in order and becomes the result's one heap object (no
+/// prefix is ever copied again, no per-element allocation). The inner Lists
+/// and their elements stay reachable through L, an operand of the allocating
+/// instruction, while the result is allocated (the collector does not move
+/// objects), exactly as rt_list_append's copied prefix does.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_list_flat(p: *mut Vm, l: Value) -> Value {
+    let outer = list_of(l).items();
+    let mut total: usize = 0;
+    for (position, &inner) in outer.iter().enumerate() {
+        if heap_kind(inner) != KIND_LIST {
+            let context = format!("std::list::flat element {position}");
+            return vm(p).fail(RtError::Type { context, expected: Kind::List, got: inner });
+        }
+        total = total.saturating_add(list_of(inner).items().len());
+    }
+    if let Some(refused) = vm(p).reject_oversized_collection(total) {
+        return refused;
+    }
+    let mut items: Vec<Value> = Vec::with_capacity(total);
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+    debug_assert_eq!(items.len(), total);
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_list_copy(total);
+    r
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
     let old = list_of(l).items();
@@ -4061,6 +4102,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
         ListWithLength => rt_list_with_length(p, a[0], a[1]),
+        ListFlat => rt_list_flat(p, a[0]),
         SetFromList => rt_set_from_list(p, a[0]),
         // Same runtime helper as SetFromList: the distinction is purely an
         // op_may_error classification (see OpCode::SetFromListTotal's own
@@ -4371,6 +4413,7 @@ runtime_helpers! {
     (rt_tree_children, 2),
     (rt_list_get, 3),
     (rt_list_with_length, 3),
+    (rt_list_flat, 2),
     (rt_list_get_proven, 3),
     (rt_list_append, 3),
     (rt_construct, 4),
@@ -5811,6 +5854,82 @@ mod tests {
         }
         let empty = rooted!(vm, vm.new_list(vec![]));
         assert_eq!(rt_list_with_length(&mut *vm, empty, small(0)), empty);
+    }
+
+    // std::list::flat (`listflat`, LIST-FLAT-MILESTONE-1.md): the elements of
+    // the inner Lists in order, exactly one level removed (a nested List
+    // stays one element), duplicates and empty Lists as they are; one List
+    // allocated and exactly n elements copied; operand and inner Lists
+    // unchanged; TYPE with the position for an element that is no List.
+    #[test]
+    fn list_flat_removes_one_level_in_order() {
+        let mut vm = vm();
+        let a = rooted!(vm, vm.new_list(vec![small(1), small(2)]));
+        let empty = rooted!(vm, vm.new_list(vec![]));
+        let nested = rooted!(vm, vm.new_list(vec![a]));
+        let b = rooted!(vm, vm.new_list(vec![small(3), nested, small(3)]));
+        let outer = rooted!(vm, vm.new_list(vec![a, empty, b, empty, a]));
+        let lists = vm.metrics.by_kind[KIND_LIST as usize].allocations;
+        let copied = vm.metrics.list_elements_copied;
+        let r = rooted!(vm, rt_list_flat(&mut *vm, outer));
+        assert_eq!(list_of(r).items(), &[small(1), small(2), small(3), nested, small(3), small(1), small(2)]);
+        assert_eq!(vm.metrics.by_kind[KIND_LIST as usize].allocations, lists + 1);
+        assert_eq!(vm.metrics.list_elements_copied, copied + 7);
+        assert_eq!(list_of(outer).items(), &[a, empty, b, empty, a]);
+        assert_eq!(list_of(a).items(), &[small(1), small(2)]);
+        assert_eq!(list_of(b).items(), &[small(3), nested, small(3)]);
+        for parts in [vec![], vec![empty], vec![empty, empty, empty]] {
+            let o = rooted!(vm, vm.new_list(parts));
+            let r = rt_list_flat(&mut *vm, o);
+            assert_eq!(list_of(r).items(), &[] as &[Value]);
+        }
+        let single = rooted!(vm, vm.new_list(vec![b]));
+        let r = rt_list_flat(&mut *vm, single);
+        assert_eq!(list_of(r).items(), list_of(b).items());
+        assert_ne!(r, b, "a new List, never the inner one");
+        let bad = rooted!(vm, vm.new_list(vec![a, empty, small(7)]));
+        assert_eq!(rt_list_flat(&mut *vm, bad), NO_VALUE);
+        assert_eq!(
+            vm.error.take().map(|e| (e.error_code(), e.message())),
+            Some((vec!["CORE", "SEMANTIC", "TYPE"], "std::list::flat element 2: expected list, got 7".to_string()))
+        );
+    }
+
+    // A collection at the result's allocation (stress: one at every
+    // allocation) frees nothing flat still reads: the inner Lists and their
+    // heap elements are reachable only through the operand, and freed
+    // Lists are poisoned, so a missed root would show in the result.
+    #[test]
+    fn list_flat_survives_a_collection_at_its_allocation() {
+        let mut vm = vm();
+        vm.heap.set_stress_for_test(true);
+        vm.heap.set_poison_for_test(true);
+        let mut inners = Vec::new();
+        for i in 0..20 {
+            // (The inner Lists made so far stay rooted while this one's
+            // Strings are allocated.)
+            let base = vm.temp_roots.len();
+            for j in 0..i {
+                rooted!(vm, vm.new_str(&format!("{i}.{j}")));
+            }
+            let items = vm.temp_roots[base..].to_vec();
+            let inner = vm.new_list(items);
+            vm.temp_roots.truncate(base);
+            vm.temp_roots.push(inner);
+            inners.push(inner);
+        }
+        let outer = vm.new_list(inners);
+        // From here on the inner Lists and their Strings are reachable only
+        // through the outer List.
+        vm.temp_roots.clear();
+        vm.temp_roots.push(outer);
+        let r = rooted!(vm, rt_list_flat(&mut *vm, outer));
+        let texts: Vec<String> = list_of(r).items().iter().map(|&v| str_of(v).as_str().to_string()).collect();
+        let expected: Vec<String> = (0..20).flat_map(|i| (0..i).map(move |j| format!("{i}.{j}"))).collect();
+        assert_eq!(texts, expected);
+        vm.collect_for_test(crate::runtime::metrics::GcReason::Explicit);
+        let again: Vec<String> = list_of(r).items().iter().map(|&v| str_of(v).as_str().to_string()).collect();
+        assert_eq!(again, expected);
     }
 
     // The *proven helpers (hir/completions.tcl's bounds proof, PROOF-FACT-

@@ -2633,16 +2633,48 @@ proc hir::types::IsHashable {type} {
 # NativeArgumentMismatch judges) is no mismatch: the call checks it when it
 # runs.
 proc hir::types::NativeKindMismatch {name index type} {
-    set paramType [lindex [dict get [core::native::metadata $name] paramTypes] $index]
+    set meta [core::native::metadata $name]
+    set paramType [lindex [dict get $meta paramTypes] $index]
     if {$paramType in {"" any} || $type eq "never"} {
         return {}
     }
     set kind [kindOf $type]
     set wanted [core::type::base $paramType]
-    if {$kind eq "" || $wanted in {"" any} || $kind eq $wanted} {
+    if {$kind eq "" || $wanted in {"" any}} {
         return {}
     }
-    return [list $kind $wanted]
+    if {$kind ne $wanted} {
+        return [list $kind $wanted]
+    }
+    if {[dict getdef $meta elementKinds {}] eq ""} {
+        # (No native but std::list::flat states element kinds.)
+        return {}
+    }
+    return [ElementKindMismatch $meta $index $type]
+}
+
+# {KIND WANTED elements} when the native of metadata META requires every
+# element of its List argument INDEX to be of kind WANTED (core/native.tcl's
+# -element-kinds: std::list::flat's List of Lists) and TYPE, that argument's
+# static type, is a List whose element type is of a statically known other
+# kind KIND, else {}: the call can only raise TYPE when it runs, as for a
+# mismatch of the argument's own kind -- one rule, one level deeper. An
+# element type of no fixed kind (`any`, never: an empty List) is checked when
+# the call runs.
+proc hir::types::ElementKindMismatch {meta index type} {
+    set wanted [lindex [dict getdef $meta elementKinds {}] $index]
+    if {$wanted eq ""} {
+        return {}
+    }
+    set elem [elementOf $type]
+    if {$elem in {"" never}} {
+        return {}
+    }
+    set kind [kindOf $elem]
+    if {$kind eq "" || $kind eq $wanted} {
+        return {}
+    }
+    return [list $kind $wanted elements]
 }
 
 # NativeKindMismatch, or {imprint WANTED} when TYPE is a rigid imprint
@@ -2655,8 +2687,19 @@ proc hir::types::NativeKindMismatch {name index type} {
 # fail (region inference, whose types are concrete, never sees the second).
 proc hir::types::NativeArgumentMismatch {name index type} {
     set mismatch [NativeKindMismatch $name $index $type]
-    if {$mismatch ne {} || ![IsImprint $type]} {
+    if {$mismatch ne {}} {
         return $mismatch
+    }
+    if {![IsImprint $type]} {
+        # (Likewise one level deeper: a List of a rigid variable where the
+        # elements must be of one kind, std::list::flat of a List[T].)
+        if {[IsImprint [elementOf $type]]} {
+            set wanted [lindex [dict getdef [core::native::metadata $name] elementKinds {}] $index]
+            if {$wanted ne ""} {
+                return [list imprint $wanted elements]
+            }
+        }
+        return {}
     }
     set paramType [lindex [dict get [core::native::metadata $name] paramTypes] $index]
     if {$paramType in {"" any}} {
@@ -3421,6 +3464,33 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result {ctx {}}} {
             set list [Unrefined [lindex $argTypes $l]]
             if {[IsList $list]} {
                 return [MakeList [lub [lindex $list 1] [lindex $argTypes $v]]]
+            }
+            return $result
+        }
+        flat {
+            # List[List[T]] -> List[T] (std::list::flat,
+            # LIST-FLAT-MILESTONE-1.md): the element type of the argument's
+            # element type, refined or not (a refinement of the inner Lists
+            # states their length, which -result-length reads, never an
+            # element fact). An empty List (List[never], or a List of
+            # List[never]s) flattens to the empty List[never]; an element
+            # type that is no List's (`any`, the raw `list` kind, a rigid
+            # imprint variable) says nothing about the result's elements:
+            # the native's declared `list`.
+            lassign $shape _ l
+            set outer [Unrefined [lindex $argTypes $l]]
+            if {$outer eq "never"} {
+                return never
+            }
+            if {![IsList $outer]} {
+                return $result
+            }
+            set inner [Unrefined [lindex $outer 1]]
+            if {$inner eq "never"} {
+                return [MakeList never]
+            }
+            if {[IsList $inner]} {
+                return [MakeList [lindex $inner 1]]
             }
             return $result
         }
@@ -4883,7 +4953,8 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # The exact length of a returned List, stated by the
                 # native's registration (core/native.tcl's -result-length):
                 # a List literal's argument count, std::list::append's one more
-                # than its List's, a live fixed array's copy -- minted as
+                # than its List's, a live fixed array's copy, the product of
+                # std::list::flat's outer and inner lengths -- minted as
                 # the refinement List[T]{length: N} (LIST-CARDINALITY-
                 # REFINEMENTS.md), the one representation of exact List
                 # cardinality. Region inference keeps its positional
@@ -5116,7 +5187,9 @@ proc hir::types::MintLength {hir length argExprs argTypes result} {
 
 # The exact length the registration LENGTH (-result-length) states for a
 # call on ARGEXPRS of types ARGTYPES, or "": `args` the argument count,
-# `list K D` the length argument K's type states plus D, `extent K` the
+# `list K D` the length argument K's type states plus D, `flat K` the
+# length argument K's type states times the length its element type states
+# (both, or nothing), `extent K` the
 # extent of argument K's live fixed array type, `path K` the extent of the
 # array designator constant argument K names. (`int K`, a MutableArray's
 # capacity, is no List length.)
@@ -5135,6 +5208,19 @@ proc hir::types::ResultLength {hir length argExprs argTypes} {
                 return ""
             }
             return [expr {$n + ($d eq "" ? 0 : $d)}]
+        }
+        flat {
+            # (std::list::flat: N Lists of exactly M elements each make N*M
+            # elements. The inner length must be every element's, which a
+            # type states only when it is uniform: a List of Lists of
+            # several lengths states none, and neither does its flat.)
+            set outer [lindex $argTypes $k]
+            set n [LengthOf $outer]
+            set m [LengthOf [elementOf $outer]]
+            if {$n eq "" || $m eq ""} {
+                return ""
+            }
+            return [expr {$n * $m}]
         }
         extent {
             set term [hir::layouts::OfArrayType [lindex $argTypes $k]]

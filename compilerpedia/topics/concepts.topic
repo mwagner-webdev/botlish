@@ -950,22 +950,23 @@ title: Lists: immutable sequences
 summary: List[T] is an immutable sequence written [a, b]; its operations need `import std::list`, collecting loops transform it, and it is never destructured positionally.
 index: concepts
 alias: List type; list literal; immutable list; sequence
-keywords: list, List, at, get, append, length, find, any?, all?, IndexNotFound, element, index, empty list
+keywords: list, List, at, get, append, flat, length, find, any?, all?, IndexNotFound, element, index, empty list
 related: concept.loops concept.values concept.destructuring concept.list-length proof.list-bounds rule.no-list-destructuring principle.name-the-parts capability.map-filter task.list-element stdlib.module.std::list stdlib.std::list::at stdlib.std::list::get
 docs: README.md STDLIB-NAMESPACES.md RETURNING-ITERABLE-LOOPS.md MINIMAL-APPLIED-LIST-TYPES.md
 
 == WHAT IT IS
 `[1, 2, 3]` is a `List[int]`; `[]` is the empty List. After `import
 std::list`: length, at, append (a new List with one more element), get (with
-a default), find, any?, all?, none?. Element types are inferred; a parameter
-or result may declare `List[T]`, or `List[T]{length: N}` for a List of a
-proven exact length (concept.list-length).
+a default), find, any?, all?, none?, and flat (the elements of a List of
+Lists, in order: one level of nesting removed). Element types are inferred;
+a parameter or result may declare `List[T]`, or `List[T]{length: N}` for a
+List of a proven exact length (concept.list-length).
 
 == RULES
   * `xs.at(i)` fails with the declared error IndexNotFound unless the
     compiler proves i in range (proof.list-bounds); handle it, admit it,
     or use `xs.get(i, default)`.
-  * A List never changes: append returns a new List.
+  * A List never changes: append and flat return a new List.
   * Lists are not destructured positionally: `[a, b] = xs` is
     LIST-DESTRUCTURING. A fixed group of different values is a struct
     (principle.name-the-parts).

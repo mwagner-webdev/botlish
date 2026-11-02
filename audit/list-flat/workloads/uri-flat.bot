@@ -1,0 +1,79 @@
+# uri-flat.bot -- LIST-FLAT-MILESTONE-1.md's applicability probe of the
+# uri-steady benchmark (bench/uri-steady.bot): the same corpus, the same
+# 2000 repeats, the same sum of escaped lengths, but each text escaped by
+# building its output as a List of byte chunks -- one List[std::byte::Byte] per
+# character (the character's own byte, or its %XX escapes) from a collecting
+# loop -- flattened with std::list::flat and decoded once (one Bytes, one
+# String), where std::web::uri_escape_text concatenates Strings in a
+# tail-recursive accumulator (String plans). Checked against
+# std::web::uri_escape_text on the corpus (`same`). No String constructor,
+# Unicode rule or URI rule is added: a probe, not an optimization.
+#
+# expect: [29500, true]
+
+import std::abi::bytes
+import std::byte
+import std::char
+import std::list
+import std::str
+import std::web
+
+corpus = ["abcXYZ012", "a b+c?", "café", "hello 世界?"]
+
+fn one(b: std::byte::Byte) -> List[std::byte::Byte]:
+    [b]
+
+# (A List literal's element type is the join of its elements' static types,
+# so the escape is written with Byte-typed parts: `[37, ...]` would be a
+# List[int] even where every element is provably a Byte.)
+fn percent() -> std::byte::Byte:
+    37
+
+fn digit(n: std::byte::Nibble) -> std::byte::Byte:
+    if n < 10:
+        48 + n
+    else:
+        55 + n
+
+fn pct(b: std::byte::Byte) -> List[std::byte::Byte]:
+    [percent(), digit(std::byte::nibble(std::byte::high_nibble(b))), digit(std::byte::nibble(b.mod(16)))]
+
+fn cont(v: int, shift: int) -> List[std::byte::Byte]:
+    pct(bit_or(128, bit_and(v.shift_right(shift), 63)))
+
+fn escape_scalar(c: UnicodeChar) -> List[std::byte::Byte]:
+    v = std::char::scalar_value(c)
+    if v < 2048:
+        std::list::flat([pct(bit_or(192, v.shift_right(6))), cont(v, 0)])
+    elif v < 65536:
+        std::list::flat([pct(bit_or(224, v.shift_right(12))), cont(v, 6), cont(v, 0)])
+    else:
+        std::list::flat([pct(bit_or(240, v.shift_right(18))), cont(v, 12), cont(v, 6), cont(v, 0)])
+
+fn escape_char(c: UnicodeChar) -> List[std::byte::Byte]:
+    v = std::char::scalar_value(c)
+    if v > 127:
+        escape_scalar(c)
+    elif std::web::is_unreserved(v):
+        one(v)
+    else:
+        pct(v)
+
+fn uri_escape_flat(text: str) -> str:
+    chunks = loop i from 0 to std::str::length(text):
+        escape_char(text.char_at(i))
+    data = std::abi::bytes::from_list(std::list::flat(chunks))
+    std::abi::bytes::decode_utf8(data):
+        on InvalidUtf8:
+            ""
+
+fn repeat_uri(i, total, acc):
+    if i >= total:
+        return acc
+    text = corpus.at(i.mod(std::list::length(corpus)))
+    repeat_uri(i + 1, total, acc + std::str::length(uri_escape_flat(text)))
+
+fn agrees?(text: str) -> bool:
+    uri_escape_flat(text) == std::web::uri_escape_text(text)
+
+[0.repeat_uri(2000, 0), std::list::all?(corpus, agrees?)]

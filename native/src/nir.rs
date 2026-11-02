@@ -71,6 +71,14 @@ pub enum OpCode {
     /// declared LengthMismatch -- the explicit validator of the List
     /// length refinement; never a copy.
     ListWithLength,
+    /// `std::list::flat(L)` (core/lists.tcl, LIST-FLAT-MILESTONE-1.md): a
+    /// new List of the elements of L's Lists, in order -- one level of
+    /// nesting removed. Linear (ops.rs's rt_list_flat: one pass to check
+    /// the inner kinds and sum the lengths, one allocation of exactly that
+    /// many elements, each inner List copied straight into place).
+    /// Fallible: TYPE for an element that is not a List (only an `any`
+    /// argument reaches it), RANGE past the collection-length ceiling.
+    ListFlat,
     /// List -> ImmutableSet, deduplicating by VEq's own rule (MINIMAL-
     /// IMMUTABLE-SET.md's `immutable_set::from_list`): O(n^2), the
     /// deliberately simple first representation -- no inline fast path
@@ -886,6 +894,7 @@ op_spellings! {
     "listget" => ListGet,
     "listappend" => ListAppend,
     "listwithlen" => ListWithLength,
+    "listflat" => ListFlat,
     "setfromlist" => SetFromList,
     "setfromlisttotal" => SetFromListTotal,
     "setcontains" => SetContains,
@@ -1143,7 +1152,7 @@ impl OpCode {
             ListNew => None,
             Argv | CPtrNull | CoFailed => Some(0),
             SyscallLinuxX86_64 | SyscallLinuxAarch64 => Some(7),
-            StrLen | StrLower | ListLen | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
+            StrLen | StrLower | ListLen | ListFlat | TreeChildren | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | HashTotal | TableHash | TableHashTotal | RBox | RUnbox | CWBox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharIsTclAlpha | CharIsTclAlnum | CharCodepoint | SetFromList
             | F64Neg | F64FromInt | F64Trunc | F64Round | D64Neg | IntToStr | StrToInt

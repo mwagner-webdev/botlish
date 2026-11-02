@@ -109,9 +109,11 @@
 !! mrt-generic-imprint-unconstrained mrt-generic-imprint-trait-constrained mrt-generic-imprint-inherited mrt-rule-cases
 ## hir/types.tcl
 <<<<
-    if {$mismatch ne {} || ![IsImprint $type]} {
+    if {![IsImprint $type]} {
+        # (Likewise one level deeper: a List of a rigid variable where the
 ====
     if {1} {
+        # (Likewise one level deeper: a List of a rigid variable where the
 >>>>
 
 @@ poison-dropped the rejected call keeps its native's result type: what uses it is judged again (a cascade)
@@ -127,9 +129,13 @@
 !! mrt-valid-receiver mrt-generic-untyped-satisfied mrt-rule-cases
 ## hir/types.tcl
 <<<<
-    if {$kind eq "" || $wanted in {"" any} || $kind eq $wanted} {
+    if {$kind ne $wanted} {
+        return [list $kind $wanted]
+    }
+    if {[dict getdef $meta elementKinds {}] eq ""} {
 ====
-    if {$kind eq "" || $wanted in {"" any}} {
+    return [list $kind $wanted]
+    if {[dict getdef $meta elementKinds {}] eq ""} {
 >>>>
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,71 @@
+# tclsh9.0 audit/list-flat/tools/measure.tcl -sizes "1024 4096 16384" -instructions 0 -time 1 -runs 60
+== basic: one flat (instructions per flat, input construction cancelled; R = 16)
+
+shape | m | n | instr/flat | instr/n | instr/(m+n) | rt_list_flat/flat | Lists/flat | copies/flat | us/flat
+----- | - | - | ---------- | ------- | ----------- | ----------------- | ---------- | ----------- | -------
+singletons | 1024 | 1024 | - | - | - | - | 1 | 1024 | 4.22
+singletons | 4096 | 4096 | - | - | - | - | 1 | 4096 | 39.11
+singletons | 16384 | 16384 | - | - | - | - | 1 | 16384 | 97.67
+few-large | 4 | 1024 | - | - | - | - | 1 | 1024 | 0.64
+few-large | 4 | 4096 | - | - | - | - | 1 | 4096 | 7.27
+few-large | 4 | 16384 | - | - | - | - | 1 | 16384 | 28.74
+many-empty | 4096 | 1024 | - | - | - | - | 1 | 1024 | 21.35
+many-empty | 16384 | 4096 | - | - | - | - | 1 | 4096 | 47.09
+many-empty | 65536 | 16384 | - | - | - | - | 1 | 16384 | 289.25
+mixed | 293 | 1018 | - | - | - | - | 1 | 1018 | 1.36
+mixed | 1170 | 4089 | - | - | - | - | 1 | 4089 | 11.45
+mixed | 4681 | 16380 | - | - | - | - | 1 | 16380 | 61.8
+structs | 128 | 1024 | - | - | - | - | 1 | 1024 | -0.76
+structs | 512 | 4096 | - | - | - | - | 1 | 4096 | 5.01
+structs | 2048 | 16384 | - | - | - | - | 1 | 16384 | 58.87
+
+== idioms: building the same List of n elements from k = 8 per inner List (per construction; R = 2, profiles of 1 and 3 runs)
+
+idiom | n | instr/construction | instr/element | Lists | copies | us | value
+----- | - | ------------------ | ------------- | ----- | ------ | -- | -----
+flat | 1024 | - | - | 1 | 1024 | 0.99 | 2048
+append-fold | 1024 | - | - | 1025 | 523776 | 275.49 | 2048
+flat-pair-fold | 1024 | - | - | 257 | 66304 | 50.29 | 2048
+vector-push | 1024 | - | - | 260 | 3581 | 102.77 | 2048
+tail-recursion | 1024 | - | - | 1154 | 2044 | 78.31 | 2048
+flat | 4096 | - | - | 1 | 4096 | 3.99 | 8192
+append-fold | 4096 | - | - | 4097 | 8386560 | 5253.81 | 8192
+flat-pair-fold | 4096 | - | - | 1025 | 1051648 | 600.99 | 8192
+vector-push | 4096 | - | - | 1028 | 14333 | 395.96 | 8192
+tail-recursion | 4096 | - | - | 4610 | 8188 | 345.78 | 8192
+flat | 16384 | - | - | 1 | 16384 | 32.38 | 32768
+append-fold | 16384 | - | - | 16385 | 134209536 | 156112.43 | 32768
+flat-pair-fold | 16384 | - | - | 4097 | 16789504 | 15635.43 | 32768
+vector-push | 16384 | - | - | 4100 | 57341 | 2002.09 | 32768
+tail-recursion | 16384 | - | - | 18434 | 32764 | 1513.53 | 32768
+
+== loop: chunks = loop x in xs: expand(x) (k = 8 elements each), then flat
+
+variant | n | instr/run | rt_list_flat | Lists | copies | listflat-allocs | us | value
+------- | - | --------- | ------------ | ----- | ------ | --------------- | -- | -----
+outer-scalar | 1024 | - | - | 4 | 504 | 0 | 9.34 | 128
+outer-and-inner | 1024 | - | - | 260 | 2040 | 0 | 63.98 | 128
+outer-inner-flat | 1024 | - | - | 261 | 3064 | 1 | 64.73 | 1024
+single-loop | 1024 | - | - | 4 | 2296 | 0 | 39.04 | 1024
+outer-scalar | 4096 | - | - | 4 | 2040 | 0 | 35.43 | 512
+outer-and-inner | 4096 | - | - | 1028 | 8184 | 0 | 272.37 | 512
+outer-inner-flat | 4096 | - | - | 1029 | 12280 | 1 | 389.02 | 4096
+single-loop | 4096 | - | - | 4 | 9208 | 0 | 156.71 | 4096
+outer-scalar | 16384 | - | - | 4 | 8184 | 0 | 140.83 | 2048
+outer-and-inner | 16384 | - | - | 4100 | 32760 | 0 | 1100.32 | 2048
+outer-inner-flat | 16384 | - | - | 4101 | 49144 | 1 | 1325.43 | 16384
+single-loop | 16384 | - | - | 4 | 36856 | 0 | 625.02 | 16384
+
+== chunks: FOLD-LOOPS-MILESTONE-1.md's chunk workloads, the chunks then flat
+
+workload | variant | n | instr/run | rt_list_flat | Lists | copies | listflat-allocs | us | value
+-------- | ------- | - | --------- | ------------ | ----- | ------ | --------------- | -- | -----
+chunks-fold | chunks-only | 128 | - | - | 214 | 1513 | 0 | 37.67 | 56
+chunks-fold | chunks-then-flat | 128 | - | - | 215 | 1630 | 1 | 26.16 | 117
+chunks-fold | chunks-only | 1024 | - | - | 1672 | 73686 | 0 | 238.19 | 439
+chunks-fold | chunks-then-flat | 1024 | - | - | 1673 | 74622 | 1 | 242.04 | 936
+chunks-recursive | chunks-only | 128 | - | - | 174 | 502 | 0 | 14.81 | 56
+chunks-recursive | chunks-then-flat | 128 | - | - | 175 | 619 | 1 | 15.32 | 117
+chunks-recursive | chunks-only | 1024 | - | - | 1351 | 4099 | 0 | 135.47 | 439
+chunks-recursive | chunks-then-flat | 1024 | - | - | 1352 | 5035 | 1 | 137.49 | 936
+

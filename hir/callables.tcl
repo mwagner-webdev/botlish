@@ -650,7 +650,7 @@ proc hir::callables::WalkExpr {hirVar e} {
 # untyped): a direct call's declared parameter type (hir::range::
 # VerifyCall proves the argument admissible for it), a structural callee's
 # contract argument type (VerifyStructuralCall), or -- for a List-building
-# native (-result-shape elements/append, core/native.tcl), a List read
+# native (-result-shape elements/append/flat, core/native.tcl), a List read
 # (element) or std::immutable_set::from_list (immutable-set) -- the position the
 # value provably lands in inside the call's own result type.
 proc hir::callables::ArgContexts {hir e} {
@@ -714,6 +714,18 @@ proc hir::callables::ArgContexts {hir e} {
                 set contexts $none
                 lset contexts $l $result
                 lset contexts $v $elem
+                return $contexts
+            }
+        }
+        flat {
+            # std::list::flat(L) (LIST-FLAT-MILESTONE-1.md): the elements of
+            # L's Lists land, unchanged and in order, in the result -- so L
+            # is preserved exactly as a List of Lists of the result's
+            # element type.
+            lassign $shape _ l
+            if {$elem ne ""} {
+                set contexts $none
+                lset contexts $l [hir::types::MakeList [hir::types::MakeList $elem]]
                 return $contexts
             }
         }

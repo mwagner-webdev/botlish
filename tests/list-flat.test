@@ -1,0 +1,550 @@
+# list-flat.test -- std::list::flat[T](lists: List[List[T]]) -> List[T]
+# (LIST-FLAT-MILESTONE-1.md): a new List of the elements of every List in
+# LISTS, in order -- exactly one level of nesting removed, eagerly, in time
+# linear in the number of inner Lists plus the number of elements.
+#
+# Every behavioral test runs on the interpreter, the Tcl compiler and both
+# native backends, and fails unless all four agree, a run-time error's
+# message included. The file pins the values (empty, singleton, nested,
+# order, duplicates, every representative element kind), the static types
+# (List[T] from List[List[T]], List[never], refinements, joins, the exact
+# length N*M, exact values, generic and imprinted functions), the
+# diagnostics (a List of no Lists, a non-List, a rigid variable's List, an
+# affine List), ordinary call semantics (the argument evaluated once, the
+# source Lists unchanged and shareable), the compositions with collecting
+# loops and folds, the representation (one runtime operation, no List
+# operation per element, the result allocated once with exactly n elements
+# copied), large inputs, a seeded randomized differential against an
+# independent Tcl model, and a standalone executable under GC stress.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+set ::lfBackends {interp compile cranelift-generic cranelift}
+if {![testConstraint nativeBuilt]} {
+    set ::lfBackends {interp compile}
+}
+
+proc lfHir {text} {
+    return [surface::compile $text t.bot -warnings off]
+}
+
+# The outcome of TEXT, the same on every backend ({value V} or {error CODE
+# MESSAGE}, a run-time error's message included); else what differs.
+proc lfOutcome {text} {
+    set hir [lfHir $text]
+    set outcomes [lmap backend $::lfBackends {lrange [outcomeUnderHir $backend $hir] 0 end-1}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "BACKENDS DISAGREE: [join [lmap backend $::lfBackends outcome $outcomes {list $backend $outcome}] { / }]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The value of TEXT, the same on every backend; else the outcome.
+proc lf {text} {
+    set outcome [lfOutcome "import std::list\n$text"]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return $outcome
+}
+
+# {KIND LINE:COLUMN MESSAGE} of each diagnostic a strict compilation of TEXT
+# reports; accepted when it reports none.
+proc lfDiagnostics {text} {
+    if {![catch {surface::compile "import std::list\n$text" t.bot -warnings off} message options]} {
+        return accepted
+    }
+    set result {}
+    foreach d [dict get $options -diagnostics] {
+        set location [dict get $d location]
+        lappend result [list [lindex [dict get $d errorcode] 2] \
+            "[dict get $location line]:[dict get $location column]" [dict get $d summary]]
+    }
+    return $result
+}
+
+proc lfKinds {text} {
+    set diagnostics [lfDiagnostics $text]
+    if {$diagnostics eq "accepted"} {
+        return accepted
+    }
+    return [lmap d $diagnostics {lindex $d 0}]
+}
+
+# The static type of top-level binding NAME of TEXT, as it is spelled.
+proc lfType {text name} {
+    set hir [lfHir "import std::list\n$text"]
+    return [hir::types::show [hir::bindingType $hir [hir::lookup $hir [hir::top $hir] $name]]]
+}
+
+# The NIR text of the function named NAME of TEXT's native lowering.
+proc lfNirFunction {text name} {
+    set nir [native::nir [lfHir "import std::list\n$text"]]
+    set lines {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp "^func \\d+ \"$name\"" $line]} {
+            set inside 1
+        }
+        if {$inside} {
+            lappend lines $line
+            if {$line eq "end"} {
+                break
+            }
+        }
+    }
+    return [join $lines \n]
+}
+
+# The `op NAME` operations of NIR text, in order.
+proc lfOps {nir} {
+    return [lmap {- op} [regexp -all -inline {= op (\S+)} $nir] {set op}]
+}
+
+# ---------------------------------------------------------------------------
+# Values
+
+test list-flat-examples {the milestone's examples: one level removed, in order} -body {
+    lf {[std::list::flat([[1, 2], [], [3, 4]]), std::list::flat([[], []]), std::list::flat([[[1, 2]], [[3]]])]}
+} -result {[[1, 2, 3, 4], [], [[1, 2], [3]]]}
+
+test list-flat-empty-outer {an empty outer List flattens to the empty List} -body {
+    lf {std::list::flat([])}
+} -result {[]}
+
+test list-flat-empty-inners {empty inner Lists contribute nothing, wherever they are} -body {
+    lf {[std::list::flat([[]]), std::list::flat([[], [], []]), std::list::flat([[], [1], [], [], [2], []]), std::list::flat([[1], [], []])]}
+} -result {[[], [], [1, 2], [1]]}
+
+test list-flat-one-inner {one inner List flattens to its own elements} -body {
+    lf {[std::list::flat([[1, 2, 3]]), std::list::flat([[7]])]}
+} -result {[[1, 2, 3], [7]]}
+
+test list-flat-singletons {many singleton inner Lists} -body {
+    lf {std::list::flat([[1], [2], [3], [4], [5], [6], [7], [8], [9], [10]])}
+} -result {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+
+test list-flat-order-and-duplicates {inner Lists in order, each inner List's elements in order; duplicates stay duplicates} -body {
+    lf {[std::list::flat([[3, 1], [1, 3], [2, 2, 2]]), std::list::flat([[1, 1], [1]])]}
+} -result {[[3, 1, 1, 3, 2, 2, 2], [1, 1, 1]]}
+
+test list-flat-one-level-only {exactly one level: deeper Lists stay elements, even empty ones} -body {
+    lf {[std::list::flat([[[1, [2]]], [[]], [[3], []]]), std::list::flat([[[[1]]]])]}
+} -result {[[[1, [2]], [], [3], []], [[[1]]]]}
+
+test list-flat-twice {flattening twice removes two levels} -body {
+    lf {std::list::flat(std::list::flat([[[1, 2], [3]], [[4]], [[]]]))}
+} -result {[1, 2, 3, 4]}
+
+test list-flat-concatenation {flat([xs, ys]) is the concatenation of two Lists} -body {
+    lf "xs = \[1, 2\]\nys = \[3\]\n\[std::list::flat(\[xs, ys\]), std::list::flat(\[ys, xs, ys\]), std::list::flat(\[xs, \[\]\])\]"
+} -result {[[1, 2, 3], [3, 1, 2, 3], [1, 2]]}
+
+test list-flat-method-syntax {written as a method on the outer List} -body {
+    lf {[[[1], [2, 3]].flat(), [[[1]], [[2]]].flat().flat()]}
+} -result {[[1, 2, 3], [1, 2]]}
+
+test list-flat-element-kinds {every representative element kind is kept exactly as it is} -body {
+    lf "enum Color:\n    Red, Green\n\nstruct P:\n    x: int\n    tag: str\n\nfn inc(n: int) -> int:\n    n + 1\n\nstrs = std::list::flat(\[\[\"ab\", \"cd\"\], \[\"é𝄞\"\]\])\nbools = std::list::flat(\[\[true\], \[false, true\]\])\nfloats = std::list::flat(\[\[1.5\], \[\], \[-0.25\]\])\nchars = std::list::flat(\[\['a', 'b'\], \['c'\]\])\ncolors = std::list::flat(\[\[Color::Red\], \[Color::Green, Color::Red\]\])\nps = std::list::flat(\[\[P {x: 1, tag: \"one\"}\], \[P {x: 2, tag: \"two\"}\]\])\nanon = std::list::flat(\[\[{a: 1, b: \"x2\"}\], \[{a: 2, b: \"y3\"}\]\])\nunits = std::list::flat(\[\[unit\], \[unit\]\])\nbig = std::list::flat(\[\[18446744073709551616\], \[-1\]\])\nfns = std::list::flat(\[\[inc\], \[inc\]\])\ncalled = loop f in fns:\n    f(41)\n\[strs, bools, floats, chars, colors, ps, anon, units, big, called\]"
+} -result {[["ab", "cd", "é𝄞"], [true, false, true], [1.5, -0.25], ['a', 'b', 'c'], [Color::Red, Color::Green, Color::Red], [P {x: 1, tag: "one"}, P {x: 2, tag: "two"}], [{a: 1, b: "x2"}, {a: 2, b: "y3"}], [unit, unit], [18446744073709551616, -1], [42, 42]]}
+
+test list-flat-heterogeneous-elements {elements of different kinds in one List stay what they are} -body {
+    lf {std::list::flat([[1, "two"], [[3]], [true]])}
+} -result {[1, "two", [3], true]}
+
+test list-flat-equality-and-hash {the result is an ordinary List: equal to the literal, with its hash} -body {
+    lf {[std::list::flat([[1], [2, 3]]) == [1, 2, 3], hash(std::list::flat([[1], [2, 3]])) == hash([1, 2, 3]), std::list::flat([[1], [2]]) == [2, 1]]}
+} -result {[true, true, false]}
+
+test list-flat-mutable-elements {Lists of MutableVector values: the elements are copied as values, never shared with the sources} -body {
+    lf "import std::mutable_vector\n\nfn bump(place v: MutableVector\[int\]):\n    v.push(9)\n\nv = std::mutable_vector::from_list(\[1\])\nw = std::mutable_vector::from_list(\[2\])\nxs = std::list::flat(\[\[v\], \[w, v\]\])\nfirst = loop m in xs:\n    std::mutable_vector::length(m)\n\[first, std::mutable_vector::length(v)\]"
+} -result {[[1, 1, 1], 1]}
+
+# ---------------------------------------------------------------------------
+# Static types
+
+test list-flat-type-int {List[List[int]] flattens to List[int]} -body {
+    lfType "fn f(xss: List\[List\[int\]\]) -> List\[int\]:\n    std::list::flat(xss)\n\nr = f(\[\[1\], \[2, 3\]\])\nx = std::list::flat(\[\[1\], \[2, 3\]\])" x
+} -result {List[int]}
+
+test list-flat-type-str {List[List[str]] flattens to List[str]} -body {
+    lfType {x = std::list::flat([["ab"], ["cd", "ef"]])} x
+} -result {List[str]}
+
+test list-flat-type-structs {named and anonymous structs} -body {
+    list [lfType "struct P:\n    x: int\n\nx = std::list::flat(\[\[P {x: 1}\], \[\]\])" x] \
+        [lfType {x = std::list::flat([[{a: 1}], [{a: 2}, {a: 3}]])} x]
+} -result {{List[P]} {List[struct{a: int}]}}
+
+test list-flat-type-nested {List[List[List[int]]] keeps one level} -body {
+    list [lfType {x = std::list::flat([[[1, 2]], [[3]], []])} x] [lfType {x = std::list::flat(std::list::flat([[[1, 2]], [[3]]]))} x]
+} -result {{List[List[int]]} {List[int]}}
+
+test list-flat-type-never {the empty List, and a List of empty Lists, flatten to List[never]} -body {
+    list [lfType {x = std::list::flat([])} x] [lfType {x = std::list::flat([[], []])} x] [lfType {x = std::list::flat([[]])} x]
+} -result {{List[never]} {List[never]} {List[never]}}
+
+test list-flat-type-refined-elements {a refined element type survives: the result is a List of the refinement} -body {
+    set text "type Digit = Int in 0..9\n\nfn digit(n: int) -> Digit:\n    if n >= 0 and n <= 9:\n        n\n    else:\n        0\n\nfn digits(xss: List\[List\[Digit\]\]) -> List\[Digit\]:\n    std::list::flat(xss)\n\nds = \[\[digit(1), digit(2)\], \[\], \[digit(3)\]\]\nx = std::list::flat(ds)\ny = digits(ds)\n\[x, y\]"
+    list [lfType $text x] [lfType $text y] [lf $text]
+} -result {{List[int[Digit]]} {List[int[Digit]]} {[[1, 2, 3], [1, 2, 3]]}}
+
+test list-flat-type-join {inner Lists of different element types: the result's element type is their join (an Int and a String join to no element type; the uniform inner length still gives the length)} -body {
+    list [lfType {x = std::list::flat([[1], ["a2"]])} x] [lfType "struct P:\n    x: int\n\nx = std::list::flat(\[\[P {x: 1}\], \[\]\])" x]
+} -result {{list{length: 2}} {List[P]}}
+
+test list-flat-type-length-product {N inner Lists of one proven length M make a List of proven length N*M; non-uniform inner lengths state none} -body {
+    list [lfType {x = std::list::flat([[1, 2], [3, 4], [5, 6]])} x] \
+        [lfType {x = std::list::flat([[1, 2], [3]])} x] \
+        [lfType {x = std::list::flat([[[1]], [[2]]])} x] \
+        [lfType "fn f(xss: List\[List\[int\]{length: 2}\]{length: 4}) -> List\[int\]{length: 8}:\n    std::list::flat(xss)\n\nx = f(\[\[1, 2\], \[3, 4\], \[5, 6\], \[7, 8\]\])" x]
+} -result {{List[int]{length: 6}} {List[int]} {List[List[int]{length: 1}]{length: 2}} {List[int]{length: 8}}}
+
+test list-flat-length-proof-removes-bounds-check {a proven length makes an index in range: no IndexNotFound to handle} -body {
+    lf "xs = std::list::flat(\[\[10, 20\], \[30, 40\]\])\n\[std::list::at(xs, 3), std::list::length(xs)\]"
+} -result {[40, 4]}
+
+test list-flat-exact-value {an exactly known List of exactly known Lists is an exact value: a projection's type and bounds are known} -body {
+    set text "xs = std::list::flat(\[\[1, 2\], \[\"ab\"\]\])\ns = std::list::at(xs, 2)\nn = std::list::at(xs, 0)\n\[s, n\]"
+    list [lfType $text s] [lfType $text n] [lf $text]
+} -result {str int {["ab", 1]}}
+
+test list-flat-declared-length-unproven {a declared length the argument does not prove is rejected} -body {
+    lfKinds "fn f(xss: List\[List\[int\]\]) -> List\[int\]{length: 2}:\n    std::list::flat(xss)\n\nf(\[\[1\], \[2\]\])"
+} -result {TYPE}
+
+test list-flat-type-generic-forwarder {an untyped forwarder: each call's instance is typed precisely} -body {
+    set text "fn g(xs):\n    std::list::flat(xs)\n\np = g(\[\[1\], \[2, 3\]\])\nq = g(\[\[\"ab\"\]\])\n\[p, q\]"
+    list [lfType $text p] [lfType $text q] [lf $text]
+} -result {{List[int]} {List[str]} {[[1, 2, 3], ["ab"]]}}
+
+test list-flat-type-imprinted {functions with imprint variables accept and produce nested Lists} -body {
+    set text "fn pairs(xs: List\[T\]) -> List\[List\[T\]\]:\n    loop x in xs:\n        \[x, x\]\n\nfn joined(xss: List\[List\[T\]\]) -> List\[T\]:\n    std::list::flat(xss)\n\na = joined(pairs(\[1, 2\]))\nb = joined(pairs(\[\"ab\"\]))\n\[a, b\]"
+    list [lfType $text a] [lfType $text b] [lf $text]
+} -result {{List[int]} {List[str]} {[[1, 1, 2, 2], ["ab", "ab"]]}}
+
+test list-flat-returned-from-functions {Lists returned from functions, and flat's result returned} -body {
+    lf "fn rows(n: int) -> List\[List\[int\]\]:\n    loop i from 0 to n:\n        loop j from 0 to i:\n            j\n\nfn total(n: int) -> List\[int\]:\n    std::list::flat(rows(n))\n\n\[total(0), total(1), total(4)\]"
+} -result {[[], [], [0, 0, 1, 0, 1, 2]]}
+
+test list-flat-module-binding {a module binding may retain a flat of structurally known Lists} -body {
+    set dir [makeDirectory {list flat module}]
+    try {
+        set m [open [file join $dir m.bot] w]
+        puts $m "import std::list\n\ntable = std::list::flat(\[\[1, 2\], \[\], \[3\]\])\n\nfn get() -> List\[int\]:\n    table"
+        close $m
+        set p [open [file join $dir main.bot] w]
+        puts $p "import m\n\nm::get()"
+        close $p
+        set hir [surface::readProgramFile [file join $dir main.bot] -warnings off]
+        lsort -unique [lmap backend $::lfBackends {lrange [outcomeUnderHir $backend $hir] 0 1}]
+    } finally {
+        removeDirectory {list flat module}
+    }
+} -result {{value {[1, 2, 3]}}}
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+
+test list-flat-not-lists {a List whose elements are not Lists is a compile-time TYPE error at the argument} -body {
+    lfDiagnostics {std::list::flat([1, 2])}
+} -result {{TYPE 2:17 {argument 1 of native std::list::flat requires a List whose every element is list, but this argument has type List[int]{length: 2}, whose elements are int: the call could only fail when it runs}}}
+
+test list-flat-not-a-list {an argument that is no List is the ordinary native kind error} -body {
+    list [lfDiagnostics {std::list::flat(5)}] [lfKinds {std::list::flat("ab")}]
+} -result {{{TYPE 2:17 {argument 1 of native std::list::flat requires list, but this argument has type int: the call could only fail when it runs}}} TYPE}
+
+test list-flat-method-receiver {the method spelling reports the receiver} -body {
+    lindex [lfDiagnostics {[1, 2].flat()}] 0
+} -result {TYPE 2:1 {argument 1 of native std::list::flat requires a List whose every element is list, but the receiver has type List[int]{length: 2}, whose elements are int: the call could only fail when it runs}}
+
+test list-flat-strings-of-lists {a List of Strings is not a List of Lists (a String is no List)} -body {
+    lfKinds {std::list::flat(["ab", "cd"])}
+} -result {TYPE}
+
+test list-flat-rigid-variable {a List of a rigid imprint variable: the body is checked for every T, and not every T is a List} -body {
+    lindex [lfDiagnostics "fn f(xs: List\[T\]) -> List\[T\]:\n    std::list::flat(xs)\n\nf(\[\[1\]\])"] 0
+} -result {TYPE 3:21 {argument 1 of native std::list::flat requires a List whose every element is list, but this argument has type List[T], whose elements are T: the function is checked once, for every T, and not every T is list}}
+
+test list-flat-declared-result-mismatch {the result is held to a declared result type like any value} -body {
+    lfKinds "fn f(xss: List\[List\[int\]\]) -> List\[str\]:\n    std::list::flat(xss)\n\nf(\[\[1\]\])"
+} -result {TYPE}
+
+test list-flat-arity {flat takes one argument: a native's arity is checked when the call runs, alike on every backend} -body {
+    list [lfOutcome "import std::list\nstd::list::flat()"] [lfOutcome "import std::list\nstd::list::flat(\[\[1\]\], \[\[2\]\])"]
+} -result {{error {CORE SEMANTIC ARITY} {std::list::flat expects 1 argument(s), got 0}} {error {CORE SEMANTIC ARITY} {std::list::flat expects 1 argument(s), got 2}}}
+
+test list-flat-poison-no-cascade {a rejected call's result restates nothing} -body {
+    lfKinds "xs = std::list::flat(\[1, 2\])\nstd::list::length(xs)"
+} -result {TYPE}
+
+test list-flat-dynamic-element {an element of no fixed kind (any) is checked when the call runs: TYPE with its position, the same message on every backend} -body {
+    lfOutcome "import std::list\n\nfn any_of(x):\n    x\n\nfn g(xs):\n    std::list::flat(xs)\n\ng(any_of(\[\[1\], \[\], 2\]))"
+} -result {error {CORE SEMANTIC TYPE} {std::list::flat element 2: expected list, got 2}}
+
+test list-flat-dynamic-heterogeneous {a literal mixing Lists and a non-List is a List[any]: the run-time check} -body {
+    lfOutcome "import std::list\n\nstd::list::flat(\[\[1\], \"ab\"\])"
+} -result {error {CORE SEMANTIC TYPE} {std::list::flat element 1: expected list, got "ab"}}
+
+test list-flat-forwarder-contract {an untyped forwarder's parameter inherits the checked contract list: a non-List argument is rejected, a List of non-Lists reaches the run-time check} -body {
+    list [lfKinds "fn g(xs):\n    std::list::flat(xs)\n\ng(5)"] \
+        [lfOutcome "import std::list\n\nfn g(xs):\n    std::list::flat(xs)\n\ng(\[1, 2\])"]
+} -result {TYPE {error {CORE SEMANTIC TYPE} {std::list::flat element 0: expected list, got 1}}}
+
+test list-flat-affine {a List of affine values cannot be flattened: like every element-wise List operation, AFFINE-LIST-OPERATION-UNSUPPORTED} -body {
+    lfKinds "import std::coroutine\n\nstruct Message:\n    value: int\n\nstruct Event:\n    value: int\n\nfn worker(seed: int, resume Message) -> Event:\n    message = yield Event {value: seed}\n    return Event {value: message.value}\n\nfn make(seed: int) -> Coroutine{args: \[Message\], return: Event}:\n    coroutine {step} = worker(seed)\n    step\n\nxss = \[\[make(1)\], \[make(2)\]\]\nys = std::list::flat(xss)\n1"
+} -result {AFFINE-LIST-OPERATION-UNSUPPORTED}
+
+# ---------------------------------------------------------------------------
+# Call semantics
+
+set ::lfLog {import std::mutable_vector
+
+fn note(place log: MutableVector[int], n: int) -> int:
+    log.push(n)
+    n
+
+fn entries(log: MutableVector[int]) -> List[int]:
+    loop x in log:
+        x
+}
+
+test list-flat-argument-once {the argument is evaluated exactly once, before the call, like any argument} -body {
+    lf "$::lfLog\nfn make(place log: MutableVector\[int\]) -> List\[List\[int\]\]:\n    note(log, 7)\n    \[\[1\], \[2\]\]\n\nlog = std::mutable_vector::from_list(\[0\])\nr = std::list::flat(make(log))\n\[r, entries(log)\]"
+} -result {[[1, 2], [0, 7]]}
+
+test list-flat-sources-unchanged {the outer List and every inner List are unchanged, and the result is independent of them} -body {
+    lf "a = \[1, 2\]\nb = \[3\]\nouter = \[a, b, a\]\nr = std::list::flat(outer)\nr2 = r.append(4)\n\[outer, a, b, r, r2, std::list::flat(outer)\]"
+} -result {[[[1, 2], [3], [1, 2]], [1, 2], [3], [1, 2, 3, 1, 2], [1, 2, 3, 1, 2, 4], [1, 2, 3, 1, 2]]}
+
+test list-flat-shared-inner {one inner List shared many times, and with other Lists} -body {
+    lf "row = \[1, 2, 3\]\ngrid = \[row, row, row\]\nflat = std::list::flat(grid)\n\[flat, std::list::length(flat), std::list::flat(\[grid, \[row\]\])\]"
+} -result {[[1, 2, 3, 1, 2, 3, 1, 2, 3], 9, [[1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2, 3]]]}
+
+test list-flat-in-every-position {as a binding, an argument, a return value, an if value, a last expression} -body {
+    lf "fn r(xss: List\[List\[int\]\]) -> List\[int\]:\n    return std::list::flat(xss)\n\nfn pick(c: bool) -> List\[int\]:\n    if c:\n        std::list::flat(\[\[1\], \[2\]\])\n    else:\n        std::list::flat(\[\[3\]\])\n\nb = std::list::flat(\[\[0\]\])\n\[b, r(\[\[4\], \[5\]\]), pick(true), pick(false), std::list::length(std::list::flat(\[\[1\], \[2\]\]))\]"
+} -result {[[0], [4, 5], [1, 2], [3], 2]}
+
+# ---------------------------------------------------------------------------
+# Compositions: collecting loops and folds (no fusion; each part ordinary)
+
+test list-flat-collecting-loop {flat_map: a collecting loop whose body makes empty, singleton, variable-length, nested and branch-dependent Lists, then flat} -body {
+    lf "fn expand(x: int) -> List\[int\]:\n    if x == 0:\n        \[\]\n    elif x == 1:\n        \[100\]\n    else:\n        loop i from 0 to x:\n            x * 10 + i\n\nxs = \[0, 1, 3, 0, 2\]\nchunks = loop x in xs:\n    expand(x)\nnested = loop x in xs:\n    \[\[x\], \[\]\]\n\[std::list::flat(chunks), std::list::flat(nested)\]"
+} -result {[[100, 30, 31, 32, 20, 21], [[0], [], [1], [], [3], [], [0], [], [2], []]]}
+
+test list-flat-collecting-loop-continue {a collecting loop's continue skips an iteration's List entirely} -body {
+    lf "chunks = loop x in \[1, 2, 3, 4\]:\n    if x == 2:\n        continue\n    \[x, -x\]\nstd::list::flat(chunks)"
+} -result {[1, -1, 3, -3, 4, -4]}
+
+set ::lfChunks {struct Chunks:
+    done: List[List[int]]
+    current: List[int]
+
+fn close(c: Chunks) -> List[List[int]]:
+    if std::list::length(c.current) == 0:
+        c.done
+    else:
+        c.done.append(c.current)
+
+fn chunks(tokens: List[int]) -> List[List[int]]:
+    final = fold t in tokens with intermediate c Chunks {done: [], current: []}:
+        if t == 0:
+            Chunks {done: close(c), current: []}
+        elif t < 0:
+            Chunks {done: close(c).append([t]).append([-t]), current: []}
+        else:
+            Chunks {done: c.done, current: c.current.append(t)}
+    close(final)
+}
+
+test list-flat-chunk-fold {a fold producing zero, one or several chunks per iteration, then flat} -body {
+    lf "$::lfChunks\nts = \[1, 2, 0, 3, -4, 0, 0, 5\]\n\[chunks(ts), std::list::flat(chunks(ts)), std::list::flat(chunks(\[\])), std::list::flat(chunks(\[0, 0\]))\]"
+} -result {[[[1, 2], [3], [-4], [4], [5]], [1, 2, 3, -4, 4, 5], [], []]}
+
+test list-flat-fold-break-continue {a fold ended by break, with continue, and one with no iterations (its initial value)} -body {
+    lf "fn upto(xs: List\[int\], stop: int) -> List\[List\[int\]\]:\n    fold x in xs with intermediate acc \[\]:\n        if x == stop:\n            break\n        if x < 0:\n            continue\n        acc.append(\[x, x\])\n\n\[std::list::flat(upto(\[1, -2, 3, 9, 4\], 9)), std::list::flat(upto(\[\], 9)), std::list::flat(upto(\[9, 1\], 9))\]"
+} -result {[[1, 1, 3, 3], [], []]}
+
+test list-flat-fold-of-flat {a fold carrying a List extended by flat: concatenation in each step} -body {
+    lf "fn grow(n: int) -> List\[int\]:\n    fold i from 0 to n with intermediate acc \[\]:\n        std::list::flat(\[acc, \[i, i\]\])\n\n\[grow(0), grow(3)\]"
+} -result {[[], [0, 0, 1, 1, 2, 2]]}
+
+# ---------------------------------------------------------------------------
+# Representation
+
+test list-flat-nir-one-op {native lowering: one listflat operation, no per-element List operation, no plan of its own} -constraints nativeBuilt -body {
+    set nir [lfNirFunction "fn f(xss: List\[List\[int\]\]) -> List\[int\]:\n    std::list::flat(xss)\n\nf(\[\[1\], \[2\]\])" f]
+    list [lfOps $nir] [regexp {construct|listappend|listnew} $nir]
+} -result {listflat 0}
+
+test list-flat-nir-loop-operand {a collecting loop's plan is materialized once and flat reads the List; no fusion} -constraints nativeBuilt -body {
+    set nir [lfNirFunction "fn f(xs: List\[int\]) -> List\[int\]:\n    chunks = loop x in xs:\n        \[x, x\]\n    std::list::flat(chunks)\n\nf(\[1\])" f]
+    list [regexp -all {construct list flat} $nir] [regexp -all {op listflat} $nir] [regexp {listappend} $nir]
+} -result {1 1 0}
+
+test list-flat-compile-code {the Tcl compiler calls the registered implementation} -body {
+    set code [core::compiler::generatedCode [hir::lower [lfHir "import std::list\nstd::list::flat(\[\[1\], \[2\]\])"]]]
+    regexp {core::lists::flat} $code
+} -result 1
+
+test list-flat-hir-text {HIR text prints the call and reads it back; both run alike} -body {
+    set hir [lfHir "import std::list\nfn f(xss: List\[List\[int\]\]) -> List\[int\]:\n    std::list::flat(xss)\n\nf(\[\[1, 2\], \[\], \[3\]\])"]
+    set text [hir::format $hir]
+    set read [hir::parse $text]
+    list [expr {[hir::format $read] eq $text}] [lrange [outcomeUnderHir interp $read] 0 1] [lrange [outcomeUnderHir compile $read] 0 1]
+} -result {1 {value {[1, 2, 3]}} {value {[1, 2, 3]}}}
+
+test list-flat-interchange {the analyzed HIR written as interchange text and read back runs alike} -body {
+    set hir [lfHir "import std::list\nstd::list::flat(\[\[1\], \[2, 3\]\])"]
+    set read [hir::interchange::decode [hir::interchange::encode $hir]]
+    lsort -unique [lmap backend $::lfBackends {lrange [outcomeUnderHir $backend $read] 0 1}]
+} -result {{value {[1, 2, 3]}}}
+
+test list-flat-core-ir-text {core IR text calling std::list::flat runs on every backend} -body {
+    set ir {
+        {call {ref std::list::flat} {call {ref list} {const list {1 2}} {const list {}} {call {ref list} {const 3} {const list {4}}}}}
+    }
+    lsort -unique [lmap backend $::lfBackends {lrange [outcomeUnder $backend $ir] 0 1}]
+} -result {{value {[1, 2, 3, [4]]}}}
+
+test list-flat-registration {the registry entry: one List argument whose elements are Lists, a List result, the flat shape and length} -body {
+    set meta [core::native::metadata std::list::flat]
+    list [dict get $meta arity] [dict get $meta paramTypes] [dict get $meta elementKinds] [dict get $meta resultType] \
+        [dict get $meta resultShape] [dict get $meta resultLength] [dict get $meta ownership] [dict get $meta errors]
+} -result {1 list list list {flat 0} {flat 0} copy-out {}}
+
+# Linearity, structurally: the native allocation report of a program that
+# builds its nested List and measures it, with and without flat. flat adds
+# exactly one List, of exactly n elements, and copies exactly n elements --
+# whatever m is (a repeated-prefix implementation copies O(n*m)).
+proc lfFlatCost {build} {
+    set without [native::allocationReport [lfHir "import std::list\n$build\nstd::list::length(xs)"] sites]
+    set with [native::allocationReport [lfHir "import std::list\n$build\nstd::list::length(std::list::flat(xs))"] sites]
+    set flatSites [lmap site [dict get $with sites] {
+        if {[dict get $site operation] ne "listflat"} continue
+        list [dict get $site allocations] [dict get $site allocatedBytes]
+    }]
+    set copies [expr {[dict get $with copies listElements] - [dict get $without copies listElements]}]
+    set lists [expr {[dict get $with byKind List allocations] - [dict get $without byKind List allocations]}]
+    return [list $flatSites $lists $copies]
+}
+
+test list-flat-linear-copies {flat allocates one List of exactly n elements and copies exactly n elements, for many singletons, few large Lists and many empty Lists alike} -constraints nativeBuilt -body {
+    set header [lindex [lindex [lfFlatCost "xs = \[\[\]\]"] 0] 0 1]
+    list \
+        [lfFlatCost "fn mk(m):\n    loop i from 0 to m:\n        \[i\]\nxs = mk(1000)"] \
+        [lfFlatCost "fn mk(m):\n    loop i from 0 to m:\n        loop j from 0 to 250:\n            j\nxs = mk(4)"] \
+        [lfFlatCost "fn mk(m):\n    loop i from 0 to m:\n        if i == 500:\n            \[7, 8\]\n        else:\n            \[\]\nxs = mk(5000)"] \
+        $header
+} -result {{{{1 8024}} 1 1000} {{{1 8024}} 1 1000} {{{1 40}} 1 2} 24}
+
+# ---------------------------------------------------------------------------
+# Large inputs
+
+test list-flat-large {10,000 elements in 100 Lists, and 5,000 empty Lists around 2 elements} -body {
+    lf "fn mk(m, k):\n    loop i from 0 to m:\n        loop j from 0 to k:\n            i * k + j\nfn sum(xs: List\[int\]) -> int:\n    fold x in xs with intermediate s 0:\n        s + x\nbig = std::list::flat(mk(100, 100))\nempties = loop i from 0 to 5000:\n    if i == 2500:\n        \[1, 2\]\n    else:\n        \[\]\nsparse = std::list::flat(empties)\n\[std::list::length(big), sum(big), sparse\]"
+} -result {[10000, 49995000, [1, 2]]}
+
+# ---------------------------------------------------------------------------
+# A seeded randomized differential: random nested Lists (Ints, Strings and
+# Lists of Ints, many empty inner Lists) flattened by every backend and by an
+# independent model (Tcl's concat of the inner element texts).
+
+proc lfRandom {stateVar n} {
+    upvar 1 $stateVar state
+    set state [expr {($state * 1103515245 + 12345) % 2147483648}]
+    return [expr {$state % $n}]
+}
+
+proc lfRandomElement {stateVar} {
+    upvar 1 $stateVar state
+    switch -- [lfRandom state 3] {
+        0 { return [expr {[lfRandom state 2000] - 1000}] }
+        1 { return "\"s[lfRandom state 50]\"" }
+        2 {
+            set items {}
+            for {set i [lfRandom state 3]} {$i > 0} {incr i -1} {
+                lappend items [lfRandom state 9]
+            }
+            return "\[[join $items {, }]\]"
+        }
+    }
+}
+
+test list-flat-random-differential {40 random nested Lists: every backend agrees with the independent model} -body {
+    set state 20261101
+    set cases {}
+    set expected {}
+    for {set c 0} {$c < 40} {incr c} {
+        set inners {}
+        set flat {}
+        for {set i [lfRandom state 9]} {$i > 0} {incr i -1} {
+            set items {}
+            set length [expr {[lfRandom state 3] == 0 ? 0 : [lfRandom state 6]}]
+            for {set j 0} {$j < $length} {incr j} {
+                lappend items [lfRandomElement state]
+            }
+            lappend inners "\[[join $items {, }]\]"
+            lappend flat {*}$items
+        }
+        lappend cases "std::list::flat(\[[join $inners {, }]\])"
+        lappend expected "\[[join $flat {, }]\]"
+    }
+    set got [lf "\[[join $cases ",\n "]\]"]
+    expr {$got eq "\[[join $expected {, }]\]" ? "agree" : "got $got\nexpected \[[join $expected {, }]\]"}
+} -result agree
+
+# ---------------------------------------------------------------------------
+# A standalone executable, plain and under GC stress (a collection at every
+# allocation, the inner Lists reachable only through the operand while the
+# result is allocated), agrees with every in-process backend.
+
+test list-flat-executable {flat of heap-backed elements in a standalone executable, plain and under GC stress} -constraints executableAot -body {
+    set dir [makeDirectory {list flat executable}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel "import std::list
+import std::int
+
+struct Item:
+    name: str
+    tags: List\[str\]
+
+fn make(i: int) -> List\[Item\]:
+    loop j from 0 to i:
+        Item {name: std::int::to_string(i * 10 + j), tags: \[std::int::to_string(j)\]}
+
+fn go(n: int) -> List\[Item\]:
+    chunks = loop i from 0 to n:
+        make(i)
+    std::list::flat(chunks)
+
+r = go(25)
+last = loop x in r:
+    x.name
+\[std::list::length(r), std::list::flat(\[last, \[\"end\"\]\])\]
+"
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path -warnings off]
+        set values {}
+        foreach backend $::lfBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend values [lindex $outcome 1]
+        }
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
+        lappend values [runStandalone [file rootname $path]]
+        lappend values [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        list [llength [lsort -unique $values]] [string range [lindex $values 0] 0 40]
+    } finally {
+        removeDirectory {list flat executable}
+    }
+} -result {1 {[300, ["10", "20", "21", "30", "31", "32"}}
+
+cleanupTests

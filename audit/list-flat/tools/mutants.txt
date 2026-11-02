@@ -1,0 +1,290 @@
+# Mutants of LIST-FLAT-MILESTONE-1.md (audit/list-flat/tools/mutate.tcl):
+# each a deliberate bug in std::list::flat -- inner Lists or their elements
+# reversed, an empty inner List kept or ending the result, two levels
+# removed, an element dropped or duplicated, the total length miscounted,
+# the result built by copying an expanding prefix (quadratic), the element
+# kind check gone -- in the reference implementation (core/lists.tcl) and
+# the native runtime (native/src/runtime/ops.rs); and in the static side:
+# the result's type, its length refinement, the element-kind rule, exact
+# values, callable contracts, module bindings, the ownership role and the
+# native lowering.
+#
+#   @@ NAME DESCRIPTION
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments. Update a mutant's text when the code it mutates changes,
+# keeping it a mutant of the same rule. A mutant that edits native/src/ is
+# a native mutant: the harness rebuilds a private copy of the native
+# backend for it.
+
+@@ tcl-reverse-inner-order the reference implementation takes the inner Lists last to first
+## core/lists.tcl
+<<<<
+    foreach inner [Items $l std::list::flat] {
+====
+    foreach inner [lreverse [Items $l std::list::flat]] {
+>>>>
+
+@@ tcl-reverse-elements the reference implementation appends each inner List's elements last to first
+## core/lists.tcl
+<<<<
+        lappend result {*}[core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+====
+        lappend result {*}[lreverse [core::value::items [core::value::expect list $inner "std::list::flat element $i"]]]
+>>>>
+
+@@ tcl-empty-kept the reference implementation keeps an empty inner List as an element
+## core/lists.tcl
+<<<<
+        lappend result {*}[core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+====
+        if {$inner eq {list {}}} { lappend result $inner }
+        lappend result {*}[core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+>>>>
+
+@@ tcl-too-deep the reference implementation also flattens an element that is itself a List
+## core/lists.tcl
+<<<<
+        lappend result {*}[core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+====
+        foreach v [core::value::items [core::value::expect list $inner "std::list::flat element $i"]] {
+            if {[core::value::kind $v] eq "list"} { lappend result {*}[core::value::items $v] } else { lappend result $v }
+        }
+>>>>
+
+@@ tcl-drop-last the reference implementation drops each inner List's last element
+## core/lists.tcl
+<<<<
+        lappend result {*}[core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+====
+        lappend result {*}[lrange [core::value::items [core::value::expect list $inner "std::list::flat element $i"]] 0 end-1]
+>>>>
+
+@@ tcl-duplicate-first the reference implementation repeats each inner List's first element
+## core/lists.tcl
+<<<<
+        lappend result {*}[core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+====
+        set items [core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+        lappend result {*}[lrange $items 0 0] {*}$items
+>>>>
+
+@@ tcl-no-kind-check the reference implementation reads an element as a List without checking its kind
+## core/lists.tcl
+<<<<
+        lappend result {*}[core::value::items [core::value::expect list $inner "std::list::flat element $i"]]
+====
+        lappend result {*}[lindex $inner 1]
+>>>>
+
+@@ rs-reverse-inner-order the native runtime copies the inner Lists last to first
+## native/src/runtime/ops.rs
+<<<<
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+====
+    for &inner in outer.iter().rev() {
+        items.extend_from_slice(list_of(inner).items());
+    }
+>>>>
+
+@@ rs-reverse-elements the native runtime copies each inner List's elements last to first
+## native/src/runtime/ops.rs
+<<<<
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+====
+    for &inner in outer {
+        items.extend(list_of(inner).items().iter().rev());
+    }
+>>>>
+
+@@ rs-stop-at-empty the native runtime stops at the first empty inner List
+## native/src/runtime/ops.rs
+<<<<
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+====
+    for &inner in outer {
+        if list_of(inner).items().is_empty() {
+            break;
+        }
+        items.extend_from_slice(list_of(inner).items());
+    }
+>>>>
+
+@@ rs-too-deep the native runtime also flattens an element that is itself a List
+## native/src/runtime/ops.rs
+<<<<
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+====
+    for &inner in outer {
+        for &v in list_of(inner).items() {
+            if heap_kind(v) == KIND_LIST {
+                items.extend_from_slice(list_of(v).items());
+            } else {
+                items.push(v);
+            }
+        }
+    }
+>>>>
+
+@@ rs-drop-first the native runtime drops each inner List's first element
+## native/src/runtime/ops.rs
+<<<<
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+====
+    for &inner in outer {
+        let part = list_of(inner).items();
+        items.extend_from_slice(&part[part.len().min(1)..]);
+    }
+>>>>
+
+@@ rs-duplicate-last the native runtime repeats each inner List's last element
+## native/src/runtime/ops.rs
+<<<<
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+====
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+        if let Some(&last) = list_of(inner).items().last() {
+            items.push(last);
+        }
+    }
+>>>>
+
+@@ rs-wrong-total the native runtime counts one element too many per inner List
+## native/src/runtime/ops.rs
+<<<<
+        total = total.saturating_add(list_of(inner).items().len());
+====
+        total = total.saturating_add(list_of(inner).items().len() + 1);
+>>>>
+
+@@ rs-quadratic the native runtime builds the result by copying the expanding prefix once per inner List (same output, O(n*m) copies)
+## native/src/runtime/ops.rs
+<<<<
+    let mut items: Vec<Value> = Vec::with_capacity(total);
+    for &inner in outer {
+        items.extend_from_slice(list_of(inner).items());
+    }
+====
+    let mut items: Vec<Value> = Vec::new();
+    let mut copied: usize = 0;
+    for &inner in outer {
+        let mut next: Vec<Value> = Vec::with_capacity(items.len() + list_of(inner).items().len());
+        next.extend_from_slice(&items);
+        next.extend_from_slice(list_of(inner).items());
+        copied += next.len();
+        items = next;
+    }
+    let total = copied;
+>>>>
+
+@@ rs-no-kind-check the native runtime reads an element as a List without checking its kind
+## native/src/runtime/ops.rs
+<<<<
+        if heap_kind(inner) != KIND_LIST {
+            let context = format!("std::list::flat element {position}");
+====
+        if false && heap_kind(inner) != KIND_LIST {
+            let context = format!("std::list::flat element {position}");
+>>>>
+
+@@ lower-unmapped native lowering has no operation for std::list::flat
+## native/lower.tcl
+<<<<
+        std::list::flat   {op listflat} \
+====
+        std::list::flat_unmapped {op listflat} \
+>>>>
+
+@@ shape-keeps-outer the result is typed as the argument (List[List[T]]), not List[T]
+## hir/types.tcl
+<<<<
+            if {[IsList $inner]} {
+                return [MakeList [lindex $inner 1]]
+            }
+====
+            if {[IsList $inner]} {
+                return [MakeList $inner]
+            }
+>>>>
+
+@@ length-sum the result's length refinement is the outer length plus the inner one
+## hir/types.tcl
+<<<<
+            return [expr {$n * $m}]
+====
+            return [expr {$n + $m}]
+>>>>
+
+@@ length-outer the result's length refinement is the outer length
+## hir/types.tcl
+<<<<
+            return [expr {$n * $m}]
+====
+            return $n
+>>>>
+
+@@ element-check-off the element-kind rule never finds a mismatch: a List of no Lists compiles
+## hir/types.tcl
+<<<<
+    set kind [kindOf $elem]
+    if {$kind eq "" || $kind eq $wanted} {
+        return {}
+    }
+    return [list $kind $wanted elements]
+====
+    return {}
+>>>>
+
+@@ exact-outer-sources the exact value of a flat is the outer List's sources, not its Lists' elements
+## hir/exactvalue.tcl
+<<<<
+                lappend result {*}[lrange $inner 2 end]
+====
+                lappend result $src
+>>>>
+
+@@ callables-no-context the callable-contract analysis gives flat's argument no typed position
+## hir/callables.tcl
+<<<<
+                lset contexts $l [hir::types::MakeList [hir::types::MakeList $elem]]
+====
+                lset contexts $l ""
+>>>>
+
+@@ modulebinding-unknown a module binding of flat cannot be proven immutable
+## hir/modulebinding.tcl
+<<<<
+            set items {}
+            foreach inner [lindex $sourceProof 1] {
+====
+            return {bad unknown "std::list::flat is unknown"}
+            set items {}
+            foreach inner [lindex $sourceProof 1] {
+>>>>
+
+@@ ownership-move flat takes its argument as a move: a List of affine values is accepted, where the specified rule is AFFINE-LIST-OPERATION-UNSUPPORTED like every element-wise List operation
+## core/lists.tcl
+<<<<
+    -result-shape {flat 0} -context-free 1 -result-length {flat 0} -ownership {copy-out}
+====
+    -result-shape {flat 0} -context-free 1 -result-length {flat 0} -ownership {move}
+>>>>
