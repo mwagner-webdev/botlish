@@ -104,7 +104,13 @@ do so.
   `reap` closes what a shutdown abandoned. Nobody has to read a diagnostics
   list for a mailbox to close (section 9).
 * **All four backends**, one trace each, for nine scenario programs, also
-  under `BOTLISH_NATIVE_GC_STRESS=1` (section 12, 13).
+  under `BOTLISH_NATIVE_GC_STRESS=1` (section 12, 13). 67 tests; 23 of 23
+  mutants killed by a named detector (section 14).
+* **Cost.** Natively a message costs 2.3 µs, about 1.2 µs over a bare
+  event-loop channel (Probe F's postbox: 0.7 µs over); the difference is
+  the host's two coroutine switches per request. Restriction itself costs
+  nothing at run time. An idle actor reserves two coroutine stacks (section
+  15).
 
 **One compiler-side addition**, and why it is the smallest sound one
 (section 4.3): the internal intrinsic `std::actor::recover[M](x)`, the
@@ -532,7 +538,57 @@ keep the loop alive, and the library adds no scheduling rule.
 
 ## 12. Backend results
 
-<<BACKENDS>>
+`tests/actor.test` has 67 tests. Each of the nine scenario programs
+(`tests/actor/{actors,authority,values,lifecycle,room,shutdown,coexist,identity,replay}.bot`)
+is compiled once under `-warnings error` and run on every backend of the
+run, which must give one outcome: the whole trace, every `t=TURN: TEXT`
+line, identical. The claims are then read from that trace. The authority
+variants, the 15 rejections and the source invariants are front-end tests.
+
+| run | backends per scenario | result |
+|---|---|---|
+| `tclsh9.0 tests/actor.test` (directly) | interp, compile, cranelift-generic, cranelift | 67 of 67 |
+| `CORE_BACKEND=interp` (as `tests/local.tcl` and CI run it) | interp, cranelift | 67 of 67 |
+| `CORE_BACKEND=compile` | compile, cranelift-generic | 67 of 67 |
+| both passes under `BOTLISH_NATIVE_GC_STRESS=1` (section 13) | as above | the 30 scenario tests, 30 of 30 |
+
+**Regression** (the suites the change touches, AGENTS.md's "Same-thread
+actors" list):
+
+| suite | result |
+|---|---|
+| `tests/event-loop.test`, interp and compile passes | 91 of 91, each |
+| `tests/event-loop-linux.test` (real epoll, sockets, threads) | 15 passed, 10 skipped (its SDL3 tests: `tests/cffi/sdl3.tcl` not built here), 0 failed |
+| `tests/restricted-injection.test` | 45 of 45 |
+| `tests/coroutines.test` | 81 of 81 |
+| `tests/affine.test` | 48 of 48 |
+| `tests/contexts.test` | 74 of 74 |
+| `tests/context-traits.test` | 61 of 61 |
+| the warning gate (`audit/refactor/tools/gate.tcl`) | passed: 86 corpus programs, 40 library loaders, 34 manifest entries |
+| `tools/compilerpedia.tcl check` | 1201 topics, 727 examples run, 0 problems |
+| the golden manifest (`audit/golden/migration/merge.tcl -names audit/golden/migration/tcl-names.txt -check 1`) | regenerated with the new census rows; consistent |
+
+The restricted-injection, coroutine, affine and context suites ran on the
+interp pass. `tests/local.tcl` as a whole, the other platforms' workflows
+and `static-decisions.yml` were not run for this change (no front-end rule
+changed; the front end's fingerprint changes because `core/` and stdlib
+did, so cached HIRs are rebuilt once).
+
+**Environment.** A 4-core Linux x86-64 container (kernel 6.18), Tcl 9.0.1
+(`tclsh9.0`), rustc 1.97.0, the native backend built with `cargo build
+--release --manifest-path native/Cargo.toml`, `LANG=C.utf8 LC_ALL=C.utf8`.
+
+**To reproduce:**
+
+```sh
+export LANG=C.utf8 LC_ALL=C.utf8
+tclsh9.0 tests/actor.test -tmpdir "$(mktemp -d)"
+CORE_BACKEND=interp tclsh9.0 tests/actor.test -tmpdir "$(mktemp -d)"
+CORE_BACKEND=compile tclsh9.0 tests/actor.test -tmpdir "$(mktemp -d)"
+BOTLISH_NATIVE_GC_STRESS=1 CORE_BACKEND=interp tclsh9.0 tests/actor.test -tmpdir "$(mktemp -d)"
+tclsh9.0 audit/actor/tools/mutate.tcl -detectors-only 1
+tclsh9.0 bench/actor.tcl -runs 3
+```
 
 ## 13. GC and resource correctness
 
