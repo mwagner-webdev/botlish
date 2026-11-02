@@ -1,0 +1,21 @@
+# test.bot -- Tasks tested deterministically with no display: Raven
+# started headless (null platform and renderer), the scripted check of
+# tasks_check.bot (adding tasks, the empty-text case, checking and
+# unchecking, clearing done tasks), each step's state and visible text
+# compared with what is expected.
+#
+#   botlish -backend cranelift test.bot      (or ./run-test.sh)
+#
+# Prints one PASS/FAIL line per check and a summary; the program's value
+# is the verdict, "TEST PASS: ..." or "TEST FAIL: ..." (run-test.sh turns
+# it into an exit status: a Botlish program cannot choose its own).
+import raven
+import readback
+import std::linux::io
+import tasks_check
+
+with context std::linux::io::create()
+with context raven::create()
+with context readback::create()
+
+tasks_check::verdict(raven::headless())

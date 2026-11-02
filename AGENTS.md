@@ -4714,6 +4714,57 @@ checks of the previous section and `tests/hir-cache.test`,
 (`cargo test ... --bin botlish-native aot::`, `tests/native-link-plan.test`,
 `tests/system-linker.test`).
 
+## The raven release (desktop build, clean room)
+
+`packages/raven` is released as one desktop-capable artifact
+(RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md): `raven-VERSION.botpkg` holds, per
+Linux target, the generated binding, the bridge's archive and Raven's
+*desktop* build (X11 and the Vulkan renderer), which also runs headless; its
+common files are the module, README.md and GUIDE.md (the consumer's
+documentation) and `examples/clicks`. `tools/package-repository.tcl OUT
+raven` is its author's one operation. Keep it so:
+
+* One library for both configurations: never pack the headless build, and
+  never add a second artifact, a feature flag or a variant of one release
+  for headless use. A `raven` change of contents is a new version: the tool
+  refuses to overwrite a different `NAME-VERSION.botpkg` (`-force` only
+  for a local file the author means to replace).
+* Builds are recognized by their configuration's stamp
+  (tests/cffi/raven.tcl: `headless`, `desktop`), never by a library merely
+  present; the desktop build's Vulkan headers are the pinned Khronos commit
+  (never Raven's own unpinned download), the AArch64 libX11 the pinned,
+  SHA-256-checked Ubuntu packages (author side only, never packed). Never
+  download an unpinned input to make a build pass.
+* libX11 is a declared *system* library (the bundled libraven's DT_NEEDED,
+  verified by the system's metadata); the Vulkan loader and driver and the
+  display are loaded at run time and are no metadata: never bundle a
+  graphics driver, the loader or X11, and never declare the loader as a
+  system library (it would make headless use require it). A missing one is
+  reported by `start`'s RavenFailed, whose detail lists every error Raven
+  reported while it started (`startup_reasons`).
+* The package's documentation is checked: every ```botlish block of its
+  README.md and GUIDE.md is a complete program (`raven-package-docs`
+  compiles them and runs the test ones); a fragment goes in a plain fence.
+  It documents what the wrapper does today, for a consumer who has only
+  the artifact and the single-file compiler.
+* The clean room (`audit/raven-cleanroom/`: `tools/cleanroom.sh`, its
+  Dockerfile) holds operating-system facilities only -- never Tcl, Rust,
+  CMake, Ninja, a checkout or a mount of one -- and runs with no network;
+  its harness acts on the program only through the X server.
+
+If you change `packages/raven`, the raven recipe of
+`tools/package-repository.tcl`, `tests/cffi/raven.tcl` or
+`audit/raven-cleanroom/`, run `tests/raven.test` (its desktop tests need
+`tclsh9.0 tests/cffi/raven.tcl desktop`, Xvfb, Mesa's Vulkan driver,
+python3 and libXtst), the `pw-raven-*` tests of
+`tests/package-workloads.test`, `audit/raven-cleanroom/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), and the clean room (`audit/raven-cleanroom/tools/cleanroom.sh
+image`, then `run single/out/botlish OUT/raven-VERSION.botpkg DIR` after
+`single/build.sh`; the `raven clean room` workflow runs it on a push that
+touches these files).
+
 ## Diagnostic recovery
 
 A rejected compilation reports every independent diagnostic it finds and

@@ -1,0 +1,167 @@
+# Mutants of the desktop raven release (audit/raven-cleanroom/tools/mutate.tcl,
+# RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md).
+#
+#   @@ NAME DESCRIPTION
+#   %% TESTFILE[:PATTERN]...   the test files (a tcltest -match each) that must kill it
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# Lines starting with # outside an edit are comments.
+
+# ---------------------------------------------------------------------------
+# The build configurations (tests/cffi/raven.tcl)
+
+@@ cache-library-presence a build is recognized by a libraven merely present, whatever configuration's stamp is beside it
+%% raven.test:raven-build-configurations
+## tests/cffi/raven.tcl
+<<<<
+    if {$text ne [RavenStamp $configuration]} { return "" }
+====
+>>>>
+
+@@ cache-one-directory the desktop configuration builds in the headless one's directory
+%% raven.test:raven-build-configurations
+## tests/cffi/raven.tcl
+<<<<
+            return [file join [RavenCacheDir] raven $commit-desktop-[string range [dict get $configuration vulkan] 0 11]]
+====
+            return [file join [RavenCacheDir] raven $commit]
+>>>>
+
+@@ cache-unpinned-vulkan the desktop configuration's stamp leaves out the Vulkan headers' commit
+%% raven.test:raven-build-configurations
+## tests/cffi/raven.tcl
+<<<<
+        "vulkan-headers [dict get $configuration vulkan]"] \n]\n
+====
+        ""] \n]\n
+>>>>
+
+# ---------------------------------------------------------------------------
+# The release recipe (tools/package-repository.tcl)
+
+@@ repo-always-forces the author's tool overwrites an existing different NAME-VERSION.botpkg, as it did before: a release silently replaced under its version
+%% package-workloads.test:pw-raven-release-immutable
+## tools/package-repository.tcl
+<<<<
+        if {$force} { dict set given -force 1 }
+====
+        dict set given -force 1
+>>>>
+
+@@ repo-packs-headless the host target's libraven is the headless build: the desktop check refuses it before anything is packed
+%% package-workloads.test:pw-raven-desktop-release
+## tools/package-repository.tcl
+<<<<
+        return [file join [cffi::ravenBuild desktop] libraven.so.0]
+====
+        return [file join [cffi::ravenBuild headless] libraven.so.0]
+>>>>
+
+@@ repo-packs-headless-unchecked the headless build packed, and the desktop check gone: the pack's own metadata checks (needs, the declared Vulkan symbol) refuse it
+%% package-workloads.test:pw-raven-desktop-release
+## tools/package-repository.tcl
+<<<<
+        return [file join [cffi::ravenBuild desktop] libraven.so.0]
+====
+        return [file join [cffi::ravenBuild headless] libraven.so.0]
+>>>>
+## tools/package-repository.tcl
+<<<<
+                checkDesktop $target $library
+====
+>>>>
+
+@@ repo-extra-file the author's tool adds a script to the release's common files
+%% package-workloads.test:pw-raven-artifact-contents
+## tools/package-repository.tcl
+<<<<
+    foreach entry [glob -nocomplain -tails -directory $package *] {
+        file copy [file join $package $entry] [file join $dir $entry]
+    }
+====
+    foreach entry [glob -nocomplain -tails -directory $package *] {
+        file copy [file join $package $entry] [file join $dir $entry]
+    }
+    pm::WriteNew [file join $dir postinstall.sh] "#!/bin/sh\n"
+>>>>
+
+# ---------------------------------------------------------------------------
+# The package (packages/raven)
+
+@@ metadata-version-reused the release keeps the version 0.2.0 of the headless release it replaces
+%% package-workloads.test:pw-raven-desktop-release
+## packages/raven/botlish.json
+<<<<
+  "version": "0.3.1",
+====
+  "version": "0.2.0",
+>>>>
+
+@@ metadata-without-x11 the linux-x86_64 metadata leaves out the system libX11 the bundled libraven loads: the pack refuses the release
+%% package-workloads.test:pw-raven-desktop-release
+## packages/raven/botlish.json
+<<<<
+          ]
+        },
+        {
+          "name": "X11",
+          "origin": "system",
+          "linkage": "shared",
+          "identity": "libX11.so.6",
+          "symbols": [
+            "XOpenDisplay"
+          ]
+        }
+      ]
+    }
+  }
+}
+====
+          ]
+        }
+      ]
+    }
+  }
+}
+>>>>
+
+@@ wrapper-last-error-only start reports only Raven's last error ("cannot initialize the X11 window system"), not the cause Raven reported before it
+%% raven.test:raven-desktop-no-display
+## packages/raven/raven.bot
+<<<<
+        fail RavenFailed {call: "Rinit_ex", code: report.code, detail: reasons}
+====
+        fail RavenFailed {call: "Rinit_ex", code: report.code, detail: report.detail}
+>>>>
+
+@@ wrapper-reasons-dropped start reports only the first error Raven recorded, leaving out the rest
+%% raven.test:raven-desktop-no-display
+## packages/raven/raven.bot
+<<<<
+    events.error_texts(i + 1, text.concat("; ").concat(event.text))
+====
+    text
+>>>>
+
+@@ example-reset-ignored the documented example's Reset button keeps the count: its test (and the package's documentation check) catch it
+%% raven.test:raven-package-docs package-workloads.test:pw-raven-deploy-relocates
+## packages/raven/examples/clicks/clicks.bot
+<<<<
+    if clicked and event.from?(screen.reset):
+        return 0
+====
+>>>>
+
+@@ wrapper-checkbox-text-as-label checkbox_text asks Raven for a label's text, which Raven refuses for a checkbox: the gap the experiment found, back
+%% raven.test:raven-texts
+## packages/raven/raven.bot
+<<<<
+    text_of(raven::controls::Rcheckbox_get_text(checkbox.id))
+====
+    text_of(raven::controls::Rlabel_get_text(checkbox.id))
+>>>>

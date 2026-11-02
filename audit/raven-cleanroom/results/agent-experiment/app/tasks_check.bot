@@ -1,0 +1,251 @@
+# tasks_check.bot -- the scripted check of Tasks, shared by test.bot
+# (headless: null platform and renderer, no display) and test_desktop.bot
+# (the real desktop configuration under an X11 display, e.g. Xvfb).
+#
+# It builds the same window as main.bot (tasks_app::build), injects
+# clicks, typing and keys where the last frame laid the widgets out, and
+# handles each frame's events exactly as main.bot's loop does
+# (tasks_app::step). After every step it compares two things with what is
+# expected: the application's state (the task list) and what the window
+# shows, read back from Raven's widgets -- the status label, the text
+# input, the task list panel's rows and each row's checkbox (its text, read
+# back through readback.bot, and whether it is checked). On the desktop it
+# also reads the rendered frames (window.capture) and checks that the
+# window was drawn and that adding and clearing tasks changed the pixels.
+#
+# The entry program installs the contexts std::linux::io's, raven::Ui and
+# readback::Readback and calls verdict(options).
+import raven
+import raven::widget
+import raven::window
+import std::abi
+import std::abi::bytes
+import std::int
+import std::io
+import std::list
+import std::str
+import readback
+import tasks_app
+
+# ---------------------------------------------------------------------------
+# Driving the window
+
+# TASKS after a frame (which delivers injected input and lays the window
+# out) and the handling of its events.
+fn settle(screen: tasks_app::Screen, tasks: List[tasks_app::Task]) -> List[tasks_app::Task] errors NonFiniteFloat:
+    drawn = raven::draw_frame()
+    screen.step(tasks)
+
+# TASKS after a left click at the middle of WIDGET. A frame first lays out
+# widgets added since the last one, so the click lands on WIDGET.
+fn click_on(screen: tasks_app::Screen, widget: raven::Widget, tasks: List[tasks_app::Task], context ui: raven::Ui) -> List[tasks_app::Task] errors NonFiniteFloat:
+    laid_out = screen.settle(tasks)
+    screen.window.click(widget)
+    screen.settle(laid_out)
+
+# TASKS after TEXT is typed into the text input (clicked first, to focus it).
+fn type_text(screen: tasks_app::Screen, text: str, tasks: List[tasks_app::Task], context ui: raven::Ui) -> List[tasks_app::Task] errors NonFiniteFloat:
+    focused = screen.click_on(screen.input, tasks)
+    screen.window.inject_text(text)
+    screen.settle(focused)
+
+# TASKS after Enter is pressed in the focused widget.
+fn press_enter(screen: tasks_app::Screen, tasks: List[tasks_app::Task]) -> List[tasks_app::Task] errors NonFiniteFloat:
+    screen.window.inject_key(raven::window::R_KEY_ENTER, 0)
+    screen.settle(tasks)
+
+# The checkbox of the Ith task (an invalid handle when there is none).
+fn box_at(tasks: List[tasks_app::Task], i: int) -> raven::Widget:
+    task = tasks.at(i):
+        on IndexNotFound:
+            return raven::Widget {id: 0}
+    task.box
+
+# ---------------------------------------------------------------------------
+# Observing
+
+# ITEMS joined with ", "; "(none)" when there are none.
+fn joined(items: List[str]) -> str:
+    text = fold item in items with intermediate s "":
+        if s == "":
+            item
+        else:
+            s.concat(", ").concat(item)
+    if text == "":
+        return "(none)"
+    text
+
+# The application's state: each task as "[x] TEXT" (done) or "[ ] TEXT".
+fn model_text(tasks: List[tasks_app::Task]) -> str:
+    items = loop t in tasks:
+        if t.done:
+            "[x] ".concat(t.text)
+        else:
+            "[ ] ".concat(t.text)
+    joined(items)
+
+# A checkbox as it shows itself: "[x] TEXT" checked, "[ ] TEXT" not, with
+# its text read back from Raven; "gone" when it no longer exists.
+fn box_text(box: raven::Widget) -> str:
+    if not box.valid?():
+        return "gone"
+    shown = readback::checkbox_text(box)
+    if box.checked?():
+        return "[x] ".concat(shown)
+    "[ ] ".concat(shown)
+
+# The checkboxes the task list panel holds, in order, as they show
+# themselves -- read from the panel's children, not from the
+# application's state.
+fn panel_boxes(panel: raven::Widget) -> List[str]:
+    count = raven::widget::Rwidget_get_child_count(panel.id)
+    loop i from 0 to count:
+        box_text(raven::Widget {id: panel.id.Rwidget_get_child(i)})
+
+# The window as it shows itself: the status label's text, the input's
+# text, how many rows the task list has, and each row's checkbox.
+fn window_text(screen: tasks_app::Screen) -> str:
+    status = raven::label_text(screen.status)
+    input = raven::input_text(screen.input)
+    rows = std::int::to_string(screen.list_panel.child_count())
+    boxes = joined(panel_boxes(screen.list_panel))
+    "status=\"".concat(status).concat("\" input=\"").concat(input).concat("\" rows=").concat(rows).concat(" boxes=").concat(boxes)
+
+# A check's outcome and its report line.
+struct Outcome:
+    pass: bool
+    line: str
+
+# One check: PASS when OBSERVED is EXPECTED.
+nomethod fn check(name: str, expected: str, observed: str) -> Outcome:
+    if expected == observed:
+        return Outcome {pass: true, line: "PASS ".concat(name).concat(": ").concat(observed)}
+    Outcome {pass: false, line: "FAIL ".concat(name).concat(":\n       expected ").concat(expected).concat("\n       observed ").concat(observed)}
+
+# The two checks of a step: the application's state and the visible window.
+nomethod fn check_step(name: str, screen: tasks_app::Screen, tasks: List[tasks_app::Task], state: str, shown: str) -> List[Outcome]:
+    [check(name.concat(" / state"), state, model_text(tasks)), check(name.concat(" / window"), shown, screen.window_text())]
+
+# FLAG as text.
+nomethod fn bool_text(flag: bool) -> str:
+    if flag:
+        return "true"
+    "false"
+
+# ---------------------------------------------------------------------------
+# The scenario
+
+# The pixels the window shows now: the frame drawn after one more frame
+# (none with the null renderer: 0 x 0).
+fn snapshot(screen: tasks_app::Screen, context ui: raven::Ui) -> raven::Image:
+    drawn = raven::draw_frame()
+    screen.window.capture()
+
+# The checks of the rendered frames (desktop only): FIRST is the empty
+# window, FILLED the window with three tasks, CLEARED the window after
+# Clear done.
+fn frame_checks(screen: tasks_app::Screen, first: raven::Image, filled: raven::Image, cleared: raven::Image, context ui: raven::Ui) -> List[Outcome]:
+    size = screen.window.size()
+    expected = std::int::to_string(size.width).append_char('x').concat(std::int::to_string(size.height))
+    shown = std::int::to_string(first.width).append_char('x').concat(std::int::to_string(first.height))
+    bytes = std::int::to_string(first.pixels.length().value)
+    [check("frames / the window is drawn at its size", expected, shown), check("frames / RGBA bytes", std::int::to_string(4 * first.width * first.height), bytes), check("frames / adding tasks changed the pixels", "true", bool_text(first.pixels != filled.pixels)), check("frames / clearing changed the pixels", "true", bool_text(filled.pixels != cleared.pixels))]
+
+# Every check of the scenario, run with OPTIONS (raven::headless() or
+# raven::desktop()).
+fn scenario(options: raven::Options, context ui: raven::Ui) -> List[List[Outcome]] errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(options)
+    screen = tasks_app::build()
+    s0 = screen.settle([])
+    first = screen.snapshot()
+    c0 = check_step("1 start", screen, s0, "(none)", "status=\"0 tasks, 0 done\" input=\"\" rows=0 boxes=(none)")
+
+    s1 = screen.click_on(screen.add_button, s0)
+    c1 = check_step("2 Add with empty text adds nothing", screen, s1, "(none)", "status=\"0 tasks, 0 done\" input=\"\" rows=0 boxes=(none)")
+
+    s2 = screen.type_text("Buy milk", s1)
+    c2 = check_step("3 typing shows in the input", screen, s2, "(none)", "status=\"0 tasks, 0 done\" input=\"Buy milk\" rows=0 boxes=(none)")
+
+    s3 = screen.click_on(screen.add_button, s2)
+    c3 = check_step("4 Add adds the task and clears the input", screen, s3, "[ ] Buy milk", "status=\"1 tasks, 0 done\" input=\"\" rows=1 boxes=[ ] Buy milk")
+
+    s4 = screen.click_on(screen.add_button, screen.type_text("Write report", s3))
+    s5 = screen.press_enter(screen.type_text("Call mom", s4))
+    c5 = check_step("5 two more (Add, then Enter)", screen, s5, "[ ] Buy milk, [ ] Write report, [ ] Call mom", "status=\"3 tasks, 0 done\" input=\"\" rows=3 boxes=[ ] Buy milk, [ ] Write report, [ ] Call mom")
+
+    s6 = screen.click_on(s5.box_at(1), s5)
+    c6 = check_step("6 checking a task marks it done", screen, s6, "[ ] Buy milk, [x] Write report, [ ] Call mom", "status=\"3 tasks, 1 done\" input=\"\" rows=3 boxes=[ ] Buy milk, [x] Write report, [ ] Call mom")
+
+    s7 = screen.click_on(s6.box_at(2), s6)
+    c7 = check_step("7 checking another", screen, s7, "[ ] Buy milk, [x] Write report, [x] Call mom", "status=\"3 tasks, 2 done\" input=\"\" rows=3 boxes=[ ] Buy milk, [x] Write report, [x] Call mom")
+
+    s8 = screen.click_on(s7.box_at(2), s7)
+    c8 = check_step("8 unchecking marks it not done", screen, s8, "[ ] Buy milk, [x] Write report, [ ] Call mom", "status=\"3 tasks, 1 done\" input=\"\" rows=3 boxes=[ ] Buy milk, [x] Write report, [ ] Call mom")
+
+    filled = screen.snapshot()
+    removed = s8.box_at(1)
+    s9 = screen.click_on(screen.clear_button, s8)
+    c9 = check_step("9 Clear done removes the done task", screen, s9, "[ ] Buy milk, [ ] Call mom", "status=\"2 tasks, 0 done\" input=\"\" rows=2 boxes=[ ] Buy milk, [ ] Call mom")
+    c9b = [check("9 / its checkbox is destroyed", "false", bool_text(removed.valid?()))]
+    cleared = screen.snapshot()
+
+    s10 = screen.click_on(screen.clear_button, s9)
+    c10 = check_step("10 Clear done with nothing done changes nothing", screen, s10, "[ ] Buy milk, [ ] Call mom", "status=\"2 tasks, 0 done\" input=\"\" rows=2 boxes=[ ] Buy milk, [ ] Call mom")
+
+    s11 = screen.click_on(screen.add_button, s10)
+    c11 = check_step("11 Add with empty text again", screen, s11, "[ ] Buy milk, [ ] Call mom", "status=\"2 tasks, 0 done\" input=\"\" rows=2 boxes=[ ] Buy milk, [ ] Call mom")
+
+    s12 = screen.click_on(s11.box_at(1), screen.click_on(s11.box_at(0), s11))
+    s13 = screen.click_on(screen.clear_button, s12)
+    c13 = check_step("12 checking all and clearing empties the list", screen, s13, "(none)", "status=\"0 tasks, 0 done\" input=\"\" rows=0 boxes=(none)")
+
+    s14 = screen.click_on(screen.add_button, screen.type_text("Water plants", s13))
+    c14 = check_step("13 adding after clearing", screen, s14, "[ ] Water plants", "status=\"1 tasks, 0 done\" input=\"\" rows=1 boxes=[ ] Water plants")
+
+    frames = if options.headless:
+        []
+    else:
+        screen.frame_checks(first, filled, cleared)
+    raven::stop()
+    [c0, c1, c2, c3, c5, c6, c7, c8, c9, c9b, c10, c11, c13, c14, frames]
+
+# ---------------------------------------------------------------------------
+# Reporting
+
+# How many of OUTCOMES are failures.
+fn failures(outcomes: List[Outcome]) -> int:
+    fold o in outcomes with intermediate n 0:
+        if o.pass:
+            n
+        else:
+            n + 1
+
+# Prints every outcome's line and a summary; how many failed.
+fn report(groups: List[List[Outcome]]) -> int errors std::io::WriteFailed:
+    outcomes = fold group in groups with intermediate all []:
+        fold o in group with intermediate acc all:
+            acc.append(o)
+    printed = loop o in outcomes:
+        std::io::print_line(o.line)
+    failed = outcomes.failures()
+    std::io::print_line(std::int::to_string(outcomes.length() - failed).concat(" passed, ").concat(std::int::to_string(failed)).concat(" failed"))
+    failed
+
+# The verdict: "TEST PASS: N checks" or "TEST FAIL: M of N checks failed".
+# (A Botlish program cannot choose its exit status: run-test.sh reads the
+# verdict.)
+fn verdict(options: raven::Options) -> str:
+    groups = scenario(options):
+        on raven::RavenFailed failure:
+            [[check("Raven starts", "started", failure.detail)]]
+        on NonFiniteFloat:
+            [[check("Raven numbers", "finite", "NonFiniteFloat")]]
+    failed = report(groups):
+        on std::io::WriteFailed:
+            -1
+    total = fold group in groups with intermediate n 0:
+        n + group.length()
+    if failed == 0:
+        return "TEST PASS: ".concat(std::int::to_string(total)).concat(" checks")
+    "TEST FAIL: ".concat(std::int::to_string(failed)).concat(" of ").concat(std::int::to_string(total)).concat(" checks failed")
+

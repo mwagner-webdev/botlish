@@ -1,0 +1,38 @@
+# test.bot -- the clicks example tested, deterministically: Raven started
+# headless (no display, nothing drawn), clicks injected where the last
+# frame laid the buttons out, each frame's events handled as main.bot's
+# loop handles them, and the label read back.
+#
+#   botlish -backend cranelift test.bot
+#
+# The value: ["2", "2 clicks", "0", "0 clicks"].
+import clicks
+import raven
+import std::int
+
+with context raven::create()
+
+# COUNT after a click of BUTTON and the frame that delivers it.
+fn press(screen: clicks::Screen, button: raven::Widget, count: int, context ui: raven::Ui) -> int errors NonFiniteFloat:
+    screen.window.click(button)
+    drawn = raven::draw_frame()
+    screen.step(count)
+
+fn main(context ui: raven::Ui) -> List[str] errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::headless())
+    screen = clicks::build()
+    # A first frame lays the window out: click aims at where it put a widget.
+    laid_out = raven::draw_frame()
+    two = screen.press(screen.add, screen.press(screen.add, 0))
+    shown = raven::label_text(screen.status)
+    zero = screen.press(screen.reset, two)
+    reset = raven::label_text(screen.status)
+    raven::stop()
+    [std::int::to_string(two), shown, std::int::to_string(zero), reset]
+
+result = main():
+    on raven::RavenFailed failure:
+        ["RavenFailed", failure.call, failure.detail]
+    on NonFiniteFloat:
+        ["NonFiniteFloat"]
+result

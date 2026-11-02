@@ -91,20 +91,22 @@ jobs:
           key: cffi-libs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('audit/c-header/profiles/boringssl.tcl', 'tests/cffi/boringssl.tcl', 'tools/c-bindgen/profiles/sdl3.tcl', 'tests/cffi/sdl3.tcl', 'tools/c-bindgen/profiles/raven.tcl', 'tests/cffi/raven.tcl') }}
 
       # Raven twice: headless (its null platform and renderer: what the
-      # binding's acceptance and the package's tests link) and for the
-      # desktop (X11 and the Vulkan renderer, which loads libvulkan.so.1 when
-      # a program runs: raven-desktop, under Xvfb with Mesa's software
-      # Vulkan driver).
+      # binding's acceptance and the package's tests link) and the desktop
+      # configuration the raven package bundles (X11 and the Vulkan
+      # renderer, with the pinned Vulkan headers; it loads libvulkan.so.1
+      # when a program runs: raven-desktop and raven-desktop-session, under
+      # Xvfb with Mesa's software Vulkan driver; the session's X client is
+      # python3 over libXtst).
       - name: Install Raven's desktop prerequisites
         run: |
-          sudo apt-get install -y --no-install-recommends libx11-dev libvulkan1 mesa-vulkan-drivers xvfb
+          sudo apt-get install -y --no-install-recommends libx11-dev libvulkan1 mesa-vulkan-drivers xvfb libxtst6 python3
 
       - name: Build the package-owned BoringSSL, SDL3 and Raven
         run: |
           tclsh9.0 tests/cffi/boringssl.tcl
           tclsh9.0 tests/cffi/sdl3.tcl
           tclsh9.0 tests/cffi/raven.tcl
-          BOTLISH_RAVEN_CMAKE_FLAGS="" tclsh9.0 tests/cffi/raven.tcl
+          tclsh9.0 tests/cffi/raven.tcl desktop
 
       - name: Run the generator's tests
         run: |

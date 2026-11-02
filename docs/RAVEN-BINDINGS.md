@@ -4,6 +4,12 @@ Botlish bindings for [Raven](https://oscar-soirey.github.io/Raven/), a GUI
 library written in C11, and a wrapper library over them. This document
 also reports what Botlish lacks for such a library.
 
+> The package's release is now the desktop-capable `raven` 0.3.0, made by
+> one author operation and consumed with only the single-file compiler and
+> the `.botpkg`: RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md (the build
+> configurations below, the package's own README.md and GUIDE.md, the
+> clean room and an independent agent's application).
+
 Three things were built:
 
 * **The generated binding.** `tools/c-bindgen.tcl` turns Raven's public
@@ -97,12 +103,16 @@ The parts of its API that matter for a binding:
   synthetic input.
 
 `tests/cffi/raven.tcl` builds the pinned release as the shared
-`libraven.so` in Botlish's cache, never in the repository. By default it
-builds the headless configuration (`-DRAVEN_PLATFORM=null
--DRAVEN_BACKEND_VULKAN=OFF`), which needs no X11 package and no download.
-`BOTLISH_RAVEN_CMAKE_FLAGS=""` builds the desktop configuration (X11 and
-Vulkan; the Vulkan headers are downloaded at configuration) into a
-directory of its own. Each build takes about 10 s.
+`libraven.so` in Botlish's cache, never in the repository, in two named
+configurations, each in a directory of its own and recognized by the
+configuration stamp it writes last. `headless` (the default:
+`-DRAVEN_PLATFORM=null -DRAVEN_BACKEND_VULKAN=OFF`) needs no X11 package
+and no download. `desktop` (`tclsh9.0 tests/cffi/raven.tcl desktop`: X11
+and the Vulkan renderer) needs libX11's headers and Khronos's
+Vulkan-Headers v1.3.290, fetched once and checked by commit; it runs
+headless too, and the raven package bundles it
+(RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md). `BOTLISH_RAVEN_CMAKE_FLAGS`
+still builds a custom configuration. Each build takes 10 to 15 s.
 
 ## 3. The generated binding
 
@@ -230,7 +240,11 @@ raven::controls::Rlabel_set_markdown(label.id, 1)
 
 The bridge is linked from the package instance
 (`extern c library "raven_bridge" static at "native/libraven_bridge.a"`).
-Raven itself is linked by `-L` and found at run time by `LD_LIBRARY_PATH`.
+In this development installation Raven itself is linked by `-L` and found
+at run time by `LD_LIBRARY_PATH`; installed from its release
+(`botlish add raven-0.3.0.botpkg`), the package bundles libraven and
+needs neither (PACKAGE-MANAGER-MILESTONE-2.md,
+RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md).
 
 ```botlish
 import raven
@@ -638,11 +652,14 @@ generated modules it imports) takes 5 to 6 s, and its NIR about 1.5 s.
   fetch raven` and `tests/cffi/raven.tcl`) and `tests/raven.test`.
 * **A change to `packages/raven`, the bridge, `tools/raven-package.tcl`,
   `examples/raven` or `tests/raven/`:** run `tests/raven.test`. For its
-  desktop test, build the desktop configuration
-  (`BOTLISH_RAVEN_CMAKE_FLAGS="" tclsh9.0 tests/cffi/raven.tcl`) and
-  install Xvfb and a Vulkan driver (`mesa-vulkan-drivers`). A change to the
+  desktop tests, build the desktop configuration
+  (`tclsh9.0 tests/cffi/raven.tcl desktop`) and install Xvfb, a Vulkan
+  driver (`mesa-vulkan-drivers`), python3 and libXtst. A change to the
   bridge's records or functions changes its ABI version: change it in
-  `raven_bridge.c` and in `start` together.
+  `raven_bridge.c` and in `start` together. A change to the release (its
+  files, metadata or recipe) also runs what
+  RAVEN-CLEANROOM-DESKTOP-MILESTONE-1.md's "What to run when changing
+  this" lists.
 * **A new or removed test:** update its census row
   (`audit/golden/migration/census/raven.tsv` or `c-bindgen.tsv`) and the
   names file, then regenerate the manifest
@@ -657,7 +674,7 @@ with no test skipped.
 |---|---|
 | `tools/c-bindgen/profiles/raven.tcl` | the binding profile: pinned source, modules, library, the string contracts |
 | `generated/c/raven/{linux-x86_64,linux-aarch64}/` | the generated binding, its report, manifest and layout checks |
-| `tests/cffi/raven.tcl` | builds the pinned Raven (headless, or desktop) into Botlish's cache |
+| `tests/cffi/raven.tcl` | builds the pinned Raven (the headless or the desktop configuration) into Botlish's cache |
 | `packages/raven/raven.bot` | the module `raven` |
 | `packages/raven/native/raven_bridge.c` | the event bridge |
 | `packages/raven/README.md` | the package's own notes |

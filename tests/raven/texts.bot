@@ -1,0 +1,35 @@
+# texts.bot -- the texts the module reads back from Raven (tests/raven.test,
+# raven-texts): a label's, a text input's and a checkbox's, as Raven holds
+# them; label_text of a checkbox is "" and an Error event (Raven's own
+# check), which is why checkboxes have checkbox_text.
+import raven
+import std::int
+import std::list
+
+with context raven::create()
+
+fn main(context ui: raven::Ui) -> List[str] errors raven::RavenFailed, NonFiniteFloat, IndexNotFound:
+    raven::start(raven::headless())
+    title = raven::label("Today")
+    input = raven::text_input("milk")
+    box = raven::checkbox("Buy milk")
+    window = raven::window("Texts", 200, 120)
+    window.set_content(raven::vbox().add(title).add(input).add(box))
+    drawn = raven::draw_frame()
+    texts = [raven::label_text(title), input.input_text(), box.checkbox_text(), raven::label_text(box)]
+    reported = fold event in raven::events() with intermediate n 0:
+        if event.kind == raven::EventKind::Error:
+            n + 1
+        else:
+            n
+    raven::stop()
+    [texts.at(0), texts.at(1), texts.at(2), texts.at(3), std::int::to_string(reported)]
+
+result = main():
+    on raven::RavenFailed failure:
+        ["RavenFailed", failure.detail]
+    on NonFiniteFloat:
+        ["NonFiniteFloat"]
+    on IndexNotFound:
+        ["IndexNotFound"]
+result
