@@ -68,7 +68,9 @@ proc ravenPackage::install {app {target ""}} {
     set into [file join $app .bot_modules raven]
     file delete -force $into
     file mkdir [file join $into native]
-    foreach file {raven.bot README.md native/raven_bridge.c} {
+    # The package's common files, as its release holds them (botlish.json
+    # aside: this installation is no package manager's).
+    foreach file {raven.bot README.md GUIDE.md native/raven_bridge.c examples} {
         file copy [file join $package $file] [file join $into $file]
     }
     file copy $binding [file join $into raven]

@@ -1,0 +1,25 @@
+# main.bot -- Tasks on the desktop: a real window (X11, drawn by Raven's
+# Vulkan renderer) until it is closed.
+#
+#   botlish -backend cranelift main.bot
+#
+# The value: the final status line when the window closed, or why Raven
+# did not start.
+import raven
+import std::str
+import tasks_app
+
+with context raven::create()
+
+fn main(context ui: raven::Ui) -> str errors raven::RavenFailed, NonFiniteFloat:
+    raven::start(raven::desktop())
+    final = tasks_app::build().run([])
+    raven::stop()
+    "closed with ".concat(tasks_app::status_text(final))
+
+result = main():
+    on raven::RavenFailed failure:
+        "Raven did not start: ".concat(failure.detail)
+    on NonFiniteFloat:
+        "Raven reported a number that is no Float64"
+result

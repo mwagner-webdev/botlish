@@ -10324,6 +10324,14 @@ tests/raven.test raven-bridge-abi pass
 tests/raven.test raven-desktop pass
 tests/c-bindgen.test cb-representations pass
 tests/raven.test raven-raw pass
+tests/raven.test raven-texts pass
+tests/raven.test raven-desktop-build pass
+tests/raven.test raven-desktop-headless pass
+tests/raven.test raven-desktop-no-display pass
+tests/raven.test raven-desktop-no-vulkan pass
+tests/raven.test raven-desktop-session pass
+tests/raven.test raven-package-docs pass
+tests/raven.test raven-build-configurations pass
 tests/raw-c-float-ffi.test rcf-types pass
 tests/raw-c-float-ffi.test rcf-positions pass
 tests/raw-c-float-ffi.test rcf-no-implicit-conversion pass
@@ -10476,6 +10484,11 @@ tests/package-workloads.test pw-sdl3-thunk-archive pass
 tests/package-workloads.test pw-raven-installs-without-a-compiler pass
 tests/package-workloads.test pw-raven-runs pass
 tests/package-workloads.test pw-raven-targets pass
+tests/package-workloads.test pw-raven-desktop-release pass
+tests/package-workloads.test pw-raven-artifact-contents pass
+tests/package-workloads.test pw-raven-release-immutable pass
+tests/package-workloads.test pw-raven-metadata-checked pass
+tests/package-workloads.test pw-raven-deploy-relocates pass
 tests/package-workloads.test pw-event-loop-runs pass
 tests/package-workloads.test pw-event-loop-linux-only pass
 tests/package-manager.test pm-dependency-cycle pass

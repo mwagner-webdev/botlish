@@ -1,0 +1,54 @@
+# readback.bot -- reads a checkbox's label back from Raven itself, for
+# test.bot: the raven module reads a label's and a text input's text
+# (label_text, input_text) but has no reader for a checkbox's text, and
+# its own C-string reader is private. So this module calls the generated
+# binding's Rcheckbox_get_text and reads the NUL-terminated string it
+# returns, one byte at a time, through a native view.
+#
+# Making a native view is raw authority (std::binary::native is a direct
+# namespace); the context Readback mediates it, so neither this module nor
+# the test is a direct module. The entry program installs it:
+# `with context readback::create()`.
+import raven
+import raven::controls
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::byte
+import std::ffi::c
+import std::list
+
+# The longest text read (a longer one is cut there).
+private layout Chars:
+    size 4096
+    align 1
+    field bytes: array 4096 of std::ffi::c::UChar at 0
+
+# The capability to read Raven's strings.
+context struct Readback:
+    ready: bool
+
+fn create() -> Readback:
+    Readback {ready: true}
+
+# The bytes of the C string at P before its NUL, read one at a time: the
+# view itself reads nothing, and no byte after the NUL is read.
+private fn bytes_of(p: std::ffi::c::Ptr[std::ffi::c::Char], context reader: Readback) -> List[std::byte::Byte] errors NativeViewNull:
+    v = std::binary::native::view(Chars, p)
+    loop i from 0 to 4096:
+        b = std::binary::element(v.bytes, i)
+        if b == 0:
+            break
+        std::byte::from_int(b)
+
+# The text Raven holds for the checkbox BOX ("" when Raven returns none or
+# bytes that are not UTF-8).
+fn checkbox_text(box: raven::Widget, context reader: Readback) -> str:
+    data = bytes_of(raven::controls::Rcheckbox_get_text(box.id)):
+        on NativeViewNull:
+            []
+    decoded = std::abi::bytes::decode_utf8(std::abi::bytes::from_list(data)):
+        on InvalidUtf8:
+            ""
+    decoded

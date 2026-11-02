@@ -1,0 +1,20 @@
+# start-desktop.bot -- Raven started for the desktop where it cannot be
+# (tests/raven.test, raven-desktop-no-display and raven-desktop-no-vulkan):
+# start fails with RavenFailed, and its detail says why -- every error Raven
+# reported while it tried, the cause before Raven's last error -- or, where
+# it can start, a window is made and Raven stopped again.
+import raven
+
+with context raven::create()
+
+fn main(context ui: raven::Ui) -> List[str] errors raven::RavenFailed:
+    raven::start(raven::desktop())
+    window = raven::window("Probe", 200, 100)
+    drawn = raven::draw_frame()
+    raven::stop()
+    ["started"]
+
+result = main():
+    on raven::RavenFailed failure:
+        ["RavenFailed", failure.call, failure.detail]
+result

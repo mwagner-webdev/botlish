@@ -1,0 +1,118 @@
+# Every command the agent ran in the clean room, in order (the wrapper's
+# trace, trace.log, holds each with its full text and output).
+06:52:54  exit 0   pwd; ls -la; ls -la inputs; uname -a; cat /etc/os-release | head -3
+06:52:56  exit 0   mkdir -p app; cd app; ~/inputs/botlish 2>&1 | head -60; echo "---"; ~/inputs/botlish -help 2>&1 | head -100
+06:52:58  exit 0   ~/inputs/botlish -help primer 2>&1
+06:53:04  exit 0   cat > app/NOTES.md
+06:53:09  exit 0   cat > app/NOTES.md
+06:53:09  exit 0   wc -l app/NOTES.md
+06:53:11  exit 0   ~/inputs/botlish add 2>&1 | head -40; echo ---; ~/inputs/botlish -help package 2>&1 | head -80
+06:53:13  exit 0   ~/inputs/botlish add -help 2>&1; echo ---; ~/inputs/botlish -help cli.packages 2>&1
+06:53:15  exit 0   ~/inputs/botlish package inspect ~/inputs/raven-0.3.0.botpkg 2>&1 | head -120
+06:53:18  exit 0   cd app && ~/inputs/botlish add ~/inputs/raven-0.3.0.botpkg 2>&1; echo "exit=$?"; ls -la; cat botlish.json 2>/dev/null
+06:53:20  exit 0   cd app && find .bot_modules -maxdepth 4 | sort | head -80
+06:53:23  exit 0   cd app/.bot_modules/raven && cat README.md
+06:53:23  exit 0   cd app/.bot_modules/raven && cat GUIDE.md
+06:53:26  exit 0   cd app/.bot_modules/raven/examples/clicks && for f in clicks.bot main.bot test.bot; do echo "=== $f"; cat $f; done
+06:53:28  exit 0   cd app/.bot_modules/raven && sed -n 1,300p raven.bot
+06:53:30  exit 0   cd app/.bot_modules/raven && sed -n 300,700p raven.bot
+06:53:32  exit 0   cd app/.bot_modules/raven && sed -n 700,1100p raven.bot
+06:53:42  exit 0   cd app/.bot_modules/.targets/linux-x86_64/raven/raven && grep -n "checkbox\|Rtext_input\|Rwidget_remove\|Rwidget_get_child\b\|Rwidget_focus\|focus" controls....
+06:53:46  exit 0   cd app/.bot_modules/.targets/linux-x86_64/raven/raven && sed -n 1,30p controls.bot; sed -n 115,160p controls.bot
+06:53:50  exit 0   ~/inputs/botlish -help std::ffi::c 2>&1 | head -80; ~/inputs/botlish -help "c string" 2>&1 | head -40
+06:53:57  exit 0   cd app/.bot_modules/.targets/linux-x86_64/raven/raven && grep -n "^extern c fn\|^# C:" accessibility.bot | head -40; grep -n "get_text\|get_name" *.bot | hea...
+06:54:01  exit 0   mkdir -p ~/try && cd ~/try && ~/inputs/botlish add ~/inputs/raven-0.3.0.botpkg >/dev/null 2>&1; cp .bot_modules/raven/examples/clicks/*.bot . && ls && time ~...
+06:54:14  exit 0   for t in Xvfb xwd xdotool xwininfo xprop import convert xdpyinfo wmctrl vulkaninfo python3 cc gcc; do printf "%s: " $t; command -v $t || echo missing; done; ...
+06:54:22  exit 0   cd ~/try && (setsid nohup Xvfb :99 -screen 0 1024x768x24 > /tmp/xvfb.log 2>&1 &) ; sleep 1; ls /tmp/.X11-unix/; DISPLAY=:99 timeout 30 ~/inputs/botlish -back...
+06:54:58  exit 0   ~/inputs/botlish -help concept.loops 2>&1 | head -120
+06:55:37  exit 0   ~/inputs/botlish -help print 2>&1 | head -60
+06:55:42  exit 0   ~/inputs/botlish -help std::str 2>&1 | head -120
+06:55:48  exit 0   ~/inputs/botlish -help std::list 2>&1 | sed -n 1,60p
+06:56:04  exit 0   cat > app/tasks_app.bot
+06:56:04  exit 0   cat > app/main.bot
+06:56:04  exit 0   cd app && ~/inputs/botlish -check main.bot 2>&1
+06:56:40  exit 0   cat > ~/try/exp1.bot
+06:56:40  exit 1   cd ~/try && ~/inputs/botlish -backend cranelift exp1.bot 2>&1
+06:56:52  exit 0   cd ~/try && sed -i "s/^import std::int$/import std::int\nimport std::list/" exp1.bot && ~/inputs/botlish -backend cranelift exp1.bot 2>&1
+06:57:04  exit 0   cd ~/try && sed -i "s/\.append(texts.length().to_string())/.append(texts.length().to_string()).append(texts.get(0, \"none\"))/" exp1.bot && ~/inputs/botlish ...
+06:57:25  exit 0   ~/inputs/botlish -help std::binary::native::view 2>&1 | head -70; ~/inputs/botlish -help std::binary::element 2>&1 | head -50
+06:57:31  exit 0   ~/inputs/botlish -help DIRECT 2>&1 | head -90
+06:57:44  exit 0   ~/inputs/botlish -help concept.contexts 2>&1 | sed -n 1,80p
+06:58:19  exit 0   cat > app/test.bot
+06:58:19  exit 1   cd app && ~/inputs/botlish -check test.bot 2>&1
+06:58:42  exit 1   cd app && python3 - <<'PY'
+06:59:11  exit 0   cat > app/test.bot
+06:59:11  exit 1   cd app && ~/inputs/botlish -check test.bot 2>&1
+06:59:22  exit 0   ~/inputs/botlish -help cli.exit-status 2>&1 | head -50; ~/inputs/botlish -help "exit status" 2>&1 | head -30
+06:59:30  exit 0   cd app && cat > /tmp/fix.py <<"PY"
+06:59:45  exit 0   cd app && time ~/inputs/botlish -backend cranelift test.bot 2>&1
+07:00:18  exit 0   cat >> app/NOTES.md
+07:00:31  exit 0   cat >> app/NOTES.md
+07:00:31  exit 0   wc -l app/NOTES.md
+07:00:36  exit 0   grep -n "^## " app/NOTES.md
+07:00:39  exit 0   cd app && head -n 92 NOTES.md > /tmp/n1 && sed -n "94,\$p" NOTES.md > /tmp/n2 && diff <(sed -n 17,92p NOTES.md) /tmp/n2 | head; cat /tmp/n1 > NOTES.md; tail ...
+07:00:45  exit 0   cd app && sed -i "s/ignores \"\" , makes/ignores \"\", makes/" NOTES.md && cat > run-test.sh && chmod +x run-test.sh
+07:00:45  exit 0   cd app && ./run-test.sh | tail -3; echo "exit=$?"
+07:01:04  exit 0   rm -rf /tmp/mut && cp -a ~/app /tmp/mut && cd /tmp/mut && python3 - <<"PY"
+07:01:21  exit 0   ~/inputs/botlish -help std::abi::bytes::from_list 2>&1 | sed -n 1,40p; ~/inputs/botlish -help std::abi::bytes::decode_utf8 2>&1 | sed -n 1,30p; ~/inputs/botl...
+07:01:32  exit 0   cat > app/ctext.bot
+07:01:32  exit 0   cat > ~/app/ctext_probe.bot
+07:01:32  exit 1   cd app && ~/inputs/botlish -backend cranelift ctext_probe.bot 2>&1
+07:01:43  exit 0   ~/inputs/botlish -help std::byte 2>&1 | sed -n 1,60p
+07:01:46  exit 1   cd app && sed -i "s/^        b$/        std::byte::from_int(b)/" ctext.bot && ~/inputs/botlish -backend cranelift ctext_probe.bot 2>&1
+07:02:05  exit 0   cd app && rm ctext.bot && cat > readback.bot
+07:02:05  exit 0   cat > ~/app/readback_probe.bot
+07:02:05  exit 0   cd app && rm -f ctext_probe.bot && ~/inputs/botlish -backend cranelift readback_probe.bot 2>&1
+07:02:27  exit 0   cd app && cat > /tmp/fix2.py
+07:02:27  exit 0   cd app && python3 /tmp/fix2.py && grep -n "check_step(\"" test.bot && ~/inputs/botlish -check test.bot 2>&1
+07:02:48  exit 0   cd app && cat > /tmp/fix3.py
+07:02:48  exit 0   cd app && python3 /tmp/fix3.py && ~/inputs/botlish -check test.bot 2>&1
+07:03:02  exit 0   cd app && sed -i "s/raven::widget::Rwidget_get_child(panel.id, i)/panel.id.Rwidget_get_child(i)/" test.bot && ~/inputs/botlish -check test.bot 2>&1 && ./run-...
+07:03:49  exit 0   ~/inputs/botlish -help "write a file" 2>&1 | head -40
+07:03:54  exit 0   cd app && sed -n 1,40p test.bot && sed -n 120,135p test.bot
+07:03:57  exit 0   cd app && grep -n "^# ----\|^fn scenario\|^    raven::start\|^    raven::stop\|^    \[c0\|^# The verdict\|^fn main\|^main()" test.bot
+07:04:19  exit 0   cd app && cat > /tmp/fix4.py
+07:04:19  exit 1   cd app && cp test.bot /tmp/test.bot.bak && python3 /tmp/fix4.py && ~/inputs/botlish -check test.bot test_desktop.bot 2>&1
+07:04:36  exit 0   ~/inputs/botlish -help std::abi::Usize 2>&1 | head -40; ~/inputs/botlish -help std::abi 2>&1 | grep -i "int\b\|to_int\|value" | head
+07:04:39  exit 0   cd app && sed -i "s/bytes = std::int::to_string(first.pixels.length())/bytes = std::int::to_string(first.pixels.length().value)/" tasks_check.bot && ~/inputs...
+07:05:05  exit 0   cd app && sed -i "s/\.concat(\"x\")\.concat(/.append_char('x').concat(/g" tasks_check.bot && sed -n 145,152p tasks_check.bot && ~/inputs/botlish -check test....
+07:05:44  exit 0   pgrep -a Xvfb; cd app && DISPLAY=:99 timeout 120 ~/inputs/botlish -backend cranelift test_desktop.bot 2>&1 | tail -12; echo "exit=${PIPESTATUS[0]}"
+07:06:06  exit 0   setsid nohup Xvfb :99 -screen 0 1024x768x24 > /tmp/xvfb.log 2>&1 < /dev/null & sleep 1; pgrep -a Xvfb
+07:06:08  exit 0   pgrep -a Xvfb; cat /tmp/xvfb.log | tail -5; ls -la /tmp/.X11-unix/
+07:06:10  exit 0   cd app && DISPLAY=:99 timeout 180 ~/inputs/botlish -backend cranelift test_desktop.bot 2>&1 | tail -14; echo "exit=${PIPESTATUS[0]}"
+07:06:48  exit 0   ~/inputs/botlish -help std::float64 2>&1 | sed -n 1,50p
+07:06:59  exit 0   cat > app/layout_probe.bot
+07:06:59  exit 0   cd app && DISPLAY=:99 timeout 120 ~/inputs/botlish -backend cranelift layout_probe.bot 2>&1
+07:07:56  exit 0   cd app && cat > /tmp/fix5.py
+07:07:56  exit 0   cd app && python3 /tmp/fix5.py && DISPLAY=:99 timeout 120 ~/inputs/botlish -backend cranelift layout_probe.bot 2>&1
+07:08:46  exit 0   cat > app/xdrive.py
+07:08:46  exit 0   cd app && DISPLAY=:99 python3 -I xdrive.py list
+07:08:51  exit 0   cd app && mkdir -p evidence && (DISPLAY=:99 setsid nohup ~/inputs/botlish -backend cranelift main.bot > evidence/main-run.log 2>&1 < /dev/null &) ; DISPLAY=:...
+07:09:03  exit 0   cd app && sleep 1; DISPLAY=:99 python3 -I xdrive.py shot Tasks evidence/0-empty.png
+07:09:15  exit 0   cd app && sed -i "s/def text_rendering(w, h, rgb, columns=84):/def text_rendering(w, h, rgb, columns=140):/" xdrive.py && export DISPLAY=:99 && python3 -I xd...
+07:09:20  exit 0   cd app && export DISPLAY=:99 && python3 -I xdrive.py click Tasks 162 13 && sleep 1 && python3 -I xdrive.py shot Tasks evidence/2-added.png
+07:09:26  exit 0   cd app && export DISPLAY=:99 && python3 -I xdrive.py click Tasks 162 13 && sleep 0.5 && python3 -I xdrive.py click Tasks 70 13 && python3 -I xdrive.py type "...
+07:09:34  exit 0   cd app && export DISPLAY=:99 && python3 -I xdrive.py click Tasks 210 101 && sleep 1 && python3 -I xdrive.py shot Tasks evidence/4-cleared.png && python3 -I x...
+07:10:03  exit 0   cat > app/run-desktop-test.sh && chmod +x app/run-desktop-test.sh
+07:10:03  exit 0   cd app && time ./run-desktop-test.sh > /tmp/desk.log 2>&1; echo "exit=$?"; grep -v "^ *$" /tmp/desk.log | grep -v "^[-+=:.@#%* ]*$" | head -80
+07:11:06  exit 0   cd app && cat > /tmp/zoom.py
+07:11:06  exit 0   cd app && python3 /tmp/zoom.py && python3 -I xdrive.py zoom evidence/3-two-one-done.png 0 0 200 80
+07:11:10  exit 0   cd app && python3 -I xdrive.py zoom evidence/4-cleared.png 0 28 190 46 && python3 -I xdrive.py zoom evidence/4-cleared.png 150 70 130 40
+07:11:17  exit 0   cd app && ~/inputs/botlish native deploy -target linux-x86_64 -out dist 2>&1; time ~/inputs/botlish -emit-native-executable -runtime-path '$ORIGIN/lib' main....
+07:11:32  exit 0   cd app && mv main dist/tasks && export DISPLAY=:99 && (dist/tasks > /tmp/exe.log 2>&1; echo "status=$?" >> /tmp/exe.log) & sleep 0.2; cd ~/app && python3 -I ...
+07:11:40  exit 0   pgrep -a Xvfb; ls -la /tmp/.X11-unix/; cat /tmp/exe.log; tail -3 /tmp/xvfb.log
+07:11:45  exit 0   pgrep -af tasks; echo "DISPLAY=$DISPLAY"; cd ~/app && DISPLAY=:99 python3 -I xdrive.py list
+07:11:50  exit 0   cd ~/app && export DISPLAY=:99 && python3 -I xdrive.py click Tasks 70 13 && python3 -I xdrive.py type "Ship it" && python3 -I xdrive.py type "
+07:11:59  exit 0   cd ~/app && rm -f readback_probe.bot && ~/inputs/botlish -check -warnings error main.bot test.bot test_desktop.bot layout_probe.bot 2>&1; echo "exit=$?"; ~/i...
+07:12:45  exit 0   cd ~/app && sed -n 1,60p tasks_check.bot && sed -n 125,175p tasks_check.bot
+07:13:07  exit 0   cat > ~/app/README.md
+07:13:08  exit 0   ls ~/app
+07:13:13  exit 0   rm -rf ~/app2 && mkdir ~/app2 && cp ~/app/botlish.json ~/app2/ && cd ~/app2 && ~/inputs/botlish install 2>&1; echo "exit=$?"; ls -a .bot_modules; cd ~ && rm ...
+07:13:18  exit 0   cd ~/app && ./run-test.sh > /tmp/final-headless.log 2>&1; echo "run-test.sh exit=$?"; tail -3 /tmp/final-headless.log; ./run-desktop-test.sh > /tmp/final-des...
+07:14:23  exit 0   cd ~/app && cp /tmp/final-headless.log evidence/run-test.log && cp /tmp/final-desktop.log evidence/run-desktop-test.log && for f in 2-added 3-two-one-done 4-...
+07:14:49  exit 0   cat >> ~/app/NOTES.md
+07:14:50  exit 0   wc -l ~/app/NOTES.md; grep -n "^## " ~/app/NOTES.md
+07:14:55  exit 0   cd ~/app && env -u DISPLAY ~/inputs/botlish -backend cranelift main.bot 2>&1; echo "exit=$?"; ~/inputs/botlish -backend interp main.bot 2>&1 | head -5
+07:15:16  exit 0   cat >> ~/app/NOTES.md
+07:15:16  exit 143 cd ~/app && pkill -f "Xvfb :99" ; sleep 0.5; pgrep -a Xvfb || echo "no Xvfb left running"; ls -la ~/app ~/app/evidence | head -40
+07:15:19  exit 0   pgrep -a Xvfb || echo "no Xvfb left running"; ls ~/app ~/app/evidence; tail -3 ~/app/NOTES.md

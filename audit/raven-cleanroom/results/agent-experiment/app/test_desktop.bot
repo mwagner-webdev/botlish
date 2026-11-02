@@ -1,0 +1,22 @@
+# test_desktop.bot -- the same scripted check as test.bot, on the real
+# desktop configuration: an X11 window drawn by Raven's Vulkan renderer.
+# It needs an X11 display (DISPLAY), the Vulkan loader and a driver; with
+# no monitor, a virtual display:
+#
+#   Xvfb :99 -screen 0 1024x768x24 &
+#   DISPLAY=:99 botlish -backend cranelift test_desktop.bot
+#   (or ./run-desktop-test.sh, which starts Xvfb itself)
+#
+# Besides test.bot's checks it reads the rendered frames back
+# (window.capture) and checks the window was drawn at its size and that
+# adding and clearing tasks changed the pixels.
+import raven
+import readback
+import std::linux::io
+import tasks_check
+
+with context std::linux::io::create()
+with context raven::create()
+with context readback::create()
+
+tasks_check::verdict(raven::desktop())
