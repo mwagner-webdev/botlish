@@ -691,6 +691,12 @@ static-economics (90), numeric-looking-names (5), coroutine-fusion (17),
 hir-range (74), native-mod-lowering (17), native-result-bounds (12),
 checked-domain-proof-provenance (18), byte-set (21), ascii (33): all pass.
 
+* **Static decisions.** A claim reads its callees' code, so the site
+  holding it depends on the sites in their bodies; the dependency graph's
+  exact call edges already give that, and `se-equal-emission-callee`
+  (`tests/static-economics.test`, 91 of 91) pins it: a claim certified only
+  once its callee's site is rejected waits for that site in the batched
+  order, and every scheduler decides it alike, in two builds.
 * `tools/compilerpedia.tcl check`: 0 problems.
 * The golden-migration census has rows for the two new test files
   (KEEP-INTERNAL: what a claim certifies is a compile-time record, not a
@@ -729,6 +735,15 @@ Correct programs the analysis does not certify:
   (EMIT-UNSUPPORTED), deliberately (section 7).
 * **Undeclared parameters** get no fact from their inferred contracts.
 * **HIR text** carries no recognizer tables: its claims are not proved.
+* **A callee that stops yielding because a `static compile:` block in it
+  was rejected** is called as its declared result type: a function whose
+  only yield follows its rejected block no longer yields, so its call
+  completes, as far as the walk knows, with nothing yielded, and a claim
+  that needs it to emit is EMIT-INCOMPLETE although the call always fails.
+  This follows the compiler's rule for a rejected block's callers (they may
+  complete normally: KNOWN-ERROR never treats a reified failure as proof
+  that they cannot) rather than refining it; batched, sequential and
+  legacy schedulers decide it alike (`se-equal-emission-callee`).
 
 ## 20. Architectural implications and next steps
 
