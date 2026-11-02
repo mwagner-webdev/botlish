@@ -528,6 +528,26 @@ test pw-event-loop-runs {examples/event-loop/native over the installed event_loo
         [file isfile [file join $app {*}$::hostView event_loop_linux native libevent_loop_linux.a]] $value
 } -cleanup cleanup -result {0 -IAPP/.bot_modules/.targets/linux-x86_64/event_loop_linux/include 1 {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
 
+test pw-release-ledger {one version, one artifact: packages/RELEASES.tsv records each release once (name, version, SHA-256); the author's tool says whether a build is the recorded release, and a build of a recorded version whose bytes differ is a CANDIDATE -- reported, and with -release refused, its file renamed so nothing takes it for the release} -constraints {eventLoopPackage} -body {
+    set lines [lsearch -all -inline -not -regexp [split [pm::ReadBytes [file join $::projectRoot packages RELEASES.tsv]] \n] {^(#|$)}]
+    set keys [lmap line $lines {lrange [split $line \t] 0 1}]
+    set wellFormed [expr {[llength [lsort -unique $keys]] == [llength $keys]
+        && [llength [lsearch -all -not -regexp $lines {^[a-z][a-z0-9_]*\t[0-9]+\.[0-9]+\.[0-9]+\t[0-9a-f]{64}$}]] == 0}]
+    set out [fresh repo]
+    set first [exec [info nameofexecutable] $::repositoryTool $out event_loop_linux 2>@1]
+    regexp {sha256 ([0-9a-f]{64})} $first -> digest
+    set ledger [file join [fresh ledger] RELEASES.tsv]
+    writeText $ledger "event_loop_linux\t0.3.0\t$digest\n"
+    set same [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {exec [info nameofexecutable] $::repositoryTool -release $out event_loop_linux 2>@1}]
+    writeText $ledger "event_loop_linux\t0.3.0\t[string repeat 0 64]\n"
+    set noted [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {exec [info nameofexecutable] $::repositoryTool $out event_loop_linux 2>@1}]
+    set refused [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {catch {exec [info nameofexecutable] $::repositoryTool -release $out event_loop_linux 2>@1} message}]
+    list $wellFormed [string match "*release: the recorded release of event_loop_linux 0.3.0*" $same] \
+        [string match "*CANDIDATE: the recorded release of event_loop_linux 0.3.0 is sha256 0000*" $noted] \
+        $refused [file exists [file join $out event_loop_linux-0.3.0.botpkg]] \
+        [llength [glob -nocomplain -directory $out event_loop_linux-0.3.0.candidate-*.botpkg]]
+} -cleanup cleanup -result {1 1 1 1 0 1}
+
 test pw-event-loop-linux-only {the event loop's driver is Linux's (x86-64 and AArch64 archives in one release): preparing a Windows or macOS view is UNSUPPORTED} -constraints {eventLoopPackage} -body {
     set repo [repository {event_loop_linux}]
     set app [fresh app]

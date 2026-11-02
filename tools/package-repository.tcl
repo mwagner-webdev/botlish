@@ -566,10 +566,16 @@ proc author::prepare {name stage} {
 }
 
 # The releases recorded in packages/RELEASES.tsv: {NAME VERSION} -> SHA256.
+# (BOTLISH_RELEASE_LEDGER, from the environment only, names another ledger:
+# for the tests of the candidate rule, tests/package-workloads.test.)
 proc author::releases {} {
     variable root
+    set ledger [file join $root packages RELEASES.tsv]
+    if {[info exists ::env(BOTLISH_RELEASE_LEDGER)] && $::env(BOTLISH_RELEASE_LEDGER) ne ""} {
+        set ledger $::env(BOTLISH_RELEASE_LEDGER)
+    }
     set recorded [dict create]
-    foreach line [split [pm::ReadBytes [file join $root packages RELEASES.tsv]] \n] {
+    foreach line [split [pm::ReadBytes $ledger] \n] {
         if {$line eq "" || [string index $line 0] eq "#"} continue
         lassign [split $line \t] name version digest
         dict set recorded [list $name $version] $digest
