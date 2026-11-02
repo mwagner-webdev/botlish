@@ -6,6 +6,10 @@
 # and Y, whose own listen was never performed, receives nothing through its
 # Receiver (Closed); X's mailbox, bound to Y, closes when Y ends -- no
 # mailbox moves between actors, and nobody reads another's messages.
+#
+# Each listener pauses for a turn after its listen, so Y still holds X's
+# mailbox when X's listen is served (were Y to end first, its retirement
+# would close the mailbox and X's listen would be refused for that reason).
 import std::actor
 import std::event_loop
 import std::event_loop::deterministic
@@ -23,6 +27,7 @@ fn listener(name: str, inbox: std::actor::Inbox[Msg], log: std::actor::Address[L
         on std::actor::Closed:
             log.send(Line {text: name.concat(": listen answered Closed")})
             return std::actor::exit(-1)
+    std::actor::pause()
     m = rx.receive():
         on std::actor::Closed:
             log.send(Line {text: name.concat(": receive answered Closed")})

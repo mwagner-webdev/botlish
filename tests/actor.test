@@ -316,9 +316,9 @@ test actor-identity {three senders on one address: each one's messages arrive in
     acLines [acTrace identity] {log:|Stale|differs}
 } -result {{t=11: main: Y's address differs from X's: 1} {t=11: main: a send to X's old address is Stale (Y reused its slot): 1} {t=12: log: thief: try_receive through a copied Receiver: Closed} {t=12: log: thief: receive through a copied Receiver: Closed} {t=12: log: owner got 10 and 20} {t=12: log: collector got sa1 sb1 sc1 sa2 sb2 sc2 sa3 sb3 sc3 } {t=12: log: latecomer: listen to a closed mailbox: Closed} {t=12: log: collector got xx1 } {t=12: log: collector got yy1 }}
 
-test actor-replay {a mailbox is bound once: an actor started with another's first request (its listen, replayed) binds that mailbox, the rightful actor's listen is refused (Closed), the impostor receives nothing through its own Receiver (Closed), and the mailbox closes with the impostor -- nobody reads another's messages} -body {
+test actor-replay {a mailbox is bound once: an actor started with another's first request (its listen, replayed) binds that mailbox, the rightful actor's listen is refused (Closed) while the impostor still holds it, the impostor receives nothing through its own Receiver (Closed), and the mailbox closes with the impostor -- nobody reads another's messages} -body {
     acTrace replay
-} -result {{t=1: yy: receive answered Closed} {t=1: xx: listen answered Closed} {t=1: queued for X: 0} {t=1: queued for Y: 1}}
+} -result {{t=2: xx: listen answered Closed} {t=2: yy: receive answered Closed} {t=2: queued for X: 0} {t=2: queued for Y: 1}}
 
 # --------------------------------------------------------------------------
 # What the compiler must reject
