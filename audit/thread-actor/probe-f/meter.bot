@@ -1,0 +1,13 @@
+# meter.bot -- binding of meter.c (Probe F).
+import std::ffi::c
+
+extern c library "meter" static at "native/libmeter.a"
+
+extern c fn meter_rss_kb() -> std::ffi::c::LongLong
+extern c fn meter_vm_kb() -> std::ffi::c::LongLong
+
+fn rss_kb() -> int:
+    meter_rss_kb()
+
+fn vm_kb() -> int:
+    meter_vm_kb()

@@ -1,0 +1,23 @@
+raw-channel ping-pong ops 40000
+raw-channel ping-pong wall us 58482
+raw-channel ping-pong cpu us 58417
+Postbox[int] ping-pong ops 40000
+Postbox[int] ping-pong wall us 88287
+Postbox[int] ping-pong cpu us 88241
+Postbox[Msg] ping-pong ops 40000
+Postbox[Msg] ping-pong wall us 97266
+Postbox[Msg] ping-pong cpu us 97269
+ring of 100 actors, hops ops 20000
+ring of 100 actors, hops wall us 35621
+ring of 100 actors, hops cpu us 35111
+create 2000 idle actors ops 2000
+create 2000 idle actors wall us 51351
+create 2000 idle actors cpu us 50693
+idle actors: RSS KiB added 8488
+idle actors: virtual KiB added 16248324
+stop 2000 actors (one message each, run to completion) ops 2000
+stop 2000 actors (one message each, run to completion) wall us 30186
+stop 2000 actors (one message each, run to completion) cpu us 29761
+after stopping: RSS KiB above before creating 1404
+after stopping: virtual KiB above before creating 516
+-- cranelift, gc-stress 0, 14919 ms (compile and run)

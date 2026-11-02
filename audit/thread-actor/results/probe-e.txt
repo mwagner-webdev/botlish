@@ -1,0 +1,9 @@
+consumer: destroy 0
+producer: destroy 0
+produced 4016, consumed 4000, checksum mismatches 0, failed calls 0, producer waits for room 1, left in queue at teardown 16 (freed as C memory)
+consumer: destroy 0
+producer: destroy 0
+produced 316, consumed 300, checksum mismatches 0, failed calls 0, producer waits for room 0, left in queue at teardown 16 (freed as C memory)
+consumer: destroy 0
+producer: destroy 0
+produced 1516, consumed 1500, checksum mismatches 0, failed calls 0, producer waits for room 0, left in queue at teardown 16 (freed as C memory)

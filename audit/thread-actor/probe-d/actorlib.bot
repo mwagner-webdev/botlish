@@ -1,0 +1,30 @@
+# actorlib.bot -- Probe D of THREAD-ACTOR-ARCHITECTURE-CENSUS.md: the
+# Botlish side of a foreign host's requests. A native library
+# (NATIVE-LIBRARY-MILESTONE-1.md): declarations only, every export an
+# environment-free top-level function. host.c owns the instance on a
+# Botlish-owned thread and serves the host's requests there.
+import std::str
+
+error Refused:
+    code: int
+
+# Not a tail call: N frames deep.
+fn sum_to(n: int) -> int:
+    if n <= 0:
+        0
+    else:
+        n + sum_to(n - 1)
+
+# A request whose cost is its recursion depth.
+exported c fn depth(n: int) -> int:
+    sum_to(n)
+
+# A str result crosses as a malloc'ed copy the host releases.
+exported c fn greet(name: str) -> str:
+    "hello, ".concat(name)
+
+# A declared error crosses as an owned error object (identity and fields).
+exported c fn checked(n: int) -> int errors Refused:
+    if n < 0:
+        fail Refused {code: n}
+    n * 2

@@ -1,0 +1,86 @@
+# matrix.bot -- the type side of Probe C (THREAD-ACTOR-ARCHITECTURE-CENSUS.md):
+# one field per value class whose cross-thread sendability the census
+# classifies. ../tools/sendability.tcl builds this program and classifies
+# every field of Matrix with a structural rule over the checked types
+# (no new compiler fact). It is never run.
+import std::abi
+import std::abi::bytes
+import std::binary
+import std::binary::native
+import std::event_loop
+import std::ffi::c
+import std::immutable_map
+import std::mutable_map
+
+enum Colour:
+    Red,
+    Green,
+
+struct Point:
+    x: int
+    y: int
+
+struct Tagged:
+    name: str
+    colour: Colour
+    points: List[Point]
+
+tree struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+opaque struct Token:
+    serial: int
+
+struct HoldsVector:
+    label: str
+    data: MutableVector[int]
+
+struct HoldsPtr:
+    label: str
+    handle: std::ffi::c::Ptr[std::ffi::c::Void]
+
+struct HoldsFn:
+    f: Fn{args: [int], return: int}
+
+context struct Settings:
+    level: MutableArray[int]
+
+layout Pair:
+    size 8
+    align 4
+    field a: std::binary::U32 at 0
+    field b: std::binary::U32 at 4
+
+struct Matrix:
+    an_int: int
+    a_bool: bool
+    a_char: UnicodeChar
+    a_float: Float64
+    a_decimal: DecimalRounded{minDecimalsPreserved: 2}
+    a_str: str
+    some_bytes: std::abi::bytes::Bytes
+    mutable_bytes: std::abi::bytes::MutableBytes
+    an_enum: Colour
+    a_list: List[int]
+    a_set: ImmutableSet[str]
+    a_struct: Point
+    nested_immutable: List[Tagged]
+    a_tree: Node[str]
+    an_immutable_map: std::immutable_map::ImmutableMap[str, int]
+    a_mutable_vector: MutableVector[Point]
+    a_mutable_array: MutableArray[int]
+    a_mutable_map: std::mutable_map::MutableMap[str, int]
+    struct_with_vector: HoldsVector
+    an_opaque_user_struct: Token
+    an_event_loop_reg: std::event_loop::Reg
+    a_context_value: Settings
+    a_function: Fn{args: [int], return: int}
+    struct_with_function: HoldsFn
+    a_coroutine: Coroutine{args: [], return: int, errors: []}
+    a_c_pointer: std::ffi::c::Ptr[std::ffi::c::Void]
+    struct_with_pointer: HoldsPtr
+    a_native_view: NativeView[Pair]
+    an_unknown: any
+
+0
