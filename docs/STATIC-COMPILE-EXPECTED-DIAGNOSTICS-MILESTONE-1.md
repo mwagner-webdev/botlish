@@ -415,7 +415,37 @@ this change.
 
 ## 12. Regression results
 
-**Results pending**: the full local run, the fuzzers and CI's `static-decisions` comparison are in progress; this section is completed with their results in the next commit. Done so far: `tests/static-compile-expected-diagnostics.test` 20/20, its golden suite 32/32 on all four backends, `tests/static-compile.test` 83/83, `tests/errors.test` 51/51, the golden suites `static-compile.bot`, `diagnostics.bot` and `completion-regressions.bot` on all four backends, `tools/compilerpedia.tcl check` (0 problems).
+On the final compiler (the code of the branch's first commit; the later
+commits change tests and documents only), x86-64 Linux, 4 cores:
+
+| run | result |
+|---|---|
+| `tclsh9.0 tests/local.tcl` (every Tcl test file on interp and compile, every golden suite on four backends) | **0 failed**: Tcl 8,301 passed on interp and 8,296 on compile (2,474 golden duplicates skipped by the manifest's policy); 117 golden suites, interp 5,589/5,589, compile 5,589/5,589, cranelift-generic 5,497/5,497, cranelift 5,599/5,599; 5,321 s wall |
+| `tests/static-compile-expected-diagnostics.test` | 21/21 (about 90 s) |
+| `tests/golden/static-compile-expected-diagnostics.bot` | 32/32 on interp, compile, cranelift-generic and cranelift; 6 whole-program builds |
+| `tests/static-compile.test`, `tests/static-economics.test` | 83/83, 91/91 (two economics tests updated: section 10) |
+| `tests/golden.test` on the new suite (manifest rows, `golden-static-economics`) | 2/2 |
+| `audit/golden/tools/perturb.tcl` on the new suite | 32 inverted, 32 altered and 23 located: every one fails as required |
+| `audit/golden/migration/merge.tcl -check 1` | 0 problems (12,708 rows) |
+| `tools/compilerpedia.tcl check` | 0 problems (1,169 topics, 726 examples, the new rejected example of `concept.static-compile` among them) |
+| `audit/static-compile/tools/fuzz.tcl` seeds 1 and 7, 20 programs each, four backends | 0 disagreements |
+| `audit/static-decisions/tools/fuzz.tcl -legacy 1` seeds 17 and 41 | 0 failures (484 and 564 sites); seed 41 identical to the tree before the change, its 2 layout pairs taking different numbers of rounds included |
+| `audit/golden/tools/fuzz.tcl` seed 3 | 110 cases on three backends, 0 disagreements |
+| `audit/static-compile/tools/mutate.tcl` | 38 of 38 killed (section 11) |
+| every mutant of every harness whose replaced text lies in a file this change edits | still applies (2,829 edits checked) |
+| CI `static-decisions` (golden suites, batched against sequential), dispatched on the branch | **pending**: `compare (mutable-array)` and `compare (shard 3/4)` passed; shard 4/4 was running and shards 1/4 and 2/4 were still waiting for a runner when this report was written |
+
+On the tree before this milestone the new Tcl file fails exactly its five
+tests of the gap and the golden suite exactly its seven `following` tests
+(section 10).
+
+The other harnesses AGENTS.md names for the six files touched (the
+ownership, coroutine, relational, emission and completion fuzzers and
+mutation tools) were not rerun: no program they generate holds a `static
+compile:` block -- only the static-compile, static-decisions and golden
+fuzzers make one -- so `reifiedStatement` is 0 on every node they build and
+the six walks take exactly their old paths. Their test files ran in the
+full local run above, and their mutants all still apply.
 
 ## 13. Source compatibility
 
