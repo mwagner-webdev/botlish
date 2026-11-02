@@ -456,18 +456,66 @@ operation, runtime helper, heap kind, Rust code, pass, option or metadata.
 `hir::construction::analyze`'s time, best of 5 lowerings; `Uses` walks, the
 linearity walk's entries into an expression; the whole native lowering):
 
-ECONOMICS-TABLE
+| program | plan folds | analyze before | analyze after | `Uses` walks before / after | lowering before / after |
+|---|---:|---:|---:|---:|---:|
+| list-fold.bot | 1 | 463 us | 563 us | 87 / 97 | 10.4 / 10.4 ms |
+| chunks-direct-fold.bot | 2 | 1,496 us | 2,117 us | 242 / 356 | 51.9 / 55.0 ms |
+| fold-flat.bot | 1 | 542 us | 717 us | 91 / 97 | 13.0 / 14.3 ms |
+| nested-1 .. nested-5 (d nested plan folds) | d | 181 .. 951 us | 246 .. 1,486 us | 8, 34, 78, 140, 220 / 12, 51, 117, 210, 330 | 6.0 .. 24.4 / 6.0 .. 24.6 ms |
+| many-40 (40 folds in one function, 20 plan) | 20 | 88.7 ms | 96.0 ms | 32,718 / 33,078 | 219 / 231 ms |
+| golden/fold-loops.bot (70 folds) | 2 | 44.4 ms | 56.0 ms | 3,564 / 3,626 | 4.61 / 4.79 s |
+| golden/list-flat.bot | 2 | 36.3 ms | 38.3 ms | 5,382 / 5,429 | 1.71 / 1.95 s |
+| scanner-fold.bot, chunks-fold.bot (struct folds) | 0 | 2,168, 1,038 us | 2,558, 1,143 us | 344, 184 / same | 71.6, 30.9 / 82.5, 31.0 ms |
+| lex-strategy-fold.bot (scalar folds) | 0 | 2,164 us | 2,345 us | 406 / same | 50.1 / 54.0 ms |
+| uri-steady.bot (M8A's recursions, no fold) | 0 | 3,109 us | 3,316 us | 329 / same | 141 / 143 ms |
+| refined-checks.bot | 0 | 5,642 us | 6,092 us | 367 / same | 262 / 290 ms |
+
+(The full tables, 30 programs: `audit/fold-virtual-construction/results/
+economics-{before,after}.txt`. Times are best of 5 lowerings in one
+process on a shared container: differences under about 15% are within
+run to run variation, as programs whose analysis did not change at all
+show (source-checks 1,482 -> 1,457 us, test-selection's lowering 51.2 ->
+45.1 ms); the walk counts are exact. The golden suites' "after" rows ran
+beside a mutation harness.)
 
 * A fold that is not String/List-typed is declined before any walk
   (`RefFamily`), so scalar and struct folds add no `Uses` walk.
-ECONOMICS-BULLETS
+* **No plan fold, no new walk.** The `Uses` walk counts of every program
+  without a plan fold are identical before and after, scalar and struct
+  folds included: a fold that is not String/List-typed is declined by
+  `RefFamily` before any walk. What remains is one extra pass over each
+  function's expressions to find its folds, and the analysis' time on
+  those programs moves within noise.
+* **A plan fold costs one walk of its own body** (`FoldLinear`) plus one
+  `Context` check per reference per fixpoint round. Nested folds grow the
+  walks quadratically in the nesting depth (each fold walks the folds
+  inside it), as the locals already did before (8, 34, 78, 140, 220 ->
+  12, 51, 117, 210, 330): no multiplicative interaction with the type
+  fixpoint FOLD-LOOPS-MILESTONE-1.md measured, which is in the front end;
+  this analysis runs once, on the final HIR, after specialization.
+* **Many folds in one function.** The first version walked the whole
+  function per fold, as `Linear` does per local: many-40's walks went from
+  32,718 to 64,638 and its analysis from 88.7 to 200.2 ms (lowering 219 ->
+  342 ms). The body walk brings that to 33,078 walks and 96.0 ms. (The
+  function's 40 `r_i` and 20 `n` locals are what cost the 32,718 walks
+  already before: `Linear` walks the whole function per local candidate.
+  That quadratic cost is M8A's, untouched here.)
+* The analysis is 4-6% of native lowering on the workloads, about 1-3% on
+  the golden suites; many-40's 42% was 40% before.
 
 **Programs without a plan fold lower to byte-identical NIR.**
-`audit/fold-virtual-construction/tools/nir-digest.tcl` over NIR-DIGEST-COUNT
+`audit/fold-virtual-construction/tools/nir-digest.tcl` over 77
 programs (bench/, its experimental variants, the bench-bimodality variants,
 FOLD-LOOPS-MILESTONE-1.md's workloads, examples/surface and examples/stdlib,
 the golden suites fold-loops.bot, list-flat.bot and virtual-construction.bot,
-and this milestone's workloads): NIR-DIGEST-RESULT
+and this milestone's workloads): the 58 that have no plan fold
+lower to byte-identical NIR in both trees (scalar folds, struct folds,
+collecting loops, M8A's recursions and plan results, the fold-loops
+workloads and the lex-strategy fold variants among them); the 12 that
+differ each have plan folds (this milestone's workloads and economics
+inputs, and fold-loops.bot, list-flat.bot and fold-virtual-construction.bot,
+with 2, 2 and 50); 7 are rejected identically by both (programs that need
+staged modules, and examples written to be rejected).
 
 **Generated code**: +120 to +248 bytes per function holding a plan fold
 (section 9); nothing elsewhere.

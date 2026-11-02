@@ -1,0 +1,78 @@
+# tools/nir-digest.tcl (this tree)
+game-server-continue/game-server.bot                     ERROR /home/user/botlish/audit/bench-bimodality/variants/game-server-continue/game-server.bot:36:8: unknown namespace "evloop": no such module file /home/user/botlish/audit/bench-bimodality/variants/game-server-continue/evloop.bot (an application's own modules are the files beside its entry program)
+game-server-continue/simdrv.bot                          ERROR /home/user/botlish/audit/bench-bimodality/variants/game-server-continue/simdrv.bot:195:8: function sent requires context Sim, so it can only be called (or bound to another name as a statement): it cannot be passed, returned or stored as a value, because a call through an unknown function value could not prove that context installed
+json-parse-ascii/json-parse.bot                          ERROR /home/user/botlish/audit/bench-bimodality/variants/json-parse-ascii/json-parse.bot:31:8: unknown namespace "json": no such module file /home/user/botlish/audit/bench-bimodality/variants/json-parse-ascii/json.bot (an application's own modules are the files beside its entry program)
+lex-strategy-chars-counted/lex-strategy.bot              6b886eb95815edef plan-folds=0
+lex-strategy-chars-direct-folded/lex-strategy.bot        b211c7a55b2ac665 plan-folds=0
+lex-strategy-chars-direct/lex-strategy.bot               742753295b9526d9 plan-folds=0
+lex-strategy-chars-folded/lex-strategy.bot               a0ce284f197a0cd9 plan-folds=0
+lex-strategy-chars-indexed/lex-strategy.bot              35bab3416b71acd8 plan-folds=0
+lex-strategy-chars/lex-strategy.bot                      53c91345ef6a89e1 plan-folds=0
+lex-strategy-indexed/lex-strategy.bot                    0fd89d6c7aac157e plan-folds=0
+lex-strategy-typed/lex-strategy.bot                      6c5f0c8adc7523b8 plan-folds=0
+refined-checks-ascii/refined-checks.bot                  2d587cc830dc20e2 plan-folds=0
+refined-checks-chars/refined-checks.bot                  7d3f8cec3551cc2b plan-folds=0
+refined-checks-local/refined-checks.bot                  cf62d0184c296c90 plan-folds=0
+source-checks-chars-listed/source-checks.bot             12adb05944b53d39 plan-folds=0
+source-checks-chars/source-checks.bot                    2eee67fa2cbcc176 plan-folds=0
+source-checks-typed/source-checks.bot                    f132832394ceaa68 plan-folds=0
+test-selection-typed-membership/test-selection.bot       cf5ceb54a9711c3a plan-folds=0
+uri-steady-append-char/uri-steady.bot                    42d59f3395d648bc plan-folds=0
+uri-steady-count-only/uri-steady.bot                     426207bac1bbe375 plan-folds=0
+workloads/chunks-fold.bot                                93e7c5b76b19f13f plan-folds=0
+workloads/chunks-recursive.bot                           732eb355912d46a7 plan-folds=0
+workloads/chunks-vector.bot                              e6a3c3d0090ab513 plan-folds=0
+workloads/scanner-cells.bot                              878ea2dcc696e48d plan-folds=0
+workloads/scanner-fold.bot                               f7b766ec5d851952 plan-folds=0
+workloads/scanner-recursive.bot                          c44f07af2c7cb913 plan-folds=0
+economics/many-40.bot                                    c98ab456d0755708 plan-folds=20
+economics/nested-1.bot                                   d77dbc7f4d36af84 plan-folds=1
+economics/nested-2.bot                                   b2fe1d92fee533f4 plan-folds=2
+economics/nested-3.bot                                   7bd6fd19d77287b1 plan-folds=3
+economics/nested-4.bot                                   5a732ec6463d5793 plan-folds=4
+economics/nested-5.bot                                   d75bf500700802e3 plan-folds=5
+workloads/chunks-direct-fold.bot                         491564d01162f287 plan-folds=2
+workloads/chunks-direct-recursive.bot                    3509d275986b4917 plan-folds=0
+workloads/fold-flat.bot                                  50698a84c3c881ed plan-folds=1
+workloads/list-fold.bot                                  e885704b9c21857e plan-folds=1
+workloads/list-recursive.bot                             160e819b4e3f77f0 plan-folds=0
+workloads/list-vector.bot                                8c02846f21dab41e plan-folds=0
+experimental/game-server.bot                             ERROR /home/user/botlish/bench/experimental/game-server.bot:31:8: unknown namespace "evloop": no such module file /home/user/botlish/bench/experimental/evloop.bot (an application's own modules are the files beside its entry program)
+experimental/json-parse.bot                              ERROR /home/user/botlish/bench/experimental/json-parse.bot:25:8: unknown namespace "json": no such module file /home/user/botlish/bench/experimental/json.bot (an application's own modules are the files beside its entry program)
+experimental/lex-strategy-fold.bot                       68c07a66846b9d2b plan-folds=0
+experimental/loop-count-fold.bot                         1aecfe38f73c8831 plan-folds=0
+bench/fib.bot                                            1c9894ecba799be7 plan-folds=0
+bench/lex-strategy.bot                                   ab739523e8d87a13 plan-folds=0
+bench/loop-count.bot                                     fd53c50d1799cf51 plan-folds=0
+bench/refined-checks.bot                                 af2ac98d7f6c117e plan-folds=0
+bench/source-checks.bot                                  140bca8bd76e4f72 plan-folds=0
+bench/sum-refined.bot                                    4e0c2de0fe28c0e3 plan-folds=0
+bench/test-selection.bot                                 1d117738830259b7 plan-folds=0
+bench/uri-steady.bot                                     3b169cc2f891ad77 plan-folds=0
+stdlib/ai_text_clean.bot                                 c683ee59a0d5fcb3 plan-folds=0
+stdlib/csv.bot                                           9167b252b34aa3e3 plan-folds=0
+stdlib/csv_chunked.bot                                   809a819df99e66f9 plan-folds=0
+stdlib/csv_geometric.bot                                 2250d7e95a2fc679 plan-folds=0
+stdlib/csv_records.bot                                   630f3a48e23a2fe0 plan-folds=0
+stdlib/hashtable.bot                                     25ad3ca36ca9b31c plan-folds=0
+stdlib/matmul.bot                                        459385bb77024841 plan-folds=0
+stdlib/string_replace.bot                                2ff29524c86b3bea plan-folds=0
+stdlib/string_reverse.bot                                42933724be3603d0 plan-folds=0
+surface/01-arithmetic.bot                                f93e9e724c950968 plan-folds=0
+surface/02-recursion.bot                                 f42107a34bf7cf15 plan-folds=0
+surface/03-closure.bot                                   e0968674cc5922e8 plan-folds=0
+surface/04-branch-value.bot                              96cc81c3b9e5a12c plan-folds=0
+surface/05-shadowing.bot                                 d7ac392da11a2114 plan-folds=0
+surface/06-list.bot                                      845be9196fee3ecb plan-folds=0
+surface/07-loop-break.bot                                4cec9f2675f86814 plan-folds=0
+surface/08-return.bot                                    dabe7080a7f8ee75 plan-folds=0
+surface/09-mutual-recursion.bot                          ERROR /home/user/botlish/examples/surface/09-mutual-recursion.bot:13:5: unbound name "is_odd": "is_odd" is declared later; forward references are not allowed (a binding is visible only after it is established)
+surface/10-duplicate-binding.bot                         ERROR /home/user/botlish/examples/surface/10-duplicate-binding.bot:7:1: duplicate binding "x" in the same lexical scope
+surface/11-boolean-operators.bot                         85c1d8c1955d5a86 plan-folds=0
+surface/12-if-value.bot                                  1697b37d7d9d6ade plan-folds=0
+surface/13-hygiene.bot                                   3edc866d7ecfa45a plan-folds=0
+surface/14-modules.bot                                   e61b8d6f09a04781 plan-folds=0
+surface/15-enums.bot                                     048ececdcbe33708 plan-folds=0
+golden/fold-loops.bot                                    8ba585fa071ee73c plan-folds=2
+golden/fold-virtual-construction.bot                     81051a5018b77d30 plan-folds=50
+golden/list-flat.bot                                     246c71bc1f693cbe plan-folds=2
