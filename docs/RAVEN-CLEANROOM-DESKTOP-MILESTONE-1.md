@@ -599,7 +599,24 @@ the test its line names.
 executable and the release and runs the clean room on a push touching
 these files; `c-bindgen.yml` builds the pinned desktop configuration
 (`tests/cffi/raven.tcl desktop`) and installs python3 and libXtst for
-`raven-desktop-session`. Neither workflow had run on this branch when this report was written: their first runs are this change's push.
+`raven-desktop-session`. **Executed on GitHub's ubuntu-24.04
+runners**: the clean-room workflow's first run failed packing (the
+AArch64 cross compiler needs `libc6-dev-arm64-cross`, which this
+machine had and the workflow did not install: fixed); its second run
+(41410971721) packed the release from scratch in 34 s, built the image
+and passed all 33 checks. `c-bindgen.yml` did not run on this branch
+(its triggers are main's).
+
+**Reproducibility.** The runner's 0.3.1 has sha256 `4cb6c223...`
+(1,735,598 bytes; the same 4,076,210 bytes unpacked), not this
+machine's `9336738e...`. On one machine the operation is reproducible --
+repeated packing gives identical bytes, and the desktop libraven built
+in two different cache directories is byte-identical (the same GNU build
+ID) -- so the difference is the runner's toolchain or library packages,
+not paths. The release is the artifact this report records; a rebuild on
+another machine is a different file and must not be published as 0.3.1
+(the tool refuses to overwrite one in the same repository, but cannot
+know about another machine's). Section I lists it.
 
 **Hosts.** Only Linux x86-64 was available. Linux AArch64: built and
 inspected only. macOS and Windows: the package refuses them (UNSUPPORTED);
@@ -611,6 +628,10 @@ nothing was attempted.
 
 * The release's AArch64 library has never run (no AArch64 host here; CI's
   arm64 workflow does not build the package).
+* Author builds are reproducible on one machine, not across machines: a
+  release's bytes depend on the build machine's compiler and libraries
+  (section H). Nothing yet pins the author's toolchain (a container image
+  for the recipe) or records it in the release (PM-3, PM-5).
 * The clean room proves the absence of a checkout for the container's
   processes; the independent agent's own tools were restricted by
   instruction and audited afterwards (section F), not by enforcement.
@@ -717,6 +738,8 @@ front end's cost per run.
    a widget's children, then lists and menus.
 5. **An exit status for programs** (tests in shells).
 6. **Run the AArch64 release** on an arm64 host (CI's arm64 workflow).
+   And **pin the author's toolchain** (the recipe in a fixed container
+   image), so any machine reproduces a release's bytes.
 7. **PM**: the cascade after a failed system library; an optional
    run-time dependency class (PM-3).
 8. **Repeat the experiment without injected repository instructions**
