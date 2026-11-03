@@ -266,7 +266,7 @@ proc hir::structs::AffinityOf {id} {
         # A resource struct is affine whatever its fields: its value carries
         # a cleanup obligation, which one owner discharges once
         # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md). It has no
-        # slots (CheckResource), so nothing else is relevant.
+        # slots (ResourceDeclaration), so nothing else is relevant.
         return {1 {}}
     }
     foreach {name t} [fieldTypes $id] {

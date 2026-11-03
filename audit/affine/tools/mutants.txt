@@ -251,7 +251,7 @@
     set key [list $type [hir::resources::unwinds $hir] [hir::resources::table $hir]]
 >>>>
 
-@@ app-descriptor-memo-ignores-resources a drop descriptor is remembered without the HIR's resource facts: the `c` the ownership analysis was given before verify decided its suspended coroutines unwind is kept for the releases, which then never run a suspended frame's cleanups
+@@ app-descriptor-memo-ignores-resources a drop descriptor is remembered without the HIR's resource facts: a HIR whose suspended coroutines unwind is answered by the `c` another HIR (or an earlier state of it) was given, and would never run a suspended frame's cleanups (today verify sets the facts before any descriptor is asked for, so the white-box aa-descriptor-memo-hir-facts is its detector)
 ## hir/affine.tcl
 <<<<
     variable descriptorCut

@@ -718,6 +718,37 @@ were not run: this milestone adds no registry and no HIR field (its memo
 tables are derived from the struct registry and cleared with it), and
 their round-trip and interleave tools ran clean.
 
+### Merged with main's lexical resource cleanup
+
+Main gained resources (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md)
+while this milestone was on its branch, and the two meet in two places:
+
+* **A resource struct is affine whatever its fields.** Main stated that in
+  the old per-declaration `hir::structs::IsAffine`; it is now the first case
+  of `AffinityOf`, the declaration's own base affinity (`{1 {}}`). A
+  resource has no type slots (`ResourceDeclaration`), so no slot is relevant and
+  every application rule above holds unchanged.
+* **Main's drop descriptors read the HIR**: `C` instead of `c` where the
+  HIR's suspended coroutines unwind, and `rK.` from its cleanup table
+  (hir/resources.tcl), facts `hir::affine::verify` sets after the analysis
+  has run. The descriptor memo (section 14) was keyed by the type and the
+  exclusion only; it is now keyed by those facts too. With today's call
+  order every descriptor is first asked for after verify has set them (a
+  trace of every program in tests/resources/ shows no earlier call), so no
+  program test can tell the two keys apart: `aa-descriptor-memo-hir-facts`
+  asks one set of declarations under both facts directly, and the mutant
+  `app-descriptor-memo-ignores-resources` (the old key) is killed by it.
+
+After the merge, on this container: `tests/local.tcl` **0 failed** (Tcl
+tests on interp 8,362 passed, on compile 8,357; 116 golden suites, every
+test passing on all four backends: 5,557 / 5,557 / 5,465 / 5,567);
+tests/affine.test, tests/affine-applications.test (21 tests) and
+tests/resources.test under GC stress all passing; the affine fuzzer (seed
+1, 30 ownership and 30 application programs) and the lexical-cleanup fuzzer
+(`-n 30 -seed 2`) 0 disagreements; `tools/compilerpedia.tcl check` 1,180
+topics, 730 examples, 0 problems; `audit/affine/tools/mutate.tcl` **54
+killed, 0 survived**.
+
 ## 16. Explicit limitations
 
 * **The written-argument rule** (`ResolveApplied`) still rejects every
