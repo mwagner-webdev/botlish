@@ -1,0 +1,116 @@
+# coro.bot -- a coroutine's frames keep what they own across suspension: it
+# is released when the coroutine completes, when it fails, or -- abandoned --
+# when the handle's scope ends (not at its last use): its pending yield then
+# fails with an internal error no handler can name, so only its frames'
+# releases run, innermost first (tests/resources.test).
+import handle
+
+struct Go:
+    n: int
+
+error Bad
+
+fn holder(base: int, context log: handle::Log, resume Go) -> int:
+    h = handle::open(base)
+    m = yield 1
+    handle::note(base + 1)
+    m2 = yield 2
+    handle::note(base + 2)
+    3
+
+fn child(context log: handle::Log, resume Go) -> int:
+    h = handle::open(300)
+    m = yield 1
+    handle::note(301)
+    2
+
+fn parent(context log: handle::Log, resume Go) -> int:
+    coroutine {step: kid, first: k0} = child()
+    m = yield k0
+    handle::note(201)
+    kid(m)
+
+fn layered(context log: handle::Log, resume Go) -> int:
+    a = handle::open(400)
+    if true:
+        b = handle::open(401)
+        m = yield 1
+        handle::note(402)
+    0
+
+fn failing(context log: handle::Log, resume Go) -> int errors Bad:
+    h = handle::open(500)
+    m = yield 1
+    if m.n > 0:
+        fail Bad
+    0
+
+# A yield inside a nested call: both frames own a Handle across it.
+fn inner_wait(context log: handle::Log, resume Go) -> int:
+    h = handle::open(600)
+    m = yield 1
+    handle::note(602)
+    m.n
+
+fn deep_waiter(context log: handle::Log, resume Go) -> int:
+    h = handle::open(601)
+    inner_wait()
+    handle::note(603)
+    0
+
+# 1. completion: 101, 102 (its notes), then 100.
+fn complete() -> int:
+    coroutine {step, first} = holder(100)
+    a = step(Go {n: 1})
+    b = step(Go {n: 2})
+    a + b
+
+# 2. abandonment at the handle's scope end, after the note 119 made past the
+#    handle's last use: 111, 119, 110.
+fn abandon() -> int:
+    coroutine {step, first} = holder(110)
+    a = step(Go {n: 1})
+    handle::note(119)
+    a
+
+# 3. nested: the parent abandoned, its frame releases the child it holds,
+#    which releases its Handle (300); neither note 201 nor 301 runs.
+fn nested() -> int:
+    coroutine {step: p, first} = parent()
+    first
+
+# 4. suspended inside a nested block: the inner Handle first (401, 400).
+fn inner() -> int:
+    coroutine {step, first} = layered()
+    first
+
+# 5. failure: the coroutine's own error edge releases its Handle (500) before
+#    the caller's handler (599).
+fn fails() -> int errors Bad:
+    coroutine {step, first} = failing()
+    step(Go {n: 1}):
+        on Bad:
+            handle::note(599)
+            0
+
+# 6. suspended in a nested call: abandoned, the innermost frame first (600,
+#    then 601); neither note 602 nor 603 runs.
+fn deep() -> int:
+    coroutine {step, first} = deep_waiter()
+    first
+
+fn main(context log: handle::Log) -> List[int] errors IndexNotFound:
+    complete()
+    abandon()
+    nested()
+    inner()
+    fails():
+        on Bad:
+            0
+    deep()
+    handle::closed()
+
+with context handle::create()
+main():
+    on IndexNotFound:
+        []

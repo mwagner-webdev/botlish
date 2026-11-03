@@ -26,7 +26,9 @@
 //                                      a key (left right a d r escape w q;
 //                                      cmd+NAME with the Command key) posted
 //                                      as a keyboard event (Quartz events:
-//                                      the HID tap by default)
+//                                      the HID tap by default); reports
+//                                      whether the session and the HID
+//                                      system hold the key down 50 ms on
 //   macos-input hold NAMES SECONDS [hid|session|pid:PID]
 //                                      NAMES (comma-separated) pressed
 //                                      together, held SECONDS, released
@@ -264,8 +266,14 @@ int main(int argc, char **argv) {
                 CFRelease(e);
                 if (i == 0 && downs[1] == 0) usleep(80000);
             }
+            // The window server's own view of the key 50 ms on, the session's
+            // (every source combined) and the keyboard's (HID): a fact about
+            // delivery, never about the game, which only its frames tell.
+            usleep(50000);
             json(@{@"key": @(argv[2]), @"code": @(code), @"action": @(action), @"mode": @(mode),
-                   @"post_event": @(CGPreflightPostEventAccess())});
+                   @"post_event": @(CGPreflightPostEventAccess()),
+                   @"session_down": @(CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState, (CGKeyCode)code)),
+                   @"hid_down": @(CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, (CGKeyCode)code))});
             return 0;
         }
         if (!strcmp(cmd, "hold") && (argc == 4 || argc == 5)) {

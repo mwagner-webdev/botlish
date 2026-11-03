@@ -53,16 +53,13 @@ jobs:
       - name: Build the single executable
         run: single/build.sh -o dist/botlish
 
-      # The package author's side only (the release holds both Linux
-      # targets): CMake, Ninja, libX11's headers, the AArch64 cross compiler.
-      - name: Install the package author's prerequisites
-        run: |
-          sudo apt-get update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            cmake ninja-build libx11-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+      # The package author's side, in the pinned author environment
+      # (tools/package-build): the release, reproduced.
+      - name: Build the pinned author image
+        run: tools/package-build/author.sh image
 
       - name: Pack the raven release
-        run: tclsh9.0 tools/package-repository.tcl repo raven
+        run: tools/package-build/author.sh build repo -release raven
 
       - name: Build the clean room's image
         run: audit/raven-cleanroom/tools/cleanroom.sh image

@@ -704,7 +704,9 @@ proc hir::types::Contract {type} {
 #
 # It is compositional: a value that owns an affine value is affine. The one
 # primitive affine root today is the coroutine handle; a struct (named or
-# anonymous) is affine iff a field type is, a List, a MutableVector and a
+# anonymous) is affine iff a field type is -- an application of a
+# parameterized struct iff a field type of that application is, its
+# arguments substituted (hir::structs::IsAffine) --, a List, a MutableVector and a
 # MutableArray (and, for completeness, an ImmutableSet, which rejects affine
 # members elsewhere) iff its element type is, a trait view iff its concrete
 # witness is.
@@ -784,7 +786,11 @@ proc hir::types::IsAffine {type {seen {}}} {
             return 0
         }
         nstruct {
-            return [hir::structs::IsAffine [lindex $type 1] $seen]
+            # An application's affinity is its fields', its arguments
+            # substituted (hir::structs::IsAffine: Box[Coroutine{...}] of
+            # `struct Box[T]: value: T` is affine, Phantom[Coroutine{...}]
+            # of `struct Phantom[T]: value: int` is not).
+            return [hir::structs::IsAffine [lindex $type 1] [StructArgs $type]]
         }
         enum {
             # Derived from the enum's case payloads (hir::enums::IsAffine):
@@ -1231,10 +1237,12 @@ proc hir::types::StructArgs {type} {
 # applications the arguments are `any` -- a sound description of every
 # value of the constructor, which keeps inferred types finite (a function
 # whose result wraps its own result) and declared types of any practical
-# depth intact.
+# depth intact -- unless the application is affine: `any` holds no affine
+# value, so the cut would erase the ownership it carries (an affine
+# element is never cut either, MakeList; AFFINE-VALUES.md).
 proc hir::types::MakeApplied {id args {depth 0} {nesting 0}} {
     variable appliedDepth
-    if {$nesting >= $appliedDepth} {
+    if {$nesting >= $appliedDepth && ![hir::structs::IsAffine $id $args]} {
         return [list nstruct $id [lrepeat [llength $args] any]]
     }
     set inner [expr {$nesting + 1}]

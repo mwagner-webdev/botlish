@@ -1,0 +1,428 @@
+# affine-applications.test -- the affinity of parameterized struct
+# applications (AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md).
+#
+# An application of a parameterized struct is affine exactly when the fields
+# of that application -- the declaration's with every slot replaced by its
+# argument -- make it affine, as if that concrete struct had been written
+# directly: Box[Coroutine{...}] of `struct Box[T]: value: T` is affine,
+# Phantom[Coroutine{...}] of `struct Phantom[T]: value: int` is not. The
+# compiler used to read the declaration's fields only (a slot variable is
+# unrestricted), so a coroutine handle held through a slot was copied freely
+# and never released by its owner.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set aaDecls {import std::coroutine
+import std::list
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+struct Box[T]:
+    value: T
+
+struct Pair[A, B]:
+    first: A
+    second: B
+
+struct Many[T]:
+    values: List[T]
+
+struct Inner[T]:
+    value: T
+
+struct Outer[T]:
+    inner: Inner[T]
+
+struct Holder:
+    step: Coroutine{args: [Message], return: Event}
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn any_take(x: any) -> int:
+    1
+
+}
+
+# The same, with no import: HIR text of a program with modules does not read
+# back (hir/read.tcl reads one program).
+set aaPlainDecls [string map [list "import std::coroutine\nimport std::list\n" ""] $aaDecls]
+
+# The error code of the first diagnostic of TEXT, or "ok".
+proc aaCode {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lindex [dict get [lindex [dict get $options -diagnostics] 0] errorcode] end]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+# The message of the first diagnostic of TEXT (without its location), or "ok".
+proc aaMessage {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set message [dict get [lindex [dict get $options -diagnostics] 0] message]
+        }
+        regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {} message
+        return $message
+    }
+    return ok
+}
+
+# The error code of $aaDecls followed by BODY: the body of fn main, whose
+# result is returned by the program.
+proc aaMain {body} {
+    return [aaCode "${::aaDecls}fn main() -> int:\n[aaIndent $body]main()\n"]
+}
+
+proc aaIndent {body} {
+    set lines {}
+    foreach line [split [string trimright $body \n] \n] {
+        lappend lines "    $line"
+    }
+    return "[join $lines \n]\n"
+}
+
+proc withGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+# Test-only probe of the Tcl runtime: the Tcl coroutines alive (a suspended
+# coroutine not released yet).
+proc aaLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_aa_live" ni [core::native::names]} {
+    core::registerNative test_aa_live -arity 0 -impl aaLiveCoroutines
+}
+
+# The op names of function NAME's instructions in NIR text.
+proc affOpsOf {nir name} {
+    set ops {}
+    set inside 0
+    foreach line [split $nir \n] {
+        if {[regexp {^func [0-9]+ "([^"]*)"} $line -> fname]} {
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$line eq "end"} {
+            set inside 0
+        } elseif {$inside && [regexp {= op ([a-z0-9]+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return $ops
+}
+
+# The program HIR of DECLS (and a trailing `1`), its declarations active,
+# and the canonical application of struct ID to ARGS in it.
+proc aaHir {decls} {
+    set hir [surface::compile "${decls}1\n" -warnings off]
+    hir::activate $hir
+    return $hir
+}
+proc aaApp {id args} {
+    return [hir::types::MakeApplied $id $args]
+}
+
+# A coroutine handle's type, and the white-box declarations.
+set aaC [hir::types::MakeCoroutineType {} int {}]
+set aaTypeDecls {struct Box[T]:
+    value: T
+
+struct Phantom[T]:
+    value: int
+
+struct Many[T]:
+    values: List[T]
+
+struct Inner[T]:
+    value: T
+
+struct Outer[T]:
+    inner: Inner[T]
+
+struct Fixed[T]:
+    inner: Inner[int]
+
+struct Pair[A, B]:
+    first: A
+    second: B
+
+struct Holder:
+    c: Coroutine{args: [], return: int, errors: []}
+
+struct Plain:
+    n: int
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+struct Fun[T]:
+    f: Fn{args: [T], return: int}
+
+struct W[T]:
+    next: List[W[List[T]]]
+
+struct V[T]:
+    next: List[V[List[T]]]
+    here: T
+
+struct D[T]:
+    here: T
+    kids: List[D[int]]
+
+struct Grow[T]:
+    here: T
+    next: List[Grow[List[T]]]
+
+struct Wrap[T]:
+    g: Grow[T]
+
+struct Vec[T]:
+    items: MutableVector[T]
+
+struct Ref[T]:
+    p: std::ffi::c::Ptr[T]
+
+}
+set aaTypeImports "import std::mutable_vector\nimport std::ffi::c\n"
+
+# ---------------------------------------------------------------------------
+# The starting defect
+
+test aa-reproducer-duplicate {the starting defect: a coroutine handle held through a type slot was copied -- `b = a; c = a` of a Box[Coroutine{...}] compiled and ran, though the same struct with the handle as a declared field is USE-AFTER-MOVE; now both are} -body {
+    list [aaCode "${aaDecls}struct Held:\n    value: Coroutine{args: \[Message\], return: Event}\na = Held {value: make(1)}\nb = a\nc = a\n0\n"] \
+        [aaCode "${aaDecls}a = Box {value: make(1)}\nb = a\nc = a\n0\n"]
+} -result {USE-AFTER-MOVE USE-AFTER-MOVE}
+
+test aa-reproducer-release-tcl {the starting defect's second consequence: a Box[Coroutine{...}] that dies released nothing (100 suspended Tcl coroutines left alive after 100 rows); now every row's handles are released where their owner dies, also through nested applications, pairs and Lists of a slot} -body {
+    sourceAgree "${aaDecls}fn row(i: int) -> int:\n    b = Box {value: make(i)}\n    o = Outer {inner: Inner {value: make(i)}}\n    n = Box {value: Box {value: make(i)}}\n    p = Pair {first: make(i), second: make(i)}\n    m = Many {values: \[make(i), make(i)\]}\n    h = Box {value: Holder {step: make(i)}}\n    1\nxs = loop i from 0 to 100:\n    row(i)\ntest_aa_live() + std::list::length(xs)\n" {interp compile}
+} -result {value 100}
+
+test aa-reproducer-release-native {natively the same rows: 800 constructions, every one released by its owner's drop, none left to the collector (it used to sweep the handles a Box[Coroutine{...}] abandoned); the same under GC stress} -constraints nativeCoroutines -body {
+    set text "${aaDecls}fn row(i: int) -> int:\n    b = Box {value: make(i)}\n    o = Outer {inner: Inner {value: make(i)}}\n    n = Box {value: Box {value: make(i)}}\n    p = Pair {first: make(i), second: make(i)}\n    m = Many {values: \[make(i), make(i)\]}\n    h = Box {value: Holder {step: make(i)}}\n    1\nxs = loop i from 0 to 100:\n    row(i)\nstd::list::length(xs)\n"
+    set hir [surface::compile $text -warnings off]
+    set report [withoutCoroutineFusion {dict get [native::allocationReport $hir summary] coroutines}]
+    list [dict get $report released] [dict get $report releasedSuspended] [dict get $report sweptSuspended] \
+        [withGcStress {withoutCoroutineFusion {lrange [outcomeUnderHir cranelift $hir] 0 1}}]
+} -cleanup {unset -nocomplain text hir report} -result {800 800 0 {value 100}}
+
+test aa-release-calls-once {every handle a dying aggregate owns is released by exactly one release call (core::coroutines::releaseCalls counts each call, not each first release): a List of handles, a List of Box applications, a Box of a List -- deterministic, where the fuzzer's release check depends on what a seed generates} -body {
+    set hir [surface::compile "${aaDecls}fn main() -> int:\n    xs = \[make(1), make(2)\]\n    bs = \[Box {value: make(3)}, Box {value: make(4)}\]\n    m = Box {value: \[make(5), make(6)\]}\n    1\nmain()\n" -warnings off]
+    set core::coroutines::releaseCalls {}
+    try {
+        set outcome [lrange [outcomeUnderHir interp $hir] 0 1]
+        set calls $core::coroutines::releaseCalls
+    } finally {
+        set core::coroutines::releaseCalls none
+    }
+    list $outcome [llength $calls] [llength [lsort -unique $calls]]
+} -cleanup {unset -nocomplain hir outcome calls} -result {{value 1} 6 6}
+
+test aa-native-nested-drop {natively a virtualized (scalar-replaced) struct that holds an affine struct in a field is released through its own registers: the inner struct's descriptor applies to the inner struct's fields, never to the first register (it used to affinedrop the coroutine handle itself with the inner descriptor, a segmentation fault -- also for an ordinary nested struct, Wrapper {inner: Holder {...}}, before this milestone)} -constraints nativeCoroutines -body {
+    set text "${aaDecls}struct Wrapper:\n    inner: Holder\n    tag: int\nfn row(i: int) -> int:\n    w = Wrapper {tag: i, inner: Holder {step: make(i)}}\n    b = Box {value: Box {value: make(i)}}\n    o = Outer {inner: Inner {value: make(i)}}\n    p = Pair {first: Box {value: make(i)}, second: Holder {step: make(i)}}\n    1\nxs = loop i from 0 to 10:\n    row(i)\nstd::list::length(xs)\n"
+    set hir [surface::compile $text -warnings off]
+    set report [withoutCoroutineFusion {dict get [native::allocationReport $hir summary] coroutines}]
+    set row [affOpsOf [native::nir $hir] row]
+    list [lmap backend {cranelift-generic cranelift} {lrange [outcomeUnderHir $backend $hir] 0 1}] \
+        [dict get $report released] [dict get $report sweptSuspended] [llength [lsearch -all $row corelease]] [lsearch $row affinedrop]
+} -cleanup {unset -nocomplain text hir report row} -result {{{value 10} {value 10}} 50 0 5 -1}
+
+# ---------------------------------------------------------------------------
+# The rule: an application's affinity is its applied fields'
+
+test aa-classification {each application is classified from its own fields, its arguments substituted: a slot's argument counts where a field holds a value of it (directly, in a List, a MutableVector, a nested application, an ordinary struct), never where none is stored (an unused slot, a slot used only in a function type or as a pointee identity) -- and a C pointer field is affine whatever its pointee} -body {
+    aaHir "${aaTypeImports}${aaTypeDecls}"
+    set C $aaC
+    set H {nstruct Holder}
+    lmap t [list [aaApp Box int] [aaApp Box str] [aaApp Box $C] [aaApp Box {list int}] [aaApp Box {nstruct Plain}] [aaApp Box $H] \
+        [aaApp Phantom $C] [aaApp Phantom $H] [aaApp Many $C] [aaApp Many int] [aaApp Outer $C] [aaApp Outer int] [aaApp Fixed $C] \
+        [aaApp Pair int $C] [aaApp Pair $C int] [aaApp Pair int str] [aaApp Pair $H str] \
+        [aaApp Box [aaApp Box [aaApp Box $C]]] [aaApp Box [aaApp Box [aaApp Box int]]] [aaApp Box [aaApp Phantom $C]] [aaApp Many [aaApp Box $C]] \
+        [aaApp Node int] [aaApp Node $C] [aaApp Fun $C] [aaApp W $C] [aaApp V $C] [aaApp V int] [aaApp D $C] [aaApp D int] \
+        [aaApp Vec $C] [aaApp Vec int] [aaApp Ref int] {nstruct Box} [aaApp Box any] [aaApp Box [hir::types::MakeImprint T {}]]] {
+        list [hir::types::show $t] [hir::types::Affinity $t]
+    }
+} -cleanup {unset -nocomplain C H} -result {{{Box[int]} unrestricted} {{Box[str]} unrestricted} {{Box[Coroutine{args: [], return: int, errors: []}]} affine} {{Box[List[int]]} unrestricted} {{Box[Plain]} unrestricted} {{Box[Holder]} affine} {{Phantom[Coroutine{args: [], return: int, errors: []}]} unrestricted} {{Phantom[Holder]} unrestricted} {{Many[Coroutine{args: [], return: int, errors: []}]} affine} {{Many[int]} unrestricted} {{Outer[Coroutine{args: [], return: int, errors: []}]} affine} {{Outer[int]} unrestricted} {{Fixed[Coroutine{args: [], return: int, errors: []}]} unrestricted} {{Pair[int, Coroutine{args: [], return: int, errors: []}]} affine} {{Pair[Coroutine{args: [], return: int, errors: []}, int]} affine} {{Pair[int, str]} unrestricted} {{Pair[Holder, str]} affine} {{Box[Box[Box[Coroutine{args: [], return: int, errors: []}]]]} affine} {{Box[Box[Box[int]]]} unrestricted} {{Box[Phantom[Coroutine{args: [], return: int, errors: []}]]} unrestricted} {{Many[Box[Coroutine{args: [], return: int, errors: []}]]} affine} {{Node[int]} unrestricted} {{Node[Coroutine{args: [], return: int, errors: []}]} affine} {{Fun[Coroutine{args: [], return: int, errors: []}]} unrestricted} {{W[Coroutine{args: [], return: int, errors: []}]} unrestricted} {{V[Coroutine{args: [], return: int, errors: []}]} affine} {{V[int]} unrestricted} {{D[Coroutine{args: [], return: int, errors: []}]} affine} {{D[int]} unrestricted} {{Vec[Coroutine{args: [], return: int, errors: []}]} affine} {{Vec[int]} unrestricted} {{Ref[int]} affine} {Box unrestricted} {{Box[any]} unrestricted} {{Box[T]} unrestricted}}
+
+test aa-not-any-argument {the rule is not "an application with an affine argument is affine": Phantom, Fixed (a field of Inner[int]), Fun (a slot in a function type only) and W (a slot only ever reached through W itself: the least fixpoint) applied to a coroutine type are unrestricted, while Box, Outer and Pair of the same argument are affine} -body {
+    aaHir "${aaTypeImports}${aaTypeDecls}"
+    lmap id {Phantom Fixed Fun W Box Outer} {
+        hir::types::IsAffine [aaApp $id $aaC]
+    }
+} -result {0 0 0 0 1 1}
+
+test aa-summary-per-declaration {what is kept is the declaration's summary -- its affinity with every slot unrestricted and its relevant slots -- never one application's answer: Box[int] asked first does not make Box[Coroutine{...}] unrestricted, nor the reverse, and Pair's summary names both slots, Many's its one} -body {
+    aaHir "${aaTypeImports}${aaTypeDecls}"
+    set answers [list [hir::types::IsAffine [aaApp Box int]] [hir::types::IsAffine [aaApp Box $aaC]] [hir::types::IsAffine [aaApp Box int]]]
+    aaHir "${aaTypeImports}${aaTypeDecls}"
+    lappend answers [hir::types::IsAffine [aaApp Box $aaC]] [hir::types::IsAffine [aaApp Box int]] [hir::types::IsAffine [aaApp Box $aaC]]
+    list $answers [hir::structs::AffinitySummary Box] [hir::structs::AffinitySummary Pair] [hir::structs::AffinitySummary Many] \
+        [hir::structs::AffinitySummary Holder] [hir::structs::AffinitySummary Phantom] [hir::structs::AffinitySummary W]
+} -cleanup {unset -nocomplain answers} -result {{0 1 0 1 0 1} {0 0} {0 {0 1}} {0 0} {1 {}} {0 {}} {0 {}}}
+
+test aa-fixpoint-order {the classification does not depend on which declaration is summarized first: with every fact forgotten, Outer[Coroutine{...}] asked first (its Inner summarized inside the same fixpoint, Inner's own answer provisional until it ends) is affine, and so is a chain three declarations deep asked from its top} -body {
+    aaHir "${aaTypeImports}${aaTypeDecls}struct Deep\[T\]:\n    outer: Outer\[T\]\n    n: int\n\n"
+    hir::structs::ForgetAffinity
+    set first [hir::types::IsAffine [aaApp Outer $aaC]]
+    hir::structs::ForgetAffinity
+    set deep [hir::types::IsAffine [aaApp Deep $aaC]]
+    list $first $deep [hir::types::IsAffine [aaApp Inner $aaC]] [hir::types::IsAffine [aaApp Deep int]]
+} -cleanup {unset -nocomplain first deep} -result {1 1 1 0}
+
+test aa-deep-application-kept {an affine application nested past the applied-type depth keeps its arguments (cutting them to any would erase the handle it owns, as an affine List element is never cut); an unrestricted one is still cut} -body {
+    aaHir "${aaTypeImports}${aaTypeDecls}"
+    set deep $aaC
+    set flat int
+    for {set i 0} {$i < 9} {incr i} {
+        set deep [aaApp Box $deep]
+        set flat [aaApp Box $flat]
+    }
+    list [hir::types::IsAffine $deep] [expr {[string first coroutine $deep] >= 0}] [expr {[string first any $flat] >= 0}]
+} -cleanup {unset -nocomplain deep flat i} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Recursive applications
+
+test aa-recursion-white-box {an affine application that holds an affine application of its own declaration in a List is a recursive affine type (Node[Coroutine{...}], V[Coroutine{...}] through a non-uniform argument); an unrestricted application, one reached through fields alone, and one whose recursive field is unrestricted (D's List[D[int]]) are not; a walk that meets ever larger applications stops at its budget as unbounded} -body {
+    aaHir "${aaTypeImports}${aaTypeDecls}"
+    lmap t [list [aaApp Node int] [aaApp Node $aaC] [aaApp V $aaC] [aaApp Box [aaApp Box $aaC]] [aaApp D $aaC] [aaApp Wrap $aaC] [aaApp Wrap int]] {
+        lindex [hir::structs::OwnedRecursion $t] 0
+    }
+} -result {{} recursive recursive {} {} unbounded {}}
+
+test aa-recursive-application-rejected {a construction whose application is a recursive affine type is AFFINE-CONTAINER-UNSUPPORTED, with the field that makes it affine and the path that recurses; the same declaration applied to an unrestricted type is an ordinary recursive value} -body {
+    list [aaMessage "${aaDecls}n = Node {value: make(1), children: \[\]}\n0\n"] \
+        [sourceAgree "${aaDecls}a = Node {value: 1, children: \[\]}\nb = Node {value: 2, children: \[a, a\]}\nc = b\nstd::list::length(b.children) + c.value\n"]
+} -result {{the construction is invalid: Node[Coroutine{args: [Message], return: Event, errors: []}] is affine (its field "value" holds Coroutine{args: [Message], return: Event, errors: []}) and holds affine values of struct "Node" in a List, MutableVector or MutableArray (Node[Coroutine{args: [Message], return: Event, errors: []}].children: List[Node[Coroutine{args: [Message], return: Event, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)} {value 4}}
+
+test aa-declaration-through-slot {an affine declaration that holds itself through another struct's slot (kids: List[Box[D]]) is a recursive affine type: the declaration check walks Box[D]'s applied fields (it used to read Box's declared field, the slot, and accept it -- every inner handle then leaked)} -body {
+    aaMessage "struct Box\[T\]:\n    value: T\nstruct D:\n    c: Coroutine{args: \[\], return: int, errors: \[\]}\n    kids: List\[Box\[D\]\]\n1\n"
+} -result {struct "D" is affine and holds values of its own type in a List, MutableVector or MutableArray (D.kids: List[Box[D]], Box[D].value: D): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)}
+
+test aa-tree-general-rule {a tree struct's application is judged by the same rule, no tree-only check: Tree[Coroutine{...}, int] stores the handle in every node and is AFFINE-CONTAINER-UNSUPPORTED, Tree[int, Coroutine{...}] uses the affine argument in a function type only and is an ordinary unrestricted tree type} -body {
+    aaHir "tree struct Tree\[T, U\]:\n    value: T\n    f: Fn{args: \[U\], return: int}\n    children: List\[Tree\[T, U\]\]\n"
+    lmap t [list [aaApp Tree $aaC int] [aaApp Tree int $aaC]] {
+        list [hir::types::IsAffine $t] [lindex [hir::structs::ApplicationIssue $t] 0]
+    }
+} -result {{1 AFFINE-CONTAINER-UNSUPPORTED} {0 {}}}
+
+# ---------------------------------------------------------------------------
+# Every affine restriction observes the classification
+
+test aa-ownership-consequences {the ordinary affine restrictions hold for an application that is affine through its arguments -- moves, erasure, equality, field projection, closure capture, List element copies, generic functions -- and an unrestricted application is copied freely; an imprinted function over Box[T] still takes no affine T where values of T exist (hir::imprint::BindingProblem, unchanged)} -body {
+    list \
+        [aaMain "b = Box {value: make(1)}\nc = b\nd = b\n0"] \
+        [aaMain "b = Box {value: 1}\nc = b\nd = b\nc.value + d.value"] \
+        [aaMain "b = Box {value: \"s\"}\nc = b\nd = b\n0"] \
+        [aaMain "p = Pair {first: 1, second: make(1)}\nq = p\nr = p\n0"] \
+        [aaMain "p = Pair {first: make(1), second: 2}\nq = p\nr = p\n0"] \
+        [aaMain "p = Pair {first: 1, second: \"s\"}\nq = p\nr = p\n0"] \
+        [aaMain "m = Many {values: \[make(1), make(2)\]}\nn = m\no = m\n0"] \
+        [aaMain "m = Many {values: \[1, 2\]}\nn = m\no = m\n0"] \
+        [aaMain "o = Outer {inner: Inner {value: make(1)}}\np = o\nq = o\n0"] \
+        [aaMain "o = Outer {inner: Inner {value: 1}}\np = o\nq = o\n0"] \
+        [aaMain "b = Box {value: Holder {step: make(1)}}\nc = b\nd = b\n0"] \
+        [aaMain "b = Box {value: Box {value: Box {value: make(1)}}}\nc = b\nd = b\n0"] \
+        [aaMain "b = Box {value: make(1)}\nany_take(b)"] \
+        [aaMain "b = Box {value: make(1)}\nif b == b:\n    return 1\n0"] \
+        [aaMain "b = Box {value: make(1)}\ne = b.value(Message {value: 1})\ne.value"] \
+        [aaMain "b = Box {value: make(1)}\nfn peek() -> int:\n    c = b\n    1\npeek()"] \
+        [aaMain "xs = \[Box {value: make(1)}, Box {value: make(2)}\]\nx = std::list::at(xs, 0)\n0"] \
+        [aaCode "${aaDecls}fn wrap(x):\n    Box {value: x}\nfn main() -> int:\n    b = wrap(make(1))\n    c = b\n    d = b\n    0\nmain()\n"] \
+        [aaCode "${aaDecls}fn wrap(x):\n    Box {value: x}\nfn main() -> int:\n    b = wrap(1)\n    c = b\n    d = b\n    c.value + d.value\nmain()\n"] \
+        [aaCode "${aaDecls}fn get(b: Box\[T\]) -> T:\n    b.value\nfn main() -> int:\n    b = Box {value: make(1)}\n    s = get(b)\n    0\nmain()\n"]
+} -result {USE-AFTER-MOVE ok ok USE-AFTER-MOVE USE-AFTER-MOVE ok USE-AFTER-MOVE ok USE-AFTER-MOVE ok USE-AFTER-MOVE USE-AFTER-MOVE AFFINE-ERASURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-CAPTURE-UNSUPPORTED AFFINE-LIST-OPERATION-UNSUPPORTED USE-AFTER-MOVE ok IMPRINT}
+
+test aa-ownership-moves-agree {an affine application moves through bindings, destructurings, nested applications and generic functions on every backend: each handle is resumed by its one owner; the same declarations applied to unrestricted types are copied and read freely} -body {
+    list [sourceAgree "${aaDecls}fn main() -> int:\n    b = Box {value: 5}\n    c = b\n    o = Outer {inner: Inner {value: 1}}\n    p = Pair {first: 10, second: \"s\"}\n    q = p\n    b.value + c.value + o.inner.value + p.first + q.first\nmain()\n"] [sourceAgree "${aaDecls}fn wrap(x):\n    Box {value: x}\nfn main() -> int:\n    b = Box {value: make(5)}\n    c = b\n    {value} = c\n    e = value(Message {value: 7})\n    o = Outer {inner: Inner {value: make(1)}}\n    {inner} = o\n    {value: v2} = inner\n    e2 = v2(Message {value: 3})\n    p = Pair {first: 10, second: make(2)}\n    {first, second} = p\n    e3 = second(Message {value: 4})\n    w = wrap(make(9))\n    {value: v4} = w\n    v4(Message {value: 100})\n    e.value + e2.value + e3.value + first\nmain()\n"]
+} -result {{value 31} {value 24}}
+
+test aa-diagnostic-says-why {a diagnostic naming an application that is affine through its arguments says which field makes it so} -body {
+    aaMessage "${aaDecls}b = Box {value: make(1)}\nany_take(b)\n"
+} -result {`b` is an affine Box[Coroutine{args: [Message], return: Event, errors: []}] (affine: its field "value" holds Coroutine{args: [Message], return: Event, errors: []}), which cannot become the argument of parameter "x", declared any: that position does not carry ownership, so the value would be duplicated or lost (keep it in a binding, a parameter, a result, a struct field or a List of an affine type)}
+
+# ---------------------------------------------------------------------------
+# Compilation isolation and HIR interchange
+
+test aa-isolation {one declaration name, two compilations: Box[T] holding its T in one program and only an int in another (Box[Coroutine{...}] affine in the first, unrestricted in the second); each HIR keeps its own classification and its runs whatever was compiled or activated last, interleaved} -body {
+    set a "${aaDecls}fn main() -> int:\n    b = Box {value: make(5)}\n    {value} = b\n    e = value(Message {value: 6})\n    e.value + test_aa_live()\nmain()\n"
+    set b "struct Box\[T\]:\n    value: int\nfn main() -> int:\n    x = Box\[str\] {value: 1}\n    y = x\n    z = x\n    y.value + z.value\nmain()\n"
+    set hA [surface::compile $a -warnings off]
+    set before [outcomeUnderHir interp $hA]
+    set hB [surface::compile $b -warnings off]
+    set afterB [list [outcomeUnderHir interp $hA] [outcomeUnderHir compile $hA] [outcomeUnderHir interp $hB]]
+    set hA2 [surface::compile $a -warnings off]
+    set hB2 [surface::compile $b -warnings off]
+    set C [hir::types::MakeCoroutineType {} int {}]
+    hir::activate $hA
+    set inA [hir::types::IsAffine [aaApp Box $C]]
+    hir::activate $hB
+    set inB [hir::types::IsAffine [aaApp Box $C]]
+    hir::activate $hA2
+    set inA2 [hir::types::IsAffine [aaApp Box $C]]
+    list $before $afterB $inA $inB $inA2 [aaCode [string map {"{value} = b\n    e = value(Message {value: 6})" "c = b\n    d = b\n    e = Event {value: 6}"} $a]] \
+        [aaCode $b] [expr {[hir::format $hA] eq [hir::format $hA2]}]
+} -cleanup {unset -nocomplain a b hA hB hA2 hB2 before afterB inA inB inA2 C} -result {{value 6 {}} {{value 6 {}} {value 6 {}} {value 2 {}}} 1 0 1 USE-AFTER-MOVE ok 1}
+
+test aa-isolation-descriptors {two compilations declaring Box[T] with its slot at different field positions each drop a Box of a handle by their own descriptor, interleaved and after the other was compiled: a drop descriptor is a fact of the declarations in force, forgotten with them (hir::structs::ForgetAffinity)} -body {
+    set a "${aaDecls}fn row(i: int) -> int:\n    b = Box {value: make(i)}\n    1\nxs = loop i from 0 to 5:\n    row(i)\nstd::list::length(xs) * 10 + test_aa_live()\n"
+    set b [string map [list "struct Box\[T\]:\n    value: T\n" "struct Box\[T\]:\n    tag: int\n    value: T\n" "Box {value: make(i)}" "Box {tag: i, value: make(i)}"] $a]
+    set hA [surface::compile $a -warnings off]
+    set hB [surface::compile $b -warnings off]
+    set hA2 [surface::compile $a -warnings off]
+    lmap {h} [list $hA $hB $hA2 $hB] {
+        list [lrange [outcomeUnderHir interp $h] 0 1] [lrange [outcomeUnderHir compile $h] 0 1]
+    }
+} -cleanup {unset -nocomplain a b hA hB hA2} -result {{{value 50} {value 50}} {{value 50} {value 50}} {{value 50} {value 50}} {{value 50} {value 50}}}
+
+test aa-descriptor-memo-hir-facts {a remembered drop descriptor answers for the HIR it is asked about: the same types under one set of declarations drop by `c` where the HIR's suspended coroutines are discarded and by `C` where they unwind (hir/resources.tcl's facts, which hir::affine::verify sets after the analysis may have asked) -- the memo is keyed by those facts too, never by the type alone} -body {
+    set hir [aaHir "${aaTypeImports}${aaTypeDecls}"]
+    set unwinding $hir
+    dict set unwinding resources unwind 1
+    lmap {h} [list $hir $unwinding $hir] {
+        list [hir::affine::Descriptor $h $aaC] [hir::affine::Descriptor $h [aaApp Box $aaC]]
+    }
+} -cleanup {unset -nocomplain hir unwinding} -result {{c s1.0.c} {C s1.0.C} {c s1.0.c}}
+
+test aa-hir-text-and-interchange {a program holding handles through applications reads back from HIR text and from HIR interchange with the same text, the same releases and the same outcome on every backend} -body {
+    set text "${aaPlainDecls}fn main() -> int:\n    b = Box {value: make(5)}\n    n = Box {value: Box {value: make(2)}}\n    i = Box {value: 3}\n    j = i\n    {value} = b\n    e = value(Message {value: 6})\n    e.value + j.value + i.value\nmain()\n"
+    set hir [surface::compile $text -warnings off]
+    set formatted [hir::format $hir]
+    set read [hir::parse $formatted]
+    set decoded [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [sourceAgree $text] [expr {[hir::format $read] eq $formatted}] [expr {[hir::format $decoded] eq $formatted}] \
+        [lmap h [list $hir $decoded] {lmap backend {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $backend $h] 0 1}}] \
+        [expr {[dict get $decoded affine] eq [dict get $hir affine]}] [expr {[hir::lower $decoded] eq [hir::lower $hir]}] \
+        [regexp -all {affine#drop} [hir::lower $hir]]
+} -cleanup {unset -nocomplain text hir formatted read decoded} -result {{value 12} 1 1 {{{value 12} {value 12} {value 12} {value 12}} {{value 12} {value 12} {value 12} {value 12}}} 1 1 1}
+
+cleanupTests

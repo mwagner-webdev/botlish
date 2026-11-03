@@ -21,8 +21,23 @@
 //! unrestricted values. Like a coroutine release, a drop is unobservable (no
 //! Botlish code runs, no value changes), idempotent, never fails and never
 //! allocates: it is no GC safepoint.
+//!
+//! Resources (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md) add two
+//! parts that run Botlish code -- exactly the program's own release code:
+//!
+//! | descriptor | drops                                                     |
+//! |------------|-----------------------------------------------------------|
+//! | `r` K `.`  | a resource: its cleanup function, entry K of the run's cleanup table (`Vm::cleanups`, installed by `cleanuptable`), called with the value |
+//! | `C`        | a coroutine of an unwinding program: `rt_co_abandon`, which runs its suspended frames' releases (runtime/coroutine.rs) |
+//!
+//! A descriptor with either is dropped by `affinedroprun` (`rt_affine_drop_run`,
+//! a GC safepoint that may fail with a cleanup's run-time fault), never by
+//! `affinedrop`; the collection drop forms that take a descriptor are
+//! safepoints for the same reason. While such a walk runs code, everything it
+//! has yet to drop is rooted (`Vm::temp_roots`): a value taken out of its
+//! aggregate is no longer reachable through it.
 
-use super::coroutine::rt_co_release;
+use super::coroutine::{rt_co_abandon, rt_co_release};
 use super::value::*;
 use super::vm::Vm;
 
@@ -33,24 +48,121 @@ pub extern "C" fn rt_affine_drop(p: *mut Vm, value: Value, descriptor: Value) ->
     UNIT
 }
 
-/// Releases every affine value VALUE owns, by descriptor text D.
-pub fn drop_descriptor(p: *mut Vm, value: Value, d: &[u8]) {
-    let mut pos = 0;
-    drop_at(p, value, d, &mut pos);
-    debug_assert_eq!(pos, d.len(), "affine drop descriptor not consumed");
+/// `affinedroprun %v %d`: the drop of VALUE by DESCRIPTOR when the
+/// descriptor runs code (a cleanup, an abandonment). VALUE and the
+/// descriptor's text are held across the walk; a run-time fault of the code
+/// it runs is its failure (NO_VALUE, recorded), after which nothing more is
+/// dropped.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_affine_drop_run(p: *mut Vm, value: Value, descriptor: Value) -> Value {
+    let text = str_of(descriptor).as_str().as_bytes().to_vec();
+    let rooted = vm(p).temp_roots.len();
+    vm(p).temp_roots.push(value);
+    let ok = drop_descriptor(p, value, &text);
+    vm(p).temp_roots.truncate(rooted);
+    if ok { UNIT } else { NO_VALUE }
 }
 
-/// The drop of VALUE by the descriptor at POS of D, advancing POS past it.
-pub fn drop_at(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
+/// `cleanuptable %f...`: the run's cleanup functions, entry K the K-th
+/// operand (hir/resources.tcl's cleanup table), held for the rest of the run.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_cleanup_table(p: *mut Vm, n: u64, functions: *const Value) -> Value {
+    let functions = unsafe { std::slice::from_raw_parts(functions, n as usize) };
+    vm(p).cleanups = functions.to_vec();
+    UNIT
+}
+
+fn vm<'a>(p: *mut Vm) -> &'a mut Vm {
+    unsafe { &mut *p }
+}
+
+/// Whether descriptor text D runs code: it has a resource or an unwinding
+/// coroutine part.
+pub fn runs_code(d: &[u8]) -> bool {
+    d.iter().any(|&c| c == b'r' || c == b'C')
+}
+
+/// Releases every affine value VALUE owns, by descriptor text D; false when
+/// code it ran failed (the failure recorded).
+pub fn drop_descriptor(p: *mut Vm, value: Value, d: &[u8]) -> bool {
+    let mut pos = 0;
+    let ok = drop_at(p, value, d, &mut pos);
+    debug_assert!(!ok || pos == d.len(), "affine drop descriptor not consumed");
+    ok
+}
+
+/// The drop of VALUE by the descriptor at POS of D, advancing POS past it;
+/// false when code it ran failed.
+pub fn drop_at(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) -> bool {
     drop_by(p, value, d, pos)
 }
 
-fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
+/// Calls cleanup K of the run's cleanup table with resource VALUE; false
+/// when it failed (a run-time fault: a cleanup declares no error).
+fn cleanup(p: *mut Vm, k: usize, value: Value) -> bool {
+    let Some(&f) = vm(p).cleanups.get(k) else {
+        vm(p).fail(super::error::RtError::Bug(format!("no cleanup function {k} in this run's cleanup table")));
+        return false;
+    };
+    call_cleanup(p, f, value)
+}
+
+/// `cleanupcall %f %v`: the release of resource VALUE by its cleanup
+/// function F.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_cleanup_call(p: *mut Vm, f: Value, value: Value) -> Value {
+    if call_cleanup(p, f, value) { UNIT } else { NO_VALUE }
+}
+
+fn call_cleanup(p: *mut Vm, f: Value, value: Value) -> bool {
+    vm(p).metrics.record_resource_cleanup();
+    preserving_pending(p, || super::ops::rt_call_value(p, f, 1, &value) != NO_VALUE)
+}
+
+/// Runs RUN -- release code: a cleanup, an abandoned coroutine's unwinding --
+/// with the Vm's pending failure set aside and put back after it: a release
+/// on an error edge runs while that error propagates (its pad then raises it
+/// on, `reraise`), and the code it runs may fail and handle errors of its
+/// own. The set-aside values stay rooted. False (and the code's own failure
+/// pending instead) when RUN failed.
+pub fn preserving_pending(p: *mut Vm, run: impl FnOnce() -> bool) -> bool {
+    let (error, id, payload, shape, rooted) = {
+        let vm = vm(p);
+        let error = vm.error.take();
+        let id = std::mem::replace(&mut vm.declared_error, 0);
+        let payload = std::mem::take(&mut vm.declared_payload);
+        let shape = vm.declared_payload_shape;
+        let rooted = vm.temp_roots.len();
+        if let Some(e) = &error {
+            vm.temp_roots.extend(e.values());
+        }
+        vm.temp_roots.extend_from_slice(&payload);
+        (error, id, payload, shape, rooted)
+    };
+    let ok = run();
+    let vm = vm(p);
+    vm.temp_roots.truncate(rooted);
+    if ok {
+        vm.error = error;
+        vm.declared_error = id;
+        vm.declared_payload = payload;
+        vm.declared_payload_shape = shape;
+    }
+    ok
+}
+
+fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) -> bool {
     let c = d[*pos];
     *pos += 1;
     match c {
         b'c' => {
             rt_co_release(p, value);
+            true
+        }
+        b'C' => rt_co_abandon(p, value) != NO_VALUE,
+        b'r' => {
+            let k = number(d, pos);
+            cleanup(p, k, value)
         }
         b'l' => {
             let start = *pos;
@@ -60,16 +172,22 @@ fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
             }
             for &item in items {
                 *pos = start;
-                drop_by(p, item, d, pos);
+                if !drop_by(p, item, d, pos) {
+                    return false;
+                }
             }
+            true
         }
         b's' => {
             let n = number(d, pos);
             let fields = struct_of(value).fields();
             for _ in 0..n {
                 let slot = number(d, pos);
-                drop_by(p, fields[slot], d, pos);
+                if !drop_by(p, fields[slot], d, pos) {
+                    return false;
+                }
             }
+            true
         }
         b'v' => super::mutvec::drop_elements(p, value, d, pos),
         b'a' => super::ops::drop_array_elements(p, value, d, pos),
@@ -77,12 +195,48 @@ fn drop_by(p: *mut Vm, value: Value, d: &[u8], pos: &mut usize) {
     }
 }
 
+/// Drops ITEMS -- the elements a collection drop took out of their
+/// collection -- by the element descriptor at START of D, first to last;
+/// leaves POS past it. When the descriptor runs code, every item is rooted
+/// until the walk ends (a taken item is reachable through nothing else).
+pub fn drop_taken(p: *mut Vm, items: &[Value], d: &[u8], start: usize, pos: &mut usize) -> bool {
+    if items.is_empty() {
+        *pos = start;
+        skip(d, pos);
+        return true;
+    }
+    let rooted = vm(p).temp_roots.len();
+    let runs = runs_code(&d[start..]);
+    if runs {
+        vm(p).temp_roots.extend_from_slice(items);
+    }
+    let mut ok = true;
+    for &item in items {
+        *pos = start;
+        if !drop_by(p, item, d, pos) {
+            ok = false;
+            break;
+        }
+    }
+    if !ok {
+        *pos = start;
+        skip(d, pos);
+    }
+    if runs {
+        vm(p).temp_roots.truncate(rooted);
+    }
+    ok
+}
+
 /// Moves POS past the descriptor at POS without dropping anything.
 pub fn skip(d: &[u8], pos: &mut usize) {
     let c = d[*pos];
     *pos += 1;
     match c {
-        b'c' => {}
+        b'c' | b'C' => {}
+        b'r' => {
+            number(d, pos);
+        }
         b'l' | b'v' | b'a' => skip(d, pos),
         b's' => {
             let n = number(d, pos);

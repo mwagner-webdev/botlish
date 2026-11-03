@@ -1,0 +1,26 @@
+# A receive right cannot be had from a send right: listen takes an Inbox, not an Address (IMPRINT).
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+struct Work:
+    n: int
+
+fn worker(to: std::actor::Address[Work]) -> std::actor::Exit:
+    rx = to.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Work](4)
+    a = inject no context:
+        coroutine {step, first} = worker(to)
+        std::actor::spawned(step, first)
+    a.start()
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

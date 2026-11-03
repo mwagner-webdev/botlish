@@ -317,6 +317,12 @@ proc surface::lower::StructDeclOf {node namespace} {
         # TYPES.md), as written: hir/structs.tcl resolves their traits.
         dict set decl slots [dict get $node slots]
     }
+    if {[dict getdef $node resource 0]} {
+        # A resource struct (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+        # MILESTONE-1.md): hir/structs.tcl checks the declaration.
+        dict set decl resource 1
+        dict set decl resourceSpan [dict get $node resourceSpan]
+    }
     if {[dict exists $node identity]} {
         # Its semantic identity, as written: hir/structs.tcl validates it.
         dict set decl identity [dict get $node identity]
@@ -918,6 +924,9 @@ proc surface::lower::Node {node} {
                 [Flags $node]]
             if {[dict exists $node nomethod] && [dict get $node nomethod]} {
                 set block [hir::syntax::withNoMethod $block]
+            }
+            if {[dict getdef $node cleanup 0]} {
+                set block [hir::syntax::withCleanup $block]
             }
             if {[dict getdef $node exported ""] ne ""} {
                 set block [hir::syntax::withExported $block [dict get $node exported]]

@@ -1,0 +1,14 @@
+# The recovery intrinsic is internal to the standard library (INTERNAL-NAMESPACE).
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    x = std::actor::recover[int](1)
+    x
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

@@ -1,0 +1,25 @@
+# c3-abandon-frames.bot -- releasing a suspended coroutine discards its
+# frames without running their exits (COROUTINES.md, "What it does not
+# cover"): a child coroutine a frame of the abandoned parent owns is not
+# released by the parent's release; a collection (natively) or the end of
+# the run (Tcl) reclaims it. The census tool reads the Tcl release trace.
+struct Go:
+    n: int
+
+fn child(resume Go) -> int:
+    yield 1
+    yield 2
+    3
+
+fn parent(resume Go) -> int:
+    coroutine {step: kid, first: k0} = child()
+    # kid is live across this yield: the parent's frame owns it.
+    m = yield k0
+    kid(m)
+
+fn run() -> int:
+    coroutine {step: p, first} = parent()
+    # p's last use: released (abandoned while suspended) right after this.
+    first + 0
+
+run()

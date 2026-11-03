@@ -48,32 +48,52 @@
 %% package-workloads.test:pw-raven-release-immutable
 ## tools/package-repository.tcl
 <<<<
-        if {$force} { dict set given -force 1 }
+        if {$force} { lappend pack -force }
 ====
-        dict set given -force 1
+        lappend pack -force
 >>>>
 
-@@ repo-packs-headless the host target's libraven is the headless build: the desktop check refuses it before anything is packed
+@@ repo-packs-headless the host target's libraven is the headless build: native add refuses it, its declared Vulkan symbol absent, before anything is packed
 %% package-workloads.test:pw-raven-desktop-release
 ## tools/package-repository.tcl
 <<<<
-        return [file join [cffi::ravenBuild desktop] libraven.so.0]
+        set build [dict create library [file join [cffi::ravenBuild desktop] libraven.so.0] flags $flags \
 ====
-        return [file join [cffi::ravenBuild headless] libraven.so.0]
+        set build [dict create library [file join [cffi::ravenBuild headless] libraven.so.0] flags $flags \
 >>>>
 
-@@ repo-packs-headless-unchecked the headless build packed, and the desktop check gone: the pack's own metadata checks (needs, the declared Vulkan symbol) refuse it
+@@ repo-packs-headless-unchecked the headless build packed, and the Vulkan symbol no longer required of it: the release packs a library without the X11 platform or the renderer, which the release's own facts show
 %% package-workloads.test:pw-raven-desktop-release
 ## tools/package-repository.tcl
 <<<<
-        return [file join [cffi::ravenBuild desktop] libraven.so.0]
+        set build [dict create library [file join [cffi::ravenBuild desktop] libraven.so.0] flags $flags \
 ====
-        return [file join [cffi::ravenBuild headless] libraven.so.0]
+        set build [dict create library [file join [cffi::ravenBuild headless] libraven.so.0] flags $flags \
 >>>>
 ## tools/package-repository.tcl
 <<<<
-                checkDesktop $target $library
+        botlish native add $library -target $target -name raven -symbol Rinit_ex -symbol Rvulkan_get_instance \
 ====
+        botlish native add $library -target $target -name raven -symbol Rinit_ex \
+>>>>
+
+@@ repo-cross-build-keeps-rpath the AArch64 cross build records the build tree's library directories as its RUNPATH again (raven 0.3.1's defect): the audit refuses the release
+%% package-workloads.test:pw-raven-aarch64-runtime-search-path
+## tools/package-repository.tcl
+<<<<
+    return [list -DCMAKE_SKIP_RPATH=ON -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$arch]
+====
+    return [list -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$arch]
+>>>>
+
+@@ repo-vulkan-as-system the Vulkan loader declared a system library (a dependency of every installation) instead of a run-time dependency of the desktop capability
+%% package-workloads.test:pw-native-metadata-derived package-workloads.test:pw-raven-runtime-dependencies
+## tools/package-repository.tcl
+<<<<
+        botlish native require vulkan -target $target -runtime capability -capability desktop -identity libvulkan.so.1 -loaded-by raven \
+            -purpose "the Vulkan loader, opened by Raven's renderer when a program starts raven::desktop(); a headless program never opens it" -package $dir
+====
+        botlish native require vulkan -target $target -origin system -identity libvulkan.so.1 -package $dir
 >>>>
 
 @@ repo-extra-file the author's tool adds a script to the release's common files
@@ -93,41 +113,21 @@
 # ---------------------------------------------------------------------------
 # The package (packages/raven)
 
-@@ metadata-version-reused the release keeps the version 0.2.0 of the headless release it replaces
+@@ metadata-version-reused the release keeps the version 0.3.1 of the release it replaces: a change of contents under an existing release's version
 %% package-workloads.test:pw-raven-desktop-release
 ## packages/raven/botlish.json
 <<<<
-  "version": "0.3.1",
+  "version": "0.3.2",
 ====
-  "version": "0.2.0",
+  "version": "0.3.1",
 >>>>
 
-@@ metadata-without-x11 the linux-x86_64 metadata leaves out the system libX11 the bundled libraven loads: the pack refuses the release
+@@ metadata-without-x11 the recipe no longer declares the system libX11 the bundled libraven loads: the pack refuses the release (an unresolved loader dependency)
 %% package-workloads.test:pw-raven-desktop-release
-## packages/raven/botlish.json
+## tools/package-repository.tcl
 <<<<
-          ]
-        },
-        {
-          "name": "X11",
-          "origin": "system",
-          "linkage": "shared",
-          "identity": "libX11.so.6",
-          "symbols": [
-            "XOpenDisplay"
-          ]
-        }
-      ]
-    }
-  }
-}
+        botlish native require X11 -target $target -origin system -identity libX11.so.6 -symbol XOpenDisplay -package $dir
 ====
-          ]
-        }
-      ]
-    }
-  }
-}
 >>>>
 
 @@ wrapper-last-error-only start reports only Raven's last error ("cannot initialize the X11 window system"), not the cause Raven reported before it

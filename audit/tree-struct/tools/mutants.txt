@@ -450,12 +450,14 @@ core::value::setTreeTest ""
         # std::tree::walk takes any tree apart
 >>>>
 
-@@ decl-affine-application-admitted a tree struct applied to an affine type is accepted
+@@ decl-affine-application-admitted a tree struct applied to an affine type is accepted (the general rule for a recursive affine application, AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md, checks it)
 ## hir/structs.tcl
 <<<<
-        if {[treeField $id] ne "" && [lsearch -exact [lmap arg [lindex $type 2] {hir::types::IsAffine $arg}] 1] >= 0} {
+        set recursion [OwnedRecursion $type]
+        if {$recursion ne ""} {
 ====
-        if {0} {
+        set recursion ""
+        if {$recursion ne ""} {
 >>>>
 
 @@ children-unproven-accepted the children of a value of unknown type are accepted where its function may run generically

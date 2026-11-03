@@ -1,61 +1,6 @@
 {
-  "schema": 2,
+  "schema": 1,
   "name": "sdl3",
-  "version": "0.2.0",
-  "dependencies": {},
-  "targets": {
-    "linux-aarch64": {
-      "files": "targets/linux-aarch64",
-      "libraries": [
-        {
-          "name": "SDL3",
-          "origin": "system",
-          "linkage": "shared",
-          "identity": "libSDL3.so.0",
-          "version": "3",
-          "pkg-config": "sdl3"
-        },
-        {
-          "name": "botlish_shim_sdl3_923ddd74",
-          "origin": "bundled",
-          "linkage": "static",
-          "file": "native/libbotlish_shim_sdl3_923ddd74.a"
-        }
-      ]
-    },
-    "linux-x86_64": {
-      "files": "targets/linux-x86_64",
-      "libraries": [
-        {
-          "name": "SDL3",
-          "origin": "bundled",
-          "linkage": "shared",
-          "file": "native/libSDL3.so.0",
-          "identity": "libSDL3.so.0",
-          "needs": [
-            "libm.so.6",
-            "libc.so.6"
-          ],
-          "symbols": [
-            "SDL_GetVersion",
-            "SDL_Init"
-          ]
-        },
-        {
-          "name": "SDL3",
-          "origin": "system",
-          "linkage": "shared",
-          "identity": "libSDL3.so.0",
-          "version": "3",
-          "pkg-config": "sdl3"
-        },
-        {
-          "name": "botlish_shim_sdl3_6de904a8",
-          "origin": "bundled",
-          "linkage": "static",
-          "file": "native/libbotlish_shim_sdl3_6de904a8.a"
-        }
-      ]
-    }
-  }
+  "version": "0.2.1",
+  "dependencies": {}
 }

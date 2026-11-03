@@ -1,0 +1,10 @@
+ok    ready frame 360 180
+ok    window id 2097165 at 0,0 size 360x180
+ok    rendered the window's pixels hold 307 colors (360x180)
+ok    click-add -> state 1 false 1 clicks true
+ok    pixels-changed 1637 pixels differ after the first click
+ok    click-shout -> state 1 true 1 clicks! true
+ok    click-add -> state 2 true 2 clicks! true
+ok    click-reset -> state 0 true 0 clicks! true
+ok    closed exit status 0, closed 0
+PASS

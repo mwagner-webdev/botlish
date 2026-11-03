@@ -137,13 +137,14 @@ program bench/uri-steady.bot
 # whose expected warnings are the module's entries below)
 
 program stdlib/abi.bot
+fails stdlib/actor.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: actor.bot recovers a message through the standard library's internal std::actor::recover, which an entry program may not name (verified through `import std::actor`)
 program stdlib/ascii.bot
 program stdlib/binary.bot
 program stdlib/byte.bot
 program stdlib/compiler.bot
 program stdlib/darwin.bot
 program stdlib/dfa.bot
-fails stdlib/event_loop.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: as for stdlib/io.bot, the last declaration (shutdown) requires contexts (verified through `import std::event_loop`)
+fails stdlib/event_loop.bot CORE SEMANTIC RESOURCE-DECLARATION -- entry-program resource: compiled as an entry program, its resource struct Owner would be the entry program's, and a resource is declared in a module (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md); past that, as for stdlib/io.bot, the last declaration (shutdown) requires contexts (verified through `import std::event_loop`)
 program stdlib/float64.bot
 fails stdlib/immutable_map.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal import: as for stdlib/mutable_map.bot, immutable_map.bot imports std::table_hash and std::ordered_table (verified through `import std::immutable_map`, which also compiles std::ordered_table)
 fails stdlib/io.bot CORE SEMANTIC CONTEXT-FUNCTION-VALUE -- entry-program value: compiled as an entry program, a module's last declaration is the program's value, and io's last function requires a context, so it cannot be a value; no module member could end the file without adding to its API (verified through `import std::io`)

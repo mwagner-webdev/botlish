@@ -24,6 +24,18 @@ interp recursionlimit {} 100000
 set mainScript [file join $::projectRoot main.tcl]
 set ::pmCounter 0
 testConstraint unixFiles [expr {$::tcl_platform(platform) eq "unix"}]
+# Whether this host can tell if a lock's holder still runs
+# (pm::install::ProcessAlive: /proc or kill -0). Where it cannot (Windows),
+# a held lock is refused as LOCKED, never BUSY, and an interrupted
+# operation is rolled back only by a command given -recover, the remedy
+# that refusal names (PACKAGE-MANAGER-MILESTONE-1.md, "Transactions").
+# Stated here for the host, not asked of pm, so that a defect of pm's own
+# answer cannot change what the tests expect.
+set lockLivenessKnown [expr {[file isdirectory /proc/self] || $::tcl_platform(platform) eq "unix"}]
+proc afterInterruption {} {
+    if {$::lockLivenessKnown} { return {} }
+    return -recover
+}
 testConstraint python3 [expr {[auto_execok python3] ne ""}]
 testConstraint mkfifo [expr {[auto_execok mkfifo] ne ""}]
 testConstraint nativeBuilt [expr {![catch {native::binary}]}]
@@ -318,12 +330,12 @@ test pm-descriptor-artifact-identity {a package artifact and a package being pac
         [descriptorError {{"schema": 1, "version": "1.0.0"}} project]
 } -result {{{  no "name": a package artifact has a name and an exact version} {  no "version": a package artifact has a name and an exact version}} {{  no "version": a package being packed has a name and an exact version}} {{  the package version "1.2" is malformed: an exact version is three numbers, MAJOR.MINOR.PATCH (1.2.3)}} {{  a "version" without a "name": the version of what?}}}
 
-test pm-descriptor-schema {a schema is required, and only schemas 1 and 2 are read (PM-2 added 2); an unknown key is an error, never ignored, and a schema 2 key in a schema 1 file says so} -body {
-    list [descriptorError {{"name": "x"}} project] [descriptorError {{"schema": 3}} project] \
+test pm-descriptor-schema {a schema is required, and only schemas 1, 2 and 3 are read (PM-2 added 2, PM-3 3); an unknown key is an error, never ignored, and a schema 2 key in a schema 1 file says so} -body {
+    list [descriptorError {{"name": "x"}} project] [descriptorError {{"schema": 4}} project] \
         [descriptorError {{"schema": "1"}} project] [descriptorError {{"schema": 1, "scripts": {"postinstall": "rm -rf /"}}} project] \
         [descriptorError {[1]} project] [descriptorError {{"schema": 2}} project] \
         [descriptorError {{"schema": 1, "targets": {}}} project]
-} -result {{{  no "schema": a botlish.json starts with "schema": 1 (or 2)}} {{  unsupported schema 3: this package manager reads schemas 1 and 2 (a newer one needs a newer Botlish)}} {{  "schema" must be the number 1 or 2}} {{  unknown key "scripts" (schema 1 has schema, name, version, dependencies, lock, sources): a key a later schema adds is never silently ignored}} {{  the file is not a JSON object}} ok {{  "targets" is a schema 2 key: a botlish.json using it says "schema": 2 (schema 1 has schema, name, version, dependencies, lock, sources)}}}
+} -result {{{  no "schema": a botlish.json starts with "schema": 1 (or 2, or 3)}} {{  unsupported schema 4: this package manager reads schemas 1, 2 and 3 (a newer one needs a newer Botlish)}} {{  "schema" must be the number 1, 2 or 3}} {{  unknown key "scripts" (schema 1 has schema, name, version, dependencies, lock, sources): a key a later schema adds is never silently ignored}} {{  the file is not a JSON object}} ok {{  "targets" is a schema 2 key: a botlish.json using it says "schema": 2 (schema 1 has schema, name, version, dependencies, lock, sources)}}}
 
 test pm-descriptor-names {a package name is a lowercase identifier: never std, never a keyword the parser reserves, never a spelling that differs only in case on another file system} -body {
     lmap name {web sdl3 event_loop_linux std fn if yield Web my-pkg 3d _x {} a234567890123456789012345678901234567890123456789012345678901234 a2345678901234567890123456789012345678901234567890123456789012345} {
@@ -823,7 +835,9 @@ test pm-remove {remove deletes the dependency's request, lock and source and its
     pm add shapes -project $app -repository [dict get $world repo]
     pm add geometry -request 2 -project $app -repository [dict get $world repo]
     set r [pm remove shapes -project $app]
-    list [dict get $r status] [lsort [glob -tails -directory [file join $app .bot_modules] *]] \
+    # The installed trees: the record's .botlish is no package (glob's *
+    # matches it on Windows, not on Unix).
+    list [dict get $r status] [lsort [lsearch -all -inline -not [glob -tails -directory [file join $app .bot_modules] *] .*]] \
         [pm::descriptor::read [file join $app botlish.json] project] [appValue $app] \
         [kindOf [dict get [pm remove shapes -project $app] err]]
 } -cleanup cleanup -result {0 geometry {schema 1 name {} version {} dependencies {geometry 2} lock {geometry 2.0.0} sources {}} 200 UNKNOWN}
@@ -996,7 +1010,7 @@ test pm-crash-recovery {a process killed at any step of an update leaves a journ
     foreach point {journal commit-old commit-new state-written descriptor-written committed} {
         set r [withEnvironment [list BOTLISH_PM_FAULT crash:$point] {pm update -project $app -repository $repo}]
         set left [file exists [file join $app .bot_modules .botlish txn]]
-        set next [pm install -project $app -repository $repo]
+        set next [pm install -project $app -repository $repo {*}[afterInterruption]]
         set lock [dict get [pm::descriptor::read [file join $app botlish.json] project] lock shapes]
         lappend out [list $point [dict get $r status] $left [lindex [split [dict get $next err] \n] 0] $lock \
             [expr {$lock eq "2.1.0" ? [treeState $app] eq $before : [appValue $app] == 107}]]
@@ -1015,7 +1029,7 @@ test pm-lock-busy {an operation never runs beside another: a lock held by a runn
     set v [pm verify -project $app]
     file delete [file join $app .bot_modules .botlish lock]
     list [kindOf [dict get $r err]] [dict get $v status] [string match "*running, or was interrupted*" [dict get $v out]]
-} -cleanup cleanup -result {BUSY 1 1}
+} -cleanup cleanup -result [if {$lockLivenessKnown} {list BUSY 1 1} else {list LOCKED 1 1}]
 
 test pm-failed-add-writes-nothing {a failed add (an unavailable dependency) writes no botlish.json, no package and no record into a new project} -body {
     set world [geometryWorld]
@@ -1068,7 +1082,7 @@ test pm-no-scripts {nothing a package holds is executed: an artifact with instal
         [kindOf [dict get $refused err]]
 } -cleanup cleanup -result {0 0 0 1 DESCRIPTOR}
 
-test pm-no-network-in-sources {the package manager has no way to reach a network or run a package's program: its sources open no socket, load no http or tls package, and run no command but `kill -0` (a lock holder's liveness) and, in pm/sha256.tcl's ToolHex and ToolFile only, the host system's SHA-256 tool at its fixed path (PM-2)} -body {
+test pm-no-network-in-sources {the package manager has no way to reach a network or run a package's program: its sources open no socket, load no http or tls package, and run no command but `kill -0` (a lock holder's liveness) and, in pm/sha256.tcl's ToolHex and ToolFile only, the host system's SHA-256 tool at its fixed path (PM-2), and in pm/sha1.tcl's ToolHex only, its SHA-1 tool (PM-3: Git object identities)} -body {
     set found {}
     foreach path [lsort [glob [file join $::projectRoot pm *.tcl]]] {
         set n 0
@@ -1080,6 +1094,8 @@ test pm-no-network-in-sources {the package manager has no way to reach a network
             if {[regexp {\msocket\M|package require (http|tls)|\mexec\M|open \|} $line] && ![string match {*exec kill -0*} $line]} {
                 if {[file tail $path] eq "sha256.tcl" && $proc in {pm::sha256::ToolHex pm::sha256::ToolFile}
                         && [regexp {exec \$tool |open \|\[concat \$command} $line]} continue
+                if {[file tail $path] eq "sha1.tcl" && $proc eq "pm::sha1::ToolHex"
+                        && [regexp {exec \$path -hashfile |open \|\[concat \$command} $line]} continue
                 lappend found "[file tail $path]:$n"
             }
         }

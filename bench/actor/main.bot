@@ -1,0 +1,336 @@
+# main.bot -- the workloads of bench/actor.tcl (SAME-THREAD-ACTORS-
+# MILESTONE-1.md, "Performance"): what std::actor costs over the bare
+# std::event_loop, on the Linux driver (real clock), next to the census's
+# Probe F (THREAD-ACTOR-ARCHITECTURE-CENSUS.md, section 12.6), whose phases
+# 1, 2, 3, 6, 7 and 8 these repeat. Each phase logs its operation count and
+# its wall and CPU microseconds; bench/actor.tcl divides.
+import event_loop_linux
+import meter
+import std::actor
+import std::event_loop
+import std::int
+import std::list
+import std::mutable_vector
+import std::str
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+struct Msg:
+    text: str
+    nums: List[int]
+
+struct Request:
+    n: int
+    reply: std::actor::Address[int]
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+# --- 1. the baseline: two tasks, two channels, ints only (Probe F's 1)
+fn raw_player(rounds: int, mine: std::event_loop::Reg, peer: std::event_loop::Reg, serve: bool, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    if serve:
+        peer.post(0, 0)
+    fold i from 0 to rounds with intermediate n 0:
+        e = std::event_loop::wait(mine)
+        if e.reason != Wake::Event:
+            break
+        peer.post(e.a + 1, 0)
+        n + 1
+
+# --- 2. int messages between two actors (Probe F's 2; constructed with no
+# context, and again with every context: the same code)
+fn int_player(rounds: int, inbox: std::actor::Inbox[int], peer: std::actor::Address[int], serve: bool) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    if serve:
+        peer.send(0)
+    n = fold i from 0 to rounds with intermediate n 0:
+        v = rx.receive():
+            on std::actor::Closed:
+                break
+        peer.send(v + 1)
+        n + 1
+    std::actor::exit(n)
+
+# --- 3. a struct with a 64-character str and a fresh 8-element List
+# (Probe F's 3)
+fn msg_player(rounds: int, inbox: std::actor::Inbox[Msg], peer: std::actor::Address[Msg], serve: bool) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    if serve:
+        peer.send(Msg {text: "0123456789012345678901234567890123456789012345678901234567890123", nums: [1, 2, 3, 4, 5, 6, 7, 8]})
+    n = fold i from 0 to rounds with intermediate n 0:
+        m = rx.receive():
+            on std::actor::Closed:
+                break
+        peer.send(Msg {text: m.text, nums: [i, i + 1, i + 2, i + 3, i + 4, i + 5, i + 6, i + 7]})
+        n + 1
+    std::actor::exit(n)
+
+# --- 4. request/reply: the client waits for each reply
+fn server(inbox: std::actor::Inbox[Request]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold with intermediate n 0:
+        r = rx.receive():
+            on std::actor::Closed:
+                break
+        r.reply.send(r.n * 2)
+        n + 1
+    std::actor::exit(n)
+
+fn client(rounds: int, server: std::actor::Address[Request], inbox: std::actor::Inbox[int], me: std::actor::Address[int]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    total = fold i from 0 to rounds with intermediate t 0:
+        server.send(Request {n: i, reply: me})
+        v = rx.receive():
+            on std::actor::Closed:
+                break
+        t + v
+    std::actor::exit(total)
+
+# --- 5. waiting for room: a producer delivers into a mailbox of capacity 4
+fn producer(rounds: int, to: std::actor::Address[int]) -> std::actor::Exit:
+    loop i from 0 to rounds:
+        to.deliver(i)
+    std::actor::exit(rounds)
+
+fn consumer(rounds: int, inbox: std::actor::Inbox[int]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold i from 0 to rounds with intermediate n 0:
+        v = rx.receive():
+            on std::actor::Closed:
+                break
+        n + 1
+    std::actor::exit(n)
+
+# --- 6. a ring of 100 actors (Probe F's 4)
+fn ring_member(laps: int, inbox: std::actor::Inbox[int], next: std::actor::Address[int]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    n = fold i from 0 to laps with intermediate n 0:
+        v = rx.receive():
+            on std::actor::Closed:
+                break
+        next.send(v + 1)
+        n + 1
+    std::actor::exit(n)
+
+# --- 7/8/9. actors that wait for one message (Probe F's 5 and 6), and
+# actors that fail on theirs
+fn one_shot(inbox: std::actor::Inbox[int]) -> std::actor::Exit errors std::event_loop::TaskFailed:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    v = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    if v < 0:
+        fail std::event_loop::TaskFailed {code: v}
+    std::actor::exit(v)
+
+# --- 10. ordinary tasks beside the actors
+fn spinner(turns: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to turns:
+        std::event_loop::yield_now()
+    turns
+
+# Empty vectors of the ring's addresses and receive rights: an empty
+# vector's element type is its declared one.
+nomethod fn no_addresses() -> MutableVector[std::actor::Address[int]]:
+    std::mutable_vector::from_list([])
+
+nomethod fn no_inboxes() -> MutableVector[std::actor::Inbox[int]]:
+    std::mutable_vector::from_list([])
+
+nomethod fn timed(name: str, t0: int, c0: int, ops: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) errors std::event_loop::SchedulerFault:
+    say(name.concat(" ops "), ops)
+    say(name.concat(" wall us "), event_loop_linux::now_us() - t0)
+    say(name.concat(" cpu us "), event_loop_linux::cpu_us() - c0)
+
+nomethod fn pair(rounds: int, restricted: bool, context ev: std::event_loop::Loop, ac: std::actor::Actors) errors std::event_loop::SchedulerFault:
+    {to: p, inbox: p_in} = std::actor::open[int](4)
+    {to: q, inbox: q_in} = std::actor::open[int](4)
+    if restricted:
+        a = inject no context:
+            coroutine {step, first} = int_player(rounds, p_in, q, true)
+            std::actor::spawned(step, first)
+        a.start()
+        b = inject no context:
+            coroutine {step, first} = int_player(rounds, q_in, p, false)
+            std::actor::spawned(step, first)
+        b.start()
+    else:
+        coroutine {step: a, first: af} = int_player(rounds, p_in, q, true)
+        std::actor::spawned(a, af).start()
+        coroutine {step: b, first: bf} = int_player(rounds, q_in, p, false)
+        std::actor::spawned(b, bf).start()
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, n: event_loop_linux::Native, ac: std::actor::Actors) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered, std::event_loop::TaskFailed:
+    rounds = 20000
+    # 1
+    t0 = event_loop_linux::now_us()
+    c0 = event_loop_linux::cpu_us()
+    a = std::event_loop::channel(Delivery::Reliable, 4)
+    b = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step: r1, first: r1f} = raw_player(rounds, a, b, true)
+    std::event_loop::adopt(r1, r1f)
+    coroutine {step: r2, first: r2f} = raw_player(rounds, b, a, false)
+    std::event_loop::adopt(r2, r2f)
+    std::event_loop::run()
+    timed("raw-channel ping-pong", t0, c0, rounds * 2)
+    a.revoke()
+    b.revoke()
+    # 2
+    t1 = event_loop_linux::now_us()
+    c1 = event_loop_linux::cpu_us()
+    pair(rounds, true)
+    std::event_loop::run()
+    timed("contextless actors, int ping-pong", t1, c1, rounds * 2)
+    t1b = event_loop_linux::now_us()
+    c1b = event_loop_linux::cpu_us()
+    pair(rounds, false)
+    std::event_loop::run()
+    timed("unrestricted actors, int ping-pong", t1b, c1b, rounds * 2)
+    # 3
+    t2 = event_loop_linux::now_us()
+    c2 = event_loop_linux::cpu_us()
+    {to: pm, inbox: pm_in} = std::actor::open[Msg](4)
+    {to: qm, inbox: qm_in} = std::actor::open[Msg](4)
+    m1 = inject no context:
+        coroutine {step, first} = msg_player(rounds, pm_in, qm, true)
+        std::actor::spawned(step, first)
+    m1.start()
+    m2 = inject no context:
+        coroutine {step, first} = msg_player(rounds, qm_in, pm, false)
+        std::actor::spawned(step, first)
+    m2.start()
+    std::event_loop::run()
+    timed("contextless actors, Msg ping-pong", t2, c2, rounds * 2)
+    # 4
+    t3 = event_loop_linux::now_us()
+    c3 = event_loop_linux::cpu_us()
+    {to: srv, inbox: srv_in} = std::actor::open[Request](4)
+    {to: cli, inbox: cli_in} = std::actor::open[int](4)
+    sa = inject no context:
+        coroutine {step, first} = server(srv_in)
+        std::actor::spawned(step, first)
+    sa.start()
+    ca = inject no context:
+        coroutine {step, first} = client(rounds, srv, cli_in, cli)
+        std::actor::spawned(step, first)
+    ca.start()
+    std::event_loop::run()
+    timed("request/reply round trips", t3, c3, rounds)
+    std::actor::close(srv)
+    std::event_loop::run()
+    # 5
+    t4 = event_loop_linux::now_us()
+    c4 = event_loop_linux::cpu_us()
+    {to: sink, inbox: sink_in} = std::actor::open[int](4)
+    pa = inject no context:
+        coroutine {step, first} = producer(rounds, sink)
+        std::actor::spawned(step, first)
+    pa.start()
+    cn = inject no context:
+        coroutine {step, first} = consumer(rounds, sink_in)
+        std::actor::spawned(step, first)
+    cn.start()
+    std::event_loop::run()
+    timed("deliver into a full mailbox (room waits)", t4, c4, rounds)
+    say("room waits ", std::actor::stats().room_waits)
+    # 6: 100 actors, 200 laps
+    t5 = event_loop_linux::now_us()
+    c5 = event_loop_linux::cpu_us()
+    tos = no_addresses()
+    inboxes = no_inboxes()
+    loop k from 0 to 100:
+        {to, inbox} = std::actor::open[int](4)
+        tos.push(to)
+        inboxes.push(inbox)
+    # popped last first: member K forwards to member K + 1
+    loop j from 0 to 100:
+        k = 99 - j
+        r = inject no context:
+            coroutine {step, first} = ring_member(200, inboxes.pop(), tos.at((k + 1).mod(100)))
+            std::actor::spawned(step, first)
+        r.start()
+    std::actor::post(tos.at(0), 0)
+    std::event_loop::run()
+    timed("ring of 100 actors, hops", t5, c5, 20000)
+    # 7 and 8: 2000 actors created, idle, then stopped
+    rss0 = meter::rss_kb()
+    vm0 = meter::vm_kb()
+    t6 = event_loop_linux::now_us()
+    c6 = event_loop_linux::cpu_us()
+    shots = loop k from 0 to 2000:
+        {to, inbox} = std::actor::open[int](1)
+        s = inject no context:
+            coroutine {step, first} = one_shot(inbox)
+            std::actor::spawned(step, first)
+        s.start()
+        to
+    std::event_loop::run()
+    timed("create 2000 idle actors", t6, c6, 2000)
+    say("idle actors: RSS KiB added ", meter::rss_kb() - rss0)
+    say("idle actors: virtual KiB added ", meter::vm_kb() - vm0)
+    t7 = event_loop_linux::now_us()
+    c7 = event_loop_linux::cpu_us()
+    loop to in shots:
+        std::actor::post(to, 1)
+    std::event_loop::run()
+    timed("stop 2000 actors (one message each, reaped by their hosts)", t7, c7, 2000)
+    say("after stopping: RSS KiB above before creating ", meter::rss_kb() - rss0)
+    say("after stopping: virtual KiB above before creating ", meter::vm_kb() - vm0)
+    # 9: 2000 actors that fail on their message
+    fails = loop k from 0 to 2000:
+        {to, inbox} = std::actor::open[int](1)
+        s = inject no context:
+            coroutine {step, first} = one_shot(inbox)
+            std::actor::spawned(step, first)
+        s.start()
+        to
+    std::event_loop::run()
+    t8 = event_loop_linux::now_us()
+    c8 = event_loop_linux::cpu_us()
+    loop to in fails:
+        std::actor::post(to, -1)
+    std::event_loop::run()
+    timed("fail 2000 actors (reaped by their hosts)", t8, c8, 2000)
+    say("open mailboxes after the failures ", std::actor::stats().open)
+    std::event_loop::take_outcomes()
+    # 10: the int ping-pong beside 50 ordinary tasks yielding every turn
+    loop k from 0 to 50:
+        coroutine {step: sp, first: spf} = spinner(rounds * 2)
+        std::event_loop::adopt(sp, spf)
+    t9 = event_loop_linux::now_us()
+    c9 = event_loop_linux::cpu_us()
+    pair(rounds, true)
+    std::event_loop::run()
+    timed("int ping-pong beside 50 spinning tasks", t9, c9, rounds * 2)
+    std::event_loop::take_outcomes()
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context event_loop_linux::create()
+with context event_loop_linux::native()
+with context std::actor::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]
+    on std::event_loop::TaskFailed:
+        ["TaskFailed"]

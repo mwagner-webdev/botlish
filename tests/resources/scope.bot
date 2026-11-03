@@ -1,0 +1,101 @@
+# scope.bot -- a Handle is released where its binding's lexical scope ends,
+# never at its last use, exactly once, and the releases of one scope run in
+# reverse acquisition order (tests/resources.test).
+import handle
+
+# 1. two Handles never read after their binding: released at the body's end,
+#    the later first (2, 1), after the note 9 the body makes past them.
+fn body() -> int:
+    h = handle::open(1)
+    g = handle::open(2)
+    handle::note(9)
+    3
+
+# 2. a move: h's obligation is k's, released where k's scope ends (3).
+fn moved() -> int:
+    h = handle::open(3)
+    k = h
+    handle::note(4)
+    4
+
+# 3. a result: the caller owns it (5, released at main's end, after closed()).
+fn returned() -> handle::Handle:
+    h = handle::open(5)
+    h
+
+# 4. the explicit release: the cleanup called, at once (6); nothing at the end.
+fn explicit() -> int:
+    h = handle::open(6)
+    handle::close(h)
+    handle::note(7)
+    7
+
+# 5. a discarded value is released where its statement ends (8).
+fn discarded() -> int:
+    handle::open(8)
+    handle::note(10)
+    0
+
+# 6. a move into a function that owns it there: released at its end (11),
+#    after its own note 111, before the caller's note 12.
+fn consume(h: handle::Handle) -> int:
+    handle::note(111)
+    0
+
+fn moved_in() -> int:
+    h = handle::open(11)
+    consume(h)
+    handle::note(12)
+    0
+
+# 7. destructuring discharges: the module's number() takes the Handle apart,
+#    and nothing is released (13 is never logged).
+fn taken_apart() -> int:
+    handle::number(handle::open(13))
+
+# 8. a nested scope's binding of the same name is another owner: the inner
+#    Handle is released at the inner scope's end (32), the outer one at the
+#    function's (31), each once.
+fn shadowed() -> int:
+    h = handle::open(31)
+    if true:
+        h = handle::open(32)
+        handle::note(33)
+    handle::note(34)
+    0
+
+# 9. two resource types, two cleanups: each value released by its own type's
+#    (42, then the Tag acquired before it: -41).
+fn two_kinds() -> int:
+    t = handle::tag(41)
+    h = handle::open(42)
+    0
+
+# 10. conditional acquisition: either branch's Handle is the binding's,
+#     released at the scope's end, after the note (53 51, 53 52).
+fn chosen(c: bool) -> int:
+    h = if c:
+        handle::open(51)
+    else:
+        handle::open(52)
+    handle::note(53)
+    0
+
+fn main(context log: handle::Log) -> List[int] errors IndexNotFound:
+    body()
+    moved()
+    r = returned()
+    explicit()
+    discarded()
+    moved_in()
+    taken_apart()
+    shadowed()
+    two_kinds()
+    chosen(true)
+    chosen(false)
+    handle::closed()
+
+with context handle::create()
+main():
+    on IndexNotFound:
+        []

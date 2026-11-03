@@ -44,7 +44,9 @@ recursion is representation: nothing a program does observes it.
     general recursive type is an ordinary `struct` (concept.structs).
   * A tree struct is never opaque, a context or an identity struct
     (TREE-STRUCT-COMBINATION), and never affine: a tree of coroutines, or
-    a `Node[T]` applied to an affine type, is AFFINE-CONTAINER-UNSUPPORTED.
+    an application `Node[T]` that is affine (its fields, T substituted,
+    hold an affine value), is AFFINE-CONTAINER-UNSUPPORTED -- the rule for
+    every recursive affine type (error.affine-container-unsupported).
   * == compares the declaration, every field and the children in order,
     recursively; both hashes read the same, in order. Two trees built
     differently but equal as trees are equal and hash equally.

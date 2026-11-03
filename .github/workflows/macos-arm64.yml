@@ -17,7 +17,7 @@ name: tests (macos arm64)
 #                  MILESTONE-1.md) -- Apple clang and ld, the precompiled
 #                  runtime archive, no rustc -- its tests and the executable
 #                  and C test files linked by it
-#   acceptance     Tier B, every push, two shards: the acceptance tier --
+#   acceptance     Tier B, every push, three shards: the acceptance tier --
 #                  the test files and golden suites that pass on macOS
 #   app            every push: the macOS distribution, Botlish.app
 #                  (MACOS-AARCH64-MILESTONE-9.md) -- built, signed ad hoc,
@@ -679,14 +679,16 @@ jobs:
           if-no-files-found: warn
 
   acceptance:
-    name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/2)
+    name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/3)
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 75
+    # Three shards: two had grown to 61-76 minutes each (Tcl test files
+    # 57-73 of them) and were cut off at the limit in the golden phase.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
 
@@ -699,7 +701,7 @@ jobs:
       - name: Acceptance tier, this shard
         env:
           SHARD: ${{ matrix.shard }}
-        run: tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/2" -backends interp acceptance 2>&1 | tee tier.log
+        run: tclsh9.0 tests/platform/tier.tcl -shard "$SHARD/3" -backends interp acceptance 2>&1 | tee tier.log
 
       - name: Publish summary
         if: always()
@@ -707,7 +709,7 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           {
-            echo "## Acceptance (macOS arm64), shard $SHARD/2"
+            echo "## Acceptance (macOS arm64), shard $SHARD/3"
             echo '```'
             awk '/^######## .*: (ok|FAILED)/ {print} /^######## [0-9]+ commands/ {tail = 1} tail {print}' tier.log 2>/dev/null | grep -a . || echo "the acceptance tier did not run"
             echo '```'

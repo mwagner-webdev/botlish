@@ -146,6 +146,7 @@ namespace eval native::lower {
         argv         {op argv} \
         std::list::length {op listlen} \
         std::tree::children {op treechildren} \
+        std::actor::recover {same} \
         std::list::at     {op listget} \
         std::list::append {op listappend} \
         std::list::flat   {op listflat} \
@@ -1552,6 +1553,7 @@ proc native::lower::Program {hirProgram args} {
         -exact-callable-opt [dict get $options -exact-callable-opt] \
         -exact-callable-limit [dict get $options -exact-callable-limit] \
         -exports [concat [lmap export [dict get $options -exports] {dict get $export block}] \
+            [CleanupBlocks $hirProgram] \
             [lmap callback [hir::callbacks::of $hirProgram] {dict get $callback block}]]]
     hir::specialize::memoizeViews $hirProgram $spec
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
@@ -2511,6 +2513,9 @@ proc native::lower::Function {id} {
         set contextProblem [ContextDiagnostic]
     } else {
         set contextProblem ""
+    }
+    if {$region eq "program" && $contextProblem eq ""} {
+        CleanupTable fn
     }
     if {$contextProblem ne ""} {
         # A -strict 0 program that failed context verification (CONTEXTS.md):
@@ -3707,13 +3712,22 @@ proc native::lower::ReleaseHandles {fnVar items e {result ""}} {
     foreach item $items {
         set plan [hir::affine::DropPlan $hir $item]
         if {$plan eq ""} continue
-        if {[lindex $plan 0] eq "coroutine"} {
-            set descriptor "c"
-        } else {
-            set descriptor [lindex $plan 1]
+        switch -- [lindex $plan 0] {
+            coroutine { set descriptor "c" }
+            abandon { set descriptor "C" }
+            cleanup {
+                set descriptor "r[hir::affine::CleanupIndex $hir [lindex $plan 1]]."
+            }
+            default { set descriptor [lindex $plan 1] }
         }
         if {[string match b* $item]} {
             set access [Access fn $item]
+            if {[lindex $plan 0] eq "cleanup" && [lindex $access 0] eq "virtual"} {
+                # A resource the escape analysis kept in registers: its
+                # cleanup takes the value itself (LEXICAL-RESOURCE-CLEANUP-
+                # EXPLORATION-MILESTONE-1.md).
+                set access [list reg [MaterializeVirtual fn $item $e]]
+            }
         } elseif {$item eq $e && [hir::kind $hir $e] eq "struct"
                 || ($item eq $e && [hir::affine::NativeName $hir $e] eq "list")} {
             # A discarded construction (not built): its components.
@@ -3741,11 +3755,25 @@ proc native::lower::ReleaseHandles {fnVar items e {result ""}} {
 # (hir::affine::Descriptor), at expression E.
 proc native::lower::DropAccess {fnVar access descriptor e} {
     upvar 1 $fnVar fn
+    variable hir
     switch -- [lindex $access 0] {
         reg {
             set where [lindex $access 1]
             if {$descriptor eq "c"} {
                 Assign fn "op corelease $where" $e
+            } elseif {$descriptor eq "C"} {
+                # An unwinding program's coroutine (hir/affine.tcl's
+                # Unwinds): its suspended frames' releases run.
+                Assign fn "op coabandon $where" $e
+            } elseif {[regexp {^r([0-9]+)\.$} $descriptor -> k]} {
+                # A resource (hir/resources.tcl): a call of its cleanup
+                # function, which the program roots (CleanupBlocks).
+                set f [Assign fn "fnvalue [GenericRef [hir::affine::CleanupBlock $hir $k]]" $e]
+                Assign fn "op cleanupcall $f $where" $e
+            } elseif {[regexp {[rC]} $descriptor]} {
+                # A drop that runs code (a cleanup or an abandonment inside).
+                set d [Assign fn "str [Quote $descriptor]" $e]
+                Assign fn "op affinedroprun $where $d" $e
             } else {
                 set d [Assign fn "str [Quote $descriptor]" $e]
                 Assign fn "op affinedrop $where $d" $e
@@ -3754,15 +3782,31 @@ proc native::lower::DropAccess {fnVar access descriptor e} {
         virtual {
             # A virtualized construction (its fields in registers, never
             # materialized): the descriptor applied to its fields directly.
-            set fields [lindex $access 1]
-            set pos 0
+            # A struct's registers are its physical fields, an opened field's
+            # (CUT) contiguous among them: a descriptor slot is a layout
+            # field, found by FieldOffset, and an opened field's part applies
+            # to its own registers, as the virtual value of its own shape
+            # (`Outer {inner: Holder {...}}`, `Box {value: Box {...}}`: the
+            # inner struct's descriptor never reaches its fields' registers).
+            lassign $access - fields shape - - cut
+            set cuts [CutDict $cut]
             foreach {field inner} [DescriptorParts $descriptor] {
                 if {$field eq "*"} {
                     foreach r $fields {
                         DropAccess fn [list reg $r] $inner $e
                     }
-                } else {
+                } elseif {$shape eq ""} {
                     DropAccess fn [list reg [lindex $fields $field]] $inner $e
+                } else {
+                    set name [lindex $shape 1 $field]
+                    set offset [FieldOffset $shape $cut $name]
+                    if {[dict exists $cuts $name]} {
+                        lassign [dict get $cuts $name] sub subcut
+                        set width [hir::escape::CutFields $sub $subcut]
+                        DropAccess fn [list virtual [lrange $fields $offset [expr {$offset + $width - 1}]] $sub "" "" $subcut] $inner $e
+                    } else {
+                        DropAccess fn [list reg [lindex $fields $offset]] $inner $e
+                    }
                 }
             }
         }
@@ -3808,6 +3852,7 @@ proc native::lower::DescriptorSkip {descriptor posVar} {
     set c [string index $descriptor $pos]
     incr pos
     switch -- $c {
+        r { DescriptorNumber $descriptor pos }
         l - v - a { DescriptorSkip $descriptor pos }
         s {
             set n [DescriptorNumber $descriptor pos]
@@ -3816,6 +3861,34 @@ proc native::lower::DescriptorSkip {descriptor posVar} {
                 DescriptorSkip $descriptor pos
             }
         }
+    }
+}
+
+# The cleanup function blocks of HIR (hir/resources.tcl), in cleanup-table
+# order: roots of the program like a C export's (hir::specialize's
+# ProgramValues) -- the compiler calls each from any release point, with
+# any value its declared parameter type admits, whether or not Botlish code
+# calls it -- so each has its open generic instance and a function value.
+proc native::lower::CleanupBlocks {hir} {
+    set blocks {}
+    dict for {id record} [hir::resources::table $hir] {
+        lappend blocks [list [dict get $record index] [dict get $record block]]
+    }
+    return [lmap pair [lsort -integer -index 0 $blocks] {lindex $pair 1}]
+}
+
+# The run's cleanup table (runtime/affine.rs's rt_cleanup_table), installed
+# first thing in the program: what a drop descriptor's `rK` calls from a
+# runtime walk. Nothing for a program without resources.
+proc native::lower::CleanupTable {fnVar} {
+    upvar 1 $fnVar fn
+    variable hir
+    set regs {}
+    foreach block [CleanupBlocks $hir] {
+        lappend regs [Assign fn "fnvalue [GenericRef $block]"]
+    }
+    if {$regs ne {}} {
+        Assign fn "op cleanuptable [join $regs { }]"
     }
 }
 
@@ -9911,6 +9984,11 @@ proc native::lower::NativeCallOp {e node} {
     set argExprs [dict get $node args]
     RuntimeRaises [dict get [core::native::metadata $name] errors]
     switch -- [lindex $impl 0] {
+        same {
+            # std::actor::recover (core/actor.tcl): its operand, unchanged;
+            # only its static type differs. No NIR operation.
+            return [list $name same]
+        }
         equality {
             if {[llength $argExprs] != 2} {
                 return [list $name veq]
@@ -10034,6 +10112,17 @@ proc native::lower::NativeCallOp {e node} {
             variable provenOps
             if {[dict exists $provenOps $op] && [BoundsProven $e]} {
                 set op [dict get $provenOps $op]
+            }
+            if {$op in {mvcleardrop mvswapdrop mutarrayswapdrop mutarraysetdrop}} {
+                # A collection's drop form whose descriptor (its last
+                # argument, a constant) runs code -- a resource's cleanup, an
+                # unwinding coroutine's abandonment: its safepoint variant
+                # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+                set d [lindex $argExprs end]
+                if {[hir::kind $hir $d] eq "const"
+                        && [regexp {[rC]} [core::value::strOf [hir::get $hir $d value]]]} {
+                    append op run
+                }
             }
             return [list $name $op]
         }
@@ -10427,6 +10516,10 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     # it always has.
     set argExprs [dict get $node args]
     EmitArgGuards fn $e $argExprs $argRegs [dict get $meta paramTypes] $name
+    if {$op eq "same"} {
+        # The operand itself (std::actor::recover: NativeCallOp's `same`).
+        return [list [lindex $argRegs 0] tagged]
+    }
     set big [BigConstantResult $e $argExprs $op]
     if {$big ne ""} {
         # An Int `+ - *` of integer constant expressions whose value BIG is
@@ -12995,6 +13088,12 @@ proc native::lower::Unsupported {e what detail} {
 # `errorIds`'s own doc.
 proc native::lower::ErrorId {name} {
     variable errorIds
+    if {$name eq [hir::affine::AbandonedError]} {
+        # The internal failure of an abandoned coroutine's pending yield
+        # (runtime/error.rs's ERR_COROUTINE_ABANDONED): no program declares
+        # or handles it; only the release edges match it.
+        return [expr {0x40000000 - 1}]
+    }
     if {[core::native::isBuiltinError $name]} {
         # The runtime's own builtin errors (core::native::declareError) have
         # fixed ids far above a program's dense 1-based ones: the runtime

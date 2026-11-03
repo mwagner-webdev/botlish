@@ -47,6 +47,11 @@ pub enum RtError {
 /// these to the errors the runtime itself declares, far above the dense
 /// 1-based ids of a program's own `error` declarations.
 pub const BUILTIN_ERROR_ID_BASE: u32 = 0x4000_0000;
+/// The internal failure an abandoned coroutine's pending yield fails with
+/// (rt_co_abandon; hir::affine::AbandonedError, native/lower.tcl's ErrorId):
+/// no program declares it or can handle it -- only the compiler's release
+/// pads match it (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+pub const ERR_COROUTINE_ABANDONED: u32 = BUILTIN_ERROR_ID_BASE - 1;
 /// `InvalidArgumentEncoding`, the error of `argv()` (builtin error 0).
 pub const ERR_INVALID_ARGUMENT_ENCODING: u32 = BUILTIN_ERROR_ID_BASE;
 /// `IndexNotFound`, the error of `list::at`, `mutable_array::at` and

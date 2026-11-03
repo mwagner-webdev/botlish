@@ -48,15 +48,15 @@ The remaining problems are primarily distribution, resolution, authentication an
 
 ## 3. Milestone sequence
 
-| Milestone | Deliverable | Priority |
-|---|---|---|
-| PM-1 | Local package manager and `botlish.json` | Immediate |
-| PM-2 | Cross-platform native package consumption | Immediate |
-| PM-3 | Native package authoring and verified artifacts | High |
-| PM-4 | Signed publication and TUF-backed registry | Medium |
-| PM-5 | Upstream history continuity and native provenance | Medium |
-| PM-6 | Independent attestations and transparency | Long-term |
-| PM-7 | Compiler-plugin distribution experiment | Parallel research after PM-2 |
+| Milestone | Deliverable | Priority | Status |
+|---|---|---|---|
+| PM-1 | Local package manager and `botlish.json` | Immediate | done: PACKAGE-MANAGER-MILESTONE-1.md |
+| PM-2 | Cross-platform native package consumption | Immediate | done: PACKAGE-MANAGER-MILESTONE-2.md |
+| PM-3 | Native package authoring and verified artifacts | High | done: PACKAGE-MANAGER-MILESTONE-3.md (generic authoring commands, native audit, schema 3 run-time dependencies, unsigned provenance records, reproducible releases from a pinned author image) |
+| PM-4 | Signed publication and TUF-backed registry | Medium | not started |
+| PM-5 | Upstream history continuity and native provenance | Medium | not started (PM-3 records upstream Git identities, unchecked against history) |
+| PM-6 | Independent attestations and transparency | Long-term | not started |
+| PM-7 | Compiler-plugin distribution experiment | Parallel research after PM-2 | not started |
 
 PM-1 through PM-3 constitute the first practically useful package ecosystem. PM-4 is required before treating a public registry as a trusted distribution channel.
 

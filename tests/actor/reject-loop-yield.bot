@@ -1,0 +1,26 @@
+# An actor yields to its host, not to the loop: a std::event_loop wait inside an actor is COROUTINE-RESULT-MISMATCH.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+struct Work:
+    n: int
+
+fn worker(inbox: std::actor::Inbox[Work], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::event_loop::yield_now()
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Work](4)
+    coroutine {step, first} = worker(inbox)
+    std::actor::spawned(step, first).start()
+    0
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

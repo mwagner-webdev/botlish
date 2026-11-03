@@ -1,0 +1,35 @@
+ok   network-none
+ok   no-development-tools
+ok   no-checkout
+ok   no-library-path
+ok   add-succeeds
+ok   add-checks-system-x11
+ok   installed-docs
+ok   installed-binding
+ok   installed-bridge
+ok   verify-succeeds
+ok   plan-x11-system
+ok   plan-x11-dpkg
+ok   plan-no-L
+ok   unsupported-target
+ok   aarch64-view
+ok   aarch64-plan
+ok   example-test
+ok   example-test-generic
+ok   example-main-checks
+ok   interp-refuses
+ok   no-display-actionable
+ok   no-driver-actionable
+ok   desktop-cranelift
+ok   desktop-generic
+ok   deploy-succeeds
+ok   runpath-origin
+ok   remove-succeeds
+ok   package-gone
+ok   loads-deployed-library
+ok   moved-test-runs
+ok   desktop-moved
+ok   maps-deployed-library
+ok   precedence-documented
+
+PASS

@@ -607,3 +607,69 @@ proc pm::binary::describe {facts} {
     }
     return "an unknown file ([dict getdef $facts reason {no known format}])"
 }
+
+# The sections of a 64-bit little-endian ELF file DATA, for provenance and
+# the comparison of release candidates (PACKAGE-MANAGER-MILESTONE-3.md):
+# {sections {{name N type T offset O size S} ...} buildid HEX comment
+# {TEXT...}} -- the section table by name (SHT_NOBITS sections have no file
+# bytes: size 0), the GNU build ID (NT_GNU_BUILD_ID) and the strings of
+# .comment (the producing compilers' identities). Read, never run.
+proc pm::binary::elfSections {data {label "the file"}} {
+    variable maxCommands
+    if {[string range $data 0 3] ne "\x7fELF" || [U $data 4 1 $label] != 2 || [U $data 5 1 $label] != 1} {
+        Fail $label "not a 64-bit little-endian ELF file"
+    }
+    set shoff [U $data 40 8 $label]
+    set shentsize [U $data 58 2 $label]
+    set shnum [U $data 60 2 $label]
+    set shstrndx [U $data 62 2 $label]
+    set result [dict create sections {} buildid "" comment {}]
+    if {$shoff == 0 || $shentsize != 64 || $shnum == 0} {
+        return $result
+    }
+    if {$shnum > $maxCommands} {
+        Fail $label "more than $maxCommands sections"
+    }
+    if {$shstrndx >= $shnum} {
+        Fail $label "a section-name table index $shstrndx outside the $shnum sections"
+    }
+    set names [U $data [expr {$shoff + $shstrndx * 64 + 24}] 8 $label]
+    set sections {}
+    for {set i 0} {$i < $shnum} {incr i} {
+        set at [expr {$shoff + $i * 64}]
+        set nameOffset [U $data $at 4 $label]
+        set type [U $data [expr {$at + 4}] 4 $label]
+        set offset [U $data [expr {$at + 24}] 8 $label]
+        set size [U $data [expr {$at + 32}] 8 $label]
+        set name [expr {$i == 0 ? "" : [CString $data [expr {$names + $nameOffset}] $label 256]}]
+        if {$type == 8} {
+            set size 0
+        } elseif {$offset + $size > [string length $data]} {
+            Fail $label "the section $name ends past the end of the file"
+        }
+        lappend sections [dict create name $name type $type offset $offset size $size]
+        if {$name eq ".comment"} {
+            foreach text [split [string range $data $offset [expr {$offset + $size - 1}]] \x00] {
+                if {$text ne ""} { dict lappend result comment $text }
+            }
+        }
+        if {$type == 7 && $size >= 16} {
+            # Notes: namesz, descsz, type, name (4-aligned), desc.
+            set note $offset
+            while {$note + 12 <= $offset + $size} {
+                set namesz [U $data $note 4 $label]
+                set descsz [U $data [expr {$note + 4}] 4 $label]
+                set ntype [U $data [expr {$note + 8}] 4 $label]
+                set nameAt [expr {$note + 12}]
+                set descAt [expr {$nameAt + (($namesz + 3) & ~3)}]
+                if {$descAt + $descsz > $offset + $size} break
+                if {$ntype == 3 && [string range $data $nameAt [expr {$nameAt + 3}]] eq "GNU\x00"} {
+                    dict set result buildid [binary encode hex [string range $data $descAt [expr {$descAt + $descsz - 1}]]]
+                }
+                set note [expr {$descAt + (($descsz + 3) & ~3)}]
+            }
+        }
+    }
+    dict set result sections $sections
+    return $result
+}
