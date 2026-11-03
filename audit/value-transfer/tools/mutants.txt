@@ -122,14 +122,12 @@ opaque struct Address[M]:
 >>>>
 
 @@ open-type-admitted a transfer of an open type is admitted: its schema is not the caller's type
-!! sd-open-type
+!! sd-open-type sd-decode-trait-view
 ## hir/range.tcl
 <<<<
-    if {![hir::types::IsClosedType $type]} {
-        hir::Diagnose hir TRANSFER-OPEN-TYPE
+    if {![hir::types::IsClosedType $type] || ($sending eq "result" && [hir::types::IsTrait $type])} {
 ====
     if {0} {
-        hir::Diagnose hir TRANSFER-OPEN-TYPE
 >>>>
 
 @@ declaration-parts-unchecked an owner's `sendable fields` and `through ... as R` are taken on trust: an any field or a function representation passes
@@ -190,7 +188,7 @@ opaque struct Address[M]:
 # --- The codec (core/transfer.tcl) -----------------------------------------
 
 @@ vector-reference a MutableVector is sent as its header's identity, which the receiver takes for its own: the copy aliases the source (the Tcl backends' heap pointer)
-!! vt-mutable-independent
+!! vt-mutable-independent vt-vector-place
 ## core/transfer.tcl
 <<<<
             vector {
@@ -217,7 +215,7 @@ opaque struct Address[M]:
 >>>>
 
 @@ source-drained encoding a MutableVector takes its elements out of the source: the sender's value changes
-!! vt-mutable-independent
+!! vt-mutable-independent vt-vector-place
 ## core/transfer.tcl
 <<<<
             vector {
@@ -228,8 +226,8 @@ opaque struct Address[M]:
                 set ::core::mutvec::store([lindex $v 1]) {}
 >>>>
 
-@@ decoded-vector-shared every decoded MutableVector of a process is one header: two copies alias each other
-!! vt-decode-twice
+@@ decoded-vector-shared every decoded MutableVector of a process is the first one decoded: two copies alias each other, and a later decode returns the first one's elements
+!! vt-decode-twice vt-vector-place
 ## core/transfer.tcl
 <<<<
         vector {

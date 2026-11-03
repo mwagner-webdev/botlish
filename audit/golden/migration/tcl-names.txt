@@ -8988,6 +8988,7 @@ tests/value-transfer.test vt-roundtrip-name-rebuilt pass
 tests/value-transfer.test vt-trait-view pass
 tests/value-transfer.test vt-mutable-independent pass
 tests/value-transfer.test vt-decode-twice pass
+tests/value-transfer.test vt-vector-place pass
 tests/value-transfer.test vt-set-rebuilt pass
 tests/value-transfer.test vt-map-order-and-lookup pass
 tests/value-transfer.test vt-immutable-map pass

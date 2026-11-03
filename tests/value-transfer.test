@@ -359,6 +359,36 @@ vl = loop x in v:
 }
 } -result {[[1, 2, 3], [1, 2], [1, 2]]}
 
+test vt-vector-place {a MutableVector encoded straight from its place is copied, never taken or referenced: encoding leaves the source as it was, a later mutation of the source never reaches the bytes, and two encodings of different vectors decode to their own elements} -body {
+    vtAgree {fn copy(d: std::abi::bytes::Bytes) -> MutableVector[int]:
+    std::transfer::decode[MutableVector[int]](d):
+        on TransferMalformed:
+            std::mutable_vector::from_list([0])
+        on TransferVersion:
+            std::mutable_vector::from_list([0])
+        on TransferTypeMismatch:
+            std::mutable_vector::from_list([0])
+        on TransferInvalidValue:
+            std::mutable_vector::from_list([0])
+        on TransferLimit:
+            std::mutable_vector::from_list([0])
+
+fn items(v: MutableVector[int]) -> List[int]:
+    loop x in v:
+        x
+
+v = std::mutable_vector::from_list([1, 2])
+data = std::transfer::encode(v)
+after = items(v)
+v.push(3)
+w = std::mutable_vector::from_list([7, 8, 9])
+other = std::transfer::encode(w)
+a = copy(data)
+b = copy(other)
+[after, items(v), items(a), items(b), size(data) == size(std::transfer::encode(std::mutable_vector::from_list([1, 2])))]
+}
+} -result {[[1, 2], [1, 2, 3], [1, 2], [7, 8, 9], true]}
+
 test vt-set-rebuilt {an ImmutableSet is rebuilt by the receiver's own set construction: bytes naming a member twice decode to the set of one} -body {
     vtAgree {good = std::transfer::encode(std::immutable_set::from_list(["a1", "b2"]))
 twice = poke(good, 18, std::byte::from_int(97))
