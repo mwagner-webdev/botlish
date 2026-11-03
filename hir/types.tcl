@@ -2841,6 +2841,12 @@ proc hir::types::IsSendable {type} {
 # view, so its transfer schema is known where it is written
 # (hir/transfer.tcl). SEEN as SendClass's.
 proc hir::types::IsClosedType {type {seen {}}} {
+    if {[IsTrait $type] && "send" in [hir::traits::intrinsicGuarantees [lindex $type 1]]} {
+        # A view of Sendable: the trait monomorphization (TRAITS.md) clones
+        # its function per witness before hir::transfer::Elaborate runs, so
+        # every clone transfers a closed type.
+        return 1
+    }
     if {[IsImprint $type] || [IsTrait $type]} {
         return 0
     }

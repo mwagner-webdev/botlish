@@ -2544,8 +2544,10 @@ one (native/src/runtime/transfer.rs) read. Keep it so:
 * The two codecs write the same bytes: change the format in both, with the
   version and tests/value-transfer.test's fixed vectors.
 * A transfer's type is closed where it is written (TRANSFER-OPEN-TYPE): a
-  generic body's transfers need the plan of a later milestone, never a
-  run-time schema guessed from a value.
+  body generic in an imprint variable has no schema to write (a later
+  milestone's plan), never a run-time schema guessed from a value. A
+  `Sendable` trait view is closed: the trait monomorphization clones its
+  function per witness before `hir::transfer::Elaborate` runs.
 * std::actor's same-VM messages stay ordinary values: never require
   Sendable of them.
 

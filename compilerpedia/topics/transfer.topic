@@ -42,7 +42,9 @@ value is checked against T as it is read.
     (std::event_loop::Reg, std::actor::Address: identities of one VM), and
     `any` or an unconstrained imprint variable (the type does not say).
   * A transfer's type must be closed where it is called: no imprint
-    variable and no trait view (TRANSFER-OPEN-TYPE).
+    variable (TRANSFER-OPEN-TYPE). A value seen through a `Sendable` trait
+    view is encoded: its function is cloned per witness type before the
+    schema is written. decode's type is always a concrete type.
   * A copy is a new value: mutating a received MutableVector or MutableMap
     changes nothing in the sender, and the reverse. A map's or set's index
     and stored hashes are computed again by the receiver.
@@ -140,7 +142,7 @@ fn send(r: std::event_loop::Reg) -> std::abi::bytes::Bytes:
 
 @topic error.transfer-open-type
 title: TRANSFER-OPEN-TYPE: a transfer whose type is not known where it is written
-summary: std::transfer::encode or decode is called on a value whose static type mentions an imprint variable or a trait view: the transfer's schema is its static type, which a generic body does not know.
+summary: A transfer's static type mentions an imprint variable (or decode's is a trait view): the transfer's schema is its static type, which a generic body does not know.
 index: errors
 alias: transfer in a generic function; encode of an imprint variable; open type
 keywords: transfer, encode, decode, imprint variable, generic, schema, Sendable, satisfies
@@ -157,7 +159,10 @@ milestone writes schemas only where the type is closed.
 
 == WHAT TO DO
 Call std::transfer::encode or decode where the concrete type is known --
-in the caller -- and pass the Bytes into or out of the generic code.
+in the caller -- and pass the Bytes into or out of the generic code. Or
+take the value as a `Sendable` trait view (`fn seal(x: Sendable)`): a
+trait-polymorphic function is cloned per witness type, so each clone
+encodes a closed type.
 
 @example reject
 import std::transfer

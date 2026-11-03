@@ -265,6 +265,42 @@ seal(Envelope[int] {body: 1})
     list $kind [string match "*has the open type*a transfer's schema is its static type*" $message]
 } -result {TRANSFER-OPEN-TYPE 1}
 
+test sd-trait-view-transfer {a value seen through a Sendable trait view is encoded: the trait monomorphization clones its function per witness before the schema is written, so each clone carries its concrete schema} -body {
+    sdRejection {import std::transfer
+import std::abi::bytes
+
+struct Point:
+    x: int
+
+fn seal(x: Sendable) -> std::abi::bytes::Bytes:
+    std::transfer::encode(x)
+
+[seal(Point {x: 1}), seal([1, 2])]
+}
+} -result accepted
+
+test sd-decode-trait-view {decode's type is concrete: decode[Sendable] is TRANSFER-OPEN-TYPE} -body {
+    lindex [sdRejection {import std::transfer
+import std::abi::bytes
+
+fn g(d: std::abi::bytes::Bytes) -> int:
+    x = std::transfer::decode[Sendable](d):
+        on TransferMalformed:
+            return 0
+        on TransferVersion:
+            return 0
+        on TransferTypeMismatch:
+            return 0
+        on TransferInvalidValue:
+            return 0
+        on TransferLimit:
+            return 0
+    1
+
+1
+}] 0
+} -result TRANSFER-OPEN-TYPE
+
 test sd-unconstrained-variable {an unconstrained imprint variable is not Sendable: NOT-SENDABLE, with the variable named} -body {
     lassign [sdRejection {import std::transfer
 import std::abi::bytes

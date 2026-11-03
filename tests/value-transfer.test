@@ -256,6 +256,32 @@ test vt-roundtrip-name-rebuilt {an owner's `through` rebuilds derived state in t
     vtAgree "$::vtDecls\n[vtRoundTrip Name {name_of("héllo")} {name_size(b) == 5 and name_text(b) == name_text(a)}]"
 } -result {"equal"}
 
+test vt-trait-view {a function taking a Sendable trait view encodes each witness with its own schema (one clone per witness): its bytes decode as that type and are refused as another} -body {
+    vtAgree {struct Point:
+    x: int
+    y: int
+
+fn seal(x: Sendable) -> std::abi::bytes::Bytes:
+    std::transfer::encode(x)
+
+fn open_point(d: std::abi::bytes::Bytes) -> str:
+    p = std::transfer::decode[Point](d):
+        on TransferMalformed:
+            return "malformed"
+        on TransferVersion:
+            return "version"
+        on TransferTypeMismatch:
+            return "mismatch"
+        on TransferInvalidValue:
+            return "invalid"
+        on TransferLimit:
+            return "limit"
+    std::int::to_string(p.x + p.y)
+
+[open_point(seal(Point {x: 3, y: 4})), open_point(seal([1, 2])), seal("ab") == std::transfer::encode("ab")]
+}
+} -result {["7", "mismatch", true]}
+
 test vt-mutable-independent {a received MutableVector, MutableArray, MutableMap and MutableSet are new values: mutating the copy leaves the source, and the reverse} -body {
     vtAgree {struct Bag:
     v: MutableVector[str]

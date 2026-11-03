@@ -411,9 +411,12 @@ proc hir::transfer::Elaborate {hirVar} {
         } else {
             set type [hir::typeOf $hir $e]
         }
-        if {[lindex [hir::types::SendClass $type] 0] ne "total" || ![hir::types::IsClosedType $type]} {
-            # (Unreachable in a checked program: VerifySending reported it.
-            # A lenient build runs nothing that reaches it.)
+        if {[lindex [hir::types::SendClass $type] 0] ne "total" || ![hir::types::IsClosedType $type]
+                || [hir::types::IsTrait $type]} {
+            # (Unreachable in an accepted program: VerifySending reported it,
+            # and a view of Sendable is a witness type once the trait
+            # monomorphization has cloned its function. A lenient build of a
+            # rejected program runs nothing that reaches it.)
             continue
         }
         set schema [Schema $type]

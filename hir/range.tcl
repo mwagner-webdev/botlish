@@ -1953,10 +1953,12 @@ proc hir::range::VerifyHashing {hirVar e node name} {
 # otherwise, with the reason path, whether the type is statically not
 # sendable (a function, a context, an opaque struct whose owner states
 # nothing) or does not say (`any`). And it must be closed where the call is
-# written -- no imprint variable or trait view: the transfer's schema is
-# the static type's (hir/transfer.tcl), which a generic body does not know
-# (TRANSFER-OPEN-TYPE). Checked in the program as written only, like
-# VerifyHashing.
+# written -- no imprint variable: the transfer's schema is the static
+# type's (hir/transfer.tcl), which a generic body does not know
+# (TRANSFER-OPEN-TYPE). A view of Sendable is admitted where a value is
+# encoded (its function is cloned per witness by the trait monomorphization
+# before the elaboration writes the schema), never as decode's type.
+# Checked in the program as written only, like VerifyHashing.
 proc hir::range::VerifySending {hirVar e node name} {
     upvar 1 $hirVar hir
     set sending [dict getdef [core::native::metadata $name] sending ""]
@@ -1984,7 +1986,10 @@ proc hir::range::VerifySending {hirVar e node name} {
             "$what is not sendable: [hir::types::show $type] cannot be reconstructed in another VM\n$why"] $at
         return
     }
-    if {![hir::types::IsClosedType $type]} {
+    if {![hir::types::IsClosedType $type] || ($sending eq "result" && [hir::types::IsTrait $type])} {
+        # (A view of Sendable is closed where it is a value -- its function
+        # is cloned per witness before the elaboration -- but never as the
+        # type a decode makes: that must be a concrete type.)
         hir::Diagnose hir TRANSFER-OPEN-TYPE [hir::semantic::NameCallables $hir \
             "$what has the open type [hir::types::show $type]: a transfer's schema is its static type, which must be known where the call is written (no imprint variable or trait view: call it where the concrete type is known)"] $at
     }
