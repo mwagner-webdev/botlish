@@ -536,9 +536,59 @@ difference for one decode. On the Tcl compiler the program is compiled
 once (`core::compiler::compileHir`) and the best of three runs of the unit
 is kept. A shared 4-core container: compare rows, never absolutes.
 
-BENCH-TABLE
+| Workload | Encoded bytes | Encode (µs) | Decode (µs) | Encode MB/s | Decode MB/s | Decode allocations / bytes | Tcl encode (µs) | Tcl decode (µs) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `int`: the Int 42 | 15 | 0.23 | 0.10 | 65 | 151 | 1 / 24 | 29.55 | 29.23 |
+| `big-int`: a 130-bit negative Int | 30 | 0.33 | 0.35 | 92 | 85 | 2 / 79 | 31.43 | 34.94 |
+| `string-12`: a 12-character String with two non-ASCII letters | 28 | 0.23 | 0.16 | 122 | 177 | 2 / 63 | 27.83 | 21.26 |
+| `bytes-64`: Bytes of 64 | 78 | 0.28 | 0.21 | 274 | 364 | 3 / 144 | 36.53 | 37.71 |
+| `bytes-4k`: Bytes of 4,096 | 4,111 | 0.70 | 0.56 | 5,878 | 7,344 | 3 / 4176 | 144 | 122 |
+| `bytes-1m`: Bytes of 1 MiB | 1,048,592 | 122 | 70.24 | 8,624 | 14,928 | 3 / 1048656 | 40,384 | 56,138 |
+| `ints-1000`: List[int] of 1,000 | 4,008 | 10.04 | 26.73 | 399 | 150 | 2 / 8048 | 3,750 | 7,610 |
+| `strings-1000`: List[str] of 1,000 short Strings | 3,905 | 9.81 | 67.28 | 398 | 58 | 1002 / 35938 | 2,450 | 4,830 |
+| `nested-100x10`: List[List[str]] of 100 × 10 | 3,596 | 10.92 | 82.12 | 329 | 44 | 1102 / 38730 | 3,874 | 5,649 |
+| `tree-d10`: a tree struct of depth 10 (2,047 nodes) | 9,227 | 60.95 | 640 | 151 | 14 | 6142 / 220071 | 9,794 | 55,391 |
+| `chain-10000`: a tree struct 10,001 nodes deep (a chain) | 30,016 | 282 | 3,564 | 106 | 8 | 30004 / 1060122 | 76,073 | 259,108 |
+| `vector-1000`: MutableVector[int] of 1,000 | 2,886 | 16.01 | 36.11 | 180 | 80 | 2 / 8040 | 4,030 | 7,235 |
+| `map-1000`: MutableMap[str, int] of 1,000 | 6,776 | 183 | 440 | 37 | 15 | 2014 / 133482 | 97,203 | 372,613 |
+| `set-1000`: MutableSet[int] of 1,000 | 2,886 | 63.40 | 144 | 46 | 20 | 12 / 57544 | 45,200 | 280,842 |
+| `message`: a struct of an Int, a String, a List[str] and 256 Bytes | 296 | 0.48 | 0.86 | 618 | 344 | 8 / 534 | 45.23 | 70.44 |
+| `shared-100x1000`: a List holding one 1,000-Int List 100 times | 287,314 | 845 | 2,685 | 340 | 107 | 102 / 803248 | 287,103 | 964,726 |
 
-BENCH-NOTES
+What the measurements show:
+
+* **The floor of a call.** Natively a scalar crosses in 0.1–0.35 µs each
+  way. The plan is parsed once per Vm and cached, so that time is the call,
+  the header and the one Bytes allocation. An actor-sized `message` (an
+  Int, a String, a List of two Strings and 256 Bytes) encodes in 0.48 µs
+  and decodes in 0.86 µs, with 8 allocations.
+* **Bytes are copied, not walked.** 1 MiB encodes at 8.6 GB/s and decodes
+  at 15 GB/s. Whatever its size, a decoded Bytes is three allocations: its
+  payload exactly, plus 64 bytes.
+* **Element-wise values cost per element.** In a List of Ints, an element
+  costs 10 ns to encode and 27 ns to decode. A String element costs 67 ns
+  to decode: one allocation and its UTF-8 check.
+* **Decoding pays for every object, encoding for none of them.** Decoding a
+  tree allocates three objects per node (the struct, its label, its child
+  List), about 310 ns a node. That is 6–12 times its encoding, which only
+  appends to the output. The receiver's own construction is the price of
+  rebuilding in another heap: allocation and validation.
+* **Depth is free.** The 10,001-deep chain decodes at 356 ns a node, against
+  312 for the balanced tree, and encodes at 28 ns a node. Neither codec
+  recurses on the host's stack.
+* **An owner's rebuild costs what the rebuild does.** A MutableMap of 1,000
+  String keys decodes in 440 µs: the owner's `transfer_in` inserts each
+  entry under the receiver's key, one keyed hash per key. Its encoding,
+  183 µs, is the owner's projection to a List of entries, then that List's
+  encoding. This is the price of never trusting a stored hash. A
+  MutableSet of 1,000 Ints decodes in 144 µs.
+* **Sharing is not preserved.** `shared-100x1000` holds one List 100 times
+  and is sent as 100 copies: 287 KB on the wire, and 100 Lists (803 KB)
+  allocated by the receiver. Section 19 records this as a limit.
+* **The Tcl codec is the reference, not a fast path.** On the Tcl compiler
+  a call costs about 30 µs, and throughput is 0.1–30 MB/s: 100–1,000 times
+  the native times. Rebuilding a map runs the owner's compiled Botlish one
+  entry at a time, 373 ms for 1,000 entries.
 
 ## 18. Compatibility
 
