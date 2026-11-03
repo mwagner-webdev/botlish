@@ -19,3 +19,5 @@ tests/sendability.test	sd-stdlib-statements	transfer	KEEP-INTERNAL	high	hir::str
 tests/sendability.test	sd-schema-*	transfer	KEEP-INTERNAL	high	hir::transfer::Schema's nodes, text and fingerprint	-	none	the canonical schema	INTERNAL	-
 tests/sendability.test	sd-hir-text-roundtrip	transfer	KEEP-INTERNAL	high	hir::format and hir::read::Program of a program with sendable clauses	-	none	HIR text carries the clause	INTERNAL	-
 tests/sendability.test	sd-elaborated	transfer	KEEP-INTERNAL	high	the elaborated HIR's transfer calls	-	none	every transfer is its run-time operation with its schema	INTERNAL	-
+tests/sendability.test	sd-trait-view-transfer	transfer	KEEP-INTERNAL	high	strict compile accepts encode of a Sendable trait view	-	none	the view is closed for encode (cloned per witness)	INTERNAL	-
+tests/sendability.test	sd-decode-trait-view	transfer	KEEP-NOT-EXPRESSIBLE	high	strict compile: TRANSFER-OPEN-TYPE of decode[Sendable]	-	rejection	the diagnostic in a top-level function	DIAGNOSTIC	-

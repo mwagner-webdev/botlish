@@ -378,8 +378,8 @@ proc hir::transfer::FunctionProblem {hir id name param result} {
 # SCHEMA, FNS) and transfer#decode(BYTES, SCHEMA, FNS), SCHEMA the String
 # constant of the transferred type's schema (RuntimeText) and FNS the List
 # of the owner functions its `through` nodes call. The call keeps its static
-# type (Bytes for encode, the imprinted T for decode); decode's imprint
-# becomes the schema. Every check ran on the call as written
+# type (Bytes for encode, the imprinted T for decode, whose imprint the
+# run-time operation keeps). Every check ran on the call as written
 # (hir::range::VerifySending held its type to Sendable and closed).
 proc hir::transfer::Elaborate {hirVar} {
     upvar 1 $hirVar hir
@@ -429,11 +429,9 @@ proc hir::transfer::Elaborate {hirVar} {
         }
         set fns [hir::mutvec::NewCall hir list $refs [list list any] $e]
         hir::mutvec::Retarget hir $e [dict get $operations $name]
-        if {[dict exists $hir exprs $e imprint]} {
-            # (The run-time operation is not imprinted: its schema is an
-            # argument now.)
-            dict unset hir exprs $e imprint
-        }
+        # (decode's run-time operation keeps the call's imprint: an analysis
+        # that types the call again -- a semantic instance's, native
+        # specialization -- reads its result type from it.)
         dict set hir exprs $e args [list [lindex $args 0] [hir::mutvec::NewConst hir [RuntimeText $schema] $e] $fns]
     }
 }

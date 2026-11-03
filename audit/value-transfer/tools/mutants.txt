@@ -340,3 +340,59 @@ proc core::transfer::Int {n} {
 ====
             return [core::value::immutableSet $parts]
 >>>>
+
+# --- The native codec (native/src/runtime/transfer.rs) ---------------------
+
+@@ native-vector-pointer a MutableVector is sent as its header's address, which the receiver takes for a value of its own: the copy aliases the source in one VM and dangles in another
+!! rust:transfer vt-mutable-independent vt-decode-twice
+## native/src/runtime/transfer.rs
+<<<<
+            Node::Vector(elem) => {
+                expect(heap_kind(v) == KIND_MUTVEC, v, "MutableVector")?;
+                push_items(p, &mut out, &mut nodes, *elem, super::mutvec::mutvec_of(v).backing.iter().copied());
+            }
+====
+            Node::Vector(_elem) => {
+                expect(heap_kind(v) == KIND_MUTVEC, v, "MutableVector")?;
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+>>>>
+## native/src/runtime/transfer.rs
+<<<<
+            Node::Set(elem) | Node::Vector(elem) | Node::Array(elem) => {
+                let count = r.varuint()?;
+====
+            Node::Vector(_) => {
+                let word = r.take8()?;
+                made(p, word)?;
+            }
+            Node::Set(elem) | Node::Array(elem) => {
+                let count = r.varuint()?;
+>>>>
+
+@@ native-unrooted a composite is allocated after its parts left the roots: a collection while it is made frees them
+!! rust:transfer vt-gc-stress
+## native/src/runtime/transfer.rs
+<<<<
+    let roots = &vm(p).temp_roots;
+    let parts: Vec<Value> = roots[roots.len() - k..].to_vec();
+====
+    let roots = &mut vm(p).temp_roots;
+    let parts: Vec<Value> = roots.split_off(roots.len() - k);
+>>>>
+## native/src/runtime/transfer.rs
+<<<<
+    roots.truncate(roots.len() - k);
+    roots.push(v);
+====
+    roots.push(v);
+>>>>
+
+@@ native-fingerprint-ignored the native receiver does not compare the bytes' fingerprint with its type's
+!! rust:transfer vt-refuse-wrong-type vt-refuse-instantiation vt-program-layout
+## native/src/runtime/transfer.rs
+<<<<
+    if u64::from_le_bytes(raw[5..HEADER].try_into().expect("eight bytes")) != plan.fingerprint {
+====
+    if false && u64::from_le_bytes(raw[5..HEADER].try_into().expect("eight bytes")) != plan.fingerprint {
+>>>>

@@ -6768,6 +6768,8 @@ tests/sendability.test sd-any-not-sendable pass
 tests/sendability.test sd-decode-not-sendable pass
 tests/sendability.test sd-not-sendable-no-erasure-cascade pass
 tests/sendability.test sd-open-type pass
+tests/sendability.test sd-trait-view-transfer pass
+tests/sendability.test sd-decode-trait-view pass
 tests/sendability.test sd-unconstrained-variable pass
 tests/sendability.test sd-trait-slot-satisfied pass
 tests/sendability.test sd-trait-slot-refused pass
@@ -8983,6 +8985,7 @@ tests/value-transfer.test vt-roundtrip-emptybytes pass
 tests/value-transfer.test vt-roundtrip-decimal pass
 tests/value-transfer.test vt-roundtrip-raw-floats pass
 tests/value-transfer.test vt-roundtrip-name-rebuilt pass
+tests/value-transfer.test vt-trait-view pass
 tests/value-transfer.test vt-mutable-independent pass
 tests/value-transfer.test vt-decode-twice pass
 tests/value-transfer.test vt-set-rebuilt pass

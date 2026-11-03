@@ -578,7 +578,8 @@ core::native::register transfer#encode -arity 3 -impl core::transfer::encode \
     -result-shape {named-struct std::abi::bytes::Bytes}
 core::native::register transfer#decode -arity 3 -impl core::transfer::decode \
     -param-types {struct str list} -result-type any -completion 1 \
-    -errors {TransferMalformed TransferVersion TransferTypeMismatch TransferInvalidValue TransferLimit}
+    -errors {TransferMalformed TransferVersion TransferTypeMismatch TransferInvalidValue TransferLimit} \
+    -imprint {vars {T} params {{nstruct std::abi::bytes::Bytes} any any} result {imprint T}}
 
 # The owner functions of the standard library's `sendable through` clauses
 # are internal: the protocol's, never API.

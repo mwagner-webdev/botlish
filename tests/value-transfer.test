@@ -870,6 +870,6 @@ test vt-gc-stress {round trips of every collection kind under BOTLISH_NATIVE_GC_
             unset ::env(BOTLISH_NATIVE_GC_STRESS)
         }
     }
-} -result {true}
+} -result {value true}
 
 cleanupTests
