@@ -433,7 +433,8 @@ commits change tests and documents only), x86-64 Linux, 4 cores:
 | `audit/golden/tools/fuzz.tcl` seed 3 | 110 cases on three backends, 0 disagreements |
 | `audit/static-compile/tools/mutate.tcl` | 38 of 38 killed (section 11) |
 | every mutant of every harness whose replaced text lies in a file this change edits | still applies (2,829 edits checked) |
-| CI `static-decisions` (golden suites, batched against sequential), dispatched on the branch | **pending**: `compare (mutable-array)` and `compare (shard 3/4)` passed; shard 4/4 was running and shards 1/4 and 2/4 were still waiting for a runner when this report was written |
+| CI `static-decisions` (golden suites, batched against sequential), dispatched on the branch ([run 41524816587](https://github.com/mwagner-webdev/botlish/actions/runs/41524816587), at the fix's commit; later commits change tests and documents only) | passed: `compare (mutable-array)` and all four shards, no `DISAGREE`, no `DOES NOT COMPILE` |
+| macOS and Windows acceptance tiers on the branch (run at the value-position commit) | one failure of this milestone's, fixed: `sced-other-file` read the module's file name from the message's text before its first colon, which on Windows is the drive letter; it now reads the raised diagnostic's location. Every other failure there was main's own at that time (`pn-unsupported-target`, `pm-remove`, `pm-crash-recovery`, `pm-lock-busy`, `pn-view-crash-recovery`: MAIN-CI-FAILURES-2026-11.md), fixed on main since |
 
 On the tree before this milestone the new Tcl file fails exactly its five
 tests of the gap and the golden suite exactly its seven `following` tests
