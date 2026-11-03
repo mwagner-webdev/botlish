@@ -7,14 +7,14 @@
 # For every workload a program builds the value once and then encodes it
 # (or decodes its bytes) K times in a fold whose result depends on every
 # copy; the same program with K = 0 is the baseline. The cost of one
-# operation is (time(K) - time(0)) / K: the value's construction, the
-# compilation and the process are the baseline's too. Natively the time is
-# native::measure's best of N runs in one process (compilation excluded),
-# and the allocations per operation native::allocationReport's difference
-# of the two programs' counts; on the Tcl compiler the best of N runs of
-# core::compiler::evalHir. Throughput is the encoding's size over the time.
-# Times are a shared container's: compare them with each other, never as
-# absolutes.
+# operation is (time(K) - time(0)) / K: the value's construction and the
+# process are the baseline's too. Natively the time is native::measure's
+# best of N runs in one process (compilation excluded), and the allocations
+# per operation native::allocationReport's difference of the two programs'
+# counts; on the Tcl compiler the best of N runs of a unit compiled once
+# (core::compiler::compileHir, then evalUnit). Throughput is the
+# encoding's size over the time. Times are a shared container's: compare
+# them with each other, never as absolutes.
 
 set here [file dirname [file normalize [info script]]]
 set root [file dirname $here]
@@ -29,6 +29,9 @@ foreach {k v} $argv {
 set env(LANG) C.utf8
 set env(LC_ALL) C.utf8
 cd $root
+# (tcltest, which the helpers load, reads argv.)
+set argv {}
+set argc 0
 source [file join $root tests helpers.tcl]
 source [file join $root surface surface.tcl]
 
@@ -68,18 +71,18 @@ set workloads {
     int          int                 {42}                                                 {c}                                   200000 2000
     big-int      int                 {-123456789012345678901234567890123456789}           {c.mod(7)}                            100000 2000
     string-12    str                 {"héllo, wörld"}                                     {std::str::length(c)}                 200000 2000
-    bytes-64     std::abi::bytes::Bytes {std::abi::bytes::from_list(loop i from 0 to 64:\n    std::byte::from_int(i))} {size(c)} 100000 1000
-    bytes-4k     std::abi::bytes::Bytes {std::abi::bytes::from_list(loop i from 0 to 4096:\n    std::byte::from_int(i.mod(256)))} {size(c)} 20000 200
-    bytes-1m     std::abi::bytes::Bytes {std::abi::bytes::from_list(loop i from 0 to 1048576:\n    std::byte::from_int(i.mod(256)))} {size(c)} 100 2
+    bytes-64     std::abi::bytes::Bytes {xs = loop i from 0 to 64:\n    std::byte::from_int(i)\nstd::abi::bytes::from_list(xs)} {size(c)} 100000 1000
+    bytes-4k     std::abi::bytes::Bytes {xs = loop i from 0 to 4096:\n    std::byte::from_int(i.mod(256))\nstd::abi::bytes::from_list(xs)} {size(c)} 20000 200
+    bytes-1m     std::abi::bytes::Bytes {xs = loop i from 0 to 1048576:\n    std::byte::from_int(i.mod(256))\nstd::abi::bytes::from_list(xs)} {size(c)} 100 2
     ints-1000    {List[int]}         {loop i from 0 to 1000:\n    i * 7919}               {std::list::length(c)}                2000 20
     strings-1000 {List[str]}         {loop i from 0 to 1000:\n    std::int::to_string(i)} {std::list::length(c)}                2000 20
     nested-100x10 {List[List[str]]}  {loop i from 0 to 100:\n    loop j from 0 to 10:\n        std::int::to_string(i * j)} {std::list::length(c)} 2000 20
     tree-d10     Node                {tree(10)}                                           {std::list::length(c.kids)}           500 5
     chain-10000  Node                {fold i from 0 to 10000 with intermediate acc Node {label: "x", kids: []}:\n    Node {label: "x", kids: [acc]}} {std::list::length(c.kids)} 50 2
-    vector-1000  MutableVector[int]  {std::mutable_vector::from_list(loop i from 0 to 1000:\n    i)} {std::mutable_vector::length(c)} 2000 20
+    vector-1000  MutableVector[int]  {xs = loop i from 0 to 1000:\n    i\nstd::mutable_vector::from_list(xs)} {std::mutable_vector::length(c)} 2000 20
     map-1000     {std::mutable_map::MutableMap[str, int]} {fold i from 0 to 1000 with intermediate m std::mutable_map::create[str, int]():\n    m.set(std::int::to_string(i), i)\n    m} {std::mutable_map::length(c)} 200 3
     set-1000     std::mutable_set::MutableSet[int] {fold i from 0 to 1000 with intermediate s std::mutable_set::create[int]():\n    s.add(i)\n    s} {std::mutable_set::length(c)} 200 3
-    message      Message             {Message {id: 7, sender: "worker-3", tags: ["urgent", "batch"], payload: std::abi::bytes::from_list(loop i from 0 to 256:\n    std::byte::from_int(i))}} {c.id} 50000 1000
+    message      Message             {xs = loop i from 0 to 256:\n    std::byte::from_int(i.mod(256))\nMessage {id: 7, sender: "worker-3", tags: ["urgent", "batch"], payload: std::abi::bytes::from_list(xs)}} {c.id} 50000 1000
     shared-100x1000 {List[List[int]]} {fold i from 0 to 100 with intermediate acc []:\n    acc.append(shared)} {std::list::length(c)} 50 1
 }
 
@@ -115,9 +118,12 @@ proc hirOf {text} {
 # The best time of RUNS runs of HIR on BACKEND, in microseconds.
 proc bestTime {backend hir runs} {
     if {$backend eq "compile"} {
+        # Compiled once; the first run also compiles the unit's Tcl
+        # procedures to bytecode, which the best of the later ones leaves out.
+        set unit [core::compiler::compileHir $hir]
         set best ""
-        for {set r 0} {$r < $runs} {incr r} {
-            set t [lindex [time {core::compiler::evalHir $hir}] 0]
+        for {set r 0} {$r <= $runs} {incr r} {
+            set t [lindex [time {core::compiler::evalUnit $unit}] 0]
             if {$best eq "" || $t < $best} { set best $t }
         }
         return $best
@@ -126,14 +132,17 @@ proc bestTime {backend hir runs} {
     return $best
 }
 
+# {ALLOCATIONS BYTES PEAK}: HIR's allocation count, allocated bytes and peak
+# live heap bytes, natively.
 proc allocations {hir} {
     set report [native::allocationReport $hir summary]
-    return [list [dict get $report total allocations] [dict get $report total bytes]]
+    set total [dict get $report total]
+    return [list [dict get $total allocations] [dict get $total allocatedBytes] [dict get $total peakLiveBytes]]
 }
 
 set runs [dict get $options -runs]
 set scale [dict get $options -scale]
-puts [format "%-16s %-17s %8s %12s %12s %10s %10s %14s" workload backend bytes "encode us" "decode us" "enc MB/s" "dec MB/s" "dec allocs/B"]
+puts [format "%-16s %-17s %8s %12s %12s %10s %10s %18s %12s" workload backend bytes "encode us" "decode us" "enc MB/s" "dec MB/s" "dec allocs/bytes" "dec peak +B"]
 foreach {name type build observe kNative kTcl} $workloads {
     set size ""
     foreach backend [dict get $options -backends] {
@@ -148,15 +157,17 @@ foreach {name type build observe kNative kTcl} $workloads {
             dict set row $mode [expr {double($tk - $t0) / $k}]
         }
         set allocs -
+        set peak -
         if {$backend ne "compile"} {
-            lassign [allocations [hirOf [program decode $type $build $observe 0]]] a0 b0
-            lassign [allocations [hirOf [program decode $type $build $observe 1]]] a1 b1
+            lassign [allocations [hirOf [program decode $type $build $observe 0]]] a0 b0 p0
+            lassign [allocations [hirOf [program decode $type $build $observe 1]]] a1 b1 p1
             set allocs "[expr {$a1 - $a0}]/[expr {$b1 - $b0}]"
+            set peak [expr {$p1 - $p0}]
         }
         set enc [dict get $row encode]
         set dec [dict get $row decode]
-        puts [format "%-16s %-17s %8s %12.2f %12.2f %10.1f %10.1f %14s" $name $backend $size $enc $dec \
-            [expr {$enc > 0 ? $size / $enc : 0}] [expr {$dec > 0 ? $size / $dec : 0}] $allocs]
+        puts [format "%-16s %-17s %8s %12.2f %12.2f %10.1f %10.1f %18s %12s" $name $backend $size $enc $dec \
+            [expr {$enc > 0 ? $size / $enc : 0}] [expr {$dec > 0 ? $size / $dec : 0}] $allocs $peak]
         flush stdout
     }
 }
