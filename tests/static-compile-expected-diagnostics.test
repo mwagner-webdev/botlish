@@ -512,7 +512,8 @@ r
     set inside [expr {[dict get $o file] ne [dict get $span file]
         && [dict get $o start] > [dict get $span start] && [dict get $o start] < [dict get $span end]
         && [dict get $o line] > [dict get $span line] && [dict get $o line] < [dict get $span endLine]}]
-    list $inside $strict [lindex [dict get $options -errorcode] end] [file tail [lindex [split $message :] 0]] \
+    list $inside $strict [lindex [dict get $options -errorcode] end] \
+        [file tail [dict get [lindex [dict get $options -diagnostics] 0] location file]] \
         [scedSites $hir] $diagnostics
 } -cleanup {
     removeDirectory sced-other-file
