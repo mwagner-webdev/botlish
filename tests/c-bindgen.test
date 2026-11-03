@@ -1011,6 +1011,28 @@ test cb-layout-anonymous-members {an anonymous member is represented truthfully,
     list $out $promoted
 } -result {{{bgf_overlay 16 8 {{kind std::ffi::c::Int 0} {member2 bgf_overlay_member2 8}} 0} {bgf_overlay_member2 8 8 {{i std::ffi::c::Int 0} {p {std::ffi::c::Ptr[std::ffi::c::Void]} 0}} 1} {bgf_overlapped 32 8 {{internal std::ffi::c::ULong 0} {internal_high std::ffi::c::ULong 8} {member3 bgf_overlapped_member3_union 16} {event {std::ffi::c::Ptr[std::ffi::c::Void]} 24}} 0} {bgf_overlapped_member3_union 8 8 {{member1 bgf_overlapped_member3_member1 0} {pointer {std::ffi::c::Ptr[std::ffi::c::Void]} 0}} 1} {bgf_overlapped_member3_member1 8 4 {{offset std::ffi::c::UInt 0} {offset_high std::ffi::c::UInt 4}} 0} {bgf_large 8 8 {{member1 bgf_large_member1 0} {u bgf_large_u 0} {quad std::ffi::c::LongLong 0}} 1} {bgf_large_member1 8 4 {{low std::ffi::c::UInt 0} {high std::ffi::c::Int 4}} 0} {bgf_deep 20 4 {{tag std::ffi::c::Char 0} {a std::ffi::c::Short 4} {member2_member2 bgf_deep_member2_member2 8} {member3 bgf_deep_member3 12}} 0} {bgf_deep_member2_member2 4 4 {{b std::ffi::c::Int 0} {c {array 3 of std::ffi::c::Char} 0}} 1} {bgf_deep_member3 8 4 {{member1 bgf_deep_member3_member1 0} {w bgf_word 0}} 1} {bgf_deep_member3_member1 6 2 {{x std::ffi::c::UShort 0} {y std::ffi::c::UShort 2} {member3 bgf_deep_member3_member1_member3 4}} 0} {bgf_deep_member3_member1_member3 2 2 {{z std::ffi::c::UChar 0} {zz std::ffi::c::UShort 0}} 1} {bgf_anon_tail 16 4 {{k std::ffi::c::Char 0} {member2 bgf_anon_tail_member2 4} {after std::ffi::c::Char 12}} 0} {bgf_anon_tail_member2 8 4 {{c {array 5 of std::ffi::c::Char} 0} {i std::ffi::c::Int 0}} 1} {bgf_two_anon 16 8 {{member1 bgf_two_anon_member1 0} {member2 bgf_two_anon_member2 8}} 0} {bgf_two_anon_member1 4 4 {{a std::ffi::c::Char 0} {b std::ffi::c::Int 0}} 1} {bgf_two_anon_member2 8 8 {{c std::ffi::c::Short 0} {d std::ffi::c::LongLong 0}} 1}} {{{struct bgf_overlapped} pointer member3.pointer 16 8} {{struct bgf_overlapped} offset member3.member1.offset 16 4} {{struct bgf_overlapped} offset_high member3.member1.offset_high 20 4} {{struct bgf_deep} b member2_member2.b 8 4} {{struct bgf_deep} c member2_member2.c 8 3} {{struct bgf_deep} w member3.w 12 4} {{struct bgf_deep} x member3.member1.x 12 2} {{struct bgf_deep} y member3.member1.y 14 2} {{struct bgf_deep} z member3.member1.member3.z 16 1} {{struct bgf_deep} zz member3.member1.member3.zz 16 2}}}
 
+test cb-layout-anonymous-nearest {an anonymous member's record layout is the nearest one clang gives at or above its brace: two anonymous unions of one record a few lines apart, each holding an unnamed struct (so both have the members member1, by place), are each their own synthetic layout of the compiler's size, never taken for one another as "several different" and blocked (the layout fuzzer's seed 163, run 41602581645)} -constraints clang -body {
+    set copy [scratch]
+    file copy [file join $::fixtureDir include] [file join $copy include]
+    set h [file join $copy include bgf bgf_records.h]
+    set text [::chdr::readFile $h]
+    set end [string last "#endif" $text]
+    set near "typedef struct bgf_near_anon \{\n    union \{ struct \{ long long ax; char ay; \}; \};\n    double mid;\n    union \{ struct \{ unsigned long long bx; long long by; \}; \};\n\} bgf_near_anon;\n\n"
+    writeText $h "[string range $text 0 [expr {$end - 1}]]$near[string range $text $end end]"
+    set profile [fixtureWith [dict create headers [dict merge [dict get $::fixture headers] [dict create source [list local $copy]]]]]
+    set generated [::cbind::generate::run $profile linux-x86_64]
+    set recs [dict get $generated model layouts]
+    set out [list [dict get $recs {struct bgf_near_anon} status]]
+    foreach {k r} $recs {
+        if {[dict get $r anonymous] && [dict getdef $r owner ""] eq {struct bgf_near_anon}} {
+            lappend out [list [dict get $r layoutName] [dict get $r status]]
+        }
+    }
+    list [lsort $out] [lmap name {bgf_near_anon bgf_near_anon_member1 bgf_near_anon_member3} {
+        lrange [dict get [layoutsOf $generated bgf] $name] 0 1
+    }]
+} -cleanup removeScratch -result {{{bgf_near_anon_member1 layout-direct} {bgf_near_anon_member1_member1 layout-direct} {bgf_near_anon_member3 layout-direct} {bgf_near_anon_member3_member1 layout-direct} layout-direct} {{40 8} {16 8} {16 8}}}
+
 test cb-layout-union-blockers {a union is blocked only by what an alternative cannot represent, and that root reason is what the report and the pressure analysis see -- never "union" or "anonymous-overlay": a long double (bgf_num; a union of a C float and a C double, bgf_fnum, is a layout), a C _Bool (bgf_flagu), a bitfield record (bgf_bitsu, nested-layout-blocked through its alternative), held by a record (bgf_holds_bitsu), as an array element (bgf_nums2), as an anonymous member (bgf_anon_float, through its synthetic union, beside bgf_anon_fnum's representable one); a representable anonymous union held by a record a bitfield blocks (bgf_bits_overlay) is no layout either: nothing reaches it, nothing C checks verifies it (unheld)} -constraints clang -body {
     set recs [dict get [generation $::fixture linux-x86_64] model layouts]
     set anon [lmap {k r} $recs {expr {[dict exists $r owner] && [dict get $r owner] eq "struct bgf_anon_float" ? $k : [continue]}}]
