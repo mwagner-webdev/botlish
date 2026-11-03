@@ -3060,6 +3060,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MutArrayToList => ("rt_mutarray_to_list", None, false, Some(("mutarraytolist", KIND_LIST))),
                         MutArrayEmpty => ("rt_mutarray_empty", None, false, None),
                         MutArrayTakeFront => ("rt_mutarray_take_front", None, false, None),
+                        // Transfer (runtime/transfer.rs): both run the
+                        // owners' `through` functions and allocate (each a
+                        // safepoint, op_may_allocate); fallible with a
+                        // decode's declared refusals and an owner call's
+                        // failure.
+                        TransferEncode => ("rt_transfer_encode", None, true, None),
+                        TransferDecode => ("rt_transfer_decode", None, true, None),
                         // Never fallible (see ops.rs's rt_str_decode_char_at):
                         // a one-character String can never exceed
                         // MAX_COLLECTION_LENGTH. Still routed through

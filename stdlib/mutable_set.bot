@@ -147,6 +147,18 @@ nomethod fn of_table(t: std::ordered_table::Table[T]) -> MutableSet[T]:
     MutableSet[T] {table: t}
 
 # ---------------------------------------------------------------------------
+# The loop protocol (hir/iteration.tcl): internal to the standard library.
+
+nomethod fn iteration_end(s: MutableSet[T]) -> int:
+    std::ordered_table::positions(s.table)
+
+nomethod fn iteration_live?(s: MutableSet[T], i: int) -> bool:
+    s.table.live_at?(i)
+
+nomethod fn iteration_at(s: MutableSet[T], i: int) -> T:
+    s.table.key_at(i)
+
+# ---------------------------------------------------------------------------
 # Sendability (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): a set is its
 # elements, in its order; its table is derived state the receiving VM
 # builds again under its own table-hash key. Internal to the standard
@@ -164,15 +176,3 @@ nomethod fn transfer_in(xs: List[T]) -> MutableSet[T]:
     loop x in xs:
         s.add(x)
     s
-
-# ---------------------------------------------------------------------------
-# The loop protocol (hir/iteration.tcl): internal to the standard library.
-
-nomethod fn iteration_end(s: MutableSet[T]) -> int:
-    std::ordered_table::positions(s.table)
-
-nomethod fn iteration_live?(s: MutableSet[T], i: int) -> bool:
-    s.table.live_at?(i)
-
-nomethod fn iteration_at(s: MutableSet[T], i: int) -> T:
-    s.table.key_at(i)

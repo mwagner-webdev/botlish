@@ -129,6 +129,15 @@ fn push_counted(p: *mut Vm, items: &mut VecDeque<Value>, x: Value) {
     }
 }
 
+/// A fresh vector of ITEMS, in order (a new, unique backing): a received
+/// vector (runtime/transfer.rs). ITEMS' referents must be rooted by the
+/// caller (the header's allocation may collect).
+pub(crate) fn new_vector_of(p: *mut Vm, items: Vec<Value>) -> Value {
+    let items: VecDeque<Value> = items.into();
+    let bytes = items.capacity() * 8;
+    new_header(p, Rc::new(items), bytes)
+}
+
 /// `mutable_vector::from_list(xs)`: a fresh vector of the List's elements.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_mv_from_list(p: *mut Vm, list: Value) -> Value {

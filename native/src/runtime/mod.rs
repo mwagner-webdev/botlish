@@ -29,6 +29,7 @@ pub mod program;
 pub mod show;
 pub mod strobj;
 pub mod syscall;
+pub mod transfer;
 #[cfg(test)]
 mod string_alloc_tests;
 pub mod value;

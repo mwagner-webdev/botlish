@@ -307,6 +307,11 @@ pub struct Vm {
     /// `resumer` link it is the chain of running coroutines: every one a GC
     /// root, and every stack on it walked by `collect_with`.
     pub co_current: *mut super::coroutine::CoroutineObj,
+    /// The transfer plans this Vm's code has used (runtime/transfer.rs), by
+    /// the address of their static String constant: parsed once per
+    /// program, not once per encode or decode. Only static constants are
+    /// keys (they live as long as this Vm, never reused for another text).
+    pub transfer_plans: std::collections::HashMap<Value, Rc<super::transfer::Plan>>,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -371,6 +376,7 @@ impl Vm {
             foreign_open: Vec::new(),
             callback_segments: Vec::new(),
             co_current: std::ptr::null_mut(),
+            transfer_plans: std::collections::HashMap::new(),
         })
     }
 
@@ -458,6 +464,8 @@ impl Vm {
 
     /// Installs the constant table (static objects owned by the VM).
     pub fn set_constants(&mut self, table: Vec<Value>, statics: Vec<*mut Header>) {
+        // (A plan is keyed by its constant's address: never across tables.)
+        self.transfer_plans.clear();
         self.const_table = table;
         self.consts = self.const_table.as_ptr();
         self.statics = statics;
