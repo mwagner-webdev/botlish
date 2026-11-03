@@ -1,0 +1,20 @@
+# helper-resume.bot -- a generic helper returning its yield's value as M: rejected (COROUTINE-RESUME-CONFLICT, TYPE).
+opaque struct Inbox[M]:
+    slot: int
+
+struct Work:
+    n: int
+
+fn inbox() -> Inbox[M]:
+    Inbox[M] {slot: 0}
+
+fn receive(i: Inbox[M]) -> M:
+    yield i.slot
+
+fn worker(i: Inbox[Work], resume Work) -> int:
+    w = receive(i)
+    v = receive(i)
+    w.n + v.n
+coroutine {step, first} = worker(inbox[Work]())
+step(Work {n: 5})
+step(Work {n: 6})

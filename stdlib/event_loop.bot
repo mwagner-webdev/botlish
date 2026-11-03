@@ -536,6 +536,22 @@ fn current_task(context ev: Loop) -> int errors SchedulerFault:
     else:
         -1
 
+private nomethod fn owned_checked?(task: int, context ev: Loop) -> bool errors IndexNotFound:
+    loop id from 0 to ev.st.at(s_ntasks):
+        if tget(id, t_live) == 1 and tget(id, t_serial) == task:
+            return true
+    false
+
+# Whether the loop still owns task TASK (adopt's id): ready, being
+# dispatched, or waiting. False once it returned or failed (its outcome is
+# recorded) or was abandoned (released without running: abandon, shutdown).
+# A library that adopted a task asks it to clean up after one the loop
+# released (std::actor's reap); it costs a pass over the task table.
+fn owned?(task: int, context ev: Loop) -> bool errors SchedulerFault:
+    owned_checked?(task):
+        on IndexNotFound:
+            fail SchedulerFault
+
 private fn ready_count(context ev: Loop) -> int:
     ev.ready_in.length() + ev.ready_out.length()
 

@@ -1,0 +1,132 @@
+# shutdown.bot -- SAME-THREAD-ACTORS-MILESTONE-1.md, "Shutdown and resource
+# accounting": std::event_loop::shutdown with actors still registered.
+#
+#   * idle waits to receive with nothing queued: the shutdown revokes its
+#     mailbox's channel, its receive answers Closed, and it ends within the
+#     shutdown's rounds (cooperative cleanup: it reports itself first);
+#   * blocked waits for room in a full mailbox: it wakes with Closed and
+#     ends;
+#   * spinner never stops pausing and has two messages queued: it is
+#     abandoned (released without running any more of its code), and reap
+#     closes its mailbox, counting the two messages undelivered;
+#   * the top level drains the replies it wants before reaping, and after
+#     reap no mailbox is left open and no actor running.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::str
+import type std::actor::Sent
+import type std::event_loop::Ending
+
+struct Msg:
+    n: int
+
+struct Line:
+    text: str
+
+fn sent_name(s: Sent) -> str:
+    if s == Sent::Delivered:
+        "Delivered"
+    elif s == Sent::Full:
+        "Full"
+    elif s == Sent::Closed:
+        "Closed"
+    else:
+        "Stale"
+
+fn idle(inbox: std::actor::Inbox[Msg], log: std::actor::Address[Line]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    got = fold with intermediate k 0:
+        m = rx.receive():
+            on std::actor::Closed:
+                break
+        k + m.n
+    log.send(Line {text: "idle: closed, cleaning up"})
+    std::actor::exit(got)
+
+fn blocked(to: std::actor::Address[Msg], log: std::actor::Address[Line]) -> std::actor::Exit:
+    s = to.deliver(Msg {n: 1})
+    log.send(Line {text: "blocked: deliver answered ".concat(sent_name(s))})
+    std::actor::exit(0)
+
+fn spinner(inbox: std::actor::Inbox[Msg]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    fold with intermediate k 0:
+        std::actor::pause()
+        k + 1
+    std::actor::exit(0)
+
+fn ending_name(e: Ending) -> str:
+    if e == Ending::Returned:
+        "Returned"
+    elif e == Ending::Failed:
+        "Failed"
+    else:
+        "Fault"
+
+nomethod fn say(text: str, n: int, context ev: std::event_loop::Loop) errors std::event_loop::SchedulerFault:
+    std::event_loop::log(text.concat(std::int::to_string(n)))
+
+nomethod fn if_closed(s: Sent) -> int:
+    if s == Sent::Closed:
+        1
+    else:
+        0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: log, inbox: log_in} = std::actor::open[Line](16)
+    {to: i_to, inbox: i_in} = std::actor::open[Msg](4)
+    {to: s_to, inbox: s_in} = std::actor::open[Msg](2)
+    i = inject no context:
+        coroutine {step, first} = idle(i_in, log)
+        std::actor::spawned(step, first)
+    say("main: idle is task ", i.start())
+    s = inject no context:
+        coroutine {step, first} = spinner(s_in)
+        std::actor::spawned(step, first)
+    say("main: spinner is task ", s.start())
+    std::actor::post(s_to, Msg {n: 1})
+    std::actor::post(s_to, Msg {n: 2})
+    b = inject no context:
+        coroutine {step, first} = blocked(s_to, log)
+        std::actor::spawned(step, first)
+    say("main: blocked is task ", b.start())
+    std::actor::post(i_to, Msg {n: 5})
+    # The loop never quiesces (the spinner): drive five turns, then shut
+    # down with two rounds.
+    loop t from 0 to 5:
+        std::event_loop::turn()
+    say("main: queued for the spinner ", std::actor::queued(s_to))
+    say("main: abandoned ", std::event_loop::shutdown(2))
+    lines = std::actor::drain(log_in)
+    say("main: reaped actors ", std::actor::reap())
+    loop o in std::event_loop::take_outcomes():
+        std::event_loop::log("main: outcome task ".concat(std::int::to_string(o.task)).append_char(' ').concat(ending_name(o.ending)).append_char(' ').concat(std::int::to_string(o.value)))
+    loop l in lines:
+        std::event_loop::log("log: ".concat(l.text))
+    st = std::actor::stats()
+    say("main: delivered ", st.delivered)
+    say("main: received ", st.received)
+    say("main: undelivered ", st.undelivered)
+    say("main: open mailboxes ", st.open)
+    say("main: running actors ", st.running)
+    say("main: ended ", st.ended)
+    say("main: reaped ", st.reaped)
+    say("main: a send to the spinner's old address answers Closed: ", if_closed(std::actor::post(s_to, Msg {n: 3})))
+    std::event_loop::trace()
+
+with context std::event_loop::create(64)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

@@ -137,6 +137,7 @@ program bench/uri-steady.bot
 # whose expected warnings are the module's entries below)
 
 program stdlib/abi.bot
+fails stdlib/actor.bot SURFACE MODULE INTERNAL-NAMESPACE -- internal member: actor.bot recovers a message through the standard library's internal std::actor::recover, which an entry program may not name (verified through `import std::actor`)
 program stdlib/ascii.bot
 program stdlib/binary.bot
 program stdlib/byte.bot

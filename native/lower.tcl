@@ -146,6 +146,7 @@ namespace eval native::lower {
         argv         {op argv} \
         std::list::length {op listlen} \
         std::tree::children {op treechildren} \
+        std::actor::recover {same} \
         std::list::at     {op listget} \
         std::list::append {op listappend} \
         std::list::flat   {op listflat} \
@@ -9983,6 +9984,11 @@ proc native::lower::NativeCallOp {e node} {
     set argExprs [dict get $node args]
     RuntimeRaises [dict get [core::native::metadata $name] errors]
     switch -- [lindex $impl 0] {
+        same {
+            # std::actor::recover (core/actor.tcl): its operand, unchanged;
+            # only its static type differs. No NIR operation.
+            return [list $name same]
+        }
         equality {
             if {[llength $argExprs] != 2} {
                 return [list $name veq]
@@ -10510,6 +10516,10 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     # it always has.
     set argExprs [dict get $node args]
     EmitArgGuards fn $e $argExprs $argRegs [dict get $meta paramTypes] $name
+    if {$op eq "same"} {
+        # The operand itself (std::actor::recover: NativeCallOp's `same`).
+        return [list [lindex $argRegs 0] tagged]
+    }
     set big [BigConstantResult $e $argExprs $op]
     if {$big ne ""} {
         # An Int `+ - *` of integer constant expressions whose value BIG is

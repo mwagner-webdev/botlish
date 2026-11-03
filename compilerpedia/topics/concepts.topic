@@ -3191,6 +3191,143 @@ inject no context:
 == MORE
 RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md.
 
+@topic concept.actors
+title: Actors: coroutines with typed mailboxes and only the authority they are given
+summary: `std::actor` runs coroutines as actors on the event loop with typed mailboxes; receiving and sending need no context, so an actor built inside `inject no context:` still communicates.
+index: concepts
+alias: actor; actors; mailbox; inbox; address; message passing; send a message; receive a message; supervisor; same-thread actors
+keywords: actor, mailbox, inbox, address, receiver, send, receive, deliver, listen, start, reap, backpressure, room, supervisor, inject, authority, event loop
+related: concept.context-injection concept.coroutines concept.affine concept.contexts stdlib.module.std::actor stdlib.module.std::event_loop
+docs: SAME-THREAD-ACTORS-MILESTONE-1.md THREAD-ACTOR-ARCHITECTURE-CENSUS.md RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md EVENT-LOOP-MILESTONE-1.md
+
+== WHAT IT IS
+    with context std::event_loop::create(64)
+    with context std::event_loop::deterministic::create()
+    with context std::actor::create()
+
+    {to: work, inbox} = std::actor::open[Work](8)
+    s = inject no context:
+        coroutine {step, first} = calculator(inbox)
+        std::actor::spawned(step, first)
+    s.start()
+    std::actor::post(work, Work {...})
+    std::event_loop::run()
+
+An actor is one ordinary coroutine: its state is its own locals, it handles
+one message at a time, and the event loop schedules it like any task. Its
+authority is what its construction was given: the inject block's contexts
+and the values passed in. Three capabilities connect actors:
+
+  * `Address[M]` -- copyable, send-only: `to.send(m)`, `to.deliver(m)`;
+  * `Inbox[M]` -- the affine receive right of one mailbox, moved into the
+    actor at construction: `rx = inbox.listen()` binds the mailbox to it;
+  * `Receiver[M]` -- what the actor receives through: `rx.receive()`,
+    `rx.try_receive()`.
+
+== RULES
+  * listen, receive, try_receive, send, deliver and pause need no context:
+    they are requests the actor's coroutine yields to the task that hosts
+    it, which performs them and resumes it with the answer.
+  * The administration -- open, start, post (a send from outside actors),
+    close, drain, reap, stats -- requires the Loop and std::actor::Actors.
+  * An actor function's result type is std::actor::Exit and it ends with
+    std::actor::exit(VALUE); it may fail with TaskFailed or IndexNotFound.
+    Either way its host closes its mailboxes (queued messages counted
+    undelivered, senders waiting for room woken with Closed), and
+    take_outcomes reports the task under start's id.
+  * Messages are values of exactly the mailbox's type, copied at the send,
+    in order per mailbox. A full mailbox answers Full; deliver waits for
+    room, woken when a place frees, in the order senders began to wait.
+    After a close sends are Closed, after the slot's reuse Stale.
+
+== WHY
+The scheduler's authority is not the actor's: a calculation actor built
+inside `inject no context:` in a supervisor that holds the network, the
+storage, the clock and the event loop can still receive work and reply --
+and the compiler proves it can do nothing else.
+
+== EXAMPLES
+@example accept
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::list
+
+struct Work:
+    n: int
+    reply: std::actor::Address[int]
+
+fn calculator(inbox: std::actor::Inbox[Work]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    served = fold with intermediate k 0:
+        w = rx.receive():
+            on std::actor::Closed:
+                break
+        w.reply.send(w.n * w.n)
+        k + 1
+    std::actor::exit(served)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[int] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: work, inbox} = std::actor::open[Work](4)
+    {to: replies, inbox: reply_in} = std::actor::open[int](4)
+    s = inject no context:
+        coroutine {step, first} = calculator(inbox)
+        std::actor::spawned(step, first)
+    s.start()
+    std::actor::post(work, Work {n: 3, reply: replies})
+    std::actor::post(work, Work {n: 7, reply: replies})
+    std::event_loop::run()
+    std::actor::drain(reply_in)
+
+with context std::event_loop::create(16)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        []
+    on std::event_loop::DriverFault:
+        []
+    on std::event_loop::LoopReentered:
+        []
+@caption A contextless actor receives work and replies
+@value [9, 49]
+@end
+
+@example reject
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+fn calculator(inbox: std::actor::Inbox[int], context ev: std::event_loop::Loop) -> std::actor::Exit errors std::event_loop::SchedulerFault:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::event_loop::log("calculating")
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[int](4)
+    s = inject no context:
+        coroutine {step, first} = calculator(inbox)
+        std::actor::spawned(step, first)
+    s.start()
+
+with context std::event_loop::create(16)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0
+@caption The actor would log through the Loop, which its inject block does not grant
+@error CORE SEMANTIC CONTEXT-NOT-INJECTED
+@at 15:9
+@end
+
+== MORE
+SAME-THREAD-ACTORS-MILESTONE-1.md.
+
 @topic concept.context-owned-state
 title: Context-owned state: an installed context owns its affine members
 summary: The installed context owns its affine members; a function requiring it reaches them as places, observed where they are stored and moved only by a collection's take, pop or swap.

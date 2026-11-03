@@ -1,0 +1,30 @@
+# A second receiver from one inbox: the Inbox is affine; moved into the first actor it is not live for the second (AFFINE-NOT-DEFINITELY-LIVE).
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+struct Work:
+    n: int
+
+fn worker(inbox: std::actor::Inbox[Work]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Work](4)
+    a = inject no context:
+        coroutine {step, first} = worker(inbox)
+        std::actor::spawned(step, first)
+    b = inject no context:
+        coroutine {step, first} = worker(inbox)
+        std::actor::spawned(step, first)
+    a.start()
+    b.start()
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0
