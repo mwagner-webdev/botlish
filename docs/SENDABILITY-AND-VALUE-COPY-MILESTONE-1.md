@@ -102,7 +102,7 @@ physical sharing inside a value is not preserved.
   and between independently compiled programs that number their shapes and
   enums differently.
 * **Evidence.** `tests/sendability.test` (82 tests) and
-  `tests/value-transfer.test` (75 tests, all four backends) pass, and the
+  `tests/value-transfer.test` (76 tests, all four backends) pass, and the
   codec's 8 Rust unit tests pass. The mutation harness kills MUTANT-COUNT of
   29 mutants. The format is the same on every backend: fixed byte vectors,
   hashes of encodings compared across backends, and bytes encoded on one
@@ -390,7 +390,10 @@ encode declares no error. The owner projections it may call are total.
 * **Mutable values.** A decoded MutableVector, MutableArray, MutableMap or
   MutableSet is a new value. Mutating it leaves the source unchanged, and
   mutating the source leaves the copy unchanged (`vt-mutable-independent`).
-  Two decodes of the same bytes are two values (`vt-decode-twice`).
+  Encoding a vector straight from its place copies it: the source keeps its
+  elements, and a later mutation of the source never reaches the bytes
+  (`vt-vector-place`). Two decodes of the same bytes are two values
+  (`vt-decode-twice`).
 * **Maps and sets** never carry stored hashes, an index or dead entries:
   * the projection is their live entries in their order;
   * the rebuild inserts them under the receiver's own table-hash key.
@@ -540,7 +543,7 @@ BENCH-NOTES
 ## 18. Compatibility
 
 * **Front-end tests.** `tests/sendability.test` (82) and
-  `tests/value-transfer.test` (75, all four backends) pass; so do
+  `tests/value-transfer.test` (76, all four backends) pass; so do
   `tests/hashable.test` (48), `tests/immutable-map.test` (26),
   `tests/mutable-set.test` (12), `tests/structs.test` (89) and
   `tests/tree-struct.test` (45).

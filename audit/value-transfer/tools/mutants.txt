@@ -342,7 +342,7 @@ proc core::transfer::Int {n} {
 # --- The native codec (native/src/runtime/transfer.rs) ---------------------
 
 @@ native-vector-pointer a MutableVector is sent as its header's address, which the receiver takes for a value of its own: the copy aliases the source in one VM and dangles in another
-!! rust:transfer vt-mutable-independent vt-decode-twice
+!! rust:transfer vt-mutable-independent vt-decode-twice vt-vector-place
 ## native/src/runtime/transfer.rs
 <<<<
             Node::Vector(elem) => {
