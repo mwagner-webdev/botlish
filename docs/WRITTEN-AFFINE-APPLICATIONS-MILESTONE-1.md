@@ -85,6 +85,11 @@ What changed:
 * **Imprints that make an application with no finite form** are refused at
   the call (`hir::imprint::UnfoldingProblem`), since a phantom slot may now
   be bound to an affine type.
+* **One type walk made linear** (`hir/types.tcl`): `MentionsMutable`
+  walked a type's applied fields along every path, exponential in the depth
+  of a type whose fields reach the next level more than once; an affine
+  argument, never cut by the type bound, written in a parameter's type made
+  that reachable (section 20). It now walks each named struct type once.
 * **Tests and documents that pinned the old rule** were updated: the
   trait-constrained-types test and its golden port (an affine argument is
   accepted), the actor test's affine message (rejected at the `post` that
@@ -96,8 +101,8 @@ What changed:
 
 ## 2. Starting asymmetry
 
-Reproduced before any change (`wd-starting-asymmetry` pins every row as
-accepted now):
+Reproduced before any change (`wd-starting-asymmetry` pins the rows
+accepted now, `wd-recursive-rejected` the last one):
 
 | program | before | after |
 |---|---|---|
@@ -479,7 +484,26 @@ the parameter and result positions it also compiles the **inferred twin**
 (an untyped parameter, an undeclared result) and requires the same verdict:
 the differential property "writing X changes nothing X has".
 
-RUNS_TABLE
+Runs (every backend: interp, compile, cranelift-generic, cranelift,
+cranelift-unfused; native release counters checked):
+
+| run | programs | disagreements |
+|---|---|---:|
+| `-written 60`, seeds 1 and 101 | 120 | 0 |
+| `-written 80`, seeds 202, 303, 404 and 505 | 320 | 0 |
+| the final code: `-n 20 -applications 20 -written 20 -seed 1`; `-written 40 -seed 7` | 20 + 20 + 20, 40 | 0 |
+| `tests/affine.test`'s `af-fuzz-bounded` (8 of each kind, seed 101) | 24 | 0 |
+| the revision before this milestone, the same generator, `-written 30 -seed 1` | 30 | 15 (every one the old slot rule: "the argument for slot A of S1 is the affine type ...") |
+
+The 500 written programs of this tree's runs: 224 accepted unrestricted,
+88 accepted affine (every handle released: Tcl coroutines alive afterwards
+0, natively released by the counters, none swept), 118
+AFFINE-CONTAINER-UNSUPPORTED (recursive declarations and applications,
+recursive applications written as types, affine set elements), 64
+USE-AFTER-MOVE, 6 IMPRINT (a generic signature's holding slot bound to an
+affine argument); among the generic signatures, 5 imprinted an affine
+argument at a phantom slot and ran. Where an inferred twin was compiled
+(the parameter and result positions), it agreed every time.
 
 The first runs found one generator defect and one oracle gap, both fixed
 in the tools, not the compiler: the generic position met a declaration
@@ -536,13 +560,20 @@ first batch is killed by the other tests listed.)
 **The existing mutants of code this milestone changed**, rerun with their
 own harnesses' detectors:
 
-* affine: MUTANTS_OLD_AFFINE
+* affine: every mutant of `hir/structs.tcl` (`struct-affine-unrestricted`
+  and the 19 `app-*` of the summaries, the application memo, the recursion
+  walk and the tree rule, whose fixpoint loop moved into `Fixpoint`) and
+  `app-ignores-arguments` (`hir/types.tcl`'s application case): 21
+  killed, with the three test files and the written fuzzer as detectors.
+  The harness's other mutants edit code this milestone did not change
+  (`hir/affine.tcl`, `MakeApplied`, the runtimes, native lowering) and
+  were not rerun;
 * trait-constrained-types (the 20 mutants of `hir/imprint.tcl`,
   `hir/resolve.tcl`, `hir/structs.tcl`): 20 killed;
 * c-abi-types (the 5 of `hir/imprint.tcl`: `imprint-only-intrinsics`,
   `bare-variable-accepted`, `fnptr-erasable`, `imprint-affine-binding`,
   `imprinted-callable-as-value`): 5 killed;
-* tree-struct (the 8 of `hir/structs.tcl`): MUTANTS_TREE
+* tree-struct (the 8 of `hir/structs.tcl`): 8 killed.
 
 Every mutant text of every harness that edits a file this milestone changed
 still occurs exactly once, after one update (`app-recursion-declared-fields`
@@ -615,7 +646,60 @@ they never end. They were not changed beyond what this milestone needed
 
 ## 21. Regression/CI
 
-REGRESSION_SECTION
+Local, on this 4-core container:
+
+* `tclsh9.0 tests/local.tcl` (with the final compiler code but for one
+  rewrite of an `expr` ternary in `WrittenProblem` into an `if`, made after
+  it and checked by `numeric-looking-names.test`): **116 golden suites, every
+  test passing on all four backends** (interp 5,557/5,557, compile
+  5,557/5,557, cranelift-generic 5,465/5,465, cranelift 5,567/5,567); Tcl
+  tests on interp 8,483 passed, on compile 8,478, 2 failed on each:
+  - `package-authoring.test`'s `pa-add-refusals`: this container's linker
+    has no AArch64 emulation (`unrecognised emulation mode: aarch64linux`);
+    it fails identically on the revision before this milestone;
+  - `numeric-looking-names.test`'s `nl-no-string-ternary`: the ternary
+    above, fixed (5/5 since).
+* The test files this milestone touches, run directly (every backend
+  where they run them): written-affine-applications 26/26,
+  affine-applications 21/21, affine 48/48, trait-constrained-types 77/77,
+  actor 67/67, tree-struct 45/45, c-abi-types 73/73, coroutines 81/81,
+  semantic-instances 80/80, static-compile 83/83, resources 40/40,
+  mutable-vector 68/68, mutable-array 36/36, mutable-map 28/28,
+  place-parameters 28/28, hashable 48/48, imports 104/104, structs 89/89,
+  numeric-looking-names 5/5, static-economics 93/93,
+  compilation-isolation 19/19, hir-interchange 11/11.
+* GC stress (`BOTLISH_NATIVE_GC_STRESS=1`): written-affine-applications
+  26/26, affine-applications 21/21, affine 48/48.
+* `tools/compilerpedia.tcl check`: 1,212 topics, 734 examples run, 0
+  problems (the two new `error.imprint` examples among them).
+* `audit/golden/migration/merge.tcl -check 1`: clean (the trait-constrained
+  types fragment's row for the affine argument is now a value).
+* `audit/compilation-isolation/tools/interleave.tcl` over the ten default
+  suites and tree-struct.bot, trait-constrained-types.bot, mutable-map.bot
+  (15 suites): 120 artifacts and outcomes compared, 0 differ.
+* `audit/static-decisions/tools/fuzz.tcl`, seeds 17 and 41: 0 failures
+  (20 programs each, 484 and 564 sites; every layout the same verdicts).
+* The fuzzers and mutation harnesses of sections 18 and 19.
+
+Not run locally: the HIR-interchange round trip over the corpus (no HIR
+field, side table, format or front-end input changed; written applications
+are ordinary types, and `wd-hir-text-and-interchange` reads one program
+back through HIR text and interchange), the compilation-isolation and
+HIR-interchange mutation harnesses (no registry was added: the slot
+positions are derived from the struct registry and forgotten with it), and
+the coroutine harness's mutants (`hir/affine.tcl` is unchanged). The static
+decisions' sequential comparison is CI's (AGENTS.md).
+
+CI on the branch (`claude/eager-johnson-6zz28g`): `main` had no red latest
+run when the branch was made (tests, tests-arm64, macOS, Windows,
+static-decisions and single executable queued or running; every other
+workflow green). On the branch, the push started `tests (macos arm64)`,
+`tests (windows x86-64)`, `icy-tower (macos arm64)` and `icy-tower (windows
+x86-64)`; `tests`, `tests (linux arm64)` and `static-decisions` were
+dispatched. When this report was written all seven runs of commit
+e9c4214 were still pending (six queued behind the runners' backlog,
+`icy-tower (windows x86-64)` in progress): none has a result yet, so none
+is counted as passed here.
 
 ## 22. Explicit limitations
 
