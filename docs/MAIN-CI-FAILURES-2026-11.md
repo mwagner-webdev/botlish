@@ -7,7 +7,9 @@ of `main`, including what the golden test framework could do.
 Method: every completed workflow run on `main` in the window, and in the
 five days before it (920 runs, through the GitHub API). For each failing
 run, the logs of its failed jobs, with each failing test traced to the
-first and the last run it appears in. The fixes were checked on Linux
+first and the last run it appears in. The counts cover the runs completed
+by 2026-11-02 18:30 UTC. A third `restart` failure after that (1e0a067,
+section 3.6) is described but not counted. The fixes were checked on Linux
 x86-64 (section 5). Their effect on Linux AArch64, macOS and Windows is
 for CI to confirm after the push.
 
@@ -266,8 +268,9 @@ compile pass. Run 41298098392 (f70542b1), once.
   close count instead of a bare 0, which tells the two explanations apart.
 
 **icy-tower (macOS), graphical acceptance case `restart`**: runs
-41328556692 and 41395294950. Both look like synthetic Quartz key events
-lost or delayed on the hosted runner:
+41328556692, 41395294950 and 41534654599 (1e0a067, after this report was
+first written). All three look like synthetic Quartz key events lost on
+the hosted runner:
 
 - **First run:** the held Right key never reached the game. The summary
   shows round 1, the player still at the centre (`x=227`), not over.
@@ -277,9 +280,29 @@ lost or delayed on the hosted runner:
 - **Second run:** the player's feet row (579) lay inside the oracle's range
   (546 to 680). The failing part was the centring check, consistent with
   the Right key-up arriving late.
-- **Changed here:** the case reports "Right reaches the game" with the
-  press's own account. An unconfirmed press now fails as an input failure,
-  not as game behavior; it is still a FAILED case, never a pass.
+- **Third run:** the same centring check. This time the facts settle it:
+  - The press was confirmed on its first attempt (the player moved +128
+    units).
+  - The summary, 0.9 s into round 2, has the player at `x=434`, so Right
+    was held through all of round 2.
+  - The game reads SDL's keyboard state after polling its events every
+    frame (`sdl::poll`), so SDL never processed the release. The key-up
+    was lost, not late.
+- **Changed here:**
+  - The case reports "Right reaches the game" with the press's own
+    account. An unconfirmed press now fails as an input failure, not as
+    game behavior; it is still a FAILED case, never a pass.
+  - Right is released by `Game.release`, which posts the key-up twice,
+    0.3 s apart. A release of a key that is up leaves SDL's keyboard state
+    as it is, so the second post changes nothing the game sees unless the
+    first never reached it. It does not hide a game that ignores releases:
+    that game would ignore both, and the case fails as before.
+  - The helper's `key` command now reports whether the window server holds
+    the key down 50 ms after posting (the session's state and the HID
+    system's), and the case keeps both reports. A recurrence then shows
+    whether the window server ever saw the release or the application
+    never got it.
+  - The centring check prints the player's x beside its feet row.
 
 **icy-tower (macOS), LaunchServices case `app-gatekeeper`**: run
 41450398416, "the game never started" failed after every Gatekeeper check
@@ -392,7 +415,7 @@ day.
 | scalar-asm-audit race | regenerate from the tip on a conflict | YAML validated; CI decides |
 | Windows unit-test crash | diagnostic rerun on one thread | YAML validated |
 | `el-linux-inflight` | the evidence on failure (holds, releases, driver counts, E1 at close) | 25 runs under GC stress pass; the new lines checked |
-| icy-tower (macOS) `restart`, `app-gatekeeper` | an unconfirmed press reported as such; a refused bundle's transient process told from a started game | `macos-session.py selftest`; runs on macOS only (icy-tower-macos.yml) |
+| icy-tower (macOS) `restart`, `app-gatekeeper` | an unconfirmed press reported as such; Right released twice, the window server's key state recorded; a refused bundle's transient process told from a started game | `macos-session.py selftest`; runs on macOS only (icy-tower-macos.yml) |
 
 `tclsh9.0 tests/local.tcl tests/package-manager.test tests/package-native.test
 tests/workload-icy-tower.test` passes.
@@ -405,8 +428,9 @@ skips dot-entries), so the mutants they kill are unchanged.
 Left open:
 
 - **`el-linux-inflight`:** not reproduced, only made diagnosable;
-- **the `restart` case's late key-up:** a lost key event stays a failure,
-  by the harness's rule;
+- **the `restart` case's lost key-up:** its cause. A release that both
+  posts lose still fails the case, by the harness's rule, and the
+  helper's reports then say where it was lost;
 - **the Windows access violation;**
 - **the two infrastructure failures.**
 
