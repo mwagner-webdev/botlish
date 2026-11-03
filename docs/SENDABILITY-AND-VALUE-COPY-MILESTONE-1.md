@@ -676,17 +676,36 @@ What the measurements show:
   commits, which touch this milestone's files only in `AGENTS.md` and
   `docs/INDEX.md`, beside its lines; they merged cleanly, and
   `tests/sendability.test` passes after the merge.
-* **Not run locally:**
-  * the whole `tests/local.tcl`;
-  * the static-decisions comparison (CI's);
-  * macOS and Windows, whose workflows run on the branch push. The codec
-    is portable Rust; its plan is the target's own NIR.
-* **CI on the branch, pending when this was written.** Dispatched, at the
-  head that holds every code change of the milestone: tests.yml (run
-  41700285818), tests-arm64.yml (41700290535) and static-decisions.yml
-  (41700295954). Started by the push: macos-arm64.yml (41700243090) and
-  windows-x86_64.yml (41700242990). All were queued; none has a verdict
-  here.
+* **The whole local suite** (`tests/local.tcl`: every Tcl test file on
+  interp and compile, every golden suite on all four backends; 106 minutes
+  on a 4-core container, front-end cache empty). Every golden suite passes
+  on every backend (116 suites; 5,557 tests on interp and compile, 5,465 on
+  cranelift-generic, 5,567 on cranelift). Four Tcl test files failed on
+  both passes, three of them this milestone's own, now fixed:
+  * `static-compile.test`'s `sc-codes-one-to-one` and
+    `golden-framework.test`'s `gf-code-name-complete` pin the number of
+    `std::compiler::DiagnosticCode` cases (now 140, the three new ones
+    included), and `std::test::code_name` names the new cases;
+  * `numeric-looking-names.test`'s `nl-no-string-ternary` found three
+    `expr ?:` selections in the codec and the schema, two of them over
+    strings (a function named `inf` would have been read as a number);
+    they are `if`s now.
+
+  The fourth, `package-authoring.test`'s `pa-add-refusals`, is main's
+  (PACKAGE-MANAGER-MILESTONE-3.md) and the container's: it links an AArch64
+  library, and this container has no AArch64 linker (the test needs lld).
+  The fixed files, the transfer tests, the warning gate and Compilerpedia
+  were run again after the fixes.
+* **Not run locally:** the static-decisions comparison (CI's), and macOS
+  and Windows, whose workflows run on a push. The codec is portable Rust;
+  its plan is the target's own NIR.
+* **CI, pending when this was written.** The branch's runs (tests.yml
+  41700285818, tests-arm64.yml 41700290535, static-decisions.yml
+  41700295954, macos-arm64.yml 41700243090, windows-x86_64.yml
+  41700242990) stayed queued for more than two hours behind main's own
+  queue, at a head without the three fixes above; they were cancelled when
+  the milestone merged into main, whose push runs every workflow on the
+  merged commit. None has a verdict here.
 * **Not rebuilt.** The committed Icy Tower executable
   (`audit/icy-tower/artifacts/icy-tower`), which AGENTS.md asks to rebuild
   with a runtime change. It is self-contained and its game uses neither

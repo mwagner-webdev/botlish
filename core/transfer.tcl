@@ -190,7 +190,11 @@ proc core::transfer::Int {n} {
         return [Varuint 0]
     }
     # The bits of the magnitude a two's complement needs besides the sign.
-    set m [expr {$n < 0 ? -$n - 1 : $n}]
+    if {$n < 0} {
+        set m [expr {-$n - 1}]
+    } else {
+        set m $n
+    }
     set bits [expr {$m == 0 ? 0 : [string length [format %llb $m]]}]
     set count [expr {$bits / 8 + 1}]
     set u [expr {$n & ((1 << (8 * $count)) - 1)}]
@@ -342,7 +346,11 @@ proc core::transfer::Decode {data schema fns} {
             bytes - mutbytes {
                 set count [ReadVaruint $raw pos $end]
                 set hex [binary encode hex [Take $raw pos $end $count]]
-                set store [expr {[lindex $node 0] eq "bytes" ? [core::value::bytestore $hex] : [core::value::mutbytes $hex]}]
+                if {[lindex $node 0] eq "bytes"} {
+                    set store [core::value::bytestore $hex]
+                } else {
+                    set store [core::value::mutbytes $hex]
+                }
                 lappend values [core::value::structOf [list [lindex $node 1] [lindex $node 2]] [list $store]]
             }
             list - set - vector - array {

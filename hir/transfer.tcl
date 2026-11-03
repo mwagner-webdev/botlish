@@ -155,7 +155,11 @@ proc hir::transfer::Make {stateVar type} {
                     set k [llength [dict get $state fns]]
                     set owner [hir::structs::owner $id]
                     foreach f [dict get $clause args] {
-                        dict lappend state fns [expr {$owner eq "" ? $f : "${owner}::$f"}]
+                        if {$owner eq ""} {
+                            dict lappend state fns $f
+                        } else {
+                            dict lappend state fns "${owner}::$f"
+                        }
                     }
                     return [list through $id [Node state [hir::structs::AppliedRepresentation $type]] $k]
                 }
