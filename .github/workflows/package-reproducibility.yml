@@ -1,0 +1,96 @@
+name: package reproducibility
+
+# PACKAGE-MANAGER-MILESTONE-3.md, "Reproducibility": this repository's
+# native packages (sdl3, sdlkit, raven, event_loop_linux) built twice, on
+# two runners that share nothing -- each builds the pinned author image
+# from tools/package-build/Dockerfile itself (a base image by digest,
+# Ubuntu's archive at one instant, Tcl 9 by SHA-256), then
+# tools/package-build/author.sh build runs the recipes in a fresh container
+# with an empty cache, fetching every source again -- and the two sets of
+# artifacts and provenance records compared file for file with
+# `botlish package compare`. -release makes a build of a version recorded
+# in packages/RELEASES.tsv that does not reproduce it fail. The artifacts
+# of both runs are kept.
+
+on:
+  push:
+    paths:
+      - "pm/**"
+      - "packages/**"
+      - "tools/package-repository.tcl"
+      - "tools/package-build/**"
+      - "tests/cffi/raven.tcl"
+      - "tests/cffi/sdl3.tcl"
+      - "tools/c-bindgen/profiles/raven.tcl"
+      - "tools/c-bindgen/profiles/sdl3.tcl"
+      - "generated/c/raven/**"
+      - "generated/c/sdl3/**"
+      - ".github/workflows/package-reproducibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.run }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [one, two]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the pinned author image (this runner's own)
+        run: tools/package-build/author.sh image
+
+      - name: Build every package in a fresh container
+        run: tools/package-build/author.sh build out -release
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.run }}
+          path: out/
+          if-no-files-found: warn
+
+  compare:
+    name: compare the two builds
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Tcl 9
+        run: bash .devcontainer/setup.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-one
+          path: one
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-two
+          path: two
+
+      - name: Compare artifacts and provenance records
+        run: |
+          status=0
+          for artifact in one/*.botpkg; do
+            name=$(basename "$artifact" .botpkg)
+            record=one/$name.provenance.json
+            echo "== $name"
+            args=("$artifact" "two/$name.botpkg")
+            [[ -f $record ]] && args+=(-provenance "$record" -provenance "two/$name.provenance.json")
+            tclsh9.0 main.tcl package compare "${args[@]}" || status=1
+            if [[ -f $record ]] && ! cmp "$record" "two/$name.provenance.json"; then
+              echo "the provenance records of $name differ"
+              status=1
+            fi
+          done
+          { echo "### package builds"; echo; echo '```'; sha256sum one/*.botpkg two/*.botpkg one/*.provenance.json two/*.provenance.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status

@@ -305,4 +305,28 @@ run -warnings off -target linux-x86_64 "$work/pkgapp2/main.bot" | grep -qF 'valu
 run -warnings off -target linux-aarch64 "$work/pkgapp2/main.bot" | grep -qF 'value: "aarch64"' || fail "the linux-aarch64 view"
 echo "   packages: a two-target release, its views and native inspect, with no native backend installed"
 
+# PM-3 (PACKAGE-MANAGER-MILESTONE-3.md): authoring a native package -- a
+# built library imported (here the system's own zlib, copied: a real ELF
+# file, its facts read from it), the package audited, packed with a
+# provenance record and the record checked against the artifact -- with no
+# C compiler and still no native backend installed (Linux: the library is
+# an ELF file of this host's target).
+if [[ $(uname -s) == Linux ]]; then
+  case $(uname -m) in x86_64) ztarget=linux-x86_64 ;; aarch64) ztarget=linux-aarch64 ;; *) ztarget="" ;; esac
+  libz=$(ls /lib/*-linux-gnu/libz.so.1 /usr/lib/*-linux-gnu/libz.so.1 2>/dev/null | head -1)
+  if [[ -n $ztarget && -n $libz ]]; then
+    mkdir -p "$work/pkgsrc/zpkg" "$work/zbuild"
+    cp -L "$libz" "$work/zbuild/libz.so.1"
+    printf '{"schema": 1, "name": "zpkg", "version": "1.0.0"}\n' >"$work/pkgsrc/zpkg/botlish.json"
+    printf 'extern c library "z"\n\nfn n() -> int:\n    1\n' >"$work/pkgsrc/zpkg/zpkg.bot"
+    printf '{"evidence": 1, "builds": [{"name": "zlib", "outputs": ["targets/%s/native/libz.so.1"], "notes": "the system zlib, copied"}]}\n' "$ztarget" >"$work/zbuild/evidence.json"
+    pm native add "$work/zbuild/libz.so.1" -target "$ztarget" -name z -symbol inflate -license Zlib -package "$work/pkgsrc/zpkg" >/dev/null || fail "native add"
+    pm native audit "$work/pkgsrc/zpkg" | grep -q "target $ztarget: complete" || fail "native audit"
+    pm package pack "$work/pkgsrc/zpkg" -out "$work/pkgrepo" -evidence "$work/zbuild/evidence.json" >/dev/null || fail "package pack -evidence"
+    pm package inspect "$work/pkgrepo/zpkg-1.0.0.botpkg" -provenance "$work/pkgrepo/zpkg-1.0.0.provenance.json" | grep -q "describes this artifact" || fail "package inspect -provenance"
+    [[ ! -e $work/home-pm/.cache ]] || fail "an authoring command installed the native backend ($(ls "$work/home-pm/.cache"))"
+    echo "   packages: native add, audit, pack -evidence, inspect -provenance, with no compiler or native backend"
+  fi
+fi
+
 echo "== smoke test passed"

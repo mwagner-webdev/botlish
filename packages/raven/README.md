@@ -1,6 +1,6 @@
 # raven -- graphical user interfaces for Botlish programs
 
-`raven` 0.3.1 is a Botlish package for [Raven](https://github.com/oscar-soirey/Raven)
+`raven` 0.3.2 is a Botlish package for [Raven](https://github.com/oscar-soirey/Raven)
 0.1.3, a C11 GUI library: real desktop windows (X11, drawn by Raven's
 Vulkan renderer) with labels, buttons, checkboxes, sliders, spin boxes,
 text inputs and combo boxes, and a headless mode -- no display, nothing
@@ -46,14 +46,20 @@ sudo apt-get install gcc libc6-dev libx11-6 libvulkan1 mesa-vulkan-drivers   # a
 The display, the loader and the driver are not checked at installation
 (a headless program needs none of them); when one is missing,
 `raven::start(raven::desktop())` fails with `raven::RavenFailed`, whose
-`detail` names it (section "When it does not start").
+`detail` names it (section "When it does not start"). The package's
+metadata says the same: libX11 is a system library its libraven loads
+(checked by `botlish add`), and the Vulkan loader, a Vulkan driver, the X11
+display, `libX11-xcb.so.1` (only for a driver that presents through XCB)
+and `libdbus-1.so.3` (only for accessibility) are run-time dependencies,
+which `botlish native plan` lists apart from the link with what this
+machine has -- never a reason the installation fails.
 
 ## Installing
 
 In your project's directory (or with `-project DIR`):
 
 ```sh
-botlish add /path/to/raven-0.3.1.botpkg
+botlish add /path/to/raven-0.3.2.botpkg
 ```
 
 This writes `botlish.json` and `.bot_modules/`, checks every native file
@@ -153,6 +159,18 @@ reported while it started, cause first.
 
 A program whose libraven cannot be loaded at all (no libX11) does not
 start: the system's loader reports the missing library.
+
+## Licenses
+
+Raven is the Apache License 2.0's, and its library includes third-party
+components under their own terms (stb: MIT or the Unlicense; the Roboto
+font: Apache 2.0; Roboto Mono: the SIL Open Font License 1.1). The package
+states it (`botlish package inspect`: `license Apache-2.0 AND OFL-1.1 AND
+(MIT OR Unlicense)`) and carries the texts their terms require to travel
+with the library, under `licenses/raven/` of the installed package: Raven's
+LICENSE and NOTICE, THIRD_PARTY.md and each component's license. An
+application that ships `libraven.so.0` (`botlish native deploy`) ships
+those notices with it.
 
 ## What it does not do
 

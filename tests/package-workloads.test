@@ -228,9 +228,9 @@ test pw-sdlkit-installs-its-binding {sdlkit and the SDL3 package -- one release 
         [file isfile [file join $app .bot_modules sdlkit .bot_modules sdl3 targets linux-aarch64 sdl3 video.bot]] \
         [dict get $statuses sdlkit] [lsort -unique [lmap {ns status} $statuses {expr {[string match sdlkit/sdl3::* $ns] ? $status : [continue]}}]] \
         [catch {hirOf [file join $sneaky main.bot] -target linux-x86_64} m o] [lindex [dict get $o -errorcode] end]
-} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.0 (sha256 *): installed} {  sdl3 0.2.0 (sha256 *): installed} {view linux-x86_64: derived (* files, 2 native libraries)}} 1 0 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
+} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.1 (sha256 *): installed} {  sdl3 0.2.1 (sha256 *): installed} {view linux-x86_64: derived (* files, 2 native libraries)}} 1 0 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
 
-test pw-sdl3-two-targets {the same sdl3 0.2.0 artifact serves linux-aarch64: preparing it derives a second view from the installed release (nothing reinstalled, the host's view untouched), the front end compiles sdlkit's program for linux-aarch64 from the AArch64 binding, its HIR is that target's, and the plan reports AArch64's system SDL3 unverified here} -constraints {sdl3Package} -body {
+test pw-sdl3-two-targets {the same sdl3 0.2.1 artifact serves linux-aarch64: preparing it derives a second view from the installed release (nothing reinstalled, the host's view untouched), the front end compiles sdlkit's program for linux-aarch64 from the AArch64 binding, its HIR is that target's, and the plan reports AArch64's system SDL3 unverified here} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
     set app [fresh app]
     writeText [file join $app main.bot] $::sdlkitMain
@@ -246,7 +246,7 @@ test pw-sdl3-two-targets {the same sdl3 0.2.0 artifact serves linux-aarch64: pre
     list [dict get $r status] [lrange [split [dict get $r out] \n] 0 3] [expr {[treeState [file join $app {*}$::hostView]] eq $before}] \
         [dict get $hir target] $files [hir::foreign::links $hir] \
         [lsearch -inline [split [dict get $plan out] \n] {    unverified*}]
-} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.0: unchanged} {view linux-aarch64: derived (* files, 2 native libraries)} {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)} {view linux-x86_64: unchanged}} 1 linux-aarch64 APP/.bot_modules/.targets/linux-aarch64/sdlkit/.bot_modules/sdl3/sdl3/video.bot SDL3 {    unverified on this host: linux-aarch64's system must provide it}}
+} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.1: unchanged} {view linux-aarch64: derived (* files, 2 native libraries)} {note: linux-aarch64: SDL3: a system library of linux-aarch64, not verified (this host is linux-x86_64): the target system must provide it (3)} {view linux-x86_64: unchanged}} 1 linux-aarch64 APP/.bot_modules/.targets/linux-aarch64/sdlkit/.bot_modules/sdl3/sdl3/video.bot SDL3 {    unverified on this host: linux-aarch64's system must provide it}}
 
 test pw-sdlkit-verify-and-reinstall {verify checks both instances against their artifacts and the host's view, its native libraries verified again; a fresh copy of the application reinstalls the same tree and view from botlish.json and the repository} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
@@ -320,7 +320,7 @@ test pw-sdl3-thunk-archive {a program calling one of the binding's thunks (an SD
 # ---------------------------------------------------------------------------
 # E. Raven
 
-test pw-raven-installs-without-a-compiler {the Raven package installs with no C compiler or linker on PATH; its host view is file for file the tree tools/raven-package.tcl installs, plus its botlish.json and the bundled libraven: the bridge archive and the library were built on the author's side} -constraints {ravenPackage} -body {
+test pw-raven-installs-without-a-compiler {the Raven package installs with no C compiler or linker on PATH; its host view is file for file the tree tools/raven-package.tcl installs, plus its botlish.json, the bundled libraven and the license notices it carries: the bridge archive and the library were built on the author's side} -constraints {ravenPackage} -body {
     set repo [repository {raven}]
     set app [fresh app]
     set empty [fresh empty-path]
@@ -336,7 +336,7 @@ test pw-raven-installs-without-a-compiler {the Raven package installs with no C 
         lappend files $list
     }
     lassign $files managed helped
-    set managed [lsearch -all -inline -not -regexp $managed {^(botlish\.json|native/libraven\.so\.0)$}]
+    set managed [lsearch -all -inline -not -regexp $managed {^(botlish\.json|native/libraven\.so\.0|licenses/raven/.*)$}]
     list [dict get $r status] [expr {$managed eq $helped}] [file isfile [file join $app {*}$::hostView .lib libraven.so.0]]
 } -cleanup cleanup -result {0 1 1}
 
@@ -379,7 +379,7 @@ proc ravenStoreFacts {app target} {
     }
 }
 
-test pw-raven-desktop-release {the release is raven 0.3.1, one artifact for linux-x86_64 and linux-aarch64, and on both it bundles Raven's desktop build -- a shared object of the target that loads libX11.so.6 (the X11 platform) and exports the Vulkan renderer's API -- beside the bridge's archive; libX11 is declared a system library, verified here by the system's own metadata, and the plan names no -L} -constraints {ravenPackage} -body {
+test pw-raven-desktop-release {the release is raven 0.3.2, one artifact for linux-x86_64 and linux-aarch64, and on both it bundles Raven's desktop build -- a shared object of the target that loads libX11.so.6 (the X11 platform) and exports the Vulkan renderer's API -- beside the bridge's archive; libX11 is declared a system library, verified here by the system's own metadata, and the plan names no -L} -constraints {ravenPackage} -body {
     set repo [repository {raven}]
     set app [fresh app]
     set added [pm add raven -project $app -repository $repo]
@@ -388,11 +388,11 @@ test pw-raven-desktop-release {the release is raven 0.3.1, one artifact for linu
         [ravenStoreFacts $app linux-x86_64] [ravenStoreFacts $app linux-aarch64] \
         [regexp {library X11: system shared \(instance raven\)\n    ELF x86-64 shared object; (pkg-config|dpkg package)} $plan] \
         [string match "*needs libm.so.6, libX11.so.6, libc.so.6, ld-linux-x86-64.so.2*" $plan] [string match "*no -L is needed*" $plan]
-} -cleanup cleanup -result {raven-0.3.1.botpkg 0 {{libraven.so.0 62 1 1 libraven.so.0} {libraven_bridge.a archive}} {{libraven.so.0 183 1 1 libraven.so.0} {libraven_bridge.a archive}} 1 1 1}
+} -cleanup cleanup -result {raven-0.3.2.botpkg 0 {{libraven.so.0 62 1 1 libraven.so.0} {libraven_bridge.a archive}} {{libraven.so.0 183 1 1 libraven.so.0} {libraven_bridge.a archive}} 1 1 1}
 
-test pw-raven-artifact-contents {the artifact holds the package and nothing to run: its common files -- the module, the two guides, the example, the bridge's source -- and per target the generated binding, the bridge's archive and libraven; no script, no build file, no header but the binding's own modules} -constraints {ravenPackage} -body {
+test pw-raven-artifact-contents {the artifact holds the package and nothing to run: its common files -- the module, the two guides, the example, the bridge's source, Raven's license and the notices its terms require -- and per target the generated binding, the bridge's archive and libraven; no script, no build file, no header but the binding's own modules} -constraints {ravenPackage} -body {
     set repo [repository {raven}]
-    set files [dict keys [dict get [pm::archive::read [file join $repo raven-0.3.1.botpkg]] files]]
+    set files [dict keys [dict get [pm::archive::read [file join $repo raven-0.3.2.botpkg]] files]]
     set common [lsort [lsearch -all -inline -not -glob $files targets/*]]
     set kinds {}
     foreach target {linux-aarch64 linux-x86_64} {
@@ -402,20 +402,20 @@ test pw-raven-artifact-contents {the artifact holds the package and nothing to r
         lappend kinds $target [expr {$bindings == [llength $own] - 2}] $native
     }
     list $common $kinds
-} -cleanup cleanup -result {{GUIDE.md README.md botlish.json examples/clicks/clicks.bot examples/clicks/main.bot examples/clicks/test.bot native/raven_bridge.c raven.bot} {linux-aarch64 1 {targets/linux-aarch64/native/libraven.so.0 targets/linux-aarch64/native/libraven_bridge.a} linux-x86_64 1 {targets/linux-x86_64/native/libraven.so.0 targets/linux-x86_64/native/libraven_bridge.a}}}
+} -cleanup cleanup -result {{GUIDE.md README.md botlish.json examples/clicks/clicks.bot examples/clicks/main.bot examples/clicks/test.bot licenses/raven/LICENSE licenses/raven/NOTICE licenses/raven/THIRD_PARTY.md licenses/raven/third_party/roboto-mono/LICENSE licenses/raven/third_party/roboto/LICENSE licenses/raven/third_party/stb/LICENSE native/raven_bridge.c raven.bot} {linux-aarch64 1 {targets/linux-aarch64/native/libraven.so.0 targets/linux-aarch64/native/libraven_bridge.a} linux-x86_64 1 {targets/linux-x86_64/native/libraven.so.0 targets/linux-x86_64/native/libraven_bridge.a}}}
 
-test pw-raven-release-immutable {the author's one operation (tools/package-repository.tcl OUT raven) prints the release's identity -- name, version, SHA-256, targets -- and run again reproduces the same bytes from its cached builds (unchanged); a different file already holding raven 0.3.1 in OUT is refused (EXISTS) and left as it was, unless -force says to overwrite that local file} -constraints {ravenPackage} -body {
+test pw-raven-release-immutable {the author's one operation (tools/package-repository.tcl OUT raven) prints the release's identity -- name, version, SHA-256, targets -- and run again reproduces the same bytes from its cached builds (unchanged); a different file already holding raven 0.3.2 in OUT is refused (EXISTS) and left as it was, unless -force says to overwrite that local file} -constraints {ravenPackage} -body {
     set out [fresh repo]
     set first [exec [info nameofexecutable] $::repositoryTool $out raven 2>@1]
     regexp {sha256 ([0-9a-f]{64})} $first -> digest
     set again [exec [info nameofexecutable] $::repositoryTool $out raven 2>@1]
-    set artifact [file join $out raven-0.3.1.botpkg]
+    set artifact [file join $out raven-0.3.2.botpkg]
     writeText $artifact "not this release"
     set refused [catch {exec [info nameofexecutable] $::repositoryTool $out raven 2>@1} refusal]
     set kept [expr {[pm::ReadBytes $artifact] eq "not this release"}]
     set forced [exec [info nameofexecutable] $::repositoryTool -force $out raven 2>@1]
-    list [regexp {packed raven 0\.3\.1: \S+raven-0\.3\.1\.botpkg\n} $first] [string match "*targets linux-aarch64, linux-x86_64*" $first] \
-        [string match "*(unchanged)*sha256 $digest*" $again] $refused [string match "*already holds a different raven 0.3.1*" $refusal] $kept \
+    list [regexp {packed raven 0\.3\.2: \S+raven-0\.3\.2\.botpkg\n} $first] [string match "*targets linux-aarch64, linux-x86_64*" $first] \
+        [string match "*(unchanged)*sha256 $digest*" $again] $refused [string match "*already holds a different raven 0.3.2*" $refusal] $kept \
         [string match "*sha256 $digest*" $forced] [expr {[pm::sha256::hex [pm::ReadBytes $artifact]] eq $digest}]
 } -cleanup cleanup -result {1 1 1 1 1 1 1 1}
 
@@ -466,6 +466,50 @@ test pw-raven-deploy-relocates {the release's example test as a native executabl
         $run [string match "*=> $moved/lib/libraven.so.0 *" $resolved]
 } -cleanup cleanup -result {0 0 0 0 {["2", "2 clicks", "0", "0 clicks"]} 1}
 
+# PM-3: the releases are made by the generic authoring workflow.
+
+test pw-native-metadata-derived {the repository's native packages state no native metadata of their own (packages/NAME/botlish.json: name, version, dependencies); every fact of a release's metadata was written by native add, native require and package stage from the built files and the recipe's statements} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set source [pm::descriptor::read [file join $::projectRoot packages raven botlish.json] project]
+    set release [pm::descriptor::fromBytes [dict get [pm::archive::read [file join $repo raven-0.3.2.botpkg]] descriptor] artifact X]
+    set x64 [dict get $release targets linux-x86_64]
+    set raven [lsearch -inline -index 1 [dict get $x64 libraries] raven]
+    list [dict get $source schema] [dict exists $source targets] [dict get $release schema] \
+        [lmap library [dict get $x64 libraries] {list [dict get $library name] [dict get $library origin]}] \
+        [dict get [dict create {*}$raven] needs] [lmap d [dict get $x64 runtime] {list [dict get $d name] [dict get $d requirement] [dict get $d capability]}]
+} -cleanup cleanup -result {1 0 3 {{raven_bridge bundled} {raven bundled} {X11 system}} {libm.so.6 libX11.so.6 libc.so.6 ld-linux-x86-64.so.2} {{vulkan capability desktop} {vulkan-driver capability desktop} {x11-display capability desktop} {x11-xcb optional {}} {dbus capability accessibility}}}
+
+test pw-raven-runtime-dependencies {the Vulkan loader is a run-time dependency of the desktop capability, never a loader dependency: no bundled library needs it, the plan lists it apart from the link (with this host's candidate, and the driver as a facility no file names), and the plan is complete without it} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set app [fresh app]
+    set added [pm add raven -project $app -repository $repo]
+    set plan [dict get [pm native plan -project $app] out]
+    list [dict get $added status] [string match "*needs libm.so.6, libX11.so.6, libc.so.6, ld-linux-x86-64.so.2*" $plan] \
+        [regexp {library vulkan \(libvulkan\.so\.1\): needed for "desktop" \(instance raven, opened by raven\)} $plan] \
+        [string match "*facility vulkan-driver: needed for \"desktop\"*not a file: the package manager cannot verify it*" $plan] \
+        [regexp {library dbus \(libdbus-1\.so\.3\): needed for "accessibility"} $plan] [string match "*problem:*" $plan]
+} -cleanup cleanup -result {0 1 1 1 1 0}
+
+test pw-raven-provenance {the release's provenance record describes exactly its artifact (package inspect -provenance), confirmed its two sources' Git trees from their files, names every native file's build, and holds no path of the machine that built it} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set record [file join $repo raven-0.3.2.provenance.json]
+    set r [pm package inspect [file join $repo raven-0.3.2.botpkg] -provenance $record]
+    set text [pm::ReadBytes $record]
+    list [dict get $r status] [string match "*describes this artifact*" [dict get $r out]] \
+        [llength [regexp -all -inline {git-tree: confirmed} [dict get $r out]]] \
+        [llength [regexp -all -inline {build raven desktop linux-[a-z0-9_]+ output targets/linux-[a-z0-9_]+/native/libraven.so.0: confirmed} [dict get $r out]]] \
+        [regexp {"/(home|root|tmp)/} $text] [string match "*\$HOME*" $text]
+} -cleanup cleanup -result {0 1 2 2 0 0}
+
+test pw-raven-aarch64-runtime-search-path {the AArch64 libraven carries no run-time search path: raven 0.3.1's held the author machine's cache directory and an empty entry (the current directory), which made the release differ between machines; the native audit now refuses such a library} -constraints {ravenPackage} -body {
+    set repo [repository {raven}]
+    set files [dict get [pm::archive::read [file join $repo raven-0.3.2.botpkg]] files]
+    lmap target {linux-aarch64 linux-x86_64} {
+        set facts [pm::binary::inspect [dict get $files targets/$target/native/libraven.so.0]]
+        list $target [dict get $facts runpath] [dict get $facts rpath]
+    }
+} -cleanup cleanup -result {{linux-aarch64 {} {}} {linux-x86_64 {} {}}}
+
 # ---------------------------------------------------------------------------
 # F. The Linux event loop's driver
 
@@ -482,7 +526,27 @@ test pw-event-loop-runs {examples/event-loop/native over the installed event_loo
     set value [lindex [outcomeUnderHir cranelift [hirOf [file join $app main.bot]]] 1]
     list [dict get $r status] [string map [list $app APP] $include] \
         [file isfile [file join $app {*}$::hostView event_loop_linux native libevent_loop_linux.a]] $value
-} -cleanup cleanup -result {0 -IAPP/.bot_modules/.targets/linux-x86_64/event_loop_linux/native 1 {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
+} -cleanup cleanup -result {0 -IAPP/.bot_modules/.targets/linux-x86_64/event_loop_linux/include 1 {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
+
+test pw-release-ledger {one version, one artifact: packages/RELEASES.tsv records each release once (name, version, SHA-256); the author's tool says whether a build is the recorded release, and a build of a recorded version whose bytes differ is a CANDIDATE -- reported, and with -release refused, its file renamed so nothing takes it for the release} -constraints {eventLoopPackage} -body {
+    set lines [lsearch -all -inline -not -regexp [split [pm::ReadBytes [file join $::projectRoot packages RELEASES.tsv]] \n] {^(#|$)}]
+    set keys [lmap line $lines {lrange [split $line \t] 0 1}]
+    set wellFormed [expr {[llength [lsort -unique $keys]] == [llength $keys]
+        && [llength [lsearch -all -not -regexp $lines {^[a-z][a-z0-9_]*\t[0-9]+\.[0-9]+\.[0-9]+\t[0-9a-f]{64}$}]] == 0}]
+    set out [fresh repo]
+    set first [exec [info nameofexecutable] $::repositoryTool $out event_loop_linux 2>@1]
+    regexp {sha256 ([0-9a-f]{64})} $first -> digest
+    set ledger [file join [fresh ledger] RELEASES.tsv]
+    writeText $ledger "event_loop_linux\t0.3.0\t$digest\n"
+    set same [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {exec [info nameofexecutable] $::repositoryTool -release $out event_loop_linux 2>@1}]
+    writeText $ledger "event_loop_linux\t0.3.0\t[string repeat 0 64]\n"
+    set noted [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {exec [info nameofexecutable] $::repositoryTool $out event_loop_linux 2>@1}]
+    set refused [withEnvironment [list BOTLISH_RELEASE_LEDGER $ledger] {catch {exec [info nameofexecutable] $::repositoryTool -release $out event_loop_linux 2>@1} message}]
+    list $wellFormed [string match "*release: the recorded release of event_loop_linux 0.3.0*" $same] \
+        [string match "*CANDIDATE: the recorded release of event_loop_linux 0.3.0 is sha256 0000*" $noted] \
+        $refused [file exists [file join $out event_loop_linux-0.3.0.botpkg]] \
+        [llength [glob -nocomplain -directory $out event_loop_linux-0.3.0.candidate-*.botpkg]]
+} -cleanup cleanup -result {1 1 1 1 0 1}
 
 test pw-event-loop-linux-only {the event loop's driver is Linux's (x86-64 and AArch64 archives in one release): preparing a Windows or macOS view is UNSUPPORTED} -constraints {eventLoopPackage} -body {
     set repo [repository {event_loop_linux}]

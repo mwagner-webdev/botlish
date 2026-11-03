@@ -18,6 +18,7 @@ on:
     paths:
       - "packages/raven/**"
       - "tools/package-repository.tcl"
+      - "tools/package-build/**"
       - "tests/cffi/raven.tcl"
       - "audit/raven-cleanroom/**"
       - "pm/**"
@@ -58,22 +59,20 @@ jobs:
       - name: Build the single executable
         run: single/build.sh -o dist/botlish
 
-      # The author's side only: CMake, Ninja, libX11's headers, the AArch64
-      # cross compiler (the release holds both Linux targets).
-      - name: Install the package author's prerequisites
-        run: |
-          sudo apt-get update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            cmake ninja-build libx11-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+      # The author's side, in the pinned author environment
+      # (tools/package-build: PACKAGE-MANAGER-MILESTONE-3.md): its builds
+      # reproduce the recorded release, which -release requires.
+      - name: Build the pinned author image
+        run: tools/package-build/author.sh image
 
       - name: Pack the raven release (the author's one operation)
-        run: tclsh9.0 tools/package-repository.tcl repo raven
+        run: tools/package-build/author.sh build repo -release raven
 
       - name: Build the clean room's image
         run: audit/raven-cleanroom/tools/cleanroom.sh image
 
       - name: Run the clean-room acceptance
-        run: audit/raven-cleanroom/tools/cleanroom.sh run dist/botlish repo/raven-0.3.1.botpkg out
+        run: audit/raven-cleanroom/tools/cleanroom.sh run dist/botlish repo/raven-0.3.2.botpkg out
 
       - if: always()
         uses: actions/upload-artifact@v4

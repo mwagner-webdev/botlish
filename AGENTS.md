@@ -5047,13 +5047,15 @@ c-bindgen.tcl stage -package 1`); `tests/workload-icy-tower.test` and the
 
 ## The package manager (pm/, botlish.json, .botpkg)
 
-`pm/` (PACKAGE-MANAGER-MILESTONE-1.md, PACKAGE-MANAGER-MILESTONE-2.md) is
-the package manager: `main.tcl add|install|update|remove|verify|package|native`
-(`botlish add ...` in the single executable), over local `.botpkg`
-artifacts (BOTPKG-FORMAT.md) and `botlish.json` (BOTLISH-JSON.md, schemas 1
-and 2). It builds the `.bot_modules` trees the compiler already reads
-(previous section) -- and, for target-aware packages, their target views --
-and nothing else. Keep it so:
+`pm/` (PACKAGE-MANAGER-MILESTONE-1.md, PACKAGE-MANAGER-MILESTONE-2.md,
+PACKAGE-MANAGER-MILESTONE-3.md) is the package manager: `main.tcl
+add|install|update|remove|verify|package|native` (`botlish add ...` in the
+single executable), over local `.botpkg` artifacts (BOTPKG-FORMAT.md),
+`botlish.json` (BOTLISH-JSON.md, schemas 1, 2 and 3) and, on the author's
+side, provenance records (BOTPKG-PROVENANCE.md). It builds the
+`.bot_modules` trees the compiler already reads (previous section) -- and,
+for target-aware packages, their target views -- and, for an author, a
+package directory and its release; nothing else. Keep it so:
 
 * The compiler never reads `botlish.json`, a version, a lock, an artifact
   or `.bot_modules/.botlish`, and never loads `pm/`: main.tcl sources
@@ -5129,12 +5131,61 @@ and nothing else. Keep it so:
   `/usr/bin/sha256sum`, `/usr/bin/shasum`, `%SystemRoot%\System32\certutil.exe`),
   given the exact bytes, after a known-answer probe, else the Tcl
   implementation: never a tool found on PATH, never OpenSSL's command line,
-  and never the native backend.
+  and never the native backend. SHA-1 (pm/sha1.tcl, the same rules) exists
+  only to compute Git object identities for provenance checks: never an
+  integrity digest of the package manager's own.
+* The author's side (pm/author.tcl: `native add`, `native require`,
+  `package stage`, `native audit`; PACKAGE-MANAGER-MILESTONE-3.md) builds
+  nothing and runs nothing: an author builds native files with their own
+  tools first, and the commands read them as bytes. Every fact a file can
+  establish (format, architecture, loader identity, loader dependencies,
+  exports, RUNPATH) is taken from the file, never typed by hand; what it
+  cannot (which needs the system provides, what is opened at run time, a
+  license) is the author's statement, and the reports say which is which.
+  Never infer a library's name, origin or linkage intent from a file name,
+  never auto-declare exports as required symbols, never record an observed
+  system version as a requirement. Existing metadata or a file that
+  differs is a CONFLICT unless `-replace`; staging copies regular files
+  only (never follows a link), and `-replace` makes a directory exactly its
+  source. An operation raises botlish.json's schema only to what its
+  contents need. The author's side (author.tcl, sha1.tcl, release.tcl)
+  is loaded by `pm::authoring`, only for the operations that use it: never
+  source it with the rest of `pm/`, which every consumer command loads.
+* Run-time dependencies (schema 3's `runtime`: a library opened by name, a
+  facility) are never loader dependencies: never in `needs`, never in the
+  link, never a problem of the native plan, never a reason an installation
+  fails. A loader dependency is never declared as one.
+* `package pack` of a target-aware package runs the audit and refuses an
+  incomplete one (an unresolved loader dependency, a declared fact the
+  file contradicts, an absolute or empty RUNPATH entry, an undeclared
+  native binary, a platform library bundled, targets with different
+  modules, a link or a C function no library provides); "partially
+  verified" (facts this host cannot check) packs. A pure-Botlish package
+  never runs the audit. Never add a way to skip it.
+* Provenance (pm/release.tcl, BOTPKG-PROVENANCE.md) is evidence, never
+  authentication: a record beside the artifact, bound to its SHA-256, never
+  inside it; computed facts, the author's assertions and the checks made
+  stay apart; a check an assertion fails stops the pack (nothing written);
+  a record never holds a local path, a host path or a credential. Never
+  describe a record as a signature or as verified provenance, never run git
+  or another tool to "check" an assertion (the Git tree is recomputed from
+  the files), and never put a time or a host fact in a record.
+* One version, one artifact: `packages/RELEASES.tsv` records each release
+  of this repository's packages by its SHA-256, once, never changed;
+  `tools/package-repository.tcl` reports a rebuild that does not reproduce
+  a recorded release as a CANDIDATE, and with `-release` refuses it (never
+  publish a candidate). A change to a package's contents is a new version.
+  The releases are built in the pinned author image
+  (tools/package-build/: a base image by digest, Ubuntu's snapshot at one
+  instant, Tcl 9 by SHA-256), whose independent builds reproduce them;
+  never pin a tool by a mutable name there.
 
 If you change `pm/`, the formats, `tools/package-repository.tcl`,
-`packages/*/botlish.json` or main.tcl's dispatch, run
+`tools/package-build/`, `packages/*/botlish.json` or main.tcl's dispatch, run
 `tests/package-manager.test`, `tests/package-native.test` (its foreign
 formats need clang and MinGW-w64; its linked runs the native backend),
+`tests/package-authoring.test` (clang, lld and MinGW-w64 for its foreign
+formats, git for its Git trees),
 `tests/package-workloads.test` (its packages are packed for linux-x86_64 and
 linux-aarch64: it needs the AArch64 GNU cross compiler, clang, cmake and
 ninja, and the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
@@ -5142,8 +5193,12 @@ ninja, and the package-owned libSDL3 and libraven: `tests/cffi/sdl3.tcl`,
 and `audit/package-manager/tools/mutate.tcl` (every mutant in its
 `mutants.txt` must still apply and be killed: update a mutant's text when
 you change the code it mutates, keeping it a mutant of the same rule; a
-mutant's `%%` line names the test files that kill it).
-`bench/package-manager.tcl` measures its costs. A change to the single
+mutant's `%%` line names the test files that kill it). A change to a
+package's recipe or the author image also runs
+`tools/package-build/author.sh build OUT -release` twice (two fresh
+containers: their artifacts and records must be identical and equal the
+recorded releases) and, on a branch, `package-reproducibility.yml`
+(two runners). `bench/package-manager.tcl` measures its costs. A change to the single
 executable's dispatch (`single/main.tcl`'s package commands) also runs the
 single-executable checks above. A change to the compiler's target package
 trees (`ApplicationTree`, `nativeDirs`) also runs the package-scoped-module
@@ -5160,8 +5215,10 @@ checks of the previous section and `tests/hir-cache.test`,
 Linux target, the generated binding, the bridge's archive and Raven's
 *desktop* build (X11 and the Vulkan renderer), which also runs headless; its
 common files are the module, README.md and GUIDE.md (the consumer's
-documentation) and `examples/clicks`. `tools/package-repository.tcl OUT
-raven` is its author's one operation. Keep it so:
+documentation), `examples/clicks` and Raven's license notices.
+`tools/package-repository.tcl OUT raven` is its author's one operation
+(`tools/package-build/author.sh build OUT -release raven` in the pinned
+author image, for a release). Keep it so:
 
 * One library for both configurations: never pack the headless build, and
   never add a second artifact, a feature flag or a variant of one release
@@ -5175,12 +5232,23 @@ raven` is its author's one operation. Keep it so:
   SHA-256-checked Ubuntu packages (author side only, never packed). Never
   download an unpinned input to make a build pass.
 * libX11 is a declared *system* library (the bundled libraven's DT_NEEDED,
-  verified by the system's metadata); the Vulkan loader and driver and the
-  display are loaded at run time and are no metadata: never bundle a
-  graphics driver, the loader or X11, and never declare the loader as a
+  verified by the system's metadata); the Vulkan loader and driver, the
+  display, libX11-xcb and libdbus are opened at run time: schema 3
+  run-time dependencies (the desktop and accessibility capabilities,
+  PACKAGE-MANAGER-MILESTONE-3.md), never loader dependencies. Never bundle
+  a graphics driver, the loader or X11, and never declare the loader as a
   system library (it would make headless use require it). A missing one is
   reported by `start`'s RavenFailed, whose detail lists every error Raven
   reported while it started (`startup_reasons`).
+* The release's metadata is derived, never written in packages/raven:
+  the recipe (`tools/package-repository.tcl`'s `author::raven`) imports
+  each target's built files with `native add` and states the rest with
+  `native require`; Raven's license and notices (licenses/raven/) travel
+  in the artifact. The AArch64 cross build is configured with
+  `-DCMAKE_SKIP_RPATH=ON`: without it CMake records the build machine's
+  cache path (and an empty, current-directory entry) as the library's
+  RUNPATH, which made raven 0.3.1 differ between machines and which the
+  audit refuses.
 * The package's documentation is checked: every ```botlish block of its
   README.md and GUIDE.md is a complete program (`raven-package-docs`
   compiles them and runs the test ones); a fragment goes in a plain fence.

@@ -860,9 +860,9 @@ title: The package manager: botlish.json, .botpkg artifacts, add and install
 summary: botlish add, install, update, remove and verify manage a project's packages from local .botpkg artifacts and botlish.json; package pack makes an artifact. Nothing is downloaded or run.
 index: backends
 alias: package manager; botlish.json; .botpkg; botlish add; botlish install; package artifact; lock file; dependency versions
-keywords: add, install, update, remove, verify, pack, inspect, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target
+keywords: add, install, update, remove, verify, pack, inspect, native, plan, deploy, botlish.json, lock, request, repository, artifact, editable, sha256, .bot_modules, targets, target view, .targets, bundled, system library, origins, -target, -drop-target, native add, native require, native audit, package stage, package compare, provenance, evidence, runtime, run-time dependency, license, notices, schema 3, authoring
 related: rule.package-modules concept.modules concept.native-link-plan cli.usage cli.exit-status backend.targets
-docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOT-MODULES-MILESTONE-1.md
+docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md PACKAGE-MANAGER-MILESTONE-3.md BOTLISH-JSON.md BOTPKG-FORMAT.md BOTPKG-PROVENANCE.md BOT-MODULES-MILESTONE-1.md
 
 == THE COMMANDS
     botlish add NAME|FILE.botpkg|DIR [-request R] [-replace]
@@ -870,11 +870,18 @@ docs: PACKAGE-MANAGER-MILESTONE-1.md PACKAGE-MANAGER-MILESTONE-2.md BOTLISH-JSON
     botlish update [NAME...]
     botlish remove NAME...
     botlish verify
-    botlish package pack [DIR] [-out DIR] [-force]
-    botlish package inspect FILE.botpkg [-target T]
+    botlish package pack [DIR] [-out DIR] [-force] [-evidence FILE]
+    botlish package inspect FILE.botpkg [-target T] [-provenance FILE]
     botlish native inspect FILE [-target T]
     botlish native plan [-target T] [-include]
     botlish native deploy -target T -out DIR [-force]
+and, for a package's author (AUTHORING A NATIVE PACKAGE, below):
+    botlish native add FILE -target T -name N [-symbol S]... [-license EXPR]
+    botlish native require NAME -target T -origin system [-identity I]
+    botlish native require NAME -target T -runtime always|capability|optional -purpose TEXT
+    botlish package stage [DIR] -target T -modules|-headers|-files SRC [-as PATH]
+    botlish native audit [DIR] [-target T]
+    botlish package compare A.botpkg B.botpkg
 (tclsh9.0 main.tcl add ... in a checkout.) add, install, update, remove
 and verify take -project DIR (the project: the directory of its
 botlish.json; default the current directory) and -repository DIR (a local
@@ -931,6 +938,41 @@ made; a package that does not name a target is UNSUPPORTED for it.
     loader identity for two libraries or two static archives defining one
     symbol are refused, never resolved by a choice. botlish.json's
     "origins" chooses system or bundled where a package offers both.
+
+== AUTHORING A NATIVE PACKAGE
+An author builds native files with their own tools (CMake, a cross
+compiler, a binding generator) and then, in the package directory (its
+botlish.json names it and its version; -package DIR or DIR elsewhere):
+  * native add FILE -target T -name N copies a built library into the
+    target's directory (native/ and its loader identity, or libN.a) and
+    writes what the file establishes -- loader identity, loader
+    dependencies, exports checked against -symbol -- into botlish.json,
+    raising its schema to 2 only when needed; it never runs the file, and
+    says what the file cannot establish. A Windows DLL takes -import FILE.
+  * native require NAME -origin system declares a library the target's
+    system provides (on this host also checked, by its metadata, as an
+    observation); -runtime declares a run-time dependency (schema 3): a
+    library opened by name, or a facility (-kind facility: a driver, a
+    display), needed always, for a capability, or optional -- never part of
+    the link or of an installation's checks, listed by native plan.
+  * package stage copies generated modules (-modules: the package's
+    namespace), public headers (-headers: each target's include/, declared)
+    or other files (-files -as DIR) to fixed paths; a difference is a
+    CONFLICT unless -replace, which makes the directory exactly the source.
+  * native audit judges every target: complete, partially verified (facts
+    this host cannot check: another target's system libraries) or
+    incomplete (an unresolved loader dependency, a contradicted fact, a
+    build machine's RUNPATH, an undeclared binary, a library or C function
+    nothing provides, targets with different modules). package pack runs it
+    and refuses an incomplete package.
+  * package pack -evidence FILE (the author's statements: sources, builds,
+    generators) also writes NAME-VERSION.provenance.json beside the
+    artifact: unsigned, bound to its SHA-256, the computed facts, the
+    assertions and the checks it made (a Git tree recomputed from the
+    source files) kept apart (BOTPKG-PROVENANCE.md). package inspect
+    -provenance checks a record against an artifact; package compare
+    explains how two builds of one release differ (a release is one
+    artifact: at most one of them is it).
 
 == WHAT THEY NEVER DO
 Download anything, run anything a package holds (no install scripts,

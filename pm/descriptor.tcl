@@ -9,8 +9,10 @@
 #
 # A descriptor is a dict:
 #
-#   schema        1 or 2 (2 only when the file says so: schema 1 files are
-#                 read and written as schema 1)
+#   schema        1, 2 or 3 (as the file says: a file is read and written in
+#                 its own schema; schema 3 is schema 2 with runtime
+#                 dependencies and a library's license and notices,
+#                 BOTLISH-JSON.md section 13)
 #   name          the package's root namespace, or "" (an application may
 #                 have none)
 #   version       its exact release, or ""
@@ -108,21 +110,21 @@ proc pm::descriptor::Validate {value context label} {
     set members [pm::json::payload $value]
     # schema
     if {![dict exists $members schema]} {
-        lappend problems "no \"schema\": a botlish.json starts with \"schema\": 1 (or 2)"
+        lappend problems "no \"schema\": a botlish.json starts with \"schema\": 1 (or 2, or 3)"
         Raise $label $problems
     }
     set schema [dict get $members schema]
     if {[pm::json::type $schema] ne "num" || ![regexp {^[0-9]+$} [pm::json::payload $schema]]} {
-        lappend problems "\"schema\" must be the number 1 or 2"
+        lappend problems "\"schema\" must be the number 1, 2 or 3"
         Raise $label $problems
     }
     set number [pm::json::payload $schema]
-    if {$number ni {1 2}} {
-        lappend problems "unsupported schema $number: this package manager reads schemas 1 and 2 (a newer one needs a newer Botlish)"
+    if {$number ni {1 2 3}} {
+        lappend problems "unsupported schema $number: this package manager reads schemas 1, 2 and 3 (a newer one needs a newer Botlish)"
         Raise $label $problems
     }
     dict set result schema $number
-    if {$number == 2} {
+    if {$number >= 2} {
         dict set result targets {}
         dict set result origins {}
     }
@@ -218,10 +220,10 @@ proc pm::descriptor::Validate {value context label} {
         }
     }
     # targets, origins (schema 2)
-    if {[dict exists $members targets] && $number == 2} {
-        dict set result targets [pm::targets::Parse [dict get $members targets] problems]
+    if {[dict exists $members targets] && $number >= 2} {
+        dict set result targets [pm::targets::Parse [dict get $members targets] problems $number]
     }
-    if {[dict exists $members origins] && $number == 2} {
+    if {[dict exists $members origins] && $number >= 2} {
         set item [dict get $members origins]
         if {$context eq "artifact"} {
             lappend problems "an artifact's botlish.json has no \"origins\": which origin a consumer's native library comes from is the consumer's choice, never the published package's"

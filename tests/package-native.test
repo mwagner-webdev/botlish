@@ -97,6 +97,18 @@ proc kindOf {err} {
     return ""
 }
 
+# The artifact of DIR written into REPO without pack's checks (as an older
+# packer or a hand-made archive would): for the consumer side's own checks.
+proc packRaw {dir repo} {
+    set descriptor [pm::descriptor::read [file join $dir botlish.json] pack]
+    set files [pm::commands::Collect $dir]
+    dict set files botlish.json [pm::descriptor::encode $descriptor 0]
+    set path [file join $repo [dict get $descriptor name]-[dict get $descriptor version].botpkg]
+    file delete $path
+    pm::WriteNew $path [pm::archive::bytes $files]
+    return $path
+}
+
 # Packs DIR into REPO; raises with the error when it fails.
 proc pack {dir repo} {
     set r [pm package pack $dir -out $repo]
@@ -568,7 +580,7 @@ test pn-native-conflicts {the native closure is the whole application's: two ins
     set app [application "1\n"]
     set r [pm add fneedy -project $app -repository $repo]
     lappend out [list needs [dict get $r status] [lindex [split [dict get $r err] \n] 1]]
-} -cleanup cleanup -result {{different 1 1 {  foo: instances fa and fb bundle different foo libraries (sha256 D and D): one process loads one foo, and the package manager never chooses between them (PM NATIVE)}} {same 0 1 {}} {origin 1 1 {  foo: instance fa uses a bundled shared foo and instance fsys a system shared one: one process links one foo (choose one origin with botlish.json's "origins", or use packages that agree) (PM NATIVE)}} {identity 1 1 {  the libraries foo and bar both load as libfoo.so.1: one loader identity is one library in a process}} {statics 1 1 {  the static libraries s1 and s2 both define dup: linking both into one executable is a duplicate definition (PM NATIVE)}} {needs 1 {  system library dep (libdep.so.2 or libdep.so) is not installed in linux-x86_64's system library directories (/usr/lib/x86_64-linux-gnu, /lib/x86_64-linux-gnu, /usr/lib, /lib, /usr/lib64, /usr/local/lib, /usr/local/lib/x86_64-linux-gnu)}}}
+} -cleanup cleanup -result {{different 1 1 {  foo: instances fa and fb bundle different foo libraries (sha256 D and D): one process loads one foo, and the package manager never chooses between them (PM NATIVE)}} {same 0 1 {}} {origin 1 1 {  foo: instance fa uses a bundled shared foo and instance fsys a system shared one: one process links one foo (choose one origin with botlish.json's "origins", or use packages that agree) (PM NATIVE)}} {identity 1 1 {  the libraries foo and bar both load as libfoo.so.1: one loader identity is one library in a process}} {statics 1 1 {  the static libraries s1 and s2 both define dup: linking both into one executable is a duplicate definition (PM NATIVE)}} {needs 1 {  system library dep (libdep.so.2 or libdep.so) is not installed in linux-x86_64's system library directories (/usr/lib/x86_64-linux-gnu, /lib/x86_64-linux-gnu, /usr/lib, /lib, /usr/lib64, /usr/local/lib, /usr/local/lib/x86_64-linux-gnu) (declared by instance fneedy) (PM NATIVE)}}}
 
 test pn-missing-transitive-dependency {a bundled library's loader dependency must resolve to the target's platform or a library a package declares: one nobody declares is refused when the package is packed} -constraints {linuxCc} -body {
     set dir [fresh bin]
@@ -579,19 +591,28 @@ test pn-missing-transitive-dependency {a bundled library's loader dependency mus
     list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
 } -cleanup cleanup -result {1 {  linux-x86_64: library needy needs libdep.so.2, which is neither linux-x86_64's platform nor a library this package declares for linux-x86_64 (with its identity): a consumer could not resolve it (PM PACK)}}
 
-test pn-source-metadata-contradiction {a package whose link declaration contradicts its metadata -- source requires a static library the metadata bundles as shared, or links an archive path the metadata does not bundle -- is refused at installation with both locations named} -constraints {linuxCc} -body {
+test pn-source-metadata-contradiction {a package whose link declaration contradicts its metadata -- source requires a static library the metadata bundles as shared, or links an archive path the metadata does not bundle -- is refused by pack (PM-3's audit) and, made into an artifact another way, at installation with both locations named} -constraints {linuxCc} -body {
     set dir [fresh bin]
     set good [sharedLibrary $dir libfoo.so.1 libfoo.so.1 foo_value 7]
     set a [staticArchive $dir libq.a q_value 3]
     set src [fresh src]
     set repo [fresh repo]
-    pack [nativePackage $src cstatic 1.0.0 [list [fooLibrary]] [list native/libfoo.so.1 $good] "extern c library \"foo\" static\n\nfn n() -> int:\n    1\n"] $repo
-    pack [nativePackage $src cpath 1.0.0 [list {{"name": "q", "origin": "bundled", "linkage": "static", "file": "native/libq.a"}}] [list native/libq.a $a] "extern c library \"q\" static at \"native/other.a\"\n\nfn n() -> int:\n    1\n"] $repo
-    lmap name {cstatic cpath} {
+    set cstatic [nativePackage $src cstatic 1.0.0 [list [fooLibrary]] [list native/libfoo.so.1 $good] "extern c library \"foo\" static\n\nfn n() -> int:\n    1\n"]
+    set cpath [nativePackage $src cpath 1.0.0 [list {{"name": "q", "origin": "bundled", "linkage": "static", "file": "native/libq.a"}}] [list native/libq.a $a] "extern c library \"q\" static at \"native/other.a\"\n\nfn n() -> int:\n    1\n"]
+    # PM-3's pack refuses both (the native audit); an artifact made another
+    # way -- by an older packer, by hand -- is still refused at installation.
+    set refused [lmap dir [list $cstatic $cpath] {
+        set r [pm package pack $dir -out $repo]
+        list [dict get $r status] [kindOf [dict get $r err]]
+    }]
+    foreach dir [list $cstatic $cpath] {
+        packRaw $dir $repo
+    }
+    list $refused {*}[lmap name {cstatic cpath} {
         set r [pm add $name -project [application "1\n"] -repository $repo]
         list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
-    }
-} -cleanup cleanup -result {{1 {  cstatic/cstatic.bot:1 requires a static foo, and the package metadata provides a bundled shared one: correct the metadata or the declaration (PM NATIVE)}} {1 {  cpath/cpath.bot:1 links q from native/other.a, and the package metadata bundles it as native/libq.a: correct the metadata or the declaration (PM NATIVE)}}}
+    }]
+} -cleanup cleanup -result {{{1 PACK} {1 PACK}} {1 {  cstatic/cstatic.bot:1 requires a static foo, and the package metadata provides a bundled shared one: correct the metadata or the declaration (PM NATIVE)}} {1 {  cpath/cpath.bot:1 links q from native/other.a, and the package metadata bundles it as native/libq.a: correct the metadata or the declaration (PM NATIVE)}}}
 
 # ---------------------------------------------------------------------------
 # 5. System libraries
@@ -622,7 +643,7 @@ test pn-system-library-needs-system-metadata {a library file in a library direct
     pack $pkg $repo
     set r [pm add pyuse -project [application "1\n"] -repository $repo]
     list [dict get $r status] [lindex [split [dict get $r err] \n] 1]
-} -cleanup cleanup -result {1 {  system library python3: /usr/local/lib/libpython3.so is installed, but no system metadata (the dpkg database, or a pkg-config file of the system's) records it: a file in a library directory is not a system-managed installation (PM NATIVE)}}
+} -cleanup cleanup -result {1 {  system library python3: /usr/local/lib/libpython3.so is installed, but no system metadata (the dpkg database, or a pkg-config file of the system's) records it: a file in a library directory is not a system-managed installation (declared by instance pyuse) (PM NATIVE)}}
 
 test pn-system-library-other-target {a system library of another target than the host's cannot be verified here: the view is made and the plan says so, never claiming it} -body {
     set src [fresh src]
