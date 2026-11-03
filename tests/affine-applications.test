@@ -404,6 +404,15 @@ test aa-isolation-descriptors {two compilations declaring Box[T] with its slot a
     }
 } -cleanup {unset -nocomplain a b hA hB hA2} -result {{{value 50} {value 50}} {{value 50} {value 50}} {{value 50} {value 50}} {{value 50} {value 50}}}
 
+test aa-descriptor-memo-hir-facts {a remembered drop descriptor answers for the HIR it is asked about: the same types under one set of declarations drop by `c` where the HIR's suspended coroutines are discarded and by `C` where they unwind (hir/resources.tcl's facts, which hir::affine::verify sets after the analysis may have asked) -- the memo is keyed by those facts too, never by the type alone} -body {
+    set hir [aaHir "${aaTypeImports}${aaTypeDecls}"]
+    set unwinding $hir
+    dict set unwinding resources unwind 1
+    lmap {h} [list $hir $unwinding $hir] {
+        list [hir::affine::Descriptor $h $aaC] [hir::affine::Descriptor $h [aaApp Box $aaC]]
+    }
+} -cleanup {unset -nocomplain hir unwinding} -result {{c s1.0.c} {C s1.0.C} {c s1.0.c}}
+
 test aa-hir-text-and-interchange {a program holding handles through applications reads back from HIR text and from HIR interchange with the same text, the same releases and the same outcome on every backend} -body {
     set text "${aaPlainDecls}fn main() -> int:\n    b = Box {value: make(5)}\n    n = Box {value: Box {value: make(2)}}\n    i = Box {value: 3}\n    j = i\n    {value} = b\n    e = value(Message {value: 6})\n    e.value + j.value + i.value\nmain()\n"
     set hir [surface::compile $text -warnings off]

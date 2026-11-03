@@ -23,6 +23,12 @@ COROUTINES.md is the milestone this one generalizes (coroutine semantics are
 unchanged; their ownership discipline and release elaboration now live in
 `hir/affine.tcl` and apply to every affine value).
 
+Later: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md adds resources
+(`opaque resource struct` and its module's `cleanup fn`), affine values
+whose release runs their cleanup at the end of the owner's lexical scope
+instead of after its last use. Every other affine value keeps the release
+described here.
+
 ## Contents
 
 * [Terminology](#terminology)
@@ -288,7 +294,10 @@ A named struct is affine iff one of its field types is affine
 declaration identity and reset whenever the declarations change); an
 anonymous struct the same, structurally. A struct's affinity is a fact of
 its type: `Running` above is affine because of `step`, not because of any
-value.
+value. (The one declaration that is affine by itself is a resource struct,
+whatever its fields: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md. It
+has no type slots, so it is its declaration's base affinity in the summary
+below.)
 
 **For a parameterized struct application, affinity is determined after
 substituting the application's type arguments into the struct's fields**

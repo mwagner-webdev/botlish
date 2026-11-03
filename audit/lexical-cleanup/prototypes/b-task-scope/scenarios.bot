@@ -1,0 +1,136 @@
+# scenarios.bot -- prototype B (scope-owned registrations, patch.tcl) on its
+# workloads. Each line of the trace states one claim; run by
+# audit/lexical-cleanup/tools/prototypes.tcl against the patched scheduler.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+error Boom
+
+# 1. A task that makes a registration and ends without revoking it.
+fn finisher(out: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    c = std::event_loop::channel(Delivery::Lossy, 4)
+    std::event_loop::post(out, c.native_slot(), c.native_generation())
+    std::event_loop::yield_now()
+    0
+
+# 2. A task waiting on its own registration forever (abandoned at the end).
+fn waiter(out: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    s = std::event_loop::source(Delivery::Lossy, 4)
+    std::event_loop::post(out, s.native_slot(), s.native_generation())
+    std::event_loop::wait(s)
+    0
+
+# 3. A helper function's registration: its lexical scope is the helper.
+fn helper(context ev: std::event_loop::Loop) -> std::event_loop::Reg errors std::event_loop::SchedulerFault:
+    std::event_loop::channel(Delivery::Lossy, 4)
+
+fn long_task(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    r = helper()
+    elog::say("3 helper returned; its registration live: ", elog::bit(std::event_loop::live?(r)))
+    std::event_loop::sleep(10)
+    elog::say("3 after a later sleep, still live: ", elog::bit(std::event_loop::live?(r)))
+    0
+
+# 4. The same with explicit marks -- and an error between them.
+fn marked(fail_it: bool, out: std::event_loop::Reg, context ev: std::event_loop::Loop) -> std::event_loop::Reg errors std::event_loop::SchedulerFault, Boom:
+    mark = std::event_loop::scope()
+    r = std::event_loop::channel(Delivery::Lossy, 4)
+    std::event_loop::post(out, r.native_slot(), r.native_generation())
+    if fail_it:
+        fail Boom
+    std::event_loop::end_scope(mark)
+    r
+
+fn marked_task(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    out = std::event_loop::channel(Delivery::Lossy, 4)
+    a = marked(false, out):
+        on Boom:
+            out
+    elog::say("4 end_scope reached: live ", elog::bit(std::event_loop::live?(a)))
+    std::event_loop::sleep(10)
+    0
+
+fn marked_failing(out: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    marked(true, out):
+        on Boom:
+            e = std::event_loop::try_take(out)
+            elog::say("4 Boom skipped end_scope; the helper's registration live: ", elog::bit(std::event_loop::live?(std::event_loop::reg_at(e.a, e.b))))
+            std::event_loop::post(out, e.a, e.b)
+            std::event_loop::sleep(10)
+            out
+    0
+
+# 7. A task's first segment runs in its spawner (eager construction): a
+# registration it makes there has no task to belong to.
+fn eager(out: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    c = std::event_loop::channel(Delivery::Lossy, 4)
+    std::event_loop::post(out, c.native_slot(), c.native_generation())
+    std::event_loop::yield_now()
+    0
+
+# 6. A listener that makes a session's registration and hands it on.
+fn session(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("6 session woke revoked: ", elog::bit(e.reason == Wake::Revoked))
+    0
+
+fn listener(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::yield_now()
+    conn = std::event_loop::channel(Delivery::Lossy, 4)
+    coroutine {step, first} = session(conn)
+    std::event_loop::adopt(step, first)
+    std::event_loop::yield_now()
+    0
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic) -> List[str] errors std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    news1 = std::event_loop::channel(Delivery::Reliable, 4)
+    news2 = std::event_loop::channel(Delivery::Reliable, 4)
+    news4 = std::event_loop::channel(Delivery::Reliable, 4)
+    news7 = std::event_loop::channel(Delivery::Reliable, 4)
+    coroutine {step: ea, first: eaf} = eager(news7)
+    std::event_loop::adopt(ea, eaf)
+    coroutine {step: f, first: ff} = finisher(news1)
+    std::event_loop::adopt(f, ff)
+    coroutine {step: w, first: wf} = waiter(news2)
+    std::event_loop::adopt(w, wf)
+    coroutine {step: l, first: lf} = long_task()
+    std::event_loop::adopt(l, lf)
+    coroutine {step: m, first: mf} = marked_task()
+    std::event_loop::adopt(m, mf)
+    coroutine {step: mx, first: mxf} = marked_failing(news4)
+    std::event_loop::adopt(mx, mxf)
+    coroutine {step: li, first: lif} = listener()
+    std::event_loop::adopt(li, lif)
+    top = std::event_loop::channel(Delivery::Lossy, 4)
+    std::event_loop::run()
+    e1 = std::event_loop::try_take(news1)
+    elog::say("1 finisher ended; its registration live: ", elog::bit(std::event_loop::live?(std::event_loop::reg_at(e1.a, e1.b))))
+    e2 = std::event_loop::try_take(news2)
+    elog::say("2 waiter parked at the end of run; its registration live: ", elog::bit(std::event_loop::live?(std::event_loop::reg_at(e2.a, e2.b))))
+    abandoned = std::event_loop::abandon()
+    elog::say("2 abandoned tasks: ", abandoned)
+    elog::say("2 after abandon, the waiter's registration live: ", elog::bit(std::event_loop::live?(std::event_loop::reg_at(e2.a, e2.b))))
+    e4 = std::event_loop::try_take(news4)
+    elog::say("4 marked_failing ended; the helper's registration live: ", elog::bit(std::event_loop::live?(std::event_loop::reg_at(e4.a, e4.b))))
+    e7 = std::event_loop::try_take(news7)
+    elog::say("7 eager task ended; the registration of its first segment live: ", elog::bit(std::event_loop::live?(std::event_loop::reg_at(e7.a, e7.b))))
+    elog::say("5 a registration made outside any dispatch: owner ", std::event_loop::owner_of(top))
+    std::event_loop::trace()
+
+with context std::event_loop::create(8, :trace)
+with context std::event_loop::deterministic::create()
+main():
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

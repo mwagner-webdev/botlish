@@ -237,7 +237,8 @@ proc hir::format::TypeDecl {entry} {
     }
     if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
         # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
-        # [opaque] [context] [slots [S, ...]] fields F1: T1, F2: T2" (NS "-"
+        # [opaque] [context] [resource] [slots [S, ...]] fields F1: T1, F2:
+        # T2" (NS "-"
         # for the entry program), the
         # fields in declared (slot) order with their resolved types. The
         # `opaque` word is printed only for an opaque struct
@@ -250,6 +251,11 @@ proc hir::format::TypeDecl {entry} {
         set opaque [expr {[dict exists $entry opaque] && [dict get $entry opaque] ? "opaque " : ""}]
         if {[dict exists $entry context] && [dict get $entry context]} {
             append opaque "context "
+        }
+        if {[dict exists $entry resource] && [dict get $entry resource]} {
+            # A resource struct (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+            # MILESTONE-1.md); printed only for one.
+            append opaque "resource "
         }
         if {[dict exists $entry slots]} {
             # A parameterized struct's type slots (TRAIT-CONSTRAINED-
@@ -570,6 +576,11 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict exists $node callback]} {
                 # A C callback (C-CALLBACK-MILESTONE-1.md): its foreign ABI.
                 append text " callback [dict get $node callback]"
+            }
+            if {[dict exists $node cleanup]} {
+                # A resource's cleanup (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+                # MILESTONE-1.md).
+                append text " cleanup"
             }
             if {[dict exists $node variadic]} {
                 # A variadic function (VARIADICS-VERTICAL-SLICE-1.md): its

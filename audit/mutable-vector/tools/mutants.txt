@@ -651,10 +651,12 @@ core::native::register std::mutable_vector::clear
 @@ failed-swap-leaks-native a failed affine swap leaks its replacement (native)
 ## native/src/runtime/mutvec.rs
 <<<<
-            drop_descriptor(p, x, str_of(d).as_str().as_bytes());
+            if !super::affine::drop_taken(p, &[x], &text, 0, &mut 0) {
+                return NO_VALUE;
+            }
             fail_index_not_found(p)
 ====
-            let _ = (x, d);
+            let _ = (x, text);
             fail_index_not_found(p)
 >>>>
 
@@ -693,12 +695,9 @@ core::native::register std::mutable_vector::clear
 @@ clear-leaks-native clear of affine elements empties the vector without releasing them (native)
 ## native/src/runtime/mutvec.rs
 <<<<
-    for item in items {
-        drop_descriptor(p, item, text);
-    }
-    UNIT
+    if super::affine::drop_taken(p, &items, &text, 0, &mut pos) { UNIT } else { NO_VALUE }
 ====
-    let _ = (items, text, p);
+    let _ = (items, text, pos, p);
     UNIT
 >>>>
 

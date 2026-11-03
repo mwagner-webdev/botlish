@@ -6,6 +6,26 @@ Push finished work directly to `main`. This project does not use a
 feature-branch-plus-pull-request review cycle: don't open a PR unless
 explicitly asked to.
 
+When you work on a branch instead (a session's own instructions can require
+one), check `main`'s CI at both ends of the work
+(MAIN-CI-FAILURES-2026-11.md, "Why they reached main and why they stayed"):
+
+* **Before you branch off,** read the latest run of every workflow on
+  `main` (the GitHub MCP server's `actions_list`, method
+  `list_workflow_runs`, branch `main`). A run that is queued or in progress
+  is acceptable. A red one is never branched off silently: tell the user
+  which workflows and tests fail on `main` before you build on it, and keep
+  that list, so your branch's failures are compared with it rather than
+  dismissed as "main's own".
+* **Before you merge a finished milestone into `main`,** check again:
+  `main`'s latest runs and your branch's own. `macos-arm64.yml` and
+  `windows-x86_64.yml` run on every branch push; `tests.yml` and
+  `tests-arm64.yml` run on a branch only when dispatched (`workflow_dispatch`
+  with the branch as the ref), so dispatch them. Don't merge onto a red
+  `main` without telling the user. A failure on your branch that `main`'s
+  latest run does not have is yours to fix before the merge. Pending runs
+  are acceptable: report them as pending, never as passed.
+
 ## Documentation layout
 
 The root `README.md` is the project overview. Everything else is in `docs/`:
@@ -1300,7 +1320,12 @@ completion proofs. A release must stay unobservable -- it never runs
 Botlish code (a released suspended Tcl coroutine is unwound by an error no
 handler catches) and never changes a value -- and must never release a
 coroutine some live binding still owns. The affine-values milestone
-extended it to every affine value, keeping both properties.
+extended it to every affine value, keeping both properties. The one
+exception is a resource's (next sections but one: Resources): its release
+runs its module's cleanup function, and in a program where a suspending
+function owns one, releasing a suspended coroutine unwinds it so that its
+frames' releases run -- the program's own release code, never anything
+else.
 
 If you change the coroutine grammar (`yield`, the coroutine binding, the
 resume clause), `hir/coroutines.tcl` (protocols, the yield effect),
@@ -1574,7 +1599,7 @@ and no acceptance depends on one.
   backends' Unicode 16 semantics -- `tests/platform/cabi-facts.tcl`, the
   native build and its Rust unit tests, `tests/platform/native-status.tcl`,
   `tests/platform/aot-facts.tcl` (the program object and an executable as
-  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, two
+  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, three
   shards) and the same smoke on ubuntu as a control. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.
@@ -2205,6 +2230,75 @@ kinds): a change to that gate, to those kinds or to which joins can hold a
 path-release diagnostic also needs `tests/static-economics.test` and the
 static-decision harnesses (Static intrinsics, below).
 
+## Resources (scope-bound cleanup)
+
+`opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`
+(LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md) make a value's
+ownership operational: a resource is affine whatever its fields, and the
+compiler calls its module's one cleanup function where its owner's lexical
+scope ends -- at the end of the owning binding's sequence, never at its last
+use -- and on every exit that leaves it (`hir::affine::Scoped`: the binding's
+scope `last` is its sequence's end), in reverse acquisition order
+(`OrderReleases`). A move transfers the obligation, the module's
+destructuring discharges it, an explicit call of the cleanup is the early
+release. The drop descriptor of a resource is `rK.` (entry K of the
+program's cleanup table, hir/resources.tcl); the runtimes call the cleanup
+(`affine#cleanup`, natively `cleanupcall` of the rooted cleanup block,
+`affinedroprun` for an aggregate holding one). Where a suspending function
+owns a resource (`hir::affine::Unwinds`, the HIR's `resources unwind`),
+coroutine handles are scoped too and released by `coroutine#abandon`
+(natively `coabandon`, descriptor `C`): the pending yield fails with the
+internal `coroutine#abandoned`, which every suspension call's error edge
+carries, so only the frames' release pads run. Keep it so:
+
+* No general destructor: a resource is a module's opaque struct with exactly
+  one cleanup, which takes it as its one ordinary parameter, declares no
+  errors, returns unit, never yields, requires context structs only (never
+  a context trait) and takes its parameter apart (RESOURCE-DECLARATION).
+  Never add a destructor on another type, a drop trait, a per-value or
+  run-time-chosen cleanup, `defer`, a finalizer, a reference count, a drop
+  flag or any run-time ownership state; the collector never runs a cleanup.
+* Lexical, not last use: never release a resource -- or, unwinding, a
+  coroutine handle -- before its binding's sequence ends. A binding moved on
+  some paths of a statement and kept on others is
+  AFFINE-PATH-RELEASE-UNSUPPORTED, never released by a flag.
+* The cleanup's context requirement is charged to every function that may
+  release one (`hir::contexts::ReleaseEdges`; a value whose whole value is
+  its function's result is exempt, `Returned`), so MISSING-CONTEXT reports a
+  release where the context is not installed ("the release of this value").
+* Release code runs with the pending error set aside and put back
+  (native `preserving_pending`; the Tcl backends' handler-shaped catch), and
+  a collection's drop roots what it took out while code runs (`drop_taken`).
+  The plain drop forms stay allocation-free; the code-running ones are
+  separate operations (`affinedroprun`, `mvcleardroprun`, ...), chosen by
+  descriptor (NativeCallOp).
+* Ordinary affine values keep last-use release: a program without resources
+  is lowered as before (its HIR has no `resources` table).
+* Scoping is a fact the static decisions read (Static intrinsics, below):
+  a scoped binding's joins -- an `if` too -- are consumers of the ownership
+  verdict (`hir::staticdeps::ScopedBy`, `PathJoins`), and whether the
+  program unwinds is the waiting channel `C:unwind`. A new way for code to
+  make a binding scoped, or for the program to unwind, goes into them.
+
+If you change any of that (hir/resources.tcl, the resource cases of
+hir/affine.tcl, hir/structs.tcl and hir/contexts.tcl, the cleanup and
+abandonment runtimes in core/affine.tcl, core/coroutines.tcl,
+native/src/runtime/{affine,coroutine,mutvec}.rs, native/lower.tcl's release
+lowering, or std::event_loop's Owner), run `tests/resources.test`,
+`tests/event-loop.test` (its `el-owned-*`), `tests/event-loop-linux.test`
+(`el-linux-owned`), `tests/affine.test`, `tests/coroutines.test`,
+`audit/lexical-cleanup/tools/fuzz.tcl` (several seeds) and
+`audit/lexical-cleanup/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule; run it in batches with
+`-only` when the whole list would exceed a background task's limit), plus
+the affine and coroutine harnesses for a change to `hir/affine.tcl`,
+`tests/static-economics.test` and `audit/static-decisions/tools/mutate.tcl`
+for a change to scoping or unwinding, and a
+`BOTLISH_NATIVE_GC_STRESS=1` run of `tests/resources.test` for a change to
+the native release paths. `bench/lexical-cleanup.tcl` regenerates the
+performance report.
+
 ## Context-owned affine state
 
 An installed context owns what it holds, affine members included
@@ -2298,12 +2392,16 @@ install`, which builds its archive there). Keep it so:
   an observer twice in a turn or in an empty turn, and never let an
   observer, a channel or a timer nobody waits on keep the loop alive or
   awake.
-* Revocation is explicit and generation-checked: a `Reg` is an identity,
-  never an owner. Nothing revokes implicitly -- no drop action until the
-  lexical-scope cleanup milestone, and never one faked with last-use
-  release -- and shutdown revokes every registration. Never deliver a record
-  of an old generation, let a reused slot inherit events, or cancel a task as
-  a side effect of revocation.
+* Revocation is generation-checked: a `Reg` is an identity, never an owner.
+  A registration made by an `owned_*` operation has an `Owner`, a resource
+  (Resources, below) whose cleanup `release` revokes it where the Owner's
+  lexical scope ends (or explicitly); its Reg cannot revoke it (`revoke`
+  answers false). Nothing else revokes implicitly -- never a drop action on
+  a Reg, never one faked with last-use release -- and shutdown revokes every
+  registration. Never deliver a record of an old generation, let a reused
+  slot inherit events, or cancel a task as a side effect of revocation (an
+  Owner's release wakes its waiters with Wake::Revoked and runs nothing
+  else).
 * Delivery is a registration's declared policy (Lossy, Coalesce, Reliable).
   Reliable never drops: a record without room is held by the driver
   (`hold_record`, `release_held`) and the backpressure reaches the producer
@@ -4056,7 +4154,8 @@ difference from `BOTLISH_STATIC_SCHEDULER=sequential`: add its edge to
 `hir/staticdeps.tcl`, not a special case to the scheduler. The sequential
 order's waiting rule (STATIC-COMPILE.md, "The waiting rule";
 `hir::staticdeps::Waiting`) reads that analysis's waiting channels
-(`C:erased`, `C:budget:B`; never the gates `C:verdict` and `C:plan`): a
+(`C:erased`, `C:budget:B`, `C:unwind`; never the gates `C:verdict` and
+`C:plan`): a
 failing block consuming one waits while a failing block contributes to it,
 so a consumer's verdict does not depend on where its contributors are
 written. An edge into a waiting channel's part of the graph, or a new link

@@ -72,6 +72,11 @@ fn main(context ev: std::event_loop::Loop, d: event_loop_linux::Linux, n: event_
     s = std::event_loop::stats()
     elog::say("stale records ", s.stale_records)
     elog::say("suppressed wakes ", s.suppressed_wakes)
+    # The evidence a run without stale records leaves (the test shows these
+    # lines when it fails): holds and releases, what the driver took.
+    ds = event_loop_linux::stats()
+    elog::say2("held records ", s.held_records, " released holds ", s.released_holds)
+    elog::say2("driver posts ", ds.posts, " taken ", ds.records_taken)
     std::event_loop::trace()
 
 with context std::event_loop::create(64)

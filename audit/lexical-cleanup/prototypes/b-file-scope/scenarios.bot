@@ -1,0 +1,41 @@
+# scenarios.bot -- prototype B's descriptor registry (fdscope.bot) on the
+# native-resource workload: what a scope mark gives and what it cannot.
+# DIR is replaced by the runner with a private directory.
+import fdscope
+import std::str
+
+error Boom
+
+fn lines(path: str, fail_it: bool, context files: fdscope::Files) -> int errors Boom, IndexNotFound:
+    m = fdscope::mark()
+    fd = fdscope::open(path)
+    fdscope::write(fd, "one\n")
+    if fail_it:
+        fail Boom
+    fdscope::end_scope(m)
+    fd
+
+fn main(context files: fdscope::Files) -> List[int] errors IndexNotFound:
+    # 1. The mark is reached: the descriptor is closed (registry empty).
+    a = lines("DIR/a", false):
+        on Boom:
+            -1
+    after_ok = fdscope::mark()
+    # 2. An error between the mark and end_scope: nothing closes it.
+    b = lines("DIR/b", true):
+        on Boom:
+            -1
+    after_fail = fdscope::mark()
+    # 3. A stale identity: close a descriptor, open another file (the kernel
+    #    reuses the number), and write through the old copy.
+    m = fdscope::mark()
+    c = fdscope::open("DIR/c")
+    fdscope::end_scope(m)
+    d = fdscope::open("DIR/d")
+    stale = fdscope::write(c, "written through a stale copy\n")
+    [after_ok, after_fail, c, d, stale]
+
+with context fdscope::create()
+main():
+    on IndexNotFound:
+        []

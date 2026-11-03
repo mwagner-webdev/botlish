@@ -157,10 +157,21 @@ jobs:
       # fiber's commit test, for what a fiber commits
       # (WINDOWS-X86-64-MILESTONE-5.md, "Performance"): a passing test's
       # output is otherwise not shown.
+      # A test binary that crashes (an access violation, 2026-11-02 on main)
+      # takes its running tests' names with it: its tests run again on one
+      # thread, where libtest prints each name before the test runs, so the
+      # log names the test that crashes -- or shows that only concurrency
+      # does. The step fails either way.
       - name: Native Rust unit tests
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log
+          status=0
+          cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast 2>&1 | tee rust-tests.log || status=$?
+          if grep -aq "didn't exit successfully.*(exit code: 0xc" rust-tests.log; then
+            echo "A test binary crashed. Its tests again, one at a time (the last 'test NAME ...' line without a result is the one that crashed):"
+            cargo test --release --manifest-path native/Cargo.toml --lib --bins --no-fail-fast -- --test-threads=1 2>&1 | tail -n 60 || true
+          fi
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
           cargo test --release --manifest-path native/Cargo.toml --bins windows_unwinds_every_instruction_of_jit_code -- --nocapture 2>&1 | grep -a '^windows_unwinds_every_instruction_of_jit_code:' | tee -a rust-tests.log
           cargo test --release --manifest-path native/Cargo.toml --lib a_fresh_fiber_commits_its_guarantee_and_a_page -- --nocapture 2>&1 | grep -a '^a_fresh_fiber_commits_its_guarantee_and_a_page:' | tee -a rust-tests.log
 
