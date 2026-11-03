@@ -103,8 +103,8 @@ physical sharing inside a value is not preserved.
   enums differently.
 * **Evidence.** `tests/sendability.test` (82 tests) and
   `tests/value-transfer.test` (76 tests, all four backends) pass, and the
-  codec's 8 Rust unit tests pass. The mutation harness kills MUTANT-COUNT of
-  29 mutants. The format is the same on every backend: fixed byte vectors,
+  codec's 8 Rust unit tests pass. The mutation harness kills all 29 of
+  its mutants. The format is the same on every backend: fixed byte vectors,
   hashes of encodings compared across backends, and bytes encoded on one
   backend decoded on another.
 
@@ -524,7 +524,57 @@ encode declares no error. The owner projections it may call are total.
 A mutant names its detectors: tests of the two files, or `rust:transfer`.
 A Rust mutant rebuilds a private copy of the native backend.
 
-MUTATION-TABLE
+| Mutant | The bug it plants | Killed by |
+|---|---|---|
+| **The static judgement** | | |
+| `opaque-structural` | an opaque struct without its owner's statement is judged by its fields: a Reg, an actor Address or a user Token becomes sendable | `sd-matrix-not-sendable-7`, `sd-matrix-not-sendable-8`, `sd-matrix-not-sendable-9` |
+| `context-sendable` | a context struct is judged by its fields: installed authority becomes a value to send | `sd-matrix-not-sendable-6` |
+| `address-stated` | std::actor's Address states `sendable fields`: a mailbox identity of one VM crosses to another | `sd-matrix-not-sendable-9`, `sd-stdlib-statements` |
+| `function-sendable` | a function or closure is judged sendable | `sd-matrix-not-sendable-1`, `sd-matrix-not-sendable-2`, `sd-matrix-not-sendable-3` |
+| `coroutine-sendable` | a coroutine handle -- an affine value owning a suspended computation -- is judged sendable, and so is an aggregate holding one | `sd-matrix-not-sendable-13` |
+| `element-ignored` | a List is sendable whatever its elements are | `sd-matrix-not-sendable-13`, `sd-matrix-not-sendable-3` |
+| `tree-fields-ignored` | a tree struct is judged by its recursion alone: a non-sendable field beside the child list is ignored | `sd-matrix-not-sendable-4` |
+| `variables-assumed` | every imprint variable is taken as sendable: an unconstrained generic body transfers a value of any type | `sd-sendclass-classes`, `sd-unconstrained-variable` |
+| `open-type-admitted` | a transfer of an open type is admitted: its schema is not the caller's type | `sd-decode-trait-view`, `sd-open-type` |
+| `declaration-parts-unchecked` | an owner's `sendable fields` and `through ... as R` are taken on trust: an any field or a function representation passes | `sd-clause-any-field`, `sd-clause-fn-field`, `sd-clause-through-not-sendable` |
+| `through-unverified` | the functions of `sendable through` are never checked: a missing, mistyped, failing or context-requiring projection or rebuild is accepted | `sd-through-context`, `sd-through-errors`, `sd-through-missing`, `sd-through-param`, `sd-through-result` |
+| `application-arguments-dropped` | a struct is judged once, at its declaration's slots taken as sendable, for every application: one statement makes every instantiation sendable, Box[Fn] included | `sd-matrix-not-sendable-11`, `sd-owner-generic-fields` |
+| **The owners' statements** | | |
+| `map-table-copied` | a MutableMap is sent field by field: its table's stored keyed hashes and index cross, valid only under the sender's table-hash key | `vt-process-compile-interp`, `vt-process-interp-compile` |
+| **The codec (core/transfer.tcl)** | | |
+| `vector-reference` | a MutableVector is sent as its header's identity, which the receiver takes for its own: the copy aliases the source (the Tcl backends' heap pointer) | `vt-vector-place` |
+| `source-drained` | encoding a MutableVector takes its elements out of the source: the sender's value changes | `vt-vector-place` |
+| `decoded-vector-shared` | every decoded MutableVector of a process is the first one decoded: two copies alias each other, and a later decode returns the first one's elements | `vt-vector-place` |
+| `text-latin1` | a String's bytes are decoded as ISO 8859-1, not UTF-8: every non-ASCII character is changed | `vt-refuse-utf8`, `vt-roundtrip-point`, `vt-roundtrip-strings` |
+| `int-truncated` | an Int is written as its low 64 bits: a big Int loses its high bits | `vt-roundtrip-big`, `vt-roundtrip-huge` |
+| `fingerprint-ignored` | the receiver does not compare the bytes' fingerprint with its type's: a value of another type, application or layout is decoded as this one | `vt-program-layout`, `vt-refuse-fingerprint`, `vt-refuse-instantiation`, `vt-refuse-same-name-layout`, `vt-refuse-wrong-type` |
+| `zero-budget-unbounded` | elements of no size draw on no budget: a few bytes claim a List of millions of units | `vt-refuse-zero-budget` |
+| `domain-unchecked` | an Int is decoded into its type without its integer domain: a Byte of 300 | `vt-refuse-domain` |
+| `bool-unchecked` | a Bool byte is not checked to be 0 or 1 | `vt-refuse-bool-byte` |
+| `enum-unchecked` | a case index is not checked against the enum's cases | `vt-refuse-enum-case` |
+| `float-unchecked` | a non-finite binary64 is decoded into a Float64 | `vt-refuse-infinite` |
+| `trailing-accepted` | bytes after the value are ignored | `vt-refuse-trailing` |
+| `set-not-rebuilt` | an ImmutableSet is built from the bytes' members as they are: a member twice stays twice | `vt-set-rebuilt` |
+| **The native codec (native/src/runtime/transfer.rs)** | | |
+| `native-vector-pointer` | a MutableVector is sent as its header's address, which the receiver takes for a value of its own: the copy aliases the source in one VM and dangles in another | `vt-vector-place`, `rust:transfer` |
+| `native-unrooted` | a composite is allocated after its parts left the roots: a collection while it is made frees them | `vt-gc-stress`, `rust:transfer` |
+| `native-fingerprint-ignored` | the native receiver does not compare the bytes' fingerprint with its type's | `vt-program-layout`, `vt-refuse-instantiation`, `vt-refuse-wrong-type`, `rust:transfer` |
+
+All 29 are killed by a named detector. The first full run, at this
+milestone's head, did not kill four of them, and fixing them changed the
+tests and one mutant:
+
+* **Three survivors.** `vector-reference`, `source-drained` and
+  `decoded-vector-shared` survived. Their detectors passed the vector to
+  `encode` through a function parameter, and the logical copy made on
+  entry to that parameter already separates it from its source. Aliasing
+  the source, draining it, or handing every decode one header was
+  therefore invisible. `vt-vector-place` encodes a place directly, mutates
+  the source afterwards, and decodes two different vectors. It kills all
+  three, and the native `native-vector-pointer` too.
+* **One mutant that no longer applied.** `open-type-admitted`'s text
+  predated the trait-view half of the open-type check; it was updated to
+  the current condition.
 
 ## 17. Performance
 
@@ -619,14 +669,23 @@ What the measurements show:
   functions now follow the protocol in all three modules.
 * **Other updates:**
   * the golden migration census and `tests/golden/manifest.tsv` list the
-    157 new Tcl tests;
+    158 new Tcl tests;
   * `audit/stdlib-census/after.tsv` is regenerated (it was also stale from
     earlier milestones).
+* **Main merged in.** The branch took main's PM-3 package-authoring
+  commits (no file of this milestone changed); `tests/sendability.test`
+  passes after the merge.
 * **Not run locally:**
   * the whole `tests/local.tcl`;
   * the static-decisions comparison (CI's);
   * macOS and Windows, whose workflows run on the branch push. The codec
     is portable Rust; its plan is the target's own NIR.
+* **CI on the branch, pending when this was written.** Dispatched, at the
+  head that holds every code change of the milestone: tests.yml (run
+  41700285818), tests-arm64.yml (41700290535) and static-decisions.yml
+  (41700295954). Started by the push: macos-arm64.yml (41700243090) and
+  windows-x86_64.yml (41700242990). All were queued; none has a verdict
+  here.
 * **Not rebuilt.** The committed Icy Tower executable
   (`audit/icy-tower/artifacts/icy-tower`), which AGENTS.md asks to rebuild
   with a runtime change. It is self-contained and its game uses neither
