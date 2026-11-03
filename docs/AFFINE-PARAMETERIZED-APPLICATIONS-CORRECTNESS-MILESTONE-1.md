@@ -760,7 +760,8 @@ resource mutants, against the merged ownership analysis and descriptors)
   a parameter of that type, and a struct cannot declare a `Box[Holder]`
   field. Lifting it is a decision about which signatures may name affine
   applications (its interaction with imprinting and with the `Positions`
-  rule below), not a correctness fix; it was left as it is.
+  rule below), not a correctness fix; it was left as it is. (Lifted, with
+  the `Positions` rule below, by WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md.)
 * **Imprinting is conservative about phantom slots**: `hir::imprint::
   Positions` counts every struct argument as a position where values of the
   variable exist, so a signature `fn f(p: Phantom[T])` takes no affine T,

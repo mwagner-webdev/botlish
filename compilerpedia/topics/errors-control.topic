@@ -1823,6 +1823,15 @@ binding that makes an application of the signature invalid (K bound to a
 function where a slot requires Hashable) is TRAIT-NOT-SATISFIED, not
 IMPRINT: the variables were established.
 
+The body is checked once, for every T, T unrestricted there: it may copy
+the values of T it obtains. So a variable is never imprinted with an
+affine type (a coroutine handle, a struct holding one) where values of it
+exist -- bare, in a List, in a function type, or as the argument of a
+parameterized struct whose fields hold values of that slot (`Box[T]` of
+`value: T`). Where none exists it may be: a pointer's pointee
+(`std::ffi::c::Ptr[T]`), or the argument of a slot no field holds
+(`Phantom[T]` of `value: int`), which is a type only.
+
 A nested function's signature names its enclosing function's variable as
 that variable: rigid there, never bound at a call of the nested function,
 every argument held to it (a TYPE error otherwise). Only the variables the
@@ -1858,6 +1867,38 @@ xs = empty[int]()
 xs
 @caption The imprint supplied at the call
 @value []
+@end
+
+@example reject
+struct Box[T]:
+    value: T
+
+fn worker() -> int:
+    yield 1
+    2
+
+fn get(b: Box[T]) -> T:
+    b.value
+
+coroutine {step} = worker()
+h = get(Box {value: step})
+0
+@caption The body obtains a T from the Box and may copy it: T is never a coroutine handle there
+@error CORE SEMANTIC IMPRINT
+@at 12:5
+@end
+
+@example accept
+struct Phantom[T]:
+    value: int
+
+fn twice(p: Phantom[T]) -> int:
+    q = p
+    p.value + q.value
+
+twice(Phantom[Coroutine{args: [], return: int, errors: []}] {value: 21})
+@caption A Phantom holds no value of T: an affine T is imprinted, and the copies are of an unrestricted value
+@value 42
 @end
 
 @topic error.layout-size

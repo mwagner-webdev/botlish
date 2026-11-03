@@ -4,7 +4,7 @@
 #
 #   tclsh9.0 audit/affine/tools/fuzz.tcl ?-n N? ?-seed S? ?-dump 1?
 #                                         ?-backends LIST? ?-native 0|1?
-#                                         ?-applications N?
+#                                         ?-applications N? ?-written N?
 #
 # Each program is a driver function `drive(k)` -- a straight line of 4..14
 # operations over coroutine handles, structs and Lists that own them -- run
@@ -99,9 +99,18 @@
 # verdict compared with the compiler's admission of a duplicated value, a
 # recursive affine construction's rejection and, for an accepted value, its
 # releases.
+#
+# With -written N (default 30), N more programs write the application they
+# construct (Written, below; WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md): as
+# a parameter's, a result's or a field's type, a List's or an ImmutableSet's
+# element, an explicit construction, or the declaration at imprint
+# variables in a generic signature -- judged by the same oracle, extended by
+# where values of each slot's argument exist, and compared with the same
+# program inferring the type where it can (an untyped parameter, an
+# undeclared result).
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
-set options [dict create -n 30 -seed 1 -dump 0 -backends {interp compile cranelift-generic cranelift cranelift-unfused} -native 1 -applications 30]
+set options [dict create -n 30 -seed 1 -dump 0 -backends {interp compile cranelift-generic cranelift cranelift-unfused} -native 1 -applications 30 -written 30]
 foreach {option value} $argv {
     if {![dict exists $options $option]} {
         error "fuzz.tcl: unknown option $option"
@@ -1196,6 +1205,13 @@ proc AppValue {decls t appsVar countVar} {
         app {
             lappend apps $t
             set j [lindex $t 1]
+            set head "S$j"
+            if {[WrittenPhantom $decls $j]} {
+                # (A slot no field establishes: the application written,
+                # WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md. The
+                # application programs' declarations have none.)
+                set head "S$j\[[join [lmap a [lindex $t 2] {AppText $a}] {, }]\]"
+            }
             set parts {}
             foreach field [dict get $decls $j fields] {
                 lassign $field name declared
@@ -1207,7 +1223,7 @@ proc AppValue {decls t appsVar countVar} {
                     lappend parts "$name: [AppValue $decls [AppSubst $declared {*}[lindex $t 2]] apps count]"
                 }
             }
-            return "S$j {[join $parts {, }]}"
+            return "$head {[join $parts {, }]}"
         }
     }
     error "AppValue: $t"
@@ -1341,8 +1357,363 @@ proc RunApplications {} {
     return $disagreements
 }
 
+# ---------------------------------------------------------------------------
+# Written applications (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md)
+#
+# A program declares structs as the application programs do (AppDeclarations)
+# and constructs one application T of them the same way, then writes T --
+# T's text, its arguments written out -- in one position:
+#
+#   param      fn take(x: T) -> int        take(VALUE); a dup inside take
+#   result     fn make_it() -> T           a = make_it(); a dup at the caller
+#   field      struct Owner: v: T          a = Owner {v: VALUE}; a dup of a
+#   list       fn take(xs: List[T])        take([VALUE]); a dup of the List
+#   set        fn take(xs: ImmutableSet[T]) -> int   never called
+#   explicit   a = Sj[ARGS] {...}          the construction written
+#   generic    fn g(x: Sj[A, B]) -> int    g(VALUE): the slots imprinted
+#
+# The oracle's expectation, in this order: AFFINE-CONTAINER-UNSUPPORTED for
+# a recursive declaration, a recursive constructed application or a
+# recursive written T (wherever T is written: no position admits a type no
+# finite drop descriptor releases); AFFINE-CONTAINER-UNSUPPORTED for an
+# affine T as a set's element; IMPRINT for the generic signature when a slot
+# whose argument is affine holds values of its argument (WrittenHolds: the
+# oracle's own least fixpoint -- a slot, a List of it, a function type over
+# it, an earlier declaration's holding slot applied to it); USE-AFTER-MOVE
+# for a dup of an affine T (of a List of one); else the value [1, 0] on
+# every backend with every handle released (natively: the counters).
+#
+# The written type must change nothing the same type inferred has: for the
+# param and result positions the program is compiled again with the type
+# left to inference (an untyped parameter, an undeclared result), and both
+# must agree -- on the first diagnostic's kind, or on the value and the
+# releases.
+
+# {J -> {HOLDS ...}}: for each declaration, 1 for each slot whose argument's
+# values its values hold (the oracle's slot positions, a least fixpoint).
+proc WrittenHolds {decls} {
+    set holds [dict create]
+    dict for {j d} $decls {
+        dict set holds $j [lrepeat [dict get $d slots] 0]
+    }
+    set changed 1
+    while {$changed} {
+        set changed 0
+        dict for {j d} $decls {
+            for {set k 0} {$k < [dict get $d slots]} {incr k} {
+                if {[lindex [dict get $holds $j] $k]} continue
+                foreach field [dict get $d fields] {
+                    if {[WrittenHeld $holds [lindex $field 1] $k]} {
+                        set row [dict get $holds $j]
+                        lset row $k 1
+                        dict set holds $j $row
+                        set changed 1
+                        break
+                    }
+                }
+            }
+        }
+    }
+    return $holds
+}
+
+# 1 if a value of declared field type T holds values of slot K, HOLDS the
+# current slot facts.
+proc WrittenHeld {holds t k} {
+    switch -- [lindex $t 0] {
+        slot { return [expr {[lindex $t 1] == $k}] }
+        list - fn { return [WrittenHeld $holds [lindex $t 1] $k] }
+        app {
+            set p 0
+            foreach a [lindex $t 2] {
+                if {[lindex [dict get $holds [lindex $t 1]] $p] && [WrittenHeld $holds $a $k]} {
+                    return 1
+                }
+                incr p
+            }
+        }
+    }
+    return 0
+}
+
+# 1 if a construction of declaration J establishes not every slot from its
+# field values (a phantom slot: no field holds one, a function type does not
+# establish, its own declaration's List is built empty).
+proc WrittenPhantom {decls j} {
+    set d [dict get $decls $j]
+    for {set k 0} {$k < [dict get $d slots]} {incr k} {
+        set established 0
+        foreach field [dict get $d fields] {
+            if {[WrittenEstablishes $j [lindex $field 1] $k]} {
+                set established 1
+                break
+            }
+        }
+        if {!$established} {
+            return 1
+        }
+    }
+    return 0
+}
+proc WrittenEstablishes {j t k} {
+    switch -- [lindex $t 0] {
+        slot { return [expr {[lindex $t 1] == $k}] }
+        list { return [expr {[lindex $t 1 0] eq "app" && [lindex $t 1 1] eq $j ? 0 : [WrittenEstablishes $j [lindex $t 1] $k]}] }
+        app {
+            foreach a [lindex $t 2] {
+                if {$a eq [list slot $k]} {
+                    return 1
+                }
+            }
+        }
+    }
+    return 0
+}
+
+# The applications oracle type T is or holds (in its arguments, a List's
+# element, a function type's argument), at any depth.
+proc WrittenApps {t} {
+    switch -- [lindex $t 0] {
+        list - fn { return [WrittenApps [lindex $t 1]] }
+        app {
+            set result [list $t]
+            foreach a [lindex $t 2] {
+                lappend result {*}[WrittenApps $a]
+            }
+            return $result
+        }
+    }
+    return {}
+}
+
+# AppDeclarations, one declaration in two without the fields that only
+# establish a slot (v0, v1): such a slot is held by no value of the
+# application unless another field uses it -- a phantom slot.
+proc WrittenDeclarations {} {
+    set decls [AppDeclarations]
+    dict for {j d} $decls {
+        if {[Rand 2] == 0} continue
+        set fields [lmap field [dict get $d fields] {
+            if {[regexp {^v[0-9]+$} [lindex $field 0]]} continue
+            set field
+        }]
+        if {$fields eq {}} {
+            set fields {{n {int}}}
+        }
+        dict set decls $j fields $fields
+    }
+    return $decls
+}
+
+# One written program: {TEXT TWIN EXPECT COUNT POSITION} (TWIN the same
+# program inferring T, or "").
+proc WrittenGenerate {} {
+    set decls [WrittenDeclarations]
+    set prelude $::appPrelude
+    dict for {j d} $decls {
+        set slots [lrange {A B} 0 [expr {[dict get $d slots] - 1}]]
+        append prelude "struct S$j\[[join $slots {, }]\]:\n"
+        foreach field [dict get $d fields] {
+            append prelude "    [lindex $field 0]: [AppText [lindex $field 1] $slots]\n"
+        }
+        append prelude "\n"
+    }
+    set j [Rand [dict size $decls]]
+    set args {}
+    for {set k 0} {$k < [dict get $decls $j slots]} {incr k} {
+        lappend args [AppArgument $decls $j $k 0]
+    }
+    set t [list app $j $args]
+    set apps {}
+    set count 0
+    set value [AppValue $decls $t apps count]
+    set written [AppText $t]
+    set position [Pick {param result field list set explicit generic}]
+    if {$position eq "generic"} {
+        for {set k 0} {$k < [dict get $decls $j slots]} {incr k} {
+            if {[AppTainted $decls $j $k]} {
+                # (A slot in a function type: the value's typed function
+                # would meet a parameter of an imprint variable's function
+                # type, whose contract is erased there -- hir/callables.tcl,
+                # unrelated to affinity. The parameter at the written type.)
+                set position param
+            }
+        }
+    }
+    set use [Pick {dup drop}]
+    set dup [expr {$use eq "dup" ? "    b = a\n    c = a\n" : ""}]
+    set twin ""
+    switch -- $position {
+        param {
+            set body "    1\n"
+            if {$use eq "dup"} {
+                set body "    b = x\n    c = x\n    1\n"
+            }
+            set text "${prelude}fn take(x: $written) -> int:\n${body}\nfn main() -> int:\n    take($value)\n"
+            set twin "${prelude}fn take(x) -> int:\n${body}\nfn main() -> int:\n    take($value)\n"
+        }
+        result {
+            set text "${prelude}fn make_it() -> $written:\n    $value\n\nfn main() -> int:\n    a = make_it()\n$dup"
+            set twin "${prelude}fn make_it():\n    $value\n\nfn main() -> int:\n    a = make_it()\n$dup"
+        }
+        field {
+            set text "${prelude}struct Owner:\n    v: $written\n\nfn main() -> int:\n    a = Owner {v: $value}\n$dup"
+        }
+        list {
+            set text "${prelude}fn take(xs: List\[$written\]) -> int:\n    1\n\nfn main() -> int:\n    a = \[$value\]\n${dup}    take([expr {$use eq "dup" ? "c" : "a"}])\n"
+        }
+        set {
+            set text "${prelude}fn take(xs: ImmutableSet\[$written\]) -> int:\n    1\n\nfn main() -> int:\n    a = $value\n$dup"
+        }
+        explicit {
+            # (Already written when a slot is phantom: WrittenPhantom.)
+            regsub {^S[0-9]+ \{} $value "$written \{" explicit
+            set text "${prelude}fn main() -> int:\n    a = $explicit\n$dup"
+        }
+        generic {
+            set slots [lrange {A B} 0 [expr {[dict get $decls $j slots] - 1}]]
+            set text "${prelude}fn g(x: S$j\[[join $slots {, }]\]) -> int:\n    1\n\nfn main() -> int:\n    g($value)\n"
+        }
+    }
+    foreach v {text twin} {
+        if {[set $v] eq ""} continue
+        if {$position ni {param list generic}} {
+            # (main's value: the other positions end with a binding.)
+            append $v "    1\n"
+        }
+        append $v "\n\[main(), test_aff_live()\]\n"
+    }
+    # The oracle.
+    set expect [list value {[1, 0]}]
+    set recursive 0
+    dict for {i d} $decls {
+        set generic [list app $i [lmap k [Iota [dict get $d slots]] {list slot $k}]]
+        if {[AppAffine $decls $generic] && [AppRecursive $decls $generic]} {
+            set recursive 1
+        }
+    }
+    # (Every application the program writes is a type: one a recursive
+    # affine type is rejected wherever it is written -- also as a phantom
+    # slot's argument, where no value of it would exist. The program writes
+    # T, its arguments included, except in the generic position, and the
+    # construction of a declaration with a phantom slot writes its
+    # arguments.)
+    set writtenApps [expr {$position eq "generic" ? {} : [WrittenApps $t]}]
+    foreach a $apps {
+        if {[WrittenPhantom $decls [lindex $a 1]]} {
+            lappend writtenApps {*}[WrittenApps $a]
+        }
+    }
+    foreach a [concat $apps [list $t] $writtenApps] {
+        if {[AppAffine $decls $a] && [AppRecursive $decls $a]} {
+            set recursive 1
+        }
+    }
+    set affine [AppAffine $decls $t]
+    if {$recursive} {
+        set expect [list error AFFINE-CONTAINER-UNSUPPORTED]
+    } elseif {$position eq "set" && $affine} {
+        set expect [list error AFFINE-CONTAINER-UNSUPPORTED]
+    } elseif {$position eq "generic"} {
+        set holds [dict get [WrittenHolds $decls] $j]
+        foreach a $args h $holds {
+            if {[AppAffine $decls $a]} {
+                if {$h} {
+                    set expect [list error IMPRINT]
+                } else {
+                    # (An affine argument imprinted where no value of it
+                    # exists: accepted.)
+                    set position "generic-phantom"
+                }
+            }
+        }
+        if {[lindex $expect 0] eq "error"} {
+            set position generic
+        }
+    } elseif {$use eq "dup" && $affine} {
+        set expect [list error USE-AFTER-MOVE]
+    }
+    return [list $text $twin $expect $count $position $affine]
+}
+
+# The outcome of program TEXT, judged against EXPECT: "" or the problem.
+# COUNT handles are constructed; the codes or the value are left in
+# VERDICTVAR (for the twin's comparison).
+proc WrittenJudge {text expect count verdictVar} {
+    global options
+    upvar 1 $verdictVar verdict
+    if {[catch {surface::compile $text -warnings off} hir errOptions]} {
+        if {[dict exists $errOptions -diagnostics]} {
+            set codes [lmap d [dict get $errOptions -diagnostics] {lindex [dict get $d errorcode] end}]
+        } else {
+            set codes [list [lindex [dict get $errOptions -errorcode] end]]
+        }
+        set verdict [list rejected [lindex $codes 0]]
+        if {[lindex $expect 0] ne "error" || [lindex $expect 1] ni $codes
+                || ([lindex $expect 1] eq "USE-AFTER-MOVE" && [lindex $codes 0] ne "USE-AFTER-MOVE")} {
+            return "rejected ($codes): $hir; oracle expects $expect"
+        }
+        return ""
+    }
+    if {[lindex $expect 0] eq "error"} {
+        set verdict accepted
+        return "accepted; oracle expects [lindex $expect 1]"
+    }
+    set tclValue [lrange [outcomeUnderHir interp $hir] 0 1]
+    set verdict [list accepted $tclValue]
+    if {$tclValue ne $expect} {
+        return "interp (with the live probe) gives $tclValue, oracle $expect"
+    }
+    set probeless [surface::compile [string map {test_aff_live() 0} $text] -warnings off]
+    foreach b [dict get $options -backends] {
+        set o [lrange [outcomeUnderHir $b $probeless] 0 1]
+        if {$o ne $expect} {
+            return "$b gives $o, oracle $expect"
+        }
+    }
+    if {$count > 0 && [dict get $options -native] && $::tcl_platform(os) eq "Linux"} {
+        set counters [dict get [withoutCoroutineFusion {native::allocationReport $probeless summary}] coroutines]
+        if {[dict get $counters released] != $count || [dict get $counters sweptSuspended] != 0} {
+            return "native release counters $counters for $count handles"
+        }
+    }
+    return ""
+}
+
+# Runs -written programs: the number of disagreements.
+proc RunWritten {} {
+    global options
+    set disagreements 0
+    set tally [dict create]
+    for {set p 0} {$p < [dict get $options -written]} {incr p} {
+        set number [expr {[dict get $options -seed] + $p}]
+        set ::seedState [expr {$number * 7919 + 53}]
+        lassign [WrittenGenerate] text twin expect count position affine
+        if {[dict get $options -dump]} {
+            puts "--- written program $number ($position)\n$text--- expect $expect"
+        }
+        set problem [WrittenJudge $text $expect $count verdict]
+        if {$problem eq "" && $twin ne ""} {
+            # The same type left to inference: the same verdict.
+            set twinProblem [WrittenJudge $twin $expect $count twinVerdict]
+            if {$twinProblem ne "" || $twinVerdict ne $verdict} {
+                set problem "the written type gives $verdict, the inferred one $twinVerdict ($twinProblem)\n--- inferred twin\n$twin"
+            }
+        }
+        if {$problem eq ""} {
+            dict incr tally "$position [expr {[lindex $expect 0] eq "error" ? [lindex $expect 1] : ($affine ? "affine" : "unrestricted")}]"
+        } else {
+            incr disagreements
+            puts "DISAGREEMENT written program $number ($position):\n$problem\n--- program\n$text"
+        }
+    }
+    puts "written programs [dict get $options -written]: [join [lmap {k n} [lsort -stride 2 $tally] {string cat "$k $n"}] {, }]; disagreements $disagreements"
+    return $disagreements
+}
+
 set failures [Run]
 incr failures [RunApplications]
+incr failures [RunWritten]
 # (The last line is the total, as audit/affine/tools/mutate.tcl reads it.)
-puts "programs [expr {[dict get $options -n] + [dict get $options -applications]}] disagreements $failures"
+puts "programs [expr {[dict get $options -n] + [dict get $options -applications] + [dict get $options -written]}] disagreements $failures"
 exit [expr {$failures > 0 ? 1 : 0}]

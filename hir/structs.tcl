@@ -111,6 +111,17 @@ namespace eval hir::structs {
     # declarations it summarizes, in the order it met them.
     variable summarizing 0
     variable summaryIds {}
+    # ID -> {{POSITION ...} ...}: struct ID's slot positions (SlotPositions),
+    # one list per slot in declared order, for this registry -- like the
+    # affinity summary a fact of the declaration, forgotten with it
+    # (ForgetAffinity), never of one application.
+    variable positions [dict create]
+    # SlotPositions' fixpoint in progress, as AffinitySummary's.
+    variable positioning 0
+    variable positionIds {}
+    # 1 while apply resolves the field types of its batch: a declaration's
+    # fields are not all known yet (WrittenProblem).
+    variable registering 0
     # The deepest path, and the most (type, crossed) pairs, OwnedRecursion
     # follows before it calls its walk unbounded: no struct type a program
     # writes nests 64 fields deep, and a walk past that meets ever larger
@@ -128,14 +139,17 @@ proc hir::structs::Reset {} {
 
 # Forgets every affinity fact of the registry -- the summaries, the
 # applications' answers and the drop descriptors derived from them
-# (hir::affine::Descriptor's table) -- whenever the declarations change.
+# (hir::affine::Descriptor's table) -- and the slots' positions
+# (SlotPositions), whenever the declarations change.
 proc hir::structs::ForgetAffinity {} {
     variable affinity
     variable applications
+    variable positions
     set affinity [dict create]
     set applications [dict create]
     namespace eval ::hir::affine {}
     set ::hir::affine::descriptorMemo [dict create]
+    set positions [dict create]
 }
 
 # Affinity of a named struct type (hir::types::Affinity, AFFINE-VALUES.md;
@@ -215,46 +229,65 @@ proc hir::structs::IsAffine {id {arguments {}}} {
 # finished fixpoint's summaries are kept.
 proc hir::structs::AffinitySummary {id} {
     variable affinity
-    variable summarizing
-    variable summaryIds
     if {[dict exists $affinity $id]} {
         return [dict get $affinity $id]
     }
     if {![declared $id]} {
         return {0 {}}
     }
-    dict set affinity $id {0 {}}
-    lappend summaryIds $id
-    if {$summarizing} {
-        return {0 {}}
+    return [Fixpoint affinity summarizing summaryIds AffinityOf AffinityBottom $id]
+}
+
+# The affinity summary every declaration starts its fixpoint at.
+proc hir::structs::AffinityBottom {id} {
+    return {0 {}}
+}
+
+# The least fixpoint of a declaration fact (AffinitySummary, SlotPositions)
+# for declared struct ID and every declaration it reaches: TABLE (ID -> fact)
+# and RUNNING (1 while a fixpoint runs), MET (the declarations it met, in
+# order) the names of this namespace's variables that hold them, OF the
+# command that computes a declaration's fact from its fields (reading every
+# struct they name at its current fact through the same table), BOTTOM the
+# command that gives a declaration's starting fact. Each fact starts at
+# BOTTOM and is recomputed until none changes; a declaration met while the
+# fixpoint runs joins it (its current fact is the answer meanwhile); only a
+# finished fixpoint's facts are kept.
+proc hir::structs::Fixpoint {table running met of bottom id} {
+    upvar #0 ::hir::structs::$table facts ::hir::structs::$running inside ::hir::structs::$met ids
+    set start [$bottom $id]
+    dict set facts $id $start
+    lappend ids $id
+    if {$inside} {
+        return $start
     }
-    set summarizing 1
+    set inside 1
     try {
         set changed 1
         while {$changed} {
             set changed 0
-            # (summaryIds grows while it is walked: a declaration met is
+            # (ids grows while it is walked: a declaration met is
             # summarized in the same round.)
-            for {set i 0} {$i < [llength $summaryIds]} {incr i} {
-                set d [lindex $summaryIds $i]
-                set summary [AffinityOf $d]
-                if {$summary ne [dict get $affinity $d]} {
-                    dict set affinity $d $summary
+            for {set i 0} {$i < [llength $ids]} {incr i} {
+                set d [lindex $ids $i]
+                set fact [$of $d]
+                if {$fact ne [dict get $facts $d]} {
+                    dict set facts $d $fact
                     set changed 1
                 }
             }
         }
     } on error {message options} {
-        # An unfinished fixpoint's summaries may be too small: keep none.
-        foreach d $summaryIds {
-            dict unset affinity $d
+        # An unfinished fixpoint's facts may be too small: keep none.
+        foreach d $ids {
+            dict unset facts $d
         }
         return -options $options $message
     } finally {
-        set summarizing 0
-        set summaryIds {}
+        set inside 0
+        set ids {}
     }
-    return [dict get $affinity $id]
+    return [dict get $facts $id]
 }
 
 # The affinity summary {BASE RELEVANT} struct ID's fields give, every struct
@@ -286,6 +319,76 @@ proc hir::structs::AffinityOf {id} {
         }
     }
     return [list 0 $relevant]
+}
+
+# Slot positions (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md): where, in the
+# values of an application, values of each slot's argument exist. A
+# declaration's slot occurs in its field types at the positions
+# hir::imprint::Occurrences states for any type -- `value` (values of it are
+# stored, or obtained from a function: a Fn type over it), `pointee` (a C
+# pointer's pointee: an identity only), `cvalue` or `csignature` (a C
+# signature's) -- an application nested in a field contributing its own
+# slots' positions. A slot at none of them is held by no value of the
+# application: its argument is a type only (Occurrences' position
+# `argument`), as in
+#
+#   struct Box[T]:        value: T                   T: value
+#   struct Phantom[T]:    value: int                 T: none
+#   struct Ref[T]:        p: std::ffi::c::Ptr[T]     T: pointee
+#   struct Handler[T]:    f: Fn{args: [T], ...}      T: value (a Fn type's)
+#   struct Nested[T]:     inner: Box[T]              T: value (Box's)
+#
+# This is where an imprinted function's body can obtain values of a variable
+# (hir::imprint::Positions, BindingProblem): a body checked for every T may
+# copy T's values, so a variable is bound to an affine type only where no
+# value of it exists. It is not the affinity summary's relevance: an
+# application's affinity asks which arguments make its values own an affine
+# value (a Fn type over T owns none; a struct with an affine field of its own
+# is affine whatever its arguments, so none is relevant there, though its
+# other fields may hold values of T), positions ask where values of T can be
+# reached at all. Computed by the same least fixpoint (a slot reached only
+# through its own declaration, `next: List[W[List[T]]]`, has no position: no
+# finite value holds one), kept per registration and forgotten with the
+# affinity facts (ForgetAffinity).
+
+# {{POSITION ...} ...}: the positions of each slot of struct ID, in slot
+# order, each list sorted ({} for a slot no value holds); {} for an identity
+# no declaration has (Occurrences then takes every argument for a value).
+proc hir::structs::SlotPositions {id} {
+    variable positions
+    if {[dict exists $positions $id]} {
+        return [dict get $positions $id]
+    }
+    if {![declared $id]} {
+        return {}
+    }
+    return [Fixpoint positions positioning positionIds PositionsOf PositionsBottom $id]
+}
+
+# The slot positions every declaration starts its fixpoint at: none.
+proc hir::structs::PositionsBottom {id} {
+    return [lrepeat [llength [slots $id]] {}]
+}
+
+# The slot positions struct ID's fields give, every struct they name read at
+# its current slot positions (SlotPositions' fixpoint).
+proc hir::structs::PositionsOf {id} {
+    set slots [slots $id]
+    set result [lrepeat [llength $slots] {}]
+    foreach {name t} [fieldTypes $id] {
+        foreach occurrence [hir::imprint::Occurrences $t] {
+            lassign $occurrence variable establishing position
+            set index [lsearch -exact $slots $variable]
+            if {$index < 0 || $position eq "argument"} {
+                continue
+            }
+            set held [lindex $result $index]
+            if {$position ni $held} {
+                lset result $index [lsort [linsert $held end $position]]
+            }
+        }
+    }
+    return $result
 }
 
 # The field by which the affine application TYPE is affine, when its
@@ -621,6 +724,117 @@ proc hir::structs::ApplicationIssue {type} {
         }
     }
     return ""
+}
+
+# Why the application TYPE, written in a type position
+# (hir::resolve::ResolveApplied), is no type a value can have: {KIND
+# MESSAGE}, or "". An argument's affinity is no reason (WRITTEN-AFFINE-
+# APPLICATIONS-MILESTONE-1.md): Box[Coroutine{...}] is an affine type like
+# any other and every position judges it by its affinity, as it judges the
+# same type inferred. A recursive affine type is one: no finite drop
+# descriptor releases its values, so it is AFFINE-CONTAINER-UNSUPPORTED
+# wherever it is written, by the rule a construction of it meets
+# (ApplicationIssue). Undecided ("") while apply resolves field types (a
+# declaration's fields are not all known yet): a field's type is judged with
+# the declaration (VerifyDeclarations).
+proc hir::structs::WrittenProblem {type} {
+    variable registering
+    if {$registering} {
+        return ""
+    }
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    set growth ""
+    if {[hir::types::AnyAffine [hir::types::StructArgs $type]]} {
+        set growth [Unfolding $type]
+    }
+    if {$growth ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [UnfoldingMessage $type $growth]]
+    }
+    return ""
+}
+
+# The steps by which TYPE (an application with an affine argument, or a
+# type holding one) nests that argument in ever larger types ({STEP ...},
+# OwnedRecursion's steps), or "" when its unfolding is finite.
+#
+# A type is finite because every type is bounded (hir::types::Bound): past
+# the aggregate and applied-type depths a component is cut to its kind or to
+# `any` -- except an affine one, which is never cut (that would erase the
+# ownership it carries). So an application that hands an affine argument on
+# to ever larger applications -- W[Coroutine{...}] of `struct W[T]: next:
+# List[W[List[T]]]`, whose values hold no handle (W's slot has no position)
+# but whose field types are W[List[C]], W[List[List[C]]], ... -- has no
+# finite form, and the compiler's walks of a type's components (what a value
+# of it carries when erased, its equality) would never end. An affine
+# application of that shape is a recursive affine type (OwnedRecursion); an
+# unrestricted one is found here. Its steps are struct fields, an
+# application's applied fields, collection elements and a function type's
+# argument and result types; a path past recursionDepth steps, or more than
+# recursionBudget types, is unbounded. An application with no affine
+# argument is cut like any type: finite.
+proc hir::structs::Unfolding {type} {
+    if {[string first nstruct $type] < 0} {
+        return ""
+    }
+    set visited [dict create]
+    return [UnfoldingFrom $type {} visited]
+}
+
+# Unfolding's walk of TYPE, reached by the steps PATH.
+proc hir::structs::UnfoldingFrom {type path visitedVar} {
+    upvar 1 $visitedVar visited
+    variable recursionDepth
+    variable recursionBudget
+    set type [hir::types::Unrefined $type]
+    if {[dict exists $visited $type]} {
+        return ""
+    }
+    if {[llength $path] >= $recursionDepth || [dict size $visited] >= $recursionBudget} {
+        return $path
+    }
+    dict set visited $type 1
+    set fields {}
+    set parts {}
+    if {[hir::types::IsNamedStruct $type]} {
+        if {![declared [lindex $type 1]]} {
+            return ""
+        }
+        set owner $type
+        set fields [AppliedFieldTypes $type]
+    } elseif {[hir::types::IsStruct $type]} {
+        set owner ""
+        set fields [lindex $type 1]
+    } elseif {[hir::types::IsList $type]} {
+        set parts [concat [list [lindex $type 1]] [hir::types::shapeOf $type]]
+    } elseif {[hir::types::IsSet $type] || [hir::types::IsMutVec $type] || [hir::types::IsMutArray $type]} {
+        set parts [list [lindex $type 1]]
+    } elseif {[hir::types::IsFn $type] || [hir::types::IsCoroutine $type]} {
+        set contract [hir::types::Contract $type]
+        set parts [concat [dict get $contract args] [list [dict get $contract return]]]
+    }
+    foreach {name t} $fields {
+        set found [UnfoldingFrom $t [linsert $path end [list $owner $name $t]] visited]
+        if {$found ne ""} {
+            return $found
+        }
+    }
+    foreach t $parts {
+        set found [UnfoldingFrom $t $path visited]
+        if {$found ne ""} {
+            return $found
+        }
+    }
+    return ""
+}
+
+# WrittenProblem's message for the application TYPE whose unfolding PATH
+# (Unfolding) never ends.
+proc hir::structs::UnfoldingMessage {type path} {
+    return [format {%s has no finite form: its fields nest its affine type argument in ever larger types (%s, ...), and an affine argument is never cut to a bound (cutting it would erase the ownership it carries), so a walk of the type's components would never end -- not supported (with an unrestricted argument the same declaration is an ordinary type: its arguments are cut)} \
+        [hir::types::presented $type] [RecursionSteps [lrange $path 0 2]]]
 }
 
 # ApplicationIssue's message alone ("" when every application is valid).
@@ -971,6 +1185,54 @@ proc hir::structs::apply {decls} {
         }
     }
     set entries {}
+    variable registering 1
+    try {
+        set entries [ResolveFields $decls]
+    } finally {
+        set registering 0
+    }
+    # Tree structs (TREE-STRUCT-MILESTONE-1.md), once every field type of
+    # the batch is resolved (a field reaches other declarations' fields):
+    # each one's recursive field, checked against the one shape there is.
+    set index 0
+    foreach decl $decls {
+        if {[dict exists $decl tree] && [dict get $decl tree]} {
+            set id [identity [dict get $decl name] [dict get $decl namespace]]
+            set field [ValidateTree $decl $id [dict get $registry $id types]]
+            dict set registry $id tree $field
+            lset entries $index [dict replace [lindex $entries $index] tree $field]
+        }
+        incr index
+    }
+    # (Affinity read while field types were still being resolved is stale.)
+    ForgetAffinity
+    foreach decl $decls {
+        set id [identity [dict get $decl name] [dict get $decl namespace]]
+        # (The declaration at its own slots, which are unrestricted here as
+        # in a generic body: an application of it is judged where it is
+        # written or made, ApplicationIssue.)
+        set recursion [OwnedRecursion [SelfType $id]]
+        if {$recursion eq ""} continue
+        # A recursive affine type: releasing a value of it would have to
+        # recurse as deep as the value nests, and an affine drop is a static
+        # descriptor -- a finite walk of the type (hir::affine::Descriptor).
+        lassign $recursion how path
+        set first [lindex $path 0 1]
+        foreach field [dict get $decl fields] {
+            if {[dict get $field name] eq $first} {
+                set span [dict get $field typeSpan]
+            }
+        }
+        Fail $span [RecursionMessage $id "" $recursion [dict get $decl name]] AFFINE-CONTAINER-UNSUPPORTED
+    }
+    return $entries
+}
+
+# The registry entries of DECLS (apply's batch, its skeleton registered):
+# every field type resolved, in declaration order.
+proc hir::structs::ResolveFields {decls} {
+    variable registry
+    set entries {}
     foreach decl $decls {
         set name [dict get $decl name]
         set ns [dict get $decl namespace]
@@ -1038,40 +1300,6 @@ proc hir::structs::apply {decls} {
             dict set entry identity $identity
         }
         lappend entries $entry
-    }
-    # Tree structs (TREE-STRUCT-MILESTONE-1.md), once every field type of
-    # the batch is resolved (a field reaches other declarations' fields):
-    # each one's recursive field, checked against the one shape there is.
-    set index 0
-    foreach decl $decls {
-        if {[dict exists $decl tree] && [dict get $decl tree]} {
-            set id [identity [dict get $decl name] [dict get $decl namespace]]
-            set field [ValidateTree $decl $id [dict get $registry $id types]]
-            dict set registry $id tree $field
-            lset entries $index [dict replace [lindex $entries $index] tree $field]
-        }
-        incr index
-    }
-    # (Affinity read while field types were still being resolved is stale.)
-    ForgetAffinity
-    foreach decl $decls {
-        set id [identity [dict get $decl name] [dict get $decl namespace]]
-        # (The declaration at its own slots, which are unrestricted here as
-        # in a generic body: an application of it is judged where it is
-        # written or made, ApplicationIssue.)
-        set recursion [OwnedRecursion [SelfType $id]]
-        if {$recursion eq ""} continue
-        # A recursive affine type: releasing a value of it would have to
-        # recurse as deep as the value nests, and an affine drop is a static
-        # descriptor -- a finite walk of the type (hir::affine::Descriptor).
-        lassign $recursion how path
-        set first [lindex $path 0 1]
-        foreach field [dict get $decl fields] {
-            if {[dict get $field name] eq $first} {
-                set span [dict get $field typeSpan]
-            }
-        }
-        Fail $span [RecursionMessage $id "" $recursion [dict get $decl name]] AFFINE-CONTAINER-UNSUPPORTED
     }
     return $entries
 }

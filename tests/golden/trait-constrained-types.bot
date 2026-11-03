@@ -227,7 +227,8 @@ fn register_application_tests():
             1
     std::test::rejects("tc-app-everywhere/construction", std::compiler::DiagnosticCode::TraitNotSatisfied, in_construction)
 
-    # tc-app-slot-argument-kinds: no trait and no affine type as an argument.
+    # tc-app-slot-argument-kinds: no trait as an argument; an affine type is
+    # one like any other.
     fn trait_argument() errors std::compiler::CompilerError:
         static compile:
             fn f(b: Box[Hashable]) -> int:
@@ -239,7 +240,7 @@ fn register_application_tests():
             fn f(b: Box[Coroutine{args: [], return: int, errors: []}]) -> int:
                 1
             1
-    std::test::rejects("tc-app-slot-argument-kinds/affine", std::compiler::DiagnosticCode::Type, affine_argument)
+    std::test::value("tc-app-slot-argument-kinds/affine", 1, affine_argument)
 
     # tc-app-distinct-and-invariant: no slot is converted, widened or narrowed.
     fn distinct() errors std::compiler::CompilerError:
