@@ -340,6 +340,28 @@ Gatekeeper's dialog is up and end it after Done.
   prints each name before the test runs. The next crash then names its
   test, or shows that only concurrency triggers it. The step still fails.
 
+### 3.9 After the window: a layout-fuzzer seed (fixed in a follow-up)
+
+**c-bindgen, `layout-fuzz.tcl`** (run 41602581645, 0d7f0b1d, the merge of
+this report's fixes): seed 163 (the workflow uses its run number) found a
+disagreement on every target. The model expected a layout for `struct
+lf_r21`; the generator blocked it, through one of its anonymous unions.
+
+- **Cause:** the generator finds an anonymous member's record layout in
+  clang's dump by its member names, on its brace's line or up to eight
+  lines above it (clang reports the keyword's line). `lf_r21` has two
+  anonymous unions three lines apart, each holding one unnamed struct, so
+  both have the member names `member1` (an unnamed member is named by its
+  place). The second union's search found both, saw two layouts, and
+  blocked it as ambiguous.
+- **Not this change:** `tools/c-bindgen/` was untouched. Each run draws a
+  new seed, and this was the first to draw two such unions close together.
+- **Fix:** `records.tcl`'s `Block` keeps only the matches at the nearest
+  line: nothing stands between a member's keyword and its brace, so a
+  match further up is another member's. Several matches on that one line
+  must still agree. `cb-layout-anonymous-nearest` pins the case: it fails
+  without the fix.
+
 ## 4. Why they reached main and why they stayed
 
 **Linux CI runs after the merge.**

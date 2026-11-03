@@ -839,8 +839,9 @@ proc ::cbind::records::AnonymousMember {recs m} {
 # ""} or {"" WHY}. It is the anonymous record of KEY's kind clang locates in
 # the parser's file at the parser's line -- or up to eight lines above it:
 # the parser tags the brace, clang the struct or union keyword -- whose own
-# members are KEY's, by name, in order (an unnamed one by its place);
-# several are taken only when they are the same layout.
+# members are KEY's, by name, in order (an unnamed one by its place), at
+# the nearest of those lines; several there are taken only when they are
+# the same layout.
 proc ::cbind::records::Block {recs key} {
     variable facts
     variable blockOf
@@ -869,6 +870,14 @@ proc ::cbind::records::Block {recs key} {
                 if {[lmap m [dict get $b members] {lindex $m 0}] ne $names} continue
                 lappend found $b
             }
+        }
+        # The nearest line is the member's own: nothing stands between its
+        # keyword and its brace, so one further up with the same member
+        # names (an unnamed member is named by its place) is another
+        # member's, a few lines earlier in the same record.
+        if {[llength $found]} {
+            set nearest [tcl::mathfunc::max {*}[lmap b $found {dict get $b line}]]
+            set found [lmap b $found {if {[dict get $b line] == $nearest} {set b} else continue}]
         }
         set shapes [lsort -unique [lmap b $found {list [dict get $b size] [dict get $b align] [dict get $b leaves] \
             [lmap m [dict get $b members] {lindex $m 1}]}]]
