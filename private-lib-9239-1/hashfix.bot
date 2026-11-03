@@ -1,4 +1,0 @@
-import std::table_hash
-
-fn keyed(x: Hashable) -> int:
-    std::table_hash::of(x)

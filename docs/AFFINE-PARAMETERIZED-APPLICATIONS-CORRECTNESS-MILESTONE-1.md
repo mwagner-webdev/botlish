@@ -451,7 +451,14 @@ applications correctly and is carried exactly as before.
   descriptor. The mutants `app-summary-leaks-across-compilations`,
   `app-answer-cached-by-declaration` and
   `app-descriptor-memo-outlives-declarations` are killed.
-* The harnesses (section 15) ran clean: <!--HARNESS-->.
+* The corpus harnesses, over the ten default suites plus tree-struct.bot,
+  trait-constrained-types.bot, mutable-map.bot (15 suites, ownership.bot
+  among the defaults): `audit/compilation-isolation/tools/interleave.tcl`
+  -- every artifact and outcome right after its own compilation and after
+  all the others, 120 compared, 0 differ;
+  `audit/hir-interchange/tools/roundtrip.tcl -via interchange` -- every
+  HIR, artifact and outcome read back by a fresh process, 135 compared, 0
+  differ; `-via cache` -- 150 compared, 0 differ.
 
 ## 12. Oracle/fuzzing
 
@@ -467,9 +474,8 @@ record (every identity's one owner, every release obligation) is the
 existing one. Faults on them -- a use after a move, a projection of the
 affine field, an erasure, an equality, a generic duplication -- predict the
 existing diagnostics. On the original compiler the extended generator
-disagrees with its oracle on most programs that box a handle (seed 1: 8 of
-the first 20, every one a handle left alive); on the fixed one it agrees on
-every program.
+disagrees with its oracle on 8 to 12 of 30 programs per seed (the table
+below); on the fixed one it agrees on every program.
 
 **Application programs** (`-applications N`, default 30). Each program
 declares 2..4 random parameterized structs (one or two slots) with fields
@@ -489,26 +495,228 @@ for a duplicated affine value, otherwise `[1, 0]` on every backend (no Tcl
 coroutine left alive), and natively every handle constructed released and
 none swept.
 
-<!--FUZZ-->
+Runs (every backend: interp, compile, cranelift-generic, cranelift,
+cranelift-unfused; native release counters checked):
+
+| seed | ownership programs | application programs | disagreements, this tree | disagreements, the tree before (same generator) |
+|---|---|---|---:|---:|
+| 1 | 30 (90 identities' releases checked) | 30: 7 affine accepted, 12 unrestricted accepted, 4 AFFINE-CONTAINER-UNSUPPORTED, 7 USE-AFTER-MOVE | 0 | 23 (12 ownership, 11 application) |
+| 101 | 30 | 30 | 0 | 22 (8, 14) |
+| 202 | 30 (70 identities) | 30: 8, 10, 5, 7 | 0 | 21 (9, 12) |
+| 101 (application programs only) | -- | 60: 15, 21, 12, 12 | 0 | -- |
+
+On the tree before this milestone, every ownership disagreement is a
+handle a GBox or GNest owned and nobody released (the Tcl coroutine left
+alive, the native counters short), or a GBox fault the oracle predicts and
+the compiler accepted; every application disagreement a duplicated affine
+application accepted, a recursive affine application accepted, or a leak.
+
+The generator itself had one defect, found by seed 101 on this tree: it
+recognized a declaration's own recursive List field after substituting
+the arguments, so `List[A]` with `A` an application of the same
+declaration was built empty and left `A` unestablished (IMPRINT, an
+invalid program, not a compiler error). It now decides on the declared
+field type; the run above is with the fix.
+
+Other fuzzers of the code this milestone touches, on this tree: tree
+structs (seeds 1 and 7: 20 programs each, 6,712 and 8,689 observations,
+0 disagreements), trait-constrained types (seeds 1 and 7: 0 failing),
+coroutines (seeds 1 and 7: 50 programs each, 0 disagreements), static
+decisions (seeds 17 and 41: 0 failures; every layout gives the same
+verdicts).
 
 ## 13. Mutation testing
 
-`audit/affine/tools/mutants.txt` gained 21 mutants of this milestone
-(section "Applications of parameterized structs"), the tree-struct
-mutant `decl-affine-application-admitted` was rewritten for the general
-check, and `struct-affine-unrestricted` for the new code; `mutate.tcl` runs
-`tests/affine.test` and `tests/affine-applications.test` and the fuzzer
-(now with its application programs) against each.
+`audit/affine/tools/mutants.txt` gained 24 mutants of this milestone (its
+section "Applications of parameterized structs"); `struct-affine-unrestricted`
+was rewritten for the new code, and so was the tree harness's
+`decl-affine-application-admitted` (now: the general recursion check
+removed). `audit/affine/tools/mutate.tcl` runs `tests/affine.test`,
+`tests/affine-applications.test` and the fuzzer (25 ownership programs,
+seed 11, and now `-applications` programs, 30 by default) against each.
 
-<!--MUTANTS-->
+The final run, every one of the harness's 53 mutants against the final
+code with the default detectors: **53 killed, 0 survived** (the two
+native mutants rebuilt the runtime). This milestone's:
+
+| mutant | tests | fuzzer |
+|---|---|---|
+| `struct-affine-unrestricted` | 25 failed (aa-classification, aa-reproducer-duplicate, ...) | 22 programs disagree |
+| `app-ignores-arguments` (the starting defect) | 20 failed | 19 programs |
+| `app-declaration-fields-only` | 20 failed | 19 programs |
+| `app-any-affine-argument` | aa-classification, aa-isolation, aa-not-any-argument, aa-summary-per-declaration, aa-tree-general-rule | survived |
+| `app-every-slot-relevant` | the same five | survived |
+| `app-first-slot-only` | aa-classification, aa-ownership-consequences, af-fuzz-bounded | 3 programs |
+| `app-last-slot-only` | aa-classification, aa-ownership-consequences, af-fuzz-bounded | 1 program |
+| `app-relevance-ignored` | 20 failed | 19 programs |
+| `app-nested-argument-not-traversed` | 7 failed (aa-deep-application-kept, aa-native-nested-drop, ...) | 1 program |
+| `app-nested-field-not-traversed` | 9 failed (aa-fixpoint-order, aa-not-any-argument, ...) | 2 programs |
+| `app-list-slot-not-seen` | 6 failed (aa-reproducer-release-tcl, ...) | 2 programs |
+| `app-recursive-assumed-unrestricted` | 7 failed (aa-recursive-application-rejected, af-recursive-container-rejected, ...) | 5 programs |
+| `app-recursive-loops` | 22 failed (did not finish its fixpoint) | 15 programs |
+| `app-answer-cached-by-declaration` | 20 failed | 19 programs |
+| `app-memo-provisional` | aa-fixpoint-order | 1 program |
+| `app-summary-leaks-across-compilations` | aa-isolation, aa-declaration-through-slot, af-fuzz-bounded, af-recursive-container-rejected | 8 programs |
+| `app-descriptor-memo-ignores-exclude` | aa-hir-text-and-interchange, af-aggregate-return-fail, af-fuzz-bounded, af-recursive-struct | 8 programs |
+| `app-descriptor-memo-outlives-declarations` | aa-isolation-descriptors | survived |
+| `app-deep-application-cut` | aa-deep-application-kept | survived |
+| `app-descriptor-visits-by-declaration` | aa-hir-text-and-interchange, aa-native-nested-drop | survived |
+| `app-recursion-declared-fields` | aa-declaration-through-slot, aa-recursion-white-box, aa-recursive-application-rejected, aa-tree-general-rule | 2 programs |
+| `app-recursion-same-type-only` | aa-recursion-white-box | survived |
+| `app-recursion-tree-only` | aa-recursive-application-rejected | 2 programs |
+| `app-tree-any-affine-argument` | aa-tree-general-rule | survived |
+| `app-native-nested-drop-by-slot` | aa-native-nested-drop, aa-reproducer-release-native, aa-hir-text-and-interchange, af-fuzz-bounded | 3 programs |
+
+Every mutant of the brief's list (section 13 of the request) is one of
+these: arguments ignored, fields before substitution, any affine argument,
+first or last slot only, nested application not traversed, `List[T]` not
+seeing T, an unused affine slot, direct-but-not-applied, the tree special
+case kept, recursion looping or assumed unrestricted, a nested affine
+struct missed (`app-nested-argument-not-traversed` with `Box[Holder]`),
+caching by declaration, and leaks across interleaved compilations.
+
+Found on the way and fixed in the tests:
+
+* the first version of `app-summary-leaks-across-compilations` deleted
+  only `hir::declarations::Install`'s own clear, which is redundant (Install
+  resets the registry first, and the registry reset clears the facts): an
+  equivalent mutant. It now removes both clears;
+* `app-memo-provisional` was killed only by one fuzz program (the
+  white-box tests ran right after a build whose summaries were final);
+  `aa-fixpoint-order` forgets the facts and asks the outer application
+  first;
+* the pre-existing `list-drop-twice` (the Tcl runtime releasing a List's
+  elements twice) had been killed only by `af-fuzz-bounded`'s 8 random
+  programs; the new fuzzer operations changed what that seed generates and
+  it survived. `aa-release-calls-once` now counts every release call of a
+  List of handles, a List of applications and a Box of a List,
+  deterministically.
+
+The other harnesses whose mutants edit the code this milestone changed,
+run with their own detectors: trait-constrained-types (all 49 mutants:
+49 killed), tree-struct (`decl-affine-application-admitted`: killed by
+`ts-decl-affine`), c-abi-types (`pointer-not-affine`,
+`pointer-released-as-coroutine`), mutable-array (`array-always-affine`,
+`affine-array-unrestricted`, `nested-affinity-shallow`), mutable-vector
+(`vector-affine-unrestricted`, `descriptor-omits-vector`), hashable
+(`reserved-name-free`), traits (`trait-storage-as-any`), coroutines
+(`native-release-not-emitted`): every one killed. Every mutant text of
+every harness was checked to still occur exactly once in its file (nine
+that do not are the same before this milestone, untouched by it).
 
 ## 14. Performance
 
-<!--PERF-->
+Measured on this 4-core container, front end only (`surface::compile`,
+best of 5, no front-end cache), this tree against a worktree of the
+revision before it; the counts are calls of `hir::types::IsAffine`, of
+`hir::structs::IsAffine` (memo hits included), of `AffinityOf` (the
+summary computations) and of `OwnedRecursion`.
+
+The specimen is deliberately nested: `struct L0[A, B]: x: A, y: B` and,
+for i = 1..N, `struct Li[A, B]: inner: L(i-1)[B, A], tag: int, rest:
+List[L(i-1)[int, A]], same: List[Li[int, int]]` -- every level a
+two-slot application over the previous one, holding it twice (`inner`
+and the elements of `rest`), a recursive field over unrestricted
+arguments (`same`), and N deeper than `appliedDepth` (6) -- built with a
+coroutine handle at the leaf (`affine`) or an int (`plain`), bound and
+moved once.
+
+| program | before | after | IsAffine calls (types / structs), before -> after | summaries computed |
+|---|---:|---:|---|---:|
+| nested, N = 6, affine | 60 ms | 68 ms | 334 / 41 -> 876 / 254 | 14 |
+| nested, N = 12, affine | 96 ms | 130 ms | 454 / 71 -> 1,977 / 740 | 26 |
+| nested, N = 12, plain | 96 ms | 100 ms | 450 / 71 -> 932 / 204 | 26 |
+| nested, N = 24, affine | 183 ms | 284 ms | 694 / 131 -> 5,583 / 2,468 | 50 |
+| tests/golden/tree-struct.bot | 11.07 s | 10.77 s | 66,261 / 10,737 -> 68,487 / 12,708 | 108 |
+| tests/golden/trait-constrained-types.bot | 7.29 s | 7.62 s | 32,903 / 3,924 -> 36,334 / 6,797 | 140 |
+| tests/golden/mutable-map.bot | 19.89 s | 19.38 s | 101,933 / 13,729 -> 109,097 / 20,250 | 115 |
+| tests/golden/ownership.bot | 7.88 s | 8.30 s | 33,360 / 4,371 -> 33,507 / 4,378 | 95 |
+
+The corpus suites are within this machine's run-to-run noise (about +-5%:
+two of four faster, two slower). A summary is computed once per
+declaration per registration (the last column: one fixpoint round over
+the declarations met, a second when one changed). The "before" numbers of
+the affine specimen are those of a wrong program: there the handle's
+owners were unrestricted, every application past depth 6 was cut to
+`any`, and no drop descriptor was ever asked for.
+
+**Memoization was needed, twice, and is measured.** The first version
+(summaries only, no memo) took 1.67 s for N = 24 (169k IsAffine calls):
+every check of a nested application re-walked its arguments, and the
+drop descriptor walk -- which this milestone made correct for nested
+applications -- visited each of the 2^(N/2) paths through the specimen's
+types (`inner` and `rest` both reach the next level), 61,428 calls for one
+descriptor. Two tables fixed it:
+
+* `hir::structs::IsAffine`'s answer per whole application, key `{ID
+  ARGUMENTS}` (never the declaration alone; never stored while a summary
+  fixpoint runs);
+* `hir::affine::Descriptor`'s descriptor per `{TYPE EXCLUDE}`, kept only
+  for a walk that met no struct type it was already inside of (that one
+  answer depends on the walk it is part of).
+
+Both are emptied with the summaries at every change of the declarations
+(`hir::structs::ForgetAffinity`), so they are facts of one registry state,
+like the summaries (`aa-isolation`, `aa-isolation-descriptors`,
+`aa-fixpoint-order`; mutants `app-answer-cached-by-declaration`,
+`app-memo-provisional`, `app-descriptor-memo-ignores-exclude`,
+`app-descriptor-memo-outlives-declarations`). The backends' release
+lowering asks the same descriptors (they are not in the HIR), and gained
+the same, for N = 24 (the middle column: summaries and the application
+memo, no descriptor memo):
+
+| N = 24, affine | before (wrong program) | no descriptor memo | final |
+|---|---:|---:|---:|
+| front end | 0.18 s | 1.72 s | 0.28 s |
+| `hir::lower` | 5 ms | 1,933 ms | 6 ms |
+| `native::nir` | 46 ms | 2,513 ms | 524 ms |
+| Tcl compile and run | 9 ms | 3,980 ms | 78 ms |
+| longest drop descriptor | none | 12,277 chars | 12,277 chars |
+
+What remains is the descriptor itself: 181 characters at N = 12, 12,277 at
+N = 24. A drop descriptor is a tree (AFFINE-VALUES.md, "Drop glue"), and
+a type that holds the next level of itself in two affine positions has a
+descriptor of 2^(N/2) parts; native lowering's work grows with it. That is
+the existing format meeting a type it has never been asked for (before,
+the type was wrongly unrestricted), not repeated work; a shared
+(DAG-shaped) descriptor would be a runtime change, outside this milestone.
+No program of the corpus comes near it.
 
 ## 15. Regression/CI
 
-<!--CI-->
+Local, on this 4-core container:
+
+* `tclsh9.0 tests/local.tcl` on the final code (only comments, documents
+  and the fuzz generator changed after it started): **0 failed**. Tcl
+  tests on interp 8,302 passed, on compile 8,297 (199 and 204 skipped by
+  constraint, 2,472 golden duplicates skipped); 116 golden suites on
+  interp, compile, cranelift-generic and cranelift, every test passing
+  (5,557 / 5,557 / 5,465 / 5,567). An earlier full run during development
+  was also clean.
+* GC stress (`BOTLISH_NATIVE_GC_STRESS=1`): tests/affine.test 48/48,
+  tests/affine-applications.test 20/20, tests/tree-struct.test 45/45.
+* `tools/compilerpedia.tcl check`: 1,169 topics, 726 examples run, 0
+  problems (the new `concept.affine` example: USE-AFTER-MOVE at 11:5).
+* `audit/golden/migration/merge.tcl -check 1`: clean; the manifest gains
+  the new file's 20 rows (KEEP-INTERNAL, KEEP-MULTI-PROGRAM,
+  KEEP-NOT-EXPRESSIBLE).
+* The fuzzers, harnesses and mutation runs of sections 11-13.
+
+Changed tests: `af-descriptor-exception-safe` (affine.test) plants an
+affine summary, because `Descriptor` now returns at once for an
+undeclared, unrestricted struct and never reached the failing layout
+lookup it guards; `af-fuzz-bounded` runs 8 application programs beside its
+8 ownership programs; `ts-decl-affine` (tree-struct.test) expects the
+general recursion message.
+
+Not run locally: the GitHub workflows (pushed to the session branch, not
+to main), and the static decisions' sequential comparison, which AGENTS.md
+reserves for CI (`static-decisions.yml` runs it on a push to main that
+changes `hir/`; seeds 17 and 41 of the static-decisions fuzzer ran clean
+here). The compilation-isolation and HIR-interchange mutation harnesses
+were not run: this milestone adds no registry and no HIR field (its memo
+tables are derived from the struct registry and cleared with it), and
+their round-trip and interleave tools ran clean.
 
 ## 16. Explicit limitations
 
