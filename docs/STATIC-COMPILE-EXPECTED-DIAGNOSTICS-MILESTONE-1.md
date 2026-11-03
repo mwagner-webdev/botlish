@@ -436,6 +436,17 @@ commits change tests and documents only), x86-64 Linux, 4 cores:
 | CI `static-decisions` (golden suites, batched against sequential), dispatched on the branch ([run 41524816587](https://github.com/mwagner-webdev/botlish/actions/runs/41524816587), at the fix's commit; later commits change tests and documents only) | passed: `compare (mutable-array)` and all four shards, no `DISAGREE`, no `DOES NOT COMPILE` |
 | macOS and Windows acceptance tiers on the branch (run at the value-position commit) | one failure of this milestone's, fixed: `sced-other-file` read the module's file name from the message's text before its first colon, which on Windows is the drive letter; it now reads the raised diagnostic's location. Every other failure there was main's own at that time (`pn-unsupported-target`, `pm-remove`, `pm-crash-recovery`, `pm-lock-busy`, `pn-view-crash-recovery`: MAIN-CI-FAILURES-2026-11.md), fixed on main since |
 
+Merged with main (lexical resource cleanup, affine applications,
+std::actor, the package manager's third milestone), the whole local suite
+(`tests/local.tcl`: 642 Tcl test files and golden suites, every golden
+suite on four backends) passes but for `package-authoring.test`'s
+`pa-add-refusals` on both passes, which links an AArch64 library and needs
+the AArch64 GNU cross binutils this container lacked; with them installed
+the file passes (29 of 30, its MinGW test skipped). Main's resource cleanup
+reads the reachability this milestone changes: a resource owned at a
+rejected statement is still released once, at the block's failure (exit
+releases keep the failure's control flow).
+
 On the tree before this milestone the new Tcl file fails exactly its five
 tests of the gap and the golden suite exactly its seven `following` tests
 (section 10).
