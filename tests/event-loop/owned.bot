@@ -1,0 +1,265 @@
+# owned.bot -- owned registrations: an Owner's lexical scope delimits its
+# registration (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md; the
+# contrast is ownership.bot, where a Reg is only an identity).
+#
+#   1. scope, not last use: holder never reads its Owner; the registration is
+#      live through its sleep after its last event, and revoked when its
+#      body ends -- and revoke through the Reg (an identity) refuses;
+#   2. explicit early release: releaser releases its Owner after one event;
+#      the registration is gone at once and its next wait is Wake::Revoked;
+#   3. a waiter on someone else's owned registration (bystander, through the
+#      Reg) wakes with Wake::Revoked when the owner's scope ends;
+#   4. queued events are discarded when the owner's scope ends, and a record
+#      arriving after it is dropped as stale;
+#   5. moves: an Owned made by one function and returned, carried in a
+#      struct, then moved into a task: released where the task's body ends;
+#   6. abandonment: a task parked on its own registration is abandoned; its
+#      Owner is released as the loop drops it, so the registration is gone
+#      after abandon (ownership.bot's NEGATIVE: it stays registered);
+#   7. a listener and its sessions: the listener's Owner ends with the
+#      listener, the sessions' timers (each owned by its session) are
+#      untouched and fire;
+#   8. an error exit: a task that fails releases its Owner on the way out;
+#   9. shutdown revokes an owned registration; its owner's release at the
+#      end of its scope then finds it gone and does nothing;
+#  10. a function that holds an Owner requires the Loop -- its release's --
+#      without naming it (slot_of: hir::contexts::summary shows it), and
+#      releases it where its body ends;
+#  11. context-owned state: Owners moved into an installed context's
+#      collection outlive the function that made them; one moved out again
+#      is released where its new owner's scope ends (its waiter wakes with
+#      Wake::Revoked), the other stays live -- nothing releases what an
+#      installed context holds until the program does (shutdown revokes it);
+#  12. two owned registrations of one scope, the second depending on the
+#      first (a timer pacing the source's consumer): the scope's end revokes
+#      the later first, so the timer's waiter wakes before the source's.
+import elog
+import std::event_loop
+import std::event_loop::deterministic
+import std::list
+import std::mutable_vector
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+fn holder(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("holder got ", e.a)
+    elog::say("identity revoke of an owned registration: ", elog::bit(std::event_loop::revoke(reg)))
+    std::event_loop::sleep(500)
+    elog::say("holder's registration live during its sleep: ", elog::bit(std::event_loop::live?(reg)))
+    e.a
+
+fn releaser(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("releaser got ", e.a)
+    std::event_loop::release(owner)
+    elog::say("releaser's registration live after its release: ", elog::bit(std::event_loop::live?(reg)))
+    again = std::event_loop::wait(reg)
+    elog::say("releaser's next wait revoked: ", elog::bit(again.reason == Wake::Revoked))
+    e.a
+
+fn short_owner(owner: std::event_loop::Owner, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 3:
+        std::event_loop::yield_now()
+    elog::say("short owner ends in turn ", std::event_loop::turn_number())
+    0
+
+fn bystander(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("bystander woke revoked ", elog::bit(e.reason == Wake::Revoked))
+    elog::say("bystander woke in turn ", std::event_loop::turn_number())
+    0
+
+fn queue_owner(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(50)
+    n = std::event_loop::pending(reg)
+    elog::say("queued on the owned source before its owner ends: ", n)
+    n
+
+struct Carrier:
+    owned: std::event_loop::Owned
+    label: int
+
+fn make_owned(context ev: std::event_loop::Loop) -> std::event_loop::Owned errors std::event_loop::SchedulerFault:
+    std::event_loop::owned_channel(Delivery::Reliable, 4)
+
+fn carried(c: Carrier, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    {owned, label} = c
+    {owner, reg} = owned
+    e = std::event_loop::wait(reg)
+    elog::say("carried task got ", e.a)
+    label
+
+fn parked_owner(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("parked owner woke (never)", e.a)
+    e.a
+
+fn session(n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    {owner, reg} = std::event_loop::owned_after(300)
+    e = std::event_loop::wait(reg)
+    elog::say2("session ", n, " timer fired: ", elog::bit(e.reason == Wake::Timer))
+    n
+
+fn listener(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    loop i from 0 to 2:
+        e = std::event_loop::wait(reg)
+        coroutine {step, first} = session(e.a)
+        std::event_loop::adopt(step, first)
+    elog::say("listener ends in turn ", std::event_loop::turn_number())
+    2
+
+fn failing_owner(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::TaskFailed, std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("failing owner got ", e.a)
+    fail std::event_loop::TaskFailed {code: e.a}
+
+fn late(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    std::event_loop::sleep(1000)
+    elog::say("late task ends in turn ", std::event_loop::turn_number())
+    0
+
+fn survivor(owner: std::event_loop::Owner, reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("survivor woke revoked ", elog::bit(e.reason == Wake::Revoked))
+    0
+
+opaque context struct Keep:
+    owners: MutableVector[std::event_loop::Owner]
+
+fn keep_two(context ev: std::event_loop::Loop, keep: Keep) -> List[std::event_loop::Reg] errors std::event_loop::SchedulerFault:
+    {owner: a, reg: ar} = std::event_loop::owned_channel(Delivery::Reliable, 4)
+    {owner: b, reg: br} = std::event_loop::owned_channel(Delivery::Reliable, 4)
+    keep.owners.push(a)
+    keep.owners.push(b)
+    [ar, br]
+
+fn drop_last(context ev: std::event_loop::Loop, keep: Keep) -> int errors IndexNotFound:
+    o = keep.owners.pop()
+    keep.owners.length()
+
+fn kept_waiter(reg: std::event_loop::Reg, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say("kept waiter woke revoked ", elog::bit(e.reason == Wake::Revoked))
+    0
+
+fn named_waiter(reg: std::event_loop::Reg, n: int, context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    e = std::event_loop::wait(reg)
+    elog::say2("dependent waiter ", n, " woke revoked ", elog::bit(e.reason == Wake::Revoked))
+    n
+
+fn paired(context ev: std::event_loop::Loop) -> int errors std::event_loop::SchedulerFault:
+    {owner: source_owner, reg: source} = std::event_loop::owned_source(Delivery::Reliable, 4, :keep_alive)
+    {owner: pacer_owner, reg: pacer} = std::event_loop::owned_every(1000)
+    coroutine {step: a, first: af} = named_waiter(source, 1)
+    std::event_loop::adopt(a, af)
+    coroutine {step: b, first: bf} = named_waiter(pacer, 2)
+    std::event_loop::adopt(b, bf)
+    0
+
+fn slot_of(owned: std::event_loop::Owned) -> int:
+    {owner, reg} = owned
+    std::event_loop::native_slot(reg)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::deterministic::Deterministic, keep: Keep) -> List[str] errors IndexNotFound, std::event_loop::TaskFailed, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    # 1
+    {owner: h, reg: hr} = std::event_loop::owned_source(Delivery::Reliable, 8, :keep_alive)
+    std::event_loop::deterministic::inject(3, hr, 10, 0)
+    coroutine {step: hs, first: hf} = holder(h, hr)
+    std::event_loop::adopt(hs, hf)
+    # 2
+    {owner: r, reg: rr} = std::event_loop::owned_source(Delivery::Reliable, 8, :keep_alive)
+    std::event_loop::deterministic::inject(4, rr, 20, 0)
+    coroutine {step: rs, first: rf} = releaser(r, rr)
+    std::event_loop::adopt(rs, rf)
+    # 3
+    {owner: s, reg: sr} = std::event_loop::owned_channel(Delivery::Reliable, 4)
+    coroutine {step: ss, first: sf} = short_owner(s)
+    std::event_loop::adopt(ss, sf)
+    coroutine {step: bs, first: bf} = bystander(sr)
+    std::event_loop::adopt(bs, bf)
+    # 4
+    {owner: q, reg: qr} = std::event_loop::owned_source(Delivery::Reliable, 8)
+    std::event_loop::deterministic::inject(5, qr, 1, 0)
+    std::event_loop::deterministic::inject(6, qr, 2, 0)
+    std::event_loop::deterministic::inject(7, qr, 3, 0)
+    std::event_loop::deterministic::inject(700, qr, 4, 0)
+    coroutine {step: qs, first: qf} = queue_owner(q, qr)
+    std::event_loop::adopt(qs, qf)
+    # 5
+    made = make_owned()
+    cr = made.reg
+    cr.post(77, 0)
+    coroutine {step: cs, first: cf} = carried(Carrier {owned: made, label: 5})
+    std::event_loop::adopt(cs, cf)
+    # 7
+    {owner: l, reg: lr} = std::event_loop::owned_source(Delivery::Reliable, 8, :keep_alive)
+    std::event_loop::deterministic::inject(8, lr, 71, 0)
+    std::event_loop::deterministic::inject(9, lr, 72, 0)
+    coroutine {step: ls, first: lf} = listener(l, lr)
+    std::event_loop::adopt(ls, lf)
+    # 8
+    {owner: f, reg: fr} = std::event_loop::owned_source(Delivery::Reliable, 8, :keep_alive)
+    std::event_loop::deterministic::inject(10, fr, 81, 0)
+    coroutine {step: fs, first: ff} = failing_owner(f, fr)
+    std::event_loop::adopt(fs, ff)
+    coroutine {step: ts, first: tf} = late()
+    std::event_loop::adopt(ts, tf)
+    stale_before = std::event_loop::stats().stale_records
+    std::event_loop::run()
+    elog::say("holder's registration live after its task ended: ", elog::bit(std::event_loop::live?(hr)))
+    elog::say("short owner's registration live after it ended: ", elog::bit(std::event_loop::live?(sr)))
+    elog::say("queued source live after its owner ended: ", elog::bit(std::event_loop::live?(qr)))
+    elog::say("stale records after the queued source's owner ended: ", std::event_loop::stats().stale_records - stale_before)
+    elog::say("carried channel live after its task ended: ", elog::bit(std::event_loop::live?(cr)))
+    elog::say("listener's source live after it ended: ", elog::bit(std::event_loop::live?(lr)))
+    elog::say("failing owner's registration live after it failed: ", elog::bit(std::event_loop::live?(fr)))
+    elog::say("failures recorded: ", std::event_loop::stats().failed)
+    # 10
+    regs = std::event_loop::stats().registrations
+    elog::say("slot_of's slot is a slot: ", elog::bit(slot_of(std::event_loop::owned_channel(Delivery::Reliable, 1)) >= 0))
+    elog::say("registrations left by slot_of: ", std::event_loop::stats().registrations - regs)
+    # 6
+    {owner: p, reg: pr} = std::event_loop::owned_source(Delivery::Reliable, 8)
+    coroutine {step: ps, first: pf} = parked_owner(p, pr)
+    std::event_loop::adopt(ps, pf)
+    elog::say("parked owner's registration live before abandon: ", elog::bit(std::event_loop::live?(pr)))
+    elog::say("abandoned: ", std::event_loop::abandon())
+    elog::say("parked owner's registration live after abandon: ", elog::bit(std::event_loop::live?(pr)))
+    # 11
+    kept = keep_two()
+    ka = std::list::at(kept, 0)
+    kb = std::list::at(kept, 1)
+    elog::say("kept registrations live after their maker returned: ", elog::bit(std::event_loop::live?(ka) and std::event_loop::live?(kb)))
+    coroutine {step: ks, first: kf} = kept_waiter(kb)
+    std::event_loop::adopt(ks, kf)
+    elog::say("owners kept after one is moved out: ", drop_last())
+    elog::say("the moved-out owner's registration live: ", elog::bit(std::event_loop::live?(kb)))
+    elog::say("the kept owner's registration live: ", elog::bit(std::event_loop::live?(ka)))
+    std::event_loop::run()
+    # 12
+    paired()
+    std::event_loop::run()
+    # 9
+    {owner: v, reg: vr} = std::event_loop::owned_source(Delivery::Reliable, 8, :keep_alive)
+    coroutine {step: vs, first: vf} = survivor(v, vr)
+    std::event_loop::adopt(vs, vf)
+    elog::say("shutdown abandoned ", std::event_loop::shutdown(2))
+    elog::say("survivor's registration live after shutdown: ", elog::bit(std::event_loop::live?(vr)))
+    elog::say("registrations after shutdown ", std::event_loop::stats().registrations)
+    std::event_loop::trace()
+
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context Keep {owners: std::mutable_vector::from_list([])}
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::TaskFailed:
+        ["TaskFailed"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

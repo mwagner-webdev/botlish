@@ -675,7 +675,22 @@ class Game:
         mode = mode or self.s.key_mode
         if mode == "pid":
             mode = "pid:%d" % self.p.pid
-        self.s.tool("key", name, action, mode)
+        return self.s.tool("key", name, action, mode)
+
+    def release(self, name):
+        """NAME up, posted twice 0.3 s apart: (whether the helper posted both, its two reports, which
+        say whether the window server holds the key down after each). The game reads SDL's keyboard
+        state, which a release of a key that is up leaves as it is, so the second changes nothing the
+        game sees unless the first never reached it (main, 2026-11-02: round 2 began with Right still
+        held, its press confirmed by the player's move). A release both posts lose is still lost: the
+        case's checks then fail as before."""
+        reports = []
+        for attempt in range(2):
+            if attempt:
+                time.sleep(0.3)
+            code, out = self.key(name, "up")
+            reports.append(out if code == 0 else {"status": code, "output": out})
+        return all("status" not in r for r in reports), reports
 
     def hold(self, names, seconds, mode=None):
         """NAMES (comma-separated) pressed together for SECONDS, timed by the helper (one process: the
@@ -1019,7 +1034,13 @@ def case_restart(s):
             except NotTheGame:
                 pass
         time.sleep(0.15)
-    g.key("right", "up")
+    # Round 2 is judged with no key down, so Right is released as
+    # Game.release does (twice; its reports say what the window server held).
+    _, facts["release"] = g.release("right")
+    # A press that never reached the game (Game.press's three attempts, each
+    # with the focus taken again) is said as such, not as a game that does
+    # not end (main, 2026-11-01: the summary's player never left the centre).
+    checks.append((held, "Right reaches the game: " + held_text))
     checks.append((over is not None, "Right held reaches game over (the oracle: within 1.7 s of the press)"))
     if over is not None:
         facts["game_over"] = {"banner": over.banner(), "png": os.path.basename(png)}
@@ -1072,9 +1093,10 @@ def case_restart(s):
                 rows = [VIEW_H - (y - camera) for (tt, y, _, camera) in run if lo <= tt <= hi]
                 feet = p["bottom"] + 1
                 checks.append((bool(rows) and abs(p["x"] - 227) <= 4 and min(rows) - 4 <= feet <= max(rows) + 4,
-                               "R: the new game's player centred, its feet at view row %d, where the oracle's run of "
-                               "round 2 with no key down draws them %.1f to %.1f s after R (rows %s to %s)"
-                               % (feet, lo, hi, rows and round(min(rows)), rows and round(max(rows)))))
+                               "R: the new game's player centred (at x %d, the centre 227), its feet at view row %d, "
+                               "where the oracle's run of round 2 with no key down draws them %.1f to %.1f s after R "
+                               "(rows %s to %s)"
+                               % (p["x"], feet, lo, hi, rows and round(min(rows)), rows and round(max(rows)))))
             t = float(fields.get("time", "-1"))
             floors = sorted({f for (tt, _, f, _) in run if abs(tt - t) <= 0.2})
             checks.append((fields.get("floor") is not None and int(fields["floor"]) in floors,
@@ -1718,9 +1740,24 @@ def case_app_gatekeeper(s):
                     s.tool("ax-press", pid, b)
                     break
         started = g.find(3.0, translocated=True)
-        checks.append((started is None, "the game never started"))
+        # Gatekeeper can register an instance of the refused bundle while its
+        # dialog is up and end it once Done is pressed, so find() may see a
+        # process that never ran the game (main, 2026-11-02: this check alone
+        # failed, every Gatekeeper check before it passing). The game started
+        # only if that process shows a window or is still running 5 s on: the
+        # game waits for its player and never ends by itself that soon.
         if started:
-            g.p.kill()
+            facts["refused_process"] = dict(g.process_facts(), pid=started)
+            shown = g.window(5.0) is not None
+            running = g.p.poll() is None
+            facts["refused_process"].update(window=shown, running_after_5s=running)
+            checks.append((not shown and not running, "the game never started (a process of the bundle appeared: %s)"
+                           % ("its window opened" if shown else "still running 5 s after Done" if running
+                              else "ended by the refusal without a window")))
+            if running:
+                g.p.kill()
+        else:
+            checks.append((True, "the game never started"))
         g.finish(2.0)
     facts["key_mode"] = s.key_mode
     return s.verdict("app-gatekeeper", checks, facts, "gatekeeper")

@@ -96,7 +96,7 @@ proc elTurnOf {line} {
 
 foreach name {smoke fairness observers timers revocation errors gameserver-sim
               compose-alone compose-quiet-before compose-quiet-after compose-busy
-              policies heap heapshape ownership fault hoststep} {
+              policies heap heapshape ownership owned fault hoststep} {
     test el-agree-$name "scenario $name compiles under -warnings error and gives one outcome on every backend of the pass (its trace)" -body {
         lindex [elRun $name] 0
     } -result 1
@@ -395,12 +395,92 @@ test el-ownership-explicit {revocation is explicit: a task's own revoke ends its
         [elNum $t {keeper's registration live after revoke: (\d)}]
 } -result {0 1 0}
 
-test el-ownership-no-drop-action {NEGATIVE (no drop action yet): a task that ends without revoking, or is abandoned, leaves its registration registered; shutdown revokes every one} -body {
+test el-ownership-no-drop-action {NEGATIVE (a Reg is an identity, with no drop action; an Owner has one, el-owned-*): a task that ends without revoking, or is abandoned, leaves its Reg-only registration registered; shutdown revokes every one} -body {
     set t [elTrace ownership]
     list [elNum $t {forgetful's registration live after its task ended: (\d)}] [elNum $t {parked task's registration live after abandon: (\d)}] \
         [elNum $t {forgetful's registration live after shutdown: (\d)}] [elNum $t {parked task's registration live after shutdown: (\d)}] \
         [elNum $t {registrations after shutdown (\d+)}]
 } -result {1 1 0 0 0}
+
+# Owned registrations (owned.bot; LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md)
+
+test el-owned-scope-not-last-use {an Owner's registration lives to the end of its owner's lexical scope, not to the owner's last use: holder never reads its Owner, and the registration is live through its sleep after its last event, gone once the task has ended} -body {
+    set t [elTrace owned]
+    list [elNum $t {holder's registration live during its sleep: (\d)}] [elNum $t {holder's registration live after its task ended: (\d)}]
+} -result {1 0}
+
+test el-owned-identity-cannot-revoke {revoke through the Reg of an owned registration refuses (false) and leaves it registered: only its Owner revokes it} -body {
+    set t [elTrace owned]
+    list [elNum $t {identity revoke of an owned registration: (\d)}] [elNum $t {holder's registration live during its sleep: (\d)}]
+} -result {0 1}
+
+test el-owned-explicit-release {release(owner) is the explicit early release: the registration is gone at once, and the task's next wait on it is Wake::Revoked (the owner's scope end then releases nothing again)} -body {
+    set t [elTrace owned]
+    list [elNum $t {releaser's registration live after its release: (\d)}] [elNum $t {releaser's next wait revoked: (\d)}]
+} -result {0 1}
+
+test el-owned-waiters-revoked {a task waiting through the Reg on someone else's owned registration wakes with Wake::Revoked in the turn after the owner's scope ends} -body {
+    set t [elTrace owned]
+    list [elNum $t {bystander woke revoked (\d)}] [elNum $t {short owner ends in turn (\d+)}] [elNum $t {bystander woke in turn (\d+)}]
+} -result {1 3 4}
+
+test el-owned-queued-and-stale {the events queued on an owned source (3) are discarded when its owner's scope ends, and a record arriving after that is dropped as stale (1)} -body {
+    set t [elTrace owned]
+    list [elNum $t {queued on the owned source before its owner ends: (\d+)}] [elNum $t {queued source live after its owner ended: (\d)}] \
+        [elNum $t {stale records after the queued source's owner ended: (\d+)}]
+} -result {3 0 1}
+
+test el-owned-moves {an Owned returned by the function that made it, carried in a struct and moved into a task is released where that task's body ends} -body {
+    set t [elTrace owned]
+    list [elNum $t {carried task got (\d+)}] [elNum $t {carried channel live after its task ended: (\d)}]
+} -result {77 0}
+
+test el-owned-abandon {abandonment releases what an abandoned task owns: a task parked on its own registration is dropped by abandon, and the registration is gone after (ownership.bot's Reg-only registration stays)} -body {
+    set t [elTrace owned]
+    list [elNum $t {parked owner's registration live before abandon: (\d)}] [elNum $t {abandoned: (\d+)}] \
+        [elNum $t {parked owner's registration live after abandon: (\d)}] [llength [elMatches $t {parked owner woke}]]
+} -result {1 1 0 0}
+
+test el-owned-listener-sessions {a listener's Owner ends with the listener; the timers its sessions own are theirs, untouched by it, and fire} -body {
+    set t [elTrace owned]
+    list [elNum $t {listener ends in turn (\d+)}] [elNum $t {listener's source live after it ended: (\d)}] \
+        [lmap m [elMatches $t {session (\d+) timer fired: (\d)}] {lrange $m 1 2}]
+} -result {9 0 {{71 1} {72 1}}}
+
+test el-owned-error-exit {a task that fails releases its Owner on the error's way out: its registration is gone, and the failure is recorded} -body {
+    set t [elTrace owned]
+    list [elNum $t {failing owner got (\d+)}] [elNum $t {failing owner's registration live after it failed: (\d)}] [elNum $t {failures recorded: (\d+)}]
+} -result {81 0 1}
+
+test el-owned-shutdown {shutdown revokes an owned registration (its waiter wakes with Wake::Revoked); the owner's release where the task then ends finds it gone and does nothing; no registration is left} -body {
+    set t [elTrace owned]
+    list [elNum $t {survivor woke revoked (\d)}] [elNum $t {survivor's registration live after shutdown: (\d)}] \
+        [elNum $t {registrations after shutdown (\d+)}]
+} -result {1 0 0}
+
+test el-owned-context {Owners moved into an installed context's collection outlive the function that made them; one moved out again is released where its new owner's scope ends (its waiter wakes with Wake::Revoked in the next run), the other stays live: nothing releases what an installed context holds before shutdown} -body {
+    set t [elTrace owned]
+    list [elNum $t {kept registrations live after their maker returned: (\d)}] [elNum $t {owners kept after one is moved out: (\d+)}] \
+        [elNum $t {the moved-out owner's registration live: (\d)}] [elNum $t {the kept owner's registration live: (\d)}] \
+        [elNum $t {kept waiter woke revoked (\d)}]
+} -result {1 1 0 1 1}
+
+test el-owned-order {two owned registrations of one scope, the second depending on the first (a timer pacing the source's consumer), are revoked in reverse acquisition order: the timer's waiter wakes (Wake::Revoked) before the source's} -body {
+    set t [elTrace owned]
+    lmap m [elMatches $t {dependent waiter (\d) woke revoked (\d)}] {lrange $m 1 2}
+} -result {{2 1} {1 1}}
+
+test el-owned-requirement {a function that holds an Owner requires the Loop -- the requirement of its release -- without naming it (hir::contexts::summary), and releases its registration where its body ends} -body {
+    set hir [surface::readProgramFile [file join $::elDir owned.bot] -warnings off]
+    set required {}
+    foreach line [split [hir::contexts::summary $hir] \n] {
+        if {[regexp {^function slot_of \S+ direct-contexts \(([^)]*)\) required-contexts \(([^)]*)\)} $line -> direct req]} {
+            set required [list $direct $req]
+        }
+    }
+    set t [elTrace owned]
+    list $required [elNum $t {registrations left by slot_of: (\d+)}]
+} -cleanup {unset -nocomplain hir required line direct req t} -result {{{} std::event_loop::Loop} 0}
 
 test el-ownership-direct {a coroutine resumed directly by its owner beside the loop is never scheduled by it} -body {
     set t [elTrace ownership]
@@ -561,6 +641,10 @@ foreach {name kind} {
     private-helper   PRIVATE-ACCESS
     handler-callback CONTEXT-FUNCTION-VALUE
     capture-task     AFFINE-CAPTURE-UNSUPPORTED
+    forge-owner      OPAQUE-CONSTRUCTION
+    owner-take-apart OPAQUE-REPRESENTATION
+    owner-twice      USE-AFTER-MOVE
+    owner-some-paths AFFINE-PATH-RELEASE-UNSUPPORTED
 } {
     test el-static-$name "tests/event-loop/reject-$name.bot is rejected with $kind (its header says why)" -body {
         elKinds [file join $::elDir reject-$name.bot]

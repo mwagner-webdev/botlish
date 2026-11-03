@@ -586,7 +586,7 @@ test af-native-evidence {item 73: natively a coroutine argument is a register th
         [dict get $report coroutines sweptSuspended]
 } -cleanup {unset -nocomplain text hir nir report main} -result {{value 20} {coresume corelease ret} retmulti {coresume corelease ret} {} 1 0 2 4 4 0}
 
-test af-native-runtime-source {the runtime adds no ownership state: no moved flag, reference count or ownership object; the one new operation is affinedrop, which never allocates (no safepoint) and walks only what its static descriptor names} -body {
+test af-native-runtime-source {the runtime adds no ownership state: no moved flag, reference count or ownership object; the one new operation is affinedrop, which never allocates (no safepoint) and walks only what its static descriptor names -- a descriptor that runs a resource's cleanup is affinedroprun's, a separate operation (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md)} -body {
     set root [file join $::projectRoot native src]
     set affine [read [set f [open [file join $root runtime affine.rs]]]][close $f]
     # The runtime code only, not its unit tests (which build VMs and values).
@@ -595,7 +595,7 @@ test af-native-runtime-source {the runtime adds no ownership state: no moved fla
     set mayAllocate [string range $ops [string first "pub fn op_may_allocate" $ops] [string first "pub fn op_may_error" $ops]]
     list [regexp -nocase {refcount|ref_count|moved|owner_count} $affine] \
         [regexp {alloc} [regsub -all {//[^\n]*} $affine ""]] \
-        [regexp {AffineDrop} $mayAllocate]
+        [regexp {\mAffineDrop\M} $mayAllocate]
 } -cleanup {unset -nocomplain root affine ops mayAllocate f} -result {0 0 0}
 
 test af-fuzz-bounded {a bounded run of the ownership fuzzer (audit/affine/tools/fuzz.tcl): every backend computes the oracle's value on every accepted program, every identity is released exactly as the oracle's owner record says (the interpreter's release calls, the native counters), and every rejected program has the predicted diagnostic} -constraints nativeCoroutines -body {

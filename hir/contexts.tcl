@@ -668,6 +668,7 @@ proc hir::contexts::verify {hirVar} {
     set required [dict get $analysis required]
     set reasons [dict get $analysis reasons]
     set regionRoot [dict get $analysis regionRoot]
+    set releases [dict get $analysis releases]
     foreach b $blocks {
         dict set hir exprs $b directContexts [lsort [dict get $analysis direct $b]]
         dict set hir exprs $b requiredContexts [dict get $required $b]
@@ -743,6 +744,14 @@ proc hir::contexts::verify {hirVar} {
                 }
             }
         }
+        # The top level's own releases in this root (hir/resources.tcl): a
+        # value whose drop runs a cleanup needs the cleanup's contexts
+        # installed where it is held.
+        foreach edge [dict getdef $releases "" {}] {
+            lassign $edge c target
+            if {[dict get $rootOf $c] ne $r || ![dict exists $required $target]} continue
+            Obligations hir $c [list $target] $installed $required $reasons "the release of this value"
+        }
         if {$pending ne ""} {
             # The installed value's own calls (the rest of this root) were
             # checked above against the set installed so far: a context is
@@ -765,7 +774,7 @@ proc hir::contexts::verify {hirVar} {
 # The context requirements of HIR (WALK hir::contexts::Walk's result) with
 # the selected implementation graph GRAPH (hir::coroutines::Implementations,
 # the feedback hir::check made the check with; {} for none): {direct D
-# edges E required R reasons S nodes N regionRoot T}.
+# edges E required R reasons S nodes N regionRoot T releases L}.
 #
 # The nodes are the program's blocks (each function as written) and, for
 # each specialization K of GRAPH (a trait-polymorphic or per-binding
@@ -778,7 +787,8 @@ proc hir::contexts::verify {hirVar} {
 # point; S why, per node and context: `direct`, or the first call
 # (breadth-first, so the shortest chain) through which it arrived, {call
 # CALL NODE}; T each block's region root (the top-level function whose
-# region it is in, itself when it is in none).
+# region it is in, itself when it is in none); L the release edges
+# (ReleaseEdges), which E holds too.
 #
 # A specialization requires exactly what the implementations its
 # operations bind require, and nothing from an implementation it does not
@@ -838,6 +848,13 @@ proc hir::contexts::Requirements {hir walk graph} {
             }
         }
     }
+    # Releases (hir/resources.tcl): a function that may release a resource
+    # calls its cleanup there -- an edge from every region holding a value
+    # (or a parameter) whose drop runs a cleanup, to that cleanup, so the
+    # cleanup's context requirement is the region's like any callee's. (A
+    # cleanup is a module's top-level function, never in a specialization's
+    # region: its node is its block.)
+    set releases [ReleaseEdges $hir $owner $parent $blocks]
     # Call edges per node.
     set edges [dict create]
     foreach n $nodes {
@@ -850,6 +867,7 @@ proc hir::contexts::Requirements {hir walk graph} {
                 lappend list [list $c $target]
             }
         }
+        lappend list {*}[dict getdef $releases $b {}]
         dict set edges $n $list
     }
     # The transitive requirement: breadth-first rounds over the previous
@@ -888,7 +906,89 @@ proc hir::contexts::Requirements {hir walk graph} {
         }
     }
     return [dict create direct $direct edges $edges required $required reasons $reasons \
-        nodes $nodes regionRoot $regionRoot]
+        nodes $nodes regionRoot $regionRoot releases $releases]
+}
+
+# The release edges of HIR (hir/resources.tcl): region (a block, "" for the
+# top level) -> {{E CLEANUP} ...}, an edge from expression E -- a value
+# whose drop runs cleanup function CLEANUP, or (E a block) a parameter of
+# that block whose drop does -- to the cleanup. OWNER, PARENT and BLOCKS are
+# Walk's. The context analysis runs before the ownership analysis decides
+# where values die, so this is a sound approximation of it: every value of
+# such a type may die in its region -- at its scope's end, on an exit, on an
+# error edge that interrupts the construction holding it -- except one whose
+# whole value is its function's result on every path that completes it
+# (Returned): the caller owns that, and a function that only makes and
+# returns a resource does not require its cleanup's contexts.
+proc hir::contexts::ReleaseEdges {hir owner parent blocks} {
+    set result [dict create]
+    if {![hir::resources::Used $hir]} {
+        return $result
+    }
+    # (The cleanups of a type, once per type: most expressions hold none.)
+    set cleanupsOf [dict create]
+    dict for {e o} $owner {
+        set node [dict get $hir exprs $e]
+        if {![dict get $node reachable] || [dict get $node kind] eq "block"} continue
+        set type [hir::typeOf $hir $e]
+        if {![dict exists $cleanupsOf $type]} {
+            dict set cleanupsOf $type [hir::resources::CleanupBlocks $hir $type]
+        }
+        set cleanups [dict get $cleanupsOf $type]
+        if {$cleanups eq {} || ($o ne "" && [Returned $hir $parent $e])} continue
+        foreach c $cleanups {
+            dict lappend result $o [list $e $c]
+        }
+    }
+    foreach b $blocks {
+        foreach p [dict get $hir exprs $b params] {
+            foreach c [hir::resources::CleanupBlocks $hir [hir::bindingType $hir $p]] {
+                if {$c ne $b} {
+                    dict lappend result $b [list $b $c]
+                }
+            }
+        }
+    }
+    return $result
+}
+
+# 1 if expression E's whole value is its function's result whenever E
+# completes: E is a `return`'s value, or the last statement of the function's
+# body, through the last statements of `if` branches and handler bodies and
+# the call a `handle` handles. (Not a loop's body: its iteration values are
+# collected into a new List, which may die in the function. Not an operand
+# of a construction or a call: a later operand's error edge may release it
+# there.)
+proc hir::contexts::Returned {hir parent e} {
+    set x $e
+    while {1} {
+        lassign [dict get $parent $x] p role
+        if {$p eq ""} {
+            return 0
+        }
+        set kind [dict get $hir exprs $p kind]
+        if {$kind eq "return"} {
+            return 1
+        }
+        if {$kind eq "handle" && $role eq "operand"} {
+            set x $p
+            continue
+        }
+        if {$role ne "seq 1"} {
+            return 0
+        }
+        switch -- $kind {
+            block {
+                return 1
+            }
+            if - handle {
+                set x $p
+            }
+            default {
+                return 0
+            }
+        }
+    }
 }
 
 # The nodes call C (reachable, no load) calls in context CTX ("" for the
@@ -944,7 +1044,7 @@ proc hir::contexts::Targets {hir graph regionRoot ctx c} {
 # makes too, so their own requirements are this call's obligations as well
 # (checked the same way, with the chain through the implementation). Returns
 # the selection, {TRAIT WITNESS ...}.
-proc hir::contexts::Obligations {hirVar c targets installed required reasons} {
+proc hir::contexts::Obligations {hirVar c targets installed required reasons {what "this call"}} {
     upvar 1 $hirVar hir
     set selection [dict create]
     set seen [dict create]
@@ -964,7 +1064,7 @@ proc hir::contexts::Obligations {hirVar c targets installed required reasons} {
         if {![isTrait $id]} {
             if {$id ni $installed} {
                 hir::Diagnose hir MISSING-CONTEXT \
-                    "$id is required by this call but is not installed here (install it with \"with context EXPR\" before the call):\n[join $chain \n]" $c
+                    "$id is required by $what but is not installed here (install it with \"with context EXPR\" before the call):\n[join $chain \n]" $c
             }
             continue
         }

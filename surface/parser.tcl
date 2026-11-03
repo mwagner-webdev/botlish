@@ -469,17 +469,20 @@ namespace eval surface::parser {
     # (see the grammar above). Each names one boolean property of the
     # `structdecl` node (`opaque` -> `opaque 0|1`, `opaqueSpan`; `context`
     # -> `context 0|1`, `contextSpan`; `tree` -> `tree 1`, `treeSpan`,
-    # present only on a tree struct). A future `resource` is one more entry
-    # here and one more property, nothing else.
-    variable structModifiers {opaque context tree}
+    # present only on a tree struct; `resource` -> `resource 1`,
+    # `resourceSpan`, present only on a resource struct:
+    # LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+    variable structModifiers {opaque context tree resource}
     # The contextual words that may precede `fn` in a function declaration
     # (see the grammar above). Each names one property of the `function`
     # node: `nomethod` -> `nomethod 0|1`, `nomethodSpan`; `exported`, always
     # followed by its foreign ABI (the one is `c`: `exported c fn`,
     # NATIVE-LIBRARY-MILESTONE-1.md) -> `exported c`, `exportedSpan`;
     # `callback`, always followed by its foreign ABI (`callback c fn`,
-    # C-CALLBACK-MILESTONE-1.md) -> `callback c`, `callbackSpan`.
-    variable functionModifiers {nomethod exported callback}
+    # C-CALLBACK-MILESTONE-1.md) -> `callback c`, `callbackSpan`; `cleanup`
+    # -> `cleanup 1`, `cleanupSpan`, present only on a resource's cleanup
+    # (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
+    variable functionModifiers {nomethod exported callback cleanup}
     # The contextual words that may precede `type` in a type declaration
     # (REFINEMENT-VALUES.md): `refined type NAME = CARRIER`.
     variable typeModifiers {refined}
@@ -3477,7 +3480,7 @@ proc surface::parser::Function {pVar} {
     lassign [ParamSections p] params flags contexts resume variadic
     set body [Suite p "the parameter list"]
     set nomethod [dict exists $modifiers nomethod]
-    return [surface::ast::node function [SpanFrom p $start] \
+    set node [surface::ast::node function [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
         params $params flags $flags contexts $contexts paramsSpan [SpanFrom p [dict get $open span]] \
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
@@ -3486,6 +3489,14 @@ proc surface::parser::Function {pVar} {
         exported $abi exportedSpan [if {$abi ne ""} {dict get $modifiers exported} else {string cat ""}] \
         callback $callbackAbi callbackSpan [if {$callbackAbi ne ""} {dict get $modifiers callback} else {string cat ""}] \
         resume $resume variadic $variadic]
+    if {[dict exists $modifiers cleanup]} {
+        # A resource's cleanup (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+        # MILESTONE-1.md, hir/resources.tcl): present only then, so an
+        # ordinary declaration's node is unchanged.
+        dict set node cleanup 1
+        dict set node cleanupSpan [dict get $modifiers cleanup]
+    }
+    return $node
 }
 
 # The parameter list of a function declaration, after "(", through ")":
@@ -5238,6 +5249,12 @@ proc surface::parser::StructDecl {pVar} {
         # field is present only then, so an ordinary declaration's node is
         # unchanged.
         dict set node slots $slots
+    }
+    if {[dict exists $modifiers resource]} {
+        # A resource struct (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-
+        # MILESTONE-1.md): likewise present only then.
+        dict set node resource 1
+        dict set node resourceSpan [dict get $modifiers resource]
     }
     if {$identity ne ""} {
         # Likewise present only for a struct that declares its identity.

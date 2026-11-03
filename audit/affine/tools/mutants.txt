@@ -212,15 +212,15 @@ proc hir::affine::Erasure {hir e what} {
 @@ partial-destructure-leak a destructuring that does not name every affine field never drops the fields it omits
 ## hir/affine.tcl
 <<<<
-        if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        if {[Descriptor $hir [BindingType $hir $b] [ItemExclude $hir $b]] eq ""} continue
 ====
-        if {[IsDestructureTemp $hir $b] || [Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        if {[IsDestructureTemp $hir $b] || [Descriptor $hir [BindingType $hir $b] [ItemExclude $hir $b]] eq ""} continue
 >>>>
 
 @@ last-use-raw-only the release at an owner's last use (and of a discarded value) recognizes only a raw Coroutine: a struct or List owning one is never dropped
 ## hir/affine.tcl
 <<<<
-        if {[Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] eq ""} continue
+        if {[Descriptor $hir [BindingType $hir $b] [ItemExclude $hir $b]] eq ""} continue
 ====
         if {![hir::types::IsCoroutine [BindingType $hir $b]]} continue
 >>>>
@@ -234,7 +234,7 @@ proc hir::affine::Erasure {hir e what} {
 @@ exit-raw-only an early exit releases only raw Coroutine bindings: a struct or List owning one is left to the collector
 ## hir/affine.tcl
 <<<<
-                    && [Descriptor $hir [BindingType $hir $b] [ConsumedFields $hir $b]] ne ""} {
+                    && [Descriptor $hir [BindingType $hir $b] [ItemExclude $hir $b]] ne ""} {
 ====
                     && [hir::types::IsCoroutine [BindingType $hir $b]]} {
 >>>>
@@ -413,7 +413,9 @@ core::native::register coroutine#release -arity 1 -impl core::coroutines::releas
             }
             for &item in items {
                 *pos = start;
-                drop_by(p, item, d, pos);
+                if !drop_by(p, item, d, pos) {
+                    return false;
+                }
             }
 ====
             let _ = list_of(value).items();
@@ -424,7 +426,9 @@ core::native::register coroutine#release -arity 1 -impl core::coroutines::releas
 ## native/src/runtime/affine.rs
 <<<<
                 let slot = number(d, pos);
-                drop_by(p, fields[slot], d, pos);
+                if !drop_by(p, fields[slot], d, pos) {
+                    return false;
+                }
 ====
                 let _slot = number(d, pos);
                 let _ = fields.len();

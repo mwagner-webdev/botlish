@@ -362,13 +362,36 @@ test workload-icy-tower-app-module-shared-sources-untouched {the application's a
 # The macOS release tooling's own tests (audit/macos-release/): the
 # credential preflight against synthetic credentials, the release's stages
 # against recording stand-ins of Apple's tools, the bundle's negative
-# controls and the workflow's trust boundary -- on any host with Python's
-# cryptography and PyYAML packages (audit/macos-release/requirements.txt).
-# BOTLISH_RELEASE_PYTHON names the interpreter of a private environment
-# holding them (CI's icy-tower workflows), else python3.
+# controls and the workflow's trust boundary -- on any host whose Python has
+# the pinned environment of audit/macos-release/requirements.txt (with the
+# tooling's own examples/games/icy-tower/macos/requirements.txt): every
+# package at its pinned version. Another version is not that environment
+# and is no evidence either way: Ubuntu 24.04's system cryptography (41.x,
+# what a GitHub arm64 runner's python3 imports) has no
+# Certificate.not_valid_before_utc, so the tooling fails there for a reason
+# no release would meet. BOTLISH_RELEASE_PYTHON names the interpreter of a
+# private environment holding them (CI's icy-tower workflows), else python3.
 set releasePython [if {[info exists ::env(BOTLISH_RELEASE_PYTHON)]} {set ::env(BOTLISH_RELEASE_PYTHON)} else {set python3 python3}]
-testConstraint releaseTooling [expr {[auto_execok $releasePython] ne "" &&
-    ![catch {exec $releasePython -I -c "import cryptography, yaml"}]}]
+proc releasePins {} {
+    set pins {}
+    foreach file {{audit macos-release requirements.txt} {examples games icy-tower macos requirements.txt}} {
+        foreach line [split [core::ReadFile [file join $::projectRoot {*}$file]] \n] {
+            if {[regexp {^([A-Za-z0-9_.-]+)==([^\s\\]+)} $line -> name version]} {
+                dict set pins $name $version
+            }
+        }
+    }
+    return $pins
+}
+proc releaseEnvironmentPinned {python} {
+    if {[auto_execok $python] eq ""} { return 0 }
+    set pins [releasePins]
+    if {[dict size $pins] == 0} { return 0 }
+    set script "import importlib.metadata as m, sys\nfor n in sys.argv\[1:\]: print(n, m.version(n))"
+    if {[catch {exec $python -I -c $script {*}[dict keys $pins]} found]} { return 0 }
+    return [expr {[lsort -stride 2 -index 0 $found] eq [lsort -stride 2 -index 0 $pins]}]
+}
+testConstraint releaseTooling [releaseEnvironmentPinned $releasePython]
 
 test workload-icy-tower-release-tooling {the macOS release tooling's suites pass (audit/macos-release/tests: test_credentials, test_release, test_workflow): every malformed credential refused with its code and remedy and no secret printed, every stage refusing what an earlier one did not establish, the workflow's trust boundary} -constraints releaseTooling -body {
     set results {}
