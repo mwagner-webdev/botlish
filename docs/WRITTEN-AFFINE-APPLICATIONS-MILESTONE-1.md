@@ -491,7 +491,64 @@ a recursive affine application written as a phantom slot's argument
 
 ## 19. Mutation testing
 
-MUTANTS_SECTION
+`audit/affine/tools/mutants.txt` gained 17 mutants (its section "Written
+applications"), and `audit/affine/tools/mutate.tcl` now runs
+`tests/written-affine-applications.test` beside `tests/affine.test` and
+`tests/affine-applications.test`, and the fuzzer with `-written 30` beside
+its ownership and application programs (seed 11). Every one is killed:
+
+| mutant | the brief's item | killed by |
+|---|---|---|
+| `written-rejects-affine-argument` | `ResolveApplied` still rejects every affine argument | 21 tests (wd-containers, wd-field, wd-generic-body-never-duplicates, wd-generic-box, wd-generic-function-type, ...); 13 fuzz programs |
+| `written-accepts-everything` | accepts every affine argument with no further check | wd-recursive-rejected, wd-recursive-message, wd-unbounded-rejected |
+| `written-recursion-unchecked` | a recursive affine application accepted because written types are allowed | wd-recursive-rejected, wd-recursive-message |
+| `written-unbounded-unchecked` | (a type with no finite form written) | wd-unbounded-rejected |
+| `imprint-unbounded-unchecked` | (one made by an imprint) | wd-unbounded-rejected |
+| `written-erases-affine-argument` | written and inferred follow different classifiers; a written result loses its release; a written field loses its propagation | 17 tests (wd-containers, wd-field, wd-generic-box, wd-generic-function-type, wd-generic-phantom, ...); 7 fuzz programs |
+| `positions-every-slot-value` | `Positions` treats every slot as a value position; `Phantom[T]` unnecessarily restricted | wd-generic-phantom, wd-generic-pointer, wd-occurrences, wd-isolation, wd-generic-body-never-duplicates |
+| `positions-no-slot-value` | no slot is a value position; a body over `Box[T]` duplicates an affine T | wd-generic-box, wd-occurrences, wd-generic-pointer, wd-isolation, wd-generic-body-never-duplicates |
+| `positions-direct-fields-only` | only direct fields count, a nested `Box[T]` does not | wd-generic-box, wd-occurrences, wd-slot-positions |
+| `positions-phantom-is-value` | a phantom slot counted as stored | wd-generic-phantom, wd-occurrences, wd-slot-positions, wd-isolation, wd-generic-body-never-duplicates |
+| `positions-pointee-is-value` | a C pointer's pointee counted as a stored T | wd-generic-pointer, wd-occurrences |
+| `positions-fn-type-not-value` | (the opposite of "a function type's T counts as stored": section 14 -- the unsound relaxation) | wd-generic-function-type, wd-generic-box, wd-slot-positions, wd-positions-not-relevance |
+| `generic-binding-admits-affine` | a generic `Box[T]` body admits an affine T and duplicates it | wd-generic-box, wd-generic-function-type, wd-generic-phantom, wd-generic-body-never-duplicates, wd-isolation, aa-ownership-consequences |
+| `explicit-imprint-rejects-affine` | the explicit imprint path disagrees with the declared and inferred ones | wd-generic-phantom, wd-generic-pointer |
+| `set-element-root-only` | (the container policy's: an affine application as an ImmutableSet element) | wd-containers, af-restrictions; 3 fuzz programs |
+| `positions-memo-outlives-declarations` | the memo leaks across compilations | wd-isolation |
+| `written-walk-per-path` | (section 20's exponential walk) | wd-nested-walks-linear |
+
+The brief's other items are mutants the harness already had, rerun against
+this tree: "any affine argument makes the application affine"
+(`app-any-affine-argument`), the nested drop descriptor
+(`app-descriptor-visits-by-declaration`, `app-nested-argument-not-traversed`),
+the recursive affine check (`app-recursion-declared-fields`,
+`app-recursion-same-type-only`, `app-recursion-tree-only`). "`List[Box[...]]`
+accepted despite the affine-element policy" has no mutant: Lists own affine
+elements by policy (section 15); its container counterpart is
+`set-element-root-only`. "`List[Phantom[...]]` rejected merely due to its
+argument" is `written-rejects-affine-argument`.
+
+(The first batch's runs also counted `af-fuzz-bounded`, which fails on the
+unmutated tree until its expected program count includes the written
+programs it now runs -- fixed before the second batch; every mutant of the
+first batch is killed by the other tests listed.)
+
+**The existing mutants of code this milestone changed**, rerun with their
+own harnesses' detectors:
+
+* affine: MUTANTS_OLD_AFFINE
+* trait-constrained-types (the 20 mutants of `hir/imprint.tcl`,
+  `hir/resolve.tcl`, `hir/structs.tcl`): 20 killed;
+* c-abi-types (the 5 of `hir/imprint.tcl`: `imprint-only-intrinsics`,
+  `bare-variable-accepted`, `fnptr-erasable`, `imprint-affine-binding`,
+  `imprinted-callable-as-value`): 5 killed;
+* tree-struct (the 8 of `hir/structs.tcl`): MUTANTS_TREE
+
+Every mutant text of every harness that edits a file this milestone changed
+still occurs exactly once, after one update (`app-recursion-declared-fields`
+took a line more context: `Unfolding`'s walk repeats two of its lines); the
+enum harness's `bare-case-accepted` occurs twice in `hir/resolve.tcl`
+before and after this milestone, untouched by it.
 
 ## 20. Performance
 
@@ -591,4 +648,33 @@ REGRESSION_SECTION
 
 ## 23. Recommendation for the next milestone
 
-NEXT_SECTION
+**Next: one summary per declaration for every walk of a type's
+components.** Affinity has one (AFFINE-PARAMETERIZED-APPLICATIONS-
+CORRECTNESS-MILESTONE-1.md), slot positions now another, by the same
+`Fixpoint`. Three walks still unfold applications along their fields,
+bounded only because the type bound cuts arguments -- which it never does
+to an affine one:
+
+* `hir::callables::Bearing`/`BearingNamed` and `CarriedInto` (what an erased
+  value carries: obligations, errors) -- a path stack, like the
+  `MentionsMutable` this milestone had to fix for the exponential case;
+* `hir::types::Totality` (equality and hashing) -- the previous milestone's
+  open item.
+
+Each is a disjunction (or union) over the components a value owns, the
+same shape as affinity, so each has the same summary form: the
+declaration's own answer with its slots at a neutral argument, plus the
+slots whose argument's answer reaches a field (for `CarriedInto`, a union
+of the arguments' errors over those slots). Answering them from summaries
+would make every such walk linear and finite, and remove this milestone's
+`Unfolding` rejection (W[Coroutine{...}] would be an ordinary unrestricted
+type, as W[int] is) together with the Totality limitation. The evidence:
+the `W` program that exhausted memory (section 12), the 2^N
+`MentionsMutable` walk (section 20), and the fuzzer's generator, which must
+avoid non-uniform recursion because its own oracle would have to unfold it
+too.
+
+Two smaller items: a polarity analysis of function types for imprinting
+(section 22: a first-order argument position holds no value a body can
+obtain), and the untyped-result destructuring precision recorded by the
+previous milestone (unchanged).
