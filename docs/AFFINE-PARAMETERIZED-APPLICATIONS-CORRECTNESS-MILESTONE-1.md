@@ -747,7 +747,9 @@ tests/resources.test under GC stress all passing; the affine fuzzer (seed
 1, 30 ownership and 30 application programs) and the lexical-cleanup fuzzer
 (`-n 30 -seed 2`) 0 disagreements; `tools/compilerpedia.tcl check` 1,180
 topics, 730 examples, 0 problems; `audit/affine/tools/mutate.tcl` **54
-killed, 0 survived**.
+killed, 0 survived**; `audit/lexical-cleanup/tools/mutate.tcl` (main's
+resource mutants, against the merged ownership analysis and descriptors)
+**24 killed, 0 survived**.
 
 ## 16. Explicit limitations
 
