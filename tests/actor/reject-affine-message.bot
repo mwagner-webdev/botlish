@@ -1,0 +1,17 @@
+# An affine message type: a type slot takes an unrestricted type, so open[Coroutine{...}] fails to imprint (IMPRINT).
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+fn worker() -> int:
+    1
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Coroutine{args: [], return: int, errors: []}](4)
+    0
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

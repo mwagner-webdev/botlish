@@ -22,6 +22,17 @@ set mainScript [file join $::projectRoot main.tcl]
 set ::pnCounter 0
 set hostTarget [core::cabi::hostTarget]
 testConstraint linuxX86Host [expr {$hostTarget eq "linux-x86_64"}]
+# Whether this host can tell if a lock's holder still runs
+# (pm::install::ProcessAlive): where it cannot (Windows), an interrupted
+# operation is rolled back only by a command given -recover
+# (package-manager.test's afterInterruption).
+# Stated here for the host, not asked of pm, so that a defect of pm's own
+# answer cannot change what the tests expect.
+set lockLivenessKnown [expr {[file isdirectory /proc/self] || $::tcl_platform(platform) eq "unix"}]
+proc afterInterruption {} {
+    if {$::lockLivenessKnown} { return {} }
+    return -recover
+}
 testConstraint cc [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
 testConstraint linuxCc [expr {[testConstraint linuxX86Host] && [testConstraint cc]}]
 testConstraint clangAarch64 [expr {[auto_execok clang] ne "" && [testConstraint linuxX86Host]}]
@@ -320,7 +331,9 @@ test pn-unsupported-target {a package names the targets it supports, and nothing
     pack [geoPackage $src 1.0.0 {linux-x86_64}] $repo
     pack [packageDir $src outer 1.0.0 {{"schema": 1, "name": "outer", "version": "1.0.0", "dependencies": {"geo": "1.0"}, "lock": {"geo": "1.0.0"}}} [list outer.bot "import geo\n\nfn which() -> str:\n    geo::which()\n"]] $repo
     set app [application "import outer\n\nouter::which()\n"]
-    pm add outer -project $app -repository $repo
+    # The supported target is named: on a host of another target (Linux
+    # AArch64's CI) an add that prepares the host's would already refuse.
+    pm add outer -project $app -repository $repo -target linux-x86_64
     set before [treeState $app]
     set r [pm install -project $app -repository $repo -target linux-aarch64]
     list [dict get $r status] [kindOf [dict get $r err]] [string map [list $app APP] [dict get $r err]] [expr {[treeState $app] eq $before}] [appValue $app linux-x86_64]
@@ -438,7 +451,7 @@ test pn-view-crash-recovery {a process killed while committing views leaves a jo
     set out {}
     foreach point {commit-view-old commit-view-new state-written committed} {
         set r [withEnvironment [list BOTLISH_PM_FAULT crash:$point] {pm update -project $app -repository $repo}]
-        set next [pm install -project $app -repository $repo]
+        set next [pm install -project $app -repository $repo {*}[afterInterruption]]
         set value [appValue $app linux-x86_64]
         lappend out [list $point [dict get $r status] [lindex [split [dict get $next err] \n] 0] $value \
             [expr {$value eq {"linux-x86_64/1.0.0"} ? [treeState $app] eq $before : 1}]]

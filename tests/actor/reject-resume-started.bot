@@ -1,0 +1,27 @@
+# Using an actor coroutine after starting it: it moved into the actor task (USE-AFTER-MOVE). (Resuming it is TYPE as well: only std::actor makes an Answer.)
+import std::actor
+import std::coroutine
+import std::event_loop
+import std::event_loop::deterministic
+
+struct Work:
+    n: int
+
+fn worker(inbox: std::actor::Inbox[Work]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Work](4)
+    coroutine {step, first} = worker(inbox)
+    std::actor::spawned(step, first).start()
+    std::coroutine::done?(step)
+    0
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

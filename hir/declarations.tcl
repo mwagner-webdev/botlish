@@ -120,7 +120,7 @@ proc hir::declarations::Install {state} {
     }
     set ::hir::sourcetypes::generation [dict get $state generation]
     set ::hir::structs::registry [dict get $state structs]
-    set ::hir::structs::affinity [dict create]
+    hir::structs::ForgetAffinity
     set ::hir::enums::registry [dict get $state enums]
     set ::hir::layouts::registry [dict get $state layouts]
     set ::hir::errordecls::current [dict get $state errors]

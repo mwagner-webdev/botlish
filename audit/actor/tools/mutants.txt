@@ -1,0 +1,293 @@
+# Mutants of std::actor (audit/actor/tools/mutate.tcl;
+# SAME-THREAD-ACTORS-MILESTONE-1.md, "Mutation testing"): each a deliberate
+# bug in one rule of the library (stdlib/actor.bot), its recovery
+# intrinsic's guard, or the event loop's task query (stdlib/event_loop.bot).
+#
+#   @@ NAME DESCRIPTION
+#   !! TEST ...        the tests of tests/actor.test meant to detect it (one
+#                      failing is a kill)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant may have several edits. Lines starting with # outside an edit
+# are comments.
+
+# --- Receive-right uniqueness ----------------------------------------------
+
+@@ inbox-copyable the receive right is no longer affine: its token holds an Int, so an Inbox can be copied to a second receiver
+!! actor-static-copy-inbox actor-static-listen-twice actor-static-drain-twice
+## stdlib/actor.bot
+<<<<
+private opaque struct Right:
+    marker: std::ffi::c::Ptr[std::ffi::c::Void]
+====
+private opaque struct Right:
+    marker: int
+>>>>
+## stdlib/actor.bot
+<<<<
+right: Right {marker: std::ffi::c::null[std::ffi::c::Void]()}}
+====
+right: Right {marker: 0}}
+>>>>
+
+@@ receiver-not-bound a host serves a receive for any open mailbox, not only one its actor listened to: a copied Receiver receives elsewhere
+!! actor-identity
+## stdlib/actor.bot
+<<<<
+    open?(slot, gen) and mget(slot, m_owner) == me and mget(slot, m_owner_gen) == mg
+====
+    open?(slot, gen)
+>>>>
+
+@@ rebind-allowed listen binds a mailbox another actor already listened to
+!! actor-replay
+## stdlib/actor.bot
+<<<<
+    if not open?(slot, gen) or mget(slot, m_owner) != -1 or not running?(me, mg):
+        return status_answer(a_closed)
+    first = xget(me, x_first)
+====
+    if not open?(slot, gen) or not running?(me, mg):
+        return status_answer(a_closed)
+    first = xget(me, x_first)
+>>>>
+
+@@ recover-unguarded the one recovery of a message no longer checks that the answer carries the receiver's own mailbox identity
+!! actor-source-recover
+## stdlib/actor.bot
+<<<<
+    if a.status != a_message or a.slot != rx.slot or a.gen != rx.gen:
+        fail Closed
+====
+    if a.status != a_message:
+        fail Closed
+>>>>
+
+# --- Context-free communication ---------------------------------------------
+
+@@ receive-needs-loop receiving requires the event loop's Loop: a contextless actor can no longer receive
+!! actor-agree-authority actor-authority-requirements actor-authority-run
+## stdlib/actor.bot
+<<<<
+fn receive(rx: Receiver[M], resume Answer) -> M errors Closed:
+    a = yield request(op_receive, rx.slot, rx.gen, 0, 0)
+====
+fn receive(rx: Receiver[M], context ev: std::event_loop::Loop, resume Answer) -> M errors Closed, std::event_loop::SchedulerFault:
+    std::event_loop::now()
+    a = yield request(op_receive, rx.slot, rx.gen, 0, 0)
+>>>>
+
+@@ send-needs-actors sending requires the mailbox administration (Actors): a contextless actor can no longer reply
+!! actor-agree-authority actor-authority-requirements actor-authority-run
+## stdlib/actor.bot
+<<<<
+fn send(to: Address[M], m: M, resume Answer) -> Sent:
+    a = yield request(op_send, to.slot, to.gen, 0, m)
+====
+fn send(to: Address[M], m: M, context ac: Actors, resume Answer) -> Sent errors std::event_loop::SchedulerFault:
+    stats()
+    a = yield request(op_send, to.slot, to.gen, 0, m)
+>>>>
+
+# --- Lifecycle and reaping --------------------------------------------------
+
+@@ failure-not-reaped a host whose actor fails with TaskFailed ends without closing its mailboxes
+!! actor-lifecycle-failure-reaped actor-lifecycle-accounting
+## stdlib/actor.bot
+<<<<
+            on std::event_loop::TaskFailed {code}:
+                retired(me, mg, c_failed)
+                fail std::event_loop::TaskFailed {code: code}
+====
+            on std::event_loop::TaskFailed {code}:
+                fail std::event_loop::TaskFailed {code: code}
+>>>>
+
+@@ return-not-reaped a host whose actor returns ends without closing its mailboxes
+!! actor-probe-a-accounting actor-authority-run actor-lifecycle-accounting
+## stdlib/actor.bot
+<<<<
+    retired(me, mg, c_ended)
+    last.value
+====
+    last.value
+>>>>
+
+@@ failed-construction-returned a host whose actor ended before it was started reports its first value instead of resuming it: a failed construction becomes a Returned task
+!! actor-lifecycle-construction
+## stdlib/actor.bot
+<<<<
+        ended = std::coroutine::done?(actor)
+        answer = if ended:
+====
+        ended = std::coroutine::done?(actor)
+        if ended:
+            break
+        answer = if ended:
+>>>>
+
+@@ reap-skips-abandoned reap leaves the mailboxes of actors the loop abandoned open
+!! actor-shutdown
+## stdlib/actor.bot
+<<<<
+        if task == -1 or std::event_loop::owned?(task):
+            continue
+====
+        if task == -1 or true:
+            continue
+>>>>
+
+@@ owned-always the event loop's owned? answers true for every task: reap never sees an abandoned actor
+!! actor-shutdown
+## stdlib/event_loop.bot
+<<<<
+        if tget(id, t_live) == 1 and tget(id, t_serial) == task:
+            return true
+    false
+====
+        if tget(id, t_live) == 1 and tget(id, t_serial) == task:
+            return true
+    true
+>>>>
+
+@@ reaper-steals-outcomes retiring an actor consumes the loop's outcomes: unrelated tasks' outcomes are lost
+!! actor-coexist-outcomes actor-lifecycle-failure-reaped
+## stdlib/actor.bot
+<<<<
+    xset(me, x_state, x_free)
+    xset(me, x_first, -1)
+    count_up(counter, 1)
+====
+    xset(me, x_state, x_free)
+    xset(me, x_first, -1)
+    count_up(counter, 1)
+    std::event_loop::take_outcomes()
+>>>>
+
+# --- Identity ---------------------------------------------------------------
+
+@@ generation-unchecked an address's generation is not compared: an old address reaches the mailbox that reuses its slot
+!! actor-probe-a-identity actor-identity actor-lifecycle-construction
+## stdlib/actor.bot
+<<<<
+    slot >= 0 and slot * ms < ac.boxes.length() and mget(slot, m_used) == 1 and mget(slot, m_gen) == gen
+====
+    slot >= 0 and slot * ms < ac.boxes.length() and mget(slot, m_used) == 1
+>>>>
+
+@@ generation-not-bumped a reused slot keeps its generation: the old address is the new one's
+!! actor-probe-a-identity actor-identity actor-lifecycle-construction
+## stdlib/actor.bot
+<<<<
+        s = ac.box_free.pop()
+        mset(s, m_gen, mget(s, m_gen) + 1)
+====
+        s = ac.box_free.pop()
+>>>>
+
+@@ closed-accepts a closed mailbox still accepts messages
+!! actor-probe-a-identity actor-lifecycle-failure-reaped actor-lifecycle-construction
+## stdlib/actor.bot
+<<<<
+    if mget(slot, m_live) != 1:
+        count_up(c_refused_closed, 1)
+        return a_refused
+====
+    if mget(slot, m_live) != 1 and false:
+        count_up(c_refused_closed, 1)
+        return a_refused
+>>>>
+
+# --- Wakeups, room and closure ----------------------------------------------
+
+@@ lost-wakeup a send to a mailbox whose receiver waits does not wake it
+!! actor-probe-a-request-reply actor-authority-run actor-values-snapshot
+## stdlib/actor.bot
+<<<<
+    if mget(slot, m_waiting) == 1:
+        mset(slot, m_waiting, 0)
+        ac.wake.at(slot).post(0, 0)
+====
+    if mget(slot, m_waiting) == 1:
+        mset(slot, m_waiting, 0)
+>>>>
+
+@@ no-room-wake a freed place wakes no sender waiting for room
+!! actor-room-fifo actor-room-events actor-probe-a-backpressure
+## stdlib/actor.bot
+<<<<
+        count_up(c_room_wakes, 1)
+        ac.room.at(slot).post(0, 0)
+====
+        count_up(c_room_wakes, 1)
+>>>>
+
+@@ reservation-ignored a place reserved for a woken sender may be taken by a send that did not wait, before the woken sender runs
+!! actor-room-reservation
+## stdlib/actor.bot
+<<<<
+    if mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
+        count_up(c_full, 1)
+====
+    if mget(slot, m_count) >= mget(slot, m_cap):
+        count_up(c_full, 1)
+>>>>
+
+@@ room-storm every message taken wakes a sender, whether or not one waits or the mailbox was full
+!! actor-room-events
+## stdlib/actor.bot
+<<<<
+        if mget(slot, m_rwait) == 0 or mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
+            break
+====
+        if k > 0:
+            break
+>>>>
+
+@@ close-keeps-room-waiters a close leaves the senders waiting for room waiting
+!! actor-room-close actor-lifecycle-failure-reaped actor-shutdown
+## stdlib/actor.bot
+<<<<
+    std::event_loop::revoke(ac.wake.at(slot))
+    std::event_loop::revoke(ac.room.at(slot))
+====
+    std::event_loop::revoke(ac.wake.at(slot))
+>>>>
+
+@@ reused-channels a reused slot keeps the closed mailbox's (revoked) channels instead of new ones
+!! actor-room-reservation actor-identity actor-lifecycle-construction actor-room-close
+## stdlib/actor.bot
+<<<<
+        s = ac.box_free.pop()
+        mset(s, m_gen, mget(s, m_gen) + 1)
+        ac.wake.swap(s, wake)
+        ac.room.swap(s, room)
+====
+        s = ac.box_free.pop()
+        mset(s, m_gen, mget(s, m_gen) + 1)
+>>>>
+
+# --- Accounting and scheduling ----------------------------------------------
+
+@@ undelivered-uncounted a close drops the queued messages without counting them
+!! actor-probe-a-accounting actor-lifecycle-accounting actor-shutdown
+## stdlib/actor.bot
+<<<<
+    count_up(c_undelivered, dropped)
+====
+    count_up(c_undelivered, 0)
+>>>>
+
+@@ batch-per-dispatch a host hands its actor every queued message in one dispatch: a busy actor holds the turn
+!! actor-probe-a-fairness actor-probe-a-request-reply actor-probe-a-suspended-handler
+## stdlib/actor.bot
+<<<<
+            if wait and xget(me, x_fresh) == 0:
+====
+            if wait and xget(me, x_fresh) == 0 and false:
+>>>>

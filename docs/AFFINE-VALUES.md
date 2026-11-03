@@ -23,6 +23,12 @@ COROUTINES.md is the milestone this one generalizes (coroutine semantics are
 unchanged; their ownership discipline and release elaboration now live in
 `hir/affine.tcl` and apply to every affine value).
 
+Later: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md adds resources
+(`opaque resource struct` and its module's `cleanup fn`), affine values
+whose release runs their cleanup at the end of the owner's lexical scope
+instead of after its last use. Every other affine value keeps the release
+described here.
+
 ## Contents
 
 * [Terminology](#terminology)
@@ -284,10 +290,40 @@ parameter). Every other affine type is derived.
 ### 11. Struct affinity derivation
 
 A named struct is affine iff one of its field types is affine
-(`hir::structs::IsAffine`, recursive, cycle-safe, cached per declaration
-identity and reset whenever the declarations change); an anonymous struct
-the same, structurally. A struct's affinity is a fact of its declaration:
-`Running` above is affine because of `step`, not because of any value.
+(`hir::structs::IsAffine`, recursive, cycle-safe, its summary kept per
+declaration identity and reset whenever the declarations change); an
+anonymous struct the same, structurally. A struct's affinity is a fact of
+its type: `Running` above is affine because of `step`, not because of any
+value. (The one declaration that is affine by itself is a resource struct,
+whatever its fields: LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md. It
+has no type slots, so it is its declaration's base affinity in the summary
+below.)
+
+**For a parameterized struct application, affinity is determined after
+substituting the application's type arguments into the struct's fields**
+(AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md). With
+
+```botlish
+struct Box[T]:
+    value: T
+
+struct Phantom[T]:
+    value: int
+```
+
+`Box[Coroutine{...}]` is affine: the application contains that affine
+value in its field `value`. `Phantom[Coroutine{...}]` is unrestricted: no
+value of `T` is stored. An affine type argument makes nothing affine by
+itself; it counts where a field of the application holds a value of it --
+directly, in a List or vector, inside another application (`Outer[T]`
+holding an `Inner[T]`), never through a function type's argument or a
+pointee. This is not a rule for generic syntax: it is the ordinary rule
+applied to the actual fields of the actual type, which is what the
+compiler computes (each declaration's affinity with its slots unrestricted
+and the slots whose argument's affinity reaches a field, then each
+application from its own arguments). Before that milestone an application
+was judged by its declaration's fields, where a slot is unrestricted, so a
+handle held through a slot was copied freely and never released.
 
 ### 12. List affinity derivation
 

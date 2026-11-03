@@ -824,6 +824,16 @@ proc core::compiler::CompileSequence {ctxVar exprs} {
             # The rest of the sequence cannot run.
             break
         }
+        if {[dict get $hir exprs $e kind] eq "bind"} {
+            # A resource's cleanup function (hir/resources.tcl), entered in
+            # the run's cleanup table as it is declared (core/affine.tcl).
+            set b [dict get $hir exprs $e binding]
+            dict for {id record} [hir::resources::table $hir] {
+                if {[dict get $record binding] eq $b} {
+                    Emit ctx "core::affine::registerCleanupImpl [Word [core::value::int [dict get $record index]]] [BoxWord $result]"
+                }
+            }
+        }
         # The affine values dead after this statement (AFFINE-VALUES.md;
         # COROUTINES.md, "Release at the last use"), its own discarded value
         # included. The statement's value is already computed: it stays the
@@ -865,10 +875,22 @@ proc core::compiler::CompileRelease {ctxVar item {op ""}} {
             set word [BoxWord [Op $repr $local any]]
         }
     }
-    if {[lindex $plan 0] eq "coroutine"} {
-        Emit ctx "core::coroutines::releaseImpl $word"
-    } else {
-        Emit ctx "core::affine::dropImpl $word [Word [core::value::str [lindex $plan 1]]]"
+    switch -- [lindex $plan 0] {
+        coroutine {
+            Emit ctx "core::coroutines::releaseImpl $word"
+        }
+        abandon {
+            # An unwinding program's coroutine (hir/affine.tcl's Unwinds).
+            Emit ctx "core::coroutines::abandonImpl $word"
+        }
+        cleanup {
+            # A resource (hir/resources.tcl): its cleanup, by its index in the
+            # run's cleanup table (CompileSequence registers it).
+            Emit ctx "core::affine::cleanupImpl [Word [core::value::int [hir::affine::CleanupIndex $hir [lindex $plan 1]]]] $word"
+        }
+        default {
+            Emit ctx "core::affine::dropImpl $word [Word [core::value::str [lindex $plan 1]]]"
+        }
     }
 }
 

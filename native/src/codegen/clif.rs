@@ -3019,6 +3019,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         CoRelease => ("rt_co_release", None, false, None),
                         CoFailed => ("rt_co_failed", None, false, Some(("cofailed", KIND_COROUTINE))),
                         AffineDrop => ("rt_affine_drop", None, false, None),
+                        // Releases that run Botlish code (LEXICAL-RESOURCE-
+                        // CLEANUP-EXPLORATION-MILESTONE-1.md): safepoints
+                        // (ops.rs's op_may_allocate), fallible on a run-time
+                        // fault of that code.
+                        CoAbandon => ("rt_co_abandon", None, true, None),
+                        AffineDropRun => ("rt_affine_drop_run", None, true, None),
+                        CleanupCall => ("rt_cleanup_call", None, true, None),
                         // MutableVector (MUTABLE-VECTOR.md, runtime/mutvec.rs).
                         MvFromList => ("rt_mv_from_list", None, false, Some(("mvfromlist", KIND_MUTVEC))),
                         MvLen => ("rt_mv_len", None, false, None),
@@ -3033,6 +3040,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         MvToList => ("rt_mv_to_list", None, false, Some(("mvtolist", KIND_LIST))),
                         MvTakeFront => ("rt_mv_take_front", None, false, None),
                         MvClearDrop => ("rt_mv_clear_drop", None, false, None),
+                        // The variants whose descriptor runs code
+                        // (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md):
+                        // the same helpers, safepoints and fallible.
+                        MvClearDropRun => ("rt_mv_clear_drop", None, true, None),
+                        MvSwapDropRun => ("rt_mv_swap_drop", None, true, None),
+                        MutArraySwapDropRun => ("rt_mutarray_swap_drop", None, true, None),
+                        MutArraySetDropRun => ("rt_mutarray_set_drop", None, true, None),
                         MvSwapDrop => ("rt_mv_swap_drop", None, true, None),
                         CtxRoot => ("rt_context_root", None, false, None),
                         // MutableArray (MUTABLE-ARRAY.md, runtime/ops.rs).
@@ -3228,6 +3242,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                             let v = self.call_allocating("rt_list_new", &[self.vm, n, ptr], "listnew", KIND_LIST);
                             self.check(v);
                             return v;
+                        }
+                        CleanupTable => {
+                            let (n, ptr) = self.array(args);
+                            return self.call_helper("rt_cleanup_table", &[self.vm, n, ptr]);
                         }
                         _ => unreachable!(),
                     };
@@ -4445,6 +4463,12 @@ mod win64_variadic_tests {
     /// (the fifth to eighth arguments).
     static mut CAPTURED: [u64; 12] = [0; 12];
 
+    /// Held from clearing CAPTURED to reading it back: the executed tests run
+    /// on parallel threads of the test harness and share the one buffer
+    /// `capture` writes (without it, one test read the other's arguments:
+    /// "argument 2 (l) in r8: 0xfffffffde78ee600", the other's -9000000000).
+    static CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Records the machine state a Win64 call arrives in before any compiled
     /// code runs, and returns 0.
     #[unsafe(naked)]
@@ -4527,9 +4551,12 @@ mod win64_variadic_tests {
         module.define_function(caller, &mut ctx).unwrap();
         module.finalize_definitions().unwrap();
         let entry: unsafe extern "win64" fn(*const u64) -> i64 = unsafe { std::mem::transmute(module.get_finalized_function(caller)) };
-        unsafe { std::ptr::addr_of_mut!(CAPTURED).write_volatile([0; 12]) };
-        assert_eq!(unsafe { entry(words.as_ptr()) }, 0);
-        let captured = unsafe { std::ptr::addr_of!(CAPTURED).read_volatile() };
+        let captured = {
+            let _held = CAPTURE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            unsafe { std::ptr::addr_of_mut!(CAPTURED).write_volatile([0; 12]) };
+            assert_eq!(unsafe { entry(words.as_ptr()) }, 0);
+            unsafe { std::ptr::addr_of!(CAPTURED).read_volatile() }
+        };
         unsafe { module.free_memory() };
         captured
     }

@@ -1,0 +1,29 @@
+# Listening twice to one Inbox inside an actor: USE-AFTER-MOVE.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+
+struct Work:
+    n: int
+
+fn worker(inbox: std::actor::Inbox[Work]) -> std::actor::Exit:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    again = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, ac: std::actor::Actors) -> int errors std::event_loop::SchedulerFault:
+    {to, inbox} = std::actor::open[Work](4)
+    a = inject no context:
+        coroutine {step, first} = worker(inbox)
+        std::actor::spawned(step, first)
+    a.start()
+with context std::event_loop::create(8)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on std::event_loop::SchedulerFault:
+        0

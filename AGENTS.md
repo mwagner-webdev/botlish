@@ -6,6 +6,26 @@ Push finished work directly to `main`. This project does not use a
 feature-branch-plus-pull-request review cycle: don't open a PR unless
 explicitly asked to.
 
+When you work on a branch instead (a session's own instructions can require
+one), check `main`'s CI at both ends of the work
+(MAIN-CI-FAILURES-2026-11.md, "Why they reached main and why they stayed"):
+
+* **Before you branch off,** read the latest run of every workflow on
+  `main` (the GitHub MCP server's `actions_list`, method
+  `list_workflow_runs`, branch `main`). A run that is queued or in progress
+  is acceptable. A red one is never branched off silently: tell the user
+  which workflows and tests fail on `main` before you build on it, and keep
+  that list, so your branch's failures are compared with it rather than
+  dismissed as "main's own".
+* **Before you merge a finished milestone into `main`,** check again:
+  `main`'s latest runs and your branch's own. `macos-arm64.yml` and
+  `windows-x86_64.yml` run on every branch push; `tests.yml` and
+  `tests-arm64.yml` run on a branch only when dispatched (`workflow_dispatch`
+  with the branch as the ref), so dispatch them. Don't merge onto a red
+  `main` without telling the user. A failure on your branch that `main`'s
+  latest run does not have is yours to fix before the merge. Pending runs
+  are acceptable: report them as pending, never as passed.
+
 ## Documentation layout
 
 The root `README.md` is the project overview. Everything else is in `docs/`:
@@ -1300,7 +1320,12 @@ completion proofs. A release must stay unobservable -- it never runs
 Botlish code (a released suspended Tcl coroutine is unwound by an error no
 handler catches) and never changes a value -- and must never release a
 coroutine some live binding still owns. The affine-values milestone
-extended it to every affine value, keeping both properties.
+extended it to every affine value, keeping both properties. The one
+exception is a resource's (next sections but one: Resources): its release
+runs its module's cleanup function, and in a program where a suspending
+function owns one, releasing a suspended coroutine unwinds it so that its
+frames' releases run -- the program's own release code, never anything
+else.
 
 If you change the coroutine grammar (`yield`, the coroutine binding, the
 resume clause), `hir/coroutines.tcl` (protocols, the yield effect),
@@ -1574,7 +1599,7 @@ and no acceptance depends on one.
   backends' Unicode 16 semantics -- `tests/platform/cabi-facts.tcl`, the
   native build and its Rust unit tests, `tests/platform/native-status.tcl`,
   `tests/platform/aot-facts.tcl` (the program object and an executable as
-  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, two
+  the host's tools see them), `tests/platform/tier.tcl smoke`), Tier B (`tier.tcl acceptance`, three
   shards) and the same smoke on ubuntu as a control. Locally, `tclsh9.0
   tests/platform/tier.tcl smoke` takes seconds, and `tier.tcl X.test
   Y.bot` runs any file or suite the way CI does.
@@ -2145,6 +2170,35 @@ affine, move, release/drop, callable contract and callable kind; an affine
 value is not a reference, a borrow or a linear value, and may be dropped
 unused.
 
+An application of a parameterized struct is affine exactly when its fields,
+its type arguments substituted, are
+(AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md):
+`Box[Coroutine{...}]` of `struct Box[T]: value: T` is affine,
+`Phantom[Coroutine{...}]` of `struct Phantom[T]: value: int` is not. Keep it
+so:
+
+* Never decide an application by its arguments ("any affine argument"), by
+  its declaration's unsubstituted fields, or by a tree-, collection- or
+  name-specific rule. `hir::structs::IsAffine ID ARGUMENTS` answers it from
+  the declaration's summary (`AffinitySummary`: its affinity with every slot
+  unrestricted and its relevant slots, a least fixpoint computed from
+  `AppliedFieldTypes` and `hir::types::IsAffine`) and the application's own
+  arguments. Keep the summary per declaration and an answer per whole
+  application (`{ID ARGUMENTS}`), per registration (`ForgetAffinity`: every
+  registry change clears both, and the drop descriptors derived from them);
+  never an answer per declaration, never one computed while a summary is
+  still provisional, and never unfold a recursive application to classify
+  it.
+* A walk of a struct type's components (drop descriptors, recursive
+  affine types: `hir::structs::OwnedRecursion`) reads an application's
+  applied fields and identifies a struct by its whole type, never by its
+  declaration alone (`Box[Box[C]]`'s inner Box is another type). A
+  recursive affine application is AFFINE-CONTAINER-UNSUPPORTED by the one
+  declaration rule, judged on its own fields (`ApplicationIssue`), trees
+  included.
+* An affine application is never cut to `any` by a bound
+  (`hir::types::MakeApplied`), as an affine List element is never cut.
+
 If you change the affinity query (`hir/types.tcl`, `hir/structs.tcl`),
 `hir/affine.tcl`, contract-based call typing of `Fn`/`Coroutine` callees
 (`hir/types.tcl`'s `Call`, `hir/range.tcl`'s `VerifyStructuralCall`,
@@ -2153,15 +2207,21 @@ specialization (`hir/traits.tcl`, `hir/semantic.tcl`'s affine instances,
 `hir::signatures::CallableAdmits`), release or pending-temporary lowering in
 any backend, or the drop runtimes (`core/affine.tcl`,
 `native/src/runtime/affine.rs`), run `tests/affine.test`,
-`tests/coroutines.test`, `audit/affine/tools/fuzz.tcl` (several seeds),
+`tests/affine-applications.test`, `tests/coroutines.test`,
+`audit/affine/tools/fuzz.tcl` (several seeds; its application programs,
+`-applications N`, against their substitution oracle),
 `audit/affine/tools/mutate.tcl` and `audit/coroutines/tools/mutate.tcl`
 (every mutant in both `mutants.txt` files must still apply and be killed;
 the coroutine mutants of ownership and release edit `hir/affine.tcl` too).
 A change to `hir::traits::Plan` for affine witnesses also means re-checking
 the trait and context-trait mutants. A change to native drop or release
 lowering also needs a `BOTLISH_NATIVE_GC_STRESS=1` run of
-`tests/affine.test` and `cargo test --release --manifest-path
-native/Cargo.toml --lib affine`. `bench/affine.tcl` regenerates the
+`tests/affine.test` and `tests/affine-applications.test` (its
+`aa-native-nested-drop`: a scalar-replaced struct's opened affine field) and
+`cargo test --release --manifest-path native/Cargo.toml --lib affine`. A
+change to how an application's affinity is decided also runs
+`tests/tree-struct.test`, `tests/trait-constrained-types.test` and their
+mutation tools. `bench/affine.tcl` regenerates the
 performance report. `hir::affine::verify` computes release scopes (and so
 `AFFINE-PATH-RELEASE-UNSUPPORTED`) only for a program its whole-program
 analysis accepts, a program-wide channel of the static decisions
@@ -2169,6 +2229,75 @@ analysis accepts, a program-wide channel of the static decisions
 kinds): a change to that gate, to those kinds or to which joins can hold a
 path-release diagnostic also needs `tests/static-economics.test` and the
 static-decision harnesses (Static intrinsics, below).
+
+## Resources (scope-bound cleanup)
+
+`opaque resource struct R:` and `cleanup fn NAME(r: R, context ...):`
+(LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md) make a value's
+ownership operational: a resource is affine whatever its fields, and the
+compiler calls its module's one cleanup function where its owner's lexical
+scope ends -- at the end of the owning binding's sequence, never at its last
+use -- and on every exit that leaves it (`hir::affine::Scoped`: the binding's
+scope `last` is its sequence's end), in reverse acquisition order
+(`OrderReleases`). A move transfers the obligation, the module's
+destructuring discharges it, an explicit call of the cleanup is the early
+release. The drop descriptor of a resource is `rK.` (entry K of the
+program's cleanup table, hir/resources.tcl); the runtimes call the cleanup
+(`affine#cleanup`, natively `cleanupcall` of the rooted cleanup block,
+`affinedroprun` for an aggregate holding one). Where a suspending function
+owns a resource (`hir::affine::Unwinds`, the HIR's `resources unwind`),
+coroutine handles are scoped too and released by `coroutine#abandon`
+(natively `coabandon`, descriptor `C`): the pending yield fails with the
+internal `coroutine#abandoned`, which every suspension call's error edge
+carries, so only the frames' release pads run. Keep it so:
+
+* No general destructor: a resource is a module's opaque struct with exactly
+  one cleanup, which takes it as its one ordinary parameter, declares no
+  errors, returns unit, never yields, requires context structs only (never
+  a context trait) and takes its parameter apart (RESOURCE-DECLARATION).
+  Never add a destructor on another type, a drop trait, a per-value or
+  run-time-chosen cleanup, `defer`, a finalizer, a reference count, a drop
+  flag or any run-time ownership state; the collector never runs a cleanup.
+* Lexical, not last use: never release a resource -- or, unwinding, a
+  coroutine handle -- before its binding's sequence ends. A binding moved on
+  some paths of a statement and kept on others is
+  AFFINE-PATH-RELEASE-UNSUPPORTED, never released by a flag.
+* The cleanup's context requirement is charged to every function that may
+  release one (`hir::contexts::ReleaseEdges`; a value whose whole value is
+  its function's result is exempt, `Returned`), so MISSING-CONTEXT reports a
+  release where the context is not installed ("the release of this value").
+* Release code runs with the pending error set aside and put back
+  (native `preserving_pending`; the Tcl backends' handler-shaped catch), and
+  a collection's drop roots what it took out while code runs (`drop_taken`).
+  The plain drop forms stay allocation-free; the code-running ones are
+  separate operations (`affinedroprun`, `mvcleardroprun`, ...), chosen by
+  descriptor (NativeCallOp).
+* Ordinary affine values keep last-use release: a program without resources
+  is lowered as before (its HIR has no `resources` table).
+* Scoping is a fact the static decisions read (Static intrinsics, below):
+  a scoped binding's joins -- an `if` too -- are consumers of the ownership
+  verdict (`hir::staticdeps::ScopedBy`, `PathJoins`), and whether the
+  program unwinds is the waiting channel `C:unwind`. A new way for code to
+  make a binding scoped, or for the program to unwind, goes into them.
+
+If you change any of that (hir/resources.tcl, the resource cases of
+hir/affine.tcl, hir/structs.tcl and hir/contexts.tcl, the cleanup and
+abandonment runtimes in core/affine.tcl, core/coroutines.tcl,
+native/src/runtime/{affine,coroutine,mutvec}.rs, native/lower.tcl's release
+lowering, or std::event_loop's Owner), run `tests/resources.test`,
+`tests/event-loop.test` (its `el-owned-*`), `tests/event-loop-linux.test`
+(`el-linux-owned`), `tests/affine.test`, `tests/coroutines.test`,
+`audit/lexical-cleanup/tools/fuzz.tcl` (several seeds) and
+`audit/lexical-cleanup/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule; run it in batches with
+`-only` when the whole list would exceed a background task's limit), plus
+the affine and coroutine harnesses for a change to `hir/affine.tcl`,
+`tests/static-economics.test` and `audit/static-decisions/tools/mutate.tcl`
+for a change to scoping or unwinding, and a
+`BOTLISH_NATIVE_GC_STRESS=1` run of `tests/resources.test` for a change to
+the native release paths. `bench/lexical-cleanup.tcl` regenerates the
+performance report.
 
 ## Context-owned affine state
 
@@ -2263,12 +2392,16 @@ install`, which builds its archive there). Keep it so:
   an observer twice in a turn or in an empty turn, and never let an
   observer, a channel or a timer nobody waits on keep the loop alive or
   awake.
-* Revocation is explicit and generation-checked: a `Reg` is an identity,
-  never an owner. Nothing revokes implicitly -- no drop action until the
-  lexical-scope cleanup milestone, and never one faked with last-use
-  release -- and shutdown revokes every registration. Never deliver a record
-  of an old generation, let a reused slot inherit events, or cancel a task as
-  a side effect of revocation.
+* Revocation is generation-checked: a `Reg` is an identity, never an owner.
+  A registration made by an `owned_*` operation has an `Owner`, a resource
+  (Resources, below) whose cleanup `release` revokes it where the Owner's
+  lexical scope ends (or explicitly); its Reg cannot revoke it (`revoke`
+  answers false). Nothing else revokes implicitly -- never a drop action on
+  a Reg, never one faked with last-use release -- and shutdown revokes every
+  registration. Never deliver a record of an old generation, let a reused
+  slot inherit events, or cancel a task as a side effect of revocation (an
+  Owner's release wakes its waiters with Wake::Revoked and runs nothing
+  else).
 * Delivery is a registration's declared policy (Lossy, Coalesce, Reliable).
   Reliable never drops: a record without room is held by the driver
   (`hold_record`, `release_held`) and the backpressure reaches the producer
@@ -2300,6 +2433,70 @@ manifest), `tools/compilerpedia.tcl generate` and `check`, and
 still apply and be killed: update a mutant's text when you change the code
 it mutates, keeping it a mutant of the same rule). `bench/event-loop.tcl` is
 the performance report against the prototype.
+
+## Same-thread actors (std::actor)
+
+`std::actor` (stdlib/actor.bot; SAME-THREAD-ACTORS-MILESTONE-1.md) is
+ordinary Botlish over `std::event_loop`: an actor is one ordinary
+coroutine, hosted by a task the library adopts into the loop (`start`),
+with typed mailboxes in the application-installed context `Actors`.
+Communicating takes no context: `listen`, `receive`, `try_receive`, `send`,
+`deliver` and `pause` are requests the actor's coroutine yields to its host
+(protocol `resume Answer`, outward `Exit`), which performs them with the
+Loop and Actors and resumes it with the answer. So an actor constructed
+inside `inject no context:` receives and replies, and the compiler's own
+requirement analysis proves it needs nothing. Keep it so:
+
+* The actor-side operations require no context, ever (`actor-authority-
+  requirements` pins them): never give `receive`, `send` or `listen` a
+  context parameter, never make an actor hold the Loop or Actors to talk,
+  and never replace the protocol with a context trait. What needs the
+  scheduler's authority (open, start, post, close, drain, reap, stats,
+  `sleep`'s timer) requires it, and stays the supervisor's.
+* Restriction is construction's: an actor's authority is what its
+  construction's inject block (or its constructor) had. Never claim `start`
+  restricts anything, and never resume an actor inside an inject block (the
+  host resumes it outside every block).
+* Messages cross the non-generic mailbox table and protocol as `any` and are
+  recovered with the one internal intrinsic `std::actor::recover[M]`
+  (core/actor.tcl: the identity), called only by `recovered`, after
+  checking that the answer carries the identity (slot, generation) of the
+  receiver's own mailbox (`actor-source-recover`). Never call it anywhere
+  else, never make it public, never add a second unchecked conversion, and
+  never let an Answer carry a message of another mailbox.
+* `Inbox[M]` is affine (an opaque token holding a null C pointer, as
+  `std::io::fs::Owner`); `listen` consumes it and binds the mailbox to the
+  actor's task for good, and a host serves only its own actor's bound
+  mailboxes (a copied `Receiver` receives nothing elsewhere). `Address[M]`
+  is unrestricted and send-only. Identity is (slot, generation): a close
+  keeps the generation (Closed), a reuse bumps it (Stale), each mailbox
+  incarnation has its own wake and room channels.
+* Lifecycle: a host retires its actor (closes its mailboxes, counting what
+  was queued undelivered, waking its room waiters with Closed) when the
+  actor returns or fails, before its task ends with the actor's outcome;
+  `reap` closes what the loop abandoned (`std::event_loop::owned?`). The
+  library never consumes `take_outcomes`, keeps no scheduler of its own, and
+  takes at most one message per actor per dispatch.
+* Backpressure is event-driven: a full mailbox answers Full, `deliver`
+  waits on the mailbox's room channel, each freed place wakes one waiting
+  sender in FIFO order, a sender that did not wait cannot overtake one that
+  does, and nothing ever polls a timer. Never drop an actor message.
+* No native, NIR instruction, runtime object or Tcl runtime of actors:
+  `std::actor::recover` (`same` in native/lower.tcl) is the whole compiler
+  side (`actor-source-ordinary`). No OS threads, cross-thread transport,
+  sendability, actor-local installation or runtime permission check here.
+
+If you change stdlib/actor.bot, core/actor.tcl, the `same` lowering or
+`std::event_loop::owned?`, run `tests/actor.test` (on both passes,
+`CORE_BACKEND=interp` and `compile`; directly, all four backends; also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `tests/event-loop.test`,
+`tests/restricted-injection.test`, `tests/coroutines.test`,
+`tests/affine.test`, the warning gate, `tools/compilerpedia.tcl generate`
+and `check`, and `audit/actor/tools/mutate.tcl` (every mutant in its
+`mutants.txt` must still apply and be killed by a test its `!!` line names:
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same rule). `bench/actor.tcl` is the performance report
+against the census's Probe F.
 
 ## DecimalRounded and scalar refinements
 
@@ -4021,7 +4218,8 @@ difference from `BOTLISH_STATIC_SCHEDULER=sequential`: add its edge to
 `hir/staticdeps.tcl`, not a special case to the scheduler. The sequential
 order's waiting rule (STATIC-COMPILE.md, "The waiting rule";
 `hir::staticdeps::Waiting`) reads that analysis's waiting channels
-(`C:erased`, `C:budget:B`; never the gates `C:verdict` and `C:plan`): a
+(`C:erased`, `C:budget:B`, `C:unwind`; never the gates `C:verdict` and
+`C:plan`): a
 failing block consuming one waits while a failing block contributes to it,
 so a consumer's verdict does not depend on where its contributors are
 written. An edge into a waiting channel's part of the graph, or a new link

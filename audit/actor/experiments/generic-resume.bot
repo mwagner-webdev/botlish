@@ -1,0 +1,13 @@
+# generic-resume.bot -- a resume protocol naming an imprint variable, resume Delivery[M]: rejected (unknown or invalid resume type).
+struct Delivery[M]:
+    m: M
+
+fn recv(resume Delivery[M]) -> M:
+    d = yield 1
+    d.m
+
+fn worker() -> int:
+    recv() + recv()
+coroutine {step, first} = worker()
+step(Delivery[int] {m: 5})
+step(Delivery[int] {m: 6})

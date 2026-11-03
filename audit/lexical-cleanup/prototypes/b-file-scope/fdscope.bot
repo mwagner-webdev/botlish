@@ -1,0 +1,58 @@
+# fdscope.bot -- prototype B for a native resource (LEXICAL-RESOURCE-
+# CLEANUP-EXPLORATION-MILESTONE-1.md, section 4): the same architecture as
+# prototypes/b-task-scope -- obligations tracked by a registry, apart from
+# the values that name them -- for Linux file descriptors. The registry is
+# the context Files; a descriptor is an unrestricted Int identity; a scope is
+# an explicit mark, and end_scope(MARK) closes every descriptor opened since,
+# last first. It needs its own registry (nothing is shared with the event
+# loop's), and its identities carry no generation: the kernel reuses a
+# closed descriptor's number.
+import std::abi
+import std::abi::bytes
+import std::linux
+import std::mutable_vector
+import std::str
+
+opaque context struct Files:
+    open: MutableVector[int]
+
+fn create() -> Files:
+    Files {open: std::mutable_vector::from_list([])}
+
+# A mark: the descriptors open now.
+fn mark(context files: Files) -> int:
+    files.open.length()
+
+# Opens PATH for writing (created or truncated): its descriptor, or -errno.
+fn open(path: str, context files: Files) -> int:
+    fd = std::linux::openat(std::abi::i32(-100), std::str::encode_utf8(path), std::abi::i32(524288 + 577), std::abi::u32(420)):
+        on std::abi::AbiIntegerBelowRange:
+            -22
+        on std::abi::AbiIntegerAboveRange:
+            -22
+    if fd >= 0:
+        files.open.push(fd)
+    fd
+
+# One write(2) of TEXT to FD: the bytes written, or -errno.
+fn write(fd: int, text: str, context files: Files) -> int:
+    d = std::abi::i32(fd):
+        on std::abi::AbiIntegerBelowRange:
+            return -9
+        on std::abi::AbiIntegerAboveRange:
+            return -9
+    std::linux::write(d, std::abi::bytes::from_list(std::str::encode_utf8(text)))
+
+# Closes every descriptor opened since MARK, last first: how many remain.
+fn end_scope(at: int, context files: Files) -> int errors IndexNotFound:
+    loop:
+        if files.open.length() <= at:
+            break
+        fd = files.open.pop()
+        d = std::abi::i32(fd):
+            on std::abi::AbiIntegerBelowRange:
+                continue
+            on std::abi::AbiIntegerAboveRange:
+                continue
+        std::linux::close(d)
+    files.open.length()

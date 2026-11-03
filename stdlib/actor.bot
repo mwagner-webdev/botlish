@@ -1,0 +1,889 @@
+# actor.bot -- the "std::actor" namespace: same-thread actors over
+# std::event_loop (SAME-THREAD-ACTORS-MILESTONE-1.md).
+#
+#   with context std::event_loop::create(64)            the scheduler (Loop)
+#   with context std::event_loop::deterministic::create()   a driver
+#   with context std::actor::create()                   the mailboxes (Actors)
+#
+#   {to: work, inbox} = std::actor::open[Work](8)       a typed mailbox
+#   s = inject no context:                              the actor's authority
+#       coroutine {step, first} = calculator(inbox, replies)
+#       std::actor::spawned(step, first)
+#   std::actor::start(s)                                adopted by the loop
+#   std::actor::post(work, Work {...})
+#   std::event_loop::run()
+#
+# An ACTOR is one ordinary coroutine: its private state is its own locals,
+# it handles one message at a time, and it is scheduled by std::event_loop
+# like every other task. What it may do is what its code may do: the
+# contexts it was constructed with (an `inject` block states them;
+# RESTRICTED-CONTEXT-INJECTION-MILESTONE-1.md) and the capabilities it was
+# given as values. Communicating takes no context at all:
+#
+# * Address[M]  an opaque, unrestricted send right: copy it, pass it in a
+#               message; it sends M to one mailbox and does nothing else.
+# * Inbox[M]    the opaque, AFFINE receive right of that mailbox: it can be
+#               moved (into an actor, at construction) but never copied.
+# * Receiver[M] what `listen` makes of an Inbox inside the actor: the
+#               mailbox is then bound to that actor's task for good, and
+#               only that actor can receive through it (a copy of a
+#               Receiver receives nothing anywhere else).
+#
+# listen, receive, try_receive, send, deliver and pause require NO context:
+# they are requests the actor's coroutine yields to its HOST, a task this
+# module adopts into the loop beside it (start), which performs them with
+# the mailbox table (Actors) and the loop (Loop) and resumes the actor with
+# the answer. The actor never holds the Loop or the Actors context: the
+# scheduler's authority is not the actor's. The administration -- open,
+# start, post, close, drain, reap, stats -- requires Actors and the Loop and
+# is the supervisor's.
+#
+# An actor function has the result type Exit and ends with exit(VALUE); a
+# handler that fails ends the actor with its error (std::event_loop::
+# TaskFailed, IndexNotFound -- the errors of an event-loop task). Either way
+# its host closes every mailbox the actor listened to (counting the
+# messages left undelivered, waking every sender waiting for room with
+# Closed) and ends its task with the actor's outcome: take_outcomes
+# reports it under start's task id, exactly as for any task.
+#
+# MESSAGES are ordinary values: a send is a logical copy (a mutable
+# collection the sender changes later is not the one the receiver gets), in
+# the order sent (FIFO per mailbox), of exactly the mailbox's type M (an
+# unrestricted type: a type slot takes no affine type). A mailbox is
+# bounded: send answers Full when it holds CAPACITY messages (nothing is
+# dropped), deliver waits for room -- woken when a place frees, waiting
+# senders served first-come first-served -- and both answer Closed after a
+# close and Stale once the slot is reused (its generation then differs).
+#
+# SCHEDULING is the loop's: a host takes at most one message per dispatch
+# (a queued one makes it yield the turn first), waits on a channel when the
+# mailbox is empty, and never keeps the loop alive -- an idle actor does not
+# (run returns when nothing else can happen; a Stop message or a close ends
+# it). Shutdown (std::event_loop::shutdown) revokes every registration, so
+# every waiting receive answers Closed; an actor abandoned by the shutdown
+# is released without running, and reap closes its mailboxes.
+#
+# Four things stay apart. MEMORY: actors on one thread share one VM and
+# heap, but no state -- messages are values, and the only state two actors
+# can both change is an installed context both were explicitly injected
+# with. AUTHORITY: actors in one VM may have different context sets, each
+# its construction's. SCHEDULING: the loop owns the hosts and decides when
+# they resume. PARALLELISM: none -- actors on one thread are cooperative,
+# and a long synchronous computation holds its turn.
+#
+# DELEGATION is not injection: an actor that receives another's Address in
+# a message may send to it, and the receiver acts on the request with its
+# own authority; the sender gains no context by it. This restricts context
+# authority, checked statically; it is no operating-system sandbox and no
+# barrier against capabilities a creator passes deliberately as values.
+import std::coroutine
+import std::event_loop
+import std::ffi::c
+import std::list
+import std::mutable_array
+import std::mutable_vector
+import type std::event_loop::Delivery
+import type std::event_loop::Wake
+
+# The mailbox is closed, its slot was reused, or this actor does not
+# receive from it.
+error Closed
+
+# What a send did with a message.
+enum Sent:
+    Delivered,
+    Full,
+    Closed,
+    Stale,
+
+# An affine token that owns nothing (one word, a null C pointer no C call
+# ever receives): it makes an Inbox movable but not copyable, as
+# std::io::fs::Owner makes a File (AFFINE-VALUES.md: a struct is affine when
+# it holds an affine value). Dropping it runs nothing.
+private opaque struct Right:
+    marker: std::ffi::c::Ptr[std::ffi::c::Void]
+
+# The send right of one mailbox, for messages of type M: its slot and the
+# generation the slot had when the mailbox was opened.
+opaque struct Address[M]:
+    slot: int
+    gen: int
+
+# The receive right of one mailbox: affine, one per mailbox.
+opaque struct Inbox[M]:
+    slot: int
+    gen: int
+    right: Right
+
+# What an actor receives through, once it listened to its Inbox.
+opaque struct Receiver[M]:
+    slot: int
+    gen: int
+
+# What open makes: the mailbox's send right and its receive right.
+struct Opened[M]:
+    to: Address[M]
+    inbox: Inbox[M]
+
+# What an actor's coroutine yields to its host (a request) and finally
+# returns (exit's). Only this module makes or reads one.
+opaque struct Exit:
+    op: int
+    slot: int
+    gen: int
+    value: int
+    payload: any
+
+# What a host resumes its actor with. Only this module makes or reads one.
+opaque struct Answer:
+    status: int
+    slot: int
+    gen: int
+    payload: any
+
+# An actor constructed and not yet started: its coroutine and its first
+# request (the construction's first value).
+opaque struct Spawned:
+    step: Coroutine{args: [Answer], return: Exit, errors: [std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault]}
+    first: Exit
+
+# The mailboxes' counters (stats).
+struct Stats:
+    opened: int
+    closed: int
+    open: int
+    delivered: int
+    full: int
+    refused_closed: int
+    refused_stale: int
+    received: int
+    undelivered: int
+    room_waits: int
+    room_wakes: int
+    started: int
+    ended: int
+    failed: int
+    reaped: int
+    running: int
+
+# Requests (Exit.op).
+private op_end = 0
+private op_listen = 1
+private op_receive = 2
+private op_try = 3
+private op_send = 4
+private op_deliver = 5
+private op_pause = 6
+private op_sleep = 7
+
+# Answers (Answer.status).
+private a_ok = 0
+private a_message = 1
+private a_empty = 2
+private a_closed = 3
+private a_delivered = 4
+private a_full = 5
+private a_refused = 6
+private a_stale = 7
+
+# Mailbox rows (stride ms).
+private ms = 14
+private m_gen = 0
+private m_live = 1
+private m_cap = 2
+private m_count = 3
+private m_head = 4
+private m_tail = 5
+private m_owner = 6
+private m_owner_gen = 7
+private m_prev = 8
+private m_next = 9
+private m_waiting = 10
+private m_rwait = 11
+private m_rres = 12
+private m_used = 13
+
+# Actor rows (stride as).
+private as = 6
+private x_gen = 0
+private x_state = 1
+private x_task = 2
+private x_first = 3
+private x_fresh = 4
+private x_used = 5
+
+# Actor states.
+private x_free = 0
+private x_running = 1
+
+# Counters (Stats, in order).
+private c_opened = 0
+private c_closed = 1
+private c_delivered = 2
+private c_full = 3
+private c_refused_closed = 4
+private c_refused_stale = 5
+private c_received = 6
+private c_undelivered = 7
+private c_room_waits = 8
+private c_room_wakes = 9
+private c_started = 10
+private c_ended = 11
+private c_failed = 12
+private c_reaped = 13
+# (not in Stats: the number of mailbox rows and of actor rows)
+private c_box_rows = 14
+private c_actor_rows = 15
+private c_count = 16
+
+# A generation stays a small Int: a slot whose generation reaches this bound
+# is retired, never reused.
+private max_generation = 1073741824
+
+# The mailbox administration: every mailbox of the thread (its rows, its
+# queue in the message pool, its two channels -- the receiver's wake and
+# the senders' room), and every started actor. Messages are held as `any`:
+# a context is not generic, and the mailbox's identity is what states each
+# message's type (recovered).
+opaque context struct Actors:
+    boxes: MutableVector[int]
+    box_free: MutableVector[int]
+    wake: MutableVector[std::event_loop::Reg]
+    room: MutableVector[std::event_loop::Reg]
+    payloads: MutableVector[any]
+    links: MutableVector[int]
+    pool_free: MutableVector[int]
+    actors: MutableVector[int]
+    actor_free: MutableVector[int]
+    counters: MutableArray[int]
+
+private fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+private fn regs() -> MutableVector[std::event_loop::Reg]:
+    std::mutable_vector::from_list([])
+
+private fn values() -> MutableVector[any]:
+    std::mutable_vector::from_list([])
+
+# No mailbox and no actor yet.
+fn create() -> Actors:
+    Actors {
+        boxes: ints(), box_free: ints(), wake: regs(), room: regs(),
+        payloads: values(), links: ints(), pool_free: ints(),
+        actors: ints(), actor_free: ints(),
+        counters: std::mutable_array::create(c_count, 0)
+    }
+
+# ---------------------------------------------------------------------------
+# What an actor does (no context: requests to its host)
+
+private nomethod fn request(op: int, slot: int, gen: int, value: int, payload: any) -> Exit:
+    Exit {op: op, slot: slot, gen: gen, value: value, payload: payload}
+
+# An actor's final value: VALUE is its task's outcome value.
+nomethod fn exit(value: int) -> Exit:
+    request(op_end, -1, -1, value, 0)
+
+# Bind INBOX's mailbox to this actor (the one whose code calls it) and
+# receive through the result. The Inbox is consumed: the mailbox is this
+# actor's until it closes, which it does when the actor ends. Closed when
+# the mailbox is closed, or was reused.
+fn listen(inbox: Inbox[M], resume Answer) -> Receiver[M] errors Closed:
+    {slot, gen, right} = inbox
+    a = yield request(op_listen, slot, gen, 0, 0)
+    if a.status != a_ok:
+        fail Closed
+    Receiver[M] {slot: slot, gen: gen}
+
+# The message an answer carries, as the receiver's type. It must carry the
+# identity of RX's own mailbox: every value queued there was sent with an
+# Address[M] of that mailbox, so it is an M (core/actor.tcl).
+private nomethod fn recovered(rx: Receiver[M], a: Answer) -> M errors Closed:
+    if a.status != a_message or a.slot != rx.slot or a.gen != rx.gen:
+        fail Closed
+    std::actor::recover[M](a.payload)
+
+# The next message of RX's mailbox, in the order it was sent; suspends this
+# actor until there is one. Closed when the mailbox closed (or the loop
+# shut down) with nothing left in it.
+fn receive(rx: Receiver[M], resume Answer) -> M errors Closed:
+    a = yield request(op_receive, rx.slot, rx.gen, 0, 0)
+    recovered(rx, a)
+
+# The next message of RX's mailbox without suspending: one, or none when
+# nothing is queued. Closed when the mailbox closed.
+fn try_receive(rx: Receiver[M], resume Answer) -> List[M] errors Closed:
+    a = yield request(op_try, rx.slot, rx.gen, 0, 0)
+    if a.status == a_empty:
+        return []
+    [recovered(rx, a)]
+
+private fn sent_of(status: int) -> Sent:
+    if status == a_delivered:
+        Sent::Delivered
+    elif status == a_full:
+        Sent::Full
+    elif status == a_refused:
+        Sent::Closed
+    else:
+        Sent::Stale
+
+# Send M to TO's mailbox now: Delivered, Full (it holds its capacity, or
+# senders wait for room before this one), Closed, or Stale.
+fn send(to: Address[M], m: M, resume Answer) -> Sent:
+    a = yield request(op_send, to.slot, to.gen, 0, m)
+    sent_of(a.status)
+
+# Send M to TO's mailbox, waiting for room while it is Full (woken when a
+# place frees, in the order senders began to wait): Delivered, Closed or
+# Stale.
+fn deliver(to: Address[M], m: M, resume Answer) -> Sent:
+    a = yield request(op_deliver, to.slot, to.gen, 0, m)
+    sent_of(a.status)
+
+# Let the other ready tasks run first (the actor runs again in the next
+# turn).
+fn pause(resume Answer):
+    yield request(op_pause, -1, -1, 0, 0)
+    unit
+
+# Suspend this actor for DELAY microseconds of the loop's clock. It needs
+# the Loop: time is the scheduler's.
+nomethod fn sleep(delay: int, context ev: std::event_loop::Loop, resume Answer) errors std::event_loop::SchedulerFault:
+    deadline = std::event_loop::now() + delay
+    yield request(op_sleep, -1, -1, deadline, 0)
+    unit
+
+# ---------------------------------------------------------------------------
+# Rows
+
+private nomethod fn mget(slot: int, f: int, context ac: Actors) -> int errors IndexNotFound:
+    ac.boxes.at(slot * ms + f)
+
+private nomethod fn mset(slot: int, f: int, v: int, context ac: Actors) errors IndexNotFound:
+    ac.boxes.swap(slot * ms + f, v)
+
+private nomethod fn xget(slot: int, f: int, context ac: Actors) -> int errors IndexNotFound:
+    ac.actors.at(slot * as + f)
+
+private nomethod fn xset(slot: int, f: int, v: int, context ac: Actors) errors IndexNotFound:
+    ac.actors.swap(slot * as + f, v)
+
+private nomethod fn count_up(c: int, n: int, context ac: Actors) errors IndexNotFound:
+    ac.counters.set(c, ac.counters.at(c) + n)
+
+# Whether SLOT/GEN names the current incarnation of a mailbox row.
+private nomethod fn current?(slot: int, gen: int, context ac: Actors) -> bool errors IndexNotFound:
+    slot >= 0 and slot * ms < ac.boxes.length() and mget(slot, m_used) == 1 and mget(slot, m_gen) == gen
+
+# Whether SLOT/GEN is a current, open mailbox.
+private nomethod fn open?(slot: int, gen: int, context ac: Actors) -> bool errors IndexNotFound:
+    current?(slot, gen) and mget(slot, m_live) == 1
+
+# ---------------------------------------------------------------------------
+# Mailboxes
+
+private nomethod fn open_checked(capacity: int, context ev: std::event_loop::Loop, ac: Actors) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    cap = if capacity < 1:
+        1
+    else:
+        capacity
+    wake = std::event_loop::channel(Delivery::Reliable, 1)
+    room = std::event_loop::channel(Delivery::Reliable, 1)
+    slot = if ac.box_free.empty?():
+        s = ac.counters.at(c_box_rows)
+        count_up(c_box_rows, 1)
+        loop f from 0 to ms:
+            ac.boxes.push(0)
+        ac.wake.push(wake)
+        ac.room.push(room)
+        s
+    else:
+        s = ac.box_free.pop()
+        mset(s, m_gen, mget(s, m_gen) + 1)
+        ac.wake.swap(s, wake)
+        ac.room.swap(s, room)
+        s
+    mset(slot, m_used, 1)
+    mset(slot, m_live, 1)
+    mset(slot, m_cap, cap)
+    mset(slot, m_count, 0)
+    mset(slot, m_head, -1)
+    mset(slot, m_tail, -1)
+    mset(slot, m_owner, -1)
+    mset(slot, m_owner_gen, -1)
+    mset(slot, m_prev, -1)
+    mset(slot, m_next, -1)
+    mset(slot, m_waiting, 0)
+    mset(slot, m_rwait, 0)
+    mset(slot, m_rres, 0)
+    count_up(c_opened, 1)
+    slot
+
+private nomethod fn opened(capacity: int, context ev: std::event_loop::Loop, ac: Actors) -> Opened[M] errors IndexNotFound, std::event_loop::SchedulerFault:
+    slot = open_checked(capacity)
+    gen = mget(slot, m_gen)
+    Opened[M] {
+        to: Address[M] {slot: slot, gen: gen},
+        inbox: Inbox[M] {slot: slot, gen: gen, right: Right {marker: std::ffi::c::null[std::ffi::c::Void]()}}
+    }
+
+# A new, empty mailbox for messages of type M (open[M]), holding at most
+# CAPACITY (at least 1) undelivered messages: its send right and its
+# receive right.
+nomethod fn open(capacity: int, context ev: std::event_loop::Loop, ac: Actors) -> Opened[M] errors std::event_loop::SchedulerFault:
+    opened[M](capacity):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+# Remove SLOT from its owner's list of mailboxes.
+private nomethod fn unlink(slot: int, context ac: Actors) errors IndexNotFound:
+    owner = mget(slot, m_owner)
+    if owner == -1:
+        return unit
+    prev = mget(slot, m_prev)
+    next = mget(slot, m_next)
+    if prev == -1:
+        xset(owner, x_first, next)
+    else:
+        mset(prev, m_next, next)
+    if next != -1:
+        mset(next, m_prev, prev)
+    mset(slot, m_owner, -1)
+    mset(slot, m_owner_gen, -1)
+    mset(slot, m_prev, -1)
+    mset(slot, m_next, -1)
+
+# Close the open mailbox SLOT: its queued messages are dropped and counted
+# (the result), its waiting receiver wakes (Wake::Revoked) and so does every
+# sender waiting for room; later sends are Closed until the slot is reused.
+private nomethod fn shut(slot: int, context ev: std::event_loop::Loop, ac: Actors) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    dropped = mget(slot, m_count)
+    fold with intermediate node mget(slot, m_head):
+        if node == -1:
+            break
+        next = ac.links.at(node)
+        ac.payloads.swap(node, 0)
+        ac.pool_free.push(node)
+        next
+    mset(slot, m_live, 0)
+    mset(slot, m_count, 0)
+    mset(slot, m_head, -1)
+    mset(slot, m_tail, -1)
+    mset(slot, m_waiting, 0)
+    mset(slot, m_rwait, 0)
+    mset(slot, m_rres, 0)
+    unlink(slot)
+    std::event_loop::revoke(ac.wake.at(slot))
+    std::event_loop::revoke(ac.room.at(slot))
+    count_up(c_closed, 1)
+    count_up(c_undelivered, dropped)
+    if mget(slot, m_gen) + 1 < max_generation:
+        ac.box_free.push(slot)
+    dropped
+
+# Queue PAYLOAD on the open mailbox SLOT and wake its receiver when it
+# waits.
+private nomethod fn enqueue(slot: int, payload: any, context ev: std::event_loop::Loop, ac: Actors) errors IndexNotFound, std::event_loop::SchedulerFault:
+    node = if ac.pool_free.empty?():
+        ac.payloads.push(payload)
+        ac.links.push(-1)
+        ac.payloads.length() - 1
+    else:
+        n = ac.pool_free.pop()
+        ac.payloads.swap(n, payload)
+        ac.links.swap(n, -1)
+        n
+    tail = mget(slot, m_tail)
+    if tail == -1:
+        mset(slot, m_head, node)
+    else:
+        ac.links.swap(tail, node)
+    mset(slot, m_tail, node)
+    mset(slot, m_count, mget(slot, m_count) + 1)
+    count_up(c_delivered, 1)
+    if mget(slot, m_waiting) == 1:
+        mset(slot, m_waiting, 0)
+        ac.wake.at(slot).post(0, 0)
+
+# Send PAYLOAD to SLOT/GEN unless it is Full: an a_* status.
+private nomethod fn put(slot: int, gen: int, payload: any, context ev: std::event_loop::Loop, ac: Actors) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    if not current?(slot, gen):
+        count_up(c_refused_stale, 1)
+        return a_stale
+    if mget(slot, m_live) != 1:
+        count_up(c_refused_closed, 1)
+        return a_refused
+    # Senders waiting for room are served first: a freed place becomes a
+    # waiting sender's reservation (m_rres) at once (grant_room), so while
+    # one waits the mailbox counts as full, and a woken one holds its place
+    # until it sends.
+    if mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
+        count_up(c_full, 1)
+        return a_full
+    enqueue(slot, payload)
+    a_delivered
+
+# Free places of SLOT go to the senders waiting for room, one wake each, in
+# the order they began to wait.
+private nomethod fn grant_room(slot: int, context ev: std::event_loop::Loop, ac: Actors) errors IndexNotFound, std::event_loop::SchedulerFault:
+    fold with intermediate k 0:
+        if mget(slot, m_rwait) == 0 or mget(slot, m_count) + mget(slot, m_rres) >= mget(slot, m_cap):
+            break
+        mset(slot, m_rwait, mget(slot, m_rwait) - 1)
+        mset(slot, m_rres, mget(slot, m_rres) + 1)
+        count_up(c_room_wakes, 1)
+        ac.room.at(slot).post(0, 0)
+        k + 1
+
+# Take the first queued message of SLOT (count > 0): an answer carrying it.
+private nomethod fn take(slot: int, context ev: std::event_loop::Loop, ac: Actors) -> Answer errors IndexNotFound, std::event_loop::SchedulerFault:
+    node = mget(slot, m_head)
+    next = ac.links.at(node)
+    mset(slot, m_head, next)
+    if next == -1:
+        mset(slot, m_tail, -1)
+    mset(slot, m_count, mget(slot, m_count) - 1)
+    payload = ac.payloads.at(node)
+    ac.payloads.swap(node, 0)
+    ac.pool_free.push(node)
+    count_up(c_received, 1)
+    grant_room(slot)
+    Answer {status: a_message, slot: slot, gen: mget(slot, m_gen), payload: payload}
+
+private nomethod fn status_answer(status: int) -> Answer:
+    Answer {status: status, slot: -1, gen: -1, payload: 0}
+
+# Send M to TO's mailbox from code that is no actor (the supervisor, the
+# top level): Delivered, Full, Closed or Stale. It never waits.
+nomethod fn post(to: Address[M], m: M, context ev: std::event_loop::Loop, ac: Actors) -> Sent errors std::event_loop::SchedulerFault:
+    status = put(to.slot, to.gen, m):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+    sent_of(status)
+
+private nomethod fn close_checked(slot: int, gen: int, context ev: std::event_loop::Loop, ac: Actors) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    if open?(slot, gen):
+        shut(slot)
+    else:
+        0
+
+# Close TO's mailbox and return how many messages it held undelivered (0
+# when it is already closed or reused). It is the administration's stop: the
+# queue is dropped, the receiver's next receive answers Closed, senders
+# waiting for room wake with Closed, and later sends are Closed.
+nomethod fn close(to: Address[M], context ev: std::event_loop::Loop, ac: Actors) -> int errors std::event_loop::SchedulerFault:
+    close_checked(to.slot, to.gen):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+private nomethod fn drained(slot: int, gen: int, context ev: std::event_loop::Loop, ac: Actors) -> List[any] errors IndexNotFound, std::event_loop::SchedulerFault:
+    if not open?(slot, gen) or mget(slot, m_owner) != -1:
+        return []
+    n = mget(slot, m_count)
+    got = loop i from 0 to n:
+        a = take(slot)
+        a.payload
+    shut(slot)
+    got
+
+private nomethod fn drained_as(rx: Receiver[M], context ev: std::event_loop::Loop, ac: Actors) -> List[M] errors IndexNotFound, std::event_loop::SchedulerFault:
+    got = drained(rx.slot, rx.gen)
+    loop p in got:
+        recovered(rx, Answer {status: a_message, slot: rx.slot, gen: rx.gen, payload: p}):
+            on Closed:
+                # Not possible: P was queued under RX's own identity.
+                fail IndexNotFound
+
+# The messages queued in INBOX's mailbox, in order, and the mailbox closed:
+# how code that is no actor (the top level) receives, once. Nothing when the
+# mailbox is closed or reused.
+nomethod fn drain(inbox: Inbox[M], context ev: std::event_loop::Loop, ac: Actors) -> List[M] errors std::event_loop::SchedulerFault:
+    {slot, gen, right} = inbox
+    drained_as(Receiver[M] {slot: slot, gen: gen}):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+private nomethod fn queued_checked(slot: int, gen: int, context ac: Actors) -> int errors IndexNotFound:
+    if open?(slot, gen):
+        mget(slot, m_count)
+    else:
+        0
+
+# Messages queued in TO's mailbox, not yet received (0 when it is closed or
+# reused).
+nomethod fn queued(to: Address[M], context ac: Actors) -> int errors std::event_loop::SchedulerFault:
+    queued_checked(to.slot, to.gen):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+private fn stats_checked(context ac: Actors) -> Stats errors IndexNotFound:
+    c = loop i from 0 to c_count:
+        ac.counters.at(i)
+    Stats {
+        opened: c.at(c_opened), closed: c.at(c_closed), open: c.at(c_opened) - c.at(c_closed),
+        delivered: c.at(c_delivered), full: c.at(c_full),
+        refused_closed: c.at(c_refused_closed), refused_stale: c.at(c_refused_stale),
+        received: c.at(c_received), undelivered: c.at(c_undelivered),
+        room_waits: c.at(c_room_waits), room_wakes: c.at(c_room_wakes),
+        started: c.at(c_started), ended: c.at(c_ended), failed: c.at(c_failed),
+        reaped: c.at(c_reaped), running: c.at(c_started) - c.at(c_ended) - c.at(c_failed) - c.at(c_reaped)
+    }
+
+# The mailboxes' counters.
+fn stats(context ac: Actors) -> Stats errors std::event_loop::SchedulerFault:
+    stats_checked():
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+# ---------------------------------------------------------------------------
+# Actors and their hosts
+
+# An actor ready to start: STEP is its coroutine, FIRST what its
+# construction returned (its first request). No context: an actor is
+# constructed under the authority it is given (an inject block) and handed
+# out of it this way.
+nomethod fn spawned(step: Coroutine{args: [Answer], return: Exit, errors: [std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault]}, first: Exit) -> Spawned:
+    Spawned {step: step, first: first}
+
+private fn new_actor(context ac: Actors) -> int errors IndexNotFound:
+    slot = if ac.actor_free.empty?():
+        s = ac.counters.at(c_actor_rows)
+        count_up(c_actor_rows, 1)
+        loop f from 0 to as:
+            ac.actors.push(0)
+        s
+    else:
+        s = ac.actor_free.pop()
+        xset(s, x_gen, xget(s, x_gen) + 1)
+        s
+    xset(slot, x_used, 1)
+    xset(slot, x_state, x_running)
+    xset(slot, x_task, -1)
+    xset(slot, x_first, -1)
+    xset(slot, x_fresh, 1)
+    count_up(c_started, 1)
+    slot
+
+# Whether actor ME/MG is still the running occupant of its row.
+private nomethod fn running?(me: int, mg: int, context ac: Actors) -> bool errors IndexNotFound:
+    xget(me, x_gen) == mg and xget(me, x_state) == x_running
+
+# Retire actor ME/MG: close every mailbox it listened to and free its row.
+# COUNTER: which way it ended.
+private nomethod fn retire(me: int, mg: int, counter: int, context ev: std::event_loop::Loop, ac: Actors) errors IndexNotFound, std::event_loop::SchedulerFault:
+    if not running?(me, mg):
+        return unit
+    fold with intermediate slot xget(me, x_first):
+        if slot == -1:
+            break
+        next = mget(slot, m_next)
+        shut(slot)
+        next
+    xset(me, x_state, x_free)
+    xset(me, x_first, -1)
+    count_up(counter, 1)
+    if xget(me, x_gen) + 1 < max_generation:
+        ac.actor_free.push(me)
+
+private nomethod fn retired(me: int, mg: int, counter: int, context ev: std::event_loop::Loop, ac: Actors) errors std::event_loop::SchedulerFault:
+    retire(me, mg, counter):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+# Bind SLOT/GEN to actor ME/MG.
+private nomethod fn bind(slot: int, gen: int, me: int, mg: int, context ac: Actors) -> Answer errors IndexNotFound:
+    if not open?(slot, gen) or mget(slot, m_owner) != -1 or not running?(me, mg):
+        return status_answer(a_closed)
+    first = xget(me, x_first)
+    mset(slot, m_owner, me)
+    mset(slot, m_owner_gen, mg)
+    mset(slot, m_prev, -1)
+    mset(slot, m_next, first)
+    if first != -1:
+        mset(first, m_prev, slot)
+    xset(me, x_first, slot)
+    status_answer(a_ok)
+
+# Whether SLOT/GEN is an open mailbox bound to actor ME/MG.
+private nomethod fn mine?(slot: int, gen: int, me: int, mg: int, context ac: Actors) -> bool errors IndexNotFound:
+    open?(slot, gen) and mget(slot, m_owner) == me and mget(slot, m_owner_gen) == mg
+
+# Make the next turn the host's own: the dispatch that delivers a message
+# is a fresh one (one message per actor per dispatch).
+private nomethod fn next_turn(me: int, context ac: Actors) errors IndexNotFound:
+    std::event_loop::yield_now()
+    xset(me, x_fresh, 1)
+
+# A receive of actor ME/MG from SLOT/GEN: the next message, waiting for
+# one; or Closed. WAIT 0: a try_receive (an empty mailbox answers Empty).
+private nomethod fn receive_for(slot: int, gen: int, me: int, mg: int, wait: bool, context ev: std::event_loop::Loop, ac: Actors) -> Answer errors IndexNotFound, std::event_loop::SchedulerFault:
+    fold with intermediate tries 0:
+        if not mine?(slot, gen, me, mg):
+            return status_answer(a_closed)
+        if mget(slot, m_count) > 0:
+            if wait and xget(me, x_fresh) == 0:
+                next_turn(me)
+                continue
+            xset(me, x_fresh, 0)
+            return take(slot)
+        if not wait:
+            return status_answer(a_empty)
+        mset(slot, m_waiting, 1)
+        e = std::event_loop::wait(ac.wake.at(slot))
+        xset(me, x_fresh, 1)
+        if e.reason == Wake::Revoked:
+            # Closed (its waiter was woken by shut), or the loop's shutdown
+            # revoked the channel: the mailbox closes for good.
+            if open?(slot, gen):
+                shut(slot)
+            return status_answer(a_closed)
+        tries + 1
+
+# A send that waits for room: Delivered, Closed or Stale.
+private nomethod fn deliver_for(slot: int, gen: int, payload: any, context ev: std::event_loop::Loop, ac: Actors) -> Answer errors IndexNotFound, std::event_loop::SchedulerFault:
+    first = put(slot, gen, payload)
+    if first != a_full:
+        return status_answer(first)
+    mset(slot, m_rwait, mget(slot, m_rwait) + 1)
+    count_up(c_room_waits, 1)
+    e = std::event_loop::wait(ac.room.at(slot))
+    if e.reason != Wake::Event:
+        # This mailbox closed while the sender waited (shut revoked its room
+        # channel -- one per mailbox, never reused -- and reset the waiting
+        # counts), or the loop shut down: Closed, even if the slot has been
+        # reused since.
+        return status_answer(a_refused)
+    # A place was reserved for this sender (grant_room).
+    mset(slot, m_rres, mget(slot, m_rres) - 1)
+    enqueue(slot, payload)
+    status_answer(a_delivered)
+
+# Perform actor ME/MG's request R: the answer to resume it with.
+private nomethod fn serve(r: Exit, me: int, mg: int, context ev: std::event_loop::Loop, ac: Actors) -> Answer errors IndexNotFound, std::event_loop::SchedulerFault:
+    op = r.op
+    if op == op_receive:
+        receive_for(r.slot, r.gen, me, mg, true)
+    elif op == op_send:
+        status_answer(put(r.slot, r.gen, r.payload))
+    elif op == op_try:
+        receive_for(r.slot, r.gen, me, mg, false)
+    elif op == op_deliver:
+        deliver_for(r.slot, r.gen, r.payload)
+    elif op == op_listen:
+        bind(r.slot, r.gen, me, mg)
+    elif op == op_pause:
+        next_turn(me)
+        status_answer(a_ok)
+    elif op == op_sleep:
+        timer = std::event_loop::timer(r.value, 0)
+        std::event_loop::wait(timer)
+        xset(me, x_fresh, 1)
+        status_answer(a_ok)
+    else:
+        status_answer(a_closed)
+
+private nomethod fn served(r: Exit, me: int, mg: int, context ev: std::event_loop::Loop, ac: Actors) -> Answer errors std::event_loop::SchedulerFault:
+    serve(r, me, mg):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+# The task that hosts actor ME/MG: performs each request ACTOR yields and
+# resumes it with the answer, until the actor ends; then closes its
+# mailboxes and ends with its outcome (its exit value, or its error).
+private nomethod fn host(actor: Coroutine{args: [Answer], return: Exit, errors: [std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault]}, first: Exit, me: int, mg: int, context ev: std::event_loop::Loop, ac: Actors) -> int errors std::event_loop::TaskFailed, IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault:
+    # The actor's requests are served from the loop's dispatch on: an
+    # adoption runs in the next turn.
+    std::event_loop::yield_now()
+    # An ended actor is resumed once more: its cached result, or its cached
+    # failure again (a construction that failed).
+    last = fold with intermediate r first:
+        ended = std::coroutine::done?(actor)
+        answer = if ended:
+            status_answer(a_closed)
+        else:
+            served(r, me, mg)
+        next = actor(answer):
+            on std::event_loop::TaskFailed {code}:
+                retired(me, mg, c_failed)
+                fail std::event_loop::TaskFailed {code: code}
+            on IndexNotFound:
+                retired(me, mg, c_failed)
+                fail IndexNotFound
+            on std::event_loop::SchedulerFault:
+                retired(me, mg, c_failed)
+                fail std::event_loop::SchedulerFault
+            on std::event_loop::DriverFault {code}:
+                retired(me, mg, c_failed)
+                fail std::event_loop::DriverFault {code: code}
+        if ended:
+            break
+        next
+    retired(me, mg, c_ended)
+    last.value
+
+private nomethod fn actor_row(context ac: Actors) -> int errors std::event_loop::SchedulerFault:
+    new_actor():
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+private nomethod fn actor_gen(me: int, context ac: Actors) -> int errors std::event_loop::SchedulerFault:
+    xget(me, x_gen):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+private nomethod fn record_task(me: int, task: int, context ac: Actors) errors std::event_loop::SchedulerFault:
+    xset(me, x_task, task):
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault
+
+# Start actor A: a task of the loop hosts it from the next turn on. The
+# result is the task's id (std::event_loop::adopt's), under which
+# take_outcomes reports how the actor ended.
+fn start(a: Spawned, context ev: std::event_loop::Loop, ac: Actors) -> int errors std::event_loop::SchedulerFault:
+    {step, first} = a
+    me = actor_row()
+    mg = actor_gen(me)
+    # The host's first segment only yields (it cannot fail): -2 stands for
+    # a failure all the same.
+    coroutine {step: h, first: hf} = host(step, first, me, mg):
+        on std::event_loop::TaskFailed:
+            -2
+        on IndexNotFound:
+            -2
+        on std::event_loop::DriverFault:
+            -2
+    if hf == -2:
+        fail std::event_loop::SchedulerFault
+    task = std::event_loop::adopt(h, hf)
+    record_task(me, task)
+    task
+
+private fn reap_checked(context ev: std::event_loop::Loop, ac: Actors) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    reaped = fold me from 0 to ac.counters.at(c_actor_rows) with intermediate k 0:
+        if xget(me, x_used) != 1 or xget(me, x_state) != x_running:
+            continue
+        task = xget(me, x_task)
+        if task == -1 or std::event_loop::owned?(task):
+            continue
+        retire(me, xget(me, x_gen), c_reaped)
+        k + 1
+    # Every other open mailbox whose wake channel the loop revoked (its
+    # shutdown revokes every registration): no receiver can wait on it again.
+    loop slot from 0 to ac.counters.at(c_box_rows):
+        if mget(slot, m_used) == 1 and mget(slot, m_live) == 1 and not std::event_loop::live?(ac.wake.at(slot)):
+            shut(slot)
+    reaped
+
+# Close the mailboxes of every actor whose task the loop no longer owns
+# without its host having ended it -- an actor abandoned by
+# std::event_loop::shutdown or abandon, which release a task without
+# running it -- and every mailbox a shutdown left without a live channel.
+# Returns how many actors it reaped. (An actor that returns or fails is
+# reaped by its own host, at once.) Call it after a shutdown, once the
+# replies the top level wants are drained.
+fn reap(context ev: std::event_loop::Loop, ac: Actors) -> int errors std::event_loop::SchedulerFault:
+    reap_checked():
+        on IndexNotFound:
+            fail std::event_loop::SchedulerFault

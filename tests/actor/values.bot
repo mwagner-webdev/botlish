@@ -1,0 +1,97 @@
+# values.bot -- Probe C's runtime half (THREAD-ACTOR-ARCHITECTURE-CENSUS.md)
+# on std::actor: what a same-thread message of a MUTABLE collection means.
+# MutableVector, MutableArray and MutableMap are values (MUTABLE-VECTOR.md):
+# a send is a logical copy, so the sender's later mutation never reaches the
+# receiver, the receiver's never reaches the sender, and no alias between
+# actors exists. Both actors are contextless; they report their
+# observations to a mailbox the top level drains.
+import std::actor
+import std::event_loop
+import std::event_loop::deterministic
+import std::int
+import std::mutable_array
+import std::mutable_map
+import std::mutable_vector
+import std::str
+
+struct Parcel:
+    label: str
+    nums: MutableVector[int]
+    grid: MutableArray[int]
+    table: std::mutable_map::MutableMap[str, int]
+
+struct Line:
+    text: str
+
+nomethod fn describe(who: str, p: Parcel) -> Line errors IndexNotFound:
+    looked = p.table.at("key"):
+        on std::mutable_map::KeyNotFound:
+            -1
+    Line {text: who.concat(": ").concat(p.label)
+        .concat(" nums.length=").concat(std::int::to_string(p.nums.length()))
+        .concat(" grid[0]=").concat(std::int::to_string(p.grid.at(0)))
+        .concat(" table[k]=").concat(std::int::to_string(looked))}
+
+fn receiver(inbox: std::actor::Inbox[Parcel], back: std::actor::Address[Parcel], log: std::actor::Address[Line]) -> std::actor::Exit errors IndexNotFound:
+    rx = inbox.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    p = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    log.send(describe("receiver got", p))
+    p.nums.push(1000)
+    p.grid.set(0, 1000)
+    p.table.set("key", 1000)
+    log.send(describe("receiver changed its copy", p))
+    back.send(p)
+    std::actor::exit(0)
+
+fn sender(to: std::actor::Address[Parcel], mine: std::actor::Inbox[Parcel], log: std::actor::Address[Line]) -> std::actor::Exit errors IndexNotFound:
+    rx = mine.listen():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    table = std::mutable_map::create[str, int]()
+    table.set("key", 1)
+    p = Parcel {label: "parcel", nums: std::mutable_vector::from_list([1, 2, 3]), grid: std::mutable_array::from_list([7, 8]), table: table}
+    to.send(p)
+    p.nums.push(4)
+    p.grid.set(0, 70)
+    p.table.set("key", 2)
+    log.send(describe("sender changed its own after sending", p))
+    back = rx.receive():
+        on std::actor::Closed:
+            return std::actor::exit(-1)
+    log.send(describe("sender got the reply", back))
+    log.send(describe("sender's own is unchanged by the receiver", p))
+    std::actor::exit(0)
+
+fn main(context ev: std::event_loop::Loop, d: std::event_loop::Driver, ac: std::actor::Actors) -> List[str] errors IndexNotFound, std::event_loop::SchedulerFault, std::event_loop::DriverFault, std::event_loop::LoopReentered:
+    {to: log, inbox: log_in} = std::actor::open[Line](16)
+    {to: r, inbox: r_in} = std::actor::open[Parcel](4)
+    {to: s, inbox: s_in} = std::actor::open[Parcel](4)
+    ra = inject no context:
+        coroutine {step, first} = receiver(r_in, s, log)
+        std::actor::spawned(step, first)
+    ra.start()
+    sa = inject no context:
+        coroutine {step, first} = sender(r, s_in, log)
+        std::actor::spawned(step, first)
+    sa.start()
+    std::event_loop::run()
+    lines = std::actor::drain(log_in)
+    loop l in lines:
+        l.text
+
+with context std::event_loop::create(16)
+with context std::event_loop::deterministic::create()
+with context std::actor::create()
+main():
+    on IndexNotFound:
+        ["IndexNotFound"]
+    on std::event_loop::SchedulerFault:
+        ["SchedulerFault"]
+    on std::event_loop::DriverFault:
+        ["DriverFault"]
+    on std::event_loop::LoopReentered:
+        ["LoopReentered"]

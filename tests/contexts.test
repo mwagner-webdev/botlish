@@ -285,7 +285,6 @@ foreach {name source message} {
     stray-fn        "context fn f():\n    1\n"                    {"context" only modifies a struct declaration ("context struct NAME:"), not a "fn" declaration}
     stray-type      "context type T = Int in 0..3\n"              {"context" only modifies a struct declaration ("context struct NAME:"), not a "type" declaration}
     nested          "fn f():\n    context struct T:\n        a: int\n    1\n" {a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop}
-    resource        "context resource struct T:\n    a: int\n"   {expected end of line, found name "resource"}
 } {
     test contexts-syntax-modifier-$name {a malformed context struct declaration is a located syntax error} -body {
         catch {surface::parse $source} m
