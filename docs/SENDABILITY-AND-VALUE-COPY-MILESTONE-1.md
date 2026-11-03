@@ -673,8 +673,9 @@ What the measurements show:
   * `audit/stdlib-census/after.tsv` is regenerated (it was also stale from
     earlier milestones).
 * **Main merged in.** The branch took main's PM-3 package-authoring
-  commits (no file of this milestone changed); `tests/sendability.test`
-  passes after the merge.
+  commits, which touch this milestone's files only in `AGENTS.md` and
+  `docs/INDEX.md`, beside its lines; they merged cleanly, and
+  `tests/sendability.test` passes after the merge.
 * **Not run locally:**
   * the whole `tests/local.tcl`;
   * the static-decisions comparison (CI's);
