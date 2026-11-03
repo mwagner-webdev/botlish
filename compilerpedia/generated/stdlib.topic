@@ -2061,10 +2061,15 @@ related: stdlib.module.std::abi::bytes stdlib.std::abi::bytes::from_list stdlib.
 == DECLARATION
     opaque struct Bytes:
         storage: any
+        sendable bytes(storage)
 
 == MODULE
 stdlib/abi/bytes.bot: import std::abi::bytes, then write
 std::abi::bytes::Bytes.
+
+== DESCRIPTION
+Both are sendable (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): a copy in
+another VM is a byte storage of its own holding the same bytes.
 
 == NOTES
 Its one field is private to module std::abi::bytes (a projection or a
@@ -2097,6 +2102,7 @@ related: stdlib.module.std::abi::bytes stdlib.std::abi::bytes::zeroed stdlib.std
 == DECLARATION
     opaque struct MutableBytes:
         storage: any
+        sendable mutable_bytes(storage)
 
 == MODULE
 stdlib/abi/bytes.bot: import std::abi::bytes, then write
@@ -2486,7 +2492,7 @@ Not here, deliberately: indexing, capacity, resizing, NUL-terminated strings
 stdlib/abi/bytes.bot (import std::abi::bytes).
 
 == MEMBERS
-    std::abi::bytes::Bytes         opaque struct
+    std::abi::bytes::Bytes         opaque struct -- Both are sendable (SEND...
     std::abi::bytes::MutableBytes  opaque struct
     std::abi::bytes::decode_utf16le function -- The String whose UTF-16LE e...
     std::abi::bytes::decode_utf8   function -- The String whose UTF-8 encod...
@@ -10649,6 +10655,7 @@ related: stdlib.module.std::immutable_map
         hashes: List[int]
         index: List[int]
         identity associations(keys, vals)
+        sendable through(transfer_out, transfer_in) as List[ImmutableMapEntry[K, V]]
 
 == MODULE
 stdlib/immutable_map.bot: import std::immutable_map, then write
@@ -15125,6 +15132,7 @@ related: stdlib.module.std::mutable_map
     opaque struct MutableMap[K satisfies Hashable, V]:
         table: std::ordered_table::Table[K]
         vals: MutableVector[V]
+        sendable through(transfer_out, transfer_in) as List[MutableMapEntry[K, V]]
 
 == MODULE
 stdlib/mutable_map.bot: import std::mutable_map, then write
@@ -15492,6 +15500,7 @@ related: stdlib.module.std::mutable_set
 == DECLARATION
     opaque struct MutableSet[T satisfies Hashable]:
         table: std::ordered_table::Table[T]
+        sendable through(transfer_out, transfer_in) as List[T]
 
 == MODULE
 stdlib/mutable_set.bot: import std::mutable_set, then write
@@ -17551,6 +17560,172 @@ stdlib/test.bot (import std::test).
     std::test::value               function (nomethod) -- BODY's value must...
 
 Each member is a topic: -help NAME (e.g. -help std::test::Erased).
+
+@topic stdlib.std::transfer::decode
+title: std::transfer::decode -- intrinsic of namespace std::transfer
+summary: std::transfer::decode[T](data): the T whose encoding DATA is, allocated in this VM, or a declared Transfer* error that refuses the bytes, after `import std::transfer`.
+index: stdlib
+symbol: std::transfer::decode
+keywords: deserialize; receive a value; decode; from bytes; Sendable; TransferMalformed; TransferTypeMismatch
+related: stdlib.module.std::transfer stdlib.std::transfer::encode concept.sendability
+
+== SIGNATURE
+    std::transfer::decode(struct) -> any
+
+== ERRORS
+    TransferInvalidValue, TransferLimit, TransferMalformed, TransferTypeMismatch, TransferVersion
+
+A call must handle each (on NAME:), admit it in its function's errors
+clause, or be proven unable to raise it (rule.unhandled-errors).
+
+== USE
+An intrinsic of namespace std::transfer: import std::transfer, then write
+std::transfer::decode. Method syntax: receiver.decode(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+T is given explicitly (decode[T]) and must be sendable and closed. The
+bytes are checked, never trusted: TransferMalformed (no header, cut short,
+a count larger than the bytes left, bytes after the value), TransferVersion
+(another format version), TransferTypeMismatch (a value of another type),
+TransferInvalidValue (a value outside T: a Bool byte other than 0 or 1,
+text that is not UTF-8, a non-finite Float64, an Int outside its domain, a
+case index of no case) and TransferLimit (an Int of more than 2^20 bytes,
+more than 2^24 elements of no size). Every String, collection and byte
+storage of the result is new; a map's or set's derived state is computed
+again here.
+
+== EXAMPLES
+@example accept
+import std::transfer
+import std::abi::bytes
+
+data = std::transfer::encode(["ab", "cd"])
+std::transfer::decode[int](data):
+    on TransferMalformed:
+        -1
+    on TransferVersion:
+        -2
+    on TransferTypeMismatch:
+        -3
+    on TransferInvalidValue:
+        -4
+    on TransferLimit:
+        -5
+@caption Bytes of a List[str] decoded as an int: another type
+@value -3
+@end
+
+@topic stdlib.std::transfer::encode
+title: std::transfer::encode -- intrinsic of namespace std::transfer
+summary: std::transfer::encode(value): the std::abi::bytes::Bytes another VM decodes into an equal value; the value's static type must be sendable and closed, after `import std::transfer`.
+index: stdlib
+symbol: std::transfer::encode
+keywords: serialize; send a value; encode; to bytes; Sendable; NOT-SENDABLE
+related: stdlib.module.std::transfer stdlib.std::transfer::decode concept.sendability error.not-sendable error.transfer-open-type
+
+== SIGNATURE
+    std::transfer::encode(any) -> struct
+
+== USE
+An intrinsic of namespace std::transfer: import std::transfer, then write
+std::transfer::encode. Method syntax: receiver.encode(...) is the same
+call.
+
+== BACKENDS
+every backend (interp, compile, cranelift-generic, cranelift)
+
+== NOTES
+The bytes start with "BOTX", the format version and a fingerprint of the
+value's schema (its static type, by canonical names), then the value
+itself: no address, no shape or enum number of this compilation, nothing a
+receiver could take for an object of the sender. The value is unchanged;
+encoding a map or set calls its owner's projection (its entries, in its
+order). It declares no error.
+
+== EXAMPLES
+@example accept
+import std::transfer
+import std::abi::bytes
+
+std::abi::bytes::length(std::transfer::encode([1, 2, 3])).value
+@caption 13 header bytes, a count and three one-byte Ints
+@value 20
+@end
+
+@topic stdlib.module.std::transfer
+title: std::transfer -- standard namespace
+summary: Copying a sendable value between Botlish VMs: std::transfer::encode(v) writes it into owned bytes, std::transfer::decode[T](data) rebuilds an independent T in this VM.
+index: stdlib
+symbol: std::transfer
+keywords: send; serialize; copy between threads; cross-VM; transfer; Sendable; encode; decode
+related: concept.sendability stdlib.std::transfer::encode stdlib.std::transfer::decode
+
+== DESCRIPTION
+  data = std::transfer::encode(value)          # std::abi::bytes::Bytes
+  copy = std::transfer::decode[T](data)        # a T of this VM's own
+
+A value is *sendable* (the intrinsic trait Sendable) when an equivalent
+value can be reconstructed in another VM without anything of the sending VM:
+no heap object, no runtime resource (a coroutine, a C pointer, a mailbox or
+event registration), no execution environment and no authority (an installed
+context). The compiler derives it from the value's static type: scalars,
+Strings, Lists, ImmutableSets, MutableVectors and MutableArrays of sendable
+elements, structs (and trees) of sendable fields, enum cases; an opaque
+struct only when its owning module states how a copy is rebuilt (its
+`sendable` clause: the standard library's byte storage and collections do).
+A call of either operation on a value whose static type is not sendable is
+NOT-SENDABLE, with the path to the component that is not.
+
+encode writes the value into owned bytes: no address, no number of this
+compilation's making (a struct shape, an enum number), and no reference into
+this VM; the value is unchanged. decode reads bytes made by a program
+compiled with the same declarations of the value's type -- the same program
+in another VM, or another program -- into a value allocated entirely in this
+VM: Strings, byte storage and collections are made anew, a map's or set's
+derived state (its index, its stored hashes) is computed again by this VM,
+and nothing of the bytes or the sender is kept. A mutable collection
+received is a new value: mutating it changes no other copy, here or in the
+sender.
+
+decode never trusts the bytes. It refuses, with a declared error and nothing
+changed:
+
+  TransferMalformed      bytes that are no transfer (no header, cut short,
+                         a count larger than the bytes left, bytes after
+                         the value)
+  TransferVersion        a format version this runtime does not read
+  TransferTypeMismatch   a value of another type (its schema's fingerprint
+                         is not T's)
+  TransferInvalidValue   a value outside its type: a Bool byte other than
+                         0 or 1, text that is not UTF-8, a non-finite
+                         Float64, an Int outside its integer domain, a
+                         case index of no case, a List of another stated
+                         length
+  TransferLimit          a decode beyond the runtime's limits (an Int of
+                         more than 2^20 bytes, more than 2^24 elements of
+                         no size)
+
+The bytes are a transfer between running programs, not a storage format:
+their version is the compiler's, and nothing promises a later compiler reads
+them.
+
+Not here, deliberately: threads, actor messages across VMs (std::actor's
+messages stay ordinary values of one VM), sharing a heap, moving an affine
+value (a coroutine, a C pointer) to another VM, and any authority: a decoded
+value is data, and the receiver's contexts are its own.
+
+== SOURCE
+stdlib/transfer.bot (import std::transfer).
+
+== MEMBERS
+    std::transfer::decode          intrinsic -- std::transfer::decode[T](da...
+    std::transfer::encode          intrinsic -- std::transfer::encode(value...
+
+Each member is a topic: -help NAME (e.g. -help std::transfer::decode).
 
 @topic stdlib.std::tree::Order
 title: std::tree::Order -- Enum of module std::tree

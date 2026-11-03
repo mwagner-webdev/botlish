@@ -130,6 +130,10 @@ proc hir::read::TypeDecls {lines} {
         # Skeletons first, then the field types (which may name any struct
         # of the text, itself included).
         set skeleton [lmap entry $structEntries {
+            if {[dict exists $entry sendable]} {
+                # (A representation is parsed with the field types.)
+                dict set entry sendable representation ""
+            }
             dict set entry fields [concat {*}[lmap {fname ftype} [dict get $entry fields] {list $fname any}]]
         }]
         hir::structs::applyEntries $skeleton
@@ -145,6 +149,10 @@ proc hir::read::TypeDecls {lines} {
             set fields [concat {*}[lmap {fname ftype} [dict get $entry fields] {
                 list $fname [hir::imprint::ConstrainVariables [ParseType $ftype $number] $constraints]
             }]]
+            if {[dict exists $entry sendable] && [dict get $entry sendable representation] ne ""} {
+                dict set entry sendable representation [hir::imprint::ConstrainVariables \
+                    [ParseType [dict get $entry sendable representation] $number] $constraints]
+            }
             dict unset entry names
             dict unset entry line
             dict set entry fields $fields
@@ -286,8 +294,8 @@ proc hir::read::EnumDeclLine {content number} {
 # (hir::format::TypeDecl) states; field types are read with the structs
 # registered skeleton-first, so a field may name any struct of the text.
 proc hir::read::StructDeclLine {content number} {
-    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(resource )?(?:slots \[([^\]]*)\] )?(?:identity ([a-z]+)\(([^)]*)\) )?(?:tree (\S+) )?fields (.*)$} $content -> id name ns opaqueWord contextWord resourceWord slotsText identityForm identityFields treeField fieldsText]} {
-        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[resource\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] \[identity FORM(FIELD,...)\] \[tree FIELD\] fields FIELD: TYPE, ...\""
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) (opaque )?(context )?(resource )?(?:slots \[([^\]]*)\] )?(?:identity ([a-z]+)\(([^)]*)\) )?(?:sendable ([a-z_]+)\(([^)]*)\) (?:as (.+?) )?)?(?:tree (\S+) )?fields (.*)$} $content -> id name ns opaqueWord contextWord resourceWord slotsText identityForm identityFields sendableForm sendableArgs sendableRep treeField fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS \[opaque\] \[context\] \[resource\] \[slots \[SLOT ?satisfies TRAIT?, ...\]\] \[identity FORM(FIELD,...)\] \[sendable FORM(NAME,...) ?as TYPE?\] \[tree FIELD\] fields FIELD: TYPE, ...\""
     }
     # A parameterized struct's slots (TRAIT-CONSTRAINED-IMPRINTED-TYPES.md):
     # {SLOT {TRAIT ...}} pairs, as hir::format::TypeDecl printed them.
@@ -335,6 +343,13 @@ proc hir::read::StructDeclLine {content number} {
         # the registry's {form FORM fields {FIELD ...}}, as the entry
         # hir::structs::apply returned held it.
         dict set decl identity [dict create form $identityForm fields [split $identityFields ,]]
+    }
+    if {$sendableForm ne ""} {
+        # The owner's sendability statement (SENDABILITY-AND-VALUE-COPY-
+        # MILESTONE-1.md): the registry's {form FORM args {NAME ...}
+        # representation R}, R's text parsed with the field types.
+        dict set decl sendable [dict create form $sendableForm \
+            args [if {$sendableArgs eq ""} {list} else {split $sendableArgs ,}] representation $sendableRep]
     }
     if {$treeField ne ""} {
         # A tree struct (TREE-STRUCT-MILESTONE-1.md): its child field, as

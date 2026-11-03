@@ -55,6 +55,7 @@ opaque struct ImmutableMap[K satisfies Hashable, V]:
     hashes: List[int]
     index: List[int]
     identity associations(keys, vals)
+    sendable through(transfer_out, transfer_in) as List[ImmutableMapEntry[K, V]]
 
 # One association of a map, as a loop over it visits it.
 struct ImmutableMapEntry[K, V]:
@@ -134,3 +135,41 @@ nomethod fn iteration_live?(m: ImmutableMap[K, V], i: int) -> bool:
 
 nomethod fn iteration_at(m: ImmutableMap[K, V], i: int) -> ImmutableMapEntry[K, V]:
     ImmutableMapEntry[K, V] {key: std::list::at(m.keys, i.mod(std::list::length(m.keys))), value: std::list::at(m.vals, i.mod(std::list::length(m.vals)))}
+
+# ---------------------------------------------------------------------------
+# Sendability (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): a map is its
+# associations, in its order; its stored hashes and its index are derived
+# state, which the receiving VM computes again under its own table-hash key.
+# Internal to the standard library (core/transfer.tcl).
+
+# M's associations, in M's order.
+nomethod fn transfer_out(m: ImmutableMap[K, V]) -> List[ImmutableMapEntry[K, V]]:
+    loop i from 0 to iteration_end(m):
+        iteration_at(m, i)
+
+# The map of ENTRIES, in their order: a key given twice keeps its first
+# place and its last value (bytes the sender wrote hold none twice, so
+# that case, O(n^2), arises only from forged bytes).
+nomethod fn transfer_in(entries: List[ImmutableMapEntry[K, V]]) -> ImmutableMap[K, V]:
+    t = std::ordered_table::fresh[K](std::list::length(entries))
+    loop e in entries:
+        h = std::table_hash::of(e.key)
+        if t.slot_of(h, e.key) < 0:
+            t.append(h, e.key)
+    keys = std::ordered_table::live_keys(t)
+    hashes = std::ordered_table::live_hashes(t)
+    index = hashes.frozen_index(std::ordered_table::slots(t))
+    if std::list::length(keys) == std::list::length(entries):
+        vals = loop e in entries:
+            e.value
+        return ImmutableMap[K, V] {keys: keys, vals: vals, hashes: hashes, index: index}
+    picked = loop k in keys:
+        matches = loop e in entries:
+            if e.key != k:
+                continue
+            e.value
+        last = std::list::at(matches, std::list::length(matches) - 1):
+            on IndexNotFound:
+                continue
+        last
+    ImmutableMap[K, V] {keys: keys, vals: picked, hashes: hashes, index: index}

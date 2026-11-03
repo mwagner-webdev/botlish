@@ -5196,6 +5196,7 @@ proc surface::parser::StructDecl {pVar} {
     Advance p
     set fields {}
     set identity ""
+    set sendable ""
     while {[Kind p] ne "DEDENT" && [Kind p] ne "EOF"} {
         if {[Kind p] eq "NEWLINE"} {
             Advance p
@@ -5214,6 +5215,18 @@ proc surface::parser::StructDecl {pVar} {
                 Fail $fieldToken "duplicate \"identity\" clause in struct \"[dict get $name value]\" (a struct has at most one identity)"
             }
             set identity [IdentityClause p [dict get $name value]]
+            continue
+        }
+        if {[dict get $fieldToken value] eq "sendable" && [Kind p 1] eq "IDENT"} {
+            # `sendable FORM...`: the owner's statement of how a value of
+            # it is reconstructed in another VM (SENDABILITY-AND-VALUE-
+            # COPY-MILESTONE-1.md). A field named `sendable` is still
+            # `sendable: Type`. Which forms exist and what they may name is
+            # hir/structs.tcl's.
+            if {$sendable ne ""} {
+                Fail $fieldToken "duplicate \"sendable\" clause in struct \"[dict get $name value]\" (a struct states its sendability at most once)"
+            }
+            set sendable [SendableClause p [dict get $name value]]
             continue
         }
         Advance p
@@ -5260,6 +5273,10 @@ proc surface::parser::StructDecl {pVar} {
         # Likewise present only for a struct that declares its identity.
         dict set node identity $identity
     }
+    if {$sendable ne ""} {
+        # And only for a struct whose owner states its sendability.
+        dict set node sendable $sendable
+    }
     if {[dict exists $modifiers tree]} {
         # And only for a tree struct (TREE-STRUCT-MILESTONE-1.md): which
         # field is its recursive one is hir/structs.tcl's to decide.
@@ -5304,6 +5321,52 @@ proc surface::parser::IdentityClause {pVar name} {
     Advance p
     return [dict create form [dict get $form value] formSpan [dict get $form span] \
         fields $fields fieldSpans $fieldSpans span $span]
+}
+
+# "sendable" FORM [ "(" NAME { "," NAME } ")" ] [ "as" typeExpr ] NEWLINE, a
+# clause of struct NAME's body (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md):
+# {form FORM formSpan SPAN args {NAME ...} argSpans {SPAN ...} span SPAN},
+# plus {representation TYPEEXPR representationSpan SPAN} when an `as` type
+# is written. The forms and what their names and type may be are
+# hir/structs.tcl's.
+proc surface::parser::SendableClause {pVar name} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set form [Expect p IDENT "a sendable form after \"sendable\" (fields, bytes, mutable_bytes or through)"]
+    set args {}
+    set argSpans {}
+    if {[Kind p] eq "("} {
+        Advance p
+        while 1 {
+            set arg [Expect p IDENT "a name in sendable [dict get $form value](...)"]
+            lappend args [dict get $arg value]
+            lappend argSpans [dict get $arg span]
+            if {[Kind p] eq ","} {
+                Advance p
+                continue
+            }
+            break
+        }
+        if {[Kind p] ne ")"} {
+            Fail [Peek p] "expected \",\" or \")\" in sendable [dict get $form value](...), found [Describe [Peek p]]"
+        }
+        Advance p
+    }
+    set clause [dict create form [dict get $form value] formSpan [dict get $form span] \
+        args $args argSpans $argSpans]
+    if {[Kind p] eq "IDENT" && [dict get [Peek p] value] eq "as"} {
+        Advance p
+        set typeStart [dict get [Peek p] span]
+        dict set clause representation [TypeExpr p "a representation type after \"as\""]
+        dict set clause representationSpan [SpanFrom p $typeStart]
+    }
+    dict set clause span [SpanFrom p $start]
+    set next [Peek p]
+    if {[dict get $next kind] ne "NEWLINE"} {
+        Fail $next "expected end of line after the sendable clause of struct \"$name\", found [Describe $next]"
+    }
+    Advance p
+    return $clause
 }
 
 # "[" typeSlot { "," typeSlot } [ "," ] "]" after the name of struct NAME

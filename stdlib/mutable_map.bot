@@ -66,11 +66,13 @@ import std::mutable_vector
 import std::mutable_set
 import std::immutable_map
 import std::table_hash
+import std::list
 import std::ordered_table
 
 opaque struct MutableMap[K satisfies Hashable, V]:
     table: std::ordered_table::Table[K]
     vals: MutableVector[V]
+    sendable through(transfer_out, transfer_in) as List[MutableMapEntry[K, V]]
 
 # One entry of a map, as a loop over it visits it.
 struct MutableMapEntry[K, V]:
@@ -171,6 +173,25 @@ fn freeze(m: MutableMap[K, V]) -> std::immutable_map::ImmutableMap[K, V]:
     hashes = std::ordered_table::live_hashes(m.table)
     index = hashes.frozen_index(std::ordered_table::slots(m.table))
     std::immutable_map::of_parts(std::ordered_table::live_keys(m.table), m.table.live_values(m.vals), hashes, index)
+
+# ---------------------------------------------------------------------------
+# Sendability (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): a map is its
+# entries, in its order; its table (stored hashes, index, dead entries) is
+# derived state the receiving VM builds again under its own table-hash key.
+# Internal to the standard library (core/transfer.tcl).
+
+# M's entries, in M's order.
+nomethod fn transfer_out(m: MutableMap[K, V]) -> List[MutableMapEntry[K, V]]:
+    loop e in m:
+        e
+
+# The map of ENTRIES, set in their order (a key given twice keeps its first
+# place and its last value).
+nomethod fn transfer_in(entries: List[MutableMapEntry[K, V]]) -> MutableMap[K, V]:
+    m = with_capacity[K, V](std::list::length(entries))
+    loop e in entries:
+        m.set(e.key, e.value)
+    m
 
 # ---------------------------------------------------------------------------
 # The loop protocol (hir/iteration.tcl): internal to the standard library.

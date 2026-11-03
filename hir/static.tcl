@@ -309,6 +309,7 @@ namespace eval hir::static {
         NOT-A-CONTEXT                            NotAContext
         NOT-A-STRUCT                             NotAStruct
         NOT-AN-ENUM                              NotAnEnum
+        NOT-SENDABLE                             NotSendable
         OPAQUE-CONSTRUCTION                      OpaqueConstruction
         OPAQUE-REPRESENTATION                    OpaqueRepresentation
         PRIVATE-ACCESS                           PrivateAccess
@@ -318,6 +319,7 @@ namespace eval hir::static {
         REORDER-NOT-PROVEN                       ReorderNotProven
         RESOURCE-DECLARATION                     ResourceDeclaration
         RETURN-OUTSIDE-CALLABLE                  ReturnOutsideCallable
+        SENDABLE-DECLARATION                     SendableDeclaration
         TRAIT-IMPL-ORDER                         TraitImplOrder
         TRAIT-INSTANCE-BUDGET                    TraitInstanceBudget
         TRAIT-NESTED-POLYMORPHIC                 TraitNestedPolymorphic
@@ -328,6 +330,7 @@ namespace eval hir::static {
         TRAIT-UNKNOWN-OPERATION                  TraitUnknownOperation
         TRAIT-VIEW-MISUSE                        TraitViewMisuse
         TRAIT-WITNESS-JOIN                       TraitWitnessJoin
+        TRANSFER-OPEN-TYPE                       TransferOpenType
         TYPE                                     Type
         UNBOUND                                  Unbound
         UNDECLARED-ERROR                         UndeclaredError

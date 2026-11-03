@@ -327,6 +327,11 @@ proc surface::lower::StructDeclOf {node namespace} {
         # Its semantic identity, as written: hir/structs.tcl validates it.
         dict set decl identity [dict get $node identity]
     }
+    if {[dict exists $node sendable]} {
+        # Its owner's sendability statement, as written (SENDABILITY-AND-
+        # VALUE-COPY-MILESTONE-1.md): hir/structs.tcl validates it.
+        dict set decl sendable [dict get $node sendable]
+    }
     if {[dict exists $node tree]} {
         # A tree struct (TREE-STRUCT-MILESTONE-1.md): hir/structs.tcl finds
         # and checks its one recursive field.

@@ -1,0 +1,511 @@
+# sendability.test -- the static half of SENDABILITY-AND-VALUE-COPY-
+# MILESTONE-1.md: the intrinsic trait Sendable (hir::types::SendClass), the
+# owner's `sendable` clause of an opaque struct (hir/structs.tcl,
+# hir::transfer::verifyDeclarations), the admission of std::transfer's
+# operations (hir::range::VerifySending: NOT-SENDABLE, TRANSFER-OPEN-TYPE)
+# and the transfer schema (hir/transfer.tcl). The dynamic half -- round trips,
+# refusals, independent VMs -- is tests/value-transfer.test.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+proc sdWriteModules {files} {
+    foreach {path text} $files {
+        set full [file join $::core::libraryDir $path]
+        file mkdir [file dirname $full]
+        set f [open $full w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $text
+        close $f
+    }
+}
+
+# {KIND MESSAGE} of the first diagnostic of SOURCE's rejection (MESSAGE
+# without its location), or "accepted"; FILES are library modules.
+proc sdRejection {source {files {}}} {
+    withPrivateLibrary {
+        sdWriteModules $files
+        if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+            if {[dict exists $options -diagnostics]} {
+                set first [lindex [dict get $options -diagnostics] 0]
+                set message [dict get $first message]
+                set code [dict get $first errorcode]
+            } else {
+                set code [dict get $options -errorcode]
+            }
+            set result [list [lindex $code end] [regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {}]]
+        } else {
+            set result accepted
+        }
+    }
+    return $result
+}
+
+# The kinds of every diagnostic of SOURCE's rejection, in order, or "accepted".
+proc sdKinds {source {files {}}} {
+    withPrivateLibrary {
+        sdWriteModules $files
+        if {[catch {surface::compile $source t.bot -warnings off} message options]} {
+            if {[dict exists $options -diagnostics]} {
+                set result [lmap d [dict get $options -diagnostics] {lindex [dict get $d errorcode] end}]
+            } else {
+                set result [list [lindex [dict get $options -errorcode] end]]
+            }
+        } else {
+            set result accepted
+        }
+    }
+    return $result
+}
+
+# A program whose function `f` encodes a value of static TYPE, with the
+# declarations DECLS and the imports IMPORTS.
+proc sdEncode {type {decls ""} {imports ""}} {
+    set text "import std::transfer\nimport std::abi::bytes\n"
+    foreach i $imports {
+        append text "import $i\n"
+    }
+    append text "\n$decls\n\nfn f(x: $type) -> std::abi::bytes::Bytes:\n    std::transfer::encode(x)\n\n1\n"
+    return $text
+}
+
+# Declarations the matrix uses.
+set ::sdDecls {
+enum Color:
+    Red, Green, Blue
+
+struct Point:
+    x: int
+    y: int
+    label: str
+
+tree struct Node:
+    name: str
+    color: Color
+    kids: List[Node]
+
+struct Box[T]:
+    value: T
+
+struct Envelope[T satisfies Sendable]:
+    body: T
+
+opaque struct Money:
+    cents: int
+    sendable fields
+
+opaque struct Token:
+    id: int
+
+context struct Settings:
+    level: int
+
+struct Job:
+    id: int
+    run: Fn{args: [int], return: int}
+
+struct Batch:
+    jobs: List[Job]
+
+tree struct Plan:
+    step: Fn{args: [], return: int}
+    next: List[Plan]
+
+refined type Mail = str
+
+fn mail?(s: str) -> bool proves s: Mail:
+    s != ""
+}
+
+# ---------------------------------------------------------------------------
+# The matrix (THREAD-ACTOR-ARCHITECTURE-CENSUS.md 5.2, the milestone's
+# section 4): every row's verdict, through the one admission every transfer
+# has.
+
+set ::sdSendable {
+    unit bool int UnicodeChar Float64 str
+    {DecimalRounded{minDecimalsPreserved: 2}}
+    std::ffi::c::RawFloat std::ffi::c::RawDouble std::ffi::c::Int std::byte::Byte
+    List[int] List[List[str]] {List[int]{length: 3}}
+    ImmutableSet[str] MutableVector[int] MutableArray[str] {MutableVector[List[Point]]}
+    Point Node Color Box[int] {Box[List[Box[str]]]} Envelope[str] Money
+    std::abi::bytes::Bytes std::abi::bytes::MutableBytes
+    {std::mutable_map::MutableMap[str, int]} std::mutable_set::MutableSet[int]
+    {std::immutable_map::ImmutableMap[str, List[int]]}
+    {std::mutable_map::MutableMap[int, std::mutable_set::MutableSet[str]]}
+    {List[std::abi::bytes::Bytes]}
+}
+set ::sdImports {std::ffi::c std::byte std::mutable_map std::mutable_set std::immutable_map std::mutable_vector}
+
+# {TYPE REASON}: not sendable, with the reason path's telling words.
+set ::sdNotSendable {
+    {{Fn{args: [int], return: int}} {a function or closure is code of this program}}
+    {Job {field "run" of Job (Fn{args: [int], return: int, errors: []}): a function or closure}}
+    {Batch {field "jobs" of Batch (List[Job]): its elements (Job): field "run" of Job}}
+    {Plan {field "step" of Plan}}
+    {{std::ffi::c::Ptr[std::ffi::c::Int]} {a C pointer, function pointer or native view or edit}}
+    {Settings {Settings is a context struct}}
+    {Token {Token is an opaque struct whose owner, the entry program, does not declare it sendable}}
+    {std::event_loop::Reg {std::event_loop::Reg is an opaque struct whose owner, module std::event_loop, does not declare it sendable}}
+    {std::actor::Address[int] {std::actor::Address[int] is an opaque struct whose owner, module std::actor, does not declare it sendable}}
+    {std::actor::Receiver[int] {is an opaque struct whose owner, module std::actor}}
+    {{Box[Fn{args: [], return: int}]} {field "value" of Box[Fn{args: [], return: int, errors: []}]}}
+    {{std::mutable_map::MutableMap[str, Fn{args: [], return: int}]} {the representation of std::mutable_map::MutableMap}}
+    {{List[Coroutine{args: [], return: int}]} {a coroutine handle owns a suspended computation}}
+    {Mail {Mail is a refinement}}
+}
+
+# One program for the whole matrix: a function per row, so one compilation
+# reports every row's verdict (diagnostic recovery reports each
+# independent diagnostic at its own call).
+proc sdMatrix {} {
+    if {[info exists ::sdMatrixResult]} {
+        return $::sdMatrixResult
+    }
+    set text "import std::transfer\nimport std::abi::bytes\n"
+    foreach i [concat $::sdImports std::event_loop std::actor] {
+        append text "import $i\n"
+    }
+    append text "\n$::sdDecls\n"
+    set lines [dict create]
+    set n 0
+    foreach type $::sdSendable {
+        append text "\nfn yes[incr n](x: $type) -> std::abi::bytes::Bytes:\n"
+        dict set lines yes$n [llength [split $text \n]]
+        append text "    std::transfer::encode(x)\n"
+    }
+    set n 0
+    foreach row $::sdNotSendable {
+        append text "\nfn no[incr n](x: [lindex $row 0]) -> std::abi::bytes::Bytes:\n"
+        dict set lines no$n [llength [split $text \n]]
+        append text "    std::transfer::encode(x)\n"
+    }
+    append text "\n1\n"
+    set found [dict create]
+    withPrivateLibrary {
+        if {[catch {surface::compile $text t.bot -warnings off} message options] && [dict exists $options -diagnostics]} {
+            foreach d [dict get $options -diagnostics] {
+                if {[regexp {^[^ ]*:([0-9]+):[0-9]+: (.*)$} [dict get $d message] -> line rest]} {
+                    dict lappend found $line [list [lindex [dict get $d errorcode] end] $rest]
+                }
+            }
+        }
+    }
+    set result [dict create]
+    dict for {key line} $lines {
+        dict set result $key [dict getdef $found $line {}]
+    }
+    set ::sdMatrixResult $result
+    return $result
+}
+
+set n 0
+foreach type $::sdSendable {
+    test sd-matrix-sendable-[incr n] "a value of $type is sendable: its encode is accepted" -body {
+        dict get [sdMatrix] yes$n
+    } -result {}
+}
+
+set n 0
+foreach row $::sdNotSendable {
+    lassign $row type reason
+    test sd-matrix-not-sendable-[incr n] "a value of $type is not sendable, with the reason path" -body {
+        set got [dict get [sdMatrix] no$n]
+        lassign [lindex $got 0] kind message
+        list [llength $got] $kind [expr {[string first $reason $message] >= 0 ? "reason" : $message}]
+    } -result {1 NOT-SENDABLE reason}
+}
+
+test sd-any-not-sendable {an untyped parameter is `any`: its type does not say what its values are, so it is not sendable (never a run-time check instead)} -body {
+    lassign [sdRejection {import std::transfer
+import std::abi::bytes
+
+fn f(x) -> std::abi::bytes::Bytes:
+    std::transfer::encode(x)
+
+f(1)
+}] kind message
+    list $kind [string match "*its static type is any, which does not say what its values are*" $message]
+} -result {NOT-SENDABLE 1}
+
+test sd-decode-not-sendable {decode's imprinted type is held to Sendable like encode's argument} -body {
+    lassign [sdRejection {import std::transfer
+import std::abi::bytes
+
+opaque struct Token:
+    id: int
+
+fn g(data: std::abi::bytes::Bytes) -> Token errors TransferMalformed, TransferVersion, TransferTypeMismatch, TransferInvalidValue, TransferLimit:
+    std::transfer::decode[Token](data)
+
+1
+}] kind message
+    list $kind [string match "the value std::transfer::decode decodes is not sendable*Token is an opaque struct*" $message]
+} -result {NOT-SENDABLE 1}
+
+test sd-not-sendable-no-erasure-cascade {a function-bearing argument is NOT-SENDABLE alone: the erasure check reads a sent value at its own type (hir::callables::ArgContexts)} -body {
+    sdKinds [sdEncode Job $::sdDecls]
+} -result NOT-SENDABLE
+
+test sd-open-type {a transfer of an open type (an imprint variable, even one Sendable constrains) is TRANSFER-OPEN-TYPE: its schema is the static type's} -body {
+    lassign [sdRejection {import std::transfer
+import std::abi::bytes
+
+struct Envelope[T satisfies Sendable]:
+    body: T
+
+fn seal(e: Envelope[T]) -> std::abi::bytes::Bytes:
+    std::transfer::encode(e)
+
+seal(Envelope[int] {body: 1})
+}] kind message
+    list $kind [string match "*has the open type*a transfer's schema is its static type*" $message]
+} -result {TRANSFER-OPEN-TYPE 1}
+
+test sd-unconstrained-variable {an unconstrained imprint variable is not Sendable: NOT-SENDABLE, with the variable named} -body {
+    lassign [sdRejection {import std::transfer
+import std::abi::bytes
+
+struct Box[T]:
+    value: T
+
+fn seal(b: Box[T]) -> std::abi::bytes::Bytes:
+    std::transfer::encode(b)
+
+seal(Box[int] {value: 1})
+}] kind message
+    list $kind [string match "*the imprint variable T, which no constraint holds to Sendable*" $message]
+} -result {NOT-SENDABLE 1}
+
+# ---------------------------------------------------------------------------
+# The intrinsic trait
+
+test sd-trait-slot-satisfied {Sendable constrains a struct slot: an application with a sendable argument is accepted} -body {
+    sdRejection "$::sdDecls\nx = Envelope\[Box\[str\]\] {body: Box\[str\] {value: \"a\"}}\nx.body.value\n"
+} -result accepted
+
+test sd-trait-slot-refused {an application whose argument is not sendable is TRAIT-NOT-SATISFIED, with the witness's reason} -body {
+    lassign [sdRejection "$::sdDecls\nfn h(e: Envelope\[Job\]) -> int:\n    e.body.id\n1\n"] kind message
+    list $kind [string match "*Sendable*field \"run\" of Job*" $message]
+} -result {TRAIT-NOT-SATISFIED 1}
+
+test sd-trait-no-refinement {Sendable neither refines nor is refined by Hashable or Equatable: its guarantee is no equality} -body {
+    list [hir::traits::Refines Sendable Hashable] [hir::traits::Refines Hashable Sendable] \
+        [hir::traits::Refines Sendable Equatable] [hir::traits::Refines Equatable Sendable] \
+        [hir::traits::intrinsicGuarantees Sendable]
+} -result {0 0 0 0 send}
+
+test sd-sendable-reserved {Sendable is reserved like the other intrinsic traits: a struct of that name is refused} -body {
+    lindex [sdRejection "struct Sendable:\n    x: int\n1\n"] 0
+} -result TYPE
+
+test sd-sendclass-classes {SendClass's three classes: total, none (statically not), unknown (the type does not say)} -body {
+    list [lindex [hir::types::SendClass int] 0] [lindex [hir::types::SendClass {list str}] 0] \
+        [lindex [hir::types::SendClass {fn {args {} return int errors {}}}] 0] \
+        [lindex [hir::types::SendClass any] 0] [lindex [hir::types::SendClass {list any}] 0] \
+        [lindex [hir::types::SendClass {imprint T}] 0] [lindex [hir::types::SendClass {imprint T {Sendable}}] 0] \
+        [lindex [hir::types::SendClass {imprint T} T] 0]
+} -result {total total none unknown unknown unknown total total}
+
+# ---------------------------------------------------------------------------
+# The owner's statement
+
+test sd-owner-generic-fields {an owner's `sendable fields` over a slot makes each application sendable exactly when its argument is: one declaration never makes every instantiation sendable} -body {
+    set decls "opaque struct Wrap\[T\]:\n    inner: List\[T\]\n    sendable fields\n\nfn job(n: int) -> int:\n    n\n\n$::sdDecls"
+    list [sdRejection [sdEncode Wrap\[str\] $decls]] [lindex [sdRejection [sdEncode Wrap\[Job\] $decls]] 0]
+} -result {accepted NOT-SENDABLE}
+
+test sd-owner-through-user {a user module's `sendable through(TO, FROM) as R`: accepted when TO and FROM are total, context-free functions of exactly the struct and R} -body {
+    sdRejection [sdEncode Name {
+opaque struct Name:
+    text: str
+    size: int
+    sendable through(name_text, name_of) as str
+
+fn name_text(n: Name) -> str:
+    n.text
+
+fn name_of(t: str) -> Name:
+    Name {text: t, size: std::str::length(t)}
+} std::str]
+} -result accepted
+
+foreach {name decl kind fragment} {
+    transparent {struct P:
+    x: int
+    sendable fields} SENDABLE-DECLARATION {is not opaque}
+    context {opaque context struct C:
+    x: int
+    sendable fields} SENDABLE-DECLARATION {context struct "C" cannot be sendable}
+    unknown-form {opaque struct P:
+    x: int
+    sendable everything} SENDABLE-DECLARATION {unknown sendable form "everything"}
+    arity {opaque struct P:
+    x: int
+    sendable fields(x)} SENDABLE-DECLARATION {sendable fields takes no names}
+    any-field {opaque struct P:
+    raw: any
+    sendable fields} SENDABLE-DECLARATION {field "raw" (any) is not sendable}
+    fn-field {opaque struct P:
+    run: Fn{args: [], return: int}
+    sendable fields} SENDABLE-DECLARATION {field "run" (Fn{args: [], return: int, errors: []}) is not sendable}
+    bytes-outside-std {opaque struct P:
+    raw: any
+    sendable bytes(raw)} SENDABLE-DECLARATION {is the standard library's byte storage}
+    through-no-type {opaque struct P:
+    x: int
+    sendable through(a, b)} SENDABLE-DECLARATION {needs its representation type}
+    through-not-sendable {opaque struct P:
+    x: int
+    sendable through(a, b) as Fn{args: [], return: int}} SENDABLE-DECLARATION {which is not sendable}
+    fields-with-type {opaque struct P:
+    x: int
+    sendable fields as int} SENDABLE-DECLARATION {takes no representation type}
+} {
+    test sd-clause-$name "a sendable clause that does not hold is SENDABLE-DECLARATION ($name)" -body {
+        lassign [sdRejection "$decl\n\n1\n"] got message
+        list $got [expr {[string first $fragment $message] >= 0 ? "fragment" : $message}]
+    } -result [list $kind fragment]
+}
+
+foreach {name functions fragment} {
+    missing {} {"to_text", which is no top-level function of the entry program}
+    param {fn to_text(n: int) -> str:
+    "x"
+
+fn of_text(t: str) -> P:
+    P {x: 1}} {whose parameter must be declared P}
+    result {fn to_text(p: P) -> int:
+    p.x
+
+fn of_text(t: str) -> P:
+    P {x: 1}} {whose result must be declared str}
+    errors {error Nope
+
+fn to_text(p: P) -> str errors Nope:
+    fail Nope
+
+fn of_text(t: str) -> P:
+    P {x: 1}} {which declares errors}
+    context {context struct Cfg:
+    n: int
+
+fn to_text(p: P, context c: Cfg) -> str:
+    "x"
+
+fn of_text(t: str) -> P:
+    P {x: 1}} {which requires a context}
+} {
+    test sd-through-$name "the functions of `sendable through` are checked once the program is built ($name)" -body {
+        lassign [sdRejection "opaque struct P:\n    x: int\n    sendable through(to_text, of_text) as str\n\n$functions\n\n1\n"] got message
+        list $got [expr {[string first $fragment $message] >= 0 ? "fragment" : $message}]
+    } -result {SENDABLE-DECLARATION fragment}
+}
+
+test sd-stdlib-statements {the standard library states sendability for its byte storage and collections, and for nothing VM-relative} -body {
+    withPrivateLibrary {
+        set hir [surface::compile {import std::abi::bytes
+import std::mutable_map
+import std::mutable_set
+import std::immutable_map
+import std::event_loop
+import std::actor
+1
+} t.bot -warnings off]
+        hir::activate $hir
+        lmap id {std::abi::bytes::Bytes std::abi::bytes::MutableBytes std::mutable_map::MutableMap
+                 std::mutable_set::MutableSet std::immutable_map::ImmutableMap std::ordered_table::Table
+                 std::event_loop::Reg std::event_loop::Loop std::actor::Address std::actor::Inbox std::actor::Receiver} {
+            set clause [hir::structs::sendableOf $id]
+            expr {$clause eq "" ? "-" : [dict get $clause form]}
+        }
+    }
+} -result {bytes mutable_bytes through through through - - - - - -}
+
+# ---------------------------------------------------------------------------
+# The schema
+
+# The schema (hir::transfer::Schema) of TYPE in a program with DECLS.
+proc sdSchemaOf {decls type {imports {}}} {
+    withPrivateLibrary {
+        set text ""
+        foreach i $imports {
+            append text "import $i\n"
+        }
+        append text "$decls\nfn f(x: $type) -> int:\n    1\n1\n"
+        set hir [surface::compile $text t.bot -warnings off]
+        hir::activate $hir
+        set p [dict get $hir exprs [lindex [dict get $hir roots] end-1]]
+        set block [dict get $hir exprs [dict get $p value]]
+        set schema [hir::transfer::Schema [lindex [dict get $block declaredParamTypes] 0]]
+    }
+    return $schema
+}
+
+
+test sd-schema-canonical {a schema names declarations canonically: fields and cases sorted, so the text does not depend on the order a declaration writes them} -body {
+    set a [sdSchemaOf "struct P:\n    b: str\n    a: int\n\nenum E:\n    Z, A\n" {List[P]}]
+    set b [sdSchemaOf "enum E:\n    A, Z\n\nstruct P:\n    a: int\n    b: str\n" {List[P]}]
+    list [expr {[dict get $a fingerprint] eq [dict get $b fingerprint]}] [dict get $a text]
+} -result {1 {botlish-transfer 1
+0 list 1
+1 struct P {a 2 b 3}
+2 int
+3 str}}
+
+test sd-schema-distinguishes {another type, another field type or another application is another schema; an integer domain and a stated List length are not (the receiver checks them)} -body {
+    set decls "struct P:\n    a: int\n\nstruct Q:\n    a: int\n\nstruct Box\[T\]:\n    value: T\n"
+    set fps [lmap t {P Q {Box[int]} {Box[str]} int std::byte::Byte List[int] {List[int]{length: 2}}} {dict get [sdSchemaOf $decls $t std::byte] fingerprint}]
+    list [llength [lsort -unique $fps]] [expr {[lindex $fps 4] eq [lindex $fps 5]}] [expr {[lindex $fps 6] eq [lindex $fps 7]}]
+} -result {6 1 1}
+
+test sd-schema-recursive {a tree's schema is a finite graph: the child List refers back to its struct} -body {
+    dict get [sdSchemaOf "tree struct Node:\n    name: str\n    kids: List\[Node\]\n" Node] nodes
+} -result {{struct Node {name kids} {{kids 1 1} {name 0 2}}} {list 0 {}} str}
+
+test sd-schema-through {a `through` struct's schema node holds its representation and the index of its owner's two functions} -body {
+    set s [sdSchemaOf "" {std::mutable_set::MutableSet[str]} std::mutable_set]
+    list [lindex [dict get $s nodes] 0] [dict get $s fns]
+} -result {{through std::mutable_set::MutableSet 1 0} {std::mutable_set::transfer_out std::mutable_set::transfer_in}}
+
+# ---------------------------------------------------------------------------
+# HIR text
+
+test sd-hir-text-roundtrip {a sendable clause is part of its struct's declaration in HIR text and reads back unchanged} -body {
+    withPrivateLibrary {
+        set hir [surface::compile "opaque struct Name:\n    text: str\n    size: int\n    sendable through(name_text, name_of) as List\[str\]\n\nopaque struct Money:\n    cents: int\n    sendable fields\n\nfn name_text(n: Name) -> List\[str\]:\n    \[n.text\]\n\nfn name_of(t: List\[str\]) -> Name:\n    Name {text: \"\", size: 0}\n\n1\n" t.bot -warnings off]
+        set text [hir::format $hir]
+        set lines [lsearch -all -inline -regexp [split $text \n] {^struct (Name|Money) }]
+        hir::read::Program $text
+        list $lines [hir::structs::sendableOf Name] [hir::structs::sendableOf Money]
+    }
+} -result {{{struct Name name Name ns - opaque sendable through(name_text,name_of) as List[str] fields text: str, size: int} {struct Money name Money ns - opaque sendable fields() fields cents: int}} {form through args {name_text name_of} representation {list str}} {form fields args {} representation {}}}
+
+test sd-elaborated {after the checks every transfer is its run-time operation, carrying its schema constant and its owner functions} -body {
+    withPrivateLibrary {
+        set hir [surface::compile {import std::transfer
+import std::abi::bytes
+import std::mutable_set
+
+s = std::mutable_set::create[str]()
+std::transfer::encode(s)
+} t.bot -warnings off]
+        set found {}
+        dict for {e node} [dict get $hir exprs] {
+            if {[dict get $node kind] eq "call"} {
+                set name [hir::decimal::CalledNative $hir $e]
+                if {$name in {std::transfer::encode std::transfer::decode transfer#encode transfer#decode}} {
+                    set args [dict get $node args]
+                    lappend found $name [core::value::kind [dict get $hir exprs [lindex $args 1] value]] \
+                        [llength [dict get $hir exprs [lindex $args 2] args]]
+                }
+            }
+        }
+        set found
+    }
+} -result {transfer#encode str 2}
+
+cleanupTests

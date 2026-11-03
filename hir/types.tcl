@@ -2628,6 +2628,247 @@ proc hir::types::IsHashable {type} {
     return [expr {[lindex [HashClass $type] 0] eq "total"}]
 }
 
+# ---------------------------------------------------------------------------
+# Sendability: the intrinsic trait Sendable
+# (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md)
+
+# {CLASS WHY}: TYPE against the intrinsic trait Sendable -- whether every
+# value of TYPE can be reconstructed, with the same meaning, in another
+# Botlish VM that shares nothing with this one: no heap object, no runtime
+# resource, no execution environment, no authority. The classes are
+# Totality's:
+#
+#   total    every value is sendable: the transfer copies it exactly (a
+#            scalar, a String, a byte storage) or rebuilds it from parts
+#            that are (a List, a struct, an enum case, a collection, an
+#            opaque struct whose owner states how: its `sendable` clause)
+#   none     TYPE names a component no value of which is: a function or
+#            closure, a coroutine handle, a C pointer or native view or
+#            edit (affine or VM-relative), a context struct (authority), an
+#            opaque struct whose owner states nothing (its fields' meaning
+#            is the owner's: a slot and a generation of one VM's table are
+#            two Ints), a refinement (its proof is this program's evidence)
+#   unknown  the static type does not say: `any`, an unconstrained imprint
+#            variable, a view of another trait, a bare collection kind
+#
+# WHY is "" for total, else the reason in source terms with the path to the
+# offending component ("field \"job\" of Batch (Job): field \"run\" of Job
+# (Fn{...}): a function ..."), Components' format. ASSUMED lists imprint
+# variables taken as sendable (a declaration's own slots, checked once for
+# every application: hir::structs::ValidateSendable). SEEN holds the named
+# struct types being walked: one met again through its own fields (a tree's
+# children) adds nothing, so a finite recursive type is sendable exactly
+# when its other components are.
+proc hir::types::SendClass {type {assumed {}} {seen {}}} {
+    if {$type eq "never"} {
+        return {total ""}
+    }
+    if {[IsTrait $type]} {
+        if {"send" in [hir::traits::intrinsicGuarantees [lindex $type 1]]} {
+            return {total ""}
+        }
+        return [list unknown "it is seen only through trait [lindex $type 1], whose values need not be sendable"]
+    }
+    if {[IsFn $type] || [IsExactBlock $type] || [IsExactNative $type]} {
+        return [list none [NoSending block]]
+    }
+    if {[IsImprint $type]} {
+        if {[lindex $type 1] in $assumed} {
+            return {total ""}
+        }
+        foreach trait [ImprintConstraints $type] {
+            if {"send" in [hir::traits::intrinsicGuarantees $trait]} {
+                return {total ""}
+            }
+        }
+        return [list unknown "its type is the imprint variable [hir::imprint::Shown [lindex $type 1]], which no constraint holds to Sendable"]
+    }
+    if {[IsCoroutine $type]} {
+        return [list none [NoSending coroutine]]
+    }
+    if {[IsCPtr $type] || [IsCFnPtr $type] || [IsNativeMemory $type] || $type eq "cptr"} {
+        return [list none [NoSending cptr]]
+    }
+    if {[hir::cabi::IsFiniteFloating $type]} {
+        return [SendClass [hir::cabi::Carrier $type] $assumed $seen]
+    }
+    if {[hir::refinements::IsRefined $type]} {
+        if {[hir::refinements::IsApplied [hir::refinements::Family $type]]} {
+            # A List length refinement: knowledge about a List, which the
+            # receiver checks again (the length is part of the schema).
+            return [SendClass [hir::refinements::Base $type] $assumed $seen]
+        }
+        # DecimalRounded: its guarantee is a property of the binary64 it
+        # holds, which the copy keeps bit for bit.
+        return {total ""}
+    }
+    if {[IsList $type]} {
+        # (A positional shape is knowledge about one value: a List is sent
+        # as a List of its element type.)
+        return [SendComponents [list [list "its elements" [lindex $type 1]]] $assumed $seen]
+    }
+    if {[IsSet $type]} {
+        return [SendComponents [list [list "its members" [lindex $type 1]]] $assumed $seen]
+    }
+    if {[IsMutVec $type] || [IsMutArray $type]} {
+        # A mutable collection is a value (MUTABLE-VECTOR.md): its copy is a
+        # new value in the receiver, its backing never crosses.
+        return [SendComponents [list [list "its elements" [lindex $type 1]]] $assumed $seen]
+    }
+    if {[IsStruct $type]} {
+        set parts {}
+        foreach {name t} [lindex $type 1] {
+            lappend parts [list "field \"$name\"" $t]
+        }
+        return [SendComponents $parts $assumed $seen]
+    }
+    if {[IsNamedStruct $type]} {
+        return [SendStruct $type $assumed $seen]
+    }
+    if {[IsEnum $type]} {
+        # A case is its enum's identity and its case name: the receiver
+        # finds both by name (ENUMS.md: no case has a position).
+        return {total ""}
+    }
+    if {$type in {any struct list immutableSet mutarray mutvec result} || [catch {core::type::normalize $type} normal]} {
+        return [list unknown "its static type is [show $type], which does not say what its values are"]
+    }
+    foreach name [core::type::evidenceClosure $normal] {
+        if {[core::type::isRefinement $name]} {
+            return [list none "$name is a refinement: membership in it is a proof of this program (its predicates and validators), which a copy cannot carry and the receiver does not run again"]
+        }
+    }
+    switch -- [core::type::base $normal] {
+        int - str - bool - unit - UnicodeChar - Float64 - DecimalRounded - rawfloat32 - rawfloat64 {
+            # (An integer domain's range is part of the schema: the receiver
+            # checks every value against it.)
+            return {total ""}
+        }
+        block - native {
+            return [list none [NoSending block]]
+        }
+        coroutine {
+            return [list none [NoSending coroutine]]
+        }
+        cptr {
+            return [list none [NoSending cptr]]
+        }
+    }
+    return [list unknown "its static type is [show $type], which does not say what its values are"]
+}
+
+# SendClass of the named struct (or application) TYPE.
+proc hir::types::SendStruct {type assumed seen} {
+    set id [lindex $type 1]
+    if {$type in $seen} {
+        return {total ""}
+    }
+    if {![hir::structs::declared $id]} {
+        return [list unknown "$id is not a declared struct"]
+    }
+    set shown [show $type]
+    if {[hir::structs::isContext $id]} {
+        return [list none "$shown is a context struct: an installed context is authority, selected by each program's own installation, never a value one VM can hand another"]
+    }
+    set seen [concat $seen [list $type]]
+    if {[hir::structs::isOpaque $id]} {
+        set clause [hir::structs::sendableOf $id]
+        if {$clause eq ""} {
+            return [list none "$shown is an opaque struct whose owner, [hir::structs::ownerOf $id], does not declare it sendable: its fields are its owner's representation, whose meaning (a value, or an identity of one VM: a slot, a handle) only the owner knows"]
+        }
+        switch -- [dict get $clause form] {
+            bytes - mutable_bytes {
+                # Byte storage: the bytes are the value.
+                return {total ""}
+            }
+            through {
+                set r [hir::structs::AppliedRepresentation $type]
+                return [SendComponents [list [list "the representation of $shown" $r]] $assumed $seen]
+            }
+        }
+        # `fields`: the owner states that a field-wise copy is the value.
+    }
+    set parts {}
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
+    }
+    return [SendComponents $parts $assumed $seen]
+}
+
+# SendClass of a value made of the PARTS {WHAT TYPE}: none if one part is
+# (the first such, named), else unknown if one part is, else total.
+proc hir::types::SendComponents {parts assumed seen} {
+    set unknown ""
+    foreach part $parts {
+        lassign $part what t
+        lassign [SendClass $t $assumed $seen] class why
+        if {$class eq "none"} {
+            return [list none "$what ([show $t]): $why"]
+        }
+        if {$class eq "unknown" && $unknown eq ""} {
+            set unknown "$what ([show $t]): $why"
+        }
+    }
+    if {$unknown ne ""} {
+        return [list unknown $unknown]
+    }
+    return {total ""}
+}
+
+# Why a value of runtime KIND is not sendable, in source terms.
+proc hir::types::NoSending {kind} {
+    switch -- $kind {
+        block {
+            return "a function or closure is code of this program and the environment it captured: neither is a value another VM can rebuild"
+        }
+        coroutine {
+            return "a coroutine handle owns a suspended computation (its frames are this VM's): it cannot be copied, and moving it is not sending a value"
+        }
+        cptr {
+            return "a C pointer, function pointer or native view or edit addresses native memory whose validity and thread affinity only its owner knows: it is not a value to copy"
+        }
+    }
+    return "a value of kind $kind is not sendable"
+}
+
+# 1 if every value of static TYPE is sendable: the witness predicate of the
+# intrinsic trait Sendable.
+proc hir::types::IsSendable {type} {
+    return [expr {[lindex [SendClass $type] 0] eq "total"}]
+}
+
+# 1 if static TYPE is closed: it mentions no imprint variable and no trait
+# view, so its transfer schema is known where it is written
+# (hir/transfer.tcl). SEEN as SendClass's.
+proc hir::types::IsClosedType {type {seen {}}} {
+    if {[IsImprint $type] || [IsTrait $type]} {
+        return 0
+    }
+    if {[IsNamedStruct $type]} {
+        if {$type in $seen} {
+            return 1
+        }
+        foreach arg [StructArgs $type] {
+            if {![IsClosedType $arg $seen]} {
+                return 0
+            }
+        }
+        return 1
+    }
+    if {[hir::refinements::IsRefined $type] && [hir::refinements::IsApplied [hir::refinements::Family $type]]} {
+        return [IsClosedType [hir::refinements::Base $type] $seen]
+    }
+    if {[IsList $type] || [IsSet $type] || [IsMutVec $type] || [IsMutArray $type]} {
+        return [IsClosedType [lindex $type 1] $seen]
+    }
+    if {[IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            if {![IsClosedType $t $seen]} { return 0 }
+        }
+    }
+    return 1
+}
+
 # {KIND WANTED} when an argument of static type TYPE at position INDEX of a
 # call of native NAME is of a statically known kind KIND other than the kind
 # WANTED the native's parameter requires (core/native.tcl's -param-types),

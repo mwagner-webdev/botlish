@@ -1037,6 +1037,15 @@ proc hir::structs::apply {decls} {
             dict set registry $id identity $identity
             dict set entry identity $identity
         }
+        if {[dict exists $decl sendable]} {
+            # Present only for a struct whose owner states its sendability
+            # (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): {form FORM args
+            # {NAME ...} representation R} (the span stays in the registry
+            # for the checks that run once the program is built).
+            set sendable [ValidateSendable $decl $id $types $imprints]
+            dict set registry $id sendable $sendable
+            dict set entry sendable [dict remove $sendable span]
+        }
         lappend entries $entry
     }
     # Tree structs (TREE-STRUCT-MILESTONE-1.md), once every field type of
@@ -1054,6 +1063,9 @@ proc hir::structs::apply {decls} {
     }
     # (Affinity read while field types were still being resolved is stale.)
     ForgetAffinity
+    # The parts of every sendable clause, now that every field type of the
+    # batch is known (a part may reach any declaration of it).
+    ValidateSendableParts $decls
     foreach decl $decls {
         set id [identity [dict get $decl name] [dict get $decl namespace]]
         # (The declaration at its own slots, which are unrestricted here as
@@ -1132,6 +1144,9 @@ proc hir::structs::applyEntries {entries} {
         }
         if {[dict exists $entry tree]} {
             dict set registry [dict get $entry id] tree [dict get $entry tree]
+        }
+        if {[dict exists $entry sendable]} {
+            dict set registry [dict get $entry id] sendable [dict get $entry sendable]
         }
     }
     ForgetAffinity
@@ -1491,6 +1506,184 @@ proc hir::structs::ValidateIdentity {decl id types} {
         }
     }
     return [dict create form $form fields $fields]
+}
+
+# ---------------------------------------------------------------------------
+# Sendability (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md)
+#
+# A value is sendable when an equivalent value can be reconstructed in
+# another Botlish VM (hir::types::SendClass, the intrinsic trait Sendable).
+# The compiler derives it from a type's structure, except for an opaque
+# struct, whose fields are its owner's representation: two Ints may be a
+# value, or a slot and a generation of one VM's table (std::event_loop::Reg).
+# So an opaque struct is sendable only when its owning module states how, by
+# one clause of its declaration:
+#
+#   sendable fields                       a field-wise copy is the value:
+#                                         every field is copied as its
+#                                         declared type, and must be
+#                                         sendable for every application
+#   sendable bytes(F)                     its one field F holds immutable
+#   sendable mutable_bytes(F)             (mutable) byte storage, whose
+#                                         bytes are the value (std::abi::
+#                                         bytes::Bytes, MutableBytes)
+#   sendable through(TO, FROM) as R       the value is projected by TO, a
+#                                         function of the owner module
+#                                         taking the struct's application
+#                                         and returning R, which is copied,
+#                                         and rebuilt in the receiver by
+#                                         FROM (R -> the application): a
+#                                         collection whose index and stored
+#                                         hashes are derived state the
+#                                         receiver computes again
+#
+# The clause is a statement of the owner, never a proof: the compiler checks
+# that its parts are sendable (every field of `fields`, R of `through`) and
+# that TO and FROM are total, context-free functions of exactly those types,
+# and trusts the owner that what it names is the value's meaning -- the trust
+# opacity already places in the owner. Nothing outside the declaration can
+# make a type sendable, and a context or resource struct cannot say so.
+
+# The sendable forms: name -> the number of names each takes.
+namespace eval hir::structs {
+    variable sendableForms {fields 0 bytes 1 mutable_bytes 1 through 2}
+}
+
+# The sendable clause of struct ID, {form FORM args {NAME ...}
+# representation R}, or "" when its declaration states none.
+proc hir::structs::sendableOf {id} {
+    variable registry
+    if {![dict exists $registry $id sendable]} {
+        return ""
+    }
+    return [dict get $registry $id sendable]
+}
+
+# The unit that owns struct ID, as a diagnostic names it: "module NS" or
+# "the entry program".
+proc hir::structs::ownerOf {id} {
+    set ns [owner $id]
+    if {$ns eq ""} {
+        return "the entry program"
+    }
+    return "module $ns"
+}
+
+# The representation of `through` struct application TYPE: its clause's R
+# with every slot replaced by its argument.
+proc hir::structs::AppliedRepresentation {type} {
+    set r [dict get [sendableOf [lindex $type 1]] representation]
+    set binding [SlotBinding $type]
+    if {$binding eq ""} {
+        return $r
+    }
+    return [hir::types::canonical [hir::imprint::Substitute $r $binding]]
+}
+
+# The sendable clause of struct declaration DECL (apply's; ID its identity,
+# TYPES its resolved field types {FIELD TYPE ...}, IMPRINTS its slot names or
+# 0), checked as far as the declaration alone decides: {form FORM args
+# {NAME ...} representation R span SPAN} (R "" unless `through`). Only an
+# opaque struct may state one (a transparent struct's sendability is its
+# fields', derived), never a context struct (authority) or a resource (an
+# affine obligation); the form is one of sendableForms with its number of
+# names. The parts' sendability is checked once the batch is registered
+# (ValidateSendableParts); TO and FROM once the program is built
+# (hir::transfer::verifyDeclarations).
+proc hir::structs::ValidateSendable {decl id types imprints} {
+    variable sendableForms
+    variable registry
+    set name [dict get $decl name]
+    set clause [dict get $decl sendable]
+    set span [dict get $clause span]
+    if {!([dict exists $decl opaque] && [dict get $decl opaque])} {
+        Fail $span "struct \"$name\" states its sendability but is not opaque: a struct whose fields are its public meaning is sendable exactly when its fields are, which the compiler derives (only an opaque struct's owner states how its hidden representation is reconstructed)" SENDABLE-DECLARATION
+    }
+    if {[dict exists $decl context] && [dict get $decl context]} {
+        Fail $span "context struct \"$name\" cannot be sendable: an installed context is authority, selected by each program's own installation, never a value one VM hands another" SENDABLE-DECLARATION
+    }
+    if {[dict exists $decl resource] && [dict get $decl resource]} {
+        Fail $span "resource struct \"$name\" cannot be sendable: a resource is affine (one owner, whose scope runs its cleanup), and sending copies a value" SENDABLE-DECLARATION
+    }
+    set form [dict get $clause form]
+    if {![dict exists $sendableForms $form]} {
+        Fail [dict get $clause formSpan] "unknown sendable form \"$form\" in struct \"$name\": the forms are fields (a field-wise copy is the value), bytes(FIELD) and mutable_bytes(FIELD) (the byte storage of the struct's one field is the value) and through(TO, FROM) as R (the owner's functions project the value to R and rebuild it from R)" SENDABLE-DECLARATION
+    }
+    set args [dict get $clause args]
+    set want [dict get $sendableForms $form]
+    if {[llength $args] != $want} {
+        set what [expr {$want == 0 ? "no names" : ($want == 1 ? "one field" : "two functions, TO and FROM")}]
+        Fail $span "sendable $form takes $what, got [llength $args] in struct \"$name\"" SENDABLE-DECLARATION
+    }
+    set representation ""
+    if {$form eq "through"} {
+        if {![dict exists $clause representation]} {
+            Fail $span "sendable through(TO, FROM) of struct \"$name\" needs its representation type: \"sendable through(TO, FROM) as R\", R what TO returns and FROM takes" SENDABLE-DECLARATION
+        }
+        set typeExpr [dict get $clause representation]
+        if {[catch {hir::imprint::ConstrainVariables \
+                [hir::resolve::ResolveTypeExpr $typeExpr [dict get $decl namespace] $imprints] \
+                [dict get $registry $id constraints]} representation options]} {
+            Fail [dict get $clause representationSpan] \
+                [format {unknown or invalid representation type %s in the sendable clause of struct "%s": %s} \
+                    [hir::resolve::ShowTypeExpr $typeExpr] $name $representation] \
+                [hir::resolve::TypeErrorKind $options TYPE]
+        }
+    } elseif {[dict exists $clause representation]} {
+        Fail [dict get $clause representationSpan] "sendable $form of struct \"$name\" takes no representation type: only through(TO, FROM) names one" SENDABLE-DECLARATION
+    }
+    if {$form in {bytes mutable_bytes}} {
+        set field [lindex $args 0]
+        if {![dict exists $types $field]} {
+            Fail [lindex [dict get $clause argSpans] 0] "sendable $form of struct \"$name\" names \"$field\", which is not a field of it" SENDABLE-DECLARATION
+        }
+        if {[dict size $types] != 1} {
+            Fail $span "sendable $form of struct \"$name\" requires \"$field\" to be its only field: the byte storage is the whole value" SENDABLE-DECLARATION
+        }
+        set ns [dict get $decl namespace]
+        if {$ns ne "std" && ![string match std::* $ns]} {
+            # Only the standard library's byte types make byte storage:
+            # nothing else can promise what an `any` field holds.
+            Fail $span "sendable $form is the standard library's byte storage (std::abi::bytes): a field of struct \"$name\" holds no byte storage the compiler can vouch for (state \"sendable fields\" over fields of sendable types, or \"sendable through(TO, FROM) as R\")" SENDABLE-DECLARATION
+        }
+    }
+    return [dict create form $form args $args representation $representation span $span]
+}
+
+# The parts of every sendable clause of DECLS (apply's), checked once the
+# batch's field types are all registered: every field of a `fields` struct,
+# and the representation of a `through` one, sendable whatever the slots are
+# applied to (each slot taken as sendable: an application's own arguments
+# are judged where it is used, SendClass). A part that is not -- `any`, a
+# function, an opaque struct that states nothing -- would make the owner's
+# statement a marker on a representation the copy cannot rebuild.
+proc hir::structs::ValidateSendableParts {decls} {
+    variable registry
+    foreach decl $decls {
+        if {![dict exists $decl sendable]} continue
+        set id [identity [dict get $decl name] [dict get $decl namespace]]
+        set clause [dict get $registry $id sendable]
+        set name [dict get $decl name]
+        set slots [dict get $registry $id slots]
+        switch -- [dict get $clause form] {
+            fields {
+                foreach field [dict get $decl fields] {
+                    set t [dict get $registry $id types [dict get $field name]]
+                    lassign [hir::types::SendClass $t $slots [list [SelfType $id]]] class why
+                    if {$class ne "total"} {
+                        Fail [dict get $field typeSpan] "struct \"$name\" states \"sendable fields\", but field \"[dict get $field name]\" ([hir::types::show $t]) is not sendable: $why" SENDABLE-DECLARATION
+                    }
+                }
+            }
+            through {
+                set r [dict get $clause representation]
+                lassign [hir::types::SendClass $r $slots [list [SelfType $id]]] class why
+                if {$class ne "total"} {
+                    Fail [dict get $decl sendable representationSpan] "struct \"$name\" states \"sendable through\" with representation [hir::types::show $r], which is not sendable: $why" SENDABLE-DECLARATION
+                }
+            }
+        }
+    }
 }
 
 # The first mutable or affine component of TYPE, described ("" for none): a

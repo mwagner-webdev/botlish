@@ -94,11 +94,15 @@ import std::byte_store
 import std::mutable_byte_store
 import type std::byte::Byte
 
+# Both are sendable (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): a copy
+# in another VM is a byte storage of its own holding the same bytes.
 opaque struct Bytes:
     storage: any
+    sendable bytes(storage)
 
 opaque struct MutableBytes:
     storage: any
+    sendable mutable_bytes(storage)
 
 # ---------------------------------------------------------------------------
 # Bytes

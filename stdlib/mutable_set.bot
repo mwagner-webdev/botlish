@@ -52,11 +52,13 @@
 # The representation is std::ordered_table's alone (the elements are its
 # keys): a set stores no value per element.
 import std::table_hash
+import std::list
 import std::ordered_table
 import std::immutable_set
 
 opaque struct MutableSet[T satisfies Hashable]:
     table: std::ordered_table::Table[T]
+    sendable through(transfer_out, transfer_in) as List[T]
 
 # A candidate order that does not hold exactly the collection's elements.
 error OrderMismatch
@@ -143,6 +145,25 @@ nomethod fn table_of(s: MutableSet[T]) -> std::ordered_table::Table[T]:
 
 nomethod fn of_table(t: std::ordered_table::Table[T]) -> MutableSet[T]:
     MutableSet[T] {table: t}
+
+# ---------------------------------------------------------------------------
+# Sendability (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): a set is its
+# elements, in its order; its table is derived state the receiving VM
+# builds again under its own table-hash key. Internal to the standard
+# library (core/transfer.tcl).
+
+# S's elements, in S's order.
+nomethod fn transfer_out(s: MutableSet[T]) -> List[T]:
+    loop x in s:
+        x
+
+# The set of XS, added in their order (an element given twice keeps its
+# first place).
+nomethod fn transfer_in(xs: List[T]) -> MutableSet[T]:
+    s = with_capacity[T](std::list::length(xs))
+    loop x in xs:
+        s.add(x)
+    s
 
 # ---------------------------------------------------------------------------
 # The loop protocol (hir/iteration.tcl): internal to the standard library.

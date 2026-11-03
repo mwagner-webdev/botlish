@@ -2498,6 +2498,69 @@ update a mutant's text when you change the code it mutates, keeping it a
 mutant of the same rule). `bench/actor.tcl` is the performance report
 against the census's Probe F.
 
+## Sendability and the cross-VM value transfer (std::transfer)
+
+`Sendable` (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md) is the third
+intrinsic trait (hir/traits.tcl's intrinsics, beside Hashable and
+Equatable): a type is a witness when every value of it can be
+reconstructed, with the same meaning, in another Botlish VM that shares
+nothing with this one (`hir::types::SendClass`, with Totality's three
+classes and reason paths). `std::transfer::encode(v)` writes such a value
+into owned Bytes and `std::transfer::decode[T](data)` rebuilds a T in this
+VM; both are written out after the checks (`hir::transfer::Elaborate`) as
+`transfer#encode`/`transfer#decode` carrying the type's *schema*
+(hir/transfer.tcl), which the Tcl codec (core/transfer.tcl) and the native
+one (native/src/runtime/transfer.rs) read. Keep it so:
+
+* Sendability is derived from checked types, never declared by a caller:
+  no impl, registration or name makes a type Sendable. The one exception is
+  an opaque struct's owner statement, its declaration's `sendable` clause
+  (`fields`, `through(TO, FROM) as R`; the standard library's byte
+  storage's `bytes(F)`/`mutable_bytes(F)`), whose parts the compiler checks
+  (`hir::structs::ValidateSendable`, `ValidateSendableParts`,
+  `hir::transfer::verifyDeclarations`). Never let an opaque struct without
+  a clause be judged by its fields (a Reg's slot and generation are two
+  Ints), never accept `any` (a clause over an `any` field is
+  SENDABLE-DECLARATION), and never let one declaration make every
+  application of a generic type sendable: an application is judged with
+  its own arguments.
+* Not sendable, ever: functions, coroutine handles and every affine value,
+  C pointers and native views or edits, context structs (authority),
+  refinements (a proof of this program), VM-relative identities
+  (std::event_loop::Reg, std::actor's Address, Inbox and Receiver), `any`.
+  Affinity is not sendability; never add an affine move between VMs here.
+* The bytes hold no address, no shape or enum number and no Rc backing:
+  values by canonical names (the schema's fingerprint, fields and enum
+  cases sorted), every object rebuilt by the receiver's own constructors,
+  a map's or set's derived state recomputed under the receiver's
+  table-hash key (`through`). Never copy stored hashes, an index or a
+  header between VMs, and never key compatibility by a program-relative
+  number.
+* Decoding never trusts the bytes: bounded reads, checked arithmetic, every
+  value validated against the receiver's schema (domains, UTF-8, finite
+  Float64, enum indices, stated lengths), declared errors (TransferMalformed,
+  TransferVersion, TransferTypeMismatch, TransferInvalidValue,
+  TransferLimit) and never a panic or NATIVE BUG; both directions iterative.
+* The two codecs write the same bytes: change the format in both, with the
+  version and tests/value-transfer.test's fixed vectors.
+* A transfer's type is closed where it is written (TRANSFER-OPEN-TYPE): a
+  generic body's transfers need the plan of a later milestone, never a
+  run-time schema guessed from a value.
+* std::actor's same-VM messages stay ordinary values: never require
+  Sendable of them.
+
+If you change any of that (SendClass, the clause, `-sending`,
+hir/transfer.tcl, either codec, the owners' TO and FROM functions), run
+`tests/sendability.test`, `tests/value-transfer.test` (also under
+`BOTLISH_NATIVE_GC_STRESS=1`), `cargo test --release --manifest-path
+native/Cargo.toml --lib transfer`, `tools/compilerpedia.tcl check` and
+`audit/value-transfer/tools/mutate.tcl` (every mutant in its `mutants.txt`
+must still apply and be killed by a detector its `!!` line names: update a
+mutant's text when you change the code it mutates, keeping it a mutant of
+the same rule), plus the trait, Hashable and collection harnesses for a
+change to code they share. `bench/value-transfer.tcl` is the performance
+report.
+
 ## DecimalRounded and scalar refinements
 
 `DecimalRounded{minDecimalsPreserved: N}` (optionally `maxDecimalsPreserved:

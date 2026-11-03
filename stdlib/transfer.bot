@@ -1,0 +1,57 @@
+# transfer.bot -- the "std::transfer" namespace: copying a sendable value
+# from one Botlish VM to another (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md).
+#
+#   data = std::transfer::encode(value)          # std::abi::bytes::Bytes
+#   copy = std::transfer::decode[T](data)        # a T of this VM's own
+#
+# A value is *sendable* (the intrinsic trait Sendable) when an equivalent
+# value can be reconstructed in another VM without anything of the sending
+# VM: no heap object, no runtime resource (a coroutine, a C pointer, a
+# mailbox or event registration), no execution environment and no
+# authority (an installed context). The compiler derives it from the
+# value's static type: scalars, Strings, Lists, ImmutableSets,
+# MutableVectors and MutableArrays of sendable elements, structs (and trees)
+# of sendable fields, enum cases; an opaque struct only when its owning
+# module states how a copy is rebuilt (its `sendable` clause: the standard
+# library's byte storage and collections do). A call of either operation on
+# a value whose static type is not sendable is NOT-SENDABLE, with the path
+# to the component that is not.
+#
+# encode writes the value into owned bytes: no address, no number of this
+# compilation's making (a struct shape, an enum number), and no reference
+# into this VM; the value is unchanged. decode reads bytes made by a
+# program compiled with the same declarations of the value's type -- the
+# same program in another VM, or another program -- into a value allocated
+# entirely in this VM: Strings, byte storage and collections are made anew,
+# a map's or set's derived state (its index, its stored hashes) is computed
+# again by this VM, and nothing of the bytes or the sender is kept. A
+# mutable collection received is a new value: mutating it changes no other
+# copy, here or in the sender.
+#
+# decode never trusts the bytes. It refuses, with a declared error and
+# nothing changed:
+#
+#   TransferMalformed      bytes that are no transfer (no header, cut short,
+#                          a count larger than the bytes left, bytes after
+#                          the value)
+#   TransferVersion        a format version this runtime does not read
+#   TransferTypeMismatch   a value of another type (its schema's fingerprint
+#                          is not T's)
+#   TransferInvalidValue   a value outside its type: a Bool byte other than
+#                          0 or 1, text that is not UTF-8, a non-finite
+#                          Float64, an Int outside its integer domain, a
+#                          case index of no case, a List of another stated
+#                          length
+#   TransferLimit          a decode beyond the runtime's limits (an Int of
+#                          more than 2^20 bytes, more than 2^24 elements of
+#                          no size)
+#
+# The bytes are a transfer between running programs, not a storage format:
+# their version is the compiler's, and nothing promises a later compiler
+# reads them.
+#
+# Not here, deliberately: threads, actor messages across VMs (std::actor's
+# messages stay ordinary values of one VM), sharing a heap, moving an affine
+# value (a coroutine, a C pointer) to another VM, and any authority: a
+# decoded value is data, and the receiver's contexts are its own.
+import std::abi::bytes

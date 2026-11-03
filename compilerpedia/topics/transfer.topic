@@ -1,0 +1,240 @@
+# transfer.topic -- sendability and the cross-VM value transfer
+# (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): the concept and its
+# diagnostics, one topic per code.
+
+@topic concept.sendability
+title: Sendable values and std::transfer
+summary: A sendable value (the intrinsic trait Sendable) can be rebuilt in another VM: std::transfer::encode writes it into owned bytes, std::transfer::decode[T] rebuilds it in this VM.
+index: concepts
+alias: sendable; Sendable; send a value to another VM; copy a value between VMs; serialize for another thread; transfer; value copy; cross-VM message
+keywords: Sendable, sendable, std::transfer, encode, decode, transfer, copy, VM, heap, NOT-SENDABLE, TRANSFER-OPEN-TYPE, SENDABLE-DECLARATION, sendable clause, opaque, through, TransferMalformed, TransferTypeMismatch
+related: error.not-sendable error.transfer-open-type error.sendable-declaration concept.opaque-structs concept.affine concept.contexts
+docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md THREAD-ACTOR-ARCHITECTURE-CENSUS.md
+
+== WHAT IT IS
+A Botlish VM owns its heap, its runtime resources (coroutine stacks,
+event registrations, mailboxes) and its installed contexts. A value is
+*sendable* when another VM can reconstruct an equivalent value from its
+content alone. The compiler derives this from the value's static type;
+the intrinsic trait `Sendable` names it, like `Hashable`: a struct slot may
+require it (`struct Envelope[T satisfies Sendable]:`).
+
+`std::transfer::encode(value)` writes a sendable value into a
+`std::abi::bytes::Bytes` that holds no address and no number of this
+compilation's making; `std::transfer::decode[T](data)` reads such bytes
+into a value allocated in this VM. The bytes carry a fingerprint of T's
+schema: bytes of another type are refused (TransferTypeMismatch), and every
+value is checked against T as it is read.
+
+== RULES
+  * Sendable: unit, bool, Int (any size; an integer domain's range is
+    checked by the receiver), UnicodeChar, Float64, DecimalRounded, raw C
+    floating values, str; Lists, ImmutableSets, MutableVectors and
+    MutableArrays of sendable elements; structs, anonymous structs and tree
+    structs of sendable fields; enum cases; and an opaque struct whose
+    owning module states how it is rebuilt (its `sendable` clause:
+    std::abi::bytes::Bytes and MutableBytes, std::mutable_map::MutableMap,
+    std::mutable_set::MutableSet and std::immutable_map::ImmutableMap state
+    it).
+  * Not sendable: functions and closures, coroutine handles, C pointers and
+    native views or edits, context structs (authority), refinements (their
+    proof is this program's), an opaque struct whose owner states nothing
+    (std::event_loop::Reg, std::actor::Address: identities of one VM), and
+    `any` or an unconstrained imprint variable (the type does not say).
+  * A transfer's type must be closed where it is called: no imprint
+    variable and no trait view (TRANSFER-OPEN-TYPE).
+  * A copy is a new value: mutating a received MutableVector or MutableMap
+    changes nothing in the sender, and the reverse. A map's or set's index
+    and stored hashes are computed again by the receiver.
+  * Sending carries no authority: a decoded value is data; the receiver's
+    contexts are its own.
+  * std::actor's messages between actors of one VM are ordinary values and
+    need not be sendable.
+
+@example accept
+import std::transfer
+import std::abi::bytes
+import std::mutable_vector
+
+struct Job:
+    id: int
+    tags: MutableVector[str]
+
+job = Job {id: 7, tags: std::mutable_vector::from_list(["new"])}
+copy = std::transfer::decode[Job](std::transfer::encode(job)):
+    on TransferMalformed:
+        job
+    on TransferVersion:
+        job
+    on TransferTypeMismatch:
+        job
+    on TransferInvalidValue:
+        job
+    on TransferLimit:
+        job
+copy.tags.push("copied")
+[copy.id, std::mutable_vector::length(copy.tags), std::mutable_vector::length(job.tags)]
+@caption A copy is a new value: pushing onto the copy's vector leaves the original's alone
+@value [7, 2, 1]
+@end
+
+@topic error.not-sendable
+title: NOT-SENDABLE: a value that cannot be rebuilt in another VM
+summary: A transferred type holds what no other VM can rebuild (a function, coroutine, C pointer, context, unstated opaque struct) or does not say what its values are (any).
+index: errors
+alias: not sendable; cannot send a function; cannot send a context; value cannot cross VMs; Sendable not satisfied
+keywords: Sendable, sendable, transfer, encode, decode, function, closure, coroutine, pointer, context, opaque, any, reason path
+related: concept.sendability error.sendable-declaration error.transfer-open-type
+docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
+code: CORE SEMANTIC NOT-SENDABLE
+
+== MEANING
+A transfer copies a value's content into bytes another VM rebuilds it
+from. Some values have no such content: a function is code and the
+environment it captured, a coroutine handle owns a suspended computation, a
+C pointer addresses memory only its owner understands, a context struct is
+installed authority, and an opaque struct's fields may be an identity of
+one VM (a slot and a generation of its event loop) rather than a value. A
+value whose static type is `any` may be any of these. The message names the
+offending component and the path to it ("field \"run\" of Job (Fn{...}):
+...").
+
+== WHAT TO DO
+Send the data the receiver needs instead of the resource: a request
+describing the work rather than a closure, the name or number the receiver
+maps to its own context or registration. Give a value of `any` a declared
+type. For an opaque struct of your own module whose fields are its value,
+state it: `sendable fields`.
+
+@example reject
+import std::transfer
+import std::abi::bytes
+
+struct Job:
+    id: int
+    run: Fn{args: [int], return: int}
+
+fn send(job: Job) -> std::abi::bytes::Bytes:
+    std::transfer::encode(job)
+
+fn ident(x: int) -> int:
+    x
+
+send(Job {id: 1, run: ident})
+@caption A struct holding a function is not sendable
+@error CORE SEMANTIC NOT-SENDABLE
+@end
+
+@example reject
+import std::transfer
+import std::abi::bytes
+import std::event_loop
+
+fn send(r: std::event_loop::Reg) -> std::abi::bytes::Bytes:
+    std::transfer::encode(r)
+
+1
+@caption A registration is an identity of one VM's event loop: its owner does not declare it sendable
+@error CORE SEMANTIC NOT-SENDABLE
+@end
+
+@topic error.transfer-open-type
+title: TRANSFER-OPEN-TYPE: a transfer whose type is not known where it is written
+summary: std::transfer::encode or decode is called on a value whose static type mentions an imprint variable or a trait view: the transfer's schema is its static type, which a generic body does not know.
+index: errors
+alias: transfer in a generic function; encode of an imprint variable; open type
+keywords: transfer, encode, decode, imprint variable, generic, schema, Sendable, satisfies
+related: concept.sendability error.not-sendable
+docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
+code: CORE SEMANTIC TRANSFER-OPEN-TYPE
+
+== MEANING
+The bytes a transfer writes describe the value's static type (its schema
+and fingerprint), which the compiler writes into the call. Inside a body
+whose parameter is `Box[T]` with `T satisfies Sendable`, every value is
+sendable, but which schema to write depends on the caller's T. This
+milestone writes schemas only where the type is closed.
+
+== WHAT TO DO
+Call std::transfer::encode or decode where the concrete type is known --
+in the caller -- and pass the Bytes into or out of the generic code.
+
+@example reject
+import std::transfer
+import std::abi::bytes
+
+struct Box[T satisfies Sendable]:
+    value: T
+
+fn seal(b: Box[T]) -> std::abi::bytes::Bytes:
+    std::transfer::encode(b)
+
+seal(Box[int] {value: 1})
+@caption Box[T]'s schema depends on the caller's T
+@error CORE SEMANTIC TRANSFER-OPEN-TYPE
+@end
+
+@topic error.sendable-declaration
+title: SENDABLE-DECLARATION: an opaque struct's sendable clause does not hold
+summary: Only an opaque, non-context, non-resource struct states `sendable fields` or `sendable through(TO, FROM) as R`; its parts must be sendable and TO and FROM total, context-free functions.
+index: errors
+alias: sendable clause; sendable fields; sendable through; owner statement of sendability
+keywords: sendable, opaque, owner, fields, through, representation, projection, rebuild, context, resource, any
+related: concept.sendability error.not-sendable concept.opaque-structs
+docs: SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md
+code: CORE SEMANTIC SENDABLE-DECLARATION
+
+== MEANING
+The compiler cannot tell from an opaque struct's fields what they mean, so
+only its owner may state how a copy in another VM is rebuilt:
+
+  * `sendable fields`: a field-wise copy is the value; every field must be
+    sendable (an `any` field is not: the statement would be a marker on a
+    representation the copy cannot rebuild).
+  * `sendable through(TO, FROM) as R`: TO (a function of the module taking
+    the struct, returning R) projects a value to R, which is copied, and
+    FROM (taking R, returning the struct) rebuilds it in the receiver: for a
+    representation with derived state, such as a hash table's index. R must
+    be sendable; TO and FROM must declare no error, require no context and
+    never yield.
+  * `bytes(F)`, `mutable_bytes(F)`: the standard library's byte storage.
+
+A transparent struct needs no clause (its fields decide), and a context or
+resource struct can never be sendable.
+
+@example reject
+import std::transfer
+
+opaque struct Handle:
+    raw: any
+    sendable fields
+
+1
+@caption An any field makes no statement the copy can keep
+@error CORE SEMANTIC SENDABLE-DECLARATION
+@end
+
+@example accept
+import std::transfer
+import std::abi::bytes
+
+opaque struct Money:
+    cents: int
+    sendable fields
+
+m = Money {cents: 250}
+back = std::transfer::decode[Money](std::transfer::encode(m)):
+    on TransferMalformed:
+        m
+    on TransferVersion:
+        m
+    on TransferTypeMismatch:
+        m
+    on TransferInvalidValue:
+        m
+    on TransferLimit:
+        m
+back == m
+@caption The owner states that a field-wise copy is the value
+@value true
+@end

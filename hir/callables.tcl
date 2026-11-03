@@ -688,6 +688,16 @@ proc hir::callables::ArgContexts {hir e} {
     if {$container ne ""} {
         return $container
     }
+    set sending [dict getdef [core::native::metadata $name] sending ""]
+    if {[string is digit -strict $sending]} {
+        # A sent value (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md) is read
+        # by the transfer codec as its own static type, which never calls
+        # or erases a callable: a value bearing one is not sendable
+        # (hir::range::VerifySending says so), so its contract is its own.
+        set contexts $none
+        lset contexts $sending [hir::typeOf $hir [lindex $args $sending]]
+        return $contexts
+    }
     set shape [dict get [core::native::metadata $name] resultShape]
     set result [hir::typeOf $hir $e]
     set elem [hir::types::elementOf $result]
