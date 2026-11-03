@@ -257,3 +257,171 @@ proc hir::static::Accepted {node body position} {
 ====
         if {[dict get $node kind] eq "fail" && [dict get $node reachable]
 >>>>
+
+# Mutants of the boundary between a block's expected diagnostic and the
+# program around it (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md),
+# killed by tests/static-compile-expected-diagnostics.test (the harness's
+# default test files include it).
+
+@@ known-error-escapes a KNOWN-ERROR in a static body never reaches its block: it escapes as the enclosing program's diagnostic (every other kind is still attributed)
+## hir/static.tcl
+<<<<
+        set owner [Owner $present $origin]
+        if {[Internal $diagnostic]} {
+====
+        set owner [Owner $present $origin]
+        if {[dict get $diagnostic kind] eq "KNOWN-ERROR"} {
+            set owner ""
+        }
+        if {[Internal $diagnostic]} {
+>>>>
+
+@@ known-error-wrong-code a KNOWN-ERROR is reified with the code of UNHANDLED-ERROR (every other kind keeps its own)
+## hir/static.tcl
+<<<<
+    return [dict get $codes $kind]
+====
+    if {$kind eq "KNOWN-ERROR"} {
+        return UnhandledError
+    }
+    return [dict get $codes $kind]
+>>>>
+
+@@ attribute-ignores-file a diagnostic belongs to a site whose body holds its line and column in any file, not only the site's own
+## hir/static.tcl
+<<<<
+        if {[lindex $body 1] ne $file} continue
+====
+>>>>
+
+@@ attribute-past-end a diagnostic after a site's body (in its file) belongs to the last site that starts before it: an ordinary diagnostic after a block is hidden in the block's rejection
+## hir/static.tcl
+<<<<
+        if {$at >= $start && $at <= [dict get $span end] && $start > $best} {
+====
+        if {$at >= $start && $start > $best} {
+>>>>
+
+@@ matcher-any-code std::test::rejects accepts any compiler diagnostic as the expected one: an assertion expecting KnownError passes on a Type, an UnhandledError or an Unbound
+## stdlib/test.bot
+<<<<
+    if code == expected:
+        passed()
+====
+    if code == code:
+        passed()
+>>>>
+
+@@ matcher-any-location std::test::rejects_at accepts the expected code at any location: a pin at another known-failing call of the block passes
+## stdlib/test.bot
+<<<<
+                if code == expected and primary.line == line and primary.column == column:
+====
+                if code == expected:
+>>>>
+
+@@ resolution-round-final a round that stopped after resolution is final: the sites without a resolution diagnostic are accepted from a build that never ran the checks (an incomplete diagnostic set taken as complete)
+## hir/static.tcl
+<<<<
+            if {[dict size $own] == 0} {
+                # Only the enclosing program's own: it is rejected whatever
+                # the sites would be.
+                break
+            }
+            set predicted [dict create]
+            continue
+====
+            AcceptBefore $sites decisions "" accepted
+            break
+>>>>
+
+@@ stale-decision-kept rejecting a site no longer makes the sites depending on it unknown: the batched scheduler commits a verdict made against the rejected site's body (a caller's KNOWN-ERROR read from a callee whose block is rejected)
+## hir/static.tcl
+<<<<
+            if {$deps eq "" || $first in [dict get $deps sites $key]} {
+====
+            if {$deps eq ""} {
+>>>>
+
+@@ cache-key-ignores-source the front-end cache's key leaves out the entry program's text: an edited tested block is read back with the decision of the text before the edit
+## surface/cache.tcl
+<<<<
+        path $path source $source library $::core::libraryDir \
+====
+        path $path source {} library $::core::libraryDir \
+>>>>
+
+@@ statement-dead-types a rejected block standing as a statement makes the code after it unreachable to the types' reachability again (the flags every other analysis reads)
+## hir/types.tcl
+<<<<
+        if {$type eq "never" && [Halts $hir $e $type]
+                && ![hir::static::reifiedStatement $hir $exprs $e]} {
+====
+        if {$type eq "never" && [Halts $hir $e $type]} {
+>>>>
+
+@@ statement-dead-completions the completion walk stops at a rejected block standing as a statement: the KNOWN-ERROR and UNHANDLED-ERROR of the code after it are gone
+## hir/completions.tcl
+<<<<
+            if {[hir::static::reifiedStatement $hir $e $child]} {
+                dict set ctx intended $intended
+                set result [hir::range::unknown]
+                continue
+            }
+====
+>>>>
+
+@@ statement-keeps-intended the completion walk goes on after a rejected block standing as a statement but still counts it as an intended completion: a function whose code after the block always fails is no known failure to its callers
+## hir/completions.tcl
+<<<<
+                dict set ctx intended $intended
+                set result [hir::range::unknown]
+====
+                set result [hir::range::unknown]
+>>>>
+
+@@ statement-dead-affine the ownership analysis stops at a rejected block standing as a statement: a use after move after it is gone
+## hir/affine.tcl
+<<<<
+        if {$state eq "dead" && [hir::static::reifiedStatement $hir $exprs $e]} {
+====
+        if {0} {
+>>>>
+
+@@ statement-dead-range the range analysis stops at a rejected block standing as a statement: the code after it has no facts (a proven admission there is a TYPE)
+## hir/range.tcl
+<<<<
+            if {[hir::static::reifiedStatement $hir $exprs $e]} {
+                continue
+            }
+            break
+====
+            break
+>>>>
+
+@@ statement-dead-relations the relational analysis stops at a rejected block standing as a statement: an unproven reorder after it is gone
+## hir/relations.tcl
+<<<<
+            if {[hir::static::reifiedStatement $hir $body $e]} {
+====
+            if {0} {
+>>>>
+
+@@ statement-dead-emission the emission walk stops at a rejected block standing as a statement: a claim over a yield after it is judged as if the yield never ran
+## hir/emission.tcl
+<<<<
+            if {$before ne {} && [hir::static::reifiedStatement $hir $body $e]} {
+====
+            if {0} {
+>>>>
+
+@@ reified-any-position a rejected block in any position, the last expression of a body included, is no divergence for the analyses: a function whose whole body was rejected looks like one that completes
+## hir/static.tcl
+<<<<
+    if {[lindex $sequence end] eq $e} {
+        return 0
+    }
+    set node [dict get $hir exprs $e]
+====
+    set node [dict get $hir exprs $e]
+>>>>

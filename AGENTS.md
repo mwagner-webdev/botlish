@@ -4259,11 +4259,26 @@ in its message text. The tests' and the fuzzer's expectations spell their
 `DiagnosticCode` cases themselves (`scPayloadOf`, the fuzzer's `codeCases`):
 never derive an expected code from `hir::static::codes` or `CodeOf`.
 
+A rejection is the block's result, never an exemption
+(STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md): a block takes only the
+diagnostics located in its own body, and a rejected block standing as a
+statement ends no sequence for the checks (`hir::static::reifiedStatement`:
+the types' reachability, the range, completion, ownership, relational and
+emission walks), so it never hides a diagnostic of the code after it. Never
+add an exemption, a suppression or a demotion for an expected diagnostic,
+and a new analysis that stops at a statement that never completes reads
+`reifiedStatement` too. Run-time decisions (the backends, exit releases,
+`hir::mutvec::LaterIn`) keep the failure's control flow.
+
 If you change the static grammar, `hir/static.tcl`, the loader's deferral of a
 block's qualified references (`surface/modules.tcl`), how `fail` resolves or
-lowers, the completion walk's `fail` case (`intended`), `hir::Diagnose`'s
+lowers, the completion walk's `fail` case (`intended`), an analysis's
+handling of a statement that never completes, `hir::Diagnose`'s
 fields, `hir::BuildFull`, or SAME-FAILURE's fail sites, run
-`tests/static-compile.test`, `audit/static-compile/tools/fuzz.tcl` (several
+`tests/static-compile.test`, `tests/static-compile-expected-diagnostics.test`,
+its golden suite (`tclsh9.0 tests/local.tcl
+tests/golden/static-compile-expected-diagnostics.bot`),
+`audit/static-compile/tools/fuzz.tcl` (several
 seeds, once with `-gc-stress 1`) and `audit/static-compile/tools/mutate.tcl`
 (every mutant in `audit/static-compile/tools/mutants.txt` must still apply and
 be killed: update a mutant's text when you change the code it mutates, keeping

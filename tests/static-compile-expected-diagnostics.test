@@ -1,0 +1,876 @@
+# static-compile-expected-diagnostics.test -- negative compilation tests of
+# static semantic proofs, KNOWN-ERROR above all, through `static compile:`
+# and the golden framework's matchers
+# (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md).
+#
+# A diagnostic is an error of ordinary code; a `static compile:` block that
+# a test expects to be rejected makes the same diagnostic the test's
+# result. These tests pin that the two never mix:
+#
+# * the facility: every form of a statically known failure the brief lists
+#   is the block's KnownError, and std::test's matchers tell it apart from
+#   every other outcome (another code, another location, no diagnostic);
+# * scope: a block's expected diagnostic never hides one of the program's,
+#   a diagnostic outside the block (another function, another block,
+#   another file) is never the block's, and -- the defect this milestone
+#   fixed -- a rejected block standing as a statement no longer makes the
+#   code after it unreachable for the checks (hir::static::reifiedStatement):
+#   the KNOWN-ERROR, UNHANDLED-ERROR, USE-AFTER-MOVE, range facts,
+#   relational proofs and emission checks of that code are what they are
+#   with the block accepted;
+# * order: the schedulers agree, a decision made against a callee's block
+#   that is rejected later is not kept, resolution comes first;
+# * incrementality: the front-end cache, HIR interchange, the compiler
+#   service and syntax recovery.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot service service.tcl]
+set ::sdRoot $::projectRoot
+source [file join $::sdRoot audit static-decisions tools lib.tcl]
+
+# The backends a std::test suite program runs on: its runner is a
+# coroutine, so natively only where native coroutines run.
+set scedBackends [expr {[testConstraint nativeCoroutines] ? {interp compile cranelift-generic cranelift} : {interp compile}}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+# SOURCE without its leading newline (the programs below are written from
+# the line after their opening brace: line 1 is their first line).
+proc scedText {source} {
+    return [string trimleft $source \n]
+}
+
+# The report of the std::test suite program SOURCE, the same on every
+# backend of scedBackends (sourceAgree raises otherwise), as a Tcl list of
+# lines.
+proc scedReport {source} {
+    set outcome [sourceAgree [scedText $source] $::scedBackends]
+    if {[lindex $outcome 0] ne "value"} {
+        error "suite does not run: $outcome"
+    }
+    set report [lindex $outcome 1]
+    return [lmap line [regexp -all -inline {"(?:[^"\\]|\\.)*"} $report] {string range $line 1 end-1}]
+}
+
+# The lenient HIR (-strict 0, warnings off) of SOURCE under SCHEDULER.
+proc scedHir {source {scheduler batched}} {
+    set saved $hir::static::scheduler
+    set hir::static::scheduler $scheduler
+    try {
+        return [surface::compile [scedText $source] -strict 0 -warnings off]
+    } finally {
+        set hir::static::scheduler $saved
+    }
+}
+
+# The decided sites of HIR in post-order: accepted, or {KIND LINE COLUMN}.
+proc scedSites {hir} {
+    set result {}
+    dict for {key site} [hir::static::sites $hir] {
+        if {[dict get $site outcome] eq "rejected"} {
+            set d [dict get $site diagnostic]
+            lappend result [list [dict get $d kind] [dict get $d origin line] [dict get $d origin column]]
+        } else {
+            lappend result [dict get $site outcome]
+        }
+    }
+    return $result
+}
+
+# The enclosing program's own diagnostics of HIR: {KIND LINE COLUMN} each
+# (a diagnostic of another file than the entry program's names it too).
+proc scedProgram {hir} {
+    return [lmap d [hir::diagnostics $hir] {
+        set o [hir::static::PrimaryOrigin $hir $d]
+        list [dict get $d kind] [dict get $o line] [dict get $o column]
+    }]
+}
+
+# What a strict compilation of SOURCE says: ok, or {KIND LINE COLUMN} of the
+# first diagnostic it raises.
+proc scedStrict {source} {
+    if {[catch {surface::compile [scedText $source] -warnings off} message options]} {
+        set code [dict get $options -errorcode]
+        if {[dict exists $options -diagnostics]} {
+            set at [dict get [lindex [dict get $options -diagnostics] 0] location]
+            return [list [lindex $code end] [dict get $at line] [dict get $at column]]
+        }
+        return [list [lindex $code end] $message]
+    }
+    return ok
+}
+
+# "" if the batched scheduler decides SOURCE exactly as the sequential and
+# the legacy ones, and no build contradicted a prediction; else the first
+# difference.
+proc scedSame {source} {
+    set text [scedText $source]
+    set b [sdCompile batched $text]
+    if {[dict get $b error] ne ""} {
+        return "does not compile: [string range [dict get $b error] 0 300]"
+    }
+    set diff [sdDiff $b [sdCompile sequential $text]]
+    if {$diff eq ""} {
+        set diff [sdDiff $b [sdCompile legacy $text] 1]
+    }
+    if {$diff eq ""} {
+        set mispredicted [dict get [scedHir $source] staticStats mispredicted]
+        if {$mispredicted ne {}} {
+            set diff "mispredicted: $mispredicted"
+        }
+    }
+    return $diff
+}
+
+# ---------------------------------------------------------------------------
+# The facility: KNOWN-ERROR as a block's expected diagnostic
+
+# The forms of a statically known failure (the brief's section 6), each a
+# case of one suite. k is the registration function's parameter (5): a
+# call on it is decided only where a narrowing decides it.
+set scedForms {
+import std::byte
+import std::compiler
+import std::test
+
+error ParseError
+error Negative
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn reject_if_negative(n: int) -> int errors Negative:
+    if n < 0:
+        fail Negative
+    n
+
+fn fails_both_ways(n: int) -> int errors Negative:
+    if n > 0:
+        fail Negative
+    fail Negative
+
+fn register(k: int):
+    fn direct() -> int errors std::compiler::CompilerError:
+        static compile:
+            reject()
+    std::test::rejects_at("direct", std::compiler::DiagnosticCode::KnownError, 24, 13, direct)
+    fn handled() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject():
+                on ParseError:
+                    42
+            r
+    std::test::rejects_at("handled", std::compiler::DiagnosticCode::KnownError, 28, 17, handled)
+    fn possible() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject_if_negative(k):
+                on Negative:
+                    -1
+            r
+    std::test::value("possible", 5, possible)
+    fn branch() -> int errors std::compiler::CompilerError:
+        static compile:
+            if k > 0:
+                r = reject():
+                    on ParseError:
+                        1
+                return r
+            k
+    std::test::rejects_at("branch", std::compiler::DiagnosticCode::KnownError, 43, 21, branch)
+    fn unreachable_branch() -> int errors std::compiler::CompilerError:
+        static compile:
+            j = 5
+            if j < 0:
+                r = reject_if_negative(j):
+                    on Negative:
+                        1
+                return r
+            j
+    std::test::value("unreachable-branch", 5, unreachable_branch)
+    fn helper() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = fails_both_ways(k):
+                on Negative:
+                    -1
+            r
+    std::test::rejects_at("helper", std::compiler::DiagnosticCode::KnownError, 61, 17, helper)
+    fn arithmetic() errors std::compiler::CompilerError:
+        static compile:
+            b = std::byte::from_int(250 + 10):
+                on std::byte::AboveRange:
+                    0
+                on std::byte::BelowRange:
+                    0
+            b
+    std::test::rejects_at("arithmetic", std::compiler::DiagnosticCode::KnownError, 68, 17, arithmetic)
+    fn narrowed() -> int errors std::compiler::CompilerError:
+        static compile:
+            m = k - 9
+            if m < 0:
+                r = reject_if_negative(m):
+                    on Negative:
+                        1
+                return r
+            m
+    std::test::rejects_at("narrowed", std::compiler::DiagnosticCode::KnownError, 79, 21, narrowed)
+    fn exact_mod() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject_if_negative(mod(500, 11) - 6):
+                on Negative:
+                    -1
+            r
+    std::test::rejects_at("exact-mod", std::compiler::DiagnosticCode::KnownError, 87, 17, exact_mod)
+
+with context std::test::suite()
+register(5)
+std::test::report()
+}
+
+test sced-known-error-forms {every form of a statically known failure is its block's KnownError at the failing call, on every backend: a direct call, a handled call, a call on a reachable branch, a helper failing on every path, constant arithmetic out of a domain, a narrowed range, an exact `mod`; a possible failure and a branch the facts rule out are accepted and run} -body {
+    scedReport $scedForms
+} -result {{PASS direct} {PASS handled} {PASS possible} {PASS branch} {PASS unreachable-branch} {PASS helper} {PASS arithmetic} {PASS narrowed} {PASS exact-mod} {9 passed, 0 failed}}
+
+# The negative half (the brief's section 8, 2 and 3): an assertion that
+# expects KnownError fails, naming what was observed, for every other
+# outcome -- including KnownError at another call of the same block.
+set scedDistinguish {
+import std::compiler
+import std::test
+
+error ParseError
+error Negative
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn reject_if_negative(n: int) -> int errors Negative:
+    if n < 0:
+        fail Negative
+    n
+
+fn register(k: int):
+    fn valid() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject_if_negative(1):
+                on Negative:
+                    -1
+            r
+    std::test::rejects("valid", std::compiler::DiagnosticCode::KnownError, valid)
+    fn typed() -> int errors std::compiler::CompilerError:
+        static compile:
+            reject_if_negative("s")
+    std::test::rejects("typed", std::compiler::DiagnosticCode::KnownError, typed)
+    fn unhandled() -> int errors std::compiler::CompilerError:
+        static compile:
+            reject_if_negative(k)
+    std::test::rejects("unhandled", std::compiler::DiagnosticCode::KnownError, unhandled)
+    fn unbound() -> int errors std::compiler::CompilerError:
+        static compile:
+            r = reject():
+                on ParseError:
+                    missing
+            r
+    std::test::rejects("unbound", std::compiler::DiagnosticCode::KnownError, unbound)
+    fn two_calls() -> int errors std::compiler::CompilerError:
+        static compile:
+            a = reject():
+                on ParseError:
+                    1
+            b = reject():
+                on ParseError:
+                    2
+            a + b
+    std::test::rejects_at("second-call", std::compiler::DiagnosticCode::KnownError, 43, 17, two_calls)
+    std::test::rejects_at("first-call", std::compiler::DiagnosticCode::KnownError, 40, 17, two_calls)
+
+with context std::test::suite()
+register(5)
+std::test::report()
+}
+
+test sced-assertion-distinguishes {an assertion expecting KnownError fails, naming what the block did, when the call becomes valid (a value), when the block has another diagnostic (Type, UnhandledError, an Unbound name that resolution reports before any proof), and when it pins another known-failing call of the block than the one the block reifies (its first); the first call's pin passes} -body {
+    scedReport $scedDistinguish
+} -result {{FAIL valid} {  expected: compiler diagnostic KnownError} {  actual: value 1} {FAIL typed} {  expected: compiler diagnostic KnownError} {  actual: compiler diagnostic Type at line 25, column 32} {  detail: argument for parameter \"n\" cannot be proven to satisfy int (argument type: str)} {FAIL unhandled} {  expected: compiler diagnostic KnownError} {  actual: compiler diagnostic UnhandledError at line 29, column 13} {  detail: this call may produce the declared error \"Negative\", which is neither handled here nor admitted by the enclosing function's own \"errors\" declaration} {FAIL unbound} {  expected: compiler diagnostic KnownError} {  actual: compiler diagnostic Unbound at line 35, column 21} {  detail: unbound name \"missing\"} {FAIL second-call} {  expected: compiler diagnostic KnownError at line 43, column 17} {  actual: compiler diagnostic KnownError at line 40, column 17} {  detail: this call can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) ParseError; a handler does not make a statically known failure legal} {PASS first-call} {1 passed, 5 failed}}
+
+# The motivating case (EMISSION-CLAIMS-MILESTONE-1.md, section 4): exact
+# `mod` made a handled recursion's input a constant, and the handled call a
+# KNOWN-ERROR. The tests that wanted the run-time value hid the input with
+# std::int::from_string; the compile-time fact is pinned directly here.
+set scedExactMod {
+import std::compiler
+import std::int
+import std::test
+
+error Negative
+
+fn register():
+    fn literal() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n) errors Negative:
+                if n < 0:
+                    fail Negative
+                if n == 0:
+                    1
+                else:
+                    f(n - 1) + 1
+            fn g(m) errors Negative:
+                f(m - 3)
+            r1 = g(mod(500, 11)):
+                on Negative:
+                    -1
+            r2 = g(mod(500, 11) - 5):
+                on Negative:
+                    -1
+            [r1, r2]
+    std::test::rejects_at("literal-mod", std::compiler::DiagnosticCode::KnownError, 22, 18, literal)
+    fn hidden() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n) errors Negative:
+                if n < 0:
+                    fail Negative
+                if n == 0:
+                    1
+                else:
+                    f(n - 1) + 1
+            fn g(m) errors Negative:
+                f(m - 3)
+            k = std::int::from_string("500"):
+                on InvalidIntegerText:
+                    0
+            r1 = g(mod(k, 11)):
+                on Negative:
+                    -1
+            r2 = g(mod(k, 11) - 5):
+                on Negative:
+                    -1
+            [r1, r2]
+    std::test::value("hidden-mod", [3, -1], hidden)
+
+with context std::test::suite()
+register()
+std::test::report()
+}
+
+test sced-exact-mod {the exact-modulo KNOWN-ERROR is pinned as what it is -- g(mod(500, 11) - 5) is g(0), whose recursion always fails, so the handled call is KnownError at the call -- while the same recursion on an input the compiler cannot decide runs to [3, -1] on every backend} -body {
+    scedReport $scedExactMod
+} -result {{PASS literal-mod} {PASS hidden-mod} {2 passed, 0 failed}}
+
+# ---------------------------------------------------------------------------
+# Scope: a block's expected diagnostic is its own, and only its own
+
+set scedPrelude {
+import std::compiler
+
+error ParseError
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn want(n: int) -> int:
+    n
+
+fn probe() -> int errors std::compiler::CompilerError:
+    static compile:
+        r = reject():
+            on ParseError:
+                1
+        r
+
+p = probe():
+    on std::compiler::CompilerError:
+        -1
+}
+
+test sced-ordinary-known-error-rejects {a block that expects KNOWN-ERROR does not make the same failure legal elsewhere: the same handled call in ordinary code is the program's KNOWN-ERROR (strict: the first diagnostic, at that call), the block's is reified, and the program's diagnostics hold only the ordinary one} -body {
+    set source "$scedPrelude\nq = reject():\n    on ParseError:\n        2\n\[p, q\]\n"
+    set hir [scedHir $source]
+    list [scedStrict $source] [scedSites $hir] [scedProgram $hir]
+} -cleanup {unset -nocomplain source hir} -result {{KNOWN-ERROR 22 5} {{KNOWN-ERROR 13 13}} {{KNOWN-ERROR 22 5}}}
+
+test sced-independent-diagnostic-visible {an independent diagnostic of the program (a TYPE of ordinary code) is reported beside a block's expected KNOWN-ERROR, which is never the program's: the program is rejected with exactly that TYPE} -body {
+    set source "$scedPrelude\nq = want(\"s\")\n\[p, q\]\n"
+    set hir [scedHir $source]
+    list [scedStrict $source] [scedSites $hir] [scedProgram $hir]
+} -cleanup {unset -nocomplain source hir} -result {{TYPE 22 10} {{KNOWN-ERROR 13 13}} {{TYPE 22 10}}}
+
+test sced-outside-scope {a KNOWN-ERROR outside the block is never the block's: in a function the block calls (the program's diagnostic, the block accepted) and in a sibling block (that block's; the tested block is accepted, so an assertion on it fails)} -body {
+    set callee [scedText {
+import std::compiler
+
+error ParseError
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn inner() -> int:
+    r = reject():
+        on ParseError:
+            1
+    r
+
+fn probe() -> int errors std::compiler::CompilerError:
+    static compile:
+        inner() + 1
+
+p = probe():
+    on std::compiler::CompilerError:
+        -1
+p
+}]
+    set sibling [scedText {
+import std::compiler
+
+error ParseError
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn tested() -> int errors std::compiler::CompilerError:
+    static compile:
+        2
+
+fn other() -> int errors std::compiler::CompilerError:
+    static compile:
+        r = reject():
+            on ParseError:
+                1
+        r
+
+a = tested():
+    on std::compiler::CompilerError:
+        -1
+b = other():
+    on std::compiler::CompilerError:
+        -1
+[a, b]
+}]
+    set h1 [scedHir $callee]
+    set h2 [scedHir $sibling]
+    list [scedStrict $callee] [scedSites $h1] [scedProgram $h1] \
+        [scedStrict $sibling] [scedSites $h2] [sourceAgree $sibling]
+} -cleanup {unset -nocomplain callee sibling h1 h2} -result {{KNOWN-ERROR 9 9} accepted {{KNOWN-ERROR 9 9}} ok {accepted {KNOWN-ERROR 14 13}} {value {[2, -1]}}}
+
+test sced-other-file {a diagnostic of another file is never the block's, even where its line and column and its character offsets fall inside the block's span (attribution compares the file first): a module's KNOWN-ERROR stays the program's (the strict compilation reports it in the module's file), and the entry program's block is accepted} -body {
+    set dir [makeDirectory sced-other-file]
+    set module [makeFile [scedText {
+# helpermod.bot -- a module whose one function holds an ordinary
+# KNOWN-ERROR. These comment lines only move it: its location, line and
+# column as well as character offset, lies inside the span of the entry
+# program's static compile block, in another file.
+
+error Boom
+
+fn boom() -> int errors Boom:
+    fail Boom
+
+fn broken() -> int:
+    r = boom():
+        on Boom:
+            1
+    r
+}] helpermod.bot $dir]
+    set entry [makeFile [scedText {
+import std::compiler
+import helpermod
+
+fn probe() -> int errors std::compiler::CompilerError:
+    static compile:
+        a = 1
+        b = 2
+        c = 3
+        d = 4
+        e = 5
+        f = 6
+        g = 7
+        h = 8
+        i = 9
+        j = 10
+        k = 11
+        m = 12
+        n = 13
+        o = 14
+        p = 15
+        a + b + c + d + e + f + g + h + i + j + k + m + n + o + p
+
+r = probe():
+    on std::compiler::CompilerError:
+        -1
+r
+}] main.bot $dir]
+    set strict [catch {surface::readProgramFile $entry -warnings off -cache ""} message options]
+    set hir [surface::readProgramFile $entry -warnings off -cache "" -strict 0]
+    set diagnostics [lmap d [hir::diagnostics $hir] {
+        set o [hir::static::PrimaryOrigin $hir $d]
+        list [dict get $d kind] [file tail [hir::sourceFile $hir [dict get $o file]]] [dict get $o line] [dict get $o column]
+    }]
+    # The premise: the module's diagnostic lies inside the block's span by
+    # line and by offset, in another file.
+    set o [hir::static::PrimaryOrigin $hir [lindex [hir::diagnostics $hir] 0]]
+    set site [lindex [dict values [hir::static::sites $hir]] 0]
+    set span [dict get $site origin]
+    set inside [expr {[dict get $o file] ne [dict get $span file]
+        && [dict get $o start] > [dict get $span start] && [dict get $o start] < [dict get $span end]
+        && [dict get $o line] > [dict get $span line] && [dict get $o line] < [dict get $span endLine]}]
+    list $inside $strict [lindex [dict get $options -errorcode] end] \
+        [file tail [dict get [lindex [dict get $options -diagnostics] 0] location file]] \
+        [scedSites $hir] $diagnostics
+} -cleanup {
+    removeDirectory sced-other-file
+    unset -nocomplain dir module entry strict message options hir diagnostics o site span inside
+} -result {1 1 KNOWN-ERROR helpermod.bot accepted {{KNOWN-ERROR helpermod.bot 12 9}}}
+
+# ---------------------------------------------------------------------------
+# Scope: a rejected statement does not reach past its block (the fix)
+#
+# Each snippet follows a block in the same function, in statement position.
+# With the block rejected (`missing`) and with it accepted (`1`), the
+# program's own diagnostics must be the same: what the code after a block is
+# checked against never depends on whether the block compiled. Before this
+# milestone the rejected variants reported nothing for every snippet but
+# want(20) (dead code), and want(5) was a spurious TYPE (dead code had no
+# range facts).
+
+set scedFollowing {
+import std::compiler
+import std::list
+import std::mutable_map
+import std::mutable_set
+import std::mutable_vector
+
+error ParseError
+
+type Small = Int in 0..10
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn want(x: Small) -> int:
+    x
+
+fn worker() -> int:
+    yield 1
+    2
+
+fn t(n: int) -> int errors std::compiler::CompilerError:
+    coroutine {step, first} = worker()
+    m = std::mutable_map::create[int, int]()
+    m.set(1, 10)
+    static compile:
+        BLOCK
+SNIPPET
+    0
+
+r = t(1):
+    on std::compiler::CompilerError:
+        -1
+r
+}
+
+set scedSnippets {
+    known {    q = reject():
+        on ParseError:
+            1}
+    unhandled {    reject()}
+    moved {    a = step
+    b = step}
+    bounds {    std::list::at([1, 2], n)}
+    range-violated {    want(20)}
+    range-proven {    want(5)}
+    reorder {    order = std::mutable_set::create[int]()
+    m.reorder(order)}
+}
+
+proc scedFollowingProgram {block snippet} {
+    return [string map [list BLOCK $block SNIPPET $snippet] $::scedFollowing]
+}
+
+test sced-following-code-checked {code after a rejected block in its function keeps every diagnostic of its own: KNOWN-ERROR, UNHANDLED-ERROR, USE-AFTER-MOVE, an unproven bound, a range admission with the argument's real facts (a violated one is a TYPE naming [20, 20], a proven one is accepted), an unproven reorder -- exactly the diagnostics the program has with the same block accepted, the caller's included (a function whose code after the block always fails is a KNOWN-ERROR to call, as it is with the block accepted: no path ends at the rejected statement, so it is no intended completion)} -body {
+    lmap {name snippet} $scedSnippets {
+        set rejected [scedHir [scedFollowingProgram missing $snippet]]
+        set accepted [scedHir [scedFollowingProgram 1 $snippet]]
+        list $name [scedSites $rejected] [scedProgram $rejected] \
+            [expr {[scedProgram $rejected] eq [scedProgram $accepted] ? "same" : [scedProgram $accepted]}]
+    }
+} -cleanup {unset -nocomplain rejected accepted} -result {{known {{UNBOUND 26 9}} {{KNOWN-ERROR 27 9}} same} {unhandled {{UNBOUND 26 9}} {{KNOWN-ERROR 30 5} {KNOWN-ERROR 27 5}} same} {moved {{UNBOUND 26 9}} {{USE-AFTER-MOVE 28 9}} same} {bounds {{UNBOUND 26 9}} {{UNHANDLED-ERROR 27 5}} same} {range-violated {{UNBOUND 26 9}} {{TYPE 27 10}} same} {range-proven {{UNBOUND 26 9}} {} same} {reorder {{UNBOUND 26 9}} {{REORDER-NOT-PROVEN 28 5}} same}}
+
+test sced-following-range-facts {the range facts of the code after a rejected block are its own: a violated admission names the argument's facts ([20, 20] {20}), not the empty facts of dead code ([-∞, +∞]), and a proven one compiles} -body {
+    list [scedStrict [scedFollowingProgram missing {    want(20)}]] \
+        [string match {*facts: \[20, 20\] {20})} [dict get [lindex [hir::diagnostics [scedHir [scedFollowingProgram missing {    want(20)}]]] 0] message]] \
+        [scedStrict [scedFollowingProgram missing {    want(5)}]]
+} -result {{TYPE 27 10} 1 ok}
+
+test sced-following-sequence-siblings {two blocks in one statement sequence are judged each on its own: the second keeps its KNOWN-ERROR after the first is rejected (it used to be accepted, its diagnostic gone with the dead code), under every scheduler} -body {
+    set source {
+import std::compiler
+
+error ParseError
+
+fn reject() -> int errors ParseError:
+    fail ParseError
+
+fn t() -> int errors std::compiler::CompilerError:
+    static compile:
+        missing
+    static compile:
+        r = reject():
+            on ParseError:
+                1
+        r
+
+r = t():
+    on std::compiler::CompilerError {code}:
+        if code == std::compiler::DiagnosticCode::Unbound:
+            -1
+        else:
+            -2
+r
+}
+    list [scedSites [scedHir $source]] [scedSame $source] [sourceAgree [scedText $source]]
+} -cleanup {unset -nocomplain source} -result {{{UNBOUND 10 9} {KNOWN-ERROR 12 13}} {} {value -1}}
+
+test sced-following-emission {an emission claim over a callee whose only yield follows a rejected block (a statement) judges that yield as written: the program's violations are the ones it has with the callee's block accepted} -body {
+    set source {
+import std::compiler
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digit_token over ascii:
+    start:
+        digit -> accept
+
+fn helper(d: int) -> unit errors std::compiler::CompilerError:
+    static compile:
+        BLOCK
+    yield 48 + d
+    unit
+
+fn emit(d: int) -> unit errors std::compiler::CompilerError emits digit_token:
+    helper(d)
+
+0
+}
+    set rejected [scedHir [string map {BLOCK missing} $source]]
+    set accepted [scedHir [string map {BLOCK 1} $source]]
+    list [scedSites $rejected] [scedProgram $rejected] [expr {[scedProgram $rejected] eq [scedProgram $accepted]}]
+} -cleanup {unset -nocomplain source rejected accepted} -result {{{UNBOUND 12 9}} {{EMIT-END-SYMBOL 13 5} {EMIT-REJECTED 13 5}} 1}
+
+test sced-value-position-unchanged {a rejected block whose value is used -- a binding's value -- is that value's ordinary failure: the code reading the value is unreachable, with no diagnostic (the value has no facts to check it against: std::list::at on it is no unhandled IndexNotFound), and the program runs to the handled CompilerError on every backend} -body {
+    set source {
+import std::compiler
+import std::list
+
+fn t() -> int errors std::compiler::CompilerError:
+    x = static compile:
+        missing
+    std::list::at([1], x)
+
+r = t():
+    on std::compiler::CompilerError:
+        -1
+r
+}
+    set hir [scedHir $source]
+    list [scedSites $hir] [scedProgram $hir] [sourceAgree [scedText $source]]
+} -cleanup {unset -nocomplain source hir} -result {{{UNBOUND 6 9}} {} {value -1}}
+
+test sced-value-position-diverges {a rejected block whose value is the value of its body (the last expression of a function), of a binding or of a `return` is that value's ordinary failure, a divergence: the decided program holds no poison (DIAGNOSTIC-RECOVERY.md: poison never exists in a valid program's HIR), it compiles strictly, and it runs to the handled CompilerErrors on every backend} -body {
+    set source {
+import std::compiler
+
+fn whole() -> int errors std::compiler::CompilerError:
+    static compile:
+        missing
+
+fn bound() -> int errors std::compiler::CompilerError:
+    x = static compile:
+        missing
+    x
+
+fn returned(n: int) -> int errors std::compiler::CompilerError:
+    if n > 0:
+        return static compile:
+            missing
+    n
+
+a = whole():
+    on std::compiler::CompilerError:
+        -1
+b = bound():
+    on std::compiler::CompilerError:
+        -2
+c = returned(1):
+    on std::compiler::CompilerError:
+        -3
+[a, b, c]
+}
+    set hir [surface::compile [scedText $source] -warnings off]
+    list [scedSites $hir] [dict exists $hir poisoned] [scedStrict $source] [sourceAgree [scedText $source]]
+} -cleanup {unset -nocomplain source hir} -result {{{UNBOUND 5 9} {UNBOUND 9 9} {UNBOUND 15 13}} 0 ok {value {[-1, -2, -3]}}}
+
+test sced-following-code-never-runs {the run time is unchanged: a function's rejected statement block fails with its CompilerError and nothing after it runs, on every backend; a coroutine created before the block and used after it is released by the block's failure, which is an exit of its function (hir::affine::releasesOnExit)} -body {
+    set source {
+import std::compiler
+
+fn worker() -> int:
+    yield 1
+    2
+
+fn t() -> int errors std::compiler::CompilerError:
+    coroutine {step, first} = worker()
+    static compile:
+        missing
+    second = step()
+    first + second + 40
+
+r = t():
+    on std::compiler::CompilerError:
+        -1
+r
+}
+    set hir [scedHir $source]
+    set exits {}
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "fail" && [dict exists $node static]} {
+            set released [hir::affine::releasesOnExit $hir $e]
+            lappend exits [lmap b [concat {*}$released] {dict get $hir bindings $b name}]
+        }
+    }
+    list [scedSites $hir] [scedProgram $hir] $exits [sourceAgree [scedText $source]]
+} -cleanup {unset -nocomplain source hir exits released} -result {{{UNBOUND 10 9}} {} step {value -1}}
+
+# ---------------------------------------------------------------------------
+# Order: decisions never read an incomplete or stale diagnostic set
+
+test sced-callee-dependency {a block's KNOWN-ERROR read from a callee whose own block is rejected afterwards is not kept: in the first build h's block (TYPE) makes h always fail E, so a's handled h() is KNOWN-ERROR; the batched scheduler defers a's block (it depends on h's) and the next build accepts it -- h's rejection is an intended outcome, never a known failure -- exactly as the sequential order} -body {
+    set source {
+import std::compiler
+
+error E
+
+fn h() -> int errors E, std::compiler::CompilerError:
+    static compile:
+        y = 1 + "s"
+        fail E
+
+fn a() -> int errors std::compiler::CompilerError:
+    static compile:
+        r = h():
+            on E:
+                1
+            on std::compiler::CompilerError:
+                2
+        r
+
+r = a():
+    on std::compiler::CompilerError:
+        -1
+r
+}
+    set saved $hir::static::trace
+    set hir::static::trace 1
+    try {
+        set hir [scedHir $source]
+    } finally {
+        set hir::static::trace $saved
+    }
+    set trace [hir::static::FormatTrace [dict get $hir staticStats]]
+    list [scedSites $hir] [scedSame $source] [sourceAgree [scedText $source]] \
+        [regexp {round 1 \(checked\) bodies 2 undecided 2 failing 2} $trace] \
+        [regexp {defer \S+: depends on \S+: position function a -> calls function h -> holds site} $trace]
+} -cleanup {unset -nocomplain source saved hir trace} -result {{{TYPE 7 17} accepted} {} {value 2} 1 1}
+
+test sced-resolution-first {an unresolved name is decided before any proof: a block holding a known failure and, in a later statement, an unbound name is rejected Unbound (a KNOWN-ERROR is never certified from a program that does not resolve, whatever the order of the source), and an unbound name of the enclosing program rejects the program whatever its blocks expect} -body {
+    set inBlock "$scedPrelude\nfn both() -> int errors std::compiler::CompilerError:\n    static compile:\n        r = reject():\n            on ParseError:\n                1\n        r + missing_name\n\np\n"
+    set outside "$scedPrelude\nq = missing_name\np\n"
+    list [scedSites [scedHir $inBlock]] [scedStrict $outside]
+} -cleanup {unset -nocomplain inBlock outside} -result {{{KNOWN-ERROR 13 13} {UNBOUND 27 13}} {UNBOUND 22 5}}
+
+test sced-schedulers-agree {the expected-diagnostic programs above are decided identically by the batched, sequential and legacy schedulers, with no misprediction} -body {
+    list [scedSame [scedFollowingProgram missing [dict get $scedSnippets known]]] \
+        [scedSame "$scedPrelude\nfn both() -> int errors std::compiler::CompilerError:\n    static compile:\n        r = reject():\n            on ParseError:\n                missing\n        r\n\np\n"] \
+        [scedSame $scedDistinguish]
+} -result {{} {} {}}
+
+# ---------------------------------------------------------------------------
+# Incrementality: cache, interchange, compiler service
+
+test sced-cache {the front-end cache follows the tested code: a block expecting KNOWN-ERROR is rejected, the same file edited to a valid call is a cache miss and accepted, the first text again is a hit and rejected again} -body {
+    set dir [makeDirectory sced-cache]
+    set cache [file join $dir cache]
+    set path [file join $dir program.bot]
+    set text [scedText $scedPrelude]
+    set results {}
+    foreach version [list $text [string map {"r = reject():" "r = want(1):"} $text] $text] {
+        set f [open $path w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f "${version}p\n"
+        close $f
+        surface::cache::resetStats
+        set sites [scedSites [surface::readProgramFile $path -warnings off -cache $cache]]
+        set stats [surface::cache::stats]
+        lappend results [list $sites [dict get $stats hits] [dict get $stats misses]]
+    }
+    set results
+} -cleanup {
+    removeDirectory sced-cache
+    unset -nocomplain dir cache path text results version f sites stats
+} -result {{{{KNOWN-ERROR 13 13}} 0 1} {accepted 0 1} {{{KNOWN-ERROR 13 13}} 1 0}}
+
+test sced-interchange {a program whose block's expected KNOWN-ERROR was reified is the same program read back from HIR interchange text: the same sites, and the same report on every backend} -body {
+    set hir [surface::compile [scedText $scedForms] -warnings off]
+    set read [hir::interchange::decode [hir::interchange::encode $hir]]
+    set outcomes [lmap b $::scedBackends {lrange [outcomeUnderHir $b $read] 0 end-1}]
+    list [expr {[scedSites $read] eq [scedSites $hir]}] [llength [lsort -unique $outcomes]] \
+        [expr {[lindex $outcomes 0] eq [sourceAgree [scedText $scedForms] $::scedBackends]}]
+} -cleanup {unset -nocomplain hir read outcomes} -result {1 1 1}
+
+# The compiler service's view of the program SOURCE as the document PATH of
+# workspace WS: {OUTCOME SEMANTICS DIAGNOSTICS SITES}, DIAGNOSTICS {CODE
+# LINE COLUMN} each.
+proc scedService {ws path source version} {
+    service::setDocument $ws $path [scedText $source] -version $version
+    set rev [service::analyze $ws $path]
+    set r [service::revision $rev]
+    set diagnostics [lmap d [service::diagnostics $rev] {
+        list [lindex [dict get $d code] end] [dict get $d line] [dict get $d column]
+    }]
+    set hir [service::hir $rev]
+    set sites [expr {$hir eq "" ? "none" : [scedSites $hir]}]
+    return [list $rev [list [dict get $r outcome] [dict get $r semantics] $diagnostics $sites]]
+}
+
+test sced-service {through the compiler service: an expected KNOWN-ERROR is no diagnostic of the program (the revision's block is rejected); editing the tested call makes a new revision whose block is accepted, the old revision unchanged; an ordinary KNOWN-ERROR beside the block is reported at its own location; a syntax error elsewhere decides no block (syntax recovery never certifies an expectation)} -body {
+    set dir [makeDirectory sced-service]
+    set path [file join $dir t.bot]
+    set ws [service::workspace -warnings off -cache ""]
+    set base $scedPrelude
+    lassign [scedService $ws $path "${base}p\n" 1] r1 v1
+    lassign [scedService $ws $path "[string map {"r = reject():" "r = want(1):"} $base]p\n" 2] r2 v2
+    set again [lindex [scedService $ws $path "${base}p\n" 3] 1]
+    lassign [scedService $ws $path "${base}q = reject():\n    on ParseError:\n        2\n\[p, q\]\n" 4] r4 v4
+    lassign [scedService $ws $path "${base}x = (1 +\np\n" 5] r5 v5
+    set old [service::hir $r1]
+    list $v1 $v2 [expr {$again eq $v1}] [scedSites $old] $v4 $v5
+} -cleanup {
+    service::closeWorkspace $ws
+    removeDirectory sced-service
+    unset -nocomplain dir path ws base r1 v1 r2 v2 again r4 v4 r5 v5 old
+} -result {{ok full {} {{KNOWN-ERROR 13 13}}} {ok full {} accepted} 1 {{KNOWN-ERROR 13 13}} {semantic full {{KNOWN-ERROR 21 5}} {{KNOWN-ERROR 13 13}}} {syntax partial {{SYNTAX 21 5}} {}}}
+
+test sced-service-following-code {through the compiler service, the code after a rejected block keeps its diagnostics, at their own locations: reject() after the block always fails (KNOWN-ERROR there, and at the call of t, which therefore never completes), the same as with the block accepted} -body {
+    set dir [makeDirectory sced-service-following]
+    set path [file join $dir t.bot]
+    set ws [service::workspace -warnings off -cache ""]
+    set source [scedFollowingProgram missing [dict get $scedSnippets unhandled]]
+    set rejected [lindex [scedService $ws $path $source 1] 1]
+    set accepted [lindex [scedService $ws $path [scedFollowingProgram 1 [dict get $scedSnippets unhandled]] 2] 1]
+    list $rejected [expr {[lindex $rejected 2] eq [lindex $accepted 2]}]
+} -cleanup {
+    service::closeWorkspace $ws
+    removeDirectory sced-service-following
+    unset -nocomplain dir path ws source rejected accepted
+} -result {{semantic full {{KNOWN-ERROR 30 5} {KNOWN-ERROR 27 5}} {{UNBOUND 26 9}}} 1}
+
+cleanupTests

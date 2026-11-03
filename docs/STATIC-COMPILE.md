@@ -53,6 +53,9 @@ index the compiler cannot decide.)
 * [The construct](#the-construct)
 * [How it works](#how-it-works)
 * [The compiler namespace](#the-compiler-namespace)
+* [Expected diagnostics](#expected-diagnostics) -- negative compilation
+  tests, KNOWN-ERROR among them
+  (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md)
 * [Diagnostic-code census](#diagnostic-code-census)
 * [Decision economics](#decision-economics) -- how many builds the decisions
   take (STATIC-DECISION-ECONOMICS.md has the milestone report)
@@ -198,6 +201,57 @@ uncaught under `-strict 0`).
 There is one error, not one per diagnostic: what happened at the level of
 control flow is that compilation rejected the block; which diagnostic did is
 `code`.
+
+## Expected diagnostics
+
+A test that expects a diagnostic writes the code under test in a block and
+asserts the block's rejection with the golden framework's matchers
+(`std::test::rejects`, `rejects_at`, `rejects_message`,
+`rejects_containing`, GOLDEN-TEST-FRAMEWORK.md): the compiler analyzes the
+code by its ordinary rules, makes its ordinary diagnostic, and the block
+completes with it as `CompilerError` -- the test's result. Every diagnostic
+a block can make is expected the same way: KNOWN-ERROR is no special case
+(`KnownError`, in every form a statically known failure takes:
+`sced-known-error-forms`).
+
+Four different things, which the language keeps apart:
+
+| what | how |
+|---|---|
+| asserting that compilation produces a diagnostic | a `static compile:` block and `std::test::rejects` (this section) |
+| handling a run-time error | a handler on a call that *may* fail |
+| testing a run-time error's value | a handler in the tested code, the outcome compared with `std::test::value` (an input the compiler cannot decide: a parameter) |
+| suppressing a diagnostic | impossible: there is no such mechanism |
+
+A rejection is the block's result, never an exemption, and it stays inside
+the block (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md has the
+evidence):
+
+* **It makes nothing legal elsewhere.** The same KNOWN-ERROR in ordinary
+  code still rejects the program (`sced-ordinary-known-error-rejects`), and
+  an independent diagnostic beside the block is reported as ever
+  (`sced-independent-diagnostic-visible`).
+* **A block takes only the diagnostics located in its body.** One in a
+  function the block calls, in a sibling block or in another file is
+  never the block's (`sced-outside-scope`, `sced-other-file`); a block
+  reifies its first diagnostic, so a matcher pinning another call of the
+  block fails (`sced-assertion-distinguishes`).
+* **It hides nothing after it.** A rejected block standing as a statement
+  (an element of a statement sequence other than its last) does not make
+  the code after it unreachable for the checks: that code keeps its
+  KNOWN-ERROR, UNHANDLED-ERROR, USE-AFTER-MOVE, range facts, relational
+  proofs and emission checks -- exactly what it has with the block accepted
+  -- and so does a later block in the same sequence
+  (`sced-following-code-checked`, `hir::static::reifiedStatement`). At run
+  time the block still fails there and nothing after it runs. Where the
+  block's value is used (a binding's value), the code reading the value is
+  unreachable as after any failure: it reads a value that never exists
+  (`sced-value-position-unchanged`); the decided program holds no poison
+  (`sced-value-position-diverges`).
+* **It is decided from complete facts.** Resolution is decided first (an
+  unbound name rejects a block before any proof), and a verdict read from a
+  callee whose own block is rejected later is not kept
+  (`sced-resolution-first`, `sced-callee-dependency`).
 
 ## Diagnostic-code census
 
@@ -791,6 +845,14 @@ callers KNOWN-ERROR, including when it comes before a rejected block
 (`sc-known-error-exempt`); a KNOWN-ERROR inside a body is the body's
 rejection with code KnownError (`sc-negative-known-error`).
 
+A rejected block standing as a statement ends no path
+(STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md): the walk charges its
+CompilerError and goes on with the code after it, as if the block completed,
+so it sets no `intended` flag -- a function whose code after such a block
+always fails is a KNOWN-ERROR to call, as it is with the block accepted --
+and the code after it keeps every diagnostic of its own ([Expected
+diagnostics](#expected-diagnostics)).
+
 ### 19. Warnings
 
 Warnings run on the final program only, as on any program: a warning in an
@@ -1341,7 +1403,8 @@ Reading it:
 | `hir/staticdeps.tcl` | the dependency analysis of a build (`Deps`, `Explain`) |
 | `hir/hir.tcl` | `hir::buildSyntax` / `hir::BuildFull` (method-call seeds, `MethodConfig`, `BuildStats`), `hir::Diagnose`'s `related` |
 | `hir/resolve.tcl` | the mark on a reified `fail`, its UNHANDLED-ERROR wording |
-| `hir/completions.tcl` | KNOWN-ERROR's `intended` |
+| `hir/completions.tcl` | KNOWN-ERROR's `intended`; `Seq`'s rejected statements |
+| `hir/types.tcl`, `hir/range.tcl`, `hir/affine.tcl`, `hir/relations.tcl`, `hir/emission.tcl` | a rejected block standing as a statement ends no sequence (`hir::static::reifiedStatement`) |
 | `hir/warnings.tcl` | SAME-FAILURE skips reified failures |
 | `hir/affine.tcl` | related locations of USE-AFTER-MOVE / AFFINE-NOT-DEFINITELY-LIVE |
 | `hir/traits.tcl` | monomorphized-program diagnostics marked `internal` |
@@ -1351,6 +1414,7 @@ Reading it:
 | `stdlib/compiler.bot` | `DiagnosticCode`, `SourceLocation`, `CompilerError` |
 | `tests/static-compile.test` | the tests named above |
 | `tests/static-economics.test` | the schedulers' equality, build-count bounds, method-decision reuse, the properties the dependency analysis relies on |
+| `tests/static-compile-expected-diagnostics.test`, `tests/golden/static-compile-expected-diagnostics.bot` | expected diagnostics: the matchers, scope, the statement rule, order, cache, interchange, the compiler service |
 | `audit/static-compile/tools/` | `fuzz.tcl`, `mutate.tcl`, `mutants.txt` |
 | `audit/static-decisions/tools/` | the schedulers' differential (`compare.tcl`, `lib.tcl`), model-based fuzzer (`fuzz.tcl`) and mutants (`mutate.tcl`, `mutants.txt`) |
 | `bench/static-compile.tcl` | the performance report |
@@ -1361,10 +1425,16 @@ Reading it:
 If you change the static-intrinsic grammar, `hir/static.tcl`, the loader's
 deferral, how `fail` resolves or lowers, the completion walk's `fail` case,
 `hir::Diagnose`'s fields, or add a diagnostic kind anywhere in the front end:
-run `tests/static-compile.test`, `audit/static-compile/tools/fuzz.tcl`
-(several seeds, once with `-gc-stress 1`) and
-`audit/static-compile/tools/mutate.tcl` (every mutant in `mutants.txt` must
-still apply and be killed). A new diagnostic kind needs its classification
+run `tests/static-compile.test`,
+`tests/static-compile-expected-diagnostics.test`, its golden suite
+(`tclsh9.0 tests/local.tcl tests/golden/static-compile-expected-diagnostics.bot`),
+`audit/static-compile/tools/fuzz.tcl` (several seeds, once with
+`-gc-stress 1`) and `audit/static-compile/tools/mutate.tcl` (every mutant in
+`mutants.txt` must still apply and be killed). The same holds for a change
+to how an analysis ends a statement sequence (`hir::static::reifiedStatement`
+and its callers): a new analysis that stops at a statement that never
+completes reads it too, or a rejected block hides that analysis's
+diagnostics of the code after it. A new diagnostic kind needs its classification
 in `sc-census-exhaustive` and, if a block can produce it, a case in
 `stdlib/compiler.bot` and `hir::static::codes`.
 

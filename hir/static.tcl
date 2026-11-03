@@ -188,15 +188,36 @@
 # Completions
 # -----------
 # The reified failure is an ordinary `fail` of an ordinary payload error,
-# marked `static {operation compile kind KIND}` (provenance only). Two rules
-# read the mark: KNOWN-ERROR does not count a reified failure as proof that a
-# function never completes normally (hir/completions.tcl's `intended`), and
-# SAME-FAILURE does not count it as a fail site written by the programmer
-# (hir/warnings.tcl). Everything else -- the enclosing function's `errors`,
-# handlers, propagation, payload transport on every backend -- is the
-# ordinary error machinery; the one other use of the mark is the wording of
-# the UNHANDLED-ERROR a rejected site's error raises where it is not admitted
-# (hir/resolve.tcl).
+# marked `static {operation compile kind KIND}` (provenance only). Three
+# rules read the mark: KNOWN-ERROR does not count a reified failure as proof
+# that a function never completes normally (hir/completions.tcl's
+# `intended`), SAME-FAILURE does not count it as a fail site written by the
+# programmer (hir/warnings.tcl), and a reified failure standing as a
+# statement ends no path for the checks (below). Everything else -- the
+# enclosing function's `errors`, handlers, propagation, payload transport on
+# every backend -- is the ordinary error machinery; the one other use of the
+# mark is the wording of the UNHANDLED-ERROR a rejected site's error raises
+# where it is not admitted (hir/resolve.tcl).
+#
+# The same reasoning keeps a rejection from reaching past its block
+# (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md). A rejected site in
+# statement position -- an element of a statement sequence other than its
+# last, its value discarded (reifiedStatement) -- does not make the code after
+# it unreachable for the checks: types, ranges, completions, ownership and
+# relations analyze what follows as if the block could complete normally, so a
+# negative test never turns off a KNOWN-ERROR, an UNHANDLED-ERROR or a
+# USE-AFTER-MOVE of the code around it, nor the diagnostics of a later site in
+# the same sequence. (Before, they were silently gone: dead code, by the
+# ordinary rule for a statement that never completes.) No path ends at such a
+# block, so it is no `intended` completion either: a function whose code after
+# it always fails is a KNOWN-ERROR to call, as it is with the block accepted;
+# the CompilerError is charged as ever. At run time the failure still leaves
+# there: the backends, its exit releases and every run-time decision keep its
+# control flow, and the code after it never runs. Where the block's value is
+# used -- a binding's value, a destructuring's, a `return`'s, the last
+# expression of a body -- the reified failure is that value's ordinary failure
+# and what depends on it is unreachable as for any failure: a value the block
+# never produced has no facts to check the code reading it against.
 
 namespace eval hir::static {
     # The public diagnostic identities (stdlib/compiler.bot's `enum
@@ -397,6 +418,27 @@ proc hir::static::CodeOf {kind} {
         error "internal compiler error: diagnostic kind \"$kind\" has no std::compiler::DiagnosticCode case (hir/static.tcl's codes, stdlib/compiler.bot)"
     }
     return [dict get $codes $kind]
+}
+
+# 1 if expression E of HIR is a rejected site's reified failure standing as
+# a *statement* of SEQUENCE (a statement sequence: a block's or a branch's
+# body, which holds E): any element but the last, whose value the sequence
+# discards (STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md). The
+# analyses that end a sequence at a statement that never completes -- the
+# types' reachability (hir::types::Sequence, whose `reachable` flags the
+# other analyses read), the range, completion, ownership and relational
+# walks -- go on after it as if the block could complete normally, so a
+# rejected block, an intended outcome of the intrinsic, never makes the
+# code after it unreachable for the checks: that code keeps every
+# diagnostic of its own (header, "Completions"). Nothing else reads it: the
+# backends, the release placement at the failure and every run-time
+# decision (hir::mutvec::LaterIn) keep the failure's control flow.
+proc hir::static::reifiedStatement {hir sequence e} {
+    if {[lindex $sequence end] eq $e} {
+        return 0
+    }
+    set node [dict get $hir exprs $e]
+    return [expr {[dict get $node kind] eq "fail" && [dict exists $node static]}]
 }
 
 # ---------------------------------------------------------------------------

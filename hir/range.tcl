@@ -976,13 +976,18 @@ proc hir::range::ExternalSeeds {hir spec} {
 # One region, under one assumption of its parameters' ranges
 
 # Types EXPRS in order (a block body, an if branch): the last one's range,
-# or never if some expression never completes normally.
+# or never if some expression never completes normally -- a rejected static
+# block standing as a statement excepted (hir::static::reifiedStatement:
+# what follows it is analyzed as if it could complete).
 proc hir::range::Sequence {hirVar ctxVar exprs} {
     upvar 1 $hirVar hir $ctxVar ctx
     set result [unknown]
     foreach e $exprs {
         set result [Expr hir ctx $e]
         if {$result eq "never"} {
+            if {[hir::static::reifiedStatement $hir $exprs $e]} {
+                continue
+            }
             break
         }
     }

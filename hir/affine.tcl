@@ -1178,7 +1178,16 @@ proc hir::affine::Seq {hirVar exprs state} {
         if {$state eq "dead"} {
             return dead
         }
+        set before $state
         set state [Flow hir $e $state]
+        if {$state eq "dead" && [hir::static::reifiedStatement $hir $exprs $e]} {
+            # A rejected static block as a statement (STATIC-COMPILE.md,
+            # "Completions"): its failure is an exit (Flow recorded its
+            # state, ExitReleases releases there what it leaves), and the
+            # code after it is analyzed as if the block completed, with
+            # what was owned before it -- its payload is constants.
+            set state $before
+        }
         # The state after each statement (a loop body's, at the fixed
         # point): where a release may go (Releases).
         dict set afterStates $e $state

@@ -4019,7 +4019,9 @@ proc hir::types::ValueBinding {hir e} {
 # poisoned expression (Poison, above) is no divergence: what follows it stays
 # reachable, and the sequence is poison when it ends in one -- recorded in
 # CTX's `poisonResult` (1 or 0) for the caller that needs to tell (Block, If,
-# the loops).
+# the loops). Nor is a rejected static block standing as a statement
+# (hir::static::reifiedStatement): what follows it stays reachable for the
+# checks, as if the block could complete (STATIC-COMPILE.md, "Completions").
 proc hir::types::Sequence {hirVar ctxVar exprs} {
     upvar 1 $hirVar hir $ctxVar ctx
     set entry [dict get $ctx reachable]
@@ -4032,7 +4034,8 @@ proc hir::types::Sequence {hirVar ctxVar exprs} {
             set result $type
             set poison [expr {$type eq "never"}]
         }
-        if {$type eq "never" && [Halts $hir $e $type]} {
+        if {$type eq "never" && [Halts $hir $e $type]
+                && ![hir::static::reifiedStatement $hir $exprs $e]} {
             set halted 1
             set poison 0
             dict set ctx reachable 0

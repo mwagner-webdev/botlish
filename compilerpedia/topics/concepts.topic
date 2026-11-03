@@ -4819,7 +4819,23 @@ a `std::compiler::DiagnosticCode` case (Unbound, Type, KnownError, ...), and
   * It is not an assertion and not compile-time evaluation: the compiler
     never runs the block, it only decides whether it compiles. `compile`
     is the only operation (`static NAME:` with another name is
-    STATIC-UNKNOWN-OPERATION).
+    STATIC-UNKNOWN-OPERATION). The assertion is the test framework's
+    (std::test::rejects, rejects_at), which compares the reified code.
+  * A rejection is the block's result, never an exemption: the diagnostic
+    stays the compiler's, made by the ordinary rules, and only the block
+    holding its location takes it. The same code outside the block is
+    still rejected; a diagnostic outside the block (in a function the
+    block calls, in another block, in another file) is never the block's;
+    and a rejected block standing as a statement does not make the code
+    after it unreachable for the checks -- that code keeps its own
+    KNOWN-ERROR, UNHANDLED-ERROR or USE-AFTER-MOVE, as with the block
+    accepted. Where the block's value is used (a binding's value), the
+    code reading that value is unreachable, as after any failure.
+  * Four different things: asserting that compilation produces a
+    diagnostic (this block, with std::test::rejects); handling a run-time
+    error (a handler on a call that may fail); testing a run-time error's
+    value (a handler in the tested code, with std::test::value); and
+    suppressing a diagnostic, which Botlish has no way to do.
 
 == WHY
 It makes "this code is rejected with this diagnostic" testable from
@@ -4855,6 +4871,30 @@ fn adds() -> int:
 adds()
 @caption An accepted block is its body; no CompilerError is possible
 @value 42
+@end
+
+@example reject
+import std::compiler
+
+error Bad
+
+fn always() -> int errors Bad:
+    fail Bad
+
+fn probe() -> int errors std::compiler::CompilerError:
+    static compile:
+        always()
+    r = always():
+        on Bad:
+            1
+    r
+
+probe():
+    on std::compiler::CompilerError:
+        0
+@caption The block's expected KNOWN-ERROR does not hide the same failure after it
+@error CORE SEMANTIC KNOWN-ERROR
+@at 11:9
 @end
 
 == MORE
@@ -4971,6 +5011,12 @@ Two supported patterns:
     itself): put the code in a `static compile:` block and register it with
     std::test::rejects(name, std::compiler::DiagnosticCode::CASE, body) (or
     rejects_at to pin the location). The file imports compiler.
+  * The rejection is the test's result, not a permission: the same call
+    outside the block is still KNOWN-ERROR, and the block hides no
+    diagnostic of the code around it (concept.static-compile). Do not
+    hide an input the compiler can decide only to keep a test compiling:
+    test the decided failure as a rejection, and the run-time path with an
+    input the compiler cannot decide (a parameter).
 
 Choose a handler value the success path cannot produce (below, -1:
 checked never returns a negative number), so the comparison tells the
