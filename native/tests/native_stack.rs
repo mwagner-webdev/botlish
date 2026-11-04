@@ -804,14 +804,17 @@ fn threads(variant: &str) {
     }
     let (a_ready, wait_a) = channel::<()>();
     let (release_a, a_released) = channel::<()>();
+    // A installs its guard after B's (`a_start`): B's record is then the
+    // earlier one, the first in use, whatever the threads' timing.
+    let (a_start, a_wait_start) = channel::<()>();
     let a = (variant != "alone").then(|| {
         let variant = variant.clone();
         spawn(Box::new(move || {
+            a_wait_start.recv().unwrap();
             let stack = NativeStack::current().expect("the thread's stack");
             let guard = OverflowGuard::install_labelled(&stack, b"vm 0 ").expect("A's guard installs");
-            // A publishes after B's guard is in place (B is made first in
-            // `second`): a process-wide publication would now name A's
-            // stack for B's fault.
+            // A publishes after B's guard is in place: a process-wide
+            // publication would now name A's stack for B's fault.
             platform::set_active_stack(&stack);
             a_ready.send(()).unwrap();
             if variant == "released" {
@@ -846,6 +849,7 @@ fn threads(variant: &str) {
     }));
     wait_b.recv().unwrap();
     if let Some(a) = a {
+        a_start.send(()).unwrap();
         wait_a.recv().unwrap();
         if variant == "released" {
             a.join().unwrap();

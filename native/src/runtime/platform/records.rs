@@ -282,6 +282,18 @@ mod tests {
         go.send(()).unwrap();
         other.join().unwrap();
         assert!(find(token(2)).is_none(), "a thread that ends holding a record releases it");
+        // A release frees the releaser's record, never another one in use:
+        // C is claimed after A (a later record than A's while A is held).
+        let later = std::thread::spawn(move || {
+            let c = claim(token(3), (50, 60), false, 3, b"").expect("c claims");
+            release(c);
+            (c, find(token(1)).map(|r| r.words()), find(token(3)).is_none())
+        })
+        .join()
+        .unwrap();
+        assert_ne!(later.0, a);
+        assert_eq!(later.1, Some((11, 21)), "releasing C left A's record in use");
+        assert!(later.2, "releasing C freed C's record");
         release(a);
         assert!(find(token(1)).is_none());
         assert!(mine().is_none());
