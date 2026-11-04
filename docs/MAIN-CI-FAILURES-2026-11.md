@@ -226,6 +226,14 @@ ecc5fd69, 10-28).
   index, not by cost.
 - **Fixed here:** three shards (`.github/workflows/macos-arm64.yml`; the
   Tier C job already uses three).
+- **Again, 2026-11-04:** main's run 41728433872 (d857749) cut shard 1 of
+  three off at the limit in its golden phase, every test file and suite
+  before the cut passing. SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md's two
+  test files had shifted the round-robin, and shard 1 took
+  `warning-gate.test` (20 minutes on a 4-core container),
+  `static-economics.test`, `tree-struct.test` and `value-identity.test`
+  among others. Tier B now has four shards (66 test files each); Tier C
+  keeps three.
 
 ### 3.5 A workflow that pushes to main
 
