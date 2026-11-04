@@ -525,9 +525,18 @@ proc gitSource {} {
     writeText [file join $dir src lib.c] "int f(void) { return 1; }\r\n"
     writeText [file join $dir run.bat] "@echo off\r\n"
     writeText [file join $dir .gitattributes] "*.bat text eol=crlf\n"
-    file attributes [file join $dir README] -permissions 0o755
+    # An executable file where the host's files have an executable bit
+    # (`file attributes -permissions` is Unix's only). On Windows no file
+    # has one: GitTree reads every file as 100644 there, as Git for Windows
+    # (core.filemode false) adds a new file.
+    if {$::tcl_platform(platform) eq "unix"} {
+        file attributes [file join $dir README] -permissions 0o755
+    }
+    # Git's tree of exactly these bytes under the repository's own
+    # attributes: no line-ending conversion from the host's configuration
+    # (Git for Windows' installer sets core.autocrlf true).
     foreach command {{init -q} {add .} {-c user.name=a -c user.email=a@b commit -q -m one}} {
-        exec git -C $dir {*}$command
+        exec git -c core.autocrlf=false -C $dir {*}$command
     }
     return [dict create dir $dir commit [exec git -C $dir rev-parse HEAD] tree [exec git -C $dir rev-parse HEAD^{tree}]]
 }
@@ -689,9 +698,10 @@ test pa-compare-archive-members {for two static archives, compare names the memb
     join [pm::release::FileDifferences [readBytes $a] [readBytes [file join $bin b libq.a]] libq.a] |
 } -cleanup cleanup -match glob -result {member q_value.o differs|  sections whose bytes differ: .text*}
 
-test pa-compare-git-tree-matches-git {the Git tree computed without git equals git's own for a tree with a subdirectory, an executable file and a .gitattributes text conversion (CRLF stored as LF)} -constraints {git} -body {
+test pa-compare-git-tree-matches-git {the Git tree computed without git equals git's own for a tree with a subdirectory, an executable file (on Unix; Windows files have no executable bit, so there README is 100644 in both trees) and a .gitattributes text conversion (CRLF stored as LF)} -constraints {git} -body {
     set git [gitSource]
-    expr {[dict get [pm::release::GitTree [dict get $git dir]] tree] eq [dict get $git tree]}
-} -cleanup cleanup -result 1
+    list [expr {[dict get [pm::release::GitTree [dict get $git dir]] tree] eq [dict get $git tree]}] \
+        [lindex [exec git -C [dict get $git dir] ls-tree HEAD README] 0]
+} -cleanup cleanup -result [list 1 [if {$::tcl_platform(platform) eq "unix"} {string cat 100755} else {string cat 100644}]]
 
 cleanupTests
