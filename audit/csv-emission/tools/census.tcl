@@ -2,7 +2,9 @@
 # (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 12).
 #
 #   tclsh9.0 audit/csv-emission/tools/census.tcl ?-only NAME? ?-out FILE?
-#       ?-backend B? ?-length L?
+#       ?-backend B? ?-length L? ?-show 1?
+#
+# (-show 1 prints the oracle's every failure, for a mutant's diagnosis.)
 #
 # Each mutation of audit/csv-emission/census/mutants.txt is applied alone to
 # a private copy of examples/dfa/csv. Then:
@@ -26,7 +28,7 @@
 # the compiler certified has an invalid trace (a false proof).
 
 set here [file dirname [file normalize [info script]]]
-set options [dict merge {-only "" -out "" -backend compile -length 3} $argv]
+set options [dict merge {-only "" -out "" -backend compile -length 3 -show 0} $argv]
 set argv {}
 source [file join [file dirname [file dirname [file dirname $here]]] tests helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -148,6 +150,9 @@ proc census::Judge {cases outcomes} {
     foreach line [split $report \n] {
         if {[regexp {^FAIL \S+ (\S+): (.*)$} $line -> check message]} {
             lappend fails [list $check $message]
+            if {$::options ne "" && [dict get $::options -show]} {
+                puts "    $line"
+            }
         }
     }
     return [list $invalid $fails]

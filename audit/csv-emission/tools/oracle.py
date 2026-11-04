@@ -324,6 +324,12 @@ def judge(kind, enc, outcome, symbols):
 
     if bad is not None:
         k, i, v = bad
+        if status == "quoting":
+            # Stopped by another guard, with another declared error: nothing
+            # wrong was written, but the error is not the profile's.
+            results["expected"] = "guard: input has U+%04X at %d of field %d: expected unsupported, the run failed %s %d %d" % (
+                v, i, k, status, at, value)
+            return results
         if status != "unsupported" or at != i or value != v:
             results["expected"] = "input has U+%04X at %d of field %d: expected unsupported, got %s %d %d" % (
                 v, i, k, status, at, value)

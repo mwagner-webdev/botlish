@@ -11181,3 +11181,4 @@ tests/csv-emission.test csv-python-reads-back pass
 tests/csv-emission.test csv-differential-sample pass
 tests/csv-emission.test csv-native-erasure pass
 tests/csv-emission.test csv-exporter pass
+tests/csv-emission.test csv-service-navigation pass

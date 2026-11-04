@@ -354,7 +354,7 @@ fn field_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter 
                 return true
 >>>>
 
-@@ selective-classic-rule selective_emit.bot accepted guard-latent needs_quotes written as the classic rule (quote if the value holds a comma, a quotation mark, CR or LF): it forgets TAB, U+2028, U+2029 and U+FEFF -- the guard stops them at run time (latent: ordinary data has none)
+@@ selective-classic-rule selective_emit.bot accepted guard-latent needs_quotes written as the classic rule (quote if the value holds a comma, a quotation mark, CR or LF): it forgets TAB, U+2028, U+2029 and U+FEFF -- the guard stops them at run time (latent: ordinary data has none), and an unsupported character now fails QuotingDecision instead of UnsupportedCSVCharacter
 <<<<
 fn needs_quotes(value: str) -> bool:
     if value.length() == 0:

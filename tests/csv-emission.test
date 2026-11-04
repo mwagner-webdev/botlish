@@ -27,6 +27,8 @@ interp recursionlimit {} 100000
 core::useProgramRecursionLimit
 
 testConstraint python3 [expr {![catch {exec python3 -I -c "import csv"}]}]
+testConstraint nativeLinux [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64 aarch64}}]
 
 set csvDir [file join $::projectRoot examples dfa csv]
 
@@ -274,6 +276,24 @@ test csv-service-hover {the compiler service's hover on a CSV emitter states its
         file delete -force $dir
     }
 } -result {{fn strict_emit::quoted_field(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::quoted_field, csv_strict::field} {{emits csv_strict::quoted_field: certified to emit csv_strict::quoted_field: every normal completion has yielded exactly one token, every prefix it yields is viable; its token ends at the end of the input or before '\r' ','} {emits csv_strict::field: certified to emit csv_strict::field: every normal completion has yielded exactly one token, every prefix it yields is viable; its token ends at the end of the input or before '\r' ','}}}
+
+test csv-service-navigation {on a claim's recognizer name the service navigates to the declared recognizer in csv_strict.bot, and lists the claims that name it among its references} -body {
+    set path [csvProgram "import strict_emit\n0\n"]
+    set dir [file dirname $path]
+    set ws [service::workspace -root $dir]
+    try {
+        set rev [service::analyze $ws $path]
+        set file [file join $dir strict_emit.bot]
+        set line [lindex [split [csvRead $file] \n] 27]
+        set column [expr {[string first "csv_strict::quoted_field" $line] + 1}]
+        set fact [service::at $rev $file 28 $column]
+        list [dict get $fact construct kind] [file tail [dict get $fact definition file]] [dict get $fact definition line] \
+            [llength [lmap r [dict get $fact references] {expr {[file tail [dict get $r file]] eq "strict_emit.bot" ? 1 : [continue]}}]]
+    } finally {
+        service::closeWorkspace $ws
+        file delete -force $dir
+    }
+} -cleanup {unset -nocomplain path dir ws rev file line column fact} -result {emits-claim csv_strict.bot 48 1}
 
 # ---------------------------------------------------------------------------
 # The runs (examples/dfa/csv/probes.bot)
