@@ -159,7 +159,7 @@ const C_CALLS: bool = cfg!(any(
 ## native/src/runtime/program.rs
 <<<<
     map.finish();
-    vm.set_framemap(Rc::new(map));
+    vm.set_framemap(std::sync::Arc::new(map));
 ====
     map.finish();
     let _ = map;
@@ -188,7 +188,7 @@ const C_CALLS: bool = cfg!(any(
 @@ result-not-printed a standalone executable prints no value
 ## native/src/runtime/aot.rs
 <<<<
-        match writeln!(std::io::stdout().lock(), "{}", show(result)) {
+        match writeln!(std::io::stdout().lock(), "{}", show(&vm.info, result)) {
 ====
         match write!(std::io::stdout().lock(), "") {
 >>>>

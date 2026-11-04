@@ -92,9 +92,14 @@ number is from that one machine.
   dropped, from a coroutine stack, and after 16 threads churned 200 guards
   each. An unguarded thread's overflow beside a guarded one is never
   relabelled (observed, native/tests/native_stack.rs).
-* 20 mutants of the new invariants, each with a named detector
+* 20 mutants of the new invariants, each killed by a named detector
   (section 14). Platform CI on macOS AArch64, Windows x86-64 and Linux
   AArch64 is covered in section 12.
+
+**Cost.** One consistent cost: about 3 ns per coroutine resume (1.04-1.05x
+on a loop that does nothing else), the guard publication finding the
+thread's own record. Context reads, context-owned collections, hashing and
+allocation are unchanged within this machine's noise (section 15).
 
 **Deferred.** Everything the brief lists as a non-goal: Botlish-owned
 threads (`std::thread`), cross-thread actors and transport, the event-loop
@@ -337,9 +342,13 @@ restored after the last, under a mutex used only by installation and
 removal.
 
 **Publication.** `set_active_stack` writes into the calling thread's record
-only, found through the thread-local index: a double buffer, then one
-release store. A thread without a guard publishes nothing, and one thread
-never overwrites another's published stack.
+only: a double buffer, then one release store. The record is found through
+a second, destructor-free thread-local holding its address (`MINE_RECORD`);
+an address computed from the index made every coroutine switch wait on a
+multiply and the table's address (section 15). A thread-local with a
+destructor of its own (`Releaser`) frees the record when the thread ends. A
+thread without a guard publishes nothing, and one thread never overwrites
+another's published stack.
 
 **Fault classification.**
 
@@ -380,16 +389,19 @@ scenarios, each in a child process):
 
 | check | scenario | result |
 |---|---|---|
-| threads second | A and B guarded, A publishing after B installed, B exhausts its stack | `vm 1 error {NATIVE LIMIT STACK} ...`, exit 0 |
-| threads released | A's guard dropped and its thread joined, then B exhausts | `vm 1 ...` (B's record and the handler outlive A's), exit 0 |
+| threads second | A and B guarded, A installing and publishing after B installed, B exhausts its stack | `vm 1 error {NATIVE LIMIT STACK} ...`, exit 0 |
+| threads released | A's guard (the later record) dropped and its thread joined, then B exhausts | `vm 1 ...` (B's record and the handler outlive A's), exit 0 |
 | threads coroutine | B exhausts a coroutine stack (a Vm, rt_co_start) while A is guarded | `vm 1 ...`, exit 0: the switch published B's coroutine stack into B's record |
 | threads churn | 16 threads install and drop guards 200 times each at once; then all records are free and one more thread exhausts | `vm 9 ...`, exit 0 |
 | threads unguarded | A guarded, an unguarded B exhausts | killed by SIGABRT, exactly as with no guard anywhere: never relabelled |
 
 `records_are_per_thread` and `a_reused_token_reclaims_a_stale_record`
 (Rust) check that the records are per thread, that publication is
-separated, that a second claim on one thread is refused, that the
-destructor releases a record, and that a stale token is reclaimed. Every
+separated, that a second claim on one thread is refused, that a release
+frees the releaser's record and never an earlier one in use, that the
+destructor releases a record, and that a stale token is reclaimed. The
+threads are sequenced by channels, never by time: A installs its guard
+only after B's, so B's record is the earlier one in every run. Every
 existing check of native_stack.rs passes unchanged: every thread kind,
 every mode, coroutine overflows, the faults a guard must not claim,
 publication and the switch sweep. Windows has a test of two guarded
@@ -598,10 +610,18 @@ for running one program's Vms with contexts. It is the driver's, like
 | target | context base from the Vm | program metadata through the Vm | per-thread guard records | concurrent Vms of one program | evidence |
 |---|---|---|---|---|---|
 | Linux x86-64 | yes | yes | yes | yes, 2-8 Vms, also under GC stress | observed (sections 7, 10, 13) |
-| Linux AArch64 | yes (the same CLIF: an AArch64 `ldr` from the Vm) | yes | yes (guard.rs, shared) | the same tests | type-checked here (`cargo check --target aarch64-unknown-linux-gnu --lib --bins --tests`); @@CI-ARM64@@ |
-| macOS AArch64 | yes | yes | yes (guard.rs, shared; macos.rs unchanged) | the same tests (the acceptance tier globs every test file) | type-checked here (`--target aarch64-apple-darwin`); @@CI-MACOS@@ |
-| Windows x86-64 (MSVC) | yes | yes | yes (windows.rs over the same records) | the same tests | type-checked here (`--target x86_64-pc-windows-msvc`); @@CI-WINDOWS@@ |
+| Linux AArch64 | yes (the same CLIF: an AArch64 `ldr` from the Vm) | yes | yes (guard.rs, shared) | the same tests | type-checked here (`cargo check --target aarch64-unknown-linux-gnu --lib --bins --tests`); CI: `tests-arm64.yml`, dispatched on the branch, had not started when this was written (pending; the note below) |
+| macOS AArch64 | yes | yes | yes (guard.rs, shared; macos.rs unchanged) | the same tests (the acceptance tier globs every test file) | type-checked here (`--target aarch64-apple-darwin`); CI, partial: the smoke job passed on the first commit (Rust unit tests, the native stack checks, native status, the smoke tier, objects and executables), `icy-tower (macos arm64)` passed on two commits; the acceptance tier was cancelled by later pushes and is pending |
+| Windows x86-64 (MSVC) | yes | yes | yes (windows.rs over the same records) | the same tests | type-checked here (`--target x86_64-pc-windows-msvc`); CI, partial: `icy-tower (windows x86-64)` passed (the game's native executable built and tested on Windows); the `roots` job's fallback-plan Rust tests and GC workloads passed before a later push cancelled the run; the smoke job (the Rust tests, `native_stack` on Windows) is pending |
 
+* **CI's state.** GitHub's runners were saturated for the whole session:
+  `main`'s own `tests.yml` runs were queued as long as the branch's. Every
+  push cancels the branch's earlier macOS and Windows runs (their
+  concurrency group), so the partial results above are from earlier
+  commits of the branch. The context base's load and the publication's
+  thread-local changed after the first commit, so its smoke results are
+  evidence for that commit's code only. Runs that had not finished are
+  pending, not passed.
 * **macOS main-thread executables.** The startup is unchanged: the guard is
   installed on whichever thread runs the program, and the records do not
   care which thread that is (`tests/main-thread-startup.test`).
@@ -613,7 +633,83 @@ for running one program's Vms with contexts. It is the driver's, like
 
 ## 13. Regression testing
 
-@@REGRESSION@@
+**The whole local suite** (`tclsh9.0 tests/local.tcl`, observed, on the
+code of `0286328`; the later commits change only Rust tests, mutant texts
+and one `cfg` attribute, and those were rerun as listed below):
+
+* 265 Tcl test files on interp and on compile (golden duplicates skipped)
+  and 117 golden suites on all four backends, through the front-end cache.
+  645 of 647 passed.
+* The two failures are one test on both passes: `package-authoring.test`'s
+  `pa-add-refusals`. The cause is this container's toolchain, not the
+  milestone. The test builds its fixture with `clang
+  --target=aarch64-linux-gnu -shared`, which links with the host's GNU ld,
+  and this ld has no AArch64 emulation ("unrecognised emulation mode:
+  aarch64linux"). It fails in the fixture's `exec clang`, before any
+  Botlish code runs.
+* The run took 6,700 s of wall time with 4 jobs on this shared container
+  (AGENTS.md's reference: 26-33 minutes on an unshared 4-core one).
+* The files of the areas the milestone changed, from that run (interp and
+  compile alike):
+
+| file | passed |
+|---|---:|
+| `concurrent-vms.test` | 11 |
+| `contexts.test` | 61 (12 golden duplicates skipped) |
+| `context-traits.test` | 53 |
+| `coroutines.test` | 37 (44 golden duplicates) |
+| `native-library.test` | 28 |
+| `c-callbacks.test` | 36 |
+| `native-stack-overflow.test` | 21 |
+| `native-stack-map.test` | 9 |
+| golden `c-callbacks.bot` | 9 on each of four backends |
+
+**Rust and the native checks** (observed, on the final code):
+
+| check | result |
+|---|---|
+| `cargo test --release --lib --bins` | 333 and 121 passed |
+| the same under `BOTLISH_NATIVE_GC_STRESS=1` | 333 and 121 passed |
+| `cargo test --release --test native_stack` | every check passes, the `threads` scenarios included; the same under GC stress (72 checks) |
+| `tests/platform/aot-facts.tcl` | "native objects and executables on linux-x86_64 are as recorded" (no context symbol or relocation) |
+| `cargo check --target` x86_64-pc-windows-msvc, aarch64-apple-darwin, aarch64-unknown-linux-gnu (`--lib --bins --tests`) | builds, no warnings |
+| `cargo check --features fallback-roots` | builds |
+| `tools/compilerpedia.tcl check` | 0 problems |
+
+**Regressions found and fixed along the way.**
+
+* `ct-source-audit` (`tests/context-traits.test`) failed on the word
+  "selections" in a new comment of `vm.rs`. That test greps the native
+  sources for context-trait vocabulary. The comment was reworded ("which
+  implementation each requirement calls").
+* `cb-refused-thread` (`tests/c-callbacks.test`) failed. A callback that C
+  calls on a thread it created is refused with a fatal report, and that
+  report used to read the driver's mode from the one process-wide guard
+  state. With per-thread records, that thread has no record, so the report
+  went to standard error with status 1 instead of the driver's result. The
+  report now reads the mode from any guarded thread's record
+  (`records::any`) and writes no label for a record that is not the
+  thread's own.
+
+**Mutants of other harnesses** whose code this milestone rewrote. AGENTS.md
+requires every mutant to still apply. A scan of every `mutants.txt` found
+23 whose text no longer occurred in the code they mutate:
+
+* `native-stack`: 16 (the POSIX and Windows guards);
+* `enums`: 2 (`ops.rs`'s hash walk);
+* `native-aot`: 2 (`program.rs`, `aot.rs`);
+* `native-library`, `target-model` and `value-identity`: 1 each.
+
+Each was rewritten against the new code as a mutant of the same rule. For
+example, "a dropped guard never returns to UNGUARDED" is now "a dropped
+guard never releases its record". `records::any` is now compiled on every
+host, so that `win-any-thread` can state its rule on Windows. All 19
+Windows mutants of `platform/windows.rs` build for
+`x86_64-pc-windows-msvc`. The rewritten mutants' Linux runs were still running when this was committed (the next commit records them). Two mutants of
+`codegen/aot.rs` (`c-ffi`'s `link-failure-removes-earlier`,
+`native-link-plan`'s `system-loses-static`) do not apply, and did not at
+the branch's base either: they are not this milestone's, and are left as
+they are.
 
 ## 14. Mutation testing
 
@@ -627,10 +723,26 @@ each naming (`!!`) the detectors meant to kill it.
 * **Kills.** A mutant is killed only when one of its own detectors fails or
   does not complete. A crash of an unrelated test is never counted.
 
-Run on Linux x86-64 (observed). 20 mutants on the first run: 18 killed, 2
-survived; the two survivors' detector was too weak and was strengthened,
-and both were then killed (`mutate.tcl -only
-guard-handler-thread-local,guard-handler-allocates`: 2 killed). 20 of 20.
+Run on Linux x86-64 (observed), in three passes:
+
+1. **First run** (the first commit's code): 18 of 20 killed. The two
+   async-signal-safety mutants survived because their detector was too weak
+   (below). It was strengthened, and `-only
+   guard-handler-thread-local,guard-handler-allocates` killed both.
+2. **Final run** (the code after the context-base and publication changes
+   of section 15): 19 of 20 killed. `guard-release-other` survived. Its
+   detector depended on timing: in `threads:released`, A and B installed
+   their guards concurrently. The mutant (a release frees the first record
+   in use) changes nothing when the releasing thread's record happens to be
+   the first one, so the first run's kill was luck. The fix: A now installs
+   after B (a channel), and `records_are_per_thread` releases a later
+   record while an earlier one is held.
+3. **That mutant alone** (`-only guard-release-other`): killed by
+   native_stack's `threads released`. The harness stops at the first
+   detector that fails, so the records test was checked by applying the
+   mutant by hand: it fails at "releasing C left A's record in use".
+
+20 of 20 killed, each by a detector that does not depend on timing.
 
 | mutant | the defect | killed by |
 |---|---|---|
@@ -646,16 +758,16 @@ guard-handler-thread-local,guard-handler-allocates`: 2 killed). 20 of 20.
 | guard-one-thread | one guarded thread per process | native_stack `threads second`, `released`, `coroutine`, `churn` |
 | guard-publish-process-wide | every publication goes to the first record | native_stack `threads second`, `released`, `churn` |
 | guard-wrong-thread | the handler takes the first record, whatever thread faulted | rust-lib `records_are_per_thread` |
-| guard-release-other | a release frees the first record in use | native_stack `threads released` |
+| guard-release-other | a release frees the first record in use | native_stack `threads released`, rust-lib `records_are_per_thread` (final run: SURVIVED, see above) |
 | guard-handler-removed-early | every drop restores the dispositions | native_stack `threads released` |
 | guard-stale-after-exit | a thread that ends holding a record keeps it | rust-lib `records_are_per_thread` |
-| guard-handler-thread-local | the POSIX handler reads the record through a thread-local (not async-signal-safe) | first run: SURVIVED; then `cv-source-guard-records` |
-| guard-handler-allocates | the POSIX handler formats its report on the heap | first run: SURVIVED; then `cv-source-guard-records` |
+| guard-handler-thread-local | the POSIX handler reads the record through a thread-local (not async-signal-safe) | `cv-source-guard-records` (first run: SURVIVED) |
+| guard-handler-allocates | the POSIX handler formats its report on the heap | `cv-source-guard-records` (first run: SURVIVED) |
 | guard-thread-only-termination | an overflow ends only the faulting thread | native_stack `threads second`, `released`, `coroutine`, `churn` |
 | pool-stale-vm | a pooled coroutine stack starts with the pool's first Vm | `cv-rounds` |
 | callback-active-kept | a closed transition leaves its Vm waiting | c-callbacks.test `cb-refused-retained` |
 
-**The two survivors.** Both are async-signal-safety defects, which no
+**The first run's two survivors.** Both are async-signal-safety defects, which no
 dynamic test catches reliably: a thread-local read or a heap allocation in
 a fault handler works until the faulting thread holds the allocator's lock,
 or until its thread-locals are not yet allocated. Their detector,
@@ -684,7 +796,99 @@ harness on the other hosts is not done here.
 
 ## 15. Performance
 
-@@PERF@@
+**Method** (`bench/per-thread-runtime.tcl -baseline BIN -repeat 5`,
+observed):
+
+* BIN is `botlish-native` built from the branch's base (`1faa9c9`) in a
+  separate tree, with the same toolchain and profile.
+* Both drivers run the same NIR files, because NIR is unchanged (section
+  4).
+* Each program is one operation the milestone changed, repeated in a loop:
+  - `context-read`: two fields of an installed context read in a 2,000,000-iteration fold;
+  - `context-collections`: 200,000 pushes onto a context-owned MutableVector;
+  - `coroutine-resume`: 200,000 resumes on the general runtime, fusion off;
+  - `hash-enum-struct`: 100,000 hashes of an enum case and a struct, whose names come from the program;
+  - `allocation`: 300,000 nested List constructions, collections included.
+* Each is run as `bench 21` (21 runs in one process, compilation excluded).
+  The table gives the best and the median per run, from the best of 5
+  processes.
+* The container is shared, and its load average was 1.4-2.4 during the
+  runs. The script was therefore run five times. The table is one run;
+  the last column is the range over all five.
+
+| program | before (µs, best / median) | after (µs, best / median) | after/before, this run | after/before, five runs |
+|---|---:|---:|---:|---:|
+| context-read | 4645 / 5151 | 4839 / 5480 | 1.04 | 0.95 - 1.04 |
+| context-collections | 928 / 978 | 918 / 1006 | 0.99 | 0.95 - 1.06 |
+| coroutine-resume | 12424 / 14024 | 13106 / 13487 | 1.05 | 1.04 - 1.05 |
+| hash-enum-struct | 13578 / 14005 | 13474 / 15002 | 0.99 | 0.96 - 1.01 |
+| allocation | 45249 / 49985 | 46333 / 50528 | 1.02 | 0.97 - 1.04 |
+
+Four of the five move in both directions, by up to 6%, from run to run:
+on this machine they are unchanged within its noise. The one consistent
+cost is the coroutine switch's publication: 1.04-1.05 in every run.
+
+**The coroutine switch.** It costs about 600 µs per 200,000 resumes (the
+five runs' best-to-best differences were 476-682 µs): about 3 ns per
+resume, or 1.5 ns per switch, since each resume and each yield publishes.
+Where it comes from was measured with experimental builds (not
+committed), each run as `bench 21`, best of the runs:
+
+| driver | coroutine-resume (ms per run) |
+|---|---:|
+| base | 13.06 |
+| base, publication removed | 12.58 |
+| first version (the record's address computed from the thread's index) | 14.09 |
+| first version, publication removed | 12.33 |
+| one static record (as if one thread; not a design) | 13.1 |
+| final (the record's address in a thread-local) | 13.7 |
+
+* **Publication is the whole difference.** Without it the new runtime is
+  no slower than the base (12.33 against 12.58 ms).
+* **Finding the thread's record is the cost.** With one static record it
+  costs what the base's did. The first version computed the record's
+  address from the thread-local index (a multiply and the table's address)
+  on every switch. Keeping the address in a destructor-free thread-local
+  (`MINE_RECORD`) removed about half of the added cost.
+* **What is left** is a thread-local load and the double buffer's stores:
+  about 7 ns per resume of publication, against the base's 2.4 ns.
+* **Not done: caching the record in the Vm.** A Vm is thread-affine, so it
+  could hold its thread's record and skip the thread-local. But a guard
+  and a Vm have independent lifetimes. Once a guard is dropped while its
+  Vm lives, another thread may claim the freed record, and the cached
+  pointer would then publish into that thread's record: the defect
+  section 7 rules out. The milestone keeps the thread-local.
+
+**The context read.** The first version loaded the context base from the
+Vm with Cranelift's `can_move` flag. Cranelift then placed the load at its
+uses, inside the loop, which made one dependent load per iteration:
+1.38x the base on `context-read`. The final version loads the base once,
+in the function's entry block, read-only but not movable (section 4). The
+five runs give 0.95-1.04.
+
+**Concurrent Vms** (the harness's whole process, milliseconds, best of 5,
+the same five runs; no before column, since the harness is new). In
+`vms N`, each of N Vms runs the same CPU-bound program, 30,000,000
+iterations of an Int fold, so N Vms do N times the work.
+
+| run | wall, this run | wall, five runs |
+|---|---:|---:|
+| `vms 1` | 72.8 | 68.7 - 72.8 |
+| `vms 2` | 71.5 | 71.2 - 88.4 |
+| `vms 4` | 71.3 | 71.3 - 99.1 |
+| `vms 1 --rounds 1` of `1 + 2` | 3.2 | 3.2 - 3.7 |
+| `vms 1 --rounds 1000` of `1 + 2` | 5.6 | 5.6 - 6.2 |
+
+* **The Vms run in parallel.** Two and four Vms finish in about the time
+  of one: their best walls over the five runs (71.2 and 71.3 ms) are
+  within 4% of one Vm's (68.7 ms). A process-wide lock on the execution
+  path would make the wall grow with N.
+* **The spread at N = 4 is the machine.** There are 4 vCPUs, shared, and
+  the harness's own main thread runs beside the four Vms.
+* **A Vm's whole life is about 2.5 µs** for a trivial program: making it,
+  installing the image, running and dropping it. That is (5.6 - 3.2) ms
+  over 999 more rounds; the rest of the process is the driver's startup
+  and the compilation.
 
 ## 16. Remaining limitations
 

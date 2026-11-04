@@ -230,8 +230,9 @@ pub fn find(token: usize) -> Option<&'static Record> {
 /// A record of any guarded thread (the first in the table), if one is:
 /// atomic loads only. What a report made on a thread holding none -- a
 /// foreign thread C created, calling a callback -- reads the process's mode
-/// from (POSIX: Windows' guard has no fatal report).
-#[cfg(unix)]
+/// from (POSIX: Windows' guard has no fatal report, but the native-stack
+/// mutants' "any thread" rule is stated with it on every host).
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn any() -> Option<&'static Record> {
     TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING))
 }

@@ -1533,11 +1533,13 @@ owns its native stack, its guard record and its thread-local runtime state
   keep a Vm pointer past its transition (`callback.rs`'s ACTIVE) or a pooled
   coroutine stack its previous Vm (`prepare` writes the Vm per start).
 * The guard's records are per thread (`records.rs`): a thread publishes only
-  into its own (through its thread-local index), the handlers find a record
-  by the faulting thread's token with atomic loads only (no thread-local,
-  lock or allocation in a handler), and a record is released when its guard
-  drops or its thread ends. A native stack overflow stays process-terminal:
-  never end only the faulting thread, whatever its Vm's isolation.
+  into its own (through a destructor-free thread-local holding its record's
+  address; never a record cached in a Vm, whose guard may drop first), the
+  handlers find a record by the faulting thread's token with atomic loads
+  only (no thread-local, lock or allocation in a handler), and a record is
+  released when its guard drops or its thread ends. A native stack overflow
+  stays process-terminal: never end only the faulting thread, whatever its
+  Vm's isolation.
 * `botlish-native vms N` (main.rs's `concurrent_vms`) is a test harness, not
   a thread API: no Botlish program can start a thread. Its collection hook
   and the heap's ownership check (`Heap::set_ownership_check`) are test
