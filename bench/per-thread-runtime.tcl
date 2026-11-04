@@ -89,9 +89,7 @@ r
 }
 dict set programs hash-enum-struct {
 enum Color:
-    Red
-    Green
-    Blue
+    Red, Green, Blue
 struct Point:
     x: int
     y: int
@@ -115,7 +113,7 @@ churn(300000)
 
 # The best and the median microseconds of BIN's `bench RUNS` of NIR, the
 # best of REPEAT processes.
-proc measure {bin nir {env {}}} {
+proc measure {bin nir {environment {}}} {
     global runs repeat
     lassign [file tempfile path botlish-ptr.nir] channel
     fconfigure $channel -encoding utf-8 -translation lf
@@ -125,7 +123,7 @@ proc measure {bin nir {env {}}} {
     set median {}
     try {
         for {set k 0} {$k < $repeat} {incr k} {
-            set output [withEnvironment $env {exec $bin bench $runs $path 2>@1}]
+            set output [withEnvironment $environment {exec $bin bench $runs $path 2>@1}]
             if {![regexp -line {^times (.*)$} $output -> times]} { error "no timing from $bin: $output" }
             set times [lsort -integer $times]
             set b [expr {[lindex $times 0] / 1000.0}]
@@ -148,10 +146,19 @@ puts "| program | before (BIN) | after (this checkout) | best after/before |"
 puts "|---|---:|---:|---:|"
 dict for {name text} $programs {
     set nir [native::nir [surface::compile $text -warnings off]]
-    set env [expr {$name eq "coroutine-resume" ? {BOTLISH_NATIVE_COROUTINE_FUSION 0} : {}}]
-    set after [measure $current $nir $env]
-    set before [expr {$baseline eq "" ? "" : [measure $baseline $nir $env]}]
-    set ratio [expr {$before eq "" ? "--" : [format %.2f [expr {[lindex $after 0] / [lindex $before 0]}]]}]
+    set environment {}
+    if {$name eq "coroutine-resume"} {
+        set environment {BOTLISH_NATIVE_COROUTINE_FUSION 0}
+    }
+    set after [measure $current $nir $environment]
+    set before {}
+    if {$baseline ne ""} {
+        set before [measure $baseline $nir $environment]
+    }
+    set ratio --
+    if {$before ne ""} {
+        set ratio [format %.2f [expr {[lindex $after 0] / [lindex $before 0]}]]
+    }
     puts "| $name | [fmt $before] | [fmt $after] | $ratio |"
 }
 

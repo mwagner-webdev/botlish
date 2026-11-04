@@ -45,7 +45,7 @@
 !! rust-bin:each_vm_of_one_compiled_program_has_its_own_area concurrent-vms.test:cv-concurrent-* concurrent-vms.test:cv-source-context-area
 ## native/src/codegen/clif.rs
 <<<<
-        Ok(self.b.ins().load(I64, MemFlagsData::trusted().with_readonly().with_can_move(), self.vm, VM_CONTEXT_OFFSET))
+        Ok(self.b.ins().load(I64, MemFlagsData::trusted().with_readonly(), self.vm, VM_CONTEXT_OFFSET))
 ====
         static SHARED: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
         let area = *SHARED.get_or_init(|| Box::leak(vec![0u64; 4096].into_boxed_slice()).as_mut_ptr() as usize);
@@ -227,14 +227,16 @@ fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
 !! native_stack:threads rust-lib:records_are_per_thread
 ## native/src/runtime/platform/records.rs
 <<<<
-    let index = MINE.try_with(|m| m.0.get()).unwrap_or(0);
-    if index != 0 {
-        TABLE[index - 1].publish(words);
+    let record = MINE_RECORD.with(|r| r.get());
+    if !record.is_null() {
+        // SAFETY: MINE_RECORD holds null or the address of the record this
+        // thread claimed, an element of the static TABLE.
+        unsafe { &*record }.publish(words);
     }
 ====
-    let index = MINE.try_with(|m| m.0.get()).unwrap_or(0);
-    if index != 0 {
-        TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING)).unwrap_or(&TABLE[index - 1]).publish(words);
+    let record = MINE_RECORD.with(|r| r.get());
+    if !record.is_null() {
+        TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING)).unwrap_or(unsafe { &*record }).publish(words);
     }
 >>>>
 
@@ -251,16 +253,18 @@ fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
 !! native_stack:threads rust-lib:records_are_per_thread
 ## native/src/runtime/platform/records.rs
 <<<<
-    let _ = MINE.try_with(|m| {
+    MINE.with(|m| {
         if m.0.get() == index + 1 {
             m.0.set(0);
+            MINE_RECORD.with(|r| r.set(std::ptr::null()));
         }
     });
     free(index);
 ====
-    let _ = MINE.try_with(|m| {
+    MINE.with(|m| {
         if m.0.get() == index + 1 {
             m.0.set(0);
+            MINE_RECORD.with(|r| r.set(std::ptr::null()));
         }
     });
     let first = TABLE.iter().position(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING)).unwrap_or(index);
@@ -285,18 +289,19 @@ fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
 !! rust-lib:records_are_per_thread
 ## native/src/runtime/platform/records.rs
 <<<<
-impl Drop for Mine {
+impl Drop for Releaser {
     fn drop(&mut self) {
-        let index = self.0.get();
+        MINE_RECORD.with(|r| r.set(std::ptr::null()));
+        let index = MINE.with(|m| m.0.replace(0));
         if index != 0 {
             free(index - 1);
         }
     }
 }
 ====
-impl Drop for Mine {
+impl Drop for Releaser {
     fn drop(&mut self) {
-        let _ = self.0.get();
+        let _ = MINE.with(|m| m.0.get());
     }
 }
 >>>>

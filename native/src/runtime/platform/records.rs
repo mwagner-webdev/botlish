@@ -74,13 +74,23 @@ const EMPTY: Record = Record {
 
 static TABLE: [Record; RECORDS] = [EMPTY; RECORDS];
 
-/// This thread's record, as its index plus one (0: none). Its destructor
-/// releases a record the thread ends holding.
+/// This thread's record, as its index plus one (0: none), and its address
+/// (null: none): plain thread-local words with no destructor, so reading
+/// them checks no initialization or teardown state. Publication (every
+/// coroutine switch) reads the address, whose stores then wait on one load
+/// only: an address computed from the index waited on a multiply and the
+/// table's address too, which made a coroutine resume measurably slower
+/// (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md, "Performance").
 struct Mine(Cell<usize>);
 
-impl Drop for Mine {
+/// Releases the record its thread ends holding: a thread-local of its own,
+/// registered (touched) only by a claim, so that MINE stays destructor-free.
+struct Releaser;
+
+impl Drop for Releaser {
     fn drop(&mut self) {
-        let index = self.0.get();
+        MINE_RECORD.with(|r| r.set(std::ptr::null()));
+        let index = MINE.with(|m| m.0.replace(0));
         if index != 0 {
             free(index - 1);
         }
@@ -89,6 +99,8 @@ impl Drop for Mine {
 
 thread_local! {
     static MINE: Mine = const { Mine(Cell::new(0)) };
+    static MINE_RECORD: Cell<*const Record> = const { Cell::new(std::ptr::null()) };
+    static RELEASER: Releaser = const { Releaser };
 }
 
 impl Record {
@@ -118,7 +130,8 @@ impl Record {
 
     #[inline(always)]
     fn publish(&self, words: (usize, usize)) {
-        let next = self.slot.load(Ordering::Relaxed) ^ 1;
+        // (`& 1`: the slot is 0 or 1, so the compiler drops the index check.)
+        let next = (self.slot.load(Ordering::Relaxed) ^ 1) & 1;
         self.slots[next][0].store(words.0, Ordering::Relaxed);
         self.slots[next][1].store(words.1, Ordering::Relaxed);
         self.slot.store(next, Ordering::Release);
@@ -157,16 +170,19 @@ pub fn claim(token: usize, words: (usize, usize), executable: bool, destination:
     record.label_len.store(label.len(), Ordering::Relaxed);
     record.owner.store(token, Ordering::Release);
     MINE.with(|m| m.0.set(index + 1));
+    MINE_RECORD.with(|r| r.set(record));
+    // Registers the destructor that releases the record at the thread's end.
+    RELEASER.with(|_| ());
     Ok(index)
 }
 
 /// Releases record INDEX, the calling thread's: from now on no fault is
 /// claimed through it.
 pub fn release(index: usize) {
-    // (try_with: a guard dropped while the thread's locals are torn down.)
-    let _ = MINE.try_with(|m| {
+    MINE.with(|m| {
         if m.0.get() == index + 1 {
             m.0.set(0);
+            MINE_RECORD.with(|r| r.set(std::ptr::null()));
         }
     });
     free(index);
@@ -181,20 +197,21 @@ fn free(index: usize) {
 
 /// Makes WORDS the calling thread's published stack, when it holds a
 /// record: never another thread's. Inlined, and only a thread-local read
-/// and atomic stores (none once the thread's locals are torn down: its
-/// record is released then).
+/// and atomic stores.
 #[inline(always)]
 pub fn publish(words: (usize, usize)) {
-    let index = MINE.try_with(|m| m.0.get()).unwrap_or(0);
-    if index != 0 {
-        TABLE[index - 1].publish(words);
+    let record = MINE_RECORD.with(|r| r.get());
+    if !record.is_null() {
+        // SAFETY: MINE_RECORD holds null or the address of the record this
+        // thread claimed, an element of the static TABLE.
+        unsafe { &*record }.publish(words);
     }
 }
 
 /// The calling thread's record, if it holds one (not async-signal-safe:
 /// a thread-local read).
 pub fn mine() -> Option<&'static Record> {
-    match MINE.try_with(|m| m.0.get()).unwrap_or(0) {
+    match MINE.with(|m| m.0.get()) {
         0 => None,
         index => Some(&TABLE[index - 1]),
     }
@@ -280,6 +297,7 @@ mod tests {
             let index = claim(token, (1, 2), false, 1, b"old ").unwrap();
             // As if its destructor never ran: forget the thread's index.
             MINE.with(|m| m.0.set(0));
+            MINE_RECORD.with(|r| r.set(std::ptr::null()));
             index
         })
         .join()

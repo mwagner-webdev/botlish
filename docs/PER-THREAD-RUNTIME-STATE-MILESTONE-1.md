@@ -170,34 +170,47 @@ lifetime. `Vm::reset` (a `bench` run's next run) zeroes it, since the next
 run installs again. A new Vm never inherits a value, from a live Vm or a
 dropped one (`each_vm_of_one_compiled_program_has_its_own_area`).
 
-**Addressing.** `codegen::clif`'s `context_addr` is one load of the base
-from the Vm argument at `VM_CONTEXT_OFFSET` (96), with the flags `notrap
-aligned readonly can_move`. `readonly` holds because a Vm's area never
-moves once installed, and a `contextstore` writes into the area, never the
-pointer. So Cranelift may share one load among a function's accesses. The
-load is followed by the slot's constant offset. `VM_CONTEXT_OFFSET` is in
-the runtime ABI fingerprint (`aotimage::abi_words`): a program object
-compiled for another layout is refused before it runs.
+**Addressing.** `codegen::clif`'s `context_addr` reads the base from the Vm
+argument at `VM_CONTEXT_OFFSET` (96), once per call: a function that reads
+or writes the area loads it in its entry block (`context_base`), which
+dominates every block (self tail calls included), and every access adds its
+slot's constant offset. The load is `notrap aligned readonly`: a Vm's area
+never moves once installed, and a `contextstore` writes into the area,
+never the pointer.
 
-Representative code, std::linux::io::write of `examples/linux/context-hello.bot`
-(observed; tests/contexts.test's `contexts-native-clif` and
-`contexts-native-machine-code` pin both):
+It is deliberately not `can_move`. The first version was, and Cranelift
+treated the movable load as pure and placed it at its uses, inside the
+loops reading the context, one dependent load per iteration (found by the
+benchmark: 1.38x the old time on a loop of context reads, section 15).
+Without it, the load stays in the entry block and the loop reads straight
+through the register.
+
+`VM_CONTEXT_OFFSET` is in the runtime ABI fingerprint
+(`aotimage::abi_words`), so a program object compiled for another layout
+is refused before it runs.
+
+Representative code, `std::linux::io::write` of
+`examples/linux/context-hello.bot` (observed; tests/contexts.test's
+`contexts-native-clif` and `contexts-native-machine-code` pin both):
 
 ```
-CLIF (after):    v4 = load.i64 notrap aligned readonly can_move v0+96
-                 v5 = load.i64 notrap aligned v4+8          ; stdout's descriptor
-x86-64 (after):  mov    0x60(%rdi),%r9                      ; the Vm's area
-                 mov    0x8(%r9),%rsi
-x86-64 (before): lea    0x6655(%rip),%r9                    # <botlish_context_area>
+CLIF (after):    block2(v0: i64, v1: i64):                    ; entry
+                     v3 = load.i64 notrap aligned readonly v0+96   ; the Vm's area
+                 block0:
+                     v5 = load.i64 notrap aligned v3+8              ; stdout's descriptor
+x86-64 (after):  mov    0x60(%rdi),%r8                       ; the Vm's area
+                 mov    0x8(%r8),%rsi
+x86-64 (before): lea    0x6655(%rip),%r9                     # <botlish_context_area>
                  mov    0x8(%r9),%rsi
 ```
 
-The access is still two instructions, with no helper call, no lookup, no
-lock and no extra argument. The change is a load from the Vm, which is in a
-register at every Botlish call, in place of a PC-relative address. The
-object has no context symbol and no relocation against one
-(`contexts-native-object-relocation`, `tests/platform/aot-facts.tcl`'s
-`object-symbols` and `object-relocations`, on every host's object format).
+The access is still two instructions per function (and one per further
+access), with no helper call, no lookup, no lock and no extra argument.
+The change is a load from the Vm, which is in a register at every Botlish
+call, in place of a PC-relative address. The object has no context symbol
+and no relocation against one (`contexts-native-object-relocation`,
+`tests/platform/aot-facts.tcl`'s `object-symbols` and `object-relocations`,
+on every host's object format).
 
 **Rooting.** Unchanged. Every word of the area is a tagged immediate, a C
 address word, or a MutableVector or MutableArray header. Installation also

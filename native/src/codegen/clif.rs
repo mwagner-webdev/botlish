@@ -875,6 +875,11 @@ struct Translator<'a, 'b, M: Module> {
     /// `error_exit` itself in `new`, never popped below that.
     error_exit_stack: Vec<ir::Block>,
     refs: HashMap<ModuleFuncId, ir::FuncRef>,
+    /// The base of the running Vm's context area, loaded once in the entry
+    /// block of a function that accesses it (`context_addr`): it dominates
+    /// every block, self tail calls included, and is a raw address, never a
+    /// GC root.
+    context_base: Option<ir::Value>,
     terminated: bool,
     /// The hidden trailing pointer parameter of a `results > 2` function
     /// (signature_n): `RetMulti` writes fields 1.. through it instead of
@@ -976,6 +981,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             error_exit,
             error_exit_stack: vec![error_exit],
             refs: HashMap::new(),
+            context_base: None,
             terminated: false,
             plan,
             result_buf: None,
@@ -1035,6 +1041,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             // the caller's own stack, not the heap), so it is read once here
             // and never stored to the shadow stack.
             self.result_buf = Some(params[next + f.params as usize]);
+        }
+        if f.body.iter().any(|inst| matches!(inst, Inst::ContextLoad { .. } | Inst::ContextStore { .. })) {
+            // The running Vm's context area (CONTEXTS.md, PER-THREAD-
+            // RUNTIME-STATE-MILESTONE-1.md), once per call: Cranelift does not
+            // hoist the load out of a loop by itself, and a load per access
+            // would put one more dependent load before every context read.
+            self.context_base = Some(self.load_context_base()?);
         }
         self.b.ins().jump(self.body, &[]);
 
@@ -1252,10 +1265,20 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// into the area, never the pointer -- so Cranelift may reuse one load
     /// for every access of a function.
     fn context_addr(&mut self) -> Result<ir::Value, BackendError> {
+        match self.context_base {
+            Some(base) => Ok(base),
+            None => self.load_context_base(),
+        }
+    }
+
+    /// One load of the running Vm's `context_ptr` (`context_addr`).
+    fn load_context_base(&mut self) -> Result<ir::Value, BackendError> {
         if !self.symbols.contexts {
             return Err(BackendError::Bug("context access in a program without a context area".into()));
         }
-        Ok(self.b.ins().load(I64, MemFlagsData::trusted().with_readonly().with_can_move(), self.vm, VM_CONTEXT_OFFSET))
+        // Not `can_move`: Cranelift would place a movable load at its uses,
+        // back inside the loops that read the context.
+        Ok(self.b.ins().load(I64, MemFlagsData::trusted().with_readonly(), self.vm, VM_CONTEXT_OFFSET))
     }
 
     fn func_ref(&mut self, id: ModuleFuncId) -> ir::FuncRef {

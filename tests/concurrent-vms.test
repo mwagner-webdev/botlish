@@ -170,7 +170,7 @@ test cv-source-context-area {the context area is the Vm's: generated code loads 
     set clif [cvSource codegen/clif.rs]
     set vm [cvSource runtime/vm.rs]
     list [regexp {declare_data\([^)]*context} $clif] [regexp -all {botlish_context_area} $clif] \
-        [regexp {load\(I64, MemFlagsData::trusted\(\)\.with_readonly\(\)\.with_can_move\(\), self\.vm, VM_CONTEXT_OFFSET\)} $clif] \
+        [regexp {load\(I64, MemFlagsData::trusted\(\)\.with_readonly\(\), self\.vm, VM_CONTEXT_OFFSET\)} $clif] \
         [regexp {pub const VM_CONTEXT_OFFSET: i32 = offset_of!\(Vm, context_ptr\)} $vm] \
         [regexp {fn install_context_area\(&mut self, bytes: u32\)} $vm]
 } -result {0 0 1 1 1}

@@ -1515,8 +1515,9 @@ owns its native stack, its guard record and its thread-local runtime state
 
 * The context area is the Vm's (`Vm::context_ptr`, `install_context_area`,
   zero when made, cleared by `reset`): generated code loads its base from the
-  Vm at `VM_CONTEXT_OFFSET` (read-only for the function), then the slot's
-  constant offset. Never a data symbol, a process-wide or recycled buffer, a
+  Vm at `VM_CONTEXT_OFFSET`, once in the entry block of a function that reads
+  or writes the area (read-only, not `can_move`: Cranelift would sink a
+  movable load back into loops), then the slot's constant offset. Never a data symbol, a process-wide or recycled buffer, a
   TLS base or a lookup; never an area per actor or coroutine. The layout and
   which implementation each requirement calls stay the program's: a Vm's
   construction selects nothing.

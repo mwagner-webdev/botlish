@@ -713,10 +713,10 @@ mod context_area_tests {
         let options = CompileOptions { clif: true, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let clif = compiled.clif.clone().unwrap();
-        // The base is one read-only load from the Vm argument, never a data
-        // symbol's address.
+        // The base is one read-only load from the Vm argument (once per call
+        // of a function that reads the area), never a data symbol's address.
         assert!(!clif.contains("symbol_value"), "{clif}");
-        let base = format!("load.i64 notrap aligned readonly can_move v0+{}", crate::runtime::vm::VM_CONTEXT_OFFSET);
+        let base = format!("load.i64 notrap aligned readonly v0+{}", crate::runtime::vm::VM_CONTEXT_OFFSET);
         assert!(clif.contains(&base), "{base} not in {clif}");
         let info = std::sync::Arc::new(ProgramInfo::empty());
         let mut a = Vm::new(info.clone(), AllocMode::Summary);

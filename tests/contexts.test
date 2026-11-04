@@ -723,16 +723,18 @@ test contexts-native-no-hidden-argument {the three-level chain compiles to the c
 
 # The CLIF of std::linux::io::write: its (vm, data) signature, and the base
 # of the running Vm's context area as one read-only load from the Vm
-# argument, then stdout's word at +8 from it (PER-THREAD-RUNTIME-STATE-
-# MILESTONE-1.md: the area is the Vm's, never a program data symbol). The
-# list: {matched OFFSET} with OFFSET the Vm field's.
+# argument (in the entry block, once per call), then stdout's word at +8
+# from it (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md: the area is the Vm's,
+# never a program data symbol). The list: {matched OFFSET SIGNATURE
+# SYMBOLS} with OFFSET the Vm field's.
 proc contextClif {} {
     set clif [native::clif [ctxHir $::helloText]]
     set start [string first {"std::linux::io::write"} $clif]
     set end [string first "; function" $clif [expr {$start + 1}]]
     set f [string range $clif $start $end]
-    set matched [regexp {(v[0-9]+) = load\.i64 notrap aligned readonly can_move v0\+([0-9]+)\n\s+v[0-9]+ = load\.i64 notrap aligned (v[0-9]+)\+8} $f -> base offset used]
-    list [expr {$matched && $base eq $used}] [expr {$matched ? $offset : ""}] \
+    set matched [regexp {(v[0-9]+) = load\.i64 notrap aligned readonly v0\+([0-9]+)\n} $f -> base offset]
+    set used [expr {$matched && [regexp "= load\\.i64 notrap aligned $base\\+8\n" $f]}]
+    list [expr {$matched && $used}] [expr {$matched ? $offset : ""}] \
         [regexp {function u0:[0-9]+\(i64, i64\) -> i64} $f] [regexp -all {symbol_value|= symbol } $f]
 }
 
@@ -801,15 +803,16 @@ proc machineCode {exe function} {
     exec objdump -d --no-show-raw-insn --disassemble=$function $exe
 }
 
-test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is two loads -- the running Vm's context-area base from the Vm argument (%rdi) at the Vm field's offset, then the word at +8 from it -- with no RIP-relative or GOT access, no helper call and no other call than std::linux::write; the executable holds no context data symbol (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md)} -constraints {linuxX86_64 objdump posixShell symbolLinker} -body {
+test contexts-native-machine-code {the machine code of std::linux::io::write in the standalone executable: stdout's descriptor is two loads -- the running Vm's context-area base from the Vm argument (%rdi) at the Vm field's offset, once in the function's entry, then the word at +8 from it -- with no RIP-relative or GOT access, no helper call and no other call than std::linux::write; the executable holds no context data symbol (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md)} -constraints {linuxX86_64 objdump posixShell symbolLinker} -body {
     set exe [buildExecutable hello $::helloText]
     set id [nirFunctionId [native::nir [ctxHir $::helloText]] std::linux::io::write]
     set code [machineCode $exe botlish_fn_$id]
     set write [nirFunctionId [native::nir [ctxHir $::helloText]] std::linux::write]
     set offset [lindex [contextClif] 1]
     set symbols [exec objdump -t $exe]
-    set base [regexp {mov\s+0x([0-9a-f]+)\(%rdi\),%(\w+)\n[^\n]*mov\s+0x8\(%(\w+)\),%rsi} $code -> hex loaded used]
-    list [expr {$base && $loaded eq $used}] [expr {$base && [scan $hex %x] == $offset}] \
+    set base [regexp {mov\s+0x([0-9a-f]+)\(%rdi\),%(\w+)\n} $code -> hex loaded]
+    set used [expr {$base && [regexp "mov\\s+0x8\\(%$loaded\\),%rsi" $code]}]
+    list [expr {$base && $used}] [expr {$base && [scan $hex %x] == $offset}] \
         [regexp -all {\(%rip\)} $code] [regexp -all {GLOBAL_OFFSET|_DYNAMIC} $code] \
         [expr {[lmap line [regexp -all -inline {call\s+[0-9a-f]+ <[^>]+>} $code] {regsub {call\s+[0-9a-f]+ } $line {}}] eq [list <botlish_fn_$write>]}] \
         [regexp -all {context_area} $symbols]
