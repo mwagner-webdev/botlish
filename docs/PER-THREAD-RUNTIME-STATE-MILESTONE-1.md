@@ -705,7 +705,25 @@ example, "a dropped guard never returns to UNGUARDED" is now "a dropped
 guard never releases its record". `records::any` is now compiled on every
 host, so that `win-any-thread` can state its rule on Windows. All 19
 Windows mutants of `platform/windows.rs` build for
-`x86_64-pc-windows-msvc`. The rewritten mutants' Linux runs were still running when this was committed (the next commit records them). Two mutants of
+`x86_64-pc-windows-msvc`.
+
+The rewritten mutants that apply on Linux x86-64 were run there (observed),
+and all were killed:
+
+| harness | run | result |
+|---|---|---|
+| `audit/native-stack/tools/mutate.tcl` | every mutant of the host | 22 of 22 killed (the 8 rewritten POSIX guard mutants among them); 29 other hosts' |
+| `audit/enums/tools/mutate.tcl` | `-only` the 2 rewritten | 2 killed |
+| `audit/native-aot/tools/mutate.tcl` | `-only` the 2 rewritten | 2 killed |
+| `audit/native-library/tools/mutate.tcl` | `-only int-result-wrapped` | killed |
+| `audit/target-model/tools/mutate.tcl` | `-only driver-runs-any-target` | killed |
+| `audit/value-identity/tools/mutate.tcl` | `-only native-identity-ignored-in-equality` | killed |
+
+The 8 rewritten Windows mutants run only on Windows (the tier item
+`native-stack-mutants`, a `[ci-full]` push). They were not run, and are
+checked here only to build.
+
+Two mutants of
 `codegen/aot.rs` (`c-ffi`'s `link-failure-removes-earlier`,
 `native-link-plan`'s `system-loses-static`) do not apply, and did not at
 the branch's base either: they are not this milestone's, and are left as
@@ -849,7 +867,8 @@ committed), each run as `bench 21`, best of the runs:
   costs what the base's did. The first version computed the record's
   address from the thread-local index (a multiply and the table's address)
   on every switch. Keeping the address in a destructor-free thread-local
-  (`MINE_RECORD`) removed about half of the added cost.
+  (`MINE_RECORD`) removed about a third of the added cost (1.03 ms over
+  the base to 0.64 ms).
 * **What is left** is a thread-local load and the double buffer's stores:
   about 7 ns per resume of publication, against the base's 2.4 ns.
 * **Not done: caching the record in the Vm.** A Vm is thread-affine, so it
