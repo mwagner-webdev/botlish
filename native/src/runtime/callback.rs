@@ -357,7 +357,7 @@ unsafe fn run(entry: usize, decl: &Descriptor, args: &[u64], out: *mut u64) -> R
             format!("{} failed, and a C callback has no error channel to its C caller: {} ({code})", decl.what(), vm.describe_error(&error)),
         ));
     }
-    let word = result_word(decl.result, result).map_err(|why| Fatal::new(&["NATIVE", "CALLBACK", "RESULT"], format!("{}: its result {why}", decl.what())))?;
+    let word = result_word(&vm.info, decl.result, result).map_err(|why| Fatal::new(&["NATIVE", "CALLBACK", "RESULT"], format!("{}: its result {why}", decl.what())))?;
     vm.callback_segments.pop();
     ACTIVE.with(|a| a.set(p));
     // SAFETY: the caller's contract.
@@ -407,7 +407,7 @@ fn argument(vm: &mut Vm, class: CAbi, word: u64) -> Result<Value, String> {
 /// The C result word of the callback result V of class CLASS. The checker
 /// proved V is of the declared type; Err only for a value of no such type
 /// (an unchecked program's).
-fn result_word(class: CAbi, v: Value) -> Result<u64, String> {
+fn result_word(prog: &super::vm::ProgramInfo, class: CAbi, v: Value) -> Result<u64, String> {
     let int = |v: Value| -> Option<i128> {
         if let Some(i) = int_small(v) {
             return Some(i as i128);
@@ -420,7 +420,7 @@ fn result_word(class: CAbi, v: Value) -> Result<u64, String> {
     let ranged = |lo: i128, hi: i128| -> Result<u64, String> {
         match int(v) {
             Some(i) if i >= lo && i <= hi => Ok(i as u64),
-            _ => Err(format!("is no value of its C type ({})", super::show::show(v))),
+            _ => Err(format!("is no value of its C type ({})", super::show::show(prog, v))),
         }
     };
     match class {
@@ -435,24 +435,24 @@ fn result_word(class: CAbi, v: Value) -> Result<u64, String> {
         CAbi::Bool => match v {
             TRUE => Ok(1),
             FALSE => Ok(0),
-            _ => Err(format!("is no bool ({})", super::show::show(v))),
+            _ => Err(format!("is no bool ({})", super::show::show(prog, v))),
         },
         CAbi::F64 => {
             if is_small(v) || v == NO_VALUE || v & 7 != 0 || heap_kind(v) != KIND_FLOAT {
-                return Err(format!("is no Float64 ({})", super::show::show(v)));
+                return Err(format!("is no Float64 ({})", super::show::show(prog, v)));
             }
             Ok(float64_of(v).to_bits())
         }
         CAbi::RawF32 | CAbi::RawF64 => {
             let format = if class == CAbi::RawF32 { CFloatFormat::Binary32 } else { CFloatFormat::Binary64 };
             if raw_format_of(v) != Some(format) {
-                return Err(format!("is no raw C floating value of its format ({})", super::show::show(v)));
+                return Err(format!("is no raw C floating value of its format ({})", super::show::show(prog, v)));
             }
             Ok(raw_bits(v))
         }
         CAbi::Ptr => {
             if !is_cptr(v) {
-                return Err(format!("is no C address ({})", super::show::show(v)));
+                return Err(format!("is no C address ({})", super::show::show(prog, v)));
             }
             Ok(cptr_address(v) as u64)
         }
@@ -480,14 +480,14 @@ mod tests {
 
     #[test]
     fn result_words_are_exactly_the_c_values() {
-        assert_eq!(result_word(CAbi::I32, make_small(-5)), Ok(-5i64 as u64));
-        assert_eq!(result_word(CAbi::U8, make_small(255)), Ok(255));
-        assert!(result_word(CAbi::U8, make_small(256)).is_err());
-        assert!(result_word(CAbi::I8, make_small(-129)).is_err());
-        assert_eq!(result_word(CAbi::Bool, TRUE), Ok(1));
-        assert_eq!(result_word(CAbi::Bool, FALSE), Ok(0));
-        assert_eq!(result_word(CAbi::Void, UNIT), Ok(0));
-        assert_eq!(result_word(CAbi::Ptr, make_cptr(0x1234)), Ok(0x1234));
-        assert!(result_word(CAbi::Ptr, make_small(1)).is_err());
+        assert_eq!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::I32, make_small(-5)), Ok(-5i64 as u64));
+        assert_eq!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::U8, make_small(255)), Ok(255));
+        assert!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::U8, make_small(256)).is_err());
+        assert!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::I8, make_small(-129)).is_err());
+        assert_eq!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::Bool, TRUE), Ok(1));
+        assert_eq!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::Bool, FALSE), Ok(0));
+        assert_eq!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::Void, UNIT), Ok(0));
+        assert_eq!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::Ptr, make_cptr(0x1234)), Ok(0x1234));
+        assert!(result_word(&super::super::vm::ProgramInfo::empty(), CAbi::Ptr, make_small(1)).is_err());
     }
 }

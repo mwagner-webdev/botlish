@@ -48,7 +48,6 @@ use botlish_native::runtime::platform::{self, OverflowGuard};
 use botlish_native::runtime::value::*;
 use botlish_native::runtime::vm::{ProgramInfo, Vm};
 use std::process::{Command, ExitStatus};
-use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 // ---------------------------------------------------------------------------
@@ -242,7 +241,7 @@ fn on_thread<T: Send + 'static>(name: &str, f: impl FnOnce() -> T + Send + 'stat
 const OVERFLOW_LINE: &str = "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}";
 
 fn new_vm() -> Box<Vm> {
-    Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+    Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
         AllocMode::Summary)
 }
 
@@ -554,6 +553,17 @@ extern "C" fn publication_a(p: *mut Vm, _: Value, _: *const Value) -> Value {
 ///   sweep:DIRECTION:X     a coroutine switch made X bytes above the low end
 ///                         of the stack it leaves; prints `completed`
 ///   publication           the published stack along a nested lifecycle
+///   threads:VARIANT       several guarded threads at once (PER-THREAD-
+///                         RUNTIME-STATE-MILESTONE-1.md): `second` (A and B
+///                         guarded, A publishing last, B exhausts its stack),
+///                         `released` (A's guard dropped and its thread
+///                         ended, then B exhausts), `coroutine` (B exhausts a
+///                         coroutine's stack while A is guarded),
+///                         `unguarded` (A guarded, an unguarded B exhausts),
+///                         `alone` (no guard anywhere, B exhausts), `churn`
+///                         (16 threads install and drop guards 200 times
+///                         each, at once; then one exhausts); each guarded
+///                         thread's label is "vm N "
 fn child(scenario: &str) -> ! {
     let parts: Vec<&str> = scenario.split(':').collect();
     match parts.as_slice() {
@@ -731,6 +741,7 @@ fn child(scenario: &str) -> ! {
                 println!("completed");
             });
         }
+        ["threads", variant] => threads(variant),
         ["publication"] => {
             guarded("driver", |p, stack| {
                 expect_published("thread", &stack);
@@ -755,6 +766,100 @@ fn child(scenario: &str) -> ! {
     std::process::exit(0)
 }
 
+/// The `threads:VARIANT` child scenarios (`child`'s doc). Threads are
+/// sequenced by channels, never by time: B exhausts its stack only after
+/// every other guard of the variant is in place (and, for `second`, after A
+/// published last), and A waits on a channel while B overflows.
+fn threads(variant: &str) {
+    use std::sync::mpsc::channel;
+    let variant = variant.to_string();
+    let spawn = |f: Box<dyn FnOnce() + Send>| std::thread::Builder::new().stack_size(4 << 20).spawn(f).unwrap();
+    if variant == "churn" {
+        let workers: Vec<_> = (0..16)
+            .map(|n| {
+                spawn(Box::new(move || {
+                    let stack = NativeStack::current().expect("the thread's stack");
+                    for _ in 0..200 {
+                        let guard = OverflowGuard::install_labelled(&stack, format!("vm {n} ").as_bytes()).expect("a guard installs");
+                        platform::set_active_stack(&stack);
+                        assert_eq!(platform::published_stack(), Some((stack.guard_low, stack.low_bound)));
+                        drop(guard);
+                        assert_eq!(platform::published_stack(), None);
+                    }
+                }))
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(platform::guarded_threads(), 0, "every record released");
+        spawn(Box::new(|| {
+            let stack = NativeStack::current().expect("the thread's stack");
+            let _guard = OverflowGuard::install_labelled(&stack, b"vm 9 ").expect("a guard installs");
+            println!("returned {}", exhaust(0));
+        }))
+        .join()
+        .unwrap();
+        return;
+    }
+    let (a_ready, wait_a) = channel::<()>();
+    let (release_a, a_released) = channel::<()>();
+    let a = (variant != "alone").then(|| {
+        let variant = variant.clone();
+        spawn(Box::new(move || {
+            let stack = NativeStack::current().expect("the thread's stack");
+            let guard = OverflowGuard::install_labelled(&stack, b"vm 0 ").expect("A's guard installs");
+            // A publishes after B's guard is in place (B is made first in
+            // `second`): a process-wide publication would now name A's
+            // stack for B's fault.
+            platform::set_active_stack(&stack);
+            a_ready.send(()).unwrap();
+            if variant == "released" {
+                drop(guard);
+                return;
+            }
+            // Never released: B's overflow ends the process.
+            let _ = a_released.recv();
+            drop(guard);
+        }))
+    });
+    let (b_go, b_wait) = channel::<()>();
+    let (b_ready, wait_b) = channel::<()>();
+    let b_variant = variant.clone();
+    let b = spawn(Box::new(move || {
+        let stack = NativeStack::current().expect("the thread's stack");
+        let guarded = !matches!(b_variant.as_str(), "unguarded" | "alone");
+        let _guard = guarded.then(|| OverflowGuard::install_labelled(&stack, b"vm 1 ").expect("B's guard installs"));
+        b_ready.send(()).unwrap();
+        b_wait.recv().unwrap();
+        if b_variant == "coroutine" {
+            let mut vm = new_vm();
+            let p: *mut Vm = &mut *vm;
+            VM.store(p as usize, Ordering::Relaxed);
+            vm.publish_active_stack(None);
+            let handle = coroutine(p, exhaust_at_start);
+            rt_co_start(p, handle);
+            println!("returned");
+            return;
+        }
+        println!("returned {}", exhaust(0));
+    }));
+    wait_b.recv().unwrap();
+    if let Some(a) = a {
+        wait_a.recv().unwrap();
+        if variant == "released" {
+            a.join().unwrap();
+            assert_eq!(platform::guarded_threads(), 1, "B's record outlives A's");
+        }
+        b_go.send(()).unwrap();
+        b.join().unwrap();
+        let _ = release_a.send(());
+    } else {
+        b_go.send(()).unwrap();
+        b.join().unwrap();
+    }
+}
+
 struct Outcome {
     status: ExitStatus,
     stdout: String,
@@ -770,6 +875,12 @@ impl Outcome {
     /// driver's report of a stack overflow.
     fn is_overflow_line(&self) -> bool {
         self.signal().is_none() && self.status.code() == Some(0) && self.stdout.trim_end() == OVERFLOW_LINE
+    }
+
+    /// Exit status 0 with exactly LABEL and the overflow line on standard
+    /// output: one guarded thread's report of its own overflow.
+    fn is_labelled_overflow_line(&self, label: &str) -> bool {
+        self.signal().is_none() && self.status.code() == Some(0) && self.stdout.trim_end() == format!("{label}{OVERFLOW_LINE}")
     }
 
     fn brief(&self) -> String {
@@ -972,6 +1083,24 @@ fn guard_checks(report: &mut Report, guarded: &[(&'static str, bool)]) {
     report.check("guard std-1MiB reinstalled", outcome.is_overflow_line(), outcome.brief());
 }
 
+/// Several guarded threads at once (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md):
+/// each overflow is reported by its own thread's record, with its label, and
+/// classified by its own published stack; dropping one guard leaves the
+/// others' (and the process's handler); an unguarded thread's overflow
+/// beside a guarded one is never relabelled; installation churn on sixteen
+/// threads at once leaves no record behind.
+fn thread_checks(report: &mut Report) {
+    for (variant, label) in [("second", "vm 1 "), ("released", "vm 1 "), ("coroutine", "vm 1 "), ("churn", "vm 9 ")] {
+        let outcome = run_child(&format!("threads:{variant}"));
+        report.check(&format!("threads {variant}"), outcome.is_labelled_overflow_line(label),
+            format!("{} stderr {:?}", outcome.brief(), outcome.stderr.trim()));
+    }
+    let unguarded = run_child("threads:unguarded");
+    let alone = run_child("threads:alone");
+    report.check("threads unguarded", !unguarded.stdout.contains("NATIVE LIMIT STACK") && unguarded.signal().is_some()
+        && unguarded.signal() == alone.signal(), format!("{}; no guard anywhere: {}", unguarded.brief(), alone.brief()));
+}
+
 /// A coroutine's own stack exhausted: at its start, after yields, and at the
 /// bottom of main -> a -> b -> c.
 fn coroutine_checks(report: &mut Report) {
@@ -1039,6 +1168,7 @@ pub fn main() {
     guard_probes(&mut report, &guarded);
     guard_checks(&mut report, &guarded);
     coroutine_checks(&mut report);
+    thread_checks(&mut report);
     fault_checks(&mut report);
     publication_check(&mut report);
     sweep_checks(&mut report);

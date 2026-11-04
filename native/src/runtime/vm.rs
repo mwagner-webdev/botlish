@@ -11,6 +11,9 @@
 //! Generated code also reads/writes `statics_ptr` at VM_STATICS_OFFSET (a
 //! fixed offset, not one of the first three, but a raw pointer read/written
 //! the same way): module-static storage, MODULE-STATIC-RETAINED-VALUES.md.
+//! And `context_ptr` at VM_CONTEXT_OFFSET: this Vm's own context area
+//! (CONTEXTS.md; PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), the base every
+//! `contextload` and `contextstore` adds its constant offset to.
 //! Unlike `consts` (read-only, compile-time-derived data), a static slot is
 //! written once by generated code itself (module initialization) and read
 //! any number of times afterward -- see `install_statics` and `statics_ptr`'s
@@ -25,7 +28,6 @@ use super::bytesobj::BytesInit;
 use super::strobj::StrInit;
 use super::value::*;
 use crate::nir::OpCode;
-use std::cell::RefCell;
 use std::mem::offset_of;
 use std::rc::Rc;
 
@@ -124,28 +126,21 @@ pub struct ProgramInfo {
     pub errors: Vec<(u32, String)>,
 }
 
-thread_local! {
-    static PROGRAM: RefCell<Option<Rc<ProgramInfo>>> = const { RefCell::new(None) };
+impl ProgramInfo {
+    /// A program with no metadata at all (tests that build no program).
+    pub fn empty() -> ProgramInfo {
+        ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }
+    }
 }
 
-/// Runs F with the program currently executing on this thread.
-pub fn current_program<R>(f: impl FnOnce(&ProgramInfo) -> R) -> R {
-    PROGRAM.with(|p| f(p.borrow().as_ref().expect("no native program is running")))
-}
-
-/// Makes PROGRAM the one currently executing on this thread and returns the
-/// previous one: a native library's call makes its instance's program current
-/// for the call and restores the previous one after it (runtime::library),
-/// so two programs on one thread never read each other's metadata.
-pub fn swap_current_program(program: Option<Rc<ProgramInfo>>) -> Option<Rc<ProgramInfo>> {
-    PROGRAM.with(|p| std::mem::replace(&mut *p.borrow_mut(), program))
-}
-
-/// Runs F with the program currently executing on this thread, if there is
-/// one (a runtime unit test runs none).
-pub fn try_current_program<R>(f: impl FnOnce(&ProgramInfo) -> R) -> Option<R> {
-    PROGRAM.with(|p| p.borrow().as_ref().map(|program| f(program)))
-}
+// Program metadata belongs to the Vm (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md,
+// "Program metadata"): every operation that reads a shape, an enum, a native
+// or a function's parameter names reads the `info` of the Vm it runs in
+// (`Vm::program`; ops.rs's `program`), and every renderer of a value takes
+// that program explicitly (runtime::show). There is no thread-local current
+// program: a thread may run several Vms -- of one program or of several, in
+// turn (a host calling two native libraries) -- and creating one never
+// changes what another reads.
 
 #[repr(C)]
 pub struct Vm {
@@ -205,6 +200,22 @@ pub struct Vm {
     /// strictly necessary -- safe, never a use-after-free -- rather than
     /// ever observed stale).
     statics_table: Vec<Value>,
+    /// This Vm's context area (CONTEXTS.md, PER-THREAD-RUNTIME-STATE-
+    /// MILESTONE-1.md): the base address of `context_table` below, read by
+    /// generated code at VM_CONTEXT_OFFSET -- one load, then the slot's
+    /// constant offset (codegen::clif's ContextLoad/ContextStore). The
+    /// program defines the layout (nir::Program::context_bytes, the slots'
+    /// offsets) and its context-trait selections; each Vm owns the values
+    /// installed in it. Null for a program without contexts. Set once by
+    /// `install_context_area`, before any generated code runs, and never
+    /// moved after: the table is never resized.
+    pub context_ptr: *mut u64,
+    /// The context area's words: zero (no installed value) until the program
+    /// function's `contextstore`s install them, never shared with another
+    /// Vm, never a GC root itself -- every word is a tagged immediate or a C
+    /// address word, or a collection header that installation also
+    /// registers in `context_roots` (`ctxroot`), so the area needs no scan.
+    context_table: Vec<u64>,
     ss_base: *mut Value,
     shadow: Vec<Value>,
     pub heap: Heap,
@@ -252,7 +263,11 @@ pub struct Vm {
     /// `r` K calls (LEXICAL-RESOURCE-CLEANUP-EXPLORATION-MILESTONE-1.md).
     /// Roots for the rest of the run.
     pub cleanups: Vec<Value>,
-    pub info: Rc<ProgramInfo>,
+    /// The program this Vm runs: its immutable metadata, shared (never
+    /// copied) by every Vm of the same program image -- the JIT driver's
+    /// concurrent VMs share one -- and the one every metadata read of this
+    /// Vm's operations consults. Set once, by `Vm::new`.
+    pub info: std::sync::Arc<ProgramInfo>,
     pub metrics: Metrics,
     const_table: Vec<Value>,
     statics: Vec<*mut Header>,
@@ -272,7 +287,8 @@ pub struct Vm {
     empty_mutbytes: *mut Header,
     /// This program's PC-indexed stack-map table (runtime::framemap), set
     /// once by `set_framemap` right after compiling (codegen::CompiledProgram
-    /// owns the original; this is an `Rc` clone). `collect_with` walks the
+    /// owns the original; this is an `Arc` clone, shared by every Vm of the
+    /// program). `collect_with` walks the
     /// native call stack through it (runtime::framewalk) to discover every
     /// active `RootStorage::NativeFrame` function's roots on the x86-64
     /// stack-map path -- a fifth root source, alongside the shadow stack,
@@ -281,7 +297,7 @@ pub struct Vm {
     /// own doc for why these never double-trace the same logical root.
     /// Starts as an empty table (`ProgramMap::new()`), which simply finds no
     /// roots -- harmless for the brief window before a program is compiled.
-    framemap: Rc<ProgramMap>,
+    framemap: std::sync::Arc<ProgramMap>,
     native_stack: Option<NativeStack>,
     /// The frame record above which the collector never walks this thread's
     /// own stack (0: no ceiling, the walk climbs to the stack's top): a
@@ -312,6 +328,12 @@ pub struct Vm {
     /// program, not once per encode or decode. Only static constants are
     /// keys (they live as long as this Vm, never reused for another text).
     pub transfer_plans: std::collections::HashMap<Value, Rc<super::transfer::Plan>>,
+    /// Called at the start of every collection, with the collection's
+    /// number (1 for the first) and this Vm, at a safepoint of its run: the
+    /// concurrent-VM harness's rendezvous (main.rs's `vms`, PER-THREAD-
+    /// RUNTIME-STATE-MILESTONE-1.md), which holds every VM of a run there
+    /// until all of them are mid-run at once. None but in that harness.
+    pub collection_hook: Option<Box<dyn FnMut(usize, &Vm)>>,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -322,9 +344,10 @@ pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as 
 pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
 pub const VM_STACK_LIMIT_OFFSET: i32 = offset_of!(Vm, stack_limit) as i32;
+pub const VM_CONTEXT_OFFSET: i32 = offset_of!(Vm, context_ptr) as i32;
 
 impl Vm {
-    pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
+    pub fn new(info: std::sync::Arc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
         // The shadow stack holds the fallback plan's roots and bounds its
         // recursion (codegen::roots's `depth_reservation`): not needed where
         // native frames hold the roots, whose recursion the stack guard
@@ -339,7 +362,6 @@ impl Vm {
         };
         let base = if shadow.is_empty() { std::ptr::null_mut() } else { shadow.as_mut_ptr() };
         let limit = if shadow.is_empty() { base } else { unsafe { base.add(SHADOW_STACK_SLOTS) } };
-        PROGRAM.with(|p| *p.borrow_mut() = Some(info.clone()));
         Box::new(Vm {
             ss_top: base,
             ss_limit: limit,
@@ -351,6 +373,8 @@ impl Vm {
             stack_limit_checked: false,
             statics_ptr: std::ptr::null_mut(),
             statics_table: Vec::new(),
+            context_ptr: std::ptr::null_mut(),
+            context_table: Vec::new(),
             ss_base: base,
             shadow,
             heap: Heap::new(),
@@ -370,14 +394,22 @@ impl Vm {
             empty_str: StrObj::new_static(""),
             empty_bytes: BytesObj::new_static(&[]),
             empty_mutbytes: BytesObj::new_static_mutable_empty(),
-            framemap: Rc::new(ProgramMap::new()),
+            framemap: std::sync::Arc::new(ProgramMap::new()),
             native_stack,
             stack_ceiling: 0,
             foreign_open: Vec::new(),
             callback_segments: Vec::new(),
             co_current: std::ptr::null_mut(),
             transfer_plans: std::collections::HashMap::new(),
+            collection_hook: None,
         })
+    }
+
+    /// The program this Vm runs (`info`): what every metadata read of its
+    /// operations consults.
+    #[inline(always)]
+    pub fn program(&self) -> &ProgramInfo {
+        &self.info
     }
 
     /// Publishes STACK (None: the thread's own stack) as the one native stack
@@ -472,7 +504,7 @@ impl Vm {
     }
 
     /// Installs this program's stack-map table (see `framemap`'s own doc).
-    pub fn set_framemap(&mut self, framemap: Rc<ProgramMap>) {
+    pub fn set_framemap(&mut self, framemap: std::sync::Arc<ProgramMap>) {
         #[cfg(all(windows, target_arch = "x86_64"))]
         if super::framewalk::NATIVE_FRAME_ROOTS && super::framewalk::windows::unwind_check() {
             super::framewalk::windows::check_map(&framemap);
@@ -516,7 +548,7 @@ impl Vm {
         for (i, &value) in self.const_table.iter().enumerate() {
             let header = value as *const Header;
             let kind = unsafe { (*header).kind };
-            write!(r, "constant {i} kind {kind} {:?}", super::show::show(value)).unwrap();
+            write!(r, "constant {i} kind {kind} {:?}", super::show::show(&self.info, value)).unwrap();
             if kind == KIND_CLOSURE {
                 let closure = unsafe { &*(value as *const ClosureObj) };
                 write!(r, " function {} arity {} code {:+}", closure.func, closure.arity, relative(closure.code)).unwrap();
@@ -541,6 +573,23 @@ impl Vm {
     pub fn install_statics(&mut self, count: usize) {
         self.statics_table = vec![UNIT; count];
         self.statics_ptr = self.statics_table.as_mut_ptr();
+    }
+
+    /// Gives this Vm a context area of BYTES bytes (nir::Program's
+    /// `context_bytes`, a multiple of 8; 0 for a program without contexts):
+    /// its own zeroed storage, which no other Vm -- of this program or
+    /// another -- addresses. Called once per Vm, with its constants, before
+    /// any generated code runs; `context_ptr` then stays valid for the Vm's
+    /// lifetime, since the table is never resized again.
+    pub fn install_context_area(&mut self, bytes: u32) {
+        self.context_table = vec![0u64; (bytes as usize).div_ceil(8)];
+        self.context_ptr = if self.context_table.is_empty() { std::ptr::null_mut() } else { self.context_table.as_mut_ptr() };
+    }
+
+    /// This Vm's context area, word by word (tests, the concurrent-VM
+    /// harness's evidence).
+    pub fn context_area(&self) -> &[u64] {
+        &self.context_table
     }
 
     pub fn fail(&mut self, error: RtError) -> Value {
@@ -597,7 +646,21 @@ impl Vm {
         self.collect_with(reason);
     }
 
+    /// Makes every collection of this Vm check that it marks only its own
+    /// heap's objects and its own statics (Heap::set_ownership_check), after
+    /// its constants are installed: the concurrent-VM harness's evidence that
+    /// no root of one Vm reaches another's heap.
+    pub fn check_heap_ownership(&mut self) {
+        let mut statics: std::collections::HashSet<usize> = self.statics.iter().map(|&o| o as usize).collect();
+        statics.extend([self.empty_str, self.empty_bytes, self.empty_mutbytes].map(|o| o as usize));
+        self.heap.set_ownership_check(statics);
+    }
+
     fn collect_with(&mut self, reason: GcReason) {
+        if let Some(mut hook) = self.collection_hook.take() {
+            hook(self.heap.collections + 1, self);
+            self.collection_hook = Some(hook);
+        }
         let stack = if self.shadow.is_empty() {
             &[][..]
         } else {
@@ -699,7 +762,7 @@ impl Vm {
     /// backends' errorId renders) -- lazily, here, never on a failure path
     /// a handler catches.
     pub fn describe_error(&self, error: &RtError) -> String {
-        let message = error.message();
+        let message = error.message(&self.info);
         if self.declared_error == 0 || self.declared_payload.is_empty() {
             return message;
         }
@@ -707,7 +770,7 @@ impl Vm {
             if let Some(stripped) = message.strip_suffix('>') {
                 return format!(
                     "{stripped} {}>",
-                    super::show::show_fields(self.declared_payload_shape, &self.declared_payload)
+                    super::show::show_fields(&self.info, self.declared_payload_shape, &self.declared_payload)
                 );
             }
         }
@@ -724,6 +787,9 @@ impl Vm {
         self.temp_roots.clear();
         self.context_roots.clear();
         self.cleanups.clear();
+        // The next run installs its contexts again: nothing of this run's
+        // stays in the area (its collection headers are released below).
+        self.context_table.fill(0);
         self.metrics.reset();
         self.collect_with(GcReason::Explicit);
     }

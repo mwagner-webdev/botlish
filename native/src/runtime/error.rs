@@ -8,6 +8,7 @@
 
 use super::show::show;
 use super::value::*;
+use super::vm::ProgramInfo;
 
 #[derive(Debug, Clone)]
 pub enum RtError {
@@ -149,23 +150,26 @@ impl RtError {
         }
     }
 
-    pub fn message(&self) -> String {
+    /// The message, rendering the values it refers to with PROG's metadata:
+    /// the program of the Vm the error was recorded in (a value's shape and
+    /// enum numbers index its own program's tables, never another's).
+    pub fn message(&self, prog: &ProgramInfo) -> String {
         match self {
             RtError::Type { context, expected, got } => {
-                format!("{context}: expected {}, got {}", expected.name(), show(*got))
+                format!("{context}: expected {}, got {}", expected.name(), show(prog, *got))
             }
             RtError::ResultTag { context, expected_ok, got } => format!(
                 "{context}: expected {} Result, got {}",
                 if *expected_ok { "an ok" } else { "an error" },
-                show(*got)
+                show(prog, *got)
             ),
-            RtError::NotBoolean { got } => format!("if condition must be a Boolean, got {}", show(*got)),
-            RtError::NotCallable { got } => format!("cannot call non-callable value {}", show(*got)),
+            RtError::NotBoolean { got } => format!("if condition must be a Boolean, got {}", show(prog, *got)),
+            RtError::NotCallable { got } => format!("cannot call non-callable value {}", show(prog, *got)),
             RtError::Equality { a, b } => {
-                format!("== is not defined for callables: {} == {}", show(*a), show(*b))
+                format!("== is not defined for callables: {} == {}", show(prog, *a), show(prog, *b))
             }
             RtError::Unhashable { value } => {
-                format!("hash is not defined for callables: {}", show(*value))
+                format!("hash is not defined for callables: {}", show(prog, *value))
             }
             RtError::Semantic { message, .. } => message.clone(),
             RtError::StackOverflow => "native stack exhausted: too many nested calls".to_string(),

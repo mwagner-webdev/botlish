@@ -19,15 +19,17 @@ pub mod macos;
 pub mod windows;
 #[cfg(unix)]
 mod guard;
+#[cfg(any(unix, all(windows, target_arch = "x86_64", target_env = "msvc")))]
+mod records;
 
 #[cfg(unix)]
-pub use guard::{published_stack, report_fatal, set_active_stack, set_result_file, OverflowGuard};
+pub use guard::{guarded_threads, published_stack, report_fatal, set_active_stack, set_result_file, OverflowGuard};
 #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
 pub use linux::{current_stack, thread_token};
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use macos::{current_stack, thread_token};
 #[cfg(all(windows, target_arch = "x86_64", target_env = "msvc"))]
-pub use windows::{current_stack, published_stack, set_active_stack, set_result_file, thread_token, OverflowGuard};
+pub use windows::{current_stack, guarded_threads, published_stack, set_active_stack, set_result_file, thread_token, OverflowGuard};
 
 /// What every host's guard writes for an exhausted stack: the driver's
 /// result line for RtError::StackOverflow (runtime/error.rs), so that the
@@ -44,7 +46,7 @@ mod tests {
         use crate::runtime::show::tcl_list;
         let error = RtError::StackOverflow;
         let code: Vec<String> = error.error_code().iter().map(|w| w.to_string()).collect();
-        let line = tcl_list(&["error".to_string(), tcl_list(&code), error.message()]) + "\n";
+        let line = tcl_list(&["error".to_string(), tcl_list(&code), error.message(&crate::runtime::vm::ProgramInfo::empty())]) + "\n";
         assert_eq!(line.as_bytes(), super::OVERFLOW_LINE);
     }
 }

@@ -972,8 +972,8 @@ mod tests {
 
     /// A program's tables: SHAPES (name, fields), ENUMS (name, cases) and
     /// NATIVES (name, op), each native of one parameter.
-    fn program(shapes: &[(Option<&str>, &[&str])], enums: &[(&str, &[&str])], natives: &[(&str, OpCode)]) -> Rc<ProgramInfo> {
-        Rc::new(ProgramInfo {
+    fn program(shapes: &[(Option<&str>, &[&str])], enums: &[(&str, &[&str])], natives: &[(&str, OpCode)]) -> std::sync::Arc<ProgramInfo> {
+        std::sync::Arc::new(ProgramInfo {
             functions: Vec::new(),
             natives: natives
                 .iter()
@@ -999,7 +999,7 @@ mod tests {
 
     /// A Vm of INFO whose every allocation collects first and whose freed
     /// objects are poisoned: a value the codec failed to root is caught.
-    fn stressed(info: Rc<ProgramInfo>) -> Box<Vm> {
+    fn stressed(info: std::sync::Arc<ProgramInfo>) -> Box<Vm> {
         let mut vm = Vm::new(info, AllocMode::Summary);
         vm.heap.set_stress_for_test(true);
         vm.heap.set_poison_for_test(true);
@@ -1008,7 +1008,7 @@ mod tests {
 
     /// V, kept rooted for the rest of the test.
     fn root(vm: &mut Vm, v: Value) -> Value {
-        assert_ne!(v, NO_VALUE, "an allocation failed: {:?}", vm.error.as_ref().map(|e| e.message()));
+        assert_ne!(v, NO_VALUE, "an allocation failed: {:?}", vm.error.as_ref().map(|e| e.message(&vm.info)));
         vm.temp_roots.push(v);
         v
     }
@@ -1070,7 +1070,7 @@ mod tests {
         if r == NO_VALUE {
             let id = vm.declared_error;
             if id == 0 {
-                panic!("a decode failed with no declared error: {:?}", vm.error.as_ref().map(|e| e.message()));
+                panic!("a decode failed with no declared error: {:?}", vm.error.as_ref().map(|e| e.message(&vm.info)));
             }
             vm.error = None;
             vm.declared_error = 0;
@@ -1380,7 +1380,7 @@ mod tests {
     fn transfer_owner_failure_is_the_operations_failure() {
         // An owner function that fails (a native called with the wrong
         // number of arguments: ARITY) fails the encode with its error.
-        let info = Rc::new(ProgramInfo {
+        let info = std::sync::Arc::new(ProgramInfo {
             functions: Vec::new(),
             natives: vec![NativeInfo { name: "bad".into(), arity: Some(2), params: vec![None, None], op: OpCode::ListGet }],
             shapes: vec![ShapeInfo { name: Some("std::abi::bytes::Bytes".into()), fields: vec!["storage".into()], opaque: false, identity: None, tree: None }],
@@ -1398,7 +1398,7 @@ mod tests {
         assert_eq!(rt_transfer_encode(p, make_small(1), plan_value, fns), NO_VALUE);
         assert_eq!(vm.temp_roots.len(), before);
         assert_eq!(vm.declared_error, 0);
-        assert!(vm.error.as_ref().is_some_and(|e| e.message().contains("expects 2 argument")), "{:?}", vm.error.as_ref().map(|e| e.message()));
+        assert!(vm.error.as_ref().is_some_and(|e| e.message(&vm.info).contains("expects 2 argument")), "{:?}", vm.error.as_ref().map(|e| e.message(&vm.info)));
         vm.error = None;
         // And a rebuild that fails fails the decode the same way.
         let r = {

@@ -1877,8 +1877,7 @@ fn read_object(bytes: &[u8]) -> Result<(Vec<Section>, Vec<Symbol>, Vec<Rela>), S
 /// and an absolute address (a data word, a GOT slot) an `Abs64` fixup.
 /// GOT-relative loads of an image symbol are relaxed to `lea` when the
 /// relocation allows it (`R_X86_64_[REX_]GOTPCRELX` on a `mov`, as GNU ld
-/// and lld relax them: the context area's accesses, mod.rs's
-/// `relax_context_got`); every other GOT-relative load gets a GOT slot.
+/// and lld relax them); every other GOT-relative load gets a GOT slot.
 fn image(program: &Program, object: &ObjectProgram) -> Result<Image, String> {
     let bytes = &object.bytes;
     let (sections, symbols, relas) = read_object(bytes)?;

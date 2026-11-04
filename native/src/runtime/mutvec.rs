@@ -388,7 +388,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn new_vm() -> Box<Vm> {
-        Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
+        Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
     }
 
     /// A rooted vector of the Ints XS.

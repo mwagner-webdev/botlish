@@ -314,7 +314,7 @@ pub fn run(startup: Startup, argv: Vec<Vec<u8>>, init: impl FnOnce() -> (Box<Vm>
             eprintln!("{} ({})", vm.describe_error(&error), error.error_code().join(" "));
             return 1;
         }
-        match writeln!(std::io::stdout().lock(), "{}", show(result)) {
+        match writeln!(std::io::stdout().lock(), "{}", show(&vm.info, result)) {
             Ok(()) => 0,
             Err(error) => {
                 eprintln!("{error} (NATIVE IO)");
@@ -459,11 +459,11 @@ fn driver_protocol(path: &std::path::Path, vm: &mut Vm, entry: ProgramEntry) -> 
         let code: Vec<String> = error.error_code().iter().map(|w| w.to_string()).collect();
         lines.push(tcl_list(&["error".to_string(), tcl_list(&code), vm.describe_error(&error)]));
     } else {
-        match tcl_value(result) {
+        match tcl_value(&vm.info, result) {
             Ok(value) => lines.push(tcl_list(&["value".to_string(), value])),
             Err(error) => {
                 let code: Vec<String> = error.error_code().iter().map(|w| w.to_string()).collect();
-                lines.push(tcl_list(&["error".to_string(), tcl_list(&code), error.message()]));
+                lines.push(tcl_list(&["error".to_string(), tcl_list(&code), error.message(&vm.info)]));
             }
         }
     }

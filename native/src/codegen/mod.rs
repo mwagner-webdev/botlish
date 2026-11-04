@@ -120,12 +120,17 @@ pub struct CompiledProgram {
     /// once, right here, after `finalize_definitions` makes absolute code
     /// addresses available, the only point they exist. `Vm::set_framemap`
     /// gives the collector (runtime/framewalk.rs) its own `Rc` clone.
-    pub framemap: std::rc::Rc<framemap::ProgramMap>,
+    pub framemap: std::sync::Arc<framemap::ProgramMap>,
     /// This program's module-static slot count (nir::Program's own
     /// `statics`, MODULE-STATIC-RETAINED-VALUES.md): `install_constants`
     /// sizes the Vm's static storage to this, once, alongside the ordinary
     /// constant table.
     statics: u32,
+    /// The size of the program's context area (nir::Program's
+    /// `context_bytes`, CONTEXTS.md): `install_constants` gives every Vm
+    /// that runs this code its own area of this size
+    /// (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md).
+    context_bytes: u32,
     /// The code's Windows function table (codegen::jitunwind): deleted
     /// before the module below releases the code (fields drop in order).
     #[cfg(all(windows, target_arch = "x86_64"))]
@@ -135,12 +140,62 @@ pub struct CompiledProgram {
 }
 
 impl CompiledProgram {
-    /// Builds the VM's constant table (static objects for this program) and
+    /// Builds the VM's constant table (static objects for this program),
     /// sizes its module-static slot table (MODULE-STATIC-RETAINED-VALUES.md)
-    /// to match -- both program-lifetime storage, installed together, once,
-    /// before any generated code can run.
+    /// and gives it its own context area (CONTEXTS.md) -- all program-lifetime
+    /// storage of that one Vm, installed together, once, before any
+    /// generated code can run. Any number of Vms may run one compiled
+    /// program (on one thread or several: the code and the program's
+    /// metadata are read-only), each with its own.
     pub fn install_constants(&self, vm: &mut Vm) {
-        crate::runtime::constants::install(vm, &self.pool.entries, &self.generic_entries, self.statics);
+        self.image().install(vm);
+    }
+
+    /// The read-only image every Vm of this program shares
+    /// (`ProgramImage`): what a thread that did not compile the program
+    /// needs to run it on a Vm of its own.
+    pub fn image(&self) -> ProgramImage<'_> {
+        ProgramImage {
+            entry: self.entry,
+            constants: &self.pool.entries,
+            generic_entries: &self.generic_entries,
+            framemap: &self.framemap,
+            statics: self.statics,
+            context_bytes: self.context_bytes,
+        }
+    }
+}
+
+/// A compiled program's machine code entry and read-only startup data, as
+/// any number of threads may share it (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md):
+/// nothing here is written after compilation, so every Vm made from it --
+/// on whatever thread -- runs the same code with the same metadata, and
+/// owns everything it writes (its heap, constants' objects, statics,
+/// context area, roots). The JIT module that owns the code outlives every
+/// borrow of it.
+#[derive(Clone, Copy)]
+pub struct ProgramImage<'a> {
+    pub entry: ProgramEntry,
+    pub constants: &'a [Const],
+    pub generic_entries: &'a [usize],
+    pub framemap: &'a std::sync::Arc<framemap::ProgramMap>,
+    pub statics: u32,
+    pub context_bytes: u32,
+}
+
+// SAFETY: every field is read-only after compilation (the entry is a code
+// address, the rest immutable data), so sharing one between threads shares
+// read-only memory.
+unsafe impl Send for ProgramImage<'_> {}
+unsafe impl Sync for ProgramImage<'_> {}
+
+impl ProgramImage<'_> {
+    /// Installs this program in VM, a Vm made on the thread that will run
+    /// it: its constant table, module-static slots, context area and frame
+    /// map (`CompiledProgram::install_constants`).
+    pub fn install(&self, vm: &mut Vm) {
+        crate::runtime::constants::install(vm, self.constants, self.generic_entries, self.statics);
+        vm.install_context_area(self.context_bytes);
     }
 }
 
@@ -330,8 +385,9 @@ impl CraneliftJit {
             vcode: None,
             code_sizes,
             sites,
-            framemap: std::rc::Rc::new(framemap),
+            framemap: std::sync::Arc::new(framemap),
             statics: program.statics,
+            context_bytes: program.context_bytes,
             #[cfg(all(windows, target_arch = "x86_64"))]
             _unwind: unwind,
             _module: module,
@@ -465,10 +521,7 @@ fn emit_object_with(program: &Program, isa: OwnedTargetIsa, library: Option<&str
     }
     let mut product = module.finish();
     add_windows_unwind(&mut product, &symbols, &functions)?;
-    let mut bytes = product.emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
-    if program.context_bytes > 0 {
-        relax_context_got(&mut bytes);
-    }
+    let bytes = product.emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
     Ok(ObjectProgram { bytes, pool, functions })
 }
 
@@ -495,9 +548,10 @@ fn define_program_record(
     use cranelift_module::{DataDescription, Linkage, Module};
     let error = |e: cranelift_module::ModuleError| BackendError::Codegen(format!("{e:?}"));
     let descriptor = ProgramDescriptor {
-        info: std::rc::Rc::new(program_info(program)),
+        info: std::sync::Arc::new(program_info(program)),
         constants: pool.entries.clone(),
         statics: program.statics,
+        context_bytes: program.context_bytes,
         functions: functions
             .iter()
             .map(|f| FunctionShape { direct_size: f.direct_size, entry_size: f.entry_size, safepoints: f.safepoints.clone() })
@@ -603,106 +657,6 @@ fn add_windows_unwind(
     Ok(())
 }
 
-/// The context area's symbol (CONTEXTS.md, clif.rs's `declare`).
-pub const CONTEXT_AREA_SYMBOL: &[u8] = b"botlish_context_area";
-
-/// Makes every GOT-relative reference to the context area *relaxable*, so the
-/// static linker turns it into a direct RIP-relative address (CONTEXTS.md).
-///
-/// Cranelift's x86-64 backend materializes any symbol address in PIC code as
-/// `movq sym@GOTPCREL(%rip), %reg` (cranelift-codegen's `LoadExtName`),
-/// colocated or not, and cranelift-object records it as R_X86_64_GOTPCREL,
-/// which a linker must honour with a real GOT slot: one extra load from the
-/// GOT before every context access. The context area is a linker-local
-/// symbol (STB_LOCAL, never preemptible), so the same instruction may carry
-/// R_X86_64_REX_GOTPCRELX instead, the relocation that permits the linker
-/// to rewrite `movq sym@GOTPCREL(%rip), %reg` into `leaq sym(%rip), %reg`
-/// (x86-64 psABI, "GOTPCRELX relaxation"; GNU ld and lld both do it for a
-/// non-preemptible symbol). Only relocations against this one symbol whose
-/// instruction is exactly that `REX.W 8B /r` RIP-relative load are changed;
-/// the linker still checks the instruction and keeps the GOT slot if it
-/// cannot relax. Returns how many relocations were changed. A no-op for
-/// anything that is not a little-endian ELF64 object.
-pub fn relax_context_got(bytes: &mut [u8]) -> usize {
-    const R_X86_64_GOTPCREL: u64 = 9;
-    const R_X86_64_REX_GOTPCRELX: u64 = 42;
-    let mut changed = 0;
-    for (entry, r_type, code_at) in context_relocations(bytes) {
-        // movq disp32(%rip), %reg: REX.W (0x48/0x4c), 0x8b, ModRM 00 reg 101.
-        if r_type != R_X86_64_GOTPCREL
-            || code_at < 3
-            || bytes[code_at - 3] & 0xfb != 0x48
-            || bytes[code_at - 2] != 0x8b
-            || bytes[code_at - 1] & 0xc7 != 0x05
-        {
-            continue;
-        }
-        let symbol = u64::from_le_bytes(bytes[entry + 8..entry + 16].try_into().unwrap()) >> 32;
-        let relaxed = (symbol << 32) | R_X86_64_REX_GOTPCRELX;
-        bytes[entry + 8..entry + 16].copy_from_slice(&relaxed.to_le_bytes());
-        changed += 1;
-    }
-    changed
-}
-
-/// Every relocation of a little-endian ELF64 object against the context area
-/// symbol: (byte offset of the Rela entry, its type, byte offset in the file
-/// of the patched field). Empty for anything else.
-pub fn context_relocations(bytes: &[u8]) -> Vec<(usize, u64, usize)> {
-    const SHT_SYMTAB: u32 = 2;
-    const SHT_RELA: u32 = 4;
-    let u16_at = |o: usize| u16::from_le_bytes([bytes[o], bytes[o + 1]]);
-    let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-    let u64_at = |o: usize| u64::from_le_bytes(bytes[o..o + 8].try_into().unwrap());
-    let mut found = Vec::new();
-    if bytes.len() < 64 || &bytes[0..4] != b"\x7fELF" || bytes[4] != 2 || bytes[5] != 1 {
-        return found;
-    }
-    let shoff = u64_at(0x28) as usize;
-    let shentsize = u16_at(0x3a) as usize;
-    let shnum = u16_at(0x3c) as usize;
-    // (type, offset, size, link, info, entsize)
-    let section = |i: usize| -> (u32, usize, usize, u32, u32, usize) {
-        let h = shoff + i * shentsize;
-        (u32_at(h + 4), u64_at(h + 0x18) as usize, u64_at(h + 0x20) as usize,
-            u32_at(h + 0x28), u32_at(h + 0x2c), u64_at(h + 0x38) as usize)
-    };
-    // The symbol index of the context area in the symbol table.
-    let mut target = None;
-    for i in 0..shnum {
-        let (kind, offset, size, link, _, entsize) = section(i);
-        if kind != SHT_SYMTAB || entsize == 0 {
-            continue;
-        }
-        let (_, strtab, _, _, _, _) = section(link as usize);
-        for index in 0..size / entsize {
-            let name = strtab + u32_at(offset + index * entsize) as usize;
-            let end = bytes[name..].iter().position(|&c| c == 0).map_or(name, |n| name + n);
-            if &bytes[name..end] == CONTEXT_AREA_SYMBOL {
-                target = Some((i, index as u64));
-            }
-        }
-    }
-    let Some((symtab, symbol)) = target else { return found };
-    for i in 0..shnum {
-        let (kind, offset, size, link, info, entsize) = section(i);
-        if kind != SHT_RELA || link as usize != symtab || entsize != 24 {
-            continue;
-        }
-        let (_, code, code_size, _, _, _) = section(info as usize);
-        for index in 0..size / entsize {
-            let entry = offset + index * entsize;
-            let r_offset = u64_at(entry) as usize;
-            let r_info = u64_at(entry + 8);
-            if r_info >> 32 != symbol || r_offset + 4 > code_size {
-                continue;
-            }
-            found.push((entry, r_info & 0xffff_ffff, code + r_offset));
-        }
-    }
-    found
-}
-
 #[cfg(test)]
 mod context_area_tests {
     use super::*;
@@ -734,41 +688,154 @@ mod context_area_tests {
         assert!(crate::nir::parse(&text).is_err(), "a slot beyond the area must be rejected");
     }
 
-    /// x86-64 ELF only: the relocation types and the relaxation are the
-    /// x86-64 psABI's (on AArch64 the object addresses the area with
-    /// ADRP/LDR GOT pairs, which `relax_context_got` leaves alone, and a
-    /// COFF object -- Windows' -- has neither GOT nor ELF relocations: the
-    /// relaxation is ELF's and a no-op there).
-    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    /// No context data symbol (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md): the
+    /// program object names no context area, so nothing a link makes can
+    /// share one between the Vms of a process -- the area is each Vm's.
     #[test]
-    fn the_object_addresses_the_area_with_relaxable_relocations_only() {
+    fn the_object_has_no_context_data_symbol() {
         let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let object = emit_object(&program).unwrap_or_else(|e| panic!("{}", e.message()));
-        let types: Vec<u64> = context_relocations(&object.bytes).iter().map(|r| r.1).collect();
-        // Two functions use the area: each takes its address once.
-        assert_eq!(types, vec![42, 42], "R_X86_64_REX_GOTPCRELX, never a plain GOTPCREL");
-        let mut again = object.bytes.clone();
-        assert_eq!(relax_context_got(&mut again), 0, "nothing left to relax");
+        let named = |name: &[u8]| object.bytes.windows(name.len()).any(|w| w == name);
+        assert!(!named(b"botlish_context_area"), "a context area symbol in the object");
+        assert!(!named(b"context_area"), "a context area symbol in the object");
+        // The program's other data stays: its record and descriptor.
+        assert!(named(b"botlish_program") && named(b"botlish_descriptor"));
     }
 
+    /// Two Vms of one compiled program: each reads and writes its own area,
+    /// installed fresh (all zero) when the Vm is made, never the other's --
+    /// the second Vm's installation leaves the first's values as they were.
     #[test]
-    fn the_jit_reads_and_writes_the_area() {
+    fn each_vm_of_one_compiled_program_has_its_own_area() {
         use crate::runtime::metrics::AllocMode;
         use crate::runtime::vm::ProgramInfo;
-        use std::rc::Rc;
         let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
         let options = CompileOptions { clif: true, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let clif = compiled.clif.clone().unwrap();
-        assert!(clif.contains("symbol_value.i64"), "{clif}");
-        let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
-            AllocMode::Summary,
-        );
+        // The base is one read-only load from the Vm argument, never a data
+        // symbol's address.
+        assert!(!clif.contains("symbol_value"), "{clif}");
+        let base = format!("load.i64 notrap aligned readonly can_move v0+{}", crate::runtime::vm::VM_CONTEXT_OFFSET);
+        assert!(clif.contains(&base), "{base} not in {clif}");
+        let info = std::sync::Arc::new(ProgramInfo::empty());
+        let mut a = Vm::new(info.clone(), AllocMode::Summary);
+        compiled.install_constants(&mut a);
+        a.set_framemap(compiled.framemap.clone());
+        assert_eq!(a.context_area(), &[0, 0], "nothing installed yet");
+        assert_eq!((compiled.entry)(&mut *a), (4 << 1) | 1, "f reads B's slot, the tagged small Int 4");
+        assert_eq!(a.context_area(), &[(3 << 1) | 1, (4 << 1) | 1]);
+        let mut b = Vm::new(info, AllocMode::Summary);
+        compiled.install_constants(&mut b);
+        b.set_framemap(compiled.framemap.clone());
+        assert_eq!(b.context_area(), &[0, 0], "a new Vm inherits no installed value");
+        assert_ne!(a.context_area().as_ptr(), b.context_area().as_ptr());
+        assert_eq!((compiled.entry)(&mut *b), (4 << 1) | 1);
+        assert_eq!(a.context_area(), &[(3 << 1) | 1, (4 << 1) | 1]);
+        drop(b);
+        assert_eq!((compiled.entry)(&mut *a), (4 << 1) | 1, "the first Vm runs on after the second is gone");
+        // A Vm made after one was dropped starts empty too: no storage of a
+        // destroyed Vm is handed on.
+        let mut c = Vm::new(std::sync::Arc::new(ProgramInfo::empty()), AllocMode::Summary);
+        compiled.install_constants(&mut c);
+        assert_eq!(c.context_area(), &[0, 0], "a Vm made after another was dropped inherits nothing");
+        assert_ne!(a.context_area().as_ptr(), c.context_area().as_ptr());
+        a.reset();
+        assert_eq!(a.context_area(), &[0, 0], "a reset clears the run's installation");
+    }
+}
+
+/// Program metadata belongs to the Vm (PER-THREAD-RUNTIME-STATE-
+/// MILESTONE-1.md): two programs whose enums and shapes are numbered alike
+/// but named differently, compiled once each, their Vms made and run in
+/// turn on one thread. The hash of an enum case reads its names, the
+/// equality of two opaque structs refuses with a message that shows their
+/// declaration's name: each run gives its own program's answer however the
+/// Vms were made and dropped -- never the most recently made Vm's.
+#[cfg(test)]
+mod program_metadata_tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::value::NO_VALUE;
+
+    /// A program whose enum 0 is NAME (cases CASES) and whose shape 0 is the
+    /// opaque struct SHAPE: it returns the hash of case 1.
+    fn hashing(name: &str, cases: &str) -> String {
+        format!(
+            "nir 1 call-effects=1 statics=0\nenum 0 \"{name}\" cases=\"{cases}\"\n\n\
+             func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n    %0 = enum 0 1\n    %1 = op hash %0\n    ret %1\nend\n"
+        )
+    }
+
+    /// A program comparing two values of its opaque shape 0, SHAPE: the
+    /// comparison refuses (a MutableArray inside), naming the opaque values.
+    fn comparing(shape: &str) -> String {
+        format!(
+            "nir 1 call-effects=1 statics=0\nshape 0 named \"{shape}\" opaque=1 fields=\"f\"\n\n\
+             func 0 \"<program>\" params=0 env=0 regs=5 pnames=\"\" captures=0\n    %0 = int 1\n    %1 = op mutarraycreate %0 %0\n    %2 = structnew 0 %1\n    %3 = structnew 0 %1\n    %4 = op veq %2 %3\n    ret %4\nend\n"
+        )
+    }
+
+    fn compile(text: &str) -> (crate::nir::Program, CompiledProgram) {
+        let program = crate::nir::parse(text).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
+        let compiled = CraneliftJit.compile(&program, &options).unwrap_or_else(|e| panic!("{}", e.message()));
+        (program, compiled)
+    }
+
+    fn vm(program: &crate::nir::Program, compiled: &CompiledProgram) -> Box<Vm> {
+        let mut vm = Vm::new(std::sync::Arc::new(crate::runtime::program::program_info(program)), AllocMode::Off);
         compiled.install_constants(&mut vm);
         vm.set_framemap(compiled.framemap.clone());
+        vm
+    }
+
+    /// The outcome of a run: the value's host text, or the error's message.
+    fn run(vm: &mut Vm, compiled: &CompiledProgram) -> String {
         let result = (compiled.entry)(&mut *vm);
-        assert_eq!(result, (4 << 1) | 1, "f reads B's slot, the tagged small Int 4");
+        if result == NO_VALUE {
+            let error = vm.error.take().expect("an error");
+            return vm.describe_error(&error);
+        }
+        crate::runtime::show::tcl_value(&vm.info, result).expect("a host value")
+    }
+
+    #[test]
+    fn two_programs_alternate_on_one_thread() {
+        let (pa, ca) = compile(&hashing("Color", "Red Green Blue"));
+        let (pb, cb) = compile(&hashing("Shape", "Circle Square"));
+        let alone_a = run(&mut vm(&pa, &ca), &ca);
+        let alone_b = run(&mut vm(&pb, &cb), &cb);
+        assert_ne!(alone_a, alone_b, "two programs' case 1 hash by their own names");
+        // A made first, B made last: each runs its own.
+        let mut a = vm(&pa, &ca);
+        let mut b = vm(&pb, &cb);
+        assert_eq!(run(&mut a, &ca), alone_a);
+        assert_eq!(run(&mut b, &cb), alone_b);
+        assert_eq!(run(&mut a, &ca), alone_a, "A after B ran");
+        drop(a);
+        assert_eq!(run(&mut b, &cb), alone_b, "B after A was dropped");
+        // The other order, and a second Vm of A beside B.
+        let mut a2 = vm(&pa, &ca);
+        assert_eq!(run(&mut b, &cb), alone_b, "B after another A was made");
+        assert_eq!(run(&mut a2, &ca), alone_a);
+        drop(b);
+        let mut a3 = vm(&pa, &ca);
+        assert_eq!(run(&mut a2, &ca), alone_a);
+        assert_eq!(run(&mut a3, &ca), alone_a);
+    }
+
+    #[test]
+    fn a_refusal_names_its_own_programs_declaration() {
+        let (pa, ca) = compile(&comparing("geo::Token"));
+        let (pb, cb) = compile(&comparing("net::Handle"));
+        let mut a = vm(&pa, &ca);
+        let mut b = vm(&pb, &cb);
+        let (ra, rb) = (run(&mut a, &ca), run(&mut b, &cb));
+        assert!(ra.contains("<opaque geo::Token>") && !ra.contains("net::Handle"), "{ra}");
+        assert!(rb.contains("<opaque net::Handle>") && !rb.contains("geo::Token"), "{rb}");
+        drop(b);
+        assert_eq!(run(&mut a, &ca), ra);
     }
 }
 
@@ -782,7 +849,6 @@ mod mutarray_inline_tests {
     use super::*;
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::vm::ProgramInfo;
-    use std::rc::Rc;
 
     /// A = create(4, 7); A[2] = 9 (a unique backing: the inline store);
     /// B = a logical copy of A; A[1] = 5 at a proven index (a shared
@@ -814,7 +880,7 @@ mod mutarray_inline_tests {
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mode = if count_accesses { AllocMode::Summary } else { AllocMode::Off };
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             mode,
         );
         compiled.install_constants(&mut vm);
@@ -897,7 +963,6 @@ mod short_string_generic_entry_tests {
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::ops::GenericEntry;
     use crate::runtime::vm::ProgramInfo;
-    use std::rc::Rc;
 
     /// func 1 echo(s): ShortString1 in, ShortString1 out, cannot fail.
     /// func 2 guarded(s, flag): ShortString1 in, flag tagged; raises when
@@ -920,7 +985,7 @@ mod short_string_generic_entry_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -979,7 +1044,6 @@ mod packed_ascii_generic_entry_tests {
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::ops::GenericEntry;
     use crate::runtime::vm::ProgramInfo;
-    use std::rc::Rc;
 
     const PROGRAM: &str = concat!(
         "nir 1 call-effects=1\n\n",
@@ -999,7 +1063,7 @@ mod packed_ascii_generic_entry_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -1208,7 +1272,6 @@ mod euclid_mod_tests {
     use crate::runtime::vm::ProgramInfo;
     use num_bigint::BigInt;
     use num_traits::{Signed, Zero};
-    use std::rc::Rc;
 
     const PROGRAM: &str = concat!(
         "nir 1 call-effects=1\n\n",
@@ -1238,7 +1301,7 @@ mod euclid_mod_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         );
         compiled.install_constants(&mut vm);
@@ -1351,7 +1414,6 @@ mod c_word_tests {
     use super::*;
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::vm::ProgramInfo;
-    use std::rc::Rc;
 
     #[test]
     fn c_word_comparisons_and_boxing_run() {
@@ -1373,14 +1435,14 @@ mod c_word_tests {
         let options = CompileOptions { clif: false, vcode: false, alloc_sites: false, count_accesses: false };
         let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
         let mut vm = Vm::new(
-            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Off,
         );
         compiled.install_constants(&mut vm);
         vm.set_framemap(compiled.framemap.clone());
         let result = (compiled.entry)(&mut *vm);
         assert_eq!(
-            crate::runtime::show::show(result),
+            crate::runtime::show::show(&vm.info, result),
             "[true, false, true, false, true, true, true, false, true, true, 18446744073709551615, -9223372036854775808, -1, 4611686018427387904, 4611686018427387903, -4611686018427387905]"
         );
     }
@@ -1408,7 +1470,6 @@ mod suspended_root_tests {
     use super::*;
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::vm::{FunctionInfo, ProgramInfo};
-    use std::rc::Rc;
 
     const PROGRAM: &str = concat!(
         "nir 1 call-effects=1 statics=0\n\n",
@@ -1457,7 +1518,7 @@ mod suspended_root_tests {
                 .map(|(arity, pnames)| FunctionInfo { arity, pnames: pnames.into() })
                 .into();
             let mut vm = Vm::new(
-                Rc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+                std::sync::Arc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
                 AllocMode::Off,
             );
             compiled.install_constants(&mut vm);
@@ -1465,7 +1526,7 @@ mod suspended_root_tests {
             vm.heap.set_stress_for_test(stress);
             vm.heap.set_poison_for_test(stress);
             let result = (compiled.entry)(&mut *vm);
-            assert!(vm.error.is_none(), "stress {stress}: {:?}", vm.error.as_ref().map(|e| e.message()));
+            assert!(vm.error.is_none(), "stress {stress}: {:?}", vm.error.as_ref().map(|e| e.message(&vm.info)));
             // body's first yield (8), the churner's two segments (240 each),
             // the program's churn (320), body's sum of its list (56).
             assert_eq!(result, make_small(8 + 240 + 320 + 240 + 56), "stress {stress}");
@@ -1493,7 +1554,6 @@ mod cleanup_root_tests {
     use super::*;
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::vm::{FunctionInfo, ProgramInfo};
-    use std::rc::Rc;
 
     const PROGRAM: &str = concat!(
         "nir 1 call-effects=1 statics=0\n\n",
@@ -1524,7 +1584,7 @@ mod cleanup_root_tests {
         for stress in [false, true] {
             let functions = [(0, ""), (1, "l"), (1, "n")].map(|(arity, pnames)| FunctionInfo { arity, pnames: pnames.into() }).into();
             let mut vm = Vm::new(
-                Rc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+                std::sync::Arc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
                 AllocMode::Summary,
             );
             compiled.install_constants(&mut vm);
@@ -1532,7 +1592,7 @@ mod cleanup_root_tests {
             vm.heap.set_stress_for_test(stress);
             vm.heap.set_poison_for_test(stress);
             let result = (compiled.entry)(&mut *vm);
-            assert!(vm.error.is_none(), "stress {stress}: {:?}", vm.error.as_ref().map(|e| e.message()));
+            assert!(vm.error.is_none(), "stress {stress}: {:?}", vm.error.as_ref().map(|e| e.message(&vm.info)));
             assert_eq!(result, make_small(0), "stress {stress}: the vector is left empty");
             assert_eq!(vm.metrics.resources.cleanups, 6, "stress {stress}: one cleanup per element");
             assert_eq!(vm.heap.collections > 0, stress);
@@ -1562,7 +1622,6 @@ mod caller_root_tests {
     use super::*;
     use crate::runtime::metrics::AllocMode;
     use crate::runtime::vm::{FunctionInfo, ProgramInfo};
-    use std::rc::Rc;
 
     const PROGRAM: &str = concat!(
         "nir 1 call-effects=1 statics=0\n\n",
@@ -1598,7 +1657,7 @@ mod caller_root_tests {
         for stress in [false, true] {
             let functions = [(0, ""), (1, "l"), (1, "n"), (1, "i")].map(|(arity, pnames)| FunctionInfo { arity, pnames: pnames.into() }).into();
             let mut vm = Vm::new(
-                Rc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+                std::sync::Arc::new(ProgramInfo { functions, natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
                 AllocMode::Off,
             );
             compiled.install_constants(&mut vm);

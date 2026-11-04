@@ -105,6 +105,11 @@ pub fn abi_words() -> Vec<u64> {
         vm::VM_NATIVE_ROOTS_PTR_OFFSET as u64,
         vm::VM_NATIVE_ROOTS_LEN_OFFSET as u64,
         vm::VM_STATICS_OFFSET as u64,
+        // Where generated code finds the running Vm's context area
+        // (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md): code of a runtime that
+        // kept it elsewhere -- or in a process-wide data symbol -- never runs
+        // on this one.
+        vm::VM_CONTEXT_OFFSET as u64,
         value::CLOSURE_CAPS_OFFSET as u64,
         value::LIST_LEN_OFFSET as u64,
         value::LIST_PTR_OFFSET as u64,

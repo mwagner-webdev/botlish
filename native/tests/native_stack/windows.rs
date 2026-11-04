@@ -22,7 +22,6 @@ use botlish_native::runtime::platform::windows::{confirmed_guard_page, stack_gua
 use botlish_native::runtime::value::*;
 use botlish_native::runtime::vm::{ProgramInfo, Vm};
 use std::process::Command;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use windows_sys::Win32::Foundation::{CloseHandle, EXCEPTION_STACK_OVERFLOW, GetLastError};
 use windows_sys::Win32::System::Diagnostics::Debug::RaiseException;
@@ -257,7 +256,7 @@ fn child(scenario: &str) -> ! {
 // Coroutine stacks
 
 fn new_vm() -> Box<Vm> {
-    Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+    Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
         AllocMode::Summary)
 }
 

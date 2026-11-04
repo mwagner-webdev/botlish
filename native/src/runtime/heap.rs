@@ -55,6 +55,16 @@ pub struct Heap {
     pub collections: usize,
     stress: bool,
     poison: bool,
+    /// The ownership check (`set_ownership_check`): the static objects of
+    /// this heap's Vm, which with the heap's own objects are every address a
+    /// root may point to. None: no check (the default).
+    ownership: Option<std::collections::HashSet<usize>>,
+    /// The pointers a collection under the ownership check found that are
+    /// neither this heap's objects nor its Vm's statics -- another Vm's
+    /// objects, or freed memory -- and did not follow
+    /// (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md, "GC isolation"). Always 0
+    /// without the check.
+    pub foreign_pointers: u64,
 }
 
 impl Heap {
@@ -66,7 +76,17 @@ impl Heap {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(MIN_THRESHOLD);
-        Heap { objects: Vec::new(), allocated: 0, threshold: min_threshold, min_threshold, collections: 0, stress, poison: false }
+        Heap {
+            objects: Vec::new(),
+            allocated: 0,
+            threshold: min_threshold,
+            min_threshold,
+            collections: 0,
+            stress,
+            poison: false,
+            ownership: None,
+            foreign_pointers: 0,
+        }
     }
 
     /// Test hook: collect before every allocation, exactly as
@@ -85,6 +105,17 @@ impl Heap {
     /// codegen::caller_root_tests. Not test-only, like `set_stress_for_test`.
     pub fn set_poison_for_test(&mut self, on: bool) {
         self.poison = on;
+    }
+
+    /// Test hook (the concurrent-VM harness, PER-THREAD-RUNTIME-STATE-
+    /// MILESTONE-1.md): every collection checks that each pointer it marks
+    /// is one of this heap's objects or one of STATICS (its Vm's static
+    /// objects), before it reads the object: one that is neither -- another
+    /// Vm's object, which a collector must never mark, or freed memory -- is
+    /// counted in `foreign_pointers` and not followed. Not test-only, like
+    /// `set_stress_for_test`: the driver's harness runs against this library.
+    pub fn set_ownership_check(&mut self, statics: std::collections::HashSet<usize>) {
+        self.ownership = Some(statics);
     }
 
     /// Test hook: no allocation-triggered collection until the next explicit
@@ -135,8 +166,19 @@ impl Heap {
     ) {
         let started = metrics.enabled().then(Instant::now);
         let mut stack: Vec<Value> = roots.collect();
+        // Under the ownership check, every address a root may point to.
+        let owned: Option<std::collections::HashSet<usize>> = self.ownership.as_ref().map(|statics| {
+            let mut owned = statics.clone();
+            owned.extend(self.objects.iter().map(|&o| o as usize));
+            owned
+        });
+        let mut foreign = 0u64;
         while let Some(v) = stack.pop() {
             if !is_pointer(v) {
+                continue;
+            }
+            if owned.as_ref().is_some_and(|owned| !owned.contains(&(v as usize))) {
+                foreign += 1;
                 continue;
             }
             let header = unsafe { &mut *(v as *mut Header) };
@@ -231,6 +273,7 @@ impl Heap {
         self.allocated = 0;
         self.threshold = self.min_threshold.max(live * 2);
         self.collections += 1;
+        self.foreign_pointers += foreign;
 
         if metrics.enabled() {
             let mut reclaimed_objects = 0u64;
