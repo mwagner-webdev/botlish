@@ -6,6 +6,7 @@
 #                                                surface/surface.tcl)
 #
 #   csvrun::kinds                     the sources a case can name
+#   csvrun::values                    the adversarial field values, named
 #   csvrun::run CASES BACKENDS        => {BACKEND OUTCOMES}...: each case's
 #                                        outcome on each backend
 #   csvrun::judge CASE OUTCOME        => ok | {invalid REASON}: the declared
@@ -61,6 +62,49 @@ namespace eval csvrun {
     variable counter 0
     variable base ""
     variable timing {}
+}
+
+# The milestone's input classes (section 10), each a named field value: the
+# adversarial corpus of differential.tcl and census.tcl.
+proc csvrun::values {} {
+    set v [dict create]
+    dict set v empty ""
+    dict set v ascii "hello world"
+    dict set v comma "a,b"
+    dict set v one-quote "\""
+    dict set v two-quotes "\"\""
+    dict set v three-quotes "\"\"\""
+    dict set v four-quotes "\"\"\"\""
+    dict set v many-quotes [string repeat "\"" 41]
+    dict set v quote-comma "x\","
+    dict set v quote-crlf "x\"\r\n"
+    dict set v cr "a\rb"
+    dict set v lf "a\nb"
+    dict set v crlf "a\r\nb"
+    dict set v quote-ends "\"edge\""
+    dict set v long [string repeat "abc,\"\r\n" 300]
+    dict set v supplementary "\U1F600 \U10348 \U10FFFF"
+    dict set v combining "é ñ क्ष"
+    dict set v line-separators "a b c"
+    dict set v bom-inside "﻿start"
+    dict set v tab "a\tb"
+    dict set v nul "a\u0000b"
+    dict set v control "bell\u0007"
+    dict set v del "del\u007F"
+    dict set v nel "next\u0085line"
+    dict set v formula-eq "=1+2"
+    dict set v formula-plus "+1+2"
+    dict set v formula-at "@SUM(1,2)"
+    dict set v formula-minus "-2+3"
+    dict set v injection "hello\",\"admin"
+    dict set v injection-record "x\"\r\n\"evil\",\"=1+2\",\"z"
+    dict set v injection-formula "a\",\"=HYPERLINK(\"\"x\"\")"
+    dict set v fake-record "\"1\",\"2\",\"3\"\r\n"
+    dict set v fake-separator ",,\r\n,,"
+    dict set v latin1 "café naïve"
+    dict set v cjk "中文表"
+    dict set v noncharacter "￾￿"
+    return $v
 }
 
 proc csvrun::kinds {} {
@@ -368,14 +412,14 @@ proc csvrun::judge {case outcome} {
         if {[lindex $r 0] eq "accept" && [lindex $r 1] == $n} {
             return ok
         }
-        return [list invalid "completes with a trace that is not one $ns::$name token: [dfaref::text $r]"]
+        return [list invalid "completes with a trace that is not one ${ns}::$name token: [dfaref::text $r]"]
     }
     if {$n == 0} { return ok }
     set r [dfaref::run $model $ns $name $symbols 0]
     if {[lindex $r 0] eq "suspended" || ([lindex $r 0] eq "accept" && [lindex $r 1] == $n)} {
         return ok
     }
-    return [list invalid "fails after a prefix that is no prefix of a $ns::$name token: [dfaref::text $r]"]
+    return [list invalid "fails after a prefix that is no prefix of a ${ns}::$name token: [dfaref::text $r]"]
 }
 
 # Lines for oracle.py: KIND, the input, then STATUS AT VALUE FINAL and the

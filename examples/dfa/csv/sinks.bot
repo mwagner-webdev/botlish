@@ -23,6 +23,9 @@
 #                   time, and done? stays true
 #   validated_bytes design A for comparison: each byte of the certified
 #                   emitter also fed to document3_bytes at run time
+#
+# A sink of several arguments is `nomethod`: its arguments are a table and
+# its parameters, none of them a receiver.
 
 import std::dfa
 import std::coroutine
@@ -67,7 +70,7 @@ fn collect_strict_field(value: str) -> List[int] errors csv_common::UnsupportedC
     loop x in out:
         x
 
-fn collect_strict_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
+nomethod fn collect_strict_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::strict_document_source(header, rows)
     out = std::mutable_vector::from_list(no_symbols())
     c = std::mutable_array::create(1, first)
@@ -91,7 +94,7 @@ fn collect_utf8_field(value: str) -> List[int] errors csv_common::UnsupportedCSV
     loop x in out:
         x
 
-fn collect_utf8_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
+nomethod fn collect_utf8_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::utf8_document_source(header, rows)
     out = std::mutable_vector::from_list(no_symbols())
     c = std::mutable_array::create(1, first)
@@ -127,7 +130,7 @@ fn collect_bytes_field_from_bytes(data: std::abi::bytes::Bytes) -> List[int] err
     loop x in out:
         x
 
-fn collect_bytes_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
+nomethod fn collect_bytes_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::bytes_document_source(header, rows)
     out = std::mutable_vector::from_list(no_symbols())
     c = std::mutable_array::create(1, first)
@@ -175,7 +178,7 @@ fn collect_selective_field(value: str) -> List[int] errors csv_common::Unsupport
     loop x in out:
         x
 
-fn collect_selective_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision:
+nomethod fn collect_selective_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision:
     coroutine {step, first} = sources::selective_document_source(header, rows)
     out = std::mutable_vector::from_list(no_symbols())
     c = std::mutable_array::create(1, first)
@@ -187,7 +190,7 @@ fn collect_selective_document(header: csv_common::Row, rows: List[csv_common::Ro
     loop x in out:
         x
 
-fn collect_selective_strict_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision:
+nomethod fn collect_selective_strict_document(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision:
     coroutine {step, first} = sources::selective_strict_document_source(header, rows)
     out = std::mutable_vector::from_list(no_symbols())
     c = std::mutable_array::create(1, first)
@@ -208,7 +211,7 @@ struct Digest:
 fn mix(h: int, c: int) -> int:
     (h * 31 + c + 1).mod(2147483647)
 
-fn digest_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Digest errors csv_common::UnsupportedCSVCharacter:
+nomethod fn digest_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Digest errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::bytes_document_source(header, rows)
     state = std::mutable_array::create(3, 0)
     state.set(2, first)
@@ -222,7 +225,7 @@ fn digest_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Digest 
 
 # The document's bytes in chunks of SIZE (the last one shorter), each chunk
 # a List: what a buffered writer hands its file descriptor.
-fn chunked_bytes(header: csv_common::Row, rows: List[csv_common::Row], size: int) -> List[List[int]] errors csv_common::UnsupportedCSVCharacter:
+nomethod fn chunked_bytes(header: csv_common::Row, rows: List[csv_common::Row], size: int) -> List[List[int]] errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::bytes_document_source(header, rows)
     chunks = std::mutable_vector::from_list([no_symbols()])
     chunks.clear()
@@ -245,7 +248,7 @@ fn chunked_bytes(header: csv_common::Row, rows: List[csv_common::Row], size: int
     loop k in chunks:
         k
 
-fn limited_bytes(header: csv_common::Row, rows: List[csv_common::Row], limit: int) -> List[int] errors csv_common::UnsupportedCSVCharacter, SinkFull:
+nomethod fn limited_bytes(header: csv_common::Row, rows: List[csv_common::Row], limit: int) -> List[int] errors csv_common::UnsupportedCSVCharacter, SinkFull:
     coroutine {step, first} = sources::bytes_document_source(header, rows)
     out = std::mutable_vector::from_list(no_symbols())
     c = std::mutable_array::create(1, first)
@@ -259,7 +262,7 @@ fn limited_bytes(header: csv_common::Row, rows: List[csv_common::Row], limit: in
     loop x in out:
         x
 
-fn prefix_bytes(header: csv_common::Row, rows: List[csv_common::Row], k: int) -> List[int] errors csv_common::UnsupportedCSVCharacter:
+nomethod fn prefix_bytes(header: csv_common::Row, rows: List[csv_common::Row], k: int) -> List[int] errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::bytes_document_source(header, rows)
     out = std::mutable_vector::from_list(no_symbols())
     c = std::mutable_array::create(1, first)
@@ -279,7 +282,7 @@ struct Partial:
     at: int
     value: int
 
-fn partial_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Partial:
+nomethod fn partial_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Partial:
     out = std::mutable_vector::from_list(no_symbols())
     coroutine {step, first} = sources::bytes_document_source(header, rows):
         on csv_common::UnsupportedCSVCharacter {at, value}:
@@ -301,7 +304,7 @@ fn partial_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Partia
 
 # The bytes' count, then the source's final value (the number of records),
 # read once done? says the source completed.
-fn written_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
+nomethod fn written_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> List[int] errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::bytes_document_source(header, rows)
     state = std::mutable_array::create(2, 0)
     state.set(1, first)
@@ -314,7 +317,7 @@ fn written_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> List[i
 
 # The final value of a completed source, resumed MORE times after the end,
 # and 1 if done? is still true.
-fn after_end(rows: List[csv_common::Row], more: int) -> List[int] errors csv_common::UnsupportedCSVCharacter:
+nomethod fn after_end(rows: List[csv_common::Row], more: int) -> List[int] errors csv_common::UnsupportedCSVCharacter:
     coroutine {step, first} = sources::bytes_stream_source(rows)
     c = std::mutable_array::create(1, first)
     loop:
@@ -333,7 +336,7 @@ fn after_end(rows: List[csv_common::Row], more: int) -> List[int] errors csv_com
 # Design A beside the certified emitter: every byte also fed, as it is
 # emitted, to the document's recognizer, which never fails here (the claim
 # is certified) -- the run-time cost the static proof saves.
-fn validated_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Digest errors csv_common::UnsupportedCSVCharacter, Invalid:
+nomethod fn validated_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> Digest errors csv_common::UnsupportedCSVCharacter, Invalid:
     coroutine {step: next, first: c0} = sources::bytes_document_source(header, rows)
     count = std::mutable_array::create(2, 0)
     if std::coroutine::done?(next):

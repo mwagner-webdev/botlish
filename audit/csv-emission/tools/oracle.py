@@ -6,9 +6,17 @@ Nothing here reads a Botlish file: the profiles are restated from RFC 4180
 and the milestone's Profile B policy, the parser is written from the ABNF,
 and CPython's csv module is the established second opinion.
 
-    python3 -I oracle.py check LINES       every line of LINES (run.tcl's
+    python3 -I oracle.py check LINES ?--all?   every line of LINES (run.tcl's
                                            csvrun::write), judged; a summary
-                                           on stdout, exit 1 on any failure
+                                           on stdout (and the first 40
+                                           failures, or --all), exit 1 on
+                                           any failure
+    python3 -I oracle.py export FILE       FILE as examples/dfa/csv/export.bot
+                                           writes its table: strict UTF-8, no
+                                           byte-order mark, the strict parser
+                                           and csv.reader reading exactly the
+                                           table, csv.writer (QUOTE_ALL, CRLF)
+                                           writing exactly FILE
     python3 -I oracle.py selftest          the parser and the csv module on
                                            hand-written documents, valid and
                                            malformed; their disagreements
@@ -341,7 +349,7 @@ def judge(kind, enc, outcome, symbols):
         return results
 
     if status != "ok":
-        results["expected"] = "input is representable, but the run was %s %d %d" % (status, at, value)
+        results["expected"] = "guard: input is representable, but the run was %s %d %d" % (status, at, value)
         return results
     expect_final = {"document": None, "rows": None, "unterminated": None}
     if records is None:
@@ -350,7 +358,7 @@ def judge(kind, enc, outcome, symbols):
         want = len(records)
     else:
         want = len(records)
-    results["expected"] = "ok" if final == want else "final value %d, expected %d" % (final, want)
+    results["expected"] = "ok" if final == want else "final: final value %d, expected %d" % (final, want)
     ref = reference()
     results["reference"] = "ok" if symbols == to_symbols(ref, encoding) else \
         "output differs from the reference %r" % ref[:80]
@@ -384,7 +392,7 @@ def judge(kind, enc, outcome, symbols):
     return results
 
 
-def check(path):
+def check(path, show=40):
     totals = {}
     failures = []
     lines = 0
@@ -407,7 +415,7 @@ def check(path):
     print("lines %d" % lines)
     for name in sorted(totals):
         print("%-11s %6d ok %4d failed" % (name, totals[name][0], totals[name][1]))
-    for f in failures[:40]:
+    for f in failures[:show]:
         print("FAIL " + f)
     return 1 if failures else 0
 
@@ -469,10 +477,54 @@ def selftest():
     return 1 if wrong else 0
 
 
+# The table examples/dfa/csv/export.bot exports (its header first).
+EXPORT_TABLE = [
+    ["id", "name", "comment"],
+    ["101", "Ada Lovelace", "First program, 1843"],
+    ["102", 'Grace "Amazing Grace" Hopper', "COBOL"],
+    ["103", 'hello","admin', "a value that tries to open a column"],
+    ["104", 'x"\r\n"evil","=1+2","z', "a value that tries to end the record"],
+    ["105", "=1+2", "+1+2"],
+    ["106", "@SUM(1,2)", "-2+3"],
+    ["107", "multi\r\nline\nvalue", "tab\there"],
+    ["108", "caf\u00e9 na\u00efve \u20ac", "\U0001F600 and \u4e2d\u6587"],
+    ["109", "", '""""'],
+]
+
+
+def check_export(path):
+    data = open(path, "rb").read()
+    problems = []
+    if data.startswith(b"\xef\xbb\xbf"):
+        problems.append("starts with a byte-order mark")
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as e:
+        print("not strict UTF-8: %s" % e)
+        return 1
+    try:
+        got = parse_document(text, "B")
+        if got != EXPORT_TABLE:
+            problems.append("the strict parser reads %r" % got)
+    except Malformed as e:
+        problems.append("the strict parser refuses it: %s" % e)
+    rows = csv_rows(text)
+    if rows != EXPORT_TABLE:
+        problems.append("csv.reader reads %r" % rows)
+    if csv_quote_all(EXPORT_TABLE) != text:
+        problems.append("csv.writer(QUOTE_ALL) writes something else")
+    for p in problems:
+        print("FAIL " + p)
+    print("export: %d bytes, %d records, %s" % (len(data), len(rows), "ok" if not problems else "%d problems" % len(problems)))
+    return 1 if problems else 0
+
+
 if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "export":
+        sys.exit(check_export(sys.argv[2]))
     if len(sys.argv) >= 2 and sys.argv[1] == "selftest":
         sys.exit(selftest())
     if len(sys.argv) >= 3 and sys.argv[1] == "check":
-        sys.exit(check(sys.argv[2]))
+        sys.exit(check(sys.argv[2], 10 ** 9 if "--all" in sys.argv[3:] else 40))
     print(__doc__)
     sys.exit(2)

@@ -56,52 +56,10 @@ proc diff::codes {s} {
     return [lmap ch [split $s ""] {scan $ch %c}]
 }
 
-# The milestone's input classes (section 10), each a named field value.
-proc diff::Values {} {
-    set v [dict create]
-    dict set v empty ""
-    dict set v ascii "hello world"
-    dict set v comma "a,b"
-    dict set v one-quote "\""
-    dict set v two-quotes "\"\""
-    dict set v three-quotes "\"\"\""
-    dict set v four-quotes "\"\"\"\""
-    dict set v many-quotes [string repeat "\"" 41]
-    dict set v quote-comma "x\","
-    dict set v quote-crlf "x\"\r\n"
-    dict set v cr "a\rb"
-    dict set v lf "a\nb"
-    dict set v crlf "a\r\nb"
-    dict set v quote-ends "\"edge\""
-    dict set v long [string repeat "abc,\"\r\n" 300]
-    dict set v supplementary "\U1F600 \U10348 \U10FFFF"
-    dict set v combining "é ñ क्ष"
-    dict set v line-separators "a b c"
-    dict set v bom-inside "﻿start"
-    dict set v tab "a\tb"
-    dict set v nul "a\u0000b"
-    dict set v control "bell\u0007"
-    dict set v del "del\u007F"
-    dict set v nel "next\u0085line"
-    dict set v formula-eq "=1+2"
-    dict set v formula-plus "+1+2"
-    dict set v formula-at "@SUM(1,2)"
-    dict set v formula-minus "-2+3"
-    dict set v injection "hello\",\"admin"
-    dict set v injection-record "x\"\r\n\"evil\",\"=1+2\",\"z"
-    dict set v injection-formula "a\",\"=HYPERLINK(\"\"x\"\")"
-    dict set v fake-record "\"1\",\"2\",\"3\"\r\n"
-    dict set v fake-separator ",,\r\n,,"
-    dict set v latin1 "café naïve"
-    dict set v cjk "中文表"
-    dict set v noncharacter "￾￿"
-    return $v
-}
-
 # The corpus: each value as a field (every field kind), in each column of a
 # record (every document kind), and all of them as one document's rows.
 proc diff::Corpus {} {
-    set values [Values]
+    set values [csvrun::values]
     set cases {}
     set header [list [codes id] [codes value] [codes note]]
     dict for {name text} $values {

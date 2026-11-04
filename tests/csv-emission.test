@@ -1,0 +1,455 @@
+# csv-emission.test -- CSV through production emission claims
+# (CSV-EMISSION-VALIDATION-MILESTONE-1.md): examples/dfa/csv's grammars and
+# emitters.
+#
+# * the declared profiles: what each recognizer accepts and rejects, by the
+#   reference interpreter over the declarations themselves, and the
+#   checker's step against it (the outcome model on grammars it was not
+#   written for);
+# * the claims: every emitter certified; the malformed compositions the
+#   milestone lists rejected, located, with their kinds; selective
+#   quoting's precision limits; a claim pinned by a static compile block;
+#   the compiler service's hover;
+# * the runs: the probes (examples/dfa/csv/probes.bot) on every backend --
+#   eager construction, deep yields, completion and stable terminal
+#   values, failures before the first symbol and mid-field, abandonment, a
+#   failing sink, chunk boundaries, zero records, both CRLF forms -- their
+#   bytes exact, and CPython's csv module reading them back;
+# * erasure: a claim changes no code; the guards are the program's own.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot service service.tcl]
+source [file join $::projectRoot tests emission-support.tcl]
+source [file join $::projectRoot audit csv-emission tools run.tcl]
+source [file join $::projectRoot audit csv-emission tools claims.tcl]
+interp recursionlimit {} 100000
+core::useProgramRecursionLimit
+
+testConstraint python3 [expr {![catch {exec python3 -I -c "import csv"}]}]
+
+set csvDir [file join $::projectRoot examples dfa csv]
+
+proc csvRead {path} {
+    set f [open $path]
+    fconfigure $f -encoding utf-8
+    set text [read $f]
+    close $f
+    return $text
+}
+
+proc csvWrite {path text} {
+    set f [open $path w]
+    fconfigure $f -encoding utf-8 -translation lf
+    puts -nonewline $f $text
+    close $f
+}
+
+# A private copy of examples/dfa/csv holding main.bot = TEXT; its path.
+proc csvProgram {text} {
+    set dir [csvrun::Workspace]
+    csvWrite [file join $dir main.bot] $text
+    return [file join $dir main.bot]
+}
+
+# {FUNCTION VERDICT KINDS} of the claims of main.bot (program TEXT).
+proc csvClaims {text} {
+    set path [csvProgram $text]
+    try {
+        return [lmap c [csvclaims::of $path] {
+            if {[lindex $c 0] ne "main.bot"} continue
+            list [lindex $c 1] [lindex $c 3] [lindex $c 4]
+        }]
+    } finally {
+        file delete -force [file dirname $path]
+    }
+}
+
+# The codes (scalar values) and UTF-8 bytes of TEXT.
+proc codesOf {text} {
+    return [lmap ch [split $text ""] {scan $ch %c}]
+}
+
+proc bytesOf {text} {
+    set out {}
+    foreach b [split [encoding convertto utf-8 $text] ""] {
+        lappend out [scan $b %c]
+    }
+    return $out
+}
+
+# The reference interpreter's outcome of recognizer NS::NAME on TEXT (a
+# Tcl string: its scalar values, or with -bytes its UTF-8 bytes; -end adds
+# the end of the input).
+proc ref {ns name text args} {
+    set inputs [expr {"-bytes" in $args ? [bytesOf $text] : [codesOf $text]}]
+    if {"-raw" in $args} { set inputs $text }
+    if {"-end" in $args} { lappend inputs -1 }
+    return [dfaref::text [dfaref::run [csvrun::Model] $ns $name $inputs 0]]
+}
+
+# ---------------------------------------------------------------------------
+# The profiles, as declared
+
+test csv-quote-ambiguity {RFC 4180's escaped field: a doubled quotation mark is data, one followed by a comma, a CR or the end closes the field (the token ending before the comma or CR: it belongs to the record), one followed by anything else is an error} -body {
+    list [ref csv_strict quoted_field {"hello"} -end] \
+        [ref csv_strict quoted_field {"he said ""hi"""} -end] \
+        [ref csv_strict quoted_field {"hello,world"} -end] \
+        [ref csv_strict quoted_field {"a",} ] \
+        [ref csv_strict quoted_field "\"a\"\r"] \
+        [ref csv_strict quoted_field {"ab"x}] \
+        [ref csv_strict quoted_field {"ab} -end] \
+        [ref csv_strict quoted_field "\"line\r\nbreak\"" -end]
+} -result {{accept 7 0} {accept 16 0} {accept 13 0} {accept 3 1} {accept 3 1} {unrecognized csv_strict::quoted_field quote 4} {end csv_strict::quoted_field body 3} {accept 13 0}}
+
+test csv-record-structure {a record is exactly three fields, any of them empty; a field's comma and CRLF are data only when quoted; adjacent quoted fields without a separator are one field (doubled quotation mark), so the record falls short} -body {
+    list [ref csv_strict record3 {"a","b","c"} -end] \
+        [ref csv_strict record3 {,,} -end] \
+        [ref csv_strict record3 "a,\"b,c\",d\r"] \
+        [ref csv_strict record3 {"a","b"} -end] \
+        [ref csv_strict record3 {"a","b""c"} -end] \
+        [ref csv_strict record3 {"a","b","c",}] \
+        [ref csv_strict record3 {a"b,c,d}] \
+        [ref csv_strict record3 "a,b\nc,d" -end]
+} -result {{accept 11 0} {accept 2 0} {accept 9 1} {end csv_strict::record3 s2 7} {end csv_strict::record3 s2 10} {unrecognized csv_strict::record3 s3 11} {unrecognized csv_strict::unquoted_field text 1} {unrecognized csv_strict::unquoted_field text 3}}
+
+test csv-stream-forms {a stream: CRLF between records, the last one's optional; the canonical document: every record a whole line; the empty file is zero records in both; a bare LF, a bare CR or an empty line is no separator} -body {
+    list [ref csv_strict stream3 "a,b,c\r\nd,e,f\r\n" -end] \
+        [ref csv_strict stream3 "a,b,c\r\nd,e,f" -end] \
+        [ref csv_strict document3 "a,b,c\r\nd,e,f" -end] \
+        [ref csv_strict stream3 "" -end] [ref csv_strict document3 "" -end] \
+        [ref csv_strict stream3 "a,b,c\nd,e,f" -end] \
+        [ref csv_strict stream3 "a,b,c\r\n\r\n" -end]
+} -result {{accept 14 0} {accept 12 0} {end csv_strict::line3 cr 12} {accept 0 0} {accept 0 0} {unrecognized csv_strict::unquoted_field text 5} {unrecognized csv_strict::stream3 next 7}}
+
+test csv-profiles-distinct {Profile A holds ASCII only; Profile B holds every scalar but NUL, the other controls and DEL, and the C1 controls -- TAB, CR, LF, U+2028, U+2029 and U+FEFF only quoted} -body {
+    set out {}
+    foreach text [list "\"\u00e9\"" "\"a\tb\"" "a\tb" "\"\u2028\"" "\u2028" "\uFEFFa" "\"\uFEFF\"" "\"\x00\"" "\"\x85\"" "\"\x7F\"" "\"\U1F600\""] {
+        lappend out [list [lindex [ref csv_strict field $text -end] 0] [lindex [ref csv_utf8 field $text -end] 0]]
+    }
+    set out
+} -result {{unrecognized accept} {unrecognized accept} {unrecognized unrecognized} {unrecognized accept} {unrecognized unrecognized} {unrecognized unrecognized} {unrecognized accept} {unrecognized unrecognized} {unrecognized unrecognized} {unrecognized unrecognized} {unrecognized accept}}
+
+test csv-byte-profile {the byte grammar recognizes the same fields in strict UTF-8: no C1 control (C2 80..9F), no overlong form, no encoded surrogate, nothing past U+10FFFF; U+2028 and U+FEFF only quoted} -body {
+    set q 34
+    list [lindex [ref csv_utf8 quoted_field_bytes [list $q 0xC2 0xA0 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 quoted_field_bytes [list $q 0xC2 0x85 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 quoted_field_bytes [list $q 0xC0 0x80 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 quoted_field_bytes [list $q 0xE0 0x80 0x80 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 quoted_field_bytes [list $q 0xED 0xA0 0x80 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 quoted_field_bytes [list $q 0xF4 0x90 0x80 0x80 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 quoted_field_bytes [list $q 0xF0 0x9F 0x98 0x80 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 field_bytes [list 0xE2 0x80 0xA8 -1] -raw] 0] \
+        [lindex [ref csv_utf8 field_bytes [list $q 0xE2 0x80 0xA8 $q -1] -raw] 0] \
+        [lindex [ref csv_utf8 field_bytes [list 0xEF 0xBB 0xBF 0x61 -1] -raw] 0]
+} -result {accept unrecognized unrecognized unrecognized unrecognized unrecognized accept unrecognized accept unrecognized}
+
+test csv-conformance {the checker's recognizer step (core/dfa.tcl's outcome model, over sets) against the reference interpreter on every CSV recognizer: generated inputs, no mismatch} -body {
+    set path [csvProgram "import csv_strict\nimport csv_utf8\n0\n"]
+    try {
+        lassign [emit::conformance [file dirname $path] 12 7] cases mismatches
+        list [expr {$cases > 1000}] [lrange $mismatches 0 2]
+    } finally {
+        file delete -force [file dirname $path]
+    }
+} -result {1 {}}
+
+# ---------------------------------------------------------------------------
+# The claims
+
+test csv-claims-certified {every claim of the CSV examples is certified, whoever imports them: always-quoted fields, records, lines, streams and documents of both profiles over scalar values and bytes, selective quoting, the coroutine sources (which return a count, not -1)} -body {
+    set path [csvProgram "import sources\nimport sinks\n0\n"]
+    set claims [csvclaims::of $path]
+    file delete -force [file dirname $path]
+    list [llength $claims] [lsort -unique [lmap c $claims {lindex $c 3}]] \
+        [llength [lsort -unique [lmap c $claims {lindex $c 2}]]]
+} -cleanup {unset -nocomplain claims path} -result {52 proven 18}
+
+test csv-examples-warning-clean {the CSV modules and their probes compile under -warnings error (the warning gate's rule for examples)} -body {
+    set path [csvProgram "import sources\nimport sinks\n0\n"]
+    try {
+        set a [surface::readProgramFile $path -warnings error]
+        set b [surface::readProgramFile [file join [file dirname $path] probes.bot] -warnings error]
+        list [llength [dict get $a diagnostics]] [llength [dict get $b diagnostics]]
+    } finally {
+        file delete -force [file dirname $path]
+    }
+} -result {0 0}
+
+# Programs over the strict grammar: one claimed function each.
+set strictHead "import std::dfa\nimport std::char\nimport std::str\nimport csv_strict\nimport csv_common\nimport strict_emit\n\n"
+
+test csv-malformed-compositions {the malformed compositions the milestone lists, each a claim the compiler rejects with the kind of its mistake: an omitted separator (two fields merge), a doubled one, a trailing one, a field closed early, a quotation mark not doubled, text after a completed field, an unquoted CRLF inside a value, fields glued without a boundary} -body {
+    set programs [list \
+        omitted "nomethod fn r(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::record3:\n    strict_emit::quoted_field(a)\n    yield 44\n    strict_emit::quoted_field(b)\n    strict_emit::quoted_field(c)\n    unit\n" \
+        doubled "nomethod fn r(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::record3:\n    strict_emit::quoted_field(a)\n    yield 44\n    yield 44\n    strict_emit::quoted_field(b)\n    yield 44\n    strict_emit::quoted_field(c)\n    unit\n" \
+        trailing "nomethod fn r(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::line3:\n    strict_emit::record3(a, b, c)\n    yield 44\n    yield 13\n    yield 10\n    unit\n" \
+        early-close "fn q(v: str) -> unit emits csv_strict::quoted_field:\n    yield 34\n    yield 97\n    yield 34\n    yield 98\n    yield 34\n    unit\n" \
+        undoubled "fn q(v: str) -> unit emits csv_strict::quoted_field:\n    yield 34\n    yield 34\n    yield 97\n    yield 34\n    unit\n" \
+        after-field "fn q(v: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::quoted_field:\n    strict_emit::quoted_field(v)\n    yield 120\n    unit\n" \
+        after-line "nomethod fn l(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::line3:\n    strict_emit::line3(a, b, c)\n    yield 120\n    unit\n" \
+        unquoted-crlf "fn q() -> unit emits csv_strict::quoted_field:\n    yield 34\n    yield 97\n    yield 34\n    yield 13\n    yield 10\n    yield 34\n    yield 98\n    yield 34\n    unit\n" \
+        glued "nomethod fn g(a: str, b: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::field:\n    strict_emit::quoted_field(a)\n    strict_emit::quoted_field(b)\n    unit\n"]
+    set out {}
+    foreach {name body} $programs {
+        lappend out $name [lmap c [csvClaims "$::strictHead$body\n0\n"] {lrange $c 1 2}]
+    }
+    set out
+} -cleanup {unset -nocomplain programs out name body} -result {omitted {{rejected EMIT-BOUNDARY}} doubled {{rejected EMIT-REJECTED}} trailing {{rejected EMIT-REJECTED}} early-close {{rejected EMIT-REJECTED}} undoubled {{rejected EMIT-REJECTED}} after-field {{rejected EMIT-REJECTED}} after-line {{rejected EMIT-AFTER-TOKEN}} unquoted-crlf {{rejected EMIT-BEYOND-TOKEN}} glued {{rejected EMIT-BOUNDARY}}}
+
+test csv-diagnostic-located {a rejected claim's diagnostic is located at the yield that may send the bad symbol, names the recognizer state (a note locates its declaration in csv_strict.bot) and the symbols, and relates the claim} -body {
+    set path [csvProgram "${strictHead}fn q(v: str) -> unit emits csv_strict::quoted_field:\n    yield 34\n    yield 97\n    yield 34\n    yield 98\n    yield 34\n    unit\n\n0\n"]
+    try {
+        catch {surface::readProgramFile $path -warnings off} message options
+        set entry [lindex [dict get $options -diagnostics] 0]
+        list [dict get $options -errorcode] [dict get $entry location line] [dict get $entry location column] \
+            [llength [dict get $entry related]] \
+            [lmap n [dict get $entry notes] {list [file tail [dict get $n location file]] [dict get $n location line] [dict get $n summary]}] \
+            [string match "*may send symbols no transition takes: 'b' in state quote of csv_strict::quoted_field*" $message]
+    } finally {
+        file delete -force [file dirname $path]
+    }
+} -result {{CORE SEMANTIC EMIT-REJECTED} 12 5 1 {{csv_strict.bot 54 {state quote of csv_strict::quoted_field is declared here}}} 1}
+
+test csv-selective-precision {selective quoting: the natural spelling (the decision's fact about the whole string, each character yielded unchecked) and the guarded loop without its peeled first character are correct but not certifiable -- EMIT-REJECTED and EMIT-INCOMPLETE, precision limits; the shipped spelling is certified} -body {
+    set text [csvRead [file join $::csvDir selective_emit.bot]]
+    set natural [string map {"fn field_strict_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter:" "fn field_strict_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::field:"} $text]
+    set start [string first "        c0 = value.char_at(0).scalar_value()\n        csv_strict::text_char(c0):" $text]
+    set end [string first "        loop i from 1 to n:\n" $text $start]
+    set unpeeled [string replace $text $start [expr {$end + [string length "        loop i from 1 to n:\n"] - 1}] "        loop i from 0 to n:\n"]
+    set out {}
+    foreach variant [list $natural $unpeeled $text] {
+        set path [csvProgram "import selective_emit\n0\n"]
+        csvWrite [file join [file dirname $path] selective_emit.bot] $variant
+        lappend out [lmap c [csvclaims::of $path] {
+            if {[lindex $c 1] ni {field_strict_natural field_strict}} continue
+            lrange $c 1 4
+        }]
+        file delete -force [file dirname $path]
+    }
+    set out
+} -cleanup {unset -nocomplain text natural start end unpeeled out variant path} -result {{{field_strict csv_strict::field proven {}} {field_strict_natural csv_strict::field rejected {EMIT-BEYOND-TOKEN EMIT-INCOMPLETE EMIT-REJECTED}}} {{field_strict csv_strict::field rejected EMIT-INCOMPLETE}} {{field_strict csv_strict::field proven {}}}}
+
+test csv-unterminated-not-document {the records without a final CRLF are in stream3's language and not in document3's: claiming the canonical document is EMIT-INCOMPLETE} -body {
+    set path [csvProgram "${strictHead}fn s(rows: List\[csv_common::Row\]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::stream3, csv_strict::document3:\n    strict_emit::stream_unterminated(rows)\n    unit\n\n0\n"]
+    try {
+        lmap c [csvclaims::of $path] {
+            if {[lindex $c 0] ne "main.bot"} continue
+            lrange $c 2 4
+        }
+    } finally {
+        file delete -force [file dirname $path]
+    }
+} -result {{csv_strict::stream3 proven EMIT-INCOMPLETE} {csv_strict::document3 rejected EMIT-INCOMPLETE}}
+
+test csv-empty-not-field {an empty unquoted field is no field token: an emitter that may write nothing cannot claim a field (the record's grammar holds the empty field)} -body {
+    csvClaims "${strictHead}fn f(v: str) -> unit emits csv_strict::field:\n    loop i from 0 to v.length():\n        yield 97\n        continue\n    unit\n\n0\n"
+} -result {{f rejected EMIT-INCOMPLETE}}
+
+test csv-static-compile {a static compile block pins an intentional rejection -- an embedded quotation mark written undoubled, decided by its DiagnosticCode -- while the same emitter without the doubling branch at all is accepted: the grammar's guard admits no quotation mark, so such a value fails UnsupportedCSVCharacter instead of corrupting the field} -body {
+    set body "            yield 34\n            loop i from 0 to v.length():\n                c = v.char_at(i).scalar_value()\n%s                csv_strict::quoted_char(c):\n                    on std::dfa::UnrecognizedInput:\n                        fail csv_common::UnsupportedCSVCharacter {at: i, value: c}\n                    on std::dfa::UnexpectedEnd:\n                        fail csv_common::UnsupportedCSVCharacter {at: i, value: c}\n                yield c\n                continue\n            yield 34\n            unit\n"
+    set out {}
+    foreach branch [list "                if c == 34:\n                    yield 34\n                    continue\n" ""] {
+        set path [csvProgram "import std::compiler\n${strictHead}fn probe() -> str errors std::compiler::CompilerError:\n    static compile:\n        fn emitter(v: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::quoted_field:\n[format $body $branch]        0\n    \"accepted\"\n\nprobe():\n    on std::compiler::CompilerError {code}:\n        \"rejected\"\n"]
+        set hir [surface::readProgramFile $path -warnings off]
+        lappend out {*}[lmap {key site} [hir::static::sites $hir] {
+            set kind [dict getdef [dict getdef $site diagnostic {}] kind ""]
+            list [dict get $site outcome] $kind [expr {$kind eq "" ? "" : [hir::static::CodeOf $kind]}]
+        }]
+        file delete -force [file dirname $path]
+    }
+    set out
+} -cleanup {unset -nocomplain body out branch path hir} -result {{rejected EMIT-INCOMPLETE EmitIncomplete} {accepted {} {}}}
+
+test csv-service-hover {the compiler service's hover on a CSV emitter states its guarantee, one line per claim} -body {
+    set path [csvProgram "import strict_emit\n0\n"]
+    set dir [file dirname $path]
+    set ws [service::workspace -root $dir]
+    try {
+        set rev [service::analyze $ws $path]
+        set lines [split [dict get [service::at $rev [file join $dir strict_emit.bot] 28 4] hover] \n]
+        list [lindex $lines 0] [lrange $lines 1 2]
+    } finally {
+        service::closeWorkspace $ws
+        file delete -force $dir
+    }
+} -result {{fn strict_emit::quoted_field(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::quoted_field, csv_strict::field} {{emits csv_strict::quoted_field: certified to emit csv_strict::quoted_field: every normal completion has yielded exactly one token, every prefix it yields is viable; its token ends at the end of the input or before '\r' ','} {emits csv_strict::field: certified to emit csv_strict::field: every normal completion has yielded exactly one token, every prefix it yields is viable; its token ends at the end of the input or before '\r' ','}}}
+
+# ---------------------------------------------------------------------------
+# The runs (examples/dfa/csv/probes.bot)
+
+proc probeOutcomes {} {
+    if {[info exists ::probeCache]} {
+        return $::probeCache
+    }
+    set hir [surface::readProgramFile [file join $::csvDir probes.bot] -warnings off]
+    set ::probeCache {}
+    foreach backend {interp compile cranelift-generic cranelift cranelift-unfused} {
+        if {$backend ne "interp" && $backend ne "compile" && ![testConstraint nativeCoroutines]} continue
+        set o [outcomeUnderHir $backend $hir]
+        lappend ::probeCache $backend [lindex [string map {\[ \{ \] \} , ""} [lindex $o 1]] 0]
+    }
+    return $::probeCache
+}
+
+proc probe {i} {
+    return [lindex [dict get [probeOutcomes] compile] $i]
+}
+
+set probeRows "\"101\",\"he said \"\"hi\"\"\",\"a,b\"\r\n\"102\",\"line\r\nbreak\",\"\"\r\n\"103\",\"xx\",\"yy\"\r\n"
+set probeDocument "\"id\",\"name\",\"note\"\r\n$probeRows"
+
+test csv-backends-agree {every probe's result is the same on the reference interpreter, the Tcl compiler, the generic native backend, the fused native backend and the general coroutine runtime} -body {
+    set results [dict values [probeOutcomes]]
+    list [llength [lindex $results 0]] [llength [lsort -unique $results]]
+} -result {19 1}
+
+test csv-documents-exact {the strict document, the UTF-8 document's bytes and the selective document are exactly the reference serializations} -body {
+    list [expr {[probe 0] eq [codesOf $probeDocument]}] [expr {[probe 1] eq [bytesOf $probeDocument]}] \
+        [expr {[probe 2] eq [codesOf "id,name,note\r\n101,\"he said \"\"hi\"\"\",\"a,b\"\r\n102,\"line\r\nbreak\",\"\"\r\n103,xx,yy\r\n"]}]
+} -result {1 1 1}
+
+test csv-terminal-value {the source's final value is no symbol: the consumer counts the symbols until done? and then reads the final value, the number of records (header included, not -1); resumed after the end it answers that value again and stays done} -body {
+    list [probe 3] [probe 4]
+} -result {{91 4} {3 3 3 3 1}}
+
+test csv-partial-output {a failure mid-document: the sink holds every byte before the unsupported character -- the earlier records whole, the failing field opened and not closed: a viable prefix, never a complete document; the failure names the character} -body {
+    set p [probe 5]
+    set prefix [lrange $p 3 end]
+    list [lrange $p 0 2] [expr {$prefix eq [bytesOf "\"id\",\"name\",\"note\"\r\n\"101\",\"ok\",\"fine\"\r\n\"102\",\"still\",\"x"]}] \
+        [lindex [csvrun::judge {bytes_document {}} [list unsupported 1 0 0 $prefix]] 0] \
+        [lindex [ref csv_utf8 document3_bytes [concat $prefix -1] -raw] 0]
+} -cleanup {unset -nocomplain p prefix} -result {{1 1 0} 1 ok end}
+
+test csv-abandonment {a consumer that stops after 7 bytes abandons the emitter mid-field (its handle released, never resumed); a sink that fails after 30 bytes does the same, with its own error} -body {
+    list [probe 6] [probe 7]
+} -result {{34 105 100 34 44 34 110} {999 30}}
+
+test csv-zero-records {zero records is the empty output, a certified stream (stream3 and document3 accept the empty file)} -body {
+    probe 8
+} -result {}
+
+test csv-unterminated {the RFC's other form: CRLF between records, none after the last} -body {
+    expr {[probe 9] eq [bytesOf [string range $probeRows 0 end-2]]}
+} -result 1
+
+test csv-chunks {chunks are transport, not grammar: the document's bytes in chunks of 3 end inside a doubled quotation mark (after byte 36) and inside the final CRLF (after byte 90), and their concatenation is the document; a document of multibyte characters in chunks of 2 splits UTF-8 sequences (six chunks begin with a continuation byte), and its concatenation is the document too} -body {
+    set doc [bytesOf $probeDocument]
+    set chunks [probe 18]
+    set pieces {}
+    set current {}
+    foreach b $chunks {
+        if {$b == -1} {
+            lappend pieces $current
+            set current {}
+        } else {
+            lappend current $b
+        }
+    }
+    set wide "\u00e9\u20ac\U1F600"
+    list [probe 10] [lrange $doc 35 36] [lrange $doc 89 90] \
+        [expr {[concat {*}$pieces] eq [bytesOf "\"$wide\",\"ab\",\"$wide\"\r\n"]}] \
+        [llength [lmap p $pieces {expr {[lindex $p 0] >= 0x80 && [lindex $p 0] <= 0xBF ? 1 : [continue]}}]]
+} -cleanup {unset -nocomplain doc chunks pieces current b wide p} -result {{31 1} {34 34} {13 10} 1 6}
+
+test csv-failure-before-first-symbol {bytes that are no UTF-8 fail InvalidUtf8 when the source is constructed, before any symbol; a Profile A field fails at a non-ASCII character after its opening quotation mark only} -body {
+    list [probe 11] [probe 12]
+} -result {3 {1 0 233}}
+
+test csv-no-leading-bom {a value beginning with U+FEFF is written quoted: the output starts with a quotation mark, never a byte-order mark} -body {
+    probe 13
+} -result {34 239 187 191 97 34}
+
+test csv-runtime-validation-agrees {design A beside the certified emitter: feeding every byte to document3_bytes at run time never fails, and the digest is the same} -body {
+    probe 14
+} -result 1
+
+test csv-selective-runs {selective quoting writes text unquoted and quotes the empty value, a comma, U+2028 and TAB (fields separated by | here)} -body {
+    set s [probe 15]
+    string map {| " | "} [join [lmap c $s {format %c $c}] ""]
+} -cleanup {unset -nocomplain s} -result "plain | \"a,b\" | \"\" | \"a\u2028b\" | \"tab\t\""
+
+test csv-injection-boundaries {the value hello","admin in every column of a record: written as one field each (its quotation marks doubled), so the record still has three fields, each the value} -body {
+    expr {[probe 16] eq [bytesOf "\"hello\"\",\"\"admin\",\"hello\"\",\"\"admin\",\"hello\"\",\"\"admin\"\r\n"]}
+} -result 1
+
+test csv-formula-unchanged {formula-like values (=1+2, +1+2, @SUM(1,2)) are valid CSV, quoted and unchanged: the grammar says nothing about how a spreadsheet interprets a cell, and the emitter neither neutralizes nor rejects them} -body {
+    expr {[probe 17] eq [bytesOf "\"=1+2\",\"+1+2\",\"@SUM(1,2)\"\r\n"]}
+} -result 1
+
+test csv-python-reads-back {CPython's csv module reads the probes' documents back as their records: the strict and UTF-8 documents, the selective one, the injection and formula records} -constraints python3 -body {
+    set docs [list [string map {\r \\r \n \\n \" \\\"} $probeDocument]]
+    set script {
+import csv, io, sys
+def rows(b): return list(csv.reader(io.StringIO(bytes(b).decode('utf-8'), newline=''), strict=True))
+data = [list(map(int, line.split())) for line in sys.stdin.read().split('\n') if line]
+for d in data: print(rows(d))
+}
+    set input "[join [probe 1] { }]\n[join [probe 16] { }]\n[join [probe 17] { }]\n[join [probe 2] { }]\n"
+    split [string trim [exec python3 -I -c $script << $input]] \n
+} -cleanup {unset -nocomplain docs script input} -result [list \
+    {[['id', 'name', 'note'], ['101', 'he said "hi"', 'a,b'], ['102', 'line\r\nbreak', ''], ['103', 'xx', 'yy']]} \
+    {[['hello","admin', 'hello","admin', 'hello","admin']]} \
+    {[['=1+2', '+1+2', '@SUM(1,2)']]} \
+    {[['id', 'name', 'note'], ['101', 'he said "hi"', 'a,b'], ['102', 'line\r\nbreak', ''], ['103', 'xx', 'yy']]}]
+
+test csv-differential-sample {a sample of the differential harness: corpus values through every source kind on two backends, the recognizer and the independent oracle (audit/csv-emission/tools/differential.tcl runs it all)} -constraints python3 -body {
+    set cases {}
+    foreach text [list "" "a,b" "\"" "x\"\r\n" "\U1F600" "a\x00b" "=1+2" "hello\",\"admin"] {
+        set c [codesOf $text]
+        foreach kind {strict_field bytes_field selective_field} {
+            lappend cases [list $kind $c]
+        }
+        lappend cases [list bytes_document [list [list [codesOf id] $c {}]]]
+    }
+    set results [csvrun::run $cases {compile cranelift}]
+    set agree [expr {[lindex $results 1] eq [lindex $results 3]}]
+    set judged [lsort -unique [lmap c $cases o [lindex $results 1] {csvrun::judge $c $o}]]
+    set path [file join [::tcltest::temporaryDirectory] csv-sample-lines.txt]
+    csvrun::write $path $cases [lindex $results 1]
+    set code [catch {exec python3 -I [file join $::projectRoot audit csv-emission tools oracle.py] check $path} report]
+    file delete $path
+    list $agree $judged $code [regexp -all {\s[1-9]\d* failed} $report]
+} -cleanup {unset -nocomplain cases text c kind results agree judged path code report} -result {1 ok 0 0}
+
+test csv-exporter {the export application (examples/dfa/csv/export.bot) built as a standalone executable by the normal compiler and run with nothing on PATH: it streams its table into the file it is given, chunk by chunk, and says how many records it wrote; the file is strict UTF-8 with no byte-order mark, the strict parser and CPython's csv module read exactly the table back, and CPython's csv.writer (QUOTE_ALL, CRLF) writes exactly the same bytes} -constraints {executableAot nativeLinux python3} -body {
+    set path [csvProgram "0\n"]
+    set dir [file dirname $path]
+    try {
+        set hir [surface::readProgramFile [file join $dir export.bot] -warnings error]
+        set exe [native::executable $hir [file join $dir export]]
+        set out [file join $dir table.csv]
+        set saved $::env(PATH)
+        set ::env(PATH) ""
+        try {
+            set code [catch {exec $exe $out} message]
+        } finally {
+            set ::env(PATH) $saved
+        }
+        list $code [string match "*wrote 10 records to *table.csv*" $message] \
+            [exec python3 -I [file join $::projectRoot audit csv-emission tools oracle.py] export $out]
+    } finally {
+        file delete -force $dir
+    }
+} -cleanup {unset -nocomplain path dir hir exe out saved code message} -result {1 1 {export: 403 bytes, 10 records, ok}}
+
+# ---------------------------------------------------------------------------
+# Erasure
+
+test csv-native-erasure {a claim changes no code: a program driving the certified UTF-8 byte document source compiles to the same fused NIR with and without every claim of the CSV modules; what recognizer code it holds is the guards' (one quoted_char per field character), the program's own run-time check, which the unclaimed program has too} -constraints nativeCoroutines -body {
+    set path [csvProgram "import std::coroutine\nimport csv_common\nimport sources\n\nfn count(rows: List\[csv_common::Row\]) -> int errors csv_common::UnsupportedCSVCharacter:\n    coroutine {step, first} = sources::bytes_stream_source(rows)\n    n = first\n    loop:\n        if std::coroutine::done?(step):\n            break\n        step()\n        continue\n    n\n\ncount(\[csv_common::Row {a: \"a\", b: \"b\", c: \"c\"}\]):\n    on csv_common::UnsupportedCSVCharacter:\n        -2\n"]
+    set dir [file dirname $path]
+    try {
+        set nir [native::fusedNir [surface::readProgramFile $path -warnings off]]
+        foreach f [glob -directory $dir *.bot] {
+            csvWrite $f [emit::strip [csvRead $f]]
+        }
+        set bare [native::fusedNir [surface::readProgramFile $path -warnings off]]
+        list [expr {$nir eq $bare}] [regexp -all {cocreate|costart} $nir] [expr {[regexp -all {rtabload|dfa#transition|^\s*switch } $nir] == [regexp -all {rtabload|dfa#transition|^\s*switch } $bare]}]
+    } finally {
+        file delete -force $dir
+    }
+} -result {1 0 1}
+
+emit::cleanup
+::tcltest::cleanupTests
