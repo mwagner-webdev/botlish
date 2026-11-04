@@ -227,12 +227,12 @@ fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
 !! native_stack:threads rust-lib:records_are_per_thread
 ## native/src/runtime/platform/records.rs
 <<<<
-    let index = MINE.with(|m| m.0.get());
+    let index = MINE.try_with(|m| m.0.get()).unwrap_or(0);
     if index != 0 {
         TABLE[index - 1].publish(words);
     }
 ====
-    let index = MINE.with(|m| m.0.get());
+    let index = MINE.try_with(|m| m.0.get()).unwrap_or(0);
     if index != 0 {
         TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING)).unwrap_or(&TABLE[index - 1]).publish(words);
     }
@@ -251,14 +251,14 @@ fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
 !! native_stack:threads rust-lib:records_are_per_thread
 ## native/src/runtime/platform/records.rs
 <<<<
-    MINE.with(|m| {
+    let _ = MINE.try_with(|m| {
         if m.0.get() == index + 1 {
             m.0.set(0);
         }
     });
     free(index);
 ====
-    MINE.with(|m| {
+    let _ = MINE.try_with(|m| {
         if m.0.get() == index + 1 {
             m.0.set(0);
         }

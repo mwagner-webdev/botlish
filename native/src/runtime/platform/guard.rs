@@ -160,20 +160,26 @@ fn report_overflow(record: &Record) -> ! {
 /// Writes the fatal report of a run that cannot go on and ends the process
 /// (C-CALLBACK-MILESTONE-1.md: a callback C called that failed, or that ran
 /// where no execution environment permits it): RESULT, the driver's result
-/// line, after this thread's label, to the result file with exit status 0
-/// while this thread holds a driver's guard (its result, as the overflow
-/// line is); else LINE on standard error with exit status 1 (a standalone
-/// executable, a native library's host). Only write(2) and _exit(2), and the
-/// records' atomic lookup: it runs inside C's frames, whose locks atexit
-/// handlers or stdio might need, and never returns to them.
+/// line, to the result file with exit status 0 while a driver's guard is
+/// installed (its result, as the overflow line is) -- after this thread's
+/// label when the guard is this thread's own; a foreign thread C created
+/// holds none, and its report is the process's, through any guarded
+/// thread's record -- else LINE on standard error with exit status 1 (a
+/// standalone executable, a native library's host). Only write(2) and
+/// _exit(2), and the records' atomic lookups: it runs inside C's frames,
+/// whose locks atexit handlers or stdio might need, and never returns to
+/// them.
 pub fn report_fatal(result: &[u8], line: &[u8]) -> ! {
-    let record = records::find(super::thread_token()).filter(|r| !r.executable());
+    let own = records::find(super::thread_token());
+    let record = own.or_else(records::any).filter(|r| !r.executable());
     match record {
         Some(record) => {
             let fd = record.destination() as libc::c_int;
-            let mut label = [0u8; records::LABEL_BYTES];
-            let len = record.label(&mut label);
-            write_all(fd, &label[..len]);
+            if own.is_some() {
+                let mut label = [0u8; records::LABEL_BYTES];
+                let len = record.label(&mut label);
+                write_all(fd, &label[..len]);
+            }
             write_all(fd, result);
         }
         None => write_all(libc::STDERR_FILENO, line),

@@ -163,7 +163,8 @@ pub fn claim(token: usize, words: (usize, usize), executable: bool, destination:
 /// Releases record INDEX, the calling thread's: from now on no fault is
 /// claimed through it.
 pub fn release(index: usize) {
-    MINE.with(|m| {
+    // (try_with: a guard dropped while the thread's locals are torn down.)
+    let _ = MINE.try_with(|m| {
         if m.0.get() == index + 1 {
             m.0.set(0);
         }
@@ -180,10 +181,11 @@ fn free(index: usize) {
 
 /// Makes WORDS the calling thread's published stack, when it holds a
 /// record: never another thread's. Inlined, and only a thread-local read
-/// and atomic stores.
+/// and atomic stores (none once the thread's locals are torn down: its
+/// record is released then).
 #[inline(always)]
 pub fn publish(words: (usize, usize)) {
-    let index = MINE.with(|m| m.0.get());
+    let index = MINE.try_with(|m| m.0.get()).unwrap_or(0);
     if index != 0 {
         TABLE[index - 1].publish(words);
     }
@@ -192,7 +194,7 @@ pub fn publish(words: (usize, usize)) {
 /// The calling thread's record, if it holds one (not async-signal-safe:
 /// a thread-local read).
 pub fn mine() -> Option<&'static Record> {
-    match MINE.with(|m| m.0.get()) {
+    match MINE.try_with(|m| m.0.get()).unwrap_or(0) {
         0 => None,
         index => Some(&TABLE[index - 1]),
     }
@@ -206,6 +208,15 @@ pub fn find(token: usize) -> Option<&'static Record> {
         return None;
     }
     TABLE.iter().find(|r| r.owner.load(Ordering::Acquire) == token)
+}
+
+/// A record of any guarded thread (the first in the table), if one is:
+/// atomic loads only. What a report made on a thread holding none -- a
+/// foreign thread C created, calling a callback -- reads the process's mode
+/// from (POSIX: Windows' guard has no fatal report).
+#[cfg(unix)]
+pub fn any() -> Option<&'static Record> {
+    TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING))
 }
 
 /// How many threads are guarded now (tests, the concurrent-VM harness).

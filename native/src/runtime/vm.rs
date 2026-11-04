@@ -205,7 +205,7 @@ pub struct Vm {
     /// generated code at VM_CONTEXT_OFFSET -- one load, then the slot's
     /// constant offset (codegen::clif's ContextLoad/ContextStore). The
     /// program defines the layout (nir::Program::context_bytes, the slots'
-    /// offsets) and its context-trait selections; each Vm owns the values
+    /// offsets) and which implementation each requirement calls; each Vm owns the values
     /// installed in it. Null for a program without contexts. Set once by
     /// `install_context_area`, before any generated code runs, and never
     /// moved after: the table is never resized.

@@ -185,13 +185,39 @@ test cv-source-program {program metadata is the Vm's: no thread-local current pr
         [regexp {pub fn message\(&self, prog: &ProgramInfo\)} [cvSource runtime/error.rs]]
 } -result {0 1 1}
 
-test cv-source-guard-records {the stack guard keeps one record per guarded thread, found by the handler by the faulting thread's token, published only by its own thread; no process-wide published stack is left} -body {
+# The text of Rust function NAME in TEXT: from `fn NAME(` to its closing
+# brace ("" when there is none).
+proc cvFunction {text name} {
+    set start [string first "fn $name\(" $text]
+    if {$start < 0} { return "" }
+    set open [string first "\{" $text $start]
+    set depth 0
+    for {set i $open} {$i < [string length $text]} {incr i} {
+        switch -- [string index $text $i] {
+            "\{" { incr depth }
+            "\}" {
+                incr depth -1
+                if {$depth == 0} { return [string range $text $start $i] }
+            }
+        }
+    }
+    return ""
+}
+
+test cv-source-guard-records {the stack guard keeps one record per guarded thread, found by the handler by the faulting thread's token, published only by its own thread; no process-wide published stack is left; the POSIX handler's own functions (fault_handler, is_overflow, report_overflow, write_all, defer) use no thread-local, lock or allocation, and the Windows handler none either} -body {
     set guard [cvSource runtime/platform/guard.rs]
     set windows [cvSource runtime/platform/windows.rs]
     set records [cvSource runtime/platform/records.rs]
+    set unsafe {records::mine|\.with\(|try_with|thread_local|format!|String|to_string|vec!|Vec<|Box::|lock\(|println!|eprintln!|print!}
+    set handler [join [lmap f {fault_handler is_overflow report_overflow write_all defer} {cvFunction $guard $f}] \n]
+    set vectored [join [lmap f {handler is_overflow write_all terminate} {cvFunction $windows $f}] \n]
+    set find [cvFunction $records find]
     list [regexp -all {static (GUARDED|SLOTS|SLOT|EXECUTABLE|DESTINATION)\M} $guard$windows] \
-        [regexp {records::find\(super::thread_token\(\)\)} $guard] [regexp {records::find\(thread\)} $windows] \
+        [regexp {records::find\(super::thread_token\(\)\)} [cvFunction $guard is_overflow]] \
+        [regexp {records::find\(thread\)} [cvFunction $windows is_overflow]] \
+        [llength [regexp -all -inline -- $unsafe $handler]] [llength [regexp -all -inline -- $unsafe $vectored]] \
+        [llength [regexp -all -inline -- $unsafe $find]] [expr {[string length $handler] > 500}] \
         [regexp {static TABLE: \[Record; RECORDS\]} $records] [regexp {static MINE: Mine} $records]
-} -result {0 1 1 1 1}
+} -result {0 1 1 0 0 0 1 1 1}
 
 cleanupTests
