@@ -103,7 +103,6 @@ enum DiagnosticCode:
     EmitNotSymbol,
     EmitRecognizer,
     EmitRejected,
-    EmitTerminalValue,
     EmitUnknownValue,
     EmitUnsupported,
     ExportEnvironment,

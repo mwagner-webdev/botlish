@@ -41,9 +41,10 @@ brackets match (that language is not regular).
 == WHAT IS EMITTED
 The outward yield trace: the values the function yields, and those its
 ordinary calls yield (deep yields). A function's result is no symbol, and
-neither is a coroutine root's final value: a function claiming R whose
-declared result is an Int is a symbol source, and must complete with -1,
-the end (error.emit-terminal-value). A coroutine the function constructs is
+neither is a coroutine root's final value, whatever its type: a source
+claiming R may complete with any value (a count, a status, the -1 a
+protocol uses for its end), which its consumer tells from a symbol with
+std::coroutine::done?. A coroutine the function constructs is
 another execution: its yields are its own, and the values the function
 receives from it are ordinary values, of whatever the analysis knows of
 them.
@@ -439,43 +440,6 @@ fn first_char(text: str) -> unit errors IndexNotFound emits byte_token:
 @caption 'é' is the scalar value 233, which UTF-8 writes as two bytes
 @error CORE SEMANTIC EMIT-BYTE-CHARACTER
 @at 10:5
-@end
-
-@topic error.emit-terminal-value
-title: EMIT-TERMINAL-VALUE: a symbol source whose final value is not -1
-summary: A claimed function whose declared result is an Int is a symbol source -- a coroutine root a consumer may read past its end -- and must complete with -1, the end.
-index: errors proofs
-alias: terminal value; final value; symbol source result
-keywords: emits, result, coroutine, root, terminal, -1, source
-related: concept.emission-claims concept.coroutines
-docs: EMISSION-CLAIMS-MILESTONE-1.md COROUTINES.md
-code: CORE SEMANTIC EMIT-TERMINAL-VALUE
-
-== MEANING
-A completed coroutine's result is stable: every later resume answers it
-again. A consumer that reads values after the end would take any other
-Int for a symbol.
-
-== WHAT TO DO
-Complete with -1, or declare the result `unit` (not a symbol source).
-
-@example reject
-import std::dfa
-
-class digit = '0'..'9'
-
-dfa digit_token over ascii:
-    start:
-        digit -> accept
-
-fn digit_source() -> int emits digit_token:
-    yield 55
-    0
-
-0
-@caption 0 after the end would read as a symbol
-@error CORE SEMANTIC EMIT-TERMINAL-VALUE
-@at 9:32
 @end
 
 @topic error.emit-boundary

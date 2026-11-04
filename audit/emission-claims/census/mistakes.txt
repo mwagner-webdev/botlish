@@ -199,7 +199,7 @@
     json_grammar::digit_symbol(first):
 >>>>
 
-@@ terminal-value number_emit.bot EMIT-TERMINAL-VALUE a coroutine root completing with 0, which a symbol source reads as a symbol
+@@ terminal-value number_emit.bot accepted result: a coroutine root completing with 0, not the -1 json's sources use for their end -- a final value is no symbol (the exploratory checker's EMIT-TERMINAL-VALUE, withdrawn by CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18: a consumer tells the end by std::coroutine::done?, never by the value)
 <<<<
 fn integer_source(n: int) -> int errors IndexNotFound emits json_lex::json_number:
     integer(n)

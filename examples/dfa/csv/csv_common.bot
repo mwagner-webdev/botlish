@@ -1,0 +1,17 @@
+# csv_common.bot -- what the CSV emitters of both profiles share
+# (CSV-EMISSION-VALIDATION-MILESTONE-1.md): the record they write and the
+# error for a value a profile cannot represent.
+
+# A three-column record.
+struct Row:
+    a: str
+    b: str
+    c: str
+
+# A character the emitter's profile cannot represent, at character index
+# AT of the field being written (VALUE its scalar value). It is never
+# replaced, stripped or normalized: the emitter fails instead, and what it
+# had yielded of the field stays a viable prefix, never a complete field.
+error UnsupportedCSVCharacter:
+    at: int
+    value: int

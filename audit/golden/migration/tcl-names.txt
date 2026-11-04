@@ -11096,7 +11096,8 @@ tests/emission-claims.test ec-recognizer-import pass
 tests/emission-claims.test ec-strict-raises pass
 tests/emission-claims.test ec-nested-function pass
 tests/emission-claims.test ec-recovery-dependent pass
-tests/emission-claims.test ec-terminal-value pass
+tests/emission-claims.test ec-result-not-symbol pass
+tests/emission-claims.test ec-result-not-symbol-runs pass
 tests/emission-claims.test ec-byte-character pass
 tests/emission-claims.test ec-unknown-value pass
 tests/emission-claims.test ec-trait-unsupported pass

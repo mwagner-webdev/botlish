@@ -49,7 +49,7 @@
 | `wrong-digit-value` | number_emit.bot | accepted | accepted | yes |
 | `unguarded-text` | number_emit.bot | EMIT-REJECTED | rejected: EMIT-INCOMPLETE, EMIT-REJECTED | yes |
 | `weak-guard` | number_emit.bot | EMIT-REJECTED | rejected: EMIT-REJECTED | yes |
-| `terminal-value` | number_emit.bot | EMIT-TERMINAL-VALUE | rejected: EMIT-TERMINAL-VALUE | yes |
+| `terminal-value` | number_emit.bot | accepted | accepted | yes |
 | `end-as-symbol` | number_emit.bot | EMIT-END-SYMBOL | rejected: EMIT-END-SYMBOL | yes |
 | `unclosed-string` | string_emit.bot | EMIT-INCOMPLETE | rejected: EMIT-BOUNDARY, EMIT-INCOMPLETE | yes |
 | `after-token` | string_emit.bot | EMIT-AFTER-TOKEN | rejected: EMIT-AFTER-TOKEN | yes |
@@ -72,5 +72,5 @@
 | `surrogate-input` | emit_probes.bot | accepted | accepted | yes |
 | `member-out-of-range` | value_emit.bot | accepted | accepted | yes |
 
-31 of 31 decided as the exploratory checker decided.
+31 of 31 decided as expected: as the exploratory checker decided, but for `terminal-value`, which it rejected (EMIT-TERMINAL-VALUE) and which is accepted since CSV-EMISSION-VALIDATION-MILESTONE-1.md withdrew that rule (a final value is no symbol).
 

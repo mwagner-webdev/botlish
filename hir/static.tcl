@@ -290,7 +290,6 @@ namespace eval hir::static {
         EMIT-NOT-SYMBOL                          EmitNotSymbol
         EMIT-RECOGNIZER                          EmitRecognizer
         EMIT-REJECTED                            EmitRejected
-        EMIT-TERMINAL-VALUE                      EmitTerminalValue
         EMIT-UNKNOWN-VALUE                       EmitUnknownValue
         EMIT-UNSUPPORTED                         EmitUnsupported
         EXPORT-ENVIRONMENT                       ExportEnvironment

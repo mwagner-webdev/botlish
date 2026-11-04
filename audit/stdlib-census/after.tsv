@@ -391,7 +391,7 @@ std::char::is_tcl_alnum	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:150
 std::char::is_tcl_alpha	intrinsic	std::char	api	intrinsic	core/tclcompat.tcl:148			
 std::char::scalar_value	intrinsic	std::char	api	intrinsic	core/unicodechar.tcl:38			
 std::compiler	namespace		api	source	stdlib/compiler.bot			
-std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:193			
+std::compiler::CompilerError	error	std::compiler	api	source	stdlib/compiler.bot:192			
 std::compiler::DiagnosticCode	enum	std::compiler	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineCaptureUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::AffineContainerUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -455,7 +455,6 @@ std::compiler::DiagnosticCode::EmitIncomplete	enum-case	std::compiler::Diagnosti
 std::compiler::DiagnosticCode::EmitNotSymbol	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::EmitRecognizer	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::EmitRejected	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
-std::compiler::DiagnosticCode::EmitTerminalValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::EmitUnknownValue	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::EmitUnsupported	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::ExportEnvironment	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
@@ -533,7 +532,7 @@ std::compiler::DiagnosticCode::UnprovenField	enum-case	std::compiler::Diagnostic
 std::compiler::DiagnosticCode::UnwrappedYield	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::UseAfterMove	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
 std::compiler::DiagnosticCode::YieldOutsideFunction	enum-case	std::compiler::DiagnosticCode	api	source	stdlib/compiler.bot:43			
-std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:187			
+std::compiler::SourceLocation	struct	std::compiler	api	source	stdlib/compiler.bot:186			
 std::coroutine	namespace		api	intrinsic				
 std::coroutine::done?	intrinsic	std::coroutine	api	intrinsic	core/coroutines.tcl:399			
 std::darwin	namespace		api	source	stdlib/darwin.bot	macos		1
@@ -1281,16 +1280,16 @@ std::mutable_map::contains	function	std::mutable_map	api	source	stdlib/mutable_m
 std::mutable_map::create	function	std::mutable_map	api	source	stdlib/mutable_map.bot:88			
 std::mutable_map::empty?	function	std::mutable_map	api	source	stdlib/mutable_map.bot:97			
 std::mutable_map::freeze	function	std::mutable_map	api	source	stdlib/mutable_map.bot:172			
-std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:205			
-std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:199			
-std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:202			
+std::mutable_map::iteration_at	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:186			
+std::mutable_map::iteration_end	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:180			
+std::mutable_map::iteration_live?	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:183			
 std::mutable_map::length	function	std::mutable_map	api	source	stdlib/mutable_map.bot:94			
 std::mutable_map::order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:144			
 std::mutable_map::remove	function	std::mutable_map	api	source	stdlib/mutable_map.bot:123			
 std::mutable_map::reorder	function	std::mutable_map	api	source	stdlib/mutable_map.bot:159			
 std::mutable_map::set	function	std::mutable_map	api	source	stdlib/mutable_map.bot:110			
-std::mutable_map::transfer_in	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:190			
-std::mutable_map::transfer_out	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:184			
+std::mutable_map::transfer_in	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:202			
+std::mutable_map::transfer_out	function	std::mutable_map	std-internal	source	stdlib/mutable_map.bot:196			
 std::mutable_map::validate_order	function	std::mutable_map	api	source	stdlib/mutable_map.bot:150			
 std::mutable_map::with_capacity	function	std::mutable_map	api	source	stdlib/mutable_map.bot:91			
 std::mutable_set	namespace		api	source	stdlib/mutable_set.bot			
@@ -1302,17 +1301,17 @@ std::mutable_set::contains	function	std::mutable_set	api	source	stdlib/mutable_s
 std::mutable_set::create	function	std::mutable_set	api	source	stdlib/mutable_set.bot:66			
 std::mutable_set::empty?	function	std::mutable_set	api	source	stdlib/mutable_set.bot:75			
 std::mutable_set::freeze	function	std::mutable_set	api	source	stdlib/mutable_set.bot:136			
-std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:177			
-std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:171			
-std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:174			
+std::mutable_set::iteration_at	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:158			
+std::mutable_set::iteration_end	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:152			
+std::mutable_set::iteration_live?	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:155			
 std::mutable_set::length	function	std::mutable_set	api	source	stdlib/mutable_set.bot:72			
 std::mutable_set::of_table	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:146			
 std::mutable_set::order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:109			
 std::mutable_set::remove	function	std::mutable_set	api	source	stdlib/mutable_set.bot:90			
 std::mutable_set::reorder	function	std::mutable_set	api	source	stdlib/mutable_set.bot:124			
 std::mutable_set::table_of	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:143			
-std::mutable_set::transfer_in	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:162			
-std::mutable_set::transfer_out	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:156			
+std::mutable_set::transfer_in	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:174			
+std::mutable_set::transfer_out	function	std::mutable_set	std-internal	source	stdlib/mutable_set.bot:168			
 std::mutable_set::validate_order	function	std::mutable_set	api	source	stdlib/mutable_set.bot:115			
 std::mutable_set::with_capacity	function	std::mutable_set	api	source	stdlib/mutable_set.bot:69			
 std::mutable_vector	namespace		api	intrinsic				
@@ -1404,38 +1403,38 @@ std::test::code_name	function	std::test	api	source	stdlib/test.bot:300
 std::test::contains_text?	function	std::test	api	source	stdlib/test.bot:256			
 std::test::count	function	std::test	api	source	stdlib/test.bot:152			
 std::test::describe	function	std::test	api	source	stdlib/test.bot:282			
-std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:622			
-std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:589			
-std::test::equal	function	std::test	api	source	stdlib/test.bot:606			
+std::test::diagnostic	function	std::test	api	source	stdlib/test.bot:626			
+std::test::diagnostic_text	function	std::test	api	source	stdlib/test.bot:593			
+std::test::equal	function	std::test	api	source	stdlib/test.bot:610			
 std::test::escape_of	function	std::test	api	source	stdlib/test.bot:189			
 std::test::escaped	function	std::test	api	source	stdlib/test.bot:205			
 std::test::glyph	function	std::test	api	source	stdlib/test.bot:160			
-std::test::holds	function	std::test	api	source	stdlib/test.bot:646			
+std::test::holds	function	std::test	api	source	stdlib/test.bot:650			
 std::test::joined	function	std::test	api	source	stdlib/test.bot:173			
-std::test::mismatch	function	std::test	api	source	stdlib/test.bot:602			
-std::test::no_results	function	std::test	api	source	stdlib/test.bot:727			
+std::test::mismatch	function	std::test	api	source	stdlib/test.bot:606			
+std::test::no_results	function	std::test	api	source	stdlib/test.bot:731			
 std::test::no_texts	function	std::test	api	source	stdlib/test.bot:168			
-std::test::passed	function	std::test	api	source	stdlib/test.bot:596			
+std::test::passed	function	std::test	api	source	stdlib/test.bot:600			
 std::test::quoted	function	std::test	api	source	stdlib/test.bot:223			
 std::test::registered	function	std::test	api	source	stdlib/test.bot:147			
-std::test::rejects	function	std::test	api	source	stdlib/test.bot:655			
-std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:677			
-std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:665			
-std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:703			
-std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:690			
-std::test::report	function	std::test	api	source	stdlib/test.bot:788			
-std::test::result_lines	function	std::test	api	source	stdlib/test.bot:756			
-std::test::results	function	std::test	api	source	stdlib/test.bot:731			
-std::test::run	function	std::test	api	source	stdlib/test.bot:721			
-std::test::satisfies	function	std::test	api	source	stdlib/test.bot:614			
+std::test::rejects	function	std::test	api	source	stdlib/test.bot:659			
+std::test::rejects_any	function	std::test	api	source	stdlib/test.bot:681			
+std::test::rejects_at	function	std::test	api	source	stdlib/test.bot:669			
+std::test::rejects_containing	function	std::test	api	source	stdlib/test.bot:707			
+std::test::rejects_message	function	std::test	api	source	stdlib/test.bot:694			
+std::test::report	function	std::test	api	source	stdlib/test.bot:792			
+std::test::result_lines	function	std::test	api	source	stdlib/test.bot:760			
+std::test::results	function	std::test	api	source	stdlib/test.bot:735			
+std::test::run	function	std::test	api	source	stdlib/test.bot:725			
+std::test::satisfies	function	std::test	api	source	stdlib/test.bot:618			
 std::test::suite	function	std::test	api	source	stdlib/test.bot:136			
-std::test::summarize	function	std::test	api	source	stdlib/test.bot:746			
-std::test::summary_line	function	std::test	api	source	stdlib/test.bot:779			
+std::test::summarize	function	std::test	api	source	stdlib/test.bot:750			
+std::test::summary_line	function	std::test	api	source	stdlib/test.bot:783			
 std::test::text_lines	function	std::test	api	source	stdlib/test.bot:229			
-std::test::value	function	std::test	api	source	stdlib/test.bot:637			
+std::test::value	function	std::test	api	source	stdlib/test.bot:641			
 std::transfer	namespace		api	source+intrinsic	stdlib/transfer.bot			
-std::transfer::decode	intrinsic	std::transfer	api	intrinsic	core/transfer.tcl:572			
-std::transfer::encode	intrinsic	std::transfer	api	intrinsic	core/transfer.tcl:569			
+std::transfer::decode	intrinsic	std::transfer	api	intrinsic	core/transfer.tcl:580			
+std::transfer::encode	intrinsic	std::transfer	api	intrinsic	core/transfer.tcl:577			
 std::tree	namespace		api	source+intrinsic	stdlib/tree.bot			
 std::tree::Order	enum	std::tree	api	source	stdlib/tree.bot:47			
 std::tree::Order::BreadthFirst	enum-case	std::tree::Order	api	source	stdlib/tree.bot:47			
@@ -1610,5 +1609,5 @@ std::windows::standard_handle	function	std::windows	api	source	stdlib/windows.bo
 std::windows::write_file	function	std::windows	api	source	stdlib/windows.bot:143	windows		
 std::windows::written	function	std::windows	api	source	stdlib/windows.bot:134	windows		
 string?	intrinsic		primitive	intrinsic				
-transfer#decode	intrinsic		internal	intrinsic	core/transfer.tcl:579			
-transfer#encode	intrinsic		internal	intrinsic	core/transfer.tcl:576			
+transfer#decode	intrinsic		internal	intrinsic	core/transfer.tcl:587			
+transfer#encode	intrinsic		internal	intrinsic	core/transfer.tcl:584			

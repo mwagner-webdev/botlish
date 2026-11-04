@@ -1296,10 +1296,15 @@ test ec-recovery-dependent {a claim whose code holds another diagnostic says not
         [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}]
 } -result {{TYPE EMIT-END-SYMBOL EMIT-REJECTED} {{a dependent} {b rejected}}}
 
-test ec-terminal-value {a claimed symbol source completes with -1; any other final value is EMIT-TERMINAL-VALUE} -body {
-    list [diagnosticsOf "${digitDfa}fn s() -> int emits digit_token:\n    yield 55\n    0\n\n0\n"] \
-        [diagnosticsOf "${digitDfa}fn s() -> int emits digit_token:\n    yield 55\n    -1\n\n0\n"]
-} -result {{{EMIT-TERMINAL-VALUE 9:21}} {}}
+test ec-result-not-symbol {a claimed function's result is no symbol, whatever its type: an Int-returning source emits its token and completes with any Int -- its argument, 0, -1 -- certified alike (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18; this was EMIT-TERMINAL-VALUE's -1 rule)} -body {
+    set hir [surface::compile "${digitDfa}fn s(n: int) -> int emits digit_token:\n    yield 55\n    n\n\nfn z() -> int emits digit_token:\n    yield 55\n    0\n\nfn e() -> int emits digit_token:\n    yield 55\n    -1\n\n0\n" -warnings off -strict 0]
+    list [lmap d [dict get $hir diagnostics] {dict get $d kind}] \
+        [lmap r [hir::emission::claims $hir] {list [dict get $r function] [dict get $r verdict]}]
+} -cleanup {unset -nocomplain hir} -result {{} {{s proven} {z proven} {e proven}}}
+
+test ec-result-not-symbol-runs {the consumer of such a source tells its symbols from its final value with std::coroutine::done?, never by the value: the token's symbol, then the unrelated result, stable when resumed again -- the same on every backend} -constraints nativeCoroutines -body {
+    sourceAgree "import std::coroutine\n${digitDfa}fn s(n: int) -> int emits digit_token:\n    yield 55\n    n\n\ncoroutine {step, first} = s(42)\nbefore = std::coroutine::done?(step)\nlast = step()\nafter = std::coroutine::done?(step)\nagain = step()\n\[first, last, again, before, after\]\n"
+} -result {value {[55, 42, 42, false, true]}}
 
 test ec-byte-character {a character's scalar value sent to a recognizer over bytes} -body {
     diagnosticsOf "import std::dfa\nimport std::char\nimport std::str\n\ndfa byte_token over bytes:\n    start:\n        0..255 -> accept\n\nfn first_char(text: str) -> unit errors IndexNotFound emits byte_token:\n    yield std::char::scalar_value(text.char_at(0))\n    unit\n\n0\n"

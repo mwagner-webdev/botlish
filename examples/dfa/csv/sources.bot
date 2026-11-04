@@ -1,0 +1,75 @@
+# sources.bot -- coroutine roots of the CSV emitters
+# (CSV-EMISSION-VALIDATION-MILESTONE-1.md): each runs one emitter inside its
+# own coroutine, so a consumer (sinks.bot, export.bot) resumes it for one
+# symbol at a time. A root's outward type is its declared result's
+# (COROUTINES.md 19), so each returns an Int -- and what Int is its own
+# business: these return how many records (or characters) they wrote. The
+# final value is no symbol: a consumer tells it from one by
+# std::coroutine::done?, never by its value, and the claim is about the
+# yields alone (the report's section 18: the -1 rule is gone).
+
+import std::list
+import std::str
+import std::abi::bytes
+import csv_common
+import csv_strict
+import csv_utf8
+import strict_emit
+import utf8_emit
+import selective_emit
+
+# Profile A, strict ASCII
+
+fn strict_field_source(value: str) -> int errors csv_common::UnsupportedCSVCharacter emits csv_strict::quoted_field:
+    strict_emit::quoted_field(value)
+    value.length()
+
+nomethod fn strict_document_source(header: csv_common::Row, rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter emits csv_strict::document3:
+    strict_emit::document(header, rows)
+    rows.length() + 1
+
+# Profile B over scalar values
+
+fn utf8_field_source(value: str) -> int errors csv_common::UnsupportedCSVCharacter emits csv_utf8::quoted_field:
+    utf8_emit::quoted_field(value)
+    value.length()
+
+nomethod fn utf8_document_source(header: csv_common::Row, rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter emits csv_utf8::document3:
+    utf8_emit::document(header, rows)
+    rows.length() + 1
+
+# Profile B over UTF-8 bytes
+
+fn bytes_field_source(value: str) -> int errors csv_common::UnsupportedCSVCharacter emits csv_utf8::quoted_field_bytes:
+    utf8_emit::quoted_field_bytes(value)
+    value.length()
+
+fn bytes_field_from_bytes_source(data: std::abi::bytes::Bytes) -> int errors InvalidUtf8, csv_common::UnsupportedCSVCharacter emits csv_utf8::quoted_field_bytes:
+    utf8_emit::quoted_field_from_bytes(data)
+    0
+
+nomethod fn bytes_document_source(header: csv_common::Row, rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter emits csv_utf8::document3_bytes:
+    utf8_emit::document_bytes(header, rows)
+    rows.length() + 1
+
+fn bytes_stream_source(rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter emits csv_utf8::document3_bytes:
+    utf8_emit::stream_bytes(rows)
+    rows.length()
+
+fn bytes_unterminated_source(rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter emits csv_utf8::stream3_bytes:
+    utf8_emit::stream_unterminated_bytes(rows)
+    rows.length()
+
+# Selective quoting
+
+fn selective_field_source(value: str) -> int errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision emits csv_utf8::field:
+    selective_emit::field(value)
+    value.length()
+
+nomethod fn selective_document_source(header: csv_common::Row, rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision emits csv_utf8::document3:
+    selective_emit::document(header, rows)
+    rows.length() + 1
+
+nomethod fn selective_strict_document_source(header: csv_common::Row, rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision emits csv_strict::document3:
+    selective_emit::document_strict(header, rows)
+    rows.length() + 1

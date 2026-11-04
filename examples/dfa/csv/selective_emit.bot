@@ -1,0 +1,182 @@
+# selective_emit.bot -- selective quoting, the comparison
+# (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 5): a field is written
+# unquoted when the grammar's unquoted class holds every one of its
+# characters and it is not empty, quoted (strict_emit's or utf8_emit's
+# always-quoted emitter) otherwise. The decision reads the grammar's own
+# guard (text_char), never a list of its own.
+#
+# Two spellings of the unquoted branch:
+#
+#   *_natural   what a serializer writes: the decision proved the characters
+#               are text, so they are yielded as they are. Correct, and not
+#               certifiable: the checker's facts are sets of single values,
+#               and "needs_quotes returned false" is a fact about the whole
+#               string, a relation between a loop's result and each later
+#               character (EMISSION-CLAIMS-MILESTONE-1.md, section 19). It
+#               carries no claim: claimed, the compiler reports EMIT-REJECTED
+#               (tests/csv-emission.test, csv-selective-natural-rejected).
+#   field*      the same output, each character of the unquoted branch passed
+#               through the guard again -- a second check per character that
+#               cannot fail (QuotingDecision, never raised) -- and the first
+#               character written before the loop. Both are for the checker:
+#               the guard restates per character what the decision knew of
+#               the whole string, and the peeled first character is what
+#               tells it the unquoted field is not empty (it keeps a counted
+#               loop's zero-iteration exit even when the count is at least
+#               one: with the loop alone the claim is EMIT-INCOMPLETE,
+#               csv-selective-loop-incomplete). Certified.
+#
+# The empty value is quoted (`""`): every field is then a nonempty token,
+# which the field emitter can claim on its own.
+
+import std::dfa
+import std::char
+import std::str
+import std::list
+import csv_strict
+import csv_utf8
+import csv_common
+import strict_emit
+import utf8_emit
+
+# The unquoted branch held a character needs_quotes said it did not (never
+# raised: the guard and the decision read the same class).
+error QuotingDecision:
+    at: int
+    value: int
+
+# --- Profile A (strict ASCII)
+
+fn needs_quotes_strict(value: str) -> bool:
+    if value.length() == 0:
+        return true
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        csv_strict::text_char(c):
+            on std::dfa::UnrecognizedInput:
+                return true
+            on std::dfa::UnexpectedEnd:
+                return true
+        continue
+    false
+
+fn field_strict_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter:
+    if needs_quotes_strict(value):
+        strict_emit::quoted_field(value)
+    else:
+        loop i from 0 to value.length():
+            yield value.char_at(i).scalar_value()
+            continue
+    unit
+
+fn field_strict(value: str) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_strict::field:
+    n = value.length()
+    if n == 0 or needs_quotes_strict(value):
+        strict_emit::quoted_field(value)
+    else:
+        c0 = value.char_at(0).scalar_value()
+        csv_strict::text_char(c0):
+            on std::dfa::UnrecognizedInput:
+                fail QuotingDecision {at: 0, value: c0}
+            on std::dfa::UnexpectedEnd:
+                fail QuotingDecision {at: 0, value: c0}
+        yield c0
+        loop i from 1 to n:
+            c = value.char_at(i).scalar_value()
+            csv_strict::text_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail QuotingDecision {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail QuotingDecision {at: i, value: c}
+            yield c
+            continue
+    unit
+
+nomethod fn record3_strict(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_strict::record3:
+    field_strict(a)
+    yield 44
+    field_strict(b)
+    yield 44
+    field_strict(c)
+    unit
+
+fn row_line_strict(r: csv_common::Row) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_strict::line3:
+    record3_strict(r.a, r.b, r.c)
+    yield 13
+    yield 10
+    unit
+
+nomethod fn document_strict(header: csv_common::Row, rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_strict::stream3, csv_strict::document3:
+    row_line_strict(header)
+    loop r in rows:
+        row_line_strict(r)
+        continue
+    unit
+
+# --- Profile B (UTF-8), over scalar values
+
+fn needs_quotes(value: str) -> bool:
+    if value.length() == 0:
+        return true
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        csv_utf8::text_char(c):
+            on std::dfa::UnrecognizedInput:
+                return true
+            on std::dfa::UnexpectedEnd:
+                return true
+        continue
+    false
+
+fn field_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter:
+    if needs_quotes(value):
+        utf8_emit::quoted_field(value)
+    else:
+        loop i from 0 to value.length():
+            yield value.char_at(i).scalar_value()
+            continue
+    unit
+
+fn field(value: str) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_utf8::field:
+    n = value.length()
+    if n == 0 or needs_quotes(value):
+        utf8_emit::quoted_field(value)
+    else:
+        c0 = value.char_at(0).scalar_value()
+        csv_utf8::text_char(c0):
+            on std::dfa::UnrecognizedInput:
+                fail QuotingDecision {at: 0, value: c0}
+            on std::dfa::UnexpectedEnd:
+                fail QuotingDecision {at: 0, value: c0}
+        yield c0
+        loop i from 1 to n:
+            c = value.char_at(i).scalar_value()
+            csv_utf8::text_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail QuotingDecision {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail QuotingDecision {at: i, value: c}
+            yield c
+            continue
+    unit
+
+nomethod fn record3(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_utf8::record3:
+    field(a)
+    yield 44
+    field(b)
+    yield 44
+    field(c)
+    unit
+
+fn row_line(r: csv_common::Row) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_utf8::line3:
+    record3(r.a, r.b, r.c)
+    yield 13
+    yield 10
+    unit
+
+nomethod fn document(header: csv_common::Row, rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter, QuotingDecision emits csv_utf8::stream3, csv_utf8::document3:
+    row_line(header)
+    loop r in rows:
+        row_line(r)
+        continue
+    unit
