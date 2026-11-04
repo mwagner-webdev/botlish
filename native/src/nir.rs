@@ -673,6 +673,20 @@ pub enum OpCode {
     MutArrayToList,
     MutArrayEmpty,
     MutArrayTakeFront,
+    /// Transfer (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md,
+    /// runtime/transfer.rs): the codec of `std::transfer`.
+    ///   `transferencode %v %plan %fns`   the std::abi::bytes::Bytes of %v's
+    ///                              encoding; runs the `through` owner
+    ///                              functions of %fns (allocates; a failing
+    ///                              call is the result's failure)
+    ///   `transferdecode %d %plan %fns`   the value the bytes of %d hold:
+    ///                              a fresh value of this program, or one of
+    ///                              the declared Transfer* errors; runs the
+    ///                              owners' rebuilds (allocates)
+    /// %plan is the String constant native/lower.tcl's TransferPlan made of
+    /// the transferred type's schema.
+    TransferEncode,
+    TransferDecode,
     /// `ctxroot %h`: %h (a MutableVector or MutableArray header just
     /// installed in the context area, MUTABLE-VECTOR.md) is a GC root for the rest of the
     /// run. Never fails or allocates; result unit.
@@ -950,6 +964,8 @@ op_spellings! {
     "mutarraytolist" => MutArrayToList,
     "mutarrayempty" => MutArrayEmpty,
     "mutarraytakefront" => MutArrayTakeFront,
+    "transferencode" => TransferEncode,
+    "transferdecode" => TransferDecode,
     "listgetproven" => ListGetProven,
     "mutarraygetproven" => MutArrayGetProven,
     "mutarraysetproven" => MutArraySetProven,
@@ -1205,7 +1221,8 @@ impl OpCode {
             | MutArrayFromList | MutArrayToList | MutArrayEmpty | MutArrayTakeFront => Some(1),
             D64Lt | D64Le | D64Gt | D64Ge | D64Eq => Some(3),
             Substr | SubstrProven | BytesSlice | BytesUtf16LeNul | MutArraySet | MutArraySetProven | MBytesSet | BinLoad | NativeLoad | NativeLoadPtr | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort
-            | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy => Some(3),
+            | MvSwap | MutArraySwap | MutArrayGenerateDrop | FfiFixtureFill | FfiFixtureFillChecked | FfiFixtureCopy
+            | TransferEncode | TransferDecode => Some(3),
             RegionEq | MvSwapDrop | MutArraySwapDrop | MutArraySetDrop | MvSwapDropRun | MutArraySwapDropRun | MutArraySetDropRun
             | BinStore | FfiFixtureMixed
             | NativeStore | NativeStorePtr | MBytesWrite | MBytesWritePtr

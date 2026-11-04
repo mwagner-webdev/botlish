@@ -1174,6 +1174,12 @@ proc surface::modules::Walk {node} {
                     set slot
                 }]
             }
+            # A sendable clause's representation type (SENDABILITY-AND-
+            # VALUE-COPY-MILESTONE-1.md) is a type like a field's.
+            if {[dict exists $node sendable representation]} {
+                Put node sendable representation [TypeRefs [dict get $node sendable representation] \
+                    [dict get $node sendable representationSpan]]
+            }
         }
         externfn {
             # An extern declaration's C types (C-FFI.md): `std::ffi::c::Ptr[...]`

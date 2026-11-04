@@ -105,6 +105,15 @@
 #                                     names (std::binary::read of an array:
 #                                     LAYOUT-UNIONS.md); nothing for any
 #                                     other designator
+#   sending         "" or K or `result`: argument K's value, or the call's
+#                   (imprinted) result, crosses to another Botlish VM by
+#                   the transfer codec (core/transfer.tcl; SENDABILITY-AND-
+#                   VALUE-COPY-MILESTONE-1.md), so its static type must
+#                   satisfy the intrinsic trait Sendable
+#                   (hir::types::SendClass: NOT-SENDABLE otherwise) and be
+#                   closed where the call is written (TRANSFER-OPEN-TYPE):
+#                   its schema is the type's. Read by registration, never by
+#                   name (hir::range::VerifySending, hir/transfer.tcl).
 #   hashing         "" or {K MODE}: argument K is hashed -- compared by the
 #                   hash's equality and walked by its canonical encoding
 #                   (core/hashing.tcl; HASHABLE-AND-KEYED-HASH.md) -- so its
@@ -602,7 +611,7 @@ proc core::native::register {name args} {
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
         -context-free 0 -errors {} -bounds {} -nomethod 0 -completion 0 -ownership {} -errors-from {} \
         -result-length {} -keeps-length 0 -drop-form {} -layout {} -imprint {} -foreign {} -extern {} \
-        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0 -element-kinds {}]
+        -mutation-stable 0 -fold {} -measures {} -hashing {} -element-place 0 -element-kinds {} -sending {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -787,6 +796,10 @@ proc core::native::register {name args} {
             || $arity eq "*" || [lindex $hashing 0] >= $arity || [lindex $hashing 1] ni {required checked})} {
         error "core::native::register: bad -hashing \"$hashing\" for \"$name\" (K required|checked)"
     }
+    set sending [dict get $options -sending]
+    if {$sending ne "" && !($sending eq "result" || ([string is digit -strict $sending] && $arity ne "*" && $sending < $arity))} {
+        error "core::native::register: bad -sending \"$sending\" for \"$name\" (K or result)"
+    }
     set elementPlace [dict get $options -element-place]
     if {$elementPlace ni {0 1} || ($elementPlace && ($arity ne "2" || [lindex $ownership 0] ne "observe"
             || [core::type::base [lindex $paramTypes 0]] ni {mutvec mutarray}))} {
@@ -813,7 +826,8 @@ proc core::native::register {name args} {
         keepsLength [dict get $options -keeps-length] dropForm $dropForm \
         layout $layout imprint $imprint foreign $foreign extern [dict get $options -extern] \
         mutationStable [dict get $options -mutation-stable] fold [dict get $options -fold] \
-        measures $measures hashing $hashing elementPlace $elementPlace elementKinds $elementKinds]
+        measures $measures hashing $hashing elementPlace $elementPlace elementKinds $elementKinds \
+        sending $sending]
     return [core::value::native $name]
 }
 

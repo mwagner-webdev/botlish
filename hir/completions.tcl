@@ -1464,13 +1464,26 @@ proc hir::completions::SeedClean {hir ctxVar block} {
 }
 
 # Walks EXPRS (a block body / branch body) in order; a "never" expression
-# makes the rest of the sequence unreachable (item 32).
+# makes the rest of the sequence unreachable (item 32) -- except a rejected
+# static block standing as a statement (hir::static::reifiedStatement): its
+# error is charged and the walk goes on as if the block could complete, so
+# the code after a negative test keeps every completion diagnostic of its
+# own (STATIC-COMPILE.md, "Completions"). No path ends at such a block, so
+# it is no `intended` completion either: the path is what the code after it
+# makes it, an ordinary failure there included (KNOWN-ERROR for the
+# function's callers, exactly as with the block accepted).
 proc hir::completions::Seq {hirVar ctxVar diagnose enclosing guard e} {
     upvar 1 $hirVar hir $ctxVar ctx
     set result [hir::range::unknown]
     foreach child $e {
+        set intended [dict get $ctx intended]
         set result [Eval hir ctx $diagnose $enclosing $guard $child]
         if {$result eq {never}} {
+            if {[hir::static::reifiedStatement $hir $e $child]} {
+                dict set ctx intended $intended
+                set result [hir::range::unknown]
+                continue
+            }
             return never
         }
     }

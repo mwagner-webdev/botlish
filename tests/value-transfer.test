@@ -1,0 +1,905 @@
+# value-transfer.test -- the dynamic half of SENDABILITY-AND-VALUE-COPY-
+# MILESTONE-1.md: std::transfer::encode and decode on every backend (one
+# HIR, every backend's outcome equal: sourceAgree), the format's bytes
+# (fixed vectors), every refusal of malformed or foreign bytes, values
+# rebuilt by an independently compiled program, and values carried between
+# separate processes -- separate VMs with separate heaps and table-hash keys,
+# the sender gone before the receiver decodes. The static half is
+# tests/sendability.test; native/src/runtime/transfer.rs's unit tests carry
+# values between two Vms of one process, the first dropped first.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+testConstraint linuxHost [expr {[core::cabi::hostTarget] in {linux-x86_64 linux-aarch64}}]
+
+# ---------------------------------------------------------------------------
+# Helpers
+
+proc vtBackends {} {
+    if {[testConstraint nativeBuilt]} {
+        return {interp compile cranelift-generic cranelift}
+    }
+    return {interp compile}
+}
+
+# The decode handlers: each declared error named by a String.
+set ::vtHandlers {
+    on TransferMalformed:
+        "malformed"
+    on TransferVersion:
+        "version"
+    on TransferTypeMismatch:
+        "mismatch"
+    on TransferInvalidValue:
+        "invalid"
+    on TransferLimit:
+        "limit"}
+
+# The prelude every program imports, with byte helpers.
+set ::vtPrelude {import std::transfer
+import std::abi
+import std::abi::bytes
+import std::decimal_rounded
+import std::ffi::c
+import std::ffi::c::raw
+import std::byte
+import std::str
+import std::list
+import std::mutable_vector
+import std::mutable_array
+import std::mutable_map
+import std::mutable_set
+import std::immutable_map
+import std::immutable_set
+import std::int
+}
+
+# The helpers every program has, after its imports.
+set ::vtHelpers {
+# DATA with byte I replaced by B.
+fn poke(data: std::abi::bytes::Bytes, i: int, b: std::byte::Byte) -> std::abi::bytes::Bytes:
+    m = std::abi::bytes::replace(std::abi::bytes::from_bytes(data), i, b):
+        on IndexNotFound:
+            return data
+    std::abi::bytes::freeze(m)
+
+# DATA's first N bytes.
+fn prefix(data: std::abi::bytes::Bytes, n: int) -> std::abi::bytes::Bytes:
+    std::abi::bytes::slice(data, 0, n):
+        on LowerUnderrun:
+            data
+        on UpperOverrun:
+            data
+
+fn size(data: std::abi::bytes::Bytes) -> int:
+    std::abi::bytes::length(data).value
+
+# DATA followed by the bytes XS.
+fn append(data: std::abi::bytes::Bytes, xs: List[std::byte::Byte]) -> std::abi::bytes::Bytes:
+    std::abi::bytes::join([data, std::abi::bytes::from_list(xs)])
+}
+
+# The program of BODY: the prelude's imports and BODY's own leading
+# imports (a file's header), the helpers, then the rest of BODY.
+proc vtProgram {body} {
+    set imports {}
+    set rest {}
+    set header 1
+    foreach line [split $body \n] {
+        if {$header && ([string match "import *" $line] || [string trim $line] eq "")} {
+            lappend imports $line
+        } else {
+            set header 0
+            lappend rest $line
+        }
+    }
+    return "$::vtPrelude\n[join $imports \n]\n$::vtHelpers\n[join $rest \n]"
+}
+
+# The value every backend agrees SOURCE's program (after the prelude) has,
+# as text, or the outcome when it is no value.
+proc vtAgree {body} {
+    set outcome [sourceAgree [vtProgram $body] [vtBackends]]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return $outcome
+}
+
+# A program that checks, on every backend, that the value VALUE of static
+# TYPE round-trips into an equal value (by EQUAL, an expression of `a` and
+# `b`), returning [EQUAL, EXTRA...].
+proc vtRoundTrip {type value {equal "a == b"} {decls ""}} {
+    return "$decls
+fn copy(a: $type) -> $type errors TransferMalformed, TransferVersion, TransferTypeMismatch, TransferInvalidValue, TransferLimit:
+    std::transfer::decode\[$type\](std::transfer::encode(a))
+
+fn check(a: $type) -> str:
+    b = copy(a):
+        on TransferMalformed:
+            return \"malformed\"
+        on TransferVersion:
+            return \"version\"
+        on TransferTypeMismatch:
+            return \"mismatch\"
+        on TransferInvalidValue:
+            return \"invalid\"
+        on TransferLimit:
+            return \"limit\"
+    if $equal:
+        return \"equal\"
+    \"different\"
+
+check($value)
+"
+}
+
+# The error-or-ok text of decoding BYTES-EXPR as TYPE, after DECLS and the
+# statements SETUP.
+proc vtRefusal {type setup bytes {decls ""}} {
+    return "$decls
+fn attempt(data: std::abi::bytes::Bytes) -> str:
+    v = std::transfer::decode\[$type\](data):
+        on TransferMalformed:
+            return \"malformed\"
+        on TransferVersion:
+            return \"version\"
+        on TransferTypeMismatch:
+            return \"mismatch\"
+        on TransferInvalidValue:
+            return \"invalid\"
+        on TransferLimit:
+            return \"limit\"
+    \"ok\"
+
+$setup
+attempt($bytes)
+"
+}
+
+# ---------------------------------------------------------------------------
+# Round trips: every sendable kind, on every backend
+
+set ::vtDecls {
+enum Color:
+    Red, Green, Blue
+
+struct Point:
+    x: int
+    y: int
+    label: str
+
+tree struct Node:
+    name: str
+    color: Color
+    kids: List[Node]
+
+struct Box[T]:
+    value: T
+
+opaque struct Money:
+    cents: int
+    sendable fields
+
+fn money(c: int) -> Money:
+    Money {cents: c}
+
+opaque struct Name:
+    text: str
+    size: int
+    sendable through(name_text, name_of) as str
+
+fn name_text(n: Name) -> str:
+    n.text
+
+fn name_of(t: str) -> Name:
+    Name {text: t, size: std::str::length(t)}
+
+fn name_size(n: Name) -> int:
+    n.size
+
+fn pair(xs: List[int]{length: 2}) -> List[int]{length: 2}:
+    xs
+}
+
+foreach {name type value} {
+    unit       unit                 unit
+    bools      {List[bool]}         {[true, false]}
+    zero       int                  0
+    small      {List[int]}          {[1, -1, 127, 128, -128, -129, 255, 256, 65535, -65536]}
+    edges      {List[int]}          {[4611686018427387903, 4611686018427387904, -4611686018427387904, -4611686018427387905, 9223372036854775807, -9223372036854775808]}
+    big        int                  {-123456789012345678901234567890123456789012345678901234567890}
+    huge       int                  {340282366920938463463374607431768211456 * 340282366920938463463374607431768211457}
+    chars      {List[UnicodeChar]}  {['a', 'é', '€', '😀', '􏿿', '\t', '\n']}
+    floats     {List[Float64]}      {[0.0, -1.5, 2.5, 1.0e308, -1.0e308, 4.9e-324, 0.1]}
+    strings    {List[str]}          {["", "a b", "héllo", "😀😀", "tab\there", "line\nbreak"]}
+    nested     {List[List[str]]}    {[[], ["x", "yy"], [""]]}
+    point      Point                {Point {x: 3, y: -129, label: "héllo😀"}}
+    box        {Box[List[Box[str]]]} {Box[List[Box[str]]] {value: [Box[str] {value: "in"}]}}
+    enum       {List[Color]}        {[Color::Blue, Color::Red, Color::Green]}
+    tree       Node                 {Node {name: "root", color: Color::Green, kids: [Node {name: "a", color: Color::Red, kids: []}, Node {name: "b", color: Color::Blue, kids: [Node {name: "c", color: Color::Red, kids: []}]}]}}
+    money      Money                {money(250)}
+    iset       {ImmutableSet[str]}  {std::immutable_set::from_list(["pp", "qq", "pp", "rr"])}
+    bytes      std::abi::bytes::Bytes {std::abi::bytes::join([std::abi::bytes::from_list(std::str::encode_utf8("a\tbé")), std::abi::bytes::freeze(std::abi::bytes::zeroed(std::abi::usize(3)))])}
+    emptybytes std::abi::bytes::Bytes {std::abi::bytes::from_list([])}
+} {
+    test vt-roundtrip-$name "a value of $type round-trips to an equal value on every backend" -body {
+        vtAgree "$::vtDecls\n[vtRoundTrip $type $value]"
+    } -result {"equal"}
+}
+
+test vt-roundtrip-decimal {a DecimalRounded value keeps its binary64 bit for bit, and so its guarantee} -body {
+    vtAgree "[vtRoundTrip {DecimalRounded{minDecimalsPreserved: 2}} 0.10 {std::decimal_rounded::to_string(a) == std::decimal_rounded::to_string(b)}]"
+} -result {"equal"}
+
+test vt-roundtrip-raw-floats {raw C floating values keep every bit pattern: NaN payloads, infinities and negative zero} -body {
+    vtAgree {xs = [std::ffi::c::raw::double_from_bits(9221120237041090561), std::ffi::c::raw::double_from_bits(18442240474082181120), std::ffi::c::raw::double_from_bits(9223372036854775808)]
+ys = std::transfer::decode[List[std::ffi::c::RawDouble]](std::transfer::encode(xs)):
+    on TransferMalformed:
+        []
+    on TransferVersion:
+        []
+    on TransferTypeMismatch:
+        []
+    on TransferInvalidValue:
+        []
+    on TransferLimit:
+        []
+loop y in ys:
+    std::ffi::c::raw::double_to_bits(y)
+}
+} -result {[9221120237041090561, 18442240474082181120, 9223372036854775808]}
+
+test vt-roundtrip-name-rebuilt {an owner's `through` rebuilds derived state in the receiver: Name's size is computed again by its rebuild} -body {
+    vtAgree "$::vtDecls\n[vtRoundTrip Name {name_of("héllo")} {name_size(b) == 5 and name_text(b) == name_text(a)}]"
+} -result {"equal"}
+
+test vt-trait-view {a function taking a Sendable trait view encodes each witness with its own schema (one clone per witness): its bytes decode as that type and are refused as another} -body {
+    vtAgree {struct Point:
+    x: int
+    y: int
+
+fn seal(x: Sendable) -> std::abi::bytes::Bytes:
+    std::transfer::encode(x)
+
+fn open_point(d: std::abi::bytes::Bytes) -> str:
+    p = std::transfer::decode[Point](d):
+        on TransferMalformed:
+            return "malformed"
+        on TransferVersion:
+            return "version"
+        on TransferTypeMismatch:
+            return "mismatch"
+        on TransferInvalidValue:
+            return "invalid"
+        on TransferLimit:
+            return "limit"
+    std::int::to_string(p.x + p.y)
+
+[open_point(seal(Point {x: 3, y: 4})), open_point(seal([1, 2])), seal("ab") == std::transfer::encode("ab")]
+}
+} -result {["7", "mismatch", true]}
+
+test vt-mutable-independent {a received MutableVector, MutableArray, MutableMap and MutableSet are new values: mutating the copy leaves the source, and the reverse} -body {
+    vtAgree {struct Bag:
+    v: MutableVector[str]
+    a: MutableArray[int]
+    m: std::mutable_map::MutableMap[str, int]
+    s: std::mutable_set::MutableSet[int]
+
+fn copy(b: Bag) -> Bag:
+    std::transfer::decode[Bag](std::transfer::encode(b)):
+        on TransferMalformed:
+            b
+        on TransferVersion:
+            b
+        on TransferTypeMismatch:
+            b
+        on TransferInvalidValue:
+            b
+        on TransferLimit:
+            b
+
+m = std::mutable_map::create[str, int]()
+m.set("one", 1)
+m.set("two", 2)
+s = std::mutable_set::create[int]()
+s.add(7)
+src = Bag {v: std::mutable_vector::from_list(["x"]), a: std::mutable_array::create(2, 5), m: m, s: s}
+dst = copy(src)
+dst.v.push("y")
+dst.a.set(0, 9):
+    on IndexNotFound:
+        unit
+dst.m.set("three", 3)
+dst.s.add(8)
+src.v.push("z")
+src.m.remove("one"):
+    on std::mutable_map::KeyNotFound:
+        0
+sv = loop x in src.v:
+    x
+dv = loop x in dst.v:
+    x
+sa = loop x in src.a:
+    x
+da = loop x in dst.a:
+    x
+[sv, dv, sa, da, std::mutable_map::length(src.m), std::mutable_map::length(dst.m), std::mutable_set::length(src.s), std::mutable_set::length(dst.s)]
+}
+} -result {[["x", "z"], ["x", "y"], [5, 5], [9, 5], 1, 3, 1, 2]}
+
+test vt-decode-twice {two decodes of the same bytes are two values: mutating one leaves the other} -body {
+    vtAgree {v = std::mutable_vector::from_list([1, 2])
+data = std::transfer::encode(v)
+fn copy(d: std::abi::bytes::Bytes) -> MutableVector[int]:
+    std::transfer::decode[MutableVector[int]](d):
+        on TransferMalformed:
+            std::mutable_vector::from_list([0])
+        on TransferVersion:
+            std::mutable_vector::from_list([0])
+        on TransferTypeMismatch:
+            std::mutable_vector::from_list([0])
+        on TransferInvalidValue:
+            std::mutable_vector::from_list([0])
+        on TransferLimit:
+            std::mutable_vector::from_list([0])
+a = copy(data)
+b = copy(data)
+a.push(3)
+al = loop x in a:
+    x
+bl = loop x in b:
+    x
+vl = loop x in v:
+    x
+[al, bl, vl]
+}
+} -result {[[1, 2, 3], [1, 2], [1, 2]]}
+
+test vt-vector-place {a MutableVector encoded straight from its place is copied, never taken or referenced: encoding leaves the source as it was, a later mutation of the source never reaches the bytes, and two encodings of different vectors decode to their own elements} -body {
+    vtAgree {fn copy(d: std::abi::bytes::Bytes) -> MutableVector[int]:
+    std::transfer::decode[MutableVector[int]](d):
+        on TransferMalformed:
+            std::mutable_vector::from_list([0])
+        on TransferVersion:
+            std::mutable_vector::from_list([0])
+        on TransferTypeMismatch:
+            std::mutable_vector::from_list([0])
+        on TransferInvalidValue:
+            std::mutable_vector::from_list([0])
+        on TransferLimit:
+            std::mutable_vector::from_list([0])
+
+fn items(v: MutableVector[int]) -> List[int]:
+    loop x in v:
+        x
+
+v = std::mutable_vector::from_list([1, 2])
+data = std::transfer::encode(v)
+after = items(v)
+v.push(3)
+w = std::mutable_vector::from_list([7, 8, 9])
+other = std::transfer::encode(w)
+a = copy(data)
+b = copy(other)
+[after, items(v), items(a), items(b), size(data) == size(std::transfer::encode(std::mutable_vector::from_list([1, 2])))]
+}
+} -result {[[1, 2], [1, 2, 3], [1, 2], [7, 8, 9], true]}
+
+test vt-set-rebuilt {an ImmutableSet is rebuilt by the receiver's own set construction: bytes naming a member twice decode to the set of one} -body {
+    vtAgree {good = std::transfer::encode(std::immutable_set::from_list(["a1", "b2"]))
+twice = poke(good, 18, std::byte::from_int(97))
+twice2 = poke(twice, 19, std::byte::from_int(49))
+s = std::transfer::decode[ImmutableSet[str]](twice2):
+    on TransferMalformed:
+        std::immutable_set::from_list([])
+    on TransferVersion:
+        std::immutable_set::from_list([])
+    on TransferTypeMismatch:
+        std::immutable_set::from_list([])
+    on TransferInvalidValue:
+        std::immutable_set::from_list([])
+    on TransferLimit:
+        std::immutable_set::from_list([])
+[s == std::immutable_set::from_list(["a1"]), std::immutable_set::contains(s, "a1"), std::immutable_set::contains(s, "b2")]
+}
+} -result {[true, true, false]}
+
+test vt-map-order-and-lookup {a map keeps its order (a removal's and a reorder's included) and its every lookup works in the receiver, which rebuilt its index} -body {
+    vtAgree {fn copy(m: std::mutable_map::MutableMap[str, int]) -> std::mutable_map::MutableMap[str, int]:
+    std::transfer::decode[std::mutable_map::MutableMap[str, int]](std::transfer::encode(m)):
+        on TransferMalformed:
+            m
+        on TransferVersion:
+            m
+        on TransferTypeMismatch:
+            m
+        on TransferInvalidValue:
+            m
+        on TransferLimit:
+            m
+
+m = std::mutable_map::create[str, int]()
+loop i from 0 to 40:
+    m.set(std::int::to_string(i), i * i)
+loop i from 0 to 40:
+    if i.mod(3) == 0:
+        m.remove(std::int::to_string(i)):
+            on std::mutable_map::KeyNotFound:
+                0
+m.set("0", -1)
+c = copy(m)
+found = loop i from 0 to 40:
+    c.at(std::int::to_string(i)):
+        on std::mutable_map::KeyNotFound:
+            -2
+keys = loop e in c:
+    e.key
+src = loop e in m:
+    e.key
+[keys == src, std::list::length(keys), found.at(0), found.at(1), found.at(3), found.at(4), c.contains("39"), c.contains("40")]
+}
+} -result {[true, 27, -1, 1, -2, 16, false, false]}
+
+test vt-immutable-map {an ImmutableMap is equal to its copy, hashes like it, and finds every key through the receiver's own index} -body {
+    vtAgree {m = std::mutable_map::create[str, List[int]]()
+m.set("a1", [1])
+m.set("b2", [2, 2])
+f = m.freeze()
+c = std::transfer::decode[std::immutable_map::ImmutableMap[str, List[int]]](std::transfer::encode(f)):
+    on TransferMalformed:
+        f
+    on TransferVersion:
+        f
+    on TransferTypeMismatch:
+        f
+    on TransferInvalidValue:
+        f
+    on TransferLimit:
+        f
+v = c.at("b2"):
+    on std::immutable_map::KeyNotFound:
+        []
+[c == f, hash(c) == hash(f), v, c.contains("zz")]
+}
+} -result {[true, true, [2, 2], false]}
+
+test vt-deep-tree {a deep tree crosses with no recursion of the host's: built by a fold, encoded and decoded by work stacks} -body {
+    vtAgree {tree struct Node:
+    depth: int
+    kids: List[Node]
+
+deep = fold i from 0 to 3000 with intermediate acc Node {depth: 0, kids: []}:
+    Node {depth: i + 1, kids: [acc]}
+copy = std::transfer::decode[Node](std::transfer::encode(deep)):
+    on TransferMalformed:
+        deep
+    on TransferVersion:
+        deep
+    on TransferTypeMismatch:
+        deep
+    on TransferInvalidValue:
+        deep
+    on TransferLimit:
+        deep
+[copy == deep, copy.depth]
+}
+} -result {[true, 3000]}
+
+test vt-large {large values: 64 KiB of bytes, 20 000 Ints, a 2 000-entry map} -body {
+    vtAgree {raw = loop i from 0 to 65536:
+    std::byte::from_int(i.mod(256))
+big = std::abi::bytes::from_list(raw)
+xs = loop i from 0 to 20000:
+    i * 1000003
+m = std::mutable_map::create[int, str]()
+loop i from 0 to 2000:
+    m.set(i, std::int::to_string(i))
+b2 = std::transfer::decode[std::abi::bytes::Bytes](std::transfer::encode(big)):
+    on TransferMalformed:
+        big
+    on TransferVersion:
+        big
+    on TransferTypeMismatch:
+        big
+    on TransferInvalidValue:
+        big
+    on TransferLimit:
+        big
+x2 = std::transfer::decode[List[int]](std::transfer::encode(xs)):
+    on TransferMalformed:
+        []
+    on TransferVersion:
+        []
+    on TransferTypeMismatch:
+        []
+    on TransferInvalidValue:
+        []
+    on TransferLimit:
+        []
+m2 = std::transfer::decode[std::mutable_map::MutableMap[int, str]](std::transfer::encode(m)):
+    on TransferMalformed:
+        m
+    on TransferVersion:
+        m
+    on TransferTypeMismatch:
+        m
+    on TransferInvalidValue:
+        m
+    on TransferLimit:
+        m
+last = m2.at(1999):
+    on std::mutable_map::KeyNotFound:
+        "?"
+[b2 == big, x2 == xs, std::mutable_map::length(m2), last]
+}
+} -result {[true, true, 2000, "1999"]}
+
+test vt-error-payload {an error's payload is its declared fields' anonymous struct: sendable, and encoded as that struct (an anonymous struct type has no spelling, so decode[T] names a declared struct instead)} -body {
+    vtAgree {error Refused:
+    code: int
+    reason: str
+
+fn refuse(n: int) -> int errors Refused:
+    if n > 5:
+        fail Refused {code: n, reason: "too big"}
+    n
+
+fn same(n: int) -> bool:
+    r = refuse(n):
+        on Refused details:
+            return std::transfer::encode(details) == std::transfer::encode({code: 7, reason: "too big"})
+    false
+
+if same(7):
+    1
+else:
+    0
+}
+} -result {1}
+
+test vt-source-unchanged {encoding observes its value: the source is unchanged and equal to its copy afterwards} -body {
+    vtAgree {xs = [["a1", "b2"], ["c3"]]
+before = xs
+data = std::transfer::encode(xs)
+again = std::transfer::encode(xs)
+[xs == before, data == again, std::abi::bytes::length(data).value]
+}
+} -result {[true, true, 25]}
+
+# ---------------------------------------------------------------------------
+# The format: fixed vectors, the same bytes on every backend
+
+# The schema of TYPE (hir::transfer::Schema), in the matrix's program.
+proc vtSchema {type} {
+    withPrivateLibrary {
+        set hir [surface::compile [vtProgram "$::vtDecls\nfn f(x: $type) -> int:\n    1\n1\n"] t.bot -warnings off]
+        hir::activate $hir
+        set p [dict get $hir exprs [lindex [dict get $hir roots] end-1]]
+        set schema [hir::transfer::Schema [lindex [dict get [dict get $hir exprs [dict get $p value]] declaredParamTypes] 0]]
+    }
+    return $schema
+}
+
+
+foreach {name type value bytes} {
+    true  bool  true  {66 79 84 88 1 * 1}
+    zero  int   0     {66 79 84 88 1 * 0}
+    minus int   -129  {66 79 84 88 1 * 2 127 255}
+    text  str   {"é"} {66 79 84 88 1 * 2 195 169}
+    list  {List[int]} {[1, 300]} {66 79 84 88 1 * 2 1 1 2 44 1}
+} {
+    test vt-bytes-$name "the format's bytes for $value of $type, on every backend" -body {
+        set fp [dict get [vtSchema $type] fingerprint]
+        set fpBytes [lmap i {0 1 2 3 4 5 6 7} {expr {("0x$fp" >> (8 * $i)) & 0xff}}]
+        set expected [concat {*}[lmap b $bytes {if {$b eq "*"} {set fpBytes} else {set b}}]]
+        vtAgree "fn typed(x: $type) -> $type:\n    x\n\nstd::transfer::encode(typed($value)) == std::abi::bytes::from_list(\[[join [lmap b $expected {string cat "std::byte::from_int($b)"}] {, }]\])"
+    } -result {true}
+}
+
+test vt-bytes-agree {every backend writes the same bytes: the hash of an encoding of a nested value agrees (sourceAgree fails on any difference)} -body {
+    set out [vtAgree "$::vtDecls\nt = Node {name: \"r\", color: Color::Blue, kids: \[Node {name: \"k\", color: Color::Red, kids: \[\]}\]}\n\[hash(std::transfer::encode(t)), hash(std::transfer::encode(\[1.5, -0.25\])), hash(std::transfer::encode(-98765432109876543210))\]"]
+    regexp {^\[-?[0-9]+, -?[0-9]+, -?[0-9]+\]$} $out
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Refusals: bytes are never trusted
+
+foreach {name type setup bytes result} {
+    header        int       {x = 1}                                      {std::abi::bytes::from_list([std::byte::from_int(66), std::byte::from_int(79)])} malformed
+    magic         int       {good = std::transfer::encode(5)}            {poke(good, 0, std::byte::from_int(65))}  malformed
+    version       int       {good = std::transfer::encode(5)}            {poke(good, 4, std::byte::from_int(2))}   version
+    fingerprint   int       {good = std::transfer::encode(5)}            {poke(good, 7, std::byte::from_int(0))}   mismatch
+    wrong-type    str       {good = std::transfer::encode(5)}            good                                     mismatch
+    truncated     str       {good = std::transfer::encode("héllo")}      {prefix(good, size(good) - 1)}            malformed
+    trailing      str       {good = std::transfer::encode("x2")}         {append(good, [std::byte::from_int(0)])}  malformed
+    bool-byte     bool      {good = std::transfer::encode(true)}         {poke(good, 13, std::byte::from_int(2))}  invalid
+    utf8          str       {good = std::transfer::encode("ab")}         {poke(good, 14, std::byte::from_int(255))} invalid
+    surrogate     str       {good = std::transfer::encode("abc")}        {poke(poke(poke(good, 14, std::byte::from_int(237)), 15, std::byte::from_int(160)), 16, std::byte::from_int(128))} invalid
+    infinite      Float64   {good = std::transfer::encode(1.5)}          {poke(poke(good, 20, std::byte::from_int(127)), 19, std::byte::from_int(240))} invalid
+    negative-zero Float64   {good = std::transfer::encode(0.0)}          {poke(good, 20, std::byte::from_int(128))} invalid
+    enum-case     Color     {good = std::transfer::encode(Color::Red)}   {poke(good, 13, std::byte::from_int(7))}  invalid
+    int-minimal   int       {good = std::transfer::encode(1)}            {append(poke(good, 13, std::byte::from_int(2)), [std::byte::from_int(0)])} invalid
+    zero-minimal  int       {good = std::transfer::encode(1)}            {poke(good, 14, std::byte::from_int(0))}  invalid
+    domain        std::byte::Byte {good = std::transfer::encode(std::byte::from_int(255))} {poke(poke(good, 14, std::byte::from_int(44)), 15, std::byte::from_int(1))} invalid
+    char          UnicodeChar {good = std::transfer::encode('a')}       {append(prefix(good, 13), [std::byte::from_int(128), std::byte::from_int(176), std::byte::from_int(3)])} invalid
+    count         {List[str]} {good = std::transfer::encode(["x1"])}     {poke(good, 13, std::byte::from_int(127))} malformed
+    varuint       {List[str]} {good = std::transfer::encode(["x1"])}     {append(poke(prefix(good, 14), 13, std::byte::from_int(128)), [std::byte::from_int(0)])} malformed
+    varuint-long  {List[str]} {good = std::transfer::encode(["x1"])}     {append(prefix(good, 13), [std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(255), std::byte::from_int(1)])} malformed
+    zero-budget   {List[unit]} {good = std::transfer::encode([unit])}    {append(prefix(good, 13), [std::byte::from_int(128), std::byte::from_int(128), std::byte::from_int(128), std::byte::from_int(16)])} limit
+    int-limit     int       {good = std::transfer::encode(1)}            {append(prefix(good, 13), [std::byte::from_int(129), std::byte::from_int(128), std::byte::from_int(64)])} limit
+    stated-length {List[int]{length: 2}} {good = std::transfer::encode(pair([1, 2]))} {poke(good, 13, std::byte::from_int(3))} invalid
+    instantiation {Box[str]} {good = std::transfer::encode(Box[int] {value: 1})} good mismatch
+    same-name-layout Point {good = std::transfer::encode(Box[Point] {value: Point {x: 1, y: 2, label: "p1"}})} good mismatch
+    ok            {List[str]} {good = std::transfer::encode(["x1"])}     good ok
+} {
+    test vt-refuse-$name "decode refuses $name bytes with a declared error, nothing changed" -body {
+        vtAgree "$::vtDecls\n[vtRefusal $type $setup $bytes]"
+    } -result "\"$result\""
+}
+
+test vt-refinements-checked {an integer domain and a stated List length are checked by the receiver, not compared: a List literal's bytes decode as a List[int] and as a List[int]{length: 2}; an Int's as a Byte when it is one, else TransferInvalidValue} -body {
+    vtAgree {fn as_list(d: std::abi::bytes::Bytes) -> str:
+    xs = std::transfer::decode[List[int]](d):
+        on TransferMalformed:
+            return "malformed"
+        on TransferVersion:
+            return "version"
+        on TransferTypeMismatch:
+            return "mismatch"
+        on TransferInvalidValue:
+            return "invalid"
+        on TransferLimit:
+            return "limit"
+    "ok"
+
+fn as_pair(d: std::abi::bytes::Bytes) -> str:
+    xs = std::transfer::decode[List[int]{length: 2}](d):
+        on TransferMalformed:
+            return "malformed"
+        on TransferVersion:
+            return "version"
+        on TransferTypeMismatch:
+            return "mismatch"
+        on TransferInvalidValue:
+            return "invalid"
+        on TransferLimit:
+            return "limit"
+    "ok"
+
+fn as_byte(d: std::abi::bytes::Bytes) -> str:
+    b = std::transfer::decode[std::byte::Byte](d):
+        on TransferMalformed:
+            return "malformed"
+        on TransferVersion:
+            return "version"
+        on TransferTypeMismatch:
+            return "mismatch"
+        on TransferInvalidValue:
+            return "invalid"
+        on TransferLimit:
+            return "limit"
+    "ok"
+
+[as_list(std::transfer::encode([1, 2])), as_pair(std::transfer::encode([1, 2])), as_pair(std::transfer::encode([1, 2, 3])), as_byte(std::transfer::encode(200)), as_byte(std::transfer::encode(300))]
+}
+} -result {["ok", "ok", "invalid", "ok", "invalid"]}
+
+# ---------------------------------------------------------------------------
+# Programs: a value crosses between independently compiled programs
+
+# The bytes (a Tcl list of Ints) program SOURCE's value -- a
+# std::abi::bytes::Bytes -- holds, run on the interp backend.
+proc vtBytesOf {source} {
+    set hir [surface::compile [vtProgram $source] t.bot -warnings off]
+    set value [core::evalProgram [hir::lower $hir]]
+    set hex [lindex $value 2 0 1]
+    binary scan [binary decode hex $hex] cu* codes
+    return $codes
+}
+
+proc vtLiteral {codes} {
+    return "std::abi::bytes::from_list(\[[join [lmap b $codes {string cat "std::byte::from_int($b)"}] {, }]\])"
+}
+
+test vt-program-names {a value made by one program is rebuilt by another compiled independently: declarations in another order, other structs and enums before them (other shape and enum numbers), the same canonical names} -body {
+    set codes [vtBytesOf {enum Color:
+    Red, Green, Blue
+
+struct Point:
+    x: int
+    y: int
+    label: str
+
+struct Pair:
+    p: Point
+    c: Color
+
+std::transfer::encode([Pair {p: Point {x: 1, y: -2, label: "one"}, c: Color::Blue}, Pair {p: Point {x: 3, y: 4, label: ""}, c: Color::Red}])
+}]
+    vtAgree "enum Other:
+    Q, R
+
+struct Unrelated:
+    a: str
+
+enum Color:
+    Blue, Green, Red
+
+struct Pair:
+    c: Color
+    p: Point
+
+struct Point:
+    label: str
+    y: int
+    x: int
+
+u = Unrelated {a: \"u\"}
+o = Other::R
+xs = std::transfer::decode\[List\[Pair\]\]([vtLiteral $codes]):
+    on TransferMalformed:
+        \[\]
+    on TransferVersion:
+        \[\]
+    on TransferTypeMismatch:
+        \[\]
+    on TransferInvalidValue:
+        \[\]
+    on TransferLimit:
+        \[\]
+loop x in xs:
+    \[x.p.label, x.p.x + x.p.y, x.c == Color::Blue\]
+"
+} -result {[["one", -1, true], ["", 7, false]]}
+
+test vt-program-layout {a same-named struct whose layout differs in another program is refused: its schema is another} -body {
+    set codes [vtBytesOf "struct Point:\n    x: int\n    y: int\n\nstd::transfer::encode(Point {x: 1, y: 2})\n"]
+    vtAgree "struct Point:\n    x: int\n    y: str\n\n[vtRefusal Point {} [vtLiteral $codes]]"
+} -result {"mismatch"}
+
+test vt-program-module {a struct of the same name in another module is another identity: refused} -body {
+    set codes [vtBytesOf "struct Point:\n    x: int\n\nstd::transfer::encode(Point {x: 1})\n"]
+    withPrivateLibrary {
+        set f [open [file join $::core::libraryDir geometry.bot] w]
+        puts $f "struct Point:\n    x: int"
+        close $f
+        set out [vtAgree "import std::geometry\n[vtRefusal std::geometry::Point {} [vtLiteral $codes]]"]
+    }
+    set out
+} -result {"mismatch"}
+
+# ---------------------------------------------------------------------------
+# Processes: separate VMs, separate heaps, separate table-hash keys; the
+# sender has exited before the receiver decodes
+
+proc vtWrite {path text} {
+    set f [open $path w]
+    fconfigure $f -encoding utf-8
+    puts -nonewline $f $text
+    close $f
+}
+
+# A driver run in a process of its own: `send BACKEND SOURCE OUT` runs the
+# program SOURCE on BACKEND (natively, in a botlish-native process of its
+# own as well) and writes the bytes of its value, a std::abi::bytes::Bytes,
+# to OUT; `receive BACKEND SOURCE IN` puts the bytes of IN into SOURCE's
+# BYTES placeholder (a literal, so the receiver's program holds nothing of
+# the sender's but them) and prints the value of running it on BACKEND.
+set ::vtDriver {
+set root [lindex $argv 0]
+lassign [lrange $argv 1 end] mode backend source path
+# (tcltest, which the helpers load, reads argv.)
+set argv {}
+set argc 0
+source [file join $root tests helpers.tcl]
+source [file join $root surface surface.tcl]
+proc readText {path} {
+    set f [open $path r]
+    fconfigure $f -encoding utf-8
+    set text [read $f]
+    close $f
+    return $text
+}
+proc run {backend hir} {
+    switch -- $backend {
+        interp { return [core::evalProgram [hir::lower $hir]] }
+        compile { return [core::compiler::evalHir $hir] }
+        cranelift { return [native::evalHir $hir] }
+        cranelift-generic { return [native::evalHir $hir -specialize 0] }
+    }
+}
+set text [readText $source]
+if {$mode eq "send"} {
+    set value [run $backend [surface::compile $text sender.bot -warnings off]]
+    set f [open $path wb]
+    puts -nonewline $f [binary decode hex [lindex $value 2 0 1]]
+    close $f
+    puts sent
+} else {
+    set f [open $path rb]
+    binary scan [read $f] cu* codes
+    close $f
+    set literal "std::abi::bytes::from_list(\[[join [lmap b $codes {string cat "std::byte::from_int($b)"}] {, }]\])"
+    set hir [surface::compile [string map [list BYTES $literal] $text] receiver.bot -warnings off]
+    puts [core::value::show [run $backend $hir] 1]
+}
+}
+
+set ::vtSender {m = std::mutable_map::create[str, List[int]]()
+loop i from 0 to 60:
+    m.set(std::str::concat("key", std::int::to_string(i)), [i, i * i])
+loop i from 0 to 60:
+    if i.mod(4) == 0:
+        m.remove(std::str::concat("key", std::int::to_string(i))):
+            on std::mutable_map::KeyNotFound:
+                []
+s = std::mutable_set::create[str]()
+s.add("é😀")
+s.add("zz")
+std::transfer::encode(Message {table: m, tags: s, tree: Node {name: "root", color: Color::Green, kids: [Node {name: "leaf", color: Color::Red, kids: []}]}, big: -265613988875874769338781322035779626829233452653394495974574961739092490901302182994384699044001})
+}
+
+set ::vtReceiver {fn main() -> List[any]:
+    got = std::transfer::decode[Message](BYTES):
+        on TransferMalformed:
+            return ["malformed"]
+        on TransferVersion:
+            return ["version"]
+        on TransferTypeMismatch:
+            return ["mismatch"]
+        on TransferInvalidValue:
+            return ["invalid"]
+        on TransferLimit:
+            return ["limit"]
+    m = got.table
+    found = loop i from 0 to 60:
+        m.at(std::str::concat("key", std::int::to_string(i))):
+            on std::mutable_map::KeyNotFound:
+                [-1]
+    m.set("new", [0])
+    removed = m.remove("key5"):
+        on std::mutable_map::KeyNotFound:
+            [-2]
+    leaf = got.tree.kids.at(0):
+        on IndexNotFound:
+            got.tree
+    [std::mutable_map::length(m), found.at(0), found.at(5), found.at(59), removed, m.contains("key5"), got.tags.contains("é😀"), leaf.name, got.big]
+
+main()
+}
+
+foreach {from to} {interp compile compile interp interp cranelift cranelift interp cranelift-generic cranelift cranelift cranelift-generic} {
+    test vt-process-$from-$to "a value sent by a $from process is rebuilt by a $to process after the sender exited: separate VMs, heaps and table-hash keys, and the received map answers every lookup through its own" -constraints [expr {$from in {cranelift cranelift-generic} || $to in {cranelift cranelift-generic} ? "nativeBuilt" : ""}] -body {
+        set dir [makeDirectory vt-process-[pid]-$from-$to]
+        set message "struct Message:\n    table: std::mutable_map::MutableMap\[str, List\[int\]\]\n    tags: std::mutable_set::MutableSet\[str\]\n    tree: Node\n    big: int\n"
+        vtWrite [file join $dir driver.tcl] $::vtDriver
+        vtWrite [file join $dir sender.bot] "[vtProgram $::vtDecls]\n$message\n$::vtSender"
+        vtWrite [file join $dir receiver.bot] "[vtProgram $::vtDecls]\n$message\n$::vtReceiver"
+        set data [file join $dir message.bin]
+        set sent [exec [info nameofexecutable] [file join $dir driver.tcl] $::projectRoot send $from [file join $dir sender.bot] $data 2>@1]
+        set received [exec [info nameofexecutable] [file join $dir driver.tcl] $::projectRoot receive $to [file join $dir receiver.bot] $data 2>@1]
+        removeDirectory vt-process-[pid]-$from-$to
+        list [lindex [split [string trim $sent] \n] end] [lindex [split [string trim $received] \n] end]
+    } -result [list sent {[45, [-1], [5, 25], [59, 3481], [5, 25], false, true, "leaf", -265613988875874769338781322035779626829233452653394495974574961739092490901302182994384699044001]}]
+}
+
+# ---------------------------------------------------------------------------
+# GC stress: the native codec under a collection at every allocation site
+
+test vt-gc-stress {round trips of every collection kind under BOTLISH_NATIVE_GC_STRESS=1 on the native backends} -constraints nativeBuilt -body {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        sourceAgree "[vtProgram $::vtDecls]\nm = std::mutable_map::create\[str, Node\]()\nloop i from 0 to 30:\n    m.set(std::int::to_string(i), Node {name: std::int::to_string(i), color: Color::Blue, kids: \[Node {name: \"k\", color: Color::Red, kids: \[\]}\]})\nc = std::transfer::decode\[std::mutable_map::MutableMap\[str, Node\]\](std::transfer::encode(m)):\n    on TransferMalformed:\n        m\n    on TransferVersion:\n        m\n    on TransferTypeMismatch:\n        m\n    on TransferInvalidValue:\n        m\n    on TransferLimit:\n        m\nks = loop e in c:\n    e.value.name\nos = loop e in m:\n    e.value.name\nks == os\n" {cranelift-generic cranelift}
+    } finally {
+        if {!$had} {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+} -result {value true}
+
+cleanupTests

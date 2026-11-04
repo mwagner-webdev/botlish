@@ -107,6 +107,7 @@ use super::nview::{
     rt_native_load_ptr, rt_native_store, rt_native_store_ptr,
 };
 use super::syscall::{rt_linux_aarch64_syscall, rt_linux_x86_64_syscall};
+use super::transfer::{rt_transfer_decode, rt_transfer_encode};
 use super::value::*;
 use super::vm::{current_program, Identity, Vm, NativeInfo};
 use crate::nir::OpCode;
@@ -221,6 +222,10 @@ pub fn op_may_allocate(op: OpCode) -> bool {
             // or a List; generate runs the factory's code for every slot.
             // The writes allocate no Botlish object.
             | MutArrayCreate | MutArrayFromList | MutArrayGenerate | MutArrayGenerateDrop | MutArrayToList
+            // Transfer (runtime/transfer.rs): the encoding's storage and its
+            // Bytes, every decoded object; both run the owners' `through`
+            // functions.
+            | TransferEncode | TransferDecode
     )
 }
 
@@ -308,6 +313,10 @@ pub fn op_may_error(op: OpCode) -> bool {
         // IndexNotFound, and whatever a factory call fails with.
         | MutArrayCreate | MutArrayGenerate | MutArrayGenerateDrop | MutArraySwap | MutArraySwapDrop
         | MutArraySetDrop
+        // Transfer: the declared Transfer* refusals (decode), whatever an
+        // owner's `through` function fails with, an encoding past the
+        // storage ceiling (RANGE).
+        | TransferEncode | TransferDecode
         | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum
         // Construction (dedup) and membership (a linear equal-scan) can
         // both raise EQUALITY through the same pre-existing
@@ -3286,7 +3295,15 @@ pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
 /// not a performance baseline to preserve.
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
-    let source = list_of(l).items();
+    new_set_of(p, list_of(l).items())
+}
+
+/// The ImmutableSet of SOURCE's items, deduplicated as `rt_set_from_list`
+/// deduplicates a List's (first occurrence kept): the one construction of a
+/// set from its candidate members (runtime/transfer.rs builds a received
+/// set with it). SOURCE's referents must be rooted by the caller (the set's
+/// allocation may collect).
+pub(crate) fn new_set_of(p: *mut Vm, source: &[Value]) -> Value {
     let mut items: Vec<Value> = Vec::with_capacity(source.len());
     if source.len() > PAIRWISE_LIMIT
         && let Some(kept) = dedup_by_hash(p, source)
@@ -3482,7 +3499,7 @@ fn backing_of(items: &[Value]) -> Rc<[Value]> {
 /// A fresh array of ITEMS (a new, unique backing). Every caller builds the
 /// backing in one allocation, by collecting an iterator of exact length
 /// (`backing_of`, `repeat_n`).
-fn new_array_of(p: *mut Vm, items: Rc<[Value]>) -> Value {
+pub(crate) fn new_array_of(p: *mut Vm, items: Rc<[Value]>) -> Value {
     let bytes = items.len() * 8;
     new_mutarray_header(p, 0, items, bytes)
 }
@@ -4141,6 +4158,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MutArrayFromList => rt_mutarray_from_list(p, a[0]),
         MutArrayGenerate => rt_mutarray_generate(p, a[0], a[1]),
         MutArrayGenerateDrop => rt_mutarray_generate_drop(p, a[0], a[1], a[2]),
+        TransferEncode => rt_transfer_encode(p, a[0], a[1], a[2]),
+        TransferDecode => rt_transfer_decode(p, a[0], a[1], a[2]),
         MutArraySwap => rt_mutarray_swap(p, a[0], a[1], a[2]),
         MutArraySwapDrop => rt_mutarray_swap_drop(p, a[0], a[1], a[2], a[3]),
         MutArraySetDrop => rt_mutarray_set_drop(p, a[0], a[1], a[2], a[3]),
@@ -4451,6 +4470,8 @@ runtime_helpers! {
     (rt_mutarray_to_list, 2),
     (rt_mutarray_empty, 2),
     (rt_mutarray_take_front, 2),
+    (rt_transfer_encode, 4),
+    (rt_transfer_decode, 4),
     (rt_is_kind, 3),
     (rt_is_result, 3),
     (rt_result_payload, 3),

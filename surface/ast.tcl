@@ -1189,6 +1189,17 @@ proc surface::ast::StatementLines {node indent show linesVar} {
                 set identity [dict get $node identity]
                 lappend lines "${pad}    identity [dict get $identity form]([join [dict get $identity fields] {, }])"
             }
+            if {[dict exists $node sendable]} {
+                set sendable [dict get $node sendable]
+                set line "${pad}    sendable [dict get $sendable form]"
+                if {[dict get $sendable args] ne {}} {
+                    append line "([join [dict get $sendable args] {, }])"
+                }
+                if {[dict exists $sendable representation]} {
+                    append line " as [showType [dict get $sendable representation]]"
+                }
+                lappend lines $line
+            }
             return
         }
         fail {

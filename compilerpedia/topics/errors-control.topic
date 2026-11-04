@@ -235,7 +235,10 @@ two supported forms:
     (concept.testing).
 
 Inside a `static compile:` block, KNOWN-ERROR is the recoverable
-diagnostic code std::compiler::DiagnosticCode::KnownError.
+diagnostic code std::compiler::DiagnosticCode::KnownError. That is the
+test's result, never an exemption: the same call outside the block is still
+KNOWN-ERROR, and a rejected block hides no diagnostic of the code around it
+(concept.static-compile).
 
 @example reject
 error Bad

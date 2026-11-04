@@ -976,13 +976,18 @@ proc hir::range::ExternalSeeds {hir spec} {
 # One region, under one assumption of its parameters' ranges
 
 # Types EXPRS in order (a block body, an if branch): the last one's range,
-# or never if some expression never completes normally.
+# or never if some expression never completes normally -- a rejected static
+# block standing as a statement excepted (hir::static::reifiedStatement:
+# what follows it is analyzed as if it could complete).
 proc hir::range::Sequence {hirVar ctxVar exprs} {
     upvar 1 $hirVar hir $ctxVar ctx
     set result [unknown]
     foreach e $exprs {
         set result [Expr hir ctx $e]
         if {$result eq "never"} {
+            if {[hir::static::reifiedStatement $hir $exprs $e]} {
+                continue
+            }
             break
         }
     }
@@ -1946,6 +1951,55 @@ proc hir::range::VerifyHashing {hirVar e node name} {
     hir::Diagnose hir TRAIT-NOT-SATISFIED [hir::semantic::NameCallables $hir $message] $arg
 }
 
+# The value of call E (NODE) of native NAME that crosses to another Botlish
+# VM (core/native.tcl's -sending; SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md):
+# argument K, or the call's own (imprinted) result. Its static type must
+# satisfy the intrinsic trait Sendable (hir::types::SendClass): NOT-SENDABLE
+# otherwise, with the reason path, whether the type is statically not
+# sendable (a function, a context, an opaque struct whose owner states
+# nothing) or does not say (`any`). And it must be closed where the call is
+# written -- no imprint variable: the transfer's schema is the static
+# type's (hir/transfer.tcl), which a generic body does not know
+# (TRANSFER-OPEN-TYPE). A view of Sendable is admitted where a value is
+# encoded (its function is cloned per witness by the trait monomorphization
+# before the elaboration writes the schema), never as decode's type.
+# Checked in the program as written only, like VerifyHashing.
+proc hir::range::VerifySending {hirVar e node name} {
+    upvar 1 $hirVar hir
+    set sending [dict getdef [core::native::metadata $name] sending ""]
+    if {$sending eq "" || [dict exists $hir semanticContext] || [hir::traits::Planning]} {
+        return
+    }
+    if {$sending eq "result"} {
+        set at $e
+        set what "the value $name decodes"
+    } else {
+        set at [lindex [dict get $node args] $sending]
+        set what "the argument of $name"
+        if {$at eq "" || [dict exists $hir poisoned $at]} {
+            return
+        }
+    }
+    set type [hir::typeOf $hir $at]
+    if {$type eq "never"} {
+        # (No value, or poison: an earlier diagnostic's.)
+        return
+    }
+    lassign [hir::types::SendClass $type] class why
+    if {$class ne "total"} {
+        hir::Diagnose hir NOT-SENDABLE [hir::semantic::NameCallables $hir \
+            "$what is not sendable: [hir::types::show $type] cannot be reconstructed in another VM\n$why"] $at
+        return
+    }
+    if {![hir::types::IsClosedType $type] || ($sending eq "result" && [hir::types::IsTrait $type])} {
+        # (A view of Sendable is closed where it is a value -- its function
+        # is cloned per witness before the elaboration -- but never as the
+        # type a decode makes: that must be a concrete type.)
+        hir::Diagnose hir TRANSFER-OPEN-TYPE [hir::semantic::NameCallables $hir \
+            "$what has the open type [hir::types::show $type]: a transfer's schema is its static type, which must be known where the call is written (no imprint variable or trait view: call it where the concrete type is known)"] $at
+    }
+}
+
 # Walks every call reachable from E within its own block/program (spec #58:
 # a nested block's body is its own region, so this never descends into a
 # closure's own body -- that gets its own top-level call from
@@ -2017,6 +2071,7 @@ proc hir::range::VerifyCallChecks {hirVar ranges e node} {
         }
         hir::containers::VerifyNative hir $ranges $e $node $name
         VerifyHashing hir $e $node $name
+        VerifySending hir $e $node $name
         if {[dict get [core::native::metadata $name] foreign] ne ""} {
             # A foreign call contract is the native's whole signature: its
             # byte exposures and its typed C parameters (hir/borrow.tcl).

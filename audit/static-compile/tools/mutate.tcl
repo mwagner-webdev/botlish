@@ -11,7 +11,8 @@
 # checkout's -- no mutant edits the Rust runtime) gets the replacements, and
 # the detectors run against it:
 #
-#   * the test files FILES (default tests/static-compile.test, with a private
+#   * the test files FILES (default tests/static-compile.test and
+#     tests/static-compile-expected-diagnostics.test, each with a private
 #     -tmpdir): killed if any test fails or the file does not complete;
 #   * audit/static-compile/tools/fuzz.tcl -n N -seed S (every backend, the
 #     independent model, the plain-program and ordinary-compiler
@@ -24,7 +25,7 @@
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {tests/static-compile.test} -fuzz-count 12 -fuzz-seed 3 -timeout 1800]
+set options [dict create -only "" -tests {tests/static-compile.test tests/static-compile-expected-diagnostics.test} -fuzz-count 12 -fuzz-seed 3 -timeout 1800]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -119,7 +120,7 @@ set selected [concat $selected $nativeSelected]
 # tools and the native backend. Its native/target is a real copy when a
 # native mutant is selected (it is rebuilt), else a link to this checkout's.
 set tree [file tempdir botlish-static-compile-mutants]
-foreach dir {compiler core hir surface stdlib tests examples audit/static-compile .cargo} {
+foreach dir {compiler core hir surface service stdlib tests examples audit/static-compile audit/static-decisions .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]

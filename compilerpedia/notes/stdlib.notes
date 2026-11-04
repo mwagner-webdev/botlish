@@ -4816,3 +4816,75 @@ summary: The golden test framework, an ordinary Botlish library: a suite context
 index: stdlib
 keywords: testing; unit tests; test framework; assertions; golden tests
 related: concept.testing concept.negative-tests
+
+@topic stdlib.module.std::transfer
+title: -
+summary: Copying a sendable value between Botlish VMs: std::transfer::encode(v) writes it into owned bytes, std::transfer::decode[T](data) rebuilds an independent T in this VM.
+index: stdlib
+keywords: send; serialize; copy between threads; cross-VM; transfer; Sendable; encode; decode
+related: concept.sendability stdlib.std::transfer::encode stdlib.std::transfer::decode
+
+@topic stdlib.std::transfer::encode
+title: -
+summary: std::transfer::encode(value): the std::abi::bytes::Bytes another VM decodes into an equal value; the value's static type must be sendable and closed, after `import std::transfer`.
+index: stdlib
+keywords: serialize; send a value; encode; to bytes; Sendable; NOT-SENDABLE
+related: stdlib.module.std::transfer stdlib.std::transfer::decode concept.sendability error.not-sendable error.transfer-open-type
+
+== NOTES
+The bytes start with "BOTX", the format version and a fingerprint of the
+value's schema (its static type, by canonical names), then the value
+itself: no address, no shape or enum number of this compilation, nothing a
+receiver could take for an object of the sender. The value is unchanged;
+encoding a map or set calls its owner's projection (its entries, in its
+order). It declares no error.
+
+== EXAMPLES
+@example accept
+import std::transfer
+import std::abi::bytes
+
+std::abi::bytes::length(std::transfer::encode([1, 2, 3])).value
+@caption 13 header bytes, a count and three one-byte Ints
+@value 20
+@end
+
+@topic stdlib.std::transfer::decode
+title: -
+summary: std::transfer::decode[T](data): the T whose encoding DATA is, allocated in this VM, or a declared Transfer* error that refuses the bytes, after `import std::transfer`.
+index: stdlib
+keywords: deserialize; receive a value; decode; from bytes; Sendable; TransferMalformed; TransferTypeMismatch
+related: stdlib.module.std::transfer stdlib.std::transfer::encode concept.sendability
+
+== NOTES
+T is given explicitly (decode[T]) and must be sendable and closed. The
+bytes are checked, never trusted: TransferMalformed (no header, cut short,
+a count larger than the bytes left, bytes after the value), TransferVersion
+(another format version), TransferTypeMismatch (a value of another type),
+TransferInvalidValue (a value outside T: a Bool byte other than 0 or 1,
+text that is not UTF-8, a non-finite Float64, an Int outside its domain, a
+case index of no case) and TransferLimit (an Int of more than 2^20 bytes,
+more than 2^24 elements of no size). Every String, collection and byte
+storage of the result is new; a map's or set's derived state is computed
+again here.
+
+== EXAMPLES
+@example accept
+import std::transfer
+import std::abi::bytes
+
+data = std::transfer::encode(["ab", "cd"])
+std::transfer::decode[int](data):
+    on TransferMalformed:
+        -1
+    on TransferVersion:
+        -2
+    on TransferTypeMismatch:
+        -3
+    on TransferInvalidValue:
+        -4
+    on TransferLimit:
+        -5
+@caption Bytes of a List[str] decoded as an int: another type
+@value -3
+@end

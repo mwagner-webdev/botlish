@@ -278,6 +278,16 @@ proc hir::format::TypeDecl {entry} {
             set identity [dict get $entry identity]
             append opaque "identity [dict get $identity form]([join [dict get $identity fields] ,]) "
         }
+        if {[dict exists $entry sendable]} {
+            # The owner's sendability statement (SENDABILITY-AND-VALUE-
+            # COPY-MILESTONE-1.md): "sendable FORM(A,B) [as R] ", printed
+            # only for one.
+            set sendable [dict get $entry sendable]
+            append opaque "sendable [dict get $sendable form]([join [dict get $sendable args] ,]) "
+            if {[dict get $sendable representation] ne ""} {
+                append opaque "as [hir::types::show [dict get $sendable representation]] "
+            }
+        }
         if {[dict exists $entry tree]} {
             # A tree struct (TREE-STRUCT-MILESTONE-1.md): "tree FIELD ", its
             # child field, printed only for one.

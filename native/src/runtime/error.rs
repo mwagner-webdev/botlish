@@ -89,6 +89,16 @@ pub const ERR_INVALID_UTF8: u32 = BUILTIN_ERROR_ID_BASE + 12;
 /// bytes are not the UTF-16LE encoding of any String (runtime::ops's
 /// rt_bytes_decode_utf16le, UTF16-BYTE-STORAGE-MILESTONE-1.md).
 pub const ERR_INVALID_UTF16: u32 = BUILTIN_ERROR_ID_BASE + 13;
+/// The refusals of `std::transfer::decode` (builtin errors 14..18,
+/// core/transfer.tcl; runtime::transfer's rt_transfer_decode,
+/// SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md): bytes that are no transfer,
+/// another format version, another type's fingerprint, a value outside its
+/// type, a decode beyond the runtime's limits.
+pub const ERR_TRANSFER_MALFORMED: u32 = BUILTIN_ERROR_ID_BASE + 14;
+pub const ERR_TRANSFER_VERSION: u32 = BUILTIN_ERROR_ID_BASE + 15;
+pub const ERR_TRANSFER_TYPE_MISMATCH: u32 = BUILTIN_ERROR_ID_BASE + 16;
+pub const ERR_TRANSFER_INVALID_VALUE: u32 = BUILTIN_ERROR_ID_BASE + 17;
+pub const ERR_TRANSFER_LIMIT: u32 = BUILTIN_ERROR_ID_BASE + 18;
 
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[

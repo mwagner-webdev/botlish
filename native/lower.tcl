@@ -237,7 +237,9 @@ namespace eval native::lower {
         mutable_vector#to_list    {op mvtolist} \
         mutable_vector#take_front {op mvtakefront} \
         mutable_vector#clear_drop {op mvcleardrop} \
-        mutable_vector#swap_drop  {op mvswapdrop}]
+        mutable_vector#swap_drop  {op mvswapdrop} \
+        transfer#encode {op transferencode} \
+        transfer#decode {op transferdecode}]
     # The floating-point operations (core/float.tcl; FLOAT64-MILESTONE-1.md):
     # every type of the float family the native backend represents, its
     # operation prefix (FloatNatives) followed by the operation.
@@ -8759,7 +8761,18 @@ proc native::lower::CallInner {fnVar e node want {wantVirtual ""} {wantRegion 0}
             }
         }
         set argRegs {}
+        set position 0
         foreach arg $argExprs {
+            if {$position == 1 && $op in {transferencode transferdecode}} {
+                # A transfer's schema (core/transfer.tcl): the String
+                # constant the runtime codec reads is its plan, resolved to
+                # this program's tables here (TransferPlan); the schema
+                # text itself is never a run-time value.
+                incr position
+                lappend argRegs [TransferPlanConst fn $e $arg]
+                continue
+            }
+            incr position
             # An operand that is a C word is boxed once every operand is
             # evaluated: the operation is its first use that needs the Int.
             set r [Expr fn $arg [expr {$rawEligible ? "raw" : "cword"}]]
@@ -10127,6 +10140,175 @@ proc native::lower::NativeCallOp {e node} {
             return [list $name $op]
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Transfer (SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md)
+#
+# transfer#encode(VALUE, SCHEMA, FNS) and transfer#decode(DATA, SCHEMA, FNS)
+# (core/transfer.tcl, after hir::transfer::Elaborate) carry the transferred
+# type's schema as a String constant: {VERSION FINGERPRINT NODES}, every
+# declaration named by its identity. The runtime codec
+# (runtime/transfer.rs) reads the same bytes core/transfer.tcl writes and
+# reads, but builds and inspects this program's objects, whose struct
+# shapes and enum words are numbers of this compilation's making
+# (ShapeIndex, EnumIndex): so the schema is resolved here, once, into a
+# *plan* -- the same nodes in the same order, each id replaced by its
+# number -- and the plan is the String constant the operation receives.
+# Nothing of the plan reaches the bytes: they hold the schema's
+# fingerprint, names' sorted order and positions only.
+#
+# The plan's text, one line per item:
+#
+#   plan VERSION FINGERPRINT BYTES          BYTES the shape of
+#                                           std::abi::bytes::Bytes (encode's
+#                                           result)
+#   MIN NODE                                one per schema node, in order:
+#                                           MIN its fewest bytes
+#                                           (core::transfer::MinSizes), NODE
+#
+#   unit | bool | char | float64 | decimal | raw32 | raw64 | str
+#   int D {i LO HI | e N V...}*D            the integer domains, decimal
+#   list E LENGTH                           LENGTH -1 when unstated
+#   set E | vector E | array E
+#   struct SHAPE SLOTS N {SLOT CHILD}*N     the wire order, each field's slot
+#                                           in the shape's layout
+#   enum ENUM N CASE...                     CASE the declaration position of
+#                                           the I-th sorted case name
+#   bytes SHAPE | mutbytes SHAPE            the one-field opaque struct
+#   through R K
+
+# The register of the plan constant of transfer call E's schema constant
+# SCHEMAEXPR.
+proc native::lower::TransferPlanConst {fnVar e schemaExpr} {
+    upvar 1 $fnVar fn
+    variable hir
+    if {[hir::kind $hir $schemaExpr] ne "const"
+            || [core::value::kind [hir::get $hir $schemaExpr value]] ne "str"} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has no constant schema"
+    }
+    set plan [TransferPlan $e [core::value::strOf [hir::get $hir $schemaExpr value]]]
+    return [Assign fn "str [Quote $plan]" $e]
+}
+
+# The plan (see above) of the run-time schema text SCHEMA of transfer call E.
+proc native::lower::TransferPlan {e schema} {
+    lassign $schema version fingerprint nodes
+    if {$version ne "1" || ![regexp {^[0-9a-f]{16}$} $fingerprint] || [llength $nodes] == 0} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has a malformed schema"
+    }
+    set min [core::transfer::MinSizes $nodes]
+    set bytesId std::abi::bytes::Bytes
+    set lines [list "plan $version $fingerprint [ShapeIndex $bytesId [hir::structs::names $bytesId]]"]
+    set count [llength $nodes]
+    set i 0
+    foreach node $nodes {
+        set kind [lindex $node 0]
+        switch -- $kind {
+            unit - bool - char - float64 - raw32 - raw64 - str - decimal {
+                set line $kind
+            }
+            int {
+                set domains [lindex $node 1]
+                set line "int [llength $domains]"
+                foreach domain $domains {
+                    switch -- [lindex $domain 0] {
+                        interval {
+                            append line " i [TransferInt $e [lindex $domain 1]] [TransferInt $e [lindex $domain 2]]"
+                        }
+                        exact {
+                            set values [lindex $domain 1]
+                            append line " e [llength $values]"
+                            foreach v $values {
+                                append line " [TransferInt $e $v]"
+                            }
+                        }
+                        default {
+                            throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has an unknown integer domain \"$domain\""
+                        }
+                    }
+                }
+            }
+            list {
+                lassign $node _ elem length
+                if {$length eq ""} {
+                    set length -1
+                }
+                set line "list [TransferNodeRef $e $elem $count] [TransferInt $e $length]"
+            }
+            set - vector - array {
+                set line "$kind [TransferNodeRef $e [lindex $node 1] $count]"
+            }
+            struct {
+                lassign $node _ id slots wire
+                if {$id eq ""} {
+                    # An anonymous struct's shape is its canonical, sorted
+                    # field set (hir/resolve.tcl's construction layout).
+                    set layout [lsort -unique $slots]
+                } else {
+                    set layout [hir::structs::names $id]
+                }
+                if {[llength $wire] != [llength $layout]} {
+                    throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: the schema of struct \"$id\" does not hold its fields"
+                }
+                set line "struct [ShapeIndex $id $layout] [llength $layout] [llength $wire]"
+                foreach w $wire {
+                    lassign $w field slot child
+                    set s [lsearch -exact $layout $field]
+                    if {$s < 0} {
+                        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: struct \"$id\" has no field \"$field\""
+                    }
+                    append line " $s [TransferNodeRef $e $child $count]"
+                }
+            }
+            enum {
+                lassign $node _ id cases
+                set declared [hir::enums::cases $id]
+                set line "enum [EnumIndex $id] [llength $cases]"
+                foreach c $cases {
+                    set k [lsearch -exact $declared $c]
+                    if {$k < 0} {
+                        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: enum \"$id\" has no case \"$c\""
+                    }
+                    append line " $k"
+                }
+            }
+            bytes - mutbytes {
+                lassign $node _ id field
+                set layout [hir::structs::names $id]
+                if {$layout ne [list $field]} {
+                    throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: struct \"$id\" is no one-field byte storage of \"$field\""
+                }
+                set line "$kind [ShapeIndex $id $layout]"
+            }
+            through {
+                lassign $node _ id r k
+                set line "through [TransferNodeRef $e $r $count] [TransferInt $e $k]"
+            }
+            default {
+                throw {NATIVE INVALID-HIR} "native lowering: transfer call $e has an unknown schema node \"$node\""
+            }
+        }
+        lappend lines "[dict get $min $i] $line"
+        incr i
+    }
+    return [join $lines \n]
+}
+
+# The canonical decimal digits of the Int N of transfer call E's schema.
+proc native::lower::TransferInt {e n} {
+    if {![string is entier -strict $n]} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: \"$n\" is no integer"
+    }
+    return [expr {$n + 0}]
+}
+
+# The node index N of a schema of COUNT nodes (transfer call E).
+proc native::lower::TransferNodeRef {e n count} {
+    if {![string is digit -strict $n] || $n >= $count} {
+        throw {NATIVE INVALID-HIR} "native lowering: transfer call $e: \"$n\" is no node of its schema"
+    }
+    return [expr {$n + 0}]
 }
 
 # ---------------------------------------------------------------------------
