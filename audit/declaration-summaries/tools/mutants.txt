@@ -279,33 +279,17 @@
 @@ totality-unknown-as-total an unknown class is taken for total: an application holding `any` is Hashable and compared with veqtotal
 ## hir/types.tcl
 <<<<
-    set level [hir::summaries::Level totality.$operation $type $classes]
-    if {$level eq ""} {
-        return unknown
-    }
-    return [lindex {total unknown none} $level]
+    return [hir::summaries::Remember totality.$operation $type [lindex {total unknown none} $level]]
 ====
-    set level [hir::summaries::Level totality.$operation $type $classes]
-    if {$level eq ""} {
-        return unknown
-    }
-    return [lindex {total total none} $level]
+    return [hir::summaries::Remember totality.$operation $type [lindex {total total none} $level]]
 >>>>
 
 @@ totality-none-as-unknown none is taken for unknown: a struct holding a function is no longer known not to be Hashable
 ## hir/types.tcl
 <<<<
-    set level [hir::summaries::Level totality.$operation $type $classes]
-    if {$level eq ""} {
-        return unknown
-    }
-    return [lindex {total unknown none} $level]
+    return [hir::summaries::Remember totality.$operation $type [lindex {total unknown none} $level]]
 ====
-    set level [hir::summaries::Level totality.$operation $type $classes]
-    if {$level eq ""} {
-        return unknown
-    }
-    return [lindex {total unknown unknown} $level]
+    return [hir::summaries::Remember totality.$operation $type [lindex {total unknown unknown} $level]]
 >>>>
 
 @@ totality-field-ignored the summary's node skips a declaration's first part: a non-total first field is not counted
@@ -468,4 +452,24 @@ proc hir::types::TotalityClass {operation type} {
 <<<<
     set type [Erased $type]
 ====
+>>>>
+
+@@ answers-outlive-declarations the remembered application classes are not forgotten when the declarations change: an earlier compilation's Box[Fn{...}] decides a later one's totality
+## hir/summaries.tcl
+<<<<
+    variable answers
+    set answers [dict create]
+}
+====
+}
+>>>>
+
+@@ answers-remembered-provisionally an application's class is remembered while a fixpoint still runs: a provisional answer outlives the fixpoint
+## hir/summaries.tcl
+<<<<
+    if {![Running $name]} {
+        dict set answers [list $name $key] $answer
+    }
+====
+    dict set answers [list $name $key] $answer
 >>>>

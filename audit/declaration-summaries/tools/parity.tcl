@@ -168,7 +168,7 @@ proc ::parity::Pool {{size full}} {
         [hir::types::MakeApplied Box [list $C]] [hir::types::MakeApplied Phantom [list $F]] \
         [hir::types::MakeStruct [dict create x int y $F] 0]]
     if {$size eq "small"} {
-        return [list int any $F [hir::types::MakeFn {} int {Oops}] $C [hir::types::MakeMutVec int 0] \
+        return [list int any Small $F [hir::types::MakeFn {} int {Oops}] $C [hir::types::MakeMutVec int 0] \
             [hir::types::MakeApplied Box [list $F]]]
     }
     return $pool

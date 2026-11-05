@@ -229,10 +229,15 @@ else:
 
 test pds-nonuniform-own {a non-uniform recursion whose declaration has an answer of its own keeps it, read from the summary: OwnGrow[T] (a Fn field beside `next: List[OwnGrow[List[T]]]`) is bearing and has no total equality for every argument, an affine one included, and its reason names the Fn field even where the walk would follow the growing applications forever (summaries.tcl's reason walk)} -body {
     set hir [pdsHir]
+    hir::structs::ForgetAffinity
     set c [pdsApp OwnGrow $::pdsCo]
+    # (OwnGrow[List[int]] is met, at the neutral argument, while OwnGrow's
+    # summary is computed: asked after, it has its final class.)
     list [pdsAnswers $hir [pdsApp OwnGrow int]] [pdsAnswers $hir $c] \
-        [string match {*field "f" of OwnGrow*a function has no total equality*} [lindex [hir::types::Totality equality $c] 1]]
-} -result {{affine 0 bearing 1 carried {} equality none hash none send none mutable 0 vector 0 carry 1} {affine 0 bearing 1 carried {} equality none hash none send none mutable 0 vector 0 carry 1} 1}
+        [string match {*field "f" of OwnGrow*a function has no total equality*} [lindex [hir::types::Totality equality $c] 1]] \
+        [lindex [hir::types::Totality equality [pdsApp OwnGrow [hir::types::MakeList int]]] 0] \
+        [lindex [hir::types::SendClass [pdsApp OwnGrow [hir::types::MakeList int]]] 0]
+} -result {{affine 0 bearing 1 carried {} equality none hash none send none mutable 0 vector 0 carry 1} {affine 0 bearing 1 carried {} equality none hash none send none mutable 0 vector 0 carry 1} 1 none none}
 
 test pds-mutual {mutual recursion, uniform (UA/UB: the slot reaches a value through the cycle) and non-uniform (GrowA/GrowB: each round nests the argument in a List): every analysis terminates on the declaration graph and the argument contributes exactly where a value of it is held -- GrowB's own `v: T`, reached from GrowA[T] as GrowB[List[T]]} -body {
     set hir [pdsHir]

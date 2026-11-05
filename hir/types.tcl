@@ -2644,6 +2644,10 @@ proc hir::types::TotalityParts {type} {
 # again through its own fields adds nothing (the least fixpoint): a
 # recursive type is total when every other component is.
 proc hir::types::TotalityClass {operation type} {
+    set known [hir::summaries::Recall totality.$operation $type]
+    if {$known ne ""} {
+        return $known
+    }
     set classes [lmap a [hir::summaries::Arguments $type] {
         lsearch -exact {total unknown none} [TotalityClassOf $operation $a]
     }]
@@ -2651,7 +2655,7 @@ proc hir::types::TotalityClass {operation type} {
     if {$level eq ""} {
         return unknown
     }
-    return [lindex {total unknown none} $level]
+    return [hir::summaries::Remember totality.$operation $type [lindex {total unknown none} $level]]
 }
 
 # Totality of {nstruct ID ARGUMENTS} for OPERATION from its parts (the
@@ -2970,6 +2974,10 @@ proc hir::types::SendParts {type assumed seen} {
 # declaration's own answer), so the application's class is the worst the
 # summary gives its arguments' classes.
 proc hir::types::SendStructClass {type assumed} {
+    set known [hir::summaries::Recall send [list $type $assumed]]
+    if {$known ne ""} {
+        return $known
+    }
     set classes [lmap a [hir::summaries::Arguments $type] {
         lsearch -exact {total unknown none} [SendClassOf $a $assumed]
     }]
@@ -2977,7 +2985,7 @@ proc hir::types::SendStructClass {type assumed} {
     if {$level eq ""} {
         return unknown
     }
-    return [lindex {total unknown none} $level]
+    return [hir::summaries::Remember send [list $type $assumed] [lindex {total unknown none} $level]]
 }
 
 # SendClass's class of TYPE alone (no reason looked for).

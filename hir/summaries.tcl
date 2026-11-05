@@ -96,6 +96,10 @@ namespace eval hir::summaries {
     variable expansive ""
     # Embedding answers of the current registry ({A B} -> 0|1).
     variable embeds [dict create]
+    # Answers for whole applications, for the properties whose answer reads
+    # nothing but the registry ({NAME KEY} -> answer: Remember, Recall):
+    # a walk over nested applications asks again about every inner one.
+    variable answers [dict create]
 }
 
 # Registers property NAME. OPTIONS:
@@ -137,6 +141,24 @@ proc hir::summaries::Forget {} {
     }
     set expansive ""
     set embeds [dict create]
+    variable answers
+    set answers [dict create]
+}
+
+# The answer remembered for KEY of property NAME (Remember), or "".
+proc hir::summaries::Recall {name key} {
+    variable answers
+    return [dict getdef $answers [list $name $key] ""]
+}
+
+# Remembers ANSWER for KEY of property NAME, unless a fixpoint of NAME runs
+# (its answers then are provisional); returns ANSWER.
+proc hir::summaries::Remember {name key answer} {
+    variable answers
+    if {![Running $name]} {
+        dict set answers [list $name $key] $answer
+    }
+    return $answer
 }
 
 proc hir::summaries::Count {counter {by 1}} {
@@ -297,9 +319,9 @@ proc hir::summaries::Compute {name id} {
 }
 
 # The arguments of the named struct type TYPE in slot order: an
-# application's own, a parameterized declaration named without arguments
-# its slots' variables (the type its fields are written in), {} for a struct
-# with no slots.
+# application's own (canonical), a parameterized declaration named without
+# arguments its slots' variables (the type its fields are written in), {}
+# for a struct with no slots.
 proc hir::summaries::Arguments {type} {
     set id [lindex $type 1]
     set slots [hir::structs::slots $id]
@@ -307,7 +329,24 @@ proc hir::summaries::Arguments {type} {
         return {}
     }
     if {[llength $type] == 3} {
-        return [lindex $type 2]
+        # Each in the form a field holds it in once substituted
+        # (hir::structs::AppliedFieldTypes canonicalizes: an application may
+        # keep a refinement's declared name, `Small`, where a field holds its
+        # normal form). A missing argument substitutes
+        # nothing a value can be: `any`, as the affinity summary reads it.
+        set arguments [lmap a [lindex $type 2] {
+            # (A compound argument is canonical already: MakeApplied bounded
+            # it, and substituting it re-bounds it at the same depth.)
+            if {[hir::types::IsSpecific $a] || [catch {hir::types::canonical $a} c]} {
+                string cat $a
+            } else {
+                set c
+            }
+        }]
+        while {[llength $arguments] < [llength $slots]} {
+            lappend arguments any
+        }
+        return $arguments
     }
     set constraints [hir::structs::slotConstraints $id]
     return [lmap slot $slots {hir::types::MakeImprint $slot [dict getdef $constraints $slot {}]}]
