@@ -1269,8 +1269,14 @@ type a `List[K]`, a field and a result may hold -- never a trait view.
     and is constrained by at most one trait: `satisfies TRAIT`, never `:`,
     `where`, `requires` or an expression.
   * An application gives one type per slot (TYPE otherwise); the bare
-    constructor `Pair` is no type. A slot takes an unrestricted concrete
-    type: no trait, context trait or affine type.
+    constructor `Pair` is no type. A slot takes a concrete type: no trait
+    or context trait. An affine type is an argument like any other: the
+    application is affine exactly when its fields, the arguments
+    substituted, are (`Box[Coroutine{...}]` of `value: T` is affine,
+    `Phantom[Coroutine{...}]` of `value: int` is not), written or inferred
+    alike; a recursive affine application (`Node[Coroutine{...}]` holding
+    `List[Node[T]]`) is AFFINE-CONTAINER-UNSUPPORTED wherever it is
+    written.
   * An invalid application -- a constrained slot's argument that does not
     satisfy the trait (a function for Hashable, `any`) -- is
     TRAIT-NOT-SATISFIED where it is written: a parameter, a result, a

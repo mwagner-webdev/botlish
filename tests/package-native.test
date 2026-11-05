@@ -306,8 +306,11 @@ test pn-concurrent-target-compiles {two compilations for two targets, run at onc
         lappend outputs $out
         lappend pids [exec [info nameofexecutable] $::mainScript -target $target [file join $app main.bot] > $out 2>@1 &]
     }
+    # Wait for each child: ps answers on Linux and macOS alike (macOS has no
+    # /proc, where a wait on /proc/PID returned at once and the outputs were
+    # read before the compilations ended), and fails once Tcl has reaped it.
     foreach pid $pids {
-        while {[file isdirectory /proc/$pid] && ![catch {exec ps -o stat= -p $pid} s] && ![string match Z* $s]} { after 50 }
+        while {![catch {exec ps -o stat= -p $pid} s] && ![string match Z* [string trim $s]]} { after 50 }
     }
     after 200
     lmap out $outputs {lindex [split [string trim [readBytes $out]] \n] end}

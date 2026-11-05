@@ -351,8 +351,14 @@ construction), and the top level receives with `drain`.
   into a construction that failed -- stays open until the administration
   closes it by address (`actor-lifecycle-construction`) or a shutdown and
   `reap` close it.
-* An affine *message* is out of scope: `open[Coroutine{...}]` does not
-  imprint (`reject-affine-message.bot`).
+* An affine *message* is out of scope: no message of an affine type ever
+  crosses a mailbox -- `post`, `send`, `deliver` and `receive` hold values
+  of M, so M is never imprinted affine there (`reject-affine-message.bot`,
+  IMPRINT at the post). `open[Coroutine{...}]` itself imprints since
+  WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md: an Address and an Inbox hold
+  no message, so open's M stands where no value of it exists (it used to be
+  refused there, when every argument of an application counted as a value
+  position).
 
 ## 7. Message semantics
 

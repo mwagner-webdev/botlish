@@ -927,6 +927,19 @@ run there; no repository package carries those targets. GitHub's macOS and
 Windows workflows ran on this branch for the unchanged compiler (their
 results are CI's, not this report's evidence).
 
+After the merge, main's Windows workflow (run 41728433827, acceptance shard
+4) failed `pa-compare-git-tree-matches-git`: its fixture marked a file
+executable with `file attributes -permissions`, which Tcl has on Unix only.
+The test, not the package manager: `GitTree` already reads the executable
+bit only where the host has one, and on Windows every file is 100644, as
+Git for Windows (`core.filemode` false) adds a new one. The fixture now sets
+the bit on Unix only and runs git with `core.autocrlf=false` (Git for
+Windows' installer sets it true, which converts the fixture's CRLF bytes
+before git hashes them: under it the unpinned fixture's tree differed from
+`GitTree`'s, checked here), and the test reads README's mode in git's own
+tree: 100755 on Unix, 100644 on Windows (the Windows branch simulated here;
+its confirmation is the Windows workflow's).
+
 ## K. Performance
 
 `bench/package-authoring.tcl -repository OUT` (**Executed**; the pinned
@@ -1012,6 +1025,12 @@ idle):
 * **Module sets must be equal across targets**: a package that offers a
   module on one target only cannot be packed (a deliberate rule: one
   public API per release); no repository package needs otherwise.
+* **A Git tree is recomputed from the bytes on disk, with Unix's
+  executable bit**: on Windows no file is executable (a tree holding one,
+  such as an upstream with scripts, is never confirmed there), and a
+  checkout made with `core.autocrlf=true` holds CRLF bytes the repository's
+  tree does not. Both make the check report a contradiction and stop the
+  pack -- never a false confirmation; the releases are authored on Linux.
 * **The evidence's toolchain and steps are the recipe's own statements**;
   the package manager checks only that outputs exist, and the `.comment`
   compiler identities it records are consistent with them, not compared.

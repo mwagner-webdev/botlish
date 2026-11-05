@@ -610,18 +610,28 @@ for running one program's Vms with contexts. It is the driver's, like
 | target | context base from the Vm | program metadata through the Vm | per-thread guard records | concurrent Vms of one program | evidence |
 |---|---|---|---|---|---|
 | Linux x86-64 | yes | yes | yes | yes, 2-8 Vms, also under GC stress | observed (sections 7, 10, 13) |
-| Linux AArch64 | yes (the same CLIF: an AArch64 `ldr` from the Vm) | yes | yes (guard.rs, shared) | the same tests | type-checked here (`cargo check --target aarch64-unknown-linux-gnu --lib --bins --tests`); CI: `tests-arm64.yml`, dispatched on the branch, had not started when this was written (pending; the note below) |
-| macOS AArch64 | yes | yes | yes (guard.rs, shared; macos.rs unchanged) | the same tests (the acceptance tier globs every test file) | type-checked here (`--target aarch64-apple-darwin`); CI, partial: the smoke job passed on the first commit (Rust unit tests, the native stack checks, native status, the smoke tier, objects and executables), `icy-tower (macos arm64)` passed on two commits; the acceptance tier was cancelled by later pushes and is pending |
-| Windows x86-64 (MSVC) | yes | yes | yes (windows.rs over the same records) | the same tests | type-checked here (`--target x86_64-pc-windows-msvc`); CI, partial: `icy-tower (windows x86-64)` passed (the game's native executable built and tested on Windows); the `roots` job's fallback-plan Rust tests and GC workloads passed before a later push cancelled the run; the smoke job (the Rust tests, `native_stack` on Windows) is pending |
+| Linux AArch64 | yes (the same CLIF: an AArch64 `ldr` from the Vm) | yes | yes (guard.rs, shared) | the same tests | type-checked here (`cargo check --target aarch64-unknown-linux-gnu --lib --bins --tests`); CI: `tests-arm64.yml` on the branch's final code, every job passed (the Tcl suite, its cranelift coverage, the golden suites, the Rust tests also under GC stress) |
+| macOS AArch64 | yes | yes | yes (guard.rs, shared; macos.rs unchanged) | the same tests (the acceptance tier globs every test file) | type-checked here (`--target aarch64-apple-darwin`); CI on the final code: the smoke job (Rust unit tests, the native stack checks in isolated processes with the `threads` scenarios, native status, objects and executables), the system linker (also under GC stress), main-thread startup, Botlish.app and acceptance shards 2 and 3 passed; shard 1 failed in one test, `package-native.test`'s `pn-concurrent-target-compiles` (below) |
+| Windows x86-64 (MSVC) | yes | yes | yes (windows.rs over the same records) | the same tests | type-checked here (`--target x86_64-pc-windows-msvc`); CI on the final code: the smoke job (the Rust tests, `windows.rs`'s two-thread test, the native stack guard checks, GC workloads under the unwind check), the `roots` job, the system linker and acceptance shards 2-4 passed; shard 1 failed in one test, `package-authoring.test`'s `pa-compare-git-tree-matches-git` (below) |
 
-* **CI's state.** GitHub's runners were saturated for the whole session:
-  `main`'s own `tests.yml` runs were queued as long as the branch's. Every
-  push cancels the branch's earlier macOS and Windows runs (their
-  concurrency group), so the partial results above are from earlier
-  commits of the branch. The context base's load and the publication's
-  thread-local changed after the first commit, so its smoke results are
-  evidence for that commit's code only. Runs that had not finished are
-  pending, not passed.
+* **CI's state, and every failure in it** (the branch's final code against
+  `main`'s latest runs, `bdd5e3d`):
+  - Linux `tests.yml`: interp, compile and the system-linked executables
+    failed in one file, `package-authoring.test`, as on `main`; the two
+    cranelift coverage jobs failed in the same 10 tests as `main`'s (tests
+    of `test-log`, a Tcl-only native); the Rust tests, the golden suites,
+    the stub-linked executables, the warning gate and the method-call
+    decision's job passed.
+  - Windows' one failure, `pa-compare-git-tree-matches-git`, is the Windows
+    Git tree fixture `main` fixed after this branch's base (`a9b29ba`,
+    `file attributes -permissions` on Windows); the merge brings the fix.
+  - macOS' one failure, `pn-concurrent-target-compiles`, is a wait in the
+    test: it polled `/proc/$pid`, which macOS does not have, so it read the
+    four compilations' outputs before they ended and passed only when they
+    happened to finish within 200 ms (`main`'s four-shard run passed it).
+    The merge commit waits with `ps` alone, which answers on both hosts.
+  - None of these touches the runtime this milestone changed: they fail
+    in the package manager's tests and on the interp backend.
 * **macOS main-thread executables.** The startup is unchanged: the guard is
   installed on whichever thread runs the program, and the records do not
   care which thread that is (`tests/main-thread-startup.test`).

@@ -699,13 +699,25 @@ What the measurements show:
 * **Not run locally:** the static-decisions comparison (CI's), and macOS
   and Windows, whose workflows run on a push. The codec is portable Rust;
   its plan is the target's own NIR.
-* **CI, pending when this was written.** The branch's runs (tests.yml
-  41700285818, tests-arm64.yml 41700290535, static-decisions.yml
-  41700295954, macos-arm64.yml 41700243090, windows-x86_64.yml
-  41700242990) stayed queued for more than two hours behind main's own
-  queue, at a head without the three fixes above; they were cancelled when
-  the milestone merged into main, whose push runs every workflow on the
-  merged commit. None has a verdict here.
+* **CI.** The branch's runs were cancelled when the milestone merged into
+  main (they stayed queued for more than two hours, at a head without the
+  three fixes above); main's push ran every workflow on the merged commit,
+  d857749:
+  * passed: static-decisions (41728433935: the batched and sequential
+    schedulers agree on every golden suite), single executable
+    (41728433993), c-bindgen, and icy-tower's build and tests on Linux,
+    macOS and Windows;
+  * Windows (41728433827): every job passed but one shard, whose one
+    failure is `package-authoring.test`'s `pa-compare-git-tree-matches-git`
+    (`file attributes -permissions`, which Windows' Tcl has not): main's
+    PACKAGE-MANAGER-MILESTONE-3.md, not this milestone's;
+  * macOS (41728433872): every job passed but acceptance shard 1 of three,
+    cut off at its 75-minute limit with every test before the cut
+    passing. This milestone's two test files had shifted the round-robin
+    shards, so the macOS Tier B job now has four
+    (MAIN-CI-FAILURES-2026-11.md, 3.4);
+  * pending when this was written: tests.yml (41728434168, queued) and
+    tests-arm64.yml (41728433797, running).
 * **Not rebuilt.** The committed Icy Tower executable
   (`audit/icy-tower/artifacts/icy-tower`), which AGENTS.md asks to rebuild
   with a runtime change. It is self-contained and its game uses neither

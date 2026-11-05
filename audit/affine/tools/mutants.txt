@@ -292,9 +292,11 @@
 @@ app-recursion-declared-fields the recursive-affine walk reads a struct's declared fields, not an application's: Node[Coroutine{...}] and a declaration holding itself through Box[D] are accepted
 ## hir/structs.tcl
 <<<<
+        dict set visited $type,$crossed 1
         set owner $type
         set fields [AppliedFieldTypes $type]
 ====
+        dict set visited $type,$crossed 1
         set owner $type
         set fields [fieldTypes $id]
 >>>>
@@ -708,4 +710,220 @@ core::native::register coroutine#release -arity 1 -impl core::coroutines::releas
                 let _slot = number(d, pos);
                 let _ = fields.len();
                 skip(d, pos);
+>>>>
+
+# ---------------------------------------------------------------------------
+# Written applications (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md, item 28):
+# whether a written application is admitted, what it denotes, and where an
+# imprint variable's values exist (slot positions).
+
+@@ written-rejects-affine-argument the old admission comes back: a written application with an affine argument is rejected where it is written (Box[Coroutine{...}] as a parameter, result or field; Phantom[Coroutine{...}] too)
+## hir/resolve.tcl
+<<<<
+    set type [hir::types::MakeApplied $id $types]
+    set problem [hir::structs::WrittenProblem $type]
+====
+    if {[hir::types::AnyAffine $types]} {
+        return -code error -errorcode {BOTLISH TYPE} "an argument is the affine type: a type slot takes an unrestricted type"
+    }
+    set type [hir::types::MakeApplied $id $types]
+    set problem [hir::structs::WrittenProblem $type]
+>>>>
+
+@@ written-accepts-everything a written application is admitted with no further check: a recursive affine application (Node[Coroutine{...}]) or one with no finite form (W[Coroutine{...}]) written as a type is accepted
+## hir/resolve.tcl
+<<<<
+    set problem [hir::structs::WrittenProblem $type]
+    if {$problem ne ""} {
+====
+    set problem ""
+    if {$problem ne ""} {
+>>>>
+
+@@ written-recursion-unchecked only the written recursion check goes: a recursive affine application written as a parameter, result or List element is accepted (no construction makes one, so no other check sees it)
+## hir/structs.tcl
+<<<<
+    set recursion [OwnedRecursion $type]
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    set growth
+====
+    set recursion ""
+    if {$recursion ne ""} {
+        return [list AFFINE-CONTAINER-UNSUPPORTED [RecursionMessage [lindex $type 1] $type $recursion]]
+    }
+    set growth
+>>>>
+
+@@ written-unbounded-unchecked a written application with no finite form is accepted: W[Coroutine{...}] (its argument nested in ever larger applications, never cut) is a parameter's type
+## hir/structs.tcl
+<<<<
+        set growth [Unfolding $type]
+    }
+    if {$growth ne ""} {
+====
+        set growth ""
+    }
+    if {$growth ne ""} {
+>>>>
+
+@@ imprint-unbounded-unchecked an imprint that makes an application with no finite form is accepted: mk[Coroutine{...}]() of `fn mk() -> W[T]` (W's slot holds no value: the binding passes BindingProblem)
+## hir/imprint.tcl
+<<<<
+            set problem [UnfoldingProblem $sig $binding]
+====
+            set problem ""
+>>>>
+
+@@ written-erases-affine-argument written and inferred follow different classifiers: a written application's affine argument is taken for any (the declaration's affinity, a slot unrestricted), so a declared Box[Coroutine{...}] parameter, result or field is unrestricted -- copied freely, never released -- while the same type inferred is affine
+## hir/resolve.tcl
+<<<<
+    set type [hir::types::MakeApplied $id $types]
+    set problem [hir::structs::WrittenProblem $type]
+====
+    set type [hir::types::MakeApplied $id [lmap t $types {expr {[hir::types::IsAffine $t] ? "any" : $t}}]]
+    set problem [hir::structs::WrittenProblem $type]
+>>>>
+
+@@ positions-every-slot-value imprinting's old rule: every argument of an application is a value position, so Phantom[T] takes no affine T (and Ref[T] no Void pointee)
+## hir/imprint.tcl
+<<<<
+            set slots [hir::structs::SlotPositions [lindex $type 1]]
+            if {[llength $slots] != [llength $arguments]} {
+====
+            set slots {}
+            if {[llength $slots] != [llength $arguments]} {
+>>>>
+
+@@ positions-no-slot-value no argument of an application is a value position: a body over Box[T] takes an affine T and copies the values it obtains (b.value)
+## hir/imprint.tcl
+<<<<
+    set written [Occurrences $type 1 value]
+    if {$positions eq {}} {
+====
+    set written [Occurrences $type 1 value]
+    if {1} {
+>>>>
+
+@@ positions-direct-fields-only a slot's positions are read from its declaration's direct fields: a slot held through another application (Outer[T] of `inner: Inner[T]`, Mixed[T] of `b: Box[T]`) holds no value, so an affine T is imprinted there
+## hir/imprint.tcl
+<<<<
+            set slots [hir::structs::SlotPositions [lindex $type 1]]
+            if {[llength $slots] != [llength $arguments]} {
+====
+            set slots [hir::structs::SlotPositions [lindex $type 1]]
+            if {$::hir::structs::positioning} {
+                set slots [lrepeat [llength $arguments] {}]
+            }
+            if {[llength $slots] != [llength $arguments]} {
+>>>>
+
+@@ positions-phantom-is-value a phantom slot (no field holds a value of it) is taken for a value position: Phantom[T] and Wrap[T] take no affine T
+## hir/imprint.tcl
+<<<<
+    if {$positions eq {}} {
+        return [lmap o $written {lreplace $o 2 2 argument}]
+    }
+====
+    if {$positions eq {}} {
+        return $written
+    }
+>>>>
+
+@@ positions-pointee-is-value a pointee slot (Ref[T] of `p: std::ffi::c::Ptr[T]`) is taken for a value position: Ref[T] takes no std::ffi::c::Void, which Ptr[T] itself takes
+## hir/imprint.tcl
+<<<<
+            default {
+                set placed [Occurrences $type 1 $position]
+            }
+====
+            default {
+                set placed $written
+            }
+>>>>
+
+@@ positions-fn-type-not-value a function type's variable is taken for no value position: a body over Getter[T] (f: Fn{args: [], return: T}), or one given f: Fn{args: [], return: T}, takes an affine T and copies the values f returns
+## hir/imprint.tcl
+<<<<
+            foreach t [dict get $fields args] {
+                lappend result {*}[Occurrences $t 0 value]
+            }
+            lappend result {*}[Occurrences [dict get $fields return] 0 value]
+        }
+    }
+    return $result
+}
+
+# The occurrences of imprint variables in TYPE, an argument of an
+====
+            foreach t [dict get $fields args] {
+                lappend result {*}[lmap o [Occurrences $t 0 value] {lreplace $o 2 2 argument}]
+            }
+            lappend result {*}[lmap o [Occurrences [dict get $fields return] 0 value] {lreplace $o 2 2 argument}]
+        }
+    }
+    return $result
+}
+
+# The occurrences of imprint variables in TYPE, an argument of an
+>>>>
+
+@@ generic-binding-admits-affine an imprinted function's variable is bound to an affine type where values of it exist: a body over Box[T] is handed a Box of a handle and duplicates the handle it obtains
+## hir/imprint.tcl
+<<<<
+        if {[hir::types::IsAffine $type]} {
+            return "$name is imprinted as $shown, an affine type, where values of $name exist: an imprinted function's body is checked for every $name and may copy its values, so $name is never an affine type there"
+        }
+====
+        if {0} {
+            return "$name is imprinted as $shown, an affine type, where values of $name exist: an imprinted function's body is checked for every $name and may copy its values, so $name is never an affine type there"
+        }
+>>>>
+
+@@ explicit-imprint-rejects-affine the explicit imprint path disagrees with the declared and inferred ones: an explicit imprint of an affine type is refused before binding, so ph[Coroutine{...}]() of `fn ph() -> Phantom[T]` is rejected though the call's own binding (T held by no value) admits it
+## hir/cabi.tcl
+<<<<
+    return [hir::resolve::ResolveTypeExpr $typeExpr $ns [if {$variables eq ""} {string cat 0} else {set variables}]]
+}
+====
+    set resolved [hir::resolve::ResolveTypeExpr $typeExpr $ns [if {$variables eq ""} {string cat 0} else {set variables}]]
+    if {[hir::types::IsAffine $resolved]} {
+        return -code error -errorcode {BOTLISH IMPRINT} "an explicit imprint takes an unrestricted type"
+    }
+    return $resolved
+}
+>>>>
+
+@@ set-element-root-only an ImmutableSet refuses only a root affine element (a coroutine handle), not an affine application: ImmutableSet[Box[Coroutine{...}]] is written
+## hir/types.tcl
+<<<<
+        if {$ctor eq "ImmutableSet" && [IsAffine $t]} {
+====
+        if {$ctor eq "ImmutableSet" && [AffineRoot $t]} {
+>>>>
+
+@@ positions-memo-outlives-declarations the slot positions survive a change of the declarations: one compilation's Box (its slot phantom) decides another's (its slot a value), interleaved
+## hir/structs.tcl
+<<<<
+    set ::hir::affine::descriptorMemo [dict create]
+    set positions [dict create]
+====
+    set ::hir::affine::descriptorMemo [dict create]
+>>>>
+
+@@ written-walk-per-path MentionsMutable remembers only its own path, as it did: every path through a deep application whose fields reach one type twice is walked -- exponential in the nesting of an affine argument, which the type bound never cuts (a written L16[Coroutine{...}, int] parameter)
+## hir/types.tcl
+<<<<
+        dict set visited $type 1
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            if {[MentionsMutableFrom $t visited]} { return 1 }
+        }
+====
+        dict set visited $type 1
+        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+            set saved $visited
+            if {[MentionsMutableFrom $t visited]} { return 1 }
+            set visited $saved
+        }
 >>>>

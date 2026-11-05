@@ -345,7 +345,7 @@ foreach {name kind} {
     drain-twice         USE-AFTER-MOVE
     resume-started      USE-AFTER-MOVE
     inbox-from-address  IMPRINT
-    affine-message      {IMPRINT UNPROVEN-FIELD}
+    affine-message      IMPRINT
     recover-internal    INTERNAL-NAMESPACE
     loop-yield          {COROUTINE-RESULT-MISMATCH COROUTINE-RESUME-CONFLICT}
     top-level-receive   UNWRAPPED-YIELD
