@@ -128,8 +128,12 @@
 @@ bare-case-accepted a bare case name resolves to the one enum that declares it (cases injected into the scope)
 ## hir/resolve.tcl
 <<<<
+        dict lappend hir rootRefs $e
+    } else {
         set b [Lookup hir $scope $name]
 ====
+        dict lappend hir rootRefs $e
+    } else {
         set b [Lookup hir $scope $name]
         if {$b eq ""} {
             set owners [lmap id [dict keys $::hir::enums::registry] {
