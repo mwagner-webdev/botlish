@@ -543,6 +543,11 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
         }
         if {$visiting eq {}} {
             hir::summaries::Count fallbacks
+            set i [hir::summaries::Contributor valueStability $type $classes 1]
+            if {$i ne ""} {
+                set a [lindex [hir::summaries::Arguments $type] $i]
+                return "has fields that hold values of its type argument, [hir::types::show $a], that [ValueStability $a]"
+            }
             return "has fields that hold, through a non-uniformly recursive declaration, a value that is not stable"
         }
         return ""

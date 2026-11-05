@@ -98,6 +98,9 @@ struct Ref[T]:
 struct OfList[T]:
     v: Box[List[T]]
 
+struct Deep[T]:
+    values: List[List[T]]
+
 struct OfBox[T]:
     v: Box[Box[T]]
 
@@ -319,6 +322,15 @@ test pds-identity-not-name {a summary belongs to a declaration's identity, never
     list [lindex [hir::types::Totality equality [pdsApp geo::Box $fn]] 0] [lindex [hir::types::Totality equality [pdsApp Box $fn]] 0] \
         [lindex [hir::types::Totality equality [pdsApp geo::Box $fn]] 0] [hir::callables::Bearing $hir [pdsApp geo::Box $fn]] [hir::callables::Bearing $hir [pdsApp Box $fn]]
 } -cleanup {file delete -force [file join [temporaryDirectory] pds-identity]} -result {total none total 0 1}
+
+test pds-reason-past-the-bound {the class reads the argument uncut, so a reason walk over field types the type bound cut (Deep[List[Fn{...}]] of `values: List[List[T]]`: the function sits past the aggregate bound) names the argument that decides it, with the argument's own reason -- never a cut type's, never a recursion that is not there} -body {
+    set hir [pdsHir]
+    set t [pdsApp Deep [hir::types::MakeList $::pdsFn]]
+    lassign [hir::types::Totality equality $t] class why
+    lassign [hir::types::SendClass $t] sclass swhy
+    list $class [string match {its fields hold values of its type argument List[[]Fn*: its elements (Fn*): a function has no total equality*} $why] \
+        $sclass [string match {its fields hold values of its type argument*a function or closure*} $swhy] [string match *recursive* $why]
+} -result {none 1 none 1 0}
 
 # ---------------------------------------------------------------------------
 # Parity with the walks the summaries replaced, and an independent model

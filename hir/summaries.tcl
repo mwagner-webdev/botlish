@@ -376,6 +376,27 @@ proc hir::summaries::Level {name type classes} {
     return $level
 }
 
+# The index of the first argument of the named struct type TYPE (classes
+# algebra, its arguments' classes CLASSES) whose slot's entry reaches
+# LEVEL where the declaration's own answer does not: the argument a class
+# comes from ("" when the declaration's own answer reaches it). A reason
+# walk that stopped short (the type bound cut what it walked, or a
+# non-uniform recursion) names that argument.
+proc hir::summaries::Contributor {name type classes level} {
+    set summary [Summary $name [lindex $type 1]]
+    if {$summary eq "" || [dict get $summary own] >= $level} {
+        return ""
+    }
+    set i 0
+    foreach row [dict get $summary values] class $classes {
+        if {[lindex $row $class] >= $level} {
+            return $i
+        }
+        incr i
+    }
+    return ""
+}
+
 # {OWN RELEVANT} of property NAME (union algebra) for the named struct type
 # TYPE: its declaration's own set and the indices of the slots whose
 # argument's whole answer joins it ("" when no declaration has TYPE's

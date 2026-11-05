@@ -1870,8 +1870,14 @@ proc hir::structs::MutableComponent {type {seen {}}} {
         }
         if {$seen eq {}} {
             # (The walk stopped short of every such component: the reason
-            # walk's account, hir/summaries.tcl.)
+            # walk's account, hir/summaries.tcl. The argument the summary
+            # says holds one, uncut, is named; else the recursion.)
             hir::summaries::Count fallbacks
+            set i [hir::summaries::Contributor mutableComponent $type $classes 1]
+            if {$i ne ""} {
+                set a [lindex [hir::summaries::Arguments $type] $i]
+                return "[hir::types::show $type], whose fields hold values of its type argument [hir::types::show $a], which holds [MutableComponent $a]"
+            }
             return "[hir::types::show $type], whose fields hold, through a non-uniformly recursive declaration, a mutable value"
         }
     }

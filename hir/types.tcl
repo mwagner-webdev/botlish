@@ -2695,6 +2695,15 @@ proc hir::types::TotalityClassOf {operation type} {
 # parts found none (TotalityParts; summaries.tcl's reason walk).
 proc hir::types::TotalityFallback {operation type class} {
     hir::summaries::Count fallbacks
+    set arguments [hir::summaries::Arguments $type]
+    set classes [lmap a $arguments {lsearch -exact {total unknown none} [TotalityClassOf $operation $a]}]
+    set i [hir::summaries::Contributor totality.$operation $type $classes [lsearch -exact {total unknown none} $class]]
+    if {$i ne ""} {
+        # (The parts' types were cut by the type bound: the argument, uncut,
+        # is the component that decides.)
+        set a [lindex $arguments $i]
+        return "its fields hold values of its type argument [show $a]: [lindex [Totality $operation $a] 1]"
+    }
     set what [expr {$operation eq "hash" ? "hashing" : "equality"}]
     if {$class eq "none"} {
         return "its fields hold, through a non-uniformly recursive declaration, a component with no total $what"
@@ -2930,6 +2939,13 @@ proc hir::types::SendStruct {type assumed seen} {
     set result [SendParts $type $assumed [concat $seen [list $type]]]
     if {$seen eq {} && [lindex $result 0] ne $class} {
         hir::summaries::Count fallbacks
+        set arguments [hir::summaries::Arguments $type]
+        set classes [lmap a $arguments {lsearch -exact {total unknown none} [SendClassOf $a $assumed]}]
+        set i [hir::summaries::Contributor send $type $classes [lsearch -exact {total unknown none} $class]]
+        if {$i ne ""} {
+            set a [lindex $arguments $i]
+            return [list $class "its fields hold values of its type argument [show $a]: [lindex [SendClass $a $assumed] 1]"]
+        }
         set result [list $class [expr {$class eq "none"
             ? "its fields hold, through a non-uniformly recursive declaration, a component that is not sendable"
             : "its fields hold, through a non-uniformly recursive declaration, a component not known to be sendable"}]]
