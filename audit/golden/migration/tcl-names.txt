@@ -11065,6 +11065,16 @@ tests/emission-claims.test ec-loop-first-iteration pass
 tests/emission-claims.test ec-loop-second-iteration pass
 tests/emission-claims.test ec-loop-later-iterations pass
 tests/emission-claims.test ec-loop-exact-count pass
+tests/emission-claims.test ec-loop-entered-guards pass
+tests/emission-claims.test ec-loop-entered-endpoints pass
+tests/emission-claims.test ec-loop-entered-huge pass
+tests/emission-claims.test ec-loop-entered-unknown pass
+tests/emission-claims.test ec-loop-entered-not-emitting pass
+tests/emission-claims.test ec-loop-entered-count pass
+tests/emission-claims.test ec-loop-entered-failures pass
+tests/emission-claims.test ec-loop-entered-fixpoint pass
+tests/emission-claims.test ec-loop-entered-contexts pass
+tests/emission-claims.test ec-loop-entered-lockstep pass
 tests/emission-claims.test ec-recursion-second-round pass
 tests/emission-claims.test ec-recursion-same-context pass
 tests/emission-claims.test ec-join-states pass
@@ -11114,6 +11124,7 @@ tests/emission-claims.test ec-unknown-value pass
 tests/emission-claims.test ec-trait-unsupported pass
 tests/emission-claims.test ec-budget pass
 tests/emission-claims.test ec-domain-admission pass
+tests/emission-claims.test ec-loop-entered-trust pass
 tests/emission-claims.test ec-hir-text pass
 tests/emission-claims.test ec-interchange-roundtrip pass
 tests/emission-claims.test ec-interchange-forged pass
@@ -11138,6 +11149,8 @@ tests/interval-sets.test iset-mod-ranges pass
 tests/interval-sets.test iset-shifts-unknown pass
 tests/interval-sets.test iset-types pass
 tests/interval-sets.test iset-induction-sound pass
+tests/interval-sets.test iset-domain-entered-sound pass
+tests/interval-sets.test iset-domain-entered-edges pass
 tests/interval-sets.test iset-registered-scalar-value pass
 tests/interval-sets.test iset-registered-forms pass
 tests/interval-sets.test iset-registered-validation pass
@@ -11174,6 +11187,7 @@ tests/csv-emission.test csv-unterminated-not-document pass
 tests/csv-emission.test csv-empty-not-field pass
 tests/csv-emission.test csv-static-compile pass
 tests/csv-emission.test csv-service-hover pass
+tests/csv-emission.test csv-selective-service-hover pass
 tests/csv-emission.test csv-backends-agree pass
 tests/csv-emission.test csv-documents-exact pass
 tests/csv-emission.test csv-terminal-value pass
@@ -11191,6 +11205,7 @@ tests/csv-emission.test csv-formula-unchanged pass
 tests/csv-emission.test csv-python-reads-back pass
 tests/csv-emission.test csv-differential-sample pass
 tests/csv-emission.test csv-native-erasure pass
+tests/csv-emission.test csv-selective-native-erasure pass
 tests/csv-emission.test csv-exporter pass
 tests/csv-emission.test csv-service-navigation pass
 tests/written-affine-applications.test wd-starting-asymmetry pass

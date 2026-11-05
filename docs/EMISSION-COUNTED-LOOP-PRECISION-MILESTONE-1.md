@@ -608,11 +608,20 @@ this tree):
 | audit/refactor/tools/gate.tcl | passed: the observed warnings exactly the manifest |
 | tests/local.tcl (267 Tcl test files on interp and compile, golden duplicates skipped; 117 golden suites on interp, compile, cranelift-generic and cranelift; an empty front-end cache: 97 minutes) | 532 of 534 file runs and 117 of 117 suites pass; the two failures are `package-authoring.test`'s `pa-add-refusals` on both Tcl backends, `main`'s own failure below (this container's GNU ld has no AArch64 emulation for the test's `clang --target=aarch64-linux-gnu` link) |
 
-CI on the branch: `tests` (dispatched), `tests (macos arm64)`, `tests
-(windows x86-64)` and both Icy Tower workflows, on commit d93e898 (the code
-as it stands; the commit after it changes only Markdown, which starts no
-workflow), were still queued two hours after the push, as `main`'s own
-newest runs were -- pending, not passed.
+CI on the branch, commit d93e898 (the code as it stands; the commits after
+it change Markdown, the golden-migration census rows and the merge of
+`main`): `tests (macos arm64)`, `tests (windows x86-64)`, `icy-tower
+(macos arm64)` and `icy-tower (windows x86-64)` passed. `tests`
+(dispatched) passed its golden shards, the warning gate, the native Rust
+unit tests, the stub-linked executables and the method-call decision's
+oracle; its interp, compile and system-linked jobs failed on
+`package-authoring.test` alone (`pa-add-refusals`, the runner's GNU ld
+without AArch64 emulation), and its two coverage jobs ended as `main`'s at
+bdd5e3d did -- the same failures as `main`'s at the time, none in what this
+branch changes. `main` has since fixed `pa-add-refusals` (lld for the
+AArch64 link); merged with it, the branch's `package-authoring.test`,
+`tools/mutant-catalogs.tcl` (85 catalogs, 3,005 mutants, 0 problems), the
+canary and golden tests and this milestone's test files pass locally.
 
 `main` when this branch was made (2026-11-05): its newest runs were
 queued; of the last completed ones, `tests` failed on
@@ -643,6 +652,10 @@ passed. Neither touches the emission checker.
   `audit/csv-emission/results/census.md`.
 * `compilerpedia/topics/emission.topic` -- EMIT-INCOMPLETE: a counted loop
   that may run zero times (rejected) and the guarded one (certified).
+* `audit/golden/migration/census/` (emission-claims, interval-sets,
+  csv-emission), `tcl-names.txt` and the regenerated
+  `tests/golden/manifest.tsv` -- the 15 new tests' rows (KEEP-INTERNAL, as
+  their files' others).
 * `docs/` -- this report, INDEX.md, notes in
   CSV-EMISSION-VALIDATION-MILESTONE-1.md (sections 5, 19, 20) and
   EMISSION-CLAIMS-MILESTONE-1.md (section 8); AGENTS.md ("Emission
