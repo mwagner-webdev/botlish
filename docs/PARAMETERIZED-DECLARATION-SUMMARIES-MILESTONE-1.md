@@ -92,11 +92,15 @@ applications substitution would make.
   other harnesses that edit code this milestone changed, one of them after
   a retarget.
 * **Tests.** `tests/parameterized-declaration-summaries.test` (24 tests).
-  Every test file the changes reach passes, and so did the full local run
-  but for `main`'s own defects.
-* **CI.** `static-decisions` and icy-tower on macOS and Windows passed.
-  The Linux, Linux arm64, macOS and Windows test workflows were still
-  queued when this was written, so they are pending (section 22).
+  Every test file the changes reach passes. The first full local run
+  failed only `main`'s `pa-add-refusals` and three tests of
+  compilerpedia.test, fixed since; on the merge of `main`'s fixes
+  (e6c1d05) the full local run has no failure (section 22).
+* **CI.** `static-decisions`, the Linux arm64 test workflow (all 12 jobs)
+  and the Windows one passed before the merges of `main`; macOS failed
+  only `main`'s `/proc` defect, which the first merge fixes. On the
+  merged head the Linux, Linux arm64, macOS and Windows test workflows
+  are pending (section 22).
 * **What the audit found and fixed on the way:**
   * one wrong answer: a refinement's name read as imprecise
     (`MayHoldVector(Box[Small])`, full corpus);
@@ -1060,8 +1064,8 @@ test defects, none in the compiler: `pn-concurrent-target-compiles`,
 `pa-add-refusals` (an AArch64 cross linker the runners lack) and
 `pa-pack-refuses-incomplete`. It also repaired eleven mutants in nine
 catalogs that no longer applied, and added `tools/mutant-catalogs.tcl`.
-This branch does not contain those fixes, so its CI is compared with that
-list.
+Until the merge of e6c1d05 (next) this branch did not contain those fixes,
+so its CI before it is compared with that list.
 
 **The full local run** (`tests/local.tcl -jobs 3`, 8,977 s): 267 Tcl
 test files on interp and compile, and the 117 golden suites on all four
@@ -1113,30 +1117,66 @@ on 7bb86da. Under `BOTLISH_NATIVE_GC_STRESS=1`, the summaries test file
 catalogs and 3,003 mutants. Its 11 problems are the 11 `main` repaired,
 none in a catalog this milestone touches.
 
-**CI on the branch.**
+**Merges of `main`.** `main` was merged into the branch three times as it
+moved, without a conflict each time:
 
-Status when this report was written. Pending runs are pending: none is
-counted as passed.
+| merge | `main` at | what `main` brought |
+|---|---|---|
+| e6c1d05 | 13dd290 | per-thread runtime state, the three test-defect fixes above, `tools/mutant-catalogs.tcl`, run cancellation and the release gate |
+| 2aedd83 | 5872c80 | the CI canary |
+| 889c5c4 | 418bae3 | counted-loop precision in the emission checker (`hir/range.tcl`, `hir/emission.tcl`), run pruning without a concurrency group |
+
+The files both sides changed were checked by hand: AGENTS.md,
+docs/INDEX.md, `audit/value-identity/tools/mutants.txt`,
+`audit/golden/migration/tcl-names.txt` and `tests/golden/manifest.tsv`
+had disjoint hunks, and `audit/hashable/tools/mutants.txt` holds `main`'s
+repair of `struct-ignores-non-hashable-field`, the same `lassign` line
+this branch added, once. After each merge the manifest that
+`audit/golden/migration/merge.tcl` regenerates equals the merged one, and
+`tools/mutant-catalogs.tcl` finds no problem (86 catalogs, 3,039 mutants
+after the last).
+
+* **e6c1d05**, the full local run (`tests/local.tcl`, 4 jobs, 6,824 s),
+  with 0 failures:
+  - 268 Tcl test files: 8,732 passed on interp, 8,727 on compile;
+  - the 117 golden suites on every backend: interp 5,589/5,589, compile
+    5,589/5,589, cranelift-generic 5,497/5,497, cranelift 5,599/5,599.
+* **2aedd83**: `tests/canary.test` 11/11 and `tools/ci/test_runs.py` (43
+  tests).
+* **889c5c4**: the files `main`'s change and this milestone's touch, on
+  interp and compile, with the golden suites of their tests (`tests/local.tcl`
+  narrowed), 0 failures:
+  - emission-claims 95, interval-sets 37, csv-emission 36, hir-range 71,
+    parameterized-declaration-summaries 24, hashable 39 (and its 9
+    duplicates as golden tests), written-affine-applications 26, canary 11;
+  - hashable.bot, hashable-admission.bot and range-and-contract-values.bot
+    on all four backends.
+
+**CI on the branch.** Status when this section was last written. Pending
+runs are pending: none is counted as passed.
 
 | workflow | commit | result |
 |---|---|---|
 | `static-decisions` (dispatched) | 961dc07 | **passed**: plan, four shards and mutable-array.bot, batched against sequential |
-| `icy-tower (macos arm64)` | 8e242ab, 35ff73b | **passed** |
-| `icy-tower (windows x86-64)` | 8e242ab, 35ff73b | **passed** |
-| `tests` (Linux x86-64, dispatched) | the branch head | **queued: pending** |
-| `tests (linux arm64)` (dispatched) | the branch head | **queued: pending** |
-| `tests (macos arm64)` | the branch head | **queued: pending** |
-| `tests (windows x86-64)` | the branch head | **queued: pending** |
+| `tests (linux arm64)` (dispatched) | 0a9398b | **passed**: all 12 jobs (interp, compile, the four golden shards, cranelift and cranelift-generic coverage, GC stress on interp and compile, the Rust unit tests with and without GC stress, the system-linked executables) |
+| `tests (windows x86-64)` | 0a9398b | **passed** |
+| `tests (macos arm64)` | 0a9398b | **failed**: one test, `pn-concurrent-target-compiles` (the system-linker job), `main`'s defect above (its wait probed `/proc`, which macOS does not have); every other job passed. e6c1d05 merges `main`'s fix |
+| `icy-tower (macos arm64)`, `icy-tower (windows x86-64)` | e6c1d05 | **passed** |
+| `raven clean room`, `package reproducibility`, `ci tools` | e6c1d05 | **passed** |
+| `tests` (Linux x86-64, dispatched) | 889c5c4 | **queued: pending** |
+| `tests (linux arm64)` (dispatched) | 889c5c4 | **queued: pending** |
+| `tests (macos arm64)`, `tests (windows x86-64)` | 889c5c4 | **queued: pending** |
 
 Infrastructure, not product:
 
-* No `tests`, `tests (linux arm64)`, `tests (macos arm64)` or `tests
-  (windows x86-64)` run on this branch has finished.
-* Every earlier push run was cancelled, as the workflows' concurrency
-  rules do, by the branch's next push, before it finished. None failed.
-* The dispatched Linux runs waited for hours without a runner. `main`'s
-  own `tests` and `tests (linux arm64)` runs of c6269fd5 and 13dd290 waited
-  the same way on the same day.
+* No `tests` (Linux x86-64) run on this branch has finished. Each one
+  dispatched waited for a runner until the next push to the branch
+  replaced it (the workflows' concurrency rule; since 5872c80 a branch
+  push starts its canary, so the dispatched run is replaced by the push's
+  run, and dispatched again).
+* `main`'s own `tests` and `tests (linux arm64)` push runs, from c6269fd
+  to eb2b481, were each cancelled by `main`'s next push before they
+  finished; its runs of 418bae3 are pending.
 
 The commits after 961dc07 change the reason texts and the reason walks'
 cost, never a class, a diagnostic kind or a fact the static-decision
