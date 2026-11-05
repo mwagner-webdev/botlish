@@ -623,7 +623,18 @@ few accepted graphs compile and run on interp and compile with a struct of
 each shared package passed between packages, the value the oracle's
 selection predicts. Observed:
 
-FUZZ-PLACEHOLDER
+```
+oracle selftest: ok
+seed 1: 500 cases: 218 accepted (86 with a package two scopes share), 151 conflicts, 19 unavailable, 112 cycles; 43 compiled and run; 0 disagreement(s)
+seed 2: 500 cases: 220 accepted (89 with a package two scopes share), 164 conflicts, 19 unavailable, 97 cycles; 44 compiled and run; 0 disagreement(s)
+seed 3: 500 cases: 228 accepted (99 with a package two scopes share), 132 conflicts, 16 unavailable, 124 cycles; 45 compiled and run; 0 disagreement(s)
+seed 17: 500 cases: 214 accepted (83 with a package two scopes share), 149 conflicts, 23 unavailable, 114 cycles; 42 compiled and run; 0 disagreement(s)
+seed 41: 500 cases: 225 accepted (82 with a package two scopes share), 143 conflicts, 16 unavailable, 116 cycles; 45 compiled and run; 0 disagreement(s)
+```
+
+2,500 universes, every outcome kind represented, no disagreement. (Each
+case also checks the reversed declaration and repository order; "compiled"
+cases ran on interp and compile, about one in five accepted graphs.)
 
 It finds planted defects (observed, each against a private copy): selecting
 a version silently on conflict (disagreements from case 1), relaxing a lock

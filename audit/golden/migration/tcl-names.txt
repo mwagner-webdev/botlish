@@ -709,6 +709,7 @@ tests/bot-modules.test bm-graph-same-hir-as-direct pass
 tests/bot-modules.test bm-graph-shared-link-declaration pass
 tests/bot-modules.test bm-graph-target-tree pass
 tests/bot-modules.test bm-graph-cache-and-service pass
+tests/bot-modules.test bm-graph-numeric-looking-names pass
 tests/bot-modules.test bm-graph-interchange pass
 tests/bot-modules.test bm-service-navigation pass
 tests/bot-modules.test bm-service-syntax-recovery pass

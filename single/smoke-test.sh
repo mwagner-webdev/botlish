@@ -286,6 +286,35 @@ pm verify -project "$work/pkgapp" -repository "$work/pkgrepo" >/dev/null || fail
 run -warnings off "$work/pkgapp/main.bot" | grep -qF 'value: 42' || fail "a program over an installed package"
 echo "   packages: pack, add, verify, with no native backend installed"
 
+# Shared dependencies (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md): two
+# packages locking the same geometry share one instance -- a Point one makes
+# is the Point the other takes -- and package graph says so; a third
+# locking another release is a DEPENDENCY-CONFLICT.
+mkdir -p "$work/pkgsrc/geometry2" "$work/pkgsrc/shapes" "$work/pkgsrc/tiles" "$work/pkgsrc/clash" "$work/pkgapp3"
+printf '{"schema": 1, "name": "geometry", "version": "2.0.0"}\n' >"$work/pkgsrc/geometry2/botlish.json"
+printf 'fn area(w: int, h: int) -> int:\n    0\n' >"$work/pkgsrc/geometry2/geometry.bot"
+printf 'struct P:\n    x: int\n' >>"$work/pkgsrc/geometry/geometry.bot"
+pm package pack "$work/pkgsrc/geometry" -out "$work/pkgrepo" -force >/dev/null || fail "package pack (geometry with P)"
+pm package pack "$work/pkgsrc/geometry2" -out "$work/pkgrepo" >/dev/null || fail "package pack (geometry 2.0.0)"
+for p in shapes:'import geometry\n\nfn make(n: int) -> geometry::P:\n    geometry::P {x: n}\n' tiles:'import geometry\n\nfn read(p: geometry::P) -> int:\n    p.x * 2\n'; do
+  name=${p%%:*}
+  printf '{"schema": 1, "name": "%s", "version": "1.0.0", "dependencies": {"geometry": "1.0"}, "lock": {"geometry": "1.0.0"}}\n' "$name" >"$work/pkgsrc/$name/botlish.json"
+  printf "${p#*:}" >"$work/pkgsrc/$name/$name.bot"
+  pm package pack "$work/pkgsrc/$name" -out "$work/pkgrepo" >/dev/null || fail "package pack ($name)"
+done
+printf '{"schema": 1, "name": "clash", "version": "1.0.0", "dependencies": {"geometry": "2.0"}, "lock": {"geometry": "2.0.0"}}\n' >"$work/pkgsrc/clash/botlish.json"
+printf 'fn c() -> int:\n    1\n' >"$work/pkgsrc/clash/clash.bot"
+pm package pack "$work/pkgsrc/clash" -out "$work/pkgrepo" >/dev/null || fail "package pack (clash)"
+printf 'import shapes\nimport tiles\n\ntiles::read(shapes::make(21))\n' >"$work/pkgapp3/main.bot"
+pm add shapes -project "$work/pkgapp3" -repository "$work/pkgrepo" >/dev/null || fail "add shapes"
+pm add tiles -project "$work/pkgapp3" -repository "$work/pkgrepo" >/dev/null || fail "add tiles"
+pm package graph -project "$work/pkgapp3" | grep -qF 'shared: one instance, geometry, for shapes, tiles' || fail "package graph shows the shared geometry"
+run -warnings off "$work/pkgapp3/main.bot" | grep -qF 'value: 42' || fail "a program over two packages sharing geometry"
+if pm add clash -project "$work/pkgapp3" -repository "$work/pkgrepo" 2>"$work/clash.err" >/dev/null; then fail "add clash succeeded"; fi
+grep -qF '(PM DEPENDENCY-CONFLICT)' "$work/clash.err" || fail "add clash is no DEPENDENCY-CONFLICT ($(cat "$work/clash.err"))"
+[[ ! -e $work/home-pm/.cache ]] || fail "a package command installed the native backend ($(ls "$work/home-pm/.cache"))"
+echo "   packages: two packages sharing one geometry; a conflicting lock refused"
+
 # PM-2 (PACKAGE-MANAGER-MILESTONE-2.md): a target-aware package -- one
 # release for two targets -- packed, added, a second target's view
 # prepared, each target's program compiled from its own view, and a native

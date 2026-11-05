@@ -749,6 +749,16 @@ test bm-graph-cache-and-service {the graph is an input like a source file: editi
         [lmap path [dict keys [service::stale $rev]] {string map [list $dir APP] $path}]
 } -cleanup {catch {service::closeWorkspace $ws}; removeApps; file delete -force [file join [temporaryDirectory] bm-cache-[pid]-3]} -result {{0 1 0 {[7, 3, -100, -14]}} {1 0 0 {[7, 3, -100, -14]}} 1 UNKNOWN-NAMESPACE APP/.bot_modules/.graph}
 
+test bm-graph-numeric-looking-names {packages of a graph named nan and inf, one using the other, resolve and run like any: a graph's names are Strings, never numbers (NUMERIC-LOOKING-NAMES)} -body {
+    set dir [app {
+        .bot_modules/.graph "botlish package graph 1\napplication inf nan\npackage inf nan\npackage nan\n"
+        .bot_modules/nan/nan.bot "fn v() -> int:\n    7\n"
+        .bot_modules/inf/inf.bot "import nan\n\nfn w() -> int:\n    nan::v() * 2\n"
+        main.bot "import inf\nimport nan\n\ninf::w() + nan::v()\n"
+    }]
+    lsort -unique [appValues $dir]
+} -cleanup removeApps -result 21
+
 test bm-graph-interchange {HIR interchange of a program over a package graph runs as built, in another process with the sources gone} -constraints nativeBuilt -body {
     set dir [app [concat $sharedGraph [list main.bot $sharedMain]]]
     set decoded [hir::interchange::decode [hir::interchange::encode [appHir $dir]]]
