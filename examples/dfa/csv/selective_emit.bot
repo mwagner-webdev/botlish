@@ -17,14 +17,14 @@
 #               (tests/csv-emission.test, csv-selective-natural-rejected).
 #   field*      the same output, each character of the unquoted branch passed
 #               through the guard again -- a second check per character that
-#               cannot fail (QuotingDecision, never raised) -- and the first
-#               character written before the loop. Both are for the checker:
-#               the guard restates per character what the decision knew of
-#               the whole string, and the peeled first character is what
-#               tells it the unquoted field is not empty (it keeps a counted
-#               loop's zero-iteration exit even when the count is at least
-#               one: with the loop alone the claim is EMIT-INCOMPLETE,
-#               csv-selective-loop-incomplete). Certified.
+#               cannot fail (QuotingDecision, never raised): the guard
+#               restates per character what the decision knew of the whole
+#               string. The branch's own `n == 0` exclusion is what tells
+#               the checker the unquoted field is not empty: its loop's
+#               bounds prove at least one iteration, so the loop has no
+#               zero-iteration exit (EMISSION-COUNTED-LOOP-PRECISION-
+#               MILESTONE-1.md; the field used to write its first character
+#               before the loop for this). Certified.
 #
 # The empty value is quoted (`""`): every field is then a nonempty token,
 # which the field emitter can claim on its own.
@@ -74,14 +74,7 @@ fn field_strict(value: str) -> unit errors csv_common::UnsupportedCSVCharacter, 
     if n == 0 or needs_quotes_strict(value):
         strict_emit::quoted_field(value)
     else:
-        c0 = value.char_at(0).scalar_value()
-        csv_strict::text_char(c0):
-            on std::dfa::UnrecognizedInput:
-                fail QuotingDecision {at: 0, value: c0}
-            on std::dfa::UnexpectedEnd:
-                fail QuotingDecision {at: 0, value: c0}
-        yield c0
-        loop i from 1 to n:
+        loop i from 0 to n:
             c = value.char_at(i).scalar_value()
             csv_strict::text_char(c):
                 on std::dfa::UnrecognizedInput:
@@ -142,14 +135,7 @@ fn field(value: str) -> unit errors csv_common::UnsupportedCSVCharacter, Quoting
     if n == 0 or needs_quotes(value):
         utf8_emit::quoted_field(value)
     else:
-        c0 = value.char_at(0).scalar_value()
-        csv_utf8::text_char(c0):
-            on std::dfa::UnrecognizedInput:
-                fail QuotingDecision {at: 0, value: c0}
-            on std::dfa::UnexpectedEnd:
-                fail QuotingDecision {at: 0, value: c0}
-        yield c0
-        loop i from 1 to n:
+        loop i from 0 to n:
             c = value.char_at(i).scalar_value()
             csv_utf8::text_char(c):
                 on std::dfa::UnrecognizedInput:

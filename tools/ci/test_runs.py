@@ -727,6 +727,9 @@ RELEASE_RUN_NAME = "${{ inputs.release && format('release {0}', inputs.release) 
 # commit back to main must not be cut off, census probes whose every run is
 # evidence, the release gate (each run sees the state as it is).
 NEVER_CANCELLED = {"scalar-asm-audit.yml", "react-native-probe.yml", "release-gate.yml"}
+# Workflows in no concurrency group: the pruning, whose waiting run a newer
+# one must never replace (under a full pool it would never get a runner).
+NO_GROUP = {"prune-runs.yml"}
 
 
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
@@ -737,6 +740,9 @@ class Workflows(unittest.TestCase):
             if not ({"push", "pull_request"} & set(on)):
                 continue
             c = w.get("concurrency")
+            if name in NO_GROUP:
+                self.assertIsNone(c, "%s: a newer run would replace one waiting for a runner" % name)
+                continue
             self.assertIsInstance(c, dict, "%s has no concurrency group" % name)
             if name in NEVER_CANCELLED:
                 continue

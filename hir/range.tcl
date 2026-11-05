@@ -1049,6 +1049,61 @@ proc hir::range::InductionBinding {startR endR direction endKind} {
     return [intersect [TypeFact int] [InductionSeed $startR $endR $direction $endKind]]
 }
 
+# 1 when a numeric loop domain whose start/end operands have Ranges
+# STARTR/ENDR runs its body at least once for *every* start in STARTR and
+# every end in ENDR, else 0 (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md).
+# A domain is entered exactly when its first value, START itself, passes the
+# loop's own test against END (core::forms::CountTest), so the rule is that
+# test at the worst pair of operands:
+#
+#   up   to       START <  END      START.max <  END.min
+#   up   through  START <= END      START.max <= END.min
+#   down to       START >  END      START.min >  END.max
+#   down through  START >= END      START.min >= END.max
+#
+# Non-relational: each operand's own Range, never a relation between them
+# (`from n - 1 to n` proves nothing here). Only a finite bound proves
+# anything: the side the test reads unbounded (a start that may be past
+# every end), `never` (no value reaches the loop) or an empty Range is 0 --
+# zero iterations stay possible. The other side may be unbounded (`n >= 1`
+# is END.min 1 whatever END.max is). The comparison is on arbitrary-
+# precision bounds, with no END+1 or END-1 formed. Who reads it: the
+# emission checker (hir::emission::EvalLoop drops a counted loop's
+# zero-iteration exit when it holds); no other analysis.
+proc hir::range::DomainEntered {startR endR direction endKind} {
+    foreach r [list $startR $endR] {
+        if {$r eq "never" || ![dict exists $r min] || ![dict exists $r max]} {
+            return 0
+        }
+        set lo [dict get $r min]
+        set hi [dict get $r max]
+        # No Int: an infinity is a bound, never a value.
+        if {$lo eq "+inf" || $hi eq "-inf"} {
+            return 0
+        }
+        if {$lo ne "-inf" && $hi ne "+inf" && $lo > $hi} {
+            return 0
+        }
+    }
+    if {$direction eq "up"} {
+        set s [dict get $startR max]
+        set z [dict get $endR min]
+    } else {
+        set s [dict get $startR min]
+        set z [dict get $endR max]
+    }
+    if {$s in {-inf +inf} || $z in {-inf +inf}} {
+        return 0
+    }
+    switch -- $direction/$endKind {
+        up/exclusive   { return [expr {$s < $z}] }
+        up/inclusive   { return [expr {$s <= $z}] }
+        down/exclusive { return [expr {$s > $z}] }
+        down/inclusive { return [expr {$s >= $z}] }
+    }
+    return 0
+}
+
 # The Range a walk whose own binding facts are BINDINGS reads for binding B:
 # the walk's fact (a binding of the region walked, a parameter, a
 # transported capture), else the exact Int B is bound to (hir::exact::

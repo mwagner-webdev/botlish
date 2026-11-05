@@ -4879,9 +4879,15 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
   tool, audit/emission-claims/tools/witness.tcl), never from the compiler.
 * One value analysis: the facts are hir/intset.tcl over hir::range's own
   transfers (add, sub, mul, `ModParts`, `BitOp`, `Narrowed`, `TypeFact`,
-  `InductionBinding`, `RegisteredSet`, `Paths`); the one rule only a set can
-  state is `!=`'s hole. Never add a second arithmetic, comparison or domain
-  rule in the checker. A native's result set is its registration
+  `InductionBinding`, `DomainEntered`, `RegisteredSet`, `Paths`); the one
+  rule only a set can state is `!=`'s hole. Never add a second arithmetic,
+  comparison or domain rule in the checker.
+* A counted loop drops only its zero-iteration exit, and only where
+  `hir::range::DomainEntered` proves every start and end its operands may
+  have enters it (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md): never an
+  exit of an iteration (a `break`, a `continue`, a `return`, a failure, the
+  head after any iteration), never from a relation between the bounds, a
+  caller's facts or an infinity read as a bound. A native's result set is its registration
   (`-result-range {intervals ...}`, std::char::scalar_value's surrogate
   gap), a contract of the implementation both runtimes uphold -- never a
   table beside the checker, never inferred from runs.
@@ -4918,7 +4924,9 @@ lowering, loader walk or resolution, or the `emissions` table's trust
 (interchange, the cache), run `tests/emission-claims.test`,
 `tests/interval-sets.test`, `tests/dfa.test`, `audit/emission-claims/tools/
 census.tcl` (no false proof; every case as expected),
-`audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs) and
+`audit/emission-claims/tools/fuzz.tcl` (several seeds; 0 false proofs),
+`audit/emission-claims/tools/loops.tcl` for a change to loops or their
+bounds' facts (several seeds; 0 false certificates, 0 regressions) and
 `audit/emission-claims/tools/mutate.tcl` (every mutant in its `mutants.txt`
 must still apply and be killed: update a mutant's text when you change the
 code it mutates, keeping it a mutant of the same rule), plus

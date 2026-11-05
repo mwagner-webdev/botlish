@@ -302,6 +302,80 @@ test iset-induction-sound {every counted loop's counter value lies in hir::range
     set bad
 } -cleanup {unset -nocomplain bad i s e ds de direction endKind r start end v} -result {}
 
+# hir::range::DomainEntered (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md)
+# held to the loop's own test: the evaluator's CountTest and CountSize.
+test iset-domain-entered-sound {a counted loop is entered (DomainEntered 1) exactly when every start and end its operands' Ranges hold runs the body at least once (core::forms::CountSize > 0): every pair enumerated, up and down, to and through} -body {
+    expr {srand(77)}
+    set bad {}
+    set entered 0
+    for {set i 0} {$i < 600 && [llength $bad] < 3} {incr i} {
+        set s [expr {int(rand() * 24) - 12}]
+        set e [expr {int(rand() * 24) - 12}]
+        set ds [expr {int(rand() * 4)}]
+        set de [expr {int(rand() * 4)}]
+        set startR [dict create min [expr {$s - $ds}] max [expr {$s + $ds}]]
+        set endR [dict create min [expr {$e - $de}] max [expr {$e + $de}]]
+        foreach direction {up down} {
+            foreach endKind {exclusive inclusive} {
+                set claimed [hir::range::DomainEntered $startR $endR $direction $endKind]
+                set every 1
+                for {set a [dict get $startR min]} {$a <= [dict get $startR max]} {set a [expr {$a + 1}]} {
+                    for {set z [dict get $endR min]} {$z <= [dict get $endR max]} {set z [expr {$z + 1}]} {
+                        if {[core::forms::CountSize $direction $endKind $a $z] == 0} {
+                            set every 0
+                        }
+                        # The evaluator's own test of the first value.
+                        if {$claimed && ![[core::forms::CountTest $direction $endKind] $a $z]} {
+                            lappend bad [list $direction $endKind $startR $endR $a $z]
+                        }
+                    }
+                }
+                if {$claimed != $every} {
+                    lappend bad [list $direction $endKind $startR $endR claimed $claimed every $every]
+                }
+                incr entered $claimed
+            }
+        }
+    }
+    list $bad [expr {$entered > 100}]
+} -cleanup {unset -nocomplain bad entered i s e ds de startR endR direction endKind claimed every a z} -result {{} 1}
+
+test iset-domain-entered-edges {DomainEntered at its edges: equal bounds (to: 0, through: 1), adjacent ones, the side the test reads unbounded (0), the other side unbounded (1), huge bounds past 2^63 and 10^23 (no sentinel), no value, an empty or a contradictory Range, an infinity as the only bound (no Int): 0} -body {
+    set big 100000000000000000000000
+    set huge 1000000000000000000000000000
+    set cases [list \
+        {{min 0 max 0} {min 0 max 0} up exclusive} \
+        {{min 0 max 0} {min 0 max 0} up inclusive} \
+        {{min 0 max 0} {min 1 max 1} up exclusive} \
+        {{min 0 max 0} {min -1 max -1} up inclusive} \
+        {{min 0 max 0} {min 0 max 0} down exclusive} \
+        {{min 0 max 0} {min 0 max 0} down inclusive} \
+        {{min 1 max 1} {min 0 max 0} down exclusive} \
+        {{min 0 max 0} {min 1 max +inf} up exclusive} \
+        {{min 0 max 0} {min 0 max +inf} up exclusive} \
+        {{min 0 max 0} {min 0 max +inf} up inclusive} \
+        {{min 0 max +inf} {min 10 max 10} up exclusive} \
+        {{min -inf max 9} {min 10 max 10} up exclusive} \
+        {{min 0 max 0} {min -inf max 5} up exclusive} \
+        {{min 1 max +inf} {min 0 max 0} down exclusive} \
+        {{min -inf max 5} {min 0 max 0} down exclusive} \
+        {{min 0 max 0} {min -inf max -1} down exclusive} \
+        [list {min 0 max 0} [list min $big max +inf] up exclusive] \
+        [list [list min 0 max $big] [list min $big max $big] up exclusive] \
+        [list [list min 0 max $big] [list min $big max $big] up inclusive] \
+        [list [list min 0 max $huge] [list min $big max $big] up exclusive] \
+        [list {min 0 max 9223372036854775807} {min 9223372036854775808 max 9223372036854775808} up exclusive] \
+        [list [list min $big max $big] [list min -$big max -$big] down exclusive] \
+        {never {min 1 max 1} up exclusive} \
+        {{min 0 max 0} never up exclusive} \
+        {{min -inf max +inf} {min -inf max +inf} up exclusive} \
+        {{min 0 max 0} {min 5 max 2} up exclusive} \
+        {{min 3 max 1} {min 5 max 5} up exclusive} \
+        {{min 0 max 0} {min +inf max +inf} up exclusive} \
+        {{min -inf max -inf} {min 5 max 5} up exclusive}]
+    lmap c $cases {hir::range::DomainEntered {*}$c}
+} -cleanup {unset -nocomplain big huge cases} -result {0 1 1 0 0 1 1 1 0 1 0 1 0 1 0 1 1 0 1 0 1 1 0 0 0 0 0 0 0}
+
 test iset-registered-scalar-value {std::char::scalar_value's registered result set is the Unicode scalar values: the surrogate gap; the Range analysis reads the same registration's hull} -body {
     list [hir::intset::OfRegistered std::char::scalar_value] [hir::range::RegisteredRange std::char::scalar_value] \
         [dict get [core::native::metadata std::char::scalar_value] resultRange]

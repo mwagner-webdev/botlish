@@ -619,6 +619,565 @@ fn maybe(n: int) -> unit emits json_lex::json_number:
 0}]
 } -result {{once proven} {twice rejected} {maybe rejected}}
 
+# ---------------------------------------------------------------------------
+# Entered counted loops (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md): a
+# counted loop has no zero-iteration exit when its bounds' facts prove the
+# body runs; every exit of the iterations that run stays.
+
+# Two recognizers of nonempty tokens: `ones` ('1'+) and `ab` ('a' 'b'*).
+set onesDfa "import std::dfa\n\ndfa ones over ascii:\n    start:\n        '1' -> more\n    more:\n        '1' -> more\n        end -> accept\n\ndfa ab over ascii:\n    start:\n        'a' -> rest\n    rest:\n        'b' -> rest\n        end -> accept\n\nerror Bad\n\n"
+
+# The claims of the entry program of BODY (after onesDfa's header):
+# {NAME VERDICT KINDS}... with -kinds 1, else {NAME VERDICT}...
+proc loopClaims {body args} {
+    set options [dict merge {-kinds 0 -files {}} $args]
+    set r [claims "$::onesDfa$body\n\n0\n" -files [dict get $options -files]]
+    if {[dict get $options -kinds]} { return $r }
+    return [lmap c $r {lrange $c 0 1}]
+}
+
+test ec-loop-entered-guards {a loop's bounds proved entered by the facts the code before it establishes -- a failing guard, a returning branch, `not`, `or`, `and`, an earlier binding, a declared domain, an exact bound past the unrolling limit -- has no zero-iteration exit; the same loops without the fact may run zero times} -body {
+    loopClaims {type Pos = Int in 1..1000
+type Nat = Int in 0..1000
+
+fn fail_guard(n: int) -> unit errors Bad emits ones:
+    if n <= 0:
+        fail Bad
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn return_guard(n: int) -> unit emits ones:
+    if n < 1:
+        yield 49
+        return unit
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn not_guard(n: int) -> unit errors Bad emits ones:
+    if not (n > 0):
+        fail Bad
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn or_guard(n: int) -> unit errors Bad emits ones:
+    if n < 1 or n > 10:
+        fail Bad
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn and_branch(n: int) -> unit emits ones:
+    if n >= 1 and n <= 10:
+        loop i from 0 to n:
+            yield 49
+            continue
+    else:
+        yield 49
+    unit
+
+fn binding(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    m = n + 1
+    loop i from 0 to m:
+        yield 49
+        continue
+    unit
+
+fn domain(n: Pos) -> unit emits ones:
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn exact_big() -> unit emits ones:
+    big = 100000000000000000000000
+    loop i from 0 to big:
+        yield 49
+        continue
+    unit
+
+fn unguarded(n: int) -> unit emits ones:
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn wrong_guard(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn nat_domain(n: Nat) -> unit emits ones:
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn check(n: int) -> unit errors Bad:
+    if n <= 0:
+        fail Bad
+    unit
+
+fn handled_guard(n: int) -> unit emits ones:
+    check(n):
+        on Bad:
+            unit
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit}
+} -result {{fail_guard proven} {return_guard proven} {not_guard proven} {or_guard proven} {and_branch proven} {binding proven} {domain proven} {exact_big proven} {unguarded rejected} {wrong_guard rejected} {nat_domain rejected} {handled_guard rejected}}
+
+test ec-loop-entered-endpoints {the loop's own test decides: `to` from 0 needs an end of at least 1, `through` of at least 0; descending loops the mirror; negative bounds; an inexact start entered only when its largest value is below every end (all pairs, never some)} -body {
+    loopClaims {fn to_ge0(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn through_ge0(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    loop i from 0 through n:
+        yield 49
+        continue
+    unit
+
+fn through_gem1(n: int) -> unit errors Bad emits ones:
+    if n < -1:
+        fail Bad
+    loop i from 0 through n:
+        yield 49
+        continue
+    unit
+
+fn down_to_ge1(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i down from n to 0:
+        yield 49
+        continue
+    unit
+
+fn down_to_ge0(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    loop i down from n to 0:
+        yield 49
+        continue
+    unit
+
+fn down_through_ge0(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    loop i down from n through 0:
+        yield 49
+        continue
+    unit
+
+fn down_end_inexact(n: int) -> unit errors Bad emits ones:
+    if n > -5:
+        fail Bad
+    loop i down from -5 through n:
+        yield 49
+        continue
+    unit
+
+fn negative(n: int) -> unit errors Bad emits ones:
+    if n < -4:
+        fail Bad
+    loop i from -5 to n:
+        yield 49
+        continue
+    unit
+
+fn negative_equal(n: int) -> unit errors Bad emits ones:
+    if n < -5:
+        fail Bad
+    loop i from -5 to n:
+        yield 49
+        continue
+    unit
+
+fn inexact_start(a: int, n: int) -> unit errors Bad emits ones:
+    if a < 0 or a > 3 or n < 4:
+        fail Bad
+    loop i from a to n:
+        yield 49
+        continue
+    unit
+
+fn inexact_overlap(a: int, n: int) -> unit errors Bad emits ones:
+    if a < 0 or a > 3 or n < 3:
+        fail Bad
+    loop i from a to n:
+        yield 49
+        continue
+    unit}
+} -result {{to_ge0 rejected} {through_ge0 proven} {through_gem1 rejected} {down_to_ge1 proven} {down_to_ge0 rejected} {down_through_ge0 proven} {down_end_inexact proven} {negative proven} {negative_equal rejected} {inexact_start proven} {inexact_overlap rejected}}
+
+test ec-loop-entered-huge {arbitrary-precision bounds, no sentinel: ends past 10^23 and around 2^63 prove a loop entered, and a start that may be past an end of 10^23 does not} -body {
+    loopClaims {fn past_big(n: int) -> unit errors Bad emits ones:
+    if n < 100000000000000000000000:
+        fail Bad
+    loop i from 99999999999999999999999 to n:
+        yield 49
+        continue
+    unit
+
+fn start_unbounded(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    loop i from n to 100000000000000000000000:
+        yield 49
+        continue
+    unit
+
+fn start_below_big(n: int) -> unit errors Bad emits ones:
+    if n < 0 or n >= 100000000000000000000000:
+        fail Bad
+    loop i from n to 100000000000000000000000:
+        yield 49
+        continue
+    unit
+
+fn at_2_63(n: int) -> unit errors Bad emits ones:
+    if n < 9223372036854775808:
+        fail Bad
+    loop i from 9223372036854775807 to n:
+        yield 49
+        continue
+    unit
+
+fn equal_2_63_to(n: int) -> unit errors Bad emits ones:
+    if n < 9223372036854775808:
+        fail Bad
+    loop i from 9223372036854775808 to n:
+        yield 49
+        continue
+    unit
+
+fn equal_2_63_through(n: int) -> unit errors Bad emits ones:
+    if n < 9223372036854775808:
+        fail Bad
+    loop i from 9223372036854775808 through n:
+        yield 49
+        continue
+    unit}
+} -result {{past_big proven} {start_unbounded rejected} {start_below_big proven} {at_2_63 proven} {equal_2_63_to rejected} {equal_2_63_through proven}}
+
+test ec-loop-entered-unknown {a bound of no known Int set, or one the checker does not model (a call through a function value, an untyped value), proves nothing: the zero-iteration exit stays} -body {
+    loopClaims {fn through_value(f: Fn{args: [int], return: int}, n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    m = f(n)
+    loop i from 0 to m:
+        yield 49
+        continue
+    unit
+
+fn untyped(n) -> unit emits ones:
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn opaque_count(n: int) -> int:
+    n * n - n
+
+fn opaque(n: int) -> unit emits ones:
+    m = opaque_count(n)
+    loop i from 0 to m:
+        yield 49
+        continue
+    unit}
+} -result {{through_value rejected} {untyped rejected} {opaque rejected}}
+
+test ec-loop-entered-not-emitting {proving that a loop runs is not proving that it emits: an entered loop whose first iteration may break, continue, return or complete without a yield is rejected, and so is one that may run beyond the token, emit an invalid symbol in a later iteration only, or contain a loop that may run zero times} -body {
+    loopClaims {fn break_first(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if i == 0:
+            break
+        yield 49
+        continue
+    unit
+
+fn break_flag(n: int, b: bool) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if b:
+            break
+        yield 49
+        continue
+    unit
+
+fn continue_first(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if i == 0:
+            continue
+        yield 49
+        continue
+    unit
+
+fn return_first(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if i == 0:
+            return unit
+        yield 49
+        continue
+    unit
+
+fn maybe_yield(n: int, b: bool) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if b:
+            yield 49
+        continue
+    unit
+
+fn later_invalid(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if i > 0:
+            yield 120
+        yield 49
+        continue
+    unit
+
+fn first_differs(n: int) -> unit errors Bad emits ab:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if i == 0:
+            yield 97
+        else:
+            yield 98
+        continue
+    unit
+
+fn first_invalid(n: int) -> unit errors Bad emits ab:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        yield 98
+        continue
+    unit
+
+fn nested_inner_empty(n: int, m: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        loop j from 0 to m:
+            yield 49
+            continue
+        continue
+    unit
+
+fn nested_both(n: int, m: int) -> unit errors Bad emits ones:
+    if n < 1 or m < 1:
+        fail Bad
+    loop i from 0 to n:
+        loop j from 0 to m:
+            yield 49
+            continue
+        continue
+    unit}
+} -result {{break_first rejected} {break_flag rejected} {continue_first rejected} {return_first rejected} {maybe_yield rejected} {later_invalid rejected} {first_differs proven} {first_invalid rejected} {nested_inner_empty rejected} {nested_both proven}}
+
+test ec-loop-entered-count {a loop proved entered keeps every later iteration: one of at most three iterations is not one symbol, one of exactly one is} -body {
+    claims "${digitDfa}error Bad\n\nfn exactly_one(n: int) -> unit errors Bad emits digit_token:\n    if n != 1:\n        fail Bad\n    loop i from 0 to n:\n        yield 55\n        continue\n    unit\n\nfn one_to_three(n: int) -> unit errors Bad emits digit_token:\n    if n < 1 or n > 3:\n        fail Bad\n    loop i from 0 to n:\n        yield 55\n        continue\n    unit\n\n0\n"
+} -result {{exactly_one proven {}} {one_to_three rejected EMIT-AFTER-TOKEN}}
+
+test ec-loop-entered-failures {failure paths of an entered loop: a bound's failure before the first iteration starts its handler from the states before the loop (where the handler emits nothing, the claim may complete empty), a helper's failure after its yield starts the handler from the state after that symbol} -body {
+    loopClaims {fn bound(n: int) -> int errors Bad:
+    if n < 1:
+        fail Bad
+    n
+
+fn run(n: int) -> unit errors Bad:
+    loop i from 0 to bound(n):
+        yield 49
+        continue
+    unit
+
+fn bound_fails_empty(n: int) -> unit emits ones:
+    run(n):
+        on Bad:
+            unit
+    unit
+
+fn bound_fails_emits(n: int) -> unit emits ones:
+    run(n):
+        on Bad:
+            yield 49
+    unit
+
+fn one_then_fail(b: bool) -> unit errors Bad:
+    yield 49
+    if b:
+        fail Bad
+    unit
+
+fn after_yield_invalid(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        one_then_fail(i == 0):
+            on Bad:
+                yield 120
+        continue
+    unit
+
+fn after_yield_valid(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        one_then_fail(i == 0):
+            on Bad:
+                yield 49
+        continue
+    unit
+
+fn fail_first_handled(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n:
+        if i == 0:
+            fail Bad
+        yield 49
+        continue
+    unit
+
+fn caller_of_fail_first(n: int) -> unit emits ones:
+    fail_first_handled(n):
+        on Bad:
+            unit
+    unit
+
+type Pos = Int in 1..1000
+
+fn fail_first_domain(n: Pos) -> unit errors Bad emits ones:
+    loop i from 0 to n:
+        if i == 0:
+            fail Bad
+        yield 49
+        continue
+    unit
+
+fn caller_of_fail_first_domain(n: Pos) -> unit emits ones:
+    fail_first_domain(n):
+        on Bad:
+            unit
+    unit}
+} -result {{bound_fails_empty rejected} {bound_fails_emits proven} {after_yield_invalid rejected} {after_yield_valid proven} {fail_first_handled proven} {fail_first_domain proven} {caller_of_fail_first rejected} {caller_of_fail_first_domain rejected}}
+
+test ec-loop-entered-fixpoint {an entered loop's later iterations still go to their fixpoint: a '.' every other iteration after a '0' is found only in a second round, from the fraction the first one starts} -body {
+    verdicts [program {error Bad
+
+fn dots(n: int) -> unit errors Bad emits json_lex::json_number:
+    if n < 1:
+        fail Bad
+    yield 49
+    loop i from 0 to n:
+        if i == 0:
+            yield 48
+        elif i.mod(2) == 0:
+            yield 48
+        else:
+            yield 46
+        continue
+    unit
+
+fn zeros(n: int) -> unit errors Bad emits json_lex::json_number:
+    if n < 1:
+        fail Bad
+    yield 49
+    loop i from 0 to n:
+        yield 48
+        continue
+    unit
+
+0} {json_lex}]
+} -result {{dots rejected} {zeros proven}}
+
+test ec-loop-entered-contexts {a helper's loop is entered or not by the argument facts of each call (its summaries are per argument context), never by another caller's: one caller's guard proves nothing for the other; a claimed helper with a positive domain composes through its certificate} -body {
+    loopClaims {type Pos = Int in 1..1000000
+
+fn digits(n: int) -> unit:
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn guarded(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    digits(n)
+    unit
+
+fn unguarded(n: int) -> unit emits ones:
+    digits(n)
+    unit
+
+fn guarded_again(n: int) -> unit errors Bad emits ones:
+    if n < 2:
+        fail Bad
+    digits(n)
+    unit
+
+fn pos_digits(n: Pos) -> unit emits ones:
+    loop i from 0 to n:
+        yield 49
+        continue
+    unit
+
+fn composed(n: int) -> unit errors Bad emits ones:
+    if n < 1 or n > 1000000:
+        fail Bad
+    pos_digits(n)
+    unit}
+} -result {{guarded proven} {unguarded rejected} {guarded_again proven} {pos_digits proven} {composed proven}}
+
+test ec-loop-entered-lockstep {a lockstep loop's domains share one count, so its counting domain decides: entered with an end of at least 1, not without} -body {
+    loopClaims {fn lock(n: int) -> unit errors Bad emits ones:
+    if n < 1:
+        fail Bad
+    loop i from 0 to n and j from 1 to n + 1:
+        yield 49
+        continue
+    unit
+
+fn lock_maybe(n: int) -> unit errors Bad emits ones:
+    if n < 0:
+        fail Bad
+    loop i from 0 to n and j from 1 to n + 1:
+        yield 49
+        continue
+    unit}
+} -result {{lock proven} {lock_maybe rejected}}
+
 test ec-recursion-second-round {recursion to a fixpoint: what follows a recursive call that returns is checked in the states it returns in} -body {
     verdicts [program {fn rec(n: int) -> unit emits json_lex::json_number:
     if n > 0:
@@ -1338,6 +1897,19 @@ test ec-domain-admission {a certificate never admits an argument: a call of a do
 
 # ---------------------------------------------------------------------------
 # HIR text, interchange, the cache: a certificate in text is never a proof
+
+test ec-loop-entered-trust {a certificate resting on an entered loop is verified again from interchange text; the memoized one is reused while the code it read is the same, and invalidated when the bound fact it read changes (the guard's constant): proved again, and rejected} -body {
+    set ::hir::emission::memo [dict create]
+    set body "${::onesDfa}fn g(n: int) -> unit errors Bad emits ones:\n    if n < %s:\n        fail Bad\n    loop i from 0 to n:\n        yield 49\n        continue\n    unit\n\n0\n"
+    set hir [surface::compile [format $body 1] -warnings off]
+    set back [hir::interchange::decode [hir::interchange::encode $hir]]
+    set out [list [expr {$back eq $hir}] [lmap r [hir::emission::claims $back] {dict get $r verdict}]]
+    foreach k {1 1 0} {
+        set dir [emit::workspace main.bot [format $body $k]]
+        lappend out [reuse [file join $dir main.bot]]
+    }
+    set out
+} -result {1 proven {{g proven 1}} {{g proven 1}} {{g rejected 0}}}
 
 test ec-hir-text {HIR text prints a block's claims (the recognizer's binding and name) and reads them back; text carries no recognizer table, so a claim read back is not proved, never certified} -body {
     set hir [surface::compile "${digitDfa}type DigitValue = Int in 0..9\n\nfn digit(d: DigitValue) -> unit emits digit_token:\n    yield 48 + d\n    unit\n\n0\n" -warnings off]
