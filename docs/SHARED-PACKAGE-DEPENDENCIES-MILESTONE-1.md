@@ -593,15 +593,27 @@ unchanged.
 |---|---|---|
 | tests/package-manager.test | 86 passed | 13 new (`pm-shared-*`, `pm-two-versions-conflict`, `pm-conflict-deterministic`, `pm-package-graph`, `pm-graph-file-owned`, `pm-nested-installation-migrated`, `pm-fault-graph`); 9 updated to the graph |
 | tests/package-native.test | 38 passed, 1 skipped (constraint) | `pn-shared-in-views` replaces `pn-two-versions-in-views`; file counts and record schema updated |
-| tests/bot-modules.test | 68 passed, 1 skipped (sdl3Run) | 12 new (`bm-graph-*`) |
-| tests/package-workloads.test | the 4 `pw-shared-*` tests passed (constraints met here); `pw-sdlkit-installs-its-binding` updated (sdl3Package: not run here) | 4 new |
+| tests/bot-modules.test | 69 tests: 68 passed, 1 skipped (sdl3Run) | 13 new (`bm-graph-*`) |
+| tests/package-workloads.test | 9 passed, 19 skipped by constraints (the SDL3 and Raven packages need their libraries built), on both passes; the 4 `pw-shared-*` tests among the passed; `pw-sdlkit-installs-its-binding` updated (sdl3Package: not run here) | 4 new |
 | tests/package-authoring.test | 29 passed, 1 skipped | -- |
 | tests/static-compile.test | 83 passed | PACKAGE-GRAPH classified |
 | compiler-service, hir-cache, hir-interchange, lsp, main-cli, imports, application-modules, compilation-isolation, surface-modules, std-namespace, native-link-plan, diagnostic-recovery, golden-duplicates | all passed | -- |
 | tools/compilerpedia.tcl check | 1219 topics, 742 examples, 0 problems | 3 topics |
+| audit/hir-interchange/tools/roundtrip.tcl `-via cache`, `-via interchange` | 12 suites each: 120 and 108 artifacts and outcomes compared, 0 differ | -- |
+| tests/numeric-looking-names.test (`nl-no-string-ternary`) | passed | -- |
 | tools/mutant-catalogs.tcl | 85 catalogs, 3005 mutants, 0 problems | 16 new mutants, 6 retargeted |
 
-FULL-SUITE-PLACEHOLDER
+The whole local suite (`tclsh9.0 tests/local.tcl`: 267 Tcl test files on
+interp and compile, 117 golden suites on interp, compile, cranelift-generic
+and cranelift, through an empty front-end cache; 105 minutes on this
+container, 4 at a time) passed 649 of 651 runs. The two failures were
+`tests/package-workloads.test` on both passes: section G had been added
+after the file's own deletion of its cached repositories, so run with the
+whole file its tests copied from a deleted directory (they passed when run
+alone). Moved before that deletion, the file passes on both passes as
+`tests/local.tcl` runs it (9 passed, 19 skipped by constraints).
+`single/smoke-test.sh` (with a new shared-dependency block) passed against a
+fresh `single/build.sh`.
 
 ### 12.2 Reference resolver
 
