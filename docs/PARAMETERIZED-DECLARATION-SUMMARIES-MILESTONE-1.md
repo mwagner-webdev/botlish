@@ -87,11 +87,16 @@ applications substitution would make.
 * **An independent model.** 5,625 random queries over 225 random
   declaration graphs were answered as the oracle answers them. 22,500 more
   comparisons with the old walks found 0 DIFFERENT.
-* **Mutants.** EVIDENCE-MUTANTS
-* **Tests.** `tests/parameterized-declaration-summaries.test` (23 tests).
+* **Mutants.** All 37 of this milestone's mutants are killed, one of them
+  by a test added when it first survived. So are the 40 mutants of seven
+  other harnesses that edit code this milestone changed, one of them after
+  a retarget.
+* **Tests.** `tests/parameterized-declaration-summaries.test` (24 tests).
   Every test file the changes reach passes, and so did the full local run
   but for `main`'s own defects.
-* **CI.** EVIDENCE-CI
+* **CI.** `static-decisions` and icy-tower on macOS and Windows passed.
+  The Linux, Linux arm64, macOS and Windows test workflows were still
+  queued when this was written, so they are pending (section 22).
 * **What the audit found and fixed on the way:**
   * one wrong answer: a refinement's name read as imprecise
     (`MayHoldVector(Box[Small])`, full corpus);
@@ -767,7 +772,68 @@ finish within its timeout kills the mutant. The harness first runs the
 detectors on the unmutated copy (the control). A detector that fails or
 does not finish there would kill every mutant, so the run stops.
 
-RESULTS-MUTANTS
+**Result** (final code, fixed reference): **37 mutants, 37 killed, 0
+survived**. The test files alone kill every one; the fuzzer kills 27 of
+them as well. Each control passed in 51 to 57 s.
+
+| mutant | verdict | tests (failed) | fuzzer |
+|---|---|---|---|
+| `fixpoint-one-round-early` | killed | 9 (`hb-list-of-callables-not-hashable`, `pds-mutual`, `pds-nested-arguments`, ...) | did not finish |
+| `fixpoint-never-revisits` | killed | 8 (`hb-list-of-callables-not-hashable`, `pds-mutual`, `pds-nested-arguments`, ...) | did not finish |
+| `summary-keyed-by-name` | killed | 1 (`pds-identity-not-name`) | survived |
+| `summary-survives-reset` | killed | 2 (`pds-counters-nonuniform`, `pds-isolation`) | did not finish |
+| `slot-order-swapped` | killed | 2 (`pds-mixed`, `pds-total-lowering`) | 29 failures |
+| `last-slot-ignored` | killed | 12 (`callable-escape-any-beside-typed-parameter-rejected`, `callable-escape-any-parameters-with-errors-rejected`, `pds-identity-not-name`, ...) | 37 failures |
+| `every-slot-relevant` | killed | 32 (`callable-escape-any-parameters-unrestricted`, `pds-mixed`, `pds-mutual`, ...) | did not finish |
+| `no-slot-relevant` | killed | 13 (`callable-escape-any-beside-typed-parameter-rejected`, `callable-escape-any-parameters-with-errors-rejected`, `pds-identity-not-name`, ...) | 72 failures |
+| `own-omitted` | killed | 5 (`hb-hash-static-rejection`, `hb-list-of-callables-not-hashable`, `hb-struct-with-callable-not-hashable`, ...) | 66 failures |
+| `union-every-slot` | killed | 7 (`pds-carried-union`, `pds-isolation`, `pds-mixed`, ...) | 20 failures |
+| `fixpoint-pessimistic` | killed | 13 (`hb-witness-census`, `pds-mixed`, `pds-mutual`, ...) | did not finish |
+| `fixpoint-optimistic-unrevised` | killed | 8 (`hb-list-of-callables-not-hashable`, `pds-mutual`, `pds-nested-arguments`, ...) | did not finish |
+| `bearing-own-fields-ignored` | killed | 1 (`pds-nonuniform-own`) | 33 failures |
+| `bearing-slot-ignored` | killed | 8 (`callable-escape-any-beside-typed-parameter-rejected`, `callable-escape-any-parameters-with-errors-rejected`, `pds-identity-not-name`, ...) | 15 failures |
+| `bearing-phantom-contributes` | killed | 6 (`pds-identity-not-name`, `pds-isolation`, `pds-mixed`, ...) | 38 failures |
+| `bearingnamed-other-summary` | killed | 60 (`callable-escape-any-parameters-unrestricted`, `hb-public-hash-pinned`, `pds-mixed`, ...) | 4 failures |
+| `bearing-unfolds-again` | killed | did not finish | survived |
+| `carried-item-dropped` | killed | 5 (`pds-carried-union`, `pds-isolation`, `pds-mixed`, ...) | did not finish |
+| `carried-slot-ignored` | killed | 5 (`pds-carried-union`, `pds-isolation`, `pds-mixed`, ...) | did not finish |
+| `carried-first-only` | killed | 1 (`pds-carried-union`) | 2 failures |
+| `carried-unfolds-again` | killed | did not finish | 36 failures |
+| `totality-unknown-as-total` | killed | 1 (`hb-witness-census`) | survived |
+| `totality-none-as-unknown` | killed | 14 (`hb-hash-static-rejection`, `hb-struct-with-callable-not-hashable`, `hb-witness-census`, ...) | 124 failures |
+| `totality-field-ignored` | killed | 13 (`hb-list-of-callables-not-hashable`, `hb-witness-census`, `hb-witness-not-user-definable`, ...) | 40 failures |
+| `totality-phantom-poisons` | killed | 11 (`pds-counters-nonuniform`, `pds-identity-not-name`, `pds-isolation`, ...) | 68 failures |
+| `totality-slot-ignored` | killed | 10 (`pds-identity-not-name`, `pds-isolation`, `pds-mixed`, ...) | 16 failures |
+| `totality-total-too-early` | killed | 5 (`hb-list-of-callables-not-hashable`, `pds-mutual`, `pds-nested-arguments`, ...) | 32 failures |
+| `totality-none-too-early` | killed | 8 (`hb-witness-census`, `pds-mixed`, `pds-mutual`, ...) | 68 failures |
+| `hashable-rejects-total` | killed | 9 (`pds-mixed`, `pds-mutual`, `pds-nested-arguments`, ...) | survived |
+| `totality-unfolds-again` | killed | did not finish | survived |
+| `totality-depth-limit` | killed | 1 (`pds-no-depth-threshold`) | survived |
+| `unfolding-retained` | killed | 6 (`pds-interchange`, `pds-owned-recursion-kept`, `pds-total-lowering`, ...) | survived |
+| `growing-argument-rejected` | killed | 6 (`pds-interchange`, `pds-owned-recursion-kept`, `pds-total-lowering`, ...) | survived |
+| `owned-recursion-allowed` | killed | 2 (`wd-recursive-message`, `wd-recursive-rejected`) | survived |
+| `schema-unfolds-phantom` | killed | did not finish | survived |
+| `answers-outlive-declarations` | killed | 1 (`pds-isolation`) | 40 failures |
+| `answers-remembered-provisionally` | killed | 6 (`hb-list-of-callables-not-hashable`, `pds-mutual`, `pds-nested-arguments`, ...) | 33 failures |
+
+("did not finish": the detector ran to its 900 s timeout. That is the
+designed verdict for the four mutants that bring an unfolding back, since a
+walk that unfolds a non-uniform recursion with an affine argument never
+ends. Where the fuzzer did not finish otherwise, it was still printing the
+failures it found.)
+
+One mutant survived on the first full run: `totality-depth-limit`, a class
+decided by the length of an application's text. No test asked about a type
+longer than `W[List^8[C]]`, and the fuzzer's types are small.
+`pds-no-depth-threshold` now asks about `W[List^N[C]]`, `Mixed[int,
+List^N[C]]` and `Box^N[C]` at N = 1, 8, 24, 48 and 96. An affine argument
+is never cut by the type bound, so `Box^96[C]` is a type of 1,605
+characters. The test requires every answer to equal the one at depth 1,
+and it kills the mutant.
+
+The run was split into three parallel harness runs after the first three
+mutants, with a control each. Those first three ran with the reference
+before its fix, and the test files killed all three.
 
 Equivalent mutants left out, and why (recorded in `mutants.txt`): applying
 an argument's contribution twice (every join is idempotent), dropping
@@ -1021,7 +1087,7 @@ those changes can reach was run again on the final code, each passing:
 
 | test file | tests |
 |---|---:|
-| parameterized-declaration-summaries | 23 (its small parity corpus included, against the fixed reference) |
+| parameterized-declaration-summaries | 24 (its small parity corpus included, against the fixed reference) |
 | written-affine-applications | 26 |
 | hashable | 48 |
 | value-identity | 33 |
@@ -1049,7 +1115,33 @@ none in a catalog this milestone touches.
 
 **CI on the branch.**
 
-RESULTS-CI
+Status when this report was written. Pending runs are pending: none is
+counted as passed.
+
+| workflow | commit | result |
+|---|---|---|
+| `static-decisions` (dispatched) | 961dc07 | **passed**: plan, four shards and mutable-array.bot, batched against sequential |
+| `icy-tower (macos arm64)` | 8e242ab, 35ff73b | **passed** |
+| `icy-tower (windows x86-64)` | 8e242ab, 35ff73b | **passed** |
+| `tests` (Linux x86-64, dispatched) | the branch head | **queued: pending** |
+| `tests (linux arm64)` (dispatched) | the branch head | **queued: pending** |
+| `tests (macos arm64)` | the branch head | **queued: pending** |
+| `tests (windows x86-64)` | the branch head | **queued: pending** |
+
+Infrastructure, not product:
+
+* No `tests`, `tests (linux arm64)`, `tests (macos arm64)` or `tests
+  (windows x86-64)` run on this branch has finished.
+* Every earlier push run was cancelled, as the workflows' concurrency
+  rules do, by the branch's next push, before it finished. None failed.
+* The dispatched Linux runs waited for hours without a runner. `main`'s
+  own `tests` and `tests (linux arm64)` runs of c6269fd5 and 13dd290 waited
+  the same way on the same day.
+
+The commits after 961dc07 change the reason texts and the reason walks'
+cost, never a class, a diagnostic kind or a fact the static-decision
+schedulers read. So `static-decisions` was not dispatched again: its
+runners are the same scarce Linux pool.
 
 ## 23. Remaining recursive type walks
 
