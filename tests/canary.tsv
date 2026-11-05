@@ -1,0 +1,295 @@
+# canary.tsv -- the canary's records (CI-RUNS.md, "The canary"), written by
+# tools/ci/history.py from the pushes to main of the four test workflows in
+# the 21 days before 2026-11-05. tests/canary.tcl reads it.
+#
+# history ITEM HOSTS COMMITS LAST REASON: ITEM (a test file or golden suite)
+# failed in CI at COMMITS commits of main, on HOSTS (comma-separated host
+# targets, * for all four), last on LAST, with REASON (its first failing
+# test then). The canary runs these after what a push changes, the most
+# failing first.
+#
+# duration ITEM SECONDS: ITEM's wall seconds on linux-x86_64 (a Tcl test
+# file on interp, a golden suite on all four backends), the canary's
+# estimate of its cost; an item without one is estimated from its size.
+
+history	tests/c-bindgen.test	linux-x86_64,linux-aarch64,windows-x86_64	16	2026-10-27	cb-win32-current
+history	tests/workload-icy-tower.test	linux-aarch64	14	2026-11-02	workload-icy-tower-release-tooling
+history	tests/c-ffi.test	linux-x86_64,macos-aarch64,windows-x86_64	13	2026-10-27	cf-wrong-architecture
+history	tests/package-native.test	linux-aarch64,macos-aarch64,windows-x86_64	9	2026-11-04	pn-concurrent-target-compiles
+history	tests/main-thread-startup.test	macos-aarch64	8	2026-11-02	mts-main-process-semantics
+history	tests/package-manager.test	windows-x86_64	8	2026-11-02	pm-remove
+history	tests/package-authoring.test	linux-x86_64,windows-x86_64	6	2026-11-04	pa-compare-git-tree-matches-git
+history	tests/c-pointer-borrowing.test	linux-aarch64	5	2026-10-18	cb-liveness-mutant-detected
+history	tests/c-byte-borrowing.test	macos-aarch64	4	2026-10-21	bb-guard-malloc
+history	tests/workload-2048.test	linux-aarch64	3	2026-10-17	workload-2048-demo-executable
+history	tests/dfa-workloads.test	windows-x86_64	2	2026-10-24	dfa-json-model
+history	tests/dfa.test	windows-x86_64	2	2026-10-24	dfa-protocol-unread-counts
+history	tests/coroutine-fusion.test	windows-x86_64	2	2026-10-23	cf-workloads-fused
+history	tests/hir-text.test	windows-x86_64	2	2026-10-21	ht-coroutine-protocols
+history	tests/event-loop-linux.test	linux-aarch64	1	2026-11-01	el-linux-inflight
+
+duration	tests/abi-bytes.test	29.4
+duration	tests/abi-mutable-bytes.test	31.8
+duration	tests/abi-numeric.test	11.5
+duration	tests/acceptance.test	0.1
+duration	tests/actor.test	453.1
+duration	tests/affine-applications.test	3.0
+duration	tests/affine.test	12.9
+duration	tests/aot-stub-linker.test	5.1
+duration	tests/application-modules.test	2.9
+duration	tests/applied-types.test	0.7
+duration	tests/argv.test	14.1
+duration	tests/ascii.test	4.9
+duration	tests/backends.test	0.2
+duration	tests/bench-backends.test	0.4
+duration	tests/bench-corpus.test	22.2
+duration	tests/binary-layout.test	11.5
+duration	tests/bindings.test	0.2
+duration	tests/blockescape-called-generic.test	0.4
+duration	tests/blockescape-nested-capturers.test	1.5
+duration	tests/blocks.test	0.1
+duration	tests/bot-modules.test	106.3
+duration	tests/branch-form-boolean.test	83.7
+duration	tests/byte-set.test	1.4
+duration	tests/c-abi-types.test	4.2
+duration	tests/c-bindgen.test	47.3
+duration	tests/c-byte-borrowing.test	21.5
+duration	tests/c-callbacks.test	17.5
+duration	tests/c-ffi-error-capture.test	70.7
+duration	tests/c-ffi.test	73.1
+duration	tests/c-float-ffi.test	13.1
+duration	tests/c-pointer-borrowing.test	28.6
+duration	tests/calls.test	0.1
+duration	tests/checked-domain-proof-provenance.test	0.7
+duration	tests/close-callers-convergence.test	0.7
+duration	tests/closed-closure-entry-facts.test	1.0
+duration	tests/closure-int-keys.test	4.6
+duration	tests/collection-iteration.test	46.1
+duration	tests/collection-reorder.test	230.0
+duration	tests/compilation-isolation.test	24.4
+duration	tests/compiler-opt.test	18.4
+duration	tests/compiler-service.test	5.0
+duration	tests/compilerpedia.test	87.9
+duration	tests/conjunctive-entry-facts.test	0.5
+duration	tests/context-affine.test	3.7
+duration	tests/context-resource-escape.test	4.3
+duration	tests/context-traits.test	18.8
+duration	tests/contexts.test	15.3
+duration	tests/control.test	0.1
+duration	tests/coroutine-fusion.test	23.7
+duration	tests/coroutines.test	14.3
+duration	tests/darwin-io.test	63.2
+duration	tests/decimal-rounded.test	5.8
+duration	tests/dfa-workloads.test	208.4
+duration	tests/dfa.test	69.6
+duration	tests/diagnostic-recovery.test	5.9
+duration	tests/direct-hir-native.test	65.6
+duration	tests/direct-modules.test	9.7
+duration	tests/dormant-instances.test	5.1
+duration	tests/elif.test	25.9
+duration	tests/emailish-predicate.test	10.7
+duration	tests/emission-claims.test	67.5
+duration	tests/empty-collection-admissibility.test	1.2
+duration	tests/enums.test	3.0
+duration	tests/error-payloads.test	7.5
+duration	tests/errors.test	2.8
+duration	tests/event-loop-linux.test	213.9
+duration	tests/event-loop.test	729.9
+duration	tests/exact-callable-executable.test	15.7
+duration	tests/exact-callable-key.test	8.6
+duration	tests/exact-value-facts.test	3.1
+duration	tests/filesystem.test	384.4
+duration	tests/fixed-arity-list-return.test	35.2
+duration	tests/flags.test	11.1
+duration	tests/float64.test	4.0
+duration	tests/fold-loops.test	7.2
+duration	tests/golden-duplicates.test	1.3
+duration	tests/golden-framework.test	73.6
+duration	tests/golden.test	59.1
+duration	tests/hashable.test	4.5
+duration	tests/higher-order-completions.test	5.5
+duration	tests/hir-aot.test	5.8
+duration	tests/hir-cache.test	1.6
+duration	tests/hir-call-facts.test	0.5
+duration	tests/hir-callable-target.test	0.8
+duration	tests/hir-cardinality.test	0.2
+duration	tests/hir-closed-call-params.test	2.1
+duration	tests/hir-interchange.test	3.2
+duration	tests/hir-lowering.test	0.5
+duration	tests/hir-range-bitop.test	0.1
+duration	tests/hir-range-exact.test	0.2
+duration	tests/hir-range.test	2.9
+duration	tests/hir-refinement.test	0.2
+duration	tests/hir-resolution.test	0.2
+duration	tests/hir-samples.test	0.3
+duration	tests/hir-specialize.test	9.5
+duration	tests/hir-syntax.test	0.2
+duration	tests/hir-text.test	1.0
+duration	tests/hir-types.test	0.2
+duration	tests/immutable-map.test	139.7
+duration	tests/immutable-set.test	1.2
+duration	tests/imports.test	4.2
+duration	tests/inference.test	0.3
+duration	tests/instance-entry-range-facts.test	0.8
+duration	tests/interval-sets.test	2.9
+duration	tests/intrinsic-contracts.test	4.2
+duration	tests/layout-arrays.test	57.1
+duration	tests/layout-unions.test	41.6
+duration	tests/linux-path.test	60.8
+duration	tests/linux-syscall-transports.test	4.3
+duration	tests/linux-syscall.test	6.2
+duration	tests/list-flat.test	6.6
+duration	tests/list-length-refinement.test	4.3
+duration	tests/list-stdlib.test	0.8
+duration	tests/lists.test	0.2
+duration	tests/loop-collecting.test	3.5
+duration	tests/loop-counted.test	1.3
+duration	tests/loop-in.test	0.5
+duration	tests/loops.test	0.1
+duration	tests/lsp-neovim.test	2.4
+duration	tests/lsp.test	55.8
+duration	tests/main-cli.test	16.4
+duration	tests/main-recursion.test	9.5
+duration	tests/main-thread-startup.test	5.4
+duration	tests/many-boolean-arguments.test	51.6
+duration	tests/method-eligible.test	61.8
+duration	tests/method-filter.test	157.5
+duration	tests/method-receiver-types.test	141.0
+duration	tests/method-resolution.test	103.0
+duration	tests/method-sugar.test	39.5
+duration	tests/module-privacy.test	1.5
+duration	tests/module-static-values.test	4.5
+duration	tests/mutable-array-type.test	4.9
+duration	tests/mutable-array.test	10.2
+duration	tests/mutable-map.test	124.3
+duration	tests/mutable-set.test	30.5
+duration	tests/mutable-vector.test	23.1
+duration	tests/mutarray-construction.test	4.2
+duration	tests/namespaced-errors.test	3.2
+duration	tests/native-alloc.test	0.5
+duration	tests/native-bitshift.test	4.9
+duration	tests/native-bitwise-fold.test	0.5
+duration	tests/native-block-escape.test	7.4
+duration	tests/native-byte.test	4.1
+duration	tests/native-csv-records.test	135.0
+duration	tests/native-edit.test	42.2
+duration	tests/native-escape.test	3.9
+duration	tests/native-executable.test	9.6
+duration	tests/native-hashing.test	1.5
+duration	tests/native-hashtable.test	46.6
+duration	tests/native-library.test	19.2
+duration	tests/native-link-plan.test	4.5
+duration	tests/native-listloop.test	1.0
+duration	tests/native-lockstep-rejected.test	0.3
+duration	tests/native-mod-lowering.test	3.0
+duration	tests/native-mutarray.test	5.8
+duration	tests/native-param-aggregate.test	8.3
+duration	tests/native-program-output.test	15.2
+duration	tests/native-refinement-propagation.test	4.6
+duration	tests/native-report-inlined-leaf.test	4.2
+duration	tests/native-report-skipped-code.test	0.9
+duration	tests/native-result-bounds.test	2.1
+duration	tests/native-root-liveness.test	0.7
+duration	tests/native-root-storage.test	0.3
+duration	tests/native-stack-map.test	0.6
+duration	tests/native-stack-overflow.test	15.7
+duration	tests/native-string-region.test	2.7
+duration	tests/native-string-traversal.test	1.3
+duration	tests/native-string-view.test	3.0
+duration	tests/native-tcl-unicode.test	33.0
+duration	tests/native-tiny-leaf-inline.test	8.8
+duration	tests/native-tiny-leaf-pressure.test	235.7
+duration	tests/native-uri-escape.test	18.0
+duration	tests/native-view.test	19.5
+duration	tests/native.test	16.4
+duration	tests/numeric-looking-names.test	8.5
+duration	tests/numeric-text.test	2.2
+duration	tests/one-char-string-literal.test	44.0
+duration	tests/opaque-struct.test	11.2
+duration	tests/ordered-table.test	159.6
+duration	tests/package-authoring.test	6.8
+duration	tests/package-manager.test	27.9
+duration	tests/package-native.test	14.8
+duration	tests/package-workloads.test	8.2
+duration	tests/packed-ascii.test	7.7
+duration	tests/place-parameters.test	1.8
+duration	tests/portable-io.test	8.7
+duration	tests/proof-loop-intervals.test	1.9
+duration	tests/proven-bounds.test	16.9
+duration	tests/proves-naming.test	42.1
+duration	tests/range-completions-crosscheck.test	5.8
+duration	tests/range-fixpoint-scaling.test	5.9
+duration	tests/raven.test	0.1
+duration	tests/raw-c-float-ffi.test	13.8
+duration	tests/raw-count-loops.test	5.8
+duration	tests/raw-int-abi.test	51.2
+duration	tests/raw-internal-abi.test	5.2
+duration	tests/refined-signatures.test	0.7
+duration	tests/refined.test	0.2
+duration	tests/refinement-validators.test	8.0
+duration	tests/refinement-values.test	9.6
+duration	tests/refinements.test	0.1
+duration	tests/regex.test	0.1
+duration	tests/resources.test	15.8
+duration	tests/restricted-injection.test	21.1
+duration	tests/result-range-narrowing.test	1.9
+duration	tests/results.test	0.1
+duration	tests/same-failure.test	35.6
+duration	tests/scalarbits.test	0.2
+duration	tests/self-recursive-result-ranges.test	29.3
+duration	tests/semantic-instances.test	2.0
+duration	tests/sendability.test	30.3
+duration	tests/setcontains-equality-total.test	2.6
+duration	tests/setfromlist-equality-total.test	1.8
+duration	tests/short-demand.test	2.6
+duration	tests/short-string.test	8.6
+duration	tests/source-types.test	0.8
+duration	tests/static-compile-expected-diagnostics.test	66.3
+duration	tests/static-compile.test	6.4
+duration	tests/static-economics.test	93.4
+duration	tests/std-namespace.test	26.1
+duration	tests/stdlib-namespaces.test	7.6
+duration	tests/stdlib.test	148.3
+duration	tests/str-append-char.test	0.8
+duration	tests/str-char-at.test	0.6
+duration	tests/strict-references.test	3.9
+duration	tests/string-allocation.test	4.5
+duration	tests/struct-destructuring.test	25.8
+duration	tests/struct-scalar-replacement.test	12.8
+duration	tests/structs-syntax.test	15.1
+duration	tests/structs.test	2.6
+duration	tests/structural-contract-completions.test	11.0
+duration	tests/structural-fn-types.test	2.9
+duration	tests/surface-lexer.test	0.1
+duration	tests/surface-lowering.test	1.0
+duration	tests/surface-modules.test	3.1
+duration	tests/surface-parser.test	0.4
+duration	tests/surface-samples.test	0.9
+duration	tests/symbolic-type-identity.test	0.9
+duration	tests/syntax-recovery.test	80.1
+duration	tests/system-linker.test	17.2
+duration	tests/target-model.test	15.7
+duration	tests/trait-constrained-types.test	16.7
+duration	tests/traits.test	16.3
+duration	tests/tree-struct.test	308.8
+duration	tests/type-predicates.test	11.8
+duration	tests/typed-callable-escape.test	0.9
+duration	tests/typed-mutarray-builder.test	88.9
+duration	tests/typed-parameters.test	0.7
+duration	tests/types.test	0.1
+duration	tests/unicode-char.test	0.9
+duration	tests/utf16-bytes.test	26.6
+duration	tests/value-display.test	1.1
+duration	tests/value-identity.test	8.6
+duration	tests/value-transfer.test	379.8
+duration	tests/value-transport.test	28.1
+duration	tests/variadics.test	3.8
+duration	tests/vector-bounds.test	0.9
+duration	tests/virtual-construction.test	12.2
+duration	tests/warning-gate.test	967.5
+duration	tests/warnings.test	9.9
+duration	tests/web-unreserved.test	6.5
+duration	tests/windows-io.test	9.6
+duration	tests/workload-2048.test	60.1
+duration	tests/workload-icy-tower.test	190.7
+duration	tests/written-affine-applications.test	7.7

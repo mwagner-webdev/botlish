@@ -20,8 +20,9 @@ one), check `main`'s CI at both ends of the work
 * **Before you merge a finished milestone into `main`,** check again:
   `main`'s latest runs and your branch's own. `macos-arm64.yml` and
   `windows-x86_64.yml` run on every branch push; `tests.yml` and
-  `tests-arm64.yml` run on a branch only when dispatched (`workflow_dispatch`
-  with the branch as the ref), so dispatch them. Don't merge onto a red
+  `tests-arm64.yml` run only their canary on a branch push (next section)
+  and the rest only when dispatched (`workflow_dispatch` with the branch as
+  the ref), so dispatch them. Don't merge onto a red
   `main` without telling the user. A failure on your branch that `main`'s
   latest run does not have is yours to fix before the merge. Pending runs
   are acceptable: report them as pending, never as passed.
@@ -32,11 +33,12 @@ nothing either way. Read the latest run of the workflow instead. Merging a
 branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
 them (CI-RUNS.md; next section).
 
-## CI housekeeping (cancellation, pruning, the release gate)
+## CI housekeeping (cancellation, pruning, the release gate, the canary)
 
 The runners are a shared, limited pool, and main's merges come in bursts
-(CI-RUNS.md). Three rules keep obsolete runs off them and keep releases
-honest; `tools/ci/runs.py` implements the last two. Keep it so:
+(CI-RUNS.md). Four rules keep obsolete and doomed runs off them and keep
+releases honest; `tools/ci/runs.py` implements the second and the third,
+`tests/canary.tcl` the fourth. Keep it so:
 
 * **A newer push cancels a running test workflow on the same ref, on main
   too:** a workflow that tests a push has `concurrency: group:
@@ -67,6 +69,19 @@ honest; `tools/ci/runs.py` implements the last two. Keep it so:
   - Never publish from a push run, never rebuild in a release run, never
     give the gate a credential or more than `actions: write`, and never
     give it a way to dispatch a release twice or move a tag backwards.
+* **Every test workflow runs its host's canary first, and its expensive
+  jobs wait for it** (CI-RUNS.md, "The canary"): tests.yml, tests-arm64.yml
+  and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
+  last step. It runs, within about ten minutes, the test files and golden
+  suites the push adds or changes, then the ones `tests/canary.tsv`'s
+  history says failed recently on that host. On a branch push tests.yml and
+  tests-arm64.yml run only the canary (and tests.yml's warning gate and
+  mutant catalogs). The canary orders, it never skips: never drop a job or
+  a test because the canary passed, never let an expensive job start
+  before it (a job that runs after a failed need checks the canary's
+  result itself), and never give it an item list of its own beside its
+  selection. `tools/ci/test_runs.py` checks the workflows' side. A new
+  test workflow, or a new expensive job, waits for its host's canary.
 
 If you change `tools/ci/`, a workflow's concurrency or triggers, a release
 job, or the name of a workflow or of a GC-stress job a requirement names,
@@ -497,8 +512,14 @@ per test file or suite, each with a private `-tmpdir`):
 * **every golden suite on all four backends**, in their place, **through the
   front-end cache** (`.hirx` entries; HIR-INTERCHANGE.md).
 
-It prints a line per file and suite, then every failure with the command
-that reruns it, and exits 1 on any.
+It starts the likeliest to fail first (`-priority 1`, the default): the
+files and suites this checkout changes against origin/main, its working
+tree included, then those that failed recently in CI on this host
+(`tests/canary.tsv`), as the CI canary selects them (CI-RUNS.md, "The
+canary"). `-fail-fast 1` starts nothing more after the first failure and
+reports the rest as not run. It prints a line per file and suite, then
+every failure with the command that reruns it, and exits 1 on any (or on
+anything not run).
 
 What it costs, measured on a 4-core container (2026-10-15):
 
@@ -571,8 +592,10 @@ What it costs, measured on a 4-core container (2026-10-15):
   - on Linux arm64 (`.github/workflows/tests-arm64.yml`, ubuntu-24.04-arm):
     the Tcl suite on interp and compile, its cranelift and cranelift-generic
     coverage, the golden suites, the native Rust unit tests (also under GC
-    stress) and, except on pull requests, the GC-stress run. Run it on a
-    branch with workflow_dispatch.
+    stress) and, on pushes to main and manual runs, the GC-stress run. Run
+    it on a branch with workflow_dispatch;
+  - first, on every push to any branch and on every host, the canary
+    (CI-RUNS.md, "The canary"), which the jobs above wait for.
 
   A push or pull request that changes only Markdown files and `docs/` starts
   no workflow (their `paths-ignore`). Renaming or removing a design document

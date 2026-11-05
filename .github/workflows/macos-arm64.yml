@@ -12,7 +12,13 @@ name: tests (macos arm64)
 #                  the native build and its Rust unit tests, the native stack
 #                  bounds and overflow tests, the native status, native
 #                  objects and executables (tests/platform/aot-facts.tcl),
-#                  the smoke tier (tests/platform/tier.tcl smoke)
+#                  the smoke tier (tests/platform/tier.tcl smoke), then the
+#                  canary (tests/canary.tcl; CI-RUNS.md, "The canary"): the
+#                  test files and golden suites the push adds or changes,
+#                  then the ones that failed in recent CI runs on macOS,
+#                  within about ten minutes. system-linker, acceptance, app
+#                  and full wait for it: a push that breaks them costs one
+#                  macOS runner for minutes
 #   system-linker  every push: the system linker (SINGLE-EXECUTABLE-FFI-
 #                  MILESTONE-1.md) -- Apple clang and ld, the precompiled
 #                  runtime archive, no rustc -- its tests and the executable
@@ -116,9 +122,13 @@ jobs:
     # A same-repository pull request's push run already covers its commits.
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The canary's history to the merge base, without file contents.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Host
         run: |
@@ -169,6 +179,14 @@ jobs:
       - name: Smoke tier
         run: tclsh9.0 tests/platform/tier.tcl smoke 2>&1 | tee tier.log
 
+      # The likeliest to fail, first (CI-RUNS.md, "The canary"): compared
+      # with main's previous head on a push to main, with the merge base
+      # with main otherwise. Its selection goes to the job summary.
+      - name: Canary
+        env:
+          BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+        run: tclsh9.0 tests/canary.tcl -base "$BASE"
+
       # A program object and a standalone executable as the host's tools see
       # them (file, nm, objdump, otool, lipo, codesign), the executable run
       # outside its build directory, the link command and timings
@@ -193,6 +211,7 @@ jobs:
   # and (the C ones) under GC stress.
   system-linker:
     name: system linker (macOS arm64)
+    needs: smoke
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 120
@@ -250,7 +269,12 @@ jobs:
   # ad-hoc signed, not notarized); the logs always are.
   app:
     name: Botlish.app (macOS arm64 distribution)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    # After the smoke job and its canary; a manual run with app_only skips
+    # them.
+    needs: smoke
+    if: >-
+      !cancelled() && (needs.smoke.result == 'success' || needs.smoke.result == 'skipped')
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: macos-15
     timeout-minutes: 120
     steps:
@@ -682,6 +706,7 @@ jobs:
 
   acceptance:
     name: acceptance (Tier B, macOS arm64, shard ${{ matrix.shard }}/4)
+    needs: smoke
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository) && !inputs.app_only
     runs-on: macos-15
     timeout-minutes: 75
@@ -755,6 +780,7 @@ jobs:
 
   full:
     name: full (Tier C, macOS arm64, shard ${{ matrix.shard }}/3)
+    needs: smoke
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
       && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full') && !inputs.app_only
