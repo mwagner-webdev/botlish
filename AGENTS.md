@@ -2302,6 +2302,11 @@ never by unfolding the application's fields. Keep it so:
   ValueStability): the class is the summary's; the walk follows field order
   and stops a non-uniform recursion grown twice (`hir::summaries::Whistle`,
   declarations on an expansive cycle only). Never decide a class by it.
+  One question walks an application's parts once (`hir::summaries::Walk`;
+  a later path reads that walk): never let a reason walk revisit an
+  application once per path, which is exponential in a declaration with
+  several recursive fields, and never keep a walk's result past its
+  question.
 * A genuine ownership rule is not a compiler guard: a recursive affine
   application stays AFFINE-CONTAINER-UNSUPPORTED (`OwnedRecursion`).
 
