@@ -134,7 +134,7 @@ proc pm {args} {
 
 # The PM kind of an error report ERR ("" when none).
 proc kindOf {err} {
-    if {[regexp {\(PM ([A-Z]+)\)\s*$} $err -> kind]} {
+    if {[regexp {\(PM ([A-Z-]+)\)\s*$} $err -> kind]} {
         return $kind
     }
     return ""
@@ -646,13 +646,14 @@ test pm-inspect {package inspect validates an artifact and shows its identity, d
 # ---------------------------------------------------------------------------
 # 8. add, install: a package and its locked dependencies
 
-test pm-add-from-repository {add NAME installs the newest version from the repository, writes a MAJOR.MINOR request and the exact lock, and installs the package's own locked dependency in its own .bot_modules; the compiler runs it} -body {
+test pm-add-from-repository {add NAME installs the newest version from the repository, writes a MAJOR.MINOR request and the exact lock, and installs the package's own locked dependency in the application's dependency graph -- once, at .bot_modules/geometry, the graph file saying shapes uses it; the compiler runs it} -body {
     set world [geometryWorld]
     set app [application "import shapes\n\nshapes::square(7)\n"]
     set r [pm add shapes -project $app -repository [dict get $world repo]]
     list [dict get $r status] [dict get $r out] [readBytes [file join $app botlish.json]] \
-        [file isfile [file join $app .bot_modules shapes .bot_modules geometry geometry.bot]] [appValue $app]
-} -cleanup cleanup -result [list 0 "shapes 2.1.4 (sha256 [string range [pm::sha256::file [file join [dict get [set ::w [geometryWorld]] repo] shapes-2.1.4.botpkg]] 0 11]): installed\n  geometry 1.0.3 (sha256 [string range [pm::sha256::file [file join [dict get $::w repo] geometry-1.0.3.botpkg]] 0 11]): installed\nadded shapes (request \"2.1\", lock 2.1.4)" "\{\n  \"schema\": 1,\n  \"dependencies\": \{\n    \"shapes\": \"2.1\"\n  \},\n  \"lock\": \{\n    \"shapes\": \"2.1.4\"\n  \}\n\}\n" 1 152]
+        [file isfile [file join $app .bot_modules geometry geometry.bot]] [file exists [file join $app .bot_modules shapes .bot_modules]] \
+        [readBytes [file join $app .bot_modules .graph]] [appValue $app]
+} -cleanup cleanup -result [list 0 "geometry 1.0.3 (sha256 [string range [pm::sha256::file [file join [dict get [set ::w [geometryWorld]] repo] geometry-1.0.3.botpkg]] 0 11]): installed, used by shapes\nshapes 2.1.4 (sha256 [string range [pm::sha256::file [file join [dict get $::w repo] shapes-2.1.4.botpkg]] 0 11]): installed\nadded shapes (request \"2.1\", lock 2.1.4)" "\{\n  \"schema\": 1,\n  \"dependencies\": \{\n    \"shapes\": \"2.1\"\n  \},\n  \"lock\": \{\n    \"shapes\": \"2.1.4\"\n  \}\n\}\n" 1 0 "botlish package graph 1\napplication shapes\npackage geometry\npackage shapes geometry\n" 152]
 
 test pm-add-explicit-requests {-request keeps the precision written: 1 accepts 1.x.y, an exact request one release; an unsatisfiable request installs nothing} -body {
     set world [geometryWorld]
@@ -699,7 +700,8 @@ test pm-install-idempotent {install on an installed project changes nothing and 
     set before [treeState $app]
     set r [pm install -project $app]
     list [dict get $r status] [dict get $r out] [expr {[treeState $app] eq $before}]
-} -cleanup cleanup -result {0 {shapes 2.1.4: unchanged} 1}
+} -cleanup cleanup -result {0 {geometry 1.0.3: unchanged, used by shapes
+shapes 2.1.4: unchanged} 1}
 
 test pm-install-needs-locks {install installs exact releases only: a dependency without a lock is an error that names update, and nothing is installed} -body {
     set world [geometryWorld]
@@ -754,7 +756,7 @@ test pm-artifact-identity-checked {an artifact's embedded identity must be its f
         [kindOf [dict get $r3 err]] [string match {*has no "sources"*} [dict get $r3 err]] [file exists [file join $app .bot_modules]]
 } -cleanup cleanup -result {IDENTITY ARTIFACT 1 ARTIFACT 1 0}
 
-test pm-dependency-cycle {a release that needs itself through its dependencies (a 1.0.0 -> b 1.0.0 -> a 1.0.0) is a cycle, refused with its path before anything is installed; a needing another version of itself further down is no cycle} -body {
+test pm-dependency-cycle {a release that needs itself through its dependencies (a 1.0.0 -> b 1.0.0 -> a 1.0.0) is a cycle, refused with its path before anything is installed; a needing another version of itself further down is no second instance of it, but a conflict of its two versions (the graph holds one of each package)} -body {
     set src [fresh src]
     set repo [fresh repo]
     packAll $repo [list [package $src a 1.0.0 "fn f() -> int:\n    1\n" {b 1.0} {b 1.0.0}] \
@@ -766,30 +768,300 @@ test pm-dependency-cycle {a release that needs itself through its dependencies (
     set r [pm add a -project $app -repository $repo]
     set r2 [pm add c -request 1 -project $app -repository $repo]
     list [dict get $r status] [kindOf [dict get $r err]] [string match "*the project -> a 1.0.0 -> b 1.0.0 -> a 1.0.0*" [dict get $r err]] \
-        [dict get $r2 status] [appValue $app]
-} -cleanup cleanup -result {1 CYCLE 1 0 21}
+        [dict get $r2 status] [kindOf [dict get $r2 err]] \
+        [string match "*1.0.0 and 2.0.0 are demanded*the application's botlish.json locks c 1.0.0*d 1.0.0 locks c 2.0.0 (the project -> c 1.0.0 -> d 1.0.0)*" [dict get $r2 err]] \
+        [file exists [file join $app botlish.json]] [file exists [file join $app .bot_modules c]]
+} -cleanup cleanup -result {1 CYCLE 1 1 DEPENDENCY-CONFLICT 1 0 0}
 
 # ---------------------------------------------------------------------------
 # 9. Scopes: distinct versions on separate branches, no transitive access
 
-test pm-two-versions-two-branches {two packages that lock different versions of one dependency each get their own instance in their own .bot_modules; the compiler keeps the instances apart (values, nominal types)} -body {
+# A world of two independently authored packages over geometry: physics
+# 1.0.0 and rendering 1.0.0 both lock geometry 1.0.3 (they share it);
+# rendering 2.0.0 locks geometry 2.0.0 (it conflicts with physics). Returns
+# {repo REPO src SRC}.
+proc sharedWorld {} {
     set world [geometryWorld]
     set src [dict get $world src]
+    packAll [dict get $world repo] [list \
+        [package $src physics 1.0.0 "import geometry\n\nfn origin() -> geometry::Point:\n    geometry::point(3, 4)\n\nfn tag() -> int:\n    geometry::version()\n" {geometry 1.0} {geometry 1.0.3}] \
+        [package $src rendering 1.0.0 "import geometry\n\nfn draw(p: geometry::Point) -> int:\n    p.x * 10 + p.y\n\nfn tag() -> int:\n    geometry::version()\n" {geometry 1.0} {geometry 1.0.3}] \
+        [package $src rendering 2.0.0 "import geometry\n\nfn draw(p: geometry::Point) -> int:\n    p.x\n\nfn tag() -> int:\n    geometry::version()\n" {geometry 2} {geometry 2.0.0}]]
+    return $world
+}
+
+# The error text ERR with the project and repository paths of an
+# application APP and repository REPO mapped out.
+proc shown {err app repo} {
+    return [string map [list $app APP $repo REPO] $err]
+}
+
+test pm-shared-one-instance {two independent packages that lock the same version of one dependency share one instance: geometry is installed once, the graph file says both use it, and a geometry::Point that physics makes is the Point rendering takes -- one nominal type, through the ordinary compiler on every backend here} -body {
+    set world [sharedWorld]
     set repo [dict get $world repo]
-    packAll $repo [list \
-        [package $src physics 1.0.0 "import geometry\n\nfn origin() -> geometry::Point:\n    geometry::point(0, 0)\n\nfn tag() -> int:\n    geometry::version()\n" {geometry 1.0} {geometry 1.0.0}] \
-        [package $src rendering 1.0.0 "import geometry\n\nfn draw(p: geometry::Point) -> int:\n    p.x + geometry::version()\n\nfn tag() -> int:\n    geometry::version()\n" {geometry 2} {geometry 2.0.0}]]
-    set app [application "import physics\nimport rendering\n\n\[physics::tag(), rendering::tag()\]\n"]
+    set app [application "import physics\nimport rendering\n\n\[rendering::draw(physics::origin()), physics::tag(), rendering::tag()\]\n"]
+    set r1 [pm add physics -project $app -repository $repo]
+    set r2 [pm add rendering -request 1 -project $app -repository $repo]
+    set backends {interp compile}
+    if {[testConstraint nativeBuilt]} { lappend backends cranelift }
+    list [dict get $r1 status] [dict get $r2 status] [lindex [split [dict get $r2 out] \n] 0] \
+        [lsort [lsearch -all -inline -not [glob -tails -directory [file join $app .bot_modules] *] .*]] \
+        [readBytes [file join $app .bot_modules .graph]] \
+        [lsort -unique [lmap backend $backends {appValue $app $backend}]]
+} -cleanup cleanup -result {0 0 {geometry 1.0.3: unchanged, used by physics, rendering} {geometry physics rendering} {botlish package graph 1
+application physics rendering
+package geometry
+package physics geometry
+package rendering geometry
+} {{[34, 103, 103]}}}
+
+test pm-two-versions-conflict {two packages that lock different versions of one dependency are a DEPENDENCY-CONFLICT naming every lock and the path to the package that holds it: no second instance is made, the add changes nothing, and a fresh install of both installs nothing} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set app [application "import physics\n\nphysics::tag()\n"]
     pm add physics -project $app -repository $repo
-    pm add rendering -project $app -repository $repo
-    set mixed [application "import physics\nimport rendering\n\nrendering::draw(physics::origin())\n"]
-    file copy -force [file join $app botlish.json] $mixed
-    pm install -project $mixed -repository $repo
-    list [appValue $app] [appValue $app compile] \
-        [file isdirectory [file join $app .bot_modules physics .bot_modules geometry]] \
-        [file isdirectory [file join $app .bot_modules rendering .bot_modules geometry]] \
-        [regexp {TYPE: .*physics/geometry::Point.*rendering/geometry::Point|TYPE: .*rendering/geometry::Point.*physics/geometry::Point} [appRejection $mixed]]
-} -cleanup cleanup -result {{[100, 200]} {[100, 200]} 1 1 1}
+    set before [treeState $app]
+    set r1 [pm add rendering -project $app -repository $repo]
+    set mixed [application "1\n"]
+    writeText [file join $mixed botlish.json] {{"schema": 1, "dependencies": {"physics": "1", "rendering": "2"}, "lock": {"physics": "1.0.0", "rendering": "2.0.0"}}}
+    set r2 [pm install -project $mixed -repository $repo]
+    list [dict get $r1 status] [kindOf [dict get $r1 err]] [expr {[treeState $app] eq $before}] [appValue $app] \
+        [lrange [split [dict get $r2 err] \n] 0 2] [file exists [file join $mixed .bot_modules]]
+} -cleanup cleanup -result {1 DEPENDENCY-CONFLICT 1 103 {{error: cannot select one version of geometry for the application's dependency graph: 1.0.3 and 2.0.0 are demanded:} {  physics 1.0.0 locks geometry 1.0.3 (the project -> physics 1.0.0)} {  rendering 2.0.0 locks geometry 2.0.0 (the project -> rendering 2.0.0)}} 0}
+
+test pm-conflict-deterministic {a conflict's report and a graph's installation are independent of the order dependencies are declared, added or found in: two repositories given in either order, botlish.json's entries in either order, the packages added in either order} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set other [fresh repo]
+    foreach file [glob -directory $repo geometry-*.botpkg] {
+        file rename $file $other
+    }
+    set reports {}
+    foreach order [list [list $repo $other] [list $other $repo]] text {
+        {{"schema": 1, "dependencies": {"physics": "1", "rendering": "2"}, "lock": {"physics": "1.0.0", "rendering": "2.0.0"}}}
+        {{"schema": 1, "lock": {"rendering": "2.0.0", "physics": "1.0.0"}, "dependencies": {"rendering": "2", "physics": "1"}}}
+    } {
+        set app [application "1\n"]
+        writeText [file join $app botlish.json] $text
+        set r [pm install -project $app {*}[concat {*}[lmap dir $order {list -repository $dir}]]]
+        lappend reports [shown [dict get $r err] $app $repo]
+    }
+    set trees {}
+    foreach adds {{physics rendering} {rendering physics}} {
+        set app [application "import physics\nimport rendering\n\nrendering::draw(physics::origin())\n"]
+        foreach name $adds {
+            pm add $name -request 1 -project $app -repository $other -repository $repo
+        }
+        file delete [file join $app botlish.json]
+        lappend trees [treeState [file join $app .bot_modules]] [appValue $app]
+    }
+    list [llength [lsort -unique $reports]] [kindOf [lindex $reports 0]] \
+        [expr {[lindex $trees 0] eq [lindex $trees 2]}] [lindex $trees 1] [lindex $trees 3]
+} -cleanup cleanup -result {1 DEPENDENCY-CONFLICT 1 34 34}
+
+test pm-shared-application-lock {the application's own lock is one demand among the others: locking the version its packages lock, it shares their instance; locking another, it is a conflict -- the application cannot override a package's lock, and a package cannot override the application's} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set agree [application "import geometry\nimport physics\n\n\[geometry::version(), physics::tag()\]\n"]
+    writeText [file join $agree botlish.json] {{"schema": 1, "dependencies": {"geometry": "1.0", "physics": "1"}, "lock": {"geometry": "1.0.3", "physics": "1.0.0"}}}
+    set r1 [pm install -project $agree -repository $repo]
+    set disagree [application "1\n"]
+    writeText [file join $disagree botlish.json] {{"schema": 1, "dependencies": {"geometry": "1.1", "physics": "1"}, "lock": {"geometry": "1.1.0", "physics": "1.0.0"}}}
+    set r2 [pm install -project $disagree -repository $repo]
+    list [dict get $r1 status] [appValue $agree] [dict get $r2 status] [lrange [split [dict get $r2 err] \n] 0 2]
+} -cleanup cleanup -result {0 {[103, 103]} 1 {{error: cannot select one version of geometry for the application's dependency graph: 1.0.3 and 1.1.0 are demanded:} {  physics 1.0.0 locks geometry 1.0.3 (the project -> physics 1.0.0)} {  the application's botlish.json locks geometry 1.1.0 (request "1.1")}}}
+
+test pm-shared-add-and-update-held {add of a package the graph holds takes the version its packages lock (not the newest), and a request it does not satisfy is a conflict; update keeps a dependency some package locks at that version, saying so, and moves it once nothing locks it} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set app [application "import geometry\nimport physics\n\n\[geometry::version(), physics::tag()\]\n"]
+    pm add physics -project $app -repository $repo
+    set refused [pm add geometry -request 2 -project $app -repository $repo]
+    set r1 [pm add geometry -request 1 -project $app -repository $repo]
+    set r2 [pm update geometry -project $app -repository $repo]
+    pm remove physics -project $app
+    set r3 [pm update geometry -project $app -repository $repo]
+    list [kindOf [dict get $refused err]] [lrange [split [dict get $r1 out] \n] end-1 end] \
+        [lindex [split [dict get $r2 out] \n] end] [lindex [split [dict get $r3 out] \n] end] \
+        [dict get [pm::descriptor::read [file join $app botlish.json] project] lock]
+} -cleanup cleanup -result {DEPENDENCY-CONFLICT {{note: geometry 1.0.3 is the version physics 1.0.0 locks: the application shares that instance} {added geometry (request "1", lock 1.0.3)}} {geometry: held at 1.0.3: physics 1.0.0 locks it, and the graph shares one instance (the newest "1" accepts is 1.1.0)} {geometry: 1.0.3 -> 1.1.0} {geometry 1.1.0}}
+
+test pm-shared-artifact-identity {a release is one artifact: an application's archive source for a release a package also locks must be the repositories' file of that release -- different bytes claiming geometry 1.0.3 are a CONFLICT, never chosen between; with no other file claiming it, the archive is the graph's instance} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set src [fresh src]
+    set vendor [fresh vendor]
+    pm package pack [package $src geometry 1.0.3 "struct Point:\n    x: int\n    y: int\n\nfn point(x: int, y: int) -> Point:\n    Point {x: x, y: y}\n\nfn version() -> int:\n    999\n"] -out $vendor
+    set app [application "import physics\n\nphysics::tag()\n"]
+    file mkdir [file join $app vendor]
+    file copy [file join $vendor geometry-1.0.3.botpkg] [file join $app vendor]
+    pm add [file join $app vendor geometry-1.0.3.botpkg] -project $app
+    set r1 [pm add physics -project $app -repository $repo]
+    set alone [fresh repo]
+    file copy [file join $repo physics-1.0.0.botpkg] $alone
+    set r2 [pm add physics -project $app -repository $alone]
+    list [kindOf [dict get $r1 err]] [string match "*two different artifacts claim geometry 1.0.3: the application's archive source vendor/geometry-1.0.3.botpkg*physics 1.0.0 locks geometry 1.0.3*" [dict get $r1 err]] \
+        [dict get $r2 status] [appValue $app]
+} -cleanup cleanup -result {CONFLICT 1 0 999}
+
+test pm-shared-editable-conflict {an editable dependency is a directory, not a release: a package that locks a release of it is a conflict, never satisfied by the directory; an editable package's own locked dependencies join the graph} -constraints unixFiles -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set dev [package [fresh dev] geometry 1.0.3 "fn version() -> int:\n    7\n"]
+    set app [application "import physics\n\nphysics::tag()\n"]
+    pm add $dev -project $app
+    set r1 [pm add physics -project $app -repository $repo]
+    set tool [package [fresh dev] tool 0.1.0 "import geometry\n\nfn v() -> int:\n    geometry::version()\n" {geometry 1.0} {geometry 1.0.3}]
+    set app2 [application "import tool\n\ntool::v()\n"]
+    set r2 [pm add $tool -project $app2 -repository $repo]
+    list [kindOf [dict get $r1 err]] [string match "*it is the application's editable dependency, and a package locks a release of it*" [dict get $r1 err]] \
+        [dict get $r2 status] [readBytes [file join $app2 .bot_modules .graph]] [appValue $app2]
+} -cleanup cleanup -result {DEPENDENCY-CONFLICT 1 0 {botlish package graph 1
+application tool
+package geometry
+package tool geometry
+} 103}
+
+test pm-shared-visibility {sharing is no ambient visibility: a package of the graph imports the packages it depends on only -- one that does not declare geometry cannot import it although another package installed it -- and the application imports its own dependencies only} -body {
+    set world [sharedWorld]
+    set src [dict get $world src]
+    set repo [dict get $world repo]
+    packAll $repo [list [package $src snoop 1.0.0 "import geometry\n\nfn v() -> int:\n    geometry::version()\n"]]
+    set app [application "import snoop\n\nsnoop::v()\n"]
+    pm add physics -project $app -repository $repo
+    pm add snoop -project $app -repository $repo
+    set app2 [application "import geometry\n\ngeometry::version()\n"]
+    pm add physics -project $app2 -repository $repo
+    list [appRejection $app] [string map [list $app2 APP] [appRejection $app2]]
+} -cleanup cleanup -result {{UNKNOWN-NAMESPACE: APP/.bot_modules/snoop/snoop.bot:1:8: unknown namespace "geometry": package snoop (of the application's package graph) does not depend on the package "geometry", which the package graph APP/.bot_modules/.graph installs for physics (package snoop uses none): a scope of the graph imports only the packages it depends on, never another package's dependencies} {UNKNOWN-NAMESPACE: APP/main.bot:1:8: unknown namespace "geometry": the application does not depend on the package "geometry", which the package graph APP/.bot_modules/.graph installs for physics (the application uses physics): a scope of the graph imports only the packages it depends on, never another package's dependencies}}
+
+test pm-shared-diamond {a diamond -- the application over a and b, both over c, c over d -- is one instance of each package, however many paths reach it; removing one side keeps what the other still uses, and removing both removes them all} -body {
+    set src [fresh src]
+    set repo [fresh repo]
+    packAll $repo [list [package $src d 1.0.0 "fn one() -> int:\n    1\n"] \
+        [package $src c 1.0.0 "import d\n\nfn two() -> int:\n    d::one() + 1\n" {d 1.0} {d 1.0.0}] \
+        [package $src a 1.0.0 "import c\n\nfn f() -> int:\n    c::two() * 10\n" {c 1.0} {c 1.0.0}] \
+        [package $src b 1.0.0 "import c\n\nfn g() -> int:\n    c::two() * 100\n" {c 1.0} {c 1.0.0}]]
+    set app [application "import a\nimport b\n\na::f() + b::g()\n"]
+    pm add a -project $app -repository $repo
+    set r [pm add b -project $app -repository $repo]
+    set value [appValue $app]
+    set installed [lsort [lsearch -all -inline -not [glob -tails -directory [file join $app .bot_modules] *] .*]]
+    pm remove a -project $app
+    set afterA [lsort [lsearch -all -inline -not [glob -tails -directory [file join $app .bot_modules] *] .*]]
+    pm remove b -project $app
+    list [regsub {sha256 [0-9a-f]+} [dict get $r out] {sha256 D}] $value $installed $afterA \
+        [lsearch -all -inline -not [glob -nocomplain -tails -directory [file join $app .bot_modules] *] .*]
+} -cleanup cleanup -result {{a 1.0.0: unchanged
+b 1.0.0 (sha256 D): installed
+c 1.0.0: unchanged, used by a, b
+d 1.0.0: unchanged, used by c
+added b (request "1.0", lock 1.0.0)} 220 {a b c d} {b c d} {}}
+
+test pm-package-graph {package graph shows the resolved graph without writing anything: every package once, its version, who uses and who locks it, whether it is installed so, a path to it; a conflict is reported as installation reports it} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set app [application "1\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"physics": "1", "rendering": "1"}, "lock": {"physics": "1.0.0", "rendering": "1.0.0"}}}
+    set before [treeState $app]
+    set r1 [pm package graph -project $app -repository $repo]
+    set unchanged [expr {[treeState $app] eq $before}]
+    pm install -project $app -repository $repo
+    set r2 [pm package graph -project $app]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"physics": "1", "rendering": "2"}, "lock": {"physics": "1.0.0", "rendering": "2.0.0"}}}
+    set r3 [pm package graph -project $app -repository $repo]
+    list $unchanged [regsub -all {sha256 [0-9a-f]+} [shown [dict get $r1 out] $app $repo] {sha256 D}] \
+        [regsub -all {sha256 [0-9a-f]+} [shown [dict get $r2 out] $app $repo] {sha256 D}] \
+        [dict get $r3 status] [kindOf [dict get $r3 err]]
+} -cleanup cleanup -result {1 {the dependency graph of APP: 3 packages, one instance of each
+application uses: physics, rendering
+geometry 1.0.3 (sha256 D): used by physics, rendering; not installed so yet (run install): REPO/geometry-1.0.3.botpkg
+  locked by: physics 1.0.0, rendering 1.0.0
+  shared: one instance, geometry, for physics, rendering
+  path: the project -> physics 1.0.0 -> geometry 1.0.3
+physics 1.0.0 (sha256 D): used by the application; not installed so yet (run install): REPO/physics-1.0.0.botpkg
+  locked by: the application (request "1")
+  uses: geometry 1.0.3
+  path: the project -> physics 1.0.0
+rendering 1.0.0 (sha256 D): used by the application; not installed so yet (run install): REPO/rendering-1.0.0.botpkg
+  locked by: the application (request "1")
+  uses: geometry 1.0.3
+  path: the project -> rendering 1.0.0} {the dependency graph of APP: 3 packages, one instance of each
+application uses: physics, rendering
+geometry 1.0.3 (sha256 D): used by physics, rendering; installed
+  locked by: physics 1.0.0, rendering 1.0.0
+  shared: one instance, geometry, for physics, rendering
+  path: the project -> physics 1.0.0 -> geometry 1.0.3
+physics 1.0.0 (sha256 D): used by the application; installed
+  locked by: the application (request "1")
+  uses: geometry 1.0.3
+  path: the project -> physics 1.0.0
+rendering 1.0.0 (sha256 D): used by the application; installed
+  locked by: the application (request "1")
+  uses: geometry 1.0.3
+  path: the project -> rendering 1.0.0} 1 DEPENDENCY-CONFLICT}
+
+test pm-graph-file-owned {the package graph is the manager's: one placed by hand is never replaced (MANUAL); one edited since it was written is a verify problem, and the next install derives it again, saying so} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set hand [application "1\n"]
+    writeText [file join $hand .bot_modules .graph] "botlish package graph 1\napplication\n"
+    set r1 [pm add physics -project $hand -repository $repo]
+    set app [application "import physics\n\nphysics::tag()\n"]
+    pm add physics -project $app -repository $repo
+    set graph [file join $app .bot_modules .graph]
+    set original [readBytes $graph]
+    writeText $graph "botlish package graph 1\napplication physics\npackage geometry\npackage physics\n"
+    set r2 [pm verify -project $app]
+    set r3 [pm install -project $app]
+    list [kindOf [dict get $r1 err]] [readBytes [file join $hand .bot_modules .graph]] [dict get $r2 status] \
+        [lsearch -inline -glob [split [dict get $r2 out] \n] problem:*] [lindex [split [dict get $r3 out] \n] 0] \
+        [expr {[readBytes $graph] eq $original}] [appValue $app]
+} -cleanup cleanup -result {MANUAL {botlish package graph 1
+application
+} 1 {problem: .bot_modules/.graph is not the graph of the installation (run install)} {note: .bot_modules/.graph was changed since it was written; it is derived again (the package graph is the package manager's, never your file)} 1 103}
+
+test pm-nested-installation-migrated {an installation an earlier package manager made -- one copy per dependency path, a schema 1 record -- still compiles as it is (the compiler reads no record); verify says it is the nested layout, and install installs it again as one graph, each package once} -body {
+    set world [geometryWorld]
+    set repo [dict get $world repo]
+    set app [application "import shapes\n\nshapes::square(2)\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}, "lock": {"shapes": "2.1.4"}}}
+    # The layout and record PM-1 wrote: geometry inside shapes.
+    set nodes [dict create]
+    foreach {name version dir} [list geometry 1.0.3 [file join $app .bot_modules shapes .bot_modules geometry] shapes 2.1.4 [file join $app .bot_modules shapes]] {
+        set artifact [pm::catalog::Load [file join $repo $name-$version.botpkg] $name]
+        foreach {path bytes} [dict get $artifact files] {
+            writeBytes [file join $dir {*}[split $path /]] $bytes
+        }
+        dict set nodes $name [pm::state::ArtifactNode $version [dict get $artifact digest] [dict get $artifact files] {}]
+    }
+    dict set nodes shapes children [dict create geometry [dict get $nodes geometry]]
+    writeBytes [file join $app .bot_modules .botlish state.json] \
+        [pm::json::encode [list obj [list state {num 1} packages [pm::state::Value [dict create shapes [dict get $nodes shapes]]]]]]
+    set before [appValue $app]
+    set v1 [pm verify -project $app -repository $repo]
+    set r [pm install -project $app -repository $repo]
+    set v2 [pm verify -project $app -repository $repo]
+    list $before [dict get $v1 status] [lsearch -inline -glob [split [dict get $v1 out] \n] problem:*] \
+        [lindex [split [dict get $r out] \n] 0] [dict get $v2 status] [file exists [file join $app .bot_modules shapes .bot_modules]] \
+        [appValue $app]
+} -cleanup cleanup -result {107 1 {problem: the packages are installed one copy per dependency path, by an earlier package manager: run install to install them as the application's one dependency graph} {note: the packages were installed one copy per dependency path by an earlier package manager: they are installed again as the application's one dependency graph, each package once} 0 0 107}
+
+test pm-fault-graph {an operation that changes the graph file rolls it back with everything else: a failure, or a process killed, at any step of the transaction -- the graph written included -- leaves the project's previous installation and graph exactly} -body {
+    set world [sharedWorld]
+    set repo [dict get $world repo]
+    set app [application "import physics\n\nphysics::tag()\n"]
+    pm add physics -project $app -repository $repo
+    set before [treeState $app]
+    set out {}
+    foreach point {stage journal commit-new graph-written state-written descriptor-written} {
+        set r [withEnvironment [list BOTLISH_PM_FAULT $point] {pm add rendering -request 1 -project $app -repository $repo}]
+        lappend out [list $point [dict get $r status] [expr {[treeState $app] eq $before}]]
+    }
+    set r [withEnvironment [list BOTLISH_PM_FAULT crash:graph-written] {pm add rendering -request 1 -project $app -repository $repo}]
+    set next [pm install -project $app -repository $repo {*}[afterInterruption]]
+    lappend out [list crash [dict get $r status] [lindex [split [dict get $next err] \n] 0] [expr {[treeState $app] eq $before}]]
+} -cleanup cleanup -result {{stage 1 1} {journal 1 1} {commit-new 1 1} {graph-written 1 1} {state-written 1 1} {descriptor-written 1 1} {crash 99 {note: rolled back a package operation that was interrupted: the previous installation is restored} 1}}
 
 test pm-no-transitive-access {the application cannot import a package its package installed: geometry is shapes', not the application's} -body {
     set world [geometryWorld]
@@ -805,15 +1077,17 @@ test pm-no-transitive-access {the application cannot import a package its packag
 test pm-update-within-precision {update moves a lock to the newest version its request accepts, never past it, and never changes the request; one named dependency leaves the others as they are} -body {
     set world [geometryWorld]
     set repo [dict get $world repo]
-    set app [application "import geometry\nimport shapes\n\n\[geometry::version(), shapes::square(1)\]\n"]
-    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"geometry": "1.0", "shapes": "2"}, "lock": {"geometry": "1.0.0", "shapes": "2.1.0"}}}
+    packAll $repo [list [package [dict get $world src] labels 1.0.0 "fn n() -> int:\n    1\n"] \
+        [package [dict get $world src] labels 1.1.0 "fn n() -> int:\n    2\n"]]
+    set app [application "import geometry\nimport labels\n\n\[geometry::version(), labels::n()\]\n"]
+    writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"geometry": "1.0", "labels": "1"}, "lock": {"geometry": "1.0.0", "labels": "1.0.0"}}}
     pm install -project $app -repository $repo
-    set shapesBefore [treeState [file join $app .bot_modules shapes]]
+    set labelsBefore [treeState [file join $app .bot_modules labels]]
     set r [pm update geometry -project $app -repository $repo]
     set d [pm::descriptor::read [file join $app botlish.json] project]
     list [dict get $r status] [lindex [split [dict get $r out] \n] end] [dict get $d dependencies] [dict get $d lock] \
-        [expr {[treeState [file join $app .bot_modules shapes]] eq $shapesBefore}] [appValue $app]
-} -cleanup cleanup -result {0 {geometry: 1.0.0 -> 1.0.3} {geometry 1.0 shapes 2} {geometry 1.0.3 shapes 2.1.0} 1 {[103, 101]}}
+        [expr {[treeState [file join $app .bot_modules labels]] eq $labelsBefore}] [appValue $app]
+} -cleanup cleanup -result {0 {geometry: 1.0.0 -> 1.0.3} {geometry 1.0 labels 1} {geometry 1.0.3 labels 1.0.0} 1 {[103, 1]}}
 
 test pm-update-all-and-stale-files {update with no name updates every dependency; a replaced version's files are gone, the new version's present (no stale file survives)} -body {
     set world [geometryWorld]
@@ -829,18 +1103,26 @@ test pm-update-all-and-stale-files {update with no name updates every dependency
         [pm::descriptor::read [file join $app botlish.json] project] [appValue $app]
 } -cleanup cleanup -result {0 new.bot {schema 1 name {} version {} dependencies {extra 1.0 geometry 1} lock {extra 1.0.1 geometry 1.1.0} sources {}} 2}
 
-test pm-remove {remove deletes the dependency's request, lock and source and its installed tree (its own dependencies with it), and nothing else} -body {
+test pm-remove {remove deletes the dependency's request, lock and source and its installed tree, and the packages only it needed with it; a package the application or another package still uses stays, and nothing else changes} -body {
     set world [geometryWorld]
+    set alone [application "1\n"]
+    pm add shapes -project $alone -repository [dict get $world repo]
+    set r1 [pm remove shapes -project $alone]
     set app [application "import geometry\n\ngeometry::version()\n"]
     pm add shapes -project $app -repository [dict get $world repo]
-    pm add geometry -request 2 -project $app -repository [dict get $world repo]
+    pm add geometry -project $app -repository [dict get $world repo]
     set r [pm remove shapes -project $app]
     # The installed trees: the record's .botlish is no package (glob's *
     # matches it on Windows, not on Unix).
-    list [dict get $r status] [lsort [lsearch -all -inline -not [glob -tails -directory [file join $app .bot_modules] *] .*]] \
+    list [dict get $r1 status] [lsearch -all -inline -not [glob -nocomplain -tails -directory [file join $alone .bot_modules] *] .*] \
+        [file exists [file join $alone .bot_modules .graph]] \
+        [dict get $r status] [lsort [lsearch -all -inline -not [glob -tails -directory [file join $app .bot_modules] *] .*]] \
         [pm::descriptor::read [file join $app botlish.json] project] [appValue $app] \
-        [kindOf [dict get [pm remove shapes -project $app] err]]
-} -cleanup cleanup -result {0 geometry {schema 1 name {} version {} dependencies {geometry 2} lock {geometry 2.0.0} sources {}} 200 UNKNOWN}
+        [readBytes [file join $app .bot_modules .graph]] [kindOf [dict get [pm remove shapes -project $app] err]]
+} -cleanup cleanup -result {0 {} 0 0 geometry {schema 1 name {} version {} dependencies {geometry 1.0} lock {geometry 1.0.3} sources {}} 103 {botlish package graph 1
+application geometry
+package geometry
+} UNKNOWN}
 
 # ---------------------------------------------------------------------------
 # 11. What the manager owns
@@ -867,7 +1149,7 @@ test pm-modified-packages-protected {an installed package changed since installa
     set app [application "import shapes\n\nshapes::square(2)\n"]
     writeText [file join $app botlish.json] {{"schema": 1, "dependencies": {"shapes": "2.1"}, "lock": {"shapes": "2.1.0"}}}
     pm install -project $app -repository $repo
-    set file [file join $app .bot_modules shapes .bot_modules geometry geometry.bot]
+    set file [file join $app .bot_modules geometry geometry.bot]
     set f [open $file a]; puts $f "# my fix"; close $f
     writeText [file join $app .bot_modules shapes notes.txt] "mine\n"
     set r1 [pm update -project $app -repository $repo]
@@ -877,7 +1159,7 @@ test pm-modified-packages-protected {an installed package changed since installa
     list [kindOf [dict get $r1 err]] [kindOf [dict get $r2 err]] $kept \
         [lsort [regexp -all -inline {\.bot_modules/\S+ (?:was changed|\(file\) is not part)} [dict get $r1 err]]] \
         [dict get $r3 status] [appValue $app]
-} -cleanup cleanup -result {MODIFIED MODIFIED 1 {{.bot_modules/shapes/.bot_modules/geometry/geometry.bot was changed} {.bot_modules/shapes/notes.txt (file) is not part}} 0 107}
+} -cleanup cleanup -result {MODIFIED MODIFIED 1 {{.bot_modules/geometry/geometry.bot was changed} {.bot_modules/shapes/notes.txt (file) is not part}} 0 107}
 
 test pm-install-restores-only-with-force {install over a package changed since installation -- a file edited, a nested file deleted -- refuses, naming the change; with -force it restores the artifact's files, and verify is clean again} -body {
     set world [geometryWorld]
@@ -886,7 +1168,7 @@ test pm-install-restores-only-with-force {install over a package changed since i
     set shapes [file join $app .bot_modules shapes shapes.bot]
     set original [readBytes $shapes]
     writeText $shapes "fn square(s: int) -> int:\n    0\n"
-    file delete [file join $app .bot_modules shapes .bot_modules geometry geometry.bot]
+    file delete [file join $app .bot_modules geometry geometry.bot]
     set refused [pm install -project $app -repository [dict get $world repo]]
     set forced [pm install -project $app -repository [dict get $world repo] -force]
     set verified [pm verify -project $app -repository [dict get $world repo]]
@@ -943,7 +1225,7 @@ test pm-verify-problems {verify reports altered, missing and extra files, a lock
     set repo [dict get $world repo]
     set app [application "1\n"]
     pm add shapes -request 2.1 -project $app -repository $repo
-    set g [file join $app .bot_modules shapes .bot_modules geometry]
+    set g [file join $app .bot_modules geometry]
     writeText [file join $g geometry.bot] "fn version() -> int:\n    666\n"
     file delete [file join $app .bot_modules shapes README.md] [file join $app .bot_modules shapes shapes.bot]
     writeText [file join $g extra.bot] "x"
@@ -964,7 +1246,7 @@ test pm-verify-problems {verify reports altered, missing and extra files, a lock
         regsub {\(size [0-9]+, installed [0-9]+\)} $line {(size)} line
         string map [list $app APP $tampered REPO] $line
     }]]
-} -cleanup cleanup -result {1 {{problem: geometry 1.0.3: .bot_modules/shapes/.bot_modules/geometry/extra.bot (file) is not part of the installation} {problem: geometry 1.0.3: .bot_modules/shapes/.bot_modules/geometry/geometry.bot was changed (size)} {problem: geometry 1.0.3: the artifact REPO/geometry-1.0.3.botpkg (sha256 D) is not the one installed (sha256 D)} {problem: other: not installed (run install)} {problem: shapes 2.1.4: .bot_modules/shapes/shapes.bot is missing} {problem: shapes: 2.1.4 is installed, and botlish.json locks 2.1.0 (run install)}}}
+} -cleanup cleanup -result {1 {{problem: geometry 1.0.3: .bot_modules/geometry/extra.bot (file) is not part of the installation} {problem: geometry 1.0.3: .bot_modules/geometry/geometry.bot was changed (size)} {problem: geometry 1.0.3: the artifact REPO/geometry-1.0.3.botpkg (sha256 D) is not the one installed (sha256 D)} {problem: other: not installed (run install)} {problem: shapes 2.1.4: .bot_modules/shapes/shapes.bot is missing} {problem: shapes: 2.1.4 is installed, and botlish.json locks 2.1.0 (run install)}}}
 
 test pm-verify-record-is-not-authority {a file changed together with the installation record passes the record's check, and only the comparison with the artifact (a -repository holding it) finds it: the record detects accidents, the artifact is the authority on contents} -body {
     set world [geometryWorld]
@@ -976,7 +1258,7 @@ test pm-verify-record-is-not-authority {a file changed together with the install
     set meta [file join $app .bot_modules .botlish]
     set state [pm::state::read $meta]
     dict set state shapes files shapes.bot [list [string length $forged] [format %08x [expr {[zlib crc32 $forged] & 0xffffffff}]]]
-    writeBytes [pm::state::Path $meta] [pm::state::encode $state]
+    writeBytes [pm::state::Path $meta] [pm::state::encode $state {} [pm::state::application $meta]]
     set recordOnly [pm verify -project $app]
     set withArtifacts [pm verify -project $app -repository [dict get $world repo]]
     list [dict get $recordOnly status] [dict get $withArtifacts status] \
