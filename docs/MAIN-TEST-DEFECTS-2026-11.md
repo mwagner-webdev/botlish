@@ -272,11 +272,10 @@ did not run them.
 every Linux x86-64 `tests.yml` run of `main` from PM-3 on (section 2.5).
 Four milestone reports, written between 11-03 20:32 and 11-05 05:46, list
 it as main's own failure, with its cause, and merge. Each was right by
-AGENTS.md's rule (since
-MAIN-CI-FAILURES-2026-11.md): "tell the user which workflows and tests fail
-on `main` before you build on it, and keep that list". The rule asks for a
-report; it does not ask anyone to fix the failure. A one-line fix was
-documented four times.
+AGENTS.md's rule (since MAIN-CI-FAILURES-2026-11.md): "tell the user which
+workflows and tests fail on `main` before you build on it, and keep that
+list". The rule asks for a report; it does not ask anyone to fix the
+failure. A one-line fix was documented four times.
 
 **A permanently failing test hides itself and others.**
 
