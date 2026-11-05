@@ -54,9 +54,10 @@ gone.
   small ranges (both directions, both endpoint kinds); 15 targeted mutants
   of the rule and its boundaries, every one killed, and the whole mutation
   suite killed (section 13).
-* **Cost.** One comparison per counted loop whose count is not exact, and
-  for an entered loop with an inexact start one more walk of its body; on
-  the CSV and JSON workloads no measurable difference (section 15). No
+* **Cost.** One comparison per counted loop that is not unrolled, and for
+  an entered loop with an inexact start one more walk of its body; on the
+  CSV and JSON workloads no measurable difference in checking time, and
+  fewer summaries on the CSV one (section 15). No
   executable code changes: the checker is a compile-time analysis, and the
   CSV programs' fused native code is identical with and without claims.
 * **Found on the way** (recorded, not fixed here: section 18): a claim whose
@@ -601,12 +602,17 @@ this tree):
 | audit/emission-claims/tools/census.tcl | every modular case as expected, no false proof; 31 of 31 mistakes as the exploratory checker decided |
 | audit/emission-claims/tools/loops.tcl, seeds 11-13 | 450 cases, 0 false certificates, 0 regressions (section 12) |
 | audit/csv-emission/tools/census.tcl, the selective mutants | every one as its class states |
-| audit/emission-claims/tools/fuzz.tcl | PENDING |
-| audit/csv-emission/tools/differential.tcl | PENDING |
-| audit/csv-emission/tools/census.tcl, whole | PENDING |
-| audit/refactor/tools/gate.tcl | PENDING |
+| audit/emission-claims/tools/fuzz.tcl, seeds 1-40 | 320 claims, 0 false proofs, 3 precision losses: exactly the committed results/fuzz.md (no generated loop there was entered and rejected) |
+| audit/csv-emission/tools/differential.tcl, `-part all` | 25,246 cases, 126,230 runs on five backends, every check passed: the committed results/differential.md case for case (times aside) |
+| audit/csv-emission/tools/census.tcl, whole | 26 mutants, 26 as stated (results/census.md regenerated) |
+| audit/refactor/tools/gate.tcl | passed: the observed warnings exactly the manifest |
+| tests/local.tcl (267 Tcl test files on interp and compile, golden duplicates skipped; 117 golden suites on interp, compile, cranelift-generic and cranelift; an empty front-end cache: 97 minutes) | 532 of 534 file runs and 117 of 117 suites pass; the two failures are `package-authoring.test`'s `pa-add-refusals` on both Tcl backends, `main`'s own failure below (this container's GNU ld has no AArch64 emulation for the test's `clang --target=aarch64-linux-gnu` link) |
 
-CI: PENDING.
+CI on the branch: `tests` (dispatched), `tests (macos arm64)`, `tests
+(windows x86-64)` and both Icy Tower workflows, on commit d93e898 (the code
+as it stands; the commit after it changes only Markdown, which starts no
+workflow), were still queued two hours after the push, as `main`'s own
+newest runs were -- pending, not passed.
 
 `main` when this branch was made (2026-11-05): its newest runs were
 queued; of the last completed ones, `tests` failed on
