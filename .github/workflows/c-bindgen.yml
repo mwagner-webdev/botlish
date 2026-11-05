@@ -26,6 +26,12 @@ on:
 permissions:
   contents: read
 
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: c-bindgen-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   bindings:
     name: c-bindgen (generate, check, acceptance)

@@ -26,6 +26,58 @@ one), check `main`'s CI at both ends of the work
   latest run does not have is yours to fix before the merge. Pending runs
   are acceptable: report them as pending, never as passed.
 
+A newer push cancels a running test workflow on the same ref, on `main`
+too, so a run of `main` may end `cancelled`: it was superseded, and says
+nothing either way. Read the latest run of the workflow instead. Merging a
+branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
+them (CI-RUNS.md; next section).
+
+## CI housekeeping (cancellation, pruning, the release gate)
+
+The runners are a shared, limited pool, and main's merges come in bursts
+(CI-RUNS.md). Three rules keep obsolete runs off them and keep releases
+honest; `tools/ci/runs.py` implements the last two. Keep it so:
+
+* **A newer push cancels a running test workflow on the same ref, on main
+  too:** a workflow that tests a push has `concurrency: group:
+  NAME-${{ github.ref }}` and `cancel-in-progress: true`. Never exempt main
+  again: a burst's last push gets the complete run. The only exceptions are
+  a tag's run, a release run, scalar-asm-audit.yml (it writes back to
+  main), react-native-probe.yml (census evidence) and release-gate.yml.
+* **`prune-runs.yml` cancels the unfinished runs of branches fully in
+  main** (the tip is main's or an ancestor; a deleted branch's run whose
+  commit is in main). It never cancels a run of main, a tag or a fork, or
+  of a branch with a commit main lacks; never give it such a rule. Main's
+  head may be a commit no workflow ran (scalar-asm-audit's).
+* **A release is published only once every test of its commit is green**,
+  by a run nothing cancels. `CORE`: tests.yml and tests-arm64.yml with their
+  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml,
+  windows-x86_64.yml, static-decisions.yml when it ran, and the release's
+  own build workflow. Any run at the commit counts.
+  - `release-gate.yml` (workflow_run of those workflows on main) dispatches
+    single-executable.yml or icy-tower-windows.yml on main with
+    `release=SHA` for main's newest green commit (`run-name: release SHA`,
+    a concurrency group of its own, never cancelled). That release run
+    builds nothing: it checks again (`runs.py check --require`) and
+    publishes the artifact of the commit's green push run. A push that
+    supersedes the commit meanwhile does not stop it.
+  - A release tag's run waits for icy-tower-macos.yml's `tested` job. Until
+    the commit's tests are green it is deferred, and the gate dispatches it
+    on the tag again.
+  - Never publish from a push run, never rebuild in a release run, never
+    give the gate a credential or more than `actions: write`, and never
+    give it a way to dispatch a release twice or move a tag backwards.
+
+If you change `tools/ci/`, a workflow's concurrency or triggers, a release
+job, or the name of a workflow or of a GC-stress job a requirement names,
+run `python3 -I tools/ci/test_runs.py` (it also checks the workflows' side
+of these rules), `python3 -I audit/macos-release/tests/test_workflow.py`
+and that audit's mutants for icy-tower-macos.yml, and
+`tclsh9.0 tools/mutant-catalogs.tcl`. Then push and read the `ci tools`
+run, which runs the gate and the pruning read-only against the
+repository's runs. A new required workflow goes into `CORE` and into
+release-gate.yml's `workflow_run` list together (the tests check it).
+
 ## Documentation layout
 
 The root `README.md` is the project overview. Everything else is in `docs/`:
@@ -260,10 +312,11 @@ zipkit holding main.tcl, the compiler stack, both native executables and the
 runtime archive, needing only glibc (and, to link a program that calls C,
 the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`), then publishes it as the
-`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
-README's download button links to that tag and asset name: rename either
-only together with the button. Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`); once every test of the commit is green,
+the release gate's release run publishes that build as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
+(CI-RUNS.md). The README's download button links to that tag and asset
+name: rename either only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
@@ -603,6 +656,33 @@ name; new tests and tools must keep it that way:
   (or under a name with `[pid]`) and removes it when it finishes, never under a
   fixed name in the working directory or the repository; one that runs a test
   file passes it a private `-tmpdir`.
+
+## Tests that hold on every host, and mutants that still apply
+
+A test is written on one machine and run on four hosts and in several
+temporary directories (MAIN-TEST-DEFECTS-2026-11.md has the cases). Keep
+what it depends on in its code or its constraints:
+
+* Wait for a child process by closing its pipeline (`open |[list ...] r`,
+  read to the end, `close`) or by a plain `exec`: never by probing `/proc`,
+  `ps` or a delay, which hold on Linux only, or only on a fast machine.
+* Every tool a test runs is in its constraint. A library of another
+  architecture is linked with `-fuse-ld=lld` (GNU ld links only its own) and
+  the test carries an `lld` constraint.
+* Never match a word against output that names a host path (the temporary
+  directory, the checkout): map the paths out first (`string map [list $dir
+  DIR]`). The native coverage jobs' temporary directory is
+  `/tmp/native-coverage_XXXXXX`.
+
+A change can break another audit's mutant: rewrite or duplicate the text it
+replaces, and that mutant guards nothing until its own harness next runs.
+`tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
+under `audit/` to the tree in memory (seconds; CI's `mutant-catalogs` job in
+`tests.yml`). Run it before pushing a change to code. A mutant it reports is
+updated in the same change, kept a mutant of the same rule, and run through
+its own harness (`-only NAME`). A new catalog whose files are not relative
+to the repository root, or not named by `## FILE` lines, gets a row in the
+tool's `Catalogs` table.
 
 ## Native GC-stress validation
 
@@ -1436,12 +1516,18 @@ thread's stack and guard are found and how a thread is named
 bounds, the usable low bound and the guard confirmed with `mach_vm_region`);
 and Windows' STATUS_STACK_OVERFLOW, `runtime/platform/windows.rs` (a
 vectored exception handler first in the chain, run in the thread's stack
-guarantee). Keep it so:
+guarantee). Any number of threads may be guarded at once, each with its own
+record (`runtime/platform/records.rs`, PER-THREAD-RUNTIME-STATE-MILESTONE-1.md:
+its token, its published stack, its mode, destination and label); the
+process's handler is installed with the first guard and removed after the
+last. Keep it so:
 
 * The handler only classifies and reports: an address in the guard of the
-  stack *published* as running, on the guarded thread (POSIX), or
-  STATUS_STACK_OVERFLOW on the guarded thread at an address of the stack
-  published as running (Windows), writes the result line and ends the process (`_exit`;
+  stack the faulting thread *published* as running, on a guarded thread
+  (POSIX), or STATUS_STACK_OVERFLOW on a guarded thread at an address of the
+  stack it published as running (Windows) -- the record found by the
+  faulting thread's token, never another thread's -- writes the record's
+  label and the result line and ends the process (`_exit`;
   TerminateProcess). It never resumes, unwinds, allocates or touches the
   runtime, and it uses nothing but lock-free atomics stored before the
   fault and calls that take no lock (async-signal-safe ones; WriteFile and
@@ -1496,6 +1582,63 @@ checks, and `[ci-full]` with `CI-Tests: native-stack-mutants` the
 mutants). `bench/native-stack-guard.tcl` compares a driver against a
 baseline build (`-baseline-rev main`; the tier item `native-stack-bench`
 on a macOS runner).
+
+## Per-VM and per-thread runtime state
+
+Several Vms of one compiled program may run at once, on threads of their
+own (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md). A compiled program (its
+machine code, its descriptor, `ProgramInfo` and the frame map, `Arc`-shared)
+defines the environment; each Vm owns its instance of it -- heap, constants'
+objects, statics, context area, roots, pending error -- and each OS thread
+owns its native stack, its guard record and its thread-local runtime state
+(callback transitions, the coroutine stack pool). Keep it so:
+
+* The context area is the Vm's (`Vm::context_ptr`, `install_context_area`,
+  zero when made, cleared by `reset`): generated code loads its base from the
+  Vm at `VM_CONTEXT_OFFSET`, once in the entry block of a function that reads
+  or writes the area (read-only, not `can_move`: Cranelift would sink a
+  movable load back into loops), then the slot's constant offset. Never a data symbol, a process-wide or recycled buffer, a
+  TLS base or a lookup; never an area per actor or coroutine. The layout and
+  which implementation each requirement calls stay the program's: a Vm's
+  construction selects nothing.
+* Program metadata is the Vm's (`Vm::info`; ops.rs's `program(p)`): every
+  runtime read of a shape, an enum, a native or a function's parameter names
+  goes through the running Vm, and every renderer takes the program
+  explicitly (`show`, `tcl_value`, `RtError::message`). Never a thread-local
+  or process-wide current program, a swap per call, or the most recently
+  made Vm's.
+* A Vm stays on the thread that made it (its stack bounds, non-atomic
+  backings, coroutine frames): never `Send` a Vm or its objects, never share
+  a backing or a heap object between Vms, and never let thread-local state
+  keep a Vm pointer past its transition (`callback.rs`'s ACTIVE) or a pooled
+  coroutine stack its previous Vm (`prepare` writes the Vm per start).
+* The guard's records are per thread (`records.rs`): a thread publishes only
+  into its own (through a destructor-free thread-local holding its record's
+  address; never a record cached in a Vm, whose guard may drop first), the
+  handlers find a record by the faulting thread's token with atomic loads
+  only (no thread-local, lock or allocation in a handler), and a record is
+  released when its guard drops or its thread ends. A native stack overflow
+  stays process-terminal: never end only the faulting thread, whatever its
+  Vm's isolation.
+* `botlish-native vms N` (main.rs's `concurrent_vms`) is a test harness, not
+  a thread API: no Botlish program can start a thread. Its collection hook
+  and the heap's ownership check (`Heap::set_ownership_check`) are test
+  hooks, None and off unless it sets them.
+
+If you change any of that (vm.rs's context area or program, ops.rs's
+`program`, show.rs, error.rs, platform/records.rs, guard.rs, windows.rs,
+codegen/clif.rs's `context_addr`, the descriptor's context size, the harness),
+run `tests/concurrent-vms.test` (also with `BOTLISH_NATIVE_GC_STRESS=1` set
+for the whole file only when diagnosing: its GC-stress tests set it
+themselves), `tests/contexts.test`, `tests/platform/aot-facts.tcl`,
+`cargo test --release --manifest-path native/Cargo.toml --lib --bins` and
+`--test native_stack`, `tests/native-library.test`, `tests/c-callbacks.test`
+and `audit/per-thread-runtime/tools/mutate.tcl` (every mutant in its
+`mutants.txt` that applies to the host must still apply and be killed by a
+detector its `!!` line names: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the native
+stack guard's checks above for a change to the guard. `bench/per-thread-runtime.tcl
+-baseline BIN` compares the costs against a driver built before a change.
 
 ## Executable startup policy (worker, main-thread)
 
@@ -4459,8 +4602,8 @@ starves everything else on the machine. So:
     run static-decisions.yml --ref BRANCH`). The optional `suites` input (file
     names, separated by spaces or commas) narrows it.
 * **Read its result.** A run takes about 30 minutes, mutable-array.bot's job
-  (the shards finish within it), and on main it may first wait for the run
-  before it. Don't wait idle for it: carry on, and before you call the change
+  (the shards finish within it); a newer push to the same ref, on main too,
+  cancels it (CI-RUNS.md), so read the latest run. Don't wait idle for it: carry on, and before you call the change
   done read the run's jobs. Each job's summary lists every suite's rounds and
   builds under both schedulers, and any `DISAGREE` or `DOES NOT COMPILE`. If
   the run has not finished, report it as pending, never as passed.
@@ -4919,13 +5062,15 @@ The Windows executable (`build-windows.sh`, the Windows section of
 tests/workload-icy-tower.test, which needs SDL3.dll built by
 `tests/cffi/sdl3.tcl` on Windows) is built and tested only by the
 `icy-tower (windows x86-64)` workflow (`.github/workflows/icy-tower-windows.yml`,
-every push to any branch), which also publishes main's build as the
-`icy-tower-windows-latest` release the README's Windows button links to:
+every push to any branch); once every test of a commit of main is green,
+its release run publishes that commit's tested build as the
+`icy-tower-windows-latest` release the README's Windows button links to
+(CI-RUNS.md):
 run it on the branch for any change to the game, `tests/cffi/sdl3.tcl`,
 the generator's MSVC target or `tools/cheader/`.
 Its signing (ICY-TOWER-WINDOWS.md, "Signing") is the `sign` job's alone:
-only that job, on main or a manual run, in the `windows-signing`
-environment, sees signing credentials -- never give them to the build job,
+only that job, in a manual run (a release run of main among them), in the
+`windows-signing` environment, sees signing credentials -- never give them to the build job,
 a pull request or another workflow, never store a signing key or password
 in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
 release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
@@ -5005,8 +5150,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
 
 * Credentials live only in the `macos-release` environment and reach only
   the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
-  tag of main's history, pushed or run by hand -- never a branch, a pull
-  request, a fork, `pull_request_target`, another job or another workflow;
+  tag of main's history, pushed, run by hand or dispatched again by the
+  release gate, and only once every test of the tagged commit is green (the
+  `tested` job, CI-RUNS.md) -- never a branch, a pull request, a fork,
+  `pull_request_target`, another job or another workflow;
   each secret only in the `env` of the step that reads it, never in a
   script, a `with` or a job's `env`; no step holding one traces commands.
   Nothing is committed: no certificate but Apple's public ones

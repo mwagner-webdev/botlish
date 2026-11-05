@@ -363,9 +363,9 @@
 @@ native-identity-ignored-in-equality native == of two values of an identity shape compares every field
 ## native/src/runtime/ops.rs
 <<<<
-            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity) {
+            if let Some(identity) = program(p).shapes[x.shape as usize].identity {
 ====
-            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity).filter(|_| false) {
+            if let Some(identity) = program(p).shapes[x.shape as usize].identity.filter(|_| false) {
 >>>>
 
 @@ native-equality-by-order native == of two identity values compares the entries in order

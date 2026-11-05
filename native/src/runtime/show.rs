@@ -4,24 +4,26 @@
 
 use super::error::RtError;
 use super::value::*;
-use super::vm::current_program;
+use super::vm::ProgramInfo;
 
 /// `core::value::show V` (without evidence: native strings carry none).
-pub fn show(v: Value) -> String {
+pub fn show(prog: &ProgramInfo, v: Value) -> String {
     let mut out = String::new();
-    show_into(v, &mut out);
+    show_into(prog, v, &mut out);
     out
 }
 
 /// The rendering of a struct of shape SHAPE whose field values are FIELDS
 /// (slot order), as `show` renders such a struct object: what an uncaught
 /// error's payload (ERROR-PAYLOADS.md), transported field-wise and never
-/// built as an object, looks like at the program boundary.
-pub fn show_fields(shape: u32, fields: &[Value]) -> String {
-    let (name, names) = current_program(|prog| {
+/// built as an object, looks like at the program boundary. PROG is the
+/// program whose shapes and enums the values' words index: the Vm's own
+/// (runtime::vm's `ProgramInfo`), never another's.
+pub fn show_fields(prog: &ProgramInfo, shape: u32, fields: &[Value]) -> String {
+    let (name, names) = {
         let shape = &prog.shapes[shape as usize];
         (shape.name.clone(), shape.fields.clone())
-    });
+    };
     let mut out = String::new();
     if let Some(name) = name {
         out.push_str(&name);
@@ -34,7 +36,7 @@ pub fn show_fields(shape: u32, fields: &[Value]) -> String {
         }
         out.push_str(field);
         out.push_str(": ");
-        show_into(*item, &mut out);
+        show_into(prog, *item, &mut out);
     }
     out.push('}');
     out
@@ -45,7 +47,7 @@ pub fn show_fields(shape: u32, fields: &[Value]) -> String {
 /// rendering of every node, character for character (core::value::TreeShow),
 /// from a stack of the nodes being rendered -- each with its next slot, and
 /// its next child while its child List is being rendered.
-fn tree_show(root: Value, shape: u32, name: &str, fields: &[String], child: usize, out: &mut String) {
+fn tree_show(prog: &ProgramInfo, root: Value, shape: u32, name: &str, fields: &[String], child: usize, out: &mut String) {
     struct Frame<'a> {
         values: &'a [Value],
         field: usize,
@@ -90,7 +92,7 @@ fn tree_show(root: Value, shape: u32, name: &str, fields: &[String], child: usiz
                     out.push_str(" {");
                     frames.push(Frame { values: struct_of(kid).fields(), field: 0, kid: None });
                 } else {
-                    show_into(kid, out);
+                    show_into(prog, kid, out);
                 }
                 continue;
             }
@@ -99,12 +101,12 @@ fn tree_show(root: Value, shape: u32, name: &str, fields: &[String], child: usiz
             top.kid = None;
             continue;
         }
-        show_into(value, out);
+        show_into(prog, value, out);
         top.field += 1;
     }
 }
 
-fn show_into(v: Value, out: &mut String) {
+fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
     match kind_of(v) {
         Kind::Int => out.push_str(&int_text(v)),
         Kind::Str => {
@@ -153,7 +155,7 @@ fn show_into(v: Value, out: &mut String) {
         Kind::Enum => {
             // Matches core::value::show's enum rendering exactly: the case's
             // qualified spelling, debug output only (ENUMS.md).
-            let (name, case) = enum_names(v);
+            let (name, case) = enum_names(prog, v);
             out.push_str(&name);
             out.push_str("::");
             out.push_str(&case);
@@ -164,7 +166,7 @@ fn show_into(v: Value, out: &mut String) {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                show_into(*item, out);
+                show_into(prog, *item, out);
             }
             out.push(']');
         }
@@ -174,10 +176,10 @@ fn show_into(v: Value, out: &mut String) {
             // struct (fields in canonical order), `Person {name: "Ada",
             // age: 36}` for a named one (declared slot order).
             let obj = struct_of(v);
-            let (name, fields, opaque, tree) = current_program(|prog| {
+            let (name, fields, opaque, tree) = {
                 let shape = &prog.shapes[obj.shape as usize];
                 (shape.name.clone(), shape.fields.clone(), shape.opaque, shape.tree)
-            });
+            };
             if opaque {
                 // An opaque struct (OPAQUE-STRUCTS.md) is rendered by its
                 // nominal type only, as core::value::show does: normal
@@ -189,7 +191,7 @@ fn show_into(v: Value, out: &mut String) {
             if let Some(child) = tree {
                 // A tree struct's value (TREE-STRUCT-MILESTONE-1.md): the
                 // same text, without the host's recursion.
-                tree_show(v, obj.shape, name.as_deref().unwrap_or(""), &fields, child, out);
+                tree_show(prog, v, obj.shape, name.as_deref().unwrap_or(""), &fields, child, out);
                 return;
             }
             if let Some(name) = name {
@@ -203,7 +205,7 @@ fn show_into(v: Value, out: &mut String) {
                 }
                 out.push_str(field);
                 out.push_str(": ");
-                show_into(*item, out);
+                show_into(prog, *item, out);
             }
             out.push('}');
         }
@@ -216,24 +218,24 @@ fn show_into(v: Value, out: &mut String) {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                show_into(*item, out);
+                show_into(prog, *item, out);
             }
             out.push('}');
         }
         Kind::Result => {
             let r = result_of(v);
             out.push_str(if r.ok { "ok(" } else { "error(" });
-            show_into(r.payload, out);
+            show_into(prog, r.payload, out);
             out.push(')');
         }
         Kind::Block => {
             let c = closure_of(v);
-            let pnames = current_program(|p| p.functions[c.func as usize].pnames.clone());
+            let pnames = prog.functions[c.func as usize].pnames.clone();
             out.push_str(&format!("<block ({pnames})>"));
         }
         Kind::Native => {
             let n = unsafe { as_ref::<NativeObj>(v) };
-            let name = current_program(|p| p.natives[n.native as usize].name.clone());
+            let name = prog.natives[n.native as usize].name.clone();
             out.push_str(&format!("<native {name}>"));
         }
         Kind::MutArray => {
@@ -244,7 +246,7 @@ fn show_into(v: Value, out: &mut String) {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                show_into(item, out);
+                show_into(prog, item, out);
             }
             out.push_str("]>");
         }
@@ -263,7 +265,7 @@ fn show_into(v: Value, out: &mut String) {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                show_into(item, out);
+                show_into(prog, item, out);
             }
             out.push_str("]>");
         }
@@ -297,12 +299,10 @@ pub fn hex_of(bytes: &[u8]) -> String {
 }
 
 /// The declaration identity and the case name of the enum case word V.
-pub fn enum_names(v: Value) -> (String, String) {
+pub fn enum_names(prog: &ProgramInfo, v: Value) -> (String, String) {
     let (e, c) = enum_parts(v);
-    current_program(|prog| {
-        let info = &prog.enums[e as usize];
-        (info.name.clone(), info.cases[c as usize].clone())
-    })
+    let info = &prog.enums[e as usize];
+    (info.name.clone(), info.cases[c as usize].clone())
 }
 
 /// The canonical decimal text of the finite number X (core/float.tcl's Text,
@@ -346,7 +346,7 @@ pub fn int_text(v: Value) -> String {
 }
 
 /// V as the host runtime value (a Tcl list such as `int 5` or `str {a b}`).
-pub fn tcl_value(v: Value) -> Result<String, RtError> {
+pub fn tcl_value(prog: &ProgramInfo, v: Value) -> Result<String, RtError> {
     Ok(match kind_of(v) {
         Kind::Int => tcl_list(&["int".to_string(), int_text(v)]),
         Kind::Str => tcl_list(&["str".to_string(), str_of(v).as_str().to_string()]),
@@ -373,30 +373,30 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         // Matches core::value::enumValue's own representation exactly
         // ({enum ID CASE}, core/value.tcl): the names, never the numbers.
         Kind::Enum => {
-            let (name, case) = enum_names(v);
+            let (name, case) = enum_names(prog, v);
             tcl_list(&["enum".to_string(), name, case])
         }
         Kind::List => {
-            let items = list_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
+            let items = list_of(v).items().iter().map(|item| tcl_value(prog, *item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["list".to_string(), tcl_list(&items)])
         }
         Kind::Struct => {
             // Matches core::value::structOf's own representation exactly
             // ({struct {ID FIELD...} VALUES}, core/value.tcl).
             let obj = struct_of(v);
-            let (name, fields) = current_program(|prog| {
+            let (name, fields) = {
                 let shape = &prog.shapes[obj.shape as usize];
                 (shape.name.clone().unwrap_or_default(), shape.fields.clone())
-            });
+            };
             let mut shape_words = vec![name];
             shape_words.extend(fields);
-            let items = obj.fields().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
+            let items = obj.fields().iter().map(|item| tcl_value(prog, *item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["struct".to_string(), tcl_list(&shape_words), tcl_list(&items)])
         }
         Kind::ImmutableSet => {
             // Matches core::value::immutableSet's own representation
             // exactly ({immutableSet ITEMS}, core/value.tcl).
-            let items = set_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
+            let items = set_of(v).items().iter().map(|item| tcl_value(prog, *item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["immutableSet".to_string(), tcl_list(&items)])
         }
         // Matches core::value::bytestore's own representation exactly
@@ -409,31 +409,31 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
             tcl_list(&[
                 "result".to_string(),
                 (if r.ok { "ok" } else { "error" }).to_string(),
-                tcl_value(r.payload)?,
+                tcl_value(prog, r.payload)?,
             ])
         }
         Kind::Native => {
             let n = unsafe { as_ref::<NativeObj>(v) };
-            let name = current_program(|p| p.natives[n.native as usize].name.clone());
+            let name = prog.natives[n.native as usize].name.clone();
             tcl_list(&["native".to_string(), name])
         }
         Kind::Block => {
             return Err(RtError::Unsupported(format!(
                 "the native backend cannot return a Block to the host: {}",
-                show(v)
+                show(prog, v)
             )));
         }
         // An array's current elements, under a tag of their own: the host
         // (native::Outcome) makes them an array value of its own runtime
         // (core/mutarray.tcl), exactly as a vector's (below).
         Kind::MutArray => {
-            let items = super::ops::array_elements(v).map(tcl_value).collect::<Result<Vec<_>, _>>()?;
+            let items = super::ops::array_elements(v).map(|item| tcl_value(prog, item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["mutarrayitems".to_string(), tcl_list(&items)])
         }
         Kind::Coroutine => {
             return Err(RtError::Unsupported(format!(
                 "the native backend cannot return a coroutine handle to the host: {}",
-                show(v)
+                show(prog, v)
             )));
         }
         // A C address as core/cabi.tcl holds it: its bits, unsigned decimal.
@@ -442,7 +442,7 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         // (native::Outcome) makes them a vector value of its own runtime
         // (core/mutvec.tcl), exactly as it would hold one.
         Kind::MutVec => {
-            let items = super::mutvec::elements(v).map(tcl_value).collect::<Result<Vec<_>, _>>()?;
+            let items = super::mutvec::elements(v).map(|item| tcl_value(prog, item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["mutvecitems".to_string(), tcl_list(&items)])
         }
     })

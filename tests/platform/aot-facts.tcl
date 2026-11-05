@@ -12,11 +12,13 @@
 #
 #   object      its format, architecture and kind (`file`, and the header
 #               read here), its symbols (`nm -P`: every botlish_fn_N and
-#               botlish_entry_N defined, the runtime helpers undefined, the
-#               context area local, each with the object format's own
-#               decoration and nothing else), its relocations (`objdump -r`:
-#               the context area and a runtime helper reached through the
-#               GOT, no relocation of another format) and, on macOS, its
+#               botlish_entry_N defined, the runtime helpers undefined, no
+#               context area symbol -- the area is each Vm's own,
+#               PER-THREAD-RUNTIME-STATE-MILESTONE-1.md -- each with the
+#               object format's own decoration and nothing else), its
+#               relocations (`objdump -r`: a runtime helper reached through
+#               the GOT, none against a context area, no relocation of
+#               another format) and, on macOS, its
 #               LC_BUILD_VERSION (`otool -l`)
 #   executable  its format, architecture and kind; on macOS one
 #               architecture (`lipo -archs`), a valid signature (`codesign
@@ -96,26 +98,25 @@ foreach {option value} $argv {
 # What the host's tools must report, per host target: the object's and the
 # executable's {FORMAT ARCHITECTURE KIND} (from the header), the `file`
 # pattern of each, the symbol decoration (the object format's user label
-# prefix), and the relocation types of a GOT access to the context area and
-# to a runtime helper.
+# prefix), and the relocation types of a GOT access to a runtime helper.
 set expected [dict create \
     linux-x86_64 {
         object {elf x86_64 relocatable} objectFile {ELF 64-bit LSB relocatable, x86-64*}
         executable {elf x86_64 shared} executableFile {ELF 64-bit LSB pie executable, x86-64*}
-        prefix "" contextReloc {R_X86_64_REX_GOTPCRELX} helperReloc {R_X86_64_GOTPCREL R_X86_64_PLT32}
+        prefix "" helperReloc {R_X86_64_GOTPCREL R_X86_64_PLT32}
         foreignRelocs {ARM64_RELOC_* R_AARCH64_*}
     } \
     linux-aarch64 {
         object {elf aarch64 relocatable} objectFile {ELF 64-bit LSB relocatable, ARM aarch64*}
         executable {elf aarch64 shared} executableFile {ELF 64-bit LSB pie executable, ARM aarch64*}
-        prefix "" contextReloc {R_AARCH64_ADR_GOT_PAGE R_AARCH64_LD64_GOT_LO12_NC}
+        prefix ""
         helperReloc {R_AARCH64_ADR_GOT_PAGE R_AARCH64_LD64_GOT_LO12_NC}
         foreignRelocs {ARM64_RELOC_* R_X86_64_*}
     } \
     macos-aarch64 {
         object {macho arm64 object} objectFile {Mach-O 64-bit object arm64*}
         executable {macho arm64 execute} executableFile {Mach-O 64-bit executable arm64*}
-        prefix _ contextReloc {ARM64_RELOC_GOT_LOAD_PAGE21 ARM64_RELOC_GOT_LOAD_PAGEOFF12}
+        prefix _
         helperReloc {ARM64_RELOC_GOT_LOAD_PAGE21 ARM64_RELOC_GOT_LOAD_PAGEOFF12}
         foreignRelocs {R_X86_64_* R_AARCH64_*}
     } \
@@ -133,8 +134,8 @@ set facts [dict get $expected $host]
 set prefix [dict get $facts prefix]
 set macos [string match macos-* $host]
 
-# The program: a context (the object's one data symbol, botlish_context_area),
-# a recursion, String building and a List.
+# The program: a context (installed in each Vm's own area, never in a data
+# symbol of the object), a recursion, String building and a List.
 set program {import std::str
 
 type Small = Int in 0..1000
@@ -489,11 +490,11 @@ proc checks {} {
     set decorated [lsearch -all -inline -regexp [concat $defined $undefined $local] {botlish_|rt_}]
     set misdecorated [lsearch -all -inline -not -regexp $decorated "^${prefix}(botlish_|rt_)"]
     set helpers [lsearch -all -inline -regexp $undefined "^${prefix}rt_"]
-    set context [lsearch -all -inline -exact $local ${prefix}botlish_context_area]
+    set context [lsearch -all -inline -glob [concat $defined $undefined $local] *context_area*]
     check object-symbols [expr {$::toolError eq "" && [llength $wanted] >= 8 && [llength $wanted] % 2 == 0
-            && [llength $helpers] > 0 && [llength $context] == 1 && $misdecorated eq ""
+            && [llength $helpers] > 0 && [llength $context] == 0 && $misdecorated eq ""
             && [lsearch -regexp $defined "^${prefix}botlish_fn_0\$"] >= 0}] \
-        "[expr {[llength $wanted] / 2}] functions defined (${prefix}botlish_fn_N and ${prefix}botlish_entry_N), [llength $helpers] runtime helpers undefined (${prefix}rt_*), context area local: [expr {$context ne {}}], misdecorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
+        "[expr {[llength $wanted] / 2}] functions defined (${prefix}botlish_fn_N and ${prefix}botlish_entry_N), [llength $helpers] runtime helpers undefined (${prefix}rt_*), context area symbols: [llength $context], misdecorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
         "$::toolError$symbols"
 
     set relocations [tool objdump -r $object]
@@ -507,17 +508,17 @@ proc checks {} {
     set contextTypes {}
     set helperTypes {}
     dict for {type values} $types {
-        if {"${prefix}botlish_context_area" in $values} { lappend contextTypes $type }
+        if {[lsearch -glob $values *context_area*] >= 0} { lappend contextTypes $type }
         if {[lsearch -glob $values "${prefix}rt_*"] >= 0} { lappend helperTypes $type }
     }
     set foreign {}
     foreach pattern [dict get $facts foreignRelocs] {
         lappend foreign {*}[lsearch -all -inline -glob [dict keys $types] $pattern]
     }
-    set contextOk [expr {[llength [lmap t [dict get $facts contextReloc] {expr {$t in $contextTypes ? $t : [continue]}}]] > 0}]
+    set contextOk [expr {$contextTypes eq ""}]
     set helperOk [expr {[llength [lmap t [dict get $facts helperReloc] {expr {$t in $helperTypes ? $t : [continue]}}]] > 0}]
     check object-relocations [expr {$::toolError eq "" && $contextOk && $helperOk && $foreign eq ""}] \
-        "types [lsort [dict keys $types]]; context area: [lsort $contextTypes]; helpers: [lsort $helperTypes]" \
+        "types [lsort [dict keys $types]]; against a context area: [expr {$contextTypes eq {} ? "none" : [lsort $contextTypes]}]; helpers: [lsort $helperTypes]" \
         "$::toolError$relocations"
 
     if {$macos} {
@@ -732,10 +733,10 @@ proc windowsChecks {} {
     set functions [lsearch -all -inline -regexp $defined {^botlish_(fn|entry)_[0-9]+$}]
     set helpers [lsearch -all -inline -regexp $undefined {^rt_}]
     set misdecorated [lsearch -all -inline -regexp [concat $defined $undefined] {^_+(botlish|rt)_}]
-    set context [lsearch -all -inline -exact [lmap s [dict get $coff symbols] {lindex $s 0}] botlish_context_area]
+    set context [lsearch -all -inline -glob [lmap s [dict get $coff symbols] {lindex $s 0}] *context_area*]
     check object-symbols [expr {[llength $functions] >= 8 && [llength $functions] % 2 == 0 && [llength $helpers] > 0
-            && "botlish_fn_0" in $defined && $misdecorated eq "" && [llength $context] == 1}] \
-        "[expr {[llength $functions] / 2}] functions defined (botlish_fn_N, botlish_entry_N), [llength $helpers] runtime helpers undefined (rt_*), context area: [llength $context], decorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
+            && "botlish_fn_0" in $defined && $misdecorated eq "" && [llength $context] == 0}] \
+        "[expr {[llength $functions] / 2}] functions defined (botlish_fn_N, botlish_entry_N), [llength $helpers] runtime helpers undefined (rt_*), context area symbols: [llength $context], decorated: [expr {$misdecorated eq {} ? "none" : $misdecorated}]" \
         [join [dict get $coff symbols] \n]
     set types [lsort -unique [lmap r [dict get $coff relocations] {lindex $r 1}]]
     set foreign [lmap t $types {expr {$t in [dict get $facts relocTypes] ? [continue] : $t}}]

@@ -688,6 +688,24 @@ rm -rf "$out/Icy Tower.app"
     runs-on: macos-15
 >>>>
 
+@@ release-before-green a release tag is built, signed and published before its commit's tests are green
+!! test_workflow.Workflow.test_release_waits_for_green_tests
+## .github/workflows/icy-tower-macos.yml
+<<<<
+      !cancelled() && (needs.tested.result == 'skipped' || needs.tested.outputs.green == 'true')
+      && (github.event_name != 'pull_request'
+====
+      !cancelled()
+      && (github.event_name != 'pull_request'
+>>>>
+## .github/workflows/icy-tower-macos.yml
+<<<<
+      && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+      && needs.tested.outputs.green == 'true'
+====
+      && startsWith(github.ref, 'refs/tags/icy-tower-macos-v')
+>>>>
+
 @@ release-on-any-ref the release job runs for any branch, not only a release tag
 !! test_workflow.Workflow.test_release_job_is_protected
 ## .github/workflows/icy-tower-macos.yml

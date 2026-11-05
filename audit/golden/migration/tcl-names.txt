@@ -1164,6 +1164,17 @@ tests/compilerpedia.test cp-search-plain-word-code-tails pass
 tests/compilerpedia.test cp-search-single-generic-word-not-everything pass
 tests/compilerpedia.test cp-search-symbols pass
 tests/compilerpedia.test cp-search-text-mentions-are-near-matches pass
+tests/concurrent-vms.test cv-concurrent-2 pass
+tests/concurrent-vms.test cv-concurrent-4 pass
+tests/concurrent-vms.test cv-concurrent-8 pass
+tests/concurrent-vms.test cv-gc-stress pass
+tests/concurrent-vms.test cv-gc-stress-rounds pass
+tests/concurrent-vms.test cv-oracle pass
+tests/concurrent-vms.test cv-overflow pass
+tests/concurrent-vms.test cv-rounds pass
+tests/concurrent-vms.test cv-source-context-area pass
+tests/concurrent-vms.test cv-source-guard-records pass
+tests/concurrent-vms.test cv-source-program pass
 tests/conjunctive-entry-facts.test empty-caller-does-not-imply-element-existence pass
 tests/conjunctive-entry-facts.test empty-caller-keeps-list-never-instance pass
 tests/conjunctive-entry-facts.test empty-immutable-set-instance-not-formed-by-key pass

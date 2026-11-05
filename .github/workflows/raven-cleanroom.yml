@@ -29,6 +29,12 @@ on:
 permissions:
   contents: read
 
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: raven-cleanroom-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cleanroom:
     name: raven clean room (linux x86-64)

@@ -334,7 +334,6 @@ pub(crate) mod tests {
     use crate::runtime::vm::{ProgramInfo, Vm};
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
-    use std::rc::Rc;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use windows_sys::Win32::Foundation::STATUS_SINGLE_STEP;
@@ -475,7 +474,7 @@ pub(crate) mod tests {
 
     fn vm(compiled: &CompiledProgram, stress: bool) -> Box<Vm> {
         let info = ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() };
-        let mut vm = Vm::new(Rc::new(info), AllocMode::Off);
+        let mut vm = Vm::new(std::sync::Arc::new(info), AllocMode::Off);
         compiled.install_constants(&mut vm);
         vm.set_framemap(compiled.framemap.clone());
         vm.heap.set_stress_for_test(stress);

@@ -4581,9 +4581,9 @@ proc native::lower::Project {fnVar e node {want tagged}} {
 # the simplest one for the common case -- a process installs its contexts at
 # startup, once each -- and is static all the way down:
 #
-#   * one context area per program: a single zero-initialized, 8-byte
-#     aligned, writable, linker-local data object (`botlish_context_area`,
-#     codegen/clif.rs), holding every context slot;
+#   * one context area layout per program, every Vm owning its own storage
+#     of it (runtime::vm's `context_ptr`, zero when the Vm is made:
+#     PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), holding every context slot;
 #   * one slot per context-struct type the program installs, assigned at
 #     compile time in installation (program) order (ContextSlots), at a fixed
 #     byte offset, and laid out flattened: one 64-bit word per scalar leaf of
@@ -4600,11 +4600,12 @@ proc native::lower::Project {fnVar e node {want tagged}} {
 #     it) materializes one, from loads, with `structnew` -- exactly where an
 #     ordinary struct of the same shape would be materialized.
 #
-# Codegen turns OFFSET into the area's fixed address plus a constant
-# displacement: a PC-relative `lea` of the data symbol in the AOT object, an
-# absolute address in the JIT. No context pointer is passed, no register is
-# reserved, nothing is looked up, and there is no presence flag: hir/
-# contexts.tcl proved every load is preceded by its installation.
+# Codegen turns OFFSET into the running Vm's area plus a constant
+# displacement: one read-only load of the base from the Vm argument
+# (codegen/clif.rs's `context_addr`), then the word. No context pointer is
+# passed, no register is reserved, nothing is looked up, and there is no
+# presence flag: hir/contexts.tcl proved every load is preceded by its
+# installation.
 #
 # Eligibility (StaticContextEligible, ContextLeaves): a leaf must be a value
 # whose tagged word is never a heap pointer -- an Int whose declared domain
