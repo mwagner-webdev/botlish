@@ -170,11 +170,11 @@ Checking every catalog under `audit/` (84 catalogs, 2,968 mutants; section
 | mutable-map | `set-value-storage` | a `sendable through(...)` clause now follows MutableSet's field | 8b0a692, sendability (11-03) | `ms-no-value-storage` |
 | direct-modules | `method-obligation-dropped` | `ObligationKinds` gained `CONTEXT-NOT-INJECTED CONTEXT-RETAINED-AUTHORITY` | 9f9cc95, restricted injection (11-02) | `dm-method-sugar-two-candidates` |
 | method-receiver-types | `context-obligation-selects`, `error-obligation-selects` | the same line | 9f9cc95 (11-02) | `mrt-context-obligation-never-selects`, `mrt-error-obligation-never-selects` |
-| method-resolution | `ambiguous-context-is-a-problem`, `missing-context-is-a-problem` | the same line | 9f9cc95 (11-02) | PENDING |
+| method-resolution | `ambiguous-context-is-a-problem`, `missing-context-is-a-problem` | the same line | 9f9cc95 (11-02) | method-resolution.test (`mr-sfiae-competing-candidates`, `mr-diag-obligations-of-the-placeholder`, ...) |
 | enums | `bare-case-accepted` | the emission-claims resolver added a second `set b [Lookup hir $scope $name]` | 46ff149, emission claims (11-02) | `enum-cases-not-injected`; the fuzzer, 10 of 25 programs |
 | hir-interchange | `decode-skips-activation` | `decode` now re-verifies emission claims between `hir::activate` and `return` | 46ff149 (11-02) | `hx-roundtrip-in-process` |
-| c-ffi | `link-failure-removes-earlier` | `emit_object(program)` became `emit_executable_object(program, startup)` | ccc51dd, main-thread startup (10-29; on `main` 10-30) | PENDING |
-| native-link-plan | `system-loses-static` | `system_link_args` gained `startup` | ccc51dd (10-29; on `main` 10-30) | PENDING |
+| c-ffi | `link-failure-removes-earlier` | `emit_object(program)` became `emit_executable_object(program, startup)` | ccc51dd, main-thread startup (10-29; on `main` 10-30) | `cf-link-failure-keeps-executable` |
+| native-link-plan | `system-loses-static` | `system_link_args` gained `startup` | ccc51dd (10-29; on `main` 10-30) | `nlp-linkers-agree` |
 
 Three properties of the list:
 
@@ -303,7 +303,7 @@ failure. A one-line fix was documented four times.
 | `pn-bundled-checks` | `lld` constraint | passes |
 | `pa-pack-refuses-incomplete` | the repository path mapped out of the output | fails before, passes after, in a temporary directory named like the coverage jobs' |
 | both files | | `tests/local.tcl tests/package-native.test tests/package-authoring.test`: 67 passed on interp and on compile (2 skipped each: MinGW-w64); package-authoring.test also on cranelift-generic |
-| eleven mutants | each updated to the code it mutates, removing or changing exactly what it did before | `tools/mutant-catalogs.tcl`: 84 catalogs, every mutant applies; each mutant run through its own harness (`-only NAME`): table of 2.4 |
+| eleven mutants | each updated to the code it mutates, removing or changing exactly what it did before | `tools/mutant-catalogs.tcl`: every mutant applies (84 catalogs at 17b0e66; 85 and 2,988 mutants after merging `main`'s per-thread runtime milestone); each of the eleven run through its own harness (`-only NAME`) and killed: table of 2.4 |
 | `tools/mutant-catalogs.tcl` | new: every mutant of every catalog applied in memory | 2.6 s; against `main`'s tree it reports exactly the eleven |
 | `tests.yml` | new job `mutant-catalogs` | YAML validated; CI decides |
 | AGENTS.md | "Tests that hold on every host, and mutants that still apply" | -- |
