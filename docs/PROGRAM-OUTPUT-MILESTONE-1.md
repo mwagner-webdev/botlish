@@ -158,7 +158,48 @@ classified).
 
 ## 5. Validation
 
-VALIDATION-PLACEHOLDER
+On Linux x86-64 (Tcl 9.0.1, the release native backend, the pinned SDL3
+built by tests/cffi/sdl3.tcl):
+
+* `tclsh9.0 tests/local.tcl`, the whole local run: Tcl tests 8,735 passed
+  on interp and 8,730 on compile, one failure on each -- package-
+  authoring.test's `pa-add-refusals`, which links an AArch64 library with
+  clang and this host's linker has no AArch64 emulation (its documented
+  requirement: clang, lld and MinGW-w64), unrelated to this change; the 117
+  golden suites on all four backends, 0 failed.
+* Every test file the migration changed passed on its own run (about 75
+  files; the macOS- and Windows-only tests in them were edited by reading),
+  among them tests/workload-icy-tower.test's executable tests with SDL3
+  (headless summary, dummy driver, GC stress, the oracle over 8 seeds, the
+  SDL call trace against its reference, valgrind) and the eight new
+  `cli-run-*` tests.
+* tests/native-executable.test with `BOTLISH_NATIVE_LINKER=stub`, with
+  `=system` (18 passed, 2 skipped: rustc-linker tests) and under
+  `BOTLISH_NATIVE_GC_STRESS=1` (20 passed).
+* `cargo test --release --manifest-path native/Cargo.toml --lib --
+  aotimage program` (11 passed) and `--bin botlish-native aot::` (29).
+* audit/native-aot/tools/mutate.tcl -only result-printed: the baseline
+  (native-executable, argv, 2048, system-linker, main-thread-startup,
+  aot-facts, native-status) passes; the mutant is killed by six detectors.
+* single/build.sh, then single/smoke-test.sh and single/ffi-smoke-test.sh
+  against single/out/botlish: both pass, `run` included (a printing
+  program, its arguments, a rejection, a program that calls C with a fresh
+  cache). audit/single-executable/tools/mutate.tcl -only
+  run-command-not-linking,backend-run-not-linking,runtime-always-installed:
+  3 killed (the new one by the FFI smoke test's `run` of b).
+* `tclsh9.0 tools/compilerpedia.tcl check`: 1,219 topics, 742 examples, 0
+  problems. audit/refactor/tools/gate.tcl: passed (Icy Tower's game is
+  built under `-warnings error` too).
+* audit/abi-bytes/tools/fuzz.tcl and audit/mutable-bytes/tools/fuzz.tcl in
+  their executable modes (`-mode write`, `-mode read`; seeds 11, 23, 37):
+  0 failures. bench/golden-aot.tcl on one suite: the AOT and JIT reports
+  agree.
+* Not run here: fuzz/scripts/replay.tcl and baseline.sh (they need the fuzz
+  campaign's AFL-built targets), audit/dfa/tools/differential.tcl (it needs
+  JSONTestSuite), the macOS census tool, and every macOS and Windows path:
+  those run in the macOS and Windows workflows, and the Linux workflows
+  (tests, tests-arm64, single-executable, icy-tower) were dispatched on the
+  branch.
 
 ## 6. Open items
 
