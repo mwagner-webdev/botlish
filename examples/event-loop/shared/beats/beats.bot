@@ -1,0 +1,39 @@
+# beats.bot -- a heartbeat, as a library of its own (the package beats,
+# examples/event-loop/shared; SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md).
+# It depends on the Linux driver, event_loop_linux, like any package: its
+# botlish.json requests it and locks the release it was written against.
+# It needs the loop (a periodic timer) and the driver's integration
+# capability, event_loop_linux::Native, to read the driver's monotonic
+# clock -- a C call of the driver's adapter -- and it can neither install
+# nor run either: the application does both, once, for every library.
+import event_loop_linux
+import std::event_loop
+import std::int
+import std::mutable_array
+import std::str
+import type std::event_loop::Wake
+
+# COUNT beats, one every PERIOD microseconds of the loop's timer, each
+# stamped with the driver's clock; logs each, and whether the stamps never
+# went back. Its result is the number of beats that arrived.
+fn run(count: int, period: int, context ev: std::event_loop::Loop, n: event_loop_linux::Native) -> int errors IndexNotFound, std::event_loop::SchedulerFault:
+    timer = std::event_loop::every(period)
+    seen = std::mutable_array::create(3, 0)
+    seen.set(1, event_loop_linux::now_us())
+    seen.set(2, 1)
+    loop i from 0 to count:
+        e = std::event_loop::wait(timer)
+        if e.reason != Wake::Timer:
+            break
+        now = event_loop_linux::now_us()
+        if now < seen.at(1):
+            seen.set(2, 0)
+        seen.set(1, now)
+        seen.set(0, seen.at(0) + 1)
+        std::event_loop::log("beats: beat ".concat(std::int::to_string(seen.at(0))))
+    std::event_loop::revoke(timer)
+    if seen.at(2) == 1:
+        std::event_loop::log("beats: the driver's clock never went back")
+    else:
+        std::event_loop::log("beats: the driver's clock went back")
+    seen.at(0)

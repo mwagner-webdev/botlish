@@ -207,3 +207,60 @@
 ====
                 continue
 >>>>
+
+# ---------------------------------------------------------------------------
+# Package graphs (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md)
+
+@@ graph-identity-by-path a graph package's instance is its place under the scope that names it, as a nested one's: two identities of one package
+## surface/modules.tcl
+<<<<
+    if {$scope eq "" || $graph} {
+        set instance $name
+====
+    if {$scope eq ""} {
+        set instance $name
+>>>>
+
+@@ graph-uses-ignored a scope of the graph sees every package of the graph, used or not
+## surface/modules.tcl
+<<<<
+        if {$name ni [GraphUses $state $scope]} {
+            return 0
+        }
+====
+        if {0} {
+            return 0
+        }
+>>>>
+
+@@ graph-unused-claims-nothing a graph package the application does not use claims no namespace there: an application file of its name is loaded under its identity
+## surface/modules.tcl
+<<<<
+    } elseif {$scope eq "" && [GraphPackage $state $head] && $head ni [GraphUses $state ""]} {
+====
+    } elseif {0} {
+>>>>
+
+@@ graph-unsorted-accepted a graph whose lists are out of order or repeat a name is read
+## surface/modules.tcl
+<<<<
+        if {$names ne [lsort -unique $names]} {
+====
+        if {0} {
+>>>>
+
+@@ graph-package-reads-own-modules a graph package's scope is its own .bot_modules, as a hand-installed one's
+## surface/modules.tcl
+<<<<
+    if {($scope eq "" || [InGraph $state $scope]) && [dict exists $state appPackages]} {
+====
+    if {$scope eq "" && [dict exists $state appPackages]} {
+>>>>
+
+@@ graph-problem-ignored a malformed graph is ignored, the packages directory read as a tree
+## surface/modules.tcl
+<<<<
+    if {$scope eq "" && [dict exists $state graphProblem]} {
+====
+    if {0} {
+>>>>

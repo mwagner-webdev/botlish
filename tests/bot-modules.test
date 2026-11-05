@@ -587,6 +587,179 @@ test bm-service-directory-stale {a package directory appearing where an analysis
     list $before [lmap path [dict keys [service::stale $rev]] {string map [list $dir APP] $path}]
 } -cleanup {service::closeWorkspace $ws; removeApps} -result {{} APP/.bot_modules/game}
 
+# ---------------------------------------------------------------------------
+# Package graphs (SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md)
+
+# A package graph: physics and rendering, independently written, both over
+# one shared geometry, which the application uses too.
+set sharedGraph [list \
+    .bot_modules/.graph "botlish package graph 1\napplication geometry physics rendering\npackage geometry\npackage physics geometry\npackage rendering geometry\n" \
+    .bot_modules/physics/physics.bot "import geometry\n\nfn make(n: int) -> geometry::Point:\n    geometry::make(n)\n\nfn side(n: int) -> geometry::Side:\n    geometry::side(n)\n\nfn safe(n: int) -> int:\n    geometry::check(n):\n        on geometry::Bad {code}:\n            code * 100\n" \
+    .bot_modules/rendering/rendering.bot "import geometry\n\nfn read(p: geometry::Point) -> int:\n    p.x + p.y\n\nfn is_right(s: geometry::Side) -> bool:\n    s == geometry::Side::Right\n\nfn check(n: int) -> int errors geometry::Bad:\n    geometry::check(n)\n" \
+    .bot_modules/geometry/geometry.bot [geometryPackage "    x: int\n    y: int\n" "Point {x: n, y: n + 1}"]]
+set sharedMain "import geometry\nimport physics\nimport rendering\n\nfn guarded(n: int) -> int:\n    rendering::check(n):\n        on geometry::Bad {code}:\n            code * 7\n\n\[rendering::read(physics::make(3)), rendering::read(geometry::make(1)), physics::safe(-1), guarded(-2)\]\n"
+
+test bm-graph-one-instance {in a package graph every scope that depends on a package sees its one instance, whose identity is its name: a Point physics makes is the Point rendering reads (and the application's), an enum case crosses, an error rendering raises is the one the application handles -- on every backend, geometry loaded once} -body {
+    set dir [app [concat $sharedGraph [list main.bot $sharedMain]]]
+    set hir [appHir $dir]
+    list [lsort -unique [appValues $dir]] [hirModules $hir $dir] \
+        [lsort [lmap name [dict keys [dict get $hir modules]] {if {[string match *geometry* $name]} {set name} else continue}]]
+} -cleanup removeApps -result {{{[7, 3, -100, -14]}} {{geometry .bot_modules/geometry/geometry.bot} {physics .bot_modules/physics/physics.bot} {rendering .bot_modules/rendering/rendering.bot} {{} main.bot}} geometry}
+
+test bm-graph-shared-context {a context struct of a shared package, required by two independent packages, is one type: the application installs it once and both run under it; without the installation, the one missing context is reported at each call} -body {
+    set files {
+        .bot_modules/.graph "botlish package graph 1\napplication drv lib_a lib_b\npackage drv\npackage lib_a drv\npackage lib_b drv\n"
+        .bot_modules/drv/drv.bot "type Id = Int in 0..1000\n\nopaque context struct Native:\n    id: Id\n\nfn native() -> Native:\n    Native {id: 7}\n\nfn id(context native: Native) -> int:\n    native.id\n"
+        .bot_modules/lib_a/lib_a.bot "import drv\n\nfn ping(context native: drv::Native) -> int:\n    drv::id() * 10\n"
+        .bot_modules/lib_b/lib_b.bot "import drv\n\nfn pong(context native: drv::Native) -> int:\n    drv::id() + 1\n"
+    }
+    set ok [app [concat $files [list main.bot "import drv\nimport lib_a\nimport lib_b\n\nwith context drv::native()\nlib_a::ping() + lib_b::pong()\n"]]]
+    set missing [app [concat $files [list main.bot "import lib_a\nimport lib_b\n\nlib_a::ping() + lib_b::pong()\n"]]]
+    list [lsort -unique [appValues $ok]] [regexp -all {drv::Native is required by this call} [appRejection $missing]] \
+        [string match {MISSING-CONTEXT:*} [appRejection $missing]] [string match {*lib_a/drv*} [appRejection $missing]]
+} -cleanup removeApps -result {78 2 1 0}
+
+test bm-graph-visibility {a scope of the graph sees exactly the packages the graph says it uses: rendering cannot import physics, its sibling; the application cannot import a package only physics uses; a graph package cannot see an application module or a package installed by hand} -body {
+    set base [list \
+        .bot_modules/physics/physics.bot "import geometry\n\nfn v() -> int:\n    geometry::v()\n" \
+        .bot_modules/geometry/geometry.bot "fn v() -> int:\n    1\n" \
+        .bot_modules/handmade/handmade.bot "fn h() -> int:\n    2\n" \
+        game.bot "fn g() -> int:\n    3\n"]
+    set graph "botlish package graph 1\napplication physics rendering\npackage geometry\npackage physics geometry\npackage rendering\n"
+    set out {}
+    foreach rendering {
+        "import physics\n\nfn r() -> int:\n    physics::v()\n"
+        "import geometry\n\nfn r() -> int:\n    geometry::v()\n"
+        "import game\n\nfn r() -> int:\n    game::g()\n"
+        "import handmade\n\nfn r() -> int:\n    handmade::h()\n"
+    } {
+        set dir [app [concat $base [list .bot_modules/.graph $graph .bot_modules/rendering/rendering.bot $rendering main.bot "import rendering\n\nrendering::r()\n"]]]
+        lappend out [lindex [split [appRejection $dir] :] 0]
+    }
+    set dir [app [concat $base [list .bot_modules/.graph $graph .bot_modules/rendering/rendering.bot "fn r() -> int:\n    0\n" \
+        main.bot "import geometry\n\ngeometry::v()\n"]]]
+    lappend out [appRejection $dir]
+    set dir [app [concat $base [list .bot_modules/.graph $graph .bot_modules/rendering/rendering.bot "fn r() -> int:\n    0\n" \
+        main.bot "import handmade\nimport game\nimport physics\n\nhandmade::h() + game::g() + physics::v()\n"]]]
+    lappend out [appValues $dir {interp}]
+} -cleanup removeApps -result {UNKNOWN-NAMESPACE UNKNOWN-NAMESPACE UNKNOWN-NAMESPACE UNKNOWN-NAMESPACE {UNKNOWN-NAMESPACE: APP/main.bot:1:8: unknown namespace "geometry": the application does not depend on the package "geometry", which the package graph APP/.bot_modules/.graph installs for physics (the application uses physics, rendering): a scope of the graph imports only the packages it depends on, never another package's dependencies} 6}
+
+test bm-graph-collision {every package of the graph claims its root namespace in the application, used by the application or not: an application file of that namespace is MODULE-COLLISION at its import, never a second module of the identity} -body {
+    set files [concat $sharedGraph [list geometry.bot "fn v() -> int:\n    1\n"]]
+    set used [app [concat $files [list main.bot "import geometry\n\ngeometry::v()\n"]]]
+    set graph "botlish package graph 1\napplication physics rendering\npackage geometry\npackage physics geometry\npackage rendering geometry\n"
+    set unused [app [concat $files [list .bot_modules/.graph $graph main.bot "import geometry\n\ngeometry::v()\n"]]]
+    list [lindex [split [appRejection $used] :] 0] [appRejection $unused]
+} -cleanup removeApps -result {MODULE-COLLISION {MODULE-COLLISION: APP/main.bot:1:8: application file APP/geometry.bot would be the namespace "geometry", but "geometry" is the root namespace of the package geometry of the application's package graph (APP/.bot_modules/.graph: used by physics, rendering): every package of the graph claims its root namespace in the application, whether the application uses it or not (one instance, whose identity is its name), and `import geometry` never chooses between an application module and a package's; rename or move the application file}}
+
+test bm-graph-malformed {a malformed package graph is PACKAGE-GRAPH, saying which line breaks which rule, at an import the application's packages decide; a program that imports only the standard library is unaffected} -body {
+    set out {}
+    foreach text {
+        "botlish package graph 2\napplication\n"
+        "botlish package graph 1\napplication a\npackage a"
+        "botlish package graph 1\npackage a\napplication a\n"
+        "botlish package graph 1\napplication b a\npackage a\npackage b\n"
+        "botlish package graph 1\napplication a\npackage b\npackage a\n"
+        "botlish package graph 1\napplication a\npackage a a\n"
+        "botlish package graph 1\napplication a\n"
+        "botlish package graph 1\napplication  a\npackage a\n"
+        "botlish package graph 1\napplication std\npackage std\n"
+        "botlish package graph 1\napplication my-pkg\n"
+        "botlish package graph 1\n"
+    } {
+        set dir [app [list .bot_modules/.graph $text .bot_modules/a/a.bot "fn v() -> int:\n    1\n" main.bot "import a\n\na::v()\n"]]
+        lappend out [string map [list $dir APP] [lindex [split [appRejection $dir] \n] 0]]
+    }
+    set dir [app [list .bot_modules/.graph "garbage\n" main.bot "import std::list\n\nstd::list::length(\[1\])\n"]]
+    lappend out [appValues $dir {interp}]
+} -cleanup removeApps -result {{PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 1: the first line is not "botlish package graph 1" (a graph of another format needs another compiler)): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 3: the file does not end with a newline): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 2: the second line is the application's: "application" and the packages it uses): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 2: the packages a scope uses are listed in ascending order, once each): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 4: the package lines are in ascending order of their names, one per package ("a" after "b")): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 3: package a uses itself): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 2: a is used, and the graph has no line "package a"): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 2: a line holds words separated by single spaces, with no other whitespace): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 2: std is the standard library's, never a package): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 2: "my-pkg" is not a package name (a namespace segment)): the application's packages are not known; reinstall them (`install`), or repair the file} {PACKAGE-GRAPH: APP/main.bot:1:8: the package graph APP/.bot_modules/.graph is malformed (line 2: the file has no application line): the application's packages are not known; reinstall them (`install`), or repair the file} 1}
+
+test bm-graph-manual-package {a directory of .bot_modules the graph does not name is a package installed by hand, with its own scope as before (its own .bot_modules); the graph's packages are the graph's, and a graph package's own .bot_modules is never read} -body {
+    set dir [app [concat $sharedGraph [list \
+        .bot_modules/handmade/handmade.bot "import helper\n\nfn h() -> int:\n    helper::one() * 1000\n" \
+        .bot_modules/handmade/.bot_modules/helper/helper.bot "fn one() -> int:\n    1\n" \
+        .bot_modules/physics/.bot_modules/geometry/geometry.bot "fn decoy() -> int:\n    666\n" \
+        main.bot "import handmade\nimport physics\nimport rendering\n\nhandmade::h() + rendering::read(physics::make(1))\n"]]]
+    set hir [appHir $dir]
+    list [lsort -unique [appValues $dir]] [lmap entry [hirModules $hir $dir] {lindex $entry 0}]
+} -cleanup removeApps -result {1003 {geometry handmade handmade/helper physics rendering {}}}
+
+test bm-graph-missing-directory {a package the graph says a scope uses, with no directory, is an incomplete installation, and the diagnostic says so} -body {
+    set dir [app {
+        .bot_modules/.graph "botlish package graph 1\napplication geometry\npackage geometry\n"
+        main.bot "import geometry\n\ngeometry::v()\n"
+    }]
+    appRejection $dir
+} -cleanup removeApps -result {UNKNOWN-NAMESPACE: APP/main.bot:1:8: unknown namespace "geometry": the package graph APP/.bot_modules/.graph says the application uses the package "geometry", and its directory APP/.bot_modules/geometry does not exist: the installation is incomplete (reinstall the packages)}
+
+test bm-graph-same-hir-as-direct {the graph changes no identity: an application whose packages use nothing compiles to the same HIR with and without its graph (a direct package's identity was already its name), and a graph identity depends on no import order} -body {
+    set files {
+        .bot_modules/geo/geo.bot "struct P:\n    x: int\n\nfn p(n: int) -> P:\n    P {x: n}\n"
+        .bot_modules/util/util.bot "fn k() -> int:\n    2\n"
+    }
+    set plain [app [concat $files [list main.bot "import geo\nimport util\n\ngeo::p(util::k()).x\n"]]]
+    set graphed [app [concat $files [list main.bot "import geo\nimport util\n\ngeo::p(util::k()).x\n" \
+        .bot_modules/.graph "botlish package graph 1\napplication geo util\npackage geo\npackage util\n"]]]
+    set a [hir::interchange::encode [appHir $plain]]
+    set b [hir::interchange::encode [appHir $graphed]]
+    set swapped [app [concat $sharedGraph [list main.bot [string map {"import geometry\nimport physics\nimport rendering" "import rendering\nimport physics\nimport geometry"} $sharedMain]]]]
+    set ordered [app [concat $sharedGraph [list main.bot $sharedMain]]]
+    set struct1 [lsort [dict keys [dict get [appHir $ordered] declarations structs]]]
+    set struct2 [lsort [dict keys [dict get [appHir $swapped] declarations structs]]]
+    list [expr {[string map [list $plain DIR] $a] eq [string map [list $graphed DIR] $b]}] [expr {$struct1 eq $struct2}] \
+        [lsearch -inline -glob $struct1 geometry::*]
+} -cleanup removeApps -result {1 1 geometry::Point}
+
+test bm-graph-shared-link-declaration {a native library a shared package declares at an archive inside its own directory is one link-plan entry, its archive the one instance's, however many packages import that package: no LINK-CONFLICT, which two instances of it would be} -body {
+    set dir [app {
+        .bot_modules/.graph "botlish package graph 1\napplication drv lib_a lib_b\npackage drv\npackage lib_a drv\npackage lib_b drv\n"
+        .bot_modules/drv/drv.bot "extern c library \"evl\" static at \"native/libevl.a\"\n\nfn one() -> int:\n    1\n"
+        .bot_modules/lib_a/lib_a.bot "import drv\n\nfn a() -> int:\n    drv::one()\n"
+        .bot_modules/lib_b/lib_b.bot "import drv\n\nfn b() -> int:\n    drv::one()\n"
+        main.bot "import drv\nimport lib_a\nimport lib_b\n\nlib_a::a() + lib_b::b() + drv::one()\n"
+    }]
+    set hir [appHir $dir]
+    lmap entry [dict get $hir links] {
+        list [dict get $entry name] [dict get $entry linkage] [dict get $entry path] [string map [list $dir APP] [dict get $entry base]]
+    }
+} -cleanup removeApps -result {{evl static native/libevl.a APP/.bot_modules/drv}}
+
+test bm-graph-target-tree {a target package tree holds its own graph: the compilation's target's tree and its graph are read, never the store's beside it} -body {
+    set files {
+        .bot_modules/.graph "botlish package graph 1\napplication geo\npackage geo\n"
+        .bot_modules/geo/geo.bot "fn which() -> str:\n    \"store\"\n"
+        .bot_modules/.targets/linux-aarch64/.graph "botlish package graph 1\napplication geo lib\npackage geo\npackage lib geo\n"
+        .bot_modules/.targets/linux-aarch64/geo/geo.bot "fn which() -> str:\n    \"aarch64\"\n"
+        .bot_modules/.targets/linux-aarch64/lib/lib.bot "import geo\n\nfn which() -> str:\n    geo::which()\n"
+        main.bot "import lib\n\nlib::which()\n"
+    }
+    set dir [app $files]
+    set hir [appHir $dir main.bot -target linux-aarch64]
+    list [lindex [outcomeUnderHir interp $hir] 1] [lindex [split [appRejection $dir] :] 0]
+} -cleanup removeApps -result {{"aarch64"} UNKNOWN-NAMESPACE}
+
+test bm-graph-cache-and-service {the graph is an input like a source file: editing it makes a cached build miss and a service revision stale; an unchanged one hits} -body {
+    set dir [app [concat $sharedGraph [list main.bot $sharedMain]]]
+    set cache [makeDirectory bm-cache-[pid]-3]
+    set runs [list [cachedRun $dir $cache] [cachedRun $dir $cache]]
+    set ws [service::workspace -warnings off]
+    set rev [service::analyze $ws [file join $dir main.bot]]
+    writeText [file join $dir .bot_modules .graph] "botlish package graph 1\napplication geometry physics rendering\npackage geometry\npackage physics\npackage rendering geometry\n"
+    lappend runs [catch {cachedRun $dir $cache} message options] [lindex [dict get $options -errorcode] end] \
+        [lmap path [dict keys [service::stale $rev]] {string map [list $dir APP] $path}]
+} -cleanup {catch {service::closeWorkspace $ws}; removeApps; file delete -force [file join [temporaryDirectory] bm-cache-[pid]-3]} -result {{0 1 0 {[7, 3, -100, -14]}} {1 0 0 {[7, 3, -100, -14]}} 1 UNKNOWN-NAMESPACE APP/.bot_modules/.graph}
+
+test bm-graph-interchange {HIR interchange of a program over a package graph runs as built, in another process with the sources gone} -constraints nativeBuilt -body {
+    set dir [app [concat $sharedGraph [list main.bot $sharedMain]]]
+    set decoded [hir::interchange::decode [hir::interchange::encode [appHir $dir]]]
+    set values [lmap backend {interp compile cranelift} {lindex [outcomeUnderHir $backend $decoded] 1}]
+    exec [info nameofexecutable] $::mainScript -emit-hir-interchange [file join $dir main.bot] 2>@1
+    set hirx [file join [makeDirectory bm-hirx-[pid]-2] main.hirx]
+    file rename [file join $dir main.hirx] $hirx
+    file delete -force $dir
+    list [lsort -unique $values] [expr {[string first {value: [7, 3, -100, -14]} [compilerIn / -backend cranelift $hirx]] >= 0}]
+} -cleanup removeApps -result {{{[7, 3, -100, -14]}} 1}
+
 # The service's definition of the reference at LINE COLUMN of the file
 # RELATIVE (to DIR) in revision REV: {BINDING-NAME FILE LINE}.
 proc definitionAt {rev dir relative line column} {

@@ -7,10 +7,11 @@
 #
 #   A  a pure-Botlish package: the 2048 engine (examples/games/2048), packed
 #      as `game2048` -- no native file, no toolchain on either side;
-#   B  nested packages: sdlkit, which locks sdl3 -- one release holding the
-#      generated SDL3 bindings, thunk archives and native libraries of
-#      linux-x86_64 and linux-aarch64 (PACKAGE-MANAGER-MILESTONE-2.md) --
-#      installed in sdlkit's own .bot_modules, compiled from target views;
+#   B  a package's own dependency: sdlkit, which locks sdl3 -- one release
+#      holding the generated SDL3 bindings, thunk archives and native
+#      libraries of linux-x86_64 and linux-aarch64
+#      (PACKAGE-MANAGER-MILESTONE-2.md) -- installed in the application's
+#      dependency graph beside sdlkit, compiled from target views;
 #   D  SDL3: sdlkit's frame through the libSDL3 the package bundles
 #      (headless), with no -L or LD_LIBRARY_PATH; deployed and relocated;
 #      the system's SDL3 chosen and honestly refused; a thunk;
@@ -18,10 +19,16 @@
 #      libraven of both targets, built on the author's side, installed with
 #      no build on the consumer's;
 #   F  the Linux event loop's driver: archives of both targets and its
-#      public header.
+#      public header;
+#   G  two independently authored libraries over that one driver
+#      (examples/event-loop/shared; SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md):
+#      one instance of the driver, its contexts installed once by the
+#      application, run against epoll; a library locking another release of
+#      the driver is a conflict.
 #
-# (C, two versions of one package on separate branches, is
-# tests/package-manager.test's pm-two-versions-two-branches.) The packages
+# (C, two versions of one package locked by two packages -- a conflict now,
+# never two instances -- is tests/package-manager.test's
+# pm-two-versions-conflict.) The packages
 # are packed by tools/package-repository.tcl, the author's side; everything
 # on the consumer's side is `main.tcl add`/`install`/`verify`.
 
@@ -135,7 +142,7 @@ proc treeState {dir} {
 }
 
 proc kindOf {out} {
-    if {[regexp {\(PM ([A-Z]+)\)} $out -> kind]} { return $kind }
+    if {[regexp {\(PM ([A-Z-]+)\)} $out -> kind]} { return $kind }
     return ""
 }
 
@@ -208,7 +215,7 @@ test pw-pure-botlish-same-hir {an installed package's program compiles to the HI
 set sdlkitMain "import sdlkit\n\nwith context sdlkit::open()\n\nshown = sdlkit::frame()\nsame = sdlkit::version_matches()\nsdlkit::close()\n\[shown, same\]\n"
 set hostView {.bot_modules .targets linux-x86_64}
 
-test pw-sdlkit-installs-its-binding {sdlkit and the SDL3 package -- one release holding the generated bindings, thunk archives and native libraries of linux-x86_64 and linux-aarch64 -- install with one add: sdlkit in the application's .bot_modules, sdl3 in sdlkit's own; the host's target view holds the host's binding at its module paths; the compiler reads it as the instances sdlkit and sdlkit/sdl3, the binding ordinary and sdlkit contextualized, and the application cannot import the binding} -constraints {sdl3Package} -body {
+test pw-sdlkit-installs-its-binding {sdlkit and the SDL3 package -- one release holding the generated bindings, thunk archives and native libraries of linux-x86_64 and linux-aarch64 -- install with one add: both in the application's dependency graph, sdl3 used by sdlkit only; the host's target view holds the host's binding at its module paths; the compiler reads them as the graph's sdlkit and sdl3, the binding ordinary and sdlkit contextualized, and the application cannot import the binding} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
     set app [fresh app]
     writeText [file join $app main.bot] $::sdlkitMain
@@ -216,19 +223,19 @@ test pw-sdlkit-installs-its-binding {sdlkit and the SDL3 package -- one release 
     set hir [hirOf [file join $app main.bot] -target linux-x86_64]
     set statuses [dict create]
     dict for {ns unit} [dict get $hir direct units] {
-        if {[string match sdlkit* $ns]} { dict set statuses $ns [dict get $unit status] }
+        if {[string match sdlkit* $ns] || [string match sdl3* $ns]} { dict set statuses $ns [dict get $unit status] }
     }
     set sneaky [fresh app]
     writeText [file join $sneaky main.bot] "import sdl3::init\n\n1\n"
     file copy -force [file join $app botlish.json] $sneaky
     pm install -project $sneaky -repository $repo
-    set view [file join $app {*}$::hostView sdlkit .bot_modules sdl3]
+    set view [file join $app {*}$::hostView sdl3]
     list [dict get $r status] [lrange [split [dict get $r out] \n] 0 2] \
         [file isfile [file join $view sdl3 video.bot]] [file isdirectory [file join $view targets]] \
-        [file isfile [file join $app .bot_modules sdlkit .bot_modules sdl3 targets linux-aarch64 sdl3 video.bot]] \
-        [dict get $statuses sdlkit] [lsort -unique [lmap {ns status} $statuses {expr {[string match sdlkit/sdl3::* $ns] ? $status : [continue]}}]] \
+        [file isfile [file join $app .bot_modules sdl3 targets linux-aarch64 sdl3 video.bot]] \
+        [dict get $statuses sdlkit] [lsort -unique [lmap {ns status} $statuses {expr {[string match sdl3::* $ns] ? $status : [continue]}}]] \
         [catch {hirOf [file join $sneaky main.bot] -target linux-x86_64} m o] [lindex [dict get $o -errorcode] end]
-} -cleanup cleanup -match glob -result {0 {{sdlkit 0.2.1 (sha256 *): installed} {  sdl3 0.2.1 (sha256 *): installed} {view linux-x86_64: derived (* files, 2 native libraries)}} 1 0 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
+} -cleanup cleanup -match glob -result {0 {{sdl3 0.2.1 (sha256 *): installed, used by sdlkit} {sdlkit 0.2.1 (sha256 *): installed} {view linux-x86_64: derived (* files, 2 native libraries)}} 1 0 1 contextualized ordinary 1 UNKNOWN-NAMESPACE}
 
 test pw-sdl3-two-targets {the same sdl3 0.2.1 artifact serves linux-aarch64: preparing it derives a second view from the installed release (nothing reinstalled, the host's view untouched), the front end compiles sdlkit's program for linux-aarch64 from the AArch64 binding, its HIR is that target's, and the plan reports AArch64's system SDL3 unverified here} -constraints {sdl3Package} -body {
     set repo [repository {sdlkit sdl3}]
@@ -561,4 +568,101 @@ test pw-event-loop-linux-only {the event loop's driver is Linux's (x86-64 and AA
 foreach dir [glob -nocomplain -directory [temporaryDirectory] pw-repo-[pid]-*] {
     file delete -force $dir
 }
+# ---------------------------------------------------------------------------
+# G. Two independently authored libraries over one driver
+
+set sharedDir [file join $::projectRoot examples event-loop shared]
+
+# The repository of the driver's release and the two libraries, beats and
+# probes, packed from examples/event-loop/shared as their authors would.
+proc sharedRepository {} {
+    set repo [fresh repo]
+    foreach file [glob -directory [repository {event_loop_linux}] *.botpkg] {
+        file copy $file $repo
+    }
+    foreach name {beats probes} {
+        set r [pm package pack [file join $::sharedDir $name] -out $repo]
+        if {[dict get $r status] != 0} { error [dict get $r out] }
+    }
+    return $repo
+}
+
+# A library NAME VERSION over event_loop_linux locked to EVL, packed into
+# REPO.
+proc driverLibrary {repo name version evl body} {
+    set dir [file join [fresh src] $name]
+    writeText [file join $dir botlish.json] "{\"schema\": 1, \"name\": \"$name\", \"version\": \"$version\", \"dependencies\": {\"event_loop_linux\": \"[join [lrange [split $evl .] 0 1] .]\"}, \"lock\": {\"event_loop_linux\": \"$evl\"}}\n"
+    writeText [file join $dir $name.bot] $body
+    set r [pm package pack $dir -out $repo]
+    if {[dict get $r status] != 0} { error [dict get $r out] }
+}
+
+# The lines of the trace TRACE (a Botlish List of str, printed) of the
+# library PREFIX, without their turn numbers: what a library logged, in its
+# order, whatever the interleaving of the two libraries' tasks.
+proc linesOf {trace prefix} {
+    lmap line [regexp -all -inline {"t=[0-9]+: [^"]*"} $trace] {
+        regsub {^t=[0-9]+: } [string trim $line "\""] "" line
+        if {![string match $prefix* $line]} continue
+        set line
+    }
+}
+
+test pw-shared-driver {beats and probes, written independently, each depend on event_loop_linux and lock 0.3.0: the application's graph holds one instance, which the application uses too, the libraries' own botlish.json locks are kept as they are, and the program -- installing the loop, the Linux driver and its Native capability once -- runs both libraries' tasks against epoll, the driver's adapter one archive in the link} -constraints {eventLoopRun} -body {
+    set repo [sharedRepository]
+    set app [fresh app]
+    file copy [file join $::sharedDir app main.bot] $app
+    set adds [lmap name {beats probes event_loop_linux} {dict get [pm add $name -project $app -repository $repo] status}]
+    set view [file join $app {*}$::hostView]
+    set hir [hirOf [file join $app main.bot]]
+    set links [lmap entry [dict get $hir links] {list [dict get $entry name] [string map [list $view VIEW] [dict get $entry base]]}]
+    set locks [lmap name {beats probes} {dict get [pm::descriptor::read [file join $view $name botlish.json] artifact] lock}]
+    set value [valueOf [file join $app main.bot] cranelift]
+    list $adds [core::ReadFile [file join $view .graph]] [lsort [glob -tails -directory $view *]] $links $locks \
+        [linesOf $value beats:] [linesOf $value probes:]
+} -cleanup cleanup -result {{0 0 0} {botlish package graph 1
+application beats event_loop_linux probes
+package beats event_loop_linux
+package event_loop_linux
+package probes event_loop_linux
+} {beats event_loop_linux probes} {{event_loop_linux VIEW/event_loop_linux}} {{event_loop_linux 0.3.0} {event_loop_linux 0.3.0}} {{beats: beat 1} {beats: beat 2} {beats: beat 3} {beats: the driver's clock never went back}} {{probes: opened 2 endpoints} {probes: the timer woke the probe} {probes: every endpoint was empty, and closed}}}
+
+test pw-shared-driver-warning-clean {the workload's libraries and application compile under -warnings error: no package of the graph and no line of the application draws a warning} -constraints {eventLoopPackage} -body {
+    set repo [sharedRepository]
+    set app [fresh app]
+    file copy [file join $::sharedDir app main.bot] $app
+    foreach name {beats probes event_loop_linux} {
+        pm add $name -project $app -repository $repo
+    }
+    surface::readProgramFile [file join $app main.bot] -warnings error -cache ""
+    list ok
+} -cleanup cleanup -result ok
+
+test pw-shared-driver-negatives {the shared driver keeps its rules: without the Native installation both libraries' requirement is the one MISSING-CONTEXT of event_loop_linux::Native; a third library locking 0.3.0 adds no instance; one locking another release is a conflict naming both locks, and nothing changes} -constraints {eventLoopPackage} -body {
+    set repo [sharedRepository]
+    set app [fresh app]
+    file copy [file join $::sharedDir app main.bot] $app
+    foreach name {beats probes event_loop_linux} {
+        pm add $name -project $app -repository $repo
+    }
+    set bare [fresh app]
+    writeText [file join $bare main.bot] [string map {"with context event_loop_linux::native()\n" ""} [core::ReadFile [file join $app main.bot]]]
+    file copy [file join $app botlish.json] $bare
+    pm install -project $bare -repository $repo
+    set missing [catch {hirOf [file join $bare main.bot]} message options]
+    driverLibrary $repo pulses 1.0.0 0.3.0 "import event_loop_linux\n\nfn now(context n: event_loop_linux::Native) -> int:\n    event_loop_linux::now_us()\n"
+    set third [dict get [pm add pulses -project $app -repository $repo] out]
+    set before [treeState $app]
+    set src [fresh src]
+    file copy [file join $::projectRoot packages event_loop_linux] $src
+    set descriptor [file join $src event_loop_linux botlish.json]
+    writeText $descriptor [string map {0.3.0 0.4.0} [core::ReadFile $descriptor]]
+    pm package pack [file join $src event_loop_linux] -out $repo
+    driverLibrary $repo future 1.0.0 0.4.0 "import event_loop_linux\n\nfn f() -> int:\n    1\n"
+    set conflict [pm add future -project $app -repository $repo]
+    list $missing [lindex [dict get $options -errorcode] end] [regexp -all {event_loop_linux::Native is required by this call} $message] \
+        [lsearch -all -inline -glob [split $third \n] {event_loop_linux*}] [kindOf [dict get $conflict out]] \
+        [lrange [split [dict get $conflict out] \n] 0 5] [expr {[treeState $app] eq $before}]
+} -cleanup cleanup -result {1 MISSING-CONTEXT 1 {{event_loop_linux 0.3.0: unchanged, used by the application, beats, probes, pulses}} DEPENDENCY-CONFLICT {{error: cannot select one version of event_loop_linux for the application's dependency graph: 0.3.0 and 0.4.0 are demanded:} {  the application's botlish.json locks event_loop_linux 0.3.0 (request "0.3")} {  beats 1.0.0 locks event_loop_linux 0.3.0 (the project -> beats 1.0.0)} {  probes 1.0.0 locks event_loop_linux 0.3.0 (the project -> probes 1.0.0)} {  pulses 1.0.0 locks event_loop_linux 0.3.0 (the project -> pulses 1.0.0)} {  future 1.0.0 locks event_loop_linux 0.4.0 (the project -> future 1.0.0)}} 1}
+
 cleanupTests

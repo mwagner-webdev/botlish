@@ -92,7 +92,7 @@ proc writeFile {path text} {
 
 # A private copy of the compiler sources and tests.
 set tree [file tempdir botlish-bot-modules-mutants]
-foreach dir {compiler core hir surface stdlib tests service lsp tools examples generated single compilerpedia} {
+foreach dir {compiler core hir surface stdlib tests service lsp tools examples generated single compilerpedia packages} {
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
 }

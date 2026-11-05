@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "name": "beats",
+  "version": "1.0.0",
+  "dependencies": {
+    "event_loop_linux": "0.3"
+  },
+  "lock": {
+    "event_loop_linux": "0.3.0"
+  }
+}
