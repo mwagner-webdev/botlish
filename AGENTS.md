@@ -20,11 +20,78 @@ one), check `main`'s CI at both ends of the work
 * **Before you merge a finished milestone into `main`,** check again:
   `main`'s latest runs and your branch's own. `macos-arm64.yml` and
   `windows-x86_64.yml` run on every branch push; `tests.yml` and
-  `tests-arm64.yml` run on a branch only when dispatched (`workflow_dispatch`
-  with the branch as the ref), so dispatch them. Don't merge onto a red
+  `tests-arm64.yml` run only their canary on a branch push (next section)
+  and the rest only when dispatched (`workflow_dispatch` with the branch as
+  the ref), so dispatch them. Don't merge onto a red
   `main` without telling the user. A failure on your branch that `main`'s
   latest run does not have is yours to fix before the merge. Pending runs
   are acceptable: report them as pending, never as passed.
+
+A newer push cancels a running test workflow on the same ref, on `main`
+too, so a run of `main` may end `cancelled`: it was superseded, and says
+nothing either way. Read the latest run of the workflow instead. Merging a
+branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
+them (CI-RUNS.md; next section).
+
+## CI housekeeping (cancellation, pruning, the release gate, the canary)
+
+The runners are a shared, limited pool, and main's merges come in bursts
+(CI-RUNS.md). Four rules keep obsolete and doomed runs off them and keep
+releases honest; `tools/ci/runs.py` implements the second and the third,
+`tests/canary.tcl` the fourth. Keep it so:
+
+* **A newer push cancels a running test workflow on the same ref, on main
+  too:** a workflow that tests a push has `concurrency: group:
+  NAME-${{ github.ref }}` and `cancel-in-progress: true`. Never exempt main
+  again: a burst's last push gets the complete run. The only exceptions are
+  a tag's run, a release run, scalar-asm-audit.yml (it writes back to
+  main), react-native-probe.yml (census evidence) and release-gate.yml.
+* **`prune-runs.yml` cancels the unfinished runs of branches fully in
+  main** (the tip is main's or an ancestor; a deleted branch's run whose
+  commit is in main). It never cancels a run of main, a tag or a fork, or
+  of a branch with a commit main lacks; never give it such a rule. Main's
+  head may be a commit no workflow ran (scalar-asm-audit's).
+* **A release is published only once every test of its commit is green**,
+  by a run nothing cancels. `CORE`: tests.yml and tests-arm64.yml with their
+  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml,
+  windows-x86_64.yml, static-decisions.yml when it ran, and the release's
+  own build workflow. Any run at the commit counts.
+  - `release-gate.yml` (workflow_run of those workflows on main) dispatches
+    single-executable.yml or icy-tower-windows.yml on main with
+    `release=SHA` for main's newest green commit (`run-name: release SHA`,
+    a concurrency group of its own, never cancelled). That release run
+    builds nothing: it checks again (`runs.py check --require`) and
+    publishes the artifact of the commit's green push run. A push that
+    supersedes the commit meanwhile does not stop it.
+  - A release tag's run waits for icy-tower-macos.yml's `tested` job. Until
+    the commit's tests are green it is deferred, and the gate dispatches it
+    on the tag again.
+  - Never publish from a push run, never rebuild in a release run, never
+    give the gate a credential or more than `actions: write`, and never
+    give it a way to dispatch a release twice or move a tag backwards.
+* **Every test workflow runs its host's canary first, and its expensive
+  jobs wait for it** (CI-RUNS.md, "The canary"): tests.yml, tests-arm64.yml
+  and windows-x86_64.yml a `canary` job, macos-arm64.yml the smoke job's
+  last step. It runs, within about ten minutes, the test files and golden
+  suites the push adds or changes, then the ones `tests/canary.tsv`'s
+  history says failed recently on that host. On a branch push tests.yml and
+  tests-arm64.yml run only the canary (and tests.yml's warning gate and
+  mutant catalogs). The canary orders, it never skips: never drop a job or
+  a test because the canary passed, never let an expensive job start
+  before it (a job that runs after a failed need checks the canary's
+  result itself), and never give it an item list of its own beside its
+  selection. `tools/ci/test_runs.py` checks the workflows' side. A new
+  test workflow, or a new expensive job, waits for its host's canary.
+
+If you change `tools/ci/`, a workflow's concurrency or triggers, a release
+job, or the name of a workflow or of a GC-stress job a requirement names,
+run `python3 -I tools/ci/test_runs.py` (it also checks the workflows' side
+of these rules), `python3 -I audit/macos-release/tests/test_workflow.py`
+and that audit's mutants for icy-tower-macos.yml, and
+`tclsh9.0 tools/mutant-catalogs.tcl`. Then push and read the `ci tools`
+run, which runs the gate and the pruning read-only against the
+repository's runs. A new required workflow goes into `CORE` and into
+release-gate.yml's `workflow_run` list together (the tests check it).
 
 ## Documentation layout
 
@@ -260,10 +327,11 @@ zipkit holding main.tcl, the compiler stack, both native executables and the
 runtime archive, needing only glibc (and, to link a program that calls C,
 the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`), then publishes it as the
-`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
-README's download button links to that tag and asset name: rename either
-only together with the button. Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`); once every test of the commit is green,
+the release gate's release run publishes that build as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
+(CI-RUNS.md). The README's download button links to that tag and asset
+name: rename either only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
@@ -444,8 +512,14 @@ per test file or suite, each with a private `-tmpdir`):
 * **every golden suite on all four backends**, in their place, **through the
   front-end cache** (`.hirx` entries; HIR-INTERCHANGE.md).
 
-It prints a line per file and suite, then every failure with the command
-that reruns it, and exits 1 on any.
+It starts the likeliest to fail first (`-priority 1`, the default): the
+files and suites this checkout changes against origin/main, its working
+tree included, then those that failed recently in CI on this host
+(`tests/canary.tsv`), as the CI canary selects them (CI-RUNS.md, "The
+canary"). `-fail-fast 1` starts nothing more after the first failure and
+reports the rest as not run. It prints a line per file and suite, then
+every failure with the command that reruns it, and exits 1 on any (or on
+anything not run).
 
 What it costs, measured on a 4-core container (2026-10-15):
 
@@ -518,8 +592,10 @@ What it costs, measured on a 4-core container (2026-10-15):
   - on Linux arm64 (`.github/workflows/tests-arm64.yml`, ubuntu-24.04-arm):
     the Tcl suite on interp and compile, its cranelift and cranelift-generic
     coverage, the golden suites, the native Rust unit tests (also under GC
-    stress) and, except on pull requests, the GC-stress run. Run it on a
-    branch with workflow_dispatch.
+    stress) and, on pushes to main and manual runs, the GC-stress run. Run
+    it on a branch with workflow_dispatch;
+  - first, on every push to any branch and on every host, the canary
+    (CI-RUNS.md, "The canary"), which the jobs above wait for.
 
   A push or pull request that changes only Markdown files and `docs/` starts
   no workflow (their `paths-ignore`). Renaming or removing a design document
@@ -603,6 +679,33 @@ name; new tests and tools must keep it that way:
   (or under a name with `[pid]`) and removes it when it finishes, never under a
   fixed name in the working directory or the repository; one that runs a test
   file passes it a private `-tmpdir`.
+
+## Tests that hold on every host, and mutants that still apply
+
+A test is written on one machine and run on four hosts and in several
+temporary directories (MAIN-TEST-DEFECTS-2026-11.md has the cases). Keep
+what it depends on in its code or its constraints:
+
+* Wait for a child process by closing its pipeline (`open |[list ...] r`,
+  read to the end, `close`) or by a plain `exec`: never by probing `/proc`,
+  `ps` or a delay, which hold on Linux only, or only on a fast machine.
+* Every tool a test runs is in its constraint. A library of another
+  architecture is linked with `-fuse-ld=lld` (GNU ld links only its own) and
+  the test carries an `lld` constraint.
+* Never match a word against output that names a host path (the temporary
+  directory, the checkout): map the paths out first (`string map [list $dir
+  DIR]`). The native coverage jobs' temporary directory is
+  `/tmp/native-coverage_XXXXXX`.
+
+A change can break another audit's mutant: rewrite or duplicate the text it
+replaces, and that mutant guards nothing until its own harness next runs.
+`tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
+under `audit/` to the tree in memory (seconds; CI's `mutant-catalogs` job in
+`tests.yml`). Run it before pushing a change to code. A mutant it reports is
+updated in the same change, kept a mutant of the same rule, and run through
+its own harness (`-only NAME`). A new catalog whose files are not relative
+to the repository root, or not named by `## FILE` lines, gets a row in the
+tool's `Catalogs` table.
 
 ## Native GC-stress validation
 
@@ -4458,8 +4561,8 @@ starves everything else on the machine. So:
     run static-decisions.yml --ref BRANCH`). The optional `suites` input (file
     names, separated by spaces or commas) narrows it.
 * **Read its result.** A run takes about 30 minutes, mutable-array.bot's job
-  (the shards finish within it), and on main it may first wait for the run
-  before it. Don't wait idle for it: carry on, and before you call the change
+  (the shards finish within it); a newer push to the same ref, on main too,
+  cancels it (CI-RUNS.md), so read the latest run. Don't wait idle for it: carry on, and before you call the change
   done read the run's jobs. Each job's summary lists every suite's rounds and
   builds under both schedulers, and any `DISAGREE` or `DOES NOT COMPILE`. If
   the run has not finished, report it as pending, never as passed.
@@ -4926,13 +5029,15 @@ The Windows executable (`build-windows.sh`, the Windows section of
 tests/workload-icy-tower.test, which needs SDL3.dll built by
 `tests/cffi/sdl3.tcl` on Windows) is built and tested only by the
 `icy-tower (windows x86-64)` workflow (`.github/workflows/icy-tower-windows.yml`,
-every push to any branch), which also publishes main's build as the
-`icy-tower-windows-latest` release the README's Windows button links to:
+every push to any branch); once every test of a commit of main is green,
+its release run publishes that commit's tested build as the
+`icy-tower-windows-latest` release the README's Windows button links to
+(CI-RUNS.md):
 run it on the branch for any change to the game, `tests/cffi/sdl3.tcl`,
 the generator's MSVC target or `tools/cheader/`.
 Its signing (ICY-TOWER-WINDOWS.md, "Signing") is the `sign` job's alone:
-only that job, on main or a manual run, in the `windows-signing`
-environment, sees signing credentials -- never give them to the build job,
+only that job, in a manual run (a release run of main among them), in the
+`windows-signing` environment, sees signing credentials -- never give them to the build job,
 a pull request or another workflow, never store a signing key or password
 in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
 release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
@@ -5012,8 +5117,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
 
 * Credentials live only in the `macos-release` environment and reach only
   the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
-  tag of main's history, pushed or run by hand -- never a branch, a pull
-  request, a fork, `pull_request_target`, another job or another workflow;
+  tag of main's history, pushed, run by hand or dispatched again by the
+  release gate, and only once every test of the tagged commit is green (the
+  `tested` job, CI-RUNS.md) -- never a branch, a pull request, a fork,
+  `pull_request_target`, another job or another workflow;
   each secret only in the `env` of the step that reads it, never in a
   script, a `with` or a job's `env`; no step holding one traces commands.
   Nothing is committed: no certificate but Apple's public ones

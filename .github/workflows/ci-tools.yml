@@ -1,0 +1,85 @@
+name: ci tools
+
+# The tests of the CI housekeeping (CI-RUNS.md): tools/ci/test_runs.py (the
+# release check, the gate and the pruning against a fake of the GitHub API,
+# and the workflows' side of the rules), then the gate and the pruning run
+# for real against this repository's runs, read-only (--dry-run: they
+# report what they would dispatch or cancel). A push that changes them runs
+# it, on any branch, so a branch gets their evidence before release-gate.yml
+# and prune-runs.yml run from main -- which is the only place workflow_run
+# and schedule triggers do. Last, tools/ci/history.py recomputes the
+# canary's records (tests/canary.tsv; CI-RUNS.md, "The canary") from main's
+# recent runs: the job summary shows how they differ from the committed
+# ones, the log and the canary-records artifact hold the new file. Commit it
+# to refresh the canary.
+
+on:
+  push:
+    paths:
+      - "tools/ci/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "tools/ci/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-tools-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ci tools (tests, dry runs)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Unit and workflow tests
+        run: |
+          python3 -I -c 'import yaml' 2>/dev/null || sudo apt-get install -y --no-install-recommends python3-yaml >/dev/null
+          python3 -I -c 'import yaml' || { echo "::error::no PyYAML: the workflow tests would be skipped"; exit 1; }
+          python3 -I tools/ci/test_runs.py -v
+
+      - name: The release gate, read-only
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I tools/ci/runs.py gate --dry-run
+
+      - name: Pruning, read-only
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I tools/ci/runs.py prune --dry-run
+
+      - name: The canary's records, recomputed
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I tools/ci/history.py --write
+          cat tests/canary.tsv
+          {
+            echo "## The canary's records (tests/canary.tsv), recomputed"
+            echo
+            echo '```diff'
+            git diff tests/canary.tsv | head -n 300
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: canary-records
+          path: tests/canary.tsv

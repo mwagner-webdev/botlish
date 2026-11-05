@@ -6,7 +6,8 @@ Windows x86-64 with MSVC's toolchain, the one native Windows target
 but its entry program is shared with Linux. What you download is a zip of
 `icy-tower.exe` and the `SDL3.dll` it loads, built from main by
 `.github/workflows/icy-tower-windows.yml` on a Windows Server 2025 runner
-and published as the `icy-tower-windows-latest` release:
+and, once every test of its commit is green (CI-RUNS.md, "The release
+gate"), published as the `icy-tower-windows-latest` release:
 
     https://github.com/mwagner-webdev/botlish/releases/download/icy-tower-windows-latest/icy-tower-windows-x86_64.zip
 
@@ -223,12 +224,18 @@ compiles `main-windows.bot` under `-warnings error` with
 7. a README and the two licenses (Botlish's MIT, SDL's zlib) beside the
    executable, then the folder uploaded as the `icy-tower-windows-x86_64`
    artifact and the binding as `sdl3-binding-windows-x86_64`;
-8. on main only, once `WINDOWS_SIGNING` is set, `sign` (section 9);
-9. on main only, `release`: the folder (the signed one when `sign` ran)
-   zipped as `icy-tower-windows-x86_64.zip` (and its `.sha256`) and
-   published to the rolling `icy-tower-windows-latest` prerelease, never
-   replacing the build of a later commit (single-executable.yml's rule),
-   and never unsigned while signing is configured. The README's Windows
+8. in a release run only (CI-RUNS.md): the release gate dispatches the
+   workflow on main with `release=SHA` once every test of that commit is
+   green, this workflow's push run among them. Its `tested` job checks that
+   again (`tools/ci/runs.py check`) and names the commit's push run, whose
+   game the release run signs and publishes: it builds nothing, and a push
+   that supersedes the commit meanwhile does not cancel it;
+9. then, once `WINDOWS_SIGNING` is set, `sign` (section 9), on that game;
+10. then `release`: the folder (the signed one when `sign` ran) zipped as
+   `icy-tower-windows-x86_64.zip` (and its `.sha256`) and published to the
+   rolling `icy-tower-windows-latest` prerelease, never replacing the build
+   of a later commit (single-executable.yml's rule), and never unsigned
+   while signing is configured. The README's Windows
    download button links to that asset: a release asset needs no GitHub
    login and does not expire, as a run's artifact does.
 
@@ -282,8 +289,10 @@ The build is ready for signing and does not sign until it is configured:
   linker's executables do): this one does not. The uploaded game stays
   unsigned.
 * **The `sign` job** runs only once the repository variable
-  `WINDOWS_SIGNING` is set, only for main (or a manual run), in the GitHub
-  environment `windows-signing`, which alone holds the credentials. It
+  `WINDOWS_SIGNING` is set, only in a manual run -- a release run of main
+  (section 7) signs the game its commit's push run built and tested, a
+  plain manual run signs its own build -- in the GitHub environment
+  `windows-signing`, which alone holds the credentials. It
   signs both files in place with Azure Artifact Signing (a SHA-256 digest
   and an RFC 3161 timestamp from Microsoft's timestamp service, so the
   signature outlives the short-lived certificate), requires both
@@ -338,7 +347,7 @@ In the repository's Settings:
 
 1. **Environments**, New environment `windows-signing`. Under Deployment
    branches and tags choose "Selected branches and tags" and add the rule
-   `main`. (Required reviewers would make every push to main wait for an
+   `main`. (Required reviewers would make every release run wait for an
    approval before signing; the rolling release does not need them.)
 2. In that environment, **Environment secrets**: `AZURE_CLIENT_ID` (the
    application's client ID), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
@@ -350,8 +359,10 @@ In the repository's Settings:
    `artifact-signing`. It must be a repository variable: the sign job's
    condition reads it before the job enters its environment. Any other
    value fails the sign job, and so the release.
-4. Push to main, or run the workflow on main (Actions, icy-tower (windows
-   x86-64), Run workflow). The run has three jobs; the sign job's log
+4. Wait for the next release run, which the release gate starts once a
+   commit of main is green, or start one: run the workflow on main
+   (Actions, icy-tower (windows x86-64), Run workflow) with `release` set
+   to a green commit's full SHA. The run has three jobs; the sign job's log
    names the signer and the timestamp authority of each file, and the
    release notes name the publisher.
 
@@ -371,8 +382,8 @@ The same with the GitHub CLI:
     gh variable set ARTIFACT_SIGNING_PROFILE --repo $repo --env windows-signing --body PROFILE
     gh variable set WINDOWS_SIGNING --repo $repo --body artifact-signing
 
-To stop signing, delete `WINDOWS_SIGNING`: the next build of main is
-published unsigned again. To try a change to the sign job on a branch, add
+To stop signing, delete `WINDOWS_SIGNING`: the next release run publishes
+unsigned again. To try a change to the sign job on a branch, add
 the branch to the environment's deployment rule and run the workflow on it
 by hand (the release stays main's).
 

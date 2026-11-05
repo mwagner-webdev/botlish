@@ -11219,3 +11219,14 @@ tests/written-affine-applications.test wd-generic-pointer pass
 tests/written-affine-applications.test wd-generic-body-never-duplicates pass
 tests/written-affine-applications.test wd-hir-text-and-interchange pass
 tests/written-affine-applications.test wd-isolation pass
+tests/canary.test canary-select-changed-first pass
+tests/canary.test canary-select-host pass
+tests/canary.test canary-select-budget pass
+tests/canary.test canary-select-only-items pass
+tests/canary.test canary-select-estimate pass
+tests/canary.test canary-records-format pass
+tests/canary.test canary-records-items-exist pass
+tests/canary.test canary-changed-since-merge-base pass
+tests/canary.test canary-changed-worktree pass
+tests/canary.test canary-changed-unknown-base pass
+tests/canary.test canary-cli-list pass

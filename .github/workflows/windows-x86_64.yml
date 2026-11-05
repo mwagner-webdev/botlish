@@ -11,6 +11,12 @@ name: tests (windows x86-64)
 # windows-probe.yml's, WINDOWS-TOOLCHAIN-CENSUS.md). Neither Wine nor WSL is
 # an authority here.
 #
+#   canary       every push, first: the test files and golden suites the
+#                push adds or changes, then the ones that failed in recent
+#                CI runs on Windows, within about ten minutes
+#                (tests/canary.tcl; CI-RUNS.md, "The canary"). Every other
+#                job waits for it: a push that breaks them costs one Windows
+#                runner for minutes, not nine for hours
 #   smoke        every push: the host and its toolchains; the native build
 #                and the Rust unit tests; core::cabi's windows-x86_64 row
 #                against clang's MSVC target; the native status (each
@@ -62,11 +68,14 @@ name: tests (windows x86-64)
 # Pushes to any branch run it, so a branch gets Windows results before this
 # file is on main; a pull request from this repository's own branches skips
 # (its push already ran), one from a fork runs. Documentation-only pushes
-# skip. A newer push to the same branch cancels a running one, except on
-# main. The checkout keeps the repository's bytes (no CRLF conversion).
+# skip, and so do tags (a tag's commit was tested where it was pushed). A
+# newer push to the same branch cancels a running one, on main too
+# (CI-RUNS.md). The checkout keeps the repository's bytes (no CRLF
+# conversion).
 
 on:
   push:
+    branches: ["**"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -95,7 +104,7 @@ permissions:
 
 concurrency:
   group: windows-x86_64-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 # The C compiler of core::cabi's windows-x86_64 row, for every job: clang,
 # whose default target on Windows is MSVC's. The image's `cc` is a MinGW gcc,
@@ -111,8 +120,39 @@ defaults:
     shell: bash
 
 jobs:
+  canary:
+    name: canary (Windows x86-64, MSVC)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-2025
+    # The budget is linux-x86_64 seconds; a Windows runner takes longer.
+    timeout-minutes: 60
+    steps:
+      - name: Keep the repository's bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+        with:
+          # The history to the merge base, without file contents.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Install prerequisites (Tcl 9.0.1, stable Rust for x86_64-pc-windows-msvc)
+        uses: ./.github/actions/setup-windows
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      # Compared with main's previous head on a push to main, with the
+      # merge base with main otherwise. Its selection goes to the job
+      # summary.
+      - name: Canary
+        env:
+          BASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before || 'origin/main' }}
+        run: tclsh9.0 tests/canary.tcl -base "$BASE"
+
   smoke:
     name: smoke (Windows x86-64, MSVC)
+    needs: canary
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-2025
     timeout-minutes: 75
@@ -546,6 +586,7 @@ jobs:
   # collection, code and unwind information sizes.
   roots:
     name: root plans (Windows x86-64, native frames and the fallback)
+    needs: canary
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-2025
     timeout-minutes: 120
@@ -691,9 +732,9 @@ jobs:
   # environment puts on PATH, which these steps enter (vcvars64.bat).
   system-linker:
     name: system linker (Windows x86-64, MSVC)
-    needs: smoke
+    needs: [canary, smoke]
     if: >-
-      !cancelled()
+      !cancelled() && needs.canary.result == 'success'
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: windows-2025
     timeout-minutes: 90
@@ -750,10 +791,10 @@ jobs:
   acceptance:
     name: acceptance (Windows x86-64, shard ${{ matrix.shard }}/4)
     # After the smoke job, whatever its result: Windows runners are few, and
-    # the smoke's verdict is the one wanted first.
-    needs: smoke
+    # the smoke's verdict is the one wanted first. Only after a green canary.
+    needs: [canary, smoke]
     if: >-
-      !cancelled()
+      !cancelled() && needs.canary.result == 'success'
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: windows-2025
     timeout-minutes: 150
@@ -814,6 +855,7 @@ jobs:
 
   full:
     name: full (Windows x86-64, shard ${{ matrix.shard }}/4)
+    needs: canary
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
       && (contains(github.event.head_commit.message, '[ci-full]') || inputs.tier == 'full')

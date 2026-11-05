@@ -36,6 +36,9 @@ proc afterInterruption {} {
 testConstraint cc [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
 testConstraint linuxCc [expr {[testConstraint linuxX86Host] && [testConstraint cc]}]
 testConstraint clangAarch64 [expr {[auto_execok clang] ne "" && [testConstraint linuxX86Host]}]
+# Linking a library of another architecture takes LLVM's linker (the host's
+# GNU ld links only its own); compiling objects and archiving them does not.
+testConstraint lld [expr {[auto_execok ld.lld] ne ""}]
 testConstraint mingw [expr {[auto_execok x86_64-w64-mingw32-gcc] ne "" && [auto_execok x86_64-w64-mingw32-dlltool] ne ""}]
 testConstraint llvmDlltool [expr {[auto_execok llvm-dlltool] ne "" || [auto_execok llvm-dlltool-18] ne ""}]
 testConstraint dpkgZlib [expr {[testConstraint linuxX86Host] && [file isdirectory /var/lib/dpkg/info]
@@ -299,22 +302,18 @@ test pn-concurrent-target-compiles {two compilations for two targets, run at onc
     pack [geoPackage [fresh src] 1.0.0] $repo
     set app [application "import geo\n\ngeo::which()\n"]
     pm add geo -project $app -repository $repo -target linux-x86_64 -target linux-aarch64
-    set outputs {}
-    set pids {}
-    foreach target {linux-x86_64 linux-aarch64 linux-x86_64 linux-aarch64} {
-        set out [file join $app out-[llength $pids]]
-        lappend outputs $out
-        lappend pids [exec [info nameofexecutable] $::mainScript -target $target [file join $app main.bot] > $out 2>@1 &]
+    # All four start before any is read. Each one's output is read to its
+    # end and its pipeline closed, which waits for the process: a portable
+    # wait (never a probe of /proc, which macOS and Windows do not have).
+    set channels [lmap target {linux-x86_64 linux-aarch64 linux-x86_64 linux-aarch64} {
+        open |[list [info nameofexecutable] $::mainScript -target $target [file join $app main.bot] 2>@1] r
+    }]
+    lmap channel $channels {
+        set output [read $channel]
+        catch {close $channel}
+        lindex [split [string trim $output] \n] end
     }
-    # Wait for each child: ps answers on Linux and macOS alike (macOS has no
-    # /proc, where a wait on /proc/PID returned at once and the outputs were
-    # read before the compilations ended), and fails once Tcl has reaped it.
-    foreach pid $pids {
-        while {![catch {exec ps -o stat= -p $pid} s] && ![string match Z* [string trim $s]]} { after 50 }
-    }
-    after 200
-    lmap out $outputs {lindex [split [string trim [readBytes $out]] \n] end}
-} -constraints {unixFiles} -cleanup cleanup -result {{   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"} {   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"}}
+} -cleanup cleanup -result {{   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"} {   value: "linux-x86_64/1.0.0"} {   value: "linux-aarch64/1.0.0"}}
 
 test pn-update-derives-every-view {an update replaces the store and derives every view again in the same transaction: both targets compile the new release} -body {
     set repo [fresh repo]
@@ -527,7 +526,7 @@ proc fooLibrary {{extra ""}} {
     return "{\"name\": \"foo\", \"origin\": \"bundled\", \"linkage\": \"shared\", \"file\": \"native/libfoo.so.1\", \"identity\": \"libfoo.so.1\", \"needs\": \[\"libc.so.6\"\]$extra}"
 }
 
-test pn-bundled-checks {every declared fact of a bundled library is checked against the file before it is packed: identity, needs, architecture, kind, symbols; a musl-built library is refused for the GNU C library's target} -constraints {linuxCc clangAarch64} -body {
+test pn-bundled-checks {every declared fact of a bundled library is checked against the file before it is packed: identity, needs, architecture, kind, symbols; a musl-built library is refused for the GNU C library's target} -constraints {linuxCc clangAarch64 lld} -body {
     set dir [fresh bin]
     set good [sharedLibrary $dir libfoo.so.1 libfoo.so.1 foo_value 7]
     set wrongName [sharedLibrary $dir libbar.so libbar.so.9 foo_value 7]

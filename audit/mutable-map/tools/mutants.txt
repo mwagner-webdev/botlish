@@ -735,6 +735,7 @@ import std::table_hash
 >>>>
 <<<<
     table: std::ordered_table::Table[T]
+    sendable through(transfer_out, transfer_in) as List[T]
 
 # A candidate order that does not hold exactly the collection's elements.
 error OrderMismatch
@@ -747,6 +748,7 @@ fn with_capacity(count: int) -> MutableSet[T]:
 ====
     table: std::ordered_table::Table[T]
     vals: MutableVector[bool]
+    sendable through(transfer_out, transfer_in) as List[T]
 
 # A candidate order that does not hold exactly the collection's elements.
 error OrderMismatch
