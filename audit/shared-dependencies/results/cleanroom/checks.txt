@@ -1,0 +1,12 @@
+PASS botlish.json has the three dependencies
+PASS one driver instance, used by the application, beats and probes
+PASS no package holds a .bot_modules of its own
+PASS the graph shows the driver shared
+PASS verify is clean
+PASS the program builds as a native executable
+PASS beats ran under the shared driver
+PASS probes ran under the shared driver
+PASS add future fails
+PASS the failure is a DEPENDENCY-CONFLICT
+PASS it names future's lock
+PASS the installation is unchanged

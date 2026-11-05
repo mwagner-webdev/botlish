@@ -3169,6 +3169,42 @@ Rename or move the application's file (and its imports), or remove the
 package; for a package that installs a package of its own name, rename or
 remove the installed one.
 
+@topic error.package-graph
+title: PACKAGE-GRAPH: a malformed package graph
+summary: The application's .bot_modules/.graph, which says which packages each scope of the resolved graph uses, breaks its format: the application's packages are not known.
+index: errors
+alias: malformed .graph; package graph damaged; broken package graph
+keywords: package graph, .graph, .bot_modules, shared dependency, malformed, install, format, line
+related: rule.package-modules cli.packages error.unknown-namespace error.module-collision
+docs: SHARED-PACKAGE-DEPENDENCIES-MILESTONE-1.md BOT-MODULES-MILESTONE-1.md
+code: SURFACE MODULE PACKAGE-GRAPH
+
+== MEANING
+A package graph (rule.package-modules, "Package graphs") is one file,
+PACKAGES/.graph, in one format: the line `botlish package graph 1`, the
+line `application` with the packages the application uses, and one line
+`package NAME` with the packages NAME uses per package of the graph -- names
+in ascending order, single spaces, every name used a package of the graph,
+none using itself, std never one, a newline at the end. A file that breaks
+any of it is reported at the first import the application's packages
+decide, naming the line and the rule:
+
+    the package graph APP/.bot_modules/.graph is malformed (line 2: the
+    packages a scope uses are listed in ascending order, once each): the
+    application's packages are not known; reinstall them (`install`), or
+    repair the file
+
+Nothing is guessed from a damaged graph: no package is taken for shared,
+and the packages directory is not read as a tree instead. A program that
+imports only the standard library compiles as before. The file is outside
+any one source file, so there is no single-file example.
+
+== WHAT TO DO
+Run `install` (cli.packages): the package manager writes the graph of the
+installation again (a graph it did not make is never overwritten: move a
+hand-made one aside first). A hand-made graph must follow the format above;
+one graph has one text.
+
 @topic error.reserved-namespace
 title: RESERVED-NAMESPACE: an application file inside std/, or a package named std
 summary: An import of std::NAME beside an application file std/NAME.bot or a package directory .bot_modules/std: std is the standard library's, so neither is ever a module or chosen.

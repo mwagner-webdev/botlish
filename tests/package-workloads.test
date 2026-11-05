@@ -665,4 +665,29 @@ test pw-shared-driver-negatives {the shared driver keeps its rules: without the 
         [lrange [split [dict get $conflict out] \n] 0 5] [expr {[treeState $app] eq $before}]
 } -cleanup cleanup -result {1 MISSING-CONTEXT 1 {{event_loop_linux 0.3.0: unchanged, used by the application, beats, probes, pulses}} DEPENDENCY-CONFLICT {{error: cannot select one version of event_loop_linux for the application's dependency graph: 0.3.0 and 0.4.0 are demanded:} {  the application's botlish.json locks event_loop_linux 0.3.0 (request "0.3")} {  beats 1.0.0 locks event_loop_linux 0.3.0 (the project -> beats 1.0.0)} {  probes 1.0.0 locks event_loop_linux 0.3.0 (the project -> probes 1.0.0)} {  pulses 1.0.0 locks event_loop_linux 0.3.0 (the project -> pulses 1.0.0)} {  future 1.0.0 locks event_loop_linux 0.4.0 (the project -> future 1.0.0)}} 1}
 
+test pw-shared-native-bridge {a package whose own native archive calls the shared provider's C API -- ticker, its C thread posting to the driver's endpoints through botlish_event_post -- links with the one event_loop_linux archive beside it, in either package's graph position: the native plan lists each library once, and the example's five ticks are handled under the driver the application installs} -constraints {eventLoopRun} -body {
+    set repo [sharedRepository]
+    set dir [file join [fresh src] ticker]
+    writeText [file join $dir botlish.json] "{\"schema\": 1, \"name\": \"ticker\", \"version\": \"1.0.0\", \"dependencies\": {\"event_loop_linux\": \"0.3\"}, \"lock\": {\"event_loop_linux\": \"0.3.0\"}}\n"
+    writeText [file join $dir ticker.bot] [string map {{static at "libticker.a"} {static at "native/libticker.a"}} \
+        [core::ReadFile [file join $::projectRoot examples event-loop native ticker.bot]]]
+    set build [fresh build]
+    exec cc -O2 -Wall -Wextra -Werror -fPIC -pthread -I[file join $::projectRoot packages event_loop_linux native] \
+        -c [file join $::projectRoot examples event-loop native ticker.c] -o [file join $build ticker.o]
+    exec ar rcs [file join $build libticker.a] [file join $build ticker.o]
+    pm native add [file join $build libticker.a] -target linux-x86_64 -name ticker -package $dir
+    set packed [pm package pack $dir -out $repo]
+    set app [fresh app]
+    foreach file {main.bot ticks.bot} {
+        file copy [file join $::projectRoot examples event-loop native $file] $app
+    }
+    foreach name {ticker beats event_loop_linux} {
+        pm add $name -project $app -repository $repo
+    }
+    set plan [dict get [pm native plan -project $app] out]
+    list [dict get $packed status] [regexp -all -line {^  library } $plan] \
+        [lsort [regexp -all -inline {library [a-z_]+: bundled static \(instance [a-z_]+\)} $plan]] \
+        [valueOf [file join $app main.bot] cranelift]
+} -cleanup cleanup -result {0 2 {{library event_loop_linux: bundled static (instance event_loop_linux)} {library ticker: bundled static (instance ticker)}} {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
+
 cleanupTests

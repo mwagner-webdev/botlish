@@ -10958,8 +10958,17 @@ tests/package-workloads.test pw-raven-artifact-contents pass
 tests/package-workloads.test pw-raven-release-immutable pass
 tests/package-workloads.test pw-raven-metadata-checked pass
 tests/package-workloads.test pw-raven-deploy-relocates pass
+tests/package-workloads.test pw-native-metadata-derived pass
+tests/package-workloads.test pw-raven-runtime-dependencies pass
+tests/package-workloads.test pw-raven-provenance pass
+tests/package-workloads.test pw-raven-aarch64-runtime-search-path pass
 tests/package-workloads.test pw-event-loop-runs pass
+tests/package-workloads.test pw-release-ledger pass
 tests/package-workloads.test pw-event-loop-linux-only pass
+tests/package-workloads.test pw-shared-driver pass
+tests/package-workloads.test pw-shared-driver-warning-clean pass
+tests/package-workloads.test pw-shared-driver-negatives pass
+tests/package-workloads.test pw-shared-native-bridge pass
 tests/fold-loops.test fold-loops-sum pass
 tests/fold-loops.test fold-loops-empty-is-initial pass
 tests/fold-loops.test fold-loops-singleton pass
