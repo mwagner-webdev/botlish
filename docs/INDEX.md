@@ -182,6 +182,7 @@ at its top ("Superseded by ...", "Partially superseded by ...").
 - [LINUX-X86-64-SYSCALL.md](LINUX-X86-64-SYSCALL.md) -- direct Linux x86-64 syscalls
 - [LINUX-SYSCALL-TRANSPORTS.md](LINUX-SYSCALL-TRANSPORTS.md) -- the AArch64 transport beside the x86-64 one (`std::linux::abi::ARCH::syscall`, one table), `std::linux::sys` as an architecture-specific module the compilation target selects, and what the single-file compiler needs on AArch64
 - [ARGV.md](ARGV.md) -- `argv()`: the process argument vector
+- [PROGRAM-RESULT-PRINTING-CENSUS.md](PROGRAM-RESULT-PRINTING-CENSUS.md) -- what removing the automatic printing of a program's value (main.tcl's `value:` line, an executable's last line) would touch: the value as the test oracle versus its two presentations, the printer against Botlish's own text formatting (no Float64 text, no generic display), the divergences between the CLI and executables, the language rules, docs, Compilerpedia contract, tests, scripts and CI that rely on it, why golden tests cannot take over the process-level assertions, and the blockers (no exit status, no output on the Tcl backends) (census; no implementation)
 
 ### Compile-time evaluation and testing
 
