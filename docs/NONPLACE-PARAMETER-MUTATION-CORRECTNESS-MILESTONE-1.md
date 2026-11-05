@@ -563,4 +563,38 @@ tclsh9.0 audit/golden/migration/merge.tcl -names audit/golden/migration/tcl-name
 tclsh9.0 tests/local.tcl
 ```
 
-RESULTS-VERIFICATION
+*Observations* on this branch (a 4-core container; the first line is the
+pre-change tree, `main` at 13dd290):
+
+* `tests/nonplace-parameter-mutation.test`: 36 of 36; its golden suite: 48
+  of 48 on all four backends, and `audit/golden/tools/perturb.tcl` makes
+  every one of them fail, with its verdict inverted and with its
+  expectation altered.
+* The census run: `tests/local.tcl -all 1 -parts tcl -backends interp` (all
+  268 Tcl test files, golden duplicates included), with every
+  NONPLACE-PARAMETER-MUTATION site logged by a temporary hook (removed
+  before committing). Each file it showed failing or carrying a site was
+  migrated and run again (section 11.3), until the only sites left were
+  the new test file's own rejections and main.tcl's reads of the frozen
+  fixture (section 11.4). A front-end pass over every golden suite under
+  the same hook found the one site in mutable-vector.bot that its first
+  rejection had hidden.
+* `audit/nonplace-parameter-mutation/tools/mutate.tcl`: 12 of 12 mutants
+  killed. The mutable-vector, mutable-array and mutable-map harnesses, run
+  on their hir/mutvec.tcl mutants: 38, 9 and 5 killed.
+  `tools/mutant-catalogs.tcl`: 86 catalogs, 3001 mutants, 0 problems.
+* Fuzzers (section 14): 0 disagreements and 0 failing runs.
+* `tools/compilerpedia.tcl check`: 1219 topics, 746 examples, 0 problems.
+  `audit/refactor/tools/gate.tcl`: passed (the observed warnings are
+  exactly the manifest), and `audit/refactor/tools/expect.tcl`: 32
+  programs, 0 mismatches. `merge.tcl -check 1`: clean (13139 rows).
+* `tests/local.tcl` (every golden suite on four backends through the
+  front-end cache, every Tcl test on interp and compile, golden duplicates
+  skipped): Tcl tests 8725 passed and 0 failed on interp, 8720 passed and
+  0 failed on compile (2493 golden duplicates skipped each); 118 golden
+  suites, 0 failed (interp 5637/5637, compile 5637/5637, cranelift-generic
+  5545/5545, cranelift 5647/5647); 97 minutes with 4 jobs.
+* CI on the branch (macos-arm64.yml and windows-x86_64.yml on the push;
+  tests.yml, tests-arm64.yml and static-decisions.yml dispatched): see the
+  branch's runs. Their verdict is reported where this report is handed
+  over, not here.
