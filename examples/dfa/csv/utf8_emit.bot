@@ -1,0 +1,203 @@
+# utf8_emit.bot -- Profile B (csv_utf8.bot) emitters, over Unicode scalar
+# values and over UTF-8 bytes (CSV-EMISSION-VALIDATION-MILESTONE-1.md):
+# strict_emit.bot's always-quoted policy with csv_utf8's alphabet. Every
+# function claims its tokens and is certified for every argument.
+#
+#   quoted_field ... document               over scalar values: each yield
+#                                           one character's scalar value
+#   quoted_field_bytes ... document_bytes   over bytes: each character in
+#                                           its UTF-8 bytes, as written to a
+#                                           file or socket
+#   quoted_field_from_bytes                 a field given as bytes: decoded
+#                                           strictly first (InvalidUtf8:
+#                                           never replaced)
+#
+# A character csv_utf8's quoted class does not hold -- NUL, another C0
+# control but TAB, CR and LF, DEL, a C1 control -- fails
+# UnsupportedCSVCharacter; nothing is replaced, stripped or normalized.
+#
+# The UTF-8 encoder is written in the byte grammar's case structure: it
+# splits its ranges where utf8_quoted's lead classes do (C2, C3..DF, E0,
+# E1..EC, ED, EE..EF, F0, F1..F3, F4), because the checker's facts are sets
+# of values, not relations between a lead byte and the next one
+# (EMISSION-CLAIMS-MILESTONE-1.md, section 19).
+#
+# The record functions are `nomethod` (strict_emit.bot's reason).
+
+import std::dfa
+import std::char
+import std::str
+import std::list
+import std::abi::bytes
+import csv_utf8
+import csv_common
+
+# --- over Unicode scalar values
+
+fn quoted_field(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::quoted_field, csv_utf8::field:
+    yield 34
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        if c == 34:
+            yield 34
+            yield 34
+        else:
+            csv_utf8::quoted_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+            yield c
+        continue
+    yield 34
+    unit
+
+nomethod fn record3(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::record3:
+    quoted_field(a)
+    yield 44
+    quoted_field(b)
+    yield 44
+    quoted_field(c)
+    unit
+
+nomethod fn line3(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::line3:
+    record3(a, b, c)
+    yield 13
+    yield 10
+    unit
+
+fn row_line(r: csv_common::Row) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::line3:
+    line3(r.a, r.b, r.c)
+    unit
+
+# Any number of records, each a CRLF-terminated line: zero records is the
+# empty output, the empty stream.
+fn stream(rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::stream3, csv_utf8::document3:
+    loop r in rows:
+        row_line(r)
+        continue
+    unit
+
+# A document: a header record, then any number of records.
+nomethod fn document(header: csv_common::Row, rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::stream3, csv_utf8::document3:
+    row_line(header)
+    stream(rows)
+    unit
+
+# --- over UTF-8 bytes
+
+# The UTF-8 bytes of the scalar value V (RFC 3629), lead byte first.
+fn utf8(v: int) -> unit:
+    if v < 128:
+        yield v
+    elif v < 192:
+        # U+0080..U+00BF: C2 and the value itself (80..BF).
+        yield 194
+        yield v
+    elif v < 2048:
+        yield 192 + v.shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 4096:
+        # E0's second byte is A0..BF (no overlong form).
+        yield 224
+        yield 128 + v.shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 53248:
+        yield 224 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 57344:
+        # ED's second byte is 80..9F (no surrogate).
+        yield 237
+        yield 128 + (v - 53248).shift_right(6)
+        yield 128 + v.mod(64)
+    elif v < 65536:
+        yield 224 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 262144:
+        # F0's second byte is 90..BF (no overlong form).
+        yield 240
+        yield 128 + v.shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    elif v < 1048576:
+        yield 240 + v.shift_right(18)
+        yield 128 + v.shift_right(12).mod(64)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    else:
+        # F4's second byte is 80..8F (nothing past U+10FFFF).
+        yield 244
+        yield 128 + (v - 1048576).shift_right(12)
+        yield 128 + v.shift_right(6).mod(64)
+        yield 128 + v.mod(64)
+    unit
+
+fn quoted_field_bytes(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::quoted_field_bytes, csv_utf8::field_bytes:
+    yield 34
+    loop i from 0 to value.length():
+        c = value.char_at(i).scalar_value()
+        if c == 34:
+            yield 34
+            yield 34
+        else:
+            csv_utf8::quoted_char(c):
+                on std::dfa::UnrecognizedInput:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+                on std::dfa::UnexpectedEnd:
+                    fail csv_common::UnsupportedCSVCharacter {at: i, value: c}
+            utf8(c)
+        continue
+    yield 34
+    unit
+
+nomethod fn record3_bytes(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::record3_bytes:
+    quoted_field_bytes(a)
+    yield 44
+    quoted_field_bytes(b)
+    yield 44
+    quoted_field_bytes(c)
+    unit
+
+nomethod fn line3_bytes(a: str, b: str, c: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::line3_bytes:
+    record3_bytes(a, b, c)
+    yield 13
+    yield 10
+    unit
+
+fn row_line_bytes(r: csv_common::Row) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::line3_bytes:
+    line3_bytes(r.a, r.b, r.c)
+    unit
+
+# Any number of records, each a CRLF-terminated line: zero records is the
+# empty output, the empty stream.
+fn stream_bytes(rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::stream3_bytes, csv_utf8::document3_bytes:
+    loop r in rows:
+        row_line_bytes(r)
+        continue
+    unit
+
+# The same records with CRLF between them and none after the last: RFC
+# 4180's other form, in stream3_bytes's language but not document3_bytes's.
+fn stream_unterminated_bytes(rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::stream3_bytes:
+    loop r in rows and i from 0 to rows.length():
+        if i > 0:
+            yield 13
+            yield 10
+        record3_bytes(r.a, r.b, r.c)
+        continue
+    unit
+
+# A document: a header record, then any number of records.
+nomethod fn document_bytes(header: csv_common::Row, rows: List[csv_common::Row]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_utf8::stream3_bytes, csv_utf8::document3_bytes:
+    row_line_bytes(header)
+    stream_bytes(rows)
+    unit
+
+# A field whose text arrives as bytes: decoded strictly (an overlong form,
+# an encoded surrogate, a truncated sequence or a stray continuation byte
+# fails InvalidUtf8 before anything is yielded), then written.
+fn quoted_field_from_bytes(data: std::abi::bytes::Bytes) -> unit errors InvalidUtf8, csv_common::UnsupportedCSVCharacter emits csv_utf8::quoted_field_bytes:
+    quoted_field_bytes(data.decode_utf8())
+    unit

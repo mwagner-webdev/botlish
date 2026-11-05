@@ -4737,6 +4737,12 @@ backend compiles, or reports why not (EMIT-*). Keep it so:
   another diagnostic, poison or a hole is `dependent` and says nothing.
   Messages never print an internal id. Every EMIT-* kind has a
   `std::compiler::DiagnosticCode` case and a Compilerpedia topic.
+* A claim is about the yield trace, never the result: a claimed function
+  may complete with any value of its declared result (a coroutine source's
+  record count, the -1 a protocol uses for its end). Never bring back a rule
+  on a claimed function's result; a consumer tells a symbol from the end by
+  `std::coroutine::done?` (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section
+  18; `ec-result-not-symbol`).
 
 If you change hir/emission.tcl, hir/emitdfa.tcl, hir/intset.tcl, the
 hir::range transfers above, core/dfa.tcl's outcome model or what Lower
@@ -4752,7 +4758,38 @@ code it mutates, keeping it a mutant of the same rule), plus
 `tests/hir-range.test` for a transfer, `tests/static-compile.test` and
 `tools/compilerpedia.tcl check` for a diagnostic kind, and the
 hir-interchange and compiler-service harnesses for a change to what they
-cover. `audit/emission-claims/tools/bench.tcl` regenerates the costs.
+cover, and `tests/csv-emission.test` (the CSV workload's claims, below).
+`audit/emission-claims/tools/bench.tcl` regenerates the costs.
+
+## Workloads (examples/dfa/csv)
+
+`examples/dfa/csv/` (CSV-EMISSION-VALIDATION-MILESTONE-1.md) is production
+`emits` on a second protocol: RFC 4180's strict ASCII profile
+(`csv_strict.bot`) and a UTF-8 profile over scalar values and bytes
+(`csv_utf8.bot`) as declared recognizers, always-quoted and selective
+emitters certified against them, coroutine sources, sinks and an export
+application. Keep it so:
+
+* The profiles stay two modules with one stated policy each (the report's
+  section 2); an emitter checks a character with the grammar's own guard
+  (`quoted_char`, `text_char`), never a list of its own, and fails
+  `UnsupportedCSVCharacter` rather than replace, strip or normalize.
+* Every claim of the example is certified; a rejected variant (selective
+  quoting's natural spelling, the census's mutants) lives in a test or
+  `audit/csv-emission/census/mutants.txt`, never in the example. The
+  example is not standard library, and no CSV package is published from it.
+* Nothing claims formula safety: a formula-like value is written as it is.
+
+If you change the example, the profiles or the emission checker, run
+`tests/csv-emission.test`, and for the example or the profiles also
+`audit/csv-emission/tools/differential.tcl` (`-part all`; every backend, the
+reference interpreter and `oracle.py`: 0 disagreements, 0 failures),
+`audit/csv-emission/tools/census.tcl` (every mutant as its class states;
+update a mutant's text when you change the code it mutates, keeping it a
+mutant of the same mistake) and `python3 -I audit/csv-emission/tools/
+oracle.py selftest`; for `export.bot`, `audit/csv-emission/tools/
+cleanroom.sh` after `single/build.sh`. `audit/csv-emission/tools/bench.tcl`
+regenerates the native costs.
 
 ## Workloads (examples/games/2048)
 

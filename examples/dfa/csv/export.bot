@@ -1,0 +1,117 @@
+# export.bot -- a CSV export application (CSV-EMISSION-VALIDATION-
+# MILESTONE-1.md, section 15): a table of three-column records, some of
+# them hostile, streamed into the file named by its argument (export.csv
+# without one) as Profile B's UTF-8 CSV -- every field quoted, every record
+# a CRLF-terminated line -- by the certified emitter (utf8_emit.bot). Only
+# the current 4,096-byte chunk is ever held: the file is truncated first,
+# then each chunk appended as it fills. The claim certifies the stream, the
+# emitter's guard refuses what the profile cannot hold.
+#
+#   tclsh9.0 main.tcl -backend cranelift -argv "export out.csv" examples/dfa/csv/export.bot
+#   tclsh9.0 main.tcl -emit-native-executable examples/dfa/csv/export.bot
+#   examples/dfa/csv/export out.csv
+#
+# It uses std::linux::fs, so it runs on Linux, on the native backends. On
+# success standard error says how many records it wrote (the source's final
+# value); a value the profile cannot represent stops it with a message
+# naming the character, after what it had written -- a viable prefix, never
+# a complete document.
+
+import std::coroutine
+import std::mutable_vector
+import std::mutable_array
+import std::abi::bytes
+import std::byte
+import std::int
+import std::list
+import std::str
+import std::io
+import std::linux::io
+import std::linux::fs
+import std::io::fs
+import std::io::path
+import csv_common
+import sources
+
+# A record of three fields (none of them a receiver).
+nomethod fn row(a: str, b: str, c: str) -> csv_common::Row:
+    csv_common::Row {a: a, b: b, c: c}
+
+fn table() -> List[csv_common::Row]:
+    [row("101", "Ada Lovelace", "First program, 1843"),
+     row("102", "Grace \"Amazing Grace\" Hopper", "COBOL"),
+     row("103", "hello\",\"admin", "a value that tries to open a column"),
+     row("104", "x\"\r\n\"evil\",\"=1+2\",\"z", "a value that tries to end the record"),
+     row("105", "=1+2", "+1+2"),
+     row("106", "@SUM(1,2)", "-2+3"),
+     row("107", "multi\r\nline\nvalue", "tab\there"),
+     row("108", "café naïve €", "😀 and 中文"),
+     row("109", "", "\"\"\"\"")]
+
+# CHUNK appended to the file at PATH (the chunk emptied).
+fn flush(path: std::linux::fs::NativePath, place chunk: MutableVector[std::byte::Byte]) -> unit errors std::io::fs::FileError:
+    full = loop b in chunk:
+        b
+    file = path.open(std::io::fs::OpenMode::Append)
+    written = file.write_all(std::abi::bytes::from_list(full))
+    written.close()
+    chunk.clear()
+
+# The number of records written.
+nomethod fn export(path: std::linux::fs::NativePath, header: csv_common::Row, rows: List[csv_common::Row]) -> int errors csv_common::UnsupportedCSVCharacter, std::io::fs::FileError:
+    empty = path.open(std::io::fs::OpenMode::Replace)
+    empty.close()
+    coroutine {step, first} = sources::bytes_document_source(header, rows)
+    chunk = std::mutable_vector::from_list("".encode_utf8())
+    c = std::mutable_array::create(1, first)
+    loop:
+        if std::coroutine::done?(step):
+            break
+        b = c.at(0)
+        if b < 0 or b > 255:
+            # Never: the source is certified to emit bytes. A consumer
+            # still receives Ints (a resume's value has its type, not the
+            # source's certificate), so it narrows them.
+            fail std::io::fs::FileError {reason: std::io::fs::Reason::Other, code: 0}
+        chunk.push(b)
+        if chunk.length() >= 4096:
+            path.flush(chunk)
+        c.set(0, step())
+    path.flush(chunk)
+    c.at(0)
+
+with context std::linux::io::create()
+with context std::linux::fs::create()
+
+fn report(text: str):
+    std::io::write_error_line(text):
+        on std::io::WriteFailed:
+            unit
+
+# Exports the table into the file NAME: the records written, or -1 (a
+# character the profile cannot hold), -2 (the file system failed), -3 (NAME
+# is no path), each reported.
+fn run(name: str) -> int:
+    path = std::linux::fs::from_text(name):
+        on std::io::path::NotAPath:
+            report("export failed: ".concat(name).concat(" is no path"))
+            return -3
+    export(path, row("id", "name", "comment"), table()):
+        on csv_common::UnsupportedCSVCharacter {at, value}:
+            report("export stopped: character U+".concat(std::int::to_string(value)).concat(" at index ").concat(std::int::to_string(at)).concat(" cannot be written in this CSV profile"))
+            -1
+        on std::io::fs::FileError {code}:
+            report("export failed: error ".concat(std::int::to_string(code)))
+            -2
+
+args = argv():
+    on InvalidArgumentEncoding:
+        ["export"]
+name = if args.length() > 1:
+    args.at(1)
+else:
+    "export.csv"
+written = run(name)
+if written >= 0:
+    report("wrote ".concat(std::int::to_string(written)).concat(" records to ").concat(name))
+unit

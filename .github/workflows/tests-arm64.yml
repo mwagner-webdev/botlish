@@ -194,15 +194,23 @@ jobs:
         run: tclsh9.0 audit/golden/tools/check.tcl -shard ${{ matrix.shard }}/4 -jobs 2
 
   gc-stress:
-    name: arm64 tests (native GC-stress)
+    name: arm64 tests (native GC-stress, ${{ matrix.backend }})
     # As in tests.yml, not on pull requests (it is the slowest job); a manual
     # run includes it, since that is how a branch gets its arm64 check.
+    # One job per Tcl backend: both passes in one job took 5 h 40 min on
+    # main (run 41787767204) and a branch's crossed GitHub's 6-hour job
+    # limit (run 41795374693, cancelled in the second pass's last files).
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [interp, compile]
     env:
       LANG: C.utf8
       LC_ALL: C.utf8
       BOTLISH_NATIVE_GC_STRESS: "1"
+      CORE_BACKEND: ${{ matrix.backend }}
     steps:
       - uses: actions/checkout@v5
 

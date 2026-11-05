@@ -44,7 +44,7 @@
 #
 # Verdicts. proven (a certificate); rejected (a violation the analysis
 # found: EMIT-REJECTED, -BEYOND-TOKEN, -AFTER-TOKEN, -INCOMPLETE,
-# -END-SYMBOL, -BOUNDARY, -TERMINAL-VALUE, -BYTE-CHARACTER: "may", because
+# -END-SYMBOL, -BOUNDARY, -BYTE-CHARACTER: "may", because
 # the facts over-approximate -- a concrete counterexample is the witness
 # tool's, audit/emission-claims/tools/witness.tcl, which runs the program);
 # not proved (EMIT-UNKNOWN-VALUE, -NOT-SYMBOL, -UNSUPPORTED, -BUDGET: the
@@ -1969,16 +1969,13 @@ proc hir::emission::CheckClaim {claim} {
     foreach v [Finish $exits $claim] {
         lappend diags [Message [dict replace $v expr $b] $claim]
     }
-    # A claimed emitter whose declared result is an Int is a symbol source:
-    # it must complete with -1, the end, never a value a consumer reading
-    # after the end would take for a symbol.
-    set declared [dict get [Node $b] declaredResult]
+    # The function's result is no symbol, whatever its type: the claim is
+    # about the yield trace alone. A coroutine root's final value -- a
+    # count, a status, the -1 a source protocol may use for its end -- is
+    # the consumer's to tell from a symbol (std::coroutine::done?), and
+    # what it is belongs to that protocol, not to the claim
+    # (CSV-EMISSION-VALIDATION-MILESTONE-1.md, section 18).
     set value [dict get $rec result]
-    if {$exits ne {} && $declared ne "" && [IsInt $declared] && $value ne [hir::intset::point -1]} {
-        lappend diags [dict create kind EMIT-TERMINAL-VALUE expr $b origin [dict get $claim origin] \
-            message "[ClaimPrefix $claim]: [FunctionText $b] returns an Int, so it is a symbol source, and its final value may be [ValueText $value], not -1: a consumer reading values after the end would read it as a symbol" \
-            related {} notes {}]
-    }
     if {$budgetHit} {
         # An analysis that did not converge: what it found is no finding
         # (its facts are a round's, not the fixpoint's) -- only the budget
