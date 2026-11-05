@@ -10,7 +10,8 @@ through and stayed, and what keeps the class out. It follows
 MAIN-CI-FAILURES-2026-11.md, whose analysis of why failures reach `main` and
 stay there still holds.
 
-Method: the logs of `main`'s CI runs from 2026-11-01 on (section 2's table);
+Method: the logs of `main`'s CI runs from 2026-11-01 to the latest
+completed one (bdd5e3d, 2026-11-04; section 2.5);
 each failure reproduced in a Linux x86-64 container before it was fixed, and
 the fix checked there (section 5). Every mutation catalog under `audit/`
 checked against `main`'s tree, and each mutant that does not apply traced to
@@ -30,9 +31,9 @@ the first commit of `main`'s history where it stopped applying.
 
 | Defect | Where it failed | Since | Cause | Fix |
 |---|---|---|---|---|
-| `pn-concurrent-target-compiles` (tests/package-native.test) | macOS, system linker job | PM-2 (2026-11-02) | waited for its child processes by probing `/proc`, which macOS does not have, then read their output after a fixed 200 ms | wait by closing each process's pipeline |
-| `pa-add-refusals` (tests/package-authoring.test) | Linux x86-64: interp, compile, system-linked executables, GC stress, both native coverage runs | PM-3 (2026-11-03) | linked an AArch64 library with whatever linker clang found: the author's AArch64 cross binutils, absent on the runners, where GNU ld refuses (`unrecognised emulation mode: aarch64linux`) | link with `-fuse-ld=lld`; an `lld` constraint |
-| `pa-pack-refuses-incomplete` (tests/package-authoring.test) | Linux x86-64: both native coverage runs | PM-3 | asserted that `pack`'s output has no word `native`; the output names the repository path, and the coverage jobs' temporary directory is `/tmp/native-coverage_XXXXXX` | match the output with the path mapped out |
+| `pn-concurrent-target-compiles` (tests/package-native.test) | macOS, system linker job | PM-2 (2026-11-02); failed once, 11-04, in 26 macOS executions | waited for its child processes by probing `/proc`, which macOS does not have, then read their output after a fixed 200 ms | wait by closing each process's pipeline |
+| `pa-add-refusals` (tests/package-authoring.test) | Linux x86-64: interp, compile, system-linked executables, GC stress, both native coverage runs | PM-3's merge, 9bcdf6f (11-03); every run since | linked an AArch64 library with whatever linker clang found: the author's AArch64 cross binutils, absent on the runners, where GNU ld refuses (`unrecognised emulation mode: aarch64linux`) | link with `-fuse-ld=lld`; an `lld` constraint |
+| `pa-pack-refuses-incomplete` (tests/package-authoring.test) | Linux x86-64: both native coverage runs | 9bcdf6f; every run since | asserted that `pack`'s output has no word `native`; the output names the repository path, and the coverage jobs' temporary directory is `/tmp/native-coverage_XXXXXX` | match the output with the path mapped out |
 | `struct-ignores-non-hashable-field` (audit/hashable/tools/mutants.txt) | `audit/hashable/tools/mutate.tcl`: NOT-APPLIED (no CI job runs it) | sendability (2026-11-03) | the text it replaces now occurs twice in hir/types.tcl: `SendComponents` copies `Components`' loop | the text extended by a line only `Components` has |
 | ten more mutants in eight catalogs | their harnesses: NOT-APPLIED (none ran) | 2026-10-30 to 11-03 | four milestones rewrote or duplicated the text they replace (section 2.4) | each updated to the code it mutates, the same rule; each run through its harness and killed |
 
@@ -78,6 +79,12 @@ slept 200 ms, and read their output files.
   and closed, which waits for the process. Nothing probes the process
   table, and nothing sleeps. The `unixFiles` constraint guarded only the
   probe and is gone, so the test now runs on Windows too.
+- **A concurrent fix.** While this change was in progress, the per-thread
+  runtime milestone's merge (905baee2) replaced the `/proc` probe on `main`
+  with `ps -o stat= -p PID`, which macOS has. That wait works on Linux and
+  macOS; it still polls, still reads after a fixed 200 ms (harmless once
+  the wait holds) and still keeps the test off Windows. The merge of `main`
+  into this change keeps the pipeline wait.
 
 ### 2.2 `pa-add-refusals`: a linker the test did not name
 
@@ -100,7 +107,7 @@ exec clang --target=aarch64-linux-gnu -shared -fPIC -nostdlib -o libarm.so -Wl,-
   constraints, `linuxCc clang`, name neither.
 - **Where it failed.** Every Linux x86-64 job of `tests.yml` that runs the
   file (the Ubuntu runners install no cross binutils: `.devcontainer/setup.sh`),
-  from PM-3's arrival on `main` on: section 2's table.
+  from PM-3's arrival on `main` on (section 2.5).
   STATIC-COMPILE-EXPECTED-DIAGNOSTICS-MILESTONE-1.md,
   WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md,
   SENDABILITY-AND-VALUE-COPY-MILESTONE-1.md and
@@ -162,7 +169,7 @@ Checking every catalog under `audit/` (84 catalogs, 2,968 mutants; section
 | hashable | `struct-ignores-non-hashable-field` | `SendComponents` (SendClass's loop) copies `Components`' `if {$class eq "none"}` block: the text occurs twice | 8b0a692, sendability (11-03) | 5 tests of hashable.test (`hb-hash-static-rejection`, ...); the fuzzer, 4 of 8 programs |
 | mutable-map | `set-value-storage` | a `sendable through(...)` clause now follows MutableSet's field | 8b0a692, sendability (11-03) | `ms-no-value-storage` |
 | direct-modules | `method-obligation-dropped` | `ObligationKinds` gained `CONTEXT-NOT-INJECTED CONTEXT-RETAINED-AUTHORITY` | 9f9cc95, restricted injection (11-02) | `dm-method-sugar-two-candidates` |
-| method-receiver-types | `context-obligation-selects`, `error-obligation-selects` | the same line | 9f9cc95 (11-02) | PENDING |
+| method-receiver-types | `context-obligation-selects`, `error-obligation-selects` | the same line | 9f9cc95 (11-02) | `mrt-context-obligation-never-selects`, `mrt-error-obligation-never-selects` |
 | method-resolution | `ambiguous-context-is-a-problem`, `missing-context-is-a-problem` | the same line | 9f9cc95 (11-02) | PENDING |
 | enums | `bare-case-accepted` | the emission-claims resolver added a second `set b [Lookup hir $scope $name]` | 46ff149, emission claims (11-02) | `enum-cases-not-injected`; the fuzzer, 10 of 25 programs |
 | hir-interchange | `decode-skips-activation` | `decode` now re-verifies emission claims between `hir::activate` and `return` | 46ff149 (11-02) | `hx-roundtrip-in-process` |
@@ -173,6 +180,10 @@ Three properties of the list:
 
 - **Four milestones in six days, none of them the owner.** Each change was
   correct; each touched code that another area's audit mutates. The
+  per-thread runtime milestone, merged during this change, did update the
+  other harnesses' mutants of the code it changed (its commit c2a30bcc);
+  with `tools/mutant-catalogs.tcl` that step stops depending on knowing
+  which harnesses to run. The
   restricted-injection milestone updated its own mutant of
   `ObligationKinds` (`obligation-selects`) and broke the five others that
   edit the same line.
@@ -193,6 +204,25 @@ Two edits in the catalogs name a file no commit holds: the macOS Icy Tower
 mutants `binding-scalar-type` and `binding-scalar-type-traced` edit the SDL3
 binding the macOS job generates and stages (`@binding/`). They are outside
 any tree check by design.
+
+### 2.5 When each appeared, and how often it failed
+
+From every run of `main`'s `tests.yml`, `macos-arm64.yml`,
+`windows-x86_64.yml` and `tests-arm64.yml` completed from 2026-11-01 to
+bdd5e3d (the runs of later commits were still queued):
+
+| Test | First failing run | Runs and outcome since |
+|---|---|---|
+| `pn-concurrent-target-compiles` | 41787767392 (bdd5e3d, 11-04), system linker job; its acceptance shard passed the same file | macOS: the file ran in 26 jobs from PM-2's merge (1ed72b5, 11-02) on, and failed in that one: **intermittent**. Linux arm64: passed in every job (the `/proc` wait works there). Windows: skipped (`unixFiles`) |
+| `pa-add-refusals` | 41682255326 (9bcdf6f, PM-3's merge into `main`, pushed 11-03 17:14; its jobs ran 11-04 01:47 to 05:22) | `tests.yml`: failed in all six runs since, in every job that runs the file (interp, compile, system-linked, both GC-stress passes, both coverage jobs): **deterministic**, the same linker error each time. Linux arm64, macOS, Windows: skipped (`linuxX86Host`) |
+| `pa-pack-refuses-incomplete` | the same run | classed "failed" in 12 of 12 coverage jobs, passed in every other job: **deterministic**, in the coverage jobs only |
+
+Before 9bcdf6f every `tests.yml` run on `main` from 11-01 (23 runs) passed.
+From 9bcdf6f to bdd5e3d these two tests were the only failures: the same
+6 of 14 jobs red in each run, every other job green. Three of the four
+reports that record `pa-add-refusals` (section 4) were written, from their
+own containers' runs, before `main`'s first run of it had started: the
+runners were saturated, and the push's jobs waited eight and a half hours.
 
 ## 3. What the defects have in common
 
@@ -239,9 +269,10 @@ others' catalogs, and the harnesses' NOT-APPLIED status reaches no one who
 did not run them.
 
 **Red on `main` was recorded instead of fixed.** `pa-add-refusals` failed on
-every Linux x86-64 `tests.yml` run of `main` from PM-3 on (section 2's
-table). Four milestone reports, written between 11-03 20:32 and 11-05 05:46,
-list it as main's own failure, with its cause, and merge. Each was right by AGENTS.md's rule (since
+every Linux x86-64 `tests.yml` run of `main` from PM-3 on (section 2.5).
+Four milestone reports, written between 11-03 20:32 and 11-05 05:46, list
+it as main's own failure, with its cause, and merge. Each was right by
+AGENTS.md's rule (since
 MAIN-CI-FAILURES-2026-11.md): "tell the user which workflows and tests fail
 on `main` before you build on it, and keep that list". The rule asks for a
 report; it does not ask anyone to fix the failure. A one-line fix was
@@ -354,7 +385,9 @@ Ordered by what each would have caught here.
 
 - **macOS and Windows** run `pn-concurrent-target-compiles` with the new
   wait for the first time on this change's branch push; Windows had never
-  run it (the old `unixFiles` constraint). Their results are CI's.
+  run it (the old `unixFiles` constraint). Their results are CI's. A pass
+  on macOS shows little by itself: the old wait failed there once in 26
+  runs.
 - **The package-manager harness's kills** were not re-run here: section 4's
   point about its missing baseline concerns hosts where
   `pa-add-refusals` failed, which this change ends.
