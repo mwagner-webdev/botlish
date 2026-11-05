@@ -16,11 +16,13 @@ proc ::reference::Fields {type} {
     variable budget
     variable reads
     variable cut
-    if {[incr reads] > $budget} {
+    if {[incr reads] > $budget || [string length $type] > 20000} {
+        # (A walk past the budget, or through types this large -- an
+        # argument doubled at every step -- does not finish.)
         error REFERENCE-BUDGET
     }
     set fields [hir::structs::AppliedFieldTypes $type]
-    if {!$cut} {
+    if {!$cut && [string length $type] < 5000} {
         # Did the type bound cut what the substitution made?
         set saved [list $::hir::types::aggregateDepth $::hir::types::appliedDepth]
         set ::hir::types::aggregateDepth 1000
