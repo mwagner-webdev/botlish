@@ -78,6 +78,30 @@ applications substitution would make.
   schema of `W[Coroutine{...}]` is finite; every schema of a type that could
   be transferred before is unchanged.
 
+**Evidence** (sections 17 to 22):
+
+* **Parity with the old walks.** 16,572 corpus comparisons of classes and
+  reasons found 0 DIFFERENT. 79 answers are more precise where the old walk
+  read a type the bound had cut, and 406 are answers the old walks never
+  reach.
+* **An independent model.** 5,625 random queries over 225 random
+  declaration graphs were answered as the oracle answers them. 22,500 more
+  comparisons with the old walks found 0 DIFFERENT.
+* **Mutants.** EVIDENCE-MUTANTS
+* **Tests.** `tests/parameterized-declaration-summaries.test` (23 tests).
+  Every test file the changes reach passes, and so did the full local run
+  but for `main`'s own defects.
+* **CI.** EVIDENCE-CI
+* **What the audit found and fixed on the way:**
+  * one wrong answer: a refinement's name read as imprecise
+    (`MayHoldVector(Box[Small])`, full corpus);
+  * an argument's classification that started reason walks without end
+    (fuzzer);
+  * a reason walk exponential in the paths it revisited (fuzzer);
+  * a mutant of the hashable harness that had become equivalent;
+  * two defects of the audit tools themselves (the oracle's worklist, the
+    reference's swallowed budget).
+
 ## 2. Starting architecture
 
 Before this milestone the affinity summary and the slot positions were
@@ -328,14 +352,19 @@ a value could refute: an `any` argument is `unknown`, a cut is never read
 
 **The reason.** The class comes from the summary; the reason is the old walk
 of the parts in field order (Components' format), entered only for a class
-that is not total, with every part whose summary class is total skipped. On
-every type the old walk finished on, this is the old walk's reason: pruning
-removes only parts the old walk would have found total, and the old walk's
-path-based `seen` already decided the rest. One form of type could still make
-it walk forever: a non-uniform recursion whose first part in field order
-grows (`OwnGrow[T]`: `next: List[OwnGrow[List[T]]]` before its `f: Fn`
-field) -- the class is decided, but "the first part of that class" descends
-into ever larger applications. `hir::summaries::Whistle` stops it: on a
+that is not total, with every part whose summary class is total skipped.
+Pruning removes only parts the old walk would have found total, and the old
+walk's path-based `seen` already decided the rest. So on every type the old
+walk finished on, this is the old walk's reason, up to the per-question
+walk below: a later path reuses the first path's walk, which can in
+principle name another part. The corpus and the fuzzer compare every
+reason, and found no such case (sections 17 and 18).
+
+One form of type could still make the walk run forever: a non-uniform
+recursion whose first part in field order grows (`OwnGrow[T]`: `next:
+List[OwnGrow[List[T]]]` before its `f: Fn` field). The class is decided,
+but "the first part of that class" descends into ever larger applications.
+`hir::summaries::Whistle` stops it: on a
 declaration that lies on an *expansive cycle* of the slot graph (`Expansive`:
 Kennedy and Pierce's finitary condition -- a cycle through an edge whose
 argument nests the slot), a third application on the walk's path, each
@@ -344,8 +373,9 @@ met again. Applications of declarations on no expansive cycle never trigger
 it, so every finite case keeps the old reason; the whistle only shortens
 reasons the old walk could only give after the bound cut its arguments.
 
-If the walk still finds no part of the class, a part that decides it was
-cut by the type bound: `Deep[List[Fn{...}]]`, whose declaration holds its
+If the walk still finds no part of the class, the part that decides it is
+past the type bound (or, in principle, was found by no first path):
+`Deep[List[Fn{...}]]`, whose declaration holds its
 argument three Lists down, holds a function the bound has replaced by a cut
 type the walk reads as `unknown`, while the summary, reading the argument
 uncut, says `none`. The reason then names the argument that decides the
@@ -577,6 +607,19 @@ reported as `diverges` instead of exhausting the machine:
   before this limit.
 * Whether the bound cut a field is compared only for types under 2,000
   characters.
+* A walk never swallows its own end. The old MutableComponent tolerated a
+  field it could not substitute (`catch {AppliedFieldTypes $type}`).
+  Rewritten to read `::reference::Fields`, it also caught REFERENCE-BUDGET
+  and Tcl's nesting limit, which a walk down a growing recursion reaches
+  first. It then went on and answered from whatever fields it had read
+  before, so every one of its walks "finished": on `W[Coroutine{...}]` it
+  answered `""` where the walk never ends. Fuzzer seed 41 showed it: the
+  walk with the bound raised to 64 (`Exact`) ran without end, and the walk
+  under the bound named field `f1` where the full walk names `f0`.
+  `::reference::CatchFields` now rethrows both, as `::reference::Run`
+  counts them, and the extractor refuses any other way of catching
+  `Fields` (73e9515). The corpus and fuzzer verdicts here were measured
+  after the fix.
 
 **What the full corpus found.** Its first run found one defect of the
 summaries: `MayHoldVector(Box[Small])` was DIFFERENT. An application kept
@@ -585,22 +628,22 @@ read as imprecise where the old walk read the field's normal form.
 `hir::summaries::Arguments` now reads every argument that is not
 already specific in the normal form a field holds it in (961dc07).
 
-**Result** (`audit/declaration-summaries/tools/corpus.tcl`, final code,
-1,223 s): 1,381 types, 12 analyses each (Bearing, CarriedErrors, both
-totalities, HashClass, SendClass, MentionsMutable, MayHoldVector, CanCarry,
-`decimal::Mentions`, MutableComponent, ValueStability), 16,572 comparisons
-of classes and reasons.
+**Result** (`audit/declaration-summaries/tools/corpus.tcl`, final code and
+fixed reference, 1,272 s): 1,381 types, 12 analyses each (Bearing,
+CarriedErrors, both totalities, HashClass, SendClass, MentionsMutable,
+MayHoldVector, CanCarry, `decimal::Mentions`, MutableComponent,
+ValueStability), 16,572 comparisons of classes and reasons.
 
 | verdict | count |
 |---|---:|
-| same | 16,120 |
-| diverges | 373 |
+| same | 16,087 |
+| diverges | 406 |
 | bound | 79 |
 | **DIFFERENT** | **0** |
 
 * **diverges**: every one is a non-uniform recursion applied to an affine
-  argument (a coroutine handle, or a `std::ffi::c::Ptr`): W 111, GrowA 57,
-  GrowB 57, PhantomRec 57, Mixed 42, GrowV 31, NonUniformFn 18, counting
+  argument (a coroutine handle, or a `std::ffi::c::Ptr`): W 120, GrowA 62,
+  GrowB 62, PhantomRec 62, Mixed 46, GrowV 31, NonUniformFn 23, counting
   the Lists, vectors, structs and function types that hold them. These are
   the types the old walks could not finish, the ones `Unfolding` used to
   reject where they were written. The summaries answer every one.
@@ -621,8 +664,10 @@ of classes and reasons.
   fallback; every one printed names the deciding argument (all on `Deep`),
   and none uses the generic recursion text.
 
-The verdicts are the same as before the last fixes: the per-question walk
-changed no reason the corpus compares.
+The run before the reference fix counted 33 of these 406 as `same`: those
+were the old MutableComponent's swallowed walks, whose `""` happened to
+equal the summary's. Every other verdict was the same in both runs, and
+the per-question walk changed no reason the corpus compares.
 
 ## 18. Oracle and fuzzing
 
@@ -652,20 +697,57 @@ agree), carried errors and MentionsMutable must equal the oracle's; with
 verdicts of section 17), the old walk stopped after 100 field reads
 (`-budget`) or at a type of more than 4,000 characters.
 
-What the fuzzer found, each fixed and covered by a test:
+What the fuzzer found, each fixed:
 
-* **The compiler.** An argument's classification started a reason walk of
-  its own, which never ended on a growth through another declaration's
-  application (seed 11; section 10, 7bb86da). A reason walk revisited an
-  application once per path, which is exponential (seed 31; section 10,
-  faaadb1).
+* **The compiler**, two defects of the reason walks, never of a class:
+  * An argument's classification started a reason walk of its own, which
+    never ended on a growth through another declaration's application
+    (seed 11; section 10, 7bb86da; `pds-reason-classification-terminates`).
+  * A reason walk revisited an application once per path, which is
+    exponential (seed 31; section 10, faaadb1; `pds-reason-walk-
+    polynomial`).
 * **The oracle.** Its worklist could lower a node's value that a nested
   solve had raised during the node's own computation (a cycle through it),
   and oscillate. Seed 31's program grew the oracle's memory without end. A
   node's value now only rises: it is joined with what the nested solve set
-  (6ff72ca).
+  (6ff72ca). The selftest has no case of it; seed 31 is the reproducer.
+* **The reference.** The old MutableComponent swallowed its own budget
+  error and Tcl's nesting limit (seed 41; section 17, 73e9515).
 
-RESULTS-FUZZ
+**Results**, on the final code. Every seed generates 25 programs and asks 25
+types of each.
+
+*Against the oracle and the old walks* (`-reference 1`, the fixed
+reference; 625 queries a seed, so 625 oracle checks and 7,500 comparisons
+with the old walks):
+
+| seed | non-uniform programs | same | bound | diverges | DIFFERENT | whistles | fallbacks | failures |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 11 | 16 | 7,023 | 15 | 462 | 0 | 24 | 0 | 0 |
+| 31 | 14 | 6,898 | 75 | 527 | 0 | 5,896 | 0 | 0 |
+| 41 | 14 | 7,110 | 75 | 315 | 0 | 120 | 0 | 0 |
+
+Seed 31's program 17 is the `Braid` declaration of section 10. Before the
+per-question walk, its reason walks did not finish.
+
+*Against the oracle alone* (`-reference 0`):
+
+| seed | non-uniform programs | queries | whistles | fallbacks | failures |
+|---:|---:|---:|---:|---:|---:|
+| 21 | 11 | 625 | 2 | 0 | 0 |
+| 51 | 11 | 625 | 136 | 0 | 0 |
+| 61 | 15 | 625 | 8 | 0 | 0 |
+| 71 | 12 | 625 | 0 | 2 | 0 |
+| 81 | 10 | 625 | 26 | 4 | 0 |
+| 91 | 10 | 625 | 0 | 0 | 0 |
+
+In all, 5,625 queries over 225 programs (113 with a non-uniform recursion)
+were answered by the compiler exactly as by the independent model, for
+affinity, Bearing, both totalities, carried errors and MentionsMutable.
+7,500 comparisons for each of three seeds matched the old walks wherever
+they finished on uncut types. The six fallbacks of seeds 71 and 81 are
+reasons only: the oracle-only runs print no reasons, so whether each names
+an argument is not recorded.
 
 ## 19. Mutation testing
 
@@ -714,7 +796,7 @@ were retargeted, keeping each one's rule:
     branch's base: its text occurs in both Totality's and SendClass's
     `Components`. `main` has since repaired it the same way. It now also
     edits `TotalityNode`, where a struct's class is decided.
-  * `recursive-struct-not-hashable` *survived* on the final code. It
+  * `recursive-struct-not-hashable` *survived* on this branch (7bb86da). It
     edited Totality's `$type in $seen`, which no longer decides a class:
     taking a struct met again for `unknown` there only changes a reason. Its
     rule now lives where a declaration met again through its own fields is
@@ -723,8 +805,11 @@ were retargeted, keeping each one's rule:
     different defect from `totality-none-too-early` in this milestone's
     own catalog, which starts them at `none`.
 
-Every mutant of every harness applies to the new code (each replaced text
-occurs exactly once). Beyond the retargeted ones, every mutant of another
+Every mutant of every catalog that edits a file this milestone changed
+applies to the new code (each replaced text occurs exactly once). `main`'s
+`tools/mutant-catalogs.tcl` finds 11 mutants elsewhere that do not apply;
+all of them predate this branch, and `main` has repaired them (section 22).
+Beyond the retargeted ones, every mutant of another
 harness whose text lies inside a procedure this milestone changed was run
 on the final code (the hashable survivor above shows why: a mutant can stay
 applicable while the code around it stops deciding anything). 40 mutants
@@ -852,6 +937,29 @@ read from a summary.)
 No family grows exponentially, and none unfolds an application; every
 family's rounds are constant in N.
 
+**Real programs.** The figures below are the front end's time
+(`surface::readProgramFile`, best of three, each in a fresh process) on
+golden suites that use parameterized structs, Hashable, identity structs
+and callables. Base tree (17b0e66) and this branch ran alternately, suite
+by suite, on the same loaded machine.
+
+| suite | base (ms) | branch (ms) | change |
+|---|---:|---:|---:|
+| hashable.bot | 6,568 | 6,281 | -4.4% |
+| trait-constrained-types.bot | 8,594 | 9,076 | +5.6% |
+| value-identity.bot | 18,260 | 17,889 | -2.0% |
+| immutable-map.bot | 69,373 | 69,467 | +0.1% |
+| tree-struct.bot | 15,035 | 15,043 | +0.1% |
+| mutable-map.bot | 22,590 | 24,344 | +7.8% |
+| callables.bot | 19,111 | 19,914 | +4.2% |
+| structs-and-enums.bot | 20,223 | 20,634 | +2.0% |
+| total | 179,754 | 182,648 | +1.6% |
+
+The changes go both ways and lie within what the machine's load moves
+from run to run. Real programs' declarations are few and small, so the
+summaries' cost, like the walks' before them, is a small part of a front
+end's time.
+
 ## 21. HIR, interchange, isolation
 
 * **Isolation.** Summaries are registry facts, forgotten with it
@@ -913,7 +1021,7 @@ those changes can reach was run again on the final code, each passing:
 
 | test file | tests |
 |---|---:|
-| parameterized-declaration-summaries | 22 (+1 skipped: the corpus, run separately) |
+| parameterized-declaration-summaries | 23 (its small parity corpus included, against the fixed reference) |
 | written-affine-applications | 26 |
 | hashable | 48 |
 | value-identity | 33 |
@@ -953,7 +1061,7 @@ application's applied fields, each justified:
 | `hir::structs::OwnedRecursion` | a rule of ownership on affine types (section 15); its bound is the one threshold left that can decide a verdict |
 | `hir::affine::Descriptor` | builds a structure (a drop descriptor) for an affine type OwnedRecursion accepted: finite by that check |
 | `hir::transfer::Schema` | builds a structure (the schema); finite because unrestricted arguments are bounded and phantom affine ones erased (section 14) |
-| reason walks of `Totality`, `SendClass`, `MutableComponent`, `ValueStability` | presentation of a class the summary decided; pruned, and stopped on growth by Whistle (section 10) |
+| reason walks of `Totality`, `SendClass`, `MutableComponent`, `ValueStability` | presentation of a class the summary decided; pruned, stopped on growth by Whistle, each application walked once per question (section 10) |
 | `hir::structs::TreeOccurrence`, `hir::resourceescape::Raw`, `hir::mutvec::ShareDescriptor` | keyed by declaration identity: finite whatever the arguments |
 | `hir::relations::Leaves` | the relational facts' leaf paths, bounded at depth 4 by design (a precision bound of what the reorder proofs track, not of an analysis of a value's components); a collection deeper than that is simply not tracked |
 | `hir::resources::ResourcesOf`, `native::lower::Context*` | read declarations only, never unfold |
@@ -973,7 +1081,9 @@ application's applied fields, each justified:
   Where the old walk finished, it reported a part it found only after the
   bound cut its arguments. Where the only deciding part sits past the bound,
   the reason names the deciding argument instead of a field path (section
-  10).
+  10). Because a later path reuses an application's first walk, a reason
+  can in principle differ from the old walk's on a type it finished on. The
+  corpus and the fuzzer found no case of it.
 * **Many-slot declarations cost more than they used to.** A declaration of
   N slots costs one node computation per slot per probe, and each
   computation substitutes N arguments into N fields, which is O(N³) in all.
@@ -989,8 +1099,10 @@ application's applied fields, each justified:
   Hashable witnesses (GrowV), and, symmetrically, a struct whose deep
   argument holds a function is now `none` (TRAIT-NOT-SATISFIED where a
   `checked` hash was dynamic) and bearing (an erasure is rejected that was
-  silently accepted). Both are the sound answers; the corpus has no case of
-  the second kind outside synthetic types.
+  silently accepted). Both are the sound answers. The parity corpus shows
+  both kinds on its own declarations only (GrowV; Deep and ListFn). No
+  test of the full local run, golden suites included, failed for a changed
+  answer (section 22).
 * **Function-type polarity** (a Fn's argument position holds no value) and
   **untyped-result precision** are out of scope, unchanged.
 
