@@ -7,22 +7,47 @@ name: single executable
 # C compiler or linker installed -- and, for programs that call C
 # (SINGLE-EXECUTABLE-FFI-MILESTONE-1.md), in the same containers with gcc
 # installed and the checkout deleted, still no Rust; and uploaded as the
-# workflow run's `botlish-linux-x86_64` artifact. A build of main that passes
-# every smoke test is then published as the `single-latest` release's
-# `botlish-linux-x86_64` asset, which the README's download button links to.
+# workflow run's `botlish-linux-x86_64` artifact.
+#
+# Publishing is a run of its own (CI-RUNS.md, "The release gate"): once
+# every test of a commit of main is green -- tests.yml with its GC-stress
+# job, tests-arm64.yml with its, macOS, Windows, static-decisions when it
+# ran, and this workflow's own build and smoke tests -- the release gate
+# (release-gate.yml) dispatches this workflow on main with release=SHA, and
+# that run publishes the very executable the commit's push run built and
+# smoke-tested as the `single-latest` release's `botlish-linux-x86_64`
+# asset, which the README's download button links to. A release run builds
+# nothing, checks the commit's tests again (tools/ci/runs.py check), and is
+# never cancelled: a push that supersedes the commit meanwhile cancels only
+# the push runs (the concurrency group below).
 
 on:
   push:
     branches: [main]
     paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish the build of this commit of main (its full SHA) once its tests are green; empty: build and test"
+        type: string
+        default: ""
+
+run-name: ${{ inputs.release && format('release {0}', inputs.release) || '' }}
 
 permissions:
   contents: read
 
+# A newer push cancels the running build and tests, on main too; a release
+# run is in a group of its own and never cancelled (a newer one only
+# replaces one still waiting).
+concurrency:
+  group: single-executable-${{ inputs.release && 'release' || github.ref }}
+  cancel-in-progress: ${{ !inputs.release }}
+
 jobs:
   build:
     name: build
+    if: ${{ !inputs.release }}
     # Pinned, not ubuntu-latest: the executable needs the glibc it was built
     # against or newer, so the build runs on the oldest release it supports.
     runs-on: ubuntu-24.04
@@ -79,6 +104,7 @@ jobs:
   # compiler.
   build-arm64:
     name: build and C FFI smoke test (Linux AArch64)
+    if: ${{ !inputs.release }}
     runs-on: ubuntu-24.04-arm
     env:
       LANG: C.utf8
@@ -182,52 +208,70 @@ jobs:
           /opt/smoke/single/ffi-smoke-test.sh /opt/botlish/botlish /opt/smoke/tests/cffi/fixture.c
 
   # The README's download button: a rolling prerelease whose tag and asset
-  # follow main. Run artifacts need a GitHub login to download and expire;
-  # a release asset has a stable URL anyone can fetch:
+  # follow main's newest commit whose tests are green. Run artifacts need a
+  # GitHub login to download and expire; a release asset has a stable URL
+  # anyone can fetch:
   #   https://github.com/OWNER/REPO/releases/download/single-latest/botlish-linux-x86_64
+  # Only in a release run (the release gate's dispatch, or one by hand with
+  # release=SHA): the check finds the commit's green push run, whose
+  # artifact it publishes.
   release:
     name: publish the latest build
-    needs: [build, smoke, ffi-smoke]
-    if: github.ref == 'refs/heads/main'
+    if: inputs.release && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    # One publication at a time, never cancelled, so two pushes in quick
-    # succession cannot interleave their tag move and upload.
+      actions: read
+    # One publication at a time, never cancelled, so two release runs in
+    # quick succession cannot interleave their tag move and upload.
     concurrency:
       group: single-executable-release
       cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      SHA: ${{ inputs.release }}
       TAG: single-latest
       ASSET: botlish-linux-x86_64
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+
+      - name: The commit's tests are green
+        id: tested
+        run: python3 -I tools/ci/runs.py check "$SHA" --for single-executable --require
+
       - uses: actions/download-artifact@v4
         with:
           name: botlish-linux-x86_64
           path: dist
+          run-id: ${{ steps.tested.outputs.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Publish to the single-latest release
+        env:
+          BUILD_RUN: ${{ steps.tested.outputs.run_id }}
         run: |
           set -euo pipefail
-          # Builds of main can finish out of order: never replace the build
+          # Release runs can finish out of order: never replace the build
           # of a later commit with an earlier one. (A tag left on a commit
           # main no longer holds, after a force push, is "diverged" and is
           # replaced.)
           if old=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null); then
-            if [ "$(gh api "repos/$GH_REPO/compare/$old...$GITHUB_SHA" --jq .status)" = behind ]; then
-              echo "$TAG already holds $old, a later commit than $GITHUB_SHA: left as it is."
+            if [ "$(gh api "repos/$GH_REPO/compare/$old...$SHA" --jq .status)" = behind ]; then
+              echo "$TAG already holds $old, a later commit than $SHA: left as it is."
               exit 0
             fi
             gh api --method PATCH "repos/$GH_REPO/git/refs/tags/$TAG" \
-              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+              -f sha="$SHA" -F force=true >/dev/null
           fi
 
           cd dist
           mv botlish "$ASSET"
           sha256sum "$ASSET" >"$ASSET.sha256"
-          notes="The single-file Botlish compiler (docs/SINGLE-EXECUTABLE.md): one Linux x86-64 executable that needs nothing but glibc 2.39 or newer -- no Tcl, Rust, C compiler or linker. Built from main at $GITHUB_SHA by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID and replaced on every push to main whose build passes the smoke tests.
+          notes="The single-file Botlish compiler (docs/SINGLE-EXECUTABLE.md): one Linux x86-64 executable that needs nothing but glibc 2.39 or newer -- no Tcl, Rust, C compiler or linker. Built from main at $SHA and smoke-tested by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$BUILD_RUN, published by $GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID once every test of that commit was green, and replaced by main's next commit whose tests are.
 
           Programs that call C (extern c fn, extern c library) link too (docs/SINGLE-EXECUTABLE-FFI-MILESTONE-1.md): they need the host's C compiler driver (cc, with its linker: apt install gcc) and the C libraries they declare, never Rust or a Botlish checkout -- the compiler carries its precompiled runtime. Every other program still links with no toolchain at all.
 
@@ -238,6 +282,6 @@ jobs:
             gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber
             gh release edit "$TAG" --notes "$notes"
           else
-            gh release create "$TAG" "$ASSET" "$ASSET.sha256" --target "$GITHUB_SHA" \
+            gh release create "$TAG" "$ASSET" "$ASSET.sha256" --target "$SHA" \
               --prerelease --title "Botlish single-file compiler (latest main)" --notes "$notes"
           fi

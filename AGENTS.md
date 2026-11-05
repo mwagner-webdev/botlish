@@ -26,6 +26,58 @@ one), check `main`'s CI at both ends of the work
   latest run does not have is yours to fix before the merge. Pending runs
   are acceptable: report them as pending, never as passed.
 
+A newer push cancels a running test workflow on the same ref, on `main`
+too, so a run of `main` may end `cancelled`: it was superseded, and says
+nothing either way. Read the latest run of the workflow instead. Merging a
+branch makes its unfinished runs obsolete, and `prune-runs.yml` cancels
+them (CI-RUNS.md; next section).
+
+## CI housekeeping (cancellation, pruning, the release gate)
+
+The runners are a shared, limited pool, and main's merges come in bursts
+(CI-RUNS.md). Three rules keep obsolete runs off them and keep releases
+honest; `tools/ci/runs.py` implements the last two. Keep it so:
+
+* **A newer push cancels a running test workflow on the same ref, on main
+  too:** a workflow that tests a push has `concurrency: group:
+  NAME-${{ github.ref }}` and `cancel-in-progress: true`. Never exempt main
+  again: a burst's last push gets the complete run. The only exceptions are
+  a tag's run, a release run, scalar-asm-audit.yml (it writes back to
+  main), react-native-probe.yml (census evidence) and release-gate.yml.
+* **`prune-runs.yml` cancels the unfinished runs of branches fully in
+  main** (the tip is main's or an ancestor; a deleted branch's run whose
+  commit is in main). It never cancels a run of main, a tag or a fork, or
+  of a branch with a commit main lacks; never give it such a rule. Main's
+  head may be a commit no workflow ran (scalar-asm-audit's).
+* **A release is published only once every test of its commit is green**,
+  by a run nothing cancels. `CORE`: tests.yml and tests-arm64.yml with their
+  GC-stress jobs *succeeded* (skipped is no success), macos-arm64.yml,
+  windows-x86_64.yml, static-decisions.yml when it ran, and the release's
+  own build workflow. Any run at the commit counts.
+  - `release-gate.yml` (workflow_run of those workflows on main) dispatches
+    single-executable.yml or icy-tower-windows.yml on main with
+    `release=SHA` for main's newest green commit (`run-name: release SHA`,
+    a concurrency group of its own, never cancelled). That release run
+    builds nothing: it checks again (`runs.py check --require`) and
+    publishes the artifact of the commit's green push run. A push that
+    supersedes the commit meanwhile does not stop it.
+  - A release tag's run waits for icy-tower-macos.yml's `tested` job. Until
+    the commit's tests are green it is deferred, and the gate dispatches it
+    on the tag again.
+  - Never publish from a push run, never rebuild in a release run, never
+    give the gate a credential or more than `actions: write`, and never
+    give it a way to dispatch a release twice or move a tag backwards.
+
+If you change `tools/ci/`, a workflow's concurrency or triggers, a release
+job, or the name of a workflow or of a GC-stress job a requirement names,
+run `python3 -I tools/ci/test_runs.py` (it also checks the workflows' side
+of these rules), `python3 -I audit/macos-release/tests/test_workflow.py`
+and that audit's mutants for icy-tower-macos.yml, and
+`tclsh9.0 tools/mutant-catalogs.tcl`. Then push and read the `ci tools`
+run, which runs the gate and the pruning read-only against the
+repository's runs. A new required workflow goes into `CORE` and into
+release-gate.yml's `workflow_run` list together (the tests check it).
+
 ## Documentation layout
 
 The root `README.md` is the project overview. Everything else is in `docs/`:
@@ -260,10 +312,11 @@ zipkit holding main.tcl, the compiler stack, both native executables and the
 runtime archive, needing only glibc (and, to link a program that calls C,
 the host's C compiler driver: SINGLE-EXECUTABLE-FFI-MILESTONE-1.md). The workflow `.github/workflows/single-executable.yml`
 builds it on every push to `main` and smoke-tests it in stock Ubuntu
-containers (`single/smoke-test.sh`), then publishes it as the
-`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease. The
-README's download button links to that tag and asset name: rename either
-only together with the button. Its base kit is a static tclsh that the
+containers (`single/smoke-test.sh`); once every test of the commit is green,
+the release gate's release run publishes that build as the
+`botlish-linux-x86_64` asset of the rolling `single-latest` prerelease
+(CI-RUNS.md). The README's download button links to that tag and asset
+name: rename either only together with the button. Its base kit is a static tclsh that the
 script builds once from the pinned Tcl 9.0.1 source release. That build is
 the one exception to "do not build Tcl 9 from source" above: no package ships
 a static zipfs tclsh. `--basekit PATH` uses a prebuilt zipkit instead. To run
@@ -4485,8 +4538,8 @@ starves everything else on the machine. So:
     run static-decisions.yml --ref BRANCH`). The optional `suites` input (file
     names, separated by spaces or commas) narrows it.
 * **Read its result.** A run takes about 30 minutes, mutable-array.bot's job
-  (the shards finish within it), and on main it may first wait for the run
-  before it. Don't wait idle for it: carry on, and before you call the change
+  (the shards finish within it); a newer push to the same ref, on main too,
+  cancels it (CI-RUNS.md), so read the latest run. Don't wait idle for it: carry on, and before you call the change
   done read the run's jobs. Each job's summary lists every suite's rounds and
   builds under both schedulers, and any `DISAGREE` or `DOES NOT COMPILE`. If
   the run has not finished, report it as pending, never as passed.
@@ -4945,13 +4998,15 @@ The Windows executable (`build-windows.sh`, the Windows section of
 tests/workload-icy-tower.test, which needs SDL3.dll built by
 `tests/cffi/sdl3.tcl` on Windows) is built and tested only by the
 `icy-tower (windows x86-64)` workflow (`.github/workflows/icy-tower-windows.yml`,
-every push to any branch), which also publishes main's build as the
-`icy-tower-windows-latest` release the README's Windows button links to:
+every push to any branch); once every test of a commit of main is green,
+its release run publishes that commit's tested build as the
+`icy-tower-windows-latest` release the README's Windows button links to
+(CI-RUNS.md):
 run it on the branch for any change to the game, `tests/cffi/sdl3.tcl`,
 the generator's MSVC target or `tools/cheader/`.
 Its signing (ICY-TOWER-WINDOWS.md, "Signing") is the `sign` job's alone:
-only that job, on main or a manual run, in the `windows-signing`
-environment, sees signing credentials -- never give them to the build job,
+only that job, in a manual run (a release run of main among them), in the
+`windows-signing` environment, sees signing credentials -- never give them to the build job,
 a pull request or another workflow, never store a signing key or password
 in GitHub (Azure Artifact Signing through OpenID Connect), and never let the
 release publish an unsigned build while `WINDOWS_SIGNING` is set. Every
@@ -5031,8 +5086,10 @@ three modes, `adhoc` and `dry-run` for ordinary CI, `release` for the
 
 * Credentials live only in the `macos-release` environment and reach only
   the `release` job of icy-tower-macos.yml, for an `icy-tower-macos-vX.Y.Z`
-  tag of main's history, pushed or run by hand -- never a branch, a pull
-  request, a fork, `pull_request_target`, another job or another workflow;
+  tag of main's history, pushed, run by hand or dispatched again by the
+  release gate, and only once every test of the tagged commit is green (the
+  `tested` job, CI-RUNS.md) -- never a branch, a pull request, a fork,
+  `pull_request_target`, another job or another workflow;
   each secret only in the `env` of the step that reads it, never in a
   script, a `with` or a job's `env`; no step holding one traces commands.
   Nothing is committed: no certificate but Apple's public ones

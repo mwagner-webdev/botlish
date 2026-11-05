@@ -1,0 +1,74 @@
+name: release gate
+
+# The release gate (CI-RUNS.md, "The release gate"): a release is published
+# only once every test of its commit is green -- tests.yml with its
+# GC-stress job, tests-arm64.yml with its, macOS (macos-arm64.yml), Windows
+# (windows-x86_64.yml), static-decisions.yml when the commit changed what it
+# compares, and the release's own build and tests. Whenever one of those
+# finishes successfully on main, this run (tools/ci/runs.py gate) looks for
+# what is due and dispatches it:
+#
+#   * single-latest and icy-tower-windows-latest: the newest commit of main
+#     whose tests are all green, when the release's tag holds an earlier one
+#     and no release run for it exists yet -- single-executable.yml or
+#     icy-tower-windows.yml on main with release=SHA, a release run that
+#     publishes what the commit's push run built and tested;
+#   * an icy-tower-macos-vX.Y.Z tag whose runs were all deferred (its tests
+#     were not green when it was pushed) and whose commit's tests are green
+#     now -- icy-tower-macos.yml on the tag.
+#
+# It publishes nothing itself and holds no credential: its token may only
+# start workflows (actions: write). A release run checks the commit's tests
+# again before it publishes. Runs never overlap; a newer one only replaces
+# one still waiting, and each reads the state as it is, so none is lost. The
+# schedule is a backstop; a manual run with dry_run only reports.
+
+on:
+  workflow_run:
+    workflows:
+      - tests
+      - tests (linux arm64)
+      - tests (macos arm64)
+      - tests (windows x86-64)
+      - static-decisions
+      - single executable
+      - icy-tower (windows x86-64)
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "41 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only report what would be dispatched
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: dispatch the releases whose tests are green
+    # A failed or cancelled run makes nothing due: no runner for it.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/ci
+
+      - name: The release gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: python3 -I tools/ci/runs.py gate $DRY_RUN
