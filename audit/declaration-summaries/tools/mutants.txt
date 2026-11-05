@@ -78,16 +78,20 @@
 ## hir/summaries.tcl
 <<<<
     foreach row [dict get $summary values] class $classes {
+        set l [lindex $row $class]
 ====
     foreach row [lreverse [dict get $summary values]] class $classes {
+        set l [lindex $row $class]
 >>>>
 
 @@ last-slot-ignored the last slot's entries are never read: its argument contributes nothing
 ## hir/summaries.tcl
 <<<<
     foreach row [dict get $summary values] class $classes {
+        set l [lindex $row $class]
 ====
     foreach row [lrange [dict get $summary values] 0 end-1] class [lrange $classes 0 end-1] {
+        set l [lindex $row $class]
 >>>>
 
 @@ every-slot-relevant every slot is relevant at its worst: a slot's entry is read at the highest class, whatever its argument
