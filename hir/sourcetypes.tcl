@@ -542,6 +542,7 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
             if {$why ne ""} { return "has a field \"$field\" that $why" }
         }
         if {$visiting eq {}} {
+            hir::summaries::Count fallbacks
             return "has fields that hold, through a non-uniformly recursive declaration, a value that is not stable"
         }
         return ""

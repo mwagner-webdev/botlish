@@ -2,7 +2,8 @@
 # (PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md).
 #
 #   tclsh9.0 audit/declaration-summaries/tools/mutate.tcl ?-only NAME,...?
-#       ?-tests FILES? ?-fuzz-programs N? ?-fuzz-seed N? ?-timeout SECONDS?
+#       ?-tests FILES? ?-fuzz-programs N? ?-fuzz-queries N? ?-fuzz-seed N?
+#       ?-timeout SECONDS?
 #
 # Each mutant is a deliberate bug, written in mutants.txt (beside this
 # script) as exact source replacements, each replaced text occurring exactly
@@ -13,16 +14,20 @@
 #   * the test files FILES (default below; each with a private -tmpdir):
 #     killed if any test fails or a file does not complete within the
 #     timeout (a mutant that brings back an unfolding never ends);
-#   * audit/declaration-summaries/tools/fuzz.tcl -programs N -seed S: the
-#     compiler against the independent model (oracle.py) and the old walks
-#     (reference.tcl): killed if it reports a failure or does not complete.
+#   * audit/declaration-summaries/tools/fuzz.tcl -programs N -queries Q
+#     -seed S: the compiler against the independent model (oracle.py) and
+#     the old walks (reference.tcl): killed if it reports a failure or does
+#     not complete.
 #
+# The detectors first run on the unmutated copy (the control): a detector
+# that fails or does not complete there would kill every mutant, so the run
+# stops.
 # A mutant every detector misses SURVIVES; the report lists each mutant,
 # what killed it and the survivors. The real checkout is never modified.
 
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 
-set options [dict create -only "" -tests {tests/parameterized-declaration-summaries.test tests/written-affine-applications.test tests/hashable.test tests/value-identity.test tests/typed-callable-escape.test tests/structural-contract-completions.test} -fuzz-programs 12 -fuzz-seed 5 -timeout 900]
+set options [dict create -only "" -tests {tests/parameterized-declaration-summaries.test tests/written-affine-applications.test tests/hashable.test tests/value-identity.test tests/typed-callable-escape.test tests/structural-contract-completions.test} -fuzz-programs 6 -fuzz-queries 15 -fuzz-seed 5 -timeout 900]
 foreach {option value} $argv {
     if {![dict exists $options $option]} { error "unknown option $option" }
     dict set options $option $value
@@ -130,8 +135,51 @@ proc lastLine {output} {
     return [string range [lindex [split [string trim $output] \n] end] 0 120]
 }
 
+proc detect {tree} {
+    global options
+    set failedTests {}
+    set incomplete ""
+    foreach testFile [dict get $options -tests] {
+        set tmp [file tempdir botlish-summary-mutant-run]
+        # (The parity corpus is the fuzzer's work here: -reference 1 runs
+        # the same comparison on its programs, in a fraction of the time.)
+        lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree $testFile] -tmpdir $tmp -skip pds-parity-corpus] status output
+        file delete -force $tmp
+        lappend failedTests {*}[lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]
+        if {$incomplete eq "" && ![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
+            set incomplete "[file tail $testFile]: [lastLine $output]"
+        }
+    }
+    set failedTests [lsort -unique $failedTests]
+    if {$incomplete ne ""} {
+        set tests "killed (did not complete: $incomplete)"
+    } elseif {$failedTests ne {}} {
+        set tests "killed ([llength $failedTests] failed: [join [lrange $failedTests 0 5] {, }][expr {[llength $failedTests] > 6 ? ", ..." : ""}])"
+    } else {
+        set tests survived
+    }
+    lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit declaration-summaries tools fuzz.tcl] \
+        -programs [dict get $options -fuzz-programs] -queries [dict get $options -fuzz-queries] \
+        -seed [dict get $options -fuzz-seed]] status output
+    if {[regexp {, (\d+) failures$} [lindex [split [string trim $output] \n] end] -> n]} {
+        set fuzz [expr {$n > 0 ? "killed ($n failures)" : "survived"}]
+    } else {
+        set fuzz "killed (did not complete: [lastLine $output])"
+    }
+    return [list $tests $fuzz]
+}
+
 set results {}
 try {
+    set start [clock seconds]
+    lassign [detect $tree] tests fuzz
+    puts "CONTROL (no mutant, [expr {[clock seconds] - $start}] s) -- tests: $tests; fuzz: $fuzz"
+    flush stdout
+    if {$tests ne "survived" || $fuzz ne "survived"} {
+        puts "the detectors do not pass on the unmutated copy: no mutant can be judged"
+        file delete -force $tree
+        exit 2
+    }
     foreach {name description edits} $selected {
         set touched [dict create]
         set applied 1
@@ -156,34 +204,7 @@ try {
             }
             continue
         }
-        set failedTests {}
-        set incomplete ""
-        foreach testFile [dict get $options -tests] {
-            set tmp [file tempdir botlish-summary-mutant-run]
-            # (The parity corpus is the fuzzer's work here: -reference 1 runs
-            # the same comparison on its programs, in a fraction of the time.)
-            lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree $testFile] -tmpdir $tmp -skip pds-parity-corpus] status output
-            file delete -force $tmp
-            lappend failedTests {*}[lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]
-            if {$incomplete eq "" && ![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
-                set incomplete "[file tail $testFile]: [lastLine $output]"
-            }
-        }
-        set failedTests [lsort -unique $failedTests]
-        if {$incomplete ne ""} {
-            set tests "killed (did not complete: $incomplete)"
-        } elseif {$failedTests ne {}} {
-            set tests "killed ([llength $failedTests] failed: [join [lrange $failedTests 0 5] {, }][expr {[llength $failedTests] > 6 ? ", ..." : ""}])"
-        } else {
-            set tests survived
-        }
-        lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree audit declaration-summaries tools fuzz.tcl] \
-            -programs [dict get $options -fuzz-programs] -seed [dict get $options -fuzz-seed]] status output
-        if {[regexp {, (\d+) failures$} [lindex [split [string trim $output] \n] end] -> n]} {
-            set fuzz [expr {$n > 0 ? "killed ($n failures)" : "survived"}]
-        } else {
-            set fuzz "killed (did not complete: [lastLine $output])"
-        }
+        lassign [detect $tree] tests fuzz
         set verdict [expr {[string match killed* $tests] || [string match killed* $fuzz] ? "KILLED" : "SURVIVED"}]
         lappend results [list $name $description $verdict $tests $fuzz]
         puts "$verdict $name -- $description\n    tests: $tests\n    fuzz:  $fuzz"

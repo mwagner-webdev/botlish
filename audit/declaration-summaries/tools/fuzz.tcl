@@ -169,6 +169,7 @@ set oracle [file join $root audit declaration-summaries tools oracle.py]
 set tmp [file tempdir declsummaries]
 set failures 0
 set stats [dict create programs 0 skipped 0 queries 0 same 0 bound 0 diverges 0 DIFFERENT 0 nonuniform 0]
+hir::summaries::ResetCounters
 try {
     for {set p 0} {$p < $opt(-programs)} {incr p} {
         set count [expr {1 + int(rand() * $opt(-decls))}]
@@ -279,5 +280,7 @@ try {
 } finally {
     file delete -force $tmp
 }
+dict set stats whistles [dict getdef [hir::summaries::counters] whistles 0]
+dict set stats fallbacks [dict getdef [hir::summaries::counters] fallbacks 0]
 puts "declaration-summaries fuzz seed $opt(-seed): $stats, $failures failures"
 exit [expr {$failures > 0}]

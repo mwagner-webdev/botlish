@@ -65,7 +65,11 @@
 # (hir::structs::ForgetAffinity calls Forget) whenever the declarations
 # change -- the same lifetime and the same invalidation hook. They are never
 # stored in HIR: a HIR read back (HIR text, interchange, the front-end cache)
-# recomputes them from its declarations.
+# recomputes them from its declarations. A property whose answer for an
+# application reads nothing but the registry (Totality's, SendClass's
+# classes) may also remember that answer per whole application (Remember,
+# Recall: same lifetime, never while its fixpoint runs), so a walk over
+# nested applications asks about each inner one once.
 #
 # The reason walk
 # ---------------
@@ -332,8 +336,8 @@ proc hir::summaries::Arguments {type} {
         # Each in the form a field holds it in once substituted
         # (hir::structs::AppliedFieldTypes canonicalizes: an application may
         # keep a refinement's declared name, `Small`, where a field holds its
-        # normal form). A missing argument substitutes
-        # nothing a value can be: `any`, as the affinity summary reads it.
+        # normal form). A missing argument substitutes nothing a value can
+        # be: `any`, as the affinity summary reads it.
         set arguments [lmap a [lindex $type 2] {
             # (A compound argument is canonical already: MakeApplied bounded
             # it, and substituting it re-bounds it at the same depth.)

@@ -2694,6 +2694,7 @@ proc hir::types::TotalityClassOf {operation type} {
 # The reason a value of TYPE has CLASS (not total) when the walk of its
 # parts found none (TotalityParts; summaries.tcl's reason walk).
 proc hir::types::TotalityFallback {operation type class} {
+    hir::summaries::Count fallbacks
     set what [expr {$operation eq "hash" ? "hashing" : "equality"}]
     if {$class eq "none"} {
         return "its fields hold, through a non-uniformly recursive declaration, a component with no total $what"
@@ -2928,6 +2929,7 @@ proc hir::types::SendStruct {type assumed seen} {
     }
     set result [SendParts $type $assumed [concat $seen [list $type]]]
     if {$seen eq {} && [lindex $result 0] ne $class} {
+        hir::summaries::Count fallbacks
         set result [list $class [expr {$class eq "none"
             ? "its fields hold, through a non-uniformly recursive declaration, a component that is not sendable"
             : "its fields hold, through a non-uniformly recursive declaration, a component not known to be sendable"}]]

@@ -37,5 +37,6 @@ foreach t $types {
     }
 }
 puts "verdicts: $counts"
+puts "reason walks stopped by Whistle: [dict getdef [hir::summaries::counters] whistles 0], fallback reasons: [dict getdef [hir::summaries::counters] fallbacks 0]"
 puts "[expr {[clock milliseconds] - $start}] ms"
 exit [expr {[dict exists $counts DIFFERENT]}]
