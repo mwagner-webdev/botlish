@@ -11,7 +11,6 @@ import std::windows::io
 with context std::windows::io::create()
 with context sdl::create()
 
-result = game::main(game::arguments()):
+game::main(game::arguments()):
     on std::io::WriteFailed:
-        "failed: writing to the terminal"
-result
+        unit

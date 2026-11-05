@@ -539,8 +539,8 @@ last = loop x in r:
             lappend values [lindex $outcome 1]
         }
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -warnings off -emit-native-executable $path
-        lappend values [runStandalone [file rootname $path]]
-        lappend values [runStandalone [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
+        lappend values [standaloneValue [file rootname $path]]
+        lappend values [standaloneValue [file rootname $path] BOTLISH_NATIVE_GC_STRESS 1]
         list [llength [lsort -unique $values]] [string range [lindex $values 0] 0 40]
     } finally {
         removeDirectory {list flat executable}

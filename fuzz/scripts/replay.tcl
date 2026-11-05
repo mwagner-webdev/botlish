@@ -234,6 +234,25 @@ switch -- $vertical {
 
 lassign [run $cmd $envExtra $runStdin] code signal stdout stderrText
 
+# An executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md):
+# an aot run that completed runs once more in the driver protocol
+# (BOTLISH_NATIVE_RESULT=FILE), whose "value V" line is the value, shown as
+# main.tcl shows one.
+set aotValue ""
+if {!$inProcess && !$raw && !$valgrind && $code == 0 && $signal eq ""} {
+    set resultPath [tempPath result]
+    run $cmd [dict merge $envExtra [dict create BOTLISH_NATIVE_RESULT $resultPath]] $runStdin
+    unset ::env(BOTLISH_NATIVE_RESULT)
+    set resultText [ReadFile $resultPath]
+    file delete $resultPath
+    source [file join $root native native.tcl]
+    if {[catch {core::value::show [native::Outcome [split [string trim [encoding convertfrom utf-8 $resultText]] \n]] 1} shown]} {
+        set aotValue ""
+    } else {
+        set aotValue $shown
+    }
+}
+
 if {$raw} {
     puts "--- exit $code signal $signal"
     puts "--- stdout:"
@@ -245,19 +264,17 @@ if {$raw} {
 
 # Verdict extraction. Framings:
 #   in-process stdout: "   value: V" or "   error: M (CODE)"
-#   aot stdout: V (the bare shown value)   aot stderr: "M (CODE)"
+#   aot: V from the driver protocol (aotValue)   aot stderr: "M (CODE)"
 # Compile-time warnings (stderr, WARNINGS-SAME-RETURN.md) are ignored by
 # design (#54 of the campaign brief): they do not affect behavior.
 #
-# Stdin targets: the AOT executable's own echo (raw input bytes) precedes
-# the value on stdout and may glue to it when the echo has no trailing
-# newline. The value is recovered by trying every suffix of the trailing
-# digit run that satisfies read-stdin's value domain (0..4096 bytes read,
-# or a negative raw -errno) and requiring the residual to equal the
-# expected echo EXACTLY: the first min(4096, input) bytes of the input
-# when n > 0, empty otherwise. Exactly one candidate must fit; none is a
-# genuine violation (a finding-class result), more than one is reported
-# as ambiguous. The in-process verticals are extracted by the ordinary
+# Stdin targets: the AOT executable's stdout is exactly its own echo (raw
+# input bytes); its value, the byte count, is the protocol's. The echo must
+# equal the expected one EXACTLY: the first min(4096, input) bytes of the
+# input when the count is positive, empty otherwise; anything else is a
+# genuine violation (a finding-class result). (While executables printed
+# their value the count was recovered from the end of stdout, glued to an
+# echo without a trailing newline.) The in-process verticals are extracted by the ordinary
 # value line below: main.tcl captures and reprints only the driver's
 # value, so their stdout never carries the raw echo (a runner property,
 # not a divergence -- the echo is verified on the aot side, which has no
@@ -276,64 +293,39 @@ if {$linesMode && $signal eq "" && $vertical in {aot aot-asan interp compile cra
         if {$inProcess && [regexp {^(== |   value: |   help: |   type: |   block )} $line]} continue
         lappend kept $line
     }
-    # The aot executable's runtime prints the program's value as the last
-    # line (always "unit" here); the in-process framing carries it in the
-    # stripped "   value:" line. Drop it from the aot side so both sides
-    # hold exactly the report.
-    if {!$inProcess} { set kept [lrange $kept 0 end-1] }
+    # (The in-process framing carries the value in the stripped "   value:"
+    # line; an executable prints none: both sides hold exactly the report.)
     set result "report|[join $kept { / }]"
 } elseif {$stdinMode && $vertical in {aot aot-asan} && $signal eq ""} {
-    set text [string trimright $stdout \n]
     set expectedEcho ""
     if {[string length $bytes] > 0} {
         set expectedEcho [string range $bytes 0 [expr {min(4095, [string length $bytes]-1)}]]
     }
-    if {![regexp {(-?[0-9]+)$} $text -> digits]} {
-        set result "raw|[string range $text end-100 end]"
+    if {![regexp {^-?[0-9]+$} $aotValue]} {
+        set result "raw|[string range $stdout end-100 end]"
     } else {
-        set fits {}
-        for {set take 1} {$take <= [string length $digits]} {incr take} {
-            set n [string range $digits end-[expr {$take - 1}] end]
-            if {$take < [string length $digits] && [string index $digits 0] eq "-"} continue
-            if {![regexp {^-?[0-9]+$} $n]} continue
-            if {$n > 4096} continue
-            if {$n < -4095} continue
-            set residual [string range $text 0 end-$take]
-            set echo ""
-            if {$n > 0} { set echo $expectedEcho }
-            if {$residual eq $echo} { lappend fits $n }
-        }
-        if {[llength $fits] == 1} {
-            set result "value|[lindex $fits 0]"
-        } elseif {[llength $fits] == 0} {
-            set result "stdin-violation|stdout does not decompose into echo + value"
+        set echo ""
+        if {$aotValue > 0} { set echo $expectedEcho }
+        if {$stdout eq $echo} {
+            set result "value|$aotValue"
         } else {
-            set result "stdin-ambiguous|candidates: $fits"
+            set result "stdin-violation|stdout is not the echo of the bytes read"
         }
     }
 } elseif {$signal ne ""} {
     set result "signal|$signal"
 } else {
-    foreach line [split $stdout \n] {
-        set line [string trimright $line \r]
-        if {$inProcess} {
+    if {$inProcess} {
+        foreach line [split $stdout \n] {
+            set line [string trimright $line \r]
             if {[regexp {^\s+value: (.*)$} $line -> value]} { set result "value|[string trimright $value]" ; continue }
             if {[regexp {^\s+error: .* \((.+)\)\s*$} $line -> errorcode]} { set result "error|$errorcode" ; continue }
-        } else {
-            if {$writeMode && $vertical in {aot aot-asan}} {
-                # stdout-writing target: <text><count> possibly glued; the
-                # value is the trailing integer (the byte count).
-                set text [string trimright $stdout \n]
-                if {[regexp {(-?[0-9]+)$} $text -> n]} {
-                    set result "value|$n"
-                } else {
-                    set result "raw|[string range $text 0 120]"
-                }
-            } else {
-                set value [string trim $line]
-                if {$value ne "" && $result eq ""} { set result "value|$value" }
-            }
         }
+    } elseif {$aotValue ne ""} {
+        # Whatever the program printed (a stdout-writing target's text), its
+        # value -- the byte count, or whatever it computes -- is the
+        # protocol's.
+        set result "value|$aotValue"
     }
     foreach line [split $stderrText \n] {
         set line [string trimright $line \r]

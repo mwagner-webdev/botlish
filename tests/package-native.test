@@ -681,7 +681,7 @@ test pn-bundled-libraries-link-and-run {a program over a package bundling a shar
     list [dict get $r status] [lsort [glob -tails -directory [file join $app .bot_modules .targets linux-x86_64 .lib] *]] $value
 } -cleanup cleanup -result {0 {libtoy.so libtoy.so.1 libtoystatic.a} 50}
 
-test pn-deploy-relocatable {native deploy places the bundled shared library, an executable linked with -runtime-path '$ORIGIN/lib' finds it there, and keeps running after the directory moves and the packages are deleted} -constraints {linkedRun} -body {
+test pn-deploy-relocatable {native deploy places the bundled shared library, an executable linked with -runtime-path '$ORIGIN/lib' finds it there, and keeps running after the directory moves and the packages are deleted: it prints nothing (an executable prints no value), and its value, through the driver protocol, is the program's} -constraints {linkedRun} -body {
     set repo [toyNative]
     set app [application "import toy\n\ntoy::total()\n"]
     pm add toy -project $app -repository $repo
@@ -692,9 +692,9 @@ test pn-deploy-relocatable {native deploy places the bundled shared library, an 
     set moved [file join [fresh moved] dist]
     file rename $dist $moved
     file delete -force [file join $app .bot_modules]
-    set run [withEnvironment {LD_LIBRARY_PATH {}} {exec [file join $moved main]}]
+    set run [withEnvironment {LD_LIBRARY_PATH {}} {list [exec [file join $moved main]] [standaloneValue [file join $moved main]]}]
     list [dict get $d status] [lindex [split [dict get $d out] \n] 0] [dict get $e status] $run [lsort [glob -tails -directory [file join $moved lib] *]]
-} -cleanup cleanup -result {0 {deployed lib/libtoy.so.1} 0 50 libtoy.so.1}
+} -cleanup cleanup -result {0 {deployed lib/libtoy.so.1} 0 {{} 50} libtoy.so.1}
 
 test pn-deploy-ownership-and-faults {a deployment replaces only what it placed: a file it did not place is MANUAL, one changed since is MODIFIED (without -force); a failure at any step, or a crash and the next deploy, leaves the previous deployment} -constraints {linuxCc} -body {
     set repo [toyNative]

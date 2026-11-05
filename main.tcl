@@ -1,6 +1,8 @@
 # main.tcl -- the Botlish compiler's command line.
 #
 #   tclsh9.0 main.tcl [OPTION...] FILE.bot|FILE.hir|FILE.hirx|FILE.ir ...
+#   tclsh9.0 main.tcl run [OPTION...] FILE [ARG...]
+#                                         one program run as a command (below)
 #   tclsh9.0 main.tcl -help [QUERY...]
 #   tclsh9.0 main.tcl -version
 #   tclsh9.0 main.tcl                     (no arguments: the usage summary)
@@ -82,10 +84,12 @@
 # is every target's (anything else is NATIVE TARGET: native code runs where
 # it was built for, and a matching architecture is not a matching target).
 #
-# Runs the given program files and prints each program's value, with runtime evidence shown as "text"#{Type}. On the
+# Runs the given program files and prints each program's value after a
+# "== FILE (BACKEND)" header: the development view of a run, which every
+# backend shows, the Tcl backends included. On the
 # native backends what a program prints (std::io::print_line) goes to this
 # process's standard output and error as it writes it, between its "== FILE"
-# line and its value, as a standalone executable writes it; the Tcl backends
+# line and its value; the Tcl backends
 # cannot print (io's only context makes raw syscalls). With
 # -backend compile it also prints the inferred types of program-level
 # bindings; -code prints the Tcl code the compiler generates; -hir prints the
@@ -125,7 +129,9 @@
 # single-file compiler uses, is system for a program that calls C and stub
 # for any other: SINGLE-EXECUTABLE.md, SINGLE-EXECUTABLE-FFI-MILESTONE-1.md).
 # It does not evaluate the program.
-# Running the executable prints its value.
+# Running the executable prints nothing but what the program writes: its value
+# is never printed (PROGRAM-OUTPUT-MILESTONE-1.md); it exits 0 when the
+# program completes and 1, with the error on stderr, when it fails.
 # -native-startup POLICY sets the executable's startup policy
 # (MAIN-THREAD-STARTUP-MILESTONE-1.md), fixed in it when it is built, never
 # by the environment it later runs in: worker (the default) runs the
@@ -146,6 +152,17 @@
 # the environment, a .bot input's analyzed HIR is kept in DIR and read back,
 # with no front end, while the program, its modules and the front end are
 # unchanged (the front-end cache, surface/cache.tcl).
+#
+# run FILE [ARG...] runs one program as a command (PROGRAM-OUTPUT-MILESTONE-1.md),
+# as an executable built from it runs: no header and no value -- standard
+# output and error are the program's own --, argv() is FILE as typed and the
+# ARGs after it (every word after FILE is the program's, an option-like one
+# too), and the exit status is 0 when the program completes and 1 when it is
+# rejected (its diagnostics on stderr after "FILE: ") or fails at run time
+# (on stderr, "MESSAGE (CODE)", as an executable writes it). It runs on the
+# native backend (cranelift) unless -backend says otherwise; of the other
+# options only -warnings, -target, -L and -F combine with it. The program
+# cannot choose its exit status yet.
 #
 # -check analyzes each .bot input as a compilation does and reports what it
 # reports -- the same diagnostics, in the same words, the same "note:" and
@@ -216,7 +233,8 @@
 # of them the vector is the synthetic one-element default (`botlish-runner`),
 # never this runner's own arguments. The same vector reaches every backend.
 # A standalone executable ignores all three: it reads its own process
-# arguments each time it runs.
+# arguments each time it runs. `run` takes none of them: the words after its
+# FILE are the program's arguments.
 #
 # For every Block in the result (directly or as a list element) the runner
 # also prints the refinements visible in the Block's captured environment, so
@@ -294,12 +312,15 @@ proc usage {} {
     global cliOptions cliInvocation
     set me $cliInvocation
     set lines [list "usage: $me \[OPTION...\] FILE..." \
+        "       $me run \[OPTION...\] FILE \[ARG...\]" \
         "       $me -help \[QUERY...\]" \
         "       $me -version" \
         "       $me add|install|update|remove|verify|package ..." "" \
         "Compiles and runs Botlish programs: FILE.bot (source), FILE.hir (HIR text)," \
         "FILE.hirx (HIR interchange) or FILE.ir (core IR text; interp and compile only)." \
-        "Each program's output is printed, then its value." "" \
+        "Each program's output is printed, then its value." \
+        "run runs one program as a command: natively, with the ARGs as its arguments," \
+        "its output only, exit status 0 or 1 (-backend, -warnings, -target, -L, -F)." "" \
         "Before writing a program, read: $me -help primer" ""]
     foreach {group heading} {run Running argv {Program arguments} build Building check {Checking (with -warnings, -target)} lsp {Language server (with -warnings, -target; no FILE)} inspect {Inspecting (printed before the program runs)} help Reference} {
         lappend lines "$heading:"
@@ -316,6 +337,7 @@ proc usage {} {
     }
     lappend lines "Examples:" \
         "  $me -backend cranelift game.bot" \
+        "  $me run tool.bot -n 3 < input   the program as a command" \
         "  $me -lsp                      the language server, for an editor" \
         "  $me -help                     the indices of Compilerpedia" \
         "  $me -help cli.options         every option in detail" \
@@ -338,7 +360,7 @@ proc usageError {message} {
 # flag), files, query (the words after -help).
 proc parseCommandLine {argv} {
     global cliOptions cliAliases
-    set result [dict create action run options {} files {} query {}]
+    set result [dict create action run options {} files {} query {} arguments {}]
     if {$argv eq ""} {
         dict set result action usage
         return $result
@@ -347,7 +369,14 @@ proc parseCommandLine {argv} {
     foreach {name argument group description} $cliOptions {
         dict set table $name $argument
     }
-    for {set i 0} {$i < [llength $argv]} {incr i} {
+    # `run [OPTION...] FILE [ARG...]`: one program, run as a command; every
+    # word after FILE is one of its arguments, options included.
+    set start 0
+    if {[lindex $argv 0] eq "run"} {
+        dict set result action program
+        set start 1
+    }
+    for {set i $start} {$i < [llength $argv]} {incr i} {
         set arg [lindex $argv $i]
         if {[dict exists $cliAliases $arg]} {
             set arg [dict get $cliAliases $arg]
@@ -380,6 +409,13 @@ proc parseCommandLine {argv} {
             usageError "unknown option \"$arg\""
         }
         dict lappend result files $arg
+        if {[dict get $result action] eq "program"} {
+            dict set result arguments [lrange $argv [expr {$i + 1}] end]
+            break
+        }
+    }
+    if {[dict get $result action] eq "program" && [dict get $result files] eq ""} {
+        usageError "run needs the program's file: run \[OPTION...\] FILE \[ARG...\]"
     }
     if {[dict get $result files] eq "" && [lspMode $result] eq ""} {
         usageError "no input file"
@@ -456,6 +492,18 @@ switch -- [dict get $commandLine action] {
     help {
         source [file join $root compilerpedia compilerpedia.tcl]
         printing {compilerpedia::main [dict get $commandLine query]}
+    }
+    program {
+        # `run` runs one program as a command: of the options only those
+        # that decide how it compiles and links. Anything else inspects,
+        # builds or checks, which a run as a command never does: refused,
+        # never ignored.
+        foreach option [dict get $commandLine options] {
+            set arg [lindex $option 0]
+            if {$arg ni {-backend -warnings -target -L -F}} {
+                usageError "run cannot be combined with $arg: it runs one program as a command, its standard output and error the program's own (it takes -backend, -warnings, -target, -L and -F; the program's arguments follow its file)"
+            }
+        }
     }
 }
 
@@ -748,6 +796,58 @@ proc runFile {path showCode showHir showAst showAot showNative} {
     return 0
 }
 
+# Runs the program PATH as a command (`run`, PROGRAM-OUTPUT-MILESTONE-1.md):
+# what an executable built from it does when it runs. Standard output and
+# error are the program's own -- no header, and the program's value is never
+# printed -- its argv() is the injected vector (PATH and the arguments after
+# it), and it returns the exit status: 0 when the program completes, 1 when
+# it is rejected (each diagnostic on stderr after "PATH: ", as a build
+# reports it) or fails at run time (on stderr as an executable reports it,
+# "MESSAGE (CODE)"). The Tcl backends run it too, though they cannot print
+# (the only std::io contexts are native: POST-2048-PRODUCT-FIXES.md, S15).
+proc runProgram {path} {
+    global backend nativeBackends warnings target hintsShown
+    set hintsShown {}
+    if {[catch {
+        set extension [file extension $path]
+        if {$extension in {.hir .hirx .bot}} {
+            switch -- $extension {
+                .bot {
+                    set hir [surface::readProgramFile $path -warnings $warnings -target $target]
+                    warningHints [lmap w [hir::warnings::of $hir] {dict get $w code}]
+                }
+                .hir { set hir [hir::readFile $path] }
+                .hirx { set hir [hir::interchange::readFile $path -target [hir::cabi::ResolveTarget $target]] }
+            }
+            switch -- $backend {
+                interp {
+                    set program [hir::lower $hir]
+                    set run {core::evalProgram $program}
+                }
+                compile {
+                    set unit [core::compiler::compileHir $hir]
+                    set run {core::compiler::evalUnit $unit}
+                }
+                cranelift { set run {native::evalHir $hir -output inherit} }
+                cranelift-generic { set run {native::evalHir $hir -specialize 0 -output inherit} }
+            }
+        } elseif {$backend in $nativeBackends} {
+            throw {NATIVE AOT INPUT} "$path is core IR text; native compilation starts from HIR (.bot or .hir), never core IR (run it with -backend interp or compile)"
+        } else {
+            set program [core::loadProgramFile $path]
+            set run {core::evalProgram $program}
+        }
+    } message options]} {
+        printError stderr "$path: " $message $options
+        return 1
+    }
+    if {[catch {core::process::withArgv $::injectedArgv $run} message options]} {
+        puts stderr "$message ([dict get $options -errorcode])"
+        return 1
+    }
+    return 0
+}
+
 # Writes the analyzed HIR of the .bot or .hir file PATH in the HIR
 # interchange format, as PATH without its extension plus .hirx.
 proc emitInterchange {path} {
@@ -865,6 +965,11 @@ proc emitExecutable {path} {
 
 set nativeBackends {cranelift cranelift-generic}
 set backend [core::useBackend]
+if {[dict get $commandLine action] eq "program"} {
+    # A program run as a command runs as its executable would: natively,
+    # unless -backend says otherwise.
+    set backend cranelift
+}
 set files [dict get $commandLine files]
 set warnings [hir::warnings::defaultMode]
 set target ""
@@ -1009,6 +1114,14 @@ if {$nativeStartup eq ""} {
 }
 if {$showNative eq "library" && [llength $files] != 1} {
     usageError "-emit-native-library builds one library from one input file (found [llength $files])"
+}
+if {[dict get $commandLine action] eq "program"} {
+    # The program's own argv(): its file as typed, then its arguments, each
+    # as its UTF-8 bytes.
+    set injectedArgv [lmap word [concat [lrange $files 0 0] [dict get $commandLine arguments]] {
+        core::process::bytesOfText $word
+    }]
+    exit [runProgram [lindex $files 0]]
 }
 set failures 0
 if {$check} {

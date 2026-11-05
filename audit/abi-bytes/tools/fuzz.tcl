@@ -499,11 +499,14 @@ try {
                     puts "FAIL seed $seed write stress=$stress: file [string length $got3]/[string length $want3] bytes, pipe [string length $got4]/[string length $want4] bytes"
                 }
             }
-            # The counts the program reports (its own result line): run it
-            # once with 3 and 4 redirected and read the printed list.
+            # The counts the program reports (its value, through the driver
+            # protocol: an executable prints none, PROGRAM-OUTPUT-MILESTONE-1.md):
+            # run it once with 3 and 4 redirected and read the reported list.
             set f3 [file join $scratch counts.[incr counter]]
-            set printed [exec sh -c {exec "$0" 3>"$1" 4>>"$1"} $exe $f3]
-            file delete $f3
+            set result [file join $scratch result.$counter]
+            exec env BOTLISH_NATIVE_RESULT=$result sh -c {exec "$0" 3>"$1" 4>>"$1"} $exe $f3
+            set printed [core::value::show [native::Outcome [split [string trim [core::ReadFile $result]] \n]] 1]
+            file delete $f3 $result
             set wantCounts {}
             foreach spec $specs { lappend wantCounts [llength [renderSpec $spec]] }
             lappend wantCounts [llength $first] [llength $first]

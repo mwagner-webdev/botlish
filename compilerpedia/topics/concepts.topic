@@ -5995,11 +5995,11 @@ docs/README.md section 21; OPPORTUNISTIC-SEMANTIC-INSTANCES.md.
 
 @topic concept.program-value
 title: A program's value: its last statement
-summary: Running a program evaluates the entry file's statements in order; the value of the last one is the program's value, which the compiler prints after `value:` (and an executable prints).
+summary: A program's statements run in order; the last one's value is the program's value, which the development run prints after `value:` (an executable never prints it).
 index: concepts
 alias: program result; program value; last expression value
 keywords: value, result, last expression, print, main, output, entry program, top level, unit
-related: concept.unit concept.argv task.print-output cli.output cli.exit-status capability.process-exit-status
+related: concept.unit concept.argv task.print-output cli.output cli.run cli.exit-status capability.process-exit-status
 docs: README.md
 
 == WHAT IT IS
@@ -6019,6 +6019,9 @@ with Strings quoted and Lists, structs and enum cases shown as values.
   * A program that wants to report several things returns a List or a
     struct of them as its value; printed text goes through io (native
     backends; task.print-output).
+  * The value is shown by the development run (`botlish FILE.bot`) only:
+    an executable and `botlish run` (cli.run) print what the program
+    writes and nothing else.
   * An error that escapes the top level is a compile-time UNHANDLED-ERROR
     for declared errors; run-time failures (ARITHMETIC, a native's TYPE
     check) stop the program with the error.

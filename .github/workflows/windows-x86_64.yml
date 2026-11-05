@@ -270,18 +270,25 @@ jobs:
           tclsh9.0 main.tcl -warnings off -emit-native-executable artifacts/bench.bot artifacts/fib.bot | tee artifacts/emit.txt
           grep -qx 'executable: artifacts/bench.exe' artifacts/emit.txt
           echo 'source native/native.tcl; native::object [surface::readProgramFile artifacts/fib.bot -warnings off] artifacts/fib.obj' | tclsh9.0
-          value=$(artifacts/fib.exe)
+          # An executable prints no value (PROGRAM-OUTPUT-MILESTONE-1.md): its
+          # standard output is empty, and its value is the driver protocol's
+          # (BOTLISH_NATIVE_RESULT), read as the words of its "value V" line,
+          # V's quoting (braces, backslashes) removed.
+          words() { rm -f artifacts/result; BOTLISH_NATIVE_RESULT=artifacts/result "$@" >/dev/null && tr -d '\\{}\r' <artifacts/result | tr -s ' \n' ' ' | sed 's/ $//'; }
+          test -z "$(artifacts/fib.exe)"
+          test -z "$(artifacts/bench.exe)"
+          value=$(words artifacts/fib.exe)
           echo "fib.exe: $value"
-          test "$value" = '[75025, "hello", 18446744073709551614]'
-          value=$(artifacts/bench.exe)
+          test "$value" = 'value list int 75025 str hello int 18446744073709551614'
+          value=$(words artifacts/bench.exe)
           echo "bench.exe: $value"
-          test "$value" = 2002720
-          value=$(BOTLISH_NATIVE_GC_STRESS=1 artifacts/bench.exe)
+          test "$value" = 'value int 2002720'
+          value=$(BOTLISH_NATIVE_GC_STRESS=1 words artifacts/bench.exe)
           echo "bench.exe under GC stress: $value"
-          test "$value" = 2002720
-          value=$(BOTLISH_NATIVE_GC_STRESS=1 BOTLISH_NATIVE_UNWIND_CHECK=1 artifacts/bench.exe 2> artifacts/unwind-check.txt)
+          test "$value" = 'value int 2002720'
+          value=$(BOTLISH_NATIVE_GC_STRESS=1 BOTLISH_NATIVE_UNWIND_CHECK=1 words artifacts/bench.exe 2> artifacts/unwind-check.txt)
           echo "bench.exe under GC stress, unwind check: $value; $(cat artifacts/unwind-check.txt)"
-          test "$value" = 2002720
+          test "$value" = 'value int 2002720'
           grep -qE '^native unwind check: [1-9][0-9]* functions, [1-9][0-9]* Botlish frames' artifacts/unwind-check.txt
           # A program object of variadic C calls (WINDOWS-X86-64-MILESTONE-6.md),
           # for the next step's dumpbin /disasm: integers only (a direct
@@ -329,7 +336,7 @@ jobs:
           cp examples/io/hello-windows.bot wio/hello.bot
           cp examples/games/2048/demo-windows.bot examples/games/2048/demo_play.bot examples/games/2048/game2048.bot wio/
           tclsh9.0 main.tcl -warnings off -emit-native-executable wio/hello.bot wio/demo-windows.bot
-          printf 'Hello, world!\nunit\n' > wio/hello.expected
+          printf 'Hello, world!\n' > wio/hello.expected
           ./wio/hello.exe > wio/hello.file 2> wio/hello.err
           cmp wio/hello.file wio/hello.expected
           test ! -s wio/hello.err

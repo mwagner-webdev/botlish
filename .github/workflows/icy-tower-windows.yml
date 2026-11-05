@@ -170,6 +170,8 @@ jobs:
           play "$tmp/signed" >"$tmp/signed.txt"
           diff "$tmp/unsigned.txt" "$tmp/signed.txt"
           cat "$tmp/signed.txt"
+          # Two summary lines, the game's own (an executable prints no value).
+          [ "$(grep -c '^frames=600 ' "$tmp/signed.txt")" = 2 ]
 
       - name: Add the README and the licenses
         run: |

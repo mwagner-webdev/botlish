@@ -1,5 +1,11 @@
 # PROGRAM-RESULT-PRINTING-CENSUS.md
 
+**Status.** Partly implemented by PROGRAM-OUTPUT-MILESTONE-1.md: standalone
+executables no longer print the value, and `main.tcl run FILE ARG...` runs a
+program as a command. The exit status is decided (section 8, item 2) and
+not implemented yet. The census below describes the repository as it was at
+`f643566`, before that milestone.
+
 Every Botlish program has a value, its last top-level statement, and two of
 the three ways to run a program print it: `main.tcl` (and the single-file
 compiler `botlish`, which is main.tcl) writes `   value: SHOWN` after the
@@ -554,14 +560,14 @@ the one the evidence above points to.
    `native::evalHir` and of the driver protocol. Removing it would break
    the golden framework, Compilerpedia's checker and thousands of tests for
    no gain.
-2. **Give programs an exit status first (B1).** Without it a utility cannot
-   say "no match" or "bad input", and an executable that stops printing
-   loses the only success signal scripts have today. Whether it is an
-   operation (`std::process::exit(status)`-like, which needs a meaning on
-   the Tcl backends and in the driver protocol) or a meaning given to the
-   program's value is a language decision; the second would keep the value
-   load-bearing and re-create this census's problem for Int-valued
-   programs.
+2. **Give programs an exit status (B1).** Without it a utility cannot
+   say "no match" or "bad input". *Decision (after this census):* the exit
+   status is the program's top-level value -- an Int is the status, `unit`
+   means 0 (success) -- and there is no early exit, by design: no exit
+   operation, no top-level `return`. It is kept out of the first
+   implementation milestone (PROGRAM-OUTPUT-MILESTONE-1.md, "The exit
+   status"), which ships everything else; until it lands a completed
+   program's status is 0.
 3. **Executables: print nothing on success.** Their error path (message on
    standard error, status 1) is already a utility's; the overflow line's
    Tcl-list format could become `MESSAGE (CODE)` like the rest.

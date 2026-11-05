@@ -213,13 +213,14 @@ test cf-fusion-off {BOTLISH_NATIVE_COROUTINE_FUSION=0 turns the pass off: no sit
     list [withoutCoroutineFusion {native::fusion $hir}] [expr {[lindex $ops 2] eq [lindex $ops 3]}] [llength [lindex $ops 2]]
 } -cleanup {unset -nocomplain hir ops text} -result {{} 1 9}
 
-test cf-executable {a standalone executable of a fused program prints the same value, also under GC stress} -constraints {executableAot nativeCoroutines} -body {
+test cf-executable {a standalone executable of a fused program has the same value (read through the driver protocol), also under GC stress; run plainly it prints nothing (an executable prints no value)} -constraints {executableAot nativeCoroutines} -body {
     set exe [native::executable [surface::compile [cfText tokens] -warnings off] [file join [temporaryDirectory] cf-tokens-[pid]]]
     set plain [exec $exe]
-    set stressed [cfGcStress {exec $exe}]
+    set value [standaloneValue $exe]
+    set stressed [cfGcStress {standaloneValue $exe}]
     file delete $exe
-    list $plain [expr {$stressed eq $plain}]
-} -cleanup {unset -nocomplain exe plain stressed} -result {{[6, 4, 17, 29]} 1}
+    list $plain $value [expr {$stressed eq $value}]
+} -cleanup {unset -nocomplain exe plain value stressed} -result {{} {[6, 4, 17, 29]} 1}
 
 set cfPrincipal {struct Message:
     value: int

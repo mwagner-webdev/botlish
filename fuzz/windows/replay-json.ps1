@@ -70,8 +70,8 @@ Get-ChildItem (Join-Path $Repo "fuzz\seeds\conformance") | ForEach-Object {
     if ($args.Count -gt 0 -and $args[$args.Count - 1] -eq '') { $args.RemoveAt($args.Count - 1) }
 
     $out = & $exe @args 2>&1 | Where-Object { "$_" -ne '' }
+    # (An executable prints no value line: PROGRAM-OUTPUT-MILESTONE-1.md.)
     $lines = @($out | ForEach-Object { "$_".TrimEnd() })
-    if ($lines.Count -gt 0) { $lines = $lines[0..($lines.Count - 2)] }  # drop the value line
     $report = 'result|report|' + ($lines -join ' / ')
 
     if (-not $expected.ContainsKey($name)) { $missing++; return }

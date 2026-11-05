@@ -148,14 +148,27 @@ printf 'x = \n' >broken.bot
 if run broken.bot >"$work/broken.out"; then fail "a broken program was accepted"; fi
 grep -q 'SURFACE SYNTAX' "$work/broken.out" || fail "a broken program reported no syntax error"
 
-programs="hello:unit context-hello:14"
-(( macos )) && programs=hello:unit
+# An executable writes what its program writes and nothing else: no value
+# line after it (PROGRAM-OUTPUT-MILESTONE-1.md).
+programs="hello context-hello"
+(( macos )) && programs=hello
 if (( toolchain )); then
-  for program in $programs; do
-    name=${program%%:*}
+  for name in $programs; do
     linking -warnings off -emit-native-executable "$name.bot" >/dev/null || fail "emit $name"
-    [[ $(env -i "./$name") == "Hello, world!"$'\n'"${program#*:}" ]] || fail "executable $name"
+    [[ $(env -i "./$name") == "Hello, world!" ]] || fail "executable $name"
   done
+  # run: the program as a command -- its output only, its arguments after
+  # its file, its status.
+  [[ $(linking run -warnings off hello.bot) == "Hello, world!" ]] || fail "run hello.bot"
+  # hello.bot (the host's: Linux's or macOS's context) printing its
+  # arguments instead of its greeting.
+  awk '$0 == "    std::io::print_line(\"Hello, world!\")" {
+         print "    words = argv():"; print "        on InvalidArgumentEncoding:"; print "            return unit"
+         print "    loop w in words:"; print "        std::io::print_line(w)"; print "    unit"; next }
+       { print }' hello.bot >show-args.bot
+  [[ $(linking run -warnings off show-args.bot one 'ünï cödé' -v) == "show-args.bot"$'\n'"one"$'\n'"ünï cödé"$'\n'"-v" ]] ||
+    fail "run passes no arguments: $(linking run -warnings off show-args.bot one 'ünï cödé' -v 2>&1)"
+  if linking run -warnings off broken.bot >"$work/run-broken.out" 2>&1; then fail "run accepted a broken program"; fi
 else
   # (macOS without the developer tools.)
   if linking -warnings off -emit-native-executable hello.bot >"$work/emit.out" 2>&1; then fail "linked without developer tools"; fi
@@ -220,7 +233,7 @@ if (( toolchain )); then
   else
     env -i "$botlish" -warnings off -emit-native-executable hello.bot >/dev/null || fail "emit without HOME"
   fi
-  [[ $(env -i ./hello) == $'Hello, world!\nunit' ]] || fail "executable built without HOME"
+  [[ $(env -i ./hello) == 'Hello, world!' ]] || fail "executable built without HOME"
 fi
 env -i "$botlish" -backend cranelift samples/01-arithmetic.bot >"$work/nohome.out" || fail "cranelift without HOME"
 grep -q 'value: 50' "$work/nohome.out" || fail "cranelift without HOME: wrong value"

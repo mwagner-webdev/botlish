@@ -425,9 +425,23 @@ proc ecExecutable {dir {options {}}} {
     return [native::withLinkDirs [list $::fixtureDir] {native::executable [ecHir $dir] [file join $dir $name] {*}$options}]
 }
 
-# What EXE prints, run with ENVIRONMENT ({NAME VALUE ...}).
+# EXE's value, run with ENVIRONMENT ({NAME VALUE ...}), shown as the
+# executable itself once printed it (opaque buffers): an executable prints
+# no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md), so it is read through
+# the driver protocol (BOTLISH_NATIVE_RESULT, ProtocolValue). These programs
+# write nothing: anything the run writes, on standard output or error, is an
+# error.
 proc ecRun {exe {environment {}}} {
-    return [string trim [exec env {*}[lmap {k v} $environment {string cat $k=$v}] $exe 2>@1]]
+    set result [ProtocolResultFile]
+    try {
+        set output [exec env {*}[lmap {k v} $environment {string cat $k=$v}] BOTLISH_NATIVE_RESULT=$result $exe 2>@1]
+        if {$output ne ""} {
+            error "the executable wrote: $output"
+        }
+        return [ProtocolValue $result]
+    } finally {
+        file delete $result
+    }
 }
 
 # The environment that loads the errno-changing allocator into a run.
@@ -526,7 +540,7 @@ test ec-arguments-once {a write-exposing C call's arguments are evaluated once e
     ecOutcome [ecApp "direct module\nimport std::abi\nimport std::abi::bytes\nimport ec\nfn once(m: std::abi::bytes::MutableBytes) -> list:\n    r = ec::fill_errno(m, ec::mlen(m), ec::tick(), 0, 0)\n    after = ec::tick()\n    \[r.result, after, r.out\]\nonce(std::abi::bytes::zeroed(std::abi::usize(4)))\n"]
 } -result [list value "\[4, 2, [ecMut 01264b70]\]"]
 
-test ec-fixture-executable {the same program as a standalone executable prints the same value (the runtime shows the buffers opaque), also under GC stress (a collection at every allocation site) and with an allocator that changes errno on every allocation (tests/cffi/errno-clobber.c): no allocation runs between a failed call and its errno read} -constraints ecClobber -body {
+test ec-fixture-executable {the same program as a standalone executable has the same value (read through the driver protocol, the buffers shown opaque), also under GC stress (a collection at every allocation site) and with an allocator that changes errno on every allocation (tests/cffi/errno-clobber.c): no allocation runs between a failed call and its errno read} -constraints ecClobber -body {
     set exe [ecExecutable [ecApp $::shapesMain]]
     set plain [ecRun $exe]
     list [expr {$plain eq [ecShown]}] [expr {[ecRun $exe {BOTLISH_NATIVE_GC_STRESS 1}] eq $plain}] \
@@ -962,8 +976,8 @@ n = nested(m, 44)
  signed_first(6, 58), signed_first(5, 0), in_coroutine(59, 60), int_sentinel(), m]
 }
 
-# What escapesMain prints (ecMut: a MutableBytes as the runtime shows it):
-# with CLOBBERED, what it prints under the eager-foreign-result fault with
+# escapesMain's value (ecMut: a MutableBytes as the host shows it revealed):
+# with CLOBBERED, its value under the eager-foreign-result fault with
 # the errno-changing allocator -- 77 for every errno read after something
 # the fault allocates (all but the two signed results inside the small-Int
 # range, which even Milestone 1 never boxed).
@@ -983,7 +997,7 @@ proc ecEscapesValue {{clobbered 0}} {
         "\[-4611686018427387905, [apply $e 58]\], \[-4611686018427387904, 0\], \[[apply $e 59], [expr {[apply $e 60] + 1000 * [apply $e 59]}]\], \[-1, [dict get [ecErrnoFacts] EBADF]\], [ecMut 00000000]\]"] ", "]
 }
 
-# escapesMain's value as its executable shows it (opaque buffers).
+# escapesMain's value as ecRun shows its executable's (opaque buffers).
 proc ecEscapesShown {{clobbered 0}} {
     return [regsub -all {std::abi::bytes::MutableBytes \{storage: <mutbytes [0-9]+: [0-9a-f]*>\}} [ecEscapesValue $clobbered] {<opaque std::abi::bytes::MutableBytes>}]
 }
@@ -1113,8 +1127,8 @@ test ec-escapes-values {the escapes program on both native backends: every errno
     ecOutcome [ecApp $::escapesMain]
 } -result [list value [ecEscapesValue]]
 
-# What shapesMain's executable lowered with OPTIONS prints with the
-# errno-changing allocator: its plain value, but for the two shapes outside
+# shapesMain's value as ecRun reads it from its executable lowered with
+# OPTIONS, run with the errno-changing allocator: its plain value, but for the two shapes outside
 # the guarantee (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 32) where the
 # lowering builds the value at the program's request -- `raw` returns its C
 # call's write-back value before anyone reads errno (an object, built before
@@ -1134,7 +1148,7 @@ proc ecShownClobbered {options} {
     return $shown
 }
 
-test ec-modes-executables {the escapes program and Milestone 1's shapes as standalone executables, lowered in every mode (specialized and generic, struct scalar replacement on and off): every mode prints the same value, and prints it again under GC stress; with the allocator that sets errno to 77 on every allocation, and with both at once, every errno is the C call's own whatever the lowering (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 4) -- but where the program itself asks for the value before its errno read: a function returning its C call's write-back value unread (via_raw's raw: built for the return when the return carries no fields, the generic lowering and struct scalar replacement off) and a struct literal built around it (wrapped, with struct scalar replacement off)} -constraints ecClobber -body {
+test ec-modes-executables {the escapes program and Milestone 1's shapes as standalone executables, lowered in every mode (specialized and generic, struct scalar replacement on and off): every mode's value (read through the driver protocol) is the same, and is again under GC stress; with the allocator that sets errno to 77 on every allocation, and with both at once, every errno is the C call's own whatever the lowering (C-FFI-ERROR-CAPTURE-MILESTONE-2.md, section 4) -- but where the program itself asks for the value before its errno read: a function returning its C call's write-back value unread (via_raw's raw: built for the return when the return carries no fields, the generic lowering and struct scalar replacement off) and a struct literal built around it (wrapped, with struct scalar replacement off)} -constraints ecClobber -body {
     set escapes [ecApp $::escapesMain]
     set shapes [ecApp $::shapesMain]
     set result {}

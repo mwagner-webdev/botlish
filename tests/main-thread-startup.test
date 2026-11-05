@@ -136,6 +136,27 @@ proc mtsRunInput {input settings exe args} {
     }
 }
 
+# mtsRun's {STATUS STDOUT STDERR} of a run of EXE under the driver protocol
+# (BOTLISH_NATIVE_RESULT), followed by the program's value as Botlish shows
+# it (ProtocolValue; its error raised): an executable prints no value of
+# its own (PROGRAM-OUTPUT-MILESTONE-1.md), so STDOUT and STDERR are the
+# program's, and this is how a test reads the value of a program that
+# completes.
+proc mtsValueRun {settings exe args} {
+    mtsValueRunInput "" $settings $exe {*}$args
+}
+
+# mtsValueRun with INPUT on the process's standard input.
+proc mtsValueRunInput {input settings exe args} {
+    set file [file join [temporaryDirectory] mts-result-[pid]]
+    try {
+        set run [mtsRunInput $input [concat $settings [list BOTLISH_NATIVE_RESULT $file]] $exe {*}$args]
+        return [concat $run [list [ProtocolValue $file]]]
+    } finally {
+        file delete $file
+    }
+}
+
 # What EXE's startup installed (BOTLISH_NATIVE_STARTUP_REPORT).
 proc mtsReport {exe} {
     set report [file join [temporaryDirectory] mts-report-[pid]]
@@ -332,14 +353,11 @@ test mts-cli-default-is-worker {an executable is the worker's when -native-start
         set exe [native::executableFile [file rootname $path]]
         set startup [mtsStartup [mtsReport $exe]]
         lappend results $case [dict get $r status] [mtsStartupWord [mtsBytes $exe]] [dict get $startup startup] \
-            [expr {[dict get $startup process-main-thread] in {0 unknown}}] [mtsRun {} $exe]
+            [expr {[dict get $startup process-main-thread] in {0 unknown}}] [mtsValueRun {} $exe]
     }
     removeDirectory mts-default
     set results
-} -result {default 0 0 worker 1 {0 {42
-} {}} worker 0 0 worker 1 {0 {42
-} {}} twice 0 0 worker 1 {0 {42
-} {}}}
+} -result {default 0 0 worker 1 {0 {} {} 42} worker 0 0 worker 1 {0 {} {} 42} twice 0 0 worker 1 {0 {} {} 42}}
 
 test mts-cli-main-thread {where main-thread startup is supported, -native-startup main-thread (once or repeated) makes the executable the main thread's: its record's startup word is 1, its startup report says the program ran on the process's main thread, and it runs as the worker's does} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-cli-main]
@@ -350,13 +368,11 @@ test mts-cli-main-thread {where main-thread startup is supported, -native-startu
         set exe [native::executableFile [file rootname $path]]
         set startup [mtsStartup [mtsReport $exe]]
         lappend results $case [dict get $r status] [mtsStartupWord [mtsBytes $exe]] [dict get $startup startup] \
-            [dict get $startup process-main-thread] [mtsRun {} $exe]
+            [dict get $startup process-main-thread] [mtsValueRun {} $exe]
     }
     removeDirectory mts-cli-main
     set results
-} -result {once 0 1 main-thread 1 {0 {42
-} {}} twice 0 1 main-thread 1 {0 {42
-} {}}}
+} -result {once 0 1 main-thread 1 {0 {} {} 42} twice 0 1 main-thread 1 {0 {} {} 42}}
 
 test mts-cli-refused {where main-thread startup is unsupported, -native-startup main-thread is NATIVE UNSUPPORTED startup, status 1, naming the target and the reason: before any linker runs, an executable already there kept, no temporary directory left} -constraints mainThreadRefused -body {
     set dir [makeDirectory mts-refused]
@@ -461,7 +477,7 @@ proc mtsPanicking {exe path} {
     mtsWriteExecutable $path [string map [list $::mtsBigDigits [string range $::mtsBigDigits 0 end-1]x] $bytes]
 }
 
-test mts-panic-native-bug {a Rust panic of the program's body (a damaged constant's installation) is "native executable panicked (NATIVE BUG)", status 1, nothing on standard output: on the worker with every linker, and on the main thread where it is supported, never Rust's status 101} -constraints executableAot -body {
+test mts-panic-native-bug {a Rust panic of the program's body (a damaged constant's installation) is "native executable panicked (NATIVE BUG)", status 1, nothing on standard output: on the worker with every linker, and on the main thread where it is supported, never Rust's status 101; the intact executable's value (through the driver protocol) is the constant} -constraints executableAot -body {
     set dir [makeDirectory mts-panic]
     set hir [surface::compile $::mtsPanicSource panic.bot -warnings off]
     set policies [expr {[native::hostSupports mainThreadStartup] ? {worker main-thread} : {worker}}]
@@ -469,7 +485,7 @@ test mts-panic-native-bug {a Rust panic of the program's body (a damaged constan
     foreach linker [concat [mtsLinkers] [expr {[testConstraint stubLinked] ? "stub" : ""}]] {
         foreach policy [expr {$linker eq "stub" ? "worker" : $policies}] {
             set exe [mtsLink $hir [file join $dir $linker-$policy] $policy $linker]
-            set intact [mtsRun {} $exe]
+            set intact [mtsValueRun {} $exe]
             lassign [mtsRun {} [mtsPanicking $exe [native::executableFile [file join $dir $linker-$policy-damaged]]]] status stdout stderr
             lappend results $linker $policy $intact $status $stdout [lindex [split [string trimright $stderr \n] \n] end]
         }
@@ -478,7 +494,7 @@ test mts-panic-native-bug {a Rust panic of the program's body (a damaged constan
     set results
 } -result [concat {*}[lmap linker [concat [mtsLinkers] [expr {[testConstraint stubLinked] ? "stub" : ""}]] {
     concat {*}[lmap policy [expr {$linker eq "stub" || ![native::hostSupports mainThreadStartup] ? "worker" : {worker main-thread}}] {
-        list $linker $policy [list 0 "$::mtsBigDigits\n" {}] 1 {} {native executable panicked (NATIVE BUG)}
+        list $linker $policy [list 0 {} {} $::mtsBigDigits] 1 {} {native executable panicked (NATIVE BUG)}
     }]
 }]]
 
@@ -508,12 +524,11 @@ test mts-worker-identity {a worker executable's program runs off the process's m
     foreach linker [mtsLinkers] {
         set exe [mtsLink $hir [file join $dir $linker] worker $linker]
         set startup [mtsStartup [mtsReport $exe]]
-        lappend results $linker [mtsRun {} $exe] [dict get $startup startup] [dict get $startup process-main-thread]
+        lappend results $linker [mtsValueRun {} $exe] [dict get $startup startup] [dict get $startup process-main-thread]
     }
     removeDirectory mts-worker-identity
     set results
-} -result [concat {*}[lmap linker [mtsLinkers] {list $linker {0 {[0, 0]
-} {}} worker 0}]]
+} -result [concat {*}[lmap linker [mtsLinkers] {list $linker {0 {} {} {[0, 0]}} worker 0}]]
 
 # ---------------------------------------------------------------------------
 # The main thread (macOS AArch64)
@@ -526,13 +541,12 @@ test mts-main-identity {a main-thread executable's program runs on the process's
         set exe [mtsLink $hir [file join $dir $linker] main-thread $linker]
         set startup [mtsStartup [mtsReport $exe]]
         lassign [dict get $startup stack] usable guard
-        lappend results $linker [mtsRun {} $exe] [dict get $startup startup] [dict get $startup process-main-thread] \
+        lappend results $linker [mtsValueRun {} $exe] [dict get $startup startup] [dict get $startup process-main-thread] \
             $usable [expr {$guard > 0}]
     }
     removeDirectory mts-main-identity
     set results
-} -result [concat {*}[lmap linker [mtsLinkers] {list $linker {0 {[1, 1]
-} {}} main-thread 1 [mtsMainUsable $linker] 1}]]
+} -result [concat {*}[lmap linker [mtsLinkers] {list $linker {0 {} {} {[1, 1]}} main-thread 1 [mtsMainUsable $linker] 1}]]
 
 test mts-main-lc-main {a main-thread executable's LC_MAIN reserves 512 MiB for the main thread's stack (Apple ld's -stack_size, otool -l), with either linker; a worker executable's reserves nothing of its own (stacksize 0)} -constraints otool -body {
     set dir [makeDirectory mts-lc-main]
@@ -557,6 +571,12 @@ proc mtsDepth {exe shape n {settings {}}} {
     mtsRun [concat {BOTLISH_NATIVE_GC_STRESS {}} $settings] $exe $shape $n
 }
 
+# mtsDepth's run under the driver protocol (mtsValueRun): {STATUS STDOUT
+# STDERR VALUE}, of a SHAPE N that completes.
+proc mtsDepthValue {exe shape n {settings {}}} {
+    mtsValueRun [concat {BOTLISH_NATIVE_GC_STRESS {}} $settings] $exe $shape $n
+}
+
 set ::mtsOverflow [list 1 {} "error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}\n"]
 
 test mts-main-overflow {every exhaustion on the main thread is the guard's NATIVE LIMIT STACK line, status 1: the small frame, a String held across the call, six Ints held across it, a call through a Fn, a 9.5 KiB frame walked by stack probes, a coroutine's stack after it yielded and was resumed} -constraints mainThreadStartup -body {
@@ -576,11 +596,10 @@ test mts-main-overflow {every exhaustion on the main thread is the guard's NATIV
 test mts-main-rustc-overflow {the rustc linker's main-thread executable reports its main thread's exhaustion the same way} -constraints {mainThreadStartup rustcLinked} -body {
     set dir [makeDirectory mts-main-rustc-overflow]
     set depth [mtsLink [mtsCensus depth] [file join $dir depth] main-thread rustc]
-    set results [list [mtsDepth $depth down 0] [mtsDepth $depth down 1000000]]
+    set results [list [mtsDepth $depth down 0] [mtsDepthValue $depth down 1000000]]
     removeDirectory mts-main-rustc-overflow
     set results
-} -result [list $::mtsOverflow {0 {1000000
-} {}}]
+} -result [list $::mtsOverflow {0 {} {} 1000000}]
 
 test mts-main-capacity {the census's finite recursions, which the default 8 MiB main stack exhausts, return their values on the 512 MiB main-thread stack as on the 1 GiB worker: down 10^6, keep 10^5, wide 10^5, rec 10^5, 100 frames of 9.5 KiB} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-capacity]
@@ -588,14 +607,14 @@ test mts-main-capacity {the census's finite recursions, which the default 8 MiB 
     foreach policy {worker main-thread} {
         set depth [mtsLink [mtsCensus depth] [file join $dir depth-$policy] $policy system]
         set big [mtsLink [surface::compile [mtsBigProgram 600] big.bot -warnings off] [file join $dir big-$policy] $policy system]
-        lappend results $policy [lindex [mtsDepth $depth down 1000000] 1] [lindex [mtsDepth $depth keep 100000] 1] \
-            [lindex [mtsDepth $depth wide 100000] 1] [lindex [mtsDepth $depth rec 100000] 1] \
-            [lindex [mtsRun {BOTLISH_NATIVE_GC_STRESS {}} $big 100] 1]
+        lappend results $policy [lindex [mtsDepthValue $depth down 1000000] 3] [lindex [mtsDepthValue $depth keep 100000] 3] \
+            [lindex [mtsDepthValue $depth wide 100000] 3] [lindex [mtsDepthValue $depth rec 100000] 3] \
+            [lindex [mtsValueRun {BOTLISH_NATIVE_GC_STRESS {}} $big 100] 3]
     }
     removeDirectory mts-main-capacity
     set results
-} -result [list worker "1000000\n" "200000\n" "0\n" "100000\n" "[mtsBigValue 100 600]\n" \
-    main-thread "1000000\n" "200000\n" "0\n" "100000\n" "[mtsBigValue 100 600]\n"]
+} -result [list worker 1000000 200000 0 100000 [mtsBigValue 100 600] \
+    main-thread 1000000 200000 0 100000 [mtsBigValue 100 600]]
 
 test mts-main-fault {a fault that is no stack's exhaustion -- C's memset through a null pointer -- ends a main-thread executable by its signal, as a worker's: never NATIVE LIMIT STACK} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-fault]
@@ -620,43 +639,44 @@ test mts-main-gc-stress {under GC stress (a collection at every allocation site)
     foreach {name hir arguments} $programs {
         foreach policy {worker main-thread} {
             set exe [mtsLink $hir [file join $dir $name-$policy] $policy system]
-            lappend results $name $policy [mtsRun {BOTLISH_NATIVE_GC_STRESS 1} $exe {*}$arguments]
+            lappend results $name $policy [mtsValueRun {BOTLISH_NATIVE_GC_STRESS 1} $exe {*}$arguments]
         }
     }
     removeDirectory mts-main-gc
     set results
 } -result [list \
-    kept worker {0 {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]
-} {}} kept main-thread {0 {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]
-} {}} \
-    keep worker [list 0 "6000\n" {}] keep main-thread [list 0 "6000\n" {}] \
-    big worker [list 0 "[mtsBigValue 8 600]\n" {}] big main-thread [list 0 "[mtsBigValue 8 600]\n" {}] \
-    closures worker [list 0 "800\n" {}] closures main-thread [list 0 "800\n" {}]]
+    kept worker {0 {} {} {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}} \
+    kept main-thread {0 {} {} {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}} \
+    keep worker [list 0 {} {} 6000] keep main-thread [list 0 {} {} 6000] \
+    big worker [list 0 {} {} [mtsBigValue 8 600]] big main-thread [list 0 {} {} [mtsBigValue 8 600]] \
+    closures worker [list 0 {} {} 800] closures main-thread [list 0 {} {} 800]]
 
 test mts-main-kept-coroutines {kept coroutines -- a handle passed to another function, four suspended frames of a recursive yielding function, two coroutines abandoned while suspended -- give the worker's values on the main thread, with either linker} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-kept]
     set results {}
     foreach linker [mtsLinkers] {
         foreach policy {worker main-thread} {
-            lappend results $linker $policy [mtsRun {BOTLISH_NATIVE_GC_STRESS {}} [mtsLink [mtsCensus kept] [file join $dir $linker-$policy] $policy $linker]]
+            lappend results $linker $policy [mtsValueRun {BOTLISH_NATIVE_GC_STRESS {}} [mtsLink [mtsCensus kept] [file join $dir $linker-$policy] $policy $linker]]
         }
     }
     removeDirectory mts-main-kept
     set results
 } -result [concat {*}[lmap linker [mtsLinkers] {
-    list $linker worker {0 {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]
-} {}} $linker main-thread {0 {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]
-} {}}
+    list $linker worker {0 {} {} {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}} \
+        $linker main-thread {0 {} {} {[[0, [1, 4, -1]], [4, 5, 6, 7, -1], [110, 34, 0, 0, 3]]}}
 }]]
 
 # The outcomes a process shows of the census's errors.bot and depth.bot on
 # EXE (DIR the scratch directory): a declared error handled, a runtime
 # error, the driver protocol's result file for both and with
 # BOTLISH_NATIVE_RUNS=3 (its times masked), the startup report unwritable,
-# the overflow line, the arguments the program reads.
+# the overflow line, the arguments the program reads. A run that completes
+# prints nothing of the executable's own (PROGRAM-OUTPUT-MILESTONE-1.md):
+# its value is read through the driver protocol, beside the plain run.
 proc mtsSemantics {dir errors depth} {
     set results {}
-    lappend results declared [mtsRun {BOTLISH_NATIVE_GC_STRESS {}} $errors declared]
+    lappend results declared [mtsRun {BOTLISH_NATIVE_GC_STRESS {}} $errors declared] \
+        [lindex [mtsValueRun {BOTLISH_NATIVE_GC_STRESS {}} $errors declared] 3]
     lappend results runtime [mtsRun {BOTLISH_NATIVE_GC_STRESS {}} $errors runtime]
     set file [file join $dir result]
     lappend results protocol [mtsRun [list BOTLISH_NATIVE_GC_STRESS {} BOTLISH_NATIVE_RESULT $file] $errors runtime] [mtsBytes $file]
@@ -665,7 +685,7 @@ proc mtsSemantics {dir errors depth} {
     lassign [mtsRun {BOTLISH_NATIVE_GC_STRESS {} BOTLISH_NATIVE_STARTUP_REPORT /nonexistent/startup-report} $errors value] status stdout stderr
     lappend results report-io $status $stdout [string match "*/nonexistent/startup-report: *(NATIVE IO)*" $stderr]
     lappend results overflow [mtsDepth $depth down 0]
-    lappend results arguments [mtsDepth $depth down 7]
+    lappend results arguments [mtsDepth $depth down 7] [lindex [mtsDepthValue $depth down 7] 3]
     return $results
 }
 
@@ -686,22 +706,23 @@ test mts-main-process-semantics {how a program leaves the process is the same on
     }
     removeDirectory mts-main-semantics
     list $reference $differences
-} -result [list [list declared [list 0 "1008\n" {}] \
+} -result [list [list declared [list 0 {} {}] 1008 \
     runtime [list 1 {} "+: expected int, got \[true\] (CORE SEMANTIC TYPE)\n"] \
     protocol [list 0 {} {}] "error {CORE SEMANTIC TYPE} {+: expected int, got \[true\]}\n" \
     protocol-runs [list 0 {} {}] "times N N N\ntiming N N N N\nvalue {int N}\n" \
-    report-io 2 {} 1 overflow $::mtsOverflow arguments [list 0 "7\n" {}]] {}]
+    report-io 2 {} 1 overflow $::mtsOverflow arguments [list 0 {} {}] 7] {}]
 
-test mts-main-stack-bytes {BOTLISH_NATIVE_STACK_BYTES sizes a worker's stack only: with 1 MiB a recursion 10^5 deep exhausts the worker's, and the main thread's, its size the link's, holds it} -constraints mainThreadStartup -body {
+test mts-main-stack-bytes {BOTLISH_NATIVE_STACK_BYTES sizes a worker's stack only: with 1 MiB a recursion 10^5 deep exhausts the worker's, and the main thread's, its size the link's, holds it (its value read through the driver protocol)} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-stack-bytes]
     set results {}
     foreach policy {worker main-thread} {
         set depth [mtsLink [mtsCensus depth] [file join $dir depth-$policy] $policy system]
         lappend results $policy [mtsDepth $depth down 100000 {BOTLISH_NATIVE_STACK_BYTES 1048576}]
     }
+    lappend results value [lindex [mtsDepthValue $depth down 100000 {BOTLISH_NATIVE_STACK_BYTES 1048576}] 3]
     removeDirectory mts-main-stack-bytes
     set results
-} -result [list worker $::mtsOverflow main-thread [list 0 "100000\n" {}]]
+} -result [list worker $::mtsOverflow main-thread [list 0 {} {}] value 100000]
 
 test mts-main-report-parity {the startup report of a main-thread executable is the worker's -- the same program metadata, constants, natives, shapes, statics and stack maps -- but for its startup lines, and the system and rustc linkers' reports of one policy are equal but for the stack the host gave the thread (mts-main-identity pins each linker's)} -constraints mainThreadStartup -body {
     set dir [makeDirectory mts-main-report]
@@ -731,12 +752,12 @@ test mts-main-darwin-io {a main-thread executable prints through Darwin I/O (lib
     set results {}
     foreach policy {worker main-thread} {
         lappend results $policy [mtsRun {} [mtsLink $hir [file join $dir $policy] $policy system]] \
-            [mtsRunInput "twelve bytes" {} [mtsLink $reader [file join $dir read-$policy] $policy system]]
+            [mtsValueRunInput "twelve bytes" {} [mtsLink $reader [file join $dir read-$policy] $policy system]]
     }
     removeDirectory mts-main-darwin-io
     set results
-} -result [list worker [list 0 "Hello from the main thread\nunit\n" {}] [list 0 "\[12, -1, 9\]\n" {}] \
-    main-thread [list 0 "Hello from the main thread\nunit\n" {}] [list 0 "\[12, -1, 9\]\n" {}]]
+} -result [list worker [list 0 "Hello from the main thread\n" {}] [list 0 {} {} {[12, -1, 9]}] \
+    main-thread [list 0 "Hello from the main thread\n" {}] [list 0 {} {} {[12, -1, 9]}]]
 
 test mts-main-link-failure {a main-thread link that fails (no rustc) is the link's failure, never a main-thread executable: the previous file kept, no temporary directory left} -constraints {mainThreadStartup rustcLinked} -body {
     set dir [makeDirectory mts-main-link-failure]

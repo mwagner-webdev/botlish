@@ -706,10 +706,30 @@ proc hexArgs {vec} {
     return [lmap a $vec {expr {$a eq "" ? "-" : [binary encode hex $a]}}]
 }
 
+# The value of the run `exec ARGS` makes -- the executable it starts,
+# directly or through a launcher, inherits this process's environment --
+# read through the driver protocol (BOTLISH_NATIVE_RESULT, ProtocolValue):
+# an executable prints no value of its own (PROGRAM-OUTPUT-MILESTONE-1.md).
+# These programs print nothing: anything the run writes is an error.
+proc execValue {args} {
+    set result [ProtocolResultFile]
+    try {
+        set output [withEnvironment [list BOTLISH_NATIVE_RESULT $result] {exec {*}$args}]
+        if {$output ne ""} {
+            error "the executable wrote: $output"
+        }
+        return [ProtocolValue $result]
+    } finally {
+        file delete $result
+    }
+}
+
 # Runs EXECUTABLE with the raw vector VEC (argument zero first; the empty
-# vector is not expressible through bash and is tested separately).
+# vector is not expressible through bash and is tested separately) and the
+# extra environment ENVIRONMENT (NAME=VALUE ...): the program's value
+# (execValue).
 proc launch {executable vec {environment {}}} {
-    return [exec env {*}$environment bash $::launcher $executable {*}[hexArgs $vec]]
+    return [execValue env {*}$environment bash $::launcher $executable {*}[hexArgs $vec]]
 }
 
 # Builds source TEXT once into the shared directory (rustc links it): the
@@ -724,7 +744,7 @@ proc buildOnce {name text} {
 
 set aotHandled "args = argv():\n    on InvalidArgumentEncoding:\n        \[\"fallback\"\]\nargs"
 
-test argv-standalone-reads-run-time-arguments {one executable built once prints this run's arguments: different argv, no recompilation} -constraints {executableAot bashLauncher} -body {
+test argv-standalone-reads-run-time-arguments {one executable built once reads this run's arguments (its value, through the driver protocol): different argv, no recompilation} -constraints {executableAot bashLauncher} -body {
     set exe [buildOnce argv-handled $::aotHandled]
     set mtime [file mtime $exe]
     set results [list \
@@ -744,8 +764,8 @@ test argv-standalone-argument-zero-is-supplied-not-reconstructed {a custom argv[
 
 test argv-standalone-invoked-by-path-spellings {argument zero is the spelling the launcher used (relative, absolute)} -constraints {executableAot bashLauncher} -body {
     set exe [buildOnce argv-handled $::aotHandled]
-    set viaTcl [exec $exe a b]
-    set relative [exec sh -c {cd "$1" && ./"$2" r} sh [file dirname $exe] [file tail $exe]]
+    set viaTcl [execValue $exe a b]
+    set relative [execValue sh -c {cd "$1" && ./"$2" r} sh [file dirname $exe] [file tail $exe]]
     list [expr {$viaTcl eq "\[\"$exe\", \"a\", \"b\"\]"}] [expr {$relative eq "\[\"./[file tail $exe]\", \"r\"\]"}]
 } -result {1 1}
 
@@ -812,13 +832,13 @@ test argv-standalone-large-vector {many arguments and many bytes through the rea
         [expr {[launch $exe $vec {BOTLISH_NATIVE_GC_STRESS=1}] eq $expected}]
 } -result {1 1}
 
-test argv-standalone-gc-stress-invalid {the error path under GC stress in a standalone executable} -constraints {executableAot bashLauncher} -body {
+test argv-standalone-gc-stress-invalid {the error path under GC stress in a standalone executable: its value through the driver protocol, and a plain run that completes printing nothing (an executable never prints its value)} -constraints {executableAot bashLauncher} -body {
     set exe [buildOnce argv-handled $::aotHandled]
     set vec [list [T ./p]]
     for {set i 0} {$i < 100} {incr i} { lappend vec [T "ok-$i"] }
     lappend vec [H fe]
-    launch $exe $vec {BOTLISH_NATIVE_GC_STRESS=1}
-} -result {["fallback"]}
+    list [launch $exe $vec {BOTLISH_NATIVE_GC_STRESS=1}] [exec env BOTLISH_NATIVE_GC_STRESS=1 bash $::launcher $exe {*}[hexArgs $vec]]
+} -result {{["fallback"]} {}}
 
 testConstraint pythonLauncher [expr {[auto_execok python3] ne "" && $::tcl_platform(platform) eq "unix"}]
 
@@ -829,7 +849,7 @@ test argv-standalone-argc-zero {a process started with argc == 0 sees argv() == 
     # still passes argc == 0 the runtime reports [] -- never a synthetic
     # executable name.
     set exe [buildOnce argv-handled $::aotHandled]
-    set result [exec python3 -c {
+    set result [execValue python3 -c {
 import ctypes, sys
 libc = ctypes.CDLL(None, use_errno=True)
 argv = (ctypes.c_char_p * 1)(None)
@@ -888,11 +908,11 @@ test argv-standalone-fuzz {random valid and invalid vectors: the standalone exec
 set windowsTexts [list "" "a b" " lead" "trail " "tab\there" "q\"uote" "back\\" "a\\\"b" "\\\\server\\share\\" \
     "%PATH%" "\u00e9" "e\u0301" "\u20ac" "\U0001F600" "\u4e2d\u6587"]
 
-# ARGS run through EXE by Tcl's exec: {ARG0 REST}, ARG0 the executable's
-# argument zero, REST the shown List of the others (the program shows its
-# argv() List; ARG0 is the first element).
+# ARGS run through EXE by Tcl's exec: {ARG0 SHOWN}, ARG0 the executable's
+# argument zero, SHOWN its value, the shown argv() List (execValue: ARG0 is
+# the first element).
 proc windowsRun {exe args} {
-    set shown [exec $exe {*}$args]
+    set shown [execValue $exe {*}$args]
     if {![regexp {^\["((?:[^"\\]|\\.)*)"(?:, |\])} $shown -> arg0]} {
         return [list "" $shown]
     }
@@ -920,13 +940,13 @@ test argv-windows-argument-zero-is-the-command-lines {argument zero is the comma
 test argv-windows-unpaired-surrogate-is-the-declared-error {an argument with an unpaired surrogate -- UTF-16 a command line may hold, no Unicode scalar -- fails argv() with InvalidArgumentEncoding, handled by the program, never replaced; a program that never calls argv() runs} -constraints {executableAot windowsProcess} -body {
     set exe [buildOnce argv-handled $::aotHandled]
     set ignoring [buildOnce argv-ignoring "1 + 1"]
-    list [exec $exe ok "a\ud800b"] [exec $exe "\udc00"] [exec $ignoring "\ud800"]
+    list [execValue $exe ok "a\ud800b"] [execValue $exe "\udc00"] [execValue $ignoring "\ud800"]
 } -result {{["fallback"]} {["fallback"]} 2}
 
 test argv-windows-same-values-as-in-process {the same program and arguments give identical text in-process and standalone: the in-process snapshot is the UTF-8 of the arguments the executable reads} -constraints {executableAot windowsProcess} -body {
     set exe [buildOnce argv-transform $::transformProgram]
     set texts [list "\u00c4B" x "" "q\"uote" "tab\there" "\U0001F600\u4e2d" "a b\\"]
-    set standalone [exec $exe {*}$texts]
+    set standalone [execValue $exe {*}$texts]
     regexp {^\[\["((?:[^"\\]|\\.)*)"} $standalone -> arg0
     set arg0 [subst -nocommands -novariables $arg0]
     set inProcess [lindex [lindex [outcomesOf [argvHir $::transformProgram] [lmap t [concat [list $arg0] $texts] {T $t}]] 0] 1]
@@ -1045,7 +1065,7 @@ test argv-linked-run-same-as-standalone {a linked run and the same program built
     set exe [buildOnce argv-linked $::linkedTransform]
     set texts [lrange $::linkedTexts 1 end]
     if {[testConstraint windowsProcess]} {
-        set standalone [exec $exe {*}$texts]
+        set standalone [execValue $exe {*}$texts]
         regexp {^\[\["((?:[^"\\]|\\.)*)"} $standalone -> arg0
         set arg0 [subst -nocommands -novariables $arg0]
     } else {

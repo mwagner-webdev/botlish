@@ -4987,6 +4987,46 @@ the same rule) with the pinned environment of
 bundle, LaunchServices and dry-run steps; the release path itself runs only
 for a release tag.
 
+## Program output: executables and `run` (PROGRAM-OUTPUT-MILESTONE-1.md)
+
+A program's value is the language's (its last top-level statement) and the
+test infrastructure's oracle; printing it is main.tcl's development view
+only (PROGRAM-RESULT-PRINTING-CENSUS.md). Keep it so:
+
+* A standalone executable writes nothing of its own when its program
+  completes: status 0, standard output and error the program's alone
+  (`runtime::aot::run`). Never print the value, a trailing line or a
+  status there, and never add a switch that brings one back. A run-time
+  error stays `MESSAGE (CODE)` on standard error with status 1.
+* The driver protocol (`BOTLISH_NATIVE_RESULT=FILE`) is the one way to read
+  an executable's value: tests use tests/helpers.tcl's `standaloneValue`
+  and `bareValue`; shell scripts without Tcl compare the words of the
+  result file's `value V` line, its quoting removed (the `value_words`
+  idiom of single/ffi-smoke-test.sh). Never parse an executable's standard
+  output for its value, and never strip a "last line" from it.
+* `main.tcl run [OPTION...] FILE [ARG...]` runs one program as a command:
+  no header, no value line, every word after FILE the program's argument,
+  natively unless `-backend` says otherwise, status 0 (completed) or 1
+  (rejected, failed: the diagnostics or the error on stderr), 2 for a
+  malformed invocation; only `-backend`, `-warnings`, `-target`, `-L` and
+  `-F` combine with it. single/main.tcl's `MayLink` knows its native
+  default. main.tcl's default run keeps its `== FILE (BACKEND)` header and
+  `value:` line: it is the Tcl backends' only output, Compilerpedia's
+  `@output` check and many tests' observable.
+* The exit status is planned as the program's top-level value -- an Int,
+  or `unit` for 0 (success) -- with no early exit by design: never add an
+  exit function, a top-level `return`, or a status from anything else.
+  Until that milestone a completed program's status is 0. Icy Tower's
+  declared C `exit` is a workaround of the game's, not a pattern.
+
+If you change any of that, run `tests/native-executable.test`,
+`tests/main-cli.test`, `tests/native-program-output.test`,
+`tests/workload-2048.test`, `tests/workload-icy-tower.test`,
+`audit/native-aot/tools/mutate.tcl` (its `result-printed` mutant) and, for
+single/main.tcl, `audit/single-executable/tools/mutate.tcl` (its
+`run-command-not-linking` mutant) and both smoke tests after
+`single/build.sh`.
+
 ## Application modules, native program output, the recursion limit
 
 Three product rules (POST-2048-PRODUCT-FIXES.md):

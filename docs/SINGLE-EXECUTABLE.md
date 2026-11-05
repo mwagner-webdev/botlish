@@ -28,7 +28,9 @@ its entry file (IMPORTS.md, "Application modules"), so in a directory holding
 only `botlish`, `main.bot` and `game.bot`, `main.bot`'s `import game` names
 `game.bot` -- the packed standard library is consulted first, and a missing
 module's diagnostic names the application path before the archive's. A native
-run shows what the program prints, then its value, as an executable would, and
+run shows what the program prints, then its value (an executable prints only
+what the program prints, and `botlish run FILE ARG...` runs a program that
+way: PROGRAM-OUTPUT-MILESTONE-1.md), and
 the interpreter runs ordinary recursion thousands of calls deep (main.tcl's
 recursion limit, core/core.tcl): main.tcl's own behavior, packed.
 
@@ -176,7 +178,7 @@ Every linker's startup reads the policy from the record before it builds
 anything (`runtime::aot::start_linked`, the stub's loader) and `aot::run`
 runs one body on the thread it names: the Vm made there, the startup report,
 the argument snapshot, the driver protocol or the overflow guard, the
-program, its value or error -- so output, errors, statuses, the driver
+program, its status or error -- so output, errors, statuses, the driver
 protocol and every runtime guarantee are the same; a Rust panic is "native
 executable panicked (NATIVE BUG)", status 1, under both. The startup report
 ends in `startup POLICY`, `process-main-thread 1|0|unknown` and `stack

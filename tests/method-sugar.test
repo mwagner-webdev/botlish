@@ -945,7 +945,7 @@ proc executableValue {text} {
     close $channel
     try {
         exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
-        return [runStandalone [file rootname $path]]
+        return [standaloneValue [file rootname $path]]
     } finally {
         removeDirectory {method executable}
     }
@@ -1004,7 +1004,7 @@ fn run(n: int) -> int:
 with context Log {digits: std::mutable_array::create(1, 0)}
 [run(1), run(20)]}
 
-test method-standalone-executable {the standalone executables of the method and free spellings print the value (and evaluation log) every in-process backend computes} -constraints executableAot -body {
+test method-standalone-executable {the standalone executables of the method and free spellings compute the value (and evaluation log) every in-process backend computes (read through the driver protocol)} -constraints executableAot -body {
     list [executableValue $::typedMethod] [executableValue $::typedFree] [parity $::typedMethod] [parity $::typedFree]
 } -result {{[12012, 50012]} {[12012, 50012]} {value {[12012, 50012]}} {value {[12012, 50012]}}}
 

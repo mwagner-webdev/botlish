@@ -221,9 +221,10 @@ proc ours {exe cases} {
     set out {}
     set batch {}
     set size 0
-    # The executable prints the program's value, unit, last.
+    # An executable prints nothing but the program's own lines
+    # (PROGRAM-OUTPUT-MILESTONE-1.md): one per case.
     set flush {apply {{exe batch} {
-        lrange [split [string trimright [exec $exe {*}$batch] \n] \n] 0 end-1
+        split [string trimright [exec $exe {*}$batch] \n] \n
     }}}
     foreach c $cases {
         set h [hex [lindex $c 1]]

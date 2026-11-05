@@ -565,7 +565,7 @@ test rcf-executable {a program that passes and receives raw floats and doubles l
     set hir [rcfHir $source]
     set dir [makeDirectory rcf-exe-[pid]]
     set exe [native::withLinkDirs [rcfLinkDirs] {native::executable $hir [file join $dir program]}]
-    list [string trim [runBare $exe]] [lindex [rcfRun $hir cranelift] 1]
+    list [string trim [bareValue $exe]] [lindex [rcfRun $hir cranelift] 1]
 } -cleanup {file delete -force [file join [temporaryDirectory] rcf-exe-[pid]]} -result {{[2141192193, 9223372036854775808, 2141192192, 9219994337134247936]} {[2141192193, 9223372036854775808, 2141192192, 9219994337134247936]}}
 
 test rcf-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection attempt at every allocation site) every raw crossing keeps its bits: C results boxed into fresh raw values, raw arguments, view and element reads, edits, whole copies, all in a loop that allocates throughout} -constraints rawfloatFixture -body {

@@ -4927,6 +4927,7 @@ tests/native-executable.test native-executable-cli-paths pass
 tests/native-executable.test native-executable-coroutines pass
 tests/native-executable.test native-executable-format pass
 tests/native-executable.test native-executable-linker-diagnostics pass
+tests/native-executable.test native-executable-prints-no-value pass
 tests/native-hashing.test hash-alloc-1 pass
 tests/native-hashing.test hash-alloc-2 pass
 tests/native-hashing.test hash-callables-1 pass
@@ -10384,6 +10385,14 @@ tests/hir-interchange.test hx-trait-source pass
 tests/hir-interchange.test hx-unstamped pass
 tests/main-cli.test cli-help-overview-newcomer-line pass
 tests/main-cli.test cli-help-overview-primer pass
+tests/main-cli.test cli-run-output-only pass
+tests/main-cli.test cli-run-arguments pass
+tests/main-cli.test cli-run-standard-input pass
+tests/main-cli.test cli-run-tcl-backends pass
+tests/main-cli.test cli-run-rejected pass
+tests/main-cli.test cli-run-runtime-error pass
+tests/main-cli.test cli-run-runtime-error-native pass
+tests/main-cli.test cli-run-usage-errors pass
 tests/module-privacy.test mp-access-binding pass
 tests/module-privacy.test mp-access-call pass
 tests/module-privacy.test mp-access-from-module pass

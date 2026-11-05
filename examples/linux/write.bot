@@ -24,7 +24,8 @@
 # Tcl backends refuse the syscall with the semantic error NATIVE-ONLY.
 #
 # stdout (native): Hello from Botlish!
-# value  (native): 20, the 20 bytes written
+# value  (native): 20, the 20 bytes written (main.tcl's "value:" line; an
+#                  executable prints no value)
 
 # A direct module (DIRECT-MODULES.md): the program calls std::linux::write, a
 # callable of the direct module linux, at its top level -- a deliberately
