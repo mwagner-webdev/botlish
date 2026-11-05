@@ -358,6 +358,31 @@ test pds-reason-walk-polynomial {one question's reason walk walks an application
     set results
 } -result {{none 1 1 1} {none 1 1 1} {none 1 1 1} {{} 1 1 1} {{} 1 1 1}}
 
+test pds-no-depth-threshold {no depth or size decides an answer: an affine argument is never cut by the type bound, so W[List^N[Coroutine]], Mixed[int, List^N[Coroutine]] and Box^N[Coroutine] exist at every depth (8, 24, 48 and 96: Box^96[Coroutine] is a type of 1,605 characters), and each answers exactly as at depth 1 -- W and Mixed total and sendable, holding no handle; Box not total, not sendable and affine} -body {
+    set hir [pdsHir]
+    set results {}
+    set longest 0
+    foreach n {1 8 24 48 96} {
+        set nested $::pdsCo
+        set boxed $::pdsCo
+        for {set i 0} {$i < $n} {incr i} {
+            set nested [hir::types::MakeList $nested]
+            set boxed [pdsApp Box $boxed]
+        }
+        set row {}
+        foreach t [list [pdsApp W $nested] [pdsApp Mixed int $nested] $boxed] {
+            if {[string length $t] > $longest} {
+                set longest [string length $t]
+            }
+            lappend row [list [lindex [hir::types::Totality equality $t] 0] \
+                [lindex [hir::types::Totality hash $t] 0] [lindex [hir::types::SendClass $t] 0] \
+                [hir::types::IsAffine $t]]
+        }
+        lappend results $row
+    }
+    list [expr {[llength [lsort -unique $results]] == 1}] [lindex $results 0] [expr {$longest > 1000}]
+} -result {1 {{total total total 0} {total total total 0} {none none none 1}} 1}
+
 test pds-reason-past-the-bound {the class reads the argument uncut, so a reason walk over field types the type bound cut (Deep[List[Fn{...}]] of `values: List[List[T]]`: the function sits past the aggregate bound) names the argument that decides it, with the argument's own reason -- never a cut type's, never a recursion that is not there} -body {
     set hir [pdsHir]
     set t [pdsApp Deep [hir::types::MakeList $::pdsFn]]
