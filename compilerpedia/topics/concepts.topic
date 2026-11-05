@@ -1362,9 +1362,9 @@ how a function's variables are established.
 
 @topic concept.declaration-summaries
 title: Recursive parameterized types: answered from their declarations
-summary: A parameterized struct that names itself with a larger argument (`next: List[W[List[T]]]`) is one finite declaration; the compiler decides what its applications hold -- ownership, equality and hashing, obligations, errors, sendability -- from a summary of the declaration, never by expanding the application.
+summary: A struct that names itself with a larger argument (`next: List[W[List[T]]]`) is one finite declaration; what its applications hold is decided from it, never by expanding them.
 index: concepts
-alias: declaration summary; non-uniform recursion; polymorphic recursion; recursive generic type; W[List[T]]; infinite type expansion
+alias: declaration summary; non-uniform recursion; recursive generic type; W[List[T]]; infinite type expansion
 keywords: recursive, parameterized, application, summary, fixpoint, Hashable, affine, sendable, W, nested, expansion
 related: concept.parameterized-structs concept.hashable concept.structs
 docs: PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md TRAIT-CONSTRAINED-IMPRINTED-TYPES.md
@@ -1420,7 +1420,8 @@ v = w
 @end
 
 == MORE
-PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md; concept.parameterized-structs.
+PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md;
+concept.parameterized-structs.
 
 @topic concept.opaque-structs
 title: Opaque structs: representation owned by one module
