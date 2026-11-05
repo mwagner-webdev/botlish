@@ -837,10 +837,27 @@ all passed. `tools/compilerpedia.tcl check`: 0 problems.
 had relied on the removed test). The emission census's `terminal-value`
 mistake: accepted, as now expected. Not run locally: the whole
 `tests/local.tcl` (90 minutes on this container), GC stress, and the
-static-decisions comparison (CI only, by the repository's rules); the
-branch's final commit is pushed for the macOS and Windows workflows, and
-`tests.yml`, `tests-arm64.yml` and `static-decisions.yml` are dispatched on
-it.
+static-decisions comparison (CI only, by the repository's rules).
+
+**CI on the branch** (d2889cd, before merging main):
+
+| workflow | result |
+|---|---|
+| static-decisions (dispatched) | passed: batched and sequential agree on every suite |
+| tests (macos arm64) | passed |
+| icy-tower (macos arm64, windows x86-64) | passed |
+| tests (linux arm64, dispatched) | every job passed but GC stress, cancelled at GitHub's 6-hour job limit (below) |
+| tests (dispatched) | the failures main's latest run (bdd5e3d) has, test for test: package-authoring.test's `pa-add-refusals` (the runner's linker cannot link the AArch64 library the test builds) in interp, compile and the system-linked executables, and with `pa-pack-refuses-incomplete` in both native coverage runs; nothing else |
+| tests (windows x86-64) | one failure, package-authoring.test's `pa-compare-git-tree-matches-git`, which main fixed (a9b29ba) after this branch left it; the merge brings the fix |
+
+The arm64 GC-stress job ran the suite's two passes (interp, compile) in one
+job: 5 h 40 min on main's latest run, 6 h on this branch's, cancelled in the
+second pass's last files. csv-emission.test costs it about 3 minutes a pass
+(2 min 39 s and 3 min 3 s), and the runner was slower throughout (the first
+pass 7 min 49 s longer than main's, of which csv-emission.test is 2 min 39
+s). Rather than shave this file, `tests-arm64.yml` now runs the two passes as
+two jobs (`CORE_BACKEND` interp and compile), each about 3 hours, as
+`tests.yml`'s own suite jobs already are.
 
 ## 19. What `emits` could not prove
 
