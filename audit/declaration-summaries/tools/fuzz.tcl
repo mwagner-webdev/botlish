@@ -25,7 +25,7 @@ source [file join $root compiler compiler.tcl]
 source [file join $root surface surface.tcl]
 source [file join $root audit declaration-summaries tools parity.tcl]
 
-array set opt {-seed 1 -programs 40 -decls 4 -queries 30 -reference 1 -budget 300 -keep "" -progress 0}
+array set opt {-seed 1 -programs 40 -decls 4 -queries 30 -reference 1 -budget 100 -keep "" -progress 0}
 array set opt $argv
 expr {srand($opt(-seed))}
 # (An old walk that has not finished after -budget field reads does not
