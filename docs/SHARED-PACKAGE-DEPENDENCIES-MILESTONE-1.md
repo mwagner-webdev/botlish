@@ -657,7 +657,29 @@ New mutants, each a deliberate defect the milestone forbids:
   graph accepted, a graph package reading its own `.bot_modules`, a
   malformed graph ignored.
 
-MUTANTS-PLACEHOLDER
+Results (observed, each harness in its private copy of the tree):
+
+| harness | mutants | killed |
+|---|---:|---:|
+| audit/package-manager/tools/mutate.tcl: the 10 new and 6 retargeted | 16 | 16 |
+| audit/package-manager/tools/mutate.tcl: those whose code or killing tests this change touched (catalog, install, rollback, recovery, locking, verify, packing, every view and native-closure mutant killed by package-native.test) | 21 | 21 |
+| audit/bot-modules/tools/mutate.tcl: the whole catalog (20 earlier, 6 new) | 26 | 26 |
+| every other catalog's mutants of surface/modules.tcl (compiler-service, diagnostic-recovery, direct-modules, error-payloads, hashable, hir-interchange, module-privacy, mutable-map, native-link-plan, static-compile, syntax-recovery, target-model, type-predicates) | 31 | 31 |
+| `tools/mutant-catalogs.tcl` (every catalog applies to the tree) | 3005 | -- (0 problems) |
+
+The six package-manager mutants retargeted are the ones whose text this
+change rewrote (`update-ignores-request`, `install-replaces-modified`,
+`install-reuse-ignores-changes` and `cycle-unchecked` now in pm/graph.tcl,
+`view-derived-ignores-store`, `compiler-ignores-target-tree`), each kept a
+mutant of the same rule.
+
+The bot-modules harness had a defect of its own: its private tree had no
+`packages/`, and `tests/bot-modules.test` reads `packages/sdlkit/sdlkit.bot`
+at file level (since PM-1), so the file stopped there and every mutant was
+reported killed because "the test file did not complete" -- including
+mutants whose only detectors come later in the file. The harness now copies
+`packages/`; all 26 mutants ran with the whole file completing, and all
+were killed by failing tests.
 
 ### 12.5 Cross-backend
 
@@ -674,7 +696,95 @@ this branch are reported in the final status of the change, not here.
 
 ## 13. Performance
 
-PERF-PLACEHOLDER
+`bench/shared-dependencies.tcl` (observed; this container, 4 cores, shared
+with nothing during the run; medians of 3 runs; milliseconds and MiB). Each
+row installs a fresh application from botlish.json and a local repository
+(`install`: resolution, every artifact read and validated, the tree written,
+the package manager loaded included), installs again with nothing to do
+(`again`), counts the installed package directories, and compiles a program
+importing every application dependency (`compile`: the front end over the
+installed tree, its peak memory `fe`). Baseline: main before this milestone
+(`-root` of a worktree at `13dd290`).
+
+This milestone:
+
+```
+scenario            N install(ms)   pm(MiB)  again(ms) instances compile(ms)   fe(MiB)  note
+wide               10       30.6       8.0       36.3        10       84.2      23.6
+wide              100      131.5       9.7      135.9       100      444.9      56.1
+wide              300      379.9      14.3      332.9       300     2780.1     460.9
+shared             10       36.8       8.1       27.5        11       93.2      23.9
+shared            100      197.2      10.1      132.0       101      520.8      57.8
+shared            300      581.4      15.4      372.0       301     3182.8     464.2
+chain              10       31.5       8.0       28.4        10       78.8      23.0
+chain              30       77.1       8.4       55.8        30      136.3      25.4
+chain             100      208.0      10.2      145.9       100      277.2      32.4
+diamond             8       41.1       7.9       25.5         8       85.6      23.4
+diamond            16       50.9       8.1       37.2        16      112.0      24.8
+diamond            20       62.2       8.2       40.8        20      129.0      25.5
+subgraph           10       39.1       8.0       27.4        10       84.2      23.4
+subgraph           30       78.3       8.5       48.0        30      124.0      25.8
+subgraph          100      208.5      10.1      146.3       100      271.0      32.7
+conflict-early    100      129.1         -          -         -          -         -  refused: DEPENDENCY-CONFLICT
+conflict-late     100      101.1         -          -         -          -         -  refused: DEPENDENCY-CONFLICT
+```
+
+Main before it:
+
+```
+scenario            N install(ms)   pm(MiB)  again(ms) instances compile(ms)   fe(MiB)  note
+wide               10       29.0       7.8       20.2        10       81.9      23.5
+wide              100      201.0       9.5       75.2       100      392.6      56.1
+wide              300      552.7      13.4      191.8       300     2730.2     456.3
+shared             10       57.6       8.0       32.3        20      106.4      24.7
+shared            100      406.4      11.3      143.0       200      652.6      63.9
+shared            300      921.5      18.7      412.0       600     3534.8     480.9
+chain              10       32.6       7.9       20.0        10       75.9      23.0
+chain              30      132.2       8.7       10.8        30      121.0      25.7
+chain             100       39.0         -          -         -          -         -  refused: deeper than 32 levels (PM LIMIT)
+diamond             8       51.2       8.1       32.0        30      125.5      26.1
+diamond            16      915.0      18.1      390.1       510     1544.7      78.2
+diamond            20       54.4         -          -         -          -         -  refused: more than 1000 package instances (PM LIMIT)
+subgraph           10       78.3       8.2       32.7        28      115.3      25.4
+subgraph           30      360.3      10.6       11.5       108      332.0      33.7
+subgraph          100       39.8         -          -         -          -         -  refused: deeper than 32 levels (PM LIMIT)
+conflict-early    100      491.6      11.1      150.9       200      639.8      64.0
+conflict-late     100      489.1      11.3      143.2       200      647.9      64.0
+```
+
+What they show:
+
+* **Shared structures stop multiplying.** One instance per package: 301
+  directories for `shared 300` (main: 600), 16 for a 16-package diamond
+  (main: 510, its 2^8 paths to the last layer), 30 for `subgraph 30` (main:
+  108). Installation and compilation follow: the diamond installs in 51 ms
+  and compiles in 112 ms (main: 915 and 1,545 ms), `shared 300` in 581 and
+  3,183 ms (main: 922 and 3,535). Graphs main refused -- a chain deeper than
+  32 levels, a diamond of more than 1,000 nested instances -- install: depth
+  is no longer physical.
+* **Resolution is linear.** Each release is explored once and each edge
+  checked once; `chain 100` resolves and installs in 208 ms, `wide 300` in
+  380 ms. Conflicts are found by the same single pass, early or late
+  (`conflict-early`/`-late`: 129 and 101 ms to the refusal); main installed
+  both conflict cases, two `base` instances each.
+* **Independent packages cost what they cost.** For `wide` (no sharing) the
+  two package managers do the same work; repeated measurements of `wide 300`
+  varied between 380 and 725 ms for this milestone and 530 and 553 ms for
+  main (the first install is dominated by writing 600 files; an in-process
+  profile of resolution and staging, 3 runs each: resolution 174-254 ms
+  against main's 198-223, staging and commit 402-579 against 515-596). A
+  no-op `install` re-checks every installed file's CRC either way; the first
+  measurement above showed this milestone's slower (333 ms against 192 for
+  `wide 300`), traced to `Apply` reading the 300-package record four times;
+  reading it once, the same comparison measured 211 against 202 ms.
+* **Memory** follows the instance count: 14-15 MiB for the package manager
+  at 300 packages in either, 18.6 MiB for main's 600-instance `shared 300`;
+  the front end's peak is set by the program's modules (461-464 MiB for 300
+  imported modules in both).
+* **Compilation and caching**: identities of a graph are their spellings,
+  so the loader's qualified-reference rewrite never runs for a graph
+  (section 3); the one new front-end input is the graph file, one probe and
+  one read per compilation. No cache key changed.
 
 ## 14. Documentation and principles
 

@@ -565,9 +565,6 @@ test pw-event-loop-linux-only {the event loop's driver is Linux's (x86-64 and AA
     }
 } -cleanup cleanup -result {{windows-x86_64 1 UNSUPPORTED} {macos-aarch64 1 UNSUPPORTED} {linux-aarch64 0 {}}}
 
-foreach dir [glob -nocomplain -directory [temporaryDirectory] pw-repo-[pid]-*] {
-    file delete -force $dir
-}
 # ---------------------------------------------------------------------------
 # G. Two independently authored libraries over one driver
 
@@ -690,4 +687,7 @@ test pw-shared-native-bridge {a package whose own native archive calls the share
         [valueOf [file join $app main.bot] cranelift]
 } -cleanup cleanup -result {0 2 {{library event_loop_linux: bundled static (instance event_loop_linux)} {library ticker: bundled static (instance ticker)}} {["t=1: tick 1", "t=2: tick 2", "t=3: tick 3", "t=4: tick 4", "t=5: tick 5", "t=5: handled 5 ticks, sum 15"]}}
 
+foreach dir [glob -nocomplain -directory [temporaryDirectory] pw-repo-[pid]-*] {
+    file delete -force $dir
+}
 cleanupTests
