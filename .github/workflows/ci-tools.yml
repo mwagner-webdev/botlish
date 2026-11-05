@@ -7,7 +7,11 @@ name: ci tools
 # report what they would dispatch or cancel). A push that changes them runs
 # it, on any branch, so a branch gets their evidence before release-gate.yml
 # and prune-runs.yml run from main -- which is the only place workflow_run
-# and schedule triggers do.
+# and schedule triggers do. Last, tools/ci/history.py recomputes the
+# canary's records (tests/canary.tsv; CI-RUNS.md, "The canary") from main's
+# recent runs: the job summary shows how they differ from the committed
+# ones, the log and the canary-records artifact hold the new file. Commit it
+# to refresh the canary.
 
 on:
   push:
@@ -32,7 +36,7 @@ jobs:
     name: ci tools (tests, dry runs)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -58,3 +62,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 -I tools/ci/runs.py prune --dry-run
+
+      - name: The canary's records, recomputed
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I tools/ci/history.py --write
+          cat tests/canary.tsv
+          {
+            echo "## The canary's records (tests/canary.tsv), recomputed"
+            echo
+            echo '```diff'
+            git diff tests/canary.tsv | head -n 300
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: canary-records
+          path: tests/canary.tsv

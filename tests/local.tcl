@@ -4,7 +4,8 @@
 #
 #   tclsh9.0 tests/local.tcl ?-jobs N? ?-backends LIST? ?-golden-backends LIST?
 #                            ?-hir-cache DIR? ?-all 0|1? ?-parts LIST?
-#                            ?-verbose 0|1? ?FILE ...?
+#                            ?-priority 0|1? ?-fail-fast 0|1? ?-verbose 0|1?
+#                            ?FILE ...?
 #
 # Tcl tests: every tests/*.test file once per backend of -backends (default
 # CORE_BACKEND if set, else interp,compile -- what tests/all.tcl runs), each
@@ -33,17 +34,23 @@
 # skipped tests, so the run covers what the files covered. -parts tcl or
 # -parts golden runs one layer only.
 #
-# -jobs N processes at a time (default: the number of processors), the
-# golden suites and the largest files first. Prints a line per finished
-# process (-verbose 1 also prints each one's output), then every failure;
-# exits 1 if any Tcl test or golden test failed, a file or suite did not
-# complete, or a test file wrote to stderr (as tests/all.tcl counts it).
+# -jobs N processes at a time (default: the number of processors). The
+# likeliest to fail start first (-priority 1, the default; CI-RUNS.md, "The
+# canary"): the test files and golden suites this checkout changes against
+# origin/main, its working tree included, then those that failed recently in
+# CI on this host (tests/canary.tsv), as tests/canary.tcl selects them; then
+# the golden suites and the largest files. -fail-fast 1 starts nothing more
+# after the first failure (the running ones finish) and reports the rest as
+# not run. Prints a line per finished process (-verbose 1 also prints each
+# one's output), then every failure; exits 1 if any Tcl test or golden test
+# failed, a file or suite did not complete or was not run, or a test file
+# wrote to stderr (as tests/all.tcl counts it).
 
 set testDir [file dirname [file normalize [info script]]]
 set root [file dirname $testDir]
 
 proc usage {} {
-    puts stderr "usage: tclsh9.0 tests/local.tcl ?-jobs N? ?-backends LIST? ?-golden-backends LIST? ?-hir-cache DIR? ?-all 0|1? ?-parts LIST? ?-verbose 0|1? ?FILE ...?"
+    puts stderr "usage: tclsh9.0 tests/local.tcl ?-jobs N? ?-backends LIST? ?-golden-backends LIST? ?-hir-cache DIR? ?-all 0|1? ?-parts LIST? ?-priority 0|1? ?-fail-fast 0|1? ?-verbose 0|1? ?FILE ...?"
     exit 2
 }
 
@@ -55,7 +62,7 @@ proc processors {} {
 set options [dict create -jobs [processors] \
     -backends [expr {[info exists ::env(CORE_BACKEND)] && $::env(CORE_BACKEND) ne "" ? $::env(CORE_BACKEND) : "interp,compile"}] \
     -golden-backends interp,compile,cranelift-generic,cranelift -hir-cache default \
-    -all 0 -parts tcl,golden -verbose 0]
+    -all 0 -parts tcl,golden -priority 1 -fail-fast 0 -verbose 0]
 set arguments {}
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
@@ -73,6 +80,7 @@ set parts [{*}$listOf [dict get $options -parts]]
 set jobs [dict get $options -jobs]
 set skipDuplicates [expr {![dict get $options -all]}]
 set verbose [dict get $options -verbose]
+set failFast [dict get $options -fail-fast]
 
 # This checkout's own front-end cache directory, under the user's cache
 # directory: "" when there is none to put it in.
@@ -204,14 +212,37 @@ foreach path [lsort -command {apply {{a b} {expr {[file size $b] - [file size $a
     }
 }
 
+# The likeliest to fail first (tests/canary.tcl), in its order; then the
+# rest in the order above.
+set first {}
+if {[dict get $options -priority]} {
+    source [file join $testDir canary.tcl]
+    if {[catch {canary::priority} likely]} {
+        puts "priority: none ($likely)"
+        set likely {}
+    }
+    foreach item $likely {
+        set tail [file tail $item]
+        if {[string match *.bot $tail]} {
+            set keys [list golden:$tail]
+        } else {
+            set keys [lmap b $backends {string cat tcl: $b : $tail}]
+        }
+        foreach key $keys {
+            if {[dict exists $items $key] && $key ni $first} { lappend first $key }
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # The pool: JOBS processes at a time, stdout through a pipe, stderr to a
 # file (any stderr output counts as a test file error, as for tests/all.tcl).
 
 set scratch [file tempdir botlish-local]
 set results [dict create]
-set pending [dict keys $items]
+set pending [concat $first [lmap key [dict keys $items] {expr {$key in $first ? [continue] : $key}}]]
 set running 0
+set stopped 0
 set started [clock milliseconds]
 
 proc launch {key} {
@@ -262,6 +293,7 @@ proc collect {channel key err} {
     unset ::pipeOutput($channel) ::pipeStart($channel)
     incr running -1
     report $key
+    if {$::failFast && ![lindex [verdict $key] 0]} { set ::stopped 1 }
     set ::event $key
 }
 
@@ -315,10 +347,13 @@ proc report {key} {
 }
 
 puts "local run: [llength $testFiles] Tcl test files on [join $backends {, }][expr {$skipDuplicates ? " (golden duplicates skipped)" : " (every test)"}], [llength $suites] golden suites on [join $goldenBackends {, }] ([expr {$hirCache eq "" ? "no front-end cache" : "front-end cache $hirCache"}]), $jobs at a time"
+if {$first ne {}} {
+    puts "first, the likeliest to fail: [join [lmap key $first {lindex [dict get $items $key] 3}] {, }]"
+}
 flush stdout
 try {
-    while {[llength $pending] > 0 || $running > 0} {
-        while {$running < $jobs && [llength $pending] > 0} {
+    while {([llength $pending] > 0 && !$stopped) || $running > 0} {
+        while {$running < $jobs && [llength $pending] > 0 && !$stopped} {
             set pending [lassign $pending key]
             launch $key
         }
@@ -327,6 +362,7 @@ try {
 } finally {
     file delete -force $scratch
 }
+set notRun [expr {$stopped ? $pending : {}}]
 set wall [expr {([clock milliseconds] - $started) / 1000.0}]
 
 # ---------------------------------------------------------------------------
@@ -336,6 +372,7 @@ set failures {}
 set totals [dict create]
 set goldenTotals [dict create suites 0 failedSuites 0]
 dict for {key item} $items {
+    if {![dict exists $results $key]} continue
     lassign $item kind command environment label
     lassign [dict get $results $key] status output stderr
     lassign [verdict $key] ok summary
@@ -384,6 +421,9 @@ if {$suites ne {} && $hirCache ne ""} {
         [expr {$removed ? ", $removed of other front ends removed" : ""}]]
 }
 puts [format "Wall time %.1f s with %d jobs." $wall $jobs]
+if {$notRun ne {}} {
+    puts "Not run (-fail-fast 1, after the first failure): [llength $notRun] of [dict size $items]"
+}
 
 if {$failures ne {}} {
     puts "\nFAILURES ([llength $failures]):"
@@ -419,4 +459,4 @@ if {$failures ne {}} {
     }
     exit 1
 }
-exit 0
+exit [expr {$notRun ne {}}]

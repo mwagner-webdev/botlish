@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""test_runs.py -- tests of tools/ci/runs.py (CI-RUNS.md):
+"""test_runs.py -- tests of tools/ci/runs.py and tools/ci/history.py
+(CI-RUNS.md):
 
     python3 -I tools/ci/test_runs.py [-v]
 
 The release check, the gate and the pruning against a fake of the GitHub
-API over a small commit graph; the requests themselves against a fake
+API over a small commit graph; the canary's records (history.py) from
+runs and job logs of the fake; the requests themselves against a fake
 urlopen; and, when PyYAML is installed, the workflows' side of the rules
 (.github/workflows/: every test workflow cancels a superseded run, main's
 included; a release is published only by a release run, after the check;
-the gate listens to every workflow a release waits for).
+the gate listens to every workflow a release waits for; every test
+workflow's expensive jobs wait for its canary).
 """
 import io
 import json
@@ -22,6 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 import runs  # noqa: E402
+import history  # noqa: E402
 
 REPO = "owner/repo"
 
@@ -46,22 +50,29 @@ class FakeApi:
         self.dispatched = []
         self.cancelled = []
         self.fail_cancel = set()
+        self.logs = {}
         self.next_id = 1000
 
     # building state
 
     def run(self, workflow, commit, branch="main", event="push", status="completed",
-            conclusion="success", title=None, jobs=None, repo=None):
+            conclusion="success", title=None, jobs=None, repo=None, created="2026-11-01T00:00:00Z"):
         self.next_id += 1
         r = {"id": self.next_id, "path": ".github/workflows/" + workflow, "head_sha": sha(commit),
              "head_branch": branch, "event": event, "status": status,
              "conclusion": conclusion if status == "completed" else None,
              "display_title": title if title is not None else "commit " + commit,
              "name": workflow, "html_url": "https://example/runs/%d" % self.next_id,
-             "head_repository": {"full_name": repo or self.repo}}
+             "head_repository": {"full_name": repo or self.repo}, "created_at": created}
         self.runs.append(r)
         if jobs is not None:
-            self.jobs_[r["id"]] = [{"name": n, "status": "completed", "conclusion": c} for n, c in jobs]
+            self.jobs_[r["id"]] = []
+            for job in jobs:
+                n, c, labels, log = (tuple(job) + (None, None))[:4]
+                self.next_id += 1
+                self.jobs_[r["id"]].append({"id": self.next_id, "name": n, "status": "completed", "conclusion": c,
+                                            "labels": labels or ["ubuntu-latest"]})
+                self.logs[self.next_id] = log or ""
         return r
 
     def green(self, commit, gc="success", own=()):
@@ -95,11 +106,12 @@ class FakeApi:
     def runs_at(self, s):
         return [r for r in self.runs if r["head_sha"] == s]
 
-    def workflow_runs(self, workflow, pages=1, per_page=100, branch=None, event=None, status=None):
+    def workflow_runs(self, workflow, pages=1, per_page=100, branch=None, event=None, status=None, created=None):
         out = [r for r in self.runs if r["path"] == ".github/workflows/" + workflow
                and (branch is None or r["head_branch"] == branch)
                and (event is None or r["event"] == event)
-               and (status is None or r["status"] == status or r["conclusion"] == status)]
+               and (status is None or r["status"] == status or r["conclusion"] == status)
+               and (created is None or r["created_at"][:10] >= created[2:])]
         return sorted(out, key=lambda r: r["id"], reverse=True)[:per_page * pages]
 
     def unfinished_runs(self):
@@ -107,6 +119,9 @@ class FakeApi:
 
     def jobs(self, run_id):
         return self.jobs_.get(run_id, [])
+
+    def log(self, job_id):
+        return self.logs[job_id]
 
     def compare(self, base, head):
         b, h = self.resolve(base), self.resolve(head)
@@ -520,11 +535,168 @@ class Requests(unittest.TestCase):
         self.assertEqual(json.loads(d.data), {"ref": "main", "inputs": {"release": "b" * 40}})
         self.assertTrue(c.full_url.endswith("/actions/runs/42/cancel"))
 
+    def test_log_follows_its_redirect_without_the_token(self):
+        hops = []
+
+        def first_hop(req, timeout=None):
+            hops.append(req)
+            raise urllib.error.HTTPError(req.full_url, 302, "Found", {"Location": "https://blob.example/log?sig=x"},
+                                         io.BytesIO(b""))
+        self.answers = []
+        seen = []
+
+        def urlopen(req, timeout=None):
+            seen.append(req)
+            return FakeResponse("2026-11-01T00:00:00Z a.test\n".encode())
+        api = runs.Api("t0ken", REPO, "https://api.example/", urlopen=urlopen, first_hop=first_hop)
+        self.assertEqual(api.log(9), "2026-11-01T00:00:00Z a.test\n")
+        self.assertEqual(hops[0].full_url, "https://api.example/repos/owner/repo/actions/jobs/9/logs")
+        self.assertEqual(hops[0].get_header("Authorization"), "Bearer t0ken")
+        self.assertEqual(seen[0].full_url, "https://blob.example/log?sig=x")
+        self.assertIsNone(seen[0].get_header("Authorization"))
+
+        def missing(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 410, "Gone", {}, io.BytesIO(b""))
+        with self.assertRaises(runs.ApiError):
+            runs.Api("t0ken", REPO, first_hop=missing).log(9)
+
     def test_refuses_without_token_or_repository(self):
         with self.assertRaises(runs.ApiError):
             runs.Api("", REPO)
         with self.assertRaises(runs.ApiError):
             runs.Api("t", "not a repository")
+
+
+# --- the canary's records (history.py) -------------------------------------------------
+
+
+def stamped(text, start="2026-11-01T10:00:00Z"):
+    """GitHub's log prefix on every line, a second apart."""
+    out = []
+    for i, line in enumerate(text.strip("\n").split("\n")):
+        out.append("2026-11-01T10:%02d:%02d.5000000Z %s" % (i // 60, i % 60, line))
+    return "\n".join(out) + "\n"
+
+
+TCLTEST_LOG = stamped("""
+######## backend: interp
+abi-bytes.test
+affine.test
+==== af-one the first FAILED
+==== Contents of test case:
+==== af-one FAILED
+==== af-two FAILED
+coroutines.test
+all.tcl:\tTotal\t10\tPassed\t7\tSkipped\t0\tFailed\t3
+Files with failing tests: affine.test coroutines.test
+Test files exiting with errors:  enums.test
+""")
+
+GOLDEN_LOG = stamped("""
+lists.bot          interp             3 passed, 0 failed
+loops.bot          cranelift          2 passed, 1 failed
+traits.bot         compile            ABORTED
+enums.bot: BACKENDS DISAGREE
+== mutable-vector.bot: COMPILE ERROR
+DISAGREE: tests/hashable.test hb-1 -> hashable.bot hb-1: old fail, new pass
+DISAGREE: tests/lists.test l-1 -> lists.bot l-1: old pass, new fail
+DISAGREE: tests/abi.test a-1 -> abi.bot a-1: old skip, new no-verdict
+TCL TEST FAILED: tests/maps.test m-7
+SUITE NOT OK: fold-loops.bot timeout
+Golden suites, wall seconds per suite (compile once, run on interp, compile, cranelift-generic, cranelift):
+    lists.bot                                           12.5   ok
+    loops.bot                                            3.0   failed
+    total                                               15.5 (elapsed 9.0 with 2 jobs)
+""")
+
+
+class History(unittest.TestCase):
+    def test_failures_of_the_test_runners(self):
+        self.assertEqual(history.failures(TCLTEST_LOG), {
+            "tests/affine.test": "af-one", "tests/coroutines.test": "a test failed",
+            "tests/enums.test": "did not complete"})
+        self.assertEqual(history.failures(GOLDEN_LOG), {
+            "tests/golden/loops.bot": "cranelift: 1 failed", "tests/golden/traits.bot": "compile: aborted",
+            "tests/golden/enums.bot": "backends disagree", "tests/golden/mutable-vector.bot": "compile error",
+            "tests/hashable.test": "hb-1", "tests/golden/lists.bot": "l-1", "tests/maps.test": "m-7",
+            "tests/golden/fold-loops.bot": "timeout"})
+        self.assertEqual(history.failures("ok\nnothing failed here\n"), {})
+
+    def test_hosts_from_labels(self):
+        cases = {"ubuntu-latest": "linux-x86_64", "ubuntu-24.04-arm": "linux-aarch64",
+                 "macos-15": "macos-aarch64", "windows-2025": "windows-x86_64", "self-hosted": None}
+        for label, host in cases.items():
+            self.assertEqual(history.host_of({"labels": [label]}), host, label)
+
+    def test_durations_from_the_logs(self):
+        self.assertEqual(history.file_durations(TCLTEST_LOG),
+                         {"tests/abi-bytes.test": 1.0, "tests/affine.test": 5.0, "tests/coroutines.test": 1.0})
+        self.assertEqual(history.suite_durations(GOLDEN_LOG),
+                         {"tests/golden/lists.bot": 12.5, "tests/golden/loops.bot": 3.0})
+
+    def api(self):
+        api = FakeApi(*linear("a", "b", "c", "d"))
+        fail = lambda files: stamped("Files with failing tests: %s" % files)  # noqa: E731
+        api.run("tests.yml", "a", conclusion="failure", created="2026-10-01T00:00:00Z",
+                jobs=[("tests (interp)", "failure", None, fail("old.test"))])
+        api.run("tests.yml", "b", conclusion="failure", created="2026-10-20T00:00:00Z",
+                jobs=[("tests (interp)", "failure", None, fail("affine.test")),
+                      ("tests (compile)", "failure", None, fail("affine.test lists.test gone.test")),
+                      ("tests (rust)", "success", None, fail("never.test"))])
+        api.run("tests.yml", "b", conclusion="failure", created="2026-10-20T01:00:00Z",
+                jobs=[("tests (interp)", "failure", None, fail("affine.test"))])
+        api.run("tests-arm64.yml", "c", conclusion="failure", created="2026-10-25T00:00:00Z",
+                jobs=[("arm64 tests (interp)", "failure", ["ubuntu-24.04-arm"], fail("affine.test lists.test"))])
+        # A layer that broke as a whole says nothing about its items.
+        api.run("tests-arm64.yml", "c", conclusion="failure", created="2026-10-25T02:00:00Z",
+                jobs=[("arm64 golden suites (shard 1/4)", "failure", ["ubuntu-24.04-arm"],
+                       fail(" ".join("x%d.test" % i for i in range(history.BROKEN + 1))))])
+        # A run that succeeded failed nothing (a job allowed to fail).
+        api.run("tests-arm64.yml", "c", conclusion="success", created="2026-10-26T00:00:00Z",
+                jobs=[("arm64 probe", "failure", ["ubuntu-24.04-arm"], fail("loops.test"))])
+        api.run("macos-arm64.yml", "c", conclusion="failure", created="2026-10-25T00:00:00Z",
+                jobs=[("acceptance", "failure", ["macos-15"], fail("affine.test")),
+                      ("linux control", "failure", ["ubuntu-latest"], fail("loops.test"))])
+        api.run("windows-x86_64.yml", "d", conclusion="failure", created="2026-10-30T00:00:00Z",
+                jobs=[("smoke", "failure", ["windows-2025"], stamped("""
+affine.test
+==== af-9 FAILED
+Files with failing tests: affine.test"""))])
+        api.run("tests.yml", "d", branch="topic", conclusion="failure", created="2026-10-30T00:00:00Z",
+                jobs=[("tests (interp)", "failure", None, fail("branch.test"))])
+        api.run("tests.yml", "d", conclusion="success", created="2026-10-31T00:00:00Z",
+                jobs=[("tests (interp)", "success", None, TCLTEST_LOG),
+                      ("golden suites (Botlish-native tests, shard 1/4)", "success", None, GOLDEN_LOG)])
+        return api
+
+    def test_history_counts_commits_per_item(self):
+        import datetime
+        today = datetime.datetime(2026, 11, 5, tzinfo=datetime.timezone.utc)
+        rows = history.history(self.api(), 21, today)
+        self.assertEqual(rows, [
+            ("tests/affine.test", "*", 3, "2026-10-30", "af-9"),
+            ("tests/lists.test", "linux-x86_64,linux-aarch64", 2, "2026-10-25", "a test failed"),
+            ("tests/loops.test", "linux-x86_64", 1, "2026-10-25", "a test failed"),
+            ("tests/gone.test", "linux-x86_64", 1, "2026-10-20", "a test failed"),
+        ])
+
+    def test_render_keeps_existing_items(self):
+        import datetime
+        today = datetime.datetime(2026, 11, 5, tzinfo=datetime.timezone.utc)
+        api = self.api()
+        text = history.render(history.history(api, 21, today), history.durations(api), 21, today)
+        body = [line.split("\t") for line in text.splitlines() if line and not line.startswith("#")]
+        self.assertEqual(body[0], ["history", "tests/affine.test", "*", "3", "2026-10-30", "af-9"])
+        items = [b[1] for b in body]
+        self.assertIn("tests/lists.test", items)
+        self.assertNotIn("tests/abi-bytes.test", [b[1] for b in body if b[0] == "history"])
+        for b in body:
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, b[1])), b)
+            self.assertEqual(len(b), 6 if b[0] == "history" else 3, b)
+        self.assertIn(["duration", "tests/golden/loops.bot", "3.0"], body)
+        self.assertNotIn("tests/golden/lists.bot", items, "no such suite")
+        self.assertNotIn("tests/gone.test", items, "no such file")
+        self.assertIn("# tools/ci/history.py", text)
 
 
 # --- the workflows' side ---------------------------------------------------------------
@@ -652,6 +824,50 @@ class Workflows(unittest.TestCase):
             for needle in req.jobs:
                 self.assertTrue([j for j in jobs.values() if needle in str(j.get("name"))],
                                 "%s has no %s job" % (req.workflow, needle))
+
+    # The canary (CI-RUNS.md, "The canary"): which job of each test workflow
+    # runs it, and the jobs that need not wait for it.
+    CANARY = {
+        "tests.yml": ("canary", {"warning-gate", "mutant-catalogs"}),
+        "tests-arm64.yml": ("canary", set()),
+        "macos-arm64.yml": ("smoke", {"linux-control", "app-mutants"}),
+        "windows-x86_64.yml": ("canary", set()),
+    }
+
+    def test_canary_gates_the_test_workflows(self):
+        for name, (canary, free) in self.CANARY.items():
+            w = workflow(name)
+            jobs = w["jobs"]
+            self.assertEqual(triggers(w)["push"]["branches"], ["**"], "%s: every branch push runs the canary" % name)
+            steps = jobs[canary]["steps"]
+            runs_canary = [st for st in steps if "tests/canary.tcl" in (st.get("run") or "")]
+            self.assertEqual(len(runs_canary), 1, "%s: job %s runs the canary once" % (name, canary))
+            self.assertEqual(runs_canary[0]["run"], 'tclsh9.0 tests/canary.tcl -base "$BASE"', name)
+            base = runs_canary[0]["env"]["BASE"]
+            self.assertIn("github.event.before", base, "%s: a push to main is compared with main's previous head" % name)
+            self.assertIn("origin/main", base, name)
+            checkout = [st for st in steps if (st.get("uses") or "").startswith("actions/checkout")]
+            self.assertEqual(checkout[0].get("with", {}).get("fetch-depth"), 0, "%s: the canary needs the history" % name)
+            for n in jobs:
+                if n == canary or n in free:
+                    continue
+                self.assertIn(canary, self.chain(jobs, n), "%s: job %s does not wait for the canary" % (name, n))
+                if_ = str(jobs[n].get("if"))
+                # A job that runs whatever its needs' results checks the canary's itself.
+                if "always()" in if_ or "!cancelled()" in if_:
+                    self.assertTrue("needs.%s.result" % canary in if_, "%s: job %s runs after a failed canary" % (name, n))
+
+    def test_branch_pushes_run_only_the_canary_on_linux(self):
+        for name in ("tests.yml", "tests-arm64.yml"):
+            jobs = workflow(name)["jobs"]
+            canary, free = self.CANARY[name]
+            for n, j in jobs.items():
+                if n == canary or n in free:
+                    continue
+                self.assertIn("github.ref == 'refs/heads/main'", str(j.get("if")), "%s: job %s runs on a branch push" % (name, n))
+                if "GC-stress" in j["name"]:
+                    self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", j["if"], name)
+                    self.assertNotIn("!= 'pull_request'", j["if"], "%s: GC stress on a branch push" % name)
 
     def test_only_housekeeping_cancels_or_dispatches(self):
         for name, w in all_workflows().items():

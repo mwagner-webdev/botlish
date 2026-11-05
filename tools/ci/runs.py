@@ -121,7 +121,8 @@ class Api:
     """The few REST calls the commands make. `urlopen` is replaceable for
     tests of the requests themselves."""
 
-    def __init__(self, token, repo, base="https://api.github.com", urlopen=urllib.request.urlopen):
+    def __init__(self, token, repo, base="https://api.github.com", urlopen=urllib.request.urlopen,
+                 first_hop=None):
         if not token:
             raise ApiError("no token: set GH_TOKEN (or GITHUB_TOKEN)")
         if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo or ""):
@@ -130,19 +131,25 @@ class Api:
         self.repo = repo
         self.base = base.rstrip("/")
         self.urlopen = urlopen
+        # A request whose redirect is not followed: a job log's answer is a
+        # redirect to storage, which must not be sent the token.
+        self.first_hop = first_hop or urllib.request.build_opener(NoRedirect).open
+
+    def headers(self, data=None):
+        return {
+            "Authorization": "Bearer " + self.token,
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "botlish-ci-runs",
+            **({"Content-Type": "application/json"} if data is not None else {}),
+        }
 
     def request(self, method, path, params=None, body=None, missing_ok=False):
         url = "%s/repos/%s%s" % (self.base, self.repo, path)
         if params:
             url += "?" + urllib.parse.urlencode(params)
         data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(url, data=data, method=method, headers={
-            "Authorization": "Bearer " + self.token,
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "botlish-ci-runs",
-            **({"Content-Type": "application/json"} if data is not None else {}),
-        })
+        req = urllib.request.Request(url, data=data, method=method, headers=self.headers(data))
         try:
             with self.urlopen(req, timeout=60) as resp:
                 text = resp.read().decode() or "null"
@@ -186,6 +193,25 @@ class Api:
     def jobs(self, run_id):
         return self.paged("/actions/runs/%d/jobs" % run_id, "jobs", filter="latest")
 
+    def log(self, job_id):
+        """A job's log, as text: GitHub answers with a redirect to storage,
+        which is followed without the token."""
+        path = "/actions/jobs/%d/logs" % job_id
+        req = urllib.request.Request("%s/repos/%s%s" % (self.base, self.repo, path), headers=self.headers())
+        try:
+            with self.first_hop(req, timeout=60) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            location = e.headers.get("Location") if e.code in (301, 302, 303, 307, 308) else None
+            if not location:
+                raise ApiError("GET %s: HTTP %d" % (path, e.code)) from None
+        try:
+            with self.urlopen(urllib.request.Request(location, headers={"User-Agent": "botlish-ci-runs"}),
+                              timeout=120) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            raise ApiError("GET %s (its redirect): HTTP %d" % (path, e.code)) from None
+
     def compare(self, base, head):
         """GitHub's comparison status of head against base: ahead, behind,
         identical or diverged (None when either is unknown)."""
@@ -218,6 +244,11 @@ class Api:
 
     def cancel(self, run_id):
         self.request("POST", "/actions/runs/%d/cancel" % run_id)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 def quote(s, safe=""):

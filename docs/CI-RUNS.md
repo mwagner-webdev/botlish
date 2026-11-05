@@ -1,4 +1,4 @@
-# CI-RUNS.md -- superseded runs, merged branches' runs, and the release gate
+# CI-RUNS.md -- superseded runs, merged branches' runs, the release gate, and the canary
 
 GitHub-hosted runners are a limited pool: a fixed number of jobs run at
 once for the account, and macOS jobs have a much smaller cap of their own.
@@ -10,7 +10,8 @@ were runs of branches already merged into main. One superseded main run (at
 17b0e66) had held its place in its workflow's queue for four hours while
 the run of main's newest commit waited behind it.
 
-Three rules came out of that, and this document is their reference:
+Three rules came out of that, and a fourth from the cost of a red push;
+this document is their reference:
 
 1. A newer push cancels a running test workflow on the same ref, on main
    too (section 1).
@@ -19,9 +20,12 @@ Three rules came out of that, and this document is their reference:
 3. A release is published only once every test of its commit is green,
    GC stress included, by a run of its own that a superseding push does not
    cancel (section 3).
+4. Every test workflow first runs a canary, the tests likeliest to fail,
+   for about ten minutes, and its expensive jobs wait for it (section 4).
 
-`tools/ci/runs.py` implements the pruning and the release gate. Nothing in
-the compiler reads any of it.
+`tools/ci/runs.py` implements the pruning and the release gate,
+`tests/canary.tcl` and `tools/ci/history.py` the canary. Nothing in the
+compiler reads any of it.
 
 ## 1. Superseded runs are cancelled, on main too
 
@@ -189,7 +193,99 @@ for instance. The gate's job summary lists each commit's requirements.
   ci tools workflow's dry run does the same on every branch that changes
   the housekeeping.
 
-## 4. The housekeeping's own tests
+## 4. The canary
+
+A push that breaks a test used to cost a whole run on every host: at
+13dd290, tests.yml's 16 jobs, tests-arm64.yml's 12, macos-arm64.yml's 11
+and windows-x86_64.yml's 7, the longest of them hours, for a failure most
+often in one or two test files. Most failures are predictable: a test fails
+where it was just written or changed, and where it failed recently. So
+every test workflow runs those first, on its own host, and starts the rest
+only once they pass.
+
+### What runs
+
+`tests/canary.tcl` selects, in this order, while the estimated time fits in
+its budget (`-budget`, 600 seconds):
+
+1. **What the push changes:** the test files (`tests/*.test`) and golden
+   suites (`tests/golden/*.bot`) the commits since the base add or change,
+   the smallest first. The base is main's previous head on a push to main
+   (`github.event.before`: every commit of the push, a burst's merges
+   included), and the merge base with main otherwise, so a branch's every
+   commit counts, not only its last push's. A base the history does not
+   hold (a force push) falls back to HEAD's parent.
+2. **What failed recently on this host:** `tests/canary.tsv`'s history
+   entries for the host target, the most failing commits first.
+
+An item's estimate is its duration in `tests/canary.tsv` (seconds on
+linux-x86_64: a Tcl test file on interp, a golden suite on all four
+backends), else one from its size. The selection runs through
+`tests/platform/tier.tcl`, as the macOS and Windows tiers do (Tcl test
+files on interp, golden suites on all four backends); the canary prints it
+and adds it to the job summary, with what the budget left out.
+
+| workflow | the canary | waits for it |
+|---|---|---|
+| tests.yml | job `canary`, beside `warning-gate` and `mutant-catalogs` | every other job, and for those two gates too |
+| tests-arm64.yml | job `canary` | every other job |
+| macos-arm64.yml | the smoke job's last step | system-linker, acceptance, app (and app-clean, link-plan-sdl3 and main-thread-startup after it), full |
+| windows-x86_64.yml | job `canary` | every other job (acceptance and system-linker still also after smoke, whatever its result) |
+
+tests.yml and tests-arm64.yml now run on every branch push, but there only
+the canary (and tests.yml's two gates): their other jobs run, as before, on
+pushes to main, on pull requests and when dispatched, and GC stress only on
+pushes to main (and arm64's in a manual run). macOS and Windows run
+everything on every push, as before, once the canary passes.
+
+### The history
+
+`tests/canary.tsv` is written by `tools/ci/history.py` from the GitHub API:
+the pushes to main of the four test workflows created in the last 21 days,
+and for every failed run the logs of its failed jobs, where the test
+runners name what failed (tests/all.tcl's and tier.tcl's `Files with
+failing tests`, the golden runner's suites, the golden check's
+`DISAGREE`, `TCL TEST FAILED` and `SUITE NOT OK`). An item counts once per
+commit, on the host its job ran on. A job that reports more than five
+items is left out: a whole layer broke there, for one cause any of its
+items shows. Durations come from the newest successful push run of
+tests.yml on main (the interp job's per-file times, the golden shards'
+per-suite times).
+
+The first file, from 2026-10-15 to 11-05: 107 failed runs, the logs of
+370 of their 373 failed jobs. A job reported zero to two items, or 15 to 30
+(all of these on 2026-10-16, when every arm64 test and golden job failed at
+five commits);
+the history has 14 items, led by c-bindgen.test (16 commits, three hosts),
+workload-icy-tower.test (14, arm64) and c-ffi.test (13, three hosts).
+
+To refresh it: the `ci tools` workflow recomputes it on every run (a push
+that changes `tools/ci/` or a workflow, or a manual run); its job summary
+shows the difference from the committed file, and its log and its
+`canary-records` artifact hold the new one. Commit it. Locally, with a
+token: `GH_TOKEN=... GITHUB_REPOSITORY=mwagner-webdev/botlish python3 -I
+tools/ci/history.py --write`.
+
+### Locally
+
+`tests/local.tcl` starts the same selection first (`-priority 1`, the
+default; no budget): what the checkout changes against origin/main, its
+working tree included, then the history for this host. `-fail-fast 1`
+starts nothing more after the first failure (the running files finish)
+and reports the rest as not run.
+
+### What it costs, and what it is not
+
+A green run starts its expensive jobs about fifteen minutes later than
+before (the canary's build and its ten minutes); on main, where GC stress
+takes three hours, that is under a tenth. A red push whose failure the
+canary finds stops after one job per host (three on tests.yml).
+
+The canary orders; it skips nothing. A test it runs runs again in its
+ordinary job, and a failure it misses is found there as before. It is no
+substitute for the checks AGENTS.md names for an area.
+
+## 5. The housekeeping's own tests
 
 `tools/ci/test_runs.py` (no network) runs the release check, the gate and
 the pruning against a fake of the GitHub API over a small commit graph:
@@ -207,7 +303,16 @@ the workflows' side of the rules:
   included;
 * only a release run publishes, after the check;
 * the gate listens to every workflow a release waits for;
-* only the two housekeeping workflows may start or cancel runs.
+* only the two housekeeping workflows may start or cancel runs;
+* every test workflow runs the canary on every branch push, its other
+  jobs wait for it (a job that runs after a failed need checks the
+  canary's result itself), and tests.yml and tests-arm64.yml run nothing
+  else on a branch push.
+
+It also tests `tools/ci/history.py` against fake runs and job logs: what
+each test runner's report names, a commit counted once, the host from the
+runner, a broken layer left out, a reason from the newest failure, and
+items that no longer exist dropped.
 
 `ci-tools.yml` runs the tests on every push that changes `tools/ci/` or a
 workflow, on any branch. Then it runs the gate and the pruning against the
@@ -217,13 +322,15 @@ mutations of runs.py (a skipped GC-stress job taken for success, a branch
 ahead of main pruned, a tag moved backwards, a second dispatch, ...) were
 all killed by these tests.
 
-## 5. What to run when changing this
+## 6. What to run when changing this
 
 For a change to `tools/ci/`, to a workflow's concurrency or triggers, to a
 release job, or to the name of a workflow or a GC-stress job that a
 requirement names:
 
 * `python3 -I tools/ci/test_runs.py`;
+* for the canary, `tclsh9.0 tests/canary.test`, and a push to a branch:
+  read every workflow's canary;
 * `python3 -I audit/macos-release/tests/test_workflow.py` and that audit's
   mutants (`audit/macos-release/tools/mutate.py`) for icy-tower-macos.yml;
 * `tclsh9.0 tools/mutant-catalogs.tcl`;
@@ -234,7 +341,7 @@ and both into release-gate.yml's `workflow_run` list. A new workflow that
 tests a push gets the concurrency block of section 1. The tests check all
 three.
 
-## 6. Limits
+## 7. Limits
 
 * `workflow_run` and `schedule` run from main only, so the gate and the
   scheduled pruning start once their files are on main. The first release
