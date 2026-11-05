@@ -534,7 +534,7 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
         if {$type in $visiting} { return "" }
         set classes [lmap a [hir::summaries::Arguments $type] {ValueStabilityClass $a}]
         set level [hir::summaries::Level valueStability $type $classes]
-        if {$level eq "" || $level == 0 || [hir::summaries::Whistle $type $visiting]} {
+        if {$level eq "" || $level == 0} {
             return ""
         }
         variable stabilityClassOnly
@@ -542,9 +542,17 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
             # (A class alone was asked: ValueStabilityClass.)
             return "is not stable"
         }
-        foreach {field t} [hir::structs::AppliedFieldTypes $type] {
-            set why [ValueStability $t [concat $visiting [list $type]]]
-            if {$why ne ""} { return "has a field \"$field\" that $why" }
+        if {[hir::summaries::Walked [list valueStability $type] why]} {
+            return $why
+        }
+        if {[hir::summaries::Whistle $type $visiting]} {
+            return ""
+        }
+        set why [hir::summaries::Walk [list valueStability $type] {
+            ValueStabilityParts $type [concat $visiting [list $type]]
+        }]
+        if {$why ne ""} {
+            return $why
         }
         if {$visiting eq {}} {
             hir::summaries::Count fallbacks
@@ -556,6 +564,19 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
             return "has fields that hold, through a non-uniformly recursive declaration, a value that is not stable"
         }
         return ""
+    }
+    return ""
+}
+
+# Why a value of the named struct type TYPE is not stable: its first field,
+# in order, that is not (ValueStability's reason walk; VISITING already holds
+# TYPE), or "".
+proc hir::sourcetypes::ValueStabilityParts {type visiting} {
+    foreach {field t} [hir::structs::AppliedFieldTypes $type] {
+        set why [ValueStability $t $visiting]
+        if {$why ne ""} {
+            return "has a field \"$field\" that $why"
+        }
     }
     return ""
 }

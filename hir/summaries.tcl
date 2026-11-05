@@ -73,15 +73,20 @@
 #
 # The reason walk
 # ---------------
-# Totality and SendClass also explain a class that is not `total`: the path
-# to the component that decides it, in field order (Components' format).
-# That text is a walk of the applied fields, as it always was; the summary
-# only decides the class and prunes the walk (a part whose class is `total`
-# is never entered). A walk that would follow a non-uniform recursion forever
-# (no reason in field order is ever reached) is stopped by Whistle: a
-# declaration on an expansive cycle (Expansive) met a third time on the
-# walk's path, each occurrence embedding the one before it (the arguments
-# grew), is treated as met again. The class never depends on it.
+# Totality, SendClass, MutableComponent and ValueStability also explain a
+# class that is not `total`: the path to the component that decides it, in
+# field order (Components' format). That text is a walk of the applied
+# fields, as it always was; the summary only decides the class and prunes
+# the walk (a part whose class is `total` is never entered). A walk that
+# would follow a non-uniform recursion forever (no reason in field order is
+# ever reached) is stopped by Whistle: a declaration on an expansive cycle
+# (Expansive) met a third time on the walk's path, each occurrence embedding
+# the one before it (the arguments grew), is treated as met again. And one
+# question's walk walks an application's parts once (Walk, Walked): a later
+# visit, on another path, reads the first visit's result. A walk that
+# revisited it once per path would be exponential in a declaration with
+# several recursive fields: the paths that reach one application multiply at
+# every level. The class never depends on any of it.
 
 namespace eval hir::summaries {
     # NAME -> {algebra classes|union neutral TYPE probes {TYPE ...}
@@ -93,7 +98,10 @@ namespace eval hir::summaries {
     # Counters (structural evidence, never semantics): computations.NAME
     # (node evaluations inside fixpoints), hits.NAME (summaries read from
     # the table), applications.NAME (answers read from a summary), rounds
-    # (fixpoint rounds), fixpoints (fixpoints run).
+    # (fixpoint rounds), fixpoints (fixpoints run); of the reason walks:
+    # whistles (Whistle's stops), fallbacks (a walk that found no part of
+    # its class), reasonWalks (parts walked: Walk), reasonReuses (a walk
+    # read again: Walked).
     variable counters [dict create]
     # The expansive declarations of the registry (Expansive), "" until
     # computed.
@@ -104,6 +112,10 @@ namespace eval hir::summaries {
     # nothing but the registry ({NAME KEY} -> answer: Remember, Recall):
     # a walk over nested applications asks again about every inner one.
     variable answers [dict create]
+    # The current question's reason-walk results ({ANALYSIS TYPE ...} ->
+    # result: Walk, Walked), and how many of its walks are running.
+    variable walks [dict create]
+    variable walking 0
 }
 
 # Registers property NAME. OPTIONS:
@@ -163,6 +175,47 @@ proc hir::summaries::Remember {name key answer} {
         dict set answers [list $name $key] $answer
     }
     return $answer
+}
+
+# 1, setting RESULTVAR in the caller to the result, if the current
+# question's reason walk has already walked the parts of KEY (Walk).
+proc hir::summaries::Walked {key resultVar} {
+    variable walks
+    if {![dict exists $walks $key]} {
+        return 0
+    }
+    upvar 1 $resultVar result
+    set result [dict get $walks $key]
+    Count reasonReuses
+    return 1
+}
+
+# Evaluates SCRIPT in the caller -- a reason walk of the parts of KEY (its
+# analysis and its type) -- and keeps the result for the rest of the
+# question, so a later visit on another path reads it (Walked). The
+# outermost walk is the question: when it ends, what it kept is forgotten,
+# so no reason depends on an earlier question. A result is the walk's on
+# the first path that reached KEY. A later path might have found another
+# part, but any part found is a true reason, and the class is the
+# summary's.
+proc hir::summaries::Walk {key script} {
+    variable walks
+    variable walking
+    Count reasonWalks
+    incr walking
+    set done 0
+    try {
+        set result [uplevel 1 $script]
+        set done 1
+    } finally {
+        incr walking -1
+        if {$walking == 0} {
+            set walks [dict create]
+        } elseif {$done} {
+            dict set walks $key $result
+        }
+    }
+    return $result
 }
 
 proc hir::summaries::Count {counter {by 1}} {

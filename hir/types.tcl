@@ -2541,13 +2541,20 @@ proc hir::types::Totality {operation type {seen {}}} {
                 if {$totalityClassOnly} {
                     return [list $class ""]
                 }
+                if {[hir::summaries::Walked [list totality $operation $type] result]} {
+                    # (Walked on another path of this question: summaries.tcl's
+                    # reason walk.)
+                    return $result
+                }
                 if {[hir::summaries::Whistle $type $seen]} {
                     # A non-uniform recursion grown twice along this walk:
                     # met again, as an exact repetition is (summaries.tcl's
                     # reason walk).
                     return {total ""}
                 }
-                set result [Components $operation [TotalityParts $type] [concat $seen [list $type]]]
+                set result [hir::summaries::Walk [list totality $operation $type] {
+                    Components $operation [TotalityParts $type] [concat $seen [list $type]]
+                }]
                 if {$seen eq {} && [lindex $result 0] ne $class} {
                     # (The walk stopped short of every component of the
                     # summary's class: Whistle's account.)
@@ -2933,10 +2940,15 @@ proc hir::types::SendStruct {type assumed seen} {
     if {$totalityClassOnly} {
         return [list $class ""]
     }
+    if {[hir::summaries::Walked [list send $type $assumed] result]} {
+        return $result
+    }
     if {[hir::summaries::Whistle $type $seen]} {
         return {total ""}
     }
-    set result [SendParts $type $assumed [concat $seen [list $type]]]
+    set result [hir::summaries::Walk [list send $type $assumed] {
+        SendParts $type $assumed [concat $seen [list $type]]
+    }]
     if {$seen eq {} && [lindex $result 0] ne $class} {
         hir::summaries::Count fallbacks
         set arguments [hir::summaries::Arguments $type]

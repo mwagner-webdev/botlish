@@ -1851,7 +1851,7 @@ proc hir::structs::MutableComponent {type {seen {}}} {
         # only to say which (summaries.tcl's reason walk).
         set classes [lmap a [hir::summaries::Arguments $type] {MutableComponentClass $a}]
         set level [hir::summaries::Level mutableComponent $type $classes]
-        if {$level eq "" || $level == 0 || [hir::summaries::Whistle $type $seen]} {
+        if {$level eq "" || $level == 0} {
             return ""
         }
         variable mutableClassOnly
@@ -1859,19 +1859,17 @@ proc hir::structs::MutableComponent {type {seen {}}} {
             # (A class alone was asked: MutableComponentClass.)
             return "a mutable value"
         }
-        if {[catch {AppliedFieldTypes $type} fields]} {
+        if {[hir::summaries::Walked [list mutableComponent $type] why]} {
+            return $why
+        }
+        if {[hir::summaries::Whistle $type $seen]} {
             return ""
         }
-        foreach {name t} $fields {
-            if {$t eq {}} continue
-            set why [MutableComponent $t [concat $seen [list $type]]]
-            if {$why ne ""} {
-                if {[isOpaque $id]} {
-                    # (An opaque struct's representation is its owner's.)
-                    return "[hir::types::show $type], a mutable value"
-                }
-                return "[hir::types::show $type], whose field \"$name\" holds $why"
-            }
+        set why [hir::summaries::Walk [list mutableComponent $type] {
+            MutableComponentParts $type [concat $seen [list $type]]
+        }]
+        if {$why ne ""} {
+            return $why
         }
         if {$seen eq {}} {
             # (The walk stopped short of every such component: the reason
@@ -1884,6 +1882,27 @@ proc hir::structs::MutableComponent {type {seen {}}} {
                 return "[hir::types::show $type], whose fields hold values of its type argument [hir::types::show $a], which holds [MutableComponent $a]"
             }
             return "[hir::types::show $type], whose fields hold, through a non-uniformly recursive declaration, a mutable value"
+        }
+    }
+    return ""
+}
+
+# Why a value of the named struct type TYPE holds a mutable or affine value:
+# its first field, in order, that holds one (MutableComponent's reason walk;
+# SEEN already holds TYPE), or "".
+proc hir::structs::MutableComponentParts {type seen} {
+    if {[catch {AppliedFieldTypes $type} fields]} {
+        return ""
+    }
+    foreach {name t} $fields {
+        if {$t eq {}} continue
+        set why [MutableComponent $t $seen]
+        if {$why ne ""} {
+            if {[isOpaque [lindex $type 1]]} {
+                # (An opaque struct's representation is its owner's.)
+                return "[hir::types::show $type], a mutable value"
+            }
+            return "[hir::types::show $type], whose field \"$name\" holds $why"
         }
     }
     return ""

@@ -335,6 +335,29 @@ test pds-reason-classification-terminates {an argument is classified by its clas
         [string match *MutableVector* [hir::sourcetypes::ValueStability $t]]
 } -result {1 1 none total 1}
 
+test pds-reason-walk-polynomial {one question's reason walk walks an application's parts once, and a later path that reaches it reads that walk: Braid[Braid[Fn{...}, int], Braid[any, str]] of a declaration with three recursive fields, two of them growing (f1 swaps and wraps its arguments, f3 nests one), is answered with a reason by every walk, each walking about a hundred applications -- the walk that revisited an application once per path reaching it walked them hundreds of thousands of times along paths sixty deep and did not finish (a fuzzer's program found it, seed 31); the classes are the summaries'} -body {
+    set hir [surface::compile "import std::mutable_vector\n\nerror Oops\n\nstruct Braid\[A, B\]:\n    f0: Braid\[MutableVector\[int\], Fn{args: \[Fn{args: \[int\], return: int}\], return: int}\]\n    f1: Braid\[B, List\[Braid\[str, A\]\]\]\n    f2: B\n    f3: List\[Braid\[List\[A\], B\]\]\n\n1\n" -warnings off]
+    hir::activate $hir
+    set q [hir::types::MakeApplied Braid [list \
+        [hir::types::MakeApplied Braid [list [hir::types::MakeFn {} int {Oops}] int]] \
+        [hir::types::MakeApplied Braid [list any str]]]]
+    set results {}
+    foreach script {
+        {hir::types::Totality equality $q}
+        {hir::types::Totality hash $q}
+        {hir::types::SendClass $q}
+        {list "" [hir::structs::MutableComponent $q]}
+        {list "" [hir::sourcetypes::ValueStability $q]}
+    } {
+        hir::summaries::ResetCounters
+        lassign [eval $script] class why
+        set c [hir::summaries::counters]
+        lappend results [list $class [string match {*field "f0"*} $why] \
+            [expr {[dict getdef $c reasonWalks 0] <= 300}] [expr {[dict getdef $c reasonReuses 0] > 0}]]
+    }
+    set results
+} -result {{none 1 1 1} {none 1 1 1} {none 1 1 1} {{} 1 1 1} {{} 1 1 1}}
+
 test pds-reason-past-the-bound {the class reads the argument uncut, so a reason walk over field types the type bound cut (Deep[List[Fn{...}]] of `values: List[List[T]]`: the function sits past the aggregate bound) names the argument that decides it, with the argument's own reason -- never a cut type's, never a recursion that is not there} -body {
     set hir [pdsHir]
     set t [pdsApp Deep [hir::types::MakeList $::pdsFn]]
