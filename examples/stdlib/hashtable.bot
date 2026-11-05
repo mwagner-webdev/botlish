@@ -19,9 +19,12 @@
 # Like every Botlish value it is copied, never shared: an update (ht_set,
 # ht_delete) is applied to the table the function was given and returns the
 # updated table, which the caller binds (`t2 = ht_set(t1, k, v)`); `t1` is
-# unchanged by it. Each update mutates its own table's arrays in place
-# through their struct-field places (`table.keys`), so passing a table's
-# last use to an update copies nothing: the compiler hands the update the
+# unchanged by it. Each update binds the table it was given to a local
+# (`updated = table`: a parameter not declared `place` is the function's
+# copy, never a place it may mutate, NONPLACE-PARAMETER-MUTATION) and
+# mutates the local's arrays in place through their struct-field places
+# (`updated.keys`), so passing a table's last use to an update copies
+# nothing: the compiler hands the update the
 # caller's arrays uncopied when the caller never reads that table again, and
 # a lookup (ht_get, ht_contains), which only reads, is handed them uncopied
 # always (hir/mutvec.tcl, "Last uses and consumed parameters"). The two
@@ -206,11 +209,12 @@ fn ht_rehash_probe(newControls, index, capacity) errors IndexNotFound:
 # DEST, the new table, with KEY/VALUE inserted at its first EMPTY slot from
 # KEY's hash on.
 fn ht_rehash_insert(dest, capacity, key, value) errors IndexNotFound:
-    index = dest.controls.ht_rehash_probe(hash(key).mod(capacity), capacity)
-    dest.controls.set(index, ht_occupied_state())
-    dest.keys.set(index, key)
-    dest.values.set(index, value)
-    dest
+    updated = dest
+    index = updated.controls.ht_rehash_probe(hash(key).mod(capacity), capacity)
+    updated.controls.set(index, ht_occupied_state())
+    updated.keys.set(index, key)
+    updated.values.set(index, value)
+    updated
 
 # DEST with every OCCUPIED slot of the old table (its arrays CONTROLS, KEYS
 # and VALUES) from I on rehashed into it at NEWCAPACITY. Only individual
@@ -264,29 +268,31 @@ fn ht_grow_or_clean(table) errors IndexNotFound:
 # INDEX was reusing one. Split out of ht_set below because it is needed
 # from two branches (with and without a resize in between).
 fn ht_place(table, index, key, value) errors IndexNotFound:
-    prior = std::mutable_array::at(table.controls, index)
-    table.controls.set(index, ht_occupied_state())
-    table.keys.set(index, key)
-    table.values.set(index, value)
-    table.counts.set(0, ht_size(table) + 1)
+    updated = table
+    prior = std::mutable_array::at(updated.controls, index)
+    updated.controls.set(index, ht_occupied_state())
+    updated.keys.set(index, key)
+    updated.values.set(index, value)
+    updated.counts.set(0, ht_size(updated) + 1)
     if prior == ht_tombstone_state():
-        table.counts.set(1, ht_tombstones(table) - 1)
+        updated.counts.set(1, ht_tombstones(updated) - 1)
 
-    table
+    updated
 
 # TABLE with KEY mapped to VALUE (replacing an existing mapping of KEY).
 fn ht_set(table, key, value) errors IndexNotFound:
-    index = table.ht_find_insert(key, table.ht_probe_start(key), -1)
-    if std::mutable_array::at(table.controls, index) == ht_occupied_state():
-        table.values.set(index, value)
-        return table
+    updated = table
+    index = updated.ht_find_insert(key, updated.ht_probe_start(key), -1)
+    if std::mutable_array::at(updated.controls, index) == ht_occupied_state():
+        updated.values.set(index, value)
+        return updated
 
-    if ht_should_grow(table):
-        grown = ht_grow_or_clean(table)
+    if ht_should_grow(updated):
+        grown = ht_grow_or_clean(updated)
         slot = grown.ht_find_insert(key, grown.ht_probe_start(key), -1)
         return grown.ht_place(slot, key, value)
 
-    table.ht_place(index, key, value)
+    updated.ht_place(index, key, value)
 
 # ---------------------------------------------------------------------------
 # Delete: tombstones the slot and clears key/value storage so a deleted
@@ -296,15 +302,16 @@ fn ht_set(table, key, value) errors IndexNotFound:
 
 # TABLE without a mapping of KEY.
 fn ht_delete(table, key) errors IndexNotFound:
-    index = table.ht_find_get(key, table.ht_probe_start(key))
+    updated = table
+    index = updated.ht_find_get(key, updated.ht_probe_start(key))
     if index >= 0:
-        table.controls.set(index, ht_tombstone_state())
-        table.keys.set(index, unit)
-        table.values.set(index, unit)
-        table.counts.set(0, ht_size(table) - 1)
-        table.counts.set(1, ht_tombstones(table) + 1)
+        updated.controls.set(index, ht_tombstone_state())
+        updated.keys.set(index, unit)
+        updated.values.set(index, unit)
+        updated.counts.set(0, ht_size(updated) - 1)
+        updated.counts.set(1, ht_tombstones(updated) + 1)
 
-    table
+    updated
 
 # ---------------------------------------------------------------------------
 # Iteration (req #46: only what correctness testing needs, not an iterator

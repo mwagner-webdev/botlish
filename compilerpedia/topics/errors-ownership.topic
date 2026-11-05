@@ -1060,11 +1060,11 @@ std::coroutine::done?(step)
 
 @topic error.mutable-place-receiver
 title: MUTABLE-PLACE-RECEIVER: a mutation's receiver is not a place
-summary: A MutableVector or MutableArray operation that mutates must be applied to a place -- a local, parameter or context parameter of the same function, or a field path from one.
+summary: A MutableVector or MutableArray operation that mutates must be applied to a place -- a local, place parameter or context parameter of the same function, or a field path from one.
 index: errors
 alias: push to a temporary vector; mutate a captured vector; push as a function value
 keywords: MutableVector, MutableArray, push, set, swap, take, pop, place, receiver, temporary, nested function, module binding, function value
-related: concept.mutable-vector concept.mutable-array concept.values error.mutable-place-capture stdlib.std::mutable_vector::push
+related: concept.mutable-vector concept.mutable-array concept.values error.mutable-place-capture error.nonplace-parameter-mutation stdlib.std::mutable_vector::push
 docs: MUTABLE-VECTOR.md MUTABLE-ARRAY.md
 code: CORE SEMANTIC MUTABLE-PLACE-RECEIVER
 
@@ -1073,10 +1073,12 @@ MutableVector[T] and MutableArray[T] are mutable VALUES, not references:
 a mutation (push, pop, take, swap, clear; set, swap, copy into) changes
 the header of the place it is applied to, in place, and never stores a
 new value anywhere else. So the receiver must be a place this function
-owns: a local binding, a parameter or a context parameter of the same
-function, or a chain of fields from one (`state.queue.push(x)`), whose
-binding's static type is the collection type. The message says which
-rule the receiver breaks:
+owns: a local binding, a place parameter or a context parameter of the
+same function, or a chain of fields from one (`state.queue.push(x)`),
+whose binding's static type is the collection type. (A parameter not
+declared `place` is the function's own copy: mutating it is
+NONPLACE-PARAMETER-MUTATION.) The message says which rule the receiver
+breaks:
 
   * a temporary value (a call's result, a List element): the update
     would be lost;
@@ -1102,7 +1104,9 @@ rule the receiver breaks:
 
 == WHAT TO DO
 Bind the value to a name, mutate the name, and use the name afterwards.
-For a helper, pass the collection in and return the updated one, or keep
+For a helper, declare its parameter `place` (concept.place-parameters), or
+pass the collection in, copy it into a local, and return the updated
+local, or keep
 it in a field of a context struct: a function mutates it through its
 context parameter (`log.lines.push(n)`), and every function sharing the
 installed context sees the change. To pass a mutation around, wrap it in a
@@ -1181,7 +1185,8 @@ into aliasing.
 == WHAT TO DO
 Pass the collection as an argument: the callee gets its own logical copy
 (copy-on-write, so passing is cheap). A nested function that must change
-it takes it as a parameter and returns the updated collection.
+it takes it as a place parameter (`place v: T`, concept.place-parameters),
+or copies its argument into a local and returns the updated local.
 
 @example reject
 import std::mutable_vector
@@ -1212,6 +1217,131 @@ fn fill() -> int:
 fill()
 @caption Passed as an argument, the nested function gets its own copy
 @value 2
+@end
+
+@topic error.nonplace-parameter-mutation
+title: NONPLACE-PARAMETER-MUTATION: mutating a parameter not declared `place`
+summary: A mutation's destination is rooted in a value parameter -- a parameter not declared `place` -- so it would change only the function's own copy, never the caller's storage.
+index: errors
+alias: mutating a parameter; modify a parameter; changes to a parameter are lost; caller does not see the change; update lost; write to an argument; out parameter without place
+keywords: place, parameter, value parameter, mutate, caller, copy, MutableVector, MutableArray, MutableMap, MutableSet, push, set, copy, swap, lost update
+related: concept.place-parameters concept.mutable-vector concept.mutable-array concept.values error.mutable-place-receiver
+docs: NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md PLACE-PARAMETERS.md MUTABLE-VECTOR.md
+code: CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+
+== MEANING
+A parameter that is not declared `place` is a value: on entry it is the
+function's own logical copy of its argument, not a reference to the
+caller's storage. A mutation through it -- a collection operation whose
+receiver is the parameter or a field path of it (`xs.push(x)`,
+`city.grid.tiles.set(i, t)`, `std::mutable_array::copy(dst, ...)`), or a
+call that gives it, or a path of it, to another function's place
+parameter -- would change that copy only. The caller, who wrote the call
+to see the change, would never observe it. That silently lost update is
+what this diagnostic rejects, at the mutation: the message names the
+parameter, its function and the operation.
+
+The rule reads the destination's root binding, never where its value
+came from: a local binding initialized from a parameter (`working = xs`)
+is a place of its own, an independent logical copy, and mutating it is
+legal. A context parameter, a loop variable, a fold's intermediate and a
+handler's payload are no parameters of a function: their places are
+unaffected.
+
+== WHY
+Botlish has no references: a collection is a value, mutated in place
+through places, and a place parameter is the one way a function updates
+its caller's collection (concept.place-parameters). Before this check,
+mutating an ordinary parameter compiled and ran: the function changed its
+own copy, returned normally, and the caller's collection stayed as it was.
+The function's signature already says which it means -- `place` or not --
+so the compiler holds the body to it, rather than let a natural-looking
+program drop a write without a word. It is an error, not a warning, and
+it is decided where the program is checked, before any backend runs, so
+every backend accepts and rejects the same programs.
+
+== LIKELY CAUSES
+  * a helper meant to fill its caller's vector or array, declared with an
+    ordinary parameter (`fn add(items: MutableVector[int], x: int)`);
+  * a struct holding collections passed by value and mutated through a
+    field path (`fn paint(city: City, ...)`, then
+    `city.grid.tiles.set(i, t)`);
+  * a value-style function that mutates its parameter and returns it.
+
+== WHAT TO DO
+Say which one you mean:
+
+  * the caller's storage must change: declare the parameter `place`
+    (`fn add(place items: MutableVector[int], x: int)`); the caller then
+    passes a place of its own and sees every update;
+  * a local working value is intended: copy the parameter into a local
+    first (`working = items`), mutate the local, and return it or use it.
+    The copy is logical and copy-on-write: when the parameter is not read
+    again, nothing is copied at run time.
+
+Declaring `place` gives the function write access to its caller's
+collection; prefer the local copy when the caller only needs the result.
+A parameter of an affine type cannot be a place: move it into a local
+(`working = items`) and return the local.
+
+@example reject
+import std::mutable_vector
+
+fn add(items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+v = std::mutable_vector::from_list([1])
+add(v, 2)
+v.length()
+@caption `items` is the function's copy: the push would never reach `v`
+@error CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+@at 4:5
+@end
+
+@example accept
+import std::mutable_vector
+
+fn add(place items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+v = std::mutable_vector::from_list([1])
+v.add(2)
+v.length()
+@caption A place parameter updates the caller's vector
+@value 2
+@end
+
+@example accept
+import std::mutable_vector
+
+fn with_item(items: MutableVector[int], x: int) -> MutableVector[int]:
+    working = items
+    working.push(x)
+    working
+
+v = std::mutable_vector::from_list([1])
+w = with_item(v, 2)
+[v.length(), w.length()]
+@caption A local copy is the function's own place: the caller keeps its value
+@value [1, 2]
+@end
+
+@example reject
+import std::mutable_vector
+
+fn add(place items: MutableVector[int], x: int) -> unit:
+    items.push(x)
+
+fn add_twice(items: MutableVector[int], x: int) -> unit:
+    add(items, x)
+    add(items, x)
+
+v = std::mutable_vector::from_list([1])
+add_twice(v, 2)
+v.length()
+@caption Passing a value parameter on to a place parameter mutates the copy only
+@error CORE SEMANTIC NONPLACE-PARAMETER-MUTATION
+@at 7:9
 @end
 
 @topic error.coroutine-binding-field

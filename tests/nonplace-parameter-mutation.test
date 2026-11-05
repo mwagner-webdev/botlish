@@ -1,0 +1,388 @@
+# nonplace-parameter-mutation.test -- mutation through a parameter that is
+# not declared `place` (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md).
+#
+# A function's parameter that is not declared `place` is a value: the
+# function's own logical copy of its argument, never its caller's storage.
+# A mutation whose destination is rooted in one -- a collection operation's
+# receiver, or the argument of a place parameter -- would change only that
+# copy, and the caller would never see it: NONPLACE-PARAMETER-MUTATION, a
+# compile-time error at the mutation. The two styles it leaves are `place`
+# (the caller's storage) and an explicit local copy (a local working value);
+# both are tested here to run, on every backend, with the semantics they
+# state.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint nativeBuilt [expr {![catch {native::binary}]}]
+
+# Every diagnostic of compiling TEXT as {CODE LINE COLUMN}, in order, or
+# {ok} when TEXT compiles.
+proc npmDiagnostics {text} {
+    if {![catch {surface::compile $text -warnings off} message options]} {
+        return ok
+    }
+    set result {}
+    foreach d [dict getdef $options -diagnostics [list [dict create errorcode [dict get $options -errorcode] message $message]]] {
+        set location [dict getdef $d location {}]
+        lappend result [list [lindex [dict get $d errorcode] end] [dict getdef $location line ?] [dict getdef $location column ?]]
+    }
+    return $result
+}
+
+# The message of TEXT's first diagnostic, its location prefix removed.
+proc npmMessage {text} {
+    catch {surface::compile $text -warnings off} message options
+    set message [dict get [lindex [dict getdef $options -diagnostics [list [dict create message $message]]] 0] message]
+    regsub {^[^:]*:[0-9]+:[0-9]+: } $message {} message
+    return $message
+}
+
+# The first diagnostic's code of TEXT, or ok.
+proc npmCode {text} {
+    lindex [npmDiagnostics $text] 0 0
+}
+
+# A program's application directory: FILES is a list {NAME TEXT ...}
+# written into a fresh tcltest directory, whose path is returned.
+proc npmApplication {name files} {
+    set dir [makeDirectory npm-$name-[pid]]
+    foreach {file text} $files {
+        set f [open [file join $dir $file] w]
+        puts -nonewline $f $text
+        close $f
+    }
+    return $dir
+}
+
+# The outcome of the application program DIR/main.bot on every backend
+# (they must agree), or {error CODE {CODE LINE COLUMN FILE}...} when it is
+# rejected.
+proc npmApplicationRun {dir} {
+    set path [file join $dir main.bot]
+    if {[catch {surface::readProgramFile $path -warnings off} hir options]} {
+        set ds [lmap d [dict getdef $options -diagnostics {}] {
+            set location [dict getdef $d location {}]
+            list [lindex [dict get $d errorcode] end] [dict getdef $location line ?] [dict getdef $location column ?] \
+                [file tail [dict getdef $location file ?]]
+        }]
+        return [list error [lindex [dict get $options -errorcode] end] $ds]
+    }
+    set outcomes [lmap b {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $b $hir] 0 end-1}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "mismatch across backends: $outcomes"
+    }
+    return [lindex $outcomes 0]
+}
+
+set npmBag {import std::mutable_vector
+
+struct Bag:
+    items: MutableVector[int]
+    label: str
+
+fn empty_bag() -> Bag:
+    Bag {items: std::mutable_vector::from_list([]), label: "b"}
+
+fn add(place b: Bag, x: int) -> unit:
+    b.items.push(x)
+
+}
+
+# ---------------------------------------------------------------------------
+# Direct mutation of a value parameter
+
+test npm-direct {a mutating operation whose receiver is a value parameter is NONPLACE-PARAMETER-MUTATION at the mutation, its message naming the parameter, its function and both fixes} -body {
+    set text "import std::mutable_vector\n\nfn add(items: MutableVector\[int\], x: int) -> unit:\n    items.push(x)\n\nv = std::mutable_vector::from_list(\[1\])\nadd(v, 2)\nv.length()\n"
+    list [npmDiagnostics $text] [npmMessage $text]
+} -result {{{NONPLACE-PARAMETER-MUTATION 4 5}} {the receiver of std::mutable_vector::push is `items`, which is value parameter "items" of add, not a place parameter: a parameter not declared `place` is the function's own copy of its argument, not its caller's storage, so this mutation would change only that copy, and the caller would never see it (declare `place items: MutableVector[int]` if the caller's storage must change; if a local working value is intended, copy it into a local first -- `working = items` -- and mutate the copy)}}
+
+# The mutating operations of the two collections, one call each on a value
+# parameter, by native: the receiver's ownership role `place`
+# (core/native.tcl) is what makes each one a mutation.
+set npmOperations {
+    std::mutable_vector::push   {v: MutableVector[int]}   {v.push(1)}
+    std::mutable_vector::pop    {v: MutableVector[int]}   {x = v.pop():\n        on IndexNotFound:\n            0}
+    std::mutable_vector::take   {v: MutableVector[int]}   {x = v.take(0):\n        on IndexNotFound:\n            0}
+    std::mutable_vector::swap   {v: MutableVector[int]}   {x = std::mutable_vector::swap(v, 0, 1):\n        on IndexNotFound:\n            0}
+    std::mutable_vector::clear  {v: MutableVector[int]}   {v.clear()}
+    std::mutable_array::set     {a: MutableArray[int]}    {a.set(0, 1):\n        on IndexNotFound:\n            unit}
+    std::mutable_array::swap    {a: MutableArray[int]}    {x = std::mutable_array::swap(a, 0, 1):\n        on IndexNotFound:\n            0}
+    std::mutable_array::copy    {a: MutableArray[int]}    {std::mutable_array::copy(a, 0, a, 0, 0):\n        on LowerUnderrun:\n            unit\n        on UpperOverrun:\n            unit}
+}
+
+test npm-every-mutating-operation {every mutating operation of MutableVector and MutableArray, given a value parameter as its receiver, is NONPLACE-PARAMETER-MUTATION; the list is exactly the registry's public operations whose receiver role is `place`} -body {
+    set registered [lsort [lmap name [core::native::names] {
+        if {![string match std::* $name] || [hir::mutvec::NativeOpKind $name] ne "mutate"} continue
+        set name
+    }]]
+    set codes [lmap {op param call} $::npmOperations {
+        set text "import std::mutable_vector\nimport std::mutable_array\nfn f($param) -> int:\n    [subst -nobackslashes -nocommands -novariables [string map {\\n \n} $call]]\n    0\n0\n"
+        list $op [npmCode $text]
+    }]
+    list [expr {$registered eq [lsort [lmap {op param call} $::npmOperations {set op}]]}] $codes
+} -result {1 {{std::mutable_vector::push NONPLACE-PARAMETER-MUTATION} {std::mutable_vector::pop NONPLACE-PARAMETER-MUTATION} {std::mutable_vector::take NONPLACE-PARAMETER-MUTATION} {std::mutable_vector::swap NONPLACE-PARAMETER-MUTATION} {std::mutable_vector::clear NONPLACE-PARAMETER-MUTATION} {std::mutable_array::set NONPLACE-PARAMETER-MUTATION} {std::mutable_array::swap NONPLACE-PARAMETER-MUTATION} {std::mutable_array::copy NONPLACE-PARAMETER-MUTATION}}}
+
+test npm-call-spelling {the same mutation spelled as a method call and as a function call is one decision: NONPLACE-PARAMETER-MUTATION at the receiver either way} -body {
+    list [npmDiagnostics "import std::mutable_vector\nfn f(v: MutableVector\[int\]) -> unit:\n    v.push(1)\n0\n"] \
+        [npmDiagnostics "import std::mutable_vector\nfn f(v: MutableVector\[int\]) -> unit:\n    std::mutable_vector::push(v, 1)\n0\n"]
+} -result {{{NONPLACE-PARAMETER-MUTATION 3 5}} {{NONPLACE-PARAMETER-MUTATION 3 31}}}
+
+test npm-method-several-candidates {a method call with several visible candidates rejects every one: the decision reports NO-APPLICABLE-METHOD, whose reason for the mutating candidate is its NONPLACE-PARAMETER-MUTATION; the function spelling reports the mutation itself} -body {
+    set decls "import std::mutable_vector\nimport std::mutable_array\n"
+    set method "${decls}fn f(a: MutableArray\[int\]) -> int errors IndexNotFound:\n    x = a.swap(0, 9)\n    x\n0\n"
+    list [npmDiagnostics $method] [string match {*std::mutable_array::swap rejects the receiver: the receiver of std::mutable_array::swap is `a`, which is value parameter "a" of f, not a place parameter*} [npmMessage $method]] \
+        [npmDiagnostics "${decls}fn f(a: MutableArray\[int\]) -> int errors IndexNotFound:\n    x = std::mutable_array::swap(a, 0, 9)\n    x\n0\n"]
+} -result {{{NO-APPLICABLE-METHOD 4 11}} 1 {{NONPLACE-PARAMETER-MUTATION 4 34}}}
+
+test npm-untyped-parameter {an untyped parameter is a value parameter too: its mutation is rejected, and the message suggests a typed place parameter} -body {
+    set text "import std::mutable_vector\nfn f(v) -> int:\n    v.push(1)\n    0\nf(std::mutable_vector::from_list(\[1\]))\n"
+    list [npmDiagnostics $text] [string match {*(declare `place v: T` if the caller's storage must change; if a local working value is intended, copy it into a local first -- `working = v` -- and mutate the copy)} [npmMessage $text]]
+} -result {{{NONPLACE-PARAMETER-MUTATION 3 5}} 1}
+
+test npm-returned-parameter {a mutation of a value parameter is rejected even when the function returns the parameter: permission is the declaration's, never a later use's} -body {
+    npmDiagnostics "import std::mutable_vector\nfn grown(v: MutableVector\[int\]) -> MutableVector\[int\]:\n    v.push(1)\n    v\ngrown(std::mutable_vector::from_list(\[\])).length()\n"
+} -result {{NONPLACE-PARAMETER-MUTATION 3 5}}
+
+test npm-every-site {every mutation site of a value parameter is reported, each at its receiver, and a nested function's own parameter and a recursive function's are value parameters like any other} -body {
+    npmDiagnostics "import std::mutable_vector\nfn f(v: MutableVector\[int\], n: int) -> int:\n    v.push(1)\n    v.clear()\n    fn g(w: MutableVector\[int\]) -> int:\n        w.push(2)\n        0\n    if n > 0:\n        return f(v, n - 1)\n    g(v)\nf(std::mutable_vector::from_list(\[\]), 2)\n"
+} -result {{NONPLACE-PARAMETER-MUTATION 3 5} {NONPLACE-PARAMETER-MUTATION 4 5} {NONPLACE-PARAMETER-MUTATION 6 9}}
+
+test npm-numeric-looking-name {a value parameter whose name reads as a number (inf, nan) is named as written, in the message's path and its advice (numeric-looking-names.test: the message is never selected by expr's ?:)} -body {
+    set text "import std::mutable_vector\nfn f(inf: MutableVector\[int\], nan: MutableVector\[int\]) -> int:\n    inf.push(1)\n    0\n0\n"
+    list [npmCode $text] [string match {the receiver of std::mutable_vector::push is `inf`, which is value parameter "inf" of f,*`working = inf`*} [npmMessage $text]]
+} -result {NONPLACE-PARAMETER-MUTATION 1}
+
+test npm-related-declaration {the diagnostic is located at the mutation and relates the parameter's declaration} -body {
+    catch {surface::compile "import std::mutable_vector\nfn f(xs: MutableVector\[int\]) -> unit:\n    xs.push(1)\n0\n" -warnings off} message options
+    set d [lindex [dict get $options -diagnostics] 0]
+    list [dict get $d location line] [dict get $d location column] \
+        [lmap r [dict get $d related] {list [dict get $r line] [dict get $r column]}]
+} -cleanup {unset -nocomplain message options d} -result {3 5 {{2 6}}}
+
+# ---------------------------------------------------------------------------
+# Field paths
+
+set npmCity {import std::mutable_array
+import std::mutable_vector
+
+struct Grid:
+    tiles: MutableArray[int]
+    marks: MutableVector[int]
+
+struct City:
+    grid: Grid
+    log: MutableVector[str]
+    name: str
+    size: int
+
+fn city() -> City:
+    City {grid: Grid {tiles: std::mutable_array::create(4, 0), marks: std::mutable_vector::from_list([])}, log: std::mutable_vector::from_list([]), name: "c", size: 4}
+
+}
+
+test npm-field-paths {a mutation through any field path of a value parameter -- one level, two, each of several collection fields -- is rejected, naming the path and its parameter} -body {
+    set offset [llength [split $::npmCity \n]]
+    set text "${::npmCity}fn change(c: City) -> int errors IndexNotFound:\n    c.grid.tiles.set(0, 1)\n    c.grid.marks.push(2)\n    c.log.push(\"x\")\n    c.size\n0\n"
+    set ds [lmap d [npmDiagnostics $text] {lreplace $d 1 1 [expr {[lindex $d 1] - $offset + 1}]}]
+    list $ds [string match {the receiver of std::mutable_array::set is `c.grid.tiles`, a path of `c`, which is value parameter "c" of change, not a place parameter:*`working = c.grid.tiles`*} [npmMessage $text]]
+} -result {{{NONPLACE-PARAMETER-MUTATION 2 5} {NONPLACE-PARAMETER-MUTATION 3 5} {NONPLACE-PARAMETER-MUTATION 4 5}} 1}
+
+test npm-field-reads {reading a value parameter -- its immutable fields, its collections' lengths and elements, a loop over one -- is no mutation: it compiles and runs on every backend} -body {
+    sourceAgree "${::npmCity}fn total(c: City) -> int errors IndexNotFound:\n    s = loop t in c.grid.tiles:\n        t\n    c.size + c.grid.tiles.capacity() + c.grid.marks.length() + c.grid.tiles.at(1) + std::str::length(c.name) + std::list::length(s)\nr = total(city()):\n    on IndexNotFound:\n        -1\nr\n"
+} -setup {set ::npmCity [string map [list "import std::mutable_vector\n" "import std::mutable_vector\nimport std::str\nimport std::list\n"] $::npmCity]} -cleanup {set ::npmCity [string map [list "import std::str\nimport std::list\n" ""] $::npmCity]} -result {value 13}
+
+# ---------------------------------------------------------------------------
+# Calls: place arguments, other functions, other modules
+
+test npm-place-argument {a value parameter given to another function's place parameter is the same mutation: rejected at the argument, in either call spelling, also through a field path; a place parameter passed on is accepted} -body {
+    set offset [llength [split $::npmBag \n]]
+    set ds [npmDiagnostics "${::npmBag}fn grown(b: Bag) -> int:\n    add(b, 1)\n    b.add(2)\n    b.items.length()\nstruct Holder:\n    bag: Bag\nfn deeper(h: Holder) -> unit:\n    add(h.bag, 3)\nfn ok(place b: Bag) -> unit:\n    add(b, 4)\n0\n"]
+    lmap d $ds {lreplace $d 1 1 [expr {[lindex $d 1] - $offset + 1}]}
+} -result {{NONPLACE-PARAMETER-MUTATION 2 9} {NONPLACE-PARAMETER-MUTATION 3 5} {NONPLACE-PARAMETER-MUTATION 8 9}}
+
+test npm-mixed-parameters {one function, a place parameter and a value parameter of the same type: the place is mutated, the value parameter's mutation rejected} -body {
+    set offset [llength [split $::npmBag \n]]
+    set ds [npmDiagnostics "${::npmBag}fn both(place into: Bag, from: Bag) -> unit:\n    into.items.push(1)\n    from.items.push(2)\n0\n"]
+    lmap d $ds {lreplace $d 1 1 [expr {[lindex $d 1] - $offset + 1}]}
+} -result {{NONPLACE-PARAMETER-MUTATION 3 5}}
+
+test npm-stdlib-collections {the standard library's MutableMap and MutableSet mutate through place parameters: a value parameter given to set, remove or add is rejected, while lookups only read it} -body {
+    set decls "import std::mutable_map\nimport std::mutable_set\n"
+    list [npmCode "${decls}fn f(m: std::mutable_map::MutableMap\[str, int\]) -> unit:\n    m.set(\"a\", 1)\n0\n"] \
+        [npmCode "${decls}fn f(s: std::mutable_set::MutableSet\[int\]) -> bool:\n    s.add(1)\n0\n"] \
+        [npmCode "${decls}fn f(s: std::mutable_set::MutableSet\[int\]) -> bool:\n    std::mutable_set::remove(s, 1)\n0\n"] \
+        [sourceAgree "${decls}fn has(m: std::mutable_map::MutableMap\[str, int\]) -> bool:\n    m.contains(\"a\")\nm = std::mutable_map::create\[str, int\]()\nm.set(\"a\", 1)\nhas(m)\n"]
+} -result {NONPLACE-PARAMETER-MUTATION NONPLACE-PARAMETER-MUTATION NONPLACE-PARAMETER-MUTATION {value true}}
+
+test npm-imprinted {an imprinted function's value parameter is rejected like any other; its place version updates the caller's place in every specialization} -body {
+    set decls "import std::mutable_vector\nstruct Box\[T\]:\n    items: MutableVector\[T\]\n"
+    list [npmDiagnostics "${decls}fn put(b: Box\[T\], x: T) -> unit:\n    b.items.push(x)\n0\n"] \
+        [sourceAgree "${decls}fn put(place b: Box\[T\], x: T) -> unit:\n    b.items.push(x)\nb = Box\[int\] {items: std::mutable_vector::from_list(\[\])}\ns = Box\[str\] {items: std::mutable_vector::from_list(\[\])}\nput(b, 1)\nput(s, \"x\")\nput(s, \"y\")\n\[b.items.length(), s.items.length()\]\n"]
+} -result {{{NONPLACE-PARAMETER-MUTATION 5 5}} {value {[1, 2]}}}
+
+test npm-cross-module {across application modules: a module function mutating its own value parameter is rejected where the module writes it, and the entry program giving its value parameter to the module's place parameter is rejected at its argument} -body {
+    set module "import std::mutable_vector\nfn add(place v: MutableVector\[int\], x: int) -> unit:\n    v.push(x)\nfn lost(v: MutableVector\[int\], x: int) -> int:\n    v.push(x)\n    v.length()\n"
+    set a [npmApplication module-a [list lib.bot $module main.bot "import std::mutable_vector\nimport lib\nv = std::mutable_vector::from_list(\[1\])\nlib::lost(v, 2)\n"]]
+    set b [npmApplication module-b [list lib.bot [string map {"fn lost" "fn unused"} [string map {"    v.push(x)\n    v.length()" "    v.length()"} $module]] \
+        main.bot "import std::mutable_vector\nimport lib\nfn twice(v: MutableVector\[int\]) -> unit:\n    lib::add(v, 1)\nfn ok(place v: MutableVector\[int\]) -> unit:\n    lib::add(v, 1)\nv = std::mutable_vector::from_list(\[1\])\nok(v)\nv.length()\n"]]
+    list [npmApplicationRun $a] [npmApplicationRun $b]
+} -result {{error NONPLACE-PARAMETER-MUTATION {{NONPLACE-PARAMETER-MUTATION 5 5 lib.bot}}} {error NONPLACE-PARAMETER-MUTATION {{NONPLACE-PARAMETER-MUTATION 4 14 main.bot}}}}
+
+test npm-cross-module-accepted {the same module with a place parameter and a local copy runs on every backend: the place call updates the caller's vector, the copy never does} -body {
+    set module "import std::mutable_vector\nfn add(place v: MutableVector\[int\], x: int) -> unit:\n    v.push(x)\nfn with(v: MutableVector\[int\], x: int) -> MutableVector\[int\]:\n    w = v\n    w.push(x)\n    w\n"
+    set dir [npmApplication module-c [list lib.bot $module main.bot "import std::mutable_vector\nimport lib\nfn twice(place v: MutableVector\[int\]) -> unit:\n    lib::add(v, 1)\n    lib::add(v, 1)\nv = std::mutable_vector::from_list(\[0\])\ntwice(v)\nw = lib::with(v, 5)\n\[v.length(), w.length()\]\n"]]
+    npmApplicationRun $dir
+} -result {value {[3, 4]}}
+
+test npm-reads-and-other-effects {a function that only reads its value parameters, passes them to ordinary parameters, and mutates other storage -- a local, a context member -- compiles and runs} -body {
+    sourceAgree "import std::mutable_vector\ncontext struct Log:\n    lines: MutableVector\[int\]\nfn size(v: MutableVector\[int\]) -> int:\n    v.length()\nfn note(v: MutableVector\[int\], context log: Log) -> int:\n    log.lines.push(size(v))\n    mine = std::mutable_vector::from_list(\[0\])\n    mine.push(v.length())\n    mine.length() + log.lines.length()\nfn run(context log: Log) -> int:\n    v = std::mutable_vector::from_list(\[1, 2\])\n    note(v) + note(v)\nwith context Log {lines: std::mutable_vector::from_list(\[\])}\nrun()\n"
+} -result {value 7}
+
+# ---------------------------------------------------------------------------
+# Local working values: the explicit copy
+
+test npm-local-copy {a local copy of a value parameter is a place of its own: mutating it is legal, the function returns it, and the caller's value never changes} -body {
+    sourceAgree "import std::mutable_vector\nfn with_item(items: MutableVector\[int\], x: int) -> MutableVector\[int\]:\n    working = items\n    working.push(x)\n    working\nv = std::mutable_vector::from_list(\[1\])\nw = with_item(v, 2)\nu = with_item(w, 3)\n\[v.length(), w.length(), u.length()\]\n"
+} -result {value {[1, 2, 3]}}
+
+test npm-local-copy-indirect {a function also called through a function value -- whose caller hands its argument over uncopied -- still copies: its local copy is a header of its own, so neither the direct nor the indirect caller's vector ever changes} -body {
+    sourceAgree "import std::mutable_vector\nfn grow(xs: MutableVector\[int\]) -> int:\n    working = xs\n    working.push(9)\n    working.length()\nfn apply(g: Fn{args: \[MutableVector\[int\]\], return: int}, v: MutableVector\[int\]) -> int:\n    g(v)\na = std::mutable_vector::from_list(\[1, 2, 3\])\nn = apply(grow, a)\nm = grow(a)\n\[n, m, a.length()\]\n"
+} -result {value {[4, 4, 3]}}
+
+test npm-local-copy-read-after {the parameter read after its local copy was mutated still holds the argument: the copy is independent} -body {
+    sourceAgree "import std::mutable_vector\nfn f(items: MutableVector\[int\]) -> List\[int\]:\n    working = items\n    working.push(9)\n    working.push(9)\n    \[items.length(), working.length()\]\nf(std::mutable_vector::from_list(\[1\]))\n"
+} -result {value {[1, 3]}}
+
+test npm-local-copy-of-field {a local copy of a field path of a value parameter is mutable; the parameter and the caller keep their values} -body {
+    sourceAgree "${::npmCity}fn painted(c: City, i: int) -> MutableArray\[int\] errors IndexNotFound:\n    tiles = c.grid.tiles\n    tiles.set(i, 7)\n    tiles\nc = city()\nt = painted(c, 2):\n    on IndexNotFound:\n        std::mutable_array::create(0, 0)\nk = t.at(2):\n    on IndexNotFound:\n        -1\nj = c.grid.tiles.at(2):\n    on IndexNotFound:\n        -1\n\[k, j\]\n"
+} -result {value {[7, 0]}}
+
+test npm-destructured-local {destructuring a value parameter binds locals of their own: mutating one is legal and independent} -body {
+    sourceAgree "${::npmBag}fn pushed(b: Bag) -> int:\n    {items, label} = b\n    items.push(1)\n    items.push(2)\n    items.length() + b.items.length()\nb = empty_bag()\nadd(b, 5)\npushed(b) * 10 + b.items.length()\n"
+} -result {value 41}
+
+test npm-fresh-locals {fresh local storage -- a new vector filled in a loop, a new array set by index, a recursion threading a local copy -- is mutated freely} -body {
+    sourceAgree "import std::mutable_vector\nimport std::mutable_array\nfn ints() -> MutableVector\[int\]:\n    std::mutable_vector::from_list(\[\])\nfn squares(n: int) -> MutableVector\[int\]:\n    v = ints()\n    loop i from 0 to n:\n        v.push(i * i)\n    v\nfn table(n: int) -> MutableArray\[int\] errors IndexNotFound:\n    a = std::mutable_array::create(n, 0)\n    loop i from 0 to n:\n        a.set(i, i + 1)\n    a\nfn fill(v: MutableVector\[int\], n: int) -> MutableVector\[int\]:\n    if n <= 0:\n        return v\n    w = v\n    w.push(n)\n    fill(w, n - 1)\nt = table(3):\n    on IndexNotFound:\n        std::mutable_array::create(0, 0)\nlast = t.at(2):\n    on IndexNotFound:\n        -1\n\[squares(4).length(), last, fill(ints(), 5).length()\]\n"
+} -result {value {[4, 3, 5]}}
+
+test npm-local-copy-costs-nothing {a local copy of a parameter at the parameter's last use copies nothing at run time: a 1000-element vector filled through a recursion threading it makes no logical copy and no detach, natively} -constraints nativeBuilt -body {
+    set hir [surface::compile "import std::mutable_vector\nfn fill(v: MutableVector\[int\], n: int) -> MutableVector\[int\]:\n    if n <= 0:\n        return v\n    w = v\n    w.push(n)\n    fill(w, n - 1)\nfill(std::mutable_vector::from_list(\[\]), 1000).length()\n" -warnings off]
+    set report [native::allocationReport $hir summary]
+    list [native::evalHir $hir] [dict get $report mutableVector shares] [dict get $report mutableVector detaches]
+} -cleanup {unset -nocomplain hir report} -result {{int 1000} 0 0}
+
+# ---------------------------------------------------------------------------
+# Not parameters: contexts, loops, handlers; other rules first
+
+test npm-context-parameter {a context parameter is no value parameter: its members are the installed context's places, mutated as before, and every function sharing it sees the change} -body {
+    sourceAgree "import std::mutable_vector\ncontext struct Log:\n    lines: MutableVector\[str\]\nfn note(text: str, context log: Log) -> unit:\n    log.lines.push(text)\nfn run(context log: Log) -> int:\n    note(\"a\")\n    note(\"b\")\n    log.lines.length()\nwith context Log {lines: std::mutable_vector::from_list(\[\])}\nrun()\n"
+} -result {value 2}
+
+test npm-construct-bindings {a loop variable and a handler's payload binding are bindings of their construct, not parameters of a function: mutating one compiles, and changes its own copy only} -body {
+    sourceAgree "import std::mutable_vector\nimport std::list\nerror Bad:\n    items: MutableVector\[int\]\nfn boom(n: int) -> int errors Bad:\n    if n > 0:\n        return n\n    fail Bad {items: std::mutable_vector::from_list(\[1\])}\nfn f(n: int) -> List\[int\]:\n    vs = \[std::mutable_vector::from_list(\[1\])\]\n    lengths = loop v in vs:\n        v.push(2)\n        v.length()\n    r = boom(n):\n        on Bad details:\n            details.items.push(2)\n            details.items.length()\n    \[std::list::at(lengths, 0), r, std::mutable_vector::length(std::list::at(vs, 0))\]\nr = f(0):\n    on IndexNotFound:\n        \[\]\nr\n"
+} -setup {} -result {value {[2, 2, 1]}}
+
+test npm-affine-parameter {an affine collection parameter cannot be a place: its mutation is rejected with the advice to move it into a local, and the moved local is mutated and returned, every element released once} -body {
+    set decls "import std::coroutine\nimport std::mutable_vector\nstruct Msg:\n    v: int\nstruct Ev:\n    v: int\nfn w(acc: int, resume Msg) -> Ev:\n    m = yield Ev {v: acc}\n    Ev {v: acc + m.v}\nfn make(acc: int) -> Coroutine{args: \[Msg\], return: Ev}:\n    coroutine {step} = w(acc)\n    step\n"
+    set rejected "${decls}fn grown(q: MutableVector\[Coroutine{args: \[Msg\], return: Ev}\]) -> MutableVector\[Coroutine{args: \[Msg\], return: Ev}\]:\n    q.push(make(1))\n    q\n0\n"
+    list [npmCode $rejected] [string match {*(to work on the value, move it into a local first -- `working = q` -- mutate the local, and return it)} [npmMessage $rejected]] \
+        [sourceAgree "${decls}fn grown(q: MutableVector\[Coroutine{args: \[Msg\], return: Ev}\]) -> MutableVector\[Coroutine{args: \[Msg\], return: Ev}\]:\n    working = q\n    working.push(make(1))\n    working\nq = std::mutable_vector::from_list(\[make(5)\])\nr = grown(q)\nr.length()\n"]
+} -result {NONPLACE-PARAMETER-MUTATION 1 {value 2}}
+
+test npm-other-rules-first {the receiver rules that already rejected a mutation keep their diagnostics: an enclosing function's parameter mutated from a nested function, and a temporary, are MUTABLE-PLACE-RECEIVER} -body {
+    list [npmDiagnostics "import std::mutable_vector\nfn f(v: MutableVector\[int\]) -> int:\n    fn g() -> int:\n        v.push(1)\n        0\n    g()\n0\n"] \
+        [npmDiagnostics "import std::mutable_vector\nfn f(v: MutableVector\[int\]) -> int:\n    std::mutable_vector::from_list(\[1\]).push(1)\n    0\n0\n"]
+} -result {{{MUTABLE-PLACE-RECEIVER 4 9}} {{MUTABLE-PLACE-RECEIVER 3 5}}}
+
+# ---------------------------------------------------------------------------
+# The clean-room SimCity incident, reconstructed (the report's section 2)
+#
+# Each case is its program as the report describes it (rejected now), the
+# `place` version (the caller's storage changes, on every backend) and the
+# explicit local-copy version -- which is what the original compiled to:
+# the callee changed its own copy and the caller's storage stayed as it was.
+
+set npmSim {import std::mutable_array
+
+struct Map:
+    tiles: MutableArray[int]
+    width: int
+
+fn fresh_map() -> Map:
+    Map {tiles: std::mutable_array::create(6, 0), width: 3}
+
+fn tile(m: Map, i: int) -> int:
+    t = m.tiles.at(i):
+        on IndexNotFound:
+            -1
+    t
+
+}
+
+test npm-simcity-field-helper {case 1: a helper given a struct's mutable array field as an ordinary parameter and setting into it is rejected; with `place` the city's tiles change, with a local copy they do not (the old program's silent behavior)} -body {
+    set rejected "${::npmSim}fn zone(tiles: MutableArray\[int\], i: int, kind: int) -> unit errors IndexNotFound:\n    tiles.set(i, kind)\nm = fresh_map()\nr = zone(m.tiles, 4, 2):\n    on IndexNotFound:\n        unit\ntile(m, 4)\n"
+    set placed [string map {"fn zone(tiles" "fn zone(place tiles"} $rejected]
+    set copied [string map {"    tiles.set(i, kind)" "    working = tiles\n    working.set(i, kind)"} $rejected]
+    list [npmCode $rejected] [sourceAgree $placed] [sourceAgree $copied]
+} -result {NONPLACE-PARAMETER-MUTATION {value 2} {value 0}}
+
+test npm-simcity-copy-destination {case 2: std::mutable_array::copy into a destination declared as an ordinary parameter is rejected; declared `place`, the destination is the caller's} -body {
+    set rejected "${::npmSim}fn blit(dst: MutableArray\[int\], src: MutableArray\[int\]) -> unit errors LowerUnderrun, UpperOverrun:\n    std::mutable_array::copy(dst, 0, src, 0, 3)\nm = fresh_map()\nrow = std::mutable_array::create(3, 5)\nr = blit(m.tiles, row):\n    on LowerUnderrun:\n        unit\n    on UpperOverrun:\n        unit\n\[tile(m, 0), tile(m, 2), tile(m, 3)\]\n"
+    set placed [string map {"fn blit(dst" "fn blit(place dst"} $rejected]
+    set copied [string map {"    std::mutable_array::copy(dst, 0, src, 0, 3)" "    working = dst\n    std::mutable_array::copy(working, 0, src, 0, 3)"} $rejected]
+    list [npmDiagnostics $rejected] [sourceAgree $placed] [sourceAgree $copied]
+} -result {{{NONPLACE-PARAMETER-MUTATION 17 30}} {value {[5, 5, 0]}} {value {[0, 0, 0]}}}
+
+test npm-simcity-byte-module {case 3: an application module using std::byte that std::mutable_array::set's a byte into an ordinary parameter is rejected in the module; the place version updates the entry program's buffer on every backend} -body {
+    set module "import std::byte\nimport std::mutable_array\nfn put_byte(buffer: MutableArray\[std::byte::Byte\], i: int, value: int) -> unit errors IndexNotFound, std::byte::BelowRange, std::byte::AboveRange:\n    b = std::byte::from_int(value)\n    std::mutable_array::set(buffer, i, b)\n"
+    set main "import std::byte\nimport std::mutable_array\nimport pixels\nfn first() -> std::byte::Byte:\n    0\nbuffer = std::mutable_array::create(4, first())\nr = pixels::put_byte(buffer, 1, 200):\n    on IndexNotFound:\n        unit\n    on std::byte::BelowRange:\n        unit\n    on std::byte::AboveRange:\n        unit\nv = std::mutable_array::at(buffer, 1):\n    on IndexNotFound:\n        0\nv\n"
+    set a [npmApplication byte-a [list pixels.bot $module main.bot $main]]
+    set b [npmApplication byte-b [list pixels.bot [string map {"fn put_byte(buffer" "fn put_byte(place buffer"} $module] main.bot $main]]
+    list [npmApplicationRun $a] [npmApplicationRun $b]
+} -result {{error NONPLACE-PARAMETER-MUTATION {{NONPLACE-PARAMETER-MUTATION 5 29 pixels.bot}}} {value 200}}
+
+# ---------------------------------------------------------------------------
+# One language rule: every backend, the command line, executables, static
+# compile blocks
+
+test npm-command-line {main.tcl rejects the program identically on every backend: the same diagnostic line, exit status 1, nothing run} -body {
+    set path [makeFile "import std::mutable_vector\nfn add(items: MutableVector\[int\], x: int) -> unit:\n    items.push(x)\nv = std::mutable_vector::from_list(\[1\])\nadd(v, 2)\nv.length()\n" npm-cli-[pid].bot]
+    set results [lmap backend {interp compile cranelift-generic cranelift} {
+        set code [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -backend $backend $path} output]
+        set lines [lsearch -all -inline [split [string map [list $path FILE] $output] \n] *NONPLACE-PARAMETER-MUTATION*]
+        list $code [llength $lines] [string match {*FILE:3:5:*} [lindex $lines 0]]
+    }]
+    list [llength [lsort -unique $results]] [lindex $results 0]
+} -cleanup {removeFile npm-cli-[pid].bot; unset -nocomplain path results code output lines} -result {1 {1 1 1}}
+
+test npm-executable {a standalone executable: the rejected program is refused before anything is emitted, and the place version's executable prints the updated length} -constraints executableAot -body {
+    set dir [makeDirectory npm-aot-[pid]]
+    set rejected "import std::mutable_vector\nfn add(items: MutableVector\[int\], x: int) -> unit:\n    items.push(x)\nv = std::mutable_vector::from_list(\[1\])\nadd(v, 2)\nv.length()\n"
+    set code [catch {exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable [file join $dir rejected] [makeFile $rejected npm-aot-r-[pid].bot]} output]
+    set hir [surface::compile [string map {"fn add(items" "fn add(place items"} $rejected] -warnings off]
+    set binary [native::executable $hir [file join $dir placed]]
+    list $code [string match *NONPLACE-PARAMETER-MUTATION* $output] [file exists [native::executableFile [file join $dir rejected]]] [exec $binary]
+} -cleanup {removeFile npm-aot-r-[pid].bot; removeDirectory npm-aot-[pid]; unset -nocomplain dir rejected code output hir binary} -result {1 1 0 2}
+
+test npm-static-compile {a static compile block whose body mutates a value parameter is rejected with the DiagnosticCode NonplaceParameterMutation at the mutation; the place version is accepted} -body {
+    set text "import std::compiler\nimport std::mutable_vector\nfn probe() -> int errors std::compiler::CompilerError:\n    static compile:\n        fn add(items: MutableVector\[int\]) -> unit:\n            items.push(1)\n        v = std::mutable_vector::from_list(\[\])\n        add(v)\n        v.length()\nfn observe() -> int:\n    r = probe():\n        on std::compiler::CompilerError e:\n            if e.code == std::compiler::DiagnosticCode::NonplaceParameterMutation:\n                return e.primary.line * 100 + e.primary.column\n            -1\n    r\nobserve()\n"
+    list [sourceAgree $text] [sourceAgree [string map {"fn add(items" "fn add(place items"} $text]]
+} -result {{value 613} {value 1}}
+
+# ---------------------------------------------------------------------------
+# The check is load-bearing
+
+test npm-check-load-bearing {without the check (hir::mutvec::IsValueParam answering 0) the rejected programs compile and silently drop the write: the caller's storage is unchanged -- the behavior this milestone closes} -body {
+    rename ::hir::mutvec::IsValueParam ::npmSavedIsValueParam
+    proc ::hir::mutvec::IsValueParam {hir b} { return 0 }
+    try {
+        list [sourceAgree "import std::mutable_vector\nfn add(items: MutableVector\[int\], x: int) -> unit:\n    items.push(x)\nv = std::mutable_vector::from_list(\[1\])\nadd(v, 2)\nv.length()\n"] \
+            [sourceAgree "${::npmSim}fn zone(tiles: MutableArray\[int\], i: int, kind: int) -> unit errors IndexNotFound:\n    tiles.set(i, kind)\nm = fresh_map()\nr = zone(m.tiles, 4, 2):\n    on IndexNotFound:\n        unit\ntile(m, 4)\n"] \
+            [sourceAgree "${::npmBag}fn grown(b: Bag) -> int:\n    add(b, 1)\n    b.items.length()\nb = empty_bag()\nn = grown(b)\n\[n, b.items.length()\]\n"]
+    } finally {
+        rename ::hir::mutvec::IsValueParam {}
+        rename ::npmSavedIsValueParam ::hir::mutvec::IsValueParam
+    }
+} -result {{value 1} {value 0} {value {[1, 0]}}}
+
+cleanupTests

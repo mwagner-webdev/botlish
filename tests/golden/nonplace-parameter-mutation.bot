@@ -1,0 +1,678 @@
+# nonplace-parameter-mutation.bot -- mutation through a parameter that is
+# not declared `place` (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-MILESTONE-1.md),
+# ported from tests/nonplace-parameter-mutation.test.
+#
+# * A parameter not declared `place` is a value parameter: the function's
+#   own copy of its argument. A mutation whose destination is rooted in one
+#   -- a collection operation's receiver (every mutating operation of
+#   MutableVector and MutableArray, either call spelling), a field path of
+#   it, the argument of a place parameter (the standard library's
+#   MutableMap and MutableSet operations among them) -- is
+#   NonplaceParameterMutation at the mutation, also when the function
+#   returns the parameter, for an untyped, an imprinted and an affine
+#   parameter, and its diagnostic relates the parameter's declaration.
+# * Reading a value parameter is no mutation; a local copy of one (`w = v`,
+#   a field's copy, a destructured field) is a place of its own, mutated
+#   freely, and the caller's value never changes -- also through a function
+#   value; a place parameter updates the caller's storage; a context
+#   parameter, a loop variable and a handler's payload are no parameters of
+#   a function.
+# * The clean-room SimCity incident's helpers (a struct's array field set
+#   through an ordinary parameter, std::mutable_array::copy into one): the
+#   originals are rejected, their `place` versions update the caller and
+#   their local-copy versions leave it unchanged.
+#
+# What a Botlish program cannot observe stays in the Tcl suite: the
+# registry census of the mutating operations, programs of several modules,
+# main.tcl and executables, the native allocation report, and the check
+# patched out.
+import std::compiler
+import std::coroutine
+import std::list
+import std::mutable_array
+import std::mutable_map
+import std::mutable_set
+import std::mutable_vector
+import std::str
+import std::test
+
+struct Bag:
+    items: MutableVector[int]
+    label: str
+
+struct Holder:
+    bag: Bag
+
+fn empty_bag() -> Bag:
+    Bag {items: std::mutable_vector::from_list([]), label: "b"}
+
+fn add_to(place b: Bag, x: int) -> unit:
+    b.items.push(x)
+
+struct Grid:
+    tiles: MutableArray[int]
+    marks: MutableVector[int]
+
+struct City:
+    grid: Grid
+    log: MutableVector[str]
+    name: str
+    size: int
+
+fn city() -> City:
+    City {grid: Grid {tiles: std::mutable_array::create(4, 0), marks: std::mutable_vector::from_list([])}, log: std::mutable_vector::from_list([]), name: "c", size: 4}
+
+struct Map:
+    tiles: MutableArray[int]
+    width: int
+
+fn fresh_map() -> Map:
+    Map {tiles: std::mutable_array::create(6, 0), width: 3}
+
+fn tile(m: Map, i: int) -> int:
+    t = m.tiles.at(i):
+        on IndexNotFound:
+            -1
+    t
+
+fn ints() -> MutableVector[int]:
+    std::mutable_vector::from_list([])
+
+struct Box[T]:
+    items: MutableVector[T]
+
+struct Msg:
+    v: int
+
+struct Ev:
+    v: int
+
+fn w(acc: int, resume Msg) -> Ev:
+    m = yield Ev {v: acc}
+    Ev {v: acc + m.v}
+
+fn make(acc: int) -> Coroutine{args: [Msg], return: Ev}:
+    coroutine {step} = w(acc)
+    step
+
+# npm-context-parameter: a context whose member is mutated through context
+# parameters (installed at the top level: a body cannot require a context).
+context struct Log:
+    lines: MutableVector[str]
+
+fn note(text: str, context log: Log) -> unit:
+    log.lines.push(text)
+
+fn log_run(context log: Log) -> int:
+    note("a")
+    note("b")
+    log.lines.length()
+
+with context Log {lines: std::mutable_vector::from_list([])}
+context_member_count = log_run()
+
+# npm-reads-and-other-effects: a function that only reads its value
+# parameters and mutates other storage -- a local, a context member.
+context struct Tally:
+    counts: MutableVector[int]
+
+fn size_of(v: MutableVector[int]) -> int:
+    v.length()
+
+fn tally(v: MutableVector[int], context t: Tally) -> int:
+    t.counts.push(size_of(v))
+    mine = std::mutable_vector::from_list([0])
+    mine.push(v.length())
+    mine.length() + t.counts.length()
+
+fn tally_run(context t: Tally) -> int:
+    v = std::mutable_vector::from_list([1, 2])
+    tally(v) + tally(v)
+
+with context Tally {counts: std::mutable_vector::from_list([])}
+reads_and_effects = tally_run()
+
+error Bad:
+    items: MutableVector[int]
+
+fn boom(n: int) -> int errors Bad:
+    if n > 0:
+        return n
+    fail Bad {items: std::mutable_vector::from_list([1])}
+
+# ---------------------------------------------------------------------------
+# Direct mutation of a value parameter
+
+fn register_direct_tests():
+    # a mutating operation whose receiver is a value parameter is rejected
+    # at the mutation, the message naming the parameter, its function and
+    # both fixes
+    fn b_direct() errors std::compiler::CompilerError:
+        static compile:
+            fn add_item(items: MutableVector[int], x: int) -> unit:
+                items.push(x)
+            v = std::mutable_vector::from_list([1])
+            add_item(v, 2)
+            v.length()
+    std::test::rejects_message("npm-direct", std::compiler::DiagnosticCode::NonplaceParameterMutation, "the receiver of std::mutable_vector::push is `items`, which is value parameter \"items\" of add_item, not a place parameter: a parameter not declared `place` is the function's own copy of its argument, not its caller's storage, so this mutation would change only that copy, and the caller would never see it (declare `place items: MutableVector[int]` if the caller's storage must change; if a local working value is intended, copy it into a local first -- `working = items` -- and mutate the copy)", b_direct)
+    std::test::rejects_at("npm-direct/at-the-receiver", std::compiler::DiagnosticCode::NonplaceParameterMutation, 153, 17, b_direct)
+
+    # every mutating operation of MutableVector and MutableArray, given a
+    # value parameter as its receiver
+    fn b_push() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> int:
+                v.push(1)
+                0
+            0
+    std::test::rejects("npm-every-mutating-operation/push", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_push)
+    fn b_pop() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> int:
+                x = v.pop():
+                    on IndexNotFound:
+                        0
+                x
+            0
+    std::test::rejects("npm-every-mutating-operation/pop", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_pop)
+    fn b_take() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> int:
+                x = v.take(0):
+                    on IndexNotFound:
+                        0
+                x
+            0
+    std::test::rejects("npm-every-mutating-operation/take", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_take)
+    fn b_vector_swap() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> int:
+                x = std::mutable_vector::swap(v, 0, 1):
+                    on IndexNotFound:
+                        0
+                x
+            0
+    std::test::rejects("npm-every-mutating-operation/vector-swap", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_vector_swap)
+    fn b_clear() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> int:
+                std::mutable_vector::clear(v)
+                0
+            0
+    std::test::rejects("npm-every-mutating-operation/clear", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_clear)
+    fn b_set() errors std::compiler::CompilerError:
+        static compile:
+            fn f(a: MutableArray[int]) -> int:
+                std::mutable_array::set(a, 0, 1):
+                    on IndexNotFound:
+                        unit
+                0
+            0
+    std::test::rejects("npm-every-mutating-operation/set", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_set)
+    fn b_array_swap() errors std::compiler::CompilerError:
+        static compile:
+            fn f(a: MutableArray[int]) -> int:
+                x = std::mutable_array::swap(a, 0, 1):
+                    on IndexNotFound:
+                        0
+                x
+            0
+    std::test::rejects("npm-every-mutating-operation/array-swap", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_array_swap)
+    fn b_copy() errors std::compiler::CompilerError:
+        static compile:
+            fn f(a: MutableArray[int]) -> int:
+                std::mutable_array::copy(a, 0, a, 0, 0):
+                    on LowerUnderrun:
+                        unit
+                    on UpperOverrun:
+                        unit
+                0
+            0
+    std::test::rejects("npm-every-mutating-operation/copy", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_copy)
+
+    # the same mutation spelled as a function call: the same rejection
+    fn b_function_spelling() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> unit:
+                std::mutable_vector::push(v, 1)
+            0
+    std::test::rejects("npm-call-spelling/function", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_function_spelling)
+
+    # a method call with several visible candidates rejects every one: the
+    # decision reports NoApplicableMethod, naming the mutation as the
+    # mutating candidate's reason
+    fn b_several_candidates() errors std::compiler::CompilerError:
+        static compile:
+            fn f(a: MutableArray[int]) -> int errors IndexNotFound:
+                x = a.swap(0, 9)
+                x
+            0
+    std::test::rejects_containing("npm-method-several-candidates", std::compiler::DiagnosticCode::NoApplicableMethod, "std::mutable_array::swap rejects the receiver: the receiver of std::mutable_array::swap is `a`, which is value parameter \"a\" of f, not a place parameter", b_several_candidates)
+
+    # an untyped parameter is a value parameter too
+    fn b_untyped() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v) -> int:
+                v.push(1)
+                0
+            f(std::mutable_vector::from_list([1]))
+    std::test::rejects_containing("npm-untyped-parameter", std::compiler::DiagnosticCode::NonplaceParameterMutation, "(declare `place v: T` if the caller's storage must change; if a local working value is intended, copy it into a local first -- `working = v` -- and mutate the copy)", b_untyped)
+
+    # rejected even when the function returns the parameter
+    fn b_returned() errors std::compiler::CompilerError:
+        static compile:
+            fn grown(v: MutableVector[int]) -> MutableVector[int]:
+                v.push(1)
+                v
+            grown(ints()).length()
+    std::test::rejects("npm-returned-parameter", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_returned)
+
+    # a nested function's own parameter is a value parameter
+    fn b_nested() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n: int) -> int:
+                fn g(v: MutableVector[int]) -> int:
+                    v.push(2)
+                    0
+                g(ints())
+            f(1)
+    std::test::rejects("npm-every-site/nested-function", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_nested)
+
+    # a parameter whose name reads as a number is named as written
+    fn b_numeric_name() errors std::compiler::CompilerError:
+        static compile:
+            fn f(inf: MutableVector[int], nan: MutableVector[int]) -> int:
+                inf.push(1)
+                0
+            0
+    std::test::rejects_containing("npm-numeric-looking-name", std::compiler::DiagnosticCode::NonplaceParameterMutation, "the receiver of std::mutable_vector::push is `inf`, which is value parameter \"inf\" of f,", b_numeric_name)
+
+    # the diagnostic relates the parameter's declaration
+    fn b_related() -> List[int]:
+        fn probe() -> int errors std::compiler::CompilerError:
+            static compile:
+                fn f(xs: MutableVector[int]) -> unit:
+                    xs.push(1)
+                0
+        r = probe():
+            on std::compiler::CompilerError e:
+                spots = loop l in e.related:
+                    [l.line, l.column]
+                return std::list::flat([[e.primary.line, e.primary.column], std::list::flat(spots)])
+        [r]
+    std::test::value("npm-related-declaration", [295, 21, 294, 22], b_related)
+
+# ---------------------------------------------------------------------------
+# Field paths
+
+fn register_field_path_tests():
+    # a mutation through any field path of a value parameter is rejected
+    fn b_field_paths() errors std::compiler::CompilerError:
+        static compile:
+            fn change(c: City) -> int errors IndexNotFound:
+                std::mutable_array::set(c.grid.tiles, 0, 1)
+                c.size
+            0
+    std::test::rejects_containing("npm-field-paths", std::compiler::DiagnosticCode::NonplaceParameterMutation, "the receiver of std::mutable_array::set is `c.grid.tiles`, a path of `c`, which is value parameter \"c\" of change", b_field_paths)
+    fn b_second_field() errors std::compiler::CompilerError:
+        static compile:
+            fn change(c: City) -> int:
+                c.log.push("x")
+                c.size
+            0
+    std::test::rejects("npm-field-paths/another-field", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_second_field)
+
+    # reading a value parameter is no mutation
+    fn b_reads() errors std::compiler::CompilerError:
+        static compile:
+            fn total(c: City) -> int errors IndexNotFound:
+                s = loop t in c.grid.tiles:
+                    t
+                c.size + c.grid.tiles.capacity() + c.grid.marks.length() + c.grid.tiles.at(1) + std::str::length(c.name) + std::list::length(s)
+            r = total(city()):
+                on IndexNotFound:
+                    -1
+            r
+    std::test::value("npm-field-reads", 13, b_reads)
+
+# ---------------------------------------------------------------------------
+# Calls
+
+fn register_call_tests():
+    # a value parameter given to another function's place parameter, in
+    # either spelling, or through a field path
+    fn b_place_argument() errors std::compiler::CompilerError:
+        static compile:
+            fn grown(b: Bag) -> int:
+                add_to(b, 1)
+                b.items.length()
+            0
+    std::test::rejects("npm-place-argument/function", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_place_argument)
+    fn b_place_argument_method() errors std::compiler::CompilerError:
+        static compile:
+            fn grown(b: Bag) -> int:
+                b.add_to(2)
+                b.items.length()
+            0
+    std::test::rejects("npm-place-argument/method", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_place_argument_method)
+    fn b_place_argument_field() errors std::compiler::CompilerError:
+        static compile:
+            fn deeper(h: Holder) -> unit:
+                add_to(h.bag, 3)
+            0
+    std::test::rejects("npm-place-argument/field-path", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_place_argument_field)
+
+    # a place parameter and a value parameter of one type
+    fn b_mixed() errors std::compiler::CompilerError:
+        static compile:
+            fn both(place into: Bag, from: Bag) -> unit:
+                into.items.push(1)
+                from.items.push(2)
+            0
+    std::test::rejects("npm-mixed-parameters", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_mixed)
+
+    # the standard library's MutableMap and MutableSet operations
+    fn b_map_set() errors std::compiler::CompilerError:
+        static compile:
+            fn f(m: std::mutable_map::MutableMap[str, int]) -> unit:
+                std::mutable_map::set(m, "a", 1)
+            0
+    std::test::rejects("npm-stdlib-collections/map-set", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_map_set)
+    fn b_set_add() errors std::compiler::CompilerError:
+        static compile:
+            fn f(s: std::mutable_set::MutableSet[int]) -> bool:
+                std::mutable_set::add(s, 1)
+            0
+    std::test::rejects("npm-stdlib-collections/set-add", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_set_add)
+    fn b_map_contains() errors std::compiler::CompilerError:
+        static compile:
+            fn has(m: std::mutable_map::MutableMap[str, int]) -> bool:
+                m.contains("a")
+            m = std::mutable_map::create[str, int]()
+            m.set("a", 1)
+            has(m)
+    std::test::value("npm-stdlib-collections/lookup", true, b_map_contains)
+
+    # an imprinted function's value parameter; its place version
+    fn b_imprinted() errors std::compiler::CompilerError:
+        static compile:
+            fn put(b: Box[T], x: T) -> unit:
+                b.items.push(x)
+            0
+    std::test::rejects("npm-imprinted/value", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_imprinted)
+    fn b_imprinted_place() errors std::compiler::CompilerError:
+        static compile:
+            fn put(place b: Box[T], x: T) -> unit:
+                b.items.push(x)
+            b = Box[int] {items: std::mutable_vector::from_list([])}
+            s = Box[str] {items: std::mutable_vector::from_list([])}
+            put(b, 1)
+            put(s, "x")
+            put(s, "y")
+            [b.items.length(), s.items.length()]
+    std::test::value("npm-imprinted/place", [1, 2], b_imprinted_place)
+
+# ---------------------------------------------------------------------------
+# Local working values
+
+fn register_local_copy_tests():
+    fn b_local_copy() errors std::compiler::CompilerError:
+        static compile:
+            fn with_item(items: MutableVector[int], x: int) -> MutableVector[int]:
+                working = items
+                working.push(x)
+                working
+            v = std::mutable_vector::from_list([1])
+            w2 = with_item(v, 2)
+            u = with_item(w2, 3)
+            [v.length(), w2.length(), u.length()]
+    std::test::value("npm-local-copy", [1, 2, 3], b_local_copy)
+
+    fn b_indirect() errors std::compiler::CompilerError:
+        static compile:
+            fn grow(xs: MutableVector[int]) -> int:
+                working = xs
+                working.push(9)
+                working.length()
+            fn apply(g: Fn{args: [MutableVector[int]], return: int}, v: MutableVector[int]) -> int:
+                g(v)
+            a = std::mutable_vector::from_list([1, 2, 3])
+            n = apply(grow, a)
+            m = grow(a)
+            [n, m, a.length()]
+    std::test::value("npm-local-copy-indirect", [4, 4, 3], b_indirect)
+
+    fn b_read_after() errors std::compiler::CompilerError:
+        static compile:
+            fn f(items: MutableVector[int]) -> List[int]:
+                working = items
+                working.push(9)
+                working.push(9)
+                [items.length(), working.length()]
+            f(std::mutable_vector::from_list([1]))
+    std::test::value("npm-local-copy-read-after", [1, 3], b_read_after)
+
+    fn b_of_field() errors std::compiler::CompilerError:
+        static compile:
+            fn painted(c: City, i: int) -> MutableArray[int] errors IndexNotFound:
+                tiles = c.grid.tiles
+                tiles.set(i, 7)
+                tiles
+            c = city()
+            t = painted(c, 2):
+                on IndexNotFound:
+                    std::mutable_array::create(0, 0)
+            k = t.at(2):
+                on IndexNotFound:
+                    -1
+            j = c.grid.tiles.at(2):
+                on IndexNotFound:
+                    -1
+            [k, j]
+    std::test::value("npm-local-copy-of-field", [7, 0], b_of_field)
+
+    fn b_destructured() errors std::compiler::CompilerError:
+        static compile:
+            fn pushed(b: Bag) -> int:
+                {items, label} = b
+                items.push(1)
+                items.push(2)
+                items.length() + b.items.length()
+            b = empty_bag()
+            add_to(b, 5)
+            pushed(b) * 10 + b.items.length()
+    std::test::value("npm-destructured-local", 41, b_destructured)
+
+    fn b_fresh() errors std::compiler::CompilerError:
+        static compile:
+            fn squares(n: int) -> MutableVector[int]:
+                v = ints()
+                loop i from 0 to n:
+                    v.push(i * i)
+                v
+            fn table(n: int) -> MutableArray[int] errors IndexNotFound:
+                a = std::mutable_array::create(n, 0)
+                loop i from 0 to n:
+                    a.set(i, i + 1)
+                a
+            fn fill(v: MutableVector[int], n: int) -> MutableVector[int]:
+                if n <= 0:
+                    return v
+                w2 = v
+                w2.push(n)
+                fill(w2, n - 1)
+            t = table(3):
+                on IndexNotFound:
+                    std::mutable_array::create(0, 0)
+            last = t.at(2):
+                on IndexNotFound:
+                    -1
+            [squares(4).length(), last, fill(ints(), 5).length()]
+    std::test::value("npm-fresh-locals", [4, 3, 5], b_fresh)
+
+# ---------------------------------------------------------------------------
+# Not parameters; affine values; other rules first
+
+fn register_binding_kind_tests():
+    # a context parameter is no value parameter (installed at the top level)
+    fn b_context() errors std::compiler::CompilerError:
+        static compile:
+            context_member_count
+    std::test::value("npm-context-parameter", 2, b_context)
+
+    # reading value parameters, passing them to ordinary parameters and
+    # mutating other storage compiles and runs (installed at the top level)
+    fn b_reads_and_effects() errors std::compiler::CompilerError:
+        static compile:
+            reads_and_effects
+    std::test::value("npm-reads-and-other-effects", 7, b_reads_and_effects)
+
+    # a loop variable and a handler's payload binding are bindings of their
+    # construct, not parameters of a function
+    fn b_construct_bindings() errors std::compiler::CompilerError:
+        static compile:
+            fn f(n: int) -> List[int]:
+                vs = [std::mutable_vector::from_list([1])]
+                lengths = loop v in vs:
+                    v.push(2)
+                    v.length()
+                r = boom(n):
+                    on Bad details:
+                        details.items.push(2)
+                        details.items.length()
+                [std::list::at(lengths, 0), r, std::mutable_vector::length(std::list::at(vs, 0))]
+            r = f(0):
+                on IndexNotFound:
+                    []
+            r
+    std::test::value("npm-construct-bindings", [2, 2, 1], b_construct_bindings)
+
+    # an affine collection parameter: rejected with the advice to move it
+    # into a local; the moved local is mutated and returned
+    fn b_affine_rejected() errors std::compiler::CompilerError:
+        static compile:
+            fn grown(q: MutableVector[Coroutine{args: [Msg], return: Ev}]) -> MutableVector[Coroutine{args: [Msg], return: Ev}]:
+                q.push(make(1))
+                q
+            0
+    std::test::rejects_containing("npm-affine-parameter/rejected", std::compiler::DiagnosticCode::NonplaceParameterMutation, "(to work on the value, move it into a local first -- `working = q` -- mutate the local, and return it)", b_affine_rejected)
+    fn b_affine_local() errors std::compiler::CompilerError:
+        static compile:
+            fn grown(q: MutableVector[Coroutine{args: [Msg], return: Ev}]) -> MutableVector[Coroutine{args: [Msg], return: Ev}]:
+                working = q
+                working.push(make(1))
+                working
+            q = std::mutable_vector::from_list([make(5)])
+            r = grown(q)
+            r.length()
+    std::test::value("npm-affine-parameter/local", 2, b_affine_local)
+
+    # the receiver rules that already rejected a mutation keep their
+    # diagnostics
+    fn b_enclosing() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> int:
+                fn g() -> int:
+                    v.push(1)
+                    0
+                g()
+            0
+    std::test::rejects("npm-other-rules-first/enclosing", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_enclosing)
+    fn b_temporary() errors std::compiler::CompilerError:
+        static compile:
+            fn f(v: MutableVector[int]) -> int:
+                std::mutable_vector::from_list([1]).push(1)
+                0
+            0
+    std::test::rejects("npm-other-rules-first/temporary", std::compiler::DiagnosticCode::MutablePlaceReceiver, b_temporary)
+
+# ---------------------------------------------------------------------------
+# The clean-room SimCity incident, reconstructed
+
+fn register_simcity_tests():
+    fn b_field_helper() errors std::compiler::CompilerError:
+        static compile:
+            fn zone(tiles: MutableArray[int], i: int, kind: int) -> unit errors IndexNotFound:
+                std::mutable_array::set(tiles, i, kind)
+            m = fresh_map()
+            r = zone(m.tiles, 4, 2):
+                on IndexNotFound:
+                    unit
+            tile(m, 4)
+    std::test::rejects("npm-simcity-field-helper/original", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_field_helper)
+    fn b_field_helper_place() errors std::compiler::CompilerError:
+        static compile:
+            fn zone(place tiles: MutableArray[int], i: int, kind: int) -> unit errors IndexNotFound:
+                std::mutable_array::set(tiles, i, kind)
+            m = fresh_map()
+            r = zone(m.tiles, 4, 2):
+                on IndexNotFound:
+                    unit
+            tile(m, 4)
+    std::test::value("npm-simcity-field-helper/place", 2, b_field_helper_place)
+    fn b_field_helper_copy() errors std::compiler::CompilerError:
+        static compile:
+            fn zone(tiles: MutableArray[int], i: int, kind: int) -> unit errors IndexNotFound:
+                working = tiles
+                std::mutable_array::set(working, i, kind)
+            m = fresh_map()
+            r = zone(m.tiles, 4, 2):
+                on IndexNotFound:
+                    unit
+            tile(m, 4)
+    std::test::value("npm-simcity-field-helper/local-copy", 0, b_field_helper_copy)
+
+    fn b_copy_destination() errors std::compiler::CompilerError:
+        static compile:
+            fn blit(dst: MutableArray[int], src: MutableArray[int]) -> unit errors LowerUnderrun, UpperOverrun:
+                std::mutable_array::copy(dst, 0, src, 0, 3)
+            m = fresh_map()
+            row = std::mutable_array::create(3, 5)
+            r = blit(m.tiles, row):
+                on LowerUnderrun:
+                    unit
+                on UpperOverrun:
+                    unit
+            [tile(m, 0), tile(m, 2), tile(m, 3)]
+    std::test::rejects("npm-simcity-copy-destination/original", std::compiler::DiagnosticCode::NonplaceParameterMutation, b_copy_destination)
+    fn b_copy_destination_place() errors std::compiler::CompilerError:
+        static compile:
+            fn blit(place dst: MutableArray[int], src: MutableArray[int]) -> unit errors LowerUnderrun, UpperOverrun:
+                std::mutable_array::copy(dst, 0, src, 0, 3)
+            m = fresh_map()
+            row = std::mutable_array::create(3, 5)
+            r = blit(m.tiles, row):
+                on LowerUnderrun:
+                    unit
+                on UpperOverrun:
+                    unit
+            [tile(m, 0), tile(m, 2), tile(m, 3)]
+    std::test::value("npm-simcity-copy-destination/place", [5, 5, 0], b_copy_destination_place)
+    fn b_copy_destination_copy() errors std::compiler::CompilerError:
+        static compile:
+            fn blit(dst: MutableArray[int], src: MutableArray[int]) -> unit errors LowerUnderrun, UpperOverrun:
+                working = dst
+                std::mutable_array::copy(working, 0, src, 0, 3)
+            m = fresh_map()
+            row = std::mutable_array::create(3, 5)
+            r = blit(m.tiles, row):
+                on LowerUnderrun:
+                    unit
+                on UpperOverrun:
+                    unit
+            [tile(m, 0), tile(m, 2), tile(m, 3)]
+    std::test::value("npm-simcity-copy-destination/local-copy", [0, 0, 0], b_copy_destination_copy)
+
+# ---------------------------------------------------------------------------
+
+fn register_nonplace_parameter_tests():
+    register_direct_tests()
+    register_field_path_tests()
+    register_call_tests()
+    register_local_copy_tests()
+    register_binding_kind_tests()
+    register_simcity_tests()
+
+with context std::test::suite()
+register_nonplace_parameter_tests()
+std::test::report()

@@ -449,13 +449,14 @@ where that value came from and convert it before the call.
 import std::mutable_vector
 
 fn add_name(v: MutableVector[int]) -> int:
-    v.push("seven")
+    w = v
+    w.push("seven")
     0
 
 0
 @caption A str pushed onto a MutableVector[int]
 @error CORE SEMANTIC TYPE
-@at 4:12
+@at 5:12
 @end
 
 @example reject

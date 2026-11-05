@@ -554,12 +554,12 @@ test mat-inv-8 {no program views one array as two element types: the second view
 # still never erased.
 
 test mat-atk-1 {passing MutableArray[str] to a raw mutarray parameter that writes: the callee writes its own copy, the caller's array is unchanged, on every backend} -body {
-    set src "import std::mutable_array\nfn smash(x: mutarray) -> mutarray errors IndexNotFound:\n    std::mutable_array::set(x, 0, 123)\n    x\nfn f() -> list errors IndexNotFound:\n    m = std::mutable_array::from_list(\[\"hello\"\])\n    s = smash(m)\n    \[std::mutable_array::at(m, 0), std::mutable_array::at(s, 0)\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr"
+    set src "import std::mutable_array\nfn smash(x: mutarray) -> mutarray errors IndexNotFound:\n    w = x\n    std::mutable_array::set(w, 0, 123)\n    w\nfn f() -> list errors IndexNotFound:\n    m = std::mutable_array::from_list(\[\"hello\"\])\n    s = smash(m)\n    \[std::mutable_array::at(m, 0), std::mutable_array::at(s, 0)\]\nr = f():\n    on IndexNotFound:\n        \[\]\nr"
     list [maRejects $src *] [maParity $src] [maValue $src]
 } -result {accepted same {["hello", 123]}}
 
 test mat-atk-2 {an untyped parameter is analyzed at its argument's type (a semantic instance), so a write of another element type into it is still rejected, kind test or not} -body {
-    set src "import std::mutable_array\nfn f(x):\n    if mutarray?(x):\n        std::mutable_array::set(x, 0, 123)\n    else:\n        unit\nm = std::mutable_array::from_list(\[\"a\"\])\nf(m)\nstd::mutable_array::at(m, 0)"
+    set src "import std::mutable_array\nfn f(x):\n    w = x\n    if mutarray?(w):\n        std::mutable_array::set(w, 0, 123)\n    else:\n        unit\nm = std::mutable_array::from_list(\[\"a\"\])\nf(m)\nstd::mutable_array::at(m, 0)"
     list [maRejects $src *] [maHas $src "*call to f with x : MutableArray\\\[str\\\] is invalid: value of type int is not admissible to element type str*"]
 } -result {{{CORE SEMANTIC TYPE} 1} 1}
 
@@ -668,7 +668,7 @@ test mat-atk-18 {a function cannot mutate an array it captures (MUTABLE-PLACE-RE
     list \
         [maRejects "import std::mutable_array\nm = std::mutable_array::create(1, \"a\")\nfn poke():\n    std::mutable_array::set(m, 0, \"q\")\npoke()" *] \
         [maRejects "import std::mutable_array\nm = std::mutable_array::create(1, \"a\")\nfn poke():\n    std::mutable_array::set(m, 0, 5)\npoke()" *] \
-        [maRejects "import std::mutable_array\nfn poke(m: MutableArray\[str\]):\n    if std::mutable_array::capacity(m) > 0:\n        std::mutable_array::set(m, 0, \"q\")\nm = std::mutable_array::create(1, \"a\")\npoke(m)" *]
+        [maRejects "import std::mutable_array\nfn poke(m: MutableArray\[str\]):\n    w = m\n    if std::mutable_array::capacity(w) > 0:\n        std::mutable_array::set(w, 0, \"q\")\nm = std::mutable_array::create(1, \"a\")\npoke(m)" *]
 } -result {{{CORE SEMANTIC MUTABLE-PLACE-RECEIVER} 1} {{CORE SEMANTIC TYPE} 1} accepted}
 
 test mat-atk-19 {a function returning a typed array cannot be reached through a forward reference at all; called after its definition it keeps its contract} -body {
@@ -719,7 +719,7 @@ test mat-ref-2 {mutarray? on a typed array keeps the element contract in the tru
 } -result {{MutableArray[str]} {MutableArray[str]} {{CORE SEMANTIC TYPE} 1}}
 
 test mat-ref-3 {a refined unknown value is a raw array that can be written with anything (it was never typed)} -body {
-    maRejects "import std::mutable_array\nfn f(x):\n    if mutarray?(x):\n        if std::mutable_array::capacity(x) > 0:\n            std::mutable_array::set(x, 0, 123)\n    else:\n        unit\nf(std::mutable_array::allocate(1))" *
+    maRejects "import std::mutable_array\nfn f(x):\n    w = x\n    if mutarray?(w):\n        if std::mutable_array::capacity(w) > 0:\n            std::mutable_array::set(w, 0, 123)\n    else:\n        unit\nf(std::mutable_array::allocate(1))" *
 } -result accepted
 
 test mat-ref-4 {mutarray? is true for a typed and a raw array at run time on every backend} -body {
@@ -793,7 +793,7 @@ test mat-sp-1 {a function returning create infers MutableArray[str] with no anno
 } -result {{MutableArray[str]} {MutableArray[str]} {MutableArray[int]}}
 
 test mat-sp-2 {a concrete forwarding function preserves the element contract} -body {
-    set src "import std::mutable_array\nfn fill(xs: MutableArray\[int\], n: int) -> MutableArray\[int\]:\n    loop i from 0 to std::mutable_array::capacity(xs):\n        if i < n:\n            std::mutable_array::set(xs, i, i)\n    xs\nfn go():\n    fill(std::mutable_array::create(3, 0), 3)\ngo()"
+    set src "import std::mutable_array\nfn fill(xs: MutableArray\[int\], n: int) -> MutableArray\[int\]:\n    w = xs\n    loop i from 0 to std::mutable_array::capacity(w):\n        if i < n:\n            std::mutable_array::set(w, i, i)\n    w\nfn go():\n    fill(std::mutable_array::create(3, 0), 3)\ngo()"
     list [maResult $src fill] [maResult $src go]
 } -result {{MutableArray[int]} {MutableArray[int]}}
 
@@ -1014,7 +1014,7 @@ test mat-bd-1 {an untyped forwarder to a typed function infers the typed contrac
 } -result {str {{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1}}
 
 test mat-bd-2 {struct boundary: a typed array may ride in a positional pair (a logical copy); typed storage plus a separate length works} -body {
-    set defs "import std::mutable_array\nfn push(storage: MutableArray\[int\], length: int, v: int) -> MutableArray\[int\]:\n    if length >= 0 and length < std::mutable_array::capacity(storage):\n        std::mutable_array::set(storage, length, v)\n    storage\n"
+    set defs "import std::mutable_array\nfn push(storage: MutableArray\[int\], length: int, v: int) -> MutableArray\[int\]:\n    w = storage\n    if length >= 0 and length < std::mutable_array::capacity(w):\n        std::mutable_array::set(w, length, v)\n    w\n"
     list \
         [lindex [maRejects "${defs}pair = \[push(std::mutable_array::create(2, 0), 0, 7), 1\]\npair" *] 0] \
         [maLast "${defs}s = push(std::mutable_array::create(2, 0), 0, 7)\nstd::mutable_array::freeze(s, std::mutable_array::capacity(s))"]
@@ -1034,8 +1034,8 @@ test mat-bd-5 {an inferred raw-mutarray contract (untyped wrapper that writes or
     list \
         [maRejects "import std::mutable_array\nfn cap(m):\n    std::mutable_array::capacity(m)\ncap(std::mutable_array::create(1, \"a\"))" *] \
         [maRejects "import std::mutable_array\nfn cap(m):\n    std::mutable_array::capacity(m)\ncap(std::mutable_array::allocate(1))" *] \
-        [maRejects "import std::mutable_array\nfn put(m):\n    if std::mutable_array::capacity(m) > 0:\n        std::mutable_array::set(m, 0, 1)\nput(std::mutable_array::create(1, \"a\"))" *] \
-        [maRejects "import std::mutable_array\nfn put(m):\n    if std::mutable_array::capacity(m) > 0:\n        std::mutable_array::set(m, 0, \"b\")\nput(std::mutable_array::create(1, \"a\"))" *]
+        [maRejects "import std::mutable_array\nfn put(m):\n    w = m\n    if std::mutable_array::capacity(w) > 0:\n        std::mutable_array::set(w, 0, 1)\nput(std::mutable_array::create(1, \"a\"))" *] \
+        [maRejects "import std::mutable_array\nfn put(m):\n    w = m\n    if std::mutable_array::capacity(w) > 0:\n        std::mutable_array::set(w, 0, \"b\")\nput(std::mutable_array::create(1, \"a\"))" *]
 } -result {accepted accepted {{CORE SEMANTIC TYPE} 1} accepted}
 
 cleanupTests

@@ -21,9 +21,12 @@
 #     full -- produces the same List as persistent std::list::append, for heap
 #     elements too, and keeps values stored only in its arrays live through
 #     growth, copy and freeze. The chunked builder's chunked_copy_chunks
-#     writes the completed chunks into its own copy of `final`, so they never
-#     reach chunked_finish's array: its List equals the persistent one only
-#     while no chunk has completed (n <= 4, the chunk size).
+#     writes the completed chunks into chunked_finish's array through its
+#     place parameter `final`, so its List equals the persistent one at every
+#     size, also once chunks have completed (n > 4, the chunk size). (It used
+#     to take `final` as an ordinary parameter, write its own copy and lose
+#     every completed chunk -- the dropped write NONPLACE-PARAMETER-MUTATION
+#     now rejects.)
 #   * Fixed-shape List parameters and results. A List built at a call site
 #     and read by constant index in the callee -- one or several fields,
 #     several such parameters beside ordinary ones, several reads of one
@@ -149,8 +152,8 @@ fn chunked_append(builder, value) errors IndexNotFound:
     std::mutable_array::set(current, filled, value)
     [completed, current, filled + 1]
 
-# Writes into its parameter `final`: the caller's array never sees it.
-fn chunked_copy_chunks(chunks, index, final, offset) errors IndexNotFound, UpperOverrun, LowerUnderrun:
+# Writes into its place parameter `final`: the caller's array.
+fn chunked_copy_chunks(chunks, index, place final: mutarray, offset) errors IndexNotFound, UpperOverrun, LowerUnderrun:
     if index >= std::list::length(chunks):
         return offset
 
@@ -511,15 +514,16 @@ fn register_builder_case(name: str, n: int, expected):
 fn register_mutarray_builder_tests():
     # 0, 1, below and at chunk_size()'s boundary (4), and sizes with one,
     # two and many completed chunks and several geometric growth steps. The
-    # chunked builder loses its completed chunks (see chunked_copy_chunks):
-    # from 5 on its List is not the persistent one.
+    # chunked builder's completed chunks reach its result through a place
+    # parameter (see chunked_copy_chunks): its List is the persistent one at
+    # every size.
     register_builder_case("mutarray-builder-0", 0, [true, true, 0])
     register_builder_case("mutarray-builder-1", 1, [true, true, 1])
     register_builder_case("mutarray-builder-3", 3, [true, true, 3])
     register_builder_case("mutarray-builder-4", 4, [true, true, 4])
-    register_builder_case("mutarray-builder-5", 5, [true, false, 5])
-    register_builder_case("mutarray-builder-8", 8, [true, false, 8])
-    register_builder_case("mutarray-builder-100", 100, [true, false, 100])
+    register_builder_case("mutarray-builder-5", 5, [true, true, 5])
+    register_builder_case("mutarray-builder-8", 8, [true, true, 8])
+    register_builder_case("mutarray-builder-100", 100, [true, true, 100])
 
     # mutarray-builder-values-1: the geometric builder holds heap values
     # (the [i, "v"] Lists) correctly.

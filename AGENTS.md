@@ -3193,6 +3193,56 @@ the Hashable and trait-constrained-type harnesses for a change to how keys
 are constrained or hashed, and the warning gate (the three modules are
 warning-clean). `bench/mutable-map.tcl` regenerates the performance report.
 
+## Value parameters are never mutated (NONPLACE-PARAMETER-MUTATION)
+
+A function's parameter not declared `place` is a value: the function's
+own logical copy of its argument (NONPLACE-PARAMETER-MUTATION-CORRECTNESS-
+MILESTONE-1.md). A mutation whose destination is rooted in one -- a
+collection operation's receiver path, or the argument of another
+function's place parameter (std::mutable_map's and std::mutable_set's
+operations among them) -- is NONPLACE-PARAMETER-MUTATION, the call's own
+problem (`hir::CheckingCall`), at the mutation, relating the parameter's
+declaration (`hir::mutvec::IsValueParam`, `ValueParamMutation`, their two
+uses in `hir::mutvec::verify`). Keep it so:
+
+* The rule reads the destination's root binding only: a parameter of a
+  function block (its `params`) that is not one of its `places`. Never
+  read whether the parameter is returned or used later, its type, its
+  callers, a name or an operation's spelling; never exempt an untyped, an
+  imprinted, an affine or a nested function's parameter, a field path or a
+  call through method syntax.
+* A local is a place of its own whatever it was bound from: `w = v`, a
+  field's copy, a destructured field are independent logical copies, and
+  mutating them is legal. Never taint a value by its origin, and never
+  turn the local copy into an alias (`hir::mutvec::Moved` moves a header
+  only out of a binding the copy convention holds; a parameter of a
+  function also called through a value never is).
+* A context parameter, a loop variable, a fold's intermediate and a
+  handler's payload binding are no value parameters (their scope is a
+  construct's, or they are locals bound to the installed context).
+* An error, never a warning or a lint; checked before any backend; no
+  runtime check, no backend special case. The existing receiver rules
+  (MUTABLE-PLACE-RECEIVER: a temporary, an enclosing function's binding, a
+  module binding) report first.
+* The fix is the program's: `place` for the caller's storage, a local copy
+  for a local working value. Never recommend `place` for an affine
+  parameter (a place parameter is never affine).
+
+If you change any of that (hir/mutvec.tcl's value parameters or receiver
+and place-argument checks, what a place path is, the copy convention's
+`Moved`), run `tests/nonplace-parameter-mutation.test`, its golden suite
+(`tclsh9.0 tests/local.tcl tests/golden/nonplace-parameter-mutation.bot`),
+`tests/place-parameters.test`, `tests/mutable-vector.test`,
+`tests/mutable-array.test`, `audit/mutable-vector/tools/fuzz.tcl` and
+`audit/mutable-array/tools/fuzz.tcl` (several seeds: their
+`valueparam` faults), and `audit/nonplace-parameter-mutation/tools/mutate.tcl`
+(every mutant in its `mutants.txt` must still apply and be killed by a
+test its `!!` line names: update a mutant's text when you change the code
+it mutates, keeping it a mutant of the same rule), plus the vector, array
+and map harnesses (MutableVector, MutableArray, MutableMap above) for a
+change to code they share. `tools/compilerpedia.tcl check` keeps the
+topic (`error.nonplace-parameter-mutation`) and its examples true.
+
 ## Collection order and relational facts
 
 `m.reorder(order)` and `s.reorder(order)` (PROVEN-COLLECTION-REORDERING.md)

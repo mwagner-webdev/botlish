@@ -122,38 +122,41 @@ fn literal_end(text: str, start: int, word: str) -> int errors IndexNotFound, Lo
 
 # OUT with the tokens of TEXT from I on pushed onto it. A MutableVector is a
 # value (MUTABLE-VECTOR.md: mutating one copy never changes another), so the
-# scan hands the vector back rather than filling the caller's.
+# scan hands the vector back rather than filling the caller's: it fills a
+# local of its own (`tokens = out`; a parameter not declared `place` is the
+# function's copy, never a place it may mutate: NONPLACE-PARAMETER-MUTATION).
 fn scan(text: str, i: int, out: MutableVector[Token], limit: int) -> MutableVector[Token] errors IndexNotFound, LowerUnderrun, UpperOverrun, Malformed, TooManyTokens:
+    tokens = out
     c = peek(text, i)
     if c == -1:
-        return out
+        return tokens
     if space?(c):
-        return scan(text, i + 1, out, limit)
-    if out.length() >= limit:
+        return scan(text, i + 1, tokens, limit)
+    if tokens.length() >= limit:
         fail TooManyTokens {limit: limit}
     if c == 123 or c == 125 or c == 91 or c == 93 or c == 58 or c == 44:
-        out.push(Token {kind: "punct", start: i, end: i + 1})
-        return scan(text, i + 1, out, limit)
+        tokens.push(Token {kind: "punct", start: i, end: i + 1})
+        return scan(text, i + 1, tokens, limit)
     if c == 34:
         end = string_end(text, i + 1)
-        out.push(Token {kind: "string", start: i, end: end})
-        return scan(text, end, out, limit)
+        tokens.push(Token {kind: "string", start: i, end: end})
+        return scan(text, end, tokens, limit)
     if c == 45 or digit?(c):
         end = number_end(text, i)
-        out.push(Token {kind: "number", start: i, end: end})
-        return scan(text, end, out, limit)
+        tokens.push(Token {kind: "number", start: i, end: end})
+        return scan(text, end, tokens, limit)
     if c == 116:
         end = literal_end(text, i, "true")
-        out.push(Token {kind: "true", start: i, end: end})
-        return scan(text, end, out, limit)
+        tokens.push(Token {kind: "true", start: i, end: end})
+        return scan(text, end, tokens, limit)
     if c == 102:
         end = literal_end(text, i, "false")
-        out.push(Token {kind: "false", start: i, end: end})
-        return scan(text, end, out, limit)
+        tokens.push(Token {kind: "false", start: i, end: end})
+        return scan(text, end, tokens, limit)
     if c == 110:
         end = literal_end(text, i, "null")
-        out.push(Token {kind: "null", start: i, end: end})
-        return scan(text, end, out, limit)
+        tokens.push(Token {kind: "null", start: i, end: end})
+        return scan(text, end, tokens, limit)
     fail Malformed {at: i}
 
 fn no_tokens() -> MutableVector[Token]:
