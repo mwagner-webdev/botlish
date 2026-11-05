@@ -484,10 +484,15 @@ Tag a commit of `main` and push the tag:
     git tag icy-tower-macos-v1.0.0 <commit of main>
     git push origin icy-tower-macos-v1.0.0
 
-The push runs `icy-tower (macos arm64)` for the tag: the game job (the build
-and every test, as on any push; no credential), then the release job in the
-`macos-release` environment (waiting for its approval when one is
-required), then the publish job. A manual run (Actions, icy-tower (macos
+The push runs `icy-tower (macos arm64)` for the tag. First its `tested` job
+checks that every test of the tagged commit is green (CI-RUNS.md, "The
+release gate": tests.yml and tests-arm64.yml with their GC-stress jobs,
+macOS, Windows, static-decisions when it ran); until they are, the run is
+deferred -- every other job skips -- and the release gate runs the workflow
+on the tag again once they are, so a tag can be pushed right after its
+merge. Then the game job (the build and every test, as on any push; no
+credential), then the release job in the `macos-release` environment
+(waiting for its approval when one is required), then the publish job. A manual run (Actions, icy-tower (macos
 arm64), Run workflow, "Use workflow from" the tag) does the same; a manual
 run on a branch runs no release job. The release job refuses a tag that is
 not `icy-tower-macos-vX.Y.Z`, one that does not name the run's commit, and
@@ -1251,18 +1256,24 @@ a different Mac -- another user, no Xcode, macOS 11 to 14 (section 46).
 ## 36. GitHub Actions trust boundaries
 
 `.github/workflows/icy-tower-macos.yml` (read by
-`audit/macos-release/tests/test_workflow.py`, 23 tests, which parse it as
+`audit/macos-release/tests/test_workflow.py`, 24 tests, which parse it as
 GitHub does):
 
 * triggers: push (branches, and `icy-tower-macos-v*` tags), pull_request,
   workflow_dispatch; no `pull_request_target`, no `workflow_run`;
   workflow-level permissions `contents: read`;
+* the **tested** job, on a release tag only: it reads runs (`contents:
+  read`, `actions: read`), no environment, no secret; the game job, and so
+  the release, waits for its finding every test of the tagged commit green
+  (CI-RUNS.md), and the release job checks that finding too;
 * the **game** job (every push and pull request from a fork; skipped for
-  the repository's own pull requests, whose push already ran): no
+  the repository's own pull requests, whose push already ran, and on a
+  deferred release tag): no
   environment, no secret, no write permission; it builds and tests the
   game and the ad hoc bundle and rehearses the release with a throwaway
   identity;
-* the **release** job: `needs: game` and the game job's success; only for
+* the **release** job: `needs: [game, tested]`, the game job's success and
+  the tested job's green; only for
   `refs/tags/icy-tower-macos-v*` on push or workflow_dispatch -- never a
   pull request; `environment: macos-release` (whose deployment rule should
   admit those tags alone, and may require approval); permissions `contents:

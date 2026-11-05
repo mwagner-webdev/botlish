@@ -62,11 +62,14 @@ name: tests (windows x86-64)
 # Pushes to any branch run it, so a branch gets Windows results before this
 # file is on main; a pull request from this repository's own branches skips
 # (its push already ran), one from a fork runs. Documentation-only pushes
-# skip. A newer push to the same branch cancels a running one, except on
-# main. The checkout keeps the repository's bytes (no CRLF conversion).
+# skip, and so do tags (a tag's commit was tested where it was pushed). A
+# newer push to the same branch cancels a running one, on main too
+# (CI-RUNS.md). The checkout keeps the repository's bytes (no CRLF
+# conversion).
 
 on:
   push:
+    branches: ["**"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -95,7 +98,7 @@ permissions:
 
 concurrency:
   group: windows-x86_64-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 # The C compiler of core::cabi's windows-x86_64 row, for every job: clang,
 # whose default target on Windows is MSVC's. The image's `cc` is a MinGW gcc,

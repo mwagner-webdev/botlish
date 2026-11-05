@@ -11,6 +11,12 @@ on:
 permissions:
   contents: read
 
+# A newer push (or run on the same ref) cancels the running one, on main
+# too (CI-RUNS.md).
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: tests (${{ matrix.backend }})

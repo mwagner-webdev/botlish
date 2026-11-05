@@ -60,14 +60,16 @@ name: tests (macos arm64)
 # Pushes to any branch run it, so a feature branch gets macOS results before
 # this file is on main; a pull request from this repository's own branches
 # skips (its push already ran), one from a fork runs. Documentation-only
-# pushes skip. A newer push to the same branch cancels a running one, except
-# on main. No macOS job waits for a Linux runner. A manual run with app_only
+# pushes skip, and so do tags (a tag's commit was tested where it was
+# pushed). A newer push to the same branch cancels a running one, on main
+# too (CI-RUNS.md). No macOS job waits for a Linux runner. A manual run with app_only
 # runs only the application's jobs. The runner label, macos-15
 # (an Apple Silicon image; the smoke job fails on anything else), is written
 # in the smoke, acceptance and full jobs: change all three together.
 
 on:
   push:
+    branches: ["**"]
     paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths-ignore: ["**.md", "docs/**"]
@@ -100,7 +102,7 @@ permissions:
 
 concurrency:
   group: macos-arm64-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 defaults:
   run:
