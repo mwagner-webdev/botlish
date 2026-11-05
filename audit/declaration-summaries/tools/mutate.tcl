@@ -104,7 +104,7 @@ foreach {name description edits} [readMutants [file join [file dirname [file nor
 
 # A private copy of the compiler sources, tests, library and this audit.
 set tree [file tempdir botlish-summary-mutants]
-foreach dir {compiler core hir surface stdlib tests examples service lsp compilerpedia audit/declaration-summaries .cargo} {
+foreach dir {compiler core hir surface stdlib tests examples service lsp compilerpedia audit/declaration-summaries audit/hashable audit/value-identity .cargo} {
     if {![file exists [file join $root $dir]]} continue
     file mkdir [file dirname [file join $tree $dir]]
     file copy [file join $root $dir] [file join $tree $dir]
@@ -135,7 +135,7 @@ proc lastLine {output} {
     return [string range [lindex [split [string trim $output] \n] end] 0 120]
 }
 
-proc detect {tree} {
+proc detect {tree {verbose 0}} {
     global options
     set failedTests {}
     set incomplete ""
@@ -145,6 +145,9 @@ proc detect {tree} {
         # the same comparison on its programs, in a fraction of the time.)
         lassign [run [dict get $options -timeout] tclsh9.0 [file join $tree $testFile] -tmpdir $tmp -skip pds-parity-corpus] status output
         file delete -force $tmp
+        if {$verbose && [regexp -line {^==== (\S+) .*FAILED$} $output]} {
+            puts $output
+        }
         lappend failedTests {*}[lmap {- n} [regexp -all -inline -line {^==== (\S+) .*FAILED$} $output] {set n}]
         if {$incomplete eq "" && ![regexp {Total\s+\d+\s+Passed\s+\d+\s+Skipped\s+\d+\s+Failed\s+(\d+)} $output]} {
             set incomplete "[file tail $testFile]: [lastLine $output]"
@@ -172,7 +175,7 @@ proc detect {tree} {
 set results {}
 try {
     set start [clock seconds]
-    lassign [detect $tree] tests fuzz
+    lassign [detect $tree 1] tests fuzz
     puts "CONTROL (no mutant, [expr {[clock seconds] - $start}] s) -- tests: $tests; fuzz: $fuzz"
     flush stdout
     if {$tests ne "survived" || $fuzz ne "survived"} {

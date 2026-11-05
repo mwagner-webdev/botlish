@@ -425,17 +425,19 @@ test pds-isolation {summaries are facts of the registry: three interleaved compi
     set result
 } -result {{Oops none 1} {{} total 0} {Oops none 1} {Oops none 1} {Oops none 1} {{} total 0}}
 
-test pds-interchange {a HIR read back from interchange text (in another compilation's state) recomputes the same summaries from its declarations: nothing of them is in the text} -body {
+test pds-interchange {a HIR read back from interchange text (in another compilation's state) recomputes the same summaries from its declarations: nothing of them is in the text (the text is the same before any summary is computed and after)} -body {
     set hir [surface::compile [pdsProgram "fn f(w: W\[@C@\], m: Mixed\[int, @C@\]) -> int:\n    1\n1\n"] -warnings off]
     hir::activate $hir
+    hir::structs::ForgetAffinity
+    set unsummarized [hir::interchange::encode $hir]
     set before [lmap t [list [pdsApp W $::pdsCo] [pdsApp Mixed int $::pdsCo] [pdsApp OwnGrow $::pdsCo]] {pdsAnswers $hir $t}]
     set text [hir::interchange::encode $hir]
     surface::compile "struct W\[T\]:\n    next: Fn{args: \[\], return: T}\n1\n" -warnings off
     set read [hir::interchange::decode $text]
     hir::activate $read
     set after [lmap t [list [pdsApp W $::pdsCo] [pdsApp Mixed int $::pdsCo] [pdsApp OwnGrow $::pdsCo]] {pdsAnswers $read $t}]
-    list [expr {$before eq $after}] [string match *summar* $text] [string match *Expansive* $text]
-} -result {1 0 0}
+    list [expr {$before eq $after}] [expr {$text eq $unsummarized}]
+} -result {1 1}
 
 test pds-owned-recursion-kept {removing the no-finite-form rejection weakens no ownership rule: a recursive affine application (Node[Coroutine{...}]: a value of T in a List of its own applications) is AFFINE-CONTAINER-UNSUPPORTED where it is written; an affine application that holds a growing recursive affine one (GrowB[C] holds C and reaches GrowB[List[C]] through a List) too; W[C] and PhantomRec[C], which hold no handle, are ordinary} -body {
     lmap body {
