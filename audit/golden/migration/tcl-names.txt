@@ -5913,6 +5913,7 @@ tests/parameterized-declaration-summaries.test pds-relevance-per-property pass
 tests/parameterized-declaration-summaries.test pds-nested-arguments pass
 tests/parameterized-declaration-summaries.test pds-carried-union pass
 tests/parameterized-declaration-summaries.test pds-identity-not-name pass
+tests/parameterized-declaration-summaries.test pds-reason-classification-terminates pass
 tests/parameterized-declaration-summaries.test pds-reason-past-the-bound pass
 tests/parameterized-declaration-summaries.test pds-parity-corpus pass
 tests/parameterized-declaration-summaries.test pds-oracle pass

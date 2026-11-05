@@ -532,10 +532,15 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
         # is held, and only by whether it is stable. The fields are walked
         # only to say why (summaries.tcl's reason walk).
         if {$type in $visiting} { return "" }
-        set classes [lmap a [hir::summaries::Arguments $type] {expr {[ValueStability $a] ne ""}}]
+        set classes [lmap a [hir::summaries::Arguments $type] {ValueStabilityClass $a}]
         set level [hir::summaries::Level valueStability $type $classes]
         if {$level eq "" || $level == 0 || [hir::summaries::Whistle $type $visiting]} {
             return ""
+        }
+        variable stabilityClassOnly
+        if {$stabilityClassOnly} {
+            # (A class alone was asked: ValueStabilityClass.)
+            return "is not stable"
         }
         foreach {field t} [hir::structs::AppliedFieldTypes $type] {
             set why [ValueStability $t [concat $visiting [list $type]]]
@@ -555,6 +560,26 @@ proc hir::sourcetypes::ValueStability {type {visiting {}}} {
     return ""
 }
 
+# 1 if TYPE is not stable (ValueStability's class alone: no reason is looked
+# for, so a named struct's class is its summary's and nothing walks its
+# fields -- an argument's classification never starts a reason walk of its
+# own).
+proc hir::sourcetypes::ValueStabilityClass {type} {
+    variable stabilityClassOnly
+    set saved $stabilityClassOnly
+    set stabilityClassOnly 1
+    try {
+        return [expr {[ValueStability $type] ne ""}]
+    } finally {
+        set stabilityClassOnly $saved
+    }
+}
+
+namespace eval hir::sourcetypes {
+    # 1 while ValueStability is asked for a class alone (ValueStabilityClass).
+    variable stabilityClassOnly 0
+}
+
 # ValueStability of {nstruct ID ARGUMENTS} from its applied fields (the
 # summary's node): 1 if one is not stable.
 proc hir::sourcetypes::ValueStabilityNode {id arguments} {
@@ -563,7 +588,7 @@ proc hir::sourcetypes::ValueStabilityNode {id arguments} {
         lappend type $arguments
     }
     foreach {field t} [hir::structs::AppliedFieldTypes $type] {
-        if {[ValueStability $t] ne ""} {
+        if {[ValueStabilityClass $t]} {
             return 1
         }
     }

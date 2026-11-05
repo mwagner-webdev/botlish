@@ -101,6 +101,10 @@ struct OfList[T]:
 struct Deep[T]:
     values: List[List[T]]
 
+struct GrowBoxed[T]:
+    next: List[Box[GrowBoxed[List[T]]]]
+    v: T
+
 struct OfBox[T]:
     v: Box[Box[T]]
 
@@ -322,6 +326,14 @@ test pds-identity-not-name {a summary belongs to a declaration's identity, never
     list [lindex [hir::types::Totality equality [pdsApp geo::Box $fn]] 0] [lindex [hir::types::Totality equality [pdsApp Box $fn]] 0] \
         [lindex [hir::types::Totality equality [pdsApp geo::Box $fn]] 0] [hir::callables::Bearing $hir [pdsApp geo::Box $fn]] [hir::callables::Bearing $hir [pdsApp Box $fn]]
 } -cleanup {file delete -force [file join [temporaryDirectory] pds-identity]} -result {total none total 0 1}
+
+test pds-reason-classification-terminates {an argument is classified by its class alone, never by a reason walk of its own: GrowBoxed[MutableVector[int]] (`next: List[Box[GrowBoxed[List[T]]]]` before `v: T`) is unstable, holds a mutable value, is not total and is sendable -- each answered, with a reason, though every step of its growth is an argument of Box, whose classification, walking afresh, never ended (a fuzzer's program found it)} -body {
+    set hir [pdsHir]
+    set t [pdsApp GrowBoxed [hir::types::MakeMutVec int 0]]
+    list [expr {[hir::sourcetypes::ValueStability $t] ne ""}] [expr {[hir::structs::MutableComponent $t] ne ""}] \
+        [lindex [hir::types::Totality equality $t] 0] [lindex [hir::types::SendClass $t] 0] \
+        [string match *MutableVector* [hir::sourcetypes::ValueStability $t]]
+} -result {1 1 none total 1}
 
 test pds-reason-past-the-bound {the class reads the argument uncut, so a reason walk over field types the type bound cut (Deep[List[Fn{...}]] of `values: List[List[T]]`: the function sits past the aggregate bound) names the argument that decides it, with the argument's own reason -- never a cut type's, never a recursion that is not there} -body {
     set hir [pdsHir]

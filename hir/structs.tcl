@@ -1849,10 +1849,15 @@ proc hir::structs::MutableComponent {type {seen {}}} {
         # (hir/summaries.tcl): an argument is read only where a value of it
         # is held, and only by whether it holds one. The fields are walked
         # only to say which (summaries.tcl's reason walk).
-        set classes [lmap a [hir::summaries::Arguments $type] {expr {[MutableComponent $a] ne ""}}]
+        set classes [lmap a [hir::summaries::Arguments $type] {MutableComponentClass $a}]
         set level [hir::summaries::Level mutableComponent $type $classes]
         if {$level eq "" || $level == 0 || [hir::summaries::Whistle $type $seen]} {
             return ""
+        }
+        variable mutableClassOnly
+        if {$mutableClassOnly} {
+            # (A class alone was asked: MutableComponentClass.)
+            return "a mutable value"
         }
         if {[catch {AppliedFieldTypes $type} fields]} {
             return ""
@@ -1884,6 +1889,27 @@ proc hir::structs::MutableComponent {type {seen {}}} {
     return ""
 }
 
+# 1 if TYPE holds a mutable or affine value (MutableComponent's class
+# alone: no reason is looked for, so a named struct's class is its
+# summary's and nothing walks its fields -- an argument's classification
+# never starts a reason walk of its own).
+proc hir::structs::MutableComponentClass {type} {
+    variable mutableClassOnly
+    set saved $mutableClassOnly
+    set mutableClassOnly 1
+    try {
+        return [expr {[MutableComponent $type] ne ""}]
+    } finally {
+        set mutableClassOnly $saved
+    }
+}
+
+namespace eval hir::structs {
+    # 1 while MutableComponent is asked for a class alone
+    # (MutableComponentClass).
+    variable mutableClassOnly 0
+}
+
 # MutableComponent of {nstruct ID ARGUMENTS} from its applied fields (the
 # summary's node): 1 if one holds a mutable or affine value.
 proc hir::structs::MutableComponentNode {id arguments} {
@@ -1898,7 +1924,7 @@ proc hir::structs::MutableComponentNode {id arguments} {
         return 0
     }
     foreach {name t} $fields {
-        if {$t ne {} && [MutableComponent $t] ne ""} {
+        if {$t ne {} && [MutableComponentClass $t]} {
             return 1
         }
     }

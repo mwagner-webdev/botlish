@@ -265,7 +265,13 @@ try {
                 puts "OPERATIONS DISAGREE seed $opt(-seed) program $p: [spelled $q]"
             }
             if {$opt(-reference)} {
-                foreach row [parity::Compare $hir [compiled $q]] {
+                if {[catch {parity::Compare $hir [compiled $q]} rows]} {
+                    incr failures
+                    puts "COMPARISON FAILS seed $opt(-seed) program $p: [spelled $q]: [string range $rows 0 300]"
+                    puts $source
+                    continue
+                }
+                foreach row $rows {
                     lassign $row analysis new old exact verdict
                     dict incr stats $verdict
                     if {$verdict eq "DIFFERENT"} {
