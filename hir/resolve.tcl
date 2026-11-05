@@ -850,13 +850,20 @@ proc hir::resolve::ResolveApplied {name args ns imprints} {
             return -code error -errorcode {BOTLISH TRAIT-STORAGE-UNSUPPORTED} \
                 "$what cannot be the trait [hir::types::show $type]: a slot is the type of the values its fields hold, and there is no erased or heterogeneous trait representation (a constrained slot, $slot satisfies TRAIT, takes a concrete type that satisfies the trait)"
         }
-        if {[hir::types::IsAffine $type]} {
-            return -code error -errorcode {BOTLISH TYPE} \
-                "$what is the affine type [hir::types::show $type]: a type slot takes an unrestricted type (its values may be copied wherever the slot's type is used)"
-        }
         lappend types $type
     }
-    return [hir::types::MakeApplied $id $types]
+    # An affine argument is an argument like any other: the application is
+    # affine exactly when its fields, the arguments substituted, are
+    # (hir::structs::IsAffine), and every position a written type stands in
+    # judges it by that, as it judges the same type inferred
+    # (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md). A recursive affine type
+    # is no type a value can have.
+    set type [hir::types::MakeApplied $id $types]
+    set problem [hir::structs::WrittenProblem $type]
+    if {$problem ne ""} {
+        return -code error -errorcode [list BOTLISH [lindex $problem 0]] [lindex $problem 1]
+    }
+    return $type
 }
 
 # The diagnostic kind of a failed ResolveTypeExpr whose catch OPTIONS are

@@ -2199,17 +2199,49 @@ so:
 * An affine application is never cut to `any` by a bound
   (`hir::types::MakeApplied`), as an affine List element is never cut.
 
+A written application is the type the same application is inferred as
+(WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md): an affine argument is an
+argument like any other, and every position judges the application by its
+affinity. Keep it so:
+
+* Never reject a written application for an affine argument, and never let
+  writing a type change what it is (`hir::resolve::ResolveApplied` builds
+  the one canonical application). What makes a written application no type
+  is `hir::structs::WrittenProblem`: a recursive affine application
+  (`OwnedRecursion`) or one that nests its affine argument in ever larger
+  types (`Unfolding`: an affine argument is never cut, so the compiler's
+  walks of such a type would never end), AFFINE-CONTAINER-UNSUPPORTED
+  wherever it is written -- also as a phantom slot's argument -- and the
+  same `Unfolding` for an imprint that makes one (`hir::imprint::
+  UnfoldingProblem`).
+* Imprinting reads where values of an argument exist:
+  `hir::imprint::Occurrences` places an application's argument at its
+  slot's positions (`hir::structs::SlotPositions`: the positions
+  Occurrences gives the slot in the declaration's fields, a least fixpoint
+  through `hir::structs::Fixpoint`, kept per registration and forgotten
+  with the affinity facts). A variable is bound to an affine type only
+  where no value of it exists (`Phantom[T]`, a pointee). Never take the
+  affinity summary's relevant slots for positions (a struct affine by its
+  own field holds values of its slots too; a function type's variable is a
+  value position, as in a signature), never count a phantom slot as a value
+  or a function type's variable as none.
+
 If you change the affinity query (`hir/types.tcl`, `hir/structs.tcl`),
-`hir/affine.tcl`, contract-based call typing of `Fn`/`Coroutine` callees
+written applications' admission (`ResolveApplied`, `WrittenProblem`,
+`Unfolding`) or slot positions (`SlotPositions`, `Occurrences`' application
+case, `Placed`), `hir/affine.tcl`, contract-based call typing of
+`Fn`/`Coroutine` callees
 (`hir/types.tcl`'s `Call`, `hir/range.tcl`'s `VerifyStructuralCall`,
 `hir/completions.tcl`), `hir::coroutines::ElaborateResumes`, the affine
 specialization (`hir/traits.tcl`, `hir/semantic.tcl`'s affine instances,
 `hir::signatures::CallableAdmits`), release or pending-temporary lowering in
 any backend, or the drop runtimes (`core/affine.tcl`,
 `native/src/runtime/affine.rs`), run `tests/affine.test`,
-`tests/affine-applications.test`, `tests/coroutines.test`,
+`tests/affine-applications.test`, `tests/written-affine-applications.test`,
+`tests/coroutines.test`,
 `audit/affine/tools/fuzz.tcl` (several seeds; its application programs,
-`-applications N`, against their substitution oracle),
+`-applications N`, against their substitution oracle, and its written
+programs, `-written N`),
 `audit/affine/tools/mutate.tcl` and `audit/coroutines/tools/mutate.tcl`
 (every mutant in both `mutants.txt` files must still apply and be killed;
 the coroutine mutants of ownership and release edit `hir/affine.tcl` too).

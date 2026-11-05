@@ -325,6 +325,33 @@ application from its own arguments). Before that milestone an application
 was judged by its declaration's fields, where a slot is unrestricted, so a
 handle held through a slot was copied freely and never released.
 
+**A type argument may itself be affine. What matters is whether the
+application stores or exposes values of that argument, and whether the
+resulting value is affine** (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md).
+An application is written as any type is -- a parameter's, a result's, a
+field's, a List's element, an explicit construction, an explicit imprint --
+and is the very type the same application is inferred as, with the same
+affinity, ownership, drop descriptor and container and equality admission:
+
+| written | the declaration | the type |
+|---|---|---|
+| `Box[Coroutine{...}]` | `struct Box[T]: value: T` | writable, affine |
+| `Phantom[Coroutine{...}]` | `struct Phantom[T]: value: int` | writable, unrestricted |
+| `Outer[Coroutine{...}]` | `struct Outer[T]: inner: Inner[T]` | writable, affine |
+| `Node[Coroutine{...}]` | `struct Node[T]: value: T, children: List[Node[T]]` | affine, and a recursive affine type: AFFINE-CONTAINER-UNSUPPORTED wherever written |
+
+A generic signature is a separate question: `fn f(b: Box[T])` imposes a
+stronger restriction on T than the legality of the concrete type
+`Box[Coroutine{...}]`, because its body -- checked once, for every T, T
+unrestricted there -- can obtain a T (`b.value`) and copy it. So an imprint
+variable is bound to an affine type only where no value of it exists:
+`hir::imprint::Occurrences` places an application's argument where its slot
+stands in the declaration's fields (`hir::structs::SlotPositions`: a value
+for `Box[T]`, `Outer[T]` and a function type over T, a pointee for
+`std::ffi::c::Ptr[T]`, nowhere for `Phantom[T]`). `fn f(p: Phantom[T])`
+takes an affine T; `fn f(b: Box[T])`, `fn f(p: Phantom[T], x: T)` and `fn
+f(p: Phantom[T]) -> T` do not.
+
 ### 12. List affinity derivation
 
 `List[T]` is affine iff `T` is (including a List type's parameter evidence).

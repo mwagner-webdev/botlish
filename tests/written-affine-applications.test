@@ -1,0 +1,540 @@
+# written-affine-applications.test -- writing parameterized struct
+# applications whose type arguments are affine
+# (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md).
+#
+# AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md made an
+# application affine exactly when its applied fields are, but a written
+# application with an affine argument was still rejected where it was
+# written ("a type slot takes an unrestricted type"): Box[Coroutine{...}]
+# could be inferred from a construction and never named in a parameter, a
+# result or a field, and Phantom[Coroutine{...}] -- unrestricted -- could
+# not be named either. Now a written application is judged as the same type
+# inferred is, by its affinity, wherever it stands; a recursive affine type
+# stays AFFINE-CONTAINER-UNSUPPORTED wherever it is written. Imprinting
+# follows where values of a slot's argument exist (hir::structs::
+# SlotPositions): a body checked for every T may copy T's values, so T is
+# still never affine where a value of it exists (Box[T]), but may be where
+# none does (Phantom[T]).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set wdDecls {import std::list
+import std::mutable_vector
+import std::ffi::c
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+struct Box[T]:
+    value: T
+
+struct Phantom[T]:
+    value: int
+
+struct Inner[T]:
+    value: T
+
+struct Outer[T]:
+    inner: Inner[T]
+
+struct Pair[A, B]:
+    first: A
+    second: B
+
+struct Many[T]:
+    values: List[T]
+
+struct Holder:
+    step: Coroutine{args: [Message], return: Event}
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+struct W[T]:
+    next: List[W[List[T]]]
+
+struct Ref[T]:
+    p: std::ffi::c::Ptr[T]
+
+struct Handler[T]:
+    f: Fn{args: [T], return: int}
+
+struct Job[T]:
+    tag: Coroutine{args: [Message], return: Event}
+    value: T
+
+struct Wrap[T]:
+    p: Phantom[T]
+
+struct Mixed[T]:
+    a: Phantom[T]
+    b: Box[T]
+
+struct Getter[T]:
+    f: Fn{args: [], return: T}
+
+fn worker(seed: int, resume Message) -> Event:
+    message = yield Event {value: seed}
+    return Event {value: message.value}
+
+fn make(seed: int) -> Coroutine{args: [Message], return: Event}:
+    coroutine {step} = worker(seed)
+    step
+
+fn any_take(x: any) -> int:
+    1
+
+fn resume(c: Coroutine{args: [Message], return: Event}, n: int) -> int:
+    e = c(Message {value: n})
+    e.value
+
+}
+
+# The handle type as a program writes it.
+set wdC {Coroutine{args: [Message], return: Event}}
+
+# The program $wdDecls followed by BODY, @C@ standing for $wdC.
+proc wdProgram {body} {
+    return [string map [list @C@ $::wdC] "$::wdDecls$body"]
+}
+
+# The error code of the first diagnostic of program TEXT, or "ok".
+proc wdCode {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            return [lindex [dict get [lindex [dict get $options -diagnostics] 0] errorcode] end]
+        }
+        return [lindex [dict get $options -errorcode] end]
+    }
+    return ok
+}
+
+# The message of the first diagnostic of program TEXT (without its
+# location), or "ok".
+proc wdMessage {text} {
+    if {[catch {surface::compile $text -warnings off} message options]} {
+        if {[dict exists $options -diagnostics]} {
+            set message [dict get [lindex [dict get $options -diagnostics] 0] message]
+        }
+        regsub {^[^ ]*:[0-9]+:[0-9]+: } $message {} message
+        return $message
+    }
+    return ok
+}
+
+# wdCode of the program whose body is BODY.
+proc wdBody {body} {
+    return [wdCode [wdProgram $body]]
+}
+
+# Test-only probe of the Tcl runtime: the Tcl coroutines alive.
+proc wdLiveCoroutines {} {
+    return [core::value::int [llength [info commands {::core::coroutines::co[0-9]*}]]]
+}
+if {"test_wd_live" ni [core::native::names]} {
+    core::registerNative test_wd_live -arity 0 -impl wdLiveCoroutines
+}
+
+proc wdGcStress {script} {
+    set had [info exists ::env(BOTLISH_NATIVE_GC_STRESS)]
+    set saved [expr {$had ? $::env(BOTLISH_NATIVE_GC_STRESS) : ""}]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        if {$had} {
+            set ::env(BOTLISH_NATIVE_GC_STRESS) $saved
+        } else {
+            unset ::env(BOTLISH_NATIVE_GC_STRESS)
+        }
+    }
+}
+
+# The HIR of $wdDecls (and a trailing `1`), its declarations active.
+proc wdHir {} {
+    set hir [surface::compile [wdProgram "1\n"] -warnings off]
+    hir::activate $hir
+    return $hir
+}
+
+# The coroutine type of $wdC, canonical, and an application of struct ID.
+set wdT [hir::types::MakeCoroutineType [list {nstruct Message}] {nstruct Event} {}]
+proc wdApp {id args} {
+    return [hir::types::MakeApplied $id $args]
+}
+
+# ---------------------------------------------------------------------------
+# The starting asymmetry
+
+test wd-starting-asymmetry {an inferred Box[Coroutine{...}] was accepted and affine while the same type written as a parameter, a result, a field, a nested application or an explicit construction was TYPE ("a type slot takes an unrestricted type"), and the unrestricted Phantom[Coroutine{...}] could not be written either; each is now accepted} -body {
+    lmap body {
+        "fn wrap(x):\n    Box {value: x}\nb = wrap(make(1))\n0\n"
+        "fn consume(job: Box\[@C@\]) -> int:\n    1\nconsume(Box {value: make(1)})\n"
+        "fn mk() -> Box\[@C@\]:\n    Box {value: make(1)}\nb = mk()\n0\n"
+        "struct JobOwner:\n    job: Box\[@C@\]\no = JobOwner {job: Box {value: make(1)}}\n0\n"
+        "fn f(o: Outer\[@C@\], p: Pair\[int, Box\[@C@\]\], b: Box\[Box\[@C@\]\]) -> int:\n    1\n0\n"
+        "b = Box\[@C@\] {value: make(1)}\n0\n"
+        "fn f(x: Phantom\[@C@\]) -> int:\n    x.value\nf(Phantom\[@C@\] {value: 3})\n"
+    } {wdBody $body}
+} -result {ok ok ok ok ok ok ok}
+
+# ---------------------------------------------------------------------------
+# Written and inferred: one type
+
+test wd-written-is-inferred {the type a written application denotes is the type the same application is inferred as -- one canonical type, so one affinity, one drop descriptor, one account of why it is affine -- for an application affine through its argument (Box, Outer, Pair, Many, a nested Box, a Box of an affine struct) and for one that is not (Phantom)} -body {
+    set hir [surface::compile [wdProgram {fn inferred(x):
+    x
+fn d1(b: Box[@C@]) -> Box[@C@]:
+    b
+fn d2(b: Outer[@C@]) -> Outer[@C@]:
+    b
+fn d3(b: Pair[int, Box[@C@]]) -> Pair[int, Box[@C@]]:
+    b
+fn d4(b: Many[@C@]) -> Many[@C@]:
+    b
+fn d5(b: Box[Box[@C@]]) -> Box[Box[@C@]]:
+    b
+fn d6(b: Box[Holder]) -> Box[Holder]:
+    b
+fn d7(b: Phantom[@C@]) -> Phantom[@C@]:
+    b
+fn main() -> int:
+    i1 = inferred(Box {value: make(1)})
+    w1 = d1(Box {value: make(1)})
+    i2 = inferred(Outer {inner: Inner {value: make(1)}})
+    w2 = d2(Outer {inner: Inner {value: make(1)}})
+    i3 = inferred(Pair {first: 1, second: Box {value: make(1)}})
+    w3 = d3(Pair {first: 1, second: Box {value: make(1)}})
+    i4 = inferred(Many {values: [make(1), make(2)]})
+    w4 = d4(Many {values: [make(1), make(2)]})
+    i5 = inferred(Box {value: Box {value: make(1)}})
+    w5 = d5(Box {value: Box {value: make(1)}})
+    i6 = inferred(Box {value: Holder {step: make(1)}})
+    w6 = d6(Box {value: Holder {step: make(1)}})
+    i7 = inferred(Phantom[@C@] {value: 1})
+    w7 = d7(Phantom[@C@] {value: 1})
+    1
+main()
+}] -warnings off]
+    hir::activate $hir
+    lmap n {1 2 3 4 5 6 7} {
+        set i [hir::typeOf $hir [lindex [hirFind $hir bind i$n] 0]]
+        set w [hir::typeOf $hir [lindex [hirFind $hir bind w$n] 0]]
+        list [expr {$i eq $w}] [hir::types::Affinity $w] [hir::affine::Descriptor $hir $w] [lindex [hir::structs::AffineThrough $w] 0]
+    }
+} -cleanup {unset -nocomplain hir} -result {{1 affine s1.0.c value} {1 affine s1.0.s1.0.c inner} {1 affine s1.1.s1.0.c second} {1 affine s1.0.lc values} {1 affine s1.0.s1.0.c value} {1 affine s1.0.s1.0.c value} {1 unrestricted {} {}}}
+
+test wd-written-is-inferred-ownership {an affine application written or inferred meets the same ownership diagnostic for the same operation -- a duplicate, an erasure, an equality, a projection of its affine field, a capture, a List element copied out, a hash -- and the same unrestricted one is copied, compared and erased freely either way} -body {
+    set ops {
+        dup "c = @V@\nd = @V@\n0"
+        erase "any_take(@V@)"
+        equal "if @V@ == @V@:\n    return 1\n0"
+        project "resume(@V@.value, 1)"
+        capture "fn peek() -> int:\n    c = @V@\n    1\npeek()"
+        element "xs = \[@V@\]\nx = std::list::at(xs, 0)\n0"
+        hash "hash(@V@)"
+    }
+    set result {}
+    foreach {source} {inferred written} {
+        set row {}
+        foreach {op text} $ops {
+            if {$source eq "inferred"} {
+                set head "fn inferred(x):\n    x\nfn main() -> int:\n    v = inferred(Box {value: make(1)})\n"
+            } else {
+                set head "fn written(x: Box\[@C@\]) -> Box\[@C@\]:\n    x\nfn main() -> int:\n    v = written(Box {value: make(1)})\n"
+            }
+            set body [string map {@V@ v} $text]
+            lappend row [wdBody "$head[join [lmap l [split $body \n] {string cat "    " $l}] \n]\nmain()\n"]
+        }
+        lappend result $row
+    }
+    foreach {source} {inferred written} {
+        if {$source eq "inferred"} {
+            set head "fn inferred(x):\n    x\nfn main() -> int:\n    v = inferred(Phantom\[@C@\] {value: 1})\n"
+        } else {
+            set head "fn written(x: Phantom\[@C@\]) -> Phantom\[@C@\]:\n    x\nfn main() -> int:\n    v = written(Phantom\[@C@\] {value: 1})\n"
+        }
+        lappend result [wdBody "${head}    c = v\n    d = v\n    any_take(v) + c.value + d.value\nmain()\n"]
+    }
+    set result
+} -cleanup {unset -nocomplain ops result row head body} -result {{USE-AFTER-MOVE AFFINE-ERASURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-CAPTURE-UNSUPPORTED AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED} {USE-AFTER-MOVE AFFINE-ERASURE-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED AFFINE-FIELD-MOVE-REQUIRES-DESTRUCTURE AFFINE-CAPTURE-UNSUPPORTED AFFINE-LIST-OPERATION-UNSUPPORTED AFFINE-EQUALITY-UNSUPPORTED} ok ok}
+
+test wd-semantic-instance {a generic (untyped) function's semantic instance and a declared function make the same Box[Coroutine{...}]: the same result type, owned by its caller, moved and released the same way on every backend} -body {
+    set text [wdProgram {fn inferred(x):
+    Box {value: x}
+fn declared(x: @C@) -> Box[@C@]:
+    Box {value: x}
+fn main() -> int:
+    a = inferred(make(3))
+    b = declared(make(4))
+    {value: va} = a
+    {value: vb} = b
+    va(Message {value: 30})
+    resume(vb, 40) + test_wd_live()
+main()
+}]
+    set hir [surface::compile $text -warnings off]
+    hir::activate $hir
+    list [sourceAgree $text {interp compile}] [sourceAgree [string map {" + test_wd_live()" ""} $text]] \
+        [string equal [hir::typeOf $hir [lindex [hirFind $hir bind a] 0]] [hir::typeOf $hir [lindex [hirFind $hir bind b] 0]]] \
+        [wdCode [string map {"{value: va} = a" "c = a\n    d = a\n    {value: va} = c"} $text]] \
+        [wdCode [string map {"{value: vb} = b" "c = b\n    d = b\n    {value: vb} = c"} $text]]
+} -cleanup {unset -nocomplain text hir} -result {{value 40} {value 40} 1 USE-AFTER-MOVE USE-AFTER-MOVE}
+
+# ---------------------------------------------------------------------------
+# Parameters, results, fields
+
+test wd-parameter {a parameter of a written affine application is an affine parameter: an argument moves into it (a second use is USE-AFTER-MOVE), the body owns it once (a copy is USE-AFTER-MOVE), destructures it to resume the handle, returns it, and releases what it does not move on -- on every backend} -body {
+    list [wdBody "fn consume(job: Box\[@C@\]) -> int:\n    1\nb = Box {value: make(1)}\nconsume(b)\nconsume(b)\n"] \
+        [wdBody "fn consume(job: Box\[@C@\]) -> int:\n    a = job\n    c = job\n    1\nconsume(Box {value: make(1)})\n"] \
+        [wdBody "fn consume(job: Box\[@C@\]) -> int:\n    any_take(job)\nconsume(Box {value: make(1)})\n"] \
+        [sourceAgree [wdProgram "fn consume(job: Box\[@C@\]) -> int:\n    {value} = job\n    resume(value, 7)\nfn pass(job: Box\[@C@\]) -> Box\[@C@\]:\n    job\nconsume(pass(Box {value: make(1)}))\n"]] \
+        [sourceAgree [wdProgram "fn consume(job: Box\[@C@\]) -> int:\n    1\nxs = loop i from 0 to 10:\n    consume(Box {value: make(i)})\nstd::list::length(xs) + test_wd_live()\n"] {interp compile}]
+} -result {USE-AFTER-MOVE USE-AFTER-MOVE AFFINE-ERASURE-UNSUPPORTED {value 7} {value 10}}
+
+test wd-result {a declared affine application result is owned by its caller as an inferred one is: a duplicate is USE-AFTER-MOVE, an ignored result and a dead binding are released, a moved one is resumed by its new owner -- on every backend} -body {
+    list [wdBody "fn mk() -> Box\[@C@\]:\n    Box {value: make(1)}\nb = mk()\nc = b\nd = b\n0\n"] \
+        [sourceAgree [wdProgram "fn mk(i: int) -> Box\[@C@\]:\n    Box {value: make(i)}\nfn row(i: int) -> int:\n    mk(i)\n    b = mk(i)\n    1\nxs = loop i from 0 to 10:\n    row(i)\nstd::list::length(xs) + test_wd_live()\n"] {interp compile}] \
+        [sourceAgree [wdProgram "fn mk(i: int) -> Box\[@C@\]:\n    Box {value: make(i)}\nfn wrap(b: Box\[@C@\]) -> Outer\[@C@\]:\n    {value} = b\n    Outer {inner: Inner {value: value}}\nfn row(i: int) -> int:\n    o = wrap(mk(i))\n    {inner} = o\n    {value} = inner\n    resume(value, i)\nxs = loop i from 0 to 10:\n    row(i)\nstd::list::length(xs)\n"]]
+} -result {USE-AFTER-MOVE {value 10} {value 10}}
+
+test wd-field {a struct field of a written affine application makes its owner affine through it: the owner moves (a duplicate is USE-AFTER-MOVE), drops its handle with it, and takes it apart to resume it; an owner of an unrestricted written application stays unrestricted} -body {
+    set decl "struct JobOwner:\n    job: Box\[@C@\]\n    tag: int\nstruct PhantomOwner:\n    p: Phantom\[@C@\]\n"
+    hir::activate [surface::compile [wdProgram "${decl}1\n"] -warnings off]
+    list [hir::types::Affinity {nstruct JobOwner}] [hir::types::Affinity {nstruct PhantomOwner}] \
+        [wdBody "${decl}o = JobOwner {job: Box {value: make(1)}, tag: 1}\np = o\nq = o\n0\n"] \
+        [wdBody "${decl}o = PhantomOwner {p: Phantom\[@C@\] {value: 1}}\np = o\nq = o\np.p.value + q.p.value\n"] \
+        [sourceAgree [wdProgram "${decl}fn row(i: int) -> int:\n    o = JobOwner {job: Box {value: make(i)}, tag: i}\n    p = o\n    p.tag\nxs = loop i from 0 to 10:\n    row(i)\nstd::list::length(xs) + test_wd_live()\n"] {interp compile}] \
+        [sourceAgree [wdProgram "${decl}o = JobOwner {job: Box {value: make(2)}, tag: 5}\n{job, tag} = o\n{value} = job\nresume(value, 9) + tag\n"]]
+} -cleanup {unset -nocomplain decl} -result {affine unrestricted USE-AFTER-MOVE ok {value 10} {value 14}}
+
+test wd-nested {nested written applications -- Box[Box[C]], Outer[C], Pair[int, Box[C]], a Pair holding a JobOwner -- are affine as their applied fields say, dropped by their own descriptors, and released whole on every backend; the same declarations at an unrestricted argument are copied} -body {
+    set decl "struct JobOwner:\n    job: Box\[@C@\]\n"
+    set row "${decl}fn row(i: int) -> int:\n    a = Box\[Box\[@C@\]\] {value: Box {value: make(i)}}\n    b = Outer\[@C@\] {inner: Inner {value: make(i)}}\n    c = Pair\[int, Box\[@C@\]\] {first: i, second: Box {value: make(i)}}\n    d = Pair\[JobOwner, str\] {first: JobOwner {job: Box {value: make(i)}}, second: \"s\"}\n    1\nxs = loop i from 0 to 10:\n    row(i)\nstd::list::length(xs)"
+    list [sourceAgree [wdProgram "$row + test_wd_live()\n"] {interp compile}] [sourceAgree [wdProgram "$row\n"]] \
+        [wdBody "${decl}fn f(p: Pair\[int, Box\[@C@\]\]) -> int:\n    q = p\n    r = p\n    0\n0\n"] \
+        [wdBody "fn f(p: Pair\[int, Box\[str\]\], b: Box\[Box\[int\]\]) -> int:\n    q = p\n    r = p\n    c = b\n    d = b\n    q.first + r.first + c.value.value + d.value.value\nf(Pair {first: 1, second: Box {value: \"s\"}}, Box {value: Box {value: 2}})\n"]
+} -cleanup {unset -nocomplain decl row} -result {{value 10} {value 10} USE-AFTER-MOVE ok}
+
+test wd-native-release {natively every handle a written affine application owns is released by its owner's drop -- a parameter, a declared result, a field, a nested application -- and none is left to the collector; the same under GC stress} -constraints nativeCoroutines -body {
+    set text [wdProgram "struct JobOwner:\n    job: Box\[@C@\]\nfn consume(job: Box\[@C@\]) -> int:\n    1\nfn mk(i: int) -> Box\[@C@\]:\n    Box {value: make(i)}\nfn row(i: int) -> int:\n    consume(Box {value: make(i)})\n    mk(i)\n    o = JobOwner {job: mk(i)}\n    n = Box\[Box\[@C@\]\] {value: mk(i)}\n    p = Pair\[int, Outer\[@C@\]\] {first: i, second: Outer {inner: Inner {value: make(i)}}}\n    1\nxs = loop i from 0 to 20:\n    row(i)\nstd::list::length(xs)\n"]
+    set hir [surface::compile $text -warnings off]
+    set report [withoutCoroutineFusion {dict get [native::allocationReport $hir summary] coroutines}]
+    list [dict get $report released] [dict get $report sweptSuspended] \
+        [wdGcStress {withoutCoroutineFusion {lrange [outcomeUnderHir cranelift $hir] 0 1}}] \
+        [lmap backend {cranelift-generic cranelift} {lrange [outcomeUnderHir $backend $hir] 0 1}]
+} -cleanup {unset -nocomplain text hir report} -result {100 0 {value 20} {{value 20} {value 20}}}
+
+test wd-nested-walks-linear {a deep application with an affine argument is never cut by the type bound, so a walk of its components must visit each type once: MentionsMutable (asked of a declared parameter's type by the semantic instances) reads each of the 3 applications per level of a 16-level specimen whose fields reach the next level twice (inner and rest) once -- it used to take every path, 2^N applied-field reads -- and the program declaring that type compiles} -body {
+    set C {Coroutine{args: [], return: int, errors: []}}
+    set decls "struct L0\[A, B\]:\n    x: A\n    y: B\n\n"
+    for {set i 1} {$i <= 16} {incr i} {
+        set p [expr {$i - 1}]
+        append decls "struct L$i\[A, B\]:\n    inner: L$p\[B, A\]\n    tag: int\n    rest: List\[L$p\[int, A\]\]\n    same: List\[L$i\[int, int\]\]\n\n"
+    }
+    set text "${decls}fn pass(x: L16\[$C, int\]) -> L16\[$C, int\]:\n    x\n0\n"
+    set hir [surface::compile $text -warnings off]
+    hir::activate $hir
+    set t [wdApp L16 [hir::types::MakeCoroutineType {} int {}] int]
+    set ::wdReads 0
+    trace add execution hir::structs::AppliedFieldTypes enter wdCountRead
+    try {
+        set mentions [hir::types::MentionsMutable $t]
+    } finally {
+        trace remove execution hir::structs::AppliedFieldTypes enter wdCountRead
+    }
+    list $mentions [expr {$::wdReads <= 3 * 17}] [hir::types::Affinity $t]
+} -setup {
+    proc wdCountRead {args} { incr ::wdReads }
+} -cleanup {unset -nocomplain C decls text hir t mentions; rename wdCountRead {}} -result {0 1 affine}
+
+# ---------------------------------------------------------------------------
+# Recursive affine applications
+
+test wd-recursive-rejected {a recursive affine application is understood as affine and rejected as AFFINE-CONTAINER-UNSUPPORTED wherever it is written -- a parameter, a result, a field, a List element, a function type, an explicit construction, an explicit imprint, an error payload -- for its recursive ownership, never because an argument is affine; the same declaration at int is an ordinary recursive type} -body {
+    list {*}[lmap body {
+        "fn g(n: Node\[@C@\]) -> int:\n    1\n0\n"
+        "fn g() -> Node\[@C@\]:\n    fail Nope\nerror Nope\n0\n"
+        "fn g(ns: List\[Node\[@C@\]\]) -> int:\n    1\n0\n"
+        "fn g(f: Fn{args: \[Node\[@C@\]\], return: int}) -> int:\n    1\n0\n"
+        "n = Node\[@C@\] {value: make(1), children: \[\]}\n0\n"
+        "fn empty() -> List\[T\]:\n    \[\]\nxs = empty\[Node\[@C@\]\]()\n0\n"
+        "error Bad:\n    n: Node\[@C@\]\n0\n"
+        "struct R:\n    n: Node\[@C@\]\n0\n"
+    } {wdBody $body}] [sourceAgree [wdProgram "fn g(n: Node\[int\]) -> int:\n    n.value + std::list::length(n.children)\ng(Node {value: 4, children: \[Node {value: 1, children: \[\]}\]})\n"]]
+} -result {AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED {value 5}}
+
+test wd-recursive-message {a written recursive affine application's message is the recursive affine type's -- the application, the field that makes it affine and the path that recurses -- never the slot rule's} -body {
+    wdMessage [wdProgram "fn g(n: Node\[@C@\]) -> int:\n    1\n0\n"]
+} -result {unknown or invalid type Node[Coroutine{args: [Message], return: Event, errors: []}] for parameter "n": Node[Coroutine{args: [Message], return: Event, errors: []}] is affine (its field "value" holds Coroutine{args: [Message], return: Event, errors: []}) and holds affine values of struct "Node" in a List, MutableVector or MutableArray (Node[Coroutine{args: [Message], return: Event, errors: []}].children: List[Node[Coroutine{args: [Message], return: Event, errors: []}]]): a recursive affine type is not supported -- its release would have to recurse as deep as the value nests, and an affine value is released by a static, finite walk of its type (an unrestricted struct may hold itself in a container)}
+
+test wd-unbounded-rejected {an unrestricted application that hands its affine argument on to ever larger applications (W[C] of `next: List[W[List[T]]]`) has no finite form -- an affine argument is never cut -- and is AFFINE-CONTAINER-UNSUPPORTED where it is written, held by another application, or made by an imprint; at int (cut like any type) it is an ordinary type} -body {
+    list [wdBody "fn f(w: W\[@C@\]) -> int:\n    1\n0\n"] \
+        [wdBody "struct M\[T\]:\n    a: T\n    w: W\[T\]\nfn f(m: M\[@C@\]) -> int:\n    1\n0\n"] \
+        [wdBody "fn mk() -> W\[T\]:\n    W\[T\] {next: \[\]}\nx = mk\[@C@\]()\n0\n"] \
+        [sourceAgree [wdProgram "fn f(w: W\[int\]) -> int:\n    std::list::length(w.next)\nf(W\[int\] {next: \[W\[List\[int\]\] {next: \[\]}\]})\n"]] \
+        [hir::structs::Unfolding [wdApp W int]] \
+        [string match {unknown or invalid type W\[*\] for parameter "w": W\[*\] has no finite form: its fields nest its affine type argument in ever larger types (W\[*\].next: List\[W\[List\[*} \
+            [wdMessage [wdProgram "fn f(w: W\[@C@\]) -> int:\n    1\n0\n"]]]
+} -result {AFFINE-CONTAINER-UNSUPPORTED AFFINE-CONTAINER-UNSUPPORTED IMPRINT {value 1} {} 1}
+
+# ---------------------------------------------------------------------------
+# Phantom applications
+
+test wd-phantom {Phantom[Coroutine{...}] stores no value of its argument: it is written, copied, compared, hashed, erased, held in a List and in an ImmutableSet like any unrestricted value -- the argument's affinity makes nothing affine by itself -- on every backend} -body {
+    list [sourceAgree [wdProgram {fn f(x: Phantom[@C@]) -> Phantom[@C@]:
+    y = x
+    z = x
+    y
+p = Phantom[@C@] {value: 3}
+q = p
+ps = [p, q]
+r = std::list::at(ps, 0)
+f(q).value + f(p).value + any_take(p) + std::list::length(ps) + r.value
+}]] [sourceAgree [wdProgram {fn same(x: Phantom[@C@], y: Phantom[@C@]) -> bool:
+    x == y
+if same(Phantom[@C@] {value: 1}, Phantom[@C@] {value: 1}) and hash(Phantom[@C@] {value: 2}) == hash(Phantom[@C@] {value: 2}):
+    1
+else:
+    0
+}]] [wdBody "fn f(s: ImmutableSet\[Phantom\[@C@\]\], t: ImmutableSet\[Wrap\[@C@\]\]) -> int:\n    1\n0\n"] \
+        [hir::types::Affinity [wdApp Phantom $::wdT]] [hir::types::Affinity [wdApp Wrap $::wdT]]
+} -result {{value 12} {value 1} ok unrestricted unrestricted}
+
+test wd-function-type-and-pointer {a slot used only in a function type stores no value: Handler[Coroutine{...}] is written and unrestricted (copied freely); a C pointer field is affine whatever its pointee: Ref[int] is written and affine (a copy is USE-AFTER-MOVE) -- the argument's affinity decides neither} -body {
+    wdHir
+    list [wdBody "fn f(h: Handler\[@C@\]) -> int:\n    g = h\n    k = h\n    1\nfn h1(c: @C@) -> int:\n    1\nf(Handler\[@C@\] {f: h1})\n"] \
+        [wdBody "fn f(r: Ref\[int\]) -> int:\n    s = r\n    t = r\n    1\n0\n"] \
+        [hir::types::Affinity [wdApp Handler $::wdT]] [hir::types::Affinity [wdApp Ref int]]
+} -result {ok USE-AFTER-MOVE unrestricted affine}
+
+# ---------------------------------------------------------------------------
+# Containers
+
+test wd-containers {containers follow their own rules, unchanged: a List or MutableVector of a written affine application holds and releases its elements, an ImmutableSet of one is AFFINE-CONTAINER-UNSUPPORTED for the affine element -- not for the argument -- and an ImmutableSet of an unrestricted phantom application is an ordinary set} -body {
+    list [sourceAgree [wdProgram "fn f(xs: List\[Box\[@C@\]\]) -> int:\n    std::list::length(xs)\nf(\[Box {value: make(1)}, Box {value: make(2)}\]) + test_wd_live()\n"] {interp compile}] \
+        [sourceAgree [wdProgram "fn f(xs: List\[Box\[@C@\]\]) -> int:\n    std::list::length(xs)\nf(\[Box {value: make(1)}, Box {value: make(2)}\])\n"]] \
+        [wdBody "fn f(v: MutableVector\[Box\[@C@\]\]) -> int:\n    1\n0\n"] \
+        [wdBody "fn f(xs: ImmutableSet\[Box\[@C@\]\]) -> int:\n    1\n0\n"] \
+        [wdBody "fn f(xs: ImmutableSet\[Phantom\[@C@\]\]) -> int:\n    1\n0\n"] \
+        [wdBody "fn f(xs: List\[Phantom\[@C@\]\]) -> int:\n    ys = xs\n    std::list::length(xs) + std::list::length(ys)\nf(\[Phantom\[@C@\] {value: 1}\])\n"]
+} -result {{value 2} {value 2} ok AFFINE-CONTAINER-UNSUPPORTED ok ok}
+
+# ---------------------------------------------------------------------------
+# Slot positions: where values of a slot's argument exist
+
+test wd-slot-positions {each slot stands where its declaration's fields put it -- a value (stored, in a List, in a nested application, inside a function type), a pointee (an identity only), or nowhere (a phantom slot, a slot reached only through its own declaration, a slot held only by another phantom slot) -- computed from the fields by hir::imprint::Occurrences' own rules} -body {
+    wdHir
+    lmap id {Box Phantom Inner Outer Pair Many Node W Ref Handler Job Wrap Mixed} {
+        list $id [hir::structs::SlotPositions $id]
+    }
+} -result {{Box value} {Phantom {{}}} {Inner value} {Outer value} {Pair {value value}} {Many value} {Node value} {W {{}}} {Ref pointee} {Handler value} {Job value} {Wrap {{}}} {Mixed value}}
+
+test wd-positions-not-relevance {slot positions are not the affinity summary's relevant slots: Job's slot holds a value though Job is affine by its own field (no slot relevant), Handler's is in a function type (a value position, conservatively: a body can be handed a T there), Ref's is a pointee (Ref is affine by its pointer, no value of T exists); Box and Phantom agree} -body {
+    wdHir
+    lmap id {Box Phantom Job Handler Ref} {
+        list $id [hir::structs::AffinitySummary $id] [hir::structs::SlotPositions $id]
+    }
+} -result {{Box {0 0} value} {Phantom {0 {}} {{}}} {Job {1 {}} value} {Handler {0 {}} value} {Ref {1 {}} pointee}}
+
+test wd-occurrences {an application's arguments stand at their slots' positions in a signature: Phantom[T]'s T at no value position (`argument`), Ref[T]'s at a pointee, Box[T]'s at a value -- and a part of an argument where its slot is phantom at no value either (Phantom[List[T]]); a pointee slot's List argument holds values, as Ptr[List[T]]'s does} -body {
+    wdHir
+    set T [hir::types::MakeImprint T {}]
+    lmap t [list [wdApp Phantom $T] [wdApp Ref $T] [wdApp Box $T] [wdApp Phantom [list list $T]] [wdApp Ref [list list $T]] \
+            [wdApp Mixed $T] [wdApp Wrap $T] [wdApp Pair $T [wdApp Phantom $T]]] {
+        hir::imprint::Occurrences $t
+    }
+} -cleanup {unset -nocomplain T} -result {{{T 1 argument}} {{T 1 pointee}} {{T 1 value}} {{T 1 argument}} {{T 1 value}} {{T 1 value}} {{T 1 argument}} {{T 1 value} {T 1 argument}}}
+
+# ---------------------------------------------------------------------------
+# Generic bodies: imprinting
+
+test wd-generic-box {a body checked for every T over Box[T] can obtain a T (b.value), so T is never imprinted affine there -- established by an argument, written explicitly, or reached through a nested application (Outer[T], Mixed[T]) or a function type (Handler[T]) -- whatever the call writes} -body {
+    lmap body {
+        "fn get(b: Box\[T\]) -> T:\n    b.value\nget(Box {value: make(1)})\n0\n"
+        "fn dup(b: Box\[T\]) -> List\[T\]:\n    \[b.value, b.value\]\ndup(Box\[@C@\] {value: make(1)})\n0\n"
+        "fn get(b: Box\[T\]) -> int:\n    1\nget\[@C@\](Box {value: make(1)})\n"
+        "fn get(o: Outer\[T\]) -> int:\n    1\nget(Outer\[@C@\] {inner: Inner {value: make(1)}})\n"
+        "fn get(m: Mixed\[T\]) -> int:\n    1\nget(Mixed\[@C@\] {a: Phantom\[@C@\] {value: 1}, b: Box {value: make(1)}})\n"
+        "fn h1(c: @C@) -> int:\n    1\nfn get(h: Handler\[T\]) -> int:\n    1\nget(Handler\[@C@\] {f: h1})\n"
+        "fn get(j: Job\[T\]) -> T:\n    {tag, value} = j\n    value\nget(Job {tag: make(1), value: make(2)})\n0\n"
+    } {wdBody $body}
+} -result {IMPRINT IMPRINT IMPRINT IMPRINT IMPRINT IMPRINT IMPRINT}
+
+test wd-generic-function-type {a function type over T is a value position, as in a signature: a body over Getter[T] (f: Fn{args: [], return: T}) obtains values of T by calling f and may copy them, so T is never imprinted affine there -- a Fn type's T is never taken for a phantom slot's (it is the declaration's conservative rule for every function type: a T a body is handed through a function's argument is as reachable, through a function it passes on)} -body {
+    list [wdBody "fn get(g: Getter\[T\]) -> int:\n    a = g.f()\n    b = a\n    c = a\n    1\nfn one() -> @C@:\n    make(1)\nget(Getter {f: one})\n"] \
+        [wdBody "fn get(p: Phantom\[T\], f: Fn{args: \[\], return: T}) -> int:\n    a = f()\n    b = a\n    c = a\n    1\nfn one() -> @C@:\n    make(1)\nget(Phantom\[@C@\] {value: 1}, one)\n"] \
+        [hir::structs::SlotPositions Getter]
+} -result {IMPRINT IMPRINT value}
+
+test wd-generic-phantom {over Phantom[T] a body can obtain no T -- a Phantom holds no value of it, nor does a Wrap of one -- so an affine T is imprinted there, established by an argument or written explicitly, and the body's copies are copies of unrestricted values; a T the signature also holds as a value (a parameter, a result, a List result) is still never affine} -body {
+    list [sourceAgree [wdProgram {fn f(x: Phantom[T]) -> Phantom[T]:
+    y = x
+    z = x
+    Phantom[T] {value: y.value + z.value}
+fn g(w: Wrap[T]) -> int:
+    v = w
+    u = w
+    v.p.value + u.p.value
+fn ph() -> Phantom[T]:
+    Phantom[T] {value: 5}
+p = f(Phantom[@C@] {value: 3})
+q = ph[@C@]()
+p.value + q.value + g(Wrap[@C@] {p: p})
+}]] {*}[lmap body {
+        "fn f(p: Phantom\[T\], x: T) -> int:\n    1\nf(Phantom\[@C@\] {value: 1}, make(1))\n"
+        "fn f(p: Phantom\[T\]) -> T:\n    f(p)\nx = f(Phantom\[@C@\] {value: 1})\n0\n"
+        "fn f(p: Phantom\[T\]) -> List\[T\]:\n    \[\]\nx = f(Phantom\[@C@\] {value: 1})\n0\n"
+    } {wdBody $body}]
+} -result {{value 23} IMPRINT IMPRINT IMPRINT}
+
+test wd-generic-pointer {over Ref[T] (a pointer to T) T stands at a pointee: an affine T is refused as a pointee is, and a pointee that is no value -- std::ffi::c::Void -- is imprinted, as Ptr[T] itself takes it (Ref's argument used to count as a value position, which refused Void)} -body {
+    list [string match "f: T is imprinted as * which cannot be a pointee: *" [wdMessage [wdProgram "fn f(r: Ref\[T\]) -> int:\n    1\nf(Ref\[@C@\] {p: std::ffi::c::null\[@C@\]()})\n"]]] \
+        [wdBody "fn f(r: Ref\[T\]) -> int:\n    1\nf(Ref {p: std::ffi::c::null\[std::ffi::c::Void\]()})\n"]
+} -result {1 ok}
+
+test wd-generic-body-never-duplicates {no generic body is handed an affine value it was checked to copy: Box[T]'s duplication of its T is refused at every call that would make T affine, Phantom[T]'s copies of its Phantom are copies of an unrestricted value whatever T is, and a body over Phantom[T] still meets no T it could copy (T is rigid in it: Phantom[T] is unrestricted there as in every instantiation)} -body {
+    wdHir
+    set T [hir::types::MakeImprint T {}]
+    list [hir::types::Affinity [wdApp Phantom $T]] [hir::types::Affinity [wdApp Phantom $::wdT]] \
+        [hir::types::Affinity [wdApp Box $T]] [hir::types::Affinity [wdApp Box $::wdT]] \
+        [wdBody "fn dup(b: Box\[T\]) -> int:\n    c = b\n    d = b\n    1\ndup(Box {value: make(1)})\n"] \
+        [wdBody "fn dup(b: Phantom\[T\]) -> int:\n    c = b\n    d = b\n    c.value + d.value\ndup(Phantom\[@C@\] {value: 1})\n"]
+} -cleanup {unset -nocomplain T} -result {unrestricted unrestricted unrestricted affine IMPRINT ok}
+
+# ---------------------------------------------------------------------------
+# HIR text, interchange, isolation
+
+test wd-hir-text-and-interchange {a program that writes affine applications in parameters, results and fields reads back from HIR text and from HIR interchange with the same text, the same releases and the same outcome on every backend} -body {
+    set decls [string map [list "import std::list\nimport std::mutable_vector\nimport std::ffi::c\n" "" "struct Ref\[T\]:\n    p: std::ffi::c::Ptr\[T\]\n" ""] $::wdDecls]
+    set text [string map [list @C@ $::wdC] "${decls}struct JobOwner:\n    job: Box\[@C@\]\nfn consume(job: Box\[@C@\]) -> int:\n    {value} = job\n    resume(value, 6)\nfn mk(i: int) -> Box\[@C@\]:\n    Box {value: make(i)}\nfn main() -> int:\n    o = JobOwner {job: mk(1)}\n    {job} = o\n    p = Phantom\[@C@\] {value: 3}\n    q = p\n    consume(job) + p.value + q.value\nmain()\n"]
+    set hir [surface::compile $text -warnings off]
+    set formatted [hir::format $hir]
+    set read [hir::parse $formatted]
+    set decoded [hir::interchange::decode [hir::interchange::encode $hir]]
+    list [sourceAgree $text] [expr {[hir::format $read] eq $formatted}] [expr {[hir::format $decoded] eq $formatted}] \
+        [lmap backend {interp compile cranelift-generic cranelift} {lrange [outcomeUnderHir $backend $decoded] 0 1}] \
+        [expr {[dict get $decoded affine] eq [dict get $hir affine]}] [expr {[hir::lower $decoded] eq [hir::lower $hir]}]
+} -cleanup {unset -nocomplain decls text hir formatted read decoded} -result {{value 12} 1 1 {{value 12} {value 12} {value 12} {value 12}} 1 1}
+
+test wd-isolation {slot positions are a fact of the declarations in force: Box[T] holding its T in one compilation and only an int in another, interleaved -- `fn f(b: Box[T])` takes an affine T in the second only, and each HIR, activated after the other, keeps its own positions and affinity} -body {
+    set a "struct Box\[T\]:\n    value: T\nfn worker() -> int:\n    yield 1\n    0\nfn make() -> Coroutine{args: \[\], return: int}:\n    coroutine {step} = worker()\n    step\nfn f(b: Box\[T\]) -> int:\n    1\nf(Box {value: make()})\n"
+    set b "struct Box\[T\]:\n    value: int\nfn f(b: Box\[T\]) -> int:\n    c = b\n    d = b\n    c.value + d.value\nf(Box\[Coroutine{args: \[\], return: int}\] {value: 2})\n"
+    set codeA [wdCode $a]
+    set hB [surface::compile $b -warnings off]
+    set codeA2 [wdCode $a]
+    set hB2 [surface::compile $b -warnings off]
+    set C [hir::types::MakeCoroutineType {} int {}]
+    set facts {}
+    foreach h [list $hB [surface::compile "struct Box\[T\]:\n    value: T\n1\n" -warnings off] $hB2] {
+        hir::activate $h
+        lappend facts [list [hir::structs::SlotPositions Box] [hir::types::IsAffine [wdApp Box $C]]]
+    }
+    list $codeA $codeA2 [lrange [outcomeUnderHir interp $hB] 0 1] [lrange [outcomeUnderHir compile $hB2] 0 1] $facts
+} -cleanup {unset -nocomplain a b codeA codeA2 hB hB2 C facts h} -result {IMPRINT IMPRINT {value 4} {value 4} {{{{}} 0} {value 1} {{{}} 0}}}
+
+cleanupTests

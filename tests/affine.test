@@ -598,16 +598,16 @@ test af-native-runtime-source {the runtime adds no ownership state: no moved fla
         [regexp {\mAffineDrop\M} $mayAllocate]
 } -cleanup {unset -nocomplain root affine ops mayAllocate f} -result {0 0 0}
 
-test af-fuzz-bounded {a bounded run of the ownership fuzzer (audit/affine/tools/fuzz.tcl): every backend computes the oracle's value on every accepted program, every identity is released exactly as the oracle's owner record says (the interpreter's release calls, the native counters), and every rejected program has the predicted diagnostic; and of its application programs, each classified by the substitution oracle (AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md)} -constraints nativeCoroutines -body {
+test af-fuzz-bounded {a bounded run of the ownership fuzzer (audit/affine/tools/fuzz.tcl): every backend computes the oracle's value on every accepted program, every identity is released exactly as the oracle's owner record says (the interpreter's release calls, the native counters), and every rejected program has the predicted diagnostic; and of its application programs, each classified by the substitution oracle (AFFINE-PARAMETERIZED-APPLICATIONS-CORRECTNESS-MILESTONE-1.md), and of its written programs, each writing its application as a type (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md)} -constraints nativeCoroutines -body {
     set here [pwd]
     cd [temporaryDirectory]
     try {
-        set output [exec [info nameofexecutable] [file join $::projectRoot audit affine tools fuzz.tcl] -n 8 -seed 101 -applications 8 2>@1]
+        set output [exec [info nameofexecutable] [file join $::projectRoot audit affine tools fuzz.tcl] -n 8 -seed 101 -applications 8 -written 8 2>@1]
     } finally {
         cd $here
     }
     lindex [split [string trim $output] \n] end
-} -cleanup {unset -nocomplain here output} -result {programs 16 disagreements 0}
+} -cleanup {unset -nocomplain here output} -result {programs 24 disagreements 0}
 
 # ---------------------------------------------------------------------------
 # HIR evidence (items 51, 52)

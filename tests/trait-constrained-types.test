@@ -397,11 +397,11 @@ test tc-app-everywhere {a bad application is rejected wherever a type is written
         [tcKind [tcProgram "H\[$fn\] {key: twice}\n"]]
 } -result {TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED TRAIT-NOT-SATISFIED}
 
-test tc-app-slot-argument-kinds {a slot takes a concrete, unrestricted type: a trait (no erased trait representation), a context trait or an affine type is no argument} -body {
+test tc-app-slot-argument-kinds {a slot takes a concrete type: a trait (no erased trait representation) or a context trait is no argument; an affine type is one like any other (WRITTEN-AFFINE-APPLICATIONS-MILESTONE-1.md: Box[Coroutine{...}] is an affine type, judged by its affinity wherever it stands)} -body {
     list [tcKind [tcProgram "fn f(b: Box\[Hashable\]) -> int:\n    1\nf\n"]] \
         [tcKind [tcProgram "context trait Clock:\n    fn now() -> int\nfn f(b: Box\[Clock\]) -> int:\n    1\nf\n"]] \
         [tcKind [tcProgram "fn f(b: Box\[Coroutine{args: \[\], return: int, errors: \[\]}\]) -> int:\n    1\nf\n"]]
-} -result {TRAIT-STORAGE-UNSUPPORTED CONTEXT-TRAIT-POSITION TYPE}
+} -result {TRAIT-STORAGE-UNSUPPORTED CONTEXT-TRAIT-POSITION accepted}
 
 test tc-app-distinct-and-invariant {applications of one constructor are distinct static types, invariant in every slot: a Box[str] is no Box[int], a Box[Small] (an integer domain) no Box[int], and the message names the slot} -body {
     list [tcRejection [tcProgram "fn f(b: Box\[int\]) -> int:\n    b.value\nf(Box {value: \"x\"})\n"]] \

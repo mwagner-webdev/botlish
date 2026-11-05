@@ -1808,28 +1808,42 @@ proc hir::types::MakeMutArray {elem depth} {
 
 # 1 if TYPE is or holds a MutableVector or a MutableArray (an element, a
 # field): a type some place of which may be mutated.
-proc hir::types::MentionsMutable {type {seen {}}} {
+#
+# Each named struct type is walked once per question (VISITED): one met
+# again either is being walked (a cycle adds nothing) or was walked and
+# holds none (the walk would have ended at the first that did). A walk that
+# remembered only its own path took every path through a type whose fields
+# reach one type twice -- exponential in the nesting of an application
+# whose affine argument is never cut (WRITTEN-AFFINE-APPLICATIONS-
+# MILESTONE-1.md, section 20).
+proc hir::types::MentionsMutable {type} {
+    set visited [dict create]
+    return [MentionsMutableFrom $type visited]
+}
+
+proc hir::types::MentionsMutableFrom {type visitedVar} {
+    upvar 1 $visitedVar visited
     if {[IsMutVec $type] || [IsMutArray $type] || $type in {mutvec mutarray}} {
         return 1
     }
     if {[IsRefinedApplied $type]} {
-        return [MentionsMutable [hir::refinements::Base $type] $seen]
+        return [MentionsMutableFrom [hir::refinements::Base $type] visited]
     }
     if {[IsList $type] || [IsSet $type]} {
-        return [MentionsMutable [lindex $type 1] $seen]
+        return [MentionsMutableFrom [lindex $type 1] visited]
     }
     if {[IsStruct $type]} {
         foreach {name t} [lindex $type 1] {
-            if {[MentionsMutable $t $seen]} { return 1 }
+            if {[MentionsMutableFrom $t visited]} { return 1 }
         }
     }
     if {[IsNamedStruct $type]} {
-        set id [lindex $type 1]
-        if {$type in $seen} {
+        if {[dict exists $visited $type]} {
             return 0
         }
+        dict set visited $type 1
         foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-            if {[MentionsMutable $t [concat $seen [list $type]]]} { return 1 }
+            if {[MentionsMutableFrom $t visited]} { return 1 }
         }
     }
     return 0
