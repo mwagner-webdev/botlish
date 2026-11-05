@@ -604,6 +604,33 @@ name; new tests and tools must keep it that way:
   fixed name in the working directory or the repository; one that runs a test
   file passes it a private `-tmpdir`.
 
+## Tests that hold on every host, and mutants that still apply
+
+A test is written on one machine and run on four hosts and in several
+temporary directories (MAIN-TEST-DEFECTS-2026-11.md has the cases). Keep
+what it depends on in its code or its constraints:
+
+* Wait for a child process by closing its pipeline (`open |[list ...] r`,
+  read to the end, `close`) or by a plain `exec`: never by probing `/proc`,
+  `ps` or a delay, which hold on Linux only, or only on a fast machine.
+* Every tool a test runs is in its constraint. A library of another
+  architecture is linked with `-fuse-ld=lld` (GNU ld links only its own) and
+  the test carries an `lld` constraint.
+* Never match a word against output that names a host path (the temporary
+  directory, the checkout): map the paths out first (`string map [list $dir
+  DIR]`). The native coverage jobs' temporary directory is
+  `/tmp/native-coverage_XXXXXX`.
+
+A change can break another audit's mutant: rewrite or duplicate the text it
+replaces, and that mutant guards nothing until its own harness next runs.
+`tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
+under `audit/` to the tree in memory (seconds; CI's `mutant-catalogs` job in
+`tests.yml`). Run it before pushing a change to code. A mutant it reports is
+updated in the same change, kept a mutant of the same rule, and run through
+its own harness (`-only NAME`). A new catalog whose files are not relative
+to the repository root, or not named by `## FILE` lines, gets a row in the
+tool's `Catalogs` table.
+
 ## Native GC-stress validation
 
 `BOTLISH_NATIVE_GC_STRESS=1` forces a GC attempt at every allocation site,

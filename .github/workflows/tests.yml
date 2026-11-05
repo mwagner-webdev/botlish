@@ -246,6 +246,27 @@ jobs:
       - name: Warning gate
         run: tclsh9.0 audit/refactor/tools/gate.tcl
 
+  mutant-catalogs:
+    name: mutation catalogs (every mutant applies)
+    # Every mutant of every audit's catalog still applies to this tree: its
+    # text to replace occurs exactly once (MAIN-TEST-DEFECTS-2026-11.md).
+    # The harnesses report a mutant that does not as NOT-APPLIED, but only
+    # when they run, which is when their own area changes; a change elsewhere
+    # that rewrites or duplicates the text it targets fails here instead, on
+    # its own push. Reads files only: seconds.
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Every mutant applies
+        run: tclsh9.0 tools/mutant-catalogs.tcl -verbose 1
+
   method-filter:
     name: method-call decision (oracle, reference audit)
     # The method-call decision (hir/methods.tcl,

@@ -53,10 +53,12 @@
 @@ struct-ignores-non-hashable-field a struct ignores a field that is not Hashable
 ## hir/types.tcl
 <<<<
+        lassign [Totality $operation $t $seen] class why
         if {$class eq "none"} {
             return [list none "$what ([show $t]): $why"]
         }
 ====
+        lassign [Totality $operation $t $seen] class why
         if {$class eq "none" && ![string match field* $what]} {
             return [list none "$what ([show $t]): $why"]
         }
