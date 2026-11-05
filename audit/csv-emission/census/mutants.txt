@@ -309,34 +309,36 @@ fn field_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter 
 
 >>>>
 
-@@ selective-unpeeled selective_emit.bot EMIT-INCOMPLETE unprovable the guarded unquoted branch without its peeled first character: correct (needs_quotes is true for the empty value), but the checker keeps the loop's zero-iteration exit
+@@ selective-count-unknown selective_emit.bot EMIT-INCOMPLETE unprovable the unquoted branch without the decision's `n == 0`: correct (needs_quotes is true for the empty value), but nothing the checker knows bounds the loop's count away from zero, so it keeps the loop's zero-iteration exit (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md)
 <<<<
-        c0 = value.char_at(0).scalar_value()
-        csv_strict::text_char(c0):
-            on std::dfa::UnrecognizedInput:
-                fail QuotingDecision {at: 0, value: c0}
-            on std::dfa::UnexpectedEnd:
-                fail QuotingDecision {at: 0, value: c0}
-        yield c0
-        loop i from 1 to n:
+    if n == 0 or needs_quotes_strict(value):
 ====
-        loop i from 0 to n:
+    if needs_quotes_strict(value):
 >>>>
 
-@@ selective-guard-weakened selective_emit.bot EMIT-BEYOND-TOKEN unprovable the unquoted branch's guards admit the quoted class (a comma, CR, LF): unreachable while needs_quotes is right, so no run shows it -- the checker rejects the code whose safety rests on that relation
+@@ selective-empty-unquoted selective_emit.bot EMIT-INCOMPLETE static the empty value judged unquotable (needs_quotes false for it, the UTF-8 field's decision without `n == 0`): the unquoted branch's loop runs zero times and the field is empty, which is no field token
 <<<<
-        c0 = value.char_at(0).scalar_value()
-        csv_strict::text_char(c0):
+    if n == 0 or needs_quotes(value):
 ====
-        c0 = value.char_at(0).scalar_value()
-        csv_strict::quoted_char(c0):
+    if needs_quotes(value):
 >>>>
 <<<<
-        loop i from 1 to n:
+fn needs_quotes(value: str) -> bool:
+    if value.length() == 0:
+        return true
+====
+fn needs_quotes(value: str) -> bool:
+    if value.length() == 0:
+        return false
+>>>>
+
+@@ selective-guard-weakened selective_emit.bot EMIT-BEYOND-TOKEN unprovable the unquoted branch's guard admits the quoted class (a comma, CR, LF): unreachable while needs_quotes is right, so no run shows it -- the checker rejects the code whose safety rests on that relation
+<<<<
+        loop i from 0 to n:
             c = value.char_at(i).scalar_value()
             csv_strict::text_char(c):
 ====
-        loop i from 1 to n:
+        loop i from 0 to n:
             c = value.char_at(i).scalar_value()
             csv_strict::quoted_char(c):
 >>>>

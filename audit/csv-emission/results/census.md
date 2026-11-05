@@ -22,12 +22,11 @@
 | `utf8-bad-lead` | utf8_emit.bot | rejected: EMIT-REJECTED (bytes_document_source, bytes_field_from_bytes_source, bytes_field_source, bytes_stream_source, bytes_unterminated_source, document_bytes, line3_bytes, quoted_field_bytes, quoted_field_from_bytes, record3_bytes, row_line_bytes, stream_bytes, stream_unterminated_bytes) | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 4 invalid, 22 wrong, 0 stopped | static-latent | static-latent | yes |
 | `utf8-no-e0-split` | utf8_emit.bot | rejected: EMIT-REJECTED (bytes_document_source, bytes_field_from_bytes_source, bytes_field_source, bytes_stream_source, bytes_unterminated_source, document_bytes, line3_bytes, quoted_field_bytes, quoted_field_from_bytes, record3_bytes, row_line_bytes, stream_bytes, stream_unterminated_bytes) | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 0 invalid, 0 wrong, 0 stopped | unprovable | unprovable | yes |
 | `selective-natural-claimed` | selective_emit.bot | rejected: EMIT-BEYOND-TOKEN, EMIT-INCOMPLETE, EMIT-REJECTED (field_natural) | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 0 invalid, 0 wrong, 0 stopped | unprovable | unprovable | yes |
-| `selective-unpeeled` | selective_emit.bot | rejected: EMIT-INCOMPLETE (field_strict) | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 0 invalid, 0 wrong, 0 stopped | unprovable | unprovable | yes |
+| `selective-count-unknown` | selective_emit.bot | rejected: EMIT-INCOMPLETE (field_strict) | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 0 invalid, 0 wrong, 0 stopped | unprovable | unprovable | yes |
+| `selective-empty-unquoted` | selective_emit.bot | rejected: EMIT-INCOMPLETE (field, selective_field_source) | ordinary: 1 invalid, 4 wrong, 0 stopped; adversarial: 2 invalid, 7 wrong, 0 stopped | static | static | yes |
 | `selective-guard-weakened` | selective_emit.bot | rejected: EMIT-AFTER-TOKEN, EMIT-BEYOND-TOKEN, EMIT-REJECTED (document_strict, field_strict, record3_strict, row_line_strict, selective_strict_document_source) | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 0 invalid, 0 wrong, 0 stopped | unprovable | unprovable | yes |
 | `selective-wrong-decision` | selective_emit.bot | accepted | ordinary: 0 invalid, 0 wrong, 1 stopped; adversarial: 0 invalid, 0 wrong, 87 stopped | guard | guard | yes |
 | `selective-classic-rule` | selective_emit.bot | accepted | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 0 invalid, 0 wrong, 14 stopped | guard-latent | guard-latent | yes |
 | `final-value` | sources.bot | accepted | ordinary: 0 invalid, 0 wrong, 0 stopped; adversarial: 0 invalid, 0 wrong, 0 stopped, 33 wrong final values | outside | outside | yes |
 
-25 mutants, 25 as stated.
-
-(`selective-classic-rule` was rerun alone after oracle.py learned to count a run stopped by another guard -- QuotingDecision where the profile's UnsupportedCSVCharacter was expected, nothing wrong written -- as a guard stop; the first run had counted those 8 runs as wrong outputs.)
+26 mutants, 26 as stated.

@@ -341,7 +341,9 @@ Summaries are shared by every claim of a compilation: the 22 JSON claims
 compute 140 and reuse 60, the prototype's counts exactly; checked one claim
 at a time from fresh state, 448 (section 17). Partial-token helpers need no
 claim. Loops peel a counted domain's first iteration, unroll exactly
-counted ones of at most 8, and otherwise iterate to a fixpoint;
+counted ones of at most 8, and otherwise iterate to a fixpoint (since
+EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md without a zero-iteration
+exit where the bounds' facts prove the loop runs);
 recursion's second round is checked (`ec-recursion-same-context`).
 
 ## 9. Failure paths and coroutine boundaries

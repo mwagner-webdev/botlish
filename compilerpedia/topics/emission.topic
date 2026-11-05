@@ -260,9 +260,78 @@ yielded a whole token: the recognizer must accept the end of the input
 there. A prefix is allowed only before a failure or while the function is
 still running.
 
+A counted loop may run zero times unless its bounds prove otherwise: the
+checker drops a loop's zero-iteration exit only where the facts before it
+show that every start and end it may have put the start in the domain
+(`from 0 to n` once `n >= 1` is known, a declared domain of positive
+values; EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md). An entered loop
+still completes empty on a path its iterations take without a symbol (a
+`break`, `continue` or `return` before the yield).
+
 == WHAT TO DO
 Yield the rest of the token on every path that completes, or fail on the
-path that cannot.
+path that cannot. For a loop that may run zero times, establish that it
+runs before it (fail on the counts that would put nothing in it, or declare
+the parameter's domain), or yield the token's first symbol before it.
+
+@example reject
+import std::dfa
+
+class digit = '0'..'9'
+
+dfa digits over ascii:
+    start:
+        digit -> more
+    more:
+        digit -> more
+        end -> accept
+
+fn sevens(n: int) -> unit emits digits:
+    loop i from 0 to n:
+        yield 55
+        continue
+    unit
+
+0
+@caption for n <= 0 the loop runs zero times: no digit at all
+@error CORE SEMANTIC EMIT-INCOMPLETE
+@at 12:33
+@end
+
+@example accept
+import std::dfa
+import std::coroutine
+
+class digit = '0'..'9'
+
+dfa digits over ascii:
+    start:
+        digit -> more
+    more:
+        digit -> more
+        end -> accept
+
+error NoDigits
+
+fn sevens(n: int) -> unit errors NoDigits emits digits:
+    if n < 1:
+        fail NoDigits
+    loop i from 0 to n:
+        yield 55
+        continue
+    unit
+
+fn source() -> int:
+    sevens(3):
+        on NoDigits:
+            return -2
+    -1
+
+coroutine {step, first} = source()
+first
+@caption past the guard n >= 1, so the loop runs at least once: certified
+@value 55
+@end
 
 @example reject
 import std::dfa

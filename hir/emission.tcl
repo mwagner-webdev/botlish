@@ -32,7 +32,9 @@
 # A helper F calls is analyzed in the states and with the argument facts F's
 # own code establishes at the call (a summary, keyed by function, entry state
 # and argument facts, shared by every claim of the compilation); recursion
-# and loops by monotone fixpoints whose convergence is checked; a failure
+# and loops by monotone fixpoints whose convergence is checked (a counted
+# loop whose bounds' facts prove it runs has no zero-iteration exit: EMISSION-
+# COUNTED-LOOP-PRECISION-MILESTONE-1.md, EvalLoop); a failure
 # point records its states, where a handler starts; a guard (a call of a
 # recognizer that never suspends) narrows its binding argument on its normal
 # path; a helper with its own certificate is composed through the
@@ -1465,6 +1467,7 @@ proc hir::emission::EvalLoop {e node s} {
         return [Unrolled $e $node $s $induction $count $before]
     }
     lassign [Peel $induction] counter all first later
+    set entered [Entered $induction]
     if {$counter ne ""} {
         dict set env $counter $all
     }
@@ -1473,6 +1476,13 @@ proc hir::emission::EvalLoop {e node s} {
     set out {}
     set head $s
     set loopEnv $env
+    if {$counter ne "" && $entered && $first eq ""} {
+        # An inexact start whose bounds still prove the body runs: the first
+        # iteration is walked on its own, with every value, so that the
+        # states before it are not among the loop's exits.
+        set first $all
+        set later $all
+    }
     if {$counter ne "" && $first ne ""} {
         # The first iteration of a counting domain with an exact start is
         # its own (the `if i > 0:` separator idiom); every later one is past
@@ -1481,7 +1491,14 @@ proc hir::emission::EvalLoop {e node s} {
         lassign [EvalBody [dict get $node body] $s] after -
         set head [lsort -unique [concat $after [dict get $continues $e]]]
         lappend out {*}[dict get $breaks $e]
-        lappend out {*}$s
+        if {!$entered} {
+            # The zero-iteration exit: the states before the loop, where
+            # its bounds may put nothing in the domain. Only it is dropped
+            # for an entered loop: every exit of its iterations -- a
+            # `break`, the head after any of them, a return or a failure
+            # recorded by the walk -- stays.
+            lappend out {*}$s
+        }
         set loopEnv [dict replace $loopEnv $counter $later]
         set env $loopEnv
     }
@@ -1547,6 +1564,20 @@ proc hir::emission::Unrolled {e node s induction count before} {
     set env $before
     set out [concat [dict get $breaks $e] $head]
     return [list [lsort -unique $out] *]
+}
+
+# 1 when counting domain INDUCTION ({BINDING STARTEXPR STARTVALUE ENDVALUE
+# DIRECTION ENDKIND}) runs its body at least once for every start and end
+# value its operands may have (hir::range::DomainEntered, on their hulls:
+# the extrema it reads are the hulls' own), else 0. A value of no known Int
+# set ("*") or none at all ({}) proves nothing. A lockstep loop's domains
+# have one iteration count (hir/lockstep.tcl's obligation, else the loop
+# raises before anything runs), so its first counting domain decides.
+proc hir::emission::Entered {induction} {
+    if {$induction eq {}} { return 0 }
+    lassign $induction b startExpr vs ve direction endKind
+    if {$vs in {* {}} || $ve in {* {}}} { return 0 }
+    return [hir::range::DomainEntered [hir::intset::HullRange $vs] [hir::intset::HullRange $ve] $direction $endKind]
 }
 
 # {COUNTER ALL FIRST LATER} for a counting domain INDUCTION ({BINDING

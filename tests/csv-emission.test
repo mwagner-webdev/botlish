@@ -213,14 +213,15 @@ test csv-diagnostic-located {a rejected claim's diagnostic is located at the yie
     }
 } -result {{CORE SEMANTIC EMIT-REJECTED} 12 5 1 {{csv_strict.bot 54 {state quote of csv_strict::quoted_field is declared here}}} 1}
 
-test csv-selective-precision {selective quoting: the natural spelling (the decision's fact about the whole string, each character yielded unchecked) and the guarded loop without its peeled first character are correct but not certifiable -- EMIT-REJECTED and EMIT-INCOMPLETE, precision limits; the shipped spelling is certified} -body {
+test csv-selective-precision {selective quoting: the natural spelling (the decision's fact about the whole string, each character yielded unchecked) is correct but not certifiable -- EMIT-REJECTED, a relational precision limit; the shipped spelling, each character guarded in one natural counted loop, is certified (its bounds prove the loop runs: EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md), and so is the former one with its first character peeled; without the branch's `n == 0` exclusion the loop may run zero times for all the checker knows: EMIT-INCOMPLETE} -body {
     set text [csvRead [file join $::csvDir selective_emit.bot]]
     set natural [string map {"fn field_strict_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter:" "fn field_strict_natural(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::field:"} $text]
-    set start [string first "        c0 = value.char_at(0).scalar_value()\n        csv_strict::text_char(c0):" $text]
-    set end [string first "        loop i from 1 to n:\n" $text $start]
-    set unpeeled [string replace $text $start [expr {$end + [string length "        loop i from 1 to n:\n"] - 1}] "        loop i from 0 to n:\n"]
-    set out {}
-    foreach variant [list $natural $unpeeled $text] {
+    set loop "        loop i from 0 to n:\n            c = value.char_at(i).scalar_value()\n            csv_strict::text_char(c):\n"
+    set peel "        c0 = value.char_at(0).scalar_value()\n        csv_strict::text_char(c0):\n            on std::dfa::UnrecognizedInput:\n                fail QuotingDecision {at: 0, value: c0}\n            on std::dfa::UnexpectedEnd:\n                fail QuotingDecision {at: 0, value: c0}\n        yield c0\n        loop i from 1 to n:\n            c = value.char_at(i).scalar_value()\n            csv_strict::text_char(c):\n"
+    set peeled [string map [list $loop $peel] $text]
+    set unknown [string map [list "    if n == 0 or needs_quotes_strict(value):\n" "    if needs_quotes_strict(value):\n"] $text]
+    set out [list [expr {$peeled ne $text}] [expr {$unknown ne $text}]]
+    foreach variant [list $natural $text $peeled $unknown] {
         set path [csvProgram "import selective_emit\n0\n"]
         csvWrite [file join [file dirname $path] selective_emit.bot] $variant
         lappend out [lmap c [csvclaims::of $path] {
@@ -230,7 +231,7 @@ test csv-selective-precision {selective quoting: the natural spelling (the decis
         file delete -force [file dirname $path]
     }
     set out
-} -cleanup {unset -nocomplain text natural start end unpeeled out variant path} -result {{{field_strict csv_strict::field proven {}} {field_strict_natural csv_strict::field rejected {EMIT-BEYOND-TOKEN EMIT-INCOMPLETE EMIT-REJECTED}}} {{field_strict csv_strict::field rejected EMIT-INCOMPLETE}} {{field_strict csv_strict::field proven {}}}}
+} -cleanup {unset -nocomplain text natural loop peel peeled unknown out variant path} -result {1 1 {{field_strict csv_strict::field proven {}} {field_strict_natural csv_strict::field rejected {EMIT-BEYOND-TOKEN EMIT-INCOMPLETE EMIT-REJECTED}}} {{field_strict csv_strict::field proven {}}} {{field_strict csv_strict::field proven {}}} {{field_strict csv_strict::field rejected EMIT-INCOMPLETE}}}
 
 test csv-unterminated-not-document {the records without a final CRLF are in stream3's language and not in document3's: claiming the canonical document is EMIT-INCOMPLETE} -body {
     set path [csvProgram "${strictHead}fn s(rows: List\[csv_common::Row\]) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::stream3, csv_strict::document3:\n    strict_emit::stream_unterminated(rows)\n    unit\n\n0\n"]
@@ -276,6 +277,20 @@ test csv-service-hover {the compiler service's hover on a CSV emitter states its
         file delete -force $dir
     }
 } -result {{fn strict_emit::quoted_field(value: str) -> unit errors csv_common::UnsupportedCSVCharacter emits csv_strict::quoted_field, csv_strict::field} {{emits csv_strict::quoted_field: certified to emit csv_strict::quoted_field: every normal completion has yielded exactly one token, every prefix it yields is viable; its token ends at the end of the input or before '\r' ','} {emits csv_strict::field: certified to emit csv_strict::field: every normal completion has yielded exactly one token, every prefix it yields is viable; its token ends at the end of the input or before '\r' ','}}}
+
+test csv-selective-service-hover {the compiler service's hover on the selective field shows it certified -- the verdict its entered loop gives (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md), with no change to the service} -body {
+    set path [csvProgram "import selective_emit\n0\n"]
+    set dir [file dirname $path]
+    set ws [service::workspace -root $dir]
+    try {
+        set rev [service::analyze $ws $path]
+        set lines [split [dict get [service::at $rev [file join $dir selective_emit.bot] 72 4] hover] \n]
+        list [string range [lindex $lines 0] 0 31] [string range [lindex $lines 1] 0 70]
+    } finally {
+        service::closeWorkspace $ws
+        file delete -force $dir
+    }
+} -result {{fn selective_emit::field_strict(} {emits csv_strict::field: certified to emit csv_strict::field: every nor}}
 
 test csv-service-navigation {on a claim's recognizer name the service navigates to the declared recognizer in csv_strict.bot, and lists the claims that name it among its references} -body {
     set path [csvProgram "import strict_emit\n0\n"]
@@ -470,6 +485,27 @@ test csv-native-erasure {a claim changes no code: a program driving the certifie
         file delete -force $dir
     }
 } -result {1 0 1}
+
+test csv-selective-native-erasure {the selective field certified by its entered loop (EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md) changes no code either: a program driving the selective document source compiles to the same fused NIR with and without every claim, fused (no coroutine object), and runs the same on every backend, its symbols the document (then its final value, the row count)} -constraints nativeCoroutines -body {
+    set path [csvProgram "import std::coroutine\nimport std::list\nimport csv_common\nimport selective_emit\nimport sources\n\nfn symbols(rows: List\[csv_common::Row\]) -> List\[int\] errors csv_common::UnsupportedCSVCharacter, selective_emit::QuotingDecision:\n    coroutine {step, first} = sources::selective_document_source(csv_common::Row {a: \"id\", b: \"x\", c: \"\"}, rows)\n    symbols = loop k from 0 to 64:\n        if k == 0:\n            first\n        elif std::coroutine::done?(step):\n            break\n        else:\n            step()\n    symbols\n\nsymbols(\[csv_common::Row {a: \"ab\", b: \"a,b\", c: \"\"}\]):\n    on csv_common::UnsupportedCSVCharacter:\n        \[-2\]\n    on selective_emit::QuotingDecision:\n        \[-3\]\n"]
+    set dir [file dirname $path]
+    try {
+        set hir [surface::readProgramFile $path -warnings off]
+        set nir [native::fusedNir $hir]
+        set runs [lmap b {interp compile cranelift-generic cranelift} {outcomeUnderHir $b $hir}]
+        foreach f [glob -directory $dir *.bot] {
+            csvWrite $f [emit::strip [csvRead $f]]
+        }
+        set bare [native::fusedNir [surface::readProgramFile $path -warnings off]]
+        set text [string map {, ""} [lindex [lindex $runs 0] 1]]
+        # The symbols, without the source's final value (its row count).
+        set written [join [lmap c [lrange [string trim $text {[]}] 0 end-1] {format %c $c}] ""]
+        list [expr {$nir eq $bare}] [regexp -all {cocreate|costart} $nir] [llength [lsort -unique $runs]] \
+            [expr {$written eq "id,x,\"\"\r\nab,\"a,b\",\"\"\r\n"}] [string map {\r <CR> \n <LF>} $written]
+    } finally {
+        file delete -force $dir
+    }
+} -cleanup {unset -nocomplain path dir hir nir runs bare text written} -result [list 1 0 1 1 {id,x,""<CR><LF>ab,"a,b",""<CR><LF>}]
 
 emit::cleanup
 ::tcltest::cleanupTests

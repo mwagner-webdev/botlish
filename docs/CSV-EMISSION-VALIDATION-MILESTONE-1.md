@@ -267,6 +267,13 @@ field, so the record-level claim needs neither fact
 (`selective_emit::record3_strict` was certified even while the field's own
 claim was rejected).
 
+(Since EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md the second row is
+certified: a counted loop whose bounds prove it runs has no zero-iteration
+exit, so `selective_emit::field` and `field_strict` are one guarded loop,
+the peeled first character gone. The census's `selective-unpeeled` became
+`selective-count-unknown` -- the decision without `n == 0`, still
+EMIT-INCOMPLETE -- and `selective-empty-unquoted`, its static counterpart.)
+
 Cost of the comparison: the always-quoted field is 17 lines and one guard
 per character; the certified selective field 22 lines plus a 12-line
 decision, two guards per character of an unquoted field and one per
@@ -870,6 +877,7 @@ Correct programs, or properties, the checker does not certify:
   `selective-unpeeled` is EMIT-INCOMPLETE until the first iteration is
   written out. This is a single-value fact, not a relation; a narrow
   improvement of `hir::emission::EvalLoop` would recover it (section 20).
+  (Recovered: EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md.)
 * **The UTF-8 lead/continuation relation** (`utf8-no-e0-split`): the encoder
   must branch where the grammar's lead classes do.
 * **Values received from a certified source** are values of their type: a
@@ -901,7 +909,7 @@ Next steps, in order of value:
    (start a point, end above it). It is a non-relational precision gain that
    would certify selective quoting's guarded loop without peeling; it needs
    the soundness audit every value rule gets (EMISSION-CLAIMS-MILESTONE-1.md,
-   section 4).
+   section 4). (Done: EMISSION-COUNTED-LOOP-PRECISION-MILESTONE-1.md.)
 2. **Typed sources.** A consumer of a certified byte source still checks
    every symbol to make it a `Byte`. A coroutine whose outward type is a
    domain (`std::byte::Byte`) with an Int result is the natural shape, but a
