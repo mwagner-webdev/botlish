@@ -165,8 +165,17 @@ built by tests/cffi/sdl3.tcl):
   on interp and 8,730 on compile, one failure on each -- package-
   authoring.test's `pa-add-refusals`, which links an AArch64 library with
   clang and this host's linker has no AArch64 emulation (its documented
-  requirement: clang, lld and MinGW-w64), unrelated to this change; the 117
-  golden suites on all four backends, 0 failed.
+  requirement: clang, lld and MinGW-w64), unrelated to this change and
+  fixed on main since (MAIN-TEST-DEFECTS-2026-11.md); the 117 golden suites
+  on all four backends, 0 failed.
+* After merging main's per-thread runtime state: the native backend
+  rebuilt, every mutant catalog applying (tools/mutant-catalogs.tcl: 85
+  catalogs, 0 problems), and native-executable, aot-stub-linker,
+  system-linker, contexts, package-native, main-cli,
+  native-program-output, concurrent-vms, workload-icy-tower, argv,
+  abi-bytes, c-ffi and main-thread-startup, tests/platform/aot-facts.tcl
+  and native-status.tcl passing again; Icy Tower's committed executable
+  rebuilt on the merged runtime.
 * Every test file the migration changed passed on its own run (about 75
   files; the macOS- and Windows-only tests in them were edited by reading),
   among them tests/workload-icy-tower.test's executable tests with SDL3
