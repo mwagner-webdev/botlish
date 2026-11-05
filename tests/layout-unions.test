@@ -1001,13 +1001,13 @@ test lu-not-a-sum-type {a union is no tagged sum: it has no case, tag or active 
 
 set luExecutableDir [makeDirectory layout-unions-executables-[pid]]
 
-test lu-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) reads and writes live unions -- alternatives of a union in a record, of an array element, a pointer alternative -- and union alternatives in byte storage exactly as the in-process backends do} -constraints executableAot -body {
+test lu-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) reads and writes live unions -- alternatives of a union in a record, of an array element, a pointer alternative -- and union alternatives in byte storage exactly as the in-process backends do (its value read through the driver protocol)} -constraints executableAot -body {
     set source [luProgram "fn run(k: int) -> List\[any\] errors NativeEditNull, NativeViewNull, LayoutLengthMismatch, IndexNotFound:\n    p = memory(ramp(40))\n    e = std::binary::native::edit(ARRS, p)\n    std::binary::store(std::binary::element(e.ws, k), WORD.halves.high, -2)\n    std::binary::store(e, ARRS.grid\[1\]\[0\].bytes\[1\], 9)\n    v = std::binary::native::view(ARRS, p)\n    d = std::binary::write(mutable(fill(24, 0)), SANDWICH.w.large.parts.high, -3)\n    \[dump(p, 40), std::binary::element(v.ws, k).whole, std::binary::load(std::binary::element(std::binary::element(v.grid, 1), 0).halves), std::binary::read(frozen(d), SANDWICH.w.large.quad)\]\n\nr = run(1):\n    on NativeEditNull:\n        \[\]\n    on NativeViewNull:\n        \[\]\n    on LayoutLengthMismatch:\n        \[\]\n    on IndexNotFound:\n        \[\]\nr\n"]
     set hir [surface::compile $source unions.bot -warnings off]
     set path [file join $::luExecutableDir unions]
     native::executable $hir $path
     set direct [luOutcome cranelift $hir]
-    list [expr {"value {[exec $path]}" eq $direct}] [lindex $direct 0]
+    list [expr {"value {[standaloneValue $path]}" eq $direct}] [lindex $direct 0]
 } -cleanup {unset -nocomplain source hir path direct} -result {1 value}
 
 test lu-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) live unions stay exact: copies of record and array alternatives building LayoutStructs and Lists, 64-bit alternatives that are BigInts stored and loaded, byte reads and writes through alternatives each allocating -- every operand stays rooted while the next allocation runs} -constraints {nativeBuilt nativeCoroutines} -body {

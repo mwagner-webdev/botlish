@@ -534,7 +534,7 @@ test float-native-gc-stress {Float64 values survive collections at every allocat
     if {$saved eq ""} { unset ::env(BOTLISH_NATIVE_GC_STRESS) } else { set ::env(BOTLISH_NATIVE_GC_STRESS) $saved }
 } -result {1 {[36768468716.43302]}}
 
-test float-native-executable {a standalone executable computes, decides and prints Float64 values like the JIT: constants in the emitted image, NonFiniteFloat at run time} -constraints {nativeBuilt executableAot} -body {
+test float-native-executable {a standalone executable computes and decides Float64 values like the JIT: constants in the emitted image, NonFiniteFloat at run time (its value read through the driver protocol: an executable prints none)} -constraints {nativeBuilt executableAot} -body {
     set dir [makeDirectory float-exe-[pid]]
     set path [file join $dir prog.bot]
     set channel [open $path w]
@@ -547,7 +547,7 @@ test float-native-executable {a standalone executable computes, decides and prin
     close $channel
     set hir [surface::readProgramFile $path -warnings off -cache ""]
     set exe [native::executable $hir [file join $dir prog]]
-    set output [exec $exe]
+    set output [standaloneValue $exe]
     file delete -force $dir
     list [expr {$output eq [lindex [outcomeUnderHir compile $hir] 1]}] $output
 } -result {1 {[1.500000000000003e300, -1.0, 0.30000000000000004, true, NonFiniteResult::NegativeInfinity]}}

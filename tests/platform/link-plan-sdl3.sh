@@ -28,8 +28,11 @@
 #      from another working directory, and checks the executable: Mach-O
 #      arm64, the archive the link plan's (BOTLISH_NATIVE_LINK_LOG), no SDL3
 #      among its dynamic libraries (otool -L: libSystem and Apple's
-#      frameworks only), its value [VERSION, true] (SDL_GetVersion, SDL_Init
-#      of no subsystem, SDL_Quit), also under BOTLISH_NATIVE_GC_STRESS=1;
+#      frameworks only), nothing printed (an executable prints no value of
+#      its own: PROGRAM-OUTPUT-MILESTONE-1.md) and its value [VERSION, true]
+#      (SDL_GetVersion, SDL_Init of no subsystem, SDL_Quit) read through the
+#      driver protocol (BOTLISH_NATIVE_RESULT), also under
+#      BOTLISH_NATIVE_GC_STRESS=1;
 #   4. the collision: `extern c library "SDL3" static` with -L
 #      native/macos, where libSDL3.a and libSDL3.dylib both are: the archive;
 #      and the control, `extern c library "SDL3"` with the same -L: the
@@ -132,6 +135,10 @@ ln -s "$shared" "$application/native/macos/libSDL3.dylib"
 printf '%s' "$main_bot" >"$application/main.bot"
 binding 'extern c library "SDL3" static at "native/macos/libSDL3.a"' 1 >"$application/sdl.bot"
 want="[$expected_version, true]"
+# $want as the driver protocol reports it: the result line `value V`, V in
+# the host value format (runtime/aot.rs; native/native.tcl's native::Outcome
+# reads it).
+want_value="value {list {{int $expected_version} {bool true}}}"
 
 # --- 3. the packaged compiler, from another directory ------------------------
 # The executable APPLICATION/main, built by the compiler $1 with ARGS..., moved to OUT/$2.
@@ -145,8 +152,23 @@ build() {
   echo "   built $name in $(( $(date +%s) - started )) s: $(wc -c <"$application/main" | tr -d ' ') bytes"
   mv "$application/main" "$work/out/$name"
 }
-# Checks executable OUT/$1: Mach-O arm64, no SDL3 among its libraries, value
-# $want, also under GC stress.
+# The result line the executable $1 reports in the driver protocol
+# (runtime/aot.rs: BOTLISH_NATIVE_RESULT names the file its result lines go
+# to: `value V` or `error CODE MESSAGE`), run with no environment but the
+# assignments $2...; fails if it exits nonzero, prints anything or reports no
+# result. An executable prints no value of its own
+# (PROGRAM-OUTPUT-MILESTONE-1.md): this is how the checks read one.
+protocol_value() {
+  local exe=$1 printed
+  shift
+  rm -f "$work/result"
+  printed=$(env -i "$@" BOTLISH_NATIVE_RESULT="$work/result" "$exe") || return 1
+  [[ -z $printed && -f $work/result ]] || return 1
+  grep -E '^(value|error) ' "$work/result"
+}
+# Checks executable OUT/$1: Mach-O arm64, no SDL3 among its libraries, an
+# ordinary run that prints nothing, value $want (the protocol's $want_value),
+# also under GC stress.
 check_static() {
   local exe="$work/out/$1"
   file "$exe" | grep -q 'Mach-O 64-bit executable arm64' || fail "$1 is $(file "$exe")"
@@ -156,12 +178,14 @@ check_static() {
   while read -r lib; do
     case $lib in /usr/lib/*|/System/Library/*) ;; *) fail "$1 needs $lib, no system library" ;; esac
   done <<<"$libs"
-  local got stressed
-  got=$(env -i "$exe") || fail "$1 failed"
-  [[ $got == "$want" ]] || fail "$1 printed $got, not $want"
-  stressed=$(env -i BOTLISH_NATIVE_GC_STRESS=1 "$exe") || fail "$1 failed under GC stress"
-  [[ $stressed == "$want" ]] || fail "$1 printed $stressed under GC stress"
-  echo "   ran $1: $got (GC stress: $stressed); $(wc -l <<<"$libs" | tr -d ' ') dynamic libraries, none SDL3's"
+  local printed got stressed
+  printed=$(env -i "$exe") || fail "$1 failed"
+  [[ -z $printed ]] || fail "$1 printed $printed: an executable prints no value of its own"
+  got=$(protocol_value "$exe") || fail "$1 failed in the driver protocol"
+  [[ $got == "$want_value" ]] || fail "$1 reported $got, not $want_value ($want)"
+  stressed=$(protocol_value "$exe" BOTLISH_NATIVE_GC_STRESS=1) || fail "$1 failed under GC stress"
+  [[ $stressed == "$want_value" ]] || fail "$1 reported $stressed under GC stress"
+  echo "   ran $1: printed nothing, $got (GC stress: $stressed); $(wc -l <<<"$libs" | tr -d ' ') dynamic libraries, none SDL3's"
 }
 step "Static SDL3 through $botlish"
 build "$botlish" static-at
@@ -183,9 +207,12 @@ binding 'extern c library "SDL3"' 1 >"$application/sdl.bot"
 build "$botlish" dynamic -L "$application/native/macos"
 otool -L "$work/out/dynamic" | sed 's/^/   /'
 otool -L "$work/out/dynamic" | grep -q 'libSDL3' || fail "the control (an ordinary declaration) did not link the dylib"
-got=$(DYLD_LIBRARY_PATH="$application/native/macos" DYLD_FALLBACK_LIBRARY_PATH="$application/native/macos" "$work/out/dynamic") || fail "the dynamic control failed"
-[[ $got == "$want" ]] || fail "the dynamic control printed $got"
-echo "   the control, an ordinary declaration, links the dylib (Apple ld's choice) and prints $got"
+rm -f "$work/result"
+printed=$(DYLD_LIBRARY_PATH="$application/native/macos" DYLD_FALLBACK_LIBRARY_PATH="$application/native/macos" BOTLISH_NATIVE_RESULT="$work/result" "$work/out/dynamic") || fail "the dynamic control failed"
+[[ -z $printed ]] || fail "the dynamic control printed $printed"
+got=$(grep -E '^(value|error) ' "$work/result") || fail "the dynamic control reported no result"
+[[ $got == "$want_value" ]] || fail "the dynamic control reported $got"
+echo "   the control, an ordinary declaration, links the dylib (Apple ld's choice) and reports $got"
 echo "   sizes: static $(wc -c <"$work/out/static-at" | tr -d ' ') bytes, dynamic $(wc -c <"$work/out/dynamic" | tr -d ' ') bytes"
 
 # --- 5. the frameworks are needed --------------------------------------------

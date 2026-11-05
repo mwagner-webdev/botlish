@@ -645,12 +645,12 @@ test nv-no-new-dependency {native views need nothing a program did not need befo
 
 set nvExecutableDir [makeDirectory native-view-executables-[pid]]
 
-test nv-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) reads native memory through views exactly as the in-process backends do: scalars, a u64 BigInt, nested views and a pointer field} -constraints executableAot -body {
+test nv-executable {a standalone executable (whichever linker BOTLISH_NATIVE_LINKER selects) reads native memory through views exactly as the in-process backends do: scalars, a u64 BigInt, nested views and a pointer field (its value read through the driver protocol)} -constraints executableAot -body {
     set source [nvProgram "${::nvLinkedProgram}fn run() -> List\[any\] errors NativeViewNull:\n    target = memory(\[146, 16, 9, 3\])\n    a = ffi_fixture::address_of(target)\n    p = memory(linked(a, 4886718345))\n    v = std::binary::native::view(Linked, p)\n    n = v.next\n    w = std::binary::native::view(Inner, n)\n    q = memory($::nvScalarsA)\n    s = std::binary::native::view(Scalars, q)\n    c = v.cb\n    \[v.inner.x, w.x, w.y, ffi_fixture::address_of(c), s.u64, s.i64\]\n\nr = run():\n    on NativeViewNull:\n        \[\]\nr\n"]
     set hir [surface::compile $source view.bot -warnings off]
     set path [file join $::nvExecutableDir views]
     native::executable $hir $path
-    list [exec $path] [nvOutcome cranelift $hir]
+    list [standaloneValue $path] [nvOutcome cranelift $hir]
 } -cleanup {unset -nocomplain source hir path} -result {{[-1, 4242, 777, 4886718345, 18446744073709551615, -9223372036854775808]} {value {[-1, 4242, 777, 4886718345, 18446744073709551615, -9223372036854775808]}}}
 
 test nv-gc-stress {under BOTLISH_NATIVE_GC_STRESS=1 (a collection at every allocation site) view reads stay exact: 64-bit fields that become BigInts, LayoutStructs std::binary::load builds, many records -- a view is an immediate word, never a root to lose} -constraints {nativeBuilt nativeCoroutines} -body {
