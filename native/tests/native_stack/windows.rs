@@ -22,7 +22,6 @@ use botlish_native::runtime::platform::windows::{confirmed_guard_page, stack_gua
 use botlish_native::runtime::value::*;
 use botlish_native::runtime::vm::{ProgramInfo, Vm};
 use std::process::Command;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use windows_sys::Win32::Foundation::{CloseHandle, EXCEPTION_STACK_OVERFLOW, GetLastError};
 use windows_sys::Win32::System::Diagnostics::Debug::RaiseException;
@@ -162,9 +161,19 @@ fn touch(address: usize) {
 ///                       thread raising STATUS_STACK_OVERFLOW at an address
 ///                       of the guarded stack)
 ///   fault:KIND:unguarded  the same without the guard
+///   threads:VARIANT     two threads at once (PER-THREAD-RUNTIME-STATE-
+///                       MILESTONE-1.md), each guard labelled "vm N ":
+///                       `second` (A and B guarded, A publishing last, B
+///                       exhausts its stack), `released` (A's guard dropped
+///                       and its thread ended, then B exhausts), `unguarded`
+///                       (A guarded, an unguarded B exhausts)
 fn child(scenario: &str) -> ! {
     let parts: Vec<&str> = scenario.split(':').collect();
     match parts.as_slice() {
+        ["threads", variant] => {
+            threads(variant);
+            std::process::exit(0)
+        }
         ["guard", thread, mode] => {
             let mode = mode.to_string();
             on_thread(thread, move || {
@@ -257,7 +266,7 @@ fn child(scenario: &str) -> ! {
 // Coroutine stacks
 
 fn new_vm() -> Box<Vm> {
-    Vm::new(Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+    Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
         AllocMode::Summary)
 }
 
@@ -721,6 +730,48 @@ fn touch_is_committed(address: usize) -> bool {
     }
 }
 
+/// The `threads:VARIANT` scenarios (`child`'s doc), sequenced by channels,
+/// never by time.
+fn threads(variant: &str) {
+    use std::sync::mpsc::channel;
+    let variant = variant.to_string();
+    let spawn = |f: Box<dyn FnOnce() + Send>| std::thread::Builder::new().stack_size(4 << 20).spawn(f).unwrap();
+    let (b_ready, wait_b) = channel::<()>();
+    let (b_go, b_wait) = channel::<()>();
+    let guarded_b = variant != "unguarded";
+    let b = spawn(Box::new(move || {
+        let stack = NativeStack::current().expect("the thread's stack");
+        let _guard = guarded_b.then(|| OverflowGuard::install_labelled(&stack, b"vm 1 ").expect("B's guard installs"));
+        b_ready.send(()).unwrap();
+        b_wait.recv().unwrap();
+        println!("returned {}", exhaust(0));
+    }));
+    wait_b.recv().unwrap();
+    let (a_ready, wait_a) = channel::<()>();
+    let (_release_a, a_released) = channel::<()>();
+    let released = variant == "released";
+    let a = spawn(Box::new(move || {
+        let stack = NativeStack::current().expect("the thread's stack");
+        let guard = OverflowGuard::install_labelled(&stack, b"vm 0 ").expect("A's guard installs");
+        // A publishes after B's guard is in place.
+        platform::set_active_stack(&stack);
+        a_ready.send(()).unwrap();
+        if released {
+            drop(guard);
+            return;
+        }
+        let _ = a_released.recv();
+        drop(guard);
+    }));
+    wait_a.recv().unwrap();
+    if released {
+        a.join().unwrap();
+        assert_eq!(platform::guarded_threads(), 1, "B's record outlives A's");
+    }
+    b_go.send(()).unwrap();
+    b.join().unwrap();
+}
+
 struct Outcome {
     code: u32,
     stdout: String,
@@ -850,6 +901,18 @@ fn fault_checks(report: &mut Report) {
     }
 }
 
+/// Two guarded threads at once: B's overflow is reported by its own record,
+/// with its label, while A is guarded or after A's guard was dropped; an
+/// unguarded B's overflow beside a guarded A ends as Windows ends it.
+fn thread_checks(report: &mut Report) {
+    for variant in ["second", "released"] {
+        let outcome = run_child(&format!("threads:{variant}"));
+        report.check(&format!("threads {variant}"), outcome.code == 0 && outcome.stdout.trim_end() == format!("vm 1 {OVERFLOW_LINE}"), outcome.brief());
+    }
+    let outcome = run_child("threads:unguarded");
+    report.check("threads unguarded", !outcome.relabelled() && outcome.code == STACK_OVERFLOW, outcome.brief());
+}
+
 pub fn main() {
     if let Ok(scenario) = std::env::var("BOTLISH_STACK_TEST_CHILD") {
         child(&scenario);
@@ -857,6 +920,7 @@ pub fn main() {
     let mut report = Report { failures: 0 };
     facts(&mut report);
     guard_checks(&mut report);
+    thread_checks(&mut report);
     fault_checks(&mut report);
     coroutine_checks(&mut report);
     coroutine_fault_checks(&mut report);

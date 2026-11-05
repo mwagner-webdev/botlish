@@ -16,12 +16,10 @@
 #
 # A mutant with no %% line applies on every host that links executables.
 #
-# Not here, because it is equivalent: the ELF context-area relaxation
-# (codegen/mod.rs's context_relocations) without its ELF magic check. On
-# Linux every object is ELF; a Mach-O object read as ELF has zeros where ELF
-# keeps its section headers' offset and count (0x28, 0x3c: inside the first
-# LC_SEGMENT_64's empty segment name and its vmaddr), so no section is found
-# and nothing is rewritten (MACOS-AARCH64-MILESTONE-5.md, "Mutation results").
+# (The ELF context-area relaxation, codegen/mod.rs's context_relocations, is
+# gone: since PER-THREAD-RUNTIME-STATE-MILESTONE-1.md a context area is each
+# Vm's own, reached from the Vm, and the object has no context symbol to
+# relax. Its one equivalent mutant went with it.)
 # One that changes nothing a host compiles (macOS's gate on Linux) is
 # skipped there, never counted as killed. Lines starting with # outside an
 # edit are comments.
@@ -161,7 +159,7 @@ const C_CALLS: bool = cfg!(any(
 ## native/src/runtime/program.rs
 <<<<
     map.finish();
-    vm.set_framemap(Rc::new(map));
+    vm.set_framemap(std::sync::Arc::new(map));
 ====
     map.finish();
     let _ = map;
@@ -190,7 +188,7 @@ const C_CALLS: bool = cfg!(any(
 @@ result-not-printed a standalone executable prints no value
 ## native/src/runtime/aot.rs
 <<<<
-        match writeln!(std::io::stdout().lock(), "{}", show(result)) {
+        match writeln!(std::io::stdout().lock(), "{}", show(&vm.info, result)) {
 ====
         match write!(std::io::stdout().lock(), "") {
 >>>>

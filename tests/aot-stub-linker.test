@@ -65,8 +65,9 @@ proc runCaptured {executable stdin args} {
     return $result
 }
 
-# Programs covering what the image must carry: constants of every kind, the
-# context area (.bss, relaxed GOT loads), generic entries (GOT slots for
+# Programs covering what the image must carry: constants of every kind,
+# installed contexts (each Vm's own area, its base loaded from the Vm:
+# PER-THREAD-RUNTIME-STATE-MILESTONE-1.md), generic entries (GOT slots for
 # function addresses), shapes, enums, natives, module statics, coroutines,
 # runtime errors, the process arguments and standard input.
 set ::stubPrograms {

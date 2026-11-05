@@ -34,7 +34,7 @@ fn vm<'a>(p: *mut Vm) -> &'a mut Vm {
 }
 
 fn type_error(p: *mut Vm, context: &str, what: &str, v: Value) -> Value {
-    let message = format!("{context}: {what}, got {}", super::show::show(v));
+    let message = format!("{context}: {what}, got {}", super::show::show(super::ops::program(p), v));
     vm(p).fail(RtError::Semantic { kind: "TYPE", message })
 }
 
@@ -186,7 +186,7 @@ mod tests {
 
     fn vm() -> Box<Vm> {
         Vm::new(
-            std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         )
     }

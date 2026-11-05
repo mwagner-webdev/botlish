@@ -36,9 +36,10 @@
 //! only: native/lower.tcl's export roots), and converts its result. The
 //! collector's frame walk of the calling thread's stack stops at `enter`'s
 //! frame (Vm::stack_ceiling): host frames above it are never read as Botlish
-//! frames. The thread's current-program register (runtime::vm's PROGRAM,
-//! read by printing and hashing) is this instance's for the call and
-//! restored after it.
+//! frames. Printing and hashing read the program of the Vm they run in
+//! (runtime::vm's `Vm::program`): an instance's operations read its own
+//! program's metadata whatever else runs on the thread, with nothing to
+//! swap per call (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md).
 //!
 //! # Results and errors
 //!
@@ -60,7 +61,7 @@ use super::aot::ProgramEntry;
 use super::error::RtError;
 use super::program::{self, LinkedProgram};
 use super::value::*;
-use super::vm::{self, Vm};
+use super::vm::Vm;
 use crate::nir::{Boundary, ExportDecl};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::c_void;
@@ -223,22 +224,6 @@ impl Drop for Checkin {
     }
 }
 
-/// Makes the instance's program the thread's current one for a call, and
-/// restores the previous one when dropped.
-struct ProgramScope(Option<std::rc::Rc<vm::ProgramInfo>>);
-
-impl ProgramScope {
-    fn enter(vm: &Vm) -> ProgramScope {
-        ProgramScope(vm::swap_current_program(Some(vm.info.clone())))
-    }
-}
-
-impl Drop for ProgramScope {
-    fn drop(&mut self) {
-        vm::swap_current_program(self.0.take());
-    }
-}
-
 type GenericEntry = unsafe extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 
 /// Calls F with VM's frame-walk ceiling at this function's own frame record:
@@ -360,7 +345,7 @@ fn result(vm: &mut Vm, ty: Boundary, value: Value, out: *mut c_void) -> Result<(
             let n = match int_small(value) {
                 Some(n) => n,
                 None => i64::try_from(int_to_big(value)).map_err(|_| {
-                    LibError::new(STATUS_BOUNDARY, "RESULT-OUT-OF-RANGE", format!("the result {} is outside int64_t", super::show::show(value)))
+                    LibError::new(STATUS_BOUNDARY, "RESULT-OUT-OF-RANGE", format!("the result {} is outside int64_t", super::show::show(&vm.info, value)))
                 })?,
             };
             // SAFETY: OUT is the caller's non-null `int64_t *`.
@@ -438,7 +423,6 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
         unsafe { *instance = 0 };
         // SAFETY: PROGRAM is the record the library object emitted.
         let (descriptor, code) = unsafe { program::read_linked(&*program) }.map_err(|e| LibError::new(STATUS_INTERNAL, "NATIVE STARTUP", e))?;
-        let previous = vm::swap_current_program(None);
         let (mut vm, entry): (Box<Vm>, ProgramEntry) = program::instantiate(&descriptor, &code);
         vm.set_argv(Vec::new());
         // A library's code checks its stack (codegen::clif's
@@ -446,11 +430,9 @@ pub unsafe extern "C" fn botlish_library_create(program: *const LinkedProgram, i
         vm.check_stack_limit();
         let mut made = Instance { vm, exports: descriptor.exports, code, program: program as usize };
         let initialized = {
-            let _scope = ProgramScope::enter(&made.vm);
             let value = run(&mut made, |vm| entry(vm));
             if value == NO_VALUE { Err(botlish_error(&mut made.vm)) } else { Ok(()) }
         };
-        vm::swap_current_program(previous);
         initialized?;
         let handle = Box::into_raw(Box::new(0u64)) as usize;
         let raw = Box::into_raw(Box::new(made));
@@ -505,7 +487,6 @@ pub unsafe extern "C" fn botlish_library_call(
         let _checkin = Checkin(instance);
         // SAFETY: checked out: this thread owns the instance for the call.
         let instance = unsafe { &mut *raw };
-        let _scope = ProgramScope::enter(&instance.vm);
         call_checked(instance, program, export as usize, args, out)
     })
 }

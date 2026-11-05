@@ -1,0 +1,223 @@
+# concurrent-vms.test -- several Vms of one compiled program at once, on OS
+# threads of their own (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md).
+#
+# The harness is the driver's `vms N FILE.nir` (native/src/main.rs's
+# concurrent_vms): the program JIT-compiled once, then run on N threads at
+# once, each Vm with its own heap, constants, statics, context area, roots
+# and stack-guard record, all of them sharing the one machine-code image and
+# the one immutable program metadata. Vm I's argument snapshot ends in I.
+#
+# The workload (tests/concurrent-vms/workload.bot) installs the event loop,
+# the deterministic driver (the program's one selection of the Driver
+# context trait), the actors' Actors and an application context whose id is
+# the Vm's index, and mutates context-owned collections, recurses, collects,
+# resumes a context-requiring generator and runs two actors whose
+# coroutines the Loop owns. Its result depends on the index only, so the
+# oracle of Vm I is the same program run alone with I, on every backend.
+#
+# What the harness reports and the tests read (concurrent_vms's doc): every
+# Vm's own result; how many Vms met at the rendezvous (held at a collection
+# until all are mid-run at once: proof they ran concurrently, by
+# synchronization, not by elapsed time); their distinct context areas; the
+# one program metadata object they share; the guarded threads; and the
+# pointers the ownership check found reaching outside a Vm's own heap.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set cvDir [file join $::projectRoot tests concurrent-vms]
+
+# The checked HIR of tests/concurrent-vms/NAME.bot (-warnings error), once.
+proc cvHir {name} {
+    if {![info exists ::cvHirs($name)]} {
+        set ::cvHirs($name) [surface::readProgramFile [file join $::cvDir $name.bot] -warnings error]
+    }
+    return $::cvHirs($name)
+}
+
+# NAME's outcome on BACKEND, run alone with argv {botlish-runner I}.
+proc cvAlone {name backend i} {
+    set hir [cvHir $name]
+    core::process::withArgv [list botlish-runner $i] {lrange [outcomeUnderHir $backend $hir] 0 1}
+}
+
+# The NIR text of NAME, once.
+proc cvNir {name} {
+    if {![info exists ::cvNirs($name)]} {
+        set ::cvNirs($name) [native::nir [cvHir $name]]
+    }
+    return $::cvNirs($name)
+}
+
+# The oracle of Vm I: the workload's text, run alone -- the driver's
+# ordinary `run`, one Vm in its process -- with argv {botlish-runner I}: the
+# text of its String (cv-oracle checks it is every backend's outcome).
+proc cvOracle {i} {
+    if {![info exists ::cvOracles($i)]} {
+        set ::cvOracles($i) [core::process::withArgv [list botlish-runner $i] {
+            lindex [native::Outcome [native::Driver run [cvNir workload]]] 1
+        }]
+    }
+    return $::cvOracles($i)
+}
+
+# The harness's lines for NAME, run as `vms N ARGS...`.
+proc cvVms {name n args} {
+    native::Driver vms [cvNir $name] $n {*}$args
+}
+
+# {RESULTS SUMMARY} of harness LINES: RESULTS a dict I -> the list of Vm
+# I's result lines' {tag value}, SUMMARY the summary line's dict.
+proc cvParse {lines} {
+    set results [dict create]
+    set summary [dict create]
+    foreach line $lines {
+        if {[lindex $line 0] eq "vm"} {
+            dict lappend results [lindex $line 1] [lrange $line 2 3]
+        } elseif {[lindex $line 0] eq "vms"} {
+            set summary $line
+        }
+    }
+    list $results $summary
+}
+
+# Whether every Vm's every result of RESULTS is the oracle of its index
+# (a host value: str TEXT): the mismatches, empty when none.
+proc cvMismatches {results} {
+    set bad {}
+    dict for {i outcomes} $results {
+        foreach outcome $outcomes {
+            if {$outcome ne [list value [list str [cvOracle $i]]]} {
+                lappend bad "vm $i: $outcome"
+            }
+        }
+    }
+    return $bad
+}
+
+# The summary's facts FIELDS, as a list.
+proc cvFacts {summary fields} {
+    lmap field $fields {dict get $summary $field}
+}
+
+# --------------------------------------------------------------------------
+# The workload and its oracle
+
+test cv-oracle {the workload run alone, for indices 0 and 3, gives one outcome on every backend -- the oracle of a concurrent Vm -- and the two indices' results differ in every part that depends on the Vm's own contexts and heap} -constraints nativeCoroutines -body {
+    set r {}
+    foreach i {0 3} {
+        set outcomes [lsort -unique [lmap b {interp compile cranelift-generic cranelift} {cvAlone workload $b $i}]]
+        lappend r [llength $outcomes] [lindex $outcomes 0 0]
+    }
+    lappend r [expr {[cvOracle 0] ne [cvOracle 3]}] [string match "vm 3;*;log 10 vm3:start,vm3:gen 0,vm3:end;*" [cvOracle 3]] \
+        [expr {"\"[cvOracle 3]\"" eq [lindex [cvAlone workload interp 3] 1]}]
+} -result {1 value 1 value 1 1 1}
+
+# --------------------------------------------------------------------------
+# N Vms of one program at once
+
+foreach {n rendezvous} {2 2 4 2 8 1} {
+    test cv-concurrent-$n "$n Vms of one compiled program at once, each on its own thread, collecting often: every Vm's result is its own index's oracle; all $n were mid-run at once (the rendezvous at a collection); $n distinct context areas, one shared program metadata, $n guarded threads, every start before every end, and no pointer of one Vm's roots reaching outside its own heap" -constraints nativeCoroutines -body {
+        withEnvironment {BOTLISH_NATIVE_GC_MIN 65536} {
+            lassign [cvParse [cvVms workload $n --rendezvous $rendezvous --check-heaps]] results summary
+        }
+        list [dict size $results] [cvMismatches $results] \
+            [cvFacts $summary {rendezvous areas programs guarded overlap foreign}]
+    } -result [list $n {} [list $n $n 1 $n 1 0]]
+}
+
+test cv-rounds {repeated construction and teardown: four threads each make, run and drop three Vms in turn -- threads in different rounds at once, a Vm ending while others run -- and every one of the twelve results is its index's oracle, with no foreign pointer} -constraints nativeCoroutines -body {
+    withEnvironment {BOTLISH_NATIVE_GC_MIN 65536} {
+        lassign [cvParse [cvVms workload 4 --rounds 3 --check-heaps]] results summary
+    }
+    list [lmap i {0 1 2 3} {llength [dict get $results $i]}] [cvMismatches $results] \
+        [cvFacts $summary {rounds foreign}]
+} -result {{3 3 3 3} {} {3 0}}
+
+test cv-gc-stress {under a collection at every allocation, with every freed List and Struct poisoned and the ownership check on: four Vms at once, mid-run together at their third collection, each its own oracle, each collecting thousands of times, none marking a pointer outside its own heap} -constraints nativeCoroutines -body {
+    withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {
+        lassign [cvParse [cvVms workload 4 --rendezvous 3 --check-heaps --poison]] results summary
+    }
+    set collections [dict get $summary collections]
+    list [cvMismatches $results] [cvFacts $summary {rendezvous areas programs foreign}] \
+        [expr {[llength $collections] == 4 && [::tcl::mathfunc::min {*}$collections] > 1000}]
+} -result {{} {4 4 1 0} 1}
+
+test cv-gc-stress-rounds {under GC stress, two threads each run two Vms in turn: every result its oracle, no foreign pointer} -constraints nativeCoroutines -body {
+    withEnvironment {BOTLISH_NATIVE_GC_STRESS 1} {
+        lassign [cvParse [cvVms workload 2 --rounds 2 --check-heaps --poison]] results summary
+    }
+    list [cvMismatches $results] [cvFacts $summary {rounds foreign}]
+} -result {{} {2 0}}
+
+# --------------------------------------------------------------------------
+# Stack guards
+
+test cv-overflow {a stack overflow on one Vm's thread while three other guarded Vms run (held mid-run at the rendezvous): the process ends with exactly that thread's labelled report -- its own guard record, classified by its own stack -- and the driver's exit status 0, nothing else written (the terminal policy: NATIVE-STACK-OVERFLOW.md)} -constraints {nativeCoroutines nativeStackGuard} -body {
+    cvVms overflow 4 --rendezvous 1
+} -result [list "vm 1 error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}"]
+
+# --------------------------------------------------------------------------
+# The runtime's ownership, read from its source
+
+proc cvSource {path} {
+    readFile [file join $::projectRoot native src {*}[split $path /]]
+}
+
+test cv-source-context-area {the context area is the Vm's: generated code loads its base from the Vm (VM_CONTEXT_OFFSET) and declares no data object for it; the Vm owns its storage, sized when its program is installed} -body {
+    set clif [cvSource codegen/clif.rs]
+    set vm [cvSource runtime/vm.rs]
+    list [regexp {declare_data\([^)]*context} $clif] [regexp -all {botlish_context_area} $clif] \
+        [regexp {load\(I64, MemFlagsData::trusted\(\)\.with_readonly\(\), self\.vm, VM_CONTEXT_OFFSET\)} $clif] \
+        [regexp {pub const VM_CONTEXT_OFFSET: i32 = offset_of!\(Vm, context_ptr\)} $vm] \
+        [regexp {fn install_context_area\(&mut self, bytes: u32\)} $vm]
+} -result {0 0 1 1 1}
+
+test cv-source-program {program metadata is the Vm's: no thread-local current program and no swap of one; the runtime's metadata reads go through the Vm (ops.rs's program, the renderers' explicit program)} -body {
+    set hits 0
+    foreach file [glob -directory [file join $::projectRoot native src] -tails {*}{*.rs runtime/*.rs runtime/*/*.rs codegen/*.rs}] {
+        set text [cvSource $file]
+        incr hits [regexp -all {current_program|swap_current_program|ProgramScope|static PROGRAM} $text]
+    }
+    list $hits [regexp {pub fn show\(prog: &ProgramInfo, v: Value\)} [cvSource runtime/show.rs]] \
+        [regexp {pub fn message\(&self, prog: &ProgramInfo\)} [cvSource runtime/error.rs]]
+} -result {0 1 1}
+
+# The text of Rust function NAME in TEXT: from `fn NAME(` to its closing
+# brace ("" when there is none).
+proc cvFunction {text name} {
+    set start [string first "fn $name\(" $text]
+    if {$start < 0} { return "" }
+    set open [string first "\{" $text $start]
+    set depth 0
+    for {set i $open} {$i < [string length $text]} {incr i} {
+        switch -- [string index $text $i] {
+            "\{" { incr depth }
+            "\}" {
+                incr depth -1
+                if {$depth == 0} { return [string range $text $start $i] }
+            }
+        }
+    }
+    return ""
+}
+
+test cv-source-guard-records {the stack guard keeps one record per guarded thread, found by the handler by the faulting thread's token, published only by its own thread; no process-wide published stack is left; the POSIX handler's own functions (fault_handler, is_overflow, report_overflow, write_all, defer) use no thread-local, lock or allocation, and the Windows handler none either} -body {
+    set guard [cvSource runtime/platform/guard.rs]
+    set windows [cvSource runtime/platform/windows.rs]
+    set records [cvSource runtime/platform/records.rs]
+    set unsafe {records::mine|\.with\(|try_with|thread_local|format!|String|to_string|vec!|Vec<|Box::|lock\(|println!|eprintln!|print!}
+    set handler [join [lmap f {fault_handler is_overflow report_overflow write_all defer} {cvFunction $guard $f}] \n]
+    set vectored [join [lmap f {handler is_overflow write_all terminate} {cvFunction $windows $f}] \n]
+    set find [cvFunction $records find]
+    list [regexp -all {static (GUARDED|SLOTS|SLOT|EXECUTABLE|DESTINATION)\M} $guard$windows] \
+        [regexp {records::find\(super::thread_token\(\)\)} [cvFunction $guard is_overflow]] \
+        [regexp {records::find\(thread\)} [cvFunction $windows is_overflow]] \
+        [llength [regexp -all -inline -- $unsafe $handler]] [llength [regexp -all -inline -- $unsafe $vectored]] \
+        [llength [regexp -all -inline -- $unsafe $find]] [expr {[string length $handler] > 500}] \
+        [regexp {static TABLE: \[Record; RECORDS\]} $records] [regexp {static MINE: Mine} $records]
+} -result {0 1 1 0 0 0 1 1 1}
+
+cleanupTests

@@ -936,7 +936,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn new_vm() -> Box<Vm> {
-        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
+        Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary)
     }
 
     /// A zero-argument Block whose code is the Rust function CODE (the
@@ -1055,7 +1055,7 @@ mod tests {
         let co = rt_co_create(&mut *vm, t);
         vm.temp_roots.push(co);
         assert_eq!(rt_co_start(&mut *vm, co), NO_VALUE);
-        assert_eq!(vm.error.take().map(|e| e.message()), Some("boom".to_string()));
+        assert_eq!(vm.error.take().map(|e| e.message(&vm.info)), Some("boom".to_string()));
         assert_eq!(rt_co_done(&mut *vm, co), TRUE);
         assert_eq!(rt_co_resume0(&mut *vm, co), NO_VALUE);
         assert_eq!(vm.error.take().map(|e| e.error_code()), Some(vec!["CORE", "SEMANTIC", "RANGE"]));
@@ -1084,7 +1084,7 @@ mod tests {
             assert_eq!(rt_co_resume0(&mut *vm, co), NO_VALUE);
             assert_eq!(vm.declared_error, 3);
             assert_eq!(vm.declared_payload.len(), 2);
-            assert_eq!(super::super::show::show(vm.declared_payload[0]), (num_bigint::BigInt::from(5u8) << 90u32).to_string());
+            assert_eq!(super::super::show::show(&vm.info, vm.declared_payload[0]), (num_bigint::BigInt::from(5u8) << 90u32).to_string());
             assert_eq!(str_of(vm.declared_payload[1]).as_str(), "payload");
             assert_eq!(crate::runtime::ops::rt_clear_declared_error(&mut *vm), 0);
             assert!(vm.declared_payload.is_empty());
@@ -1973,7 +1973,7 @@ mod fallback_tests {
     #[test]
     fn the_fallback_plan_refuses_native_coroutines() {
         assert!(!STACK_SWITCHING);
-        let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary);
+        let mut vm = Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Summary);
         let caps: Box<[Value]> = Vec::new().into_boxed_slice();
         let t = vm.alloc(
             ClosureObj { hdr: Header::new(KIND_CLOSURE, false), func: 0, arity: 0, code: never as *const () as usize, ncaps: 0, caps: Box::into_raw(caps) as *mut Value },

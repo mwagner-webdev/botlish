@@ -112,7 +112,7 @@ proc native::library::TopLevelProblems {hir} {
 ## native/src/runtime/library.rs
 <<<<
                 None => i64::try_from(int_to_big(value)).map_err(|_| {
-                    LibError::new(STATUS_BOUNDARY, "RESULT-OUT-OF-RANGE", format!("the result {} is outside int64_t", super::show::show(value)))
+                    LibError::new(STATUS_BOUNDARY, "RESULT-OUT-OF-RANGE", format!("the result {} is outside int64_t", super::show::show(&vm.info, value)))
                 })?,
 ====
                 None => i64::try_from(int_to_big(value)).unwrap_or(-1),
