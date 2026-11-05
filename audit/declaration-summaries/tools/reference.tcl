@@ -38,6 +38,22 @@ proc ::reference::Fields {type} {
     }
     return $fields
 }
+# `catch {AppliedFieldTypes $type} VAR` of a walk that tolerated a field
+# it cannot substitute: 1 (VAR the message) for such an error, 0 (VAR the
+# fields) otherwise -- but a walk that does not finish (REFERENCE-BUDGET,
+# or Tcl's nesting limit, as Run counts it) is never caught. A walk that
+# swallowed it would go on and answer from the fields it happened to read
+# before, which the walk never answers.
+proc ::reference::CatchFields {type varName} {
+    upvar 1 $varName fields
+    if {[catch {Fields $type} fields options]} {
+        if {$fields eq "REFERENCE-BUDGET" || [string match {too many nested evaluations*} $fields]} {
+            return -options $options $fields
+        }
+        return 1
+    }
+    return 0
+}
 proc ::reference::Run {script} {
     variable reads
     variable cut
@@ -772,7 +788,7 @@ proc ::reference::structs::MutableComponent {type {seen {}}} {
         if {$type in $seen || ![declared $id] || [identityOf $id] ne ""} {
             return ""
         }
-        if {[catch {::reference::Fields $type} fields]} {
+        if {[::reference::CatchFields $type fields]} {
             return ""
         }
         foreach {name t} $fields {
