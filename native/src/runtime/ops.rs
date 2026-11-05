@@ -109,7 +109,7 @@ use super::nview::{
 use super::syscall::{rt_linux_aarch64_syscall, rt_linux_x86_64_syscall};
 use super::transfer::{rt_transfer_decode, rt_transfer_encode};
 use super::value::*;
-use super::vm::{current_program, Identity, Vm, NativeInfo};
+use super::vm::{Identity, NativeInfo, ProgramInfo, Vm};
 use crate::nir::OpCode;
 use super::decimal::{rt_decimal_cmp, rt_decimal_round, rt_decimal_to_f64, rt_decimal_to_str};
 use super::inttext::{rt_int_to_str, rt_str_to_int};
@@ -356,6 +356,16 @@ pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 
 fn vm<'a>(p: *mut Vm) -> &'a mut Vm {
     unsafe { &mut *p }
+}
+
+/// The program of the Vm P: the metadata (shapes, enums, natives, function
+/// parameter names) every operation of P's reads -- never another Vm's,
+/// whatever ran on this thread before (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md).
+#[inline(always)]
+pub(crate) fn program<'a>(p: *mut Vm) -> &'a ProgramInfo {
+    // SAFETY: P is the running Vm, alive for the operation; its program is
+    // immutable and outlives every borrow an operation takes.
+    unsafe { &(*p).info }
 }
 
 // ---------------------------------------------------------------------------
@@ -643,18 +653,18 @@ pub const DECIMAL_HASH_MESSAGE: &str = "hash of a DecimalRounded value needs the
 
 /// core::value::equal's and core::hashing::Encode's refusals of a raw C
 /// floating value (RAW-C-FLOAT-FFI-MILESTONE-1.md), word for word.
-pub fn raw_equality_message(v: Value) -> String {
-    format!("== is not defined for a raw C floating value ({}): compare its bits (std::ffi::c::raw::float_to_bits, std::ffi::c::raw::double_to_bits) or the Float64 it admits to", super::show::show(v))
+pub fn raw_equality_message(prog: &ProgramInfo, v: Value) -> String {
+    format!("== is not defined for a raw C floating value ({}): compare its bits (std::ffi::c::raw::float_to_bits, std::ffi::c::raw::double_to_bits) or the Float64 it admits to", super::show::show(prog, v))
 }
-pub fn raw_hash_message(v: Value) -> String {
-    format!("hash is not defined for a raw C floating value ({}): hash its bits", super::show::show(v))
+pub fn raw_hash_message(prog: &ProgramInfo, v: Value) -> String {
+    format!("hash is not defined for a raw C floating value ({}): hash its bits", super::show::show(prog, v))
 }
 
 fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     let (ka, kb) = (kind_of(a), kind_of(b));
     for (k, v) in [(ka, a), (kb, b)] {
         if matches!(k, Kind::RawFloat32 | Kind::RawFloat64) {
-            vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_equality_message(v) });
+            vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_equality_message(program(p), v) });
             return Err(());
         }
     }
@@ -731,12 +741,12 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             if x.shape != y.shape {
                 return Ok(false);
             }
-            if let Some(child) = current_program(|prog| prog.shapes[x.shape as usize].tree) {
+            if let Some(child) = program(p).shapes[x.shape as usize].tree {
                 // A tree struct's value (TREE-STRUCT-MILESTONE-1.md): the
                 // same comparison, walked with a work stack of its own.
                 return tree_equal(p, a, b, x.shape, child);
             }
-            if let Some(identity) = current_program(|prog| prog.shapes[x.shape as usize].identity) {
+            if let Some(identity) = program(p).shapes[x.shape as usize].identity {
                 // A shape that declares its identity (REPRESENTATION-
                 // INDEPENDENT-VALUE-IDENTITY.md): equal when the identities
                 // are, whatever its other fields hold. Opaque, so a refusal
@@ -762,7 +772,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
                         // (OPAQUE-STRUCTS.md): a refusal inside it is the
                         // opaque values' (core::value::equal's struct case;
                         // ORDERED-MUTABLE-MAP-SET.md).
-                        let opaque = current_program(|prog| prog.shapes[x.shape as usize].opaque);
+                        let opaque = program(p).shapes[x.shape as usize].opaque;
                         if opaque {
                             let vm = vm(p);
                             if matches!(vm.error, Some(RtError::Equality { .. })) {
@@ -807,7 +817,7 @@ fn tree_node(v: Value, shape: u32) -> bool {
 /// root's.
 fn tree_equal(p: *mut Vm, a: Value, b: Value, shape: u32, child: usize) -> Result<bool, ()> {
     let result = tree_equal_walk(p, a, b, shape, child);
-    if result.is_err() && current_program(|prog| prog.shapes[shape as usize].opaque) {
+    if result.is_err() && program(p).shapes[shape as usize].opaque {
         let vm = vm(p);
         if matches!(vm.error, Some(RtError::Equality { .. })) {
             vm.error = Some(RtError::Equality { a, b });
@@ -1502,7 +1512,7 @@ impl<const C: usize, const D: usize> CanonicalSink for Sip<C, D> {
 fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> {
     let kind = kind_of(v);
     if matches!(kind, Kind::RawFloat32 | Kind::RawFloat64) {
-        vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_hash_message(v) });
+        vm(p).fail(RtError::Semantic { kind: "EQUALITY", message: raw_hash_message(program(p), v) });
         return Err(());
     }
     if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray | Kind::Coroutine | Kind::MutVec | Kind::CPtr) {
@@ -1572,12 +1582,10 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
         // name -- never the numbers the word carries.
         Kind::Enum => {
             let (e, c) = enum_parts(v);
-            current_program(|prog| {
-                let info = &prog.enums[e as usize];
-                sink.text(info.name.as_bytes());
-                sink.bytes(&[0xFF]);
-                sink.text(info.cases[c as usize].as_bytes());
-            })
+            let info = &program(p).enums[e as usize];
+            sink.text(info.name.as_bytes());
+            sink.bytes(&[0xFF]);
+            sink.text(info.cases[c as usize].as_bytes());
         }
         Kind::List => {
             let items = list_of(v).items();
@@ -1597,10 +1605,10 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
             // count, then each slot's name text and value in slot order.
             // The shape is borrowed for the whole walk, never cloned: a
             // field's walk (a nested struct's or enum's) borrows the program
-            // again, and RefCell's shared borrows nest (only `Vm::new`
-            // borrows it mutably, and hashing makes no Vm).
+            // again, from the Vm's own immutable program.
             let obj = struct_of(v);
-            current_program(|prog| {
+            let prog = program(p);
+            (|| {
                 let shape = &prog.shapes[obj.shape as usize];
                 sink.text(shape.name.as_deref().unwrap_or("").as_bytes());
                 if let Some(child) = shape.tree {
@@ -1620,7 +1628,7 @@ fn walk<S: CanonicalSink>(p: *mut Vm, sink: &mut S, v: Value) -> Result<(), ()> 
                     sink.child(p, *item)?;
                 }
                 Ok(())
-            })?
+            })()?
         }
         Kind::ImmutableSet => {
             // Order-independent (XOR-combined member hashes), matching
@@ -1732,7 +1740,7 @@ pub extern "C" fn rt_bytes_from_list(p: *mut Vm, l: Value) -> Value {
                 let got = if is_small(item) || heap_kind(item) == KIND_BIGINT {
                     super::show::int_text(item)
                 } else {
-                    super::show::show(item)
+                    super::show::show(program(p), item)
                 };
                 let message = format!(
                     "std::byte_store::from_list: element {position} must be a byte (an Int in 0..255), got {got}"
@@ -2088,7 +2096,7 @@ pub extern "C" fn rt_bytes_addr(p: *mut Vm, v: Value) -> Value {
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_cptr_fixture(p: *mut Vm, n: Value) -> Value {
     if !is_small(n) || small_of(n) < 0 || small_of(n) >= (1i64 << 59) {
-        let message = format!("C pointer test fixture: address {} is outside 0..2^59-1", super::show::show(n));
+        let message = format!("C pointer test fixture: address {} is outside 0..2^59-1", super::show::show(program(p), n));
         return vm(p).fail(RtError::Semantic { kind: "RANGE", message });
     }
     make_cptr(small_of(n))
@@ -2422,7 +2430,7 @@ pub extern "C" fn rt_mbytes_set(p: *mut Vm, m: Value, i: Value, b: Value) -> Val
     let byte = match int_small(b) {
         Some(n) if (0..=255).contains(&n) => n as u8,
         _ => {
-            let got = if is_small(b) || heap_kind(b) == KIND_BIGINT { super::show::int_text(b) } else { super::show::show(b) };
+            let got = if is_small(b) || heap_kind(b) == KIND_BIGINT { super::show::int_text(b) } else { super::show::show(program(p), b) };
             let message = format!("{CONTEXT}: the value must be a byte (an Int in 0..255), got {got}");
             return vm(p).fail(RtError::Semantic { kind: "TYPE", message });
         }
@@ -3082,11 +3090,11 @@ pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
 pub extern "C" fn rt_tree_children(p: *mut Vm, t: Value) -> Value {
     if kind_of(t) == Kind::Struct {
         let obj = struct_of(t);
-        if let Some(child) = current_program(|prog| prog.shapes[obj.shape as usize].tree) {
+        if let Some(child) = program(p).shapes[obj.shape as usize].tree {
             return obj.fields()[child];
         }
     }
-    let message = format!("std::tree::children: {} is not a tree struct value", super::show::show(t));
+    let message = format!("std::tree::children: {} is not a tree struct value", super::show::show(program(p), t));
     vm(p).fail(RtError::Semantic { kind: "TYPE", message });
     NO_VALUE
 }
@@ -3880,13 +3888,13 @@ pub fn non_finite_code(x: f64) -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_float_nonfinite(p: *mut Vm, result: u64) -> Value {
     let case = NON_FINITE_CASES[(result as usize).min(2)];
-    let payload = super::vm::try_current_program(|program| {
+    let payload = (|| {
+        let program = program(p);
         let e = program.enums.iter().position(|info| info.name == "NonFiniteResult")?;
         let c = program.enums[e].cases.iter().position(|name| name == case)?;
         let s = program.shapes.iter().position(|shape| shape.name.is_none() && shape.fields == ["result"])?;
         Some((make_enum(e as u32, c as u32), s as u32))
-    })
-    .flatten();
+    })();
     let failed = fail_builtin(p, super::error::ERR_NON_FINITE_FLOAT, "NonFiniteFloat");
     if let Some((word, shape)) = payload {
         let vm = vm(p);
@@ -4529,7 +4537,7 @@ mod tests {
 
     fn vm() -> Box<Vm> {
         Vm::new(
-            std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
+            std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }),
             AllocMode::Summary,
         )
     }
@@ -4538,7 +4546,7 @@ mod tests {
     fn vm_with_shapes(shapes: &[(Option<&str>, &[&str])]) -> Box<Vm> {
         use crate::runtime::vm::ShapeInfo;
         Vm::new(
-            std::rc::Rc::new(ProgramInfo {
+            std::sync::Arc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: shapes
@@ -4562,7 +4570,7 @@ mod tests {
     fn vm_with_enums(enums: &[(&str, &[&str])]) -> Box<Vm> {
         use crate::runtime::vm::EnumInfo;
         Vm::new(
-            std::rc::Rc::new(ProgramInfo {
+            std::sync::Arc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: Vec::new(),
@@ -4655,12 +4663,18 @@ mod tests {
         // enum-hash), byte for byte.
         assert_eq!(rt_hash(&mut *vm, car), small(632455997673246507));
         assert_ne!(rt_hash(&mut *vm, car), rt_hash(&mut *vm, make_enum(1, 0)));
-        assert_eq!(show(car), "VehicleType::Car");
-        assert_eq!(tcl_value(car).unwrap(), "enum VehicleType Car");
+        assert_eq!(show(&vm.info, car), "VehicleType::Car");
+        assert_eq!(tcl_value(&vm.info, car).unwrap(), "enum VehicleType Car");
         // Reordered cases: another number, the same name, the same hash.
         let mut reordered = vm_with_enums(&[("VehicleType", &["Airplane", "Tank", "Car"])]);
         assert_eq!(rt_hash(&mut *reordered, make_enum(0, 2)), small(632455997673246507));
-        assert_eq!(show(make_enum(0, 2)), "VehicleType::Car");
+        assert_eq!(show(&reordered.info, make_enum(0, 2)), "VehicleType::Car");
+        // Each Vm reads its own program, whichever was made last on this
+        // thread (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md): the first Vm's
+        // case 2 is still its Truck, its hash still its own.
+        assert_eq!(show(&vm.info, make_enum(0, 2)), "VehicleType::Truck");
+        assert_ne!(rt_hash(&mut *vm, make_enum(0, 2)), small(632455997673246507));
+        assert_eq!(rt_hash(&mut *vm, car), small(632455997673246507));
     }
 
     // -----------------------------------------------------------------------
@@ -4776,7 +4790,7 @@ mod tests {
     /// Int and code point through `to_string()`, every BigInt through a
     /// clone, every shape's strings cloned), for the kinds those changed:
     /// the reference the allocation-free implementation must equal.
-    fn reference_mix(v: Value) -> u64 {
+    fn reference_mix(prog: &ProgramInfo, v: Value) -> u64 {
         let tagged = |tag: u8| fnv1a(FNV_OFFSET, &[tag]);
         match kind_of(v) {
             Kind::Int => {
@@ -4792,29 +4806,29 @@ mod tests {
                 let items = list_of(v).items();
                 let mut h = fnv1a(tagged(4), &(items.len() as u64).to_le_bytes());
                 for item in items {
-                    h = fnv1a(h, &reference_mix(*item).to_le_bytes());
+                    h = fnv1a(h, &reference_mix(prog, *item).to_le_bytes());
                 }
                 h
             }
             Kind::Enum => {
                 let (e, c) = enum_parts(v);
-                let (name, case) = current_program(|prog| {
+                let (name, case) = {
                     let info = &prog.enums[e as usize];
                     (info.name.clone(), info.cases[c as usize].clone())
-                });
+                };
                 fnv1a(fnv1a(fnv1a(tagged(11), name.as_bytes()), &[0xFF]), case.as_bytes())
             }
             Kind::Struct => {
                 let obj = struct_of(v);
-                let (name, fields) = current_program(|prog| {
+                let (name, fields) = {
                     let shape = &prog.shapes[obj.shape as usize];
                     (shape.name.clone().unwrap_or_default(), shape.fields.clone())
-                });
+                };
                 let mut h = fnv1a(tagged(8), name.as_bytes());
                 h = fnv1a(h, &(fields.len() as u64).to_le_bytes());
                 for (field, item) in fields.iter().zip(obj.fields().iter()) {
                     h = fnv1a(h, field.as_bytes());
-                    h = fnv1a(h, &reference_mix(*item).to_le_bytes());
+                    h = fnv1a(h, &reference_mix(prog, *item).to_le_bytes());
                 }
                 h
             }
@@ -4822,8 +4836,8 @@ mod tests {
         }
     }
 
-    fn reference_hash(v: Value) -> Value {
-        make_small((reference_mix(v) & HASH_MASK) as i64)
+    fn reference_hash(prog: &ProgramInfo, v: Value) -> Value {
+        make_small((reference_mix(prog, v) & HASH_MASK) as i64)
     }
 
     #[test]
@@ -4833,17 +4847,17 @@ mod tests {
             for neg in [false, true] {
                 let big = if neg { -BigInt::from(mag) } else { BigInt::from(mag) };
                 let v = rooted!(vm, vm.new_big(big.clone()));
-                assert_eq!(rt_hash(&mut *vm, v), reference_hash(v), "hash({big})");
+                assert_eq!(rt_hash(&mut *vm, v), reference_hash(&vm.info, v), "hash({big})");
                 // Beyond 128 bits: num-bigint's own text of the borrowed value.
                 let wide = rooted!(vm, vm.new_big(big.clone() * BigInt::from(u128::MAX) + 7));
-                assert_eq!(rt_hash(&mut *vm, wide), reference_hash(wide), "hash({big} * (2^128-1) + 7)");
+                assert_eq!(rt_hash(&mut *vm, wide), reference_hash(&vm.info, wide), "hash({big} * (2^128-1) + 7)");
             }
         }
         for n in [0, -1, 7, SMALL_MIN, SMALL_MAX, (1 << 61) - 1, 1 << 61, -(1 << 61)] {
-            assert_eq!(rt_hash(&mut *vm, small(n)), reference_hash(small(n)), "hash({n})");
+            assert_eq!(rt_hash(&mut *vm, small(n)), reference_hash(&vm.info, small(n)), "hash({n})");
         }
         for cp in [0u32, 0x61, 0x7F, 0x80, 0x7FF, 0x800, 0xFFFF, 0x1F642, 0x10FFFF] {
-            assert_eq!(rt_hash(&mut *vm, make_char(cp)), reference_hash(make_char(cp)), "hash(char {cp})");
+            assert_eq!(rt_hash(&mut *vm, make_char(cp)), reference_hash(&vm.info, make_char(cp)), "hash(char {cp})");
         }
         // core/hashing.tcl's values of 7, i64::MIN (a BigInt here) and 2^80
         // (tests/native-hashing.test's hash-parity-kinds-1 compares many
@@ -4918,7 +4932,7 @@ mod tests {
     fn table_hash_of_values_matches_the_oracle() {
         use crate::runtime::vm::{EnumInfo, ShapeInfo};
         let mut vm = Vm::new(
-            std::rc::Rc::new(ProgramInfo {
+            std::sync::Arc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: vec![ShapeInfo { name: Some("P".into()), fields: vec!["x".into(), "y".into()], opaque: false, identity: None, tree: None }],
@@ -5013,7 +5027,7 @@ mod tests {
             tree: None,
         };
         let mut vm = Vm::new(
-            std::rc::Rc::new(ProgramInfo {
+            std::sync::Arc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: vec![shape(Some("P"), &["x", "y"]), shape(Some("m::Q"), &["a", "b", "c"]), shape(None, &["p", "q", "e"])],
@@ -5028,7 +5042,7 @@ mod tests {
         let q = rooted!(vm, vm.new_struct(1, vec![p, list, s]));
         let anon = rooted!(vm, vm.new_struct(2, vec![p, q, make_enum(0, 0)]));
         for v in [p, q, anon, list] {
-            assert_eq!(rt_hash(&mut *vm, v), reference_hash(v));
+            assert_eq!(rt_hash(&mut *vm, v), reference_hash(&vm.info, v));
         }
         // A failing field's sub-hash leaves the borrow unwound, the next
         // hash borrows again.
@@ -5036,7 +5050,7 @@ mod tests {
         let bad = rooted!(vm, vm.new_struct(0, vec![small(1), array]));
         assert_eq!(rt_hash(&mut *vm, bad), NO_VALUE);
         assert!(vm.error.take().is_some());
-        assert_eq!(rt_hash(&mut *vm, anon), reference_hash(anon));
+        assert_eq!(rt_hash(&mut *vm, anon), reference_hash(&vm.info, anon));
     }
 
     /// A VM whose shape 0 is the tree struct `Node {value, children}`
@@ -5053,7 +5067,7 @@ mod tests {
             tree,
         };
         Vm::new(
-            std::rc::Rc::new(ProgramInfo {
+            std::sync::Arc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: vec![node(Some(1)), node(None)],
@@ -5105,10 +5119,10 @@ mod tests {
         let deep_plain = tree_chain(&mut vm, 1, 300, 7);
         for (t, p) in [(tree, plain), (swapped, plain_swapped), (deep, deep_plain)] {
             assert_eq!(rt_hash(&mut *vm, t), rt_hash(&mut *vm, p));
-            assert_eq!(rt_hash(&mut *vm, t), reference_hash(p));
+            assert_eq!(rt_hash(&mut *vm, t), reference_hash(&vm.info, p));
             let key = (0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210);
             assert_eq!(table_hash_with_key(&mut *vm, t, key), table_hash_with_key(&mut *vm, p, key));
-            assert_eq!(show(t), show(p));
+            assert_eq!(show(&vm.info, t), show(&vm.info, p));
         }
         assert_eq!(rt_value_eq(&mut *vm, tree, again), TRUE);
         assert_eq!(rt_value_eq(&mut *vm, tree, swapped), FALSE);
@@ -5117,8 +5131,8 @@ mod tests {
         let list = rooted!(vm, vm.new_list(vec![tree, deep]));
         let plain_list = rooted!(vm, vm.new_list(vec![plain, deep_plain]));
         assert_eq!(rt_hash(&mut *vm, list), rt_hash(&mut *vm, plain_list));
-        assert_eq!(show(list), show(plain_list));
-        assert_eq!(show(tree), "Node {value: 1, children: [Node {value: 2, children: [Node {value: 4, children: []}, Node {value: 5, children: []}]}, Node {value: 3, children: []}]}");
+        assert_eq!(show(&vm.info, list), show(&vm.info, plain_list));
+        assert_eq!(show(&vm.info, tree), "Node {value: 1, children: [Node {value: 2, children: [Node {value: 4, children: []}, Node {value: 5, children: []}]}, Node {value: 3, children: []}]}");
     }
 
     #[test]
@@ -5160,7 +5174,7 @@ mod tests {
                 rt_hash(&mut *vm, a) == rt_hash(&mut *vm, b),
                 rt_hash(&mut *vm, a) != rt_hash(&mut *vm, c),
                 table_hash_with_key(&mut *vm, a, key) == table_hash_with_key(&mut *vm, b, key),
-                crate::runtime::show::show(a).len(),
+                crate::runtime::show::show(&vm.info, a).len(),
             )
         });
         let (eq, ne, hash, hash_ne, table, shown) = worker.expect("thread").join().expect("no stack overflow");
@@ -5175,7 +5189,7 @@ mod tests {
         use crate::runtime::show::{show, tcl_value};
         use crate::runtime::vm::ShapeInfo;
         let mut vm = Vm::new(
-            std::rc::Rc::new(ProgramInfo {
+            std::sync::Arc::new(ProgramInfo {
                 functions: Vec::new(),
                 natives: Vec::new(),
                 shapes: vec![
@@ -5189,9 +5203,9 @@ mod tests {
         );
         let token = rooted!(vm, vm.new_struct(0, vec![small(1234)]));
         let holder = rooted!(vm, vm.new_struct(1, vec![token]));
-        assert_eq!(show(token), "<opaque token::Token>");
-        assert_eq!(show(holder), "Holder {token: <opaque token::Token>}");
-        assert_eq!(tcl_value(token).unwrap(), "struct {token::Token secret} {{int 1234}}");
+        assert_eq!(show(&vm.info, token), "<opaque token::Token>");
+        assert_eq!(show(&vm.info, holder), "Holder {token: <opaque token::Token>}");
+        assert_eq!(tcl_value(&vm.info, token).unwrap(), "struct {token::Token secret} {{int 1234}}");
     }
 
     #[test]
@@ -5202,12 +5216,12 @@ mod tests {
         let anon = rooted!(vm, vm.new_struct(0, vec![small(45), name]));
         let named = rooted!(vm, vm.new_struct(1, vec![small(2), small(1)]));
         let empty = rooted!(vm, vm.new_struct(2, vec![]));
-        assert_eq!(show(anon), "{age: 45, name: \"Grace\"}");
-        assert_eq!(show(named), "geo::Point {y: 2, x: 1}");
-        assert_eq!(show(empty), "{}");
-        assert_eq!(tcl_value(anon).unwrap(), "struct {{} age name} {{int 45} {str Grace}}");
-        assert_eq!(tcl_value(named).unwrap(), "struct {geo::Point y x} {{int 2} {int 1}}");
-        assert_eq!(tcl_value(empty).unwrap(), "struct {{}} {}");
+        assert_eq!(show(&vm.info, anon), "{age: 45, name: \"Grace\"}");
+        assert_eq!(show(&vm.info, named), "geo::Point {y: 2, x: 1}");
+        assert_eq!(show(&vm.info, empty), "{}");
+        assert_eq!(tcl_value(&vm.info, anon).unwrap(), "struct {{} age name} {{int 45} {str Grace}}");
+        assert_eq!(tcl_value(&vm.info, named).unwrap(), "struct {geo::Point y x} {{int 2} {int 1}}");
+        assert_eq!(tcl_value(&vm.info, empty).unwrap(), "struct {{}} {}");
     }
 
     #[test]
@@ -5218,13 +5232,13 @@ mod tests {
         let mut vm = vm();
         for (c, shown) in [('\\', "\\\\"), ('\n', "\\n"), ('\r', "\\r"), ('\t', "\\t"), ('a', "a"), ('é', "é")] {
             let s = str_val(&mut vm, &c.to_string());
-            assert_eq!(show(s), format!("\"{shown}\""));
-            assert_eq!(show(make_char(c as u32)), format!("'{shown}'"));
+            assert_eq!(show(&vm.info, s), format!("\"{shown}\""));
+            assert_eq!(show(&vm.info, make_char(c as u32)), format!("'{shown}'"));
         }
         let quotes = str_val(&mut vm, "\"'");
-        assert_eq!(show(quotes), "\"\\\"'\"");
-        assert_eq!(show(make_char('\'' as u32)), "'\\''");
-        assert_eq!(show(make_char('"' as u32)), "'\"'");
+        assert_eq!(show(&vm.info, quotes), "\"\\\"'\"");
+        assert_eq!(show(&vm.info, make_char('\'' as u32)), "'\\''");
+        assert_eq!(show(&vm.info, make_char('"' as u32)), "'\"'");
     }
 
     #[test]
@@ -5819,7 +5833,7 @@ mod tests {
         assert_eq!(r, NO_VALUE);
         assert_eq!(vm.declared_error, crate::runtime::error::ERR_INVALID_ARGUMENT_ENCODING);
         assert_eq!(
-            vm.error.as_ref().map(|e| (e.error_code(), e.message())),
+            vm.error.as_ref().map(|e| (e.error_code(), e.message(&vm.info))),
             Some((vec!["CORE", "SEMANTIC", "UNCAUGHT-ERROR"], "uncaught propagated error: <error InvalidArgumentEncoding>".to_string()))
         );
         // No List (and no String of the valid prefix) was ever built.
@@ -5855,7 +5869,7 @@ mod tests {
                 assert_eq!(read(&mut *vm, container, index), NO_VALUE);
                 assert_eq!(vm.declared_error, crate::runtime::error::ERR_INDEX_NOT_FOUND);
                 assert_eq!(
-                    vm.error.as_ref().map(|e| (e.error_code(), e.message())),
+                    vm.error.as_ref().map(|e| (e.error_code(), e.message(&vm.info))),
                     Some((vec!["CORE", "SEMANTIC", "UNCAUGHT-ERROR"], "uncaught propagated error: <error IndexNotFound>".to_string()))
                 );
                 vm.error = None;
@@ -5882,7 +5896,7 @@ mod tests {
             assert_eq!(rt_list_with_length(&mut *vm, list, n), NO_VALUE);
             assert_eq!(vm.declared_error, crate::runtime::error::ERR_LENGTH_MISMATCH);
             assert_eq!(
-                vm.error.as_ref().map(|e| (e.error_code(), e.message())),
+                vm.error.as_ref().map(|e| (e.error_code(), e.message(&vm.info))),
                 Some((vec!["CORE", "SEMANTIC", "UNCAUGHT-ERROR"], "uncaught propagated error: <error LengthMismatch>".to_string()))
             );
             vm.error = None;
@@ -5926,7 +5940,7 @@ mod tests {
         let bad = rooted!(vm, vm.new_list(vec![a, empty, small(7)]));
         assert_eq!(rt_list_flat(&mut *vm, bad), NO_VALUE);
         assert_eq!(
-            vm.error.take().map(|e| (e.error_code(), e.message())),
+            vm.error.take().map(|e| (e.error_code(), e.message(&vm.info))),
             Some((vec!["CORE", "SEMANTIC", "TYPE"], "std::list::flat element 2: expected list, got 7".to_string()))
         );
     }
@@ -6050,7 +6064,8 @@ mod tests {
         }
         assert_eq!(vm.declared_error, 4);
         assert_eq!(str_of(rt_declared_payload(&mut *vm, 0)).as_str(), "detail");
-        assert_eq!(super::super::show::show(rt_declared_payload(&mut *vm, 1)), (num_bigint::BigInt::from(7u8) << 70u32).to_string());
+        let payload = rt_declared_payload(&mut *vm, 1);
+            assert_eq!(super::super::show::show(&vm.info, payload), (num_bigint::BigInt::from(7u8) << 70u32).to_string());
         assert_eq!(rt_clear_declared_error(&mut *vm), 0);
         assert!(vm.declared_payload.is_empty() && vm.declared_error == 0 && vm.error.is_none());
         let name = rooted!(vm, vm.new_str("E"));
@@ -6687,7 +6702,7 @@ mod tests {
             let p: *mut Vm = &mut *vm;
             let l = bytes_list(&mut vm, &[1, bad, 3]);
             assert_eq!(rt_bytes_from_list(p, l), NO_VALUE);
-            let message = vm.error.take().unwrap().message();
+            let message = vm.error.take().unwrap().message(&vm.info);
             assert!(message.contains("element 1 must be a byte"), "{message}");
             assert!(message.contains(&bad.to_string()), "{message}");
         }
@@ -6696,7 +6711,7 @@ mod tests {
         let text = rooted!(strings, strings.new_str("a"));
         let l = rooted!(strings, strings.new_list(vec![text]));
         assert_eq!(rt_bytes_from_list(p, l), NO_VALUE);
-        assert!(strings.error.take().unwrap().message().contains("got \"a\""));
+        assert!(strings.error.take().unwrap().message(&strings.info).contains("got \"a\""));
         // A BigInt (above the small range) is no byte either.
         let mut bigs = vm();
         let p: *mut Vm = &mut *bigs;
@@ -6712,7 +6727,7 @@ mod tests {
         let l = bytes_list(&mut vm, &[1, 2]);
         for helper in [rt_bytes_len as extern "C" fn(*mut Vm, Value) -> Value, rt_bytes_addr] {
             assert_eq!(helper(p, l), NO_VALUE);
-            assert!(vm.error.take().unwrap().message().contains("expected bytestore"));
+            assert!(vm.error.take().unwrap().message(&vm.info).contains("expected bytestore"));
             assert_eq!(helper(p, make_small(5)), NO_VALUE);
             assert!(vm.error.take().is_some());
         }
@@ -6782,11 +6797,11 @@ mod tests {
         use crate::runtime::show::{show, tcl_value};
         let mut vm = vm();
         let b = vm.new_bytes(&[0x41, 0, 0xff]);
-        assert_eq!(show(b), "<bytes 3: 4100ff>");
-        assert_eq!(tcl_value(b).unwrap(), "bytestore 4100ff");
+        assert_eq!(show(&vm.info, b), "<bytes 3: 4100ff>");
+        assert_eq!(tcl_value(&vm.info, b).unwrap(), "bytestore 4100ff");
         let e = vm.new_bytes(&[]);
-        assert_eq!(show(e), "<bytes 0: >");
-        assert_eq!(tcl_value(e).unwrap(), "bytestore {}");
+        assert_eq!(show(&vm.info, e), "<bytes 0: >");
+        assert_eq!(tcl_value(&vm.info, e).unwrap(), "bytestore {}");
     }
 
     #[test]
@@ -6810,7 +6825,7 @@ mod tests {
         let before = vm.metrics.total_allocations();
         let v = vm.new_bytes_with(MAX_COLLECTION_LENGTH + 1, |_| unreachable!("no payload is written"));
         assert_eq!(v, NO_VALUE);
-        assert!(vm.error.take().unwrap().message().contains("cannot exceed"));
+        assert!(vm.error.take().unwrap().message(&vm.info).contains("cannot exceed"));
         assert_eq!(vm.metrics.total_allocations(), before);
     }
 
@@ -6850,12 +6865,12 @@ mod tests {
         for bad in [small(-1), big, make_small(MAX_COLLECTION_LENGTH as i64 + 1)] {
             let before = vm.metrics.total_allocations();
             assert_eq!(rt_mbytes_new(p, bad), NO_VALUE);
-            assert!(vm.error.take().unwrap().message().contains("the length must be in 0.."));
+            assert!(vm.error.take().unwrap().message(&vm.info).contains("the length must be in 0.."));
             assert_eq!(vm.metrics.total_allocations(), before);
         }
         // A length the allocator cannot supply is reported, never an abort.
         assert_eq!(rt_mbytes_new(p, make_small(MAX_COLLECTION_LENGTH as i64)), NO_VALUE);
-        assert!(vm.error.take().unwrap().message().contains("out of memory"));
+        assert!(vm.error.take().unwrap().message(&vm.info).contains("out of memory"));
     }
 
     #[test]
@@ -6906,7 +6921,7 @@ mod tests {
         ] {
             assert_eq!(rt_mbytes_set(p, target, index, value), NO_VALUE);
             let e = vm.error.take().unwrap();
-            assert_eq!(e.error_code()[1..], ["SEMANTIC", kind], "{}", e.message());
+            assert_eq!(e.error_code()[1..], ["SEMANTIC", kind], "{}", e.message(&vm.info));
         }
         assert_eq!(mutbytes_of(m), &[0, 0, 0]);
     }
@@ -6930,7 +6945,7 @@ mod tests {
             assert_eq!(bytes_of(q), want);
         }
         assert_eq!(rt_mbytes_freeze_prefix(p, m, small(5)), NO_VALUE);
-        assert!(vm.error.take().unwrap().message().contains("the count must be in 0..4"));
+        assert!(vm.error.take().unwrap().message(&vm.info).contains("the count must be in 0..4"));
         assert_eq!(rt_mbytes_freeze_prefix(p, m, small(-1)), NO_VALUE);
         vm.error = None;
         // The two storage kinds are never accepted for one another.
@@ -6940,7 +6955,7 @@ mod tests {
         vm.error = None;
         for helper in [rt_mbytes_len as extern "C" fn(*mut Vm, Value) -> Value, rt_mbytes_addr, rt_mbytes_clone, rt_mbytes_freeze] {
             assert_eq!(helper(p, a), NO_VALUE, "a Bytes storage is not a MutableBytes");
-            assert!(vm.error.take().unwrap().message().contains("expected mutbytes"));
+            assert!(vm.error.take().unwrap().message(&vm.info).contains("expected mutbytes"));
             assert_eq!(helper(p, small(1)), NO_VALUE);
             vm.error = None;
         }
@@ -6986,11 +7001,11 @@ mod tests {
         h = fnv1a(h, &3u64.to_le_bytes());
         h = fnv1a(h, &[1, 2, 3]);
         assert_eq!(rt_hash(p, a), make_small((h & HASH_MASK) as i64));
-        assert_eq!(show(a), "<mutbytes 3: 010203>");
-        assert_eq!(tcl_value(a).unwrap(), "mutbytes 010203");
+        assert_eq!(show(&vm.info, a), "<mutbytes 3: 010203>");
+        assert_eq!(tcl_value(&vm.info, a).unwrap(), "mutbytes 010203");
         let e = rt_mbytes_new(p, small(0));
-        assert_eq!(show(e), "<mutbytes 0: >");
-        assert_eq!(tcl_value(e).unwrap(), "mutbytes {}");
+        assert_eq!(show(&vm.info, e), "<mutbytes 0: >");
+        assert_eq!(tcl_value(&vm.info, e).unwrap(), "mutbytes {}");
     }
 
     #[test]

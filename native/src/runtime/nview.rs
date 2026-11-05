@@ -77,7 +77,7 @@ fn fail(p: *mut Vm, kind: &'static str, message: String) -> Value {
 /// offset O; CONTEXT names the operation in a failure.
 fn view_address(p: *mut Vm, v: Value, offset: Value, context: &str) -> Result<usize, Value> {
     if !is_cptr(v) {
-        let message = format!("{context}: expected a native view (a C address), got {}", super::show::show(v));
+        let message = format!("{context}: expected a native view (a C address), got {}", super::show::show(super::ops::program(p), v));
         return Err(fail(p, "TYPE", message));
     }
     if v == CPTR_NULL {
@@ -172,7 +172,7 @@ pub extern "C" fn rt_cptr_fixture_memory(p: *mut Vm, bytes: Value) -> Value {
         bytes
     };
     if heap_kind(bytes) != KIND_BYTES {
-        let message = format!("native memory test fixture: expected byte storage, got {}", super::show::show(bytes));
+        let message = format!("native memory test fixture: expected byte storage, got {}", super::show::show(super::ops::program(p), bytes));
         return fail(p, "TYPE", message);
     }
     let data = bytes_of(bytes);
@@ -195,7 +195,7 @@ pub extern "C" fn rt_cptr_fixture_memory(p: *mut Vm, bytes: Value) -> Value {
 /// address (a 32-bit target's pointer field), else RANGE.
 fn pointer_bits(p: *mut Vm, pointer: Value, width: Value, context: &str) -> Result<([u8; 8], usize), Value> {
     if !is_cptr(pointer) {
-        let message = format!("{context}: expected a C pointer, got {}", super::show::show(pointer));
+        let message = format!("{context}: expected a C pointer, got {}", super::show::show(super::ops::program(p), pointer));
         return Err(fail(p, "TYPE", message));
     }
     let width = match int_small(width) {
@@ -557,7 +557,7 @@ mod tests {
     use crate::runtime::vm::ProgramInfo;
 
     fn with_vm<R>(f: impl FnOnce(*mut Vm) -> R) -> R {
-        let mut vm = Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Off);
+        let mut vm = Vm::new(std::sync::Arc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new(), enums: Vec::new(), errors: Vec::new() }), AllocMode::Off);
         f(&mut *vm as *mut Vm)
     }
 
@@ -793,7 +793,7 @@ mod tests {
 
     /// The text of a runtime value (a List of Ints here).
     fn shown(v: Value) -> String {
-        super::super::show::show(v)
+        super::super::show::show(&super::super::vm::ProgramInfo::empty(), v)
     }
 
     #[test]
@@ -874,7 +874,7 @@ mod tests {
             let storage = [9u8, 8, 7, 6];
             let list = rt_cptr_fixture_bytes(p, make_cptr(storage.as_ptr() as i64), make_small(3));
             assert_ne!(list, NO_VALUE);
-            assert_eq!(super::super::show::show(list), "[9, 8, 7]");
+            assert_eq!(super::super::show::show(super::super::ops::program(p), list), "[9, 8, 7]");
         });
     }
 }

@@ -17,7 +17,7 @@
 # check, a failure, or an emitter that never completes). The census fails
 # when the compiler's verdict differs, or a replacement does not apply.
 
-@@ NAME FILE EXPECT DESCRIPTION
+#   @@ NAME FILE EXPECT DESCRIPTION
 #   <<<<
 #   text to replace (must occur exactly once in FILE)
 #   ====

@@ -24,6 +24,11 @@ testConstraint cc [expr {[auto_execok cc] ne "" && [auto_execok ar] ne ""}]
 testConstraint linuxCc [expr {[testConstraint linuxX86Host] && [testConstraint cc]}]
 testConstraint clang [expr {[auto_execok clang] ne "" && [testConstraint linuxX86Host]}]
 testConstraint machoTools [expr {[auto_execok clang] ne "" && ([auto_execok ld64.lld] ne "" || [auto_execok lld] ne "")}]
+# A library of another architecture is linked by LLVM's linker, which links
+# every target: the host's GNU ld links only its own (on the Ubuntu runners,
+# "unrecognised emulation mode: aarch64linux") unless that architecture's
+# cross binutils are installed.
+testConstraint lld [expr {[auto_execok ld.lld] ne ""}]
 testConstraint mingw [expr {[auto_execok x86_64-w64-mingw32-gcc] ne ""}]
 testConstraint git [expr {[auto_execok git] ne ""}]
 testConstraint dpkgZlib [expr {[testConstraint linuxX86Host] && [file isdirectory /var/lib/dpkg/info]
@@ -180,10 +185,10 @@ test pa-add-windows {a MinGW-w64 DLL is added with its import library (-import):
         [dict get $r status] [dict get $library file] [dict get $library import] [dict get $library identity]
 } -cleanup cleanup -result {1 1 1 1 0 native/w.dll native/libw.dll.a w.dll}
 
-test pa-add-refusals {what is no native library of the target is refused, saying what it is and writing nothing: another architecture's library, an object file, a library without a soname, a thin archive, a linker script, LLVM bitcode, a truncated file, a shared library declared static, a declared symbol it does not export} -constraints {linuxCc clang} -body {
+test pa-add-refusals {what is no native library of the target is refused, saying what it is and writing nothing: another architecture's library, an object file, a library without a soname, a thin archive, a linker script, LLVM bitcode, a truncated file, a shared library declared static, a declared symbol it does not export} -constraints {linuxCc clang lld} -body {
     set bin [fresh bin]
     writeText [file join $bin f.c] "int f_value(void) { return 1; }\n"
-    exec clang --target=aarch64-linux-gnu -shared -fPIC -nostdlib -o [file join $bin libarm.so] -Wl,-soname,libarm.so.1 [file join $bin f.c]
+    exec clang --target=aarch64-linux-gnu -shared -fPIC -nostdlib -fuse-ld=lld -o [file join $bin libarm.so] -Wl,-soname,libarm.so.1 [file join $bin f.c]
     exec cc -c -fPIC -o [file join $bin f.o] [file join $bin f.c]
     exec cc -shared -fPIC -o [file join $bin libnosoname.so] [file join $bin f.c]
     exec ar rcT [file join $bin libthin.a] [file join $bin f.o]
@@ -440,7 +445,7 @@ test pa-pack-refuses-incomplete {pack runs the audit: an incomplete native packa
     botlish native add $rpath -target linux-x86_64 -name rp -package $rp
     set audited [botlish package pack $rp -out $repo]
     list [dict get $r status] [kindOf [dict get $r err]] [string match "*cannot be packed*needs libz.so.1*" [dict get $r err]] \
-        $written [dict get $p status] [regexp {audit|native} [dict get $p out]] \
+        $written [dict get $p status] [regexp {audit|native} [string map [list $repo REPO] [dict get $p out]]] \
         [dict get [descriptorOf $pure] schema] [dict get $audited status] \
         [string match "*its native audit is incomplete*carries the run-time search path /home/builder/lib*" [dict get $audited err]] \
         [file exists [file join $repo rp-1.0.0.botpkg]]

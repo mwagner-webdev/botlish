@@ -604,6 +604,33 @@ name; new tests and tools must keep it that way:
   fixed name in the working directory or the repository; one that runs a test
   file passes it a private `-tmpdir`.
 
+## Tests that hold on every host, and mutants that still apply
+
+A test is written on one machine and run on four hosts and in several
+temporary directories (MAIN-TEST-DEFECTS-2026-11.md has the cases). Keep
+what it depends on in its code or its constraints:
+
+* Wait for a child process by closing its pipeline (`open |[list ...] r`,
+  read to the end, `close`) or by a plain `exec`: never by probing `/proc`,
+  `ps` or a delay, which hold on Linux only, or only on a fast machine.
+* Every tool a test runs is in its constraint. A library of another
+  architecture is linked with `-fuse-ld=lld` (GNU ld links only its own) and
+  the test carries an `lld` constraint.
+* Never match a word against output that names a host path (the temporary
+  directory, the checkout): map the paths out first (`string map [list $dir
+  DIR]`). The native coverage jobs' temporary directory is
+  `/tmp/native-coverage_XXXXXX`.
+
+A change can break another audit's mutant: rewrite or duplicate the text it
+replaces, and that mutant guards nothing until its own harness next runs.
+`tclsh9.0 tools/mutant-catalogs.tcl` applies every mutant of every catalog
+under `audit/` to the tree in memory (seconds; CI's `mutant-catalogs` job in
+`tests.yml`). Run it before pushing a change to code. A mutant it reports is
+updated in the same change, kept a mutant of the same rule, and run through
+its own harness (`-only NAME`). A new catalog whose files are not relative
+to the repository root, or not named by `## FILE` lines, gets a row in the
+tool's `Catalogs` table.
+
 ## Native GC-stress validation
 
 `BOTLISH_NATIVE_GC_STRESS=1` forces a GC attempt at every allocation site,
@@ -1436,12 +1463,18 @@ thread's stack and guard are found and how a thread is named
 bounds, the usable low bound and the guard confirmed with `mach_vm_region`);
 and Windows' STATUS_STACK_OVERFLOW, `runtime/platform/windows.rs` (a
 vectored exception handler first in the chain, run in the thread's stack
-guarantee). Keep it so:
+guarantee). Any number of threads may be guarded at once, each with its own
+record (`runtime/platform/records.rs`, PER-THREAD-RUNTIME-STATE-MILESTONE-1.md:
+its token, its published stack, its mode, destination and label); the
+process's handler is installed with the first guard and removed after the
+last. Keep it so:
 
 * The handler only classifies and reports: an address in the guard of the
-  stack *published* as running, on the guarded thread (POSIX), or
-  STATUS_STACK_OVERFLOW on the guarded thread at an address of the stack
-  published as running (Windows), writes the result line and ends the process (`_exit`;
+  stack the faulting thread *published* as running, on a guarded thread
+  (POSIX), or STATUS_STACK_OVERFLOW on a guarded thread at an address of the
+  stack it published as running (Windows) -- the record found by the
+  faulting thread's token, never another thread's -- writes the record's
+  label and the result line and ends the process (`_exit`;
   TerminateProcess). It never resumes, unwinds, allocates or touches the
   runtime, and it uses nothing but lock-free atomics stored before the
   fault and calls that take no lock (async-signal-safe ones; WriteFile and
@@ -1496,6 +1529,63 @@ checks, and `[ci-full]` with `CI-Tests: native-stack-mutants` the
 mutants). `bench/native-stack-guard.tcl` compares a driver against a
 baseline build (`-baseline-rev main`; the tier item `native-stack-bench`
 on a macOS runner).
+
+## Per-VM and per-thread runtime state
+
+Several Vms of one compiled program may run at once, on threads of their
+own (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md). A compiled program (its
+machine code, its descriptor, `ProgramInfo` and the frame map, `Arc`-shared)
+defines the environment; each Vm owns its instance of it -- heap, constants'
+objects, statics, context area, roots, pending error -- and each OS thread
+owns its native stack, its guard record and its thread-local runtime state
+(callback transitions, the coroutine stack pool). Keep it so:
+
+* The context area is the Vm's (`Vm::context_ptr`, `install_context_area`,
+  zero when made, cleared by `reset`): generated code loads its base from the
+  Vm at `VM_CONTEXT_OFFSET`, once in the entry block of a function that reads
+  or writes the area (read-only, not `can_move`: Cranelift would sink a
+  movable load back into loops), then the slot's constant offset. Never a data symbol, a process-wide or recycled buffer, a
+  TLS base or a lookup; never an area per actor or coroutine. The layout and
+  which implementation each requirement calls stay the program's: a Vm's
+  construction selects nothing.
+* Program metadata is the Vm's (`Vm::info`; ops.rs's `program(p)`): every
+  runtime read of a shape, an enum, a native or a function's parameter names
+  goes through the running Vm, and every renderer takes the program
+  explicitly (`show`, `tcl_value`, `RtError::message`). Never a thread-local
+  or process-wide current program, a swap per call, or the most recently
+  made Vm's.
+* A Vm stays on the thread that made it (its stack bounds, non-atomic
+  backings, coroutine frames): never `Send` a Vm or its objects, never share
+  a backing or a heap object between Vms, and never let thread-local state
+  keep a Vm pointer past its transition (`callback.rs`'s ACTIVE) or a pooled
+  coroutine stack its previous Vm (`prepare` writes the Vm per start).
+* The guard's records are per thread (`records.rs`): a thread publishes only
+  into its own (through a destructor-free thread-local holding its record's
+  address; never a record cached in a Vm, whose guard may drop first), the
+  handlers find a record by the faulting thread's token with atomic loads
+  only (no thread-local, lock or allocation in a handler), and a record is
+  released when its guard drops or its thread ends. A native stack overflow
+  stays process-terminal: never end only the faulting thread, whatever its
+  Vm's isolation.
+* `botlish-native vms N` (main.rs's `concurrent_vms`) is a test harness, not
+  a thread API: no Botlish program can start a thread. Its collection hook
+  and the heap's ownership check (`Heap::set_ownership_check`) are test
+  hooks, None and off unless it sets them.
+
+If you change any of that (vm.rs's context area or program, ops.rs's
+`program`, show.rs, error.rs, platform/records.rs, guard.rs, windows.rs,
+codegen/clif.rs's `context_addr`, the descriptor's context size, the harness),
+run `tests/concurrent-vms.test` (also with `BOTLISH_NATIVE_GC_STRESS=1` set
+for the whole file only when diagnosing: its GC-stress tests set it
+themselves), `tests/contexts.test`, `tests/platform/aot-facts.tcl`,
+`cargo test --release --manifest-path native/Cargo.toml --lib --bins` and
+`--test native_stack`, `tests/native-library.test`, `tests/c-callbacks.test`
+and `audit/per-thread-runtime/tools/mutate.tcl` (every mutant in its
+`mutants.txt` that applies to the host must still apply and be killed by a
+detector its `!!` line names: update a mutant's text when you change the
+code it mutates, keeping it a mutant of the same rule), plus the native
+stack guard's checks above for a change to the guard. `bench/per-thread-runtime.tcl
+-baseline BIN` compares the costs against a driver built before a change.
 
 ## Executable startup policy (worker, main-thread)
 

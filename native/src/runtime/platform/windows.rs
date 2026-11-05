@@ -16,13 +16,16 @@
 //! enough for its reporting path (`GUARANTEE`).
 //!
 //! The guard is a vectored exception handler, first in the process's chain,
-//! for as long as an `OverflowGuard` lives: installed by the thread that runs
-//! Botlish code (the driver's and an executable's worker thread, main.rs and
-//! runtime/aot.rs) before it runs any, removed when the run is over. Vectored
-//! handlers are process-wide; the guard claims an exception only when
+//! for as long as an `OverflowGuard` lives on some thread: one guard per
+//! thread that runs Botlish code (the driver's and an executable's worker
+//! thread, main.rs and runtime/aot.rs; each VM thread of the driver's
+//! concurrent-VM harness), any number at once, each with its own record
+//! (records.rs, PER-THREAD-RUNTIME-STATE-MILESTONE-1.md); the handler is
+//! added with the first and removed after the last. Vectored handlers are
+//! process-wide; the guard claims an exception only when
 //!
 //!   * it is `STATUS_STACK_OVERFLOW`,
-//!   * on the guarded thread (`GUARDED`, its thread id), while installed,
+//!   * on a guarded thread (one holding a record: its thread id),
 //!   * at an address (the record's second parameter: the access that could
 //!     not grow the stack) inside the reservation of the stack published as
 //!     running -- the thread's own, or the coroutine fiber it switched to
@@ -33,7 +36,8 @@
 //!     (WINDOWS-X86-64-MILESTONE-4.md, "Experiments": 0 for every real
 //!     exhaustion, 0x80 for RaiseException's).
 //!
-//! It then writes the driver's result line `error {NATIVE LIMIT STACK}
+//! It then writes the thread's label (empty but in the concurrent-VM
+//! harness) and the driver's result line `error {NATIVE LIMIT STACK}
 //! {...}` (a standalone executable: to its standard error) with WriteFile
 //! and ends the process with TerminateProcess: exit status 0 for the driver
 //! (the line is its result), 1 for an executable, as the POSIX guard does
@@ -46,7 +50,8 @@
 //! relabelled.
 //!
 //! Which stack runs is published by the runtime, never inferred by the
-//! handler (`set_active_stack`): a double buffer, as the POSIX guard's -- the
+//! handler (`set_active_stack`), by each thread into its own record only: a
+//! double buffer, as the POSIX guard's -- the
 //! new bounds go to the slot not in use, then one release store selects it --
 //! so an exception at any instruction, a publication's own included, reads
 //! one consistent reservation. Every stack it can name has the guarantee the
@@ -58,9 +63,9 @@
 //! Why that is a valid recovery: NATIVE LIMIT STACK is terminal for a native
 //! invocation, so nothing of the run is resumed. The handler never returns
 //! into the faulting code, never unwinds a frame, runs no destructor, and
-//! touches neither the heap, the collector nor a lock: it reads atomics this
-//! process stored before the fault, makes one WriteFile per partial write of
-//! a static line (each writes at least a byte, so at most the line's length)
+//! touches neither the heap, the collector nor a lock: it reads atomics the
+//! faulting thread stored before the fault (its record, found by its thread
+//! id), makes one WriteFile per partial write of its label and a static line (each writes at least a byte, so at most the line's length)
 //! and calls TerminateProcess, which ends every thread of the process
 //! without running DLL detach routines, TLS callbacks or the C runtime's
 //! exit handlers, and does not return to its caller; should it ever return,
@@ -69,14 +74,16 @@
 //! exception handlers -- inside the stack guarantee the kernel committed
 //! for it; GUARANTEE is that room, measured (the report's "Experiments").
 //!
-//! The destination is resolved when the guard is installed, never in the
-//! handler: the `--result` file's handle (`set_result_file`, a file the
+//! The destination is resolved when a guard is installed, into its record,
+//! never in the handler: the `--result` file's handle (`set_result_file`, a file the
 //! driver keeps open for the whole run), else the process's standard output
 //! (the driver) or standard error (an executable), as GetStdHandle names
 //! them then.
+use super::records::{self, Record};
 use crate::runtime::native_stack::{NativeStack, StackState};
 use std::io;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use windows_sys::Win32::Foundation::{EXCEPTION_STACK_OVERFLOW, HANDLE};
 use windows_sys::Win32::Storage::FileSystem::WriteFile;
 use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
@@ -181,102 +188,86 @@ pub fn stack_guarantee() -> u32 {
     size
 }
 
-/// GUARDED's value while no guard is installed.
-const UNGUARDED: usize = 0;
-/// GUARDED's value while a guard is being installed or removed: no
-/// exception is claimed. No thread id: Windows' are multiples of four.
-const BUSY: usize = usize::MAX;
-/// The guarded thread's id, or UNGUARDED or BUSY.
-static GUARDED: AtomicUsize = AtomicUsize::new(UNGUARDED);
-/// Two slots of the running stack's reservation, `[low, high)`, and the one
-/// in use.
-static SLOTS: [[AtomicUsize; 2]; 2] = [[AtomicUsize::new(0), AtomicUsize::new(0)], [AtomicUsize::new(0), AtomicUsize::new(0)]];
-static SLOT: AtomicUsize = AtomicUsize::new(0);
-/// A standalone executable reports to standard error and exits 1.
-static EXECUTABLE: AtomicBool = AtomicBool::new(false);
+/// The process's vectored handler and how many guards are installed: added
+/// with the first, removed after the last. Installation and removal only,
+/// never the handler: a lock is fine.
+struct Installed {
+    guards: usize,
+    handler: usize,
+}
+static INSTALLED: Mutex<Installed> = Mutex::new(Installed { guards: 0, handler: 0 });
 /// The `--result` file's handle (set_result_file), 0 for none.
 static RESULT: AtomicUsize = AtomicUsize::new(0);
-/// Where the handler writes: resolved at installation.
-static DESTINATION: AtomicUsize = AtomicUsize::new(0);
 const OVERFLOW_LINE: &[u8] = super::OVERFLOW_LINE;
 
 /// Makes FILE where the driver's overflow report is written, with its other
 /// result lines: the `--result` file, so that a program's own standard
-/// output never carries it. FILE must stay open while a guard is installed.
+/// output never carries it. Read when a guard is installed; FILE must stay
+/// open while one is.
 pub fn set_result_file(file: &std::fs::File) {
     use std::os::windows::io::AsRawHandle;
     RESULT.store(file.as_raw_handle() as usize, Ordering::Relaxed);
 }
 
 /// Makes STACK the stack whose reservation the handler reports an overflow
-/// of: the stack this thread runs on from now (runtime/coroutine.rs calls it
-/// on arriving on a stack). A no-op while no guard is installed. Inlined, and
-/// only atomic stores: it adds no frame to the stack it is called on.
+/// of on this thread: the stack this thread runs on from now
+/// (runtime/coroutine.rs calls it on arriving on a stack). A no-op on a
+/// thread without a guard; never another thread's record. Inlined, and only
+/// a thread-local read and atomic stores: it adds no frame to the stack it
+/// is called on.
 #[inline(always)]
 pub fn set_active_stack(stack: &NativeStack) {
-    if GUARDED.load(Ordering::Relaxed) == UNGUARDED {
-        return;
-    }
-    publish(stack);
+    records::publish((stack.low_bound, stack.high_bound));
 }
 
-#[inline(always)]
-fn publish(stack: &NativeStack) {
-    let next = SLOT.load(Ordering::Relaxed) ^ 1;
-    SLOTS[next][0].store(stack.low_bound, Ordering::Relaxed);
-    SLOTS[next][1].store(stack.high_bound, Ordering::Relaxed);
-    SLOT.store(next, Ordering::Release);
-}
-
-/// The reservation `[low, high)` the handler would read now, while a guard
-/// is installed: what the runtime last published (tests).
+/// The reservation `[low, high)` the handler would read now for an
+/// exception on this thread, while it is guarded: what the runtime last
+/// published on it (tests).
 pub fn published_stack() -> Option<(usize, usize)> {
-    match GUARDED.load(Ordering::Acquire) {
-        UNGUARDED | BUSY => None,
-        _ => {
-            let slot = SLOT.load(Ordering::Acquire);
-            Some((SLOTS[slot][0].load(Ordering::Relaxed), SLOTS[slot][1].load(Ordering::Relaxed)))
-        }
-    }
+    records::mine().map(Record::words)
 }
 
-/// Whether an exception with CODE and FLAGS, whose record holds
-/// PARAMETERS, raised on the thread THREAD, is the exhaustion of the stack
-/// published as running on the guarded thread.
+/// How many threads are guarded now (tests, the concurrent-VM harness).
+pub fn guarded_threads() -> usize {
+    records::in_use()
+}
+
+/// The record of THREAD, when an exception with CODE and FLAGS, whose
+/// record holds PARAMETERS, raised on THREAD, is the exhaustion of the
+/// stack THREAD published as running.
 #[inline(always)]
-fn is_overflow(code: i32, flags: u32, parameters: &[usize], thread: usize) -> bool {
+fn is_overflow(code: i32, flags: u32, parameters: &[usize], thread: usize) -> Option<&'static Record> {
     if code != EXCEPTION_STACK_OVERFLOW || flags & EXCEPTION_SOFTWARE_ORIGINATE != 0 {
-        return false;
+        return None;
     }
-    let guarded = GUARDED.load(Ordering::Acquire);
-    if guarded == UNGUARDED || guarded == BUSY || guarded != thread {
-        return false;
-    }
-    let slot = SLOT.load(Ordering::Acquire);
-    let (low, high) = (SLOTS[slot][0].load(Ordering::Relaxed), SLOTS[slot][1].load(Ordering::Relaxed));
-    parameters.len() >= 2 && parameters[1] >= low && parameters[1] < high
+    let record = records::find(thread)?;
+    let (low, high) = record.words();
+    (parameters.len() >= 2 && parameters[1] >= low && parameters[1] < high).then_some(record)
 }
 
 unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     // SAFETY: Windows hands a vectored handler a valid record.
     let record = unsafe { &*(*info).ExceptionRecord };
     let count = (record.NumberParameters as usize).min(record.ExceptionInformation.len());
-    if is_overflow(record.ExceptionCode, record.ExceptionFlags, &record.ExceptionInformation[..count], thread_token()) {
-        write_overflow_line();
-        terminate();
+    if let Some(guard) = is_overflow(record.ExceptionCode, record.ExceptionFlags, &record.ExceptionInformation[..count], thread_token()) {
+        let out = guard.destination() as HANDLE;
+        let mut label = [0u8; records::LABEL_BYTES];
+        let len = guard.label(&mut label);
+        write_all(out, &label[..len]);
+        write_all(out, OVERFLOW_LINE);
+        terminate(guard.executable());
     }
     EXCEPTION_CONTINUE_SEARCH
 }
 
-/// Writes the overflow line to the destination resolved at installation:
-/// one WriteFile per partial write, at most the line's length of them; a
-/// failed one ends the attempt (nothing is retried).
-fn write_overflow_line() {
-    let out = DESTINATION.load(Ordering::Relaxed) as HANDLE;
-    let mut rest = OVERFLOW_LINE;
+/// Writes BYTES to OUT: one WriteFile per partial write, at most the
+/// bytes' length of them; a failed one ends the attempt (nothing is
+/// retried).
+fn write_all(out: HANDLE, bytes: &[u8]) {
+    let mut rest = bytes;
     while !rest.is_empty() {
         let mut written = 0u32;
-        // SAFETY: a static buffer, synchronous I/O on a handle that stays
+        // SAFETY: a live buffer, synchronous I/O on a handle that stays
         // open while the guard is installed.
         let ok = unsafe { WriteFile(out, rest.as_ptr(), rest.len() as u32, &mut written, std::ptr::null_mut()) };
         if ok == 0 || written == 0 || written as usize > rest.len() {
@@ -287,9 +278,10 @@ fn write_overflow_line() {
 }
 
 /// Ends the process: exit status 0 for the driver (the line is its result),
-/// 1 for a standalone executable.
-fn terminate() -> ! {
-    let status = if EXECUTABLE.load(Ordering::Relaxed) { 1 } else { 0 };
+/// 1 for a standalone executable (EXECUTABLE). Terminal for every thread
+/// (NATIVE-STACK-OVERFLOW.md): the faulting thread may hold any lock.
+fn terminate(executable: bool) -> ! {
+    let status = if executable { 1 } else { 0 };
     // SAFETY: ends this process; TerminateProcess of the calling process
     // does not return.
     unsafe { TerminateProcess(GetCurrentProcess(), status) };
@@ -298,11 +290,12 @@ fn terminate() -> ! {
     unsafe { std::arch::asm!("int 0x29", in("ecx") 7, options(noreturn, nostack)) }
 }
 
-/// The installed guard: the vectored handler, first in the chain. Dropping
-/// it removes the handler (the thread keeps its stack guarantee: Windows
-/// never lowers one).
+/// The installed guard of one thread: its record and, while any guard is
+/// installed, the process's vectored handler, first in the chain. Dropping
+/// it releases the record; the last one dropped removes the handler (the
+/// thread keeps its stack guarantee: Windows never lowers one).
 pub struct OverflowGuard {
-    handler: *mut core::ffi::c_void,
+    record: usize,
 }
 
 impl OverflowGuard {
@@ -311,33 +304,55 @@ impl OverflowGuard {
     /// the result file (or standard output) and the process exits 0. STACK
     /// is the calling thread's own stack, the one published first.
     pub fn install(stack: &NativeStack) -> io::Result<Self> {
-        Self::install_mode(stack, false)
+        Self::install_mode(stack, false, b"")
     }
 
     /// Installs the guard for a standalone executable's own run: the line goes
     /// to standard error and the process exits 1.
     pub fn install_executable(stack: &NativeStack) -> io::Result<Self> {
-        Self::install_mode(stack, true)
+        Self::install_mode(stack, true, b"")
     }
 
-    fn install_mode(stack: &NativeStack, executable: bool) -> io::Result<Self> {
-        if GUARDED.compare_exchange(UNGUARDED, BUSY, Ordering::AcqRel, Ordering::Relaxed).is_err() {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "a stack-overflow guard is already installed"));
+    /// Installs the driver's guard with LABEL written before its line (the
+    /// concurrent-VM harness's "vm N ").
+    pub fn install_labelled(stack: &NativeStack, label: &[u8]) -> io::Result<Self> {
+        Self::install_mode(stack, false, label)
+    }
+
+    fn install_mode(stack: &NativeStack, executable: bool, label: &[u8]) -> io::Result<Self> {
+        if records::mine().is_some() {
+            return Err(io::Error::new(io::ErrorKind::AlreadyExists, "this thread's stack-overflow guard is already installed"));
         }
-        match Self::prepare(stack, executable) {
-            Ok(handler) => {
-                GUARDED.store(thread_token(), Ordering::Release);
-                Ok(OverflowGuard { handler })
+        let destination = Self::prepare(stack, executable)?;
+        let mut installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if installed.guards == 0 {
+            // SAFETY: a handler with the vectored handler's ABI, first in the
+            // chain; removed after the last guard drops.
+            let handler = unsafe { AddVectoredExceptionHandler(1, Some(handler)) };
+            if handler.is_null() {
+                return Err(io::Error::new(io::ErrorKind::Other, "AddVectoredExceptionHandler failed"));
+            }
+            installed.handler = handler as usize;
+        }
+        match records::claim(thread_token(), (stack.low_bound, stack.high_bound), executable, destination, label) {
+            Ok(record) => {
+                installed.guards += 1;
+                Ok(OverflowGuard { record })
             }
             Err(error) => {
-                GUARDED.store(UNGUARDED, Ordering::Release);
+                if installed.guards == 0 {
+                    // SAFETY: the handler added above.
+                    unsafe { RemoveVectoredExceptionHandler(installed.handler as *mut core::ffi::c_void) };
+                    installed.handler = 0;
+                }
                 Err(error)
             }
         }
     }
 
-    /// Everything but the publication of the guarded thread, under BUSY.
-    fn prepare(stack: &NativeStack, executable: bool) -> io::Result<*mut core::ffi::c_void> {
+    /// This thread's stack guarantee and guard page, confirmed, and the
+    /// report's destination.
+    fn prepare(stack: &NativeStack, executable: bool) -> io::Result<usize> {
         let mut size = GUARANTEE;
         // SAFETY: the calling thread's own guarantee; a request smaller than
         // the current one is ignored, so it never lowers it.
@@ -353,30 +368,26 @@ impl OverflowGuard {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "the thread's stack has no confirmed guard page"));
         }
         // SAFETY: GetStdHandle reads the process's standard handles.
-        let destination = match RESULT.load(Ordering::Relaxed) {
+        Ok(match RESULT.load(Ordering::Relaxed) {
             _ if executable => (unsafe { GetStdHandle(STD_ERROR_HANDLE) }) as usize,
             0 => (unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }) as usize,
             file => file,
-        };
-        DESTINATION.store(destination, Ordering::Relaxed);
-        EXECUTABLE.store(executable, Ordering::Relaxed);
-        publish(stack);
-        // SAFETY: a handler with the vectored handler's ABI, first in the
-        // chain; removed by Drop.
-        let handler = unsafe { AddVectoredExceptionHandler(1, Some(handler)) };
-        if handler.is_null() {
-            return Err(io::Error::new(io::ErrorKind::Other, "AddVectoredExceptionHandler failed"));
-        }
-        Ok(handler)
+        })
     }
 }
 
 impl Drop for OverflowGuard {
     fn drop(&mut self) {
-        GUARDED.store(BUSY, Ordering::Release);
-        // SAFETY: the handler install added.
-        unsafe { RemoveVectoredExceptionHandler(self.handler) };
-        GUARDED.store(UNGUARDED, Ordering::Release);
+        // First the record: from now on no exception of this thread is
+        // claimed.
+        records::release(self.record);
+        let mut installed = INSTALLED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        installed.guards -= 1;
+        if installed.guards == 0 {
+            // SAFETY: the handler the first guard added.
+            unsafe { RemoveVectoredExceptionHandler(installed.handler as *mut core::ffi::c_void) };
+            installed.handler = 0;
+        }
     }
 }
 
@@ -424,20 +435,38 @@ mod tests {
         let stack = current_stack().unwrap();
         let inside = stack.low_bound + 4096;
         let me = thread_token();
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me), "no guard installed");
+        let claimed = |code, flags, parameters: &[usize], thread| is_overflow(code, flags, parameters, thread).is_some();
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me), "no guard installed");
         let guard = OverflowGuard::install(&stack).expect("the guard installs");
         assert!(stack_guarantee() >= GUARANTEE);
-        assert!(is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me));
-        assert!(is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[0, stack.high_bound - 1], me));
-        assert!(!is_overflow(ACCESS_VIOLATION, 0, &[1, inside], me), "an access violation in the stack");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, EXCEPTION_SOFTWARE_ORIGINATE, &[1, inside], me), "raised by software");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me + 4), "another thread");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[], me), "raised with no address");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, stack.low_bound - 1], me), "below the reservation");
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, stack.high_bound], me), "above it");
-        assert!(OverflowGuard::install(&stack).is_err(), "one guard per process");
+        assert!(claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me));
+        assert!(claimed(EXCEPTION_STACK_OVERFLOW, 0, &[0, stack.high_bound - 1], me));
+        assert!(!claimed(ACCESS_VIOLATION, 0, &[1, inside], me), "an access violation in the stack");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, EXCEPTION_SOFTWARE_ORIGINATE, &[1, inside], me), "raised by software");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me + 4), "another thread");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[], me), "raised with no address");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, stack.low_bound - 1], me), "below the reservation");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, stack.high_bound], me), "above it");
+        assert!(OverflowGuard::install(&stack).is_err(), "one guard per thread");
+        // Another thread installs its own guard beside this one, and its
+        // stack is claimed only on it (PER-THREAD-RUNTIME-STATE-MILESTONE-1.md).
+        let (theirs, their_id) = std::thread::spawn(|| {
+            let stack = current_stack().unwrap();
+            let guard = OverflowGuard::install(&stack).expect("a second thread's guard installs");
+            let id = thread_token();
+            let inside = stack.low_bound + 4096;
+            let claimed = is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], id).is_some();
+            drop(guard);
+            ((stack.low_bound + 4096, claimed), id)
+        })
+        .join()
+        .unwrap();
+        assert!(theirs.1, "the other thread's overflow on its own stack");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, theirs.0], me), "the other thread's stack, raised here");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], their_id), "this stack, raised on the other thread");
+        assert!(claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me), "this guard outlives the other's");
         drop(guard);
-        assert!(!is_overflow(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me), "the guard removed");
+        assert!(!claimed(EXCEPTION_STACK_OVERFLOW, 0, &[1, inside], me), "the guard removed");
         drop(OverflowGuard::install_executable(&stack).expect("a guard installs again"));
     }
 }

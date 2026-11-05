@@ -1,0 +1,387 @@
+# Mutants of the per-VM and per-thread runtime state
+# (audit/per-thread-runtime/tools/mutate.tcl; PER-THREAD-RUNTIME-STATE-
+# MILESTONE-1.md, "Mutation testing"): the Vm-owned context area, the
+# Vm-owned program metadata, the per-thread stack-guard records, and the
+# thread-local runtime state that must never outlive or cross a Vm.
+#
+#   @@ NAME DESCRIPTION
+#   %% HOST ...        (optional) the host targets the mutant applies to
+#   !! DETECTOR ...    the detectors meant to kill it (one at least), each
+#                      KIND:NAME -- rust-lib:TEST and rust-bin:TEST (a Rust
+#                      test whose path contains TEST), native_stack:CHECK
+#                      (a check of native/tests/native_stack.rs), FILE:TEST
+#                      (tcltest TEST of tests/FILE, a -match pattern)
+#   ## FILE
+#   <<<<
+#   text to replace (must occur exactly once in FILE)
+#   ====
+#   replacement
+#   >>>>
+#
+# A mutant is KILLED only when one of its own detectors fails (or does not
+# complete); a crash of an unrelated test never counts. Lines starting with
+# # outside an edit are comments.
+#
+# Not here, with the reason:
+#   * "Release another VM's context-owned affine resource": no runtime code
+#     releases context state (CONTEXT-OWNED-AFFINE-STATE-MILESTONE-1.md: an
+#     installed context's members live as long as its Vm, and nothing
+#     releases them at the end). The only way a Vm reaches another's
+#     context-owned handle is a shared area: ctx-process-wide-area and
+#     ctx-first-vm-area below, whose detectors see it.
+#   * "Share a collection backing between VMs": a backing is reached only
+#     through its header, a heap object of one Vm; sharing one needs a
+#     shared area or a stale root, which the mutants below are.
+#   * "Share a mutable runtime cache without synchronization": no such
+#     cache exists to mutate (the transfer plans are the Vm's, the table-
+#     hash key a OnceLock); the census records each process-wide item.
+#   * "Destroy program metadata while a VM still references it": a Vm holds
+#     an Arc of its program; no safe edit frees it early.
+
+# ---------------------------------------------------------------------------
+# The context area
+
+@@ ctx-process-wide-area the context area is one process-wide data object again: every Vm of the program addresses the same storage
+!! rust-bin:each_vm_of_one_compiled_program_has_its_own_area concurrent-vms.test:cv-concurrent-* concurrent-vms.test:cv-source-context-area
+## native/src/codegen/clif.rs
+<<<<
+        Ok(self.b.ins().load(I64, MemFlagsData::trusted().with_readonly(), self.vm, VM_CONTEXT_OFFSET))
+====
+        static SHARED: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        let area = *SHARED.get_or_init(|| Box::leak(vec![0u64; 4096].into_boxed_slice()).as_mut_ptr() as usize);
+        Ok(self.b.ins().iconst(I64, area as i64))
+>>>>
+
+@@ ctx-first-vm-area every Vm gets the first Vm's context area: a second Vm's installation overwrites the first's values
+!! rust-bin:each_vm_of_one_compiled_program_has_its_own_area concurrent-vms.test:cv-concurrent-*
+## native/src/runtime/vm.rs
+<<<<
+        self.context_table = vec![0u64; (bytes as usize).div_ceil(8)];
+        self.context_ptr = if self.context_table.is_empty() { std::ptr::null_mut() } else { self.context_table.as_mut_ptr() };
+====
+        static FIRST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        self.context_table = vec![0u64; (bytes as usize).div_ceil(8)];
+        let mine = self.context_table.as_mut_ptr() as usize;
+        let first = match FIRST.compare_exchange(0, mine, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire) {
+            Ok(_) => mine,
+            Err(first) => first,
+        };
+        self.context_ptr = if self.context_table.is_empty() { std::ptr::null_mut() } else { first as *mut u64 };
+>>>>
+
+@@ ctx-recycled-uncleared a new Vm takes over the area of a Vm its thread dropped, uncleared: it starts with the destroyed Vm's installed values
+!! rust-bin:each_vm_of_one_compiled_program_has_its_own_area
+## native/src/runtime/vm.rs
+<<<<
+        self.context_table = vec![0u64; (bytes as usize).div_ceil(8)];
+        self.context_ptr = if self.context_table.is_empty() { std::ptr::null_mut() } else { self.context_table.as_mut_ptr() };
+====
+        let words = (bytes as usize).div_ceil(8);
+        self.context_table = RECYCLED.with(|r| r.borrow_mut().take()).filter(|t| t.len() == words).unwrap_or_else(|| vec![0u64; words]);
+        self.context_ptr = if self.context_table.is_empty() { std::ptr::null_mut() } else { self.context_table.as_mut_ptr() };
+>>>>
+<<<<
+impl Drop for Vm {
+    fn drop(&mut self) {
+====
+thread_local! {
+    static RECYCLED: std::cell::RefCell<Option<Vec<u64>>> = const { std::cell::RefCell::new(None) };
+}
+
+impl Drop for Vm {
+    fn drop(&mut self) {
+        let table = std::mem::take(&mut self.context_table);
+        RECYCLED.with(|r| *r.borrow_mut() = Some(table));
+>>>>
+
+@@ ctx-reset-keeps-installation a reset (the next run of the Vm) keeps the previous run's installed words, whose collection headers its collection then frees
+!! rust-bin:each_vm_of_one_compiled_program_has_its_own_area
+## native/src/runtime/vm.rs
+<<<<
+        self.context_table.fill(0);
+====
+        let _ = &self.context_table;
+>>>>
+
+@@ ctx-roots-wrong-vm a context-owned collection is rooted in the first Vm made, not in the Vm that installed it
+!! concurrent-vms.test:cv-gc-stress concurrent-vms.test:cv-concurrent-*
+## native/src/runtime/ops.rs
+<<<<
+pub extern "C" fn rt_context_root(p: *mut Vm, h: Value) -> Value {
+    vm(p).context_roots.push(h);
+    UNIT
+}
+====
+pub extern "C" fn rt_context_root(p: *mut Vm, h: Value) -> Value {
+    static FIRST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let first = match FIRST.compare_exchange(0, p as usize, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire) {
+        Ok(_) => p as usize,
+        Err(first) => first,
+    };
+    if first == p as usize {
+        vm(p).context_roots.push(h);
+    }
+    UNIT
+}
+>>>>
+
+@@ ctx-wrong-slot a context load reads the word after its slot: another field's (or another context's) layout
+!! contexts.test:contexts-native-* concurrent-vms.test:cv-oracle
+## native/src/codegen/clif.rs
+<<<<
+                let v = self.b.ins().load(I64, MemFlagsData::trusted(), area, *offset as i32);
+====
+                let v = self.b.ins().load(I64, MemFlagsData::trusted(), area, (*offset + 8) as i32);
+>>>>
+
+# ---------------------------------------------------------------------------
+# Program metadata
+
+@@ prog-latest-vm the runtime's metadata reads take the program of the Vm made last on the thread (the thread-local current program, restored)
+!! rust-bin:two_programs_alternate_on_one_thread rust-lib:enum_hash_and_show_read_names_never_numbers concurrent-vms.test:cv-source-program
+## native/src/runtime/ops.rs
+<<<<
+pub(crate) fn program<'a>(p: *mut Vm) -> &'a ProgramInfo {
+    // SAFETY: P is the running Vm, alive for the operation; its program is
+    // immutable and outlives every borrow an operation takes.
+    unsafe { &(*p).info }
+}
+====
+pub(crate) fn program<'a>(p: *mut Vm) -> &'a ProgramInfo {
+    // SAFETY: as the mutant pretends: the latest Vm's program.
+    let _ = p;
+    unsafe { &*super::vm::LATEST.with(|l| l.get()) }
+}
+>>>>
+## native/src/runtime/vm.rs
+<<<<
+#[repr(C)]
+pub struct Vm {
+====
+thread_local! {
+    pub static LATEST: std::cell::Cell<*const ProgramInfo> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+#[repr(C)]
+pub struct Vm {
+>>>>
+<<<<
+    pub fn new(info: std::sync::Arc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
+====
+    pub fn new(info: std::sync::Arc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
+        LATEST.with(|l| l.set(std::sync::Arc::as_ptr(&info)));
+>>>>
+
+@@ prog-first-process-wide the runtime's metadata reads take one process-wide program, the first Vm's
+!! rust-bin:two_programs_alternate_on_one_thread rust-bin:a_refusal_names_its_own_programs_declaration
+## native/src/runtime/ops.rs
+<<<<
+pub(crate) fn program<'a>(p: *mut Vm) -> &'a ProgramInfo {
+    // SAFETY: P is the running Vm, alive for the operation; its program is
+    // immutable and outlives every borrow an operation takes.
+    unsafe { &(*p).info }
+}
+====
+pub(crate) fn program<'a>(p: *mut Vm) -> &'a ProgramInfo {
+    static FIRST: std::sync::OnceLock<std::sync::Arc<ProgramInfo>> = std::sync::OnceLock::new();
+    // SAFETY: P is the running Vm.
+    FIRST.get_or_init(|| unsafe { (*p).info.clone() })
+}
+>>>>
+
+@@ prog-show-first-process-wide rendering a value at the program boundary reads the first program seen, not its Vm's
+!! rust-bin:a_refusal_names_its_own_programs_declaration rust-lib:enum_hash_and_show_read_names_never_numbers
+## native/src/runtime/show.rs
+<<<<
+fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
+====
+fn show_into(prog: &ProgramInfo, v: Value, out: &mut String) {
+    static FIRST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let first = match FIRST.compare_exchange(0, prog as *const ProgramInfo as usize, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire) {
+        Ok(_) => prog as *const ProgramInfo as usize,
+        Err(first) => first,
+    };
+    // SAFETY: as the mutant pretends: the first program outlives every Vm.
+    let prog: &ProgramInfo = unsafe { &*(first as *const ProgramInfo) };
+>>>>
+
+# ---------------------------------------------------------------------------
+# The stack guard's records
+
+@@ guard-one-thread one guarded thread per process: a second thread's guard is refused while another is installed
+!! native_stack:threads concurrent-vms.test:cv-concurrent-* rust-lib:records_are_per_thread
+## native/src/runtime/platform/records.rs
+<<<<
+    if mine().is_some() {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "this thread's stack-overflow guard is already installed"));
+    }
+    // A record a dead thread
+====
+    if mine().is_some() || in_use() > 0 {
+        return Err(io::Error::new(io::ErrorKind::AlreadyExists, "this thread's stack-overflow guard is already installed"));
+    }
+    // A record a dead thread
+>>>>
+
+@@ guard-publish-process-wide a publication goes to the first record whatever thread publishes: one thread overwrites another's published stack
+!! native_stack:threads rust-lib:records_are_per_thread
+## native/src/runtime/platform/records.rs
+<<<<
+    let record = MINE_RECORD.with(|r| r.get());
+    if !record.is_null() {
+        // SAFETY: MINE_RECORD holds null or the address of the record this
+        // thread claimed, an element of the static TABLE.
+        unsafe { &*record }.publish(words);
+    }
+====
+    let record = MINE_RECORD.with(|r| r.get());
+    if !record.is_null() {
+        TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING)).unwrap_or(unsafe { &*record }).publish(words);
+    }
+>>>>
+
+@@ guard-wrong-thread the handler takes the first guarded record for any fault, whatever thread faulted: classified by another thread's stack
+!! native_stack:threads rust-lib:records_are_per_thread
+## native/src/runtime/platform/records.rs
+<<<<
+    TABLE.iter().find(|r| r.owner.load(Ordering::Acquire) == token)
+====
+    TABLE.iter().find(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING))
+>>>>
+
+@@ guard-release-other releasing a guard frees the first record in use, perhaps another thread's
+!! native_stack:threads rust-lib:records_are_per_thread
+## native/src/runtime/platform/records.rs
+<<<<
+    MINE.with(|m| {
+        if m.0.get() == index + 1 {
+            m.0.set(0);
+            MINE_RECORD.with(|r| r.set(std::ptr::null()));
+        }
+    });
+    free(index);
+====
+    MINE.with(|m| {
+        if m.0.get() == index + 1 {
+            m.0.set(0);
+            MINE_RECORD.with(|r| r.set(std::ptr::null()));
+        }
+    });
+    let first = TABLE.iter().position(|r| !matches!(r.owner.load(Ordering::Acquire), FREE | CLAIMING)).unwrap_or(index);
+    free(first);
+>>>>
+
+@@ guard-handler-removed-early every guard's drop restores the previous dispositions, though other threads are still guarded
+%% linux-x86_64 linux-aarch64 macos-aarch64
+!! native_stack:threads
+## native/src/runtime/platform/guard.rs
+<<<<
+            *installed -= 1;
+            if *installed == 0 {
+                restore_handler();
+            }
+====
+            *installed -= 1;
+            restore_handler();
+>>>>
+
+@@ guard-stale-after-exit a thread that ends holding a record never releases it: the record outlives its thread, and a later thread of the same token would inherit it
+!! rust-lib:records_are_per_thread
+## native/src/runtime/platform/records.rs
+<<<<
+impl Drop for Releaser {
+    fn drop(&mut self) {
+        MINE_RECORD.with(|r| r.set(std::ptr::null()));
+        let index = MINE.with(|m| m.0.replace(0));
+        if index != 0 {
+            free(index - 1);
+        }
+    }
+}
+====
+impl Drop for Releaser {
+    fn drop(&mut self) {
+        let _ = MINE.with(|m| m.0.get());
+    }
+}
+>>>>
+
+@@ guard-handler-thread-local the POSIX handler finds the faulting thread's record through a thread-local, which is not async-signal-safe
+%% linux-x86_64 linux-aarch64 macos-aarch64
+!! concurrent-vms.test:cv-source-guard-records
+## native/src/runtime/platform/guard.rs
+<<<<
+    let record = records::find(super::thread_token())?;
+    let (guard_low, low_bound) = record.words();
+====
+    let record = records::mine()?;
+    let (guard_low, low_bound) = record.words();
+>>>>
+
+@@ guard-handler-allocates the POSIX handler formats its report on the heap (not async-signal-safe: the faulting thread may hold the allocator's lock)
+%% linux-x86_64 linux-aarch64 macos-aarch64
+!! concurrent-vms.test:cv-source-guard-records
+## native/src/runtime/platform/guard.rs
+<<<<
+    let len = record.label(&mut label);
+    write_all(fd, &label[..len]);
+    write_all(fd, OVERFLOW_LINE);
+    // SAFETY: _exit(2) has no preconditions.
+    unsafe { libc::_exit(if executable { 1 } else { 0 }) }
+====
+    let len = record.label(&mut label);
+    let text = format!("{}{}", String::from_utf8_lossy(&label[..len]), String::from_utf8_lossy(OVERFLOW_LINE));
+    write_all(fd, text.as_bytes());
+    // SAFETY: _exit(2) has no preconditions.
+    unsafe { libc::_exit(if executable { 1 } else { 0 }) }
+>>>>
+
+@@ guard-thread-only-termination an overflow ends only the faulting thread (exit(2) of the thread, not the process), as if its isolated VM made that safe
+%% linux-x86_64 linux-aarch64
+!! native_stack:threads
+## native/src/runtime/platform/guard.rs
+<<<<
+    write_all(fd, OVERFLOW_LINE);
+    // SAFETY: _exit(2) has no preconditions.
+    unsafe { libc::_exit(if executable { 1 } else { 0 }) }
+}
+====
+    write_all(fd, OVERFLOW_LINE);
+    let _ = executable;
+    // SAFETY: as the mutant pretends: only this thread ends.
+    unsafe {
+        libc::syscall(libc::SYS_exit, 0);
+    }
+    loop {}
+}
+>>>>
+
+# ---------------------------------------------------------------------------
+# Thread-local runtime state that must not outlive or cross a Vm
+
+@@ pool-stale-vm a pooled coroutine stack starts with the Vm that first used the thread's pool, not the Vm that starts it
+%% linux-x86_64
+!! concurrent-vms.test:cv-rounds concurrent-vms.test:cv-gc-stress-rounds
+## native/src/runtime/coroutine.rs
+<<<<
+        co as usize,                      // r13
+        p as usize,                       // r12
+====
+        co as usize,                      // r13
+        {
+            thread_local! { static FIRST: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+            FIRST.with(|f| { if f.get() == 0 { f.set(p as usize) }; f.get() })
+        },                                // r12
+>>>>
+
+@@ callback-active-kept a closed transition leaves its Vm as the thread's waiting execution environment: a callback after the call returned runs in it
+!! c-callbacks.test:cb-refused-retained
+## native/src/runtime/callback.rs
+<<<<
+    let closed = vm.foreign_open.pop();
+    ACTIVE.with(|a| a.set(previous as *mut Vm));
+====
+    let closed = vm.foreign_open.pop();
+    let _ = previous;
+    ACTIVE.with(|a| a.set(p));
+>>>>
