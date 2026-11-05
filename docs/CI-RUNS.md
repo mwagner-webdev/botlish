@@ -89,6 +89,13 @@ pending, requested) and cancels a run when:
   `identical`): the branch tests nothing that main's own runs do not; or
 * its branch was deleted and the run's commit is in main.
 
+Prune runs are in no concurrency group. In one, the next push to main or
+the next hour replaced a run still waiting for a runner, and while the pool
+was full, which is when pruning matters, none ever got one (2026-11-05:
+three runs in a row replaced while queued). Runs that overlap are harmless:
+each reads the state as it is, and a run already cancelled is only reported
+as one it could not cancel. A prune run still needs a runner like any job.
+
 It never cancels:
 
 * **a run of main.** The concurrency groups already cancel main's
@@ -349,6 +356,11 @@ three.
 * A release run publishes its push run's artifact, which expires after the
   repository's artifact retention (90 days by default). A commit's release
   run starts as soon as its tests are green.
+* The gate must not overlap itself (two runs could dispatch one release
+  twice), so it stays in its group, and there a newer run replaces one
+  still waiting: under a full pool, every finished workflow on main
+  replaces the waiting gate run, and the gate runs once the queue drains.
+  A release waits for the end of a burst; nothing is lost.
 * GitHub can delay or skip scheduled runs under load. The schedules are
   backstops, never the primary trigger.
 * A run that GITHUB_TOKEN started, such as a gate's dispatch, may not

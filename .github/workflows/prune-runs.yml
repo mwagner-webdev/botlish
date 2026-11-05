@@ -9,9 +9,15 @@ name: prune runs
 # cancels main's superseded runs), of a tag or of a fork's pull request.
 #
 # Every push to main runs it, documentation-only merges included; the
-# hourly schedule catches runs started on a merged branch later. A newer run
-# cancels this one: each reads the state as it is. A manual run with dry_run
-# only reports.
+# hourly schedule catches runs started on a merged branch later. A manual
+# run with dry_run only reports.
+#
+# No concurrency group: a run waiting for a runner must keep its place in
+# the queue. In a group, the next push or the next hour replaced it, and
+# while the pool was full (when pruning matters) no run ever got a runner
+# (2026-11-05: three in a row replaced while queued). Runs that overlap are
+# harmless: each reads the state as it is, and cancelling a run already
+# cancelled only reports that it could not.
 
 on:
   push:
@@ -27,10 +33,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: prune-runs
-  cancel-in-progress: true
 
 jobs:
   prune:
