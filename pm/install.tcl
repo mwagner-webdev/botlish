@@ -292,8 +292,10 @@ proc pm::install::Apply {ctx plan state force descriptorBytes {viewSpec {}}} {
     set report {}
     set operations {}
     set meta [dict get $ctx meta]
-    set oldViews [pm::state::views $meta]
-    set oldLayout [pm::state::layout $meta]
+    # (The record read once: a large one's JSON costs.)
+    set old [pm::state::readAll $meta]
+    set oldViews [dict get $old views]
+    set oldLayout [dict get $old layout]
     # The package graph: the manager's own file, never one someone placed.
     set graphPath [GraphPath $ctx]
     if {[pm::Exists $graphPath] && ($oldLayout ne "graph" || [file type $graphPath] ne "file")} {
@@ -371,7 +373,7 @@ proc pm::install::Apply {ctx plan state force descriptorBytes {viewSpec {}}} {
     if {$oldLayout eq "nested" && [dict size $state] > 0} {
         lappend notes "note: the packages were installed one copy per dependency path by an earlier package manager: they are installed again as the application's one dependency graph, each package once"
     }
-    if {$oldGraph ne "" && [encoding convertfrom utf-8 $oldGraph] ne [pm::graph::OfState [pm::state::application $meta] $state]} {
+    if {$oldGraph ne "" && [encoding convertfrom utf-8 $oldGraph] ne [pm::graph::OfState [dict get $old application] $state]} {
         lappend notes "note: .bot_modules/.graph was changed since it was written; it is derived again (the package graph is the package manager's, never your file)"
     }
     if {$operations eq "" && [pm::Exists $statePath] && [pm::ReadBytes $statePath] eq $newStateBytes
