@@ -224,7 +224,10 @@ class Model:
         work = [start]
         while work:
             node = work.pop()
-            value = self.compute(node)
+            # Joined with the current value: a nested solve may have raised
+            # it while this computation ran (a cycle through NODE), and a
+            # value must never go down.
+            value = self.prop.join(self.values[node], self.compute(node))
             if value != self.values[node]:
                 self.values[node] = value
                 work.extend(self.users.get(node, ()))

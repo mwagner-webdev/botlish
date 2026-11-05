@@ -5,6 +5,7 @@
 #
 #   tclsh9.0 audit/declaration-summaries/tools/fuzz.tcl ?-seed N? ?-programs N?
 #       ?-decls N? ?-queries N? ?-reference 0|1? ?-budget N? ?-keep DIR?
+#       ?-progress 0|1?
 #
 # Each program declares 1 to -decls parameterized structs of 0 to 3 slots
 # (the oracle's type language: scalars, List, a Fn's argument and result,
@@ -24,7 +25,7 @@ source [file join $root compiler compiler.tcl]
 source [file join $root surface surface.tcl]
 source [file join $root audit declaration-summaries tools parity.tcl]
 
-array set opt {-seed 1 -programs 40 -decls 4 -queries 30 -reference 1 -budget 300 -keep ""}
+array set opt {-seed 1 -programs 40 -decls 4 -queries 30 -reference 1 -budget 300 -keep "" -progress 0}
 array set opt $argv
 expr {srand($opt(-seed))}
 # (An old walk that has not finished after -budget field reads does not
@@ -221,6 +222,9 @@ try {
             continue
         }
         dict incr stats programs
+        if {$opt(-progress)} {
+            puts stderr "program $p ([clock format [clock seconds] -format %T])"
+        }
         hir::activate $hir
         if {[dict size [hir::summaries::ExpansiveDeclarations]] > 0} {
             dict incr stats nonuniform
