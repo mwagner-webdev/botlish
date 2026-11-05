@@ -1,0 +1,157 @@
+# corpus.bot -- the declarations of the parity corpus
+# (PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md, "Parity"): every kind
+# of declaration the component analyses walk -- ordinary, opaque, recursive,
+# mutually recursive, tree and identity structs, parameterized structs with
+# value, phantom, pointee and function-type slots, nested applications,
+# enums, refinements, collections, functions, coroutines, C pointers and
+# DecimalRounded -- and the non-uniform recursions the old walks could not
+# finish on. tools/parity.tcl's corpus applies them to a pool of arguments.
+import std::list
+import std::mutable_vector
+import std::mutable_array
+import std::ffi::c
+
+struct Message:
+    value: int
+
+struct Event:
+    value: int
+
+enum Color:
+    Red, Green
+
+refined type Small = int
+
+struct Plain:
+    a: int
+    b: str
+
+struct HoldsFn:
+    f: Fn{args: [int], return: int}
+
+struct HoldsAnyFn:
+    f: Fn{args: [any], return: int}
+
+struct HoldsErrFn:
+    f: Fn{args: [], return: int, errors: [Oops]}
+
+error Oops
+
+struct HoldsVector:
+    v: MutableVector[int]
+
+struct HoldsArray:
+    a: MutableArray[int]
+
+struct HoldsCo:
+    c: Coroutine{args: [Message], return: Event}
+
+struct HoldsPtr:
+    p: std::ffi::c::Ptr[std::ffi::c::Int]
+
+struct HoldsDecimal:
+    d: DecimalRounded{minDecimalsPreserved: 2}
+
+struct HoldsColor:
+    c: Color
+
+struct HoldsAny:
+    x: any
+
+struct Tree:
+    kids: List[Tree]
+    f: Fn{args: [int], return: int}
+
+tree struct Rose[T]:
+    value: T
+    children: List[Rose[T]]
+
+struct Mutual1:
+    other: List[Mutual2]
+    n: int
+
+struct Mutual2:
+    back: Mutual1
+
+opaque struct Hidden:
+    secret: Fn{args: [], return: int}
+
+struct Box[T]:
+    value: T
+
+struct Phantom[T]:
+    value: int
+
+struct Pair[A, B]:
+    first: A
+    second: B
+
+struct Many[T]:
+    values: List[T]
+
+struct Deep[T]:
+    values: List[List[T]]
+
+struct Handler[T]:
+    f: Fn{args: [T], return: int}
+
+struct Getter[T]:
+    f: Fn{args: [], return: T}
+
+struct Ref[T]:
+    p: std::ffi::c::Ptr[T]
+
+struct Inner[T]:
+    value: T
+
+struct Outer[T]:
+    inner: Inner[T]
+
+struct Wrap[T]:
+    p: Phantom[T]
+
+struct Node[T]:
+    value: T
+    children: List[Node[T]]
+
+struct Swap[A, B]:
+    value: A
+    next: List[Swap[B, A]]
+
+struct VecOf[T]:
+    v: MutableVector[T]
+
+struct SetOf[T]:
+    s: ImmutableSet[T]
+
+struct FnOf[T]:
+    f: Fn{args: [T], return: T}
+
+struct ListFn[T]:
+    fs: List[Fn{args: [], return: T}]
+
+struct W[T]:
+    next: List[W[List[T]]]
+
+struct Mixed[A, B]:
+    value: A
+    next: List[Mixed[A, List[B]]]
+
+struct PhantomRec[T]:
+    next: List[PhantomRec[List[T]]]
+
+struct GrowA[T]:
+    b: List[GrowB[List[T]]]
+
+struct GrowB[T]:
+    a: GrowA[T]
+
+struct GrowV[T]:
+    value: T
+    next: List[GrowV[Box[T]]]
+
+struct NonUniformFn[T]:
+    f: Fn{args: [int], return: int}
+    next: List[NonUniformFn[List[T]]]
+
+1

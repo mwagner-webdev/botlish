@@ -1442,7 +1442,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range intset emitdfa emission rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
+    foreach file {summaries syntax static staticdeps imports resolve flags variadic contexts injection direct privacy coroutines affine resources mutvec iteration relations transfer refcheck hygiene sourcetypes structs enums layouts cabi imprint traits syscall internal borrow foreign errordecls refinements types operators decimal listlength exactvalue signatures modulebinding refine repeatable lower condition format read aot specialize range intset emitdfa emission rangerec callables containers semantic exports callbacks completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep fold resourceescape warnings recovery methods declarations interchange} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

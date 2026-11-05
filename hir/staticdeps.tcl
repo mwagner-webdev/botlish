@@ -2905,19 +2905,35 @@ proc hir::staticdeps::CanCarry {hir type {seen {}}} {
     }
     if {[hir::types::IsNamedStruct $type]} {
         # (An application's fields, its slots replaced by the arguments:
-        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md.)
-        if {$type in $seen} {
-            return 0
-        }
-        lappend seen $type
-        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-            if {[CanCarry $hir $t $seen]} {
-                return 1
-            }
+        # TRAIT-CONSTRAINED-IMPRINTED-TYPES.md -- answered from the
+        # declaration's summary, hir/summaries.tcl, by whether each argument
+        # can carry where a value of it is held: a struct met again adds
+        # nothing, the least fixpoint.)
+        set classes [lmap a [hir::summaries::Arguments $type] {CanCarry $hir $a $seen}]
+        set level [hir::summaries::Level canCarry $type $classes]
+        return [expr {$level ne "" && $level > 0}]
+    }
+    return 0
+}
+
+# CanCarry of {nstruct ID ARGUMENTS} from its applied fields (the summary's
+# node; a declaration's field types name no exact block, so no HIR is read).
+proc hir::staticdeps::CanCarryNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        if {[CanCarry {} $t]} {
+            return 1
         }
     }
     return 0
 }
+
+hir::summaries::define canCarry -algebra classes -neutral any \
+    -probes [list any [list fn [dict create args {} return int errors {}]]] \
+    -node hir::staticdeps::CanCarryNode
 
 # 1 if a value of static TYPE holds a mutable value (a MutableVector or a
 # MutableArray: the value itself, an element, a field, at any depth): a value

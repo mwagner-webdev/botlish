@@ -326,6 +326,8 @@ namespace eval hir::types {
     # so a declared type of practical depth is never cut, and finite, so
     # inference over applications terminates.
     variable appliedDepth 6
+    # 1 while Totality is asked for a class alone (TotalityClassOf).
+    variable totalityClassOnly 0
     # Registered *type constructors* (MINIMAL-APPLIED-LIST-TYPES.md): NAME
     # -> arity. A source type annotation "NAME[ARG]" (surface::parser::
     # TypeExpr) is resolved generically against this table (resolveNamed/
@@ -1809,17 +1811,34 @@ proc hir::types::MakeMutArray {elem depth} {
 # 1 if TYPE is or holds a MutableVector or a MutableArray (an element, a
 # field): a type some place of which may be mutated.
 #
-# Each named struct type is walked once per question (VISITED): one met
-# again either is being walked (a cycle adds nothing) or was walked and
-# holds none (the walk would have ended at the first that did). A walk that
-# remembered only its own path took every path through a type whose fields
-# reach one type twice -- exponential in the nesting of an application
-# whose affine argument is never cut (WRITTEN-AFFINE-APPLICATIONS-
-# MILESTONE-1.md, section 20).
+# A named struct type is answered from its declaration's summary
+# (hir/summaries.tcl, PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md):
+# its own answer, or a slot whose argument mentions one where a field holds
+# a value of it -- never by walking the application's fields, which a
+# non-uniform recursion grows without end and a walk along every path made
+# exponential in the nesting of an affine argument (WRITTEN-AFFINE-
+# APPLICATIONS-MILESTONE-1.md, section 20). Each struct type is answered once
+# per question (VISITED, the arguments' answers included).
 proc hir::types::MentionsMutable {type} {
     set visited [dict create]
     return [MentionsMutableFrom $type visited]
 }
+
+# MentionsMutable of {nstruct ID ARGUMENTS} from its applied fields (the
+# summary's node).
+proc hir::types::MentionsMutableNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        if {[MentionsMutable $t]} { return 1 }
+    }
+    return 0
+}
+
+hir::summaries::define mentionsMutable -algebra classes -neutral int \
+    -probes [list int [list mutvec int]] -node hir::types::MentionsMutableNode
 
 proc hir::types::MentionsMutableFrom {type visitedVar} {
     upvar 1 $visitedVar visited
@@ -1839,12 +1858,14 @@ proc hir::types::MentionsMutableFrom {type visitedVar} {
     }
     if {[IsNamedStruct $type]} {
         if {[dict exists $visited $type]} {
-            return 0
+            return [dict get $visited $type]
         }
-        dict set visited $type 1
-        foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-            if {[MentionsMutableFrom $t visited]} { return 1 }
-        }
+        dict set visited $type 0
+        set classes [lmap a [hir::summaries::Arguments $type] {MentionsMutableFrom $a visited}]
+        set level [hir::summaries::Level mentionsMutable $type $classes]
+        set result [expr {$level ne "" && $level > 0}]
+        dict set visited $type $result
+        return $result
     }
     return 0
 }
@@ -2499,8 +2520,12 @@ proc hir::types::Totality {operation type {seen {}}} {
             }
             nstruct {
                 # (SEEN holds the struct types being walked, an application
-                # with its arguments: a recursive parameterized struct's
-                # applications are finitely many, hir::structs::apply.)
+                # with its arguments.) The class is the declaration
+                # summary's (TotalityClass), never an unfolding of the
+                # application; the parts are walked only to say why a
+                # class is not total -- the first part of that class, in
+                # field order -- and a part whose class is total is never
+                # entered (TotalityParts).
                 set id [lindex $type 1]
                 if {$type in $seen} {
                     return {total ""}
@@ -2508,36 +2533,27 @@ proc hir::types::Totality {operation type {seen {}}} {
                 if {![hir::structs::declared $id] && [hir::layouts::OfStructId $id] eq ""} {
                     return [list unknown "$id is not a declared struct"]
                 }
-                set parts {}
-                set shown [show $type]
-                set identity [hir::structs::identityOf $id]
-                if {$identity ne ""} {
-                    # A struct that declares its identity
-                    # (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md) is
-                    # compared and hashed by it alone: its identity fields'
-                    # elements are its components, named in the type's own
-                    # terms (its representation is its owner's), and every
-                    # other field takes no part.
-                    set fields [hir::structs::AppliedFieldTypes $type]
-                    foreach field [dict get $identity fields] label [hir::structs::IdentityLabels [dict get $identity form]] {
-                        set t [dict get $fields $field]
-                        lappend parts [list "the $label of $shown" [if {$t eq {}} {string cat any} else {elementOf $t}]]
-                    }
-                    return [Components $operation $parts [concat $seen [list $type]]]
+                set class [TotalityClass $operation $type]
+                if {$class eq "total"} {
+                    return {total ""}
                 }
-                set child [hir::structs::treeField $id]
-                foreach {name t} [hir::structs::AppliedFieldTypes $type] {
-                    if {$name eq $child} {
-                        # A tree struct's child field (TREE-STRUCT-
-                        # MILESTONE-1.md) is a List of values of this very
-                        # application: it adds no requirement of its own,
-                        # so the tree is total exactly when its other
-                        # fields are (every tree is finite).
-                        continue
-                    }
-                    lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
+                variable totalityClassOnly
+                if {$totalityClassOnly} {
+                    return [list $class ""]
                 }
-                return [Components $operation $parts [concat $seen [list $type]]]
+                if {[hir::summaries::Whistle $type $seen]} {
+                    # A non-uniform recursion grown twice along this walk:
+                    # met again, as an exact repetition is (summaries.tcl's
+                    # reason walk).
+                    return {total ""}
+                }
+                set result [Components $operation [TotalityParts $type] [concat $seen [list $type]]]
+                if {$seen eq {} && [lindex $result 0] ne $class} {
+                    # (The walk stopped short of every component of the
+                    # summary's class: Whistle's account.)
+                    set result [list $class [TotalityFallback $operation $type $class]]
+                }
+                return $result
             }
         }
     }
@@ -2577,6 +2593,117 @@ proc hir::types::Components {operation parts seen} {
     }
     return {total ""}
 }
+
+# The parts {WHAT TYPE} of a value of the named struct type TYPE that
+# Totality reads (in its own terms), in field order: an identity struct's
+# identity elements (REPRESENTATION-INDEPENDENT-VALUE-IDENTITY.md), else
+# every field but a tree struct's child field (TREE-STRUCT-MILESTONE-1.md).
+proc hir::types::TotalityParts {type} {
+    set id [lindex $type 1]
+    set parts {}
+    set shown [show $type]
+    set identity [hir::structs::identityOf $id]
+    if {$identity ne ""} {
+        # A struct that declares its identity is compared and hashed by it
+        # alone: its identity fields' elements are its components, named in
+        # the type's own terms (its representation is its owner's), and
+        # every other field takes no part.
+        set fields [hir::structs::AppliedFieldTypes $type]
+        foreach field [dict get $identity fields] label [hir::structs::IdentityLabels [dict get $identity form]] {
+            set t [dict get $fields $field]
+            set element [if {$t eq {}} {string cat any} else {elementOf $t}]
+            if {$element eq ""} {
+                # (A List of `any` is the bare kind, whose element is
+                # unknown: its summary's probe of the unknown class.)
+                set element any
+            }
+            lappend parts [list "the $label of $shown" $element]
+        }
+        return $parts
+    }
+    set child [hir::structs::treeField $id]
+    foreach {name t} [hir::structs::AppliedFieldTypes $type] {
+        if {$name eq $child} {
+            # A tree struct's child field is a List of values of this very
+            # application: it adds no requirement of its own, so the tree is
+            # total exactly when its other fields are (every tree is finite).
+            continue
+        }
+        lappend parts [list "field \"$name\" of $shown" [if {$t eq {}} {string cat any} else {set t}]]
+    }
+    return $parts
+}
+
+# The class (total, unknown, none) of the named struct type TYPE for
+# OPERATION, from its declaration's summary (hir/summaries.tcl,
+# PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md): Totality reads an
+# argument at a slot position only where a value of it is a component (a
+# field, an element, an identity element) and only by its own class, so the
+# summary holds the declaration's class at each slot for each class of its
+# argument, and the application's class is the worst of them. A struct met
+# again through its own fields adds nothing (the least fixpoint): a
+# recursive type is total when every other component is.
+proc hir::types::TotalityClass {operation type} {
+    set classes [lmap a [hir::summaries::Arguments $type] {
+        lsearch -exact {total unknown none} [TotalityClassOf $operation $a]
+    }]
+    set level [hir::summaries::Level totality.$operation $type $classes]
+    if {$level eq ""} {
+        return unknown
+    }
+    return [lindex {total unknown none} $level]
+}
+
+# Totality of {nstruct ID ARGUMENTS} for OPERATION from its parts (the
+# summaries' node, hir::summaries::Compute): the worst class of the parts,
+# each nested named struct read from its own summary.
+proc hir::types::TotalityNode {operation id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    set worst 0
+    foreach part [TotalityParts $type] {
+        set t [lindex $part 1]
+        set level [lsearch -exact {total unknown none} [TotalityClassOf $operation $t]]
+        if {$level > $worst} {
+            set worst $level
+        }
+    }
+    return $worst
+}
+
+# Totality's class of TYPE for OPERATION alone: no reason is looked for
+# (totalityClassOnly: a named struct's class is its summary's, and Totality
+# walks its parts only for a reason).
+proc hir::types::TotalityClassOf {operation type} {
+    variable totalityClassOnly
+    set saved $totalityClassOnly
+    set totalityClassOnly 1
+    try {
+        return [lindex [Totality $operation $type] 0]
+    } finally {
+        set totalityClassOnly $saved
+    }
+}
+
+# The reason a value of TYPE has CLASS (not total) when the walk of its
+# parts found none (TotalityParts; summaries.tcl's reason walk).
+proc hir::types::TotalityFallback {operation type class} {
+    set what [expr {$operation eq "hash" ? "hashing" : "equality"}]
+    if {$class eq "none"} {
+        return "its fields hold, through a non-uniformly recursive declaration, a component with no total $what"
+    }
+    return "its fields hold, through a non-uniformly recursive declaration, a component whose $what is not known to be total"
+}
+
+foreach operation {equality hash} {
+    # Probes: int (total), any (unknown), a function type (none).
+    hir::summaries::define totality.$operation -algebra classes -neutral int \
+        -probes [list int any [hir::types::MakeFn {} int {}]] \
+        -node [list hir::types::TotalityNode $operation]
+}
+unset operation
 
 # Why a value of runtime KIND has no OPERATION, in source terms.
 proc hir::types::NoTotality {operation kind} {
@@ -2771,8 +2898,13 @@ proc hir::types::SendClass {type {assumed {}} {seen {}}} {
     return [list unknown "its static type is [show $type], which does not say what its values are"]
 }
 
-# SendClass of the named struct (or application) TYPE.
+# SendClass of the named struct (or application) TYPE. The class is the
+# declaration summary's (SendStructClass), never an unfolding of the
+# application; the parts are walked only to say why a class is not total, a
+# part whose class is total never entered (as Totality's: summaries.tcl's
+# reason walk).
 proc hir::types::SendStruct {type assumed seen} {
+    variable totalityClassOnly
     set id [lindex $type 1]
     if {$type in $seen} {
         return {total ""}
@@ -2780,11 +2912,33 @@ proc hir::types::SendStruct {type assumed seen} {
     if {![hir::structs::declared $id]} {
         return [list unknown "$id is not a declared struct"]
     }
+    set class [SendStructClass $type $assumed]
+    if {$class eq "total"} {
+        return {total ""}
+    }
+    if {$totalityClassOnly} {
+        return [list $class ""]
+    }
+    if {[hir::summaries::Whistle $type $seen]} {
+        return {total ""}
+    }
+    set result [SendParts $type $assumed [concat $seen [list $type]]]
+    if {$seen eq {} && [lindex $result 0] ne $class} {
+        set result [list $class [expr {$class eq "none"
+            ? "its fields hold, through a non-uniformly recursive declaration, a component that is not sendable"
+            : "its fields hold, through a non-uniformly recursive declaration, a component not known to be sendable"}]]
+    }
+    return $result
+}
+
+# SendClass of the named struct TYPE from what its owner states and its
+# parts: SEEN already holds TYPE.
+proc hir::types::SendParts {type assumed seen} {
+    set id [lindex $type 1]
     set shown [show $type]
     if {[hir::structs::isContext $id]} {
         return [list none "$shown is a context struct: an installed context is authority, selected by each program's own installation, never a value one VM can hand another"]
     }
-    set seen [concat $seen [list $type]]
     if {[hir::structs::isOpaque $id]} {
         set clause [hir::structs::sendableOf $id]
         if {$clause eq ""} {
@@ -2808,6 +2962,56 @@ proc hir::types::SendStruct {type assumed seen} {
     }
     return [SendComponents $parts $assumed $seen]
 }
+
+# The sendability class of the named struct type TYPE from its declaration's
+# summary (hir/summaries.tcl): SendClass reads an argument at a slot position
+# only where a value of it is a component, and only by its own class (ASSUMED
+# decides the class of an imprint variable among the arguments, never the
+# declaration's own answer), so the application's class is the worst the
+# summary gives its arguments' classes.
+proc hir::types::SendStructClass {type assumed} {
+    set classes [lmap a [hir::summaries::Arguments $type] {
+        lsearch -exact {total unknown none} [SendClassOf $a $assumed]
+    }]
+    set level [hir::summaries::Level send $type $classes]
+    if {$level eq ""} {
+        return unknown
+    }
+    return [lindex {total unknown none} $level]
+}
+
+# SendClass's class of TYPE alone (no reason looked for).
+proc hir::types::SendClassOf {type {assumed {}}} {
+    variable totalityClassOnly
+    set saved $totalityClassOnly
+    set totalityClassOnly 1
+    try {
+        return [lindex [SendClass $type $assumed] 0]
+    } finally {
+        set totalityClassOnly $saved
+    }
+}
+
+# SendClass of {nstruct ID ARGUMENTS} from its parts (the summary's node).
+proc hir::types::SendNode {id arguments} {
+    set type [list nstruct $id]
+    if {$arguments ne {}} {
+        lappend type $arguments
+    }
+    variable totalityClassOnly
+    set saved $totalityClassOnly
+    set totalityClassOnly 1
+    try {
+        set class [lindex [SendParts $type {} [list $type]] 0]
+    } finally {
+        set totalityClassOnly $saved
+    }
+    return [lsearch -exact {total unknown none} $class]
+}
+
+hir::summaries::define send -algebra classes -neutral int \
+    -probes [list int any [hir::types::MakeFn {} int {}]] \
+    -node hir::types::SendNode
 
 # SendClass of a value made of the PARTS {WHAT TYPE}: none if one part is
 # (the first such, named), else unknown if one part is, else total.

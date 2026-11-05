@@ -642,19 +642,6 @@ proc hir::imprint::Bind {sig argTypes explicit callee} {
             return [dict create ok 0 message "$callee: $problem"]
         }
     }
-    foreach name $vars {
-        if {[hir::types::IsAffine [dict get $binding $name]]} {
-            # An affine type bound where no value of the variable exists
-            # (a type argument only: Phantom[T]) makes an application with
-            # an affine argument, as writing it would: one with no finite
-            # form is no type a value can have (hir::structs::Unfolding).
-            set problem [UnfoldingProblem $sig $binding]
-            if {$problem ne ""} {
-                return [dict create ok 0 message "$callee: $problem"]
-            }
-            break
-        }
-    }
     if {[ConstraintsOf $sig] ne {}} {
         # The constructors' obligations (TRAIT-CONSTRAINED-IMPRINTED-
         # TYPES.md): once the variables are established, every application
@@ -670,22 +657,6 @@ proc hir::imprint::Bind {sig argTypes explicit callee} {
         }
     }
     return [dict create ok 1 binding $binding]
-}
-
-# Why the types of signature SIG imprinted with BINDING (an affine type
-# bound at a position no value holds) are no types a value can have, or "":
-# an application they make that nests its affine argument in ever larger
-# types (hir::structs::Unfolding).
-proc hir::imprint::UnfoldingProblem {sig binding} {
-    foreach type [concat [dict get $sig params] [list [dict get $sig result]]] {
-        if {$type eq "" || ![Mentions $type]} continue
-        set imprinted [hir::types::canonical [Substitute $type $binding]]
-        set growth [hir::structs::Unfolding $imprinted]
-        if {$growth ne ""} {
-            return [hir::structs::UnfoldingMessage $imprinted $growth]
-        }
-    }
-    return ""
 }
 
 # 1 if some parameter of SIG holds variable NAME bare (or in a Fn type):

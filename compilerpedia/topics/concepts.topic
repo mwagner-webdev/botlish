@@ -1232,7 +1232,7 @@ summary: `struct Map[K satisfies Hashable, V]:` is a type constructor whose appl
 index: concepts
 alias: parameterized struct; generic struct; type slot; type parameter; satisfies; type constructor; struct type arguments; Map[K, V]
 keywords: slot, satisfies, Hashable, imprint, application, type constructor, constraint, obligation, generic, K, V, TRAIT-NOT-SATISFIED, IMPRINT
-related: concept.structs concept.traits concept.hashable error.imprint error.trait-not-satisfied error.type
+related: concept.structs concept.traits concept.hashable concept.declaration-summaries error.imprint error.trait-not-satisfied error.type
 docs: TRAIT-CONSTRAINED-IMPRINTED-TYPES.md STRUCTS.md C-ABI-TYPES.md
 
 == WHAT IT IS
@@ -1277,6 +1277,13 @@ type a `List[K]`, a field and a result may hold -- never a trait view.
     alike; a recursive affine application (`Node[Coroutine{...}]` holding
     `List[Node[T]]`) is AFFINE-CONTAINER-UNSUPPORTED wherever it is
     written.
+  * A declaration may name itself or another with a larger argument
+    (`struct W[T]: next: List[W[List[T]]]`): it is still one finite
+    declaration, and every application of it is an ordinary type.
+    `W[Coroutine{...}]` holds no handle at any depth (no field holds a
+    value of T), so it is unrestricted, Hashable and sendable, as `W[int]`
+    is. The compiler answers such a type from its declaration, never by
+    expanding it (concept.declaration-summaries).
   * An invalid application -- a constrained slot's argument that does not
     satisfy the trait (a function for Hashable, `any`) -- is
     TRAIT-NOT-SATISFIED where it is written: a parameter, a result, a
@@ -1352,6 +1359,68 @@ struct Outer[T]:
 == MORE
 TRAIT-CONSTRAINED-IMPRINTED-TYPES.md; concept.structs; error.imprint for
 how a function's variables are established.
+
+@topic concept.declaration-summaries
+title: Recursive parameterized types: answered from their declarations
+summary: A parameterized struct that names itself with a larger argument (`next: List[W[List[T]]]`) is one finite declaration; the compiler decides what its applications hold -- ownership, equality and hashing, obligations, errors, sendability -- from a summary of the declaration, never by expanding the application.
+index: concepts
+alias: declaration summary; non-uniform recursion; polymorphic recursion; recursive generic type; W[List[T]]; infinite type expansion
+keywords: recursive, parameterized, application, summary, fixpoint, Hashable, affine, sendable, W, nested, expansion
+related: concept.parameterized-structs concept.hashable concept.structs
+docs: PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md TRAIT-CONSTRAINED-IMPRINTED-TYPES.md
+
+== WHAT IT IS
+    struct W[T]:
+        next: List[W[List[T]]]
+
+Substituting W's argument into its field gives `W[List[T]]`, whose field
+gives `W[List[List[T]]]`, and so on without end: the applications are
+infinitely many, but the declaration is one. What a value of `W[X]` holds
+does not depend on how deep that sequence goes: no field of W holds a
+value of T at any depth, so `W[Coroutine{...}]` owns no handle, compares
+and hashes totally and can be sent, exactly as `W[int]` can.
+
+== RULES
+  * For each declaration the compiler computes once how each question --
+    is a value affine, is its equality and hash total, does it carry a
+    callable's obligation or declared errors, can it be sent, does it hold
+    a mutable value -- depends on each slot: the slot is held where a value
+    of it is a component, or not at all. An application's answer is the
+    declaration's own answer joined with its arguments' answers at the
+    slots that are held.
+  * The summaries are a least fixpoint over the program's declarations, so
+    they exist for every declaration, whatever applications substitution
+    would make; a declaration met again through its own fields adds
+    nothing.
+  * A slot is held differently for each question: a `Fn{args: [T], ...}`
+    field holds no value of T (no ownership, no equality), but its
+    argument type is a caller's obligation; a `Phantom[T]` holds nothing.
+  * A recursive affine application (`Node[Coroutine{...}]`: a value of T in
+    a List of its own applications) is still AFFINE-CONTAINER-UNSUPPORTED:
+    that is a rule of ownership, not of the compiler's analysis.
+
+== EXAMPLES
+@example accept
+import std::list
+
+struct Message:
+    value: int
+
+struct W[T]:
+    next: List[W[List[T]]]
+
+fn count(w: W[Coroutine{args: [Message], return: Message}]) -> int:
+    std::list::length(w.next)
+
+w = W[Coroutine{args: [Message], return: Message}] {next: [W[List[Coroutine{args: [Message], return: Message}]] {next: []}]}
+v = w
+[count(w), count(v), w == v, hash(w) == hash(v)]
+@caption W[Coroutine{...}] holds no handle: it is copied, compared, hashed and passed like any unrestricted value
+@value [1, 1, true, true]
+@end
+
+== MORE
+PARAMETERIZED-DECLARATION-SUMMARIES-MILESTONE-1.md; concept.parameterized-structs.
 
 @topic concept.opaque-structs
 title: Opaque structs: representation owned by one module
