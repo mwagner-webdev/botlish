@@ -703,7 +703,9 @@ What the rule does not prove, with the differential's examples:
   certificate, but the claim's record and the service's hover say
   "certified". It predates this milestone (the same verdict with the
   change stashed). The fix is to treat a poisoned or diagnosed callee like
-  any other tainted expression in `EvalCall`.
+  any other tainted expression in `EvalCall`. (Fixed, with its transitive
+  form -- a helper whose `never` result comes from such a call:
+  EMISSION-CALLEE-DEPENDENCY-CORRECTNESS-MILESTONE-1.md.)
 
 ## 19. Recommendation
 
