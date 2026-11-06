@@ -362,7 +362,7 @@ test pn-shared-in-views {a target-aware package two packages lock at one version
     pm add rendering -project $app -repository $repo
     set r [pm add other -project $app -repository $repo]
     list [appValue $app linux-x86_64] [appValue $app linux-aarch64] \
-        [lsort [glob -tails -directory [file join $app .bot_modules .targets linux-aarch64] *]] \
+        [lsort [glob -tails -types d -directory [file join $app .bot_modules .targets linux-aarch64] *]] \
         [readBytes [file join $app .bot_modules .targets linux-aarch64 .graph]] [kindOf [dict get $r err]]
 } -cleanup cleanup -result {{["linux-x86_64/1.0.0", "linux-x86_64/1.0.0"]} {["linux-aarch64/1.0.0", "linux-aarch64/1.0.0"]} {geo physics rendering} {botlish package graph 1
 application physics rendering

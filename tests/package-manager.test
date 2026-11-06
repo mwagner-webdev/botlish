@@ -826,7 +826,7 @@ test pm-two-versions-conflict {two packages that lock different versions of one 
     writeText [file join $mixed botlish.json] {{"schema": 1, "dependencies": {"physics": "1", "rendering": "2"}, "lock": {"physics": "1.0.0", "rendering": "2.0.0"}}}
     set r2 [pm install -project $mixed -repository $repo]
     list [dict get $r1 status] [kindOf [dict get $r1 err]] [expr {[treeState $app] eq $before}] [appValue $app] \
-        [lrange [split [dict get $r2 err] \n] 0 2] [file exists [file join $mixed .bot_modules]]
+        [lrange [split [string map {\r\n \n} [dict get $r2 err]] \n] 0 2] [file exists [file join $mixed .bot_modules]]
 } -cleanup cleanup -result {1 DEPENDENCY-CONFLICT 1 103 {{error: cannot select one version of geometry for the application's dependency graph: 1.0.3 and 2.0.0 are demanded:} {  physics 1.0.0 locks geometry 1.0.3 (the project -> physics 1.0.0)} {  rendering 2.0.0 locks geometry 2.0.0 (the project -> rendering 2.0.0)}} 0}
 
 test pm-conflict-deterministic {a conflict's report and a graph's installation are independent of the order dependencies are declared, added or found in: two repositories given in either order, botlish.json's entries in either order, the packages added in either order} -body {
@@ -868,7 +868,7 @@ test pm-shared-application-lock {the application's own lock is one demand among 
     set disagree [application "1\n"]
     writeText [file join $disagree botlish.json] {{"schema": 1, "dependencies": {"geometry": "1.1", "physics": "1"}, "lock": {"geometry": "1.1.0", "physics": "1.0.0"}}}
     set r2 [pm install -project $disagree -repository $repo]
-    list [dict get $r1 status] [appValue $agree] [dict get $r2 status] [lrange [split [dict get $r2 err] \n] 0 2]
+    list [dict get $r1 status] [appValue $agree] [dict get $r2 status] [lrange [split [string map {\r\n \n} [dict get $r2 err]] \n] 0 2]
 } -cleanup cleanup -result {0 {[103, 103]} 1 {{error: cannot select one version of geometry for the application's dependency graph: 1.0.3 and 1.1.0 are demanded:} {  physics 1.0.0 locks geometry 1.0.3 (the project -> physics 1.0.0)} {  the application's botlish.json locks geometry 1.1.0 (request "1.1")}}}
 
 test pm-shared-add-and-update-held {add of a package the graph holds takes the version its packages lock (not the newest), and a request it does not satisfy is a conflict; update keeps a dependency some package locks at that version, saying so, and moves it once nothing locks it} -body {

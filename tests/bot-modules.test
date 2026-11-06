@@ -735,8 +735,10 @@ test bm-graph-target-tree {a target package tree holds its own graph: the compil
     }
     set dir [app $files]
     set hir [appHir $dir main.bot -target linux-aarch64]
-    list [lindex [outcomeUnderHir interp $hir] 1] [lindex [split [appRejection $dir] :] 0]
-} -cleanup removeApps -result {{"aarch64"} UNKNOWN-NAMESPACE}
+    # Both targets named: a host's own target is one of them on an arm64 host.
+    set other [catch {appHir $dir main.bot -target linux-x86_64} message options]
+    list [lindex [outcomeUnderHir interp $hir] 1] $other [lindex [dict get $options -errorcode] end]
+} -cleanup removeApps -result {{"aarch64"} 1 UNKNOWN-NAMESPACE}
 
 test bm-graph-cache-and-service {the graph is an input like a source file: editing it makes a cached build miss and a service revision stale; an unchanged one hits} -body {
     set dir [app [concat $sharedGraph [list main.bot $sharedMain]]]
