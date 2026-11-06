@@ -73,7 +73,8 @@ a scalar String, a projected struct) never released the resource (section
 | `tests/http-client.test`, `tests/http/` | 38 tests against independent peers (`server.py`, nghttpd), the PKI (`pki.sh`), the test client, the URI and header oracles |
 | `tests/cffi/http.tcl` | builds the native files for the tests (the release recipe's builds) |
 | `audit/http-client/cleanroom/` | the clean room: its image, harness, consumer program, the `feeds` library, results |
-| `audit/http-client/tools/` | `syntax-fuzz.tcl` (URIs and header fields against their oracles), `mutate.tcl` and `mutants.txt`, `measure.tcl` |
+| `audit/http-client/tools/` | `syntax-fuzz.tcl` (URIs and header fields against their oracles), `mutate.tcl` and `mutants.txt`, `measure.tcl`, `attribute.py` (callgrind attribution) |
+| `audit/http-client/results/` | the measurements as measured |
 | `audit/http-client/bench/bench.bot` | the measurement program |
 | `audit/http-client/findings/` | reproducers of the compiler findings (section 12) |
 | `native/lower.tcl`, `tests/resources/forms.bot` | the release fix and its regression test |
@@ -157,8 +158,9 @@ this milestone's brief, section 12):
   released unit does not build (every fault check compiles to `false`) and
   whose exports (`bh_t_*`) only the test unit has (`http-unit-exports`).
 * **No Tokio runtime.** Hyper's executor and timer traits are implemented
-  on the bridge; tokio is in the dependency graph only through h2's codec
-  types, without `rt`, `time` or `net`.
+  on the bridge; tokio (1.54.1) is in the dependency graph only through
+  h2's codec, with the features `bytes`, `io-util` and `sync`: no `rt`,
+  `time` or `net`.
 
 ## 5. TLS and trust
 
@@ -306,8 +308,10 @@ store when `BOTLISH_CLEANROOM_SYSTEM_CA` names it (and says so in the
 transcript), as the operator of such a network would. Without it, workload
 A fails exactly as it should -- `TlsVerifyFailed self signed certificate
 in certificate chain` -- and every other check passes
-(`results/checks-without-operator-ca.txt`): the client trusts the system's
-store and the program's anchors, and nothing else.
+(`results/checks-without-operator-ca.txt`, from the first run, with the
+compiler of a64bd30 and the artifacts before they were recorded): the
+client trusts the system's store and the program's anchors, and nothing
+else.
 
 ## 10. Testing
 
@@ -324,6 +328,13 @@ built with the test unit. The peers are independent of Hyper and BoringSSL:
   http/1.1 only; wrong-host, expired and untrusted certificates from
   `tests/http/pki.sh`, made by the openssl command-line tool);
 * nghttpd (nghttp2 1.59.0, C) for HTTP/2 over TLS where installed.
+
+This is interoperability evidence, not a conformance claim: the client's
+HTTP/1.1 and HTTP/2 are Hyper's and h2's, and no client conformance suite
+was run (h2spec, the common one, tests servers). What the tests establish
+is that the package's use of them -- framing, flow control, ALPN, header
+validation, errors -- behaves as documented against two independent
+servers.
 
 | area | tests |
 |---|---|
@@ -417,7 +428,7 @@ How each of HTTP-STACK-INTEGRATION-CENSUS.md's claims maps to the client
 | `lifetime-stale`, `control-stale-completion` | `http-stale-handle` and its control |
 | `idle-cpu` | not re-measured |
 | `deterministic-driver`, `deterministic-trace` | not applicable: the package runs under the Linux driver only |
-| `no-tokio-runtime`, `tokio-features` | the unit's dependency graph (no `rt`, `time` or `net`); not re-tested |
+| `no-tokio-runtime`, `tokio-features` | the unit's dependency graph: tokio 1.54.1 (h2's codec) with the features `bytes`, `default`, `io-util` and `sync` only (`cargo tree -e features -i tokio`): no `rt`, `time` or `net` |
 | `combined-consumers`, `combined-one-provider`, `link-one-provider-*`, `control-private-copy-*`, `bundled-twice`, `bundled-link-order`, `control-other-revision`, `control-second-provider-declared` | one provider by construction: one archive, the identity symbol, the graph's single boringssl (`http-provider-identity`, the clean room's symbol checks and its conflict); quiche is not shipped, so nothing bundles a second copy |
 | `control-library-installs-driver` | unchanged rule: `http` installs nothing; the application installs the driver (clean room D) |
 | `lifetime-listener`, every `quiche-*`, `quiche-loss-recovery`, `control-quiche-timer-never-armed` | server and HTTP/3 probes: out of this milestone |
