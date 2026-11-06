@@ -420,9 +420,12 @@ every query's verdict with it and classifies every difference mechanically:
 | `uninhabited` | recursive | finite | its path passed a declaration whose values would hold themselves through fields alone: nothing nests |
 | `DIFFERENT` | | | none: any other difference is a failure |
 
-Over four 40-program runs (seeds 2-5; 1,390 queries): 1,216 same, 48
-old-bound, 15 old-diverges, 7 other-declaration, 38 transient, 26 nested and
-0 DIFFERENT; the compiler agreed with the independent oracle on every query.
+Over four 40-program runs (seeds 2-5; 1,350 queries, 82 of them
+recursive): 1,216 same, 48 old-bound, 15 old-diverges, 7 other-declaration,
+38 transient, 26 nested, 0 uninhabited and 0 DIFFERENT; the compiler agreed
+with the independent oracle on every query, the 1,350 written queries
+agreed end to end, and 34 runtime programs (8 of them natively) released
+every coroutine exactly once.
 `or-old-walk` pins the classes on named specimens. `parity.tcl` runs both
 over every affine named struct type the golden suites and examples give an
 expression, a binding or a field: see section 19 for its result.
