@@ -1,0 +1,117 @@
+{
+  "name": "botlish",
+  "displayName": "Botlish",
+  "description": "Botlish's language server (main.tcl -lsp) in VS Code: diagnostics, hover, go to definition, references.",
+  "version": "0.1.0",
+  "publisher": "botlish",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:botlish"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In a restricted workspace the workspace's own settings cannot choose the executables that start the language server.",
+      "restrictedConfigurations": [
+        "botlish.tclsh",
+        "botlish.main",
+        "botlish.server.command"
+      ]
+    }
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "botlish",
+        "aliases": [
+          "Botlish",
+          "botlish"
+        ],
+        "extensions": [
+          ".bot"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[botlish]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4
+      }
+    },
+    "commands": [
+      {
+        "command": "botlish.restartServer",
+        "title": "Restart Language Server",
+        "category": "Botlish"
+      }
+    ],
+    "configuration": {
+      "title": "Botlish",
+      "properties": {
+        "botlish.tclsh": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "The Tcl 9 interpreter that runs `main.tcl -lsp`. Empty: `tclsh9.0` or `tclsh90` on PATH, else (Windows) `%LOCALAPPDATA%\\Apps\\Tcl90\\bin\\tclsh90.exe` or `C:\\botlish-tcl\\bin\\tclsh9.0.exe`."
+        },
+        "botlish.main": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "`main.tcl` of a Botlish checkout. Empty: the checkout this extension was loaded from, when it was (`editors/vscode` of a checkout); else the single executable `botlish` on PATH."
+        },
+        "botlish.server.command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine-overridable",
+          "markdownDescription": "The whole command that starts the server, for example `[\"botlish\", \"-lsp\"]`. When set, `#botlish.tclsh#` and `#botlish.main#` are not used; `#botlish.target#` and `#botlish.warnings#` are still appended."
+        },
+        "botlish.target": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "The compilation target the server analyzes for (`-target`), for example `linux-x86_64`. Empty: the host's. A program importing `linux::*` is `UNSUPPORTED-PLATFORM` on another host's target."
+        },
+        "botlish.warnings": {
+          "type": "string",
+          "enum": [
+            "default",
+            "off",
+            "error"
+          ],
+          "default": "default",
+          "description": "The warning policy of the analysis (-warnings)."
+        },
+        "botlish.debounce": {
+          "type": "number",
+          "default": 250,
+          "minimum": 0,
+          "description": "Milliseconds after the last change before the server analyzes again (initializationOptions.debounce)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "package": "vsce package --skip-license --allow-missing-repository",
+    "test:vscode": "node test/vscode/run.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0"
+  }
+}
