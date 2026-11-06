@@ -9,7 +9,6 @@ index: concepts principles
 alias: primer; getting started; quick start; cheat sheet; first program; before you start; common mistakes; pitfalls; gotchas
 keywords: newcomer, habit, mistake, tutorial, primer
 related: principle.idiomatic-botlish rule.immutable-bindings rule.if-placement rule.loop-placement concept.loops concept.if-expressions concept.method-sugar concept.nomethod task.accumulate error.unbound warning.method-eligible warning.one-char-string-literal cli.output
-docs: AGENT-PRIMER.md
 
 == AT A GLANCE
 Botlish looks like Python. These habits fail to compile, or compile and
@@ -211,7 +210,6 @@ index: stdlib backends
 alias: print output; print; println; print a line; write to stdout; hello world; console output
 keywords: print, output, stdout, stderr, io, hello, print_line, write
 related: backend.io stdlib.std::io::print_line stdlib.module.std::io concept.context-traits concept.program-value backend.native-only task.number-text
-docs: CONTEXT-TRAITS.md
 
 == THE PROGRAM
     import std::io
@@ -267,10 +265,9 @@ std::decimal_rounded::to_string(x) for a DecimalRounded value
 title: Handling several declared errors
 summary: Write one `on NAME:` handler per error a call may raise (their values may be equal); there is no `on A, B:`; a callee can instead declare one error whose payload says which failure.
 index: concepts rules
-alias: handle several errors; handle multiple errors; catch multiple errors; several handlers; catch multiple exceptions; handle multiple exceptions
+alias: handle several errors; handle multiple errors; catch multiple errors; several handlers; catch multiple exceptions; handle multiple exceptions; convert an error; wrap an error; map an error; rethrow as
 keywords: handler, errors, several, multiple, on, payload, unhandled
 related: rule.one-handler-per-error capability.multi-error-handler concept.errors concept.error-payloads rule.unhandled-errors error.unhandled-error warning.same-return-value
-docs: EXPLICIT-ERROR-COMPLETIONS.md ERROR-PAYLOADS.md DIAGNOSTIC-RECOVERY.md
 
 == ONE HANDLER PER ERROR
     moves = solve(board, 40):
@@ -324,6 +321,44 @@ at the reason.
 == PASSING THEM ON
 Admit some or all in the enclosing function's own `errors` clause; its
 callers then decide.
+
+== CONVERTING ONE INTO YOUR OWN
+A handler may fail with an error of its own, so a module's functions can
+report their own errors instead of passing on a library's:
+    fn load(name: str) -> Level errors LevelMissing:
+        text = read_level(name):
+            on std::io::fs::FileError:
+                fail LevelMissing
+        parse(text)
+Each call that may raise the library's error converts it this way; there
+is no conversion that applies to a whole block or function. To keep the
+details, give your error a payload field and fill it from the handled
+one's payload (`on std::io::fs::FileError {reason}:`).
+
+@example accept
+error Low
+error Mine
+
+fn risky(x: int) -> int errors Low:
+    if x < 0:
+        fail Low
+    x
+
+fn wrapped(x: int) -> int errors Mine:
+    risky(x):
+        on Low:
+            fail Mine
+
+fn checked(n: int) -> int:
+    wrapped(n):
+        on Mine:
+            42
+
+checked(-1)
+@caption A library error converted into the module's own
+@value 42
+@quiet
+@end
 
 @topic task.string-concatenation
 title: Joining text
@@ -402,7 +437,6 @@ index: stdlib
 alias: command line arguments; program arguments; read arguments; args
 keywords: argv, arguments, command line, process
 related: concept.argv stdlib.argv cli.options backend.native-executable
-docs: ARGV.md
 
 == HOW
     args = argv():
@@ -472,7 +506,6 @@ index: concepts stdlib
 alias: integer to string; int to string; number to text; to_string; format number; itoa; tostring; string of a number; string to int; parse int; parse number; atoi; text to number; round a float; nearest integer; decimal to string; format money
 keywords: convert, string, text, decimal, format, parse, round, to_string, from_string
 related: stdlib.module.std::int stdlib.std::int::to_string stdlib.std::int::from_string stdlib.std::float64::round stdlib.std::float64::truncate stdlib.std::decimal_rounded::to_string concept.decimal-rounded concept.integers capability.string-formatting
-docs: NUMERIC-TEXT-BOUNDARY-MILESTONE-1.md
 
 == HOW
     import std::int

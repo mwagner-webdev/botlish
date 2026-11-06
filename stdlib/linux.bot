@@ -27,7 +27,7 @@
 # names a register or a number.
 #
 # write is the first syscall that moves memory, so it is also the first that
-# needs the memory boundary of ABI-BYTES.md: its buffer is an
+# needs the owned-bytes memory boundary (ABI-BYTES.md): its buffer is an
 # std::abi::bytes::Bytes -- an immutable, owned, contiguous byte value -- and both
 # the address and the byte count are derived from that ONE value. The wrapper
 # deliberately has no `count` parameter: a separate count could disagree with

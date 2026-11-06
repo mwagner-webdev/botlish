@@ -27,10 +27,10 @@
 #                         -1 is 0xffffffffffffffff). Anything else is the
 #                         declared error Register64BelowRange /
 #                         Register64AboveRange -- never truncation. The
-#                         call-specific completion proof (STATIC-COMPLETION-
-#                         PROOFS.md) makes a provably in-range argument
-#                         (register64(39)) need no handler, and a provably
-#                         out-of-range literal a compile-time KNOWN-ERROR.
+#                         call-specific completion proof makes a provably
+#                         in-range argument (register64(39)) need no
+#                         handler, a provably out-of-range literal a
+#                         compile-time KNOWN-ERROR (STATIC-COMPLETION-PROOFS.md).
 #   std::abi::x86_64::to_int(register)         Register64 -> Int: the register
 #                         contents read as a signed 64-bit two's-complement
 #                         integer (0x27 -> 39, 0xffffffffffffffff -> -1), an
@@ -39,8 +39,8 @@
 #                         errno or other meaning is read into it.
 #
 #   std::abi::x86_64::from_i8(value) ... from_usize(value)
-#                         ABI numeric value -> Register64 (ABI-NUMERIC-
-#                         DOMAINS.md): total, no error, no check. Signed
+#                         ABI numeric value -> Register64: total, no error,
+#                         no check (ABI-NUMERIC-DOMAINS.md). Signed
 #                         values (std::abi::I8 I16 I32 I64 Isize) are sign-
 #                         extended to 64 bits, unsigned ones (std::abi::U8 U16
 #                         U32 U64 Usize) zero-extended -- see "Encoding ABI
@@ -126,7 +126,7 @@ fn to_int(register: Register64) -> Register64Word:
 # provided (raw Linux results are signed words).
 #
 # One function per ABI type, because Botlish has no overloading and this
-# milestone adds none: the ABI type a caller has selects the encoder by name
+# module adds none: the ABI type a caller has selects the encoder by name
 # (from_i32, from_usize) exactly as the creator's name selects the domain
 # (std::abi::i32, std::abi::usize). Each is an ordinary, nominally typed function --
 # from_usize does not accept a std::abi::U64 -- and none needs a check: the

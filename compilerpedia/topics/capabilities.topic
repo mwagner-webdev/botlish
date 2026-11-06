@@ -27,7 +27,6 @@ index: concepts stdlib
 alias: division; divide; integer division; quotient; div; / operator; % operator; remainder; modulo operator
 keywords: divide, quotient, remainder, mod, shift_right, slash, percent
 related: concept.integers concept.floats stdlib./ stdlib.mod stdlib.shift_right task.number-text
-docs: LANGUAGE-LIBRARY-DEFICIENCIES.md BYTE-NIBBLE-BIT-ARITHMETIC.md FLOAT64-MILESTONE-1.md
 match: CORE SEMANTIC TYPE | *Botlish has no integer division*
 match: SURFACE SYNTAX | unexpected character "%"*
 
@@ -92,13 +91,13 @@ summary: The test framework has no timeout: a test that does not terminate hangs
 index: concepts
 alias: test timeout; timeout; hanging test
 keywords: timeout, hang, infinite loop, test, limit
-related: concept.testing capability.process-exit-status
-docs: GOLDEN-TEST-FRAMEWORK.md
+related: concept.testing capability.process-exit-status capability.concurrency
 
 == STATUS
-stdlib/test.bot runs each registered check to completion, in order; Botlish
-has no clock, no timer and no cancellation. A non-terminating check stops
-the whole run.
+stdlib/test.bot runs each registered check to completion, in order, and
+nothing interrupts a running computation: std::event_loop's timers wake
+tasks that wait for them, never a task that is running. A non-terminating
+check stops the whole run.
 
 == NEAREST ALTERNATIVE
 Give searches and loops an explicit bound the test can choose (a depth
@@ -106,22 +105,33 @@ limit, a step count) and test the bound's behavior too; run suites under an
 external timeout (the shell's `timeout`).
 
 @topic capability.concurrency
-title: Threads, parallelism and async: absent
-summary: A Botlish program runs one computation on one thread: there are no threads, tasks, async/await, channels or locks; coroutines suspend and resume cooperatively, inside that one computation.
+title: Threads and parallelism: absent (cooperative tasks and actors exist)
+summary: A program runs on one thread, with no async/await or locks; std::event_loop schedules coroutines as cooperative tasks, and std::actor runs actors with typed mailboxes on it.
 index: concepts
-alias: threads; concurrency; parallelism; async; await; async await; multithreading
-keywords: thread, concurrent, parallel, async, await, task, lock, channel, mutex
-related: concept.coroutines concept.mutable-vector capability.test-timeout backend.overview
+alias: threads; concurrency; parallelism; async; await; async await; multithreading; tasks; scheduler
+keywords: thread, concurrent, parallel, async, await, task, lock, channel, mutex, event loop, actor, mailbox, timer
+related: concept.coroutines concept.actors stdlib.module.std::event_loop stdlib.module.std::actor concept.mutable-vector capability.test-timeout backend.overview
 
 == STATUS
 No construct or standard-library function starts a second thread of
-control. A coroutine is not a thread: `step(message)` runs the coroutine
-until its next `yield` while the caller waits, so at any moment exactly one
-piece of Botlish code runs (concept.coroutines).
+control, and nothing runs two pieces of Botlish code at once: there is no
+thread, async/await, lock or shared mutable memory. A coroutine is not a
+thread: `step(message)` runs the coroutine until its next `yield` while
+the caller waits (concept.coroutines).
+
+Cooperative concurrency on that one thread exists. std::event_loop is a
+scheduler of ordinary coroutines: tasks adopted into its context, ready
+queues, channels, timers and native event sources, driven by a driver
+context the entry program installs (std::event_loop::deterministic on
+every backend; a Linux epoll driver as the package event_loop_linux).
+std::actor runs actors on it: coroutines with typed mailboxes that
+receive and send without any context of their own (concept.actors). A
+task runs until it yields; nothing preempts it.
 
 == NEAREST ALTERNATIVE
-Interleave work with coroutines (a scheduler loop resuming several
-handles), or run several processes from outside. The native runtime runs a
+Interleave work with std::event_loop's tasks or std::actor's actors, or
+with a scheduler loop of your own resuming several coroutine handles; run
+several processes from outside for parallelism. The native runtime runs a
 program on a worker thread of its own (for its stack guard): an
 implementation detail, not something a program can use.
 
@@ -132,7 +142,6 @@ index: concepts
 alias: catch several errors; multiple errors one handler; on A, B
 keywords: handler, on, several, errors, payload, enum
 related: rule.one-handler-per-error task.handle-several-errors concept.errors concept.error-payloads
-docs: EXPLICIT-ERROR-COMPLETIONS.md ERROR-PAYLOADS.md
 
 == STATUS
 `on A, B:` is rejected ("a handler names exactly one error: write one "on
@@ -150,8 +159,7 @@ summary: There is no line or text input API; natively std::linux::io::read and s
 index: concepts stdlib
 alias: read input; stdin; read line; user input; keyboard input; standard input
 keywords: input, read, stdin, line, console, bytes
-related: concept.argv backend.io capability.files stdlib.std::linux::io::read stdlib.module.std::linux::io stdlib.std::abi::bytes::MutableBytes
-docs: CONTEXT-TRAITS.md
+related: concept.argv backend.io capability.files stdlib.std::linux::io::read stdlib.module.std::linux::io stdlib.std::abi::bytes::MutableBytes stdlib.std::abi::bytes::decode_utf8 stdlib.std::abi::bytes::freeze_prefix
 
 == STATUS
 stdlib/io.bot is output only (print, print_line, write_error,
@@ -177,32 +185,81 @@ no direct module
 (the context mediates it), but it runs only on cranelift,
 cranelift-generic and native executables: interp and compile refuse it
 (NATIVE-ONLY). There is no line splitting or end-of-file helper (read
-until the result is 0), and no UTF-8 decoding of bytes into a String in
-the standard namespaces: what is read stays bytes.
+until the result is 0). To turn what was read into a String, take the
+bytes read (std::abi::bytes::freeze_prefix(r.data, n) for a count n) and
+decode them with std::abi::bytes::decode_utf8 (InvalidUtf8 when they are
+no UTF-8). Windows has no standard-input operation yet. A file's
+contents are read whole with std::io::fs's read_file (capability.files).
 
 == NEAREST ALTERNATIVE
 For small, fixed inputs pass them in the program text or through argv()
 (concept.argv), which works on every backend.
 
 @topic capability.files
-title: Files and directories: absent from the portable library
-summary: There is no portable file or directory API; the path modules handle path text, and only macOS's low-level darwin module opens files (open, create, close through libSystem).
+title: Files and directories: synchronous, whole files and owned handles
+summary: std::io::fs reads and writes whole files and lists directories over each platform's filesystem module, which also streams through owned File handles; no metadata, renaming or async I/O.
 index: concepts stdlib
-alias: open file; read file; write file; file system; filesystem
-keywords: file, open, read, write, close, directory, path, darwin
-related: capability.input backend.io stdlib.module.std::io::path stdlib.module.std::linux stdlib.module.std::darwin
-docs: MACOS-AARCH64-MILESTONE-8.md
+alias: open file; read file; write file; file system; filesystem; file io; file i/o; save file; load file; save and load; persist data; directory listing
+keywords: file, open, read, write, close, directory, path, fs, save, load, persist, FileError, LinuxFS, DarwinFS, WindowsFS
+related: stdlib.module.std::io::fs stdlib.module.std::linux::fs stdlib.module.std::linux::path stdlib.module.std::darwin::fs stdlib.module.std::darwin::path stdlib.module.std::windows::fs stdlib.module.std::windows::path stdlib.module.std::windows stdlib.module.std::io::path stdlib.module.std::abi::bytes capability.input backend.io concept.context-traits concept.affine
 
 == STATUS
-No portable open/read/write of named files. std::io::path, std::linux::path
-and std::darwin::path are textual path utilities. On macOS,
-stdlib/darwin.bot's low-level operations open (std::darwin::open), create
-(std::darwin::create, std::darwin::create_new: open(2)'s variadic creation
-mode), read, write and close a descriptor through libSystem, each one C call
-returning its count or descriptor and the errno of a failure; they are a
-direct module's raw authority, run on the native backends only, and own
-nothing (closing is the caller's). On Linux, stdlib/linux.bot's raw read and
-write system calls are the only route, and no open exists.
+Files exist, synchronously, on every platform the native backend runs on.
+Each platform has a filesystem module whose functions require its
+context, which the entry program installs once:
+
+    std::linux::fs     with context std::linux::fs::create()     (LinuxFS)
+    std::darwin::fs    with context std::darwin::fs::create()    (DarwinFS)
+    std::windows::fs   with context std::windows::fs::create()   (WindowsFS)
+
+A textual path is validated as the platform's path
+(std::linux::path::validate, std::darwin::path::validate,
+std::windows::path::validate) and joined with `concat`. Its whole-file and
+directory operations are std::io::fs's: read_file (every byte, as a
+std::abi::bytes::Bytes), write_file (create or replace), create_file (a
+file that did not exist), entries, create_directory, remove_file and
+remove_directory. The trait std::io::fs::FilePath states them once, so a
+function over a FilePath works with every platform's path and compiles
+to direct calls of that platform's functions.
+
+Streaming is each platform module's own: open returns an owned File (an
+affine value: it is moved, never copied), read and write give it back
+with what they did, read_all and write_all run to completion, close
+releases it. Nothing closes a File for you but close (and a failed read
+or write, which closes it). Every failure is the declared error
+std::io::fs::FileError {reason, code}: the reason as the platforms agree
+(NotFound, AlreadyExists, PermissionDenied, ...) and the system's own code.
+
+Text is bytes here: encode a String with std::str::encode_utf8 (and
+std::abi::bytes::from_list) before writing it, and decode what you read
+with std::abi::bytes::decode_utf8 (InvalidUtf8 when it is no UTF-8).
+
+These run on the native backends (cranelift, cranelift-generic,
+executables): interp and compile refuse the first system call with
+NATIVE-ONLY. Not here: metadata (sizes, times, permissions), renaming,
+links, watching, asynchronous I/O and a file dialog.
+
+@example accept
+import std::abi::bytes
+import std::io::fs
+import std::io::path
+import std::linux::fs
+import std::linux::path
+import std::str
+
+with context std::linux::fs::create()
+
+# Saves TEXT as DIR/notes.txt and reads it back.
+fn round_trip(dir: std::linux::path::LinuxPath, text: str) -> str errors std::io::path::NotAPath, std::io::fs::FileError, InvalidUtf8:
+    file = std::linux::path::concat(dir, "notes.txt")
+    file.write_file(std::abi::bytes::from_list(text.encode_utf8()))
+    file.read_file().decode_utf8()
+
+"round_trip compiles"
+@caption Saving and loading text on Linux (run it on a native backend)
+@value "round_trip compiles"
+@warn ONE-CHAR-STRING-LITERAL
+@end
 
 @topic capability.string-formatting
 title: String formatting and interpolation: absent
@@ -227,7 +284,7 @@ summary: Bindings are immutable and a name is bound once per scope: `x = x + 1` 
 index: concepts
 alias: assignment; mutable variable; reassign; variable update; counter variable; x = x + 1; +=; x += 1; -=; compound assignment
 keywords: assign, mutate, variable, counter, accumulate, update
-related: concept.bindings rule.immutable-bindings principle.immutability concept.loops concept.mutable-vector
+related: concept.bindings rule.immutable-bindings principle.immutability concept.loops concept.folds concept.mutable-vector
 
 == STATUS
 `x = 1` then `x = x + 1` in the same scope is DUPLICATE. A nested scope may
@@ -235,6 +292,9 @@ shadow a name with a new binding, which never changes the outer one.
 
 == NEAREST ALTERNATIVES
   * a new name: `next = x + 1`;
+  * a fold for an accumulator a loop carries (`total = fold x in xs with
+    intermediate acc 0:` and the body `acc + x` on the next line,
+    concept.folds);
   * a collecting loop for per-element values: `squares = loop x in xs: x *
     x`;
   * recursion, carrying the accumulator as a parameter;
@@ -260,12 +320,14 @@ summary: Botlish has no null, no nil and no optional type: a function that may n
 index: concepts
 alias: null; nil; none; optional; maybe; undefined
 keywords: null, optional, missing, absent, default
-related: principle.errors-over-sentinels concept.errors stdlib.std::list::get capability.match
+related: principle.errors-over-sentinels concept.errors stdlib.std::list::get capability.match stdlib.std::ffi::c::null
 match: CORE SEMANTIC UNBOUND | unbound name "null"*
 
 == STATUS
 `null` is just an unbound name. No value means "nothing" except unit, which
-is a value of its own type, not a member of every type.
+is a value of its own type, not a member of every type. The one null is
+C's: std::ffi::c::null[T]() is a null C pointer, a value of the C ABI type
+std::ffi::c::Ptr[T] only, for calling C (concept.c-ffi).
 
 == NEAREST ALTERNATIVE
 Declare an error (`fn find(...) errors NotFound`) and handle it at the call
@@ -346,7 +408,6 @@ index: concepts stdlib
 alias: map; filter; comprehension; list comprehension
 keywords: map, filter, reduce, fold, transform, collect, flat_map, flatten
 related: concept.loops concept.folds stdlib.module.std::list stdlib.std::list::flat capability.assignment
-docs: RETURNING-ITERABLE-LOOPS.md COLLECTING-LOOPS.md LIST-FLAT-MILESTONE-1.md
 
 == STATUS
 stdlib/list.bot deliberately has no map or filter: the collecting loop
@@ -374,7 +435,6 @@ index: concepts
 alias: try catch; try/catch; throw; raise; exception; exceptions; catch; finally
 keywords: exception, throw, catch, try, raise, error, handler
 related: concept.errors concept.error-payloads rule.unhandled-errors rule.one-handler-per-error concept.known-errors capability.multi-error-handler
-docs: EXPLICIT-ERROR-COMPLETIONS.md
 
 == HOW THE CONCEPTS MAP
     throw / raise E      fail E            (E a declared error: `error E`)
@@ -414,7 +474,6 @@ index: concepts
 alias: import struct; import struct type; import type struct
 keywords: import type, struct, qualified, short name
 related: rule.import-type concept.imports concept.structs concept.enums
-docs: IMPORTS.md
 
 == STATUS
 `import type puzzle15::Board` for a struct is rejected (NOT-A-TYPE: "is a

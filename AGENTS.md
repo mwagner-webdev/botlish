@@ -5898,12 +5898,50 @@ runs it); it fails when:
 * an example no longer compiles, runs or is rejected as stated: when the
   compiler learns to prove a pattern a proof page lists as a limitation, or
   changes a rule, update the page, never the example's expectation alone;
-* a reference, alias or matcher is broken.
+* a reference, alias or matcher is broken;
+* a page names a design document (`docs/NAME.md`, a README): the reference
+  ships without `docs/` (the single executable, Botlish.app), so a page says
+  what it means itself and points at other topics. There is no `docs:`
+  header key. A standard-library comment may cite a document for its
+  maintainers; the generator drops a citation it can (`cpt::Unreferenced`:
+  a parenthetical of citations, a citation leading or ending one, a
+  "-- see DOC", a sentence that is only citations), and a citation it
+  cannot fails the check until the comment is reworded (keep the file's
+  line count: the warning gate's manifest pins locations);
+* a capability page's alias names an existing standard-library operation
+  (a function or intrinsic, not a predicate: "read file" and
+  std::linux::fs::read_file) and the page does not relate its topic or its
+  module's (next paragraph).
 
 State only what the compiler does today; document an absent facility as
 absent (`capability.*`) with the nearest alternative. A change to the
 command line updates `cliOptions` (main.tcl), the `cli.options` topic and
 main.tcl's header comment (`tests/main-cli.test` checks all three).
+
+**Cross-check the capability pages against the standard library's
+registry.** `capability.*` pages say what Botlish lacks, and the stdlib
+grows under them: `capability.files` said "no open exists" for months after
+std::io::fs and std::linux::fs shipped, and sent a user to hand-written C
+calls. So whenever you add, rename or remove a public standard-library
+module, function or intrinsic (a new `stdlib/` module, a registered
+native, a public declaration):
+
+* list the capability pages (`tclsh9.0 main.tcl -help capability.overview`)
+  and read every one whose subject the change touches -- by its title and
+  STATUS, not only its aliases -- and run `-help` with the names a user
+  would type for the new facility (`-help "read file"`, `-help timer`):
+  each must lead to the real documentation;
+* a page the change makes wrong is rewritten in the same change: the real
+  documentation, its ID kept (other topics and help lines name it), its
+  title saying "limited" or describing what exists, its `related:` naming
+  the new modules' and operations' topics, an example that compiles;
+* a page that stays right but whose alias now names an operation of the
+  same spelling relates that operation's topic (`capability.null` relates
+  std::ffi::c::null) or drops the alias.
+
+The check catches only the mechanical case (an alias that is an
+operation's name); a broader claim -- "no tasks" while std::event_loop
+schedules them -- is found only by reading the pages, so read them.
 
 ## Golden tests (Botlish-native test framework)
 

@@ -67,7 +67,6 @@ index: proofs stdlib
 alias: bounds proof; index proof; IndexNotFound
 keywords: std::list::at, guard, descending
 related: proof.slices rule.unhandled-errors stdlib.std::list::at
-docs: STDLIB-NAMESPACES.md STATIC-COMPLETION-PROOFS.md
 code: CORE SEMANTIC UNHANDLED-ERROR
 match: CORE SEMANTIC UNHANDLED-ERROR | *"std::list::at" may produce*
 
@@ -92,7 +91,6 @@ The header runs from `@topic ID` to the first blank line.
 | `summary` | one sentence, at most 200 characters | required |
 | `index` | index names, space-separated | required; at least one |
 | `related` | topic IDs, space-separated | each must exist |
-| `docs` | design documents (bare names in docs/) | shown as optional repository links |
 | `alias` | phrases separated by `;`, repeatable | exact-match lookup keys; unique across the catalogue |
 | `keywords` | phrases separated by `;` or `,` | weighted search words |
 | `code` | one diagnostic or warning code per line, as printed: `CORE SEMANTIC TYPE`, `SURFACE MODULE CYCLE`, `NATIVE NOT-BUILT`, a parser code such as `LIST-DESTRUCTURING`, a warning code | the topic *documents* the code; each code is documented by one topic |
@@ -132,7 +130,19 @@ A topic says what is true of this compiler, and keeps three things apart
 where they could be confused: what the language guarantees, what the
 compiler proves today, and what it does not prove (yet). An absent facility
 is documented as absent, with the nearest supported alternative: never
-describe something Botlish does not have as if it existed.
+describe something Botlish does not have as if it existed -- nor the
+reverse: when the standard library gains a facility a capability page
+calls absent or limited, that page is replaced by the real documentation
+(its ID kept) in the same change (section 7 checks the plain case).
+
+A page never names a design document (`docs/NAME.md`, a README): the
+reference ships without `docs/` (in the single executable and
+Botlish.app), so it says what it means itself and points at other topics.
+The design documents cite Compilerpedia, never the other way round. A
+standard-library comment may cite one for its maintainers: the generator
+drops such citations from the text it takes (`cpt::Unreferenced`), and a
+citation it cannot drop cleanly fails the check until the comment is
+reworded.
 
 ### Examples
 
@@ -303,6 +313,12 @@ which runs it) fails on:
   symbol; a code or a symbol documented by two topics; an index without
   topics; a rejected example without `@error`;
 * a stale generated file, or a native without a note, or a stale note;
+* a page (a topic, an index or the overview, as rendered) that names a
+  design document;
+* a capability page with an alias that names an existing standard-library
+  operation (a function or an intrinsic, not a predicate: "read file" and
+  `std::linux::fs::read_file`) whose topic, or its module's, the page does
+  not relate: the page must account for the operation or drop the alias;
 * an undocumented diagnostic: the inventory (`tools/compilerpedia.tcl
   inventory`) is scanned from the compiler's source with the patterns each
   reporting mechanism uses -- the census token scan of

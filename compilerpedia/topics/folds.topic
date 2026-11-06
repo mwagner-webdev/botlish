@@ -8,7 +8,6 @@ index: concepts
 alias: fold; reduce; accumulate with a loop; fold loop; folding loop; carry a value through a loop; with intermediate; running value
 keywords: fold, reduce, accumulate, accumulator, intermediate, carry, sum, count, running, state, scanner, aggregate
 related: concept.loops concept.lockstep task.accumulate capability.map-filter rule.immutable-bindings error.fold-intermediate-type error.affine-fold-unsupported
-docs: FOLD-LOOPS-MILESTONE-1.md COLLECTING-LOOPS.md
 
 == WHAT IT IS
     fold x in xs with intermediate acc INITIAL:      every element
@@ -105,8 +104,7 @@ f([1])
 @end
 
 == MORE
-FOLD-LOOPS-MILESTONE-1.md; concept.loops for collecting loops;
-task.accumulate for running totals.
+concept.loops for collecting loops; task.accumulate for running totals.
 
 @topic error.fold-intermediate-type
 title: FOLD-INTERMEDIATE-TYPE: a fold's intermediate would change its kind
@@ -115,7 +113,6 @@ index: errors
 alias: the intermediate of this fold is; have no common type
 keywords: fold, intermediate, type, join, initial value, unit, else, struct
 related: concept.folds concept.if-expressions error.type
-docs: FOLD-LOOPS-MILESTONE-1.md
 code: CORE SEMANTIC FOLD-INTERMEDIATE-TYPE
 
 == MEANING
@@ -172,7 +169,6 @@ index: errors
 alias: which would become the intermediate of a fold
 keywords: fold, affine, coroutine, handle, ownership, intermediate
 related: concept.folds concept.affine concept.coroutines error.affine-list-operation-unsupported
-docs: FOLD-LOOPS-MILESTONE-1.md AFFINE-VALUES.md
 code: CORE SEMANTIC AFFINE-FOLD-UNSUPPORTED
 
 == MEANING

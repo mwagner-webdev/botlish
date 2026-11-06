@@ -13,7 +13,6 @@ index: proofs concepts
 alias: static proof; static analysis; what does the compiler prove
 keywords: guarantee, proven, limitation, completion, analysis
 related: proof.completions proof.list-bounds proof.slices proof.ranges proof.types proof.refinements proof.lockstep proof.contexts proof.ownership proof.callable-contracts proof.reachability principle.restate-in-proven-form
-docs: STATIC-COMPLETION-PROOFS.md PROOF-FACT-CENSUS.md
 
 == WHY PROOFS MATTER IN BOTLISH
 Botlish turns several run-time failures into compile-time obligations. A
@@ -67,7 +66,6 @@ index: proofs stdlib
 alias: bounds proof; bounds; bounds check; IndexNotFound; index proof; range proof; indexed access; list index; index out of range; out of bounds; IndexNotFound proof; array index
 keywords: std::list::at, at, index, length, guard, loop, descending, field, local binding, mod, bit_and, mask, hash, capacity
 related: proof.slices proof.completions proof.ranges concept.lists concept.list-length concept.errors rule.unhandled-errors rule.known-error stdlib.std::list::at stdlib.std::list::get principle.restate-in-proven-form
-docs: STDLIB-NAMESPACES.md STATIC-COMPLETION-PROOFS.md REFACTOR-WARNINGS-CLEAN.md ORDERED-MUTABLE-MAP-SET.md
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::list::at" may produce*
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::mutable_array::at" may produce*
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::mutable_array::set" may produce*
@@ -432,7 +430,6 @@ index: proofs stdlib
 alias: slice proof; substring proof; LowerUnderrun; UpperOverrun; substring bounds
 keywords: substring, slice, freeze, copy, start, end, length
 related: proof.list-bounds proof.completions concept.strings stdlib.std::str::substring rule.unhandled-errors
-docs: STDLIB-NAMESPACES.md
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::str::substring" may produce*
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::mutable_array::freeze" may produce*
 match: CORE SEMANTIC UNHANDLED-ERROR | this call of "std::mutable_array::copy" may produce*
@@ -502,7 +499,6 @@ index: proofs concepts
 alias: completion proof; completion analysis; provable success; error analysis; static completion
 keywords: completion, errors, handler, fail, proof, known error, success
 related: concept.errors concept.known-errors rule.unhandled-errors rule.known-error error.unhandled-error error.known-error proof.list-bounds proof.slices proof.ranges proof.callable-contracts concept.negative-tests
-docs: STATIC-COMPLETION-PROOFS.md EXPLICIT-ERROR-COMPLETIONS.md ERROR-IDENTITY-AND-COMPLETION-SOUNDNESS.md
 
 == LANGUAGE GUARANTEE
 A function completes normally (with its value), with one of the declared
@@ -589,7 +585,6 @@ index: proofs
 alias: integer range; range analysis; integer domain proof; value range
 keywords: range, Int, domain, comparison, guard, facts
 related: concept.integer-domains proof.list-bounds proof.completions proof.reachability proof.exact-values
-docs: SOURCE-DEFINED-INTEGER-DOMAINS.md RANGE-FIXPOINT-SCALING.md M6-RANGE-DECIDED-BRANCH-LOWERING.md
 
 == LANGUAGE GUARANTEE
 A value of an integer domain (`type Byte = Int in 0..255`) is always within
@@ -642,7 +637,6 @@ index: proofs concepts
 alias: type proof; cannot be proven to satisfy; does not prove declared type
 keywords: type, inference, declared, annotation, any, prove, satisfy
 related: concept.types error.type rule.typed-parameters proof.ranges proof.refinements
-docs: README.md STRICT-TYPED-PARAMETERS.md SYMBOLIC-TYPE-IDENTITY.md
 
 == LANGUAGE GUARANTEE
 A declared parameter type, result type or struct field type holds for every
@@ -680,7 +674,6 @@ index: proofs
 alias: refinement proof; predicate proof; validator proof
 keywords: proves, refined, predicate, validator, narrowing, if
 related: concept.refinements warning.proves-naming proof.types principle.predicate-naming
-docs: REFINEMENT-VALUES.md
 
 == LANGUAGE GUARANTEE
 A value of a refinement type (`refined type Small = int`) was proven to be
@@ -728,7 +721,6 @@ index: proofs
 alias: lockstep proof; equal iteration counts; zip proof
 keywords: lockstep, and, loop, length, cardinality, zip
 related: concept.lockstep error.lockstep-unproven error.lockstep-unequal concept.loops
-docs: COLLECTING-LOOPS.md
 
 == RECOGNIZED PATTERNS
 The count of a list clause is its list's length; of a numeric clause its
@@ -794,7 +786,6 @@ index: proofs
 alias: same members proof; order proof; membership relation; relational fact
 keywords: reorder, order, validate_order, relation, members, keys, invalidation, join, copy
 related: concept.collection-order error.reorder-not-proven proof.overview proof.lockstep
-docs: PROVEN-COLLECTION-REORDERING.md
 
 == RECOGNIZED PATTERNS
 The fact relates two values, not a type: it is minted by `m.order()` (its
@@ -850,7 +841,6 @@ index: proofs
 alias: context proof; context requirement; missing context proof
 keywords: context, with context, requirement, install, MISSING-CONTEXT
 related: concept.contexts concept.context-traits error.missing-context rule.context-installation
-docs: CONTEXTS.md CONTEXT-TRAITS.md
 
 == LANGUAGE GUARANTEE
 A function that uses a context declares it (`context io: LinuxIO`); its
@@ -886,7 +876,6 @@ index: proofs
 alias: ownership proof; affine proof; use after move proof
 keywords: affine, move, release, coroutine, ownership, drop
 related: concept.affine concept.coroutines rule.affine-use error.use-after-move
-docs: AFFINE-VALUES.md COROUTINES.md
 
 == LANGUAGE GUARANTEE
 An affine value is never copied: binding it to another name, passing it,
@@ -906,7 +895,6 @@ index: proofs
 alias: callable contract; function value errors; Fn contract proof
 keywords: Fn, callable, function value, contract, errors, higher-order
 related: concept.function-types concept.closures proof.completions error.unhandled-error
-docs: VERIFIED-CALLABLE-CONTRACT-BOUNDARY.md STRUCTURAL-FUNCTION-TYPES.md STATIC-COMPLETION-PROOFS.md
 
 == LANGUAGE GUARANTEE
 A parameter typed `Fn{args: [int], return: int, errors: [E]}` admits only
@@ -926,7 +914,6 @@ index: proofs
 alias: dead code; unreachable code; decided branch
 keywords: reachable, unreachable, dead code, decided, condition
 related: proof.ranges proof.exact-values warning.same-return-value
-docs: M6-RANGE-DECIDED-BRANCH-LOWERING.md
 
 == WHAT THE COMPILER PROVES
 A statement after `return`, `fail`, `break` or `continue`, or after a call
@@ -947,7 +934,6 @@ index: proofs
 alias: exact value; constant folding; known value
 keywords: constant, literal, exact, binding, immutable
 related: proof.completions proof.ranges proof.list-bounds warning.same-return-value
-docs: EXACT-VALUE-FACTS.md
 
 == WHAT THE COMPILER PROVES
 Literals (Int, Bool, String, character, small Lists of them), immutable
