@@ -11,6 +11,11 @@ window that starts the server. What you get is what the server answers:
   library;
 * find references within the analyzed program.
 
+A program that does not load at all -- an import that finds no module,
+say a generated binding that was never staged -- answers nothing anywhere;
+its error is then also shown at the import in your file that leads to it,
+with a link to the line where it is.
+
 There is no syntax highlighting (the repository has no grammar), and no
 completion, rename or formatting (the server implements none). Comment
 toggling, bracket matching and spaces for indentation are configured

@@ -366,6 +366,25 @@ warnings in the compiler's order, with
   future code action (the protocol returns `data` with code-action
   requests).
 
+**A program that does not load** (added after this milestone). A loader
+error -- an import that finds no module, an unknown namespace -- leaves the
+program with no analysis at all, so nothing in it answers hover,
+definitions or references. When the error is in a module file, the loader's
+diagnostic carries import notes (`surface::modules::ImportNotes`: the chain
+of imports that loads that file, the entry program's first, each "the
+import of "NS" here loads FILE", kind `import`), and the server publishes
+the diagnostic at each of them too, in that import's file: its severity,
+code and topic, the note's text followed by the diagnostic's message, and
+the error's own location as its related information
+(`lsp-lang-module-load-error`). The entry an editor has open therefore
+shows why it answers nothing, at the import that leads to the error,
+instead of looking clean. Only a program with no analysis is shown this
+way: an analyzed program's module diagnostics (a syntax error in a module,
+which the analysis works around) stay in the module's file, so an importer
+is not marked while it answers fresh (`lsp-lang-recovery-session`). The
+import notes are the compiler's own (main.tcl prints them as `note:`
+lines); the server only chooses where to show them.
+
 An open document hears about every version analyzed, with that version (an
 empty list says "no problems"); a closed file only of a change, with no
 version (`lsp-lang-closed-module-diagnostics`: an error in a module no

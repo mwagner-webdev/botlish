@@ -1158,6 +1158,7 @@ proc lsp::server::Reconcile {} {
         foreach path [dict get [RevInfo $latest] read] {
             dict set grouped $path {}
         }
+        set analyzed [dict get [RevInfo $latest] hir]
         foreach d [service::diagnostics $latest] {
             if {[dict get $d range] eq "none"} {
                 set path $root
@@ -1165,6 +1166,18 @@ proc lsp::server::Reconcile {} {
                 set path [Internal [file normalize [dict get $d file]]]
             }
             dict lappend grouped $path $d
+            # A program with no analysis at all (a loader error: nothing
+            # answers anywhere in it) shows each diagnostic in a module file
+            # also at each import of the chain that loads that file (its
+            # `import` notes, the loader's), so the file an editor has open
+            # -- the program's entry -- says why. An analyzed program's
+            # files answer for themselves: a module's syntax error stays
+            # the module's.
+            foreach n [if {$analyzed} {list} else {dict get $d notes}] {
+                if {[dict getdef $n kind ""] eq "import"} {
+                    dict lappend grouped [Internal [file normalize [dict get $n file]]] [ImportMirror $d $n]
+                }
+            }
         }
         dict set reports $root $grouped
         lappend paths {*}[dict keys $grouped]
@@ -1207,6 +1220,26 @@ proc lsp::server::Reconcile {} {
             }
         }
     }
+}
+
+# The service diagnostic D shown at its import note N (Reconcile): at N's
+# range, with D's severity, code and topic (its text), the message N's text
+# and D's own, and D's location as its related information -- the same
+# diagnostic, presented where the import is.
+proc lsp::server::ImportMirror {d n} {
+    set mirror [dict create severity [dict get $d severity] code [dict get $d code] \
+        message "[dict get $n message]: [dict get $d message]" text [dict get $d text] range span]
+    foreach key {file start end line column endLine endColumn} {
+        dict set mirror $key [dict get $n $key]
+    }
+    set primary [dict create message [dict get $d message] text [dict get $d text]]
+    foreach key {file start end line column endLine endColumn} {
+        dict set primary $key [dict get $d $key]
+    }
+    dict set mirror related {}
+    dict set mirror notes [list $primary]
+    dict set mirror record ""
+    return $mirror
 }
 
 proc lsp::server::DocumentVersion {path} {
