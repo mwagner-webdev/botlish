@@ -106,6 +106,17 @@ struct HoldsW:
     c: @C@
     w: W[@C@]
 
+struct Ref[T]:
+    p: std::ffi::c::Ptr[T]
+
+struct PtrLoop[T]:
+    v: T
+    r: Ref[PtrLoop[T]]
+
+struct PtrList[T]:
+    v: T
+    rs: List[Ref[PtrList[T]]]
+
 struct Vectored[T]:
     value: T
     kids: MutableVector[Vectored[T]]
@@ -226,16 +237,17 @@ proc orChain {n} {
 # ---------------------------------------------------------------------------
 # The specimens
 
-test or-specimens {each specimen's verdict, from the declaration graph: Node[C] (a value of T in a List of its own applications) recursive; W[C] and PhantomRec[C] (the argument only grows, no value holds it) not; Mixed's owning slot recursive, its phantom slot not; GrowA/GrowB (non-uniform mutual recursion, T held in B) recursive from either side; T held nowhere not, held in A recursive; a MutableVector edge recursive; a Fn type over the slot, an unrelated unrestricted recursion and a recursion whose argument becomes a function type over the slot (FnArg[C]: kids hold FnArg[Fn{args: [C]}], unrestricted) not, nor an affine struct beside an unrestricted W[C] (HoldsW)} -body {
+test or-specimens {each specimen's verdict, from the declaration graph: Node[C] (a value of T in a List of its own applications) recursive; W[C] and PhantomRec[C] (the argument only grows, no value holds it) not; Mixed's owning slot recursive, its phantom slot not; GrowA/GrowB (non-uniform mutual recursion, T held in B) recursive from either side; T held nowhere not, held in A recursive; a MutableVector edge recursive; a Fn type over the slot, an unrelated unrestricted recursion and a recursion whose argument becomes a function type over the slot (FnArg[C]: kids hold FnArg[Fn{args: [C]}], unrestricted) not, nor an affine struct beside an unrestricted W[C] (HoldsW), nor a recursion through a C pointer's pointee (PtrLoop[C] of `r: Ref[PtrLoop[T]]`, PtrList[C] through a List of them: a pointer owns no value of its pointee)} -body {
     orHir
     set c $::orCo
     lmap t [list [orApp Node $c] [orApp Node int] [orApp W $c] [orApp PhantomRec $c] \
             [orApp Mixed $c int] [orApp Mixed int $c] [orApp GrowA $c] [orApp GrowB $c] \
             [orApp NowhereA $c] [orApp InA $c] [orApp InB $c] [orApp Vectored $c] \
-            [orApp Fun $c] {nstruct HoldsUnrelated} [orApp GrowA [orList $c]] [orApp FnArg $c] {nstruct HoldsW}] {
+            [orApp Fun $c] {nstruct HoldsUnrelated} [orApp GrowA [orList $c]] [orApp FnArg $c] {nstruct HoldsW} \
+            [orApp PtrLoop $c] [orApp PtrList $c]] {
         string cat [orVerdict $t].
     }
-} -result {recursive. . . . recursive. . recursive. recursive. . recursive. recursive. recursive. . . recursive. . .}
+} -result {recursive. . . . recursive. . recursive. recursive. . recursive. recursive. recursive. . . recursive. . . . .}
 
 test or-declarations {a declaration is judged at its own slots (unrestricted): an intrinsically affine recursion through a container (R: handle and List[R]) and one through a pointer-holding struct (an affine C address in every level) are AFFINE-CONTAINER-UNSUPPORTED at the declaration, as is one whose own field introduces the affine argument (Q[T]: kids: List[Q[C]]); a recursion through fields alone (FieldSelf: no finite value) and an unrelated unrestricted recursion are accepted} -body {
     lmap text [list \
